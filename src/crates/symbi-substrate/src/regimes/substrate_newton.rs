@@ -1,17 +1,17 @@
 // =============================================================================
 // regimes/substrate_newton.rs
 //
-// AdiabaticSubstrateKernelSet<Mem, Sc, const D> — the D-GENERIC adiabatic (ideal-gas
+// AdiabaticSubstrateKernelSet<Mem, Sc, const D> — the D-generic adiabatic (ideal-gas
 // Newtonian Euler) KernelSet, every method dispatched to a build-time AOT substrate
 // kernel through the structured binding ABI, the instance resolved by name (regime,
 // ndim, dir) via the generated `kernel_by_name` registry. one struct serves 1D/2D/3D.
 //
 // it shares the EOS-generic substrate kernels with the RHD set — the godunov /
-// snapshot / rk2 are the SAME `{prefix}_*` builders — and adds the genuinely
+// snapshot / rk2 are the same `{prefix}_*` builders — and adds the genuinely
 // regime-specific pieces: the closed-form adiabatic c2p (`p` from the energy) and
 // the adiabatic face flux. the CFL wave-speed map is the iso one
-// (`iso_wave_speed_map_{D}d`: cs = sqrt(gamma*p/rho), folding ALL D velocity
-// components + per-axis inv_dx — D-correct), and the ghost fill is the SHARED
+// (`iso_wave_speed_map_{D}d`: cs = sqrt(gamma*p/rho), folding all D velocity
+// components + per-axis inv_dx — D-correct), and the ghost fill is the shared
 // lattice-map pullback (`iso_ghost_fill_{D}d`).
 //
 // a Newtonian sim allocates cons.nrg, prim.pre, flux.nrg (has_energy), so the
@@ -48,7 +48,7 @@ use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
 
 /// a D-generic adiabatic (ideal-gas Euler) `KernelSet`, every method substrate-generated.
-// the ADIABATIC viscous operator books BOTH the Navier-Stokes shear force AND the viscous heating
+// the adiabatic viscous operator books both the Navier-Stokes shear force and the viscous heating
 // (div(tau.v) onto the total energy); constant-nu, cartesian 2D.
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
     for AdiabaticSubstrateKernelSet<Mem, Sc, D>
@@ -58,7 +58,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosit
         self
     }
     fn with_alpha(mut self, alpha: f64) -> Self {
-        // nu = alpha (gamma p/rho) / Omega_K with the LOCAL sound speed — the
+        // nu = alpha (gamma p/rho) / Omega_K with the local sound speed — the
         // shakura-sunyaev prescription on a varying-cs gas.
         self.alpha = alpha;
         self
@@ -92,17 +92,17 @@ pub struct AdiabaticSubstrateKernelSet<
     /// kernel (the original default; bit-identical for existing callers). `Some`
     /// => `godunov_euler` / `godunov_rk2` route through the fused variant.
     pub fused_source: Option<FusedSourceBinding>,
-    /// the NON-fused (additive) source overlay — plain godunov + a
+    /// the non-fused (additive) source overlay — plain godunov + a
     /// per-stage `adiabatic_source_with_{slug}_{D}d` pass. proven bit-for-bit
     /// equal to `fused_source` with the same binding. see the iso analogue.
     pub additive_source: Option<FusedSourceBinding>,
-    /// a RUNTIME-loaded user source (python -> json -> `build_user_source` ->
+    /// a runtime-loaded user source (python -> json -> `build_user_source` ->
     /// `SourceEvaluator::from_built`). `Some` => `source_apply` runs a per-cell CPU pass that
-    /// interprets the user `BuiltSource`(s) and adds `weight*S` to cons — NO recompile, NO
+    /// interprets the user `BuiltSource`(s) and adds `weight*S` to cons — no recompile, no
     /// AOT-baked kernel. CPU-only (host memory); the gpu path is runtime NVRTC (future).
     pub runtime_source: Option<Arc<RuntimeSource>>,
-    /// when true AND a `runtime_source` is attached, the runtime user source is
-    /// FUSED into the godunov stage as ONE Cranelift-JIT'd host kernel (cooling -> RT MZCS) instead
+    /// when true and a `runtime_source` is attached, the runtime user source is
+    /// fused into the godunov stage as one Cranelift-JIT'd host kernel (cooling -> rt MZCS) instead
     /// of the two-pass (plain godunov + per-cell `apply_runtime_source`). opt-in + gated: falls back
     /// to the two-pass on non-f64 carriers, device memory, or an out-of-JIT-subset source. the
     /// two-pass remains the default; the fused path is bit-for-bit identical to it.
@@ -110,7 +110,7 @@ pub struct AdiabaticSubstrateKernelSet<
     /// the drain timescale dial tau = c_drain dx / c_s: a
     /// convergence-study parameter, never tuned to a target rate.
     pub c_drain: f64,
-    /// the BODY-ONLY fused godunov kernel (godunov + geo + immersed-body wrap, no user source),
+    /// the body-only fused godunov kernel (godunov + geo + immersed-body wrap, no user source),
     /// resolved once + cached here on the kernel-set — a gravity/accretion run with no runtime source
     /// to carry the body. built lazily on first `godunov_stage` (geometry + bodies known then), gated
     /// host+f64 + `fuse_runtime`. `Some(None)` = out-of-JIT-subset -> the two-pass body pass runs.
@@ -134,19 +134,19 @@ pub struct AdiabaticSubstrateKernelSet<
     pub recon: symbi_discretize::Recon,
     /// ppm flatten dials (onset, full); (0, 0) = pure parabola. see `ppm_flatten`.
     pub flatten: (f64, f64),
-    /// the reference mach number the PUBLISHED low-mach ramp saturates at. read only by
+    /// the reference mach number the published low-mach ramp saturates at. read only by
     /// `Solver::HllcLm`; inert on every other solver. see `mach_limit`.
     pub mach_limit: f64,
-    /// whether the face reconstruction limits the STATE or its departure from local hydrostatic
+    /// whether the face reconstruction limits the state or its departure from local hydrostatic
     /// equilibrium. see `balance`.
     pub balance: symbi_discretize::coords::Balance,
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
-    /// constant kinematic viscosity nu. 0 = inviscid. >0 runs the Navier-Stokes shear PLUS the
+    /// constant kinematic viscosity nu. 0 = inviscid. >0 runs the Navier-Stokes shear plus the
     /// viscous heating (div(tau.v) onto the total energy) and caps dt at C_visc dx^2 / nu. cartesian
     /// 2D (the adiabatic energy-flux kernel).
     pub viscosity: f64,
-    /// shakura-sunyaev alpha with the LOCAL sound speed: nu = alpha (gamma p/rho) / Omega_K
+    /// shakura-sunyaev alpha with the local sound speed: nu = alpha (gamma p/rho) / Omega_K
     /// about immersed body 0. takes precedence over the constant nu when positive.
     pub alpha: f64,
 }
@@ -182,12 +182,12 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         }
     }
 
-    /// attach a RUNTIME-loaded user source from already-lowered `(target, BuiltSource)`
-    /// pairs (the `build_user_source` output of a python -> json `SourceConfig`). ONE source of
-    /// truth: the substrate derives BOTH the CPU per-cell interpreter (`SourceEvaluator::from_built`)
-    /// AND — lazily, on first device dispatch — the GPU IR (the SAME `source_apply_from_built_gv`
+    /// attach a runtime-loaded user source from already-lowered `(target, BuiltSource)`
+    /// pairs (the `build_user_source` output of a python -> json `SourceConfig`). one source of
+    /// truth: the substrate derives both the CPU per-cell interpreter (`SourceEvaluator::from_built`)
+    /// and — lazily, on first device dispatch — the GPU IR (the same `source_apply_from_built_gv`
     /// builder build.rs AOT-bakes), so the host runs the interpreter and the device runs an
-    /// NVRTC-JIT kernel, both from the same DAG, no recompile. `params` are the DAG's `p{i}` knobs.
+    /// nvrtc-jit kernel, both from the same DAG, no recompile. `params` are the DAG's `p{i}` knobs.
     /// `let built = build_user_source(&cfg, has_energy)?;`
     /// `let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());`
     pub fn with_runtime_source(
@@ -195,15 +195,15 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         built: Vec<(String, BuiltSource)>,
         params: Vec<f64>,
     ) -> Self {
-        // has_energy = true is the AUTHORITY here (Newtonian's RegimeSpec) —
-        // the set IS the regime. validation of the source vs the regime happened at
+        // has_energy = true is the authority here (Newtonian's RegimeSpec) —
+        // the set is the regime. validation of the source vs the regime happened at
         // `build_user_source(cfg, &NEWTONIAN_SPEC)`.
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
         self
     }
 
-    /// attach a runtime user source AND route it through the FUSED host path — the
-    /// source rides INSIDE the Cranelift-JIT'd godunov stage (one launch).
+    /// attach a runtime user source and route it through the fused host path — the
+    /// source rides inside the Cranelift-JIT'd godunov stage (one launch).
     /// same source, faster execution; bit-for-bit identical to `with_runtime_source` (the two-pass).
     /// host + f64 only; otherwise it transparently falls back
     /// to the two-pass.
@@ -217,7 +217,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self
     }
 
-    /// enable source fusion WITHOUT a user source: an immersed body (gravity + accretion) folds into
+    /// enable source fusion without a user source: an immersed body (gravity + accretion) folds into
     /// the godunov stage on host+f64, sparing a separate `body_source` pass. the body-only twin of
     /// `with_fused_runtime_source`; bit-identical to the two-pass, falls back off-host / non-f64 /
     /// JIT-miss. the production (py) path sets this so a pure-gravity run fuses; the direct-construction
@@ -236,7 +236,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self.fused_rhs.get().map(|o| o.is_some())
     }
 
-    /// register a DRIVEN boundary. the returned id (registration order, 0-based)
+    /// register a driven boundary. the returned id (registration order, 0-based)
     /// is what the sim's `Boundaries` must carry as `BoundaryType::Driven(id)` on the prescribed
     /// face. build `built` from `expr_bridge::build_boundary_dag(&cfg, &NEWTONIAN_SPEC)` (a complete
     /// prim prescription `[rho, vel.., pre]`). after the standard ghost-fill skips the driven faces,
@@ -254,7 +254,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         (self, id)
     }
 
-    /// register a NEUMANN / ROBIN gradient boundary (the convenience short-circuit). the returned id
+    /// register a neumann / robin gradient boundary (the convenience short-circuit). the returned id
     /// (registration order) is what the sim's `Boundaries` carries as `BoundaryType::Neumann(id)` /
     /// `Robin(id)` on the prescribed face. `coeffs` are the per-variable coefficients in prim order
     /// `[rho, vel.., pre]`. after the standard ghost-fill skips these faces, `ghost_fill` fills them
@@ -274,7 +274,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self
     }
 
-    /// bind the SAME source as a NON-fused additive pass instead of
+    /// bind the same source as a non-fused additive pass instead of
     /// fusing it into godunov. bit-for-bit equal to `with_fused_source` for a
     /// baked family. fluent builder; chain off `new(..)`.
     pub fn with_additive_source(mut self, binding: FusedSourceBinding) -> Self {
@@ -317,21 +317,21 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
 
     /// the ppm convergence-gated flatten dials (onset, full) in units of
     /// compression per cell crossing over the isothermal sound speed. the
-    /// default (0, 0) is the PURE parabola; a gravity-sink run declares its own
+    /// default (0, 0) is the pure parabola; a gravity-sink run declares its own
     /// dials to close the smooth-infall entropy vent (full flatten by the
     /// standing-layer strength), and a trans-sonic turbulence run leaves them
     /// off — an active flatten there degrades the parabola to first order in
     /// every eddy collision. inert under plm (the kernels never declare the
     /// scalars). fluent.
-    /// set the reference mach number the PUBLISHED low-mach ramp saturates at (default
+    /// set the reference mach number the published low-mach ramp saturates at (default
     /// `MACH_LIMIT` = 0.1, the value used throughout Fleischmann, Adami & Adams 2020).
-    /// the ramp reduces acoustic dissipation only BELOW this number, so it decides how much
+    /// the ramp reduces acoustic dissipation only below this number, so it decides how much
     /// of the flow the reduction reaches: a deeply subsonic problem whose entire range sits
     /// under 0.1 is untouched by the published value and needs it raised to meet the flow.
     /// 0 reduces nothing and recovers classical HLLC; 1 reduces all the way to the sonic
     /// point. read only by `Solver::HllcLm` -- the retired clamped arm froze its own
     /// pressure ceiling from the compile-time constant and holds them consistent. fluent.
-    /// reconstruct each cell's DEPARTURE from the local hydrostatic profile rather than the
+    /// reconstruct each cell's departure from the local hydrostatic profile rather than the
     /// state, so a discretely balanced atmosphere presents no face jump and a low-dissipation
     /// riemann solver has no residual to leave undamped.
     ///
@@ -339,7 +339,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// inherits it (that redo runs HLLE at theta = 0, and a piecewise-constant reconstruction of
     /// departures is exactly balanced). exact on a locally isentropic hydrostatic column;
     /// degrades linearly in the entropy variation off one. costs a per-stencil body-potential
-    /// evaluation, so it is OFF by default and worth measuring before a long run. fluent.
+    /// evaluation, so it is off by default and worth measuring before a long run. fluent.
     pub fn well_balanced_reconstruction(mut self, on: bool) -> Self {
         self.balance = if on {
             symbi_discretize::coords::Balance::Hydrostatic
@@ -445,11 +445,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        // the FUSED runtime-source path: one Cranelift-JIT'd godunov+source launch, replacing
+        // the fused runtime-source path: one Cranelift-JIT'd godunov+source launch, replacing
         // (plain godunov + the separate `apply_runtime_source` pass). gated host+f64; the source's
-        // own pass is skipped in `source_apply` under the SAME predicate. geo = Hydro{inertial:true}
+        // own pass is skipped in `source_apply` under the same predicate. geo = Hydro{inertial:true}
         // matches the AOT `adiabatic` godunov (geo_source), so the two-pass fallback is exact.
-        // a dyed run stays OFF the fused body path: the fused godunov carries den/mom/nrg only,
+        // a dyed run stays off the fused body path: the fused godunov carries den/mom/nrg only,
         // so folding the body in there would drain mass without its dye and raise the concentration
         // of the gas left behind. fusion is a launch-count optimization, not semantics, so the
         // two-pass body kernels (which have dyed twins) carry a dye correctly at a small cost.
@@ -485,7 +485,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn cfl(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> f64 {
         // adiabatic shares the iso wave-speed map (cs = sqrt(gamma*p/rho), gamma=1.4 vs 1);
-        // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
+        // the shared cfl dispatch binds the field buffers by manifest + owns the reduction.
         let pre = sim
             .fields
             .prim
@@ -504,8 +504,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         );
         // the parabolic viscous cap: an explicit momentum-diffusion step is stable for
         // dt <= C_visc dx^2 / nu (C_visc = 0.1 below the ~0.21 von-Neumann limit of the 4/3 normal
-        // stress). cartesian 2D only, so the coordinate dx IS the physical cell width. inert inviscid.
-        // alpha: nu grows with radius AND with the local cs^2, so the cap bounds it
+        // stress). cartesian 2D only, so the coordinate dx is the physical cell width. inert inviscid.
+        // alpha: nu grows with radius and with the local cs^2, so the cap bounds it
         // by the largest sound speed at the slowest orbit (adiabatic_alpha_nu_max).
         let nu_max = if self.alpha > 0.0 {
             crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(sim, self.alpha, self.gamma)
@@ -547,8 +547,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
-        // the SHARED lattice-map pullback (iso_ghost_fill{sfx}_{D}d): rho/vel/pre, in-place,
-        // bound by manifest. (DOF>NDIM: the cyl ghost manifest carries no per-axis BC entry,
+        // the shared lattice-map pullback (iso_ghost_fill{sfx}_{D}d): rho/vel/pre, in-place,
+        // bound by manifest. (DOF>NDIM: the cyl ghost manifest carries no per-axis bc entry,
         // but the dispatch path is regime-uniform.)
         let bc = to_bc_array::<D>(&sim.boundaries);
         let pre = sim
@@ -557,7 +557,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             .pre_field()
             .expect("Newtonian requires prim.pre");
         let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
-        // under a BALANCED reconstruction the ghosts must satisfy the same premise the
+        // under a balanced reconstruction the ghosts must satisfy the same premise the
         // interior does: a mirrored copy of a stratified column is not its continuation, so
         // reflect/outflow ghosts extend (rho, p) along the local isentrope to the ghost's own
         // potential (velocity mirrors as always). without this the wall face presents pure
@@ -602,7 +602,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         };
 
         // the fill's face-position ladder reads the runtime spacing map, so the per-axis
-        // (x_lo, dx) it binds must be the MAP's parameters (face-0 position + linear width /
+        // (x_lo, dx) it binds must be the map's parameters (face-0 position + linear width /
         // log slope / geometric seed width) — identical to the raw grid scalars on an
         // unmapped axis. ghost fills are static-mesh (a = 1).
         let (x_lo_k, dx_k) = crate::regimes::substrate_kernels::kernel_geom(
@@ -614,7 +614,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         );
         GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
             |region, p| {
-                // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes (the
+                // params by name via the type-sorted manifest: map_type/arg are INT lanes (the
                 // `ints` tail), vel_sign FLOAT (the `scalars` tail) — each routed by the kernel's
                 // declared sort. the int \sqcup float coproduct that defeated positional scalars_for.
                 let (ints, scalars) = resolve_params(
@@ -720,7 +720,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        // the dye divergence divides by the PHYSICAL cell width, so its geom scalars resolve
+        // the dye divergence divides by the physical cell width, so its geom scalars resolve
         // through the same motion-aware path the gas godunov uses: on a homologously expanding
         // mesh `dx` carries a(t) on the expanding axes, and the comoving width would be short by
         // exactly that factor. reproduces the raw linear (x_lo, dx) bit-identically on a static grid.
@@ -869,7 +869,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // when the fused stage carried the immersed body inside godunov (one launch), running the
         // standalone pass here would double-apply it. same predicate + geo the godunov stage used —
         // via the user-source fused kernel, or the body-only fused kernel when there is no user source.
-        // the FUSED stage applies the ANALYTIC rho*g; under a balanced reconstruction that is the
+        // the fused stage applies the analytic rho*g; under a balanced reconstruction that is the
         // wrong pairing, so balance forces the standalone equilibrium-difference pass.
         if self.balance == symbi_discretize::coords::Balance::Plain
             && self.fuse_runtime
@@ -884,7 +884,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 return;
             }
         }
-        // forward immersed-body source: cons += dt*S, in-place. under a BALANCED
+        // forward immersed-body source: cons += dt*S, in-place. under a balanced
         // reconstruction the momentum source must be the equilibrium-pressure difference at
         // the cell faces, or the flux/source mismatch re-accelerates the very column the
         // reconstruction balanced -- measured as an O((dx/H)^2) per-step drift that walks a

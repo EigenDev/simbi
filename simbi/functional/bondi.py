@@ -1,7 +1,7 @@
 # =============================================================================
 # bondi.py
 #
-# the ONE python text for bondi-accretion analytics and the config machinery
+# the one python text for bondi-accretion analytics and the config machinery
 # built from them. each function here previously existed as two to four
 # hand-copied transcriptions across the bondi / binary-bondi / bhl configs,
 # and the copies had already drifted (a hardcoded 1.12 for e^1.5/4, a missing

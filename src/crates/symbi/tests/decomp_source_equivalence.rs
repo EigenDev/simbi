@@ -1,7 +1,7 @@
 // =============================================================================
 // decomp_source_equivalence.rs
 //
-// the SOURCE correctness contract for multi-gpu domain decomposition: a domain split into tiles,
+// the source correctness contract for multi-gpu domain decomposition: a domain split into tiles,
 // each carrying the same runtime source collection, evolved with the additive source pass in
 // `evolve_decomposed`, must reproduce the monolithic run to round-off.
 //
@@ -42,7 +42,7 @@ const T_FINAL: f64 = 0.04;
 type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
-// a position-dependent force `a_x = x_0` (VARIABLE_X1, the cell's GLOBAL x), `a_y = 0`. the energy
+// a position-dependent force `a_x = x_0` (VARIABLE_X1, the cell's global x), `a_y = 0`. the energy
 // regime lowers this into a momentum overlay (S_mom = rho*a) together with an nrg work overlay; both
 // flow through the additive `source_apply` pass in `evolve_decomposed`.
 const SOURCE_JSON_1: &str = r#"{
@@ -266,7 +266,7 @@ fn assert_source_matches(counts: [usize; 2], ts: Timestepping) {
         "{counts:?} {ts:?} mom_x err {me:e} under runtime source"
     );
 
-    // ALSO the production gather path (the python checkpoint output).
+    // also the production gather path (the python checkpoint output).
     let bnd = Boundaries(std::array::from_fn(|_| [BoundaryType::Outflow; 2]));
     let global = make([N, N], [0.0, 0.0], bnd, ts);
     let stores: Vec<_> = dec.iter().map(|(s, _)| &**s).collect();

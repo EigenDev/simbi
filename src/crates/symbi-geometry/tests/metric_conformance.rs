@@ -99,7 +99,7 @@ fn flat_metrics_report_flat_background() {
     assert_flat(&Cartesian, Tensor::new([5.0]), "Cartesian 1D");
     assert_flat(&Cartesian, Tensor::new([5.0, 3.0]), "Cartesian 2D");
     assert_flat(&Cartesian, Tensor::new([5.0, 3.0, 2.0]), "Cartesian 3D");
-    // spherical (flat SPACETIME, curved spatial geometry — still Minkowski, lapse 1)
+    // spherical (flat spacetime, curved spatial geometry — still Minkowski, lapse 1)
     assert_flat(&Spherical, Tensor::new([5.0]), "Spherical 1D");
     assert_flat(&Spherical, Tensor::new([5.0, 1.0]), "Spherical 2D");
     assert_flat(&Spherical, Tensor::new([5.0, 1.0, 0.5]), "Spherical 3D");
@@ -168,7 +168,7 @@ fn curved_metrics_have_consistent_background() {
 
 #[test]
 fn reduced_dimension_volume_factor_is_the_proper_measure() {
-    // the required `volume_factor` must be the PROPER measure including suppressed angular
+    // the required `volume_factor` must be the proper measure including suppressed angular
     // directions. the naive `sqrt_det_gamma` of the reduced spatial block drops those directions
     // and is wrong. spherical 1D: r^2 (naive would give 1); spherical 2D: r^2 sin(theta) (naive: r);
     // cylindrical 1D/2D: r (naive: 1).

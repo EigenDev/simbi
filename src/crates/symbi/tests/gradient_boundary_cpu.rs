@@ -1,9 +1,9 @@
 // =============================================================================
 // gradient_boundary_cpu.rs
 //
-// a NEUMANN boundary (the registry-driven convenience short-circuit) prescribes its ghost prim
+// a neumann boundary (the registry-driven convenience short-circuit) prescribes its ghost prim
 // state as `U_ghost = u_edge + q*dist` per primitive variable, from the boundary-adjacent interior
-// ("edge") cell. the standard ghost-fill SKIPS the Neumann face (Neumann -> BcType::Skip); the
+// ("edge") cell. the standard ghost-fill skips the Neumann face (Neumann -> BcType::Skip); the
 // gradient-boundary pass then fills it from the edge + the registered per-variable gradients.
 //
 // x_lo is Neumann with per-variable gradients q = [rho:0.5, vx:-0.3, vy:0.2, pre:1.0]; the interior
@@ -38,9 +38,9 @@ fn neumann_boundary_extrapolates_from_the_edge_cell() {
         .boundaries(boundaries)
         .finish()
         .unwrap();
-    // populate the PRIM state directly (the ghost fill reads prim; in the evolve loop c2p fills it
+    // populate the prim state directly (the ghost fill reads prim; in the evolve loop c2p fills it
     // from cons each step, but this isolated test skips the step). uniform interior, so the edge
-    // value is exactly (RHO, VX, 0, PRE).
+    // value is exactly (rho, vx, 0, pre).
     let pre_f = sim.fields.prim.pre_field().unwrap();
     for c in sim.geom.interior.iter() {
         sim.fields.prim.rho.view_mut().set(c, RHO);
@@ -94,7 +94,7 @@ fn neumann_boundary_extrapolates_from_the_edge_cell() {
 #[test]
 fn neumann_boundary_spherical_radial_uses_the_baked_cartesian_kernel() {
     // plain spherical hydro (DOF == D) reuses the cart-baked neumann kernel; the geometry enters
-    // only through the runtime x_lo/dx/map_kind the dist reads. a radial Neumann on the OUTER (hi)
+    // only through the runtime x_lo/dx/map_kind the dist reads. a radial Neumann on the outer (hi)
     // r face therefore extrapolates with the true radial spacing dr (radial dist is exact).
     type SimSph = SimCpu<Newtonian, 1, Spherical, IdealGas<f64>>;
     let n = 16usize;
@@ -145,7 +145,7 @@ fn neumann_boundary_spherical_radial_uses_the_baked_cartesian_kernel() {
 
 #[test]
 fn neumann_boundary_iso_rederives_the_eos_pressure() {
-    // iso: the shared kernel is fed cs^2 so the ghost pressure honours pre = cs^2*rho (NOT a free
+    // iso: the shared kernel is fed cs^2 so the ghost pressure honours pre = cs^2*rho (not a free
     // gradient). rho/vel extrapolate; pre tracks the closure. the substrate owns `pre` (off the
     // global prim ABI), so seed + read it directly.
     type SimIso = SimCpu<IsoNewtonian, 1, Cartesian, Isothermal<f64>>;
@@ -259,7 +259,7 @@ fn robin_boundary_solves_the_mixed_relation() {
 // the dye concentration carries no entry in the per-variable gradient registry, so a gradient face
 // resolves it at zero normal derivative: the ghost band copies the boundary-adjacent interior cell.
 // the interior dye varies along x, so a copy of the edge cell is distinguishable from any
-// extrapolation, and the band is poisoned before the fill so an UNWRITTEN band fails here rather
+// extrapolation, and the band is poisoned before the fill so an unwritten band fails here rather
 // than passing on stale data.
 #[test]
 fn gradient_face_carries_the_dye_at_zero_normal_derivative() {

@@ -101,7 +101,7 @@ def setup_parser(subparsers) -> None:
         formatter_class=HelpFormatter,
         usage="simbi run <config> [options]",
         # -h/--help is handled here so that `simbi run <config> --help`
-        # can load the config and show ITS flags.
+        # can load the config and show its flags.
         add_help=False,
     )
 
@@ -160,7 +160,7 @@ def setup_parser(subparsers) -> None:
     # utilities
     util_group = run_parser.add_argument_group("utilities")
     # -h/--help/--peek/--info all show the config's flags: with a <config> given they
-    # print THAT problem's parameters (--gamma-shock0, --has-mesh-motion, ...); with no
+    # print that problem's parameters (--gamma-shock0, --has-mesh-motion, ...); with no
     # config they print the generic run help. one flag, all the aliases a user reaches for.
     util_group.add_argument(
         "-h",

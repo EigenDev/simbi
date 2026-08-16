@@ -1,14 +1,14 @@
 // =============================================================================
 // decomp_refine_driven_equivalence.rs
 //
-// DRIVEN boundaries x REFINEMENT x DECOMPOSITION: per-tile 2-level hierarchies whose root is
-// split into tiles, with a driven inflow on x_lo and the refined patch FLUSH against that face
+// driven boundaries x refinement x decomposition: per-tile 2-level hierarchies whose root is
+// split into tiles, with a driven inflow on x_lo and the refined patch flush against that face
 // — so the owning tile's fine level inherits `Driven(id)` and evaluates the coordinate DAG at
 // its own fine ghost coordinates while the root halo exchange couples the tiles. must
 // reproduce the monolithic refined run (itself gated by refinement_driven_boundary.rs) to
-// round-off through the PRODUCTION `evolve_hierarchy_decomposed` loop.
+// round-off through the production `evolve_hierarchy_decomposed` loop.
 //
-// the prescription is POSITION-DEPENDENT (rho = 2 + 0.2*y, the cell's GLOBAL y): with the cut
+// the prescription is position-dependent (rho = 2 + 0.2*y, the cell's global y): with the cut
 // along the driven face, both edge tiles own a piece of it, so a tile evaluating the DAG at a
 // local coordinate diverges; with the cut perpendicular, the injected gas crosses the cut via
 // the root exchange.
@@ -61,7 +61,7 @@ fn kset(sim: &Sim) -> Kern {
     k
 }
 
-// the refined patch FLUSH against the driven x_lo face, inside the bottom-left quadrant so a
+// the refined patch flush against the driven x_lo face, inside the bottom-left quadrant so a
 // single tile owns it under every tested topology (cuts at x = 0.5 and/or y = 0.5).
 fn patch() -> RefinementRegion<2> {
     RefinementRegion {

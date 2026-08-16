@@ -9,7 +9,7 @@
 //   let nodes = vec![
 //       NodeDesc::constant(1.0),
 //       NodeDesc::variable("VARIABLE_X1"),
-//       NodeDesc::binary("MULTIPLY", 0, 1),
+//       NodeDesc::binary("multiply", 0, 1),
 //   ];
 //   let expr = load_expression(&nodes, &[2], &[])?;
 //   assert_eq!(expr.eval(3.0, 0.0, 0.0, 0.0)[0], 3.0);
@@ -33,7 +33,7 @@ pub enum LoadError {
         index: usize,
         num_nodes: usize,
     },
-    /// a node referencing itself or a LATER node. the wire format is a topologically
+    /// a node referencing itself or a later node. the wire format is a topologically
     /// ordered dag, so every operand must already exist when its parent is read. without
     /// this check the malformed graph loads and the failure surfaces much later, as an
     /// out-of-bounds inside a graph pass, with nothing pointing back at the config.
@@ -183,7 +183,7 @@ pub fn load_expression(
     params: &[f64],
 ) -> Result<Expression, LoadError> {
     let nodes = nodes_from_descs(node_descs)?;
-    // constant-power strength reduction — the SAME rewrite the ir bridge applies, so the
+    // constant-power strength reduction — the same rewrite the ir bridge applies, so the
     // f64 reference vm and the lowered kernel evaluate identical arithmetic.
     let (nodes, output_indices) = crate::strength::strength_reduce(&nodes, output_indices);
     let mut expr = Expression::from_nodes(&nodes, &output_indices);
@@ -196,12 +196,12 @@ pub fn load_expression(
 /// build the topologically-ordered `Node` array from serialized descriptors — the shared
 /// front half of `load_expression`. `symbi-hydro::expr_bridge` lowers this same `Vec<Node>`
 /// into the IR Graph (for fused codegen), so json -> nodes -> {VM `Expression` | IR
-/// `BuiltSource`} is ONE parse. validates op names, arity, and child indices.
+/// `BuiltSource`} is one parse. validates op names, arity, and child indices.
 pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError> {
     let nn = node_descs.len();
     let mut nodes = Vec::with_capacity(nn);
 
-    // an operand must be EARLIER in the array, which is what topological order means and
+    // an operand must be earlier in the array, which is what topological order means and
     // what every downstream pass assumes. checking only against the node count would admit
     // a self-reference or a forward edge, and the graph would then fail deep inside a pass
     // rather than at the config that caused it.
@@ -285,7 +285,7 @@ pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError>
     Ok(nodes)
 }
 
-/// a serialized USER source — the python front door's wire format. a python builder emits this
+/// a serialized user source — the python front door's wire format. a python builder emits this
 /// as json (`SourceConfig::from_json`); the rust side turns it into a VM `Expression`
 /// (`to_expression`) or hands the `nodes` + `outputs` to `symbi-hydro::expr_bridge` for a fused
 /// IR `BuiltSource`, then wraps it in the conservation law per `kind`.
@@ -293,16 +293,16 @@ pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError>
 /// json shape (None node fields omitted):
 /// ```json
 /// { "kind": "force", "dim": 2, "outputs": [2, 3], "params": [],
-///   "nodes": [ {"op":"VARIABLE_X1"}, {"op":"PARAMETER","param_idx":0},
-///              {"op":"MULTIPLY","left":1,"right":0}, {"op":"CONSTANT","value":0.4} ] }
+///   "nodes": [ {"op":"VARIABLE_X1"}, {"op":"parameter","param_idx":0},
+///              {"op":"multiply","left":1,"right":0}, {"op":"constant","value":0.4} ] }
 /// ```
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceConfig {
-    /// the conservation LAW the framework wraps the field in (`kind <-> invariant`):
+    /// the conservation law the framework wraps the field in (`kind <-> invariant`):
     /// `"force"` (acceleration -> S_mom=rho*a, S_nrg=rho*a.v), `"cooling"` (rate -> S_nrg=-Lambda),
     /// `"relax"` (velocity relaxation S_mom=kappa*rho*(v_ref-v), kappa>=0 -> stable damping; the
     /// `outputs` are `[kappa, v_ref_0..v_ref_{D-1}]`), or `"raw"` (outputs written directly to
-    /// `target`). force/cooling/relax are the SAFE primitive-lifted constructors; raw is the hole.
+    /// `target`). force/cooling/relax are the safe primitive-lifted constructors; raw is the hole.
     pub kind: String,
     /// spatial dimension D the source is built at.
     pub dim: usize,
@@ -315,8 +315,8 @@ pub struct SourceConfig {
     /// runtime parameter values, indexed by each `PARAMETER` node's `param_idx`.
     #[serde(default)]
     pub params: Vec<f64>,
-    /// **`region` axis** — an OPTIONAL node index (into `nodes`) of a mask
-    /// `chi(x) in [0,1]` restricting WHERE the source acts (sponge layers, jet nozzles). the
+    /// **`region` axis** — an optional node index (into `nodes`) of a mask
+    /// `chi(x) in [0,1]` restricting where the source acts (sponge layers, jet nozzles). the
     /// contribution is multiplied by `chi` at build time (the lift is linear in the field, so
     /// masking the field == masking the conserved contribution). `None` => everywhere (`chi == 1`),
     /// byte-identical to the pre-region kernels.
@@ -344,7 +344,7 @@ impl SourceConfig {
     }
 }
 
-/// a STATIONARY TARGET state, as an expression of position: the PRIMITIVE vector a run declares
+/// a stationary target state, as an expression of position: the primitive vector a run declares
 /// its equilibrium to be, so that a well-balanced scheme can hold it exactly.
 ///
 /// this is a state, not a source, so it carries no conservation law to be wrapped in and no
@@ -352,7 +352,7 @@ impl SourceConfig {
 /// `[rho, v_0 .. v_{DOF-1}, p]`, with the pressure slot present exactly when the regime carries
 /// energy.
 ///
-/// the target crosses the wire as an EXPRESSION rather than as sampled field data because it must
+/// the target crosses the wire as an expression rather than as sampled field data because it must
 /// be re-derivable at any resolution: a restart that adds a refinement level needs the target
 /// defined on cells that did not exist when the run began, and sampled data cannot supply them.
 ///
@@ -406,10 +406,10 @@ pub struct CensusAxisConfig {
     pub edges: Vec<f64>,
 }
 
-/// a serialized USER census — a pointwise map followed by a segmented reduce, emitted by the
+/// a serialized user census — a pointwise map followed by a segmented reduce, emitted by the
 /// python front door as json alongside the source expressions.
 ///
-/// the axis expressions and the value expressions share ONE dag, so a subexpression used by
+/// the axis expressions and the value expressions share one dag, so a subexpression used by
 /// both (a radius, its logarithm) is written once and evaluated once per cell.
 ///
 /// json shape:
@@ -418,14 +418,14 @@ pub struct CensusAxisConfig {
 ///   "axes": [ {"name": "r", "expr": 0, "edges": [1.0, 2.0, 4.0]} ],
 ///   "values": [1], "value_names": ["mass"],
 ///   "nodes": [ {"op":"VARIABLE_X1"},
-///              {"op":"MULTIPLY","left":2,"right":3},
+///              {"op":"multiply","left":2,"right":3},
 ///              {"op":"VARIABLE_RHO"}, {"op":"VARIABLE_DV"} ] }
 /// ```
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CensusConfig {
     /// names the census's output group. unique across a run's registrations.
     pub name: String,
-    /// bin axes, in registration order. they take an OUTER PRODUCT, and an empty list is a
+    /// bin axes, in registration order. they take an outer product, and an empty list is a
     /// global reduction over the grid — the case total mass and energy occupy.
     #[serde(default)]
     pub axes: Vec<CensusAxisConfig>,
@@ -444,18 +444,18 @@ pub struct CensusConfig {
     /// runtime parameter values, indexed by each `PARAMETER` node's `param_idx`.
     #[serde(default)]
     pub params: Vec<f64>,
-    /// the shortest SIMULATION-TIME interval between samples. `None` samples every step, which is
+    /// the shortest simulation-time interval between samples. `None` samples every step, which is
     /// the finest a run can offer and also the most expensive: a sample is a full extra sweep of
     /// the grid plus its reduction, measured at roughly a third of a hydro step on a small 1d
     /// problem, so sampling every step means paying that on every step.
     ///
-    /// an interval in TIME rather than a step count because it is the time series that is being
+    /// an interval in time rather than a step count because it is the time series that is being
     /// recorded: dt varies over a run — with the cfl, with refinement, with the state — so a
     /// fixed step stride produces a non-uniform sampling of the physics, and the spacing of the
     /// resulting series would be an artifact of the timestepper rather than a choice.
     #[serde(default)]
     pub sample_interval: Option<f64>,
-    /// fold every sample into ONE running row rather than storing a row apiece, combining them
+    /// fold every sample into one running row rather than storing a row apiece, combining them
     /// with the census's own reduce op.
     ///
     /// what this trades away is the time series; what it buys is that a two-dimensional histogram

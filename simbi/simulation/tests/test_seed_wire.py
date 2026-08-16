@@ -1,13 +1,13 @@
 # =============================================================================
 # test_seed_wire.py
 #
-# the python -> rust initial-PERTURBATION wire. the payload is a state DELTA
+# the python -> rust initial-perturbation wire. the payload is a state delta
 # carrying one expression per primitive component, read positionally by the
 # backend, so a missing or extra component silently shifts every one after it.
 #
 # also the residual gate that stands in for an explicit momentum projection: the
 # backend applies the declared delta and nothing else, so whether the seeded
-# state carries a coherent drift or spin is a property of the MODE TABLE. random
+# state carries a coherent drift or spin is a property of the mode table. random
 # phases make both negligible (measured |L_net|/L_pool = 4.7e-3 and
 # |P_net|/P_pool = 1.1e-2 on the composite grid, giving a coherent xi of ~6e-4
 # and an S contribution of ~4e-7 against a lock value near unity). a table built

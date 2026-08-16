@@ -8,12 +8,12 @@
 // all ncomp = 3) through the DOF-generic AdiabaticSubstrateKernelSet + the
 // metadata-driven dispatch (each kernel's buffer manifest read off the artifact).
 //
-// physics check — the AXISYMMETRIC CENTRIFUGAL SOURCE. a uniform swirling gas
+// physics check — the axisymmetric centrifugal source. a uniform swirling gas
 // (rho, p uniform; v_phi = v0 const; v_r = v_z = 0) has zero pressure gradient, so
 // the only radial force is centrifugal: d v_r / dt = v_phi^2 / r. over a short time
 // t (before the pressure feedback matters) v_r(r) ~ v0^2 t / r, i.e., v_r * r is
 // constant across r — the unmistakable 1/r signature of the geometric source. a
-// cartesian scheme (no source) would leave v_r = 0; matching the magnitude AND the
+// cartesian scheme (no source) would leave v_r = 0; matching the magnitude and the
 // 1/r structure proves the source is active, correctly signed, and r-weighted.
 // =============================================================================
 
@@ -35,14 +35,14 @@ fn axisymmetric_swirl_centrifugal_source() {
     type CylSim =
         SimStateGeneric<Newtonian, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
 
-    // an annulus r in [1, 2] (r_min > 0 avoids the r=0 axis singularity BC); z periodic.
+    // an annulus r in [1, 2] (r_min > 0 avoids the r=0 axis singularity bc); z periodic.
     let (nr, nz) = (48usize, 8usize);
     let (r_lo, r_hi) = (1.0_f64, 2.0_f64);
     let dr = (r_hi - r_lo) / nr as f64;
     let dz = 0.5 / nz as f64;
     let v0 = 1.0_f64; // uniform swirl speed.
 
-    // uniform state: rho = 1, p = 1, v_phi = v0, v_r = v_z = 0. vel is COORDINATE-indexed
+    // uniform state: rho = 1, p = 1, v_phi = v0, v_r = v_z = 0. vel is coordinate-indexed
     // (0 = r, 1 = phi, 2 = z); the regime folds the full 3-component kinetic term into energy.
     let mut sim = CylSim::build(Newtonian, IdealGas { gamma: GAMMA }, Cylindrical)
         .cells([nr, nz])
@@ -73,7 +73,7 @@ fn axisymmetric_swirl_centrifugal_source() {
     let vz = &sim.fields.prim.vel[2];
     let pre = sim.fields.prim.pre_field().expect("prim.pre");
 
-    // sample the interior away from the r-walls (the BC perturbation can reach a few cells
+    // sample the interior away from the r-walls (the bc perturbation can reach a few cells
     // in over t_final; the centrifugal signature is under test).
     let mut vr_times_r: Vec<f64> = Vec::new();
     for c in sim.geom.interior.iter() {
@@ -122,7 +122,7 @@ fn axisymmetric_swirl_centrifugal_source() {
         100.0 * (hi - lo) / mean
     );
 
-    // the MAGNITUDE: v_r * r ~ v0^2 * t. lenient band — the realized integration time
+    // the magnitude: v_r * r ~ v0^2 * t. lenient band — the realized integration time
     // overshoots t_final by < 1 dt and the pressure feedback shaves the late growth.
     let expected = v0 * v0 * t_final;
     assert!(

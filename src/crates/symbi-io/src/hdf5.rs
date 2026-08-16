@@ -6,7 +6,7 @@
 // existing checkpoint files + every plot script (`scripts/plot_*.py`) read
 // unchanged.
 //
-// the implementation is intentionally a SINGLE-PASS recursive walk: for each
+// the implementation is intentionally a single-pass recursive walk: for each
 // group node, create the HDF5 group, drain its attrs + datasets + children.
 // both directions share the same Tree shape.
 // =============================================================================
@@ -56,7 +56,7 @@ impl IoBackend for Hdf5Backend {
 }
 
 impl Hdf5Backend {
-    /// length of the first axis of a root dataset, WITHOUT reading the data — the
+    /// length of the first axis of a root dataset, without reading the data — the
     /// row count that drives a chunked read loop.
     pub fn dataset_len(&self, path: &Path, name: &str) -> Result<usize> {
         let file = hdf5_metno::File::open(path)
@@ -65,10 +65,10 @@ impl Hdf5Backend {
         Ok(ds.shape().first().copied().unwrap_or(0))
     }
 
-    /// read the rows `[start, start + count)` of EVERY root dataset (a flat-table / SoA
+    /// read the rows `[start, start + count)` of every root dataset (a flat-table / SoA
     /// slice), plus all root attrs, into a TreeBuf — without ever materializing the full
     /// columns. `start`/`count` are clamped to each dataset's length, so the last chunk is
-    /// naturally short and an out-of-range start yields empty columns. subgroups are NOT
+    /// naturally short and an out-of-range start yields empty columns. subgroups are not
     /// walked (the photon catalog is a flat root table). this is the bounded-memory
     /// counterpart to `read`: reduce a huge events file chunk-by-chunk, discarding each slice.
     pub fn read_root_slice(&self, path: &Path, start: usize, count: usize) -> Result<TreeBuf> {
@@ -135,7 +135,7 @@ impl<'a> FileOrGroup<'a> {
         r.map_err(|e| IoError::Backend(format!("create attr '{name}': {e}")))
     }
     fn new_attr_str(&self, name: &str) -> Result<hdf5_metno::Attribute> {
-        // string metadata rides as a variable-length unicode HDF5 ATTRIBUTE,
+        // string metadata rides as a variable-length unicode HDF5 attribute,
         // matching the frozen v2.0 python reader contract (`meta_group.attrs[..]`
         // decoded via `decode_str`).
         use hdf5_metno::types::VarLenUnicode;
@@ -231,7 +231,7 @@ fn write_subtree_into(grp: &hdf5_metno::Group, sub: &Tree<'_>) -> Result<()> {
     Ok(())
 }
 
-// ----- READ side -----------------------------------------------------------
+// ----- read side -----------------------------------------------------------
 
 enum FileOrGroupRead<'a> {
     File(&'a hdf5_metno::File),

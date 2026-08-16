@@ -1,16 +1,16 @@
 // =============================================================================
 // refinement_excise.rs
 //
-// horizon excision on a REFINED hierarchy: the excise pass runs on the level that OWNS the excised
-// region — the ROOT, since the request gate forbids a fine patch overlapping the excised core — while
+// horizon excision on a refined hierarchy: the excise pass runs on the level that owns the excised
+// region — the root, since the request gate forbids a fine patch overlapping the excised core — while
 // an off-horizon fine patch refines the far field. the excise dispatch runs per level, so a
 // refined root excises its own core; a dispatch restricted to the finest level would leave the
 // excised region untouched on every refined-root run. gates, each split at the horizon r_+ = 2M:
-// - NON-VACUITY: the excised INTERIOR (r < r_+, where the excise pass acts) differs from an
+// - non-vacuity: the excised interior (r < r_+, where the excise pass acts) differs from an
 //   unexcised run, so a silently dead pass on a refined root cannot pass;
-// - CAUSAL ISOLATION: the EXTERIOR (r > r_+) is nearly independent of the excision surface's radius
-//   AND its presence. discrete disconnection is BOUNDED not exact (the flux stencil couples across
-//   r_+ at truncation level), so the exterior leak must be ORDERS below the interior effect — a
+// - causal isolation: the exterior (r > r_+) is nearly independent of the excision surface's radius
+//   and its presence. discrete disconnection is bounded not exact (the flux stencil couples across
+//   r_+ at truncation level), so the exterior leak must be orders below the interior effect — a
 //   ratio bound, not bit-equality. a surface leaking O(1) outward (an inconsistent core determinant)
 //   fails it loudly;
 // - the fine patch genuinely evolves (its state departs the seeded IC);
@@ -125,8 +125,8 @@ fn refined_run_excises_the_root_and_evolves_the_fine_patch() {
     );
 
     // r_+ = 2M = 0.6; both excision radii (0.35, 0.5) sit strictly inside the horizon. classify each
-    // root cell by |x|: the INTERIOR (r < r_+) is where excision acts and is causally disconnected
-    // from the exterior; the EXTERIOR (r > r_+) is the physical domain an observer sees.
+    // root cell by |x|: the interior (r < r_+) is where excision acts and is causally disconnected
+    // from the exterior; the exterior (r > r_+) is the physical domain an observer sees.
     const R_PLUS: f64 = 2.0 * MASS; // 0.6
     // max |a - b| over the root cells on one side of the horizon (inside = r < r_+).
     let split = |a: &[f64], b: &[f64], inside: bool| -> f64 {
@@ -138,9 +138,9 @@ fn refined_run_excises_the_root_and_evolves_the_fine_patch() {
             .fold(0.0_f64, f64::max)
     };
 
-    // NON-VACUITY: excision genuinely ran on the REFINED ROOT. the excised interior (r < r_+, which
+    // non-vacuity: excision genuinely ran on the refined root. the excised interior (r < r_+, which
     // the excise pass freezes at the cold vacuum floor) must differ from the un-excised run; a dispatch that skipped the
-    // pass on a refined root would leave the two identical. the comparison is against NO excision,
+    // pass on a refined root would leave the two identical. the comparison is against no excision,
     // the only baseline a correct scheme is obliged to differ from.
     let interior_acted = split(&root_a, &none, true);
     assert!(
@@ -149,11 +149,11 @@ fn refined_run_excises_the_root_and_evolves_the_fine_patch() {
          refined root (r < r_+ = {R_PLUS})"
     );
 
-    // CAUSAL ISOLATION: the EXTERIOR (r > r_+) is nearly independent of what happens inside the
+    // causal isolation: the exterior (r > r_+) is nearly independent of what happens inside the
     // horizon — of both the excision surface's position and its very presence. discrete causal
-    // disconnection is BOUNDED, not exact: the flux stencil couples the two sides of r_+ at
+    // disconnection is bounded, not exact: the flux stencil couples the two sides of r_+ at
     // truncation level, so a small residual leak crosses outward and decays with resolution. the
-    // isolation is stated as a RATIO: the exterior leak must be orders below the interior excision
+    // isolation is stated as a ratio: the exterior leak must be orders below the interior excision
     // effect. measured: interior changes by 2.6e1, exterior leaks 6.0e-5 (radius) / 4.5e-7 (presence)
     // — ~6 decades of isolation. the bound carries wide margin; a surface whose influence leaks O(1)
     // outward (an inconsistent core determinant, say) fails it loudly.

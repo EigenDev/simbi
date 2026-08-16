@@ -3,13 +3,13 @@
 #
 # the RMHD (B = 0) rotating-equilibrium accuracy gate: the
 # GrRotatingEquilibrium constant-l orbit (Fishbone-Moncrief 1976, at general
-# spin, dynamic boundaries pinned to the analytic state) run on the RELATIVISTIC-
+# spin, dynamic boundaries pinned to the analytic state) run on the relativistic-
 # MHD kernel path with a vanishing magnetic field. at B = 0 the RMHD equations
-# reduce to GRHD, so the SAME analytic equilibrium is stationary — while the state
+# reduce to GRHD, so the same analytic equilibrium is stationary — while the state
 # flows through the full spinning-kerr RMHD flux (the tetrad HLLD, the shift,
-# and the v^phi FRAME-DRAGGING w-reconstruction), c2p, and covariant EM-stress
+# and the v^phi frame-dragging w-reconstruction), c2p, and covariant EM-stress
 # source. it is the accuracy check for those pieces: the one-step S_phi residual
-# must sit at truncation and CONVERGE under refinement (a raw v^phi
+# must sit at truncation and converge under refinement (a raw v^phi
 # reconstruction generates S_phi off the dragging manifold and fails to converge).
 #
 # usage:

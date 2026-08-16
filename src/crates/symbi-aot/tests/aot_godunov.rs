@@ -1,11 +1,11 @@
 // =============================================================================
 // aot_godunov.rs
 //
-// run the BUILD-TIME-GENERATED godunov kernel (compiled into this crate from a
+// run the build-time-generated godunov kernel (compiled into this crate from a
 // substrate RegimeSpec via emit_kernel_cpu) and diff against the hand-written
 // reference. since this kernel matches the hand-written reference via the #4
 // interpreter, this transitively proves the AOT-compiled Rust \equiv the interpreter
-// — and, more importantly, that the generated Rust COMPILES and RUNS.
+// — and, more importantly, that the generated Rust compiles and runs.
 //
 // the generated signature (see the header in OUT_DIR/godunov_generated.rs):
 //   godunov_mass_1d(
@@ -21,7 +21,7 @@
 use symbi_aot::NamedKernel;
 
 // thin shim mapping a "raw slices + scattered lo" call shape to the
-// view-struct ABI. tests stay focused on the kernel's NUMERICS.
+// view-struct ABI. tests stay focused on the kernel's numerics.
 fn godunov_mass_1d<S: symbi_aot::Scalar + symbi_aot::OrderedNumeric + Send + Sync>(
     rho: &[S],
     flux: &[S],

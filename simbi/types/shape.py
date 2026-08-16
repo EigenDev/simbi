@@ -4,7 +4,7 @@
 # signed-distance CSG shapes for immersed rigid boundaries. mirrors the rust
 # `SdfExpr` (symbi-ib/src/sdf.rs): sphere / box primitives composed by union,
 # intersect, complement, and translate. a Shape serializes to the json wire form
-# `SdfExpr::from_json` reads. coordinates are the body-LOCAL frame; the backend
+# `SdfExpr::from_json` reads. coordinates are the body-local frame; the backend
 # translates the whole tree to the body position.
 # usage:
 #  s = Shape.sphere((0, 0, 0), 1.0).union(Shape.box((2, 0, 0), (0.5, 0.5, 0.5)))

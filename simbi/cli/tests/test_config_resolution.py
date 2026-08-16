@@ -1,9 +1,9 @@
 # =============================================================================
 # test_config_resolution.py
 #
-# regression: `simbi run <name>` resolution of a config NAME to a file.
+# regression: `simbi run <name>` resolution of a config name to a file.
 # - a name matched by exactly one discovered config resolves to that file
-# - a name shared by SEVERAL configs must NOT silently run the first one the
+# - a name shared by several configs must not silently run the first one the
 #   directory walk visited: non-interactive resolution fails loudly with the
 #   full candidate paths; a tty gets a numbered prompt (not exercised here)
 # - an explicit .py path that does not exist fails at parse time

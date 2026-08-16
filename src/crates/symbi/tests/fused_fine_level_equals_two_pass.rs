@@ -1,9 +1,9 @@
 // =============================================================================
 // fused_fine_level_equals_two_pass.rs
 //
-// source/body fusion must hold at REFINED levels as well as the uni-grid. a 2-level
-// hierarchy carrying a central accreting body is evolved two ways — every level's kernel-set FUSED
-// (`with_source_fusion`, body folded into godunov) vs every level TWO-PASS (the standalone
+// source/body fusion must hold at refined levels as well as the uni-grid. a 2-level
+// hierarchy carrying a central accreting body is evolved two ways — every level's kernel-set fused
+// (`with_source_fusion`, body folded into godunov) vs every level two-pass (the standalone
 // `body_source`) — and must produce a bit-for-bit identical trajectory on every level. this gates the
 // py `$make` closure fusing fine levels (it re-attaches the source / enables fusion per level);
 // without it a refined run silently drops to the two-pass on its finest, most-cell-dense levels.
@@ -77,7 +77,7 @@ fn two_level(fused: bool) -> Hier {
     })
     .unwrap()
     .with_bodies(central_black_hole());
-    // refinement allocates the fine level ZEROED; the coarse initial condition has to be
+    // refinement allocates the fine level zeroed; the coarse initial condition has to be
     // prolonged into its interior. without this the fine level carries vacuum, both kernel sets
     // fold a body source into nothing, and the bit-for-bit comparison below holds trivially.
     hier.seed_fine_from_coarse().expect("fine-level seed");
@@ -86,7 +86,7 @@ fn two_level(fused: bool) -> Hier {
 
 #[test]
 fn fused_fine_level_equals_two_pass() {
-    // the two-pass is the default; this test pins the FUSED kernel as live, so
+    // the two-pass is the default; this test pins the fused kernel as live, so
     // opt in before the policy OnceLock latches.
     unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     let t_final = 0.02;
@@ -95,7 +95,7 @@ fn fused_fine_level_equals_two_pass() {
     h_two.evolve(t_final).expect("two-pass hierarchy evolve");
     h_fused.evolve(t_final).expect("fused hierarchy evolve");
 
-    // GUARD: the finest fused kernel-set actually compiled the body fold (else two-pass vs two-pass).
+    // guard: the finest fused kernel-set actually compiled the body fold (else two-pass vs two-pass).
     assert_eq!(
         h_fused.levels[1].kernels.body_only_fused_state(),
         Some(true),

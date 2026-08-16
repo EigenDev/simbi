@@ -7,7 +7,7 @@
 //
 // usage:
 //   let w = terminal::width();
-//   print!("{}{}{}", color::HEADER, "Title", color::RESET);
+//   print!("{}{}{}", color::header, "Title", color::reset);
 // =============================================================================
 
 // ansi escape sequences
@@ -70,7 +70,7 @@ pub fn supports_unicode() -> bool {
 pub fn is_tty() -> bool {
     #[cfg(unix)]
     {
-        // SAFETY: isatty on the stdout fd; returns 1 for a terminal, 0 otherwise.
+        // safety: isatty on the stdout fd; returns 1 for a terminal, 0 otherwise.
         unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 }
     }
     #[cfg(not(unix))]
@@ -79,7 +79,7 @@ pub fn is_tty() -> bool {
     }
 }
 
-/// check if TERM suggests 256-color support.
+/// check if term suggests 256-color support.
 pub fn supports_256_color() -> bool {
     if let Ok(term) = std::env::var("TERM") {
         return term.contains("256")
@@ -105,7 +105,7 @@ pub fn padding_for_width(ww: usize) -> usize {
 fn terminal_size() -> (usize, usize) {
     #[cfg(unix)]
     {
-        // ioctl TIOCGWINSZ
+        // ioctl tiocgwinsz
         #[cfg(target_os = "macos")]
         const TIOCGWINSZ: libc::c_ulong = 0x40087468;
         #[cfg(target_os = "linux")]
@@ -126,7 +126,7 @@ fn terminal_size() -> (usize, usize) {
             ws_ypixel: 0,
         };
 
-        // SAFETY: standard posix ioctl on stdout fd. Winsize is repr(C)
+        // safety: standard posix ioctl on stdout fd. Winsize is repr(C)
         // and zeroed, so the kernel writes valid data or returns -1.
         let ret = unsafe { libc::ioctl(libc::STDOUT_FILENO, TIOCGWINSZ, &mut ws) };
         if ret == 0 && ws.ws_col > 0 && ws.ws_row > 0 {

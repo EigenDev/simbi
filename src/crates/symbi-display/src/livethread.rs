@@ -1,28 +1,28 @@
 // =============================================================================
 // livethread.rs
 //
-// render-thread decouple. the solver thread PUBLISHES a
+// render-thread decouple. the solver thread publishes a
 // DiagnosticView snapshot at its cadence; a dedicated render thread owns the
 // ratatui terminal, draws at ~30 fps, and handles keyboard input — so tab / pause
 // respond instantly regardless of step rate, the ui never freezes on a heavy step,
 // and the solver never blocks on a slow terminal.
 //
 // ScreenGuard (alt screen + termios) and SignalGuard (Ctrl-C) stay owned by the
-// MAIN thread. the render thread only draws cells + reads keys over the mode they
+// main thread. the render thread only draws cells + reads keys over the mode they
 // established, and exits the moment a signal is caught (checking
 // `signal_guard::stop_requested`) so it stops touching a terminal the async-signal-
 // safe handler has already restored. the main thread joins the render thread before
 // leaving the alt screen, so terminal ownership is never shared concurrently.
 //
 // usage (solver thread):
-//   let mut dash = LiveDashboard::spawn().unwrap();   // AFTER ScreenGuard::enter()
+//   let mut dash = LiveDashboard::spawn().unwrap();   // after ScreenGuard::enter()
 //   loop {
 //       let c = dash.controls();
 //       if c.quit() || signal_guard::stop_requested() { break; }
 //       // ... step, then at the cadence:
 //       dash.publish(view);
 //   }
-//   dash.shutdown();                                  // BEFORE ScreenGuard::leave()
+//   dash.shutdown();                                  // before ScreenGuard::leave()
 // =============================================================================
 
 use std::io;
@@ -51,7 +51,7 @@ struct Frame {
 }
 
 /// solver-affecting control flags, set by the render thread's key handler and read
-/// by the solver loop. tab selection is NOT here — it is render-only state the
+/// by the solver loop. tab selection is not here — it is render-only state the
 /// render thread owns, so switching panels never round-trips through the solver.
 #[derive(Default)]
 pub struct Controls {
@@ -107,7 +107,7 @@ impl Controls {
 pub enum PauseSource {
     /// in-process: the space key toggles `Controls` and the integrator parks on that flag,
     /// so the live value is authoritative and the badge reads it at draw time. a parked
-    /// producer publishes NOTHING, which is exactly why its published copy cannot be used.
+    /// producer publishes nothing, which is exactly why its published copy cannot be used.
     LocalControls,
     /// read-only attach: the solver is a different process, reachable only through the
     /// snapshot it writes. its pause state travels in the published view and no local key
@@ -204,11 +204,11 @@ impl Drop for LiveDashboard {
     }
 }
 
-/// write the ui state the RENDER THREAD owns into a received view, just before drawing:
+/// write the ui state the render thread owns into a received view, just before drawing:
 /// tab, scroll offset, spinner frame, the paused badge, and the colormap.
 ///
 /// the paused badge belongs here rather than in the published view because a paused run
-/// PUBLISHES NOTHING — the producer parks its integrator and stops sending frames, so a
+/// publishes nothing — the producer parks its integrator and stops sending frames, so a
 /// producer-side copy of the flag would read "integrating" for exactly as long as the run
 /// is paused. reading `Controls` at draw time makes the badge track the state the space
 /// key actually toggles.
@@ -250,7 +250,7 @@ fn render_loop(
     let mut log_scale = false; // `l`-key log10 colormap normalization, render-side
     let mut scroll = 0u16; // up/down scroll offset for a tall panel (the config listing); reset on tab
 
-    // exit on shutdown OR a caught signal (so drawing never targets a terminal the
+    // exit on shutdown or a caught signal (so drawing never targets a terminal the
     // async-signal-safe handler has already restored).
     while running.load(Ordering::SeqCst) && !signal_guard::stop_requested() {
         while let Ok(v) = rx.try_recv() {
@@ -283,7 +283,7 @@ fn render_loop(
                         .unwrap_or(0);
                     scroll = (scroll + 1).min(cap);
                 }
-                // pause / step / checkpoint act on the LOCAL integrator. under read-only
+                // pause / step / checkpoint act on the local integrator. under read-only
                 // attach there is none, so they stay inert rather than moving a flag no
                 // solver reads -- a local toggle would otherwise paint a paused badge over
                 // a run that is still integrating.
@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn an_in_process_badge_follows_the_live_controls_not_the_published_view() {
-        // the badge is fed at DRAW time from `Controls`, which is the state the space key
+        // the badge is fed at draw time from `Controls`, which is the state the space key
         // toggles and the integrator parks on. a published view carries no pause state, so
         // a renderer trusting the view would read "integrating" throughout a pause -- and
         // the absence of any producer calling a setter would look like a badge never wired.
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn an_attached_badge_reports_the_solver_state_and_ignores_local_keys() {
         // read-only attach: the solver is another process and the snapshot is the only
-        // channel. a local key cannot pause it, so a locally-set flag must NOT reach the
+        // channel. a local key cannot pause it, so a locally-set flag must not reach the
         // badge -- otherwise pressing space paints "paused" over a run that is still
         // integrating, which is the whole failure this separation exists to prevent.
         let mut view = crate::table::Table::new("attach probe", false).diagnostic_view();

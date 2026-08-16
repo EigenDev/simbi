@@ -2,7 +2,7 @@
 // dispatch_profile_reports.rs
 //
 // `SYMBI_DISPATCH_PROF` must produce numbers. the profiler counts calls and splits the
-// per-call cost of the AMR-transfer dispatch into the registry NAME LOOKUP and the kernel
+// per-call cost of the AMR-transfer dispatch into the registry name lookup and the kernel
 // execution, so the prolong/restrict overhead can be attributed to scheduling rather than
 // to arithmetic.
 //
@@ -11,7 +11,7 @@
 // reported at all. a run with refinement drives the transfer dispatch, so a zero call count
 // after evolving a two-level hierarchy means the instrument is inert.
 //
-// the profiler is env-gated through a process-global OnceLock, so this binary holds ONLY
+// the profiler is env-gated through a process-global OnceLock, so this binary holds only
 // this law (the flag must be set before the first dispatch).
 // =============================================================================
 
@@ -74,7 +74,7 @@ fn the_dispatch_profiler_reports_numbers_when_enabled() {
 
     hier.evolve(0.05).unwrap();
 
-    // NON-VACUITY: the run has to have actually refined and stepped, or a zero call count
+    // non-vacuity: the run has to have actually refined and stepped, or a zero call count
     // below would mean the setup never reached a transfer rather than that the instrument
     // is inert.
     assert!(

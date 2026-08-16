@@ -1,7 +1,7 @@
 # =============================================================================
 # test_passive_scalar_io.py
 #
-# the passive scalar end to end through the python chain: the dyed KH example
+# the passive scalar end to end through the python chain: the dyed kh example
 # runs, the checkpoint carries `chi` in both the primitive and conserved
 # groups, the concentration stays in [0, 1], and the dyed region is where the
 # config painted it.
@@ -44,7 +44,7 @@ def test_dyed_checkpoint_carries_chi():
         ny = core.shape[0]
         assert core[ny // 2, :].mean() > 0.9, "central layer lost its dye"
         assert core[2, :].mean() < 0.1, "ambient rows gained dye"
-        # the dye must EVOLVE, not merely persist: the seeded field is an exact
+        # the dye must evolve, not merely persist: the seeded field is an exact
         # 0/1 step, so a frozen chi (the failure mode: a stage driver missing
         # the chi phase) is binary to the bit. any transport — even the tiny
         # early-time seed-noise advection — pulls edge cells measurably off

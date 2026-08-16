@@ -2,9 +2,9 @@
 // nmhd_1p5d_brio_wu.rs
 //
 // validation of the 1.5D Newtonian-MHD substrate: the
-// canonical Brio & Wu (1988) MHD shock tube on a GENUINE D=1 grid (DOF=3). 1.5D has
-// NO constrained transport — C(1,2)=0 edges (the StaggerComplex empty case) — so:
-//   - the normal field Bx is carried but NEVER curled: it MUST stay at its constant IC
+// canonical Brio & Wu (1988) MHD shock tube on a genuine D=1 grid (DOF=3). 1.5D has
+// no constrained transport — C(1,2)=0 edges (the StaggerComplex empty case) — so:
+//   - the normal field Bx is carried but never curled: it must stay at its constant IC
 //     (0.75) to machine precision (the defining 1.5D property + trivial div B = dBx/dx),
 //   - the transverse By,Bz ride the ordinary induction-flux divergence (bcell_godunov),
 //   - the gas (rho, v, p) shocks via the HLLE flux.
@@ -39,7 +39,7 @@ const T_FINAL: f64 = 0.1;
 fn make_sim() -> Sim {
     let dx = 1.0 / NX as f64;
     // the normal field Bx is constant (the 1.5D parameter): seed_faces_uniform sets the
-    // (thin) face field over its FULL domain incl. ghosts to 0.75 and marks it initialized,
+    // (thin) face field over its full domain incl. ghosts to 0.75 and marks it initialized,
     // so the flux normal-B override reads 0.75 at every face and evolve() does not re-derive it.
     Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([NX])
@@ -100,7 +100,7 @@ fn nmhd_1p5d_brio_wu_shock_tube() {
         &sim.geom.allocated,
     );
 
-    // Bx must stay EXACTLY constant under evolve — the crux of the no-CT 1.5D scheme.
+    // Bx must stay exactly constant under evolve — the crux of the no-CT 1.5D scheme.
     let assert_bx_const = |s: &Sim| {
         let mhd = s.fields.mhd.as_ref().unwrap();
         for c in s.geom.interior.iter() {

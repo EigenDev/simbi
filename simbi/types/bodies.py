@@ -34,9 +34,9 @@ def has_capability(
     return bool(body_capability & capability)
 
 
-# capability bits the rust binding actually honors: GRAVITATIONAL builds a
-# fixed-potential mass, ACCRETION a black-hole sink, RIGID a drain-off wall
-# (the porous surface with porosity 0). ELASTIC / DEFORMABLE have no backend
+# capability bits the rust binding actually honors: gravitational builds a
+# fixed-potential mass, accretion a black-hole sink, rigid a drain-off wall
+# (the porous surface with porosity 0). elastic / deformable have no backend
 # path, so a config declaring them is rejected at load. running them would
 # silently do nothing while the config claimed the capability was active.
 _WIRED_CAPABILITIES = (
@@ -52,10 +52,10 @@ def _config_error(message: str) -> Exception:
     return ConfigError(message)
 
 
-# the softening FAMILY vocabulary, shared by every config that carries a softening length so the
+# the softening family vocabulary, shared by every config that carries a softening length so the
 # two spellings cannot drift apart between body kinds.
 #
-# "plummer" is a genuine extended profile, and its field sits BELOW newtonian at every radius
+# "plummer" is a genuine extended profile, and its field sits below newtonian at every radius
 # (0.354 of it at r = h, reaching 0.99 only past r = 5h). a length chosen to keep the field finite
 # near a body therefore biases gravity across the entire domain, which a measurement fitting a
 # power law in radius reads as a shifted exponent.
@@ -221,7 +221,7 @@ class AccretionProperties:
                 f"accretion_radius must be > 0: a sink of zero radius drains no "
                 f"gas. got {self.accretion_radius}."
             )
-        # the drain rate is NOT a free parameter. every immersed-boundary surface (drain, porous,
+        # the drain rate is not a free parameter. every immersed-boundary surface (drain, porous,
         # torque-free) drains through the penalization stack at `1 / tau` with
         # `tau = c_drain * dx / c_s` — the local sound-crossing time of a cell, scaled by a
         # convergence dial. the legacy in-godunov sink that `sink_rate` once set is retired, and the
@@ -230,7 +230,7 @@ class AccretionProperties:
         # refused rather than ignored: a run that sets it is asserting control over the accretion
         # rate that it does not have, and the resulting Mdot looks entirely reasonable — it is simply
         # the sound-crossing drain, whatever the dial said. with `r_acc` a fixed multiple of `dx` and
-        # `c_s ~ r^-1/2` near an accretor, that rate is a FIXED multiple of the local dynamical rate
+        # `c_s ~ r^-1/2` near an accretor, that rate is a fixed multiple of the local dynamical rate
         # `1 / t_acc` at every resolution, so the sink is self-similar and there is nothing here to
         # tune per run.
         if self.sink_rate != 0.0:
@@ -285,11 +285,11 @@ class RigidProperties:
     k_eta_n: float = 1.0
     k_eta_t: float = 1.0
     shape: Optional[Shape] = None
-    # optional PRINCIPAL MOMENTS of inertia (I1, I2, I3) in the body frame. None = isotropic
+    # optional principal moments of inertia (I1, I2, I3) in the body frame. None = isotropic
     # (`inertia` on all three axes). unequal moments make an asymmetric body precess/tumble under
     # Euler's gyroscopic term (a torque-free wobble).
     inertia_principal: Optional[tuple[float, float, float]] = None
-    # prescribed spin RATE (radians/time) about `spin_axis`. nonzero makes a SHAPED wall spin: its
+    # prescribed spin rate (radians/time) about `spin_axis`. nonzero makes a shaped wall spin: its
     # mask rotates as Rodrigues(axis, omega*t) and its no-slip surface drags the gas at
     # (omega * axis) x r. the axis is normalized here; default z (the 2D in-plane spin).
     omega: float = 0.0

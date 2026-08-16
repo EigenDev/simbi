@@ -246,12 +246,12 @@ fn ct_curl_sph_constant_edge_flux_is_curl_free() {
 
 #[test]
 fn ct_curl_sph_b_r_matches_analytic() {
-    // sharp magnitude test for B_r. E_theta = ALPHA*phi and E_phi = BETA*theta/sin(theta)
-    // make h_theta E_theta (= r * ALPHA*phi) and h_phi E_phi (= r sin th * BETA th/sin th
-    // = r BETA th) linear in their difference variables (phi, theta resp.), so the
+    // sharp magnitude test for B_r. E_theta = alpha*phi and E_phi = beta*theta/sin(theta)
+    // make h_theta E_theta (= r * alpha*phi) and h_phi E_phi (= r sin th * beta th/sin th
+    // = r beta th) linear in their difference variables (phi, theta resp.), so the
     // forward differences are exact. then the discrete
     //   curl_r = (1/(r sin th_c)) [ dE_theta/dphi - d(sin th E_phi)/dtheta ]
-    //          = (1/(r sin th_c)) (ALPHA - BETA)
+    //          = (1/(r sin th_c)) (alpha - beta)
     // matches the closed-form substrate curl (= -(curl E)_r) at the face center to
     // machine precision.
     const ALPHA: f64 = 0.37;

@@ -7,10 +7,10 @@
 // dispatch (binding / params / dispatch / runtime_source / boundary), and the
 // regime-agnostic kernel support (cfl_from_lambda, GhostFillDriver, ...).
 //
-// sits ABOVE `symbi-sim` (it implements `KernelSet` over `FieldStore` and names the
+// sits above `symbi-sim` (it implements `KernelSet` over `FieldStore` and names the
 // classification enums) and `symbi-exec` (it dispatches through the launch engine);
-// BELOW the `symbi` top crate (which drives it via `evolve` + AMR). it names NO
-// integrator and NO refinement — those depend DOWN on it.
+// below the `symbi` top crate (which drives it via `evolve` + AMR). it names no
+// integrator and no refinement — those depend down on it.
 //
 // usage:
 //  use symbi_substrate::regimes::substrate::IsoSubstrateKernelSet;

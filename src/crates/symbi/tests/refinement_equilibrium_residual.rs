@@ -1,16 +1,16 @@
 // =============================================================================
 // refinement_equilibrium_residual.rs
 //
-// how far the coarse-fine transfer moves a state that is supposed to be STATIONARY.
+// how far the coarse-fine transfer moves a state that is supposed to be stationary.
 //
 // a hydrostatic atmosphere is a fixed point: the pressure gradient cancels the gravity source
 // exactly, nothing moves, and `v = 0` forever. that cancellation is discrete, though -- it holds
 // between the scheme's own flux and its own source on a given grid -- and the coarse-fine transfer
-// interpolates the CONSERVED state, which carries no obligation to preserve it. so the interface
+// interpolates the conserved state, which carries no obligation to preserve it. so the interface
 // behaves like a boundary that cannot hold equilibrium, and the residual force there drives a flow
 // that was never in the initial condition.
 //
-// VELOCITY is the probe. the equilibrium has `v = 0` identically, so any velocity present after a
+// velocity is the probe. the equilibrium has `v = 0` identically, so any velocity present after a
 // step is the imbalance itself, measured with no reference state to subtract and no cancellation
 // to get wrong. entropy is the downstream symptom -- the spurious kinetic energy thermalizes --
 // but it is a second-order shadow of a first-order quantity, and this measures the first-order one.
@@ -105,7 +105,7 @@ fn build_at(regions: &[RefinementRegion<1>], ncells: usize) -> Hier {
             1.0e-3,
             0.0,
         )));
-    // every level starts on the EXACT equilibrium, so the residual measured afterwards is the
+    // every level starts on the exact equilibrium, so the residual measured afterwards is the
     // scheme's, not an interpolation artifact left over from setting the levels up.
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(hydrostatic);
@@ -114,7 +114,7 @@ fn build_at(regions: &[RefinementRegion<1>], ncells: usize) -> Hier {
 }
 
 /// the largest spurious speed on one level, its interior index, and whether that cell is covered
-/// by a finer patch. the wall band is skipped: a reflecting boundary mirrors the state but NOT the
+/// by a finer patch. the wall band is skipped: a reflecting boundary mirrors the state but not the
 /// gravity source, so it cannot hold the equilibrium the interior holds, and its imbalance would
 /// otherwise mask the interface's.
 fn worst_speed(hier: &Hier, level: usize) -> (f64, usize, bool, usize) {
@@ -168,7 +168,7 @@ fn the_equilibrium_residual_localizes_at_the_coarse_fine_interface() {
         let mut hier = build(&nested(levels));
         assert_eq!(hier.levels.len(), levels, "asked for {levels} levels");
 
-        // NON-VACUITY: the transfer acts AT the patch edge, so what has to be non-flat is the
+        // non-vacuity: the transfer acts at the patch edge, so what has to be non-flat is the
         // density there rather than end to end. this atmosphere spans a factor of 96 across the
         // domain; the bound below asks only that a level edge sees real curvature, since a
         // constant is interpolated exactly at any order and would make the measurement empty.
@@ -204,14 +204,14 @@ fn the_equilibrium_residual_localizes_at_the_coarse_fine_interface() {
         println!("{:-<86}", "");
     }
 
-    // the SHAPE of the residual across an interface distinguishes two very different faults.
+    // the shape of the residual across an interface distinguishes two very different faults.
     // refluxing makes the level exchange conservative to machine precision, and conservation
-    // constrains only the SUM over cells -- fluxes telescope -- so it permits every individual
+    // constrains only the sum over cells -- fluxes telescope -- so it permits every individual
     // cell at the interface to carry a force as long as those forces cancel. a balance error
     // under exact conservation is therefore forced to appear as equal-and-opposite velocities: a
-    // DIPOLE. a genuine conservation leak would instead show one sign on both sides, a monopole.
+    // dipole. a genuine conservation leak would instead show one sign on both sides, a monopole.
     {
-        // the interior scheme carries its own one-signed imbalance on EVERY cell, refined or not,
+        // the interior scheme carries its own one-signed imbalance on every cell, refined or not,
         // and it swamps the interface term in the raw field. level 0 of the two-level ladder is
         // the same grid as the single-level run, cell for cell, so subtracting one from the other
         // leaves the transfer's contribution alone.
@@ -251,10 +251,10 @@ fn the_equilibrium_residual_localizes_at_the_coarse_fine_interface() {
              errors cancelling in the sum. a ratio near one is a monopole: a genuine leak.)"
         );
 
-        // the two halves of the question, side by side. MASS carries no source term, so the
+        // the two halves of the question, side by side. mass carries no source term, so the
         // refluxed level exchange must hold it to round-off -- that is exactly what conservation
-        // buys. MOMENTUM carries the gravity source, so conservation says nothing about it, and a
-        // flux/source cancellation that fails at the interface is a spurious FORCE, which injects
+        // buys. momentum carries the gravity source, so conservation says nothing about it, and a
+        // flux/source cancellation that fails at the interface is a spurious force, which injects
         // net momentum. one number is machine zero and the other is not, from the same run.
         let composite_mass = |h: &Hier| -> f64 {
             let mut mass = 0.0;
@@ -318,11 +318,11 @@ fn the_equilibrium_residual_localizes_at_the_coarse_fine_interface() {
 // is the declared equilibrium what it claims to be?
 //
 // the deviation method subtracts `U_eq` and balances whatever it is handed, so the state handed
-// to it has to be checked on its own terms BEFORE any of that machinery exists. two claims are
+// to it has to be checked on its own terms before any of that machinery exists. two claims are
 // independent and fail differently.
 // =============================================================================
 
-/// CLAIM ONE: `hydrostatic` is the continuum solution, i.e. `dp/dr = -rho GM/r^2`.
+/// claim one: `hydrostatic` is the continuum solution, i.e. `dp/dr = -rho GM/r^2`.
 ///
 /// the profile is built from the bernoulli invariant `gamma K0/(gamma-1) rho^(gamma-1) - GM/r`,
 /// which satisfies the balance identically, so the only thing that can be wrong is the way the
@@ -355,7 +355,7 @@ fn the_hydrostatic_profile_satisfies_the_continuum_balance() {
     println!("continuum balance residual: h=1e-3 -> {coarse:.3e},  h=5e-4 -> {fine:.3e}   (order {order:.2})");
 
     // a central difference is second order, so halving the step must cut the residual by ~4. a
-    // profile that did not solve the ODE would leave a floor that does not move with h at all,
+    // profile that did not solve the ode would leave a floor that does not move with h at all,
     // and this is the measurement that separates the two.
     assert!(
         order > 1.8,
@@ -364,9 +364,9 @@ fn the_hydrostatic_profile_satisfies_the_continuum_balance() {
          dp/dr = -rho GM/r^2 and every measurement built on it is measuring the wrong state"
     );
 
-    // the ABSOLUTE statement, with the difference formula's own error removed. richardson on a
+    // the absolute statement, with the difference formula's own error removed. richardson on a
     // second-order rule gives the h -> 0 limit as (4 f(h/2) - f(h))/3, which is the part of the
-    // residual that is NOT truncation. an exact solution leaves nothing there; a profile off by a
+    // residual that is not truncation. an exact solution leaves nothing there; a profile off by a
     // constant leaves that constant, untouched by the extrapolation. the raw residual cannot be
     // bounded directly, because at these sample points second-order truncation on a profile this
     // steep is itself a few times 1e-6.
@@ -385,7 +385,7 @@ fn the_hydrostatic_profile_satisfies_the_continuum_balance() {
     );
 }
 
-/// CLAIM TWO: how far the CELL AVERAGES of that continuum solution sit from the scheme's own
+/// claim two: how far the cell averages of that continuum solution sit from the scheme's own
 /// discrete fixed point.
 ///
 /// these are different states. the scheme's fixed point satisfies a cancellation between its
@@ -393,13 +393,13 @@ fn the_hydrostatic_profile_satisfies_the_continuum_balance() {
 /// satisfies the differential equation. they agree only to truncation order, so a grid seeded
 /// with the analytic profile drifts even with no coarse-fine interface anywhere.
 ///
-/// this sets the FLOOR for the interface fix. a deviation-well-balanced transfer removes the
+/// this sets the floor for the interface fix. a deviation-well-balanced transfer removes the
 /// transfer's contribution and nothing else, so it can bring the interface down to this number
 /// and no lower. reading the order here says whether that floor shrinks under refinement or sits
 /// at a fixed level.
 #[test]
 fn the_discrete_imbalance_of_the_analytic_profile_converges() {
-    // a fixed TIME rather than a fixed step count: the induced speed is the residual force times
+    // a fixed time rather than a fixed step count: the induced speed is the residual force times
     // the elapsed time, so evolving every resolution to the same instant compares forces rather
     // than forces times a resolution-dependent dt.
     const T_PROBE: f64 = 1.0e-3;
@@ -438,7 +438,7 @@ fn the_discrete_imbalance_of_the_analytic_profile_converges() {
         );
     }
 
-    // the imbalance must SHRINK with resolution. a floor that does not move would mean the
+    // the imbalance must shrink with resolution. a floor that does not move would mean the
     // analytic profile is not converging to the scheme's fixed point at all, and no amount of
     // refinement would make the declared equilibrium the right thing to subtract.
     let (_, coarsest) = rows[0];

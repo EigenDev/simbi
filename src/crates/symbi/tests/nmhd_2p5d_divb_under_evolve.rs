@@ -2,14 +2,14 @@
 // nmhd_2p5d_divb_under_evolve.rs
 //
 // validation of the 2.5D Newtonian-MHD substrate: run
-// the ENTIRE production NMHD KernelSet on a GENUINE D=2 grid (DOF=3) — c2p ->
+// the entire production NMHD KernelSet on a genuine D=2 grid (DOF=3) — c2p ->
 // ghost_fill -> flux per dir -> cfl -> snapshot -> godunov_euler -> post_godunov[CT]
 // -> rk2 — for ~10 steps with periodic BCs and assert
 //   (a) the discrete staggered in-plane div(B) = dBx/dx + dBy/dy stays at machine
 //       zero (the 2.5D CT: single corner E_z evolving the face-staggered Bx,By), and
-//   (b) the state stays PHYSICAL (rho>0, p>0, finite), and
-//   (c) the out-of-plane Bz (carried CELL-CENTERED, NO face, evolved by the ordinary
-//       induction-flux divergence — no CT) actually EVOLVES from its IC (so the 2.5D
+//   (b) the state stays physical (rho>0, p>0, finite), and
+//   (c) the out-of-plane Bz (carried cell-centered, no face, evolved by the ordinary
+//       induction-flux divergence — no CT) actually evolves from its IC (so the 2.5D
 //       out-of-plane path is genuinely exercised).
 //
 // IC: Orszag-Tang vortex with an added non-uniform out-of-plane Bz. in 2.5D d/dz=0,
@@ -172,7 +172,7 @@ fn nmhd_2p5d_orszag_tang_preserves_divb_evolves_bz() {
         "2.5D evolve produced only {steps_seen} steps — gate barely exercised"
     );
 
-    // PHYSICALITY: recover prims from the evolved conserved state (DOF=3 cons).
+    // physicality: recover prims from the evolved conserved state (DOF=3 cons).
     let eos = IdealGas { gamma: GAMMA };
     let mhd = sim.fields.mhd.as_ref().expect("mhd");
     for c in sim.geom.interior.iter() {

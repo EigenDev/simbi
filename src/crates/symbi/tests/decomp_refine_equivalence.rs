@@ -1,10 +1,10 @@
 // =============================================================================
 // decomp_refine_equivalence.rs
 //
-// REFINEMENT x DECOMPOSITION (tile-local static refinement, euler root). a 2-level
-// hierarchy whose ROOT is split into tiles must reproduce the monolithic hierarchy run, when each
-// refined patch lives entirely inside ONE root tile's interior. each tile then owns a complete
-// sub-hierarchy that the EXISTING recursive advance drives unchanged (all prolong / restrict /
+// refinement x decomposition (tile-local static refinement, euler root). a 2-level
+// hierarchy whose root is split into tiles must reproduce the monolithic hierarchy run, when each
+// refined patch lives entirely inside one root tile's interior. each tile then owns a complete
+// sub-hierarchy that the existing recursive advance drives unchanged (all prolong / restrict /
 // reflux stay local to the owning tile); the only cross-tile coupling is the root-level halo
 // exchange, done between root steps (euler root = single stage, so a between-step exchange is
 // correct -- the rk2-root between-stage case is covered separately).
@@ -41,8 +41,8 @@ fn kset(sim: &Sim) -> Kern {
     Kern::new(GAMMA, CFL, &sim.geom.allocated)
 }
 
-// a smooth density+pressure bump centered in the bottom-LEFT quadrant (x ~ y ~ 0.25) so its
-// dynamics + the refined patch stay inside tile 0 for EVERY topology (x-cut, y-cut, 2x2 -- the cuts
+// a smooth density+pressure bump centered in the bottom-left quadrant (x ~ y ~ 0.25) so its
+// dynamics + the refined patch stay inside tile 0 for every topology (x-cut, y-cut, 2x2 -- the cuts
 // are at x = 0.5 and/or y = 0.5). waves stay interior over T_FINAL.
 fn bump(x: f64, y: f64) -> f64 {
     0.3 * (-(((x - 0.25) / 0.08).powi(2) + ((y - 0.25) / 0.08).powi(2))).exp()
@@ -79,8 +79,8 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Times
         .build()
 }
 
-// the MONOLITHIC reference: one full-grid root + the refined patch, run via the CANONICAL
-// `hier.evolve()` (so the test validates BOTH the decomposition AND that the staged driver
+// the monolithic reference: one full-grid root + the refined patch, run via the canonical
+// `hier.evolve()` (so the test validates both the decomposition and that the staged driver
 // reproduces the canonical recursive advance).
 fn build_mono(ts: Timestepping) -> Hier {
     let root = build_root(
@@ -97,7 +97,7 @@ fn build_mono(ts: Timestepping) -> Hier {
     h
 }
 
-// the DECOMPOSED build: `counts` root tiles. tile 0 (containing the patch) is a 2-level hierarchy;
+// the decomposed build: `counts` root tiles. tile 0 (containing the patch) is a 2-level hierarchy;
 // every other tile is single-level. each tile's root carries CoarseFine on internal faces + the
 // physical boundary outside, so the root halo exchange owns the cut.
 fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
@@ -122,7 +122,7 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
         }));
         let root = build_root(m, origin, bnd, ts);
         // the patch lives in the single tile whose physical extent contains it (the bottom-left
-        // quadrant -> tile 0 for every tested topology). check BOTH axes.
+        // quadrant -> tile 0 for every tested topology). check both axes.
         let owns_patch =
             (0..2).all(|a| origin[a] <= 0.125 && origin[a] + m[a] as f64 * DX >= 0.375);
         let mut h = if owns_patch {
@@ -141,7 +141,7 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
     tiles
 }
 
-// drive the tiles through the PRODUCTION decomposed-hierarchy loop (symbi-amr): exercises the
+// drive the tiles through the production decomposed-hierarchy loop (symbi-amr): exercises the
 // same `evolve_hierarchy_decomposed` a multi-gpu refinement run would call, so a divergence
 // between test and production is impossible. host: all tiles on "device 0".
 fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2], t_final: f64, ts: Timestepping) {
@@ -159,7 +159,7 @@ fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2], t_final: f64, ts: Time
     );
 }
 
-// scatter every level's density into one global composite grid at the FINEST resolution that
+// scatter every level's density into one global composite grid at the finest resolution that
 // covers each point: a covered coarse cell is skipped in favor of its fine children. keyed by
 // absolute fine-index (fine levels use the global index space), so mono and decomposed line up.
 fn composite_fine(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
@@ -195,8 +195,8 @@ fn composite_fine(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
             let fine = &h.levels[1].state;
             let flo: [isize; 2] = std::array::from_fn(|a| fine.geom.interior.spaces[a].lo);
             for c in fine.geom.interior.iter() {
-                // absolute fine index: interior_lo is coverage.lo*RATIO in the tile's index space;
-                // tile shares the global origin so this IS the global fine index.
+                // absolute fine index: interior_lo is coverage.lo*ratio in the tile's index space;
+                // tile shares the global origin so this is the global fine index.
                 let fx = (c[0] - flo[0]) as usize + (flo[0] as usize);
                 let fy = (c[1] - flo[1]) as usize + (flo[1] as usize);
                 out[fy * fn_n + fx] = *fine.fields.cons.den.view().at(c);
@@ -215,7 +215,7 @@ fn max_err(a: &[f64], b: &[f64]) -> f64 {
 
 fn assert_refine_matches(counts: [usize; 2], ts: Timestepping) {
     let mut mono = build_mono(ts);
-    mono.evolve(T_FINAL).expect("mono evolve"); // CANONICAL recursive advance
+    mono.evolve(T_FINAL).expect("mono evolve"); // canonical recursive advance
     let mono_c = composite_fine(std::slice::from_ref(&mono), [1, 1]);
 
     let mut dec = build_tiles(counts, ts);
@@ -258,7 +258,7 @@ fn refine_euler_quad_tile_2d_grid() {
     assert_refine_matches([2, 2], Timestepping::Euler);
 }
 
-// RK2 root: the root halo MUST be exchanged between the two root stages -- the corrector
+// RK2 root: the root halo must be exchanged between the two root stages -- the corrector
 // reads each neighbor's stage-1 update. a between-step-only exchange would diverge here. driven by
 // the level_step_begin / level_stage / level_step_tail interface.
 #[test]

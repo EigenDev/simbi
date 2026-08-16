@@ -66,7 +66,7 @@ pub fn block_for(ndim: usize, extent: &[u32]) -> [u32; 3] {
 /// a warp coalesces into one segment, and the (often thin, CT-transverse-expanded) z axis
 /// tiles across grid blocks. ncu showed the old
 /// `[8,8,4]` base starved x: a flux face domain with `nz_face=3` got block.x = 256/(8*3) = 10
-/// (below a full warp) -> 59% SM throughput, vs the `nz_face=2` direction at block.x=16 -> 78%.
+/// (below a full warp) -> 59% sm throughput, vs the `nz_face=2` direction at block.x=16 -> 78%.
 /// native 2D (Iso/Newtonian) keeps `[16,16,1]` and 1D keeps `[256,1,1]` — only 3D changes.
 ///   - clamp every block dim to its extent (no lanes launched past a thin axis).
 ///   - redistribute any unspent budget x-first (coalescing), then y, then z; when x is the

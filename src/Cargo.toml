@@ -37,7 +37,7 @@ edition = "2024"
 [workspace.lints.rust]
 warnings = "deny"
 
-# thin LTO + single codegen unit lets the compiler inline across the
+# thin lto + single codegen unit lets the compiler inline across the
 # kernel-dispatch hot path (substrate_kernels -> substrate_gpu -> symbi-xpu)
 # that otherwise crosses crate boundaries on every launch. measured wins on
 # AOT-compiled scalar kernels (CPU per-cell loops) and on the launch glue.
@@ -54,21 +54,21 @@ codegen-units = 1
 [profile.release.package.symbi-py]
 codegen-units = 256
 
-# debug-build size control (docs: the 134 test+example binaries x full DWARF of a heavily
+# debug-build size control (docs: the 134 test+example binaries x full dwarf of a heavily
 # monomorphized generic codebase = a ~200GB target/). `line-tables-only` keeps panic file:line +
 # backtraces (the nan-locator / check_dt_or_panic / manifest-slot panics all still resolve) while
-# dropping the heavy type/local-variable DWARF that explodes per monomorphization; deps carry no
-# debuginfo at all (we never step into serde/rayon/hdf5); split-debuginfo keeps DWARF out of the
-# linked binaries. lose only debugger LOCAL-variable inspection, which this CFD work rarely uses.
-# DEBUGINFO OFF WORKSPACE-WIDE. the recursive dwarf emitter (llvm createAndAddScopeChildren)
-# overflows the compiler stack -> SIGBUS on heavily-monomorphized crates EVEN at line-tables-only.
+# dropping the heavy type/local-variable dwarf that explodes per monomorphization; deps carry no
+# debuginfo for serde/rayon/hdf5 is unused; split-debuginfo keeps dwarf out of the
+# linked binaries. lose only debugger local-variable inspection, which this cfd work rarely uses.
+# debuginfo off workspace-wide. the recursive dwarf emitter (llvm createAndAddScopeChildren)
+# overflows the compiler stack -> sigbus on heavily-monomorphized crates even at line-tables-only.
 # it hit symbi-substrate then symbi-aot; the threshold is depth-of-inlined-lexical-scope, so any
 # crate can cross it as the codebase grows (B2's metric contractions add monomorphization). rather
-# than whack-a-mole per crate, drop debuginfo everywhere: no DWARF scope tree -> no overflow, and
+# than whack-a-mole per crate, drop debuginfo everywhere: no dwarf scope tree -> no overflow, and
 # faster debug builds (less to emit).
-# the crash dies cleanly (~20s + backtrace) interactively but HANGS indefinitely under sandboxed /
+# the crash dies cleanly (~20s + backtrace) interactively but hangs indefinitely under sandboxed /
 # agent shells (signal handling differs), masquerading as an endless compile — the insidious part.
-# COST: panic file:line in DEBUG builds (the panic MESSAGE still prints; `release` already carries
+# cost: panic file:line in debug builds (the panic message still prints; `release` already carries
 # no debuginfo, so the canonical path is unaffected). need a source line for one crate while
 # debugging? temporarily add `[profile.dev.package.<crate>] debug = "line-tables-only"`.
 [profile.dev]

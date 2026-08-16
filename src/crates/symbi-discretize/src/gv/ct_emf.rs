@@ -10,13 +10,13 @@ use symbi_hydro::mhd_state::MhdPrimG;
 
 /// chart-generic ADM data (lapse alpha, sqrt(det gamma), full shift beta) at a world position, for
 /// the curved-spacetime CT stack. one (spacetime, coords) match selects the KS-family metric of the
-/// active chart. the shift is the FULL 3-vector: a chart with a transverse in-plane shift (cartesian
+/// active chart. the shift is the full 3-vector: a chart with a transverse in-plane shift (cartesian
 /// carries it on every axis, cylindrical on r and z) contributes both plane components to the
 /// transport EMF; the spherical polar chart has beta only along r, so its second plane component
 /// vanishes identically and the generic form reduces to the single-shift spherical EMF.
 fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv, Tensor<Gv, 3>) {
     use symbi_geometry::Metric;
-    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
     // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
     fn adm<M: Metric<Gv, 3>>(m: &M, x: Tensor<Gv, 3>) -> (Gv, Gv, Tensor<Gv, 3>) {
         (m.lapse(x), m.sqrt_det_gamma(x), m.shift(x))
@@ -33,7 +33,7 @@ fn gr_spatial_metric_at(
     x: Tensor<Gv, 3>,
 ) -> SpatialMetric<Gv, 3> {
     use symbi_geometry::Metric;
-    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
     // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
     fn adm<M: Metric<Gv, 3>>(m: &M, x: Tensor<Gv, 3>) -> SpatialMetric<Gv, 3> {
         SpatialMetric::new(
@@ -48,7 +48,7 @@ fn gr_spatial_metric_at(
 /// the corner-EMF sign, and the grid axes `(g1, g2) = (pos(p1), pos(p2))` carrying them. the
 /// out-of-plane component is `k = 3 - a0 - a1`; `p1 = (k+1) % 3`, `p2 = (k+2) % 3`. contiguous
 /// identity axes (spherical/cartesian/disk `[0,1]`) give `(0, 1, 0, 1)`, so the shift indexing and
-/// the +/-2 face reconstruction address grid axes 0/1 directly; the GAPPED cylindrical `(R, z)` set
+/// the +/-2 face reconstruction address grid axes 0/1 directly; the gapped cylindrical `(R, z)` set
 /// `[0,2]` gives `(2, 0, 1, 0)` — phi is out-of-plane, `p1 = z` on grid axis 1, `p2 = R` on axis 0 —
 /// so the shift pairs with the right velocity component and the reconstruction reads the axis whose
 /// transverse halo the staggered field actually carries. matches the runtime `ct_edges` mapping.
@@ -79,7 +79,7 @@ fn gr_plane_pos(coords: Coords, axes: &[usize], p0: Gv, p1: Gv) -> Tensor<Gv, 3>
     }))
 }
 
-/// the gardiner & stone CT-contact edge EMF (the SOFT-SIGN blend), carrier-generic at S=Gv.
+/// the gardiner & stone CT-contact edge EMF (the soft-sign blend), carrier-generic at S=Gv.
 /// a pointwise function of the 4 face EMFs, 4 cell-corner
 /// EMFs, and 4 density fluxes: `s = f/(|f|+eps)`; `0.5*((a+b) + s*(a-b))`, transitions
 /// continuously through f=0 (= a hard 3-way sign in the |f|>>eps limit). div(B) unaffected.
@@ -283,7 +283,7 @@ pub fn rmhd_ct_curl_cyl_rz_gv(
     } else {
         // dB_z/dt = -(1/r_c) d_r(r E_phi) : the cylindrical metric on the radial derivative.
         // r at the cell's two r-faces (= the corner radii bounding this z-face), cell-center r_c.
-        // minus because (curl E)_z = +(1/r) d_r(r E_phi) and dB/dt = -curl(E) — OPPOSITE sign to
+        // minus because (curl E)_z = +(1/r) d_r(r E_phi) and dB/dt = -curl(E) — opposite sign to
         // the spherical-poloidal B_theta update (curl_theta carries its own minus). the plus form
         // leaks div(B) secularly (d/dt div(B) != 0); the rotor div(B) blows to O(1) in one step.
         let inv_dr =
@@ -300,8 +300,8 @@ pub fn rmhd_ct_curl_cyl_rz_gv(
     )
 }
 
-/// the 2.5D CYLINDRICAL r-z OHMIC RESISTIVE edge EMF: adds `eta * J_phi` to the out-of-plane edge
-/// EMF `ephi` (efield[0]) IN PLACE, where `J_phi` is the MIMETIC ADJOINT of the cylindrical induction
+/// the 2.5D cylindrical r-z ohmic resistive edge EMF: adds `eta * J_phi` to the out-of-plane edge
+/// EMF `ephi` (efield[0]) in place, where `J_phi` is the mimetic adjoint of the cylindrical induction
 /// curl `rmhd_ct_curl_cyl_rz_gv` — so `-curl(eta * J)` is a negative-definite laplacian (stable
 /// diffusion). metric-free form, from `J = W_E^-1 C^T W_F` with the natural cyl weights
 /// `w_r \propto r_edge, w_z \propto r_c, w_E \propto r_edge`, whose r-factors cancel; the discrete
@@ -325,7 +325,7 @@ pub fn rmhd_resistive_emf_cyl_rz_gv(
     let br_zm = gv_field_at("br", "br", 2, &[0, -1]); // B_r at the neighbor below in z (axis 1)
     let bz_rm = gv_field_at("bz", "bz", 2, &[-1, 0]); // B_z at the neighbor behind in r (axis 0)
     // J_phi = (curl B)_phi = dB_r/dz - dB_z/dr (backward differences). this sign makes -curl(eta J) a
-    // NEGATIVE-definite laplacian (magnetic energy decays); the flipped sign would grow it. matches
+    // negative-definite laplacian (magnetic energy decays); the flipped sign would grow it. matches
     // the cartesian resistive convention J = +(curl B).
     let jphi = inv_dz * (br - br_zm) - inv_dr * (bz - bz_rm);
     let ephi_new = ephi + eta * jphi;
@@ -338,7 +338,7 @@ pub fn rmhd_resistive_emf_cyl_rz_gv(
 /// the covariant 2.5D orthogonal-chart ohmic resistive edge EMF: adds `eta * J_out` to the
 /// out-of-plane corner EMF, where `J_out = (1/(h_i h_j)) [d_i(h_j B_j) - d_j(h_i B_i)]` is the physical
 /// curl of the poloidal field in the running orthogonal chart, `h_i` the chart's lame scale factors
-/// (`Metric::scale_factors`). this is the DEC codifferential — the mimetic adjoint of the induction
+/// (`Metric::scale_factors`). this is the dec codifferential — the mimetic adjoint of the induction
 /// curl — written through the scale factors, so a single kernel covers every 2.5D orthogonal chart:
 /// cyl r-z (`h = (1, 1)`) recovers the metric-free `d_z B_r - d_r B_z`; cyl r-phi and spherical r-theta
 /// (`h_2 = r`) grow the `(1/r) d_r(r .)` factor. the geometry-agnostic adjoint reference validates each
@@ -675,8 +675,8 @@ pub fn rmhd_edge_emf_gv(
     g2: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    // g1/g2 are the two GRID offset axes the corner stencil walks (the edge's perpendicular
-    // grid plane). they are DECOUPLED from the in-plane physical components p1/p2 the runtime
+    // g1/g2 are the two grid offset axes the corner stencil walks (the edge's perpendicular
+    // grid plane). they are decoupled from the in-plane physical components p1/p2 the runtime
     // binds to vel_p1/bcell_p1/...: for identity geometries grid axis == component (3D: g1/g2 =
     // (dir+1)%3/(dir+2)%3), but for cyl r-z the grid axes are {0,1} while the components are
     // {r=0, z=2}. the kernel is component-agnostic — only the gather offsets are geometric.
@@ -690,7 +690,7 @@ pub fn rmhd_edge_emf_gv(
     gv_register_field("edge_bflux_b", "bflux_b");
     gv_register_field("edge_fden_p1", "fden_p1");
     gv_register_field("edge_fden_p2", "fden_p2");
-    // -1 on the listed GRID axes (ndim-length offset; the 2.5D corner walks grid axes 0/1).
+    // -1 on the listed grid axes (ndim-length offset; the 2.5D corner walks grid axes 0/1).
     let cm = |axes: &[usize]| -> Vec<i32> {
         let mut o = vec![0i32; ndim];
         for &ax in axes {
@@ -945,7 +945,7 @@ fn uct_hllc_coeffs(ll: Gv, lr: Gv, lstar: Gv, vxl: Gv, vxr: Gv) -> UctDir {
     }
 }
 
-/// the UCT edge EMF in MASTER form (mignone & del zanna 2020, Eq. 33) — the structure that
+/// the UCT edge EMF in master form (mignone & del zanna 2020, Eq. 33) — the structure that
 /// generalizes across riemann solvers by swapping only the per-direction (a^L, a^R, d) coefficients
 /// (`uct_*_coeffs`). for the out-of-plane (z) edge:
 /// ```text
@@ -953,8 +953,8 @@ fn uct_hllc_coeffs(ll: Gv, lr: Gv, lstar: Gv, vxl: Gv, vxr: Gv) -> UctDir {
 ///       + vbar_y (a^L_y B_x^N + a^R_y B_x^S) - d_y (B_x^N - B_x^S)   [y: advect + diffuse B_x]
 /// ```
 /// `vbar_t` is the upwind transverse velocity (Eq. 29, from the edge speeds); the `B` are the
-/// STAGGERED div-free FACE fields (B_y on y-faces E/W, B_x on x-faces N/S); the edge speeds are the
-/// MAX over the 4 surrounding cells (the paper-sanctioned maximal-diffusion edge reconstruction).
+/// staggered div-free face fields (B_y on y-faces E/W, B_x on x-faces N/S); the edge speeds are the
+/// max over the 4 surrounding cells (the paper-sanctioned maximal-diffusion edge reconstruction).
 /// reduces to `v_y B_x - v_x B_y` in the symmetric-speed limit; the diffusion matches the verified
 /// compact Eq. 27. div(B)=0 preserved (a CT curl of one edge EMF, independent of the coefficients).
 /// component-agnostic: only the gather offsets are geometric (g1/g2 = the perpendicular grid plane).
@@ -990,7 +990,7 @@ pub fn rmhd_edge_emf_uct_gv(
     let vx_w = (vp1(&cm(&[g1])) + vp1(&cm(&[g1, g2]))) * half; // West (NW, SW)
     let vy_n = (vp2(&zero) + vp2(&cm(&[g1]))) * half; // North (NE, NW)
     let vy_s = (vp2(&cm(&[g2])) + vp2(&cm(&[g1, g2]))) * half; // South (SE, SW)
-    // edge signal speeds: MAX over the 4 surrounding cells (maximal-diffusion edge reconstruction).
+    // edge signal speeds: max over the 4 surrounding cells (maximal-diffusion edge reconstruction).
     let max4 = |key: &str, path: &str| -> Gv {
         let v0 = gv_field_at(key, path, ndim, &zero);
         let v1 = gv_field_at(key, path, ndim, &cm(&[g1]));
@@ -1009,16 +1009,16 @@ pub fn rmhd_edge_emf_uct_gv(
     let amx = zero_g.max(neg_min4("edge_wsl1", "wsl_p1"));
     let apy = zero_g.max(max4("edge_wsr2", "wsr_p2"));
     let amy = zero_g.max(neg_min4("edge_wsl2", "wsl_p2"));
-    // the SOLVER-SPECIFIC coefficients; HLL here, and the only piece an hllc/hlld variant replaces.
+    // the solver-specific coefficients; HLL here, and the only piece an hllc/hlld variant replaces.
     let cx = uct_hll_coeffs(apx, amx);
     let cy = uct_hll_coeffs(apy, amy);
     // upwind transverse velocities (Eq. 29): vbar_x upwind in x (alpha^+ carries the West/left state),
     // vbar_y upwind in y (alpha^+ carries the South/lower state).
     let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
     let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
-    // staggered face B PLM-reconstructed a half-cell to the EDGE (M&DZ: the staggered transverse
+    // staggered face B PLM-reconstructed a half-cell to the edge (M&DZ: the staggered transverse
     // field reconstructed from the adjacent interface — the load-bearing 2nd-order piece). geometry
-    // VERIFIED vs the CT curl: Ez[i,j] is the corner (i-1/2,j-1/2); B_y is at the corner's y but
+    // verified vs the CT curl: Ez[i,j] is the corner (i-1/2,j-1/2); B_y is at the corner's y but
     // offset +-1/2 in x (recon along x = its transverse), B_x at the corner's x offset +-1/2 in y.
     // one-sided minmod-theta extrapolation: +1/2 toward the edge from the lower face, -1/2 from the
     // upper. needs the 2nd transverse neighbor -> bface allocated with +-2 transverse halo.
@@ -1046,14 +1046,14 @@ pub fn rmhd_edge_emf_uct_gv(
     )
 }
 
-/// the CURVED-SPACETIME UCT-HLL edge EMF for the 2.5D (r, theta) poloidal plane — the master
-/// form [`rmhd_edge_emf_uct_gv`] producing the DENSITIZED corner EMF `Etilde_phi` the GR curl
-/// consumes. GENERALIZATION (GR-UCT): (1) the edge signal speeds are the SHIFTED
+/// the curved-spacetime UCT-HLL edge EMF for the 2.5D (r, theta) poloidal plane — the master
+/// form [`rmhd_edge_emf_uct_gv`] producing the densitized corner EMF `Etilde_phi` the GR curl
+/// consumes. generalization (GR-UCT): (1) the edge signal speeds are the shifted
 /// coordinate speeds materialized by `rmhd_wave_speeds_cell_gr_gv` (the BF fast bound minus the
 /// shift — quartic-free; the flux still computes its own inline); (2) the advective velocity is
 /// the transport velocity `vtilde = alpha v - beta` at the corner (the upwound physical v
 /// transformed there); (3) the whole master EMF is densitized by `sqrt(gamma)(corner)` — since
-/// reconstruction co-locates all four staggered fields AT the corner, one metric factor scales
+/// reconstruction co-locates all four staggered fields at the corner, one metric factor scales
 /// the entire (advective + dissipative) EMF, and div(B)=0 is preserved (a CT curl of one scalar
 /// corner EMF, coefficient-independent). reduces to the flat master form at gamma = id, alpha =
 /// 1, beta = 0. baked per (spacetime, spacing).
@@ -1112,7 +1112,7 @@ pub fn rmhd_edge_emf_uct_gr_gv(
     let cy = uct_hll_coeffs(apy, amy);
     let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
     let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
-    // the transport velocity at the corner: vtilde = alpha v - beta on EACH in-plane axis (beta_p1
+    // the transport velocity at the corner: vtilde = alpha v - beta on each in-plane axis (beta_p1
     // vanishes on the spherical polar angle but not on cartesian y / cylindrical z). the metric at
     // the corner (a0_f, a1_f) also densitizes the whole EMF below.
     let a0_f = gv_axis_face_at(0, spacing[0], 0);
@@ -1147,8 +1147,8 @@ pub fn rmhd_edge_emf_uct_gr_gv(
     )
 }
 
-/// the FULL-3D densitized UCT-HLL corner EMF for the cartesian GR charts: the same
-/// master-formula combination as the 2d builder, per EDGE direction `dir` — the edge
+/// the full-3D densitized UCT-HLL corner EMF for the cartesian GR charts: the same
+/// master-formula combination as the 2d builder, per edge direction `dir` — the edge
 /// runs along `dir`, the transverse plane is (g1, g2) = (dir+1, dir+2) mod 3, and the
 /// corner metric sits at (cell center on `dir`, faces on g1/g2). the dispatch binds
 /// the per-edge slots (vel/bface/wave-speed pairs) exactly as it does the 2d family.
@@ -1239,10 +1239,10 @@ pub fn rmhd_edge_emf_uct_gr_3d_gv(
     )
 }
 
-/// PLM-reconstruct a staggered face field a half-cell to the EDGE (M&DZ: the staggered transverse
+/// PLM-reconstruct a staggered face field a half-cell to the edge (M&DZ: the staggered transverse
 /// field reconstructed from the adjacent interface — the 2nd-order piece that preserves smooth fields,
-/// VERIFIED on the field-loop test). `base` the face offset; `axis` the reconstruction direction (the
-/// face's TRANSVERSE: x for B_y on y-faces, y for B_x on x-faces); `sign` = +1 reconstructs +1/2
+/// verified on the field-loop test). `base` the face offset; `axis` the reconstruction direction (the
+/// face's transverse: x for B_y on y-faces, y for B_x on x-faces); `sign` = +1 reconstructs +1/2
 /// toward the edge from the lower face, -1 reconstructs -1/2 from the upper. minmod-theta slope;
 /// needs the 2nd transverse neighbor, hence bface's +-2 transverse halo.
 fn recon_face_to_edge(
@@ -1393,14 +1393,14 @@ pub fn uct_master_emf_proof_kernel(swap: bool) -> (GvKernel, Vec<(String, FieldB
 }
 
 /// the UN-halved HLLD wave-sum dissipation for one transverse B component across the 4-wave fan
-/// (M&DZ Eq. 39): `sum_k |wave speed_k| * (jump across wave k)`. the DISSIPATION-SIGN PAIRING is the
-/// load-bearing invariant — the wave-sum analog of the upwind pairing: the LEFT staggered endpoint
-/// `bt_l` is diffused by the LEFT fast wave `alam_l` (it enters as `- alam_l * bt_l`), the RIGHT
-/// endpoint `bt_r` by the RIGHT fast wave `alam_r` (`+ alam_r * bt_r`); the star / central states
-/// telescope. mispairing an endpoint with the OPPOSITE fast wave flips the dissipation sign
-/// (anti-diffusion — the invisible-subsonically failure history). the 1/2 is applied by the CALLER
+/// (M&DZ Eq. 39): `sum_k |wave speed_k| * (jump across wave k)`. the dissipation-sign pairing is the
+/// load-bearing invariant — the wave-sum analog of the upwind pairing: the left staggered endpoint
+/// `bt_l` is diffused by the left fast wave `alam_l` (it enters as `- alam_l * bt_l`), the right
+/// endpoint `bt_r` by the right fast wave `alam_r` (`+ alam_r * bt_r`); the star / central states
+/// telescope. mispairing an endpoint with the opposite fast wave flips the dissipation sign
+/// (anti-diffusion — the invisible-subsonically failure history). the 1/2 is applied by the caller
 /// (kept out here so the pairing coefficients stay integral for the symbolic proof). the speeds are
-/// the ABSOLUTE (>= 0) fan speeds; the states are the reconstructed transverse-field values.
+/// the absolute (>= 0) fan speeds; the states are the reconstructed transverse-field values.
 pub(crate) fn hlld_wave_sum_terms(
     alam_l: Gv,
     aalf_l: Gv,
@@ -1419,9 +1419,9 @@ pub(crate) fn hlld_wave_sum_terms(
 }
 
 /// proof entry point for the HLLD wave-sum dissipation-sign pairing. traces `hlld_wave_sum_terms`
-/// in ISOLATION with symbolic leaves: the five staggered / star transverse fields
-/// {bt_l, bstar_l, bc, bstar_r, bt_r} are the LinForm "fields", the four ABSOLUTE fan speeds
-/// {alam_l, aalf_l, aalf_r, alam_r} the opaque scalars. because the wave-sum is LINEAR in the fields,
+/// in isolation with symbolic leaves: the five staggered / star transverse fields
+/// {bt_l, bstar_l, bc, bstar_r, bt_r} are the LinForm "fields", the four absolute fan speeds
+/// {alam_l, aalf_l, aalf_r, alam_r} the opaque scalars. because the wave-sum is linear in the fields,
 /// `LinForm` reads each field's coefficient polynomial and the pairing is a coefficient check.
 /// `swap` mispairs the two fast-wave endpoints (`alam_l` <-> `alam_r`) to reproduce the anti-diffusive
 /// bug for the negative control. shared by `rmhd_edge_emf_uct_hlld_gv` (flat) and `_gr_gv` (both build
@@ -1453,11 +1453,11 @@ pub fn hlld_wave_sum_proof_kernel(swap: bool) -> (GvKernel, Vec<(String, FieldBi
     )
 }
 
-/// the UCT-HLLC edge EMF (master Eq. 33 + HLLC coefficients Eq. 37-38). same master formula as the
-/// HLL kernel, but the diffusion uses the CONTACT speed `lstar` (the three-wave fan) -> less
-/// dissipative. CLASSICAL ideal-gas (NMHD): `lstar = m_n^hll/rho^hll` is the HLL-average normal
+/// the uct-hllc edge EMF (master Eq. 33 + HLLC coefficients Eq. 37-38). same master formula as the
+/// HLL kernel, but the diffusion uses the contact speed `lstar` (the three-wave fan) -> less
+/// dissipative. classical ideal-gas (NMHD): `lstar = m_n^hll/rho^hll` is the HLL-average normal
 /// velocity, computed in-kernel from the cell prims with the classical momentum flux
-/// `F[m_n] = rho v_n^2 + p + |B|^2/2 - B_n^2`. edge speeds & per-side states use the MAX-over-4-cells
+/// `F[m_n] = rho v_n^2 + p + |B|^2/2 - B_n^2`. edge speeds & per-side states use the max-over-4-cells
 /// / 2-cell-average reconstruction. (IMHD: p = cs^2*rho; RMHD: relativistic conserved/flux.)
 pub fn nmhd_edge_emf_uct_hllc_gv(
     ndim: usize,
@@ -1507,7 +1507,7 @@ pub fn nmhd_edge_emf_uct_hllc_gv(
     let nw = cm(&[g1]);
     let se = cm(&[g2]);
     let sw = cm(&[g1, g2]);
-    // edge signal speeds: MAX over the 4 cells.
+    // edge signal speeds: max over the 4 cells.
     let max4 = |key: &str, path: &str| -> Gv {
         let v0 = gv_field_at(key, path, ndim, &ne);
         let v1 = gv_field_at(key, path, ndim, &nw);
@@ -1526,10 +1526,10 @@ pub fn nmhd_edge_emf_uct_hllc_gv(
     let amx = zero_g.max(neg_min4("e_wsl1", "wsl_p1"));
     let apy = zero_g.max(max4("e_wsr2", "wsr_p2"));
     let amy = zero_g.max(neg_min4("e_wsl2", "wsl_p2"));
-    // per-FACE HLLC coefficients: each face uses ITS OWN two cells (first-order L/R) + davis face
+    // per-face HLLC coefficients: each face uses its own two cells (first-order L/R) + davis face
     // speeds (s_r = max(0, ws_r^L, ws_r^R), s_l = min(0, ws_l^L, ws_l^R)) so lstar = m_n^hll/rho^hll
-    // is CONSISTENT (the contact stays inside the fan -> no degeneracy blow-up). then the diffusion
-    // is MAX-combined to the edge (the maximal-diffusion edge reconstruction). vn/bn read the normal
+    // is consistent (the contact stays inside the fan -> no degeneracy blow-up). then the diffusion
+    // is max-combined to the edge (the maximal-diffusion edge reconstruction). vn/bn read the normal
     // velocity / normal cell-B; wsr/wsl are the direction's per-cell speed fields.
     let face_d = |l: &[i32],
                   r: &[i32],
@@ -1567,7 +1567,7 @@ pub fn nmhd_edge_emf_uct_hllc_gv(
         let c = uct_hllc_coeffs(sl, sr, lstar, vl, vr);
         (c.dl, c.dr)
     };
-    // x-faces (normal p1): North NW->NE, South SW->SE; MAX-combine d to the edge.
+    // x-faces (normal p1): North NW->NE, South SW->SE; max-combine d to the edge.
     let (dln, drn) = face_d(&nw, &ne, &vp1, &bp1, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
     let (dls, drs) = face_d(&sw, &se, &vp1, &bp1, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
     let cx = UctDir {
@@ -1764,14 +1764,14 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
     // upwind transverse velocity (eq:vt): alpha^+ carries the West/South state.
     let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
     let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
-    // staggered face B reconstructed to the EDGE (R+/-; theta=0 => identity = zeroth order). these are the
-    // DISSIPATED transverse fields in the master composition (Eq. 16).
+    // staggered face B reconstructed to the edge (R+/-; theta=0 => identity = zeroth order). these are the
+    // dissipated transverse fields in the master composition (Eq. 16).
     let by_e = recon_face_to_edge(ndim, theta, "h_bface_b", "bface_b", &ne, g1, -1.0);
     let by_w = recon_face_to_edge(ndim, theta, "h_bface_b", "bface_b", &nw, g1, 1.0);
     let bx_n = recon_face_to_edge(ndim, theta, "h_bface_a", "bface_a", &ne, g2, -1.0);
     let bx_s = recon_face_to_edge(ndim, theta, "h_bface_a", "bface_a", &se, g2, 1.0);
-    // per-face coefficients at the 4 faces, combined to the edge: AVERAGE on a (eq:dEW), MAX on d
-    // (paper-sanctioned "maximizing the diffusion terms"). the fan's NORMAL B is the staggered FACE
+    // per-face coefficients at the 4 faces, combined to the edge: average on a (eq:dEW), max on d
+    // (paper-sanctioned "maximizing the diffusion terms"). the fan's normal B is the staggered face
     // value (guideline 2, the un-reconstructed face field). x-faces (normal g1, prim comp 0).
     let bn_n = gv_field_at("h_bface_a", "bface_a", ndim, &ne);
     let bn_s = gv_field_at("h_bface_a", "bface_a", ndim, &se);
@@ -1877,7 +1877,7 @@ impl EmfFace {
 
 /// chart plumbing for [`rmhd_edge_emf_uct_hlld_impl`] — everything the wave-sum composition does
 /// not own: where each riemann's geometry lives and which solver runs its fan. the builder calls
-/// the tracing methods in a FIXED order (corner prelude, then each face's position/ADM data ahead
+/// the tracing methods in a fixed order (corner prelude, then each face's position/ADM data ahead
 /// of that face's reconstructions and its fan after them, then the corner transport factors), so
 /// every chart keeps its own op sequence in the traced graph.
 trait WaveSumChart {
@@ -1971,12 +1971,12 @@ fn rmhd_edge_emf_uct_hlld_impl(
             mag: Tensor::new(b),
         }
     };
-    // staggered face B reconstructed to the EDGE — the DISSIPATED transverse fields in the wave-sum.
+    // staggered face B reconstructed to the edge — the dissipated transverse fields in the wave-sum.
     let bx_n = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &ne, g2, -1.0);
     let bx_s = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &se, g2, 1.0);
     let by_w = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &nw, g1, 1.0);
     let by_e = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &ne, g1, -1.0);
-    // the single div-free NORMAL B at each face (the un-reconstructed staggered FACE value).
+    // the single div-free normal B at each face (the un-reconstructed staggered face value).
     let bx_n_face = gv_field_at("e_bface_a", "bface_a", ndim, &ne);
     let bx_s_face = gv_field_at("e_bface_a", "bface_a", ndim, &se);
     let by_w_face = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
@@ -1984,7 +1984,7 @@ fn rmhd_edge_emf_uct_hlld_impl(
     // the wave-sum dissipative flux Phi (M&DZ Eq. 39) for a riemann whose transverse component is
     // `t`, with staggered endpoints `bt_l`,`bt_r` and the single-/double-star fields from `st`.
     // gated on `success` -> HLL dissipation (NaN-safe true select; the HLL branch uses only the
-    // finite lam). `vf` is the MOVING-INTERFACE speed (beta^n/alpha): a shifted chart evaluates
+    // finite lam). `vf` is the moving-interface speed (beta^n/alpha): a shifted chart evaluates
     // the fan at x/t = vf, so every wave speed enters relative to it (lambda - vf) — matching the
     // shifted gas HLLD flux, which is what keeps the edge EMF flux-consistent. the flat chart
     // passes None: zero shift, and no speed shift enters the graph.
@@ -2014,9 +2014,9 @@ fn rmhd_edge_emf_uct_hlld_impl(
         let phi_hll = uct_hll_coeffs(ap, am).dl * (bt_r - bt_l);
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
-    // the grid-g1-face riemann (world normal pc1) dissipates the transverse pc2 field. PER-FACE:
+    // the grid-g1-face riemann (world normal pc1) dissipates the transverse pc2 field. per-face:
     // North (NW->NE) and South (SW->SE), each from reconstructed states (matching the gas flux);
-    // Phi_x = 1/2(Phi_N + Phi_S) (M&DZ Eq. 34 edge average). normal B = the staggered FACE value;
+    // Phi_x = 1/2(Phi_N + Phi_S) (M&DZ Eq. 34 edge average). normal B = the staggered face value;
     // transverse B = by_w / by_e.
     let vf_xn = chart.face_vf(EmfFace::XNorth, half);
     let xn_l = prim_face(&nw, g1, 1.0, pc1, bx_n_face, pc2, by_w);
@@ -2030,8 +2030,8 @@ fn rmhd_edge_emf_uct_hlld_impl(
         wave_sum(&st_xn, pc2, by_w, by_e, vf_xn),
         wave_sum(&st_xs, pc2, by_w, by_e, vf_xs),
     );
-    // the grid-g2-face riemann (world normal pc2) dissipates the transverse pc1 field. PER-FACE:
-    // West (SW->NW) and East (SE->NE). normal B = the staggered FACE value; transverse B = bx_s / bx_n.
+    // the grid-g2-face riemann (world normal pc2) dissipates the transverse pc1 field. per-face:
+    // West (SW->NW) and East (SE->NE). normal B = the staggered face value; transverse B = bx_s / bx_n.
     let vf_yw = chart.face_vf(EmfFace::YWest, half);
     let yw_l = prim_face(&sw, g2, 1.0, pc2, by_w_face, pc1, bx_s);
     let yw_r = prim_face(&nw, g2, -1.0, pc2, by_w_face, pc1, bx_n);
@@ -2045,7 +2045,7 @@ fn rmhd_edge_emf_uct_hlld_impl(
         wave_sum(&st_ye, pc1, bx_s, bx_n, vf_ye),
     );
     // advective velocities at the corner (2-cell averages straddling the edge). a curved chart
-    // upgrades them to the transport velocity vtilde = alpha v - beta on EACH in-plane axis, and
+    // upgrades them to the transport velocity vtilde = alpha v - beta on each in-plane axis, and
     // densitizes the coordinate EMF to Etilde = sqrt(gamma)(corner) * E.
     let tp = chart.transport();
     let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
@@ -2149,9 +2149,9 @@ pub fn rmhd_edge_emf_uct_hlld_gv(
 }
 
 /// the curved-spacetime 2.5D poloidal-plane chart (schwarzschild + spinning kerr): per-face
-/// ORTHONORMAL-frame MUB09 fans at each riemann's own face metric, moving-interface speeds
+/// orthonormal-frame MUB09 fans at each riemann's own face metric, moving-interface speeds
 /// beta^n/alpha from the face ADM data, and the corner sqrt(gamma) densitization. the prim is
-/// assembled in WORLD order (v[pc] = ..), the fan solves along the world normal (dir = pc), and
+/// assembled in world order (v[pc] = ..), the fan solves along the world normal (dir = pc), and
 /// the shift/transverse fields address the physical axes; offsets/reconstructions stay in grid
 /// space via (g1, g2). contiguous axes [0,1] give (pc1,pc2,g1,g2) = (0,1,0,1); the gapped (R,z)
 /// set [0,2] gives (2,0,1,0) and rides the same indexing. positions are (grid-0, grid-1)
@@ -2183,8 +2183,8 @@ impl WaveSumChart for Gr2dWaveSum<'_> {
         let th_f = gv_axis_face_at(1, self.spacing[1], 0);
         self.corner = Some((r_f, th_f));
     }
-    // the world position of the face point: the face's grid axis sits ON the face (offset 0), the
-    // other grid axis on a CELL center — the ADM data and the fan's metric are read at each
+    // the world position of the face point: the face's grid axis sits on the face (offset 0), the
+    // other grid axis on a cell center — the ADM data and the fan's metric are read at each
     // riemann's own face center, matching the gas HLLD flux. vf = beta^n/alpha is zero for the
     // zero-shift schwarzschild chart and for the theta-direction fan (beta^theta = 0).
     fn face_vf(&mut self, face: EmfFace, half: Gv) -> Option<Gv> {
@@ -2233,7 +2233,7 @@ impl WaveSumChart for Gr2dWaveSum<'_> {
 
 /// the curved-spacetime UCT-HLLD edge EMF (the wave-sum dissipative form, M&DZ Eq. 39) for the
 /// 2.5D (r, theta) poloidal plane — the sharp, alfven-resolving GR-UCT EMF. mirrors the flat
-/// `rmhd_edge_emf_uct_hlld_gv` with three GR generalizations (GR-HLLD): (1) the per-face
+/// `rmhd_edge_emf_uct_hlld_gv` with three GR generalizations (gr-hlld): (1) the per-face
 /// HLLD riemann uses the orthonormal-frame MUB09 solver `hlld_rmhd_states_gr_ortho(.., &face_metric)`
 /// — the flat star fields + speeds map back to the coordinate frame (fields /sqrt(g_i), speeds
 /// /sqrt(g_n)) so the wave-sum telescopes exactly to the coordinate HLLD B_t flux (proven,
@@ -2241,7 +2241,7 @@ impl WaveSumChart for Gr2dWaveSum<'_> {
 /// (spinning kerr carries a radial shift; schwarzschild is zero-shift), and the wave-sum fan speeds
 /// enter relative to the moving interface vf = beta^r/alpha, matching the shifted gas HLLD flux;
 /// (3) the whole coordinate EMF is densitized by sqrt(gamma)(corner) -> Etilde_phi (the same corner-
-/// densitization as the GR-UCT-HLL EMF; the corner-averaged Phi (Eq. 34) is a corner quantity).
+/// densitization as the gr-uct-hll EMF; the corner-averaged Phi (Eq. 34) is a corner quantity).
 /// schwarzschild + spinning kerr — the kerr-schild 2D MHD row is unbaked. the per-face metrics sit at
 /// each riemann's face center, matching the gas HLLD flux. baked per spacing.
 pub fn rmhd_edge_emf_uct_hlld_gr_gv(
@@ -2267,7 +2267,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     })
 }
 
-/// the curved-spacetime FULL-3D chart along edge axis `dir` (identity chart: world component ==
+/// the curved-spacetime full-3D chart along edge axis `dir` (identity chart: world component ==
 /// grid axis, so pc1/pc2 = g1/g2 and the out-of-plane prim component is `dir`). positions are
 /// world 3-vectors: the edge is cell-centered along `dir` and cornered on the transverse pair;
 /// per-face fans, moving-interface speeds and the corner densitization follow the 2.5D chart.
@@ -2307,7 +2307,7 @@ impl WaveSumChart for Gr3dWaveSum<'_> {
         xc[self.g2] = self.a_f(self.g2, 0);
         self.corner = Some(Tensor::new(xc));
     }
-    // the 3d position of the face point: the face's grid axis ON the face, the other transverse
+    // the 3d position of the face point: the face's grid axis on the face, the other transverse
     // axis on a cell center, the edge axis cell-centered.
     fn face_vf(&mut self, face: EmfFace, half: Gv) -> Option<Gv> {
         let (fa, co) = face.grid(self.g1, self.g2);
@@ -2339,9 +2339,9 @@ impl WaveSumChart for Gr3dWaveSum<'_> {
     }
 }
 
-/// the CURVED-SPACETIME UCT-HLLD edge EMF for the FULL 3D grid, along edge axis `dir` — the
+/// the curved-spacetime UCT-HLLD edge EMF for the full 3D grid, along edge axis `dir` — the
 /// wave-sum dissipative form (M&DZ Eq. 39) with the three GR generalizations of the 2D builder
-/// (`rmhd_edge_emf_uct_hlld_gr_gv`): per-face ORTHONORMAL-frame MUB09 fans at each riemann's own
+/// (`rmhd_edge_emf_uct_hlld_gr_gv`): per-face orthonormal-frame MUB09 fans at each riemann's own
 /// face metric, the transport velocity vtilde = alpha v - beta with the fan speeds relative to the
 /// moving interface vf = beta^n/alpha, and the corner sqrt(gamma) densitization. identity chart
 /// only (physical component == grid axis): the edge is cell-centered along `dir` and cornered on
@@ -2427,14 +2427,14 @@ pub fn fofc_emf_splice_gv(
     )
 }
 
-/// the CURVED-SPACETIME CT edge EMF for the FULL 3D grid, along edge axis `dir` — the contact
-/// assembly of [`rmhd_edge_emf_gv`] producing the DENSITIZED corner EMF the GR curl consumes:
+/// the curved-spacetime CT edge EMF for the full 3D grid, along edge axis `dir` — the contact
+/// assembly of [`rmhd_edge_emf_gv`] producing the densitized corner EMF the GR curl consumes:
 ///   cell terms:  sqrt(gamma)|cell x [(alpha v_p2 - beta_p2) b_p1 - (alpha v_p1 - beta_p1) b_p2]
 ///   face terms:  alpha sqrt(gamma)|face x (raw mag-row flux)
-/// every gather point carries the metric factors at ITS OWN 3d position: the edge is
+/// every gather point carries the metric factors at its own 3d position: the edge is
 /// cell-centered along `dir` and cornered on the transverse axes (g1, g2) = (dir+1, dir+2) mod 3;
 /// cells sit at arithmetic centers, the bflux_a points on the g1-faces, the bflux_b points on the
-/// g2-faces. the density fluxes stay RAW (the soft-sign blend uses only their signs, and the
+/// g2-faces. the density fluxes stay raw (the soft-sign blend uses only their signs, and the
 /// alpha sqrt(gamma) measure is positive). identity chart only: physical component == grid axis,
 /// so the shift components are addressed directly by (g1, g2).
 pub fn rmhd_edge_emf_gr_3d_gv(
@@ -2479,7 +2479,7 @@ pub fn rmhd_edge_emf_gr_3d_gv(
         let (alpha, sqrtg, beta) = gr_adm_at(spacetime, coords, pos(c_g1, c_g2));
         (alpha, sqrtg, beta[g1], beta[g2])
     };
-    // densitized cell EMF at the cell whose LOW corner offset (on g1, g2) is `o`.
+    // densitized cell EMF at the cell whose low corner offset (on g1, g2) is `o`.
     let cell = |o: &[i32]| -> Gv {
         let (alpha, sqrtg, beta_p1, beta_p2) = adm(a_c(g1, o[g1] as i64), a_c(g2, o[g2] as i64));
         let vp1 = gv_field_at("edge_vp1", "vel_p1", ndim, o);
@@ -2515,8 +2515,8 @@ pub fn rmhd_edge_emf_gr_3d_gv(
     )
 }
 
-/// the CURVED-SPACETIME 3D CT face-B update along face axis `dir` from the two incident
-/// DENSITIZED edge EMFs: the coordinate curl of Etilde divided by the face's own
+/// the curved-spacetime 3D CT face-B update along face axis `dir` from the two incident
+/// densitized edge EMFs: the coordinate curl of Etilde divided by the face's own
 /// sqrt(gamma) — the densitized induction d(sqrt(gamma) B)/dt = -curl(Etilde) solved for
 /// B at the face point, so div(sqrt(gamma) B) is preserved exactly (the coordinate curl
 /// telescopes for any weight).
@@ -2540,7 +2540,7 @@ pub fn rmhd_ct_curl_3d_gr_dir_gv(
     let half = Gv::from_f64(0.5);
     let a_f = |ax: usize, o: i64| gv_axis_face_at(ax, spacing[ax], o);
     let a_c = |ax: usize| (a_f(ax, 0) + a_f(ax, 1)) * half;
-    // sqrt(gamma) at THIS face's center: on the low dir-face, centered transversely.
+    // sqrt(gamma) at this face's center: on the low dir-face, centered transversely.
     let face_pos = {
         let mut x = [Gv::ZERO; 3];
         x[dir] = a_f(dir, 0);

@@ -1,18 +1,18 @@
 # =============================================================================
 # test_dispatch_guard.py
 #
-# the dims/coords dispatch macros must FAIL LOUD on a non-minkowski spacetime
+# the dims/coords dispatch macros must fail loud on a non-minkowski spacetime
 # that has no baked GR kernel, never silently fall through to a flat
 # `(dims, coords)` arm and run on a Minkowski metric — wrong physics with zero
 # warning.
 #
 # strategy: take a baked GR config (GrMichel: 1D spherical Schwarzschild) and
-# flip its spacetime to one that is UNBAKED for that (dims, coords). the IC stays
+# flip its spacetime to one that is unbaked for that (dims, coords). the IC stays
 # valid (still spherical, r-based), so the run reaches the dispatch and must raise
 # the dispatch guard.
 #
 # the sibling rejection is also covered here: a curved spacetime on a
-# NON-relativistic regime (the non-relativistic kernel rows are never baked with a
+# non-relativistic regime (the non-relativistic kernel rows are never baked with a
 # spacetime slug) must be rejected before dispatch — dropping that guard would
 # silently run flat gravity-free physics on a config that asked for GR.
 # =============================================================================
@@ -38,7 +38,7 @@ def test_horizon_penetrating_spacetime_names_identify_the_solution() -> None:
 
 
 class _UnbakedKerrMichel(GrMichel):
-    # (1, spherical, kerr) is NOT a baked GR-hydro arm (only 2D spherical kerr is);
+    # (1, spherical, kerr) is not a baked GR-hydro arm (only 2D spherical kerr is);
     # the dispatch guard must reject it before it can reach the flat (1, spherical) arm.
     spacetime: Spacetime = Spacetime.KERR_KS
 
@@ -52,11 +52,11 @@ def test_dispatch_rejects_unbaked_gr_spacetime():
 
 @needs_backend
 def test_baked_gr_spacetime_still_dispatches():
-    # regression: the guard must NOT reject a genuinely baked GR combo. the default
-    # GrMichel (1D spherical Schwarzschild) IS baked; run a couple of steps and assert
-    # it does not raise the dispatch guard (it gets PAST it into real evolution).
+    # regression: the guard must not reject a genuinely baked GR combo. the default
+    # GrMichel (1D spherical Schwarzschild) is baked; run a couple of steps and assert
+    # it does not raise the dispatch guard (it gets past it into real evolution).
     p = GrMichel.from_cli(["--resolution", "16", "--end-time", "0.001"])
-    # any exception here must NOT be the dispatch guard (baked combos dispatch fine).
+    # any exception here must not be the dispatch guard (baked combos dispatch fine).
     try:
         runner.run(p, compute_mode="cpu", max_steps=400)
     except Exception as e:  # pragma: no cover - only trips on a real regression
@@ -66,7 +66,7 @@ def test_baked_gr_spacetime_still_dispatches():
 
 
 class _NewtonianOnSchwarzschild(SodProblem):
-    # a NON-relativistic regime (newtonian) with a curved spacetime: the non-relativistic kernel rows
+    # a non-relativistic regime (newtonian) with a curved spacetime: the non-relativistic kernel rows
     # are never baked with a spacetime slug, so the regime-vs-spacetime guard must reject this before
     # dispatch. the mass is positive so the GR-parameter check, which rejects a curved
     # spacetime with M = 0, stays silent and does not mask the regime-vs-spacetime

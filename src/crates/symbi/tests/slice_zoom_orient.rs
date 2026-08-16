@@ -2,9 +2,9 @@
 // slice_zoom_orient.rs
 //
 // the display-slice zoom + orientation contracts: the field encodes its own
-// cell INDICES exactly (rho = 10000 ix + 100 iy + iz + 1, f32-representable),
+// cell indices exactly (rho = 10000 ix + 100 iy + iz + 1, f32-representable),
 // so where a sample came from is decodable off its value. gates:
-// - zoom 1 (2x) samples ONLY the centered half-extent window on both display
+// - zoom 1 (2x) samples only the centered half-extent window on both display
 //   axes, at full output resolution (crisper), while the
 //   unzoomed view reaches both domain edges;
 // - orientation 1 (the y mid-plane) pins every sample at iy = N/2 exactly
@@ -76,7 +76,7 @@ fn zoom_samples_the_centered_half_window_only() {
         full_ix.iter().any(|&i| i == 0) && full_ix.iter().any(|&i| i == N - 1),
         "full-extent view missing the domain edges"
     );
-    // the 2x view samples ONLY the centered half window on BOTH display axes, at
+    // the 2x view samples only the centered half window on both display axes, at
     // full output resolution (crisper).
     let (wlo, whi) = (N / 4, N / 4 + N / 2);
     for v in &zoomed.data {

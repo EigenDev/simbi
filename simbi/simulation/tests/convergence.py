@@ -1,14 +1,14 @@
 # =============================================================================
 # convergence.py
 #
-# the ONE definition of what "this converges" means, stated in quantities that do
+# the one definition of what "this converges" means, stated in quantities that do
 # not mention a grid.
 #
 # a discrete error behaves as
 #
 #     E(N) = C * N^(-p) + higher order
 #
-# for a scheme of order p on N cells across the domain (dx/L = 1/N). an ABSOLUTE
+# for a scheme of order p on N cells across the domain (dx/L = 1/N). an absolute
 # tolerance on E pins both C and N at once, so it silently encodes the resolution,
 # the domain, the cfl and the scheme's dissipation. change any of them and the
 # number becomes a lie that reads as a physics failure: a sharper wave-speed
@@ -17,23 +17,23 @@
 #
 # two quantities survive that:
 #
-#   the MEASURED ORDER, from two resolutions refined by r,
+#   the measured order, from two resolutions refined by r,
 #       p = log(E_coarse / E_fine) / log(r)
-#   dimensionless, independent of C and of the grid. this is the SHARP instrument:
+#   dimensionless, independent of C and of the grid. this is the sharp instrument:
 #   a wrong term is a resolution-independent floor, which drives p to zero. no
 #   amount of dissipation retuning can fake it.
 #
-#   the EXTRAPOLATED ERROR CONSTANT,
+#   the extrapolated error constant,
 #       C = E(N) * N^p
 #   the error the scheme would carry at unit resolution. invariant under refinement
-#   by construction, and it moves when the error MAGNITUDE moves at fixed order --
+#   by construction, and it moves when the error magnitude moves at fixed order --
 #   so it catches a scheme that got uniformly more diffusive while still converging.
 #
 # assert both and the test says: "this converges at least this fast, and its error
 # constant is at most this big." neither clause names a grid, so refining the test,
 # widening the domain or retuning the cfl leaves it standing.
 #
-# the honest caveat: C is a property of the SCHEME AND PROBLEM, not a universal. a
+# the honest caveat: C is a property of the scheme and problem, not a universal. a
 # legitimate change to the Riemann solver moves it. so C_max carries real margin --
 # it is the smoke alarm, detecting an order-of-magnitude regression, while p is the
 # instrument that says whether the discretization is right.

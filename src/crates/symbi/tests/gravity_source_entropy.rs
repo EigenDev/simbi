@@ -5,13 +5,13 @@
 //
 // gravity does work: it adds momentum `S_mom = rho a` and energy `S_nrg = rho a . v`.
 // those two have to agree with each other to machine precision, because the internal
-// energy is what is LEFT after the kinetic part is removed. if the energy term uses a
+// energy is what is left after the kinetic part is removed. if the energy term uses a
 // velocity that is even slightly out of step with the one the momentum term produces --
 // a stale stage value, say -- the residue lands in the internal energy as `rho a dv dt`,
 // one-signed, every step. that is invisible in the conserved totals (both mass and total
 // energy stay perfectly conserved) and shows up only as entropy drift.
 //
-// the setup makes the exact answer trivial. a UNIFORM medium at rest in a UNIFORM
+// the setup makes the exact answer trivial. a uniform medium at rest in a uniform
 // gravitational field is accelerated identically everywhere, so it never compresses: the
 // exact solution is the same uniform state translating, with `K = p / rho^gamma` constant
 // for all time. uniformity is obtained by putting the mass very far away, so the field
@@ -21,10 +21,10 @@
 // so any drift here is the source term, isolated from reconstruction, the riemann solver,
 // refinement transfer, sinks, and boundaries.
 //
-// the uniform case pins the source's SELF-CONSISTENCY but exercises it at only one field
+// the uniform case pins the source's self-consistency but exercises it at only one field
 // strength, and a residue proportional to the local acceleration is invisible there. the
 // second setup below supplies the missing dynamic range: an isentropic atmosphere in
-// HYDROSTATIC BALANCE against a point mass, whose exact solution is that nothing moves and
+// hydrostatic balance against a point mass, whose exact solution is that nothing moves and
 // `K = p / rho^gamma` stays at its initial value for all time, swept over four decades of
 // `GM`. that is the configuration deep in an accretion flow -- strong gravity, near-zero
 // velocity, held for a great many steps -- and it is where a per-step residue `rho a dv dt`
@@ -157,13 +157,13 @@ fn hydrostatic_density(r: f64, gm: f64) -> f64 {
 /// the worst `K / K0` over the interior with a fraction `skip` of the cells excluded at each
 /// wall.
 ///
-/// a reflecting boundary mirrors the conserved state but does NOT mirror the gravitational
+/// a reflecting boundary mirrors the conserved state but does not mirror the gravitational
 /// source, so it cannot hold the hydrostatic equilibrium the interior holds: the wall drives a
 /// slow flow the exact solution does not have, and that flow is a genuine feature of the
 /// boundary condition rather than of the scheme under test. measuring across it would attribute
 /// the wall's defect to the source term.
 ///
-/// the exclusion is not a tolerance. the entropy error after ONE step is exactly `K = K0` to
+/// the exclusion is not a tolerance. the entropy error after one step is exactly `K = K0` to
 /// every digit (`the_discrete_balance_is_exact_on_the_equilibrium_profile`), and over a long run
 /// the deficit localizes against the outer wall and recovers monotonically as the wall is
 /// excluded -- at `GM = 100`, `N = 512`: 0.994686 at 0.4 percent excluded, 0.995456 at 5
@@ -239,7 +239,7 @@ fn hydrostatic_atmosphere_ts(gm: f64, cells: usize, cfl: f64, ts: Timestepping) 
 fn a_hydrostatic_atmosphere_holds_its_entropy_at_every_field_strength() {
     // the exact solution is static at every `GM`: the pressure gradient balances gravity by
     // construction and the state is isentropic, so `K` is `K0` everywhere for all time. the
-    // ONLY thing that varies across the sweep is the field strength, so a deficit that grows
+    // only thing that varies across the sweep is the field strength, so a deficit that grows
     // with `GM` is a source residue proportional to the local acceleration -- the term that a
     // single weak-field case cannot see.
     let mut worsts = Vec::new();
@@ -264,7 +264,7 @@ fn a_hydrostatic_atmosphere_holds_its_entropy_at_every_field_strength() {
         worsts.push((gm, worst, contrast, sim.iteration));
     }
 
-    // NON-VACUITY: the strong-field cases have to be genuinely stratified and genuinely
+    // non-vacuity: the strong-field cases have to be genuinely stratified and genuinely
     // long-running. a flat atmosphere would make the balance trivial, and a run that barely
     // stepped could not accumulate a per-step residue whatever its size.
     let (gm_max, _, contrast_max, steps_max) = *worsts.last().unwrap();
@@ -317,7 +317,7 @@ fn a_gravitational_source_does_not_destroy_entropy() {
     let (worst, steps, vmax) = run(true);
     println!("gravity:    min K/K0 = {worst:.12}  ({steps} steps, max|v| = {vmax:.3e})");
 
-    // NON-VACUITY: gravity has to have actually done work, or a preserved K says nothing.
+    // non-vacuity: gravity has to have actually done work, or a preserved K says nothing.
     // the field is gentle by construction, so this only asserts the gas really moved.
     assert!(
         vmax > 1.0e-2,
@@ -335,7 +335,7 @@ fn a_gravitational_source_does_not_destroy_entropy() {
     );
 }
 
-/// the immersed-body source and the additive source deliver the SAME gravity, so they must
+/// the immersed-body source and the additive source deliver the same gravity, so they must
 /// produce the same state — and neither may carry a timestep-dependent entropy bias.
 ///
 /// a source operator applied on top of an already-flux-advanced state composes sequentially with
@@ -345,7 +345,7 @@ fn a_gravitational_source_does_not_destroy_entropy() {
 /// fixed cell width and is common to every integrator. evaluating both the flux and the source at
 /// the stage input removes it.
 ///
-/// the two clauses are independent. equality alone would pass if BOTH paths shared the bias;
+/// the two clauses are independent. equality alone would pass if both paths shared the bias;
 /// timestep-independence alone would pass if they were independently clean but disagreed.
 #[test]
 fn the_body_and_additive_sources_agree_and_carry_no_timestep_bias() {
@@ -369,7 +369,7 @@ fn the_body_and_additive_sources_agree_and_carry_no_timestep_bias() {
             let (kb_min, ka_min) = (worst_entropy_ratio(&body), worst_entropy_ratio(&add));
             println!("GM = {gm:>6}  cfl = {cfl:>5}:  body {kb_min:.9}  additive {ka_min:.9}");
 
-            // NON-VACUITY: gravity has to be doing enough work for either clause to bite. at
+            // non-vacuity: gravity has to be doing enough work for either clause to bite. at
             // GM = 1 the atmosphere is already 1.5x denser at the inner edge than the outer.
             let contrast = hydrostatic_density(1.0, gm) / hydrostatic_density(1.0 + R_OFFSET, gm);
             assert!(
@@ -407,15 +407,15 @@ fn the_hydrostatic_residue_converges_at_third_order() {
     // how well the discrete flux gradient cancels the discrete gravity source, measured on the
     // analytic equilibrium whose exact evolution is to stand still.
     //
-    // this is NOT exactness. a genuinely well-balanced scheme leaves the discrete equilibrium at
-    // ROUND-OFF whatever the resolution; this one leaves a residue that shrinks with `dx`, so the
-    // balance is a convergence property rather than an identity. holding the STEP COUNT fixed and
+    // this is not exactness. a genuinely well-balanced scheme leaves the discrete equilibrium at
+    // round-off whatever the resolution; this one leaves a residue that shrinks with `dx`, so the
+    // balance is a convergence property rather than an identity. holding the step count fixed and
     // varying `dx` is what separates the two: flat-at-round-off would mean balanced, and a clean
     // power means merely consistent.
     //
     // a `tend` at or below one CFL step is useless here — `evolve` clamps `dt` to the remaining
     // time, so it takes one degenerate step of that size and measures nothing. the end time below
-    // scales with `dx` precisely so every resolution takes the SAME number of real steps.
+    // scales with `dx` precisely so every resolution takes the same number of real steps.
     const STEPS: f64 = 20.0;
     for gm in [1.0, 100.0] {
         let mut residue = Vec::new();
@@ -434,7 +434,7 @@ fn the_hydrostatic_residue_converges_at_third_order() {
                 worst = worst.max((*pre.at(*c) / r.powf(GAMMA) / k0() - 1.0).abs());
             }
             println!("GM = {gm:>6}  N = {n:>4}: {:>3} steps  |K/K0 - 1| = {worst:.4e}", sim.iteration);
-            // NON-VACUITY: a clamped `dt` would make this measure nothing at all.
+            // non-vacuity: a clamped `dt` would make this measure nothing at all.
             assert!(
                 sim.iteration >= 4,
                 "only {} step(s) at N = {n}; the end time collapsed onto the timestep and this \
@@ -564,7 +564,7 @@ fn diagnose_entropy_residue_accumulates_or_rings() {
 /// stagnant strong-contrast column is the low-mach central-differencing limit of
 /// the HLLC-LM (fleischmann) anti-diffusive scaling — the regime a sealed
 /// accretor wall holds its masked cells in permanently. an entropy floor
-/// violation that appears ONLY on the low-mach arm localizes the production
+/// violation that appears only on the low-mach arm localizes the production
 /// K < K_0 deficit to the flux, not the source or the wall ledger (both hold
 /// the floor on this exact setup under HLLE). production knobs: cfl 0.3, rk2.
 #[test]
@@ -572,7 +572,7 @@ fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
     use symbi::prelude::Solver;
     let gm = 100.0;
     let mut rows = Vec::new();
-    // the low-mach arm pairs with the BALANCED reconstruction: since the clamp's
+    // the low-mach arm pairs with the balanced reconstruction: since the clamp's
     // retirement (2026-08-15) the published ramp leaves the hydrostatic residual undamped
     // by design, and the balancing removes it instead -- unpaired, this exact column loses
     // 4.2e-4 of the floor, which is the failure that once motivated the clamp.
@@ -613,13 +613,13 @@ fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
 }
 
 /// the low-mach arm's floor law with its precondition made explicit: the sealed
-/// stratified column holds `K >= K_0` under hllc_lm WHILE the fleischmann ramp is
+/// stratified column holds `K >= K_0` under hllc_lm while the fleischmann ramp is
 /// genuinely engaged — the residual velocities stay below the mach limit, so a pass
 /// cannot come from the ramp being inactive. unpaired, this exact configuration loses
 /// 4.2e-4 of the floor at t = 2 (5.4e-4 at half the timestep — spatial
 /// anti-dissipation, not a source bias): the ramp cuts the acoustic dissipation that
 /// damps the hydrostatic residual and the ringing undershoots the adiabat. the
-/// BALANCED RECONSTRUCTION removes that residual at its source — each cell's
+/// balanced reconstruction removes that residual at its source — each cell's
 /// departure from the isentrope through it is what gets limited, so the balanced
 /// column presents no face jump and there is nothing to ring. (a compressibility
 /// clamp once restored classical dissipation here instead; retired 2026-08-15.)
@@ -636,7 +636,7 @@ fn the_low_mach_arm_holds_the_floor_with_the_ramp_engaged() {
 
     // the precondition: the column's residual flow sits under the mach limit, so the
     // ramp reduces the acoustic dissipation everywhere and the floor below is a
-    // statement about the CLAMPED scheme, not about the ramp never activating.
+    // statement about the clamped scheme, not about the ramp never activating.
     let rho = sim.fields.prim.rho.view();
     let pre = sim.fields.prim.pre_field().expect("adiabatic pre").view();
     let vel = sim.fields.prim.vel[0].view();

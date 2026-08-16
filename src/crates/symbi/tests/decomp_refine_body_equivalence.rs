@@ -1,7 +1,7 @@
 // =============================================================================
 // decomp_refine_body_equivalence.rs
 //
-// IMMERSED BODIES x REFINEMENT x DECOMPOSITION: per-tile 2-level hierarchies, each carrying
+// immersed bodies x refinement x decomposition: per-tile 2-level hierarchies, each carrying
 // the same bodies at their global positions (finest-owns-bodies per tile: the fine level
 // holds the full accreting body, the root a gravity-only proxy), driven through the
 // production `evolve_hierarchy_decomposed` loop, reproduce the monolithic refined run
@@ -10,7 +10,7 @@
 // region) and applies the identical global delta everywhere, the same lockstep contract the
 // flat decomposed loop proves in decomp_body_equivalence.
 //
-// two placements: the sink INSIDE one tile's fine patch, and the sink STRADDLING a root cut
+// two placements: the sink inside one tile's fine patch, and the sink straddling a root cut
 // with the refined patch spanning both tiles (each tile's clipped fine level drains its own
 // share; the clipped containment invariant holds on both).
 // =============================================================================
@@ -44,7 +44,7 @@ fn kset(sim: &Sim) -> Kern {
 }
 
 // an accreting sink at `pos`: gravitating mass fixed, drain + accretion bookkeeping active.
-// a FRESH collection per attach (with_bodies takes ownership); same GLOBAL position everywhere.
+// a fresh collection per attach (with_bodies takes ownership); same global position everywhere.
 fn sink_at(pos: [f64; 2]) -> BodyCollection<f64, 2> {
     BodyCollection::new().add(Body::black_hole(
         0,
@@ -198,7 +198,7 @@ fn composite_den(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
             }
         }
         if h.levels.len() > 1 {
-            // the fine interior index is TILE-LOCAL (coverage.lo * RATIO in the tile's root
+            // the fine interior index is tile-local (coverage.lo * ratio in the tile's root
             // index space); the global fine index adds the tile's root offset at 2x.
             let fine = &h.levels[1].state;
             for c in fine.geom.interior.iter() {
@@ -246,7 +246,7 @@ fn assert_matches(counts: [usize; 2], region: RefinementRegion<2>, sink_pos: [f6
         mono_acc > 1e-6,
         "the sink accreted nothing ({mono_acc:e}); test is vacuous"
     );
-    // every tile carries the identical GLOBAL accreted-mass tally, equal to the monolithic one.
+    // every tile carries the identical global accreted-mass tally, equal to the monolithic one.
     for (i, h) in tiles.iter().enumerate() {
         let a = accreted(h);
         assert!(
@@ -282,7 +282,7 @@ fn sink_inside_one_tiles_patch() {
 
 #[test]
 fn sink_straddling_a_cut_with_the_patch_spanning_tiles() {
-    // the patch spans the x = 0.5 cut in a [2, 1] tiling; the sink sits ON the cut, so each
+    // the patch spans the x = 0.5 cut in a [2, 1] tiling; the sink sits on the cut, so each
     // tile's clipped fine level drains its own share and the cross-tile sum restores the
     // global reaction.
     let region = RefinementRegion {

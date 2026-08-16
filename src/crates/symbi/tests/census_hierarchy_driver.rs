@@ -1,11 +1,11 @@
 // =============================================================================
 // census_hierarchy_driver.rs
 //
-// a census through the REFINEMENT HIERARCHY driver, which is the driver the configuration front
+// a census through the refinement hierarchy driver, which is the driver the configuration front
 // end actually runs. every other census test drives the uni-grid evolve loop.
 //
 // that asymmetry matters because the hierarchy has its own sampling hook and its own checkpoint
-// writer, and either one going missing is SILENT: a hierarchy that never takes the samples, or a
+// writer, and either one going missing is silent: a hierarchy that never takes the samples, or a
 // writer that never emits the census group, produces no crash and no missing-kernel panic. a
 // checkpoint with no census group reads exactly like a run that registered none, so the whole
 // feature reports success while recording nothing.
@@ -33,7 +33,7 @@ const R_LO: f64 = 1.0;
 const DR: f64 = 0.1;
 const GAMMA: f64 = 5.0 / 3.0;
 
-/// a mass census with no bin axes: one global bucket, so the sample IS the total mass and any
+/// a mass census with no bin axes: one global bucket, so the sample is the total mass and any
 /// drift in it is arithmetic rather than binning.
 fn mass_census() -> CensusConfig {
     CensusConfig::from_json(

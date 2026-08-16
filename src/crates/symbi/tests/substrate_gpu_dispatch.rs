@@ -1,16 +1,16 @@
 // =============================================================================
 // substrate_gpu_dispatch.rs
 //
-// proof of the structured-ABI GPU mapping AND its
-// precision-genericity: build the SAME `KernelInvocation` the substrate
+// proof of the structured-ABI GPU mapping and its
+// precision-genericity: build the same `KernelInvocation` the substrate
 // KernelSet hands `run_cpu`, back it with unified memory, and route it through
 // `substrate_gpu::dispatch`. with a device-accessible `Mem`, dispatch renders the
 // neutral IR at the scalar's precision, NVRTC-compiles it, reorders the buffers
 // into kernel binding order, packs the args, and launches — and the device output
-// must match the CPU kernel. run at BOTH f64 and f32 in one process, which also
+// must match the CPU kernel. run at both f64 and f32 in one process, which also
 // proves the precision-keyed render + module caches don't collide.
 //
-// runs on the HOST GPU (NVRTC needs no nvcc). run:
+// runs on the host GPU (NVRTC needs no nvcc). run:
 //   cargo test -p symbi --features cuda --test substrate_gpu_dispatch
 // =============================================================================
 
@@ -37,8 +37,8 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
         .iter()
         .map(|&x| S::from_f64(x))
         .collect();
-    // cs2 is a per-cell FIELD (the prescribed sound-speed-squared). a varying cs2 here
-    // exercises the LOCALLY isothermal path: p = cs2(x)*rho with a distinct sound speed per cell.
+    // cs2 is a per-cell field (the prescribed sound-speed-squared). a varying cs2 here
+    // exercises the locally isothermal path: p = cs2(x)*rho with a distinct sound speed per cell.
     let cs2: Vec<S> = [0.49, 0.6, 0.4, 0.55, 0.5, 0.45]
         .iter()
         .map(|&x| S::from_f64(x))
@@ -82,7 +82,7 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
     let ext = [n as u32];
     let grid = [n as u32];
     let dom_lo = [0i32];
-    // SAFETY: `blocks` outlives `inv`; the 6 buffers are disjoint, each n elements.
+    // safety: `blocks` outlives `inv`; the 6 buffers are disjoint, each n elements.
     let inv = KernelInvocation::<S> {
         buffers: vec![
             Buf {
@@ -154,7 +154,7 @@ fn dispatch_routes_iso_c2p_to_gpu_matching_cpu() {
     iso_c2p_gpu_matches_cpu::<f64>(1e-12);
 }
 
-// the precision-generic GPU path: the SAME IR blob renders at
+// the precision-generic GPU path: the same IR blob renders at
 // f32, the f32 buffers/scalars launch, and match the f32 CPU kernel (looser tol —
 // single precision + FMA). running in the same process as the f64 test above proves
 // the precision-keyed render/module caches keep the two builds distinct.

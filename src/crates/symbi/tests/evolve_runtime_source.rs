@@ -1,7 +1,7 @@
 // =============================================================================
 // evolve_runtime_source.rs
 //
-// end to end: a user source LOADED AT RUNTIME (python -> json -> SourceConfig, no recompile)
+// end to end: a user source loaded at runtime (python -> json -> SourceConfig, no recompile)
 // actually drives the live evolve loop. a force config `a = [p0, 0]` (p0 = 0.5) is bridged +
 // wrapped (build_user_source) into a SourceEvaluator, attached to the adiabatic kernel-set via
 // `with_runtime_source`, and `source_apply` interprets it per cell each SSP stage. a uniform
@@ -46,7 +46,7 @@ fn runtime_loaded_force_accelerates_gas() {
         pre: 1.0,
     });
 
-    // attach the RUNTIME-loaded source — no recompile, no AOT-baked kernel.
+    // attach the runtime-loaded source — no recompile, no AOT-baked kernel.
     let sub = sim
         .substrate()
         .with_runtime_source(built, cfg.params.clone());

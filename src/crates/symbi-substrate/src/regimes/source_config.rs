@@ -3,21 +3,21 @@
 //
 // the Overlay -> KernelSet source dispatch. an `Overlay`
 // (symbi_hydro's source-monoid value: point_mass(gm,xm) + uniform_accel(g) + ..)
-// is the user's declaration of WHAT sources act; this module decides HOW each
+// is the user's declaration of what sources act; this module decides how each
 // runs and binds it into a substrate kernel set:
 //
-//   - prefer FUSED when the AOT layer baked a fused godunov for the family
+//   - prefer fused when the AOT layer baked a fused godunov for the family
 //     (one launch covers div(F) + source + integrator).
-//   - else fall back to the standalone ADDITIVE pass — proven bit-for-bit equal
+//   - else fall back to the standalone additive pass — proven bit-for-bit equal
 //     to fused (godunov_with_fused_source + additive_source_equals_fused_evolve).
 //
-// so the execution strategy is a property of what's BAKED;
+// so the execution strategy is a property of what's baked;
 // the same Overlay runs fused on a baked family and additive on an unbaked one,
 // with identical numerics either way.
 //
 // scope: external source families (point_mass, uniform_accel) — baked cartesian.
 // the in-godunov metric/geometric source is separate (always fused, never an
-// Overlay). the substrate binds the FIRST fused family (the documented
+// Overlay). the substrate binds the first fused family (the documented
 // single-family limit, simulation_laws::derive_fused_binding).
 //
 // usage:
@@ -37,8 +37,8 @@ use crate::regimes::substrate_kernels::FusedSourceBinding;
 use crate::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 
 /// the source-execution seam a substrate kernel set exposes: route a binding to
-/// EITHER the fused godunov or the additive pass. lets `configure_source` write
-/// the fused-vs-additive decision ONCE, regime-generically.
+/// either the fused godunov or the additive pass. lets `configure_source` write
+/// the fused-vs-additive decision once, regime-generically.
 pub trait ConfigureSource: Sized {
     /// fold the source into the godunov kernel (the fast, baked path).
     fn route_fused(self, binding: FusedSourceBinding) -> Self;
@@ -88,7 +88,7 @@ pub fn configure_source_with<K: ConfigureSource>(
     d: usize,
     is_baked: impl Fn(&str) -> bool,
 ) -> K {
-    // the substrate binds the FIRST fused family (single-family limit); a 2nd
+    // the substrate binds the first fused family (single-family limit); a 2nd
     // family awaits a composite slug or a spec-list additive pass (parked).
     let Some(family) = overlay.fused.first() else {
         return ks;
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn falls_back_to_additive_when_unbaked() {
-        // is_baked = false -> the SAME binding routes to the additive pass.
+        // is_baked = false -> the same binding routes to the additive pass.
         let ks = configure_source_with(
             iso_set(),
             &point_mass(1.0, vec![0.0, 0.0], 0.0),
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn real_registry_bakes_point_mass_iso_2d() {
-        // end-to-end against the ACTUAL AOT registry: point_mass IS baked for
+        // end-to-end against the actual AOT registry: point_mass is baked for
         // iso 2d, so the production `configure_source` routes it fused — proves
         // the kernel-name format + the registry consult agree with the bake.
         let ks = configure_source(iso_set(), &point_mass(1.0, vec![0.0, 0.0], 0.0), "iso", 2);

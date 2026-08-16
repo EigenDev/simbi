@@ -1,9 +1,9 @@
 // =============================================================================
 // ingest.rs
 //
-// the real-data ingestion path: turn hydro cells from an ACTUAL simulation — in any
+// the real-data ingestion path: turn hydro cells from an actual simulation — in any
 // geometry (Cartesian / Spherical / Cylindrical) the hydro ran, with the full velocity
-// VECTOR (v1, v2, v3) — into synchrotron photon packets. this is what the afterglow
+// vector (v1, v2, v3) — into synchrotron photon packets. this is what the afterglow
 // module consumes to observe real spheres, jets, and rings, capturing lateral spreading
 // (the velocity is not assumed radial) and letting the observer sit anywhere.
 //
@@ -33,7 +33,7 @@ use crate::units::{Energy, Time, Volume};
 pub struct Cell {
     /// cell-center position [cm].
     pub position: [f64; 3],
-    /// fluid three-velocity (units of c) as a Cartesian VECTOR — direction captures spreading.
+    /// fluid three-velocity (units of c) as a Cartesian vector — direction captures spreading.
     pub beta_vec: [f64; 3],
     /// proper mass density [g/cm^3].
     pub rho: f64,
@@ -47,7 +47,7 @@ pub struct Cell {
 
 impl Cell {
     /// build a Cartesian cell from a hydro cell in coordinate system `coords`: the coordinate
-    /// position `x = (x1, x2, x3)` and the PHYSICAL three-velocity `v = (v1, v2, v3)` (units of c)
+    /// position `x = (x1, x2, x3)` and the physical three-velocity `v = (v1, v2, v3)` (units of c)
     /// are converted to the global Cartesian frame via the canonical hydro transforms. positions
     /// must already be in cm, velocity in units of c (apply the sim's code-unit scales first).
     #[allow(clippy::too_many_arguments)]
@@ -249,7 +249,7 @@ mod tests {
         );
     }
 
-    // SPREADING is captured: a cell whose lateral velocity points TOWARD the observer images
+    // spreading is captured: a cell whose lateral velocity points toward the observer images
     // brighter (larger doppler) than the same cell whose lateral velocity points away — a purely
     // radial treatment (which ignores the lateral component) could not tell them apart.
     #[test]

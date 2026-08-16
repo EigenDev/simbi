@@ -4,7 +4,7 @@
 // **end-to-end GPU launch test for spec-driven sources** — the
 // load-bearing claim:
 //
-//   the SAME spec data, lowered through `Homomorphism<Cuda>`, NVRTC-
+//   the same spec data, lowered through `Homomorphism<Cuda>`, NVRTC-
 //   compiled, and launched on actual GPU hardware, produces ULP-equivalent
 //   results to the CPU `SourceEvaluator` path on the same SimulationLaws.
 //
@@ -125,7 +125,7 @@ fn gpu_launch_ib_localization_holds_on_real_hardware() {
     // **the clause-3 canary on actual GPU**: the IB region mask
     // (`S::select` on `cmp_lt`) emits as a C ternary on Cuda and survives
     // through NVRTC compilation. cells outside the body must produce
-    // EXACTLY 0.0 — proves the branchless conditional discipline holds
+    // exactly 0.0 — proves the branchless conditional discipline holds
     // all the way from spec data to compiled GPU machine code.
     use symbi_hydro::source_spec::{ib_params, rigid_body_penalty_sources};
 
@@ -133,8 +133,8 @@ fn gpu_launch_ib_localization_holds_on_real_hardware() {
     let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_ib(rigid_body_penalty_sources(3));
     let gpu_kern = GpuSourceKernel::new(&sim, 3).expect("ib kernel");
 
-    // every cell is OUTSIDE the body (body at origin, radius 1.0; cells
-    // at distance > 2.0 along the x-axis). every output MUST be 0.0.
+    // every cell is outside the body (body at origin, radius 1.0; cells
+    // at distance > 2.0 along the x-axis). every output must be 0.0.
     let cell_vals = |i: usize| -> Vec<(String, f64)> {
         let f = i as f64 + 1.0;
         vec![

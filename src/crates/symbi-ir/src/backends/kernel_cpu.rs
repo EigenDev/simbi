@@ -407,7 +407,7 @@ impl KernelRenderer for RustRenderer {
             // rebind (amortized over the block's cells).
             //
             // the contiguous axis runs its full extent (ndim >= 2): the vectorized
-            // (mask-form/SLP) bodies need long unit-stride inner trips —
+            // (mask-form/slp) bodies need long unit-stride inner trips —
             // edge-length trips invert their win (the
             // same law as the cover executor's row-elongated blocks). 1d tiles
             // its only axis, which is what exposes the parallelism there.
@@ -834,7 +834,7 @@ fn rust_flat_index(ndim: u8, buf: u32, comps: &[String]) -> String {
 }
 
 /// emit `let field{bb} = CpuField { data: buf{bb}, lo: [..], extent: [..],
-// render a coord index expression in INTEGER space: coord vars (`_coord_N` ->
+// render a coord index expression in integer space: coord vars (`_coord_N` ->
 // `ii`/`jj`/`kk`), integer-valued constants as integer literals, and `+`/`-`/`*`.
 // anything else (a float field value used as a gather index, division, a method
 // call) panics loudly, keeping index arithmetic in integer space.

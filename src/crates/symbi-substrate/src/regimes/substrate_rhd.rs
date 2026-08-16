@@ -1,7 +1,7 @@
 // =============================================================================
 // regimes/substrate_rhd.rs
 //
-// RhdSubstrateKernelSet<Mem, Sc, const D> — the D-GENERIC RHD (special-
+// RhdSubstrateKernelSet<Mem, Sc, const D> — the D-generic RHD (special-
 // relativistic Euler) KernelSet, every method dispatched to a build-time AOT
 // substrate kernel through the structured binding ABI (a KernelInvocation of
 // ordered Buf handles, inputs-then-outputs, run_cpu / GPU JIT). the kernel instance
@@ -11,8 +11,8 @@
 // the relativistic pieces: the masked-Newton c2p (`rhd_c2p_{D}d`), the HLLE flux
 // with relativistic U/F/wave speeds per sweep dir (`rhd_face_flux_{D}d_{dir}`), and
 // the relativistic CFL wave-speed map (`rhd_wave_speed_map_{D}d`). the godunov /
-// snapshot / rk2 are the SAME EOS-generic kernels as the Newtonian sets (D/S_k/tau ==
-// den/mom/nrg in structure), and the ghost_fill is the SHARED lattice-map pullback
+// snapshot / rk2 are the same EOS-generic kernels as the Newtonian sets (D/S_k/tau ==
+// den/mom/nrg in structure), and the ghost_fill is the shared lattice-map pullback
 // (`iso_ghost_fill_{D}d`, the EOS-generic 3-field prim pullback).
 //
 // the wave-speed map is D-generic: it folds the per-axis relativistic Davis speed
@@ -76,9 +76,9 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     pub cfl_number: f64,
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
     pub theta: f64,
-    /// the reference mach number the PUBLISHED low-mach ramp saturates at. carried so the
+    /// the reference mach number the published low-mach ramp saturates at. carried so the
     /// builder chain is uniform across regimes and forwarded to the flux dispatch exactly as
-    /// `flatten` is; no relativistic kernel DECLARES the scalar, because the relativistic LM
+    /// `flatten` is; no relativistic kernel declares the scalar, because the relativistic LM
     /// arm is the clamped one, so the binding arm is unreachable here rather than ignored.
     pub mach_limit: f64,
     pub cfl_scratch: Field<Sc, D, Mem>,
@@ -91,15 +91,15 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// increment directly and it is added in `source_apply` via the regime-agnostic
     /// `dispatch_runtime_source`. None for source-free runs.
     pub runtime_source: Option<Arc<RuntimeSource>>,
-    /// when true AND a `runtime_source` is attached on a FLAT (Minkowski) background, the raw user
-    /// source is FUSED into the godunov stage as one Cranelift-JIT'd host kernel, replacing the
+    /// when true and a `runtime_source` is attached on a flat (Minkowski) background, the raw user
+    /// source is fused into the godunov stage as one Cranelift-JIT'd host kernel, replacing the
     /// two-pass. host+f64 only; falls back to the two-pass off-host / non-f64 / JIT-miss / GR (the
     /// fused builder traces the flat geo, so it cannot match a curved godunov kernel).
     pub fuse_runtime: bool,
-    /// DRIVEN (DYNAMIC) boundary prescriptions, indexed by `BoundaryType::Driven(id)` — the
+    /// driven (dynamic) boundary prescriptions, indexed by `BoundaryType::Driven(id)` — the
     /// complete prim state [rho, vel_0..DOF-1, pre] as coordinate DAGs, evaluated over the
     /// face's ghost band after the standard pullback skips it. a rotating (theta-stratified)
-    /// equilibrium REQUIRES this: no local rule (mirror or copy) can represent the state
+    /// equilibrium requires this: no local rule (mirror or copy) can represent the state
     /// beyond a wedge wall — only the analytic continuation can.
     pub boundary_dags: Vec<Arc<RuntimeSource>>,
     /// gradient-boundary (Neumann / Robin) coefficients, indexed by the `BoundaryType::Neumann(id)` /
@@ -164,7 +164,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self
     }
 
-    /// register a DRIVEN boundary. the returned id (registration order,
+    /// register a driven boundary. the returned id (registration order,
     /// 0-based) is what the sim's `Boundaries` must carry as `BoundaryType::Driven(id)` on the
     /// prescribed face. build `built` from `expr_bridge::build_boundary_dag(&cfg, RHD_SPEC)` —
     /// a complete prim prescription `[rho, vel.., pre]`.
@@ -179,7 +179,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         (self, id)
     }
 
-    /// register a NEUMANN / ROBIN gradient boundary (the convenience short-circuit). the id
+    /// register a neumann / robin gradient boundary (the convenience short-circuit). the id
     /// (registration order) is what the sim's `Boundaries` carries as `BoundaryType::Neumann(id)` /
     /// `Robin(id)`. `coeffs` are the per-variable coefficients in prim order `[rho, vel.., pre]`.
     pub fn with_gradient_boundary(mut self, coeffs: GradientBc) -> (Self, u16) {
@@ -202,7 +202,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self
     }
 
-    /// attach a runtime user source AND fuse it into the godunov stage (flat host+f64); the two-pass
+    /// attach a runtime user source and fuse it into the godunov stage (flat host+f64); the two-pass
     /// twin `with_runtime_source` forces the separate pass. bit-identical (falls back off-host / non-f64
     /// / GR). no immersed-body fold — RHD has no Newtonian body.
     pub fn with_fused_runtime_source(
@@ -232,7 +232,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// set the reference mach number the published low-mach ramp saturates at. accepted for
     /// builder uniformity; the relativistic LM arm is the clamped one, so no relativistic
     /// kernel reads it. fluent.
-    /// accepted for builder-chain uniformity and REFUSED when set: the well-balanced
+    /// accepted for builder-chain uniformity and refused when set: the well-balanced
     /// reconstruction limits departures from the newtonian polytropic isentrope, and no
     /// relativistic kernel carries it. silently ignoring the request would run a plain
     /// reconstruction under a config that asked for a balanced one.
@@ -319,7 +319,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
         // the GR path uses the metric-aware Valencia recovery (`|S|^2 = gamma^{ij} S_i S_j`,
         // contravariant `v^i`); its name carries the spacetime slug and it reads the lapse
-        // mass M + the LOG-AWARE radial grid scalars (the metric is evaluated at the cell centroid).
+        // mass M + the log-aware radial grid scalars (the metric is evaluated at the cell centroid).
         // flat keeps the plain `rhd_c2p_{D}d` (gamma only), bit-identical. the DOF-lift tag
         // (spherical swirl) selects the instance whose manifest carries the extra momentum.
         // the chart/DOF tag: the spherical swirl (DOF != D) rides geom_suffix; the cartesian GR
@@ -397,9 +397,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn godunov_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        // fuse the raw user source into godunov on a FLAT background, host+f64. the fused builder
+        // fuse the raw user source into godunov on a flat background, host+f64. the fused builder
         // traces the flat geo (GeoSource::Hydro, matching the `rhd` AOT godunov's geo_source), so it
-        // matches ONLY the Minkowski kernel; GR (a spacetime suffix) keeps the two-pass. fold_body =
+        // matches only the Minkowski kernel; GR (a spacetime suffix) keeps the two-pass. fold_body =
         // false — RHD has no Newtonian immersed body.
         if self.fuse_runtime && matches!(sim.geom.spacetime, Spacetime::Minkowski) {
             if let Some(rs) = &self.runtime_source {
@@ -471,15 +471,15 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn cfl(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> f64 {
-        // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
-        // RHD's only contribution is the "rhd" map (its relativistic wave speed). on a CURVED
+        // the shared cfl dispatch binds the field buffers by manifest + owns the reduction.
+        // RHD's only contribution is the "rhd" map (its relativistic wave speed). on a curved
         // background (DOF == D, where FOFC is active) the source-admissibility rate lambda_S folds in
         // after the map: the geodesic source must not push U + dt S out of the physical cone.
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        // the WU 2017 source-admissibility rate lambda_S is now SUBSUMED by the admissible-boundary
-        // projection: the projection guarantees U in G post-hoc for ANY dt, so lambda_S no longer has
+        // the wu 2017 source-admissibility rate lambda_S is now subsumed by the admissible-boundary
+        // projection: the projection guarantees U in G post-hoc for any dt, so lambda_S no longer has
         // to shrink the step to keep U + dt S admissible. dropping it lets the near-horizon cusp cell
-        // (near-vacuum ultrarelativistic infall, where lambda_S -> inf and collapsed the step) FLOOR
+        // (near-vacuum ultrarelativistic infall, where lambda_S -> inf and collapsed the step) floor
         // via the projection instead of dictating the global dt — the HARM discipline. dt is then set
         // by the flux light-cone; a resolved cell's geodesic source is well within it, an unresolvable
         // cusp cell is floored. flat SRHD never had a source rate.
@@ -514,7 +514,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
-        // the SHARED lattice-map pullback (iso_ghost_fill_{D}d): the EOS-generic
+        // the shared lattice-map pullback (iso_ghost_fill_{D}d): the EOS-generic
         // prim pullback (rho/vel_0..DOF-1/pre), in-place, per ghost region. the DOF-lift
         // tag (spherical swirl) selects the instance carrying the extra velocity. the
         // spinning-kerr instance copies the azimuthal ghost through the angular-momentum
@@ -549,8 +549,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 }
                 outputs.push(pre);
                 // ints: map_type_0..{D-1}, arg_0..{D-1}. scalars: vel_sign_0..{D-1} (+ the
-                // metric mass/spin and the LOG-AWARE grid scalars on the kerr instance).
-                // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
+                // metric mass/spin and the log-aware grid scalars on the kerr instance).
+                // params by name via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
                 // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int \sqcup float
                 // coproduct).
                 let (ints, scalars) = resolve_params(
@@ -681,9 +681,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         ac: f64,
         _stage: u8,
     ) -> bool {
-        // the first-order redo runs at theta = 0 (PCM). FLAT (Minkowski) SRHD uses HLLE — the
+        // the first-order redo runs at theta = 0 (PCM). flat (Minkowski) SRHD uses HLLE — the
         // positivity-preserving Einfeldt fan — regardless of the production solver (HLLC can
-        // undershoot in a strong rarefaction). the CURVED (GR) background uses the light-cone rusanov
+        // undershoot in a strong rarefaction). the curved (GR) background uses the light-cone rusanov
         // fan: the state-dependent HLLE speeds can under-bound near the physical-set boundary on a
         // curved metric, whereas alpha sqrt(gamma^{nn}) bounds every fluid characteristic. the GR
         // source-admissibility timestep (the lambda_S folded into the CFL) keeps U + dt S in the cone.
@@ -712,7 +712,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             || self.source_apply(sim, ac * dt),
             || {}, // rhd has no immersed-body source (trait-default no-op)
             || {
-                // ADMISSIBLE-BOUNDARY PROJECTION: on a curved background, project every spliced cell
+                // admissible-boundary projection: on a curved background, project every spliced cell
                 // onto partial-G along the segment to the admissible stage input, replacing the freeze
                 // parachute with a provable map into the physical set. flat SRHD keeps the freeze.
                 if curved {

@@ -19,9 +19,9 @@ use symbi_ir::algebra::Scalar;
 /// early-breaks on convergence, so the cap only bounds pathological inputs.
 const MAX_ITER: usize = crate::c2p_result::C2P_MAX_ITER;
 
-/// the branch-free RHD cons->prim recovery — THE single-source physics: the pressure
+/// the branch-free RHD cons->prim recovery — the single-source physics: the pressure
 /// is the root of a 1D equation found by a carrier-generic Newton (`Scalar::iterate`),
-/// then velocity/Lorentz/density follow algebraically. NO floors, NO guards — exactly
+/// then velocity/Lorentz/density follow algebraically. no floors, no guards — exactly
 /// what the substrate c2p kernel computes (the `rhd_to_primitive` wrapper adds the
 /// host C2pResult diagnostics post-hoc, matching `Newtonian::to_primitive`).
 ///
@@ -36,14 +36,14 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
 ) -> Prim<S, D> {
     let dd = cons.den;
     let tau = cons.nrg;
-    // the conserved-momentum norm |S|^2 = gamma^{ij} S_i S_j (S_i is COVARIANT -> contract with
+    // the conserved-momentum norm |S|^2 = gamma^{ij} S_i S_j (S_i is covariant -> contract with
     // the inverse spatial metric). flat/orthonormal -> identity -> bit-identical to euclidean S.S.
-    // THIS is the SR->GR distinction: the metric is a carrier-generic value the physics contracts
+    // this is the SR->GR distinction: the metric is a carrier-generic value the physics contracts
     // with, transported by the homomorphism like `eos`.
     let s_mag = metric.norm_sq_cov(&cons.mom).sqrt();
     // the rescaled conserved-momentum norm r^2 = |S|^2 / D^2 and the shared c2p velocity ceiling
     // v_limit^2 = r^2/(1+r^2) (KKC h0 = 1). clamping every recovered v^2 to this keeps the Lorentz
-    // factor finite for an OUT-of-cone input (no NaN to poison a neighbor) while leaving an
+    // factor finite for an out-of-cone input (no NaN to poison a neighbor) while leaving an
     // in-cone recovery bit-identical (its true v is strictly below the ceiling). the cone test at
     // the end drives the pressure non-positive to signal the out-of-cone case. same contract as
     // rmhd_recover — see c2p_result::relativistic_velocity_ceiling_sq / relativistic_cone_residual.
@@ -53,7 +53,7 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     // initial pressure guess: |S - D - tau|
     let p_init = (s_mag - dd - tau).abs();
 
-    // ONE newton step on the pressure: given a guess, derive (v, W, rho, eps), form
+    // one newton step on the pressure: given a guess, derive (v, W, rho, eps), form
     // f(p) = eos.pressure - p and g = df/dp = cs_rel^2*v^2 - 1, return the updated guess.
     let newton_step = |p_eq: S| -> S {
         let et = tau + dd + p_eq;
@@ -73,22 +73,22 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     };
 
     // convergence predicate |dp| = |cur - prev| < tol: drives the f64/f32 host early-break
-    // AND the Gv carrier's sticky-done freeze (so the baked fixed-count kernel returns the
+    // and the Gv carrier's sticky-done freeze (so the baked fixed-count kernel returns the
     // same recovered pressure the host does — see Scalar::iterate / Gv::iterate).
     let p_eq = p_init.iterate(max_iter, &newton_step, |prev, cur| {
         let tol = prev.abs().max(cur.abs()) * S::from_f64(1e-12);
         (cur - prev).abs().cmp_le(tol)
     });
 
-    // recover primitives: the CONTRAVARIANT 3-velocity v^i = gamma^{ij} S_j / (tau+D+p) (RAISE the
+    // recover primitives: the contravariant 3-velocity v^i = gamma^{ij} S_j / (tau+D+p) (raise the
     // covariant conserved momentum), W = 1/sqrt(1 - v.v), rho = D/W. flat/orthonormal -> gamma^{ij} =
     // identity -> v^i = S_i/et bit-identically; a real (GR) gamma raises the index (the Valencia
     // recovery) so `norm_sq_contra(v)` = gamma_ij v^i v^j = |S|^2/et^2 is consistent with the Newton's
-    // norm_sq_cov (without the raise, S_i/et is the COVARIANT velocity — wrong for non-identity gamma).
+    // norm_sq_cov (without the raise, S_i/et is the covariant velocity — wrong for non-identity gamma).
     let et = tau + dd + p_eq;
     let vel = metric.raise(&cons.mom).map(|s| s / et);
-    // density from the CEILING-clamped Lorentz factor: an out-of-cone state recovers a finite (if
-    // flagged) rho; the clamp keeps it off NaN. the velocity VECTOR is left exact (finite, possibly
+    // density from the ceiling-clamped Lorentz factor: an out-of-cone state recovers a finite (if
+    // flagged) rho; the clamp keeps it off NaN. the velocity vector is left exact (finite, possibly
     // superluminal — the post-hoc diagnostic flags it); the clamp only sanitizes rho.
     let ww = lorentz_factor(metric.norm_sq_contra(&vel).min(v_ceiling_sq));
     let rho = dd / ww;
@@ -284,14 +284,14 @@ mod tests {
     }
 
     // the unified relativistic-c2p contract (shared with rmhd_recover): the branch-free kernel body
-    // recovers a FINITE state for an out-of-cone conserved input — density from the ceiling-clamped
+    // recovers a finite state for an out-of-cone conserved input — density from the ceiling-clamped
     // Lorentz factor, pressure driven to the shared density-scaled non-positive sentinel
-    // by the Wu-2017 cone test. the sentinel is FINITE and non-positive rather than NaN: the FOFC
-    // probe's `finite_pos(pre)` rejects it IDENTICALLY to a NaN (so the fail-loud is preserved),
+    // by the Wu-2017 cone test. the sentinel is finite and non-positive rather than NaN: the FOFC
+    // probe's `finite_pos(pre)` rejects it identically to a NaN (so the fail-loud is preserved),
     // while a finite value cannot poison a neighbor's reconstruction the way an absorbing NaN
     // does. where FOFC is inactive, the sentinel still fails loud: a sound speed
     // `sqrt(gamma p / rho h)` on p < 0 goes non-finite and trips the CFL check. the state is always
-    // FLAGGED (non-positive pressure), never floored to a spurious-physical value.
+    // flagged (non-positive pressure), never floored to a spurious-physical value.
     #[test]
     fn kernel_path_unphysical_cons_recovers_finite_and_flagged() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };

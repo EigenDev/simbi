@@ -12,7 +12,7 @@
 // validated against the closed-form schwarzschild and kerr-schild geodesic sources. the caller
 // supplies the ADM radial block (alpha, beta^r, gamma_rr) + its radial derivatives (the metric's
 // analytic d_r), plus the fluid state (E = rho eta W^2 = D + tau + p, the orthonormal radial
-// velocity V, and p). SPHERICAL background (the GR metrics are spherical); the suppressed angular
+// velocity V, and p). spherical background (the GR metrics are spherical); the suppressed angular
 // directions enter the energy source via g_{theta theta} = r^2, g_{phi phi} = r^2 sin^2(theta), whose
 // theta-dependence cancels, so the equatorial (sin theta = 1) evaluation is exact for the radial 1D
 // source.
@@ -49,8 +49,8 @@ impl<S: Scalar> AdmRadialDerivs<S> {
     }
 }
 
-/// the generic GRHD geodesic gravity source on a SPHERICAL curved background, radial component.
-/// returns `(S_{S_r}^gravity, S_tau)` — the momentum GRAVITY source (the t-r block; excludes the flat
+/// the generic GRHD geodesic gravity source on a spherical curved background, radial component.
+/// returns `(S_{S_r}^gravity, S_tau)` — the momentum gravity source (the t-r block; excludes the flat
 /// 2p/r), and the full energy source. carrier-generic: at `S = Gv` this traces the kernel expression,
 /// at `S = f64` it evaluates directly.
 #[allow(clippy::too_many_arguments)]
@@ -119,7 +119,7 @@ pub fn grhd_radial_geodesic_source<S: Scalar>(
     (s_mom, s_tau)
 }
 
-/// the FULL covariant valencia geodesic source on a general STATIC background — the momentum
+/// the full covariant valencia geodesic source on a general static background — the momentum
 /// source for every coordinate slot plus the energy source, from one forward-autodiff pass per
 /// coordinate axis:
 ///   S_j   = (1/2) T^{mu nu} d_j g_{mu nu}                       (all blocks, per coordinate j)
@@ -199,13 +199,13 @@ pub fn ehat_to_tau<S: Scalar, const D: usize>(
 }
 
 /// the coordinate free-index-down covariant energy conserved density and flux (HARM: Gammie et al.
-/// 2003; AthenaK: Stone et al. 2024, eq. 20), in the code's POSITIVE-energy convention:
+/// 2003; AthenaK: Stone et al. 2024, eq. 20), in the code's positive-energy convention:
 ///   E_hat  = -sqrt(-g) ( T^t_t + rho u^t ),   F^j = -sqrt(-g) ( T^j_t + rho u^j )
 /// with `T^mu_nu = w u^mu u_nu + p delta^mu_nu` (hydro; `w = rho h` the total enthalpy density),
 /// `sqrt(-g) = alpha sqrt(det gamma)`, and the coordinate 4-velocity `u^t = W/alpha`,
 /// `u^i = W(v^i - beta^i/alpha)`. the overall minus flips AthenaK's negative-energy `T^t_t` (which
 /// is `-rho eps` at rest) to `+tau` at rest, matching the Valencia energy sign. the energy source is
-/// IDENTICALLY ZERO on a stationary metric (the t-row of `(1/2)(d_nu g_ab)T^ab`), so this evolves
+/// identically zero on a stationary metric (the t-row of `(1/2)(d_nu g_ab)T^ab`), so this evolves
 /// the killing energy current exactly. equals the ADM `E_hat = sqrt(gamma)(alpha tau + (alpha-1) D -
 /// beta^i S_i)`, but `sqrt(-g) T^j_t` is the fully-densitized covariant
 /// flux — no alpha/shift/sqrt(gamma) reassembly.
@@ -454,7 +454,7 @@ where
 }
 
 /// the harvested ADM blocks + derivatives a covariant-source contraction consumes: the 4-metric
-/// coordinate derivatives `dg4[kk] = d_kk g_{mu nu}` (one Dual pass per axis on a STATIC
+/// coordinate derivatives `dg4[kk] = d_kk g_{mu nu}` (one Dual pass per axis on a static
 /// background), the inverse 4-metric `gi4`, and the point values of the 3+1 split.
 struct AdmContractionBlocks<S: Scalar, const D: usize> {
     alpha: S,
@@ -737,7 +737,7 @@ mod tests {
     }
 
     // the covariant contraction at the metric's full D = 3, radial flow: the radial momentum
-    // source must equal the (t, r)-block source PLUS the angular pressure blocks
+    // source must equal the (t, r)-block source plus the angular pressure blocks
     // (1/2)(T^{theta theta} d_r g_{theta theta} + T^{phi phi} d_r g_{phi phi}) = 2p/r; the
     // polar source is the pressure term p cot(theta); the azimuthal source vanishes
     // (axisymmetry); the energy source equals the (t, r)-block source (which carries the angular
@@ -1142,7 +1142,7 @@ mod tests {
         }
     }
 
-    // finite-difference mirror with the FULL ideal-MHD stress: the same T^{mu nu} =
+    // finite-difference mirror with the full ideal-MHD stress: the same T^{mu nu} =
     // (rho h + b^2) u u + (p + b^2/2) g^{-1} - b b algebra with every metric derivative
     // numerical — validates the b^mu assembly + contraction through the non-diagonal
     // theta-dependent kerr metric.

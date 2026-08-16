@@ -1,10 +1,10 @@
 // =============================================================================
 // regimes/substrate_kernels/runtime_source.rs
 //
-// RUNTIME user sources, REGIME-AGNOSTIC. one mechanism for every
+// runtime user sources, regime-agnostic. one mechanism for every
 // regime: a spec-validated `RuntimeSource` (DAGs + params + has_energy) drives the CPU
 // per-cell interpreter, the lazily-JIT'd fused host kernel, and the device NVRTC kernel,
-// all from the SAME `BuiltSource`s. also the `dispatch_runtime_ir` device path for any
+// all from the same `BuiltSource`s. also the `dispatch_runtime_ir` device path for any
 // runtime-built IR (sources + driven boundaries) and the shared GvKernel->IR plumbing.
 // =============================================================================
 
@@ -31,12 +31,12 @@ use super::params::{ScalarBind, body_scalar, geom_scalar, motion_scalar, physica
 
 use symbi_ib::collection::MAX_SOURCE_BODIES;
 
-/// dispatch a RUNTIME-BUILT IR kernel — one whose neutral IR blob was produced at sim
+/// dispatch a runtime-built IR kernel — one whose neutral IR blob was produced at sim
 /// startup (not AOT-baked into the registry), e.g., a python-authored user source lowered
 /// via `source_apply_from_built_gv` -> `prepared_to_ir`. binds the kernel's buffers by its
 /// own manifest (`kernel_bindings_from_ir`) through `resolve_path`, and its scalar params
-/// by name through `resolve_scalar`, then launches on-device (render + NVRTC-JIT, cached by
-/// `name`). DEVICE-ONLY: the host path runs the per-cell interpreter, so the cpu arm here is
+/// by name through `resolve_scalar`, then launches on-device (render + nvrtc-jit, cached by
+/// `name`). device-only: the host path runs the per-cell interpreter, so the cpu arm here is
 /// unreachable. the manifest folds in-place fields (cons.*: read + write) into the output
 /// group, so there is no input/output aliasing.
 pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
@@ -53,7 +53,7 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
         Mem::IS_DEVICE_ACCESSIBLE,
         "dispatch_runtime_ir is the gpu source path; the host path uses the per-cell interpreter",
     );
-    // the buffer manifest + scalar kinds come from the IR ITSELF — this kernel is not in the
+    // the buffer manifest + scalar kinds come from the IR itself — this kernel is not in the
     // AOT registry, so `kernel_bindings(name)` / `kernel_scalar_kinds(name)` cannot resolve it.
     // the IR manifest is born typed (`ScalarBind`) — a straight read, no string parse at load.
     let bindings = parse_manifest(name, symbi_ir::kernel_bindings_from_ir(ir));
@@ -62,7 +62,7 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
     // bind fields by manifest (the shared `bind_manifest` helper — same split as
     // `dispatch_named_inner`). the source kernel reads u_stage.* + cons.* and writes cons.*
     // in-place (the manifest folds in-place fields into the output group, so no aliasing).
-    // a driven boundary may WRITE `prim.pre`; supply the sim's real pressure field as the override.
+    // a driven boundary may write `prim.pre`; supply the sim's real pressure field as the override.
     // (iso prescribes no pressure — has_energy=false — so `None` is never bound there.)
     let pre = sim.fields.prim.pre_field();
     let (inputs, outputs) = bind_manifest(&bindings, |fref| resolve_path(sim, pre, None, 0, fref));
@@ -81,9 +81,9 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
         scalars.push(resolve_scalar(bind));
     }
 
-    // build the invocation over device buffers via the ONE whole-buffer binding constructor
+    // build the invocation over device buffers via the one whole-buffer binding constructor
     // (shared with `dispatch_fields`; the disjoint-write guard runs here too — runtime sources
-    // fold in-place cons.* into the OUTPUT group only, so inputs/outputs stay disjoint). cell-
+    // fold in-place cons.* into the output group only, so inputs/outputs stay disjoint). cell-
     // centered: the shared allocated layout, replicated per field for the constructor.
     let (grid, dlo) = exec_layout(exec);
     let shared = alloc_layout(&sim.geom.allocated);
@@ -104,14 +104,14 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 // =============================================================================
-// RUNTIME user sources, REGIME-AGNOSTIC.
+// runtime user sources, regime-agnostic.
 //
-// ONE mechanism for every regime. the regime supplies only `has_energy` (from its static
+// one mechanism for every regime. the regime supplies only `has_energy` (from its static
 // `RegimeSpec`, stamped at attach by the kernel-set, which is the authority); the
-// splice / per-cell interpreter / runtime IR build / dispatch are carrier- AND regime-generic.
+// splice / per-cell interpreter / runtime IR build / dispatch are carrier- and regime-generic.
 // each kernel-set holds an `Option<Arc<RuntimeSource>>`, validates the config against its own
 // spec at attach via `expr_bridge::build_user_source(cfg, &SPEC)` (rejecting relativistic
-// force/cooling, cooling-without-energy, bad targets BEFORE attach), and routes `source_apply`
+// force/cooling, cooling-without-energy, bad targets before attach), and routes `source_apply`
 // here. the conserved set + DOF the kernel reads come from the sim, so iso (no energy, no `nrg`
 // write) and the energy regimes share this code unchanged.
 // =============================================================================
@@ -126,14 +126,14 @@ pub struct RuntimeSource {
     pub params: Vec<f64>,
     pub(crate) has_energy: bool,
     pub(crate) gpu_ir: OnceLock<(String, String)>,
-    /// the FUSED host path: the godunov+source `GvKernel` Cranelift-JIT'd into ONE
+    /// the fused host path: the godunov+source `GvKernel` Cranelift-JIT'd into one
     /// native kernel, lazily built on first host dispatch (geometry known only then), cached for the
     /// run. `Some(None)` = built but out-of-JIT-subset -> dispatch falls back to the two-pass. a
-    /// `CompiledKernel` is a bare code ptr (`Send + Sync`), so this field does NOT make `RuntimeSource`
+    /// `CompiledKernel` is a bare code ptr (`Send + Sync`), so this field does not make `RuntimeSource`
     /// any less `Sync` than `built` already does.
     fused_cpu: OnceLock<Option<FusedCpuKernel>>,
-    /// the COMPILED standalone source pass (the two-pass twin of `fused_cpu`): the source-only
-    /// `GvKernel` (`source_apply_from_built_gv`, the SAME builder the gpu path uses) cranelift-JIT'd
+    /// the compiled standalone source pass (the two-pass twin of `fused_cpu`): the source-only
+    /// `GvKernel` (`source_apply_from_built_gv`, the same builder the gpu path uses) cranelift-JIT'd
     /// into one native kernel dispatched over the interior like any other — replacing the per-cell
     /// evaluation harness, whose per-cell coord/param/lookup orchestration measured 93 ns/zone-cycle
     /// on the bondi sponge (vs ~4 for a compiled kernel over the same math). `Some(None)` = out of
@@ -158,7 +158,7 @@ pub(crate) struct FusedCpuKernel {
 impl RuntimeSource {
     /// build from spec-validated `(target, BuiltSource)` pairs. `has_energy` comes from the
     /// attaching kernel-set's `RegimeSpec` (e.g., `NEWTONIAN_SPEC.has_energy` /
-    /// `ISO_NEWTONIAN_SPEC.has_energy`) — the set IS the regime.
+    /// `ISO_NEWTONIAN_SPEC.has_energy`) — the set is the regime.
     pub fn new(built: Vec<(String, BuiltSource)>, params: Vec<f64>, has_energy: bool) -> Arc<Self> {
         let eval = SourceEvaluator::from_built(&built);
         Arc::new(Self {
@@ -184,8 +184,8 @@ impl RuntimeSource {
 }
 
 /// route a runtime source for one SSP stage: host -> the per-cell IR interpreter, device -> the
-/// NVRTC-JIT substrate kernel (a per-cell host scan on unified gpu memory thrashes via page faults
-/// — forbidden, so the device path runs the SAME DAG as a real on-device kernel). regime-generic.
+/// nvrtc-jit substrate kernel (a per-cell host scan on unified gpu memory thrashes via page faults
+/// — forbidden, so the device path runs the same DAG as a real on-device kernel). regime-generic.
 pub fn dispatch_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     rs: &RuntimeSource,
@@ -203,9 +203,9 @@ pub fn dispatch_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// the CPU per-cell pass: read the STAGE-INPUT state from `u_stage` (S taken at the stage input —
+/// the CPU per-cell pass: read the stage-input state from `u_stage` (S taken at the stage input —
 /// the invariant the fused/AOT pass also obeys), evaluate the user source per cell, and add
-/// `weight * S` to the target conserved field in place. host-memory ONLY.
+/// `weight * S` to the target conserved field in place. host-memory only.
 fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     rs: &RuntimeSource,
@@ -234,13 +234,13 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     let eval = &rs.eval;
     let rs_params = &rs.params;
 
-    // the PURE-OP + SINGLE-WRITER model (op/executor separation). each cell's op READS the
-    // stage input and COMPUTES its source contribution `s`; the ONLY field mutation is
-    // `Field::add_assign_checked` — the audited writer, whose bounds check is RELEASE-ACTIVE. the op
+    // the pure-op + single-writer model (op/executor separation). each cell's op reads the
+    // stage input and computes its source contribution `s`; the only field mutation is
+    // `Field::add_assign_checked` — the audited writer, whose bounds check is release-active. the op
     // never writes a field directly, so there is exactly one place writes happen and they are
     // checked. parallelism is a flat `par_iter` over the interior coords: each coord is handled by
-    // exactly ONE thread (disjoint cells), so the read-modify-write is race-free BY CONSTRUCTION,
-    // and a bad index PANICS loudly (a silent out-of-bounds would corrupt the heap).
+    // exactly one thread (disjoint cells), so the read-modify-write is race-free by construction,
+    // and a bad index panics loudly (a silent out-of-bounds would corrupt the heap).
     let coords: Vec<[isize; D]> = sim.geom.interior.iter().collect();
     coords.par_iter().for_each(|&c| {
         let rho = (*u.den.at(c)).to_f64();
@@ -249,7 +249,7 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
         let x = sim.geom.cell_coord(c);
         for field in &fields {
             let params = eval.params_for(field).expect("runtime source: params_for");
-            // build the param inputs by INDEX into a stack buffer — no per-cell heap alloc on the
+            // build the param inputs by index into a stack buffer — no per-cell heap alloc on the
             // JIT path. sources have a handful of params (rho, vel_k, pre, x_k, t, p_i); 32 is ample.
             const MAX_PARAMS: usize = 32;
             const MAX_OUT: usize = 8;
@@ -263,7 +263,7 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
             }
             let inputs = &inbuf[..params.len()];
 
-            // compute the source contribution `out[0..n_out]`: the NATIVE JIT path when the field
+            // compute the source contribution `out[0..n_out]`: the native JIT path when the field
             // compiled (allocation-free), else the interpreter fallback (allocates; only when
             // a node fell outside the JIT subset).
             let mut out = [0.0f64; MAX_OUT];
@@ -285,11 +285,11 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
 
             match field.as_str() {
                 "mom" => {
-                    // the structural gate: a `mom` overlay emits either the SPATIAL dim D
+                    // the structural gate: a `mom` overlay emits either the spatial dim D
                     // components (an in-plane force on a 2.5D MHD grid where DOF=3 > D — the
                     // out-of-plane momentum is left untouched) or the full regime DOF (raw, or
                     // hydro where D == DOF). any other count is a config `dim` mismatch and fails
-                    // HERE, loudly (a silent mis-index would scatter momentum into the wrong
+                    // here, loudly (a silent mis-index would scatter momentum into the wrong
                     // components). (D/DOF are known only at dispatch.)
                     assert!(
                         n_out == D || n_out == DOF,
@@ -322,10 +322,10 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     });
 }
 
-/// build the FUSED godunov+source host kernel from a runtime user source: trace the combined
+/// build the fused godunov+source host kernel from a runtime user source: trace the combined
 /// `GvKernel` (the step-2 `godunov_stage_gv_with_fused_built` core, fed the loaded `BuiltSource`s)
 /// and Cranelift-JIT it. `None` when a node falls outside the JIT subset -> the caller runs the
-/// two-pass. `geo` MUST match the AOT godunov the two-pass uses, so the fused and two-pass results
+/// two-pass. `geo` must match the AOT godunov the two-pass uses, so the fused and two-pass results
 /// stay bit-equivalent.
 fn build_fused_cpu_kernel<const D: usize>(
     coords: symbi_discretize::Coords,
@@ -354,10 +354,10 @@ fn build_fused_cpu_kernel<const D: usize>(
         false,
         n_bodies,
     );
-    // an out-of-JIT-subset node -> `None` -> the caller runs the two-pass (the safe fallback). NOT
+    // an out-of-JIT-subset node -> `None` -> the caller runs the two-pass (the safe fallback). not
     // an error: the gate is "compile when possible, else interpret", never miscompile.
     let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, D).ok()?;
-    // reads AND writes are born-typed FieldBind; a `Raw` reaching the fused-source path is a
+    // reads and writes are born-typed FieldBind; a `Raw` reaching the fused-source path is a
     // wiring bug (these kernels are closed-vocabulary), so demand `Ref` loudly.
     let bind_ref = |b: &FieldBind| match b {
         FieldBind::Ref(f) => *f,
@@ -373,7 +373,7 @@ fn build_fused_cpu_kernel<const D: usize>(
             .map(|(_, rt)| bind_ref(rt))
             .collect(),
         out_refs: writes.iter().map(|(_, rt, _)| bind_ref(rt)).collect(),
-        // the producer's GvKernel scalar names (raw strings) are classified to typed binds ONCE at
+        // the producer's GvKernel scalar names (raw strings) are classified to typed binds once at
         // build (off the per-stage host resolve).
         scalar_params: gvk
             .scalar_params
@@ -418,7 +418,7 @@ fn build_source_only_cpu_kernel<const D: usize>(
     })
 }
 
-/// the GATE for the compiled standalone source pass: host memory AND `Sc == f64` AND the
+/// the gate for the compiled standalone source pass: host memory and `Sc == f64` and the
 /// source-only kernel compiled. `None` -> the per-cell evaluation path (the fallback).
 pub(crate) fn source_only_cpu_kernel<'a, const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -451,7 +451,7 @@ where
         .as_ref()
 }
 
-/// dispatch the COMPILED standalone source pass: `cons += weight * S(u_stage)` as one native
+/// dispatch the compiled standalone source pass: `cons += weight * S(u_stage)` as one native
 /// kernel over the interior, with the same cover tiling every other kernel gets. scalar
 /// resolution mirrors the fused dispatcher minus the godunov/body binds: the kernel's `dt`
 /// scalar carries the SSP `weight` (exactly what the aot `source_apply` twin receives).
@@ -500,7 +500,7 @@ fn dispatch_source_only_cpu<const D: usize, const DOF: usize, Mem, Sc>(
     }).collect();
     let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
     let (grid, dlo) = exec_layout(&sim.geom.interior);
-    // SAFETY: same contract as the fused dispatcher — shared allocated layout, in-place cons.*
+    // safety: same contract as the fused dispatcher — shared allocated layout, in-place cons.*
     // read-before-write per cell, cell-disjoint blocks.
     unsafe {
         match policy_for(&sim.geom.interior, Mem::IS_DEVICE_ACCESSIBLE) {
@@ -514,21 +514,21 @@ fn dispatch_source_only_cpu<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// the GATE for the fused host path: returns the cached `FusedCpuKernel` only when it applies —
-/// host memory AND `Sc == f64` (the JIT reads/writes raw f64 buffers) AND `SYMBI_FUSE=1` or the
+/// the gate for the fused host path: returns the cached `FusedCpuKernel` only when it applies —
+/// host memory and `Sc == f64` (the JIT reads/writes raw f64 buffers) and `SYMBI_FUSE=1` or the
 /// source-only kernel missed the jit subset (the two-pass with a compiled source pass is the
-/// default) AND the kernel compiled. any failure returns `None` -> the caller runs the two-pass
+/// default) and the kernel compiled. any failure returns `None` -> the caller runs the two-pass
 /// (plain AOT godunov + the source pass). builds + caches on first call (geometry known only here). both
-/// `godunov_stage` and `source_apply` call this with the SAME `geo` so they agree on whether the
+/// `godunov_stage` and `source_apply` call this with the same `geo` so they agree on whether the
 /// fused path is live this stage (the cache makes the second call free).
 pub(crate) fn fused_runtime_cpu_kernel<'a, const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     rs: &'a RuntimeSource,
     geo: symbi_discretize::gv::GeoSource,
-    // whether to fold the immersed body into the fused stage. TRUE only on the Newtonian (adiabatic)
-    // regime — `body_evolved_gv` is softened NEWTONIAN gravity + Bondi accretion, valid on the
+    // whether to fold the immersed body into the fused stage. true only on the Newtonian (adiabatic)
+    // regime — `body_evolved_gv` is softened newtonian gravity + Bondi accretion, valid on the
     // non-relativistic conserved state. iso (cs from prim.pre, separate baked path) and rhd (relativistic
-    // cons) pass FALSE; their bodies are handled elsewhere / unsupported.
+    // cons) pass false; their bodies are handled elsewhere / unsupported.
     fold_body: bool,
 ) -> Option<&'a FusedCpuKernel>
 where
@@ -574,9 +574,9 @@ where
         .as_ref()
 }
 
-/// whether the fused stage ABSORBED the immersed-body source this run — the predicate the standalone
+/// whether the fused stage absorbed the immersed-body source this run — the predicate the standalone
 /// `body_source` pass checks to avoid double-applying it. true only when the fused host kernel is live
-/// AND it was built with the body fold (energy regime + bodies present); false on iso, on device / non-f64
+/// and it was built with the body fold (energy regime + bodies present); false on iso, on device / non-f64
 /// (two-pass), and on any JIT-subset miss. same `geo` the caller's `godunov_stage` uses.
 pub(crate) fn body_fused_in<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -593,14 +593,14 @@ where
         && fused_runtime_cpu_kernel(sim, rs, geo, fold_body).is_some()
 }
 
-/// build+cache the BODY-ONLY fused godunov kernel: godunov + geo + the immersed-body wrap, with NO
+/// build+cache the body-only fused godunov kernel: godunov + geo + the immersed-body wrap, with no
 /// user source. this is the no-runtime-source path — a gravity/accretion run that would otherwise
-/// two-pass the body. cached on the KERNEL-SET (not a RuntimeSource, since there is none). host+f64 +
+/// two-pass the body. cached on the kernel-set (not a RuntimeSource, since there is none). host+f64 +
 /// energy regime + bodies present; `None` otherwise (nothing to fold, or the two-pass fallback). the
 /// body is baked at MAX_SOURCE_BODIES to match the standalone `body_source` (unused slots zero via mass = 0).
 /// the fused-vs-two-pass policy: the two-pass —
 /// llvm-compiled aot godunov + the standalone aot body pass + the compiled
-/// cranelift source-only pass — is the DEFAULT. fusing puts ALL the stage compute
+/// cranelift source-only pass — is the default. fusing puts all the stage compute
 /// under cranelift (no slp, simpler scheduling); the two-pass pays one extra
 /// memory sweep for llvm-quality compute, and measures faster (bondi 25.1 vs
 /// 16.2 MZCS with the source-only pass compiled). SYMBI_FUSE=1 opts back into
@@ -658,11 +658,11 @@ where
         .as_ref()
 }
 
-/// dispatch the FUSED godunov+source host kernel: bind each manifest path to the sim's `Field`
-/// buffer (the in-place `cons.*` resolve to the SAME `Field` -> one base aliased into both the input
+/// dispatch the fused godunov+source host kernel: bind each manifest path to the sim's `Field`
+/// buffer (the in-place `cons.*` resolve to the same `Field` -> one base aliased into both the input
 /// and output lists — the read-before-write `run_parallel_raw` permits), resolve the scalars by
 /// name, and map the kernel over the interior in parallel. replaces (plain AOT godunov +
-/// `apply_runtime_source`) with ONE compiled+fused launch. host + f64 only (the caller's gate proves
+/// `apply_runtime_source`) with one compiled+fused launch. host + f64 only (the caller's gate proves
 /// both). `pre` is the regime's pressure override for `resolve_path` (energy: `prim.pre`; iso: `cs^2*rho`).
 pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -691,7 +691,7 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     );
 
     // buffer bases. the f64 reinterpret is sound: the gate proved Sc = f64, so the `Field<Sc>`
-    // backing buffer IS f64. in-place cons.* appear in BOTH in_paths and out_paths -> the same
+    // backing buffer is f64. in-place cons.* appear in both in_paths and out_paths -> the same
     // `Field` -> the same base (intended alias); all other inputs (u_n.*, flux.*, prim.pre) are
     // distinct + read-only.
     let in_bases: Vec<*const f64> = fk
@@ -705,7 +705,7 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
         .map(|&fref| resolve_path(sim, Some(pre), None, 0, fref).as_mut_ptr() as *mut f64)
         .collect();
 
-    // scalars by NAME (the godunov+source manifest order): dt = sim dt (the kernel forms ac*dt
+    // scalars by name (the godunov+source manifest order): dt = sim dt (the kernel forms ac*dt
     // internally), a0/ac = the SSP convex coefficients, mesh_hdil from the homologous motion, the
     // lazy centroid/spacing geom scalars, t = sim time, and the user knobs p{i}.
     let t = sim.time;
@@ -747,13 +747,13 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
 
     let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
     let (grid, dlo) = exec_layout(&sim.geom.interior);
-    // the SAME cache-tiling policy the AOT kernels get through `dispatch_fields_each`: a big window
+    // the same cache-tiling policy the AOT kernels get through `dispatch_fields_each`: a big window
     // is fanned over a disjoint block cover so the godunov flux-divergence stencil's neighbor reads
-    // (which run along the SLOW memory axes) stay L1-resident, avoiding a stream from main memory. without this
+    // (which run along the slow memory axes) stay L1-resident, avoiding a stream from main memory. without this
     // the fused stage is the one kernel in the step that never tiles. bit-identical: the cover
     // partitions the window, so each cell is computed once by the same kernel on the same inputs.
     //
-    // SAFETY: every base points into a buffer allocated over the shared `allocated` (alo, aext)
+    // safety: every base points into a buffer allocated over the shared `allocated` (alo, aext)
     // layout; the only aliasing is the intended in-place cons.* (read-before-write per cell);
     // distinct cells write distinct indices on distinct threads (blocks are cell-disjoint).
     unsafe {
@@ -805,8 +805,8 @@ pub(crate) fn resolve_runtime_param<const D: usize, const DOF: usize>(
 }
 
 /// the GPU pass: JIT-build a substrate kernel from the loaded DAGs and launch it on-device. the
-/// kernel IS `source_apply_from_built_gv` (the SAME builder build.rs AOT-bakes), invoked at runtime
-/// over the user `BuiltSource`s; the IR is built ONCE (lazily; geometry known only at dispatch),
+/// kernel is `source_apply_from_built_gv` (the same builder build.rs AOT-bakes), invoked at runtime
+/// over the user `BuiltSource`s; the IR is built once (lazily; geometry known only at dispatch),
 /// NVRTC-compiled + module-cached by a content-addressed name, then re-launched every stage with
 /// fresh `(dt=weight, t, p{i})` scalars. bit-identical-by-construction to the CPU interpreter pass.
 fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
@@ -821,9 +821,9 @@ fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
         .gpu_ir
         .get_or_init(|| build_runtime_source_ir(sim, &rs.built, rs.has_energy));
     let t = sim.time;
-    // resolve each kernel scalar BY NAME (the IR's declared order): dt = the SSP stage weight, the
+    // resolve each kernel scalar by name (the IR's declared order): dt = the SSP stage weight, the
     // lazily-declared geom centroid params (x_lo_k / dx_k), sim time t, and the user knobs p{i}.
-    // (rho / vel_k / x_k are per-cell FIELD reads inside the kernel.)
+    // (rho / vel_k / x_k are per-cell field reads inside the kernel.)
     dispatch_runtime_ir(sim, name, ir, &sim.geom.interior, |bind| {
         let ScalarBind::Ref(sref) = bind else {
             panic!("runtime source gpu: unexpected spec scalar {bind:?}");
@@ -848,7 +848,7 @@ fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// lower the runtime `BuiltSource`s into the substrate source kernel and serialize its neutral IR,
 /// reading the live sim geometry (coords / spacing / axis-roles) and the regime's `has_energy`.
-/// returns `(content-addressed kernel name, ir blob)`. the kernel name is baked INTO the IR
+/// returns `(content-addressed kernel name, ir blob)`. the kernel name is baked into the IR
 /// (`run_gpu` asserts they agree), so it is content-derived: build a probe IR with a fixed name,
 /// hash it (captures the whole graph + manifest), rebuild with that hash as the name — identical
 /// sources reuse one JIT module, distinct sources get distinct modules.
@@ -870,7 +870,7 @@ where
 }
 
 /// extract the substrate geometry (coords / per-axis spacing / axis-roles) from the live sim — the
-/// shared head of every runtime GvKernel build (source AND boundary).
+/// shared head of every runtime GvKernel build (source and boundary).
 pub(crate) fn sim_gv_geom<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
 ) -> (
@@ -903,7 +903,7 @@ where
 }
 
 /// serialize a runtime-built GvKernel to a `(content-addressed name, neutral IR)` pair. the name is
-/// baked INTO the IR (`run_gpu` asserts they agree), so it is content-derived: build a probe IR with
+/// baked into the IR (`run_gpu` asserts they agree), so it is content-derived: build a probe IR with
 /// a fixed name, hash it, rebuild with that hash. shared by the source + boundary IR builders.
 pub(crate) fn gv_kernel_to_ir(
     gvk: &symbi_ir::GvKernel,
@@ -918,9 +918,9 @@ pub(crate) fn gv_kernel_to_ir(
         let inputs = KernelEmitInputs {
             kernel_name: nm,
             ndim,
-            // inert token: `prepare` does NOT bake the target into the neutral `Prepared` IR
+            // inert token: `prepare` does not bake the target into the neutral `Prepared` IR
             // (it carries no target field — one blob renders every backend).
-            // the LIVE render target is `GpuBackend::TARGET` in `run_gpu`; this stays a fixed
+            // the live render target is `GpuBackend::TARGET` in `run_gpu`; this stays a fixed
             // value only so the content-hash below is stable.
             target: TargetConfig {
                 target: Target::Cuda,

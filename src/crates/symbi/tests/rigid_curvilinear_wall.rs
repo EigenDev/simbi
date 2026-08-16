@@ -2,21 +2,21 @@
 // rigid_curvilinear_wall.rs
 //
 // shaped rigid walls on the cylindrical (R, phi) chart, through the production
-// dispatch. gas momentum is stored in PHYSICAL (orthonormal) components whose
+// dispatch. gas momentum is stored in physical (orthonormal) components whose
 // basis rotates with phi, while the body lives in the cartesian world frame —
 // the penalization must bridge the frames per cell. gates:
-// - NO-PENETRATION: uniform cartesian flow past a shaped drain-off porous wall
+// - no-penetration: uniform cartesian flow past a shaped drain-off porous wall
 //   suppresses the wall-normal speed in the surface band by an order of
 //   magnitude versus the body-free run (the same contract the cartesian
 //   rigid-sphere gate enforces);
-// - RECEIPT FRAME: the body force receipt is a cartesian world vector. a wall
+// - receipt frame: the body force receipt is a cartesian world vector. a wall
 //   at phi = pi/2 in an x-directed stream absorbs x-momentum, so the receipt
 //   points along +x with the y component cancelling by symmetry — summing the
 //   raw physical-frame components instead would rotate the receipt into the
 //   local (r, phi) basis and swap the axes at that position;
-// - TARGET FRAME: a wall translating through still gas drags the gas along its
+// - target frame: a wall translating through still gas drags the gas along its
 //   own (cartesian) velocity. at phi = pi/2 an unrotated velocity target would
-//   read the x-velocity as a RADIAL (locally y-directed) target and push the
+//   read the x-velocity as a radial (locally y-directed) target and push the
 //   gas outward.
 // =============================================================================
 
@@ -192,7 +192,7 @@ fn force_receipt_is_a_cartesian_world_vector() {
 
 #[test]
 fn moving_wall_target_is_rotated_into_the_local_frame() {
-    // a sealed no-slip wall translating along +x through STILL gas drags the
+    // a sealed no-slip wall translating along +x through still gas drags the
     // gas toward +x: the gas gains x-momentum, so the receipt on the body
     // points along -x. an unrotated velocity target reads the x-velocity as a
     // radial (locally +y) push at phi = pi/2 and the receipt lands in -y.

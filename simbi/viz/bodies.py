@@ -3,7 +3,7 @@
 #
 # load + draw immersed-boundary bodies from a checkpoint. reads the `bodies`
 # group (position / orientation / angular velocity + the per-body CSG shape
-# wire) and shades each body's silhouette on a 2D field plot AT ITS POSE, so a
+# wire) and shades each body's silhouette on a 2D field plot at its pose, so a
 # spinning / tumbling body tracks its rotation across frames.
 #
 # usage:

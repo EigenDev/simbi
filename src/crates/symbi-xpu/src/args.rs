@@ -77,7 +77,7 @@ impl KernelArgs {
             self.storage.resize(cur + pad, 0);
         }
         let offset = self.storage.len();
-        // SAFETY: `T: Copy` so it has no destructor; the byte view is sound
+        // safety: `T: Copy` so it has no destructor; the byte view is sound
         // for any `Copy` plain-data type. `size_of::<T>` bytes are valid.
         let bytes = unsafe { std::slice::from_raw_parts(val as *const T as *const u8, size) };
         self.storage.extend_from_slice(bytes);
@@ -92,7 +92,7 @@ impl KernelArgs {
         self.ptrs.clear();
         let base = self.storage.as_mut_ptr();
         for &off in &self.offsets {
-            // SAFETY: `off` came from `storage.len()` at push time and the
+            // safety: `off` came from `storage.len()` at push time and the
             // arena has only grown since; the offset is in-bounds.
             let p = unsafe { base.add(off as usize) };
             self.ptrs.push(p as *mut std::ffi::c_void);
@@ -162,7 +162,7 @@ mod tests {
         a.push(&y);
         let s = a.as_mut_slice();
         assert_eq!(s.len(), 2);
-        // SAFETY: pointers point into the arena's stable bytes.
+        // safety: pointers point into the arena's stable bytes.
         unsafe {
             assert_eq!(*(s[0] as *const i32), 42);
             assert!((*(s[1] as *const f64) - std::f64::consts::PI).abs() < 1e-15);

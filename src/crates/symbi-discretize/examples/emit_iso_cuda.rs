@@ -63,7 +63,7 @@ fn main() {
         .unwrap_or_else(|| "target/iso_cuda".to_string());
     fs::create_dir_all(&out).expect("create out dir");
 
-    // ghost_fill: the gv lattice-map pullback — integer source-coord SELECT branch.
+    // ghost_fill: the gv lattice-map pullback — integer source-coord select branch.
     let (gk, gw) = iso_ghost_fill_gv(1, 1, &[0]);
     emit_gv(&out, "iso_ghost_fill_1d", 1, gk, gw);
 

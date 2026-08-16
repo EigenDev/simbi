@@ -2,9 +2,9 @@
 // prolong_timing.rs
 //
 // single-core wall-time of the amr prolongation on a coarse-fine ghost slab:
-// the fused TIME-PAIR kernel (refine_prolong_{order}_5c_3d — the gather
+// the fused time-pair kernel (refine_prolong_{order}_5c_3d — the gather
 // census: 2 snapshots x 5^3 x 5 comps loads per fine cell)
-// against the LERP-THEN-PROLONG split (field_lerp_5c_3d over the coarse
+// against the lerp-then-prolong split (field_lerp_5c_3d over the coarse
 // parent region + refine_prolong_1t_{order}_5c_3d — one snapshot). serial
 // twins, so the number is per-core compute without rayon scheduling noise.
 // prints ns/fine-zone for both paths; the split includes the lerp pass.

@@ -1,19 +1,19 @@
 # =============================================================================
 # test_nan_fail_loud.py
 #
-# the fail-loud gate for STATE-INDEPENDENT wave-speed maps. the driver's only
+# the fail-loud gate for state-independent wave-speed maps. the driver's only
 # per-step blow-up detector is the dt chain ("NaN state -> NaN wave speeds ->
 # NaN/zero dt -> halt"): a pure-geometry CFL map (the GR light-cone bound) breaks
 # that chain — a NaN'd run would march to t_final and write garbage checkpoints
 # as a "successful" result. the guard: the map probes the conserved state per
 # cell and forces lambda -> +inf when it is non-finite (dt collapses to zero and
-# the crash heuristics halt; a NaN lambda would be silently DROPPED by the
+# the crash heuristics halt; a NaN lambda would be silently dropped by the
 # max-reduce, so the poison must be +inf).
 #
 # the poison here: a kerr rotating-equilibrium (light-cone CFL map) with one
 # driven-boundary expression producing NaN (sqrt of a negative constant) — the
 # ghost state is NaN from the first fill, the first step's boundary flux pulls it
-# into the interior, and the SECOND step's cfl must halt the run instead of
+# into the interior, and the second step's cfl must halt the run instead of
 # completing. requires the built cpu_ext backend; skipped otherwise.
 # =============================================================================
 import glob
@@ -75,9 +75,9 @@ def test_poisoned_state_halts_under_a_state_independent_cfl_map() -> None:
 
 @needs_backend
 def test_persistent_freeze_halts_on_unrecoverable_source() -> None:
-    # the SECOND FOFC-surviving fail-loud: a poison that stays FINITE (so the ghost-band /
+    # the second FOFC-surviving fail-loud: a poison that stays finite (so the ghost-band /
     # finiteness guards never fire) but is unrecoverable by first-order flux correction, forcing
-    # the freeze tier every stage. a huge energy-SINK raw source drives eps < 0 (finite negative
+    # the freeze tier every stage. a huge energy-sink raw source drives eps < 0 (finite negative
     # pressure); FOFC restores the stage input, but the source re-cools it the next stage, so the
     # freeze fires on consecutive substages until the persistent-freeze streak halts loudly. the
     # rare correct parachute (isolated freezes) never reaches the streak; a genuine poison does.
@@ -101,7 +101,7 @@ def test_persistent_freeze_halts_on_unrecoverable_source() -> None:
     p.data_directory = tempfile.mkdtemp() + "/"
     p.checkpoint_interval = 1.0e30
     # the halt is a Rust panic (assert) surfaced as pyo3_runtime.PanicException, which derives from
-    # BaseException (NOT Exception) — catch the broad base.
+    # BaseException (not Exception) — catch the broad base.
     with pytest.raises(BaseException) as excinfo:
         runner.run(p, compute_mode="cpu", max_steps=400)
     assert "freeze" in str(excinfo.value).lower(), (

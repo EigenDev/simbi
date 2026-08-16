@@ -65,7 +65,7 @@ impl BinaryKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum UnaryKind {
     Neg,
-    /// bitwise complement on int, logical NOT on bool. Rust's `!` operator
+    /// bitwise complement on int, logical not on bool. Rust's `!` operator
     /// covers both (CUDA's `!` is the bool form; `~` would be the int form,
     /// but the substrate uses this op only for Bool — Mask's `Not`).
     Not,
@@ -148,12 +148,12 @@ pub enum ScalarExpr {
 }
 
 impl ScalarExpr {
-    /// the immediate sub-expressions this node owns, in evaluation order. THE single source for
-    /// "which children do I have" — every WALK / TRANSFORM pass (cse var
+    /// the immediate sub-expressions this node owns, in evaluation order. the single source for
+    /// child enumeration used by every walk / transform pass (cse var
     /// collect, free-call scan, var-use test, FieldLoadAt rewrite) recurses through this uniform
-    /// accessor, with no per-variant re-matching. the EMIT backends (cpu/cuda/interp/jit) still match
+    /// accessor, with no per-variant re-matching. the emit backends (cpu/cuda/interp/jit) still match
     /// per-variant — producing target source/IR is the irreducible part — exactly the split the
-    /// `ScalarStmt` SSOT (above) documents. adding a variant => update this once; the walks follow.
+    /// `ScalarStmt` ssot (above) documents. adding a variant => update this once; the walks follow.
     pub fn children(&self) -> Vec<&ScalarExpr> {
         match self {
             ScalarExpr::Const(_) | ScalarExpr::Var(_) => Vec::new(),
@@ -221,7 +221,7 @@ pub enum ScalarStmt {
     /// `name = value;` — plain (non-compound) assignment.
     /// applied to a previously-declared `LetMut`. used by Op::Fold's
     /// lowering, where the body lambda returns a new accumulator that
-    /// REPLACES (not accumulates into) the current one. CompoundAssign
+    /// replaces (not accumulates into) the current one. CompoundAssign
     /// only covers reductive updates; Fold needs the general case.
     Assign { name: String, value: ScalarExpr },
     /// `for iter in 0..bound { body }` — const-generic loop. bound is
@@ -268,22 +268,22 @@ pub enum ScalarStmt {
     /// the CSE pass treats the scope as a **hoisting barrier**:
     /// CSE candidates whose uses are all inside the
     /// scope stay inside; candidates whose uses cross the boundary get
-    /// hoisted to the LCA scope of all use sites.
+    /// hoisted to the lca scope of all use sites.
     ///
     /// the CSE pass passes scopes through unchanged (treats them as ordinary
-    /// statement containers); LCA-aware placement is not applied.
+    /// statement containers); lca-aware placement is not applied.
     Scope {
         name: String,
         element: ElementTy,
         body: Vec<ScalarStmt>,
         result: ScalarExpr,
     },
-    /// the DUAL of the `For`/`Break` iterate lowering: a real data-dependent
-    /// branch where ONLY the taken arm executes. lowered from `Op::IfElse`
+    /// the dual of the `For`/`Break` iterate lowering: a real data-dependent
+    /// branch where only the taken arm executes. lowered from `Op::IfElse`
     /// (`S::cond` -> 1 output, `S::cond_vec` -> N outputs). `outs` declares the
-    /// N result slots in the enclosing scope; each arm body ENDS with one
+    /// N result slots in the enclosing scope; each arm body ends with one
     /// `Assign { outs[j].0, <arm result j> }` per slot, so the variant carries
-    /// one immediate expr (`cond`) plus two sub-bodies — fitting the SSOT walk
+    /// one immediate expr (`cond`) plus two sub-bodies — fitting the ssot walk
     /// model. the renderer translates this to:
     ///   - **Rust**: `let o0: e0; ... let o{N-1}: e{N-1}; if cond { then_body }
     ///     else { else_body }` (definite-assignment: both arms assign every out).
@@ -299,26 +299,26 @@ pub enum ScalarStmt {
 }
 
 // =============================================================================
-// the SINGLE SOURCE OF TRUTH for ScalarStmt structural walks.
+// the single source of truth for ScalarStmt structural walks.
 //
 // every transformation pass (cse, FieldLoadAt rewrite, uses-var detection, the
 // fresh-name index scan) walks scalar statements the same way: visit the
-// immediate scalar expression a stmt CARRIES, then recurse into any child
-// statement bodies. those two notions are encoded ONCE here rather than
+// immediate scalar expression a stmt carries, then recurse into any child
+// statement bodies. those two notions are encoded once here rather than
 // respelled inline in every backend match.
 //
 // the four helpers below + `with_child_expr` are the one place that encodes
-// "which exprs belong to me" and "which sub-bodies do I own". every walk-style
+// expression and sub-body ownership. every walk-style
 // pass derives from them. emit backends (cpu/cuda/interp) still match
 // per-variant — that's the irreducible part of producing source. but the
-// WALK / TRANSFORM passes are now one-liners.
+// walk / transform passes are now one-liners.
 //
 // adding a new ScalarStmt variant becomes: update the enum (above), then add
 // arms here (one per accessor) for the variant's exprs + bodies. the walk
 // passes pick it up for free.
 // =============================================================================
 impl ScalarStmt {
-    /// the scalar expression this statement HOLDS directly (not nested inside a
+    /// the scalar expression this statement holds directly (not nested inside a
     /// child body). every variant has at most one — Let's `value`, LetMut's
     /// `init`, Assign / CompoundAssign's `value`, If's `cond`. For / Break have
     /// no immediate expression (For's bound is a `DimExpr`).
@@ -329,7 +329,7 @@ impl ScalarStmt {
             ScalarStmt::Assign { value, .. } => Some(value),
             ScalarStmt::CompoundAssign { value, .. } => Some(value),
             ScalarStmt::If { cond, .. } => Some(cond),
-            // Scope's IMMEDIATE child expression is its `result` — the value
+            // Scope's immediate child expression is its `result` — the value
             // bound to `name` in the enclosing scope. body is a separate
             // sub-list (see `child_stmts`).
             ScalarStmt::Scope { result, .. } => Some(result),
@@ -356,7 +356,7 @@ impl ScalarStmt {
     }
 
     /// the child statement bodies this variant owns, as a list of sub-bodies.
-    /// `For`/`If`/`Scope` own ONE body; `IfElse` owns TWO (then + else); every
+    /// `For`/`If`/`Scope` own one body; `IfElse` owns two (then + else); every
     /// other variant owns none. walks that recurse use this to descend
     /// uniformly without naming variants — and it handles multi-body variants
     /// (IfElse) that a single `&[ScalarStmt]` return could not express.
@@ -390,7 +390,7 @@ impl ScalarStmt {
         }
     }
 
-    /// the binding name this statement INTRODUCES, if any. Let / LetMut /
+    /// the binding name this statement introduces, if any. Let / LetMut /
     /// Scope declare new locals; other variants don't. used by the CSE
     /// fresh-name scan to pick the next available temp index without
     /// colliding with existing lets.
@@ -557,7 +557,7 @@ impl Scalarizer {
     /// compute in-degree per NodeId by walking the graph
     /// once. used by `maybe_hoist_to_let` to share ScalarExpr trees
     /// across consumers — without this, each downstream reference
-    /// CLONES the entire binding sub-tree, producing exponential
+    /// clones the entire binding sub-tree, producing exponential
     /// scalarized text size for graphs with shared sub-nodes (RMHD
     /// wave-speed kernels were ~100s in scalarize before this fix).
     fn compute_in_degrees(graph: &Graph) -> HashMap<NodeId, u32> {
@@ -571,7 +571,7 @@ impl Scalarizer {
     }
 
     /// after lowering a node, if it produced a rank-0 scalar binding
-    /// that's non-trivial AND has in-degree >= 2, hoist the expression
+    /// that's non-trivial and has in-degree >= 2, hoist the expression
     /// to a Let with a fresh `__cse_<n>` name and replace the binding
     /// with `Var(name)`. subsequent consumers then clone a cheap Var
     /// standing in for the full sub-tree.
@@ -768,11 +768,11 @@ impl Scalarizer {
     /// lower an `Op::IterateInline` over an N-component accumulator
     /// vector to `LetMut acc_j = inits[j]; For i { <union cone> acc_j = steps[j] }`.
     /// the `cone` is the acc-dependent slice of all `steps` (id/topo order); its
-    /// loop-INVARIANT inputs are already lowered before the loop. the N assigns
-    /// come AFTER the whole cone, so the update is SIMULTANEOUS (Jacobi): every
-    /// `steps[j]` reads the OLD `acc_*`. binds the node to `Var(acc_result)`.
+    /// loop-invariant inputs are already lowered before the loop. the N assigns
+    /// come after the whole cone, so the update is simultaneous (Jacobi): every
+    /// `steps[j]` reads the old `acc_*`. binds the node to `Var(acc_result)`.
     /// lower an `Op::Scope` node into a
-    /// `ScalarStmt::Scope` brace-block. body NodeIds are lowered IN ORDER into
+    /// `ScalarStmt::Scope` brace-block. body NodeIds are lowered in order into
     /// a fresh sub-body that becomes the scope's inner statements; `result`'s
     /// expression becomes the scope's trailing tail value.
     ///
@@ -783,7 +783,7 @@ impl Scalarizer {
     /// point — `require_concrete` reads it cleanly.
     ///
     /// the scope's NodeId itself binds to `ScalarExpr::Var("__scope_<n>")` in
-    /// the OUTER body, so downstream consumers reference the scope's
+    /// the outer body, so downstream consumers reference the scope's
     /// observable value through that name.
     fn lower_scope(
         &mut self,
@@ -797,12 +797,12 @@ impl Scalarizer {
     ) {
         // capture the position where the scope's inner Lets will begin.
         let mark = self.body.len();
-        // lower body NodeIds IN ORDER. for each:
-        //   - if it belongs to a DEEPER scope (scope_owner maps it to !=
+        // lower body NodeIds in order. for each:
+        //   - if it belongs to a deeper scope (scope_owner maps it to !=
         //     scope_id), skip — it is lowered on recursion into that
         //     nested scope.
-        //   - if it IS a nested `Op::Scope`, dispatch to `lower_scope`
-        //     recursively so its body lands inside ITS brace block.
+        //   - if it is a nested `Op::Scope`, dispatch to `lower_scope`
+        //     recursively so its body lands inside its brace block.
         //   - otherwise, lower normally and the resulting Let lands in the
         //     inner body (it'll be captured by `split_off` below).
         for &bid in body {
@@ -815,7 +815,7 @@ impl Scalarizer {
             }
             let bnode = graph.node(bid);
             let bty = graph.ty(bid).clone();
-            // dispatch nested Op::Scope BEFORE lower_node — lower_node
+            // dispatch nested Op::Scope before lower_node — lower_node
             // panics on Op::Scope (the unreachable arm; scopes go through
             // this specialized path).
             if let Op::Scope {
@@ -838,8 +838,8 @@ impl Scalarizer {
             self.lower_node(bid, &bop, &bty, graph);
             self.maybe_hoist_to_let(bid, in_degrees, &bty);
         }
-        // resolve the result's expression NOW — bindings are populated and
-        // this expression is evaluated AS THE SCOPE'S TAIL VALUE
+        // resolve the result's expression now — bindings are populated and
+        // this expression is evaluated as the scope'S tail value
         // (i.e., inside the brace block, after all the inner Lets, before the
         // closing brace).
         let result_expr = self.require_concrete(result, "Op::Scope result")[0].clone();
@@ -847,7 +847,7 @@ impl Scalarizer {
         let scope_body = self.body.split_off(mark);
         // mint a fresh outer name for the scope's observable value.
         let scope_name = self.fresh("__scope");
-        // emit the ScalarStmt::Scope into the OUTER body.
+        // emit the ScalarStmt::Scope into the outer body.
         self.body.push(ScalarStmt::Scope {
             name: scope_name.clone(),
             element: result_ty.element,
@@ -862,12 +862,12 @@ impl Scalarizer {
         );
     }
 
-    /// lower an `Op::IfElse` (the DUAL of `lower_iterate_inline`): N outer-
+    /// lower an `Op::IfElse` (the dual of `lower_iterate_inline`): N outer-
     /// declared result slots plus two arm sub-bodies, each ending with one
-    /// `Assign { outs[j], <arm result j> }` per slot. only the TAKEN arm runs at
+    /// `Assign { outs[j], <arm result j> }` per slot. only the taken arm runs at
     /// render time. N=1 is scalar `S::cond`; N>1 is `S::cond_vec` (the IfElse
     /// node binds to an N-component `Concrete`, consumed via `Op::Proj`). the
-    /// `cond` is computed OUTSIDE the branch, so it is already lowered.
+    /// `cond` is computed outside the branch, so it is already lowered.
     #[allow(clippy::too_many_arguments)]
     fn lower_if_else(
         &mut self,
@@ -922,9 +922,9 @@ impl Scalarizer {
         );
     }
 
-    /// lower ONE arm of an `Op::IfElse`. mirrors the cone body of
+    /// lower one arm of an `Op::IfElse`. mirrors the cone body of
     /// `lower_iterate_inline` / `lower_scope`: mark the body length, lower the
-    /// nodes THIS arm owns (skipping nodes evicted to the outer level or claimed
+    /// nodes this arm owns (skipping nodes evicted to the outer level or claimed
     /// by a nested region — those are lowered elsewhere), `split_off` the arm's
     /// Lets, and append one trailing `names[j] = <result j>` assign per output.
     #[allow(clippy::too_many_arguments)]
@@ -941,8 +941,8 @@ impl Scalarizer {
     ) -> Vec<ScalarStmt> {
         let mark = self.body.len();
         for &bid in body {
-            // lower ONLY the nodes this arm owns — evicted (outer-shared) nodes
-            // and nodes claimed by a NESTED region are lowered in their own
+            // lower only the nodes this arm owns — evicted (outer-shared) nodes
+            // and nodes claimed by a nested region are lowered in their own
             // place; their bindings are visible here as `Var(...)`.
             if branch_owner.get(&bid) != Some(&(ifelse_id, is_then)) {
                 continue;
@@ -975,7 +975,7 @@ impl Scalarizer {
             self.lower_node(bid, &bop, &bty, graph);
             self.maybe_hoist_to_let(bid, in_degrees, &bty);
         }
-        // capture result exprs BEFORE split_off (bindings still resolve here).
+        // capture result exprs before split_off (bindings still resolve here).
         let result_exprs: Vec<ScalarExpr> = results
             .iter()
             .map(|&r| self.require_concrete(r, "Op::IfElse arm result")[0].clone())
@@ -1003,7 +1003,7 @@ impl Scalarizer {
         graph: &Graph,
     ) {
         let iter_name = self.fresh("iter_i");
-        // the mutable accumulator locals (one per component), BEFORE the loop.
+        // the mutable accumulator locals (one per component), before the loop.
         let acc_names: Vec<String> = (0..inits.len()).map(|_| self.fresh("iter_acc")).collect();
         for (j, &init) in inits.iter().enumerate() {
             let init_expr = self.require_concrete(init, "IterateInline init")[0].clone();
@@ -1013,7 +1013,7 @@ impl Scalarizer {
                 init: init_expr,
             });
         }
-        // lower the union cone INSIDE the loop (split_off captures its lets);
+        // lower the union cone inside the loop (split_off captures its lets);
         // `IterAcc(j)` resolves to `acc_names[j]` via `self.iter_acc`.
         self.iter_acc = Some(acc_names.clone());
         let mark = self.body.len();
@@ -1034,7 +1034,7 @@ impl Scalarizer {
             break_when.map(|bw| self.require_concrete(bw, "IterateInline break_when")[0].clone());
         self.iter_acc = None;
         let n = step_exprs.len();
-        // temp names for the SIMULTANEOUS (Jacobi) update (N>1 only).
+        // temp names for the simultaneous (Jacobi) update (N>1 only).
         let tmp_names: Vec<String> = if n > 1 {
             (0..n).map(|_| self.fresh("iter_next")).collect()
         } else {
@@ -1048,8 +1048,8 @@ impl Scalarizer {
                 value: step_exprs.into_iter().next().unwrap(),
             });
         } else {
-            // vector: capture EVERY step into a temp (reading the OLD accumulators)
-            // BEFORE any assign — the update must be SIMULTANEOUS (Jacobi). a
+            // vector: capture every step into a temp (reading the old accumulators)
+            // before any assign — the update must be simultaneous (Jacobi). a
             // direct `acc_j = step_j` sequence would let a later assign read an
             // already-updated sibling accumulator (Gauss-Seidel), corrupting it.
             for (j, value) in step_exprs.into_iter().enumerate() {
@@ -1066,7 +1066,7 @@ impl Scalarizer {
                 });
             }
         }
-        // early-out: if the break predicate is satisfied AFTER the assigns, exit
+        // early-out: if the break predicate is satisfied after the assigns, exit
         // the loop. the assigns already wrote the converged values (the freeze
         // pattern means step_j = select(conv, old_j, new_j) is a no-op once conv
         // fires, so the accs hold the converged answer). subsequent iterations
@@ -1328,7 +1328,7 @@ pub fn scalarize(graph: &Graph, output: NodeId, name: &str) -> LoweredFn {
     // CSE pass collapses duplicated sub-expressions to
     // __cse_<n> Lets. without this, large kernels emit single-line
     // CUDA source strings >700 KB and blow up rustc's memory during
-    // string-literal lowering (40-50 GiB anon-RSS on the symbi crate).
+    // string-literal lowering (40-50 GiB anon-rss on the symbi crate).
     crate::passes::cse::cse_lowered_fn(&mut f);
     f
 }
@@ -1350,47 +1350,47 @@ pub struct KernelScalarized {
 pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
     let mut sc = Scalarizer::new();
     let in_degrees = Scalarizer::compute_in_degrees(graph);
-    // DCE: walk backward from `outputs`, collect transitively-reachable nodes.
-    // any node NOT reachable from an output is dead — its arithmetic contributes
+    // dce: walk backward from `outputs`, collect transitively-reachable nodes.
+    // any node not reachable from an output is dead — its arithmetic contributes
     // to no buffer write. without this filter, the iso flux (which traces the
     // Newtonian regime then drops the `flux.nrg` write) still lowers the entire
     // energy U/F sub-DAG into the body as orphan `__cse_*` let-bindings; nvcc
-    // DCEs the SASS but pays the parse + register-pressure cost. closing the
+    // DCEs the sass but pays the parse + register-pressure cost. closing the
     // dead path here removes them from the emitted CUDA source up front.
     //
-    // IterateInline cone nodes (lowered INSIDE the loop body)
+    // IterateInline cone nodes (lowered inside the loop body)
     // are reached via the IterateInline node's `steps` field through `Op::inputs`
     // — so a reachable IterateInline pulls its cone in automatically.
     let reachable = reachable_from_outputs(graph, outputs);
-    // an IterateInline emits its body ONCE as a `for`. its `step`
-    // sub-DAG's acc-dependent cone must be lowered INSIDE the loop
+    // an IterateInline emits its body once as a `for`. its `step`
+    // sub-DAG's acc-dependent cone must be lowered inside the loop
     // — collect those nodes to skip, and the cone per iterate node.
     //
     // Op::Scope body NodeIds are similarly partitioned —
-    // they belong to the Scope's lexical region and are lowered INSIDE a
+    // they belong to the Scope's lexical region and are lowered inside a
     // `ScalarStmt::Scope` brace block.
     //
-    // for NESTED scopes (an Op::Scope inside another Op::Scope's body), a
+    // for nested scopes (an Op::Scope inside another Op::Scope's body), a
     // single NodeId may appear in multiple scopes' body lists. `scope_owner`
-    // maps each scoped NodeId to its INNERMOST owner — built by walking the
+    // maps each scoped NodeId to its innermost owner — built by walking the
     // graph in NodeId order (inner scopes have smaller NodeIds than the
     // outer scopes containing them, so first-claim wins is correct).
     let mut skip: HashSet<NodeId> = HashSet::new();
     let mut iter_cones: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
     let mut scope_owner: HashMap<NodeId, NodeId> = HashMap::new();
     // a NodeId can appear in a scope's
-    // body list yet ALSO be referenced from outside the scope, because the
+    // body list yet also be referenced from outside the scope, because the
     // graph is hash-consed — a closure may compute `bn * bn` (pushed inside
     // the scope) and later outer code may produce a structurally-identical
-    // `bn * bn` that hash-conses to the SAME NodeId. lowering it inside the
+    // `bn * bn` that hash-conses to the same NodeId. lowering it inside the
     // scope's brace breaks the outer reference. so scope-body
-    // bookkeeping is collected first; a SECOND pass evicts shared NodeIds from
+    // bookkeeping is collected first; a second pass evicts shared NodeIds from
     // scope_owner so the main pass lowers them at the outer level.
     let mut scope_body: HashMap<NodeId, HashSet<NodeId>> = HashMap::new();
     let mut scope_result: HashMap<NodeId, NodeId> = HashMap::new();
-    // `Op::IfElse` (the DUAL of IterateInline): each arm body is a lexical
-    // region lowered INSIDE its `if`/`else` brace — same partition as Scope but
-    // TWO regions per node. `branch_owner` maps each arm-owned NodeId to its
+    // `Op::IfElse` (the dual of IterateInline): each arm body is a lexical
+    // region lowered inside its `if`/`else` brace — same partition as Scope but
+    // two regions per node. `branch_owner` maps each arm-owned NodeId to its
     // (ifelse_id, is_then_arm); innermost-wins via NodeId order (a nested
     // IfElse node has a smaller id than the arm containing it, so its arm nodes
     // are claimed first). `branch_body` records each arm's set for eviction.
@@ -1417,7 +1417,7 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
             scope_body.insert(id, body_set);
             scope_result.insert(id, *result);
             for &b in body {
-                // first-seen wins -> INNERMOST scope claims the NodeId.
+                // first-seen wins -> innermost scope claims the NodeId.
                 scope_owner.entry(b).or_insert(id);
             }
         }
@@ -1446,7 +1446,7 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
             users.entry(input).or_default().push(id);
         }
     }
-    // each kernel OUTPUT is a virtual user — a sentinel NodeId past the
+    // each kernel output is a virtual user — a sentinel NodeId past the
     // graph's range. ensures eviction catches "scope body node is also a
     // top-level kernel output" — otherwise the output's binding would be
     // a Var(...) only visible inside the scope's brace.
@@ -1454,16 +1454,16 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
     for out in outputs {
         users.entry(*out).or_default().push(output_sentinel);
     }
-    // evict scope_owner claims for NodeIds with users OUTSIDE the claimed
+    // evict scope_owner claims for NodeIds with users outside the claimed
     // scope's body. the scope's `result` NodeId is exempt — it's allowed
-    // to be referenced by the Op::Scope node (which is in the OUTER body)
+    // to be referenced by the Op::Scope node (which is in the outer body)
     // because that reference resolves to the scope's named output.
     //
-    // a NESTED Op::Scope NodeId is also exempt: it's a STRUCTURAL child of
+    // a nested Op::Scope NodeId is also exempt: it's a structural child of
     // the outer scope (lowered via the recursive `lower_scope` dispatch),
-    // and any "outside" use of its value lives in the OUTER scope's body —
+    // and any "outside" use of its value lives in the outer scope's body —
     // which the recursive dispatch handles correctly. evicting nested
-    // Op::Scope nodes would dump their body INTO the outer level, defeating
+    // Op::Scope nodes would dump their body into the outer level, defeating
     // the bounded-pressure point.
     let mut evict: Vec<NodeId> = Vec::new();
     for (&x, &owner_scope) in scope_owner.iter() {
@@ -1481,18 +1481,18 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
         let is_result = scope_result.get(&owner_scope) == Some(&x);
         for &u in user_list {
             // the Op::Scope node references its result NodeId via its
-            // structural `result` field — allowed ONLY for the result.
+            // structural `result` field — allowed only for the result.
             if u == owner_scope && is_result {
                 continue;
             }
             if body_set.contains(&u) {
                 continue;
             }
-            // user is OUTSIDE the scope's body — shared. evict so main pass
+            // user is outside the scope's body — shared. evict so main pass
             // lowers X at the outer level (the scope body still names the
-            // outer's let in its `Var(...)` references). this handles BOTH
-            // non-result body members (the `bn * bn` hash-cons case) AND
-            // result NodeIds that ALSO leak outside (an inner expression
+            // outer's let in its `Var(...)` references). this handles both
+            // non-result body members (the `bn * bn` hash-cons case) and
+            // result NodeIds that also leak outside (an inner expression
             // hash-consed with an outer expression).
             evict.push(x);
             break;
@@ -1501,27 +1501,27 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
     for x in evict {
         scope_owner.remove(&x);
     }
-    // now populate `skip` from the FINAL scope_owner (so evicted nodes
+    // now populate `skip` from the final scope_owner (so evicted nodes
     // remain visible to the main pass).
     for &b in scope_owner.keys() {
         skip.insert(b);
     }
     // branch-arm eviction (the IfElse dual of the scope eviction above). a
-    // then/else-arm node that is used OUTSIDE its arm — by the sibling arm
+    // then/else-arm node that is used outside its arm — by the sibling arm
     // (cross-arm hash-cons share) or by outer code — is hoisted to the outer
-    // level and computed ONCE (shared work is unconditional, which is correct).
-    // CRUCIAL difference from Scope: the IfElse node lists its OWN arm bodies as
+    // level and computed once (shared work is unconditional, which is correct).
+    // crucial difference from Scope: the IfElse node lists its own arm bodies as
     // inputs (for remap-safety), so it appears as a "user" of every arm node;
-    // that self-reference is NOT an escape — exempt `u == ifelse_id` for every
+    // that self-reference is not an escape — exempt `u == ifelse_id` for every
     // arm node, else laziness would be destroyed (all arms hoisted out).
-    // FIXPOINT eviction: an arm node X "escapes" if it has a REAL (dataflow)
-    // user lying OUTSIDE the arm's CURRENT membership. evicting X moves it to
-    // the outer level, so any in-arm INPUT of X must then escape too — hence
+    // fixpoint eviction: an arm node X "escapes" if it has a real (dataflow)
+    // user lying outside the arm's current membership. evicting X moves it to
+    // the outer level, so any in-arm input of X must then escape too — hence
     // the iteration to a fixpoint (a single pass would miss the cascade, and
-    // checking STATIC body membership would wrongly treat an already-evicted
+    // checking static body membership would wrongly treat an already-evicted
     // body member as still-in-arm, leaving a dangling in-arm reference). a user
-    // is NOT an escape when it is: the owning container itself (arm output /
-    // structural self-listing); still owned by the SAME arm; or an OUTER
+    // is not an escape when it is: the owning container itself (arm output /
+    // structural self-listing); still owned by the same arm; or an outer
     // container that lists X only structurally (nested arm ranges overlap).
     let mut changed = true;
     while changed {
@@ -1569,10 +1569,10 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
     }
     for (id, node, ty) in graph.iter() {
         if !reachable.contains(&id) {
-            continue; // unreachable from any output — DCE
+            continue; // unreachable from any output — dce
         }
         if skip.contains(&id) {
-            continue; // a loop cone OR scope body node — lowered inside its container
+            continue; // a loop cone or scope body node — lowered inside its container
         }
         if let Op::IterateInline {
             inits,
@@ -1678,14 +1678,14 @@ fn reachable_from_outputs(graph: &Graph, outputs: &[NodeId]) -> HashSet<NodeId> 
     reachable
 }
 
-/// the acc-dependent CONE of an `IterateInline` — the nodes that
+/// the acc-dependent cone of an `IterateInline` — the nodes that
 /// must be recomputed each iteration. = the union backward-reachable set of all
 /// `steps` whose `dep` flag is true, where `dep[n] = accs.contains(n) ||
-/// any(dep[input])`. returned in increasing-id (topological) order. loop-INVARIANT
+/// any(dep[input])`. returned in increasing-id (topological) order. loop-invariant
 /// nodes (dep == false) stay in the main pass as kernel locals computed once.
-/// is `user`'s reference to `x` purely STRUCTURAL — i.e., `user` is a container
-/// (IfElse / Scope) that lists `x` in its body for remap-safety/DCE but does
-/// NOT consume `x` as dataflow (cond / result)? such a reference must not count
+/// is `user`'s reference to `x` purely structural — i.e., `user` is a container
+/// (IfElse / Scope) that lists `x` in its body for remap-safety/dce but does
+/// not consume `x` as dataflow (cond / result)? such a reference must not count
 /// as a "use outside the arm" in the branch-eviction pass, otherwise nested
 /// cond arms (whose body ranges overlap their outer containers) get flattened.
 fn is_structural_container_use(graph: &Graph, user: NodeId, x: NodeId) -> bool {
@@ -1709,7 +1709,7 @@ fn iterate_cone(
 ) -> Vec<NodeId> {
     // union backward-reachable set from all `steps` (transitive inputs). also
     // seed from `break_when` so its acc-dependent expression is part of the
-    // cone (lowered INSIDE the for-loop; hoisting it as a loop invariant
+    // cone (lowered inside the for-loop; hoisting it as a loop invariant
     // would constant-fold `0.5 < initial_done` into a dead `false`).
     let mut back: HashSet<NodeId> = HashSet::new();
     let mut stack: Vec<NodeId> = steps.to_vec();
@@ -1812,7 +1812,7 @@ fn scalar_element_wise(op: ElementWiseOp, mut inputs: Vec<ScalarExpr>) -> Scalar
         // renders them as the `a<b?a:b` / `a>b?a:b` ternary:
         // the cuda special-case arm, the interp/jit ternary, and the f64/f32
         // `Numeric` carrier. so CPU and GPU agree at NaN/signed-zero
-        // WITHOUT lowering to a scoped `if`-select — that inlines nested min/max
+        // without lowering to a scoped `if`-select — that inlines nested min/max
         // chains into deeply-nested lexical scopes and overflows rustc's debuginfo.
         ElementWiseOp::Min => method_binary("min", &mut inputs),
         ElementWiseOp::Max => method_binary("max", &mut inputs),
@@ -1888,23 +1888,23 @@ fn const_zero_or_one(e: &ScalarExpr) -> Option<f64> {
 /// emitted by substrate constructions that contract against unit vectors
 /// (e.g., `contract(v, ehat)` for `ehat = (1, 0, 0)` lowers to `v0*1 + v1*0 + v2*0`).
 ///
-/// SAFE set (the ONLY identities folded here):
+/// safe set (the only identities folded here):
 ///   `x + 0 -> x`,  `0 + x -> x`
 ///   `x - 0 -> x`
 ///   `x * 1 -> x`,  `1 * x -> x`
 ///   `x / 1 -> x`
 ///
 /// safety: `Mul`-absorbing arms (`x * 0 -> 0` / `0 * x -> 0`) are
-/// INTENTIONALLY OMITTED — IEEE-754 says `inf * 0 = NaN` and `NaN * 0 = NaN`,
+/// intentionally omitted — IEEE-754 says `inf * 0 = NaN` and `NaN * 0 = NaN`,
 /// and the user's `feedback_no_silent_floors` policy is that NaN must
 /// propagate so dt-reduction / regression-test machinery sees it. while the
-/// substrate's current emit only feeds SYNTACTIC `Op::Const(0.0)` into Mul
+/// substrate's current emit only feeds syntactic `Op::Const(0.0)` into Mul
 /// (so `inf` could not in practice reach the zero arm), any future builder
 /// that drops a syntactic 0 into a flux-limiter / floor-clamp position could
 /// pick up an `inf * x` upstream — and the absorbing fold would mask it
 /// silently. removed pre-emptively.
 ///
-/// the safe set is the ONE `arith_identity_elements` table in `graph.rs`, which the
+/// the safe set is the one `arith_identity_elements` table in `graph.rs`, which the
 /// graph-layer fold queries too — the two layers structurally cannot drift.
 ///
 /// comparison / bitwise kinds fall through to construction unchanged.
@@ -2081,8 +2081,8 @@ mod tests {
     #[test]
     fn iterate_inline_lowers_to_one_loop_body_emitted_once() {
         // a fixed-iteration sqrt-Newton: acc <- 0.5*(acc + a/acc). `a` is
-        // loop-INVARIANT (must stay outside the loop); the acc-dependent step
-        // (a/acc, acc+.., 0.5*..) goes INSIDE — emitted ONCE.
+        // loop-invariant (must stay outside the loop); the acc-dependent step
+        // (a/acc, acc+.., 0.5*..) goes inside — emitted once.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);
         let acc = g.iter_acc(0, None);
@@ -2096,7 +2096,7 @@ mod tests {
 
         let k = scalarize_kernel(&g, &[it]);
 
-        // exactly ONE loop (the body emitted once).
+        // exactly one loop (the body emitted once).
         let fors: Vec<&ScalarStmt> = k
             .body
             .iter()
@@ -2125,7 +2125,7 @@ mod tests {
                 "loop body must end with `acc = step`: {:?}",
                 body,
             );
-            // the acc-dependent step IS inside the loop (a Div for a/acc).
+            // the acc-dependent step is inside the loop (a Div for a/acc).
             assert!(
                 body.iter()
                     .any(|s| matches!(s, ScalarStmt::Assign { value, .. }
@@ -2152,9 +2152,9 @@ mod tests {
     #[test]
     fn vector_iterate_updates_simultaneously() {
         // RMHD c2p: a 2-component accumulator — the Fibonacci recurrence
-        // (a, b) -> (b, a+b). this is the cleanest probe of SIMULTANEOUS update:
-        // sequential (`a = b; b = a + b`) would read the NEW `a` and corrupt it.
-        // the substrate must emit BOTH assigns AFTER the step body, reading the OLD
+        // (a, b) -> (b, a+b). this is the cleanest probe of simultaneous update:
+        // sequential (`a = b; b = a + b`) would read the new `a` and corrupt it.
+        // the substrate must emit both assigns after the step body, reading the old
         // accumulators. (the RMHD KKC c2p carries a 4-value bracket the same way.)
         let mut g = Graph::new();
         let a0 = g.iter_acc(0, None);
@@ -2191,8 +2191,8 @@ mod tests {
             k.body
         );
 
-        // the loop ends with the two assigns BOTH last (simultaneous), each reading
-        // the OLD accumulator locals.
+        // the loop ends with the two assigns both last (simultaneous), each reading
+        // the old accumulator locals.
         let for_body = k
             .body
             .iter()
@@ -2211,7 +2211,7 @@ mod tests {
             "expected 2 simultaneous assigns: {:?}",
             for_body
         );
-        // they must be the LAST two statements (nothing reads a partially-updated acc).
+        // they must be the last two statements (nothing reads a partially-updated acc).
         assert!(
             matches!(for_body[for_body.len() - 2], ScalarStmt::Assign { .. })
                 && matches!(for_body[for_body.len() - 1], ScalarStmt::Assign { .. }),

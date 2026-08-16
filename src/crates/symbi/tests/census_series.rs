@@ -1,7 +1,7 @@
 // =============================================================================
 // census_series.rs
 //
-// the census as an OUTPUT: registered on a simulation, sampled at the tail of every
+// the census as an output: registered on a simulation, sampled at the tail of every
 // accepted step, and written into the checkpoint as its own group.
 //
 // what these gates establish:
@@ -102,7 +102,7 @@ fn a_run_without_registrations_is_untouched_by_the_mechanism() {
     assert!(!observed.censuses[0].history.is_empty());
 
     // a census is a pure observer: it reads the state and feeds nothing back, so the
-    // fluid result must agree BITWISE with the unobserved run.
+    // fluid result must agree bitwise with the unobserved run.
     for c in bare.geom.interior.iter() {
         assert_eq!(
             bare.fields.cons.den.view().at(c).to_bits(),
@@ -149,7 +149,7 @@ fn one_sample_lands_per_accepted_step() {
 #[test]
 fn each_sample_conserves_the_total_mass_across_its_shells() {
     // the partition property, now per sample and through the whole run: an outflow
-    // boundary lets mass leave, so the total drifts — but within ANY ONE sample the
+    // boundary lets mass leave, so the total drifts — but within any one sample the
     // shells must still add up to that instant's total.
     let mut sim = build_sim();
     register(&mut sim, &shell_census());
@@ -175,7 +175,7 @@ fn each_sample_conserves_the_total_mass_across_its_shells() {
         sample(last, 0)
     );
 
-    // the volume channel is a property of the GRID, not the flow, so it must be the same
+    // the volume channel is a property of the grid, not the flow, so it must be the same
     // in every sample — a drifting volume would mean the binning moved under the census.
     let v0 = sample(0, 1);
     for ii in 0..history.len() {
@@ -241,7 +241,7 @@ fn the_series_reaches_the_checkpoint_with_its_edges_and_labels() {
     assert_eq!(ds("time").shape, vec![n_samples]);
     assert_eq!(ds("values").shape, vec![n_samples, 4, 2]);
     assert_eq!(ds("dropped").shape, vec![n_samples]);
-    // the edges are a property of the registration, so they are written ONCE, not per row.
+    // the edges are a property of the registration, so they are written once, not per row.
     assert_eq!(ds("axis0_edges").shape, vec![5]);
     assert_eq!(
         ds("axis0_edges").data.as_f64().unwrap().to_vec(),

@@ -17,7 +17,7 @@ scientific_theme = ThemeConfig(
     grid=False,
     axis_below=True,
     # figure styling
-    fig_size=(6, 4.5),  # Standard figure size for publications (I think)
+    fig_size=(6, 4.5),  # standard figure size for publications
     dpi=300,
     # # LaTeX settings
     use_tex=True,

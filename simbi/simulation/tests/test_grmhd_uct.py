@@ -4,15 +4,15 @@
 # the GR-UCT constrained-transport gates: the upwind
 # constrained-transport edge EMF (Del Zanna 2007 / M&DZ 2020 master form) on a
 # curved background — the densitized corner EMF `Etilde_phi` built from the
-# transport velocity `vtilde = alpha v - beta` and the SHIFTED Banyuls-Font bound
+# transport velocity `vtilde = alpha v - beta` and the shifted Banyuls-Font bound
 # speeds (materialized per cell, quartic-free), consumed by the same GR curl the
 # contact EMF uses. UCT-HLL coefficients; the sharper UCT-HLLD wave-sum is
 # unimplemented.
 #
-# the gates are CORRECTNESS; a quantitative checkerboard win needs the
+# the gates are correctness; a quantitative checkerboard win needs the
 # sharp UCT-HLLD solver — the HLLE gas flux here is already diffusive:
 #
-#   smooth-limit: the theta-uniform magnetized-michel monopole holds IDENTICALLY
+#   smooth-limit: the theta-uniform magnetized-michel monopole holds identically
 #   under UCT and contact (E_phi = 0 pointwise, so the upwind master form and the
 #   contact soft-blend agree) — B static, hydro hold == the 1D gate.
 #
@@ -61,7 +61,7 @@ def _run_michel(ct: CtMethod):
 
 @needs_backend
 def test_uct_holds_the_michel_monopole_like_contact() -> None:
-    # the smooth field: the upwind UCT master form must give the SAME (zero) EMF as
+    # the smooth field: the upwind UCT master form must give the same (zero) EMF as
     # the contact soft-blend, so B stays static and the hydro holds the michel profile.
     p, first, final = _run_michel(CtMethod.UCT)
     with h5py.File(final) as h:
@@ -88,7 +88,7 @@ def _w_div_max(p, B1, B2) -> tuple[float, float]:
     rf = np.array(p.radial_faces())
     tf = np.array(p.theta_faces())
     dr, dth = rf[1] - rf[0], tf[1] - tf[0]
-    # the measure comes from the PROBLEM, not a second spelling here: the seed is built against
+    # the measure comes from the problem, not a second spelling here: the seed is built against
     # it and the divergence is measured with it, so a chart change must move both together.
     sg = p.sqrt_gamma
     rc = 0.5 * (rf[:-1] + rf[1:])

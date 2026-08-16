@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 # the checkpoint adapter: bridges symbi's HDF5 checkpoints into the afterglow's neutral
-# `Cell` ingestion. kept as a SEPARATE crate so symbi-afterglow stays a pure, dependency-light
+# `Cell` ingestion. kept as a separate crate so symbi-afterglow stays a pure, dependency-light
 # leaf (the physics core) while the file/HDF5 coupling lives here — a sibling adapter above it.
 [dependencies]
 symbi-afterglow = { path = "../symbi-afterglow" }

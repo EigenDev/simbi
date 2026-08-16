@@ -1,8 +1,8 @@
 // =============================================================================
 // block.rs
 //
-// the BLOCK DECOMPOSITION primitive: a `Domain` tiled into fixed-size blocks.
-// the blocks are a PARTITION of the domain — pairwise disjoint and exactly
+// the block decomposition primitive: a `Domain` tiled into fixed-size blocks.
+// the blocks are a partition of the domain — pairwise disjoint and exactly
 // covering it (the last block on a non-divisible axis is partial). this is the
 // disjoint cover that physics fans out over, and the foundation for choosing a
 // block size that controls the surface-to-volume (ghost) ratio.
@@ -102,7 +102,7 @@ impl<const R: usize> BlockGrid<R> {
         (lo, size)
     }
 
-    /// the block multi-index that OWNS a domain cell. every cell of the domain
+    /// the block multi-index that owns a domain cell. every cell of the domain
     /// lies in exactly one block; this finds it. (out-of-domain coords clamp to
     /// the nearest block — callers should pass interior coords.)
     pub fn block_of(&self, coord: [isize; R]) -> [usize; R] {
@@ -134,11 +134,11 @@ impl<const R: usize> BlockGrid<R> {
         out
     }
 
-    /// the GHOST RATIO for a halo of `width`: ghost cells per interior cell for a
-    /// FULL block, `prod(b_a + 2w) / prod(b_a) - 1`. this is the surface-to-volume
+    /// the ghost ratio for a halo of `width`: ghost cells per interior cell for a
+    /// full block, `prod(b_a + 2w) / prod(b_a) - 1`. this is the surface-to-volume
     /// quantity that dominates haloed-stencil cost (measured: binary_disk prolong
     /// share fell 60% -> 34% as the block went 16^3 -> 48^3). it is strictly
-    /// DECREASING in every block dimension — grow `block` to shrink the overhead.
+    /// decreasing in every block dimension — grow `block` to shrink the overhead.
     pub fn ghost_ratio(&self, width: usize) -> f64 {
         let inner: usize = self.block.iter().product();
         let outer: usize = self.block.iter().map(|&b| b + 2 * width).product();
@@ -150,7 +150,7 @@ impl<const R: usize> BlockGrid<R> {
 // algebraic laws (axioms)
 //
 // the block grid is verified against ground-truth set semantics: the blocks
-// PARTITION the domain (disjoint + covering), block_of inverts block membership,
+// partition the domain (disjoint + covering), block_of inverts block membership,
 // and the ghost ratio is monotone in block size — the "larger patches are
 // cheaper" result, encoded as a law.
 // =============================================================================
@@ -217,12 +217,12 @@ mod laws {
             let vol_sum: usize = blocks.iter().map(|b| b.volume()).sum();
             assert_eq!(vol_sum, union.len(), "blocks not disjoint by volume");
 
-            // COVERING: union == the whole domain, exactly.
+            // covering: union == the whole domain, exactly.
             assert_eq!(union, cells(&dom), "blocks do not cover the domain");
         }
     }
 
-    // AXIOM: window(bi) is block()'s (lo, size) without minting a Domain — same
+    // axiom: window(bi) is block()'s (lo, size) without minting a Domain — same
     // disjoint cover, allocation-free. (blocks() and window share the row-major
     // axis-0-fastest index order.)
     #[test]
@@ -255,7 +255,7 @@ mod laws {
         }
     }
 
-    // AXIOM: block_of inverts membership — every cell is owned by the unique
+    // axiom: block_of inverts membership — every cell is owned by the unique
     // block that contains it.
     #[test]
     fn block_of_finds_the_owning_block() {
@@ -282,7 +282,7 @@ mod laws {
         }
     }
 
-    // AXIOM: the ghost ratio is STRICTLY DECREASING in block size (for width>0)
+    // axiom: the ghost ratio is strictly decreasing in block size (for width>0)
     // and zero at width 0 — "larger blocks are cheaper", as a law.
     #[test]
     fn ghost_ratio_is_monotone_in_block_size() {
@@ -307,7 +307,7 @@ mod laws {
         assert_eq!(BlockGrid::new(dom, [32, 32, 32]).ghost_ratio(0), 0.0);
     }
 
-    // the block decomposition COMPOSES with guillotine_difference: a block's halo
+    // the block decomposition composes with guillotine_difference: a block's halo
     // shell (expanded block minus the block) is the minimal disjoint cover.
     #[test]
     fn block_halo_is_a_guillotine_shell() {

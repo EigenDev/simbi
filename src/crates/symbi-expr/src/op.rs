@@ -6,7 +6,7 @@
 // string parsing for config deserialization, arity for validation.
 //
 // usage:
-//   let op = Op::from_name("ADD").unwrap();
+//   let op = Op::from_name("add").unwrap();
 //   assert_eq!(op.arity(), 2);
 // =============================================================================
 
@@ -21,10 +21,10 @@ pub enum Op {
     VariableT,
     Parameter,
 
-    // per-cell STATE variables (arity 0): the fluid state a source/expression reads at the
+    // per-cell state variables (arity 0): the fluid state a source/expression reads at the
     // cell. unlike the coordinate variables above (which the standalone VM pre-loads), these
     // are resolved by the source bridge into carrier field reads (`rho`/`vel_k`/`pre`); they
-    // are NOT VM registers, so they appear only on the source-lowering path, never the VM.
+    // are not VM registers, so they appear only on the source-lowering path, never the VM.
     VariableRho,
     VariableVel1,
     VariableVel2,

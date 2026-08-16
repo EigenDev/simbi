@@ -1,14 +1,14 @@
 // =============================================================================
 // nvrtc.rs
 //
-// NVRTC: NVIDIA's runtime CUDA compiler (libnvrtc.so). compiles a CUDA C++
+// NVRTC: nvidia's runtime CUDA compiler (libnvrtc.so). compiles a CUDA C++
 // source string straight to PTX in-process — no `nvcc` binary, no host C++
 // compiler, no temp files (every accelerator compiles at
 // runtime via its own runtime compiler). this is what lets `Sim<UnifiedMemory>`
 // JIT + run a substrate kernel on the GPU independent of the nvcc toolchain (the
 // host gcc-16 breaks nvcc; NVRTC ships its own front-end and stays unaffected).
 //
-// the driver still JITs the PTX to SASS at module load, so compilation targets the device's
+// the driver still JITs the PTX to sass at module load, so compilation targets the device's
 // virtual arch (`compute_<major><minor>`, queried from the driver) and let the
 // driver finish the lowering for whatever GPU is present.
 //
@@ -49,7 +49,7 @@ unsafe extern "C" {
 /// compile a CUDA C++ source string to PTX bytes via NVRTC. targets the present
 /// device's `compute_<major><minor>` virtual arch. on a compile error, the NVRTC
 /// program log (the actual compiler diagnostics) is returned in the error detail.
-/// the returned bytes are NUL-terminated — `CudaSpace::load_module` accepts that.
+/// the returned bytes are nul-terminated — `CudaSpace::load_module` accepts that.
 pub fn compile_ptx(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
     let (major, minor) = crate::cuda::device_compute_capability()?;
     let arch = CString::new(format!("--gpu-architecture=compute_{major}{minor}"))
@@ -59,7 +59,7 @@ pub fn compile_ptx(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
     // against the CPU, which evaluates the multiply and add as separate rounded
     // steps. leave `--fmad=false` out.
     // -O3 falls outside NVRTC's recognized options on the current driver; the PTX ->
-    // SASS JIT done at module load by the CUDA driver already optimizes at -O3, so
+    // sass JIT done at module load by the CUDA driver already optimizes at -O3, so
     // performance here is already captured. confirm the NVRTC version actually
     // accepts `-O3` before adding it back.
 

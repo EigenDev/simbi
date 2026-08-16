@@ -126,7 +126,7 @@ fn part3_what_a_cuda_warp_actually_reads() {
         println!("    thread {warp_lane}: cell ({i}, 0, 0) -> flat = {flat}");
     }
 
-    // pin: adjacent warp threads access ADJACENT memory (stride 1) ->
+    // pin: adjacent warp threads access adjacent memory (stride 1) ->
     // coalesced reads. this is the load-bearing assertion.
     if NX >= 2 {
         let stride_between_threads = addrs[1] - addrs[0];
@@ -147,8 +147,8 @@ fn part4_what_numpy_imshow_sees() {
     // (Nz=1) the user reshapes to `(Ny, Nx)` in numpy (last-axis fastest ->
     // matches the axis-0 = x = fastest convention).
     //
-    // matplotlib `imshow(arr)` puts numpy axis 0 as ROWS (vertical) and
-    // axis 1 as COLUMNS (horizontal). with reshape (Ny, Nx):
+    // matplotlib `imshow(arr)` puts numpy axis 0 as rows (vertical) and
+    // axis 1 as columns (horizontal). with reshape (Ny, Nx):
     //   - numpy axis 0 = Ny -> vertical screen axis = physical y
     //   - numpy axis 1 = Nx -> horizontal screen axis = physical x
     // standard physics orientation, screen axes aligned with the physical ones.

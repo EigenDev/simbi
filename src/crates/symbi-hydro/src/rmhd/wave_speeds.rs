@@ -292,7 +292,7 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
     let r2_hi = S::select(d2_valid, r2_nz, sent_lo);
     let r3_hi = S::select(d2_valid, r3_nz, sent_lo);
 
-    // OR of validity (d1_valid || d2_valid), expressed via select so it stays traceable:
+    // or of validity (d1_valid || d2_valid), expressed via select so it stays traceable:
     // `cmp_*` returns a Bool node under the tracing carrier (Gv), so arithmetic on it
     // (`1-(1-a)(1-b)`) is a type error — select keeps it a clean 0/1 value.
     let any_valid = S::select(d1_valid, S::ONE, S::select(d2_valid, S::ONE, S::ZERO));
@@ -437,7 +437,7 @@ mod tests {
     /// rmhd_wave_speeds kernel.
     ///
     /// the estimate counts every ancestor-scope `Let` as live and ignores true liveness, so it is a
-    /// conservative upper bound, well above the SASS register count a device compiler picks. the
+    /// conservative upper bound, well above the sass register count a device compiler picks. the
     /// full Mignone & Del Zanna quartic (~200 ops) sits inside the lazily-selected branch reached
     /// where the flow is away from near-static (`vsq ~ 0`) and away from field-aligned degeneracy
     /// (`bn ~ 0`); the estimate sums that whole branch body as simultaneously live at the deepest
@@ -889,7 +889,7 @@ mod tests {
         use std::hint::black_box;
         use std::time::Instant;
 
-        // deterministic LCG giving representative (b,c,d) coefficient triples spanning
+        // deterministic lcg giving representative (b,c,d) coefficient triples spanning
         // all four resolvent cases (p>0, three-real, q-sign), free of an rng dependency.
         let n = 5_000_000usize;
         let mut inputs = Vec::with_capacity(n);

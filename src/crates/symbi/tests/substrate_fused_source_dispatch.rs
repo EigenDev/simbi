@@ -2,11 +2,11 @@
 // substrate_fused_source_dispatch.rs
 //
 // the substrate dispatch entry
-// `dispatch_godunov_with_sources` selects the AOT-baked FUSED kernel
+// `dispatch_godunov_with_sources` selects the AOT-baked fused kernel
 // (`{prefix}_godunov_euler_with_{source_id}_{ndim}d`) by composing the
 // runtime name + packing the spec source's scalar params alongside `dt` + the
 // per-axis grid scalars. one substrate call runs `div(F) + spec source +
-// integrator` in ONE kernel launch — replacing the two-kernel (godunov +
+// integrator` in one kernel launch — replacing the two-kernel (godunov +
 // body_source) pattern.
 //
 // **what this validates**:
@@ -44,11 +44,11 @@ const GAMMA: f64 = 1.4;
 fn substrate_routes_to_adiabatic_fused_uniform_accel() {
     // end-to-end: the substrate dispatch composes the fused
     // kernel name, packs the spec source's `g_ext_0` scalar, AOT-registry
-    // resolves the kernel, and one launch applies BOTH mom + nrg overlays of
+    // resolves the kernel, and one launch applies both mom + nrg overlays of
     // `uniform_acceleration` (multi-source) to the SimState in-place.
     let n = 8usize;
     let dx = 1.0 / n as f64;
-    // trivial seed to reach a Ready sim; the EXACT conserved literals this test asserts are
+    // trivial seed to reach a Ready sim; the exact conserved literals this test asserts are
     // written raw below (the source step is applied to these raw gauge values, which need not form a physical prim).
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([n])
@@ -81,8 +81,8 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
         cnrg.view_mut().set(c, nrg_v);
     }
 
-    // pre-populate the per-axis flux buffers as CONSTANTS — uniform fluxes give
-    // zero divergence on the interior, so the output IS the source contribution.
+    // pre-populate the per-axis flux buffers as constants — uniform fluxes give
+    // zero divergence on the interior, so the output is the source contribution.
     // (the production evolve() path computes these via the flux kernel; stubbed
     // here so the test isolates the godunov + fused-source step.)
     let face = sim.fields.flux[0].den.domain().clone();
@@ -148,7 +148,7 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
 
 #[test]
 fn substrate_routes_to_iso_fused_uniform_accel() {
-    // **iso variant**: the iso fused kernel has NO energy law (mass + mom only).
+    // **iso variant**: the iso fused kernel has no energy law (mass + mom only).
     // proves the per-regime name routing — `iso_godunov_euler_with_uniform_accel_1d`
     // resolves correctly with the same fused-source plumbing.
     use symbi_algebra::Tensor;
@@ -161,7 +161,7 @@ fn substrate_routes_to_iso_fused_uniform_accel() {
     let n = 8usize;
     let dx = 1.0 / n as f64;
     let cs = 1.0_f64;
-    // trivial seed to reach a Ready iso sim; the EXACT conserved literals are written raw below.
+    // trivial seed to reach a Ready iso sim; the exact conserved literals are written raw below.
     let sim = IsoSim::build(IsoNewtonian, Isothermal { cs }, Cartesian)
         .cells([n])
         .spacing([dx])

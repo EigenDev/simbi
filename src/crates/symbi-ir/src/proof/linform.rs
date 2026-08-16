@@ -5,7 +5,7 @@
 // `LinFormR` (rational-function coefficients) — linear combinations of field
 // reads `sum_t coeff_t * read(t)`. cancellation to the empty/zero map is the
 // div(curl B)=0 proof condition. pure transforms only (add/scaled/shifted/
-// canonicalize/neg/residual/...); the IR-DAG extraction lives in extract.rs.
+// canonicalize/neg/residual/...); the ir-dag extraction lives in extract.rs.
 //
 // usage:
 //  let mut acc = curl_lf.shifted(&[1, 0, 0]);
@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 use super::poly::{FieldTerm, Poly, RatFun};
 
-/// a linear combination of field reads with RATIONAL-FUNCTION coefficients — the
+/// a linear combination of field reads with rational-function coefficients — the
 /// curvilinear analog of `LinForm`. cancellation to all-zero numerators is the
 /// curvilinear div(curl B)=0 proof.
 #[derive(Clone, Debug, Default)]
@@ -85,8 +85,8 @@ impl LinFormR {
         self.scaled(c)
     }
 
-    /// shift every field read's offset by `delta` (per-axis) AND apply the same
-    /// shift COVARIANTLY to each coefficient's coord/sin dependence. THIS is the
+    /// shift every field read's offset by `delta` (per-axis) and apply the same
+    /// shift covariantly to each coefficient's coord/sin dependence. this is the
     /// curvilinear divergence stencil: the curl at cell c+e_dir uses the geometry
     /// at c+e_dir, so the coefficients must translate with the read.
     pub fn shifted(&self, delta: &[i32]) -> LinFormR {
@@ -101,9 +101,9 @@ impl LinFormR {
     }
 
     /// rename the form's field keys through `rename` (the per-dir generic emf keys
-    /// e_p1/e_p2 -> physical e_<axis>). UNLIKE the cartesian `canonicalize`, the
-    /// per-dir generic SCALAR widths do not appear in the curvilinear coefficients
-    /// (the geometry is built from the absolute axis scalars x_lo_N/dx_N, NOT
+    /// e_p1/e_p2 -> physical e_<axis>). unlike the cartesian `canonicalize`, the
+    /// per-dir generic scalar widths do not appear in the curvilinear coefficients
+    /// (the geometry is built from the absolute axis scalars x_lo_N/dx_N, not
     /// per-dir id_pN), so only the field keys are renamed here.
     pub fn canonicalize_keys(
         &self,
@@ -124,7 +124,7 @@ impl LinFormR {
     }
 
     /// the non-cancelling terms (field read + residual numerator), for diagnostics
-    /// when the proof FAILS.
+    /// when the proof fails.
     pub fn residual(&self) -> Vec<(FieldTerm, Poly)> {
         self.terms
             .iter()
@@ -179,9 +179,9 @@ impl LinForm {
     }
 
     /// rewrite the form's field keys and scalar-param variable names through
-    /// `rename` (`old -> new`). the per-dir curl builder reuses the GENERIC keys
+    /// `rename` (`old -> new`). the per-dir curl builder reuses the generic keys
     /// `e_p1`/`e_p2` and scalars `id_p1`/`id_p2` for all three face axes, but
-    /// they denote DIFFERENT physical emf components / inverse widths per dir
+    /// they denote different physical emf components / inverse widths per dir
     /// (the runtime dispatch binds the real buffers positionally). to telescope
     /// the three dirs symbolically they must first be canonicalized to their
     /// physical-axis identity. keys not in `rename` pass through unchanged.
@@ -257,12 +257,12 @@ impl LinForm {
     }
 
     /// true iff the linear form is identically zero — every coefficient
-    /// polynomial cancelled. THIS is the div(B)=0 proof condition.
+    /// polynomial cancelled. this is the div(B)=0 proof condition.
     pub fn is_zero(&self) -> bool {
         self.terms.values().all(|p| p.is_zero())
     }
 
-    /// the non-cancelling terms, for diagnostics when the proof FAILS — a real
+    /// the non-cancelling terms, for diagnostics when the proof fails — a real
     /// bug-discovery report (which field read at which offset survived, with its
     /// residual coefficient).
     pub fn residual(&self) -> Vec<(FieldTerm, Poly)> {

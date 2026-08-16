@@ -2,16 +2,16 @@
 // cylindrical_regime_coverage.rs
 //
 // fills the cylindrical hydro matrix: 1D (radial), 2D (r-phi disk), 3D (r,phi,z) for
-// ALL THREE EOS regimes (iso / newton-adiabatic / rhd) — the natural DOF == NDIM
+// all three EOS regimes (iso / newton-adiabatic / rhd) — the natural DOF == NDIM
 // plane, dispatched through geom_suffix to the "_cyl" godunov + wave-speed (the
 // c2p/flux/snapshot/ghost reuse the cartesian ncomp==NDIM instances). the geometric
-// source falls out of the Geom and is SHARED across the three regimes
+// source falls out of the Geom and is shared across the three regimes
 // (`GeoSource::Hydro`), so two newton physics checks prove the cyl 1D + 3D source is
 // active + correctly signed, and the iso/rhd cells are NaN-free-smoke validated
 // (their flux/c2p closures are already validated in cartesian/spherical).
 //
-//   newton: cyl-1D uniform radial OUTFLOW rarefies as rho_dot = -rho*v_r/r (the 1/r
-//           area-weighted divergence); cyl-3D uniform SWIRL drives v_r*r ~ v0^2*t
+//   newton: cyl-1D uniform radial outflow rarefies as rho_dot = -rho*v_r/r (the 1/r
+//           area-weighted divergence); cyl-3D uniform swirl drives v_r*r ~ v0^2*t
 //           (the centrifugal source, with z gridded but inert).
 //   iso/rhd: each runs NaN-free + positive over a short evolve on cyl 1D/2D/3D.
 // =============================================================================
@@ -50,7 +50,7 @@ fn cyl_bc<const D: usize>() -> Boundaries<D> {
 
 #[test]
 fn cyl_1d_radial_outflow_rarefies_1_over_r() {
-    // uniform rho/p with a uniform OUTWARD v_r=v0: cylindrical continuity gives
+    // uniform rho/p with a uniform outward v_r=v0: cylindrical continuity gives
     // rho_dot = -(1/r) d(r rho v_r)/dr = -rho v_r / r (uniform). so (rho0-rho)*r ~ rho0*v0*t,
     // constant across radius — the 1/r area-weighting. a cartesian scheme leaves rho uniform.
     type Sim = SimStateGeneric<Newtonian, 1, 1, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;

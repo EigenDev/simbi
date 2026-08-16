@@ -26,7 +26,7 @@ const N: usize = 6;
 const NZ: usize = 5;
 
 // a sheared, stratified in-plane state. the shear drives the stress, the density and pressure
-// gradients make the LOCAL cs^2 (hence nu) vary from cell to cell, and none of it depends on z.
+// gradients make the local cs^2 (hence nu) vary from cell to cell, and none of it depends on z.
 fn rho_at(i: usize, j: usize) -> f64 {
     1.0 + 0.3 * (i as f64) - 0.2 * (j as f64)
 }
@@ -175,7 +175,7 @@ fn vertical_stratification_reaches_the_viscosity() {
             }
         }
     }
-    // a vertically varying pressure changes the LOCAL sound speed, hence nu, hence the update.
+    // a vertically varying pressure changes the local sound speed, hence nu, hence the update.
     // an operator that read one z-independent nu (the isothermal rule) would give zero here.
     assert!(
         worst > 1e-9,

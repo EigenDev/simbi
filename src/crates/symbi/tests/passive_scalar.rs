@@ -44,7 +44,7 @@ fn build(bc: BoundaryType, ic: impl Fn([f64; 2]) -> Prim<f64, 2>) -> Sim {
         .expect("chi alloc")
 }
 
-// seed chi = f(x, y) over the WHOLE allocated (ghost-padded) grid so the first
+// seed chi = f(x, y) over the whole allocated (ghost-padded) grid so the first
 // stage's upwind stencil reads consistent ghosts before any fill runs.
 fn seed_chi(sim: &Sim, f: impl Fn(f64, f64) -> f64) {
     let dx = 2.0 * L / N as f64;
@@ -165,10 +165,10 @@ fn dye_front_advects_at_the_flow_speed() {
     );
 }
 
-// the python driver ALWAYS wraps the sim in a single-level hierarchy (fofc
+// the python driver always wraps the sim in a single-level hierarchy (fofc
 // lives there), which sequences its stages by hand — a chi phase present only
 // in the uni-grid pipeline is invisible to every python run. this gate drives
-// the SAME hierarchy loop and pins that the dye actually moves under it.
+// the same hierarchy loop and pins that the dye actually moves under it.
 #[test]
 fn dye_advects_under_the_hierarchy_driver() {
     use symbi::sim::refinement::Hierarchy;

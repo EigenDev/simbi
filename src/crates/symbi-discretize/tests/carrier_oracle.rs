@@ -1290,12 +1290,12 @@ fn plm_theta_f64(q: &[f64], i: usize, theta: f64) -> (f64, f64) {
 #[test]
 fn euler_flux_nonuniform_reconstruction_drives_limiter() {
     // a 4-cell density/pressure/velocity series chosen so the theta-MC slope hits each
-    // minmod3 arm at the face cell FCELL: a local extremum (clamp to 0) on one field,
+    // minmod3 arm at the face cell fcell: a local extremum (clamp to 0) on one field,
     // a monotone steep gradient (sign-consistent) on another. theta = 1.5 (compression
     // in [1,2]) makes the *theta vs *0.5 selection non-trivial.
     let theta = 1.5_f64;
     // the series are chosen so the theta-MC limiter takes all three minmod3 arms across the
-    // two reconstruction stencils at FCELL (left = cells {0,1,2}, right = cells {1,2,3}):
+    // two reconstruction stencils at fcell (left = cells {0,1,2}, right = cells {1,2,3}):
     //   rho: all-positive arm (both stencils, magnitude-limited).
     //   v0:  all-negative arm (left) and the sign-mixed clamp-to-zero arm (right, local extremum).
     //   v1:  all-negative arm (both, the transverse component is reconstructed too).
@@ -1343,7 +1343,7 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
 
     // Gv kernel: that same adiabatic flux on the per-cell series, evaluated on the f64
     // interpreter. the kernel reconstructs internally (the non-uniform input drives its
-    // select-branches), so its output at FCELL must equal the f64 reference.
+    // select-branches), so its output at fcell must equal the f64 reference.
     let out = KernelRun::new(adiabatic_flux_gv::<2>(0, Recon::Plm))
         .grid([NSWEEP, 1])
         .compute_window([FCELL as i32, 0], [1, 1])

@@ -11,7 +11,7 @@
 //     offsets, alignment), which the static_asserts in `substrate_gpu.rs` cannot
 //     catch alone (those only pin the Rust side);
 //   - drift in the `__symbi_View` CUDA struct emitted by the kernel preamble
-//     away from the Rust POD passed by value.
+//     away from the Rust pod passed by value.
 //
 // the round-trip is the only mechanical check that the two structs agree: a
 // one-byte field reorder on either side otherwise shows up only as garbled
@@ -30,7 +30,7 @@ use symbi_xpu::cuda::{UnifiedMemory, ctx_sync};
 use symbi_xpu::runtime::{GpuRuntime, cuda_runtime::current_dispatcher};
 use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
 
-// host-side mirror of the CUDA `__symbi_View` struct. MUST match the
+// host-side mirror of the CUDA `__symbi_View` struct. must match the
 // substrate's `DeviceView` (substrate_gpu.rs) in layout. redeclared
 // here because `DeviceView` is private to the symbi
 // crate; the static asserts on that side + this round-trip lock both ends.

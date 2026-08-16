@@ -6,7 +6,7 @@
 // `Selectable`) live in `symbi_ir::algebra`; this is the structural subset.
 // this trait is `pub(crate)`-equivalent: its audience is `symbi-algebra`
 // itself. its role is to provide arithmetic / sqrt / min / max / abs /
-// ZERO / ONE / from_f64 so dot / norm / det / inv etc. compile within this
+// zero / one / from_f64 so dot / norm / det / inv etc. compile within this
 // crate alone (a `symbi-ir` dependency would close a cycle — `symbi-ir` already
 // depends on `symbi-algebra` for `Tensor`, `FieldElement`, `Domain`).
 //

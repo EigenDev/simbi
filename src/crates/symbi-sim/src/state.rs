@@ -31,7 +31,7 @@ use symbi_ir::algebra::Scalar;
 use symbi_xpu::{DefaultMemory, DefaultSpace, ExecutionSpace, Executor, MemorySpace};
 
 // =============================================================================
-// energy/pressure FIELD slot — the field-layer analog of
+// energy/pressure field slot — the field-layer analog of
 // `symbi_hydro::energy::EnergySlot`. encodes energy presence at the type level so
 // `cons.nrg` / `prim.pre` are a real `Field` for energy regimes and a zero-sized
 // `FieldZero` for isothermal — retiring the runtime `Option<Field>`. lives in this crate
@@ -85,7 +85,7 @@ impl<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> EnergyFieldS
     }
 }
 
-/// bridge from an energy MARKER (`Adiabatic` / `IsoModel`, foreign `symbi-hydro` types) to its
+/// bridge from an energy marker (`Adiabatic` / `IsoModel`, foreign `symbi-hydro` types) to its
 /// field slot. impl'd here (local trait + foreign type) so `SimStateGeneric<R, ..>` can pick the
 /// field storage from `R::Energy` at the type level.
 pub trait FieldEnergy {
@@ -114,7 +114,7 @@ impl FieldEnergy for symbi_hydro::energy::IsoModel {
 /// GPU-optimal: each kernel reads one contiguous array at a time. nrg is None for
 /// isothermal regimes (no energy equation).
 ///
-/// `NDIM` is the GRID dimension (the field storage `Field<Sc, NDIM, M>`); `DOF` the VECTOR
+/// `NDIM` is the grid dimension (the field storage `Field<Sc, NDIM, M>`); `DOF` the vector
 /// (momentum-component) dimension — decoupled, so axisymmetric (r,z) hydro carries `DOF=3`
 /// momentum components (the v_phi swirl) on an `NDIM=2` grid. the `ConsFields<D>` alias fills
 /// `DOF = NDIM = D` (the natural case), so every existing site is unchanged.
@@ -256,7 +256,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     }
 
     /// gather AoS from SoA with a specific energy model.
-    /// isothermal: nrg slot becomes Zero<f64> (ZST). adiabatic: nrg slot is f64.
+    /// isothermal: nrg slot becomes Zero<f64> (zst). adiabatic: nrg slot is f64.
     #[inline]
     pub fn gather_as<E: EnergyModel>(&self, coord: [isize; NDIM]) -> ConsG<Sc, DOF, E> {
         ConsG {
@@ -406,7 +406,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     }
 
     /// gather AoS from SoA with a specific energy model.
-    /// isothermal: pre slot becomes Zero<f64> (ZST). adiabatic: pre slot is f64.
+    /// isothermal: pre slot becomes Zero<f64> (zst). adiabatic: pre slot is f64.
     #[inline]
     pub fn gather_as<E: EnergyModel>(&self, coord: [isize; NDIM]) -> PrimG<Sc, DOF, E> {
         PrimG {
@@ -603,7 +603,7 @@ impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric
     }
 }
 
-/// the step-entry state an explicit step is replayed from after it is REJECTED: the gas
+/// the step-entry state an explicit step is replayed from after it is rejected: the gas
 /// conserved state plus both representations of the magnetic field. rolling the face field
 /// back exactly is what keeps `div(B) = 0` across a rejection — re-curling from a restored
 /// `bface` reproduces the accepted-step history rather than accumulating the rejected curl.
@@ -636,7 +636,7 @@ pub struct MhdStaggeredFields<
 
     /// cell-centered B: bcell[c] on the allocated domain (same as cons/prim), one
     /// per DOF vector component. the D in-plane components [0..D) are interpolated
-    /// from bface after CT; the (DOF-D) out-of-plane components [D..DOF) have no
+    /// from bface after CT; the (dof-d) out-of-plane components [D..DOF) have no
     /// face to stagger on and are carried/evolved cell-centered directly (1.5D /
     /// 2.5D MHD). at D=DOF this is the fully interpolated B.
     pub bcell: BcellFields<D, DOF, M, Sc>,
@@ -647,7 +647,7 @@ pub struct MhdStaggeredFields<
     /// the b_old the magnetic-energy correction reads before CT overwrites bcell.
     pub bcell_n: BcellFields<D, DOF, M, Sc>,
 
-    /// FOFC: the STAGE-INPUT cell B (snapshot in `snapshot_stage`, alongside `u_stage`). the
+    /// FOFC: the stage-input cell B (snapshot in `snapshot_stage`, alongside `u_stage`). the
     /// face-based CT redo restores `bcell <- bcell_stage` before re-running the stage from the
     /// spliced fluxes, so the recomputed edge EMF reads the stage-input B and the cell-B predictor
     /// combines from the correct base. only touched on a firing MHD substage.
@@ -673,7 +673,7 @@ pub struct MhdStaggeredFields<
     /// saved E from RK2 stage 1 (for time-averaging).
     pub efield_n: EfieldFields<D, M, Sc>,
 
-    /// FOFC: save of the HIGH-ORDER edge EMF (`= efield` at FOFC entry). the CT redo splices the
+    /// FOFC: save of the high-order edge EMF (`= efield` at FOFC entry). the CT redo splices the
     /// edge EMF `edge_flag ? E_FO(Contact) : E_HO`, keeping the saved HO EMF here on edges touching no
     /// flagged cell so their face field is bit-unchanged (I5). only touched on a firing substage.
     pub efield_ho: EfieldFields<D, M, Sc>,
@@ -685,7 +685,7 @@ pub struct MhdStaggeredFields<
     /// inner length DOF: each face carries all DOF B-component fluxes.
     pub bflux: [BfluxFields<D, DOF, M, Sc>; D],
 
-    /// FOFC: the HIGH-ORDER induction flux save (mirror of the gas `flux_ho`). the face-based CT
+    /// FOFC: the high-order induction flux save (mirror of the gas `flux_ho`). the face-based CT
     /// redo saves `bflux -> bflux_ho` before the first-order redo overwrites `bflux`, then splices
     /// FO-on-flagged faces from `bflux_ho` (HO) and the live `bflux` (FO) so the recomputed edge EMF
     /// and cell-B predictor are HO off the fallback region, FO on it. only touched on a firing
@@ -740,7 +740,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         };
 
         // face-centered B: one extra in normal direction; for MHD the CT
-        // stencil needs a TRANSVERSE halo. +/-2 (not +/-1): the faithful UCT edge EMF
+        // stencil needs a transverse halo. +/-2 (not +/-1): the faithful UCT edge EMF
         // (Mignone & Del Zanna) PLM-reconstructs the staggered transverse field to
         // the edge, whose minmod slope reaches the second transverse neighbor. +/-1
         // suffices for bface->bcell + curl-of-E (which read 1 neighbor); the extra
@@ -799,7 +799,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             }
             efield_vec.push(Field::zeros(&edge_dom)?);
             efield_n_vec.push(Field::zeros(&edge_dom)?);
-            efield_ho_vec.push(Field::zeros(&edge_dom)?); // FOFC HO-EMF save (same edge domain)
+            efield_ho_vec.push(Field::zeros(&edge_dom)?); // FOFC ho-emf save (same edge domain)
         }
         let efield = EfieldFields {
             e: efield_vec.try_into().unwrap_or_else(|_| unreachable!()),
@@ -865,8 +865,8 @@ pub struct RkWorkspaceGeneric<
 > {
     pub u_n: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
     pub prim_n: PrimFieldsGeneric<NDIM, DOF, M, Sc>,
-    /// the per-STAGE conserved snapshot. distinct from `u_n` (the per-STEP `u^n`
-    /// held for the `a0*u_n` SSP term): `u_stage` is the stage-INPUT cons, taken
+    /// the per-stage conserved snapshot. distinct from `u_n` (the per-step `u^n`
+    /// held for the `a0*u_n` SSP term): `u_stage` is the stage-input cons, taken
     /// before each godunov stage so the additive source pass evaluates `S` at the
     /// same state the fused stage does — the bit-for-bit `fused == plain + additive`
     /// invariant `godunov_with_fused_source` establishes. dead weight unless an
@@ -922,7 +922,7 @@ pub struct RkWorkspaceGeneric<
     pub stage_writes: std::sync::Mutex<Option<std::collections::HashSet<usize>>>,
     /// per-registration census scratch, allocated on the first sample and reused after.
     ///
-    /// one full-grid field per accumulator plus the segment — order 384 MB for sixteen
+    /// one full-grid field per accumulator plus the segment — order 384 mb for sixteen
     /// accumulators over three million cells — so allocating and freeing it per sample churns
     /// that much memory for artifacts of fixed shape. the exclusion default is written once with
     /// it: the ghost band is static, and the sweep overwrites every interior cell each sample, so
@@ -958,7 +958,7 @@ pub struct PartitionGeometry<const D: usize> {
     /// kernel selection (`_sph` / `_cyl` suffix) and the geometric source terms.
     pub coords: symbi_geometry::Geometry,
 
-    /// the spacetime background (from the metric `M::spacetime()`) — ORTHOGONAL to `coords`:
+    /// the spacetime background (from the metric `M::spacetime()`) — orthogonal to `coords`:
     /// `Minkowski` for every flat run, a curved variant (Schwarzschild, ...) for GR. drives the
     /// lapse / sqrt(gamma) densitization selector in the kernel; flat -> no-op.
     pub spacetime: symbi_geometry::Spacetime,
@@ -992,7 +992,7 @@ pub enum CylPlane {
     RPhi,
 }
 
-/// the default grid-axis -> coordinate map: identity everywhere EXCEPT the cylindrical 2D grid,
+/// the default grid-axis -> coordinate map: identity everywhere except the cylindrical 2D grid,
 /// which defaults to r-z (`[0, 2]`) — the established axisymmetric convention (back-compat).
 pub fn default_grid_axes<const D: usize>(coords: symbi_geometry::Geometry) -> [usize; D] {
     match coords {
@@ -1058,7 +1058,7 @@ where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    /// the grid resolution (interior cell count per axis). REQUIRED.
+    /// the grid resolution (interior cell count per axis). required.
     pub fn cells(mut self, n: [usize; D]) -> Self {
         self.n_cells = Some(n);
         self
@@ -1394,7 +1394,7 @@ where
         self.retag()
     }
 
-    /// seed each face-normal B `bface[d]` to a UNIFORM value `b0[d]` (the common case — a uniform
+    /// seed each face-normal B `bface[d]` to a uniform value `b0[d]` (the common case — a uniform
     /// field threading the domain), then reach `Ready`.
     pub fn seed_faces_uniform(self, b0: [Sc; D]) -> SimBuilder<R, D, DOF, M, E, S, Mem, Sc, Ready> {
         {
@@ -1468,8 +1468,8 @@ impl<const D: usize> PartitionGeometry<D> {
         self.stagger_coord(coord, [Loc::Center; D])
     }
 
-    /// physical position of a STAGGERED quantity: per axis, [`Loc::Face`] samples the
-    /// lower cell face and [`Loc::Center`] the cell center. this is the SINGLE source
+    /// physical position of a staggered quantity: per axis, [`Loc::Face`] samples the
+    /// lower cell face and [`Loc::Center`] the cell center. this is the single source
     /// of the half-cell offset — every staggered IC reads its coordinates here, with no
     /// hand-written `coord*dx` vs `(coord+0.5)*dx` (the Orszag-Tang point-symmetry
     /// bug class). honors non-uniform maps (Face -> map.face, Center -> map.center).
@@ -1493,7 +1493,7 @@ impl<const D: usize> PartitionGeometry<D> {
         )
     }
 
-    /// physical position of a CELL CENTER — the index->coordinate bridge an IC closure wants.
+    /// physical position of a cell center — the index->coordinate bridge an IC closure wants.
     /// map-aware (non-uniform grids) via `stagger_coord`. `[x_lo + (i+1/2)*dx]` on a uniform grid.
     #[inline]
     pub fn cell_coord(&self, coord: [isize; D]) -> [f64; D] {
@@ -1543,21 +1543,21 @@ pub enum BoundaryType {
     /// filled by prolongation from a coarser AMR level.
     /// standard ghost fill skips these faces.
     CoarseFine,
-    /// a DRIVEN boundary: the ghost state is PRESCRIBED by a user DAG
+    /// a driven boundary: the ghost state is prescribed by a user DAG
     /// (`build_boundary_dag`). the `u16` indexes the kernel-set's
-    /// boundary-DAG side table. standard ghost fill SKIPS these faces (like `CoarseFine`); the
+    /// boundary-DAG side table. standard ghost fill skips these faces (like `CoarseFine`); the
     /// driven-boundary pass fills them by evaluating the DAG over the face's ghost band. enum stays
     /// `Copy`/`Eq` — the DAG lives in the side table, only its id rides here.
     Driven(u16),
-    /// a NEUMANN boundary: the ghost holds a prescribed OUTWARD normal derivative `dU/dn = q` per
+    /// a neumann boundary: the ghost holds a prescribed outward normal derivative `dU/dn = q` per
     /// primitive variable, `U_ghost = u_edge + q*dist`. the `u16` indexes the kernel-set's
-    /// gradient-BC side table (the per-variable coefficients). standard ghost fill SKIPS these faces;
+    /// gradient-bc side table (the per-variable coefficients). standard ghost fill skips these faces;
     /// the gradient-boundary pass fills them from the boundary-adjacent interior cell. a convenience
     /// short-circuit for the classical prescribed-gradient wall — a custom boundary is the general path.
     Neumann(u16),
-    /// a ROBIN boundary: the ghost enforces `a*U_face + b*dU/dn = c` per primitive variable. the
-    /// `u16` indexes the same gradient-BC side table as `Neumann` (the entry carries the `(a,b,c)`
-    /// triples). standard ghost fill SKIPS these faces; the gradient-boundary pass fills them.
+    /// a robin boundary: the ghost enforces `a*U_face + b*dU/dn = c` per primitive variable. the
+    /// `u16` indexes the same gradient-bc side table as `Neumann` (the entry carries the `(a,b,c)`
+    /// triples). standard ghost fill skips these faces; the gradient-boundary pass fills them.
     /// degenerates to Dirichlet (`b=0`) and Neumann (`a=0`).
     Robin(u16),
 }
@@ -1700,7 +1700,7 @@ pub struct ImmersedBodies<const NDIM: usize> {
     /// as the `body_diagnostics` group, consumed by the steady-state detector.
     /// restarts empty on load; earlier segments live in earlier checkpoints.
     pub history: symbi_ib::BodyHistory<NDIM>,
-    /// per-body immersed-boundary SHAPE (body-local CSG signed distance), parallel to
+    /// per-body immersed-boundary shape (body-local CSG signed distance), parallel to
     /// `bodies`. `None` = the analytic sphere of radius `body.radius` (the AOT penalization
     /// kernel). `Some(sdf)` = an arbitrary shape whose penalization kernel is runtime-built +
     /// JIT-compiled per distinct geometry (the sphere geometry is baked constants; the body
@@ -1823,7 +1823,7 @@ pub struct FieldStore<
     pub ito_transport: Option<crate::tracers::ItoTransportReceipt<NDIM, Mem>>,
 
     /// whether the primitive fields hold a state recovered from the conserved fields.
-    /// seeding writes the CONSERVED state only, so the primitives are meaningless until
+    /// seeding writes the conserved state only, so the primitives are meaningless until
     /// the conserved-to-primitive recovery has run. a reader of `prim.*` on a freshly
     /// seeded store would find zeros and no error, so anything that consumes primitives
     /// outside the evolve loop checks this first.
@@ -1836,7 +1836,7 @@ pub struct FieldStore<
     pub time: f64,
     pub dt: f64,
     /// an upper clamp on the CFL time step (`dt = min(dt_cfl, max_dt)`); 0 disables. pins the
-    /// dt SEQUENCE across runs whose CFL estimators differ (kernel cross-validation, temporal
+    /// dt sequence across runs whose CFL estimators differ (kernel cross-validation, temporal
     /// convergence studies) — two clamped runs from the same state take bitwise-identical steps.
     pub max_dt: f64,
     pub iteration: u64,
@@ -1875,8 +1875,8 @@ pub struct Context<S: ExecutionSpace> {
 }
 
 /// complete simulation state = `FieldStore` (substance) + `Physics` (tags) + `Context`
-/// (executor). generic over regime, GRID dim (`NDIM`),
-/// VECTOR dim (`DOF`), metric, eos. the `SimState<R, D, M, ..>` alias fills
+/// (executor). generic over regime, grid dim (`NDIM`),
+/// vector dim (`DOF`), metric, eos. the `SimState<R, D, M, ..>` alias fills
 /// `DOF = NDIM = D` (the natural case); axisymmetric hydro uses `SimStateGeneric<R, 2, 3,
 /// Cylindrical, ..>` directly (2D grid, 3-vector momentum with the v_phi swirl).
 ///
@@ -1964,7 +1964,7 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
         }
     }
 
-    /// the stage-INPUT cell B — the CT twin of [`Self::stage_input`]: `bcell_n`
+    /// the stage-input cell B — the CT twin of [`Self::stage_input`]: `bcell_n`
     /// (the step-entry snapshot, written unconditionally with `u_n`) at the first
     /// stage of a multi-stage scheme, where the driver elides `snapshot_stage`
     /// (which is what captures `bcell -> bcell_stage`); the `bcell_stage`
@@ -2058,7 +2058,7 @@ pub type SimState<R, const D: usize, M, E, S = DefaultSpace, Mem = DefaultMemory
 /// unstable try_from_fn). centering defaults to Cell so existing callers
 /// keep working unchanged; pass an explicit C turbofish for face / edge
 /// arrays.
-// `N` component fields on a `D`-dimensional grid. `N` is the VECTOR (component) dimension,
+// `N` component fields on a `D`-dimensional grid. `N` is the vector (component) dimension,
 // decoupled from the grid `D` — `N == D` for the natural case, `N > D` for an
 // axisymmetric vector (the v_phi swirl on an (r,z) grid). `N` is inferred from the target array.
 pub fn array_field_zeros<
@@ -2220,7 +2220,7 @@ where
             );
             let alpha = <M as Metric<Sc, DOF>>::lapse(&self.physics.metric, x_dof);
             let shift = <M as Metric<Sc, DOF>>::shift(&self.physics.metric, x_dof);
-            // the FULL-chart spatial measure, including the directions the momentum block
+            // the full-chart spatial measure, including the directions the momentum block
             // suppresses: `volume_factor` is r^2 sin(theta)/sqrt(f) on a 1D radial spherical grid
             // where the 1x1 determinant would give only 1/sqrt(f). paired with the lapse it is the
             // sqrt(-g) the densitized relativistic state carries.
@@ -2286,7 +2286,7 @@ where
         <<R as Regime<Sc, DOF>>::Cons as SeedableCons<Sc, DOF>>::from_parts(hydro, mag)
     }
 
-    /// recover the regime's PRIMITIVE at a cell (c2p) — `sim.prim_at(c)` replaces building the
+    /// recover the regime's primitive at a cell (c2p) — `sim.prim_at(c)` replaces building the
     /// Cons by hand + calling the regime recover. returns the recovered primitive (the c2p error
     /// code is dropped; assert physicality yourself, or use `regime.to_primitive` for the full
     /// `C2pResult`).
@@ -2344,10 +2344,10 @@ where
         )
     }
 
-    /// construct a simulation whose interior starts at an arbitrary ABSOLUTE index
+    /// construct a simulation whose interior starts at an arbitrary absolute index
     /// `interior_lo` (amr levels share one global index space: a fine level covering
     /// coarse cells [cov_lo, cov_hi) lives at [r*cov_lo, r*cov_hi)). `x_lo` stays the
-    /// GLOBAL physical origin — the coordinate of index 0 — so `geom.centroid` is
+    /// global physical origin — the coordinate of index 0 — so `geom.centroid` is
     /// correct on every level with the same formula.
     /// crate-internal: the amr hierarchy builds fine levels at absolute indices; the public
     /// constructor is [`SimBuilder`] (which always uses `interior_lo = [0; D]`).
@@ -2493,7 +2493,7 @@ where
         self.workspace.u_n.alloc_chi(&allocated)?;
         // the per-direction interface dye flux `F_chi = mass_flux * chi_upwind`. materialized
         // rather than folded into the dye update because a coarse-fine reflux corrects the
-        // conserved dye from the flux MISMATCH at the interface, which needs the fine and coarse
+        // conserved dye from the flux mismatch at the interface, which needs the fine and coarse
         // fluxes as stored quantities. same face convention as `flux[d].den`.
         for dd in 0..D {
             self.fields.flux[dd].alloc_chi(&allocated)?;
@@ -2534,7 +2534,7 @@ where
         self
     }
 
-    /// seed a staggered FACE-normal B component `bface[d]` from a closure over the face's
+    /// seed a staggered face-normal B component `bface[d]` from a closure over the face's
     /// physical position, and mark the staggered field initialized. dissolves the per-IC loop
     /// `for c in bface[d].domain() { set(c, f(face_coord)); } + bface_initialized.store(...)`.
     /// the CT ground truth: seed the faces with `seed_face*`, the cells with `seed_cells`.
@@ -2553,14 +2553,14 @@ where
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// seed a staggered face-normal B component to a UNIFORM value (the common case — e.g., a
+    /// seed a staggered face-normal B component to a uniform value (the common case — e.g., a
     /// uniform Bx / vertical B_z / toroidal B_phi threading the domain).
     pub fn seed_face(&self, d: usize, value: Sc) {
         self.seed_face_with(d, |_| value);
     }
 
     /// seed a staggered face-normal B component `bface[d]` from a flat buffer in axis-0-fastest
-    /// order over the INTERIOR face domain (`interior` extended +1 on axis `d`) — the layout the
+    /// order over the interior face domain (`interior` extended +1 on axis `d`) — the layout the
     /// python `staggered_bfields` generators yield. the index analog of [`seed_face_with`] for
     /// array-sourced ICs (the CT divergence-free ground truth).
     pub fn seed_face_indexed(&self, d: usize, data: &[Sc]) {
@@ -2706,16 +2706,16 @@ pub struct ConservationDiag {
     /// non-relativistic regimes (where v is unbounded and W is undefined).
     pub max_w: Option<f64>,
     /// max over the interior of the kinetic-to-internal energy ratio carried by the
-    /// CONSERVED state, `(|m|^2 / 2 rho) / (E - |m|^2 / 2 rho)`.
+    /// conserved state, `(|m|^2 / 2 rho) / (E - |m|^2 / 2 rho)`.
     ///
-    /// this is the CONDITIONING of the energy split. recovering internal energy from the
+    /// this is the conditioning of the energy split. recovering internal energy from the
     /// total is the subtraction `e = E - |m|^2 / 2 rho`, so at a ratio R the result is a
     /// `1/(1 + R)` fraction of the operands and roughly `log10(R)` significant digits are
     /// lost every time it is evaluated. an ordinary mach-M flow sits at
     /// `gamma (gamma - 1) M^2 / 2` (about 56 at M = 10, gamma = 5/3), so large values mean
     /// a cold, kinetically dominated flow rather than a bug by themselves.
     ///
-    /// it is reported because the associated failure is SILENT and self-reinforcing: an
+    /// it is reported because the associated failure is silent and self-reinforcing: an
     /// under-recovered internal energy cools the gas, which raises the ratio, which
     /// worsens the next inversion. it also hides from the timestep, since the collapsing
     /// internal energy keeps the sound speed small and the CFL comfortable.
@@ -2745,7 +2745,7 @@ where
         }
         let bg = self.geom.block_geometry(self.physics.metric);
         // lab-frame (physical) cell volumes: on a homologously expanding (ALE) mesh
-        // the conserved density multiplies the PHYSICAL volume = comoving * a^n (n
+        // the conserved density multiplies the physical volume = comoving * a^n (n
         // per geometry), so total mass/energy stay constant as
         // a(t) evolves. a static mesh (a = 1) leaves the comoving volume unchanged.
         let a = self.motion.a;
@@ -2808,7 +2808,7 @@ where
             None
         };
 
-        // the energy split's conditioning, from the CONSERVED state, since that is the
+        // the energy split's conditioning, from the conserved state, since that is the
         // pair the c2p subtraction actually operates on. cells with a non-positive
         // recovered internal energy are already unphysical and are left to the c2p
         // diagnostics rather than contributing an inverted ratio here.
@@ -2913,15 +2913,15 @@ where
 
     /// decimate the selected field (by cycle `index`) to a screen-sized slice for
     /// the live heatmap: block-average the interior (mid-plane in axes >= 2 for the
-    /// 3D z-slice) to <= `max_dim` per axis, so cost is bounded by the SCREEN size.
+    /// 3D z-slice) to <= `max_dim` per axis, so cost is bounded by the screen size.
     /// a 1D grid yields a 1-row line profile. `None` off host memory.
     pub fn field_slice(&self, max_dim: usize, index: usize) -> Option<FieldDecimation> {
         self.field_slice_oriented(max_dim, index, 0, 0)
     }
 
-    /// the decimated 2D display slice with a selectable ORIENTATION on a 3D grid
+    /// the decimated 2D display slice with a selectable orientation on a 3D grid
     /// (orient 0 = the z mid-plane (x, y), 1 = the y mid-plane (x, z), 2 = the x
-    /// mid-plane (y, z); 1D/2D grids ignore it) and a ZOOM exponent: the display
+    /// mid-plane (y, z); 1D/2D grids ignore it) and a zoom exponent: the display
     /// axes sample a centered 1/2^zoom-extent window, decimated to the same
     /// screen resolution — each step doubles the magnification about the domain
     /// center (where the hole / disk / body of interest conventionally sits).
@@ -2936,7 +2936,7 @@ where
             return None;
         }
         let (kind, name) = self.nth_field(index);
-        // a 2D ANGULAR chart draws in its physical shape: spherical (r, theta) as the
+        // a 2D angular chart draws in its physical shape: spherical (r, theta) as the
         // meridional half-plane, the cylindrical (R, phi) disk plane as the disk. the
         // (R, z) plane is already a faithful rectangle and 1D/3D keep the index view.
         if D == 2 {
@@ -3071,13 +3071,13 @@ where
         })
     }
 
-    /// the polar (physical-shape) decimation of a 2D angular chart, by INVERSE
+    /// the polar (physical-shape) decimation of a 2D angular chart, by inverse
     /// sampling: each display pixel maps to (display radius, angle) -> nearest
     /// grid cell -> field value, so cost is screen-bounded exactly like the
     /// index-space decimation. pixels outside the annulus/wedge are NaN and the
     /// renderer leaves them blank — the central hole marks the inner boundary.
     ///
-    /// the display radius is the radial INDEX fraction, so a log-radial grid gets
+    /// the display radius is the radial index fraction, so a log-radial grid gets
     /// a log-polar view (equal display area per cell shell — the inner decades of
     /// an accretion run keep their visual weight) and a uniform grid a linear one,
     /// with no coordinate-map inversion.
@@ -3107,7 +3107,7 @@ where
         // boundary (excision surface, inner ghost) when the grid starts off zero.
         let s0 = if self.geom.x_lo[0] > 0.0 { 0.08 } else { 0.0 };
 
-        // the TIGHT display bounding box of the annular sector, so a wedge fills
+        // the tight display bounding box of the annular sector, so a wedge fills
         // its panel (a full-circle box would leave it floating in mostly-NaN space): evaluate
         // the sector's (x, y) at both radii for the angular endpoints and every
         // quarter-turn extremum inside the span. meridional (x, y) = rho (sin, cos)
@@ -3186,7 +3186,7 @@ where
             self.field_value(c, kind)
         };
         // supersample each pixel and average the in-domain sub-samples, with tap
-        // counts matched to the pixel's FOOTPRINT in cells: a display pixel spans
+        // counts matched to the pixel's footprint in cells: a display pixel spans
         // ~nr/out radial cells (and, near the center, many angular cells), and any
         // tap count below that lets a thin feature — a 2-cell blast shell — fall
         // between taps on some rays, aliasing a smooth ring into a dotted arc.
@@ -3197,12 +3197,12 @@ where
         let clamp_taps = |t: f64| (t.ceil() as usize).clamp(3, 16);
         // radial cells per pixel is uniform in the index-fraction display map; the
         // radial direction rotates against the display axes around the arc, so the
-        // sub-grid is UNIFORM at this density in both axes (direction-agnostic).
+        // sub-grid is uniform at this density in both axes (direction-agnostic).
         let ss_r = clamp_taps(nr as f64 * px / (1.0 - s0).max(1e-12));
         let ang_span = a_hi - a_lo;
         for jj in 0..out_h {
             for ii in 0..out_w {
-                // near the center a pixel also spans many ANGULAR cells: coverage
+                // near the center a pixel also spans many angular cells: coverage
                 // du_a ~ px / (s * span) grows as 1/s. take the denser requirement.
                 let yc = y_max - (jj as f64 + 0.5) / out_h as f64 * span_y;
                 let xc = x_min + (ii as f64 + 0.5) / out_w as f64 * span_x;

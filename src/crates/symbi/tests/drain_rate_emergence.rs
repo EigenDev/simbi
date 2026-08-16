@@ -1,8 +1,8 @@
 // =============================================================================
 // drain_rate_emergence.rs
 //
-// whether the accretion rate onto an immersed sink is EMERGENT (set by how fast the flow can
-// resupply the mask) or IMPOSED (set by the penalization dial). the drain relaxes masked gas at
+// whether the accretion rate onto an immersed sink is emergent (set by how fast the flow can
+// resupply the mask) or imposed (set by the penalization dial). the drain relaxes masked gas at
 // `1/tau = c_s / (c_drain dx)`, floored at the free-fall rate; `c_drain` is declared a
 // convergence-study parameter, which is a claim that the measured `Mdot` stops depending on it
 // once the drain is fast enough. that is a falsifiable statement about the flow, and this is the
@@ -12,14 +12,14 @@
 //   - imposed:  Mdot ~ 1/tau ~ 1/c_drain, so each halving of c_drain doubles Mdot and the
 //               relative change per halving stays ~1 forever.
 //   - emergent: Mdot approaches a limit, so the relative change per halving shrinks toward 0.
-// the gate is that the successive relative changes DECREASE — a convergence statement, carrying
+// the gate is that the successive relative changes decrease — a convergence statement, carrying
 // no tuned tolerance.
 //
 // two preconditions decide whether the sweep means anything, and both are asserted, because
 // either one failing makes the flat result vacuous rather than informative:
-//   - the free-fall floor must stay INERT across the swept range. where the floor binds, the rate
+//   - the free-fall floor must stay inert across the swept range. where the floor binds, the rate
 //     is independent of the dial by construction and a flat Mdot measures the floor, not the flow.
-//   - the mask reservoir must be in BALANCE: more mass flows through the sink during the window
+//   - the mask reservoir must be in balance: more mass flows through the sink during the window
 //     than the mask's own gas content changes by. a reservoir still filling or emptying reports a
 //     transient, and a rate read off a transient says nothing about what sets it in steady state.
 //
@@ -56,7 +56,7 @@ const R_ACC: f64 = 0.1;
 
 // the spin-up carries the flow past the initial fill of the mask and into resupply; the window is
 // the interval the rate is measured over. both are in units where the free-fall time from the
-// bondi radius R_B = MASS / c_s^2 = 0.3 is sqrt(R_B^3 / MASS) = 0.23, so the spin-up is ~9
+// bondi radius R_B = mass / c_s^2 = 0.3 is sqrt(R_B^3 / mass) = 0.23, so the spin-up is ~9
 // free-fall times and the window ~2.
 const T_SPINUP: f64 = 2.0;
 const T_WINDOW: f64 = 0.5;
@@ -185,7 +185,7 @@ fn measure(c_drain: f64) -> Measurement {
 
 #[test]
 fn the_accretion_rate_saturates_as_the_drain_dial_shrinks() {
-    // each entry halves the drain timescale, so the IMPOSED rate spans a factor of eight. every
+    // each entry halves the drain timescale, so the imposed rate spans a factor of eight. every
     // value must leave the free-fall floor inert, or the dial is not the thing being varied.
     let dials = [1.0, 0.5, 0.25, 0.125];
     let floor = free_fall_rate();

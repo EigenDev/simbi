@@ -12,8 +12,8 @@
 //                         spatially varying viscosity, face-averaged so the flux
 //                         divergence stays conservative.
 //
-// hazard-free in place: the stencil reads are on PRIMITIVE fields (read-only in
-// this pass); the only write is `cons.mom` at the CENTER cell (pointwise), so no
+// hazard-free in place: the stencil reads are on primitive fields (read-only in
+// this pass); the only write is `cons.mom` at the center cell (pointwise), so no
 // cell reads a neighbor's half-updated momentum. runs post-c2p (prim current).
 // no support ball — the viscous operator acts over the whole interior.
 // =============================================================================
@@ -54,11 +54,11 @@ fn prim_stencil() -> ([[Tensor<Gv, 2>; 3]; 3], [[Gv; 3]; 3]) {
     (vst, rst)
 }
 
-// on every newtonian chart prim.vel / cons.mom store PHYSICAL (orthonormal)
+// on every newtonian chart prim.vel / cons.mom store physical (orthonormal)
 // components — the r-phi inertial source (m_phi v_phi / r), the CFL's
 // physical-width crossing rate, and the keplerian-disk balance v_phi =
 // sqrt(GM/r) all carry that convention. the orthogonal stress carrier consumes
-// physical components, so the stored stencil feeds it DIRECTLY: scaling by the
+// physical components, so the stored stencil feeds it directly: scaling by the
 // metric h (reading the storage as coordinate-contravariant v^i) shifts the
 // shear null from v_phi = Omega r (rigid rotation) to v_phi = const (a sheared
 // profile) — an O(1) spurious torque on every rotating disk. (the contravariant
@@ -170,7 +170,7 @@ fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, Writes) {
     );
     let (cx, cy) = (geo.centroid[0], geo.centroid[1]);
 
-    // per-stencil-cell nu from the LOCAL cs^2 = gamma p / rho and the keplerian
+    // per-stencil-cell nu from the local cs^2 = gamma p / rho and the keplerian
     // frequency at that cell's in-plane distance from body 0.
     let mut nust = [[Gv::ZERO; 3]; 3];
     for jj in 0..3usize {
@@ -230,7 +230,7 @@ fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, Writes) {
 /// the scale factors `(h1, h2)` at a coordinate point, per chart (cartesian -> 1;
 /// cylindrical (R, phi) -> (1, R); spherical (r, theta) -> (1, r)). the const-D
 /// metric bridge mirrors the geometric-source dispatch — one metric family. shared with the covariant
-/// resistive EMF (the DEC codifferential is the same lame-coefficient machinery as the viscous stress).
+/// resistive EMF (the dec codifferential is the same lame-coefficient machinery as the viscous stress).
 pub(crate) fn scale_factors_at(coords: Coords, ndim: usize, x: &[Gv]) -> Vec<Gv> {
     fn run<M, const D: usize>(m: M, x: &[Gv]) -> Vec<Gv>
     where
@@ -262,8 +262,8 @@ pub fn viscous_adiabatic_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
     viscous_adiabatic_ortho_impl(coords, None)
 }
 
-/// the ADIABATIC orthogonal ALPHA operator: nu(x) = alpha (gamma p / rho) / Omega_K
-/// per stencil cell (the LOCAL sound speed), with the keplerian frequency from the
+/// the adiabatic orthogonal alpha operator: nu(x) = alpha (gamma p / rho) / Omega_K
+/// per stencil cell (the local sound speed), with the keplerian frequency from the
 /// chart's radial coordinate (the central mass sits on the axis/origin, matching
 /// the iso ortho alpha kernel's convention).
 pub fn viscous_adiabatic_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
@@ -297,7 +297,7 @@ fn viscous_adiabatic_ortho_impl(coords: Coords, alpha_mode: Option<()>) -> (GvKe
             h1[dj][di] = h[0];
             h2[dj][di] = h[1];
             nust[dj][di] = if alpha_mode.is_some() {
-                // the LOCAL cs^2 = gamma p / rho and Omega_K at this cell's radial
+                // the local cs^2 = gamma p / rho and Omega_K at this cell's radial
                 // coordinate (slot 0 on both supported charts).
                 let alpha = Gv::scalar("alpha");
                 let gamma = Gv::scalar("gamma");
@@ -363,10 +363,10 @@ pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
-/// trace the shakura-sunyaev ALPHA operator on a GENERAL 2D orthogonal chart: the
+/// trace the shakura-sunyaev alpha operator on a general 2D orthogonal chart: the
 /// same scale-factor operator as `viscous_iso_ortho_gv` but with a spatially
 /// varying `nu(R) = alpha c_s^2 / Omega_k(R)`, `Omega_k = sqrt(GM/R^3)`, `R` the
-/// RADIAL coordinate `x0` (the orbital radius on both cylindrical and spherical,
+/// radial coordinate `x0` (the orbital radius on both cylindrical and spherical,
 /// the central mass on the axis). one alpha kernel for every curvilinear chart.
 pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
     const NDIM: u8 = 2;
@@ -514,7 +514,7 @@ pub fn viscous_adiabatic_gv_3d() -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
-/// read the primitive `(3-vector velocity, density)` 3x3 IN-PLANE stencil about the current cell — the
+/// read the primitive `(3-vector velocity, density)` 3x3 in-plane stencil about the current cell — the
 /// DOF=3 velocity a 2.5D MHD flow carries on a 2-axis grid (the out-of-plane v_2 is real, just
 /// gridless in that axis).
 fn prim_stencil_2p5d() -> ([[Tensor<Gv, 3>; 3]; 3], [[Gv; 3]; 3]) {
@@ -535,8 +535,8 @@ fn prim_stencil_2p5d() -> ([[Tensor<Gv, 3>; 3]; 3], [[Gv; 3]; 3]) {
 }
 
 /// the constant-nu 2.5D DOF-aware viscous operator (D=2 grid, DOF=3 momentum). two variants share the
-/// stencil + `viscous_update_2p5d`: the ISOTHERMAL twin writes the 3 momentum components; the
-/// ADIABATIC twin ALSO writes the total-energy heating. serves 2.5D MHD (the toroidal velocity
+/// stencil + `viscous_update_2p5d`: the isothermal twin writes the 3 momentum components; the
+/// adiabatic twin also writes the total-energy heating. serves 2.5D MHD (the toroidal velocity
 /// diffuses; B is untouched so the heat warms the gas).
 pub fn viscous_iso_gv_2p5d() -> (GvKernel, Writes) {
     viscous_2p5d_impl(false)
@@ -579,7 +579,7 @@ fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, Writes) {
 /// sqrt(GM/R^3)` is a function of R alone and the vertical z-offset drops out. hence `nu(x,y)
 /// = alpha c_s^2 / Omega_k(R)` is z-invariant (a cylinder of constant nu about the
 /// rotation axis), face-averaged so the flux divergence stays conservative.
-/// the alpha-viscosity ADIABATIC operator, 3D cartesian: `nu(x) = alpha cs^2(x) / Omega_k(R)`
+/// the alpha-viscosity adiabatic operator, 3D cartesian: `nu(x) = alpha cs^2(x) / Omega_k(R)`
 /// with the local sound speed `cs^2 = gamma p / rho` read per stencil cell, and the keplerian
 /// frequency set by the cylindrical radius `R = sqrt((x-x_body)^2 + (y-y_body)^2)` about the
 /// rotation axis, so `Omega_k` depends on R alone.
@@ -784,7 +784,7 @@ pub fn viscous_ortho_2p5d_gv(
         OrthoPlane25::Sph => (Coords::Spherical, [0, 1]),
     };
     // the carrier orders components (in-plane-1, in-plane-2, out-of-plane);
-    // storage is COORDINATE-indexed (r, phi, z) / (r, theta, phi). the (r, z)
+    // storage is coordinate-indexed (r, phi, z) / (r, theta, phi). the (r, z)
     // section permutes (storage phi = slot 1 is the out-of-plane component);
     // the disk and the meridian line up with storage already.
     let perm: [usize; 3] = match plane {
@@ -851,7 +851,7 @@ pub fn viscous_ortho_2p5d_gv(
     );
     let mut writes: Writes = Vec::new();
     for c in 0..3 {
-        // carrier component c lands on its STORAGE slot perm[c].
+        // carrier component c lands on its storage slot perm[c].
         let slot = perm[c] as u8;
         let mom_c = Gv::field(&format!("mom{}", perm[c]), FieldRef::cons_mom(slot));
         writes.push((
@@ -871,7 +871,7 @@ pub fn viscous_ortho_2p5d_gv(
     (end_trace(), writes)
 }
 
-/// trace the FULL-3D orthogonal viscous operator for the cylindrical
+/// trace the full-3D orthogonal viscous operator for the cylindrical
 /// (h = (1, r, 1)) or spherical (h = (1, r, r sin(theta))) chart: the general
 /// scale-factor stress + (adiabatic) heating; `alpha` as in the 2.5D twin.
 pub fn viscous_ortho_3d_gv(coords: Coords, adiabatic: bool, alpha: bool) -> (GvKernel, Writes) {

@@ -1,12 +1,12 @@
 # =============================================================================
 # test_cartesian_kerr_mhd_3d.py
 #
-# GRMHD on the FULL 3D cartesian SPINNING-KERR chart. the seeded field is the
+# GRMHD on the full 3D cartesian spinning-kerr chart. the seeded field is the
 # vertical densitized-divergence-free B_z = B0 / w with w = sqrt(gamma) =
 # sqrt(1 + 2H |l|^2) at the face (the spinning rank-1 metric's own weight), so
 # d_i(sqrt(gamma) B^i) = 0 on the staggered mesh to machine precision. gates:
-# - the constrained transport preserves the DENSITIZED divergence at spin:
-#   recomputed from the evolved staggered field with the KERNEL's clamped
+# - the constrained transport preserves the densitized divergence at spin:
+#   recomputed from the evolved staggered field with the kernel's clamped
 #   weights, it stays at machine zero;
 # - the spinning metric and the vertical field are invariant under the quarter
 #   turn about the spin axis, so the accreting gas stays rot90-symmetric to
@@ -44,7 +44,7 @@ L = 5.0
 
 
 def _w(x: float, y: float, z: float, a: float) -> float:
-    # the kernel's sqrt(gamma) = sqrt(1 + 2H |l|^2) with the CLAMPED (r >= M/2)
+    # the kernel's sqrt(gamma) = sqrt(1 + 2H |l|^2) with the clamped (r >= M/2)
     # oblate-spheroidal kerr-schild radius — the exact face weight the CT divides by.
     rr2 = x * x + y * y + z * z
     d = 0.5 * (rr2 - a * a)
@@ -144,13 +144,13 @@ def test_cartesian_kerr_mhd_3d_divb_and_quarter_turn() -> None:
     assert rho.max() > 1.05 * RHO0, f"no accretion (max rho {rho.max():.3f})"
     assert np.abs(f["b1"]).max() > 1e-6, "B_x never developed; the CT never acted"
 
-    # the quarter turn about the spin axis is exact at ANY spin for the scalar
+    # the quarter turn about the spin axis is exact at any spin for the scalar
     # density (the vertical seed and the metric share the symmetry).
     err = np.abs(rho - np.rot90(rho, 1, (1, 2))).max()
     assert err < 1e-10, f"quarter-turn symmetry broken at spin: {err:e}"
 
     # the defining CT invariant at spin: the densitized divergence recomputed from
-    # the EVOLVED staggered faces with the kernel's clamped kerr weights stays at
+    # the evolved staggered faces with the kernel's clamped kerr weights stays at
     # machine zero relative to the field scale.
     dd = 2.0 * L / RES
     xs = (np.arange(RES) + 0.5) * dd - L
@@ -193,7 +193,7 @@ def test_cartesian_kerr_mhd_a0_matches_kerr_schild_exterior() -> None:
     z, y, x = np.meshgrid(xs, xs, xs, indexing="ij")
     r = np.sqrt(x * x + y * y + z * z)
     # the a = 0 kerr metric equals the kerr_schild chart outside the clamped core
-    # (the frozen cores are DIFFERENT consistent continuations); the stiff
+    # (the frozen cores are different consistent continuations); the stiff
     # magnetized c2p amplifies the core difference more than the hydro chain, so
     # the exterior band carries a looser bound than the hydro gate, still decaying.
     mid = (r > 0.75) & (r <= 2.0)

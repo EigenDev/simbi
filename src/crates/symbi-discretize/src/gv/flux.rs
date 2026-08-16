@@ -516,7 +516,7 @@ fn euler_flux_writes<const D: usize>(flux: &Cons<Gv, D>) -> Vec<(String, FieldBi
     writes
 }
 
-/// trace an ideal-gas euler face flux (newtonian OR relativistic) along sweep `dir` —
+/// trace an ideal-gas euler face flux (newtonian or relativistic) along sweep `dir` —
 /// the gv single source: PLM-reconstruct (rho, every vel_k, pre) to the face, then the
 /// canonical `riemann::hlle(regime, IdealGas, L, R, n_hat, 0)` (symbi-hydro). replaces
 /// the hand-written `hlle_flux` / `rhd_hlle_flux` Expr builders + their per-component
@@ -1674,4 +1674,3 @@ fn balanced_thermo_pair(
     let (rho_r, pre_r) = side(anchor_r, false);
     (rho_l, rho_r, pre_l, pre_r)
 }
-

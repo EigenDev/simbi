@@ -269,7 +269,7 @@ fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
 ///
 /// `center` is the body's center of mass and its mask/geometric center at once — they coincide for
 /// a symmetric body (sphere, symmetric CSG). everything dynamical (translation, gravity, the
-/// omega x r wall velocity, the torque moment arm `x - center`) is referenced to the COM, so an
+/// omega x r wall velocity, the torque moment arm `x - center`) is referenced to the com, so an
 /// asymmetric mass distribution would offset the mask placement alone.
 /// the drain rate for a spherical accretor: the faster of the sound-crossing timescale and the
 /// free-fall rate at the mask radius, `sqrt(GM / r_acc^3)`.

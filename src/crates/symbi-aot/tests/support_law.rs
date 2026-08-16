@@ -1,8 +1,8 @@
 // =============================================================================
 // support_law.rs
 //
-// the support-validation law: a kernel's DECLARED
-// output support must hold on the COMPILED kernel — every output exactly zero
+// the support-validation law: a kernel's declared
+// output support must hold on the compiled kernel — every output exactly zero
 // in f64 at every cell outside the declared region, for
 // nontrivial field inputs. the declaration drives dispatch decisions (the
 // body-feedback reduction box), so a support declared wider than reality is
@@ -177,7 +177,7 @@ fn drain_outputs_are_exactly_zero_outside_the_declared_ball() {
     );
 }
 
-// bug injection: a ball shrunk below the true support must FAIL the sampler —
+// bug injection: a ball shrunk below the true support must fail the sampler —
 // nonzero outputs exist outside it. proves the law can distinguish a too-narrow
 // declaration (the failure mode that silently drops physics from a reduction).
 #[test]

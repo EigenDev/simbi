@@ -2,14 +2,14 @@
 // substrate_rmhd_gpu.rs
 //
 // the RMHD substrate KernelSet runs on the
-// GPU through the production dispatch path. build TWO identical RMHD sims — one on
-// host memory (CpuSpace), one on unified memory (CudaSpace) — and run the SAME
+// GPU through the production dispatch path. build two identical RMHD sims — one on
+// host memory (CpuSpace), one on unified memory (CudaSpace) — and run the same
 // `RmhdSubstrateKernelSet3D` method on each. the unified-memory `Mem` makes
 // `dispatch` route every kernel to `run_gpu` (render the neutral IR -> NVRTC ->
 // launch); host memory routes to the AOT CPU kernel. the device prim must match the
 // host prim (modulo nvcc FMA fusion).
 //
-// runs on the HOST GPU (NVRTC needs no nvcc). run:
+// runs on the host GPU (NVRTC needs no nvcc). run:
 //   cargo test -p symbi --features cuda --test substrate_rmhd_gpu
 // =============================================================================
 
@@ -141,7 +141,7 @@ fn substrate_rmhd_flux_gpu_matches_cpu() {
     for dir in 0..3 {
         hset.flux(&host, dir);
         dset.flux(&dev, dir);
-        // run_gpu does NOT ctx_sync per-launch; a host read of device-written buffers
+        // run_gpu does not ctx_sync per-launch; a host read of device-written buffers
         // races with the in-flight kernel. unified memory makes already-resident pages (the
         // interior) look correct while freshly-written ghost pages read stale zero-init, so the
         // mismatch shows up only in the corner ghosts. sync before the host comparison.
@@ -189,11 +189,11 @@ fn substrate_rmhd_flux_gpu_matches_cpu() {
     }
 }
 
-// the FULL evolve loop on the GPU. drive the real RK2 step
+// the full evolve loop on the GPU. drive the real RK2 step
 // driver (cfl -> flux -> efield -> godunov -> CT -> c2p -> ghost, multiple steps)
 // on host + unified sims with identical init; the substrate KernelSet routes every
 // kernel to the GPU for unified memory. assert the run completes NaN-free and the
-// conserved + magnetic state matches CPU. SHORT smoke: a handful of steps on an 8^3
+// conserved + magnetic state matches CPU. short smoke: a handful of steps on an 8^3
 // smooth box, well short of a physics run. tolerance is loose: FMA drift compounds per step.
 #[test]
 fn substrate_rmhd_evolve_gpu_matches_cpu() {
@@ -271,7 +271,7 @@ fn substrate_rmhd_evolve_gpu_matches_cpu() {
 }
 
 // the Reduce-morphism proof in isolation: the GPU block-reduction max over a
-// field's INTERIOR window must equal the host max — bit-exact (max has no FMA) — AND
+// field's interior window must equal the host max — bit-exact (max has no FMA) — and
 // must ignore values outside the window (a huge ghost value is not reduced). this
 // pins the device reduction + its view_t windowing independently of the full step.
 #[test]
@@ -315,8 +315,8 @@ fn field_max_reduce_device_matches_host_and_respects_window() {
         },
     ]);
     let f = Field::<f64, 3, UnifiedMemory>::zeros(&alloc).unwrap();
-    // smooth distinct values everywhere; a HUGE spike in a GHOST cell (outside the
-    // interior) that the windowed reduction must NOT see.
+    // smooth distinct values everywhere; a huge spike in a ghost cell (outside the
+    // interior) that the windowed reduction must not see.
     for c in alloc.iter() {
         let v = 0.1 + 0.01 * (c[0] + 3 * c[1] + 7 * c[2]) as f64;
         f.view_mut().set(c, v);
@@ -416,7 +416,7 @@ fn field_reduce_device_all_ops_match_host() {
     );
 }
 
-// keystone: a single NaN cell must survive the ON-DEVICE block reduction (the
+// keystone: a single NaN cell must survive the on-device block reduction (the
 // in-block ternary `a > b ? a : b` drops NaN unless guarded with `x != x`). this
 // validates the CUDA combine matches the host NaN-propagation so a poisoned cell
 // propagates through to the dt guard on the GPU.

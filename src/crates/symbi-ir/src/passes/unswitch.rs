@@ -6,8 +6,8 @@
 // `theta < 0`) is loop-invariant — every cell takes the same arm. `find`
 // locates the most-used such condition; `specialize` partially evaluates the
 // body at cond = true / false, deleting the untaken arm of every select
-// gated on it. the emitter renders BOTH specializations and a dispatcher
-// that branches ONCE per kernel call, so each specialized loop nest is free
+// gated on it. the emitter renders both specializations and a dispatcher
+// that branches once per kernel call, so each specialized loop nest is free
 // of the invariant conditional (and each can be mask-formed independently —
 // an arm-cost-heavy branch keeps bool/if form while the cheap branch
 // vectorizes).
@@ -103,9 +103,9 @@ fn walk_stmt_exprs<'a>(stmt: &'a ScalarStmt, out: &mut Vec<&'a ScalarExpr>) {
 /// find the param-invariant bool local gating the most selects, if any gates
 /// at least `MIN_SELECT_USES`. one level only — no 2^n multi-cond expansion.
 ///
-/// `scalar_params` must be the kernel's declared SCALAR params only — the
+/// `scalar_params` must be the kernel's declared scalar params only — the
 /// scalarized param list also carries field inputs (per-cell base reads),
-/// which are NOT invariant.
+/// which are not invariant.
 pub fn find(scalarized: &KernelScalarized, scalar_params: &HashSet<String>) -> Option<Candidate> {
     let param_names: HashSet<&str> = scalarized
         .params
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn specialize_collapses_gated_selects_only() {
         let mut k = theta_lt_zero_kernel(4);
-        // add a select on a DIFFERENT (cell-varying) condition; it must survive.
+        // add a select on a different (cell-varying) condition; it must survive.
         k.body.push(ScalarStmt::Let {
             name: "other".into(),
             element: ElementTy::F64,

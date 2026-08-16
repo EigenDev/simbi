@@ -6,7 +6,7 @@
 # the energy-free counterpart of the isentropic case: with `p = cs^2 rho` the equation of
 # state supplies the pressure from the density and the regime stores none, so the declared
 # target carries a density and a velocity and nothing else. hydrostatic balance is then
-# `grad(ln rho) = -grad phi / cs^2`, which integrates to an EXPONENTIAL in the potential
+# `grad(ln rho) = -grad phi / cs^2`, which integrates to an exponential in the potential
 # rather than a power of it — a genuinely different profile, not the gamma -> 1 limit of the
 # adiabatic one.
 #
@@ -14,7 +14,7 @@
 # for a different cs is not a steady state of this run, and the backend's refinement check
 # rejects it rather than quietly holding the wrong state still.
 #
-# the potential is declared ONCE: the equilibrium is the closed-form inversion of hydrostatic
+# the potential is declared once: the equilibrium is the closed-form inversion of hydrostatic
 # balance against it, and the gravity source is its gradient.
 # =============================================================================
 from pathlib import Path

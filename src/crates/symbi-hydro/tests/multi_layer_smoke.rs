@@ -1,7 +1,7 @@
 // =============================================================================
 // multi_layer_smoke.rs
 //
-// **end-to-end multi-layer smoke test.** exercises the FULL stack in one place:
+// **end-to-end multi-layer smoke test.** exercises the full stack in one place:
 //
 //   spec data -> SimulationLaws -> SourceEvaluator -> time evolution -> physics check.
 //
@@ -41,7 +41,7 @@ use symbi_hydro::{IsoNewtonian, Newtonian, SimulationLaws, SourceEvaluator};
 //
 // the cleanest exercise of source-RHS integration. with no spatial gradients,
 // the flux divergence is identically zero per cell — every cell gets the
-// same flux from every neighbor — so the source RHS is the SOLE contribution
+// same flux from every neighbor — so the source RHS is the sole contribution
 // to dU/dt. analytical answer:
 //
 //   dm/dt = rho*g       (momentum density gains rho*g per unit time)
@@ -149,10 +149,10 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
 // =============================================================================
 // section 2 — additive composition under time evolution.
 //
-// two overlays target the SAME field. the cumulative effect after N steps
-// MUST equal the sum of the individual overlays' effects after N steps
+// two overlays target the same field. the cumulative effect after N steps
+// must equal the sum of the individual overlays' effects after N steps
 // (additivity = A1's commutative/associative Add at the composition layer
-// AND at the time-integration layer).
+// and at the time-integration layer).
 // =============================================================================
 
 #[test]
@@ -189,7 +189,7 @@ fn additive_composition_holds_under_time_evolution() {
             .unwrap()
     });
 
-    // ----- run with COMPOSED A + B -----
+    // ----- run with composed A + B -----
     let sim_c = SimulationLaws::new(&NEWTONIAN_SPEC)
         .with_user(uniform_acceleration_sources(3, false))
         .with_gravity(point_mass_gravity_sources(3, false));
@@ -202,12 +202,12 @@ fn additive_composition_holds_under_time_evolution() {
 
     // ----- analytical assertion -----
     //
-    // the analytical sum is ONLY exact when each overlay's source is
-    // INDEPENDENT of the running state. uniform_acceleration depends on
+    // the analytical sum is only exact when each overlay's source is
+    // independent of the running state. uniform_acceleration depends on
     // rho (constant per cell) -> constant per step -> integrates linearly.
-    // point-mass gravity depends on rho (constant) AND v (changing) — but
+    // point-mass gravity depends on rho (constant) and v (changing) — but
     // its momentum source `-rho*GM*(x-xm)/|x-xm|^3` is v-independent, so
-    // it's ALSO constant per step under the static-position assumption.
+    // it's also constant per step under the static-position assumption.
     //
     // since both individual contributions are constant per step, the
     // composed result equals the sum exactly.
@@ -228,7 +228,7 @@ fn additive_composition_holds_under_time_evolution() {
 // section 3 — isothermal regime + momentum-only overlay.
 //
 // the iso-routing in SimulationLaws / SourceEvaluator: when the regime is
-// isothermal (has_energy=false), the gravity overlay must DROP the energy
+// isothermal (has_energy=false), the gravity overlay must drop the energy
 // source automatically. the runtime call sequence (validate -> fields_with_overlays
 // -> eval) handles this without the caller intervening. this test exercises
 // that path end-to-end.
@@ -243,7 +243,7 @@ fn iso_regime_with_momentum_only_overlay_evolves_correctly() {
     let g_ext = [0.5_f64];
 
     // iso + gravity with has_energy=false. SourceEvaluator.fields() must
-    // return ONLY "mom" (no "nrg" — iso has no energy equation).
+    // return only "mom" (no "nrg" — iso has no energy equation).
     let sim =
         SimulationLaws::new(&ISO_NEWTONIAN_SPEC).with_user(uniform_acceleration_sources(1, false));
     let evaluator = SourceEvaluator::new(&sim, 1).expect("iso composes");

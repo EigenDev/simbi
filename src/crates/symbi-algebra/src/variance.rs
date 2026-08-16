@@ -33,7 +33,7 @@ use crate::algebra::Numeric as Scalar;
 // ============================================================
 
 // the four inhabited (variance x frame) states. variance (Upper/Lower) is a
-// COORDINATE-frame concept (the metric gamma != delta there); the orthonormal (Ortho) and global
+// coordinate-frame concept (the metric gamma != delta there); the orthonormal (Ortho) and global
 // Cartesian (Cart) frames are Euclidean (gamma = delta), so variance collapses and they need no
 // up/down tag. so the product collapses to four markers.
 
@@ -499,12 +499,12 @@ mod tests {
     // fn test_con_add_cov_fails() {
     //     let v = Con3::new(vec3(1.0, 0.0, 0.0));
     //     let w = Cov3::from_array([1.0, 0.0, 0.0]);
-    //     let _ = v + w;  // ERROR: mismatched types
+    //     let _ = v + w;  // error: mismatched types
     // }
     //
     // fn test_con_sub_cov_fails() {
     //     let v = Con3::new(vec3(1.0, 0.0, 0.0));
     //     let w = Cov3::from_array([1.0, 0.0, 0.0]);
-    //     let _ = v - w;  // ERROR: mismatched types
+    //     let _ = v - w;  // error: mismatched types
     // }
 }

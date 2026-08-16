@@ -1,15 +1,15 @@
 # =============================================================================
 # test_fmr_covered_restriction.py
 #
-# a refined run's checkpoint must show the covered coarse CONSERVED cells equal
+# a refined run's checkpoint must show the covered coarse conserved cells equal
 # to the conservative restriction (2x2 average) of their fine children to
 # round-off: the hierarchy restricts at the tail of every root step, and the
 # writer serializes that synced state. this gates the whole chain — step-loop
 # restriction, checkpoint writer, and the per-level halo metadata (the ghost
-# width DIFFERS by level: reconstruct it from the array shape minus
+# width differs by level: reconstruct it from the array shape minus
 # mesh/global_cells, never assume a uniform strip — a uniform strip shifts the
 # fine array one cell diagonally and fakes a percent-level mismatch on every
-# field). derived velocities are NOT compared: restrict(m)/restrict(rho)
+# field). derived velocities are not compared: restrict(m)/restrict(rho)
 # differs from restrict(m/rho) by the averaging nonlinearity, by design.
 # =============================================================================
 import glob

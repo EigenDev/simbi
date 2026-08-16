@@ -1,11 +1,11 @@
 // =============================================================================
 // viscous_mhd_2p5d.rs
 //
-// the DOF-aware 2.5D MHD viscous operator (D=2 grid, DOF=3 momentum) must diffuse the OUT-OF-PLANE
+// the DOF-aware 2.5D MHD viscous operator (D=2 grid, DOF=3 momentum) must diffuse the out-of-plane
 // velocity v_z -- the toroidal component a rotating disk carries -- which the plain 2D viscous kernel
 // (2 in-plane momentum components) cannot touch. seed a pure out-of-plane shear v_z = V sin(k y): with
 // viscosity the out-of-plane kinetic energy decays (mom[2] diffuses by the in-plane Laplacian) and the
-// gas heats; the inviscid twin barely moves. this is the case that would silently do NOTHING without
+// gas heats; the inviscid twin barely moves. this is the case that would silently do nothing without
 // the _dof3 kernel.
 // =============================================================================
 
@@ -40,7 +40,7 @@ fn make() -> Sim {
         .cfl(0.3)
         .allocate()
         .expect("2.5d mhd sim")
-        // a PURELY out-of-plane velocity shear v_z = V sin(k y); tiny uniform in-plane B (div-free).
+        // a purely out-of-plane velocity shear v_z = V sin(k y); tiny uniform in-plane B (div-free).
         .set_initial(|[_x, y]| MhdPrim {
             hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, V0 * (k * y).sin()]), pre: 1.0 },
             mag: Tensor::new([1e-3, 0.0, 0.0]),
@@ -96,7 +96,7 @@ fn viscosity_diffuses_the_out_of_plane_velocity() {
     let (kz0_i, _, kz1_i, _) = run(0.0);
 
     assert!(kz0 > 0.0, "degenerate seed");
-    // the OUT-OF-PLANE kinetic energy decays far more with viscosity than the inviscid floor -- the
+    // the out-of-plane kinetic energy decays far more with viscosity than the inviscid floor -- the
     // _dof3 kernel is diffusing mom[2], which the plain 2D kernel would leave untouched.
     let loss_visc = kz0 - kz1;
     let loss_ideal = kz0_i - kz1_i;

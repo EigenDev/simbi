@@ -108,7 +108,7 @@ fn ppm_refuses_the_default_two_ghost_allocation() {
 /// the refinement refusal: a hierarchy with more than one level has coarse-fine
 /// boundaries, and the widest baked prolongation covers plm evolution only —
 /// ppm across a level boundary would silently lose an order inside the domain,
-/// so the first step refuses. a SINGLE-level hierarchy carries ppm freely (the
+/// so the first step refuses. a single-level hierarchy carries ppm freely (the
 /// python driver wraps every uniform run in one).
 #[test]
 #[should_panic(expected = "reconstruction reach 3")]
@@ -145,7 +145,7 @@ fn ppm_refuses_a_refined_hierarchy() {
     hier.evolve(0.01).unwrap();
 }
 
-/// monotonicity on a square wave: an advected discontinuity admits NO new
+/// monotonicity on a square wave: an advected discontinuity admits no new
 /// extrema — the monotonized parabola clamps its interfaces to the neighbor
 /// range and flattens at extrema, so any value outside the initial [1, 2]
 /// band beyond roundoff accumulation is an oscillation. an unlimited parabola
@@ -251,7 +251,7 @@ fn ppm_strong_shock_stays_inside_the_wave_fan_band() {
 /// the sink-regime flatten dials: onset above the subsonic accretor
 /// turbulence's compressive scale (c ~ gamma Ma^2 < 1e-2 at mach 0.06), full by
 /// the sealed-wall standing layer (c ~ 0.05, where a mid-ramp coefficient still
-/// vents and the dip grows with resolution). the DEFAULT dials are (0, 0) — the
+/// vents and the dip grows with resolution). the default dials are (0, 0) — the
 /// pure parabola — because trans-sonic turbulence lives at c ~ 0.05-0.3 and an
 /// active flatten there degrades ppm to first order in every eddy collision.
 const SINK_FLATTEN: (f64, f64) = (0.015, 0.05);
@@ -275,7 +275,7 @@ fn sealed_wall_infall_probe(
 ) -> (f64, f64, f64) {
     use symbi_ib::{Body, BodyCollection, SurfaceSpec};
     type Sim3 = SimState<Newtonian, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
-    // the body radius is FIXED in physical units (4 dx at n = 32) so a
+    // the body radius is fixed in physical units (4 dx at n = 32) so a
     // resolution sweep refines the same physical problem.
     const R_BODY: f64 = 0.125;
     let dx = 1.0 / n as f64;
@@ -429,8 +429,8 @@ fn diagnose_ppm_entropy_dip_scaling() {
 }
 
 /// the ppm entropy floor on gravitational infall: the adiabat violation must be
-/// SMALL and NON-GROWING under refinement. the unflattened parabola vented
-/// K = p/rho^gamma anti-diffusively — the dip GREW with resolution (1.3e-3 at
+/// small and non-growing under refinement. the unflattened parabola vented
+/// K = p/rho^gamma anti-diffusively — the dip grew with resolution (1.3e-3 at
 /// n = 32 to 2.4e-3 at n = 64 open, 3.4e-5 to 1.7e-4 walled at a mid-ramp
 /// flatten, worst cell tracking the steepening compression inward) — because
 /// its dispersive truncation beats the riemann dissipation its own small face
@@ -441,12 +441,12 @@ fn diagnose_ppm_entropy_dip_scaling() {
 /// unflattened vent; the 1.5x growth cap sits above extreme-value noise in a
 /// min-over-cells statistic (healthy runs measure 0.23-0.75x) and below every
 /// measured defective regime (1.85x, 5x). a fixed-n comparison against plm
-/// (which holds K/K0 = 1.0 exactly here) is NOT the law: plm holds by
+/// (which holds K/K0 = 1.0 exactly here) is not the law: plm holds by
 /// dissipation-dominance at second order, which a higher-order scheme cannot
 /// match at fixed n and converges past instead.
 #[test]
 fn the_ppm_entropy_dip_on_infall_is_small_and_converges_away() {
-    // NON-VACUITY of the dials themselves: the pure parabola (dials off) must
+    // non-vacuity of the dials themselves: the pure parabola (dials off) must
     // still vent on this probe, or the flatten machinery is dead weight and
     // the small-dip law below is testing nothing.
     let (k_off, _, _) = sealed_wall_infall_probe(

@@ -31,7 +31,7 @@ use crate::layout::{alloc_layout, exec_layout, expect_kernel};
 /// each group, so the call site is free to order the two groups independently of
 /// how the binding list happens to interleave them).
 ///
-/// SAFETY: the caller guarantees every `outputs` field is a distinct allocation from
+/// safety: the caller guarantees every `outputs` field is a distinct allocation from
 /// the others and from `inputs` — the multiple `&mut` slices then alias nothing.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_fields<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
@@ -86,7 +86,7 @@ fn no_host_fallback<Sc: Scalar + OrderedNumeric>(
 /// then output-binding order over the shared allocated layout, and every field a distinct
 /// allocation (in-place read+write fields are passed once, as outputs).
 ///
-/// SAFETY: as `dispatch_fields` — every field outlives the dispatch scope and the kernel
+/// safety: as `dispatch_fields` — every field outlives the dispatch scope and the kernel
 /// reads inputs immutably + writes only its own outputs.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_fields_runtime_ir<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
@@ -119,13 +119,13 @@ pub fn dispatch_fields_runtime_ir<Sc: Scalar + OrderedNumeric, Mem: MemorySpace,
 /// `(lo, extent)` layout — the one place the `from_raw_parts` whole-buffer construction lives,
 /// with the disjoint-write contract checked once, release-active. inputs bind `&[T]`, outputs
 /// `&mut [T]`; if two bindings shared a backing allocation the resulting `&` + `&mut` (or two
-/// `&mut`s) would alias — UB under Stacked/Tree Borrows, and a silent garbled-physics bug on
+/// `&mut`s) would alias — ub under Stacked/Tree Borrows, and a silent garbled-physics bug on
 /// release (the class a debug-only guard misses). a manifest with a duplicate path or a caller
 /// binding the same field twice fails loudly here. the per-block (`dispatch_fields_cover`) and
 /// per-face (`dispatch_fields_each`) executors slice per-region and keep their own builds; this
 /// is the whole-buffer case shared by `dispatch_fields` + the runtime-source dispatch.
 ///
-/// SAFETY: the caller guarantees every `inputs`/`outputs` field outlives `'a` (the dispatch
+/// safety: the caller guarantees every `inputs`/`outputs` field outlives `'a` (the dispatch
 /// scope) and that the kernel reads inputs immutably + writes only its own outputs; the
 /// distinctness check above makes the no-aliasing precondition release-enforced.
 pub fn disjoint_host_buffers<'a, Sc, const D: usize, Mem>(
@@ -141,7 +141,7 @@ where
     // `layouts` carries one `(lo, extent, vol)` per field, in `inputs ++ outputs` order — a shared
     // cell layout (replicated) for `dispatch_fields`, or each field's own `Field::domain()` layout
     // for `dispatch_fields_each` (staggered / mixed-domain binds). one constructor, one distinctness
-    // check (release-active) — the "DisjointBufferSet" SSOT.
+    // check (release-active) — the "DisjointBufferSet" ssot.
     debug_assert_eq!(
         layouts.len(),
         inputs.len() + outputs.len(),
@@ -233,7 +233,7 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
     // distinct allocation from every other binding: inter-block disjointness is the
     // proven partition law, but inter-field disjointness is the caller's contract. a
     // duplicate output (or an output bound as an input) would alias live `&mut`s
-    // across every block -> UB that silently garbles physics on release. duplicate
+    // across every block -> ub that silently garbles physics on release. duplicate
     // inputs are sound (shared `&[T]` reads alias nothing) and intentional — the
     // prolong binds the same coarse buffer as src_old/src_new. the whole-window paths
     // assert this in debug; the cover path is the production CPU parallelism, so it
@@ -298,7 +298,7 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
         let mut buffers: Vec<Buf<Sc>> = Vec::with_capacity(layouts.len());
         for (i, &p) in ptrs.ins().iter().enumerate() {
             let (l, ext, vol) = &layouts[i];
-            // SAFETY: `p` spans the whole allocated field (`vol`); the block only
+            // safety: `p` spans the whole allocated field (`vol`); the block only
             // restricts the output window — stencil reads stay in-bounds.
             buffers.push(Buf {
                 handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(p, *vol) }),
@@ -308,7 +308,7 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
         }
         for (j, &p) in ptrs.outs().iter().enumerate() {
             let (l, ext, vol) = &layouts[n_in + j];
-            // SAFETY: blocks partition the exec window (proven) -> this block's
+            // safety: blocks partition the exec window (proven) -> this block's
             // written cells are disjoint from every other task's.
             buffers.push(Buf {
                 handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(p, *vol) }),
@@ -504,7 +504,7 @@ pub fn run_policy<const D: usize>(
 /// auto block policy — row-elongated cache tiling. keep the whole domain (`None`)
 /// only when it is small enough to already sit in cache; otherwise tile the
 /// transverse axes at a small fixed edge (stencil reuse stays in cache) while the
-/// contiguous axis runs the full row — the vectorized (mask-form/SLP) kernel
+/// contiguous axis runs the full row — the vectorized (mask-form/slp) kernel
 /// bodies need long unit-stride inner trips to amortize; 8-cell trips invert
 /// their win into a loss.
 ///

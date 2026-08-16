@@ -1,14 +1,14 @@
 // =============================================================================
 // rhd/gr.rs
 //
-// `RhdGr` — the relativistic-hydro regime on a curved spacetime, in the FULLY DENSITIZED
+// `RhdGr` — the relativistic-hydro regime on a curved spacetime, in the fully densitized
 // free-index-down form (Gammie et al. 2003; Stone et al. 2024 eq. 20):
 //
 //   U   = sqrt(-g) [ rho u^t,  T^t_i,  -(T^t_t + rho u^t) ]
 //   F^j = sqrt(-g) [ rho u^j,  T^j_i,  -(T^j_t + rho u^j) ]
 //   d_t U + d_j F^j = sqrt(-g) [ 0,  (1/2) (d_i g_ab) T^ab,  0 ]
 //
-// with `T^mu_nu = rho h u^mu u_nu + p delta^mu_nu`. both the state and the flux carry the SAME
+// with `T^mu_nu = rho h u^mu u_nu + p delta^mu_nu`. both the state and the flux carry the same
 // measure `sqrt(-g) = alpha sqrt(det gamma)`, so the divergence is plain coordinate differencing
 // on every chart and there is no lapse to place; the energy source vanishes identically because
 // the metric is stationary (the t-row of `(1/2)(d_nu g_ab) T^ab`).
@@ -19,11 +19,11 @@
 // so the flat limit (`sqrt(gamma) = 1`, `alpha = 1`, `beta = 0`) reduces to `Rhd` component for
 // component and flat SR is untouched.
 //
-// `sqrt_gamma` is the determinant of the FULL spacetime chart, not of the possibly-reduced `D`
+// `sqrt_gamma` is the determinant of the full spacetime chart, not of the possibly-reduced `D`
 // momentum block: on a 1D radial spherical grid the measure is still `r^2 sin(theta) sqrt(gamma_rr)`,
 // and the reduced 1x1 block would drop the `r^2 sin(theta)` that carries the geometry.
 //
-// `prim.vel` is the CONTRAVARIANT velocity `v^i` (the valencia velocity; = the physical V under
+// `prim.vel` is the contravariant velocity `v^i` (the valencia velocity; = the physical V under
 // identity gamma).
 // =============================================================================
 
@@ -46,7 +46,7 @@ const MAX_ITER: usize = crate::c2p_result::C2P_MAX_ITER;
 
 /// the densitized relativistic-hydro regime on a curved spacetime. `metric` = gamma_{ij}/gamma^{ij}
 /// of the momentum block; `alpha` = the lapse; `shift` = the contravariant shift `beta^i`;
-/// `sqrt_gamma` = sqrt(det gamma) of the FULL chart (every spatial coordinate, gridded or not), so
+/// `sqrt_gamma` = sqrt(det gamma) of the full chart (every spatial coordinate, gridded or not), so
 /// `sqrt(-g) = alpha * sqrt_gamma` is the complete four-volume measure. every conserved slot and
 /// every flux slot carries that measure. reduces to `Rhd` at identity gamma, lapse 1, zero shift,
 /// unit measure.
@@ -71,7 +71,7 @@ struct ValenciaParts<S: Scalar, const D: usize> {
 
 impl<S: Scalar, const D: usize> RhdGr<S, D> {
     /// the undensitized Valencia decomposition of a primitive on this chart. `|v|^2 = gamma_ij v^i
-    /// v^j` (v^i CONTRAVARIANT) and `S_i = rho h W^2 gamma_ij v^j` is LOWERED; identity gamma gives
+    /// v^j` (v^i CONTRAVARIANT) and `S_i = rho h W^2 gamma_ij v^j` is lowered; identity gamma gives
     /// the euclidean norm and the orthonormal `S = rho h W^2 v`.
     #[inline]
     fn valencia_parts(&self, eos: &impl Eos<S>, prim: &Prim<S, D>) -> ValenciaParts<S, D> {
@@ -137,7 +137,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         }
         // recover the Valencia tau from the covariant energy first (invert ehat = alpha tau +
         // (alpha-1) D - beta^i S_i): tau = (ehat + (1-alpha) D + beta^i S_i) / alpha. alpha=1,
-        // beta=0 -> tau = ehat, so the flat recovery is untouched. then the SHARED metric-aware
+        // beta=0 -> tau = ehat, so the flat recovery is untouched. then the shared metric-aware
         // newton on (D, S_i, tau) — the recovery physics never sees the energy re-split.
         let tau = (cons.nrg + (S::ONE - self.alpha) * dd + self.shift.dot(&cons.mom)) / self.alpha;
         let cons_tau = Cons {
@@ -147,7 +147,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
             nrg: tau,
         };
         // the metric-aware recovery: |S|^2 = gamma^{ij} S_i S_j, then the raised v^i (`rhd_recover`
-        // already contracts with `self.metric`). the SR->GR difference lives entirely in the metric VALUE; the code path is shared.
+        // already contracts with `self.metric`). the SR->GR difference lives entirely in the metric value; the code path is shared.
         let prim = rhd_recover(eos, &cons_tau, &self.metric, MAX_ITER);
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
@@ -164,7 +164,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         // speed vt^n = alpha v^n - beta^n and the coordinate-unit normal n_i:
         //   sqrt(-g) rho u^n = sqrt(gamma) D vt^n
         //   sqrt(-g) T^n_i   = sqrt(gamma) (S_i vt^n + alpha p n_i)
-        // the shift rides INSIDE the flux, so no separate advection transform downstream.
+        // the shift rides inside the flux, so no separate advection transform downstream.
         let parts = self.valencia_parts(eos, prim);
         let vt = self.alpha * prim.vel.dot(nhat) - self.shift.dot(nhat);
         // the free-index-down energy flux -sqrt(-g)(T^n_t + rho u^n) = -sqrt(-g) u^n (rho h u_t +
@@ -188,10 +188,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
 
     #[inline]
     fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
-        // Banyuls-Font coordinate speed (Font 2008 eq 37). the two velocities are DISTINCT and must
-        // NOT be conflated: `vn` = the CONTRAVARIANT normal v^n = v^i n_i (the transport term + inside
-        // the radical), `v_sq` = gamma_ij v^i v^j = the PHYSICAL speed squared (the `1 - v^2` factors).
-        // feeding the physical velocity sqrt(gamma_nn) v^n to BOTH slots drove the discriminant
+        // Banyuls-Font coordinate speed (Font 2008 eq 37). the two velocities are distinct and must
+        // not be conflated: `vn` = the contravariant normal v^n = v^i n_i (the transport term + inside
+        // the radical), `v_sq` = gamma_ij v^i v^j = the physical speed squared (the `1 - v^2` factors).
+        // feeding the physical velocity sqrt(gamma_nn) v^n to both slots drove the discriminant
         // negative (NaN Riemann fan) once |v| approached alpha near the horizon — the gr_bondi crash.
         // gamma^{nn} is the inverse-metric normal. identity gamma + alpha 1 (v_sq = vn^2) -> flat.
         let cs_sq = sound_speed_sq(eos, prim.rho, prim.pre);
@@ -230,8 +230,8 @@ mod tests {
 
     #[test]
     fn rhd_gr_reduces_to_flat_at_identity() {
-        // RhdGr on the flat metric (gamma = identity, alpha = 1) MUST equal the flat Rhd regime,
-        // component-for-component: conserved, flux, AND wave speeds. the flat path stays untouched.
+        // RhdGr on the flat metric (gamma = identity, alpha = 1) must equal the flat Rhd regime,
+        // component-for-component: conserved, flux, and wave speeds. the flat path stays untouched.
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let flat = Rhd;
         let gr = RhdGr::<f64, 1> {
@@ -272,7 +272,7 @@ mod tests {
     fn rhd_gr_stores_the_densitized_momentum_on_schwarzschild() {
         // Schwarzschild r=10, M=1: f = 0.8, gamma_rr = 1/f = 1.25, gamma^{rr} = f, alpha = sqrt(f).
         // the stored momentum is sqrt(-g) T^t_r = sqrt(gamma) S_r with S_r = rho h W^2 gamma_rr v^r
-        // (v^r CONTRAVARIANT) and W from |v|^2 = gamma_rr (v^r)^2. the measure is the FULL spherical
+        // (v^r contravariant) and W from |v|^2 = gamma_rr (v^r)^2. the measure is the full spherical
         // one, r^2 sin(theta) sqrt(gamma_rr) at the equator, so the r^2 that the 1x1 radial block
         // drops is present and the densitization is exercised far from 1.
         let eos = IdealGas { gamma: 4.0 / 3.0 };
@@ -335,7 +335,7 @@ mod tests {
     fn rhd_gr_energy_slot_is_the_harm_current_on_kerr_schild() {
         // ingoing kerr-schild at r = 6, M = 1 (beta^r != 0), equatorial. the energy conserved and
         // its flux must equal the free-index-down current -sqrt(-g)(T^t_t + rho u^t) and
-        // -sqrt(-g)(T^r_t + rho u^r), computed INDEPENDENTLY straight from the SchwarzschildKS line
+        // -sqrt(-g)(T^r_t + rho u^r), computed independently straight from the SchwarzschildKS line
         // element by autodiff — the transcription check on the conserved vector, not a restatement
         // of the regime's own algebra. `to_primitive` then inverts the densitized state back.
         use symbi_geometry::SchwarzschildKS;

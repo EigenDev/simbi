@@ -1,10 +1,10 @@
 # =============================================================================
 # gr_fishbone_moncrief_mhd_cartesian.py
 #
-# the MAGNETIZED fishbone-moncrief torus on the FULL 3D CARTESIAN kerr-schild
+# the magnetized fishbone-moncrief torus on the full 3D cartesian kerr-schild
 # grid (the MRI seed configuration, pole-free): the hydro torus of the
 # unmagnetized cartesian config threaded by a weak poloidal loop, exactly
-# divergence-free in the DENSITIZED sense the GR constrained transport
+# divergence-free in the densitized sense the GR constrained transport
 # preserves. the azimuthal vector potential A_phi(r, theta) = max(rho/rho_max
 # - rho_cut, 0) becomes the cartesian edge potential via dphi = (-y dx + x dy)
 # / (x^2 + y^2); the staggered field is its discrete edge curl divided by the
@@ -88,9 +88,9 @@ class GrFishboneMoncriefMhdCartesian(GrFishboneMoncriefCartesian):
     def _sqrtg(self, x: float, y: float, z: float) -> float:
         # the kernel's sqrt(gamma) = sqrt(1 + 2H |l|^2) including its r >= M/2
         # clamp, so the seeded densitized field satisfies the constraint in the
-        # SAME weights the CT curl divides by: 2H = 2 M r^3 / (r^4 + a^2 z^2),
+        # same weights the CT curl divides by: 2H = 2 M r^3 / (r^4 + a^2 z^2),
         # l = ((r x + a y)/(r^2 + a^2), (r y - a x)/(r^2 + a^2), z/r) with the
-        # CLAMPED kerr-schild radius. a = 0 reduces to sqrt(1 + 2M/max(r, M/2))
+        # clamped kerr-schild radius. a = 0 reduces to sqrt(1 + 2M/max(r, M/2))
         # (moot for the torus-confined loop, kept for exactness).
         mm, a = self.schwarzschild_mass, self.kerr_spin
         r = max(self.ks_radius(x, y, z), 0.5 * mm)
@@ -167,7 +167,7 @@ class GrFishboneMoncriefMhdCartesian(GrFishboneMoncriefCartesian):
             d -= (a_x(xc(i), yf(j + 1), z) - a_x(xc(i), yf(j), z)) / dy
             return d / self._sqrtg(xc(i), yc(j), z)
 
-        # beta normalization over the DENSE CORE of the equatorial plane: the full 3d
+        # beta normalization over the dense core of the equatorial plane: the full 3d
         # scan is O(n^3) expensive and the minimum beta of an equatorial loop sits on
         # the equator by the torus's reflection symmetry.
         k_eq = nz // 2

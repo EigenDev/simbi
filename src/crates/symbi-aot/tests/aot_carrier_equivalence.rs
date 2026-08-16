@@ -18,7 +18,7 @@
 
 use symbi_aot::NamedKernel;
 
-// shims binding the emitted kernels BY FIELD NAME (NamedKernel) — order-
+// shims binding the emitted kernels by field name (NamedKernel) — order-
 // independent, loud + named on manifest drift. every buffer is 1D (lo = 0); the
 // silenced ignores absorb the scattered `buf_lo_*` zeros each call site passes.
 #[allow(clippy::too_many_arguments)]
@@ -293,7 +293,7 @@ fn rhd_prim_to_cons(rho: f64, v: f64, p: f64) -> (f64, f64, f64) {
 #[test]
 fn rhd_c2p_kernel_equals_host_at_baked_count() {
     // (rho, v, p). first row converges within 20 (the round-trip regime); the rest
-    // are HARD — ultra-relativistic (slow Newton) + strong contrast / near-vacuum.
+    // are hard — ultra-relativistic (slow Newton) + strong contrast / near-vacuum.
     // a no-freeze kernel runs all 20 steps past convergence and drifts from the
     // host early-break on exactly these, so they are the freeze regression guard.
     let cases: &[(f64, f64, f64)] = &[
@@ -387,7 +387,7 @@ fn rmhd_p2c(rho: f64, v: [f64; 3], p: f64, b: [f64; 3]) -> (f64, [f64; 3], f64, 
 
 #[test]
 fn rmhd_c2p_kernel_equals_host_at_baked_count() {
-    // (rho, v, p, B). nice states + HARD ones (relativistic + strongly magnetized).
+    // (rho, v, p, B). nice states + hard ones (relativistic + strongly magnetized).
     let cases: &[(f64, [f64; 3], f64, [f64; 3])] = &[
         (1.0, [0.1, 0.0, 0.0], 1.0, [0.5, 0.0, 0.0]),
         (1.0, [0.5, 0.2, 0.1], 3.0, [1.0, 0.5, 0.2]),
@@ -474,7 +474,7 @@ fn rmhd_c2p_kernel_equals_host_at_baked_count() {
 
 #[test]
 fn flux_kernel_equals_host_hlle_on_uniform_field() {
-    // a face flux bundles PLM reconstruction + the HLLE Riemann solver. on a UNIFORM
+    // a face flux bundles PLM reconstruction + the HLLE Riemann solver. on a uniform
     // field PLM gives L == R, which isolates HLLE: the compiled flux kernel must equal
     // the host `hlle::<f64>` source on that state. (non-uniform L != R would require
     // replicating the theta-MC reconstruction by hand — the re-implemented-reference

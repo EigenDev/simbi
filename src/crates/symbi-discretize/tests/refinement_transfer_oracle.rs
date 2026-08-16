@@ -2,12 +2,12 @@
 // refine_transfer_oracle.rs
 //
 // gate: the gv-traced amr transfer kernels
-// (refine_restrict_gv / refine_prolong_gv) BIT-MATCH an INDEPENDENT f64 reference
+// (refine_restrict_gv / refine_prolong_gv) bit-match an independent f64 reference
 // (the host axis-by-axis sweep with scratch buffers, vendored below) on
 // pseudo-random data, across 1d/2d/3d, all prolongation orders, and
 // time-interpolation fractions — and lower to CPU + CUDA source.
 //
-// the kernels run in ABSOLUTE level-global indices, including negative ghost
+// the kernels run in absolute level-global indices, including negative ghost
 // coordinates (floor-division parent maps) — the windows below deliberately
 // straddle zero to pin that.
 // =============================================================================
@@ -20,7 +20,7 @@ use symbi_discretize::{
     refine_restrict_gv,
 };
 
-// deterministic per-cell noise from the ABSOLUTE coordinate (splitmix-style
+// deterministic per-cell noise from the absolute coordinate (splitmix-style
 // integer mix), mapped into [0.5, 2.5) — strictly positive, structureless.
 fn noise(seed: u64, c: &[i64]) -> f64 {
     let mut h = seed.wrapping_mul(0x9e3779b97f4a7c15);

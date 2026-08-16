@@ -1,7 +1,7 @@
 # =============================================================================
 # refined_blast.py
 #
-# a 2d Sedov-like blast on a STATICALLY REFINED mesh: a coarse base grid with one
+# a 2d Sedov-like blast on a statically refined mesh: a coarse base grid with one
 # fine box around the central overpressure region. exercises the AMR path end to
 # end — the hierarchy is checkpointed as level_0 (coarse) + level_1 (fine) in one
 # file. the fine interior is seeded by prolongation from the coarse IC.

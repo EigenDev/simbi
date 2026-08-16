@@ -1,20 +1,20 @@
 // =============================================================================
 // refinement_restart_depth.rs
 //
-// resuming a checkpoint at a GREATER refinement depth than it was written with — the bootstrap
+// resuming a checkpoint at a greater refinement depth than it was written with — the bootstrap
 // ladder, where a rung converges at its own resolution and the next rung resumes it with one more
 // level. without it every depth pays the initial transient again at its own (far more expensive)
 // resolution.
 //
 // three properties make it correct, and each is checkable independently:
 //
-//   - the levels the file carries are LOADED, and the levels beyond it are INJECTED from their
+//   - the levels the file carries are loaded, and the levels beyond it are injected from their
 //     parents. an off-by-one either way is silent: injecting over a level that should have been
 //     loaded discards converged data and replaces it with a coarser copy of itself, which is
 //     smooth, finite and plausible.
 //   - injection is exactly conservative on cell averages, which is the entire reason a
 //     piecewise-constant operator is sufficient here.
-//   - level `i` must occupy the SAME region at every depth. that is a property of a config's
+//   - level `i` must occupy the same region at every depth. that is a property of a config's
 //     refinement schedule, not of the code — a schedule deriving its regions from the level count
 //     violates it — so it is verified against the file rather than assumed, and the violation is an
 //     error rather than a field laid over the wrong region.
@@ -50,7 +50,7 @@ fn ic(x: [f64; 1]) -> Prim<f64, 1> {
     }
 }
 
-/// the region schedule: level `l` covers the inner half of its parent about the origin. FIXED
+/// the region schedule: level `l` covers the inner half of its parent about the origin. fixed
 /// geometry — level `l`'s box does not depend on how many levels follow it, which is what makes a
 /// deeper restart meaningful at all.
 fn region(ll: usize) -> RefinementRegion<1> {
@@ -86,7 +86,7 @@ fn ladder(levels: usize, seed: bool) -> Hier {
     hier
 }
 
-/// the conserved mass and energy a level holds over the region a FINER level would cover — the
+/// the conserved mass and energy a level holds over the region a finer level would cover — the
 /// integral injection must preserve.
 fn mass_energy_over(sim: &Sim, lo: f64, hi: f64) -> (f64, f64) {
     let bg = sim.geom.block_geometry(sim.physics.metric);
@@ -179,7 +179,7 @@ fn injection_is_refused_where_it_would_break_a_constraint() {
 
 #[test]
 fn a_checkpoint_reports_the_levels_it_actually_carries() {
-    // the count that decides which levels are loaded and which are injected. taken from the FILE
+    // the count that decides which levels are loaded and which are injected. taken from the file
     // rather than from the config, so a truncated or hand-edited checkpoint cannot make a level
     // silently start from zeros while the run reports a successful restart.
     let dir = std::env::temp_dir().join(format!("restart_depth_{}", std::process::id()));
@@ -210,7 +210,7 @@ fn a_checkpoint_reports_the_levels_it_actually_carries() {
 #[test]
 fn a_level_whose_region_moved_between_runs_is_refused() {
     // the compatibility property a deeper restart rests on: level `i` occupies the same region at
-    // every depth. that holds for a schedule of FIXED regions and fails for one deriving its
+    // every depth. that holds for a schedule of fixed regions and fails for one deriving its
     // regions from the level count — and the failure is invisible, since loading a level's data
     // onto a different region yields a field that is smooth, finite and wrong everywhere.
     let dir = std::env::temp_dir().join(format!("restart_geom_{}", std::process::id()));
@@ -275,7 +275,7 @@ fn a_level_whose_region_moved_between_runs_is_refused() {
 
 #[test]
 fn a_moving_mesh_checkpoint_verifies_against_the_comoving_rebuild() {
-    // homologous mesh motion scales the STORED bounds by a(t) at write time, while a
+    // homologous mesh motion scales the stored bounds by a(t) at write time, while a
     // restart rebuilds the comoving (a = 1) grid and re-derives a(t) from the resume
     // time — a is a pure function of time, never integrated state. the region check
     // must therefore compare comoving against comoving: a checkpoint written
@@ -359,7 +359,7 @@ fn restarting_at_the_same_depth_reproduces_the_state_bitwise() {
          copy of itself and leaves a state that is smooth, finite and wrong"
     );
 
-    // the premise: the levels must actually DIFFER from a fresh injection, or "loaded" and
+    // the premise: the levels must actually differ from a fresh injection, or "loaded" and
     // "injected" produce the same bits and the comparison above is vacuous.
     let mut all_injected = ladder(4, false);
     all_injected.levels[0].state.seed_cells(ic);
@@ -453,7 +453,7 @@ fn a_restart_may_not_drop_levels() {
 
 #[test]
 fn a_restart_onto_a_moved_region_is_refused_by_the_restart_itself() {
-    // the geometry check has to be WIRED, not merely available. every other assertion about it
+    // the geometry check has to be wired, not merely available. every other assertion about it
     // calls the verifier directly, so a restart path that never invoked it would leave them all
     // green while loading a converged level's data onto a region it never occupied — a field that
     // is smooth, finite and wrong everywhere, discovered as an unexplained profile weeks later.
@@ -507,9 +507,9 @@ fn a_restart_onto_a_moved_region_is_refused_by_the_restart_itself() {
 }
 
 // =============================================================================
-// the checkpoint's mesh description is written in REVERSED (storage) axis order — `global_cells` as
+// the checkpoint's mesh description is written in reversed (storage) axis order — `global_cells` as
 // [nx_D, .., nx_1] and the geometry groups named by storage slot — so that a reader's plot axes are
-// not transposed. every gate above is ONE-DIMENSIONAL, where that reversal is the identity, and a
+// not transposed. every gate above is one-dimensional, where that reversal is the identity, and a
 // cubic grid hides it just as well. an anisotropic multi-dimensional grid is the only shape that
 // exposes it, and reading the wrong axis rejects every legitimate restart it touches.
 // =============================================================================
@@ -536,7 +536,7 @@ fn an_anisotropic_grid_verifies_against_its_own_axes() {
         .set_initial(ic2)
         .build();
 
-    // the premise: the two axes must differ in BOTH cell count and physical extent, or a swapped
+    // the premise: the two axes must differ in both cell count and physical extent, or a swapped
     // read agrees by coincidence and this proves nothing.
     assert_ne!(nx, ny, "the cell counts must differ");
     assert!(
@@ -559,7 +559,7 @@ fn an_anisotropic_grid_verifies_against_its_own_axes() {
         )
     });
 
-    // and the check must still DISCRIMINATE on an anisotropic grid: a genuinely different grid is
+    // and the check must still discriminate on an anisotropic grid: a genuinely different grid is
     // refused. swapping the two axes is the sharpest case — same total cells, same total volume.
     let swapped = Sim2::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([ny, nx])

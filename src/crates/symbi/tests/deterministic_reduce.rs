@@ -2,7 +2,7 @@
 // deterministic_reduce.rs
 //
 // the fixed-order reduction contract: the host parallel Add reduce combines its
-// per-slab partials in SLAB ORDER, so the result is bit-reproducible run to run
+// per-slab partials in slab order, so the result is bit-reproducible run to run
 // and across thread counts for a fixed domain shape. the body-feedback sums
 // feed the body equations of motion, so a join-order-dependent combine was a
 // run-to-run trajectory nondeterminism at production sizes. the field mixes
@@ -48,7 +48,7 @@ fn build() -> (Field<f64, 2, HostMemory>, Domain<2>) {
 #[test]
 fn parallel_add_reduce_is_bit_reproducible() {
     let (field, domain) = build();
-    // run to run: the SAME call must produce the SAME bits, repeatedly (a
+    // run to run: the same call must produce the same bits, repeatedly (a
     // work-stealing-dependent combine tree fails this within a few repeats).
     let first = field_reduce(&field, &domain, ReductionOp::Add);
     for rep in 0..8 {
@@ -60,7 +60,7 @@ fn parallel_add_reduce_is_bit_reproducible() {
     }
 
     // against the independently-computed fixed-order reference: per-slab partials
-    // over the OUTERMOST axis in storage order, folded in slab order — the exact
+    // over the outermost axis in storage order, folded in slab order — the exact
     // algorithm the contract promises.
     let mut expect = 0.0_f64;
     for ii in 0..NX {

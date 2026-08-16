@@ -1,16 +1,16 @@
 # =============================================================================
 # test_field_loop_flat_uct.py
 #
-# the FLAT (Minkowski, cartesian) constrained-transport gate, covering the flat cartesian 2.5D
+# the flat (Minkowski, cartesian) constrained-transport gate, covering the flat cartesian 2.5D
 # UCT/contact kernels (nmhd here) that no GR fixture reaches. the UCT failure modes it pins are
 # anti-diffusive HLLD, advective upwind-pairing, and transverse reconstruction.
 #
 # vehicle: the Gardiner & Stone (2005) magnetic field-loop advection — a weak (passive, beta >> 1)
-# loop advected diagonally across a periodic box. two properties must hold for EVERY ct_method/solver:
+# loop advected diagonally across a periodic box. two properties must hold for every ct_method/solver:
 #   - div(B) stays at machine zero (the CT invariant), and
-#   - the run is STABLE — the loop advects without amplifying. a broken EMF blows the loop up: the
-#     upwind-pairing failure drives gas pressure 1 -> 29. the velocity is SUPERSONIC
-#     (|v| = sqrt5, the paper's v=(2,1)) BY DESIGN — the EMF-pairing failures are invisible
+#   - the run is stable — the loop advects without amplifying. a broken EMF blows the loop up: the
+#     upwind-pairing failure drives gas pressure 1 -> 29. the velocity is supersonic
+#     (|v| = sqrt5, the paper's v=(2,1)) by design — the EMF-pairing failures are invisible
 #     subsonic (Orszag-Tang) and only fire supersonically.
 # =============================================================================
 import glob
@@ -49,7 +49,7 @@ def _load(path: str):
 
 
 def _div_b_max(b1, b2, dx, dy) -> float:
-    # discrete cartesian divergence per cell from the staggered faces: it is IDENTICALLY zero for a
+    # discrete cartesian divergence per cell from the staggered faces: it is identically zero for a
     # constrained-transport update, so any nonzero value is a CT bug. normalized by |B|/dx.
     d = (b1[:, 1:] - b1[:, :-1]) / dx + (b2[1:, :] - b2[:-1, :]) / dy
     scale = max(float(np.abs(b1).max()), float(np.abs(b2).max())) / min(dx, dy) + 1e-30
@@ -88,7 +88,7 @@ def test_flat_field_loop_preserves_divergence_and_is_stable(ct, solver) -> None:
     assert _div_b_max(ib1, ib2, dx, dy) < 1e-10, f"initial div(B) nonzero at {tag}"
     assert _div_b_max(fb1, fb2, dx, dy) < 1e-10, f"div(B) broke to nonzero at {tag}"
 
-    # stability: no NaN, pressure stays positive and does NOT blow up (a broken supersonic EMF
+    # stability: no NaN, pressure stays positive and does not blow up (a broken supersonic EMF
     # amplifies the loop and heats the gas, measured pre 1 -> 29), and the field does not amplify.
     assert not np.isnan(frho).any() and not np.isnan(fpre).any(), f"NaN at {tag}"
     assert fpre.min() > 0.0, f"pressure went non-positive at {tag}"

@@ -1,7 +1,7 @@
 # =============================================================================
 # test_cli_inheritance.py
 #
-# a subclass that overrides a core knob (e.g., `solver`) ONLY to change its
+# a subclass that overrides a core knob (e.g., `solver`) only to change its
 # default must keep the base class's `cli=True`. an Annotated override replaces
 # the base metadata wholesale, so without an mro-aware lookup the cli flag is
 # dropped, `--solver` becomes an unknown arg that `parse_known_args` silently

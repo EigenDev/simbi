@@ -1,7 +1,7 @@
 // =============================================================================
 // census_accumulate.rs
 //
-// an ACCUMULATING census: every sample folded into one stored row with the census's own reduce
+// an accumulating census: every sample folded into one stored row with the census's own reduce
 // op, rather than a row apiece.
 //
 // the mode exists because storage, not compute, is what bounds a fine binning. a two-dimensional
@@ -9,7 +9,7 @@
 // segment's time average would write thousands of them to disk in order to average them back
 // down.
 //
-// what is asserted here is that the fold is EXACT — the stored row equals the same samples
+// what is asserted here is that the fold is exact — the stored row equals the same samples
 // combined by hand — and that it is the census's own operator rather than a second rule. an
 // accumulating census that summed where the registration says max, or that quietly held only the
 // last sample, would still produce one plausible row and nothing downstream could tell.
@@ -126,7 +126,7 @@ fn an_accumulating_census_stores_one_row_that_is_the_exact_sum_of_its_samples() 
         "the accumulated row is {got}, but summing the five per-sample rows gives {want}"
     );
 
-    // the premise: the samples must actually DIFFER, or a fold that kept only the last would be
+    // the premise: the samples must actually differ, or a fold that kept only the last would be
     // indistinguishable from one that summed them.
     let last = *per_sample.last().expect("five rows");
     assert!(
@@ -137,7 +137,7 @@ fn an_accumulating_census_stores_one_row_that_is_the_exact_sum_of_its_samples() 
 
 #[test]
 fn an_accumulating_census_folds_with_its_own_reduce_op() {
-    // the fold over time is the SAME commutative monoid as the fold over refinement levels. an
+    // the fold over time is the same commutative monoid as the fold over refinement levels. an
     // extremal census accumulates the extremum over space and time; summing it instead would
     // report a quantity with no physical meaning at all, and it would still be one plausible row.
     let mut sim = build(&mass_census("max", true));
@@ -147,7 +147,7 @@ fn an_accumulating_census_folds_with_its_own_reduce_op() {
     let history = &sim.store.censuses[0].history;
     assert_eq!(history.len(), 1);
 
-    // the peak sample was the 2.5x one, and it was NOT the last — a fold that kept the most
+    // the peak sample was the 2.5x one, and it was not the last — a fold that kept the most
     // recent value would report the 1.7x row instead.
     let mut reference = build(&mass_census("max", false));
     let _ = samples_with(&mut reference, 4, |k| [1.0, 2.5, 0.4, 1.7][k]);
@@ -202,7 +202,7 @@ fn the_accumulated_row_carries_the_span_it_covers() {
 
 #[test]
 fn accumulation_composes_with_the_sample_cadence() {
-    // the two controls are independent: the interval decides WHICH steps are sampled, the mode
+    // the two controls are independent: the interval decides which steps are sampled, the mode
     // decides how the samples that were taken are stored. a run declaring both must fold exactly
     // the due samples — folding the skipped ones as zeros would silently deflate every average by
     // the duty cycle.

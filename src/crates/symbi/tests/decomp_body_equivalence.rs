@@ -1,18 +1,18 @@
 // =============================================================================
 // decomp_body_equivalence.rs
 //
-// the IMMERSED-BODY correctness contract for multi-gpu domain decomposition: a domain split into
-// tiles, each carrying the SAME body (global position), evolved through `evolve_decomposed`, must
-// reproduce the monolithic run to round-off for the FLUID (den/mom/nrg).
+// the immersed-body correctness contract for multi-gpu domain decomposition: a domain split into
+// tiles, each carrying the same body (global position), evolved through `evolve_decomposed`, must
+// reproduce the monolithic run to round-off for the fluid (den/mom/nrg).
 //
-// the body is a fixed accreting BLACK HOLE at the domain center, placed exactly on the 2x2 tile
-// CORNER -- the worst case: its gravity AND its mass-removing sink straddle all four tiles. for a
-// cartesian grid the body source is FUSED into `godunov_stage` (gravity on mom/nrg + the sink on
-// den), so `evolve_decomposed` needs NO change: each tile's godunov self-applies the body to its
-// own cells from the body's GLOBAL position. body motion is prescribed (here: fixed) and the
-// backward force/accreted-mass feedback is DIAGNOSTICS-only (it never re-enters the fluid or the
+// the body is a fixed accreting black hole at the domain center, placed exactly on the 2x2 tile
+// corner -- the worst case: its gravity and its mass-removing sink straddle all four tiles. for a
+// cartesian grid the body source is fused into `godunov_stage` (gravity on mom/nrg + the sink on
+// den), so `evolve_decomposed` needs no change: each tile's godunov self-applies the body to its
+// own cells from the body's global position. body motion is prescribed (here: fixed) and the
+// backward force/accreted-mass feedback is diagnostics-only (it never re-enters the fluid or the
 // body's gravitating mass), so the per-tile fluid is correct with no cross-tile reduction. the
-// accreted-mass DIAGNOSTIC sum across tiles is a separate concern from the fluid correctness this test checks.
+// accreted-mass diagnostic sum across tiles is a separate concern from the fluid correctness this test checks.
 //
 // cpu-only + 2d: same exchange index math as the gpu path; the fast iteration loop. a tile that
 // applied the body at a wrong (local) coordinate, or that failed to remove sink mass at the cut,
@@ -42,8 +42,8 @@ type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
 // a fixed accreting black hole at the origin: gravity (mom/nrg) + a mass-removing sink (den). the
-// sink + accretion radii are generous so the removal straddles the tile corner. a FRESH collection
-// per tile (with_bodies takes ownership), all at the same GLOBAL position.
+// sink + accretion radii are generous so the removal straddles the tile corner. a fresh collection
+// per tile (with_bodies takes ownership), all at the same global position.
 fn central_bh() -> BodyCollection<f64, 2> {
     BodyCollection::new().add(Body::black_hole(
         0,
@@ -84,7 +84,7 @@ fn two_accretors() -> BodyCollection<f64, 2> {
         ))
 }
 
-// a MOVING binary: two gravitating bodies orbiting the origin (prescribed Keplerian motion via
+// a moving binary: two gravitating bodies orbiting the origin (prescribed Keplerian motion via
 // advance_binary). this exercises the decomposed body bookkeeping's prescribed-orbit advance: each
 // tile must advance the orbit identically so all tiles' body positions stay in lockstep and the
 // rotating gravity the fluid feels is consistent across cuts.
@@ -111,10 +111,10 @@ fn binary() -> BodyCollection<f64, 2> {
         .with_binary_params(BinaryParams::new(1.0, 0.5, 0.0, 1.0))
 }
 
-// dense fluid at rest: no pressure gradient, so the ONLY dynamics are the body gravity (+ the BH
+// dense fluid at rest: no pressure gradient, so the only dynamics are the body gravity (+ the BH
 // sink). outflow boundaries + short time keep the flow interior so mono == decomposed is exact.
-// `bodies` builds a FRESH collection per tile (with_bodies takes ownership); all tiles get the same
-// body state at the same GLOBAL position.
+// `bodies` builds a fresh collection per tile (with_bodies takes ownership); all tiles get the same
+// body state at the same global position.
 fn make(
     cells: [usize; 2],
     origin: [f64; 2],
@@ -239,7 +239,7 @@ fn body_state(sim: &Sim, idx: usize) -> ([f64; 2], f64) {
 }
 
 // `expect_accretion`: BH runs must remove sink mass + record accretion (non-vacuous); binary runs
-// (gravitational, no sink) instead require the bodies to have actually MOVED.
+// (gravitational, no sink) instead require the bodies to have actually moved.
 fn assert_body_matches(
     counts: [usize; 2],
     ts: Timestepping,
@@ -264,7 +264,7 @@ fn assert_body_matches(
         "some global cells were never written"
     );
 
-    // FLUID equivalence: decomposed == monolithic to round-off (den/mom/nrg).
+    // fluid equivalence: decomposed == monolithic to round-off (den/mom/nrg).
     for (name, pick) in [
         ("den", &den as &dyn Fn(&Sim, [isize; 2]) -> f64),
         ("momx", &momx),
@@ -280,8 +280,8 @@ fn assert_body_matches(
         );
     }
 
-    // BODY-STATE equivalence: every decomposed tile's body must match the monolithic body's
-    // position AND total_accreted_mass. accreted-mass tests the cross-tile DIAGNOSTIC SUM
+    // body-state equivalence: every decomposed tile's body must match the monolithic body's
+    // position and total_accreted_mass. accreted-mass tests the cross-tile diagnostic sum
     // (step_bodies_decomposed); position tests the prescribed-orbit advance staying in lockstep.
     let nbodies = mono[0].0.immersed.as_ref().unwrap().bodies.len();
     let mut moved = 0.0_f64;
@@ -349,13 +349,13 @@ fn body_rk2_two_tile_x_cut() {
 
 // the 2x2 corner under rk2 -- the body sits exactly on the four-tile corner, so its gravity and
 // sink straddle every cut. the hardest case. also asserts the cross-tile accreted-mass diagnostic
-// SUM (step_bodies_decomposed) equals the monolithic value and all tiles stay in lockstep.
+// sum (step_bodies_decomposed) equals the monolithic value and all tiles stay in lockstep.
 #[test]
 fn body_rk2_quad_tile_2d_grid() {
     assert_body_matches([2, 2], Timestepping::Rk2, central_bh, true);
 }
 
-// a MOVING binary across the 2x2 corner: the two bodies orbit (prescribed Keplerian advance run per
+// a moving binary across the 2x2 corner: the two bodies orbit (prescribed Keplerian advance run per
 // tile in step_bodies_decomposed). the fluid feels the rotating gravity; decomposed == monolithic
 // requires every tile to advance the orbit identically (lockstep body positions). asserts the
 // bodies actually moved (non-vacuous) and stayed synced across tiles.

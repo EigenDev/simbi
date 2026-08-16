@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 # the bridge crate: instantiates the carrier-generic symbi-hydro physics at
-# S = Gv to TRACE it into discrete stencil DAGs in symbi-ir. the choice of
+# S = Gv to trace it into discrete stencil DAGs in symbi-ir. the choice of
 # discretization (geometry, spacing, reconstruction) is a value the caller
 # selects; the physics source is unchanged. this is where numerical choices
 # live and only here.
@@ -16,11 +16,11 @@ symbi-ir      = { path = "../symbi-ir" }
 # the Gv carrier impls symbi_algebra::Scalar to trace physics into the tensor IR.
 symbi-algebra = { path = "../symbi-algebra" }
 # discretize instantiates the carrier-generic symbi-hydro physics at S=Gv to
-# BUILD kernels — one physics source.
+# build kernels — one physics source.
 symbi-hydro   = { path = "../symbi-hydro" }
 # the property-algebra layer: SdfExpr + penalize_cell traced at S=Gv.
 symbi-ib      = { path = "../symbi-ib" }
-# the SINGLE-SOURCE geometric christoffel source: discretize traces `Metric<Gv, D>` at S=Gv
+# the single-source geometric christoffel source: discretize traces `Metric<Gv, D>` at S=Gv
 # instead of re-deriving the spherical/cylindrical inertial by hand. one geometry source.
 symbi-geometry = { path = "../symbi-geometry" }
 

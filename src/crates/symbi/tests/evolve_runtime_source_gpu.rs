@@ -1,25 +1,25 @@
 // =============================================================================
 // evolve_runtime_source_gpu.rs
 //
-// GPU validation of the runtime user-source path: a RUNTIME-loaded user source (python -> json ->
-// SourceConfig, no recompile) must run ON THE DEVICE via NVRTC and match the CPU per-cell
+// GPU validation of the runtime user-source path: a runtime-loaded user source (python -> json ->
+// SourceConfig, no recompile) must run on the device via NVRTC and match the CPU per-cell
 // interpreter. proves the
-// runtime DAG -> `source_apply_from_built_gv` -> neutral IR -> render(Cuda) -> NVRTC-JIT path closes
+// runtime DAG -> `source_apply_from_built_gv` -> neutral IR -> render(Cuda) -> nvrtc-jit path closes
 // on-device, the device twin of the CPU `evolve_runtime_source.rs`.
 //
-// the test isolates the SOURCE kernel (no multi-step evolve, so no FMA-induced dt drift): build TWO
+// the test isolates the source kernel (no multi-step evolve, so no FMA-induced dt drift): build two
 // identical adiabatic sims (host = CpuSpace/HostMemory, device = CudaSpace/UnifiedMemory) with a
-// smooth nonzero state, attach the SAME runtime source on both, then `snapshot_stage` (fill u_stage)
-// + ONE `source_apply` at a fixed weight, and diff every conserved field. relative tolerance < 1e-9
+// smooth nonzero state, attach the same runtime source on both, then `snapshot_stage` (fill u_stage)
+// + one `source_apply` at a fixed weight, and diff every conserved field. relative tolerance < 1e-9
 // per the FMA-fusion budget (`project_fma_discipline`).
 //
-// TWO source shapes:
-//   * POSITION-INDEPENDENT force `a = [p0, 0..]` — stresses the scalar (p{i}) manifest path.
-//   * POSITION-DEPENDENT force `a = [x_0 * p0, 0..]` — the harder case: the device kernel resolves
-//     `x_0` from the IN-KERNEL centroid (`x_lo + i*dx`), the CPU pass from `cell_coord`; they must
+// two source shapes:
+//   * position-independent force `a = [p0, 0..]` — stresses the scalar (p{i}) manifest path.
+//   * position-dependent force `a = [x_0 * p0, 0..]` — the harder case: the device kernel resolves
+//     `x_0` from the in-kernel centroid (`x_lo + i*dx`), the CPU pass from `cell_coord`; they must
 //     agree, validating the runtime-built `cell_geometry_gv` centroid arithmetic under NVRTC.
 //
-// runs ONLY with --features cuda; needs a CUDA GPU (RTX 2070 canonical env, NVCC_CCBIN=g++-15).
+// runs only with --features cuda; needs a CUDA GPU (rtx 2070 canonical env, NVCC_CCBIN=g++-15).
 // run: cargo test -p symbi --features cuda --test evolve_runtime_source_gpu
 // =============================================================================
 
@@ -99,7 +99,7 @@ where
     .build()
 }
 
-// position-INDEPENDENT force `a = [p0, 0, 0..]`: nodes [PARAMETER p0, CONSTANT 0]; output 0 -> a_0,
+// position-independent force `a = [p0, 0, 0..]`: nodes [parameter p0, constant 0]; output 0 -> a_0,
 // the rest -> a_k = 0.
 fn force_const_json(dim: usize) -> String {
     let outputs: Vec<usize> = std::iter::once(0)
@@ -111,8 +111,8 @@ fn force_const_json(dim: usize) -> String {
     )
 }
 
-// position-DEPENDENT force `a = [x_0 * p0, 0, 0..]`: nodes [VARIABLE_X1, PARAMETER p0, MULTIPLY,
-// CONSTANT 0]; output 2 -> a_0 = x_0*p0, the rest -> a_k = 0.
+// position-dependent force `a = [x_0 * p0, 0, 0..]`: nodes [VARIABLE_X1, parameter p0, multiply,
+// constant 0]; output 2 -> a_0 = x_0*p0, the rest -> a_k = 0.
 fn force_posdep_json(dim: usize) -> String {
     let outputs: Vec<usize> = std::iter::once(2)
         .chain(std::iter::repeat(3).take(dim - 1))
@@ -124,7 +124,7 @@ fn force_posdep_json(dim: usize) -> String {
     )
 }
 
-// build TWO identical sims, attach the SAME runtime source, snapshot_stage + ONE source_apply, diff.
+// build two identical sims, attach the same runtime source, snapshot_stage + one source_apply, diff.
 fn check_runtime_source<const D: usize>(json: &str)
 where
     Cartesian: Metric<f64, D>,
@@ -229,26 +229,26 @@ fn runtime_relax_gpu_2d() {
 }
 
 // =============================================================================
-// the runtime-source EVOLVE oracle across the device boundary.
+// the runtime-source evolve oracle across the device boundary.
 //
 // the device twin of `jit_fused_equals_two_pass.rs` (which pins the three CPU
 // engines — interp / pointwise-JIT / fused-JIT — bit-for-bit). the 4th engine is
 // GPU NVRTC (`apply_runtime_source_gpu` -> `build_runtime_source_ir` ->
 // `prepared_to_ir`); the single-`source_apply` tests pin it at one stage, and
-// this drives the runtime source INSIDE the production `evolve()` loop
+// this drives the runtime source inside the production `evolve()` loop
 // on-device — the multi-step interaction of cfl -> flux -> godunov -> per-stage
 // runtime `source_apply` -> c2p -> ghost, driven on the GPU and tracked against
 // the CPU.
 //
-// tolerance is rel < 1e-6 (NOT bit-for-bit): unlike the CPU-vs-CPU twin, this
+// tolerance is rel < 1e-6 (not bit-for-bit): unlike the CPU-vs-CPU twin, this
 // crosses the device boundary, so nvcc FMA fusion in the godunov flux + the c2p
 // compounds per RK2 step (`project_fma_discipline`). the anti-vacuous guard is
-// STRUCTURAL: if the GPU silently skipped the NVRTC source, its trajectory would
+// structural: if the GPU silently skipped the NVRTC source, its trajectory would
 // diverge from the CPU (which applied the source) and the rel-close assert would
-// fire — a passing run means the device source ran AND tracked the host.
+// fire — a passing run means the device source ran and tracked the host.
 // =============================================================================
 
-// build host + device adiabatic sims with the SAME runtime source, run the full
+// build host + device adiabatic sims with the same runtime source, run the full
 // evolve() loop on each to t_final, and assert the conserved state tracks (rel <
 // 1e-6, NaN-free) with matching step counts.
 fn check_runtime_source_evolve<const D: usize>(json: &str)

@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn the_charts_disagree_on_the_radial_slot() {
-        // the spherical and cylindrical radial centroids are DIFFERENT points; a
+        // the spherical and cylindrical radial centroids are different points; a
         // chart-blind seed that applies one formula to the other chart mislocates
         // the metric by a finite amount that no resolution increase removes.
         let (lo, hi) = (1.0_f64, 2.0_f64);

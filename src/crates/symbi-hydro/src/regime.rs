@@ -6,7 +6,7 @@
 // flux, and wave speed estimates.
 //
 // all methods use nhat (unit normal vector) for direction; no dir: usize index is passed.
-// this means ONE riemann solver works for ALL directions in ALL dimensions.
+// this means one riemann solver works for all directions in all dimensions.
 // dot(vel, nhat) projects velocity onto the face normal.
 //
 // regimes: Newtonian (newtonian.rs), Rhd (rhd.rs), MHD/RMHD (future).
@@ -41,7 +41,7 @@ use symbi_ir::algebra::{Scalar, Selectable};
 pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// the declarative metadata bundle for this regime — name, field layout,
     /// flag consts, c2p flavor: the physics
-    /// regime as a FIRST-CLASS DATA VALUE. callers prefer
+    /// regime as a first-class data value. callers prefer
     /// `<Self as Regime<S, D>>::SPEC.is_relativistic` over the
     /// `self.is_relativistic()` accessor; the bool methods below default to
     /// reading from SPEC so per-regime impls don't repeat the flag.
@@ -52,7 +52,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
 
     /// the energy model: `Adiabatic` (energy equation evolved) or `IsoModel`
     /// (none). this is the regime's `Prim`/`Cons` energy `Slot` parameter, surfaced as an associated
-    /// type so the SIM-FIELD layer can pick the field storage (`Field` vs a ZST) at the TYPE level —
+    /// type so the sim-field layer can pick the field storage (`Field` vs a zst) at the type level —
     /// retiring the runtime `Option<Field>` on `cons.nrg` / `prim.pre`.
     type Energy: EnergyModel;
 
@@ -68,13 +68,13 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// convert primitive to conservative.
     fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons;
 
-    /// convert primitive to conservative on a curved spacetime. the DEFAULT ignores the metric and
+    /// convert primitive to conservative on a curved spacetime. the default ignores the metric and
     /// delegates to `to_conserved` (the flat / orthonormal storage), so every non-relativistic
-    /// regime and every flat run are unchanged; the relativistic regimes OVERRIDE it so the
+    /// regime and every flat run are unchanged; the relativistic regimes override it so the
     /// initial-condition conserved state matches the metric-aware c2p (the storage<->recovery
     /// bijection is per-cell at the same metric point). `gamma`/`alpha`/`shift` are the spatial
     /// metric, lapse and contravariant shift `beta^i` at the cell; `sqrt_gamma` is sqrt(det gamma)
-    /// of the FULL chart, so `alpha sqrt_gamma` is the four-volume measure the densitized
+    /// of the full chart, so `alpha sqrt_gamma` is the four-volume measure the densitized
     /// relativistic-hydro state carries.
     fn to_conserved_covariant(
         &self,
@@ -111,10 +111,10 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// rhd: relativistic davis formula.
     fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S);
 
-    /// characteristic wave speeds along grid AXIS `axis` (the CFL projection):
+    /// characteristic wave speeds along grid axis `axis` (the CFL projection):
     /// `(lambda_minus, lambda_plus)`. the timestep needs the speed normal to each grid face,
     /// which is `wave_speeds` with `nhat = unit(axis)`. regimes whose speed depends only on the
-    /// NORMAL velocity OVERRIDE this to read `prim.vel[axis]` directly — avoiding the
+    /// normal velocity override this to read `prim.vel[axis]` directly — avoiding the
     /// unit-vector dot, so a CFL kernel traced from this reads only the velocity components it
     /// actually uses (the cyl r-z swirl reads only v_r and v_z, leaving the folded v_phi untouched). the default
     /// is the dot form, correct for every regime.
@@ -123,14 +123,14 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     }
 
     /// whether `extremal_speeds` clamps the HLL fan to include the stationary state
-    /// (`sl <= 0 <= sr`). the RELATIVISTIC regimes (rhd/rmhd) set this `true` for HLLE
+    /// (`sl <= 0 <= sr`). the relativistic regimes (rhd/rmhd) set this `true` for HLLE
     /// stability; the newtonian/iso davis estimate leaves the fan unclamped. a compile-time
     /// const (monomorphized per regime); it never traces a Select.
     const CLAMP_EXTREMAL_TO_ZERO: bool = false;
 
     /// extremal wave speeds for a riemann problem along nhat — the davis estimate (min/max of
     /// per-side speeds), optionally clamped to include the stationary state (see
-    /// `CLAMP_EXTREMAL_TO_ZERO`). ONE implementation for every regime; the clamp is the only
+    /// `CLAMP_EXTREMAL_TO_ZERO`). one implementation for every regime; the clamp is the only
     /// per-regime difference, so it is expressed as a single const.
     fn extremal_speeds(
         &self,
@@ -151,8 +151,8 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     }
 
     /// maximum wave speed across all grid directions — the CFL fold `max_d |s_d|` over
-    /// `wave_speeds_axis`. correct for EVERY regime; regimes with a cheaper closed form
-    /// (newtonian/iso: `max_k(|v_k| + c)`) OVERRIDE this. mirrors the wave_speeds_axis
+    /// `wave_speeds_axis`. correct for every regime; regimes with a cheaper closed form
+    /// (newtonian/iso: `max_k(|v_k| + c)`) override this. mirrors the wave_speeds_axis
     /// "default correct, override for efficiency" pattern.
     fn max_wave_speed(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
         let mut smax = S::ZERO;

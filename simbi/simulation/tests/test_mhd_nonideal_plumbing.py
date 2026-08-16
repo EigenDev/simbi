@@ -2,7 +2,7 @@
 # test_mhd_nonideal_plumbing.py
 #
 # the config-to-kernel plumbing gate for the MHD non-ideal knobs: a run with
-# resistivity (or viscosity) set MUST evolve differently from the ideal run of
+# resistivity (or viscosity) set must evolve differently from the ideal run of
 # the same setup. this is deliberately a plumbing gate —
 # the diffusion operators themselves are oracle-tested in rust (the mimetic
 # adjoint identity, viscous-heating equivalence); what only an end-to-end run

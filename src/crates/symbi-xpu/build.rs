@@ -1,7 +1,7 @@
 /// the CUDA toolkit lib directories that exist on this machine, searched broadly so a cluster
 /// module install (where the toolkit lives outside /opt/cuda and the env var carries a
 /// different name) still resolves libnvrtc. roots come from the common toolkit env vars, an
-/// `nvcc` PATH probe, and the two standard install prefixes; each root is tried against the
+/// `nvcc` path probe, and the two standard install prefixes; each root is tried against the
 /// layouts CUDA uses (`lib64`, `lib`, and the `targets/<arch>/lib` split of recent toolkits).
 fn cuda_libdirs() -> Vec<String> {
     let mut roots: Vec<String> = [
@@ -15,8 +15,8 @@ fn cuda_libdirs() -> Vec<String> {
     .filter_map(|v| std::env::var(v).ok())
     .collect();
 
-    // `nvcc` on PATH -> toolkit root is two levels up (<root>/bin/nvcc). resolves the common
-    // cluster case where a `module load cuda` puts nvcc on PATH but sets a non-standard var.
+    // `nvcc` on path -> toolkit root is two levels up (<root>/bin/nvcc). resolves the common
+    // cluster case where a `module load cuda` puts nvcc on path but sets a non-standard var.
     if let Ok(out) = std::process::Command::new("which").arg("nvcc").output()
         && out.status.success()
     {
@@ -58,7 +58,7 @@ fn main() {
     if cfg!(feature = "cuda") {
         // link against the CUDA driver API library (libcuda.so / cuda.lib); the
         // runtime API libcudart is a distinct library exposing a different symbol
-        // set. libcuda.so is always present on systems with NVIDIA GPU drivers
+        // set. libcuda.so is always present on systems with nvidia GPU drivers
         // (default linker search path).
         println!("cargo:rustc-link-lib=cuda");
 

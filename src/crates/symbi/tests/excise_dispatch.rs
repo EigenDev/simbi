@@ -5,7 +5,7 @@
 // cartesian kerr-schild box with the black hole (and its coordinate singularity)
 // on the grid. the pass freezes the excised sphere at the cold vacuum floor
 // (a Dirichlet sink: rho = 1e-10, v = 0, p = 1e-12, rebuilt cons), leaves the
-// far field BIT-untouched, and is exactly idempotent.
+// far field bit-untouched, and is exactly idempotent.
 // =============================================================================
 
 use symbi::regimes::substrate_kernels::dispatch_excise;
@@ -40,7 +40,7 @@ fn build_sim(init: impl Fn([f64; 2]) -> Prim<f64, 2>) -> Sim {
     .expect("sim")
     .set_initial(|x| init(x))
     .build();
-    // the builder stores the CONSERVED state; the primitive fields materialize via
+    // the builder stores the conserved state; the primitive fields materialize via
     // c2p during evolution (every stage ends with one), so the excision pass always
     // reads current prims in production. populate them directly here to model the
     // post-c2p state the pass actually sees.
@@ -128,9 +128,9 @@ fn excision_fills_the_sphere_and_leaves_the_far_field_bit_untouched() {
 
 #[test]
 fn excision_freezes_the_vacuum_floor_and_is_idempotent() {
-    // the excised interior is a DIRICHLET vacuum sink: every cell with
+    // the excised interior is a dirichlet vacuum sink: every cell with
     // r_ks < r_exc is frozen at the cold c2p-safe floor (rho = 1e-10, v = 0,
-    // p = 1e-12) each pass, the live exterior is bit-untouched (prims AND
+    // p = 1e-12) each pass, the live exterior is bit-untouched (prims and
     // cons — the rebuild passes live cons through), and the pass is exactly
     // idempotent: a second dispatch reads the same prims at the same metric
     // and must change nothing anywhere.

@@ -2,7 +2,7 @@
 // coords.rs
 //
 // coordinate-system-agnostic transforms: map a hydro cell's coordinate position and
-// PHYSICAL (orthonormal-frame) three-velocity into the global Cartesian frame the
+// physical (orthonormal-frame) three-velocity into the global Cartesian frame the
 // afterglow geometry (EATS arrival time, beaming toward an observer) works in.
 //
 // this matches the canonical transforms in `symbi_geometry::metric` — same coordinate
@@ -12,7 +12,7 @@
 //   Cartesian   : (x, y, z),      v = (vx, vy, vz)
 //   Spherical   : (r, theta, phi), v = (v_r, v_theta, v_phi)   [theta from +z, phi about +z]
 //   Cylindrical : (r, phi, z),     v = (v_r, v_phi, v_z)
-// the stored v1,v2,v3 are PHYSICAL components in units of c (the hydro's Lorentz factor
+// the stored v1,v2,v3 are physical components in units of c (the hydro's Lorentz factor
 // is W = 1/sqrt(1 - v.v) with a plain dot product, i.e., v is the orthonormal velocity).
 //
 // usage:
@@ -45,7 +45,7 @@ impl Coords {
         }
     }
 
-    /// rotate a PHYSICAL (orthonormal-frame) three-velocity `v = (v1, v2, v3)` at coordinate
+    /// rotate a physical (orthonormal-frame) three-velocity `v = (v1, v2, v3)` at coordinate
     /// position `x` into the global Cartesian frame. this is the orthonormal-basis rotation —
     /// identical to `symbi_geometry::Metric::vector_to_cartesian` for a `Physical` vector.
     pub fn velocity_to_cartesian(self, x: [f64; 3], v: [f64; 3]) -> [f64; 3] {

@@ -1,28 +1,28 @@
 // =============================================================================
 // iterate_break_bit_equivalence.rs
 //
-// the IterateInline `break_when` predicate is a PERF SHORTCUT, not a semantic
-// change: running an iterate WITH a break-predicate produces BIT-EXACT the same
-// f64 result as running the SAME iterate WITHOUT one, provided convergence fires
+// the IterateInline `break_when` predicate is a perf shortcut, not a semantic
+// change: running an iterate with a break-predicate produces bit-exact the same
+// f64 result as running the same iterate without one, provided convergence fires
 // before the iteration cap. the freeze pattern
 // `step = select(conv, x, x_new)` already pins the converged value.
 //
 // physics: Newton iteration for sqrt(2), f(x) = x^2 - 2, f'(x) = 2x, step
 // x_new = x - f(x)/f'(x). converges quadratically; the freeze predicate is
-// |x_new - x| < 1e-10. 20 deterministic LCG initial guesses in [0.5, 10); for
+// |x_new - x| < 1e-10. 20 deterministic lcg initial guesses in [0.5, 10); for
 // each:
 //
-//   IR-A:  Graph::iterate_inline_scalar(..., break_when = Some(conv))
-//   IR-B:  Graph::iterate_inline_scalar(..., break_when = None)
+//   ir-a:  Graph::iterate_inline_scalar(..., break_when = Some(conv))
+//   ir-b:  Graph::iterate_inline_scalar(..., break_when = None)
 //
 //   same body, same predicate, same init, same max_steps. both lowered by
 //   scalarize_kernel (which handles IterateInline's cone partitioning), both
-//   run through the CPU interpreter. assert IDENTICAL bits.
+//   run through the CPU interpreter. assert identical bits.
 //
 // the IR is built through the low-level Graph API (`with_trace |t| t.graph()...`)
 // because `Gv::iterate` always passes
 // Some(conv) — only the direct builder can flip the knob. lowering uses
-// scalarize_kernel (NOT plain scalarize) because IterAcc only resolves inside
+// scalarize_kernel (not plain scalarize) because IterAcc only resolves inside
 // the loop body context that scalarize_kernel sets up via lower_iterate_inline.
 // =============================================================================
 
@@ -32,7 +32,7 @@ use symbi_ir::{Backend, Cpu, Gv, begin_trace, end_trace, with_trace};
 
 // build a Newton-for-sqrt(2) iterate via raw Graph ops, returning a LoweredFn
 // the CPU interpreter can evaluate. `with_break = true` passes Some(conv);
-// `false` passes None. all OTHER IR is bit-identical so only the break knob
+// `false` passes None. all other IR is bit-identical so only the break knob
 // is under test.
 fn build_newton_sqrt2(with_break: bool, max_steps: usize) -> LoweredFn {
     begin_trace();
@@ -59,8 +59,8 @@ fn build_newton_sqrt2(with_break: bool, max_steps: usize) -> LoweredFn {
         g.element_wise(ElementWiseOp::Sub, vec![acc_id, q], None)
     });
 
-    // freeze predicate: conv = |x_new - acc| < eps. one node, used in BOTH
-    // select(conv, acc, x_new) AND break_when (Some/None).
+    // freeze predicate: conv = |x_new - acc| < eps. one node, used in both
+    // select(conv, acc, x_new) and break_when (Some/None).
     let conv_id = with_trace(|t| {
         let g = t.graph();
         let delta = g.element_wise(ElementWiseOp::Sub, vec![x_new_id, acc_id], None);
@@ -97,7 +97,7 @@ fn iterate_break_is_bit_equivalent_to_no_break() {
     let f_with_break = build_newton_sqrt2(true, 64);
     let f_no_break = build_newton_sqrt2(false, 64);
 
-    // deterministic LCG over [0.5, 10.0]; both sides of sqrt2 at varying distances.
+    // deterministic lcg over [0.5, 10.0]; both sides of sqrt2 at varying distances.
     // Newton converges in ~6-8 steps from this range, well inside max=64.
     let mut state: u64 = 0xA5;
     let mut mismatches: Vec<(f64, f64, f64)> = Vec::new();
@@ -147,8 +147,8 @@ fn iterate_break_is_bit_equivalent_to_no_break() {
     }
 }
 
-// guards against a wrong break_when accidentally gating something OTHER than
-// early exit. shallow cap (= 2 Newton steps) so conv NEVER fires from x0=100.
+// guards against a wrong break_when accidentally gating something other than
+// early exit. shallow cap (= 2 Newton steps) so conv never fires from x0=100.
 // even with break_when never firing, both paths must produce identical bits.
 #[test]
 fn iterate_break_equivalent_when_cap_hit_before_convergence() {
@@ -166,7 +166,7 @@ fn iterate_break_equivalent_when_cap_hit_before_convergence() {
         b,
         a.to_bits() ^ b.to_bits(),
     );
-    // verify the test really IS hitting the cap path (value != sqrt2).
+    // verify the test really is hitting the cap path (value != sqrt2).
     assert!(
         (a - std::f64::consts::SQRT_2).abs() > 1e-3,
         "shallow Newton converged unexpectedly — bump x0 further or shrink the cap",

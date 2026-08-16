@@ -4,7 +4,7 @@
 // newtonian (non-relativistic) hydrodynamics regime. implements the Regime
 // trait with nhat-parametrized flux and wave speeds.
 //
-// all methods use dot(vel, nhat) for the normal velocity. ONE implementation
+// all methods use dot(vel, nhat) for the normal velocity. one implementation
 // handles all dimensions and all directions.
 //
 // usage:
@@ -256,7 +256,7 @@ mod tests {
                 .error
                 .contains(crate::c2p_result::ErrorCode::NEGATIVE_DENSITY)
         );
-        // ...but the value is the RAW computed prim (no silent floor).
+        // ...but the value is the raw computed prim (no silent floor).
         assert_eq!(result.value.rho, -1.0);
     }
 

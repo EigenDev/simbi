@@ -2,11 +2,11 @@
 // symbi-afterglow/src/lib.rs
 //
 // synchrotron afterglow post-processing for relativistic-blast-wave simulations
-// (GRB-like): turn a hydro snapshot into observed light curves / spectra via the
+// (grb-like): turn a hydro snapshot into observed light curves / spectra via the
 // Sari, Piran & Narayan model + equal-arrival-time (EATS) integration.
 //
 // the physics is a pure CGS core operating on neutral hydro arrays (`HydroFields`)
-// over a spherical `Mesh`, with NO symbi dependency, in two complementary paths:
+// over a spherical `Mesh`, with no symbi dependency, in two complementary paths:
 //   - the deterministic EATS integrator: `synchrotron` (per-cell primitives + the
 //     broken-power-law spectrum) feeding `lightcurve` (the equal-arrival-time flux),
 //   - the Monte-Carlo photon-transfer path: `transfer` (`generate_photon_events` +
@@ -15,7 +15,7 @@
 //     into light curves, sky maps, and polarization curves for any line of sight.
 // dimensional correctness is enforced by the `units` system (compile-time M/L/T).
 //
-// PENDING: a thin symbi-checkpoint adapter (symbi-io HDF5 -> these inputs) and a
+// pending: a thin symbi-checkpoint adapter (symbi-io HDF5 -> these inputs) and a
 // python frontend; both are sibling adapters above this pure core, never baked in.
 //
 // all physics is CGS (gauss, Hz, erg, cm, s); `QuantScales` converts the sim's
@@ -57,7 +57,7 @@ pub use transfer::{
 use units::{EnergyDensity, Frequency, Length, MassDensity, Time, Velocity};
 
 /// the observation + microphysics conditions for one snapshot's flux contribution. angles in
-/// radians, distances in cm, frequencies in Hz; `current_time`/`dt` are in CODE units (scaled to
+/// radians, distances in cm, frequencies in Hz; `current_time`/`dt` are in code units (scaled to
 /// seconds via `QuantScales::time`). `redshift` is carried for the phase-3 transfer path; the
 /// phase-1 EATS light curve uses the luminosity distance directly.
 #[derive(Clone, Debug)]
@@ -103,7 +103,7 @@ pub struct QuantScales {
 
 /// the hydro snapshot fields, flat row-major arrays indexed `k*ni*nj + j*ni + i` (lower-dimensional
 /// data broadcasts over the missing axes via `Mesh::data_dim`). `gamma_beta` is the four-velocity
-/// magnitude |gamma * beta| (dimensionless); `rho`/`pre` are in CODE units (scaled by `QuantScales`).
+/// magnitude |gamma * beta| (dimensionless); `rho`/`pre` are in code units (scaled by `QuantScales`).
 #[derive(Clone, Copy, Debug)]
 pub struct HydroFields<'a> {
     /// mass density [code units].

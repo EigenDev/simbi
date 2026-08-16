@@ -1,15 +1,15 @@
 // =============================================================================
 // spherical_excision_evolve.rs
 //
-// horizon excision END TO END on a spherical kerr-schild chart, through the production driver
-// rather than the kernels alone: a uniform gas at rest on a radial grid that SPANS r_+ = 2M
+// horizon excision end to end on a spherical kerr-schild chart, through the production driver
+// rather than the kernels alone: a uniform gas at rest on a radial grid that spans r_+ = 2M
 // accretes, and the region inside the excision surface must be held at the cold vacuum floor
 // while the exterior evolves normally.
 //
 // the excision is the causal statement, not a numerical convenience: inside r_+ every
 // characteristic points inward, so those cells cannot influence the exterior and holding them at a
 // floor makes the surface a one-way absorber. the failure this gate catches is the substrate
-// silently NOT running the pass — the interior then keeps accreting gas forever, which nothing
+// silently not running the pass — the interior then keeps accreting gas forever, which nothing
 // else notices precisely because it is causally disconnected and never protests.
 // =============================================================================
 
@@ -49,7 +49,7 @@ fn run(excision_radius: f64) -> (Vec<f64>, Vec<f64>) {
 }
 
 /// `log_radial` selects the geometric radial map the accretion problems actually use. it belongs in
-/// this gate because the kernel's face map reads the axis map's own PARAMETER — the log slope, not
+/// this gate because the kernel's face map reads the axis map's own parameter — the log slope, not
 /// a linear width — and a dispatch that hands it the wrong one puts every cell center outside the
 /// excision surface, masking nothing. a uniform-only gate cannot see that: the conversion between
 /// the two is the identity there.
@@ -63,7 +63,7 @@ fn run_on(excision_radius: f64, log_radial: bool) -> ((Vec<f64>, Vec<f64>), Vec<
     .cells([N])
     .origin([R_MIN]);
     let log_slope = (R_MAX / R_MIN).log10() / N as f64;
-    // NOTE the deliberate mismatch: `spacing` carries the LINEAR cell width while the axis map is
+    // note the deliberate mismatch: `spacing` carries the linear cell width while the axis map is
     // logarithmic. that is the state the config front end actually produces — the map is the
     // authority and every dispatch is required to derive the kernel's face-map parameter from it
     // via `kernel_geom`. building the two consistently here would hide exactly the defect this
@@ -118,7 +118,7 @@ fn run_on(excision_radius: f64, log_radial: bool) -> ((Vec<f64>, Vec<f64>), Vec<
 fn the_excised_interior_is_held_at_the_vacuum_floor() {
     let r = radii();
 
-    // the PREMISE: the grid must straddle both the excision surface and the horizon, with live
+    // the premise: the grid must straddle both the excision surface and the horizon, with live
     // cells on either side. a grid that stopped outside r_+ would be testing an inner wall.
     let inside: Vec<usize> = (0..N).filter(|&i| r[i] < R_EXC).collect();
     assert!(
@@ -192,7 +192,7 @@ fn the_excised_interior_is_held_on_a_log_radial_grid() {
 #[test]
 fn without_excision_the_interior_fills_with_gas() {
     // the companion that makes the gate above non-vacuous. at zero radius the pass is inert, so
-    // the same cells accrete and hold gas: the difference between the two runs IS the excision.
+    // the same cells accrete and hold gas: the difference between the two runs is the excision.
     // without this, a run that somehow evacuated the interior for an unrelated reason would let
     // the excision gate pass while the pass did nothing.
     let r = radii();

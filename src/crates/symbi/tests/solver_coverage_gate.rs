@@ -21,16 +21,16 @@ const MHD_REGIMES: &[(&str, &[Solver])] = &[
 // the hydro regimes (kernel prefix from each `flux()` dispatch) and their solvers. hydro flux is
 // geometry-free except for the DOF-lifted cyl-swirl (DOF != D), so cartesian + spherical share
 // these names. iso is HLLE-only (no contact wave); curvilinear-swirl HLLC is unsupported
-// and is intentionally NOT asserted here.
+// and is intentionally not asserted here.
 const HYDRO_REGIMES: &[(&str, &[Solver])] = &[
     ("adiabatic", &[Solver::Hlle, Solver::Hllc]),
     ("rhd", &[Solver::Hlle, Solver::Hllc]),
     ("iso", &[Solver::Hlle]),
 ];
 
-// the exact name the regime dispatch builds -- through the SAME composer the dispatch and the
+// the exact name the regime dispatch builds -- through the same composer the dispatch and the
 // bake use, never a local `format!`. this gate spelled it independently with the chart segment
-// BEFORE the solver, which is one of the three incompatible orders that let a curvilinear
+// before the solver, which is one of the three incompatible orders that let a curvilinear
 // kernel name diverge from its bake; a gate that re-derives the protocol it is checking can
 // only ever confirm its own copy of it.
 fn flux_name(prefix: &str, geom: &str, solver: Solver, d: usize, dir: usize) -> String {

@@ -1,8 +1,8 @@
 # =============================================================================
 # test_fishbone_moncrief_oracle.py
 #
-# certification of the GENERAL-SPIN fishbone-moncrief oracle against the paper's
-# printed disks (FM 1976, ApJ 207:962, figs. 2-3 captions) — five independent
+# certification of the general-spin fishbone-moncrief oracle against the paper's
+# printed disks (fm 1976, ApJ 207:962, figs. 2-3 captions) — five independent
 # published test vectors, each pinning l (eq. 3.8 with kappa), the potential
 # maximum (ln h)_max and its radius, the equatorial outer edge, and the minimum
 # polar angle of the ln h = 0 surface:
@@ -22,7 +22,7 @@ import pytest
 
 from simbi_configs.helpers.fishbone_moncrief import FishboneMoncrief
 
-# extreme kerr: the fishbone-moncrief solution sits AT a = M but is defined only for
+# extreme kerr: the fishbone-moncrief solution sits at a = M but is defined only for
 # |a| < M, so the
 # vectors evaluate in the limit (the printed 3-4 digit values are insensitive).
 _A_EXTREME = 1.0 - 1e-9
@@ -86,7 +86,7 @@ def test_oracle_reproduces_the_published_disks(
     assert abs(t.ell - l) < 6e-3, f"{name}: l = {t.ell:.4f} vs paper {l}"
     m, rm, e, p = _survey(t, r_hi)
     assert abs(m - lnh_max) < 1e-4, f"{name}: (ln h)_max = {m:.5f} vs paper {lnh_max}"
-    # the potential is FLAT near its maximum, so the printed location carries the
+    # the potential is flat near its maximum, so the printed location carries the
     # paper's rounding; half a gravitational radius covers it.
     assert abs(rm - r_max) < 0.5, f"{name}: r_max = {rm:.2f} vs paper {r_max}"
     assert abs(e - edge) < 0.5, f"{name}: outer edge = {e:.2f} vs paper {edge}"

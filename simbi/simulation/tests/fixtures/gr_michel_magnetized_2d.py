@@ -5,9 +5,9 @@
 # exact michel transonic hydro profile on an equatorial wedge, threaded by the
 # theta-uniform radial monopole B^r = C sqrt(f)/r^2. the state is
 # theta-uniform and purely radial, so the out-of-plane EMF
-# E_phi = v_theta B_r - v_r B_theta vanishes POINTWISE at every gather point of
-# the contact assembly — the staggered field must stay BITWISE static through the
-# FULL curved-CT machinery (densitized corner EMF -> curl -> interpolation), and
+# E_phi = v_theta B_r - v_r B_theta vanishes pointwise at every gather point of
+# the contact assembly — the staggered field must stay bitwise static through the
+# full curved-CT machinery (densitized corner EMF -> curl -> interpolation), and
 # the hydro must hold the michel profile exactly as the 1D gate does. any wrong
 # metric factor in the EMF/curl/interpolation chain breaks a known answer.
 #
@@ -51,7 +51,7 @@ class GrMichelMagnetized2D(SimbiProblem):
     spacetime: Annotated[
         Spacetime,
         ProblemParam(
-            # kerr-schild at zero spin IS schwarzschild-kerr-schild: one horizon-
+            # kerr-schild at zero spin is schwarzschild-kerr-schild: one horizon-
             # penetrating family covers both, so the 2d spherical GRMHD bake carries a
             # single (chart, spacetime) pair instead of one per hole type.
             Spacetime.KERR_KS,

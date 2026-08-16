@@ -1143,7 +1143,7 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     let sa_l = u_star - cax; // lambda^{*L}
     let sa_r = u_star + cax; // lambda^{*R}
 
-    // chi~^s (Appendix A: u* + single rho* in place of the MK contact); nu/d/a unchanged (Eq. 44-46).
+    // chi~^s (Appendix A: u* + single rho* in place of the mk contact); nu/d/a unchanged (Eq. 44-46).
     let chi_den_l = sa_l + s_l - two * u_star;
     let chi_den_r = sa_r + s_r - two * u_star;
     let chi_l_ok = chi_den_l
@@ -1694,7 +1694,7 @@ mod tests {
         );
     }
 
-    // a mild diagonal SPD spatial metric (a physical Schwarzschild-scale perturbation of
+    // a mild diagonal spd spatial metric (a physical Schwarzschild-scale perturbation of
     // identity: gamma_rr = 1.3, gamma_tt = gamma_pp = 1.15) that exercises every metric
     // contraction in the HLLD fan while staying clear of the r^2 blow-up that maps coordinate
     // B to an unphysical ultra-low-beta physical field.
@@ -1709,7 +1709,7 @@ mod tests {
         )
     }
 
-    // a mild non-diagonal SPD spatial metric (the kerr-class case: off-diagonal gamma_r_phi-type
+    // a mild non-diagonal spd spatial metric (the kerr-class case: off-diagonal gamma_r_phi-type
     // couplings), exercising the full tetrad path in the orthonormal-frame HLLD, including the
     // off-diagonal couplings beyond the diagonal sqrt(g) scaling. the inverse is computed exactly from the closed-form 3x3 inv.
     fn mild_nondiag_metric() -> SpatialMetric<f64, 3> {
@@ -1723,7 +1723,7 @@ mod tests {
         // the decisive proof for the metric-generalized MUB09 solver: the M&DZ wave-sum
         // (Eq. 39) built from the metric-aware star states telescopes exactly to the
         // metric-aware HLLD B_t flux — the star states and the flux are self-consistent on a
-        // curved background (the CT-flux consistency the GR-UCT-HLLD EMF relies on). the
+        // curved background (the CT-flux consistency the gr-uct-hlld EMF relies on). the
         // induction flux F(B^i) = B^i v^n - v^i B^n is metric-free in contravariant
         // components, so the telescoping formula stands as written; the star fields carry gamma.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
@@ -1839,7 +1839,7 @@ mod tests {
     fn hlld_rmhd_gr_ortho_reduces_to_flat_at_identity() {
         // the GR orthonormal wrapper at the identity metric (sqrt(g_i) = 1) is bit-identical
         // to the flat MUB09 solver on a genuine L != R shock: every metric factor reduces to
-        // unity there. this guard holds the SR-MHD path fixed under the GR generalization.
+        // unity there. this guard holds the sr-mhd path fixed under the GR generalization.
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let flat = SpatialMetric::<f64, 3>::flat();
         let prim_l = MhdPrim {
@@ -2041,7 +2041,7 @@ mod tests {
     fn hlld_rmhd_gr_ortho_nondiagonal_telescopes() {
         // the tetrad wave-sum gate: on a non-diagonal metric the M&DZ wave-sum built from the tetrad
         // star states telescopes exactly to the tetrad HLLD B_t flux (the CT-flux consistency the
-        // GR-UCT-HLLD EMF relies on, with the full frame-dragging-class metric). r-direction,
+        // gr-uct-hlld EMF relies on, with the full frame-dragging-class metric). r-direction,
         // dissipated component B_y. the induction flux F(B^i) = B^i v^n - v^i B^n is metric-free in
         // contravariant components, so the telescoping formula stands as written; the tetrad enters
         // through the star fields and speeds.

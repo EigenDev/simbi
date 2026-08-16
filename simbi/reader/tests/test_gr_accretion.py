@@ -6,7 +6,7 @@
 #      construction) -> the reducer recovers a single r_ex-independent Mdot. exercises
 #      the W = 1/sqrt(1 - gamma_rr (v^r)^2) contraction, the beta^r/alpha shift,
 #      sqrt(-g) = r^2 sin(theta), and the shell reduction.
-#   2. the EXACT michel (1972) transonic solution on schwarzschild -> the reducer
+#   2. the exact michel (1972) transonic solution on schwarzschild -> the reducer
 #      reproduces the analytic Mdot = 4 pi jm across the sonic point. this is the
 #      convention gate: it fails loudly if the stored velocity is mis-interpreted
 #      (orthonormal vs contravariant), which only shows up near the horizon.
@@ -56,7 +56,7 @@ def test_reducer_recovers_a_conserved_ks_inflow_1d():
 
 
 def test_reducer_is_rex_invariant_2d_axisymmetric():
-    # a uniform-in-theta conserved flow: the reducer's r_ex-invariance must be EXACT
+    # a uniform-in-theta conserved flow: the reducer's r_ex-invariance must be exact
     # (the theta quadrature is identical at every radius, so it cancels in the spread).
     mass = 1.0
     r = np.array([3.0, 5.0, 10.0, 20.0])
@@ -80,7 +80,7 @@ def test_reducer_is_rex_invariant_2d_axisymmetric():
 
 
 def test_reducer_reproduces_analytic_michel_mdot():
-    # the convention gate: feed the reducer the EXACT michel primitives (the stored
+    # the convention gate: feed the reducer the exact michel primitives (the stored
     # contravariant v^r) on schwarzschild and require the analytic Mdot = 4 pi jm at
     # every radius, including inside the sonic point where the metric is far from flat.
     from simbi_configs.examples.grhd.gr_michel import MichelSolution

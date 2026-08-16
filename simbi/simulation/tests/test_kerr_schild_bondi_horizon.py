@@ -1,11 +1,11 @@
 # =============================================================================
 # test_kerr_schild_bondi_horizon.py
 #
-# the ingoing-Kerr-Schild GRHD payoff: bondi accretion in a HORIZON-PENETRATING
-# chart, with the inner boundary placed BELOW the horizon (r = 1.5 < 2M = 2). the
+# the ingoing-Kerr-Schild GRHD payoff: bondi accretion in a horizon-penetrating
+# chart, with the inner boundary placed below the horizon (r = 1.5 < 2M = 2). the
 # schwarzschild-coordinate run (test_schwarzschild_bondi_transient) must hold its
-# boundary OUTSIDE 2M and even so was fragile; the KS chart is regular across the
-# horizon, so a uniform-at-rest gas develops transonic accretion and CROSSES r = 2M
+# boundary outside 2M and even so was fragile; the KS chart is regular across the
+# horizon, so a uniform-at-rest gas develops transonic accretion and crosses r = 2M
 # smoothly — no crash, no floor, density rising inward through the horizon. exercises
 # the shift-advection flux kernel + KS densitization + KS sources end-to-end.
 # requires the built cpu_ext backend; skipped otherwise.
@@ -42,7 +42,7 @@ def _bondi_ks_problem(data_dir: str):
 def _read_interior(chkpt_path: str):
     # the stored arrays carry the ghost cells; the interior is the central
     # `_RESOLUTION` entries (owned_start/owned_fin are interior-relative and do
-    # NOT index the ghost-padded arrays).
+    # not index the ghost-padded arrays).
     with h5py.File(chkpt_path, "r") as h:
         prims = h["level_0/partition_0/hydro/primitives"]
         halo = (prims["rho"].shape[0] - _RESOLUTION) // 2
@@ -66,7 +66,7 @@ def test_ks_bondi_crosses_horizon_stable_and_positive() -> None:
 
         rho, pre = _read_interior(finals[0])
 
-        # NO FLOOR: pressure must stay strictly positive through and inside the horizon.
+        # no floor: pressure must stay strictly positive through and inside the horizon.
         assert pre.min() > 0.0, f"pressure went non-positive: min = {pre.min():.3e}"
 
         # accretion: the gas compresses toward the hole — inner density well above ambient (1.0).

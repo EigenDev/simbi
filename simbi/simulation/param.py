@@ -26,7 +26,7 @@ class ParamMetadata:
     # group render together. None -> the default "Parameters" group.
     group: Optional[str] = None
     # the admissible values, when a parameter takes one of a fixed set. carried as
-    # metadata rather than enforced here; nothing currently rejects a value outside it.
+    # metadata consumed by the cli and checkpoint layers; this type does not validate membership.
     choices: Optional[tuple[Any, ...]] = None
 
 
@@ -66,7 +66,7 @@ def ProblemParam(
         # optional with default, cli-configurable, must match checkpoint
         resolution: Annotated[int, ProblemParam(1000, cli=True, checkpoint_safe=False)]
     """
-    # `choices` is OURS, not pydantic's: forwarding it into `Field` as an extra keyword
+    # `choices` is ours, not pydantic's: forwarding it into `Field` as an extra keyword
     # is deprecated and becomes an error in pydantic v3, so it rides in the metadata the
     # rest of the parameter description already travels in.
     metadata = ParamMetadata(

@@ -58,7 +58,7 @@ fn schwarzschild_kerr_schild_cartesian_has_unit_four_volume() {
     }
 }
 
-/// the closed-form measure must equal the determinant of the metric MATRIX the source contraction
+/// the closed-form measure must equal the determinant of the metric matrix the source contraction
 /// actually differentiates. `sqrt_det_gamma` uses the rank-1 shortcut det = 1 + 2H, which assumes
 /// |l| = 1; the matrix is delta_ij + 2H l_i l_j, whose determinant is 1 + 2H |l|^2. where a radius
 /// floor clamps r but leaves l^i = x^i / r, those two part company, and the connection source's

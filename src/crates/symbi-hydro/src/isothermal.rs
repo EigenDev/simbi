@@ -3,8 +3,8 @@
 //
 // zero-overhead isothermal hydrodynamics via the energy model type system.
 // uses ConsG<S, D, IsoModel> and PrimG<S, D, IsoModel> — the energy/pressure
-// slots are Zero<S> (ZST). no wasted memory, no wasted FLOPS, no wasted
-// bandwidth. accessing .nrg on isothermal cons returns Zero<S>, a ZST placeholder.
+// slots are Zero<S> (zst). no wasted memory, no wasted flops, no wasted
+// bandwidth. accessing .nrg on isothermal cons returns Zero<S>, a zst placeholder.
 //
 // IsoNewtonian implements Regime<S, D> with isothermal types. HLLE works
 // automatically (regime-generic). HLLC is not applicable (contact wave
@@ -214,7 +214,7 @@ mod tests {
         let cons = regime.to_conserved(&eos, &prim);
         assert!(approx(cons.den, 2.0));
         assert!(approx(cons.mom[0], 1.4));
-        assert_eq!(cons.nrg.value(), 0.0); // isothermal: nrg is ZST
+        assert_eq!(cons.nrg.value(), 0.0); // isothermal: nrg is zst
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
         assert!(approx(prim.rho, prim2.rho));
         assert!(approx(prim.vel[0], prim2.vel[0]));

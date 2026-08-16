@@ -12,7 +12,7 @@
 // speed, and therefore the CFL, comfortable. nothing else in the run reports it.
 //
 // the law: the reported value is the analytic ratio of the state it is given, it is the
-// MAXIMUM over the interior rather than a mean (one badly conditioned cell is the
+// maximum over the interior rather than a mean (one badly conditioned cell is the
 // problem, and an average over a large quiescent domain buries it), and it is absent for
 // the regimes whose c2p takes another route entirely.
 // =============================================================================
@@ -108,7 +108,7 @@ fn a_single_ill_conditioned_cell_is_reported_over_a_quiescent_domain() {
         .max_ke_over_eint
         .expect("energy split present");
 
-    // NON-VACUITY: the quiescent domain must be well conditioned, or "the max rose" says
+    // non-vacuity: the quiescent domain must be well conditioned, or "the max rose" says
     // nothing about whether the max is what is being reported.
     assert!(
         quiet < 1.0,

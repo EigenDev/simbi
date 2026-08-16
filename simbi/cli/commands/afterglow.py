@@ -119,7 +119,7 @@ def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, d
 
     def _reduce(path, half_width_cm):
         # accumulate over the input's event handles: a saved catalog streams in row-chunks
-        # (bounded memory), a checkpoint is one handle. with a FIXED half_width the chunks
+        # (bounded memory), a checkpoint is one handle. with a fixed half_width the chunks
         # share the grid so summing intensities is exact; in the sizing pass (half_width=0)
         # the per-chunk grids differ but only the max extent `hw` is used.
         total = None
@@ -435,7 +435,7 @@ def _catalog_arrival_window(path, nhat, redshift, power=3.0, lo=0.02, hi=0.98):
     def _at(q):
         return float(t_arr[order[min(np.searchsorted(cw, q), len(order) - 1)]])
 
-    # (lo percentile, flux-weighted MEDIAN/peak, hi percentile)
+    # (lo percentile, flux-weighted median/peak, hi percentile)
     return _at(lo), _at(0.5), _at(hi)
 
 
@@ -1044,7 +1044,7 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
     manifest = SystemManifest.resolve(args.inputs[0], scale_fallback=args.scale)
     doppler_power = 4.0 if args.bolometric else 3.0
     multi = len(args.inputs) > 1
-    # log morphology is the DEFAULT afterglow view; --linear opts into absolute mJy/mas^2.
+    # log morphology is the default afterglow view; --linear opts into absolute mJy/mas^2.
     if getattr(args, "linear", False):
         args.log_decades = None
 
@@ -1055,8 +1055,8 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
         method = "mc" if _is_event_catalog(args.inputs[0]) else "deposit"
         print(f"method: {method} (auto; override with --method)")
 
-    # DETERMINISTIC deposition path (zrake+2018): no photon catalog, no shot noise. operates on
-    # the hydro CHECKPOINT array directly, depositing each cell's emissivity onto a shared grid.
+    # deterministic deposition path (zrake+2018): no photon catalog, no shot noise. operates on
+    # the hydro checkpoint array directly, depositing each cell's emissivity onto a shared grid.
     if method == "deposit":
         if _is_event_catalog(args.inputs[0]):
             raise SystemExit(
@@ -1107,7 +1107,7 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
         return
 
     if multi:
-        # STREAM: never merge all checkpoints' events (the memory blowup). the EATS observer
+        # stream: never merge all checkpoints' events (the memory blowup). the EATS observer
         # time can't be auto-found without a pass over the data, so it is required here.
         if args.time is None:
             raise SystemExit(
@@ -1208,7 +1208,7 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
         print(f"saved skymap to {args.output}")
 
     if args.plot or args.save_fig:
-        # the log morphology is frequency-INDEPENDENT, so drop the nu/flux label there.
+        # the log morphology is frequency-independent, so drop the nu/flux label there.
         beaming = "bolometric" if args.bolometric else f"{nu:.1e} Hz"
         title = (
             f"t = {obs_time:.3g} day   ({beaming})"
@@ -1302,7 +1302,7 @@ def execute_movie(args: Namespace, remaining: Optional[list] = None) -> None:
     catalog = _combine_catalogs(args.inputs, args, rad_hydro, observer, manifest)
 
     # auto-range the sweep to where the flux is, unless the user pinned the endpoints. the
-    # window is read from the MERGED handle via a throwaway catalog dump (so it spans all
+    # window is read from the merged handle via a throwaway catalog dump (so it spans all
     # provided epochs).
     if args.t_start is None or args.t_stop is None:
         t0, _, t1 = _handle_arrival_window(
@@ -1355,7 +1355,7 @@ def execute_movie(args: Namespace, remaining: Optional[list] = None) -> None:
     # fixed mas field of view (half_max) so the ring expands within the frame; each image
     # is drawn at its true extent inside that fixed window.
     # paper-style orientation (matches _draw_skymap_on_ax): jet axis horizontal, approaching
-    # (doppler-beamed, +z) hemisphere on the LEFT.
+    # (doppler-beamed, +z) hemisphere on the left.
     def _orient(sb):
         return np.asarray(sb).T[:, ::-1]
 

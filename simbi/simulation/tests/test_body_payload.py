@@ -1,7 +1,7 @@
 # =============================================================================
 # test_body_payload.py
 #
-# the immersed-body serialization SSOT: `ImmersedBodyConfig.to_backend` /
+# the immersed-body serialization ssot: `ImmersedBodyConfig.to_backend` /
 # `GravitationalSystemConfig.to_backend` / `body_payload` emit exactly the dict
 # tree the rust `BodyParams` reader consumes. the backend reads every key with an
 # unwrap_or default, so a silently dropped or renamed key becomes a wrong-physics
@@ -171,6 +171,6 @@ def test_body_payload_composes_present_kinds_and_omits_absent() -> None:
 
 def test_body_payload_rejects_a_raw_dict_body() -> None:
     # a raw dict bypasses every field validation; the backend would read it through
-    # silent unwrap_or defaults. the SSOT refuses it loudly.
+    # silent unwrap_or defaults. the ssot refuses it loudly.
     with pytest.raises(ConfigError, match="not an\n?.*ImmersedBodyConfig|ImmersedBodyConfig"):
         body_payload(None, [{"capability": BodyCapability.RIGID, "mass": 1.0}])

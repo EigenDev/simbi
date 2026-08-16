@@ -1,10 +1,10 @@
 // =============================================================================
 // sealed_column_graded.rs
 //
-// the GRADED-MESH twin of `sealed_column_unclamped` / `sealed_column_curvilinear`:
+// the graded-mesh twin of `sealed_column_unclamped` / `sealed_column_curvilinear`:
 // the balanced triple (reconstruction + equilibrium-pressure source + balance-
 // aware ghosts) holding a sealed, stagnant, strongly stratified column on a
-// NON-UNIFORMLY spaced grid — log-radial spherical (the natural bondi-like
+// non-uniformly spaced grid — log-radial spherical (the natural bondi-like
 // grid) and geometrically graded cartesian. the spacing is what changes the
 // statement: every position in the balanced ladder (stencil anchors, source
 // face/center potentials, ghost centroids) now comes from the runtime spacing
@@ -101,7 +101,7 @@ macro_rules! sealed_graded_gate {
                         symbi_algebra::Tensor::new([$body_pos]),
                         symbi_algebra::Tensor::zeros(),
                         GM,
-                        // pointlike mask; SOFT rides the softening slot so the body's
+                        // pointlike mask; soft rides the softening slot so the body's
                         // field is the same plummer potential the column is built from.
                         1.0e-6,
                         SOFT,

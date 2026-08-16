@@ -9,9 +9,9 @@
 //
 // usage:
 //   let out = KernelRun::new(some_builder_gv(args))
-//       .grid([NR, NZ])
+//       .grid([nr, nz])
 //       .fields(&[("pre", p), ("mom_0", vr)])
-//       .scalars(&[("x_lo_0", R0), ("dx_0", DR)])
+//       .scalars(&[("x_lo_0", R0), ("dx_0", dr)])
 //       .run();
 //   close(out.get([i, j], "s_0"), want, ...);
 // =============================================================================

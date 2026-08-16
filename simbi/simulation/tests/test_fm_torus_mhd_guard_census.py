@@ -2,10 +2,10 @@
 # test_fm_torus_mhd_guard_census.py
 #
 # the magnetized spinning fishbone-moncrief torus on the 3d cartesian kerr
-# chart: the guard-activation gate for the MAGNETIZED admissibility projection.
+# chart: the guard-activation gate for the magnetized admissibility projection.
 #
 # the unmagnetized torus gates the hydrodynamic projection, whose admissible set
-# is a second-order cone -- necessary AND sufficient, so every cell is
+# is a second-order cone -- necessary and sufficient, so every cell is
 # recoverable by blending toward the stage-input anchor. the magnetized set is
 # strictly smaller: a state can satisfy the B-free cone
 # q = E - sqrt(D^2 + |S|^2) > 0 and still admit no physical primitive, because
@@ -14,16 +14,16 @@
 # the stress case for that distinction -- a weak poloidal loop threading the
 # spinning torus, where the near-horizon infall is both magnetized and stiff.
 #
-# the gates are STATE invariants, measured over a few tens of steps rather than a
+# the gates are state invariants, measured over a few tens of steps rather than a
 # march to an end time:
 # - the timestep stays within reach of the light-crossing step. a mis-masked
 #   source rate or a metric evaluated where it is singular drives dt orders below
 #   the hyperbolic limit, and it does so from the first steps -- the collapse this
 #   detects is a property of the discretization, not something that develops.
-# - ZERO freezes outside the horizon. a freeze is a cell no flux could update
+# - zero freezes outside the horizon. a freeze is a cell no flux could update
 #   admissibly, and outside the horizon that is a physical breakdown. the
 #   interior of r_+ is causally disconnected fiction and is exempt, but its
-#   count is REPORTED, because the magnetic field is constrained-transport
+#   count is reported, because the magnetic field is constrained-transport
 #   evolved and cannot be blended -- so the projection searches only the slice
 #   B = B_candidate, and an anchor admissible with its own field need not be
 #   admissible in that slice. those cells are genuinely unrecoverable by
@@ -31,8 +31,8 @@
 # - every cell stays in the admissible set, and the field survives (a magnetized
 #   gate on a field-free state is vacuous).
 #
-# WHAT THIS NO LONGER ASSERTS, deliberately: that the torus survives to t = 5.
-# that is a SOAK -- it answers "does this stay healthy for a long time", which is
+# what this no longer asserts, deliberately: that the torus survives to t = 5.
+# that is a soak -- it answers "does this stay healthy for a long time", which is
 # a different question from "is the discretization sound", costs three orders of
 # magnitude more, and cannot be run in a development loop. it belongs to a
 # campaign launched from simbi_configs/examples/grmhd, not to a test suite.

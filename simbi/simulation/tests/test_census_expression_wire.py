@@ -7,7 +7,7 @@
 #
 # the registration-time rejections matter as much as the schema: a census that
 # only fails once it reaches the grid has already cost a queue slot, and a
-# malformed binning that DOESN'T fail is indistinguishable from a physics result.
+# malformed binning that doesn'T fail is indistinguishable from a physics result.
 # =============================================================================
 import json
 
@@ -284,7 +284,7 @@ def test_the_backend_rejects_a_census_it_cannot_lower() -> None:
     g = expr.ExprGraph()
     payload = _sod_payload()
     cfg = expr.Census(name="c", values={"m": expr.density(g)}).serialize()
-    # MOD has no carrier primitive, so the bridge cannot lower it.
+    # mod has no carrier primitive, so the bridge cannot lower it.
     cfg["nodes"] = [
         {"op": "CONSTANT", "value": 1.0},
         {"op": "CONSTANT", "value": 2.0},

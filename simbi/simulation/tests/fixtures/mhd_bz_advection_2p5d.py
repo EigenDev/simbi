@@ -1,17 +1,17 @@
 # =============================================================================
 # mhd_bz_advection_2p5d.py
 #
-# a force-balanced OUT-OF-PLANE field advection on a 2.5D cartesian grid (D=2, DOF=3):
+# a force-balanced out-of-plane field advection on a 2.5D cartesian grid (D=2, DOF=3):
 # the transverse Bz has no staggered face (only the in-plane Bx,By are CT), so it is a
-# cell-centered conserved variable evolved SOLELY by the out-of-plane cell-B flux predictor.
+# cell-centered conserved variable evolved solely by the out-of-plane cell-B flux predictor.
 #
 # the state is a rigid advecting equilibrium: uniform rho and velocity, Bx=By=0, and a
 # smooth Bz(x,y) whose magnetic pressure is exactly cancelled by the gas pressure
-# (p_gas = P0 - Bz^2/2), so the TOTAL pressure is uniform and there is no force. with no
+# (p_gas = P0 - Bz^2/2), so the total pressure is uniform and there is no force. with no
 # magnetic tension (Bz-only field, d/dz=0), Bz advects rigidly at the flow velocity:
 #   Bz(x, y, t) = Bz(x - vx t, y - vy t, 0)
 # a working out-of-plane predictor reproduces this translation; a frozen predictor leaves
-# Bz at its IC. the domain is periodic; at a HALF period the exact solution
+# Bz at its IC. the domain is periodic; at a half period the exact solution
 # is the IC shifted by half the domain in each direction — far from the IC, so it separates a
 # genuinely-advected Bz from a frozen one (a full period would return to the IC either way).
 # =============================================================================

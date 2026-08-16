@@ -2,14 +2,14 @@
 // imhd_shock_tube.rs
 //
 // Mignone (2007) Table-1 isothermal-MHD shock tube (test 1) — validates that
-// `hlld_isothermal` (the 3-state solver) produces a CORRECT, NON-OSCILLATORY
+// `hlld_isothermal` (the 3-state solver) produces a correct, non-oscillatory
 // wave structure. pure host physics: 1D PLM(minmod) + forward-Euler godunov over
 // the carrier-generic solvers at S = f64. no CT (Bx is the normal field, F(Bx)=0
 // keeps it constant in 1D). isothermal closure p = a^2 rho, a = 1.
 //
 // discriminator (same as the Brio-Wu test): HLLE is the most diffusive, monotone
-// baseline, so TV(hlld) <~ TV(hlle) AND small ||rho_hlld - rho_hlle||_1 ==> clean.
-// the paper's B already absorbed sqrt(4pi), so the table's (Hx,Hy,Hz) ARE B.
+// baseline, so TV(hlld) <~ TV(hlle) and small ||rho_hlld - rho_hlle||_1 ==> clean.
+// the paper's B already absorbed sqrt(4pi), so the table's (Hx,Hy,Hz) are B.
 // =============================================================================
 
 use symbi_algebra::Tensor;
@@ -145,7 +145,7 @@ fn imhd_hlld_is_clean_shock_capturing() {
     let by_e = interior(&p_hlle, |p| p.mag[1]);
     let by_d = interior(&p_hlld, |p| p.mag[1]);
 
-    // - PHYSICAL everywhere (isothermal density = HLL average -> stays positive).
+    // - physical everywhere (isothermal density = HLL average -> stays positive).
     for (i, pi) in p_hlld[NG..NG + N].iter().enumerate() {
         assert!(
             pi.rho.is_finite() && pi.rho > 0.0,
@@ -154,12 +154,12 @@ fn imhd_hlld_is_clean_shock_capturing() {
         );
     }
 
-    // - Bx (normal field) stays EXACTLY constant (F(Bx)=0 in 1D).
+    // - Bx (normal field) stays exactly constant (F(Bx)=0 in 1D).
     for pi in &p_hlld[NG..NG + N] {
         assert!((pi.mag[0] - 3.0).abs() < 1e-12, "Bx drifted: {}", pi.mag[0]);
     }
 
-    // - NON-OSCILLATORY: TV(hlld) <~ TV(hlle) (the monotone baseline).
+    // - non-oscillatory: TV(hlld) <~ TV(hlle) (the monotone baseline).
     let (tv_re, tv_rd) = (total_variation(&rho_e), total_variation(&rho_d));
     let (tv_be, tv_bd) = (total_variation(&by_e), total_variation(&by_d));
     eprintln!("[imhd] TV(rho): hlle={tv_re:.4} hlld={tv_rd:.4}");
@@ -173,12 +173,12 @@ fn imhd_hlld_is_clean_shock_capturing() {
         "HLLD By OSCILLATES: TV {tv_bd:.4} vs hlle {tv_be:.4}"
     );
 
-    // - SAME solution as HLLE, only sharper: small L1 distance.
+    // - same solution as HLLE, only sharper: small L1 distance.
     let l1 = l1_diff(&rho_d, &rho_e);
     eprintln!("[imhd] L1(rho_hlld - rho_hlle) = {l1:.4}");
     assert!(l1 < 0.05, "HLLD rho diverges from HLLE: L1 {l1}");
 
-    // - HLLD actually SHARPENS the discontinuity, confirming the HLLD path is active.
+    // - HLLD actually sharpens the discontinuity, confirming the HLLD path is active.
     let max_grad = |f: &[f64]| {
         f.windows(2)
             .map(|w| (w[1] - w[0]).abs())

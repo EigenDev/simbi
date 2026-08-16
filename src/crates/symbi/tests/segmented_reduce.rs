@@ -124,7 +124,7 @@ fn one_bucket_reproduces_the_whole_field_reduction() {
         let global = field_reduce(&field, &dom, op);
         assert_eq!(census.values.len(), 1);
         assert_eq!(census.dropped, 0);
-        // both fold the same cells in the same slab order, so they agree BITWISE.
+        // both fold the same cells in the same slab order, so they agree bitwise.
         assert!(
             census.values[0].to_bits() == global.to_bits(),
             "{op:?}: one-bucket census {:e} != whole-field reduce {global:e}",
@@ -222,7 +222,7 @@ fn min_and_max_land_on_the_per_bucket_extrema() {
 
 #[test]
 fn a_poisoned_cell_survives_its_bucket() {
-    // min/max must PROPAGATE NaN rather than silently returning the non-NaN operand,
+    // min/max must propagate NaN rather than silently returning the non-NaN operand,
     // which is what the bare `f64::min` does. a dropped NaN would let a poisoned cell
     // pass a census unnoticed, and only the bucket that contains it may be poisoned.
     let dom = domain();
@@ -283,7 +283,7 @@ fn the_host_accumulator_is_double_precision_whatever_the_field_carrier_is() {
     let value = Field::<f32, 1, HostMemory>::zeros(&dom).expect("value field");
     let segment = Field::<f32, 1, HostMemory>::zeros(&dom).expect("segment field");
     for c in dom.iter() {
-        // the large term FIRST in traversal order, so the running sum is already too coarse to
+        // the large term first in traversal order, so the running sum is already too coarse to
         // resolve the ones that follow.
         value.view_mut().set(c, if c[0] == 0 { BIG } else { 1.0 });
         segment.view_mut().set(c, 0.0);

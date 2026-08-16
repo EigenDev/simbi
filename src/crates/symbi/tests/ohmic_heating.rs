@@ -1,7 +1,7 @@
 // =============================================================================
 // ohmic_heating.rs
 //
-// resistive MHD conserves TOTAL energy and books the Ohmic heating into the gas AUTOMATICALLY: nrg is
+// resistive MHD conserves total energy and books the Ohmic heating into the gas automatically: nrg is
 // the total energy (conserved by the godunov flux), and the CT `bcell_from_bface` reconciliation moves
 // the resistively-dissipated magnetic energy 1/2 B^2 into the gas internal energy -- no separate Joule
 // source term. a decaying sheared field B_x = B0 sin(k y) in a periodic box loses magnetic energy to
@@ -101,7 +101,7 @@ fn resistive_mhd_conserves_energy_and_heats_the_gas() {
         me_loss > 0.05 * me0,
         "resistivity should have dissipated substantial magnetic energy: {me0} -> {me1}"
     );
-    // TOTAL energy conserved to round-off (the conservative total-energy flux form). the Ohmic
+    // total energy conserved to round-off (the conservative total-energy flux form). the Ohmic
     // dissipation redistributes energy within the conserved total, so the sum is unchanged.
     let rel_drift = (e1 - e0).abs() / e0;
     assert!(
@@ -113,8 +113,8 @@ fn resistive_mhd_conserves_energy_and_heats_the_gas() {
         ie_gain > 0.0,
         "the gas did not heat: internal {ie0} -> {ie1}"
     );
-    // nearly ALL the dissipated magnetic energy became gas HEAT (a sub-percent sliver goes to kinetic
-    // energy from the resistive dynamics; E = KE + ME + IE is the exactly-conserved total above).
+    // nearly all the dissipated magnetic energy became gas heat (a sub-percent sliver goes to kinetic
+    // energy from the resistive dynamics; E = KE + me + ie is the exactly-conserved total above).
     assert!(
         (ie_gain - me_loss).abs() < 0.02 * me_loss,
         "gas heating {ie_gain} did not track the magnetic-energy loss {me_loss}"

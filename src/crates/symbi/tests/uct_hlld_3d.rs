@@ -2,14 +2,14 @@
 // uct_hlld_3d.rs
 //
 // the flat-cartesian 3D UCT family, end to end through the production MHD
-// substrates: all THREE corner-EMF edge kernels (k = 0, 1, 2) dispatch and the
+// substrates: all three corner-EMF edge kernels (k = 0, 1, 2) dispatch and the
 // staggered div(B) stays at machine zero under evolve. the IC is an
 // Orszag-Tang vortex with an out-of-plane swirl (v_z != 0, B_z(x) != 0), so
 // the x- and y-edge EMFs carry genuinely nonzero physics — a plain 2D OT
 // leaves them identically zero and would pass with broken curls. gates:
 // - NMHD under UCT-HLLD and UCT-HLL (the five-wave and the regime-generic
 //   corner families), IMHD and RMHD under UCT-HLLD;
-// - the dimensional-degeneracy oracle: an IN-PLANE problem (v_z = B_z = 0)
+// - the dimensional-degeneracy oracle: an in-plane problem (v_z = B_z = 0)
 //   run z-invariantly in 3D reproduces the 2.5D run column by column — the
 //   z flux divergence cancels exactly and the x/y-edge EMFs are exact zeros,
 //   so the surviving arithmetic is the 2.5D chain.

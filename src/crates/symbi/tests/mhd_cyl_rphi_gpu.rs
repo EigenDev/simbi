@@ -1,11 +1,11 @@
 // =============================================================================
 // mhd_cyl_rphi_gpu.rs
 //
-// GPU<->CPU parity for the CYLINDRICAL r-phi DISK MHD path — the carrier gate for the
+// GPU<->CPU parity for the cylindrical r-phi disk MHD path — the carrier gate for the
 // r-phi substrate kernels (r-z parity lives in
-// mhd_cyl_rz_gpu.rs). builds the SAME in-plane-rotor-in-B_phi disk sim on host and
+// mhd_cyl_rz_gpu.rs). builds the same in-plane-rotor-in-B_phi disk sim on host and
 // device via `with_cyl_plane(RPhi)`, evolves a handful of RK2 steps through the
-// production loop, and asserts conserved state + cell B + the staggered FACE B agree
+// production loop, and asserts conserved state + cell B + the staggered face B agree
 // over the interior. exercises the device r-phi metric curl (-(1/r) d_phi E_z), the
 // reused E_z corner EMF, and the manifest-driven curvilinear (unfused) godunov.
 // =============================================================================
@@ -69,13 +69,13 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
     .spacing([dr, dphi])
     .cfl(CFL)
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
-    // the cyl plane MUST be set before seeding (it picks the _cyl_rphi axis set the CT reads).
+    // the cyl plane must be set before seeding (it picks the _cyl_rphi axis set the CT reads).
     .cyl_plane(CylPlane::RPhi)
     .allocate()
     .expect("cyl r-phi sim")
     .set_initial(|[r, phi]| {
         let (rho, vr, vphi) = rotor_state(r, phi);
-        // velocity COORDINATE-indexed (0=r, 1=phi, 2=z); B = (B_r, B_phi, B_z) = (0, B0, 0).
+        // velocity coordinate-indexed (0=r, 1=phi, 2=z); B = (B_r, B_phi, B_z) = (0, B0, 0).
         MhdPrim {
             hydro: Prim {
                 rho,
@@ -163,7 +163,7 @@ fn nmhd_cyl_rphi_evolve_gpu_matches_cpu() {
             );
         }
     }
-    // the STAGGERED face B — the r-phi metric curl writes these on device (B_r on r-faces,
+    // the staggered face B — the r-phi metric curl writes these on device (B_r on r-faces,
     // B_phi on phi-faces). diff over each face domain to gate the device curl directly.
     for d in 0..2 {
         for fc in hmhd.bface[d].domain().clone().iter() {

@@ -4,20 +4,20 @@
 // the well-balanced (hydrostatic-equilibrium) regression gate for the
 // curvilinear geometric pressure source. the source in
 // symbi-discretize/src/gv/sources.rs (~:130) is written in the divergence's
-// FLUX-DIFFERENCE form `(ptot*A_hi - ptot*A_lo)*inv_V` SPECIFICALLY so a static
+// flux-difference form `(ptot*A_hi - ptot*A_lo)*inv_V` specifically so a static
 // v=0, uniform-total-pressure state cancels the area-weighted flux divergence
 // bit-for-bit: a uniform atmosphere must stay put.
 //
-// it is well-balanced BY CONSTRUCTION but nothing PINS it: the spherical sod
-// tests assert the OPPOSITE (max |v| > 0.05, motion). a refactor of the
-// area-weighting / source could silently break HSE with zero test failures.
+// it is well-balanced by construction but nothing pins it: the spherical sod
+// tests assert the opposite (max |v| > 0.05, motion). a refactor of the
+// area-weighting / source could silently break hse with zero test failures.
 //
-// this gate seeds the minimal well-balanced state — UNIFORM rho, UNIFORM p, v=0
+// this gate seeds the minimal well-balanced state — uniform rho, uniform p, v=0
 // — on a spherical-polar (strongest source) and a cylindrical annular shell, runs
 // N evolve steps through the real evolve() loop, and asserts the radial velocity
-// stays at machine zero (|v_r| < EPS). it directly exercises the sources.rs
+// stays at machine zero (|v_r| < eps). it directly exercises the sources.rs
 // cancellation and needs no gravity: if the geometric source ever stops matching
-// the geometric flux divergence, v grows and this FAILS.
+// the geometric flux divergence, v grows and this fails.
 // =============================================================================
 
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
@@ -42,7 +42,7 @@ const R_LO: f64 = 0.5; // annular shell r in [0.5, 1.5] — away from the r=0 si
 const DR: f64 = 1.0 / N as f64;
 const T_FINAL: f64 = 0.05; // the uniform state's only signal is the sound speed; dt is finite.
 
-// the machine-ish well-balancedness bound: a TRUE algebraic cancellation gives bit-zero, but the
+// the machine-ish well-balancedness bound: a true algebraic cancellation gives bit-zero, but the
 // area-weighted divergence and the geometric source are evaluated as two separate floating-point
 // expressions whose difference is a few rounding ulps per step, accumulated over the step count.
 // 1e-12 is machine-ish (>> the ~1e-3..1e-1 a broken/absent source produces, << any physical flow).
@@ -153,7 +153,7 @@ fn well_balanced_spherical_1d_adiabatic() {
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sph.geom.allocated);
     evolve(&mut sph, &sub, T_FINAL).expect("spherical well-balanced evolution failed");
 
-    // the state must stay finite, positive, and STATIC — the well-balanced cancellation pinned.
+    // the state must stay finite, positive, and static — the well-balanced cancellation pinned.
     for c in sph.geom.interior.iter() {
         let rho = *sph.fields.prim.rho.view().at(c);
         let p = *sph.fields.prim.pre_field().expect("prim.pre").view().at(c);

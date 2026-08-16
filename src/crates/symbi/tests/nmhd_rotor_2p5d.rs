@@ -1,12 +1,12 @@
 // =============================================================================
 // nmhd_rotor_2p5d.rs
 //
-// the magnetized ROTOR (Toth 2000 test 1) as a 2.5D NMHD gate — a strong-field
+// the magnetized rotor (Toth 2000 test 1) as a 2.5D NMHD gate — a strong-field
 // robustness + div(B) stress test distinct from Orszag-Tang: a dense disk spins in
 // a uniform Bx, winding the field into torsional Alfven waves. asserts:
 //   (a) the in-plane staggered div(B) = dBx/dx + dBy/dy stays at machine zero,
 //   (b) the state stays physical (rho>0, p>0, finite) through the low-beta core,
-//   (c) the field actually WINDS — By (zero in the IC) develops from the rotation,
+//   (c) the field actually winds — By (zero in the IC) develops from the rotation,
 //       proving the CT genuinely evolves the in-plane field under shear.
 // =============================================================================
 
@@ -119,7 +119,7 @@ fn nmhd_rotor_2p5d_preserves_divb_winds_field_stays_physical() {
         "rotor produced only {steps} steps — gate barely exercised"
     );
 
-    // physicality through the low-beta core + the field has WOUND (By developed from 0).
+    // physicality through the low-beta core + the field has wound (By developed from 0).
     let eos = IdealGas { gamma: GAMMA };
     let mhd = sim.fields.mhd.as_ref().unwrap();
     let cnrg = sim.fields.cons.nrg_field().unwrap();

@@ -2,14 +2,14 @@
 // substrate_rmhd_spherical.rs
 //
 // the curvilinear RMHD wiring smoke: the M-generic RmhdSubstrateKernelSet3D
-// on a SPHERICAL shell through the real evolve() loop, exercising the _sph
+// on a spherical shell through the real evolve() loop, exercising the _sph
 // kernels the godunov/cfl methods dispatch — rmhd_godunov_euler_sph_3d (the
 // area-weighted divergence + the RMHD geometric momentum source: pressure +
 // inertial + magnetic tension), rmhd_wave_speed_map_sph_3d (per-cell physical
 // CFL widths), and the spherical CT curl (rmhd_ct_curl_3d_*_sph). flux/c2p/
 // edge_emf/bcell_from_bface are geometry-agnostic (Cartesian kernels on a shell).
 //
-// the IC is a div-free RADIAL field B_r = B0/r^2 (the split-monopole: A_r B_r =
+// the IC is a div-free radial field B_r = B0/r^2 (the split-monopole: A_r B_r =
 // r^2 sin(th) dth dph * B0/r^2 = const in r, so the area-weighted div telescopes
 // to 0) over a smooth radial pressure bump. the run must stay finite, positive,
 // and subluminal — the wiring proof (a wrong buffer/scalar order NaNs). geometry
@@ -47,14 +47,14 @@ const B0: f64 = 0.1;
 const T_FINAL: f64 = 0.03;
 
 // div-free radial B_r = B0/r^2 + a smooth radial pressure bump, v = 0. generic over M
-// so the SAME field values seed both the spherical and the Cartesian sim.
+// so the same field values seed both the spherical and the Cartesian sim.
 fn set_ic<M>(sim: &mut SimState<Rmhd, 3, M, IdealGas<f64>, CpuSpace, HostMemory>)
 where
     M: symbi_geometry::Metric<f64, 3> + Copy,
 {
     let mhd = sim.fields.mhd.as_ref().expect("Rmhd requires mhd fields");
     // staggered B_r on the r-faces (B_theta = B_phi = 0); the area weighting makes this
-    // exactly div-free. face_coord(c, 0)[0] is the r-face radius (R_LO + i*DR for uniform DR,
+    // exactly div-free. face_coord(c, 0)[0] is the r-face radius (R_LO + i*dr for uniform dr,
     // or the log-map face for non-uniform) — the one staggered-coordinate accessor.
     for c in &sim.geom.interior.extend(0, 0, 1) {
         let rf = sim.geom.face_coord(c, 0)[0];
@@ -130,7 +130,7 @@ fn full_substrate_spherical_rmhd_smoke() {
         "coords must be Spherical"
     );
 
-    // geometry is ACTIVE in the wave-speed map: the spherical CFL dt (r-weighted angular
+    // geometry is active in the wave-speed map: the spherical CFL dt (r-weighted angular
     // widths h_theta=r, h_phi=r sin(theta)) differs from the Cartesian dt on the same state.
     // c2p first (cfl reads prim; the evolve loop also leads with c2p).
     let mut cart = make_cart();

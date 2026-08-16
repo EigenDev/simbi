@@ -166,7 +166,7 @@ class LinePlotComponent(Component):
         if data.spacing_types and len(data.spacing_types) > 0:
             spacing_type = data.spacing_types[0]
 
-        # a step is drawn at the cell EDGES; a line needs their centres, taken with
+        # a step is drawn at the cell edges; a line needs their centres, taken with
         # the spacing's own mean so a logarithmic mesh centres geometrically.
         steps = self.props.drawstyle == "steps"
         x_data = x_vertices if steps else calc_any_mean(x_vertices, spacing_type)

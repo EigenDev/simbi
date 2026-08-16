@@ -1,8 +1,8 @@
 // =============================================================================
 // mhd_2p5d_bench.rs
 //
-// throughput comparison of the GENUINE 2.5D MHD path (spatial D=2,
-// vector DOF=3) vs the legacy 3D-with-nz=1 HACK, on the same Orszag-Tang vortex.
+// throughput comparison of the genuine 2.5D MHD path (spatial D=2,
+// vector DOF=3) vs the legacy 3D-with-nz=1 hack, on the same Orszag-Tang vortex.
 // the 2.5D run removes the wasted z-sweep, the z-ghosts, and the 3D loop overhead;
 // the cache-tiling executor (policy_for, D-generic) then tiles the genuine 2D grid.
 // reports compute-only MZCS (mega-zone-cycles/sec) for both + the speedup.
@@ -158,7 +158,7 @@ fn main() {
     let (m3, i3) = bench_3d_nz1(nx, t_final);
     eprintln!("  3D-with-nz=1 (hack): {m3:7.2} MZCS  ({i3} steps)");
     // 2.5D is skipped by default: its GPU kernels have no device-validation gate.
-    // set SYMBI_BENCH_2P5D=1 to include it (CPU OK).
+    // set SYMBI_BENCH_2P5D=1 to include it (CPU ok).
     if std::env::var("SYMBI_BENCH_2P5D").is_ok() {
         let (m2, i2) = bench_2p5d(nx, t_final);
         eprintln!("  genuine 2.5D       : {m2:7.2} MZCS  ({i2} steps)");

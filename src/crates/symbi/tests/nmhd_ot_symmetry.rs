@@ -1,10 +1,10 @@
 // diagnostic: the canonical Newtonian Orszag-Tang vortex has a 180-degree point
 // symmetry about the domain center — v -> -v, B -> -B, rho/p invariant — so the
-// SCALAR fields obey rho(x,y,t) = rho(1-x,1-y,t) for all t. on the grid this is the
-// EXACT cell map i -> N-1-i (no interpolation). the relative-L1 of that reflection
+// scalar fields obey rho(x,y,t) = rho(1-x,1-y,t) for all t. on the grid this is the
+// exact cell map i -> N-1-i (no interpolation). the relative-L1 of that reflection
 // is the discriminator the bisection-in-time argument needs:
 //   ~roundoff at t=0.3, finite at t=1.0  => physical instability seeded by roundoff.
-//   already finite at t=0.3              => a SCHEME asymmetry (sweep order / CT EMF).
+//   already finite at t=0.3              => a scheme asymmetry (sweep order / CT EMF).
 // run: cargo test -p symbi --release --test nmhd_ot_symmetry -- --ignored --nocapture
 
 use std::f64::consts::PI;
@@ -35,7 +35,7 @@ fn make_sim() -> Sim {
     let p0 = 5.0 / (12.0 * PI);
     let b0 = 1.0 / (4.0 * PI).sqrt();
     // staggered B via face_coord() (in seed_faces): Bx on the x-face is exact in x,
-    // cell-CENTERED in y/z. the accessor owns the half-cell offset that this whole test
+    // cell-centered in y/z. the accessor owns the half-cell offset that this whole test
     // exists to police.
     Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([NX, NY, 1])
@@ -114,7 +114,7 @@ fn nmhd_ot_reflection_symmetry_t03_vs_t10() {
     // the scheme preserves the OT point symmetry: with a correctly-sampled (face-midpoint)
     // IC, any asymmetry at t=0.3 is roundoff. a directional bias in the Riemann solver / CT EMF
     // / the bface coupling would show up here as a finite (>> roundoff) value. late growth to
-    // ~1e-10 is the physical tearing/KH instability amplifying roundoff — expected.
+    // ~1e-10 is the physical tearing/kh instability amplifying roundoff — expected.
     assert!(
         s03 < 1e-10,
         "scheme broke OT point symmetry at t=0.3: rel-L1 {s03:.3e} >> roundoff -> directional bias",

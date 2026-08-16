@@ -115,12 +115,12 @@ fn drain_removes_out_of_plane_momentum() {
     }
     let (in1, out1) = out_of_plane_momentum(&sim);
 
-    // the out-of-plane momentum INSIDE the mask is drained substantially...
+    // the out-of-plane momentum inside the mask is drained substantially...
     assert!(
         in1 < 0.9 * in0,
         "the 2.5D MHD drain did not remove the out-of-plane momentum: inside {in0:.5} -> {in1:.5}"
     );
-    // ...while OUTSIDE the mask it is untouched (the drain is local, and mom[2] is a real conserved
+    // ...while outside the mask it is untouched (the drain is local, and mom[2] is a real conserved
     // channel).
     assert!(
         (out1 - out0).abs() < 1e-4 * out0,

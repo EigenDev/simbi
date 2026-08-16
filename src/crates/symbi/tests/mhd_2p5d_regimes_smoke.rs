@@ -1,8 +1,8 @@
 // =============================================================================
 // mhd_2p5d_regimes_smoke.rs
 //
-// cross-regime smoke: the ISOTHERMAL and RELATIVISTIC
-// MHD substrates each run a few steps on a GENUINE 2.5D grid (D=2, DOF=3) with an
+// cross-regime smoke: the isothermal and relativistic
+// MHD substrates each run a few steps on a genuine 2.5D grid (D=2, DOF=3) with an
 // Orszag-Tang-with-Bz IC; assert the in-plane staggered div(B) stays at machine zero,
 // the state stays finite, and the out-of-plane Bz evolves. companion to
 // nmhd_2p5d_divb_under_evolve.rs (the detailed NMHD gate) — these confirm the same
@@ -32,7 +32,7 @@ const B0: f64 = 1.0;
 const BZ0: f64 = 0.4;
 const V0: f64 = 0.3;
 
-// the OT-with-Bz primitive vectors (vel, B 3-vectors) at a cell CENTER — regime-agnostic.
+// the OT-with-Bz primitive vectors (vel, B 3-vectors) at a cell center — regime-agnostic.
 fn ot_vectors(x: f64, y: f64) -> (Tensor<f64, 3>, Tensor<f64, 3>) {
     let vel = Tensor::new([-V0 * (2.0 * PI * y).sin(), V0 * (2.0 * PI * x).sin(), 0.0]);
     let mag = Tensor::new([

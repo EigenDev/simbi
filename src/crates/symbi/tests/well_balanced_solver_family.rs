@@ -1,29 +1,29 @@
 // =============================================================================
 // well_balanced_solver_family.rs
 //
-// DIVISION OF LABOUR between the well-balancing and the riemann solver, on the
+// division of labour between the well-balancing and the riemann solver, on the
 // regime a sealed accretor wall holds its masked cells in: a stagnant, strongly
 // stratified, deeply subsonic column.
 //
-// a hydrostatic state solves the CONTINUUM equations, not the discrete ones, so an
+// a hydrostatic state solves the continuum equations, not the discrete ones, so an
 // undeclared scheme leaves a truncation residual and deposits it one-signed every
-// step. that residual rings at grid scale and shows up as an entropy DEFICIT
+// step. that residual rings at grid scale and shows up as an entropy deficit
 // (K = p/rho^gamma below its lagrangian value) in an adiabatic gas that cannot lose
 // entropy. two different tools can suppress it:
 //
-//   - the RIEMANN SOLVER, by keeping enough acoustic dissipation on the stratified
+//   - the riemann solver, by keeping enough acoustic dissipation on the stratified
 //     faces to damp the ring. this is what a compressibility clamp on the low-mach
 //     scaling does, and it costs the low-mach accuracy the scaling exists to buy,
 //     across the whole stratified region;
-//   - the WELL-BALANCING, by measuring the residual once per level and subtracting
+//   - the well-balancing, by measuring the residual once per level and subtracting
 //     it every stage, so there is no ring to damp in the first place.
 //
-// if the second works, the first is not needed HERE, and a solver that reduces
+// if the second works, the first is not needed here, and a solver that reduces
 // dissipation aggressively becomes usable on a stratified problem. that is the
 // question: does declaring the target let the acoustic-consistency scaling — which
 // fails this column undeclared — hold the floor?
 //
-// UNDECLARED is the positive control. the deficit must actually appear there, or the
+// undeclared is the positive control. the deficit must actually appear there, or the
 // column is not exercising the imbalance and the declared arm proves nothing.
 //
 // run: cargo test -p symbi --test well_balanced_solver_family -- --nocapture
@@ -150,8 +150,8 @@ fn declaring_the_target_frees_the_solver_from_damping_the_residual() {
         declared.push((name, with_target));
     }
 
-    // POSITIVE CONTROL: the acoustic scaling is the one that under-damps the residual,
-    // so its UNDECLARED arm must show a deficit. without that this column is not
+    // positive control: the acoustic scaling is the one that under-damps the residual,
+    // so its undeclared arm must show a deficit. without that this column is not
     // exercising the imbalance and the declared results say nothing.
     let bare_acoustic = undeclared[2].1;
     assert!(
@@ -161,7 +161,7 @@ fn declaring_the_target_frees_the_solver_from_damping_the_residual() {
          vacuous. lengthen the run or steepen the stratification"
     );
 
-    // declaring must never make a solver WORSE: the correction is the scheme's own
+    // declaring must never make a solver worse: the correction is the scheme's own
     // measured imbalance, so subtracting it can only remove a deposit.
     for ((name, bare), (_, with_target)) in undeclared.iter().zip(&declared) {
         let (d_bare, d_decl) = ((1.0 - bare).max(0.0), (1.0 - with_target).max(0.0));
@@ -172,7 +172,7 @@ fn declaring_the_target_frees_the_solver_from_damping_the_residual() {
         );
     }
 
-    // THE CLAIM under test: for the scaling that cannot damp the residual ITSELF, moving
+    // the claim under test: for the scaling that cannot damp the residual itself, moving
     // that job to the well-balancing recovers most of the floor — the division of labour
     // works, even if it is not exact.
     let (d_bare, d_decl) = (
@@ -186,7 +186,7 @@ fn declaring_the_target_frees_the_solver_from_damping_the_residual() {
          damping the hydrostatic residual"
     );
 
-    // and what it does NOT do: the residual deficit still ORDERS by how much dissipation
+    // and what it does not do: the residual deficit still orders by how much dissipation
     // each solver applies, so the declaration relieves the solver without replacing it.
     // recorded here because it is the reason a stratified science run should still prefer
     // the mach-limited scaling over the aggressive one.

@@ -301,7 +301,7 @@ pub fn ghost_fill_all<const D: usize>(
 }
 
 /// like ghost_fill_all, but the callback also receives a bitmask of which
-/// axes have a Reflect BC active for this ghost region. bit `ax` is set
+/// axes have a Reflect bc active for this ghost region. bit `ax` is set
 /// when the region contacts a Reflect face on axis `ax`. use this to
 /// negate velocity components normal to reflecting faces.
 pub fn ghost_fill_all_reflect<const D: usize>(

@@ -1,17 +1,17 @@
 # =============================================================================
 # test_cartesian_ks_mhd_3d.py
 #
-# GRMHD on the FULL 3D cartesian kerr-schild chart. the seeded field is
+# GRMHD on the full 3D cartesian kerr-schild chart. the seeded field is
 # B_z = B0 / sqrt(gamma), the exactly densitized-divergence-free vertical
 # field (sqrt(gamma) B^z = B0 is constant, so d_i(sqrt(gamma) B^i) = 0 on the
 # staggered mesh to machine precision). two invariants:
 # - the a = 0 metric and the vertical field are symmetric under x <-> y, so
 #   the accreting state must stay transpose-symmetric over that pair to
 #   roundoff (the 3d GR CT chain's coordinate-role gate);
-# - the constrained transport preserves the DENSITIZED divergence: recomputed
+# - the constrained transport preserves the densitized divergence: recomputed
 #   from the evolved staggered field, it stays at machine zero.
 #
-# the run EXCISES the singular core (r_ks < 0.7 r_+ = 1.4 M, r_+ = 2M): the
+# the run excises the singular core (r_ks < 0.7 r_+ = 1.4 M, r_+ = 2M): the
 # region inside the horizon is causally disconnected and its metric is the
 # clamped fiction the r >= M/2 floor fabricates, so its state is numerical
 # padding, not flow. the stiff magnetized c2p amplifies ULP-level differences
@@ -49,7 +49,7 @@ L = 5.0
 
 
 def _sqrtg(x: float, y: float, z: float) -> float:
-    # the KERNEL's sqrt(gamma), including its r >= M/2 clamp: the seeded densitized
+    # the kernel's sqrt(gamma), including its r >= M/2 clamp: the seeded densitized
     # field must satisfy the constraint in the same weights the CT curl divides by.
     r_true = np.sqrt(x * x + y * y + z * z)
     r = max(r_true, 0.5 * MASS)
@@ -61,11 +61,11 @@ class _CartesianKsMhd3D(SimbiProblem):
     adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0)]
     spacetime: Annotated[Spacetime, ProblemParam(Spacetime.SCHWARZSCHILD_KS)]
     schwarzschild_mass: Annotated[float, ProblemParam(MASS)]
-    # excision of the singular core at 0.7 r_+ (r_+ = 2M) is OPT-IN per test: the
+    # excision of the singular core at 0.7 r_+ (r_+ = 2M) is opt-in per test: the
     # full-evolution symmetry gate excises it (the sub-horizon interior is causally
     # disconnected fiction whose grown c2p chatter would mask the exterior it checks),
     # while the two-step early-stencil gate leaves it in place (its whole point is the
-    # raw CT-stencil symmetry BEFORE any core contamination, so it must not be filled).
+    # raw CT-stencil symmetry before any core contamination, so it must not be filled).
     excision_radius: Annotated[float, ProblemParam(0.0, cli=True)]
     regime: Annotated[Regime, ProblemParam(Regime.RMHD)]
     resolution: Annotated[tuple[int, int, int], ProblemParam((RES, RES, RES))]
@@ -145,25 +145,25 @@ def test_cartesian_ks_mhd_3d_symmetry_and_densitized_divb() -> None:
     z, y, x = np.meshgrid(xs, xs, xs, indexing="ij")
     r = np.sqrt(x * x + y * y + z * z)
     # x <-> y transpose symmetry (storage [k, j, i]). the gas-side chain holds it to
-    # roundoff (proven with B = 0); with the field on, the UNEXCISED clamped core is
+    # roundoff (proven with B = 0); with the field on, the unexcised clamped core is
     # numerically noisy under the stiff magnetized c2p (tolerance-level chatter on
-    # ULP-mirrored inputs) and the noise spreads — bound it, tightly OUTSIDE the
+    # ULP-mirrored inputs) and the noise spreads — bound it, tightly outside the
     # horizon and loosely inside. an excised run owns those cells instead.
     asym = np.abs(rho - np.transpose(rho, (0, 2, 1)))
     assert asym.max() < 1e-4, f"gross x<->y asymmetry: {asym.max():e}"
     ext = r > 2.0
     assert asym[ext].max() < 2e-5, f"exterior x<->y asymmetry: {asym[ext].max():e}"
-    # the FIELD mirror bound at the same radial split: B_x(x, y) <-> B_y(y, x) (the
+    # the field mirror bound at the same radial split: B_x(x, y) <-> B_y(y, x) (the
     # x <-> y reflection composed with B -> -B, an exact MHD symmetry of this data).
     berr = np.abs(b1c - np.transpose(b2c, (0, 2, 1)))
     assert berr[ext].max() < 1e-3, f"exterior B mirror error: {berr[ext].max():e}"
     # the field genuinely evolved (non-vacuous).
     assert np.abs(b1c).max() > 1e-6, "B_x never developed; the CT never acted"
 
-    # the DENSITIZED divergence d_i(sqrt(gamma) B^i), recomputed from the evolved
+    # the densitized divergence d_i(sqrt(gamma) B^i), recomputed from the evolved
     # staggered faces, stays at machine zero relative to the field scale — the 3d GR
     # constrained transport's defining invariant.
-    # the checkpointed face arrays are INTERIOR-only, [k, j, i]-ordered, +1 on the
+    # the checkpointed face arrays are interior-only, [k, j, i]-ordered, +1 on the
     # own axis (B1 staggered on x = the last index, B3 on z = the first).
     b1, b2, b3 = bf[0], bf[1], bf[2]
     assert b1.shape == (RES, RES, RES + 1), f"B1 shape {b1.shape}"
@@ -172,7 +172,7 @@ def test_cartesian_ks_mhd_3d_symmetry_and_densitized_divb() -> None:
     xs_f = np.arange(RES + 1) * dd - L
 
     def w(xg, yg, zg):
-        # the kernel's sqrt(gamma), INCLUDING its r >= M/2 clamp (the frozen singular
+        # the kernel's sqrt(gamma), including its r >= M/2 clamp (the frozen singular
         # core): the invariant the curl preserves is div(w B) with the kernel's own w.
         rr = np.sqrt(xg * xg + yg * yg + zg * zg)
         r_true = rr.copy()
@@ -198,9 +198,9 @@ def test_cartesian_ks_mhd_3d_symmetry_and_densitized_divb() -> None:
 
 @needs_backend
 def test_cartesian_ks_mhd_3d_uct_preserves_divb_and_mirror() -> None:
-    # the FULL-3D UCT-HLL corner EMF (three edge orientations, materialized wave
+    # the full-3D UCT-HLL corner EMF (three edge orientations, materialized wave
     # speeds): the same two defining invariants as the contact CT — the recomputed
-    # densitized divergence stays at machine zero from the EVOLVED staggered field,
+    # densitized divergence stays at machine zero from the evolved staggered field,
     # and the early-time field mirror symmetry holds to roundoff (the sharp
     # coordinate-role gate over the per-edge slot bindings).
     d = tempfile.mkdtemp() + "/"
@@ -286,7 +286,7 @@ def test_cartesian_ks_mhd_3d_stencils_are_mirror_exact_early() -> None:
 
 @needs_backend
 def test_ct_contact_upwinding_is_ill_posed_on_a_flow_symmetry_plane() -> None:
-    # the contact CT scheme selects the electromotive-force derivative by the SIGN of the
+    # the contact CT scheme selects the electromotive-force derivative by the sign of the
     # normal mass flux (Gardiner & Stone 2005, eq. 51). that flux vanishes identically on a
     # symmetry plane of the flow — here uniform gas falls radially onto the hole, so
     # v_x = v_r x/r is zero on x = 0 — leaving the selector with no defined direction across
@@ -296,12 +296,12 @@ def test_ct_contact_upwinding_is_ill_posed_on_a_flow_symmetry_plane() -> None:
     # UCT selects on wave speeds instead, which carry the fast magnetosonic speed and never
     # approach zero, so it has a well-defined direction everywhere and holds the symmetry.
     #
-    # this configuration is EXACTLY mirror symmetric under exchanging x and y: the metric is
+    # this configuration is exactly mirror symmetric under exchanging x and y: the metric is
     # spherically symmetric (zero spin), the gas is uniform and at rest, and the field is
     # purely vertical with a magnitude depending only on radius. so B_x(x, y, z) must equal
     # B_y(y, x, z) for all time, and any departure is numerical.
     #
-    # the gate is RELATIVE, comparing the two schemes on identical data rather than pinning a
+    # the gate is relative, comparing the two schemes on identical data rather than pinning a
     # measured number: UCT must hold the symmetry, and the contact scheme must violate it by
     # orders of magnitude. a contact formulation that becomes well posed here fails this test,
     # which is the signal to delete it along with the UCT pin in the mirror-exactness test.

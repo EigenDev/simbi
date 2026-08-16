@@ -1,7 +1,7 @@
 // =============================================================================
 // space.rs
 //
-// the execution space trait. defines HOW work runs on a backend.
+// the execution space trait. defines how work runs on a backend.
 // all fallible operations return Result<T, XpuError>.
 // =============================================================================
 

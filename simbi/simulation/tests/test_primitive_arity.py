@@ -1,7 +1,7 @@
 # =============================================================================
 # test_primitive_arity.py
 #
-# the per-cell primitive tuple is read POSITIONALLY by the backend, so a
+# the per-cell primitive tuple is read positionally by the backend, so a
 # too-long tuple silently shifts a trailing field (e.g. pressure) into an
 # ignored slot with no error. these tests pin the width where the regime
 # determines it exactly (cartesian hydro, energy mhd) and confirm the ambiguous

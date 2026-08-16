@@ -7,11 +7,11 @@
 // robust HLLE/light-cone) update from the physical stage-input state and, per zone, keeps
 // whichever tier is physical: high-order, else first-order, else the frozen stage input.
 //
-// GRMHD replaces the last two tiers with a CONSERVATIVE recovery (`SourceReplay`): the spliced
+// GRMHD replaces the last two tiers with a conservative recovery (`SourceReplay`): the spliced
 // first-order flux and edge EMF are kept single-valued, and the only thing clipped is the
 // pointwise geometric (metric) source, scaled to the largest fraction of the source ray that
 // stays inside the Wu & Tang admissible set. that leaves nothing to freeze — a state the
-// source-free low-order operator cannot make admissible is a statement about the TIMESTEP, and
+// source-free low-order operator cannot make admissible is a statement about the timestep, and
 // the orchestrator reports it up so the driver rejects the step and replays at a smaller dt.
 //
 // usage:
@@ -34,7 +34,7 @@ use crate::regimes::substrate_kernels::{
 };
 use symbi_ir::emit::ReductionOp;
 
-// FOFC observability counters — the running totals of DELIBERATE fallback events over a run, so a
+// FOFC observability counters — the running totals of deliberate fallback events over a run, so a
 // run can surface how often/where the first-order flux correction and the last-resort freeze fired
 // (a limiter is fine as long as it is visible). `FALLBACK_CELLS` counts flagged-cell x
 // substage events (a cell whose high-order c2p was unphysical and took the first-order redo);
@@ -47,7 +47,7 @@ static FOFC_FREEZE_CELLS: AtomicU64 = AtomicU64::new(0);
 // horizon radius. on a black-hole run everything inside r_+ is causally disconnected
 // from the exterior, so fallbacks there (e.g. the ring at the metric-guard radius,
 // where the clamped metric's source is discontinuous) are expected and harmless —
-// the acceptance criterion for a production run is EXTERIOR events == 0, and that
+// the acceptance criterion for a production run is exterior events == 0, and that
 // signal must not be drowned by the interior's steady, legitimate firing.
 static FOFC_FALLBACK_CELLS_HORIZON: AtomicU64 = AtomicU64::new(0);
 static FOFC_FREEZE_CELLS_HORIZON: AtomicU64 = AtomicU64::new(0);
@@ -65,7 +65,7 @@ pub fn fofc_stats() -> (u64, u64) {
     )
 }
 
-/// the (fallback, freeze) subtotals whose cells lie INSIDE the configured horizon radius —
+/// the (fallback, freeze) subtotals whose cells lie inside the configured horizon radius —
 /// the causally disconnected region of a black-hole run. exterior counts are the totals
 /// minus these. both zero when no horizon radius is configured.
 pub fn fofc_horizon_stats() -> (u64, u64) {
@@ -76,7 +76,7 @@ pub fn fofc_horizon_stats() -> (u64, u64) {
 }
 
 /// configure the horizon radius for the FOFC region split: events at euclidean cell-center
-/// radius |x| < r_h book into the horizon subtotals. CARTESIAN charts only (the euclidean
+/// radius |x| < r_h book into the horizon subtotals. cartesian charts only (the euclidean
 /// center radius is meaningless on an angular grid); 0 disables the split. host-memory runs
 /// only — a device run keeps global counts (the masked count would force a device round-trip).
 pub fn fofc_set_horizon_radius(r_h: f64) {
@@ -158,7 +158,7 @@ where
 
 /// book a per-substage flagged count into a horizon subtotal, when the split is active:
 /// a configured radius, a cartesian chart, and host-resident memory. returns the number of
-/// events booked (the count INSIDE the horizon), or 0 when no split applies — so the caller can
+/// events booked (the count inside the horizon), or 0 when no split applies — so the caller can
 /// derive the exterior count as `total - returned` and treat a run with no configured horizon as
 /// all-exterior (unchanged behavior).
 fn book_horizon_events<const D: usize, const DOF: usize, Mem, Sc>(
@@ -183,10 +183,10 @@ where
 }
 
 /// consecutive substages the FOFC freeze tier may fire before the run halts. the freeze is the
-/// last-resort MOOD parachute (neither high- nor first-order recovered a zone); it deploys rarely
-/// and in ISOLATION for a genuine hard cell (the magnetized-torus inner-cliff pathology freezes on
+/// last-resort mood parachute (neither high- nor first-order recovered a zone); it deploys rarely
+/// and in isolation for a genuine hard cell (the magnetized-torus inner-cliff pathology freezes on
 /// ~0.5% of stages, never consecutively), but a poisoned source / initial datum that FOFC cannot fix
-/// freezes EVERY stage. so a long consecutive streak is the honest "genuinely broken" fail-loud that
+/// freezes every stage. so a long consecutive streak is the honest "genuinely broken" fail-loud that
 /// survives FOFC recovery, without false-halting the rare correct parachute. generous margin.
 const FOFC_FREEZE_HALT_STREAK: u32 = 16;
 
@@ -263,8 +263,8 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.allocated, &inputs, &outputs, &[], &[]);
 }
 
-/// dispatch the FREEZE-tier select kernel `{prefix}_fofc_select_{D}d` over the interior: keep the
-/// live spliced first-order conserved (`x_*` = the in-place cons/prim) where physical, else FREEZE to
+/// dispatch the freeze-tier select kernel `{prefix}_fofc_select_{D}d` over the interior: keep the
+/// live spliced first-order conserved (`x_*` = the in-place cons/prim) where physical, else freeze to
 /// the stage input (`us_*` = u_stage). the face-based splice already made every kept cell
 /// conservative; this handles only the rare cell no flux can update admissibly (the documented
 /// single-cell conservation waiver). only the conserved is chosen; the primitive is re-derived by the
@@ -306,9 +306,9 @@ pub fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
 }
 
-/// the FREEZE-tier select with the immersed-body source composed INLINE: the `has_bodies` twin of
+/// the freeze-tier select with the immersed-body source composed inline: the `has_bodies` twin of
 /// `fofc_select`. dispatches `{prefix}_fofc_select_with_body{coords}_{D}d`, whose freeze parachute is
-/// the stage input EVOLVED by the body source (gravity + accretion) over `dt`, guarded to a physical
+/// the stage input evolved by the body source (gravity + accretion) over `dt`, guarded to a physical
 /// state — so a frozen cell near a body keeps its body-evolved gravity (the raw pre-body `u_stage` would lose it). field
 /// binding is identical to `fofc_select` (us_* stage input, x_* live cons/prim); the body + grid
 /// scalars are resolved by the kernel manifest exactly as for the standalone body source.
@@ -379,11 +379,11 @@ where
     field_reduce(flag, &sim.geom.interior, ReductionOp::Add) as u64
 }
 
-/// dispatch the FACE-BASED FLUX SPLICE kernel `{prefix}_fofc_splice_{D}d_{dir}` over the axis-`dir`
+/// dispatch the face-based flux splice kernel `{prefix}_fofc_splice_{D}d_{dir}` over the axis-`dir`
 /// interior face domain: on each face the live first-order flux (`fo_*` = `fields.flux[dir]`, spliced
 /// in place) is kept where either adjacent cell is flagged, else replaced with the saved high-order
 /// flux (`ho_*` = `flux_ho[dir]`). the flag is the 0/1 cell field. after all axes are spliced every
-/// face carries ONE flux and the following godunov telescopes conservatively.
+/// face carries one flux and the following godunov telescopes conservatively.
 pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
@@ -430,7 +430,7 @@ pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// FOFC FREEZE DIAGNOSTIC: count the zones where the SPLICED first-order result is still unphysical —
+/// FOFC freeze diagnostic: count the zones where the spliced first-order result is still unphysical —
 /// the zones the freeze tier holds at the stage input (the conservation waiver). writes the per-zone
 /// freeze flag to the scratch (`{prefix}_fofc_freeze{dof_sfx}_{D}d`) and max-reduces it over the
 /// interior: > 0 iff some zone froze this substage. dispatched after the spliced-godunov c2p, so `x_*`
@@ -468,7 +468,7 @@ where
         }
     }
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
-    // SUM: the freeze flag is 0/1, so this is the COUNT of frozen zones (> 0 iff any froze — the
+    // sum: the freeze flag is 0/1, so this is the count of frozen zones (> 0 iff any froze — the
     // caller's streak test and the observability tally both read it).
     field_reduce(scratch, &sim.geom.interior, ReductionOp::Add)
 }
@@ -489,13 +489,13 @@ pub(crate) enum SourceReplay {
 /// same-signature closures traveled as positional arguments, so transposing two of
 /// them typechecked and linked while corrupting `bcell` only on FOFC cells. hydro
 /// regimes pass `CtHooks::none()`; MHD names each field at the call site. a flagged
-/// cell needs FIRST-ORDER (diffused) B to recover, so the redo re-runs the CT with
-/// the edge EMF SPLICED (HO off the fallback region, FO on it):
+/// cell needs first-order (diffused) B to recover, so the redo re-runs the CT with
+/// the edge EMF spliced (HO off the fallback region, FO on it):
 ///  - `save`         : bflux -> bflux_ho + efield -> efield_ho (the HO induction flux +
 ///    edge EMF), before the FO flux redo overwrites them.
 ///  - `restore`      : bcell <- bcell_stage (the stage-input cell B, so the recomputed
 ///    EMF + the cell-B predictor read the correct base).
-///  - `flux_and_curl`: AFTER the FO flux + gas splice, BEFORE the godunov — splice
+///  - `flux_and_curl`: after the FO flux + gas splice, before the godunov — splice
 ///    bflux, recompute the FO edge EMF (Contact/HLL), splice the edge EMF (HO on
 ///    non-flagged edges, FO on flagged), restore bface <- bface_n and re-curl. gives
 ///    flagged cells FO B, leaves non-flagged B unchanged.
@@ -528,21 +528,21 @@ impl CtHooks<fn(), fn(), fn(), fn()> {
     }
 }
 
-/// the FACE-BASED FOFC flow. (1) flag every zone whose high-order c2p is unphysical (the probe write
+/// the face-based FOFC flow. (1) flag every zone whose high-order c2p is unphysical (the probe write
 /// over the interior), boundary-fill the flag; early-out if none. (2) save the high-order fluxes.
-/// (3) restore cons <- u_stage so the first-order flux reconstructs from the PHYSICAL stage input;
-/// c2p. (4) re-flux at first order (the caller's `first_order_flux`). (5) SPLICE per face: keep the
+/// (3) restore cons <- u_stage so the first-order flux reconstructs from the physical stage input;
+/// c2p. (4) re-flux at first order (the caller's `first_order_flux`). (5) splice per face: keep the
 /// first-order flux where either adjacent cell is flagged, else the saved high-order flux — one flux
-/// per face. (6) the SINGLE conservative godunov from the spliced fluxes (+ additive source); c2p.
+/// per face. (6) the single conservative godunov from the spliced fluxes (+ additive source); c2p.
 /// (7) the freeze tier holds the stage input on any cell the spliced update still left unphysical
 /// (the documented single-cell conservation waiver); c2p to re-derive the primitive. because every
-/// face carries ONE flux, the update telescopes exactly across every fallback boundary — the mass /
+/// face carries one flux, the update telescopes exactly across every fallback boundary — the mass /
 /// momentum / energy created at flag boundaries by a per-cell state replacement is gone. the caller
 /// supplies the substrate's own first-order flux (per direction) / c2p / godunov / source_apply.
 ///
 /// step (6) is where GRMHD diverges: `source_replay` completes the substage itself with the
 /// geometric source limited per cell, and steps (7)'s freeze tier then only ever counts. returns
-/// TRUE when the substage cannot be completed at this timestep at all and the caller must reject
+/// true when the substage cannot be completed at this timestep at all and the caller must reject
 /// and replay the whole step.
 pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -560,19 +560,19 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     source_apply: impl Fn(),
     // the immersed-body source (gravity + accretion), re-applied in the redo exactly as the
     // high-order substage does it (hierarchy.rs: godunov -> additive -> body). the redo restores
-    // `u_stage` (the stage input, BEFORE any source) and re-runs the godunov, so without this a
+    // `u_stage` (the stage input, before any source) and re-runs the godunov, so without this a
     // FO/freeze-selected cell near a body would lose its body source for the substage — precisely
     // the cells where fallback is most likely. self-gating (no-op when the sim has no bodies); a
     // no-op where the godunov already fuses the body (iso cartesian), so it never double-applies.
     body_apply: impl Fn(),
-    // the ADMISSIBLE-BOUNDARY PROJECTION (GR-hydro): blend every spliced cell toward the admissible
-    // stage-input anchor onto partial-G BEFORE the c2p, so the recovery succeeds on every cell and the
+    // the admissible-boundary projection (GR-hydro): blend every spliced cell toward the admissible
+    // stage-input anchor onto partial-G before the c2p, so the recovery succeeds on every cell and the
     // freeze tier below fires only on a genuinely inadmissible anchor. a no-op for regimes without a
     // baked projection (flat, MHD, iso), which keep the freeze parachute.
     project: impl Fn(),
-    // the FREEZE-tier body parachute: `Some((dt_eff, gamma))` when the sim carries immersed bodies AND
+    // the freeze-tier body parachute: `Some((dt_eff, gamma))` when the sim carries immersed bodies and
     // the regime has a `_with_body` freeze-select kernel (adiabatic only). a frozen cell holds the
-    // stage input `u_stage` (pre-body), so `body_apply` above — which targets the LIVE cons — never
+    // stage input `u_stage` (pre-body), so `body_apply` above — which targets the live cons — never
     // reaches it; the with-body select instead evolves the parachute by the body source inline. `None`
     // falls back to the plain `fofc_select` (regimes without the kernel keep the pre-body freeze).
     body_freeze: Option<(f64, f64)>,
@@ -583,7 +583,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // of the source ray instead of blending whole cell states, so the flux and CT operators stay
     // untouched. see `SourceReplay`. every other regime reports `NotApplicable`.
     source_replay: impl Fn() -> SourceReplay,
-    // whether an exterior cell the projection could not recover should REJECT the step (replay it
+    // whether an exterior cell the projection could not recover should reject the step (replay it
     // at a smaller dt) rather than freeze. true only where a projection exists to have tried and
     // failed first; a regime with no projection has no tier below the freeze and must keep it.
     retry_on_freeze: bool,
@@ -595,7 +595,7 @@ where
 {
     let ws = &sim.workspace;
     let flag = &ws.fofc_flag;
-    // HOST GATE + FLAG: write the per-cell fallback flag (1 where the high-order c2p is unphysical)
+    // host gate + flag: write the per-cell fallback flag (1 where the high-order c2p is unphysical)
     // over the interior. FOFC only corrects a flagged cell (a physical one keeps its high-order flux
     // on every non-fallback face), so with none the whole pass is a no-op — skip it. a clean substage
     // costs one pointwise probe + a reduction, skipping the flux sweep + two extra c2p passes.
@@ -610,8 +610,8 @@ where
         &[],
         &[],
     );
-    // SUM (not max): the flag is 0/1, so the reduction is the COUNT of flagged cells — it doubles as
-    // the fire/skip decision (count == 0 iff every high-order c2p was physical) AND the observability
+    // sum (not max): the flag is 0/1, so the reduction is the count of flagged cells — it doubles as
+    // the fire/skip decision (count == 0 iff every high-order c2p was physical) and the observability
     // tally, in a single pass.
     let fallback_cells = field_reduce(flag, &sim.geom.interior, ReductionOp::Add);
     if fallback_cells < 0.5 {
@@ -623,7 +623,7 @@ where
     // the horizon-region subtotal (inert without a configured split radius).
     book_horizon_events(sim, flag, &FOFC_FALLBACK_CELLS_HORIZON);
     // boundary-consistent ghosts for the flag: a face straddling the periodic wrap (or any boundary)
-    // must take ONE first-order decision from both of its cells, else the splice re-creates the very
+    // must take one first-order decision from both of its cells, else the splice re-creates the very
     // non-conservation it exists to remove.
     crate::regimes::mhd_substrate::flag_ghost_fill(
         sim,
@@ -632,7 +632,7 @@ where
     );
 
     let (cons, prim) = (&sim.fields.cons, &sim.fields.prim);
-    // save the HIGH-ORDER fluxes before the first-order redo overwrites the live buffers. the
+    // save the high-order fluxes before the first-order redo overwrites the live buffers. the
     // componentwise conserved copy is exactly `fofc_restore` (d_x = s_x), reused on the per-direction
     // flux ConsFields.
     for dir in 0..D {
@@ -646,8 +646,8 @@ where
         );
     }
     (ct.save)(); // MHD: bflux -> bflux_ho + efield -> efield_ho (the HO induction flux + edge EMF)
-    // the stage input via THE accessor: at the first stage of a multi-stage scheme
-    // the driver elides the cons -> u_stage copy (u_n IS the stage input), so a
+    // the stage input via the accessor: at the first stage of a multi-stage scheme
+    // the driver elides the cons -> u_stage copy (u_n is the stage input), so a
     // direct ws.u_stage read restores from a stale (first step: zeroed) buffer —
     // the redo then rebuilds the flow from garbage and the freeze tier both
     // fires where it should not and parachutes into zeros where it fires.
@@ -679,28 +679,28 @@ where
             body_apply(); // re-apply the immersed-body source on the redo (mirrors the HO godunov->additive->body order)
         }
     }
-    // ADMISSIBLE-BOUNDARY PROJECTION — the tier BELOW every conservative correction above, and it
-    // must sit below ALL of them: the flux splice and the source limiter both act on the OPERATOR
+    // admissible-boundary projection — the tier below every conservative correction above, and it
+    // must sit below all of them: the flux splice and the source limiter both act on the operator
     // (a face flux, a source magnitude) and neither can move a cell that is already outside G. this
     // maps such a cell onto partial-G along the segment to the admissible stage-input anchor, so the
-    // freeze tier afterwards counts only a genuinely inadmissible ANCHOR. exact passthrough on an
+    // freeze tier afterwards counts only a genuinely inadmissible anchor. exact passthrough on an
     // admissible cell, hence a no-op wherever the tiers above already succeeded. a no-op entirely
     // for regimes with no baked projection (flat MHD, iso), which keep the freeze parachute.
     project();
     c2p();
-    // PERSISTENT-FREEZE FAIL-LOUD: the freeze tier holds the stage input where even full first-order
+    // persistent-freeze fail-loud: the freeze tier holds the stage input where even full first-order
     // fluxes leave a cell unphysical. it is the rare correct parachute for a genuinely hard cell
     // (isolated in time), so a single firing is not a failure — but a poisoned source / initial datum
-    // that FOFC cannot fix freezes EVERY stage. track the consecutive streak and halt loudly once it
+    // that FOFC cannot fix freezes every stage. track the consecutive streak and halt loudly once it
     // persists.
     let froze = fofc_freeze_count(sim, prefix, dof_sfx, scratch, cons, prim);
-    // the freeze-streak HALT gates on the EXTERIOR (r > r_+) freeze count only. a cell inside the
+    // the freeze-streak halt gates on the exterior (r > r_+) freeze count only. a cell inside the
     // event horizon is causally disconnected from the exterior — no numerical signal crosses r_+
     // outward faster than the light cone the CFL bounds — so a persistent freeze there is expected
     // and harmless: the near-vacuum supersonic infall between the excision surface and the horizon
     // is the stiffest gas in the domain, and the acceptance criterion for a black-hole run is
-    // EXTERIOR events == 0 (the small residual interior->exterior leak is separately bounded by the
-    // excision-leakage gate). the panic exists to catch a poison spreading across the PHYSICAL
+    // exterior events == 0 (the small residual interior->exterior leak is separately bounded by the
+    // excision-leakage gate). the panic exists to catch a poison spreading across the physical
     // domain; charging it for causally-disconnected interior fiction halts a healthy run. a run with
     // no configured horizon (flat, angular chart, device) books zero interior events, so exterior ==
     // total and the halt is bit-unchanged.
@@ -713,11 +713,11 @@ where
     };
     let exterior_froze = (froze as u64).saturating_sub(interior_froze);
     let streak = advance_freeze_streak(freeze_streak, exterior_froze);
-    // TIER 3, the last resort below the projection: an EXTERIOR cell that even the projection could
-    // not land in G has an inadmissible ANCHOR — its stage input is already unrecoverable — so the
+    // tier 3, the last resort below the projection: an exterior cell that even the projection could
+    // not land in G has an inadmissible anchor — its stage input is already unrecoverable — so the
     // substage cannot be completed at this timestep. replaying the whole step at a smaller dt is
     // strictly better than the freeze below, which holds the cell at that same anchor and waives
-    // its conservation. bounded by the SAME streak the halt uses, so a state no timestep can rescue
+    // its conservation. bounded by the same streak the halt uses, so a state no timestep can rescue
     // still fails loudly instead of halving forever.
     if exterior_froze > 0 && streak < FOFC_FREEZE_HALT_STREAK && retry_on_freeze {
         return true;

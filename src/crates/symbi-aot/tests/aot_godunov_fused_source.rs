@@ -1,7 +1,7 @@
 // =============================================================================
 // aot_godunov_fused_source.rs
 //
-// the FUSED-source godunov AOT-compiles to a single
+// the fused-source godunov AOT-compiles to a single
 // Rust kernel that applies `div(F) + \sum spec_source + integrator` in one call.
 //
 //   - `iso_godunov_stage_with_uniform_accel_1d` — iso (mass + mom) + uniform
@@ -119,7 +119,7 @@ fn adi_fused<S: symbi_aot::Scalar + symbi_aot::OrderedNumeric + Send + Sync>(
 fn iso_fused_kernel_registered_by_name() {
     // structural: the AOT build emitted the kernel, the registry exposes it.
     // a `Some` here proves the build.rs pipeline (gen_godunov_euler_fused ->
-    // emit_gv -> write_both -> REGISTRY -> kernel_by_name) closed for the
+    // emit_gv -> write_both -> registry -> kernel_by_name) closed for the
     // fused-source variant.
     let resolved = kernel_by_name::<f64>("iso_godunov_stage_with_uniform_accel_1d");
     assert!(
@@ -209,14 +209,14 @@ fn iso_aot_fused_step_matches_analytical_source_update() {
 #[test]
 fn adiabatic_aot_fused_step_applies_both_mom_and_nrg_overlays() {
     // **the Phase-2b-via-AOT claim**: `uniform_acceleration_sources(D, true)`
-    // returns TWO specs (mom + nrg). the AOT-baked adiabatic kernel applies
+    // returns two specs (mom + nrg). the AOT-baked adiabatic kernel applies
     // both in one call:
     //
     //     rho_new[i] = rho[i]
     //     mom_new[i] = mom[i] + dt * rho[i] * g_ext_0
     //     nrg_new[i] = nrg[i] + dt * rho[i] * v[i] * g_ext_0,  v = mom/rho
     //
-    // with uniform fluxes (zero divergence) the AOT step must EQUAL the
+    // with uniform fluxes (zero divergence) the AOT step must equal the
     // analytical update, bit-exact at f64.
     let n = 8usize;
     let dt = 0.01_f64;
@@ -285,7 +285,7 @@ fn adiabatic_aot_fused_step_applies_both_mom_and_nrg_overlays() {
 
 #[test]
 fn iso_aot_fused_runs_at_f32() {
-    // **precision-genericity at the FUSED variant**: the same generated
+    // **precision-genericity at the fused variant**: the same generated
     // `pub fn iso_godunov_stage_with_uniform_accel_1d__raw<S>` instantiated at
     // S=f32 by the input buffer type. proves that AOT-baking a spec-driven
     // source preserves Scalar-genericity through the splice + integrator —
@@ -331,9 +331,9 @@ fn iso_aot_fused_runs_at_f32() {
 #[test]
 fn bake_matrix_emits_every_regime_family_ndim_cell() {
     // **structural fingerprint**: the data-driven bake
-    // matrix in build.rs (REGIMES x FUSED_FAMILIES x ndim) must emit a
+    // matrix in build.rs (regimes x FUSED_FAMILIES x ndim) must emit a
     // kernel at every cell of the cube. asserts the loop walked the table
-    // — adding a row to REGIMES or FUSED_FAMILIES must surface here as a
+    // — adding a row to regimes or FUSED_FAMILIES must surface here as a
     // new kernel without any other change in the codebase.
     let regimes = ["iso", "adiabatic"];
     let families = ["uniform_accel", "point_mass_grav"];

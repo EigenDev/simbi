@@ -1,7 +1,7 @@
 # =============================================================================
 # test_config_discovery.py
 #
-# regression: config discovery must NOT descend into virtualenvs / caches when a
+# regression: config discovery must not descend into virtualenvs / caches when a
 # config tree is a symlink to a repo that carries its own .venv. the original
 # `rglob("*.py")` followed `simbi_configs/science -> sibling_repo` straight into
 # `.venv/lib/.../site-packages`, listing ~2200 scipy/matplotlib modules as
@@ -78,7 +78,7 @@ def test_is_config_file_recognizes_a_subclass_of_an_imported_base(tmp_path: Path
     )
     assert _is_config_file(derived)
 
-    # importing a config without subclassing it (an analysis / plot helper) is NOT a
+    # importing a config without subclassing it (an analysis / plot helper) is not a
     # config — the base name must appear as a class base; a bare import or reference does not qualify.
     helper = tmp_path / "analysis.py"
     helper.write_text(
@@ -89,7 +89,7 @@ def test_is_config_file_recognizes_a_subclass_of_an_imported_base(tmp_path: Path
 
 
 # =============================================================================
-# which ROOTS get searched (the above covers what is a config once a root is walked)
+# which roots get searched (the above covers what is a config once a root is walked)
 #
 # discovery used to locate the checkout through a `gitrepo_home.txt` marker written
 # beside the package -- except nothing ever wrote it and it was gitignored, so a fresh
@@ -116,7 +116,7 @@ def test_bundled_configs_are_found_from_an_unrelated_directory(tmp_path, monkeyp
 
 
 def test_a_cwd_local_directory_is_also_searched(tmp_path, monkeypatch):
-    # the other half: drop a simbi_configs/ beside you and your own problems become
+    # a neighboring simbi_configs/ directory adds its problems to discovery.
     # name-addressable without passing a path.
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("SIMBI_CONFIG_PATH", raising=False)

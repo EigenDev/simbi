@@ -841,12 +841,12 @@ impl<const D: usize, Mem: symbi_xpu::MemorySpace> ContinuousTracerSet<D, Mem> {
 }
 
 /// stratified apportionment of `n` tracers over cells proportional to their
-/// masses: sample points from the sorted GOLDEN-RATIO low-discrepancy sequence
+/// masses: sample points from the sorted golden-ratio low-discrepancy sequence
 /// `fract((k+1) phi) * M` along the cumulative mass and count how many land in
 /// each cell's interval. deterministic, no rng, exact total (sum == n),
 /// per-interval deviation O(log n) — and immune to two failure modes of the
 /// simpler schemes: largest-remainder degenerates to winner-take-all in the
-/// sparse regime (every quota below 1), and UNIFORM strata alias against
+/// sparse regime (every quota below 1), and uniform strata alias against
 /// periodic mass structure in the cell-walk order (a striped density walked
 /// column-wise at a rational strata-per-column ratio biases systematically).
 pub fn systematic_counts(masses: &[f64], n: usize) -> Vec<usize> {
@@ -1409,7 +1409,7 @@ mod tests {
         // n far below the cell count — the regime where largest-remainder
         // degenerates to winner-take-all on the densest cells: 2/5 of the
         // cells carry rho 3 (2/3 of the mass) and must get ~2/3 of a sparse
-        // population, spread across the WHOLE band, not stacked densest-first.
+        // population, spread across the whole band, not stacked densest-first.
         let mut masses = vec![1.0; 2000];
         for m in masses.iter_mut().take(800) {
             *m = 3.0;
@@ -3392,7 +3392,7 @@ fn face_destination<const D: usize>(
 
 /// the flat tile index owning a physical position, or None if outside the global domain. the
 /// tile grid is uniform, so it is a floor-divide by the per-tile extent; the flat index is the
-/// SAME `flatten` the decomposition addresses tiles by, so a tracer lands in the store the
+/// same `flatten` the decomposition addresses tiles by, so a tracer lands in the store the
 /// decomposition calls its owner.
 fn tile_owner<const D: usize>(
     x: &[f64; D],
@@ -3413,7 +3413,7 @@ fn tile_owner<const D: usize>(
 
 /// seed `n` tracers from `global`'s density (the monolithic seeding) and split them across the
 /// `counts` tiles by initial position, returning one set per tile in flat order. the monolithic
-/// and decomposed runs thus start from the IDENTICAL population (same ids, same positions), so a
+/// and decomposed runs thus start from the identical population (same ids, same positions), so a
 /// decomposed run can be gated against the single-grid trajectories.
 pub fn seed_and_partition<const D: usize, const DOF: usize, Mem: MemorySpace>(
     global: &FieldStore<D, DOF, Mem, f64>,
@@ -3439,7 +3439,7 @@ fn partition_seeded<const D: usize, const DOF: usize, Mem: MemorySpace>(
     set: TracerSet<D>,
     counts: [usize; D],
 ) -> Vec<TracerSet<D>> {
-    // the per-tile extent from the FULL-SIZE global grid: interior cells / tile counts, times dx.
+    // the per-tile extent from the full-size global grid: interior cells / tile counts, times dx.
     let mut glo = [0.0; D];
     let mut extent = [0.0; D];
     for a in 0..D {

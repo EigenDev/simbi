@@ -1,21 +1,21 @@
 // =============================================================================
 // fofc_stage_input.rs
 //
-// the FOFC redo must restore from THE stage input (`FieldStore::stage_input()`),
+// the FOFC redo must restore from the stage input (`FieldStore::stage_input()`),
 // not from a direct `workspace.u_stage` read: at the first stage of a
 // multi-stage scheme the hierarchy driver elides the cons -> u_stage copy
-// (u_n IS the stage input), so a direct read hands the redo a stale — on the
+// (u_n is the stage input), so a direct read hands the redo a stale — on the
 // first step, zeroed — buffer. the redo then rebuilds the flow from garbage:
-// an unrecoverable poison COMPLETES as a "success" with a zeroed conserved
+// an unrecoverable poison completes as a "success" with a zeroed conserved
 // buffer (density 0 is finite, so no guard fires), and a recoverable blast
 // freezes instead of recovering.
 //
-// both gates drive the PRODUCTION hierarchy loop (the same single-level wrap
+// both gates drive the production hierarchy loop (the same single-level wrap
 // every python run uses — the raw evolve() pipeline has no fofc phase):
 //   - a finite, unrecoverable energy sink must trip the persistent-freeze
 //     halt (a panic naming the freeze) — never march to t_final.
 //   - a recoverable strong blast fires FOFC and conserves the totals with
-//     ZERO freezes — the first-order tier recovers every flagged cell.
+//     zero freezes — the first-order tier recovers every flagged cell.
 // =============================================================================
 
 use symbi::prelude::SimSubstrate;
@@ -35,7 +35,7 @@ use symbi_xpu::{CpuSpace, HostMemory};
 const GAMMA: f64 = 1.4;
 const N: usize = 100;
 
-// a spatially uniform, enormous energy SINK: finite everywhere (the finiteness
+// a spatially uniform, enormous energy sink: finite everywhere (the finiteness
 // guards never fire) but unrecoverable — the redo restores the stage input and
 // the sink re-poisons it, forcing the freeze tier every substage.
 const SINK_JSON: &str = r#"{
@@ -115,7 +115,7 @@ fn colliding_streams_conserve_with_zero_freezes() {
     // periodic relativistic colliding streams (v = +0.99 / -0.96, p = 1e-3):
     // the collision shocks drive the high-order c2p unphysical so FOFC fires on
     // hundreds of substages, and the stream strength is tuned so the first-order
-    // tier RECOVERS every flagged cell — zero freezes, and periodicity makes the
+    // tier recovers every flagged cell — zero freezes, and periodicity makes the
     // conserved totals exact invariants of any face-telescoping update. a redo
     // restoring from a stale stage input fails both ways at once.
     use symbi_hydro::rhd::Rhd;

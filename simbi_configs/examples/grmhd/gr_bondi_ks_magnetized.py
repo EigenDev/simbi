@@ -3,15 +3,15 @@
 #
 # magnetized through-horizon bondi accretion on the ingoing kerr-schild chart —
 # the `_ks` GRMHD gate: uniform gas at rest threaded by the divergence-free
-# radial monopole sqrt(gamma) B^r = const, with the inner boundary BELOW r = 2M.
+# radial monopole sqrt(gamma) B^r = const, with the inner boundary below r = 2M.
 # the gas develops transonic accretion and crosses the horizon; the radial field
 # aligned with the radial flow exerts zero lorentz force, so the flow matches the
-# unmagnetized kerr-schild bondi while the SHIFTED riemann fan's magnetic rows are
+# unmagnetized kerr-schild bondi while the shifted riemann fan's magnetic rows are
 # fully engaged. the load-bearing term: the true mag-row flux is
 # (alpha v^n - beta^n) B^i - (alpha v^i - beta^i) B^n, so the fan's uniform
 # `-(beta^n/alpha) U` subtraction must be undone on the B^r row by the induction
-# TRANSPOSE `+(beta^r/alpha) B^n` — without it the radial field advects with the
-# shift and B^r drifts. B^r staying bitwise static IS the transpose-term gate.
+# transpose `+(beta^r/alpha) B^n` — without it the radial field advects with the
+# shift and B^r drifts. B^r staying bitwise static is the transpose-term gate.
 #
 # the field: sqrt(gamma) = r^2 sqrt(1 + b) (per unit sin(theta), b = 2M/r), so
 # the contravariant B^r = C / (r^2 sqrt(1 + b)); `b_ref` sets B^r at r = 2M.

@@ -1,9 +1,9 @@
 # =============================================================================
 # viscous_shear.py
 #
-# viscous decay of a sinusoidal shear layer in ADIABATIC newtonian hydro: the
+# viscous decay of a sinusoidal shear layer in adiabatic newtonian hydro: the
 # isolated, exactly-solvable probe for the navier-stokes momentum flux div(tau)
-# AND the viscous heating div(tau.v) that feeds the total-energy channel.
+# and the viscous heating div(tau.v) that feeds the total-energy channel.
 #
 # setup: uniform rho and p, a single transverse shear v_y = V0 sin(2 pi x) that
 # varies only in x (periodic, no pressure gradient, no advection). the linearized
@@ -12,7 +12,7 @@
 #     v_y(x, t) = V0 exp(-nu (2 pi)^2 t) sin(2 pi x),
 # and the peak speed halves after t_half = ln 2 / (nu (2 pi)^2). the kinetic
 # energy the shear loses does not vanish: the dissipation Phi = tau : grad v >= 0
-# converts it into gas internal energy, so with periodic walls the TOTAL energy is
+# converts it into gas internal energy, so with periodic walls the total energy is
 # conserved to machine precision while thermal energy rises monotonically. that
 # split is the whole point of the adiabatic (energy-carrying) viscosity.
 #

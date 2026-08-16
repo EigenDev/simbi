@@ -4,13 +4,13 @@
 // homologous mesh-motion gates (single grid, cartesian, newtonian hydro):
 //
 // static equivalence — `MotionState::homologous(1.0, 0.0)` must reproduce the
-// default static mesh BIT-FOR-BIT: every motion term enters as an exact
+// default static mesh bit-for-bit: every motion term enters as an exact
 // identity (vface = 0*x, |s - 0|, dx*1.0, dilution -dt*(0*u)), so any
 // divergence means a motion scalar leaked into the static arithmetic.
 //
 // free expansion — the exact solution: cold gas coasting homologously
 // (v = a_dot*x, uniform rho/p, a_ddot = 0) stays self-similar; on the
-// comoving grid the profile is STATIC up to the adiabatic power laws
+// comoving grid the profile is static up to the adiabatic power laws
 // rho = rho0/a^3, p = p0/a^(3*gamma), v = a_dot*x. pins the full moving-mesh
 // pipeline (ALE flux, relative-speed cfl, physical-width divergence, dilution
 // source, stage-time a) against the one problem with a closed-form answer.
@@ -298,7 +298,7 @@ fn rhd_free_expansion_stays_self_similar() {
 }
 
 /// uniform translation, the strongest possible moving-mesh demonstration: a
-/// density pulse moving WITH the grid is an at-rest contact in the grid
+/// density pulse moving with the grid is an at-rest contact in the grid
 /// frame, and hllc resolves at-rest contacts exactly — the pulse must be
 /// preserved to roundoff while any static grid would diffuse it under
 /// advection. uniform p, v = vtrans everywhere; only rho varies.
@@ -391,7 +391,7 @@ fn translated_contact_is_preserved_exactly_on_the_comoving_grid() {
 
 /// spherical homologous free expansion: the same coasting solution in
 /// spherical coordinates (only r expands; v_theta = 0), exercising the
-/// curvilinear geometric source against PHYSICAL radii and the
+/// curvilinear geometric source against physical radii and the
 /// radial-axis-only grid velocity. theta-uniform, asserted on the radial
 /// core away from both r boundaries.
 #[test]
@@ -470,7 +470,7 @@ fn free_expansion_stays_self_similar_on_the_comoving_grid() {
         "velocity left the homologous profile: {vel_1:.3e}"
     );
 
-    // the deviations are pure TIME-integration error of the a(t)-coupled terms
+    // the deviations are pure time-integration error of the a(t)-coupled terms
     // (the velocity profile is exact to roundoff-scale advection) — halving dt
     // must shrink them at second order. the 3.0 bound leaves margin under the
     // ideal 4.0 for the boundary-layer floor.

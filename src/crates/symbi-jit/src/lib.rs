@@ -2,20 +2,20 @@
 // symbi-jit/src/lib.rs
 //
 // the CPU's NVRTC. `compile(&LoweredFn)` translates a scalarized IR function (the
-// SAME `LoweredFn` the interpreter `Cpu::eval_elemental` runs) into native machine
+// same `LoweredFn` the interpreter `Cpu::eval_elemental` runs) into native machine
 // code via Cranelift, returning a `CompiledFn` callable as
 // `fn(inputs: &[f64], out: &mut [f64])`.
 //
-// the v1 subset is exactly what a SOURCE dag emits: `ScalarStmt::Let`
+// the v1 subset is exactly what a source dag emits: `ScalarStmt::Let`
 // + `Const`/`Var`/`BinOp`/`UnaryOp`/`MethodCall`/`Select`/`Cast`. anything else
-// (stencils, generic-dim loops, reductions) is REJECTED (`JitError::Unsupported`) so the
+// (stencils, generic-dim loops, reductions) is rejected (`JitError::Unsupported`) so the
 // caller falls back to the interpreter — never a miscompile.
 //
 // bit-identity with the interpreter (`f64-interp == cranelift`):
-//   - arithmetic is plain IEEE `fadd/fmul/...`; Cranelift does NOT auto-contract to FMA,
+//   - arithmetic is plain IEEE `fadd/fmul/...`; Cranelift does not auto-contract to FMA,
 //     so `a*b + c` matches the interpreter's separate mul+add;
 //   - every `MethodCall` is routed through a Rust shim (`extern "C" fn` wrapping `x.sin()`
-//     etc.), so the JIT calls the EXACT std functions the interpreter does — no `libm`
+//     etc.), so the JIT calls the exact std functions the interpreter does — no `libm`
 //     dependency, no platform-libm divergence to reason about.
 // =============================================================================
 
@@ -72,7 +72,7 @@ impl std::fmt::Display for JitError {
 }
 impl std::error::Error for JitError {}
 
-// ---- the method shims: extern "C" wrappers over std f64, so the JIT calls the EXACT
+// ---- the method shims: extern "C" wrappers over std f64, so the JIT calls the exact
 //      functions the interpreter (`eval_method`) does. one shim per non-native method. ----
 
 macro_rules! shim1 {
@@ -228,7 +228,7 @@ fn shim_table() -> &'static [(&'static str, usize, *const u8)] {
 /// a JIT-compiled `LoweredFn`. owns the `JITModule` (keeps the code mapped) + the native
 /// entry point `fn(inputs: *const f64, outputs: *mut f64)`.
 pub struct CompiledFn {
-    // SAFETY: the module is kept ONLY to keep the finalized code memory mapped; after
+    // safety: the module is kept only to keep the finalized code memory mapped; after
     // `finalize_definitions` it is read-only and never touched again. the entry point is a
     // bare code pointer (no state), so it is sound to call from many threads concurrently.
     _module: JITModule,
@@ -237,7 +237,7 @@ pub struct CompiledFn {
     n_out: usize,
 }
 
-// SAFETY: see the field comment — the only thing shared is an immutable code pointer.
+// safety: see the field comment — the only thing shared is an immutable code pointer.
 unsafe impl Send for CompiledFn {}
 unsafe impl Sync for CompiledFn {}
 
@@ -264,7 +264,7 @@ impl CompiledFn {
             self.n_out,
             "CompiledFn::call: output arity mismatch"
         );
-        // SAFETY: the function reads exactly `n_in` f64s from `inputs` and writes exactly
+        // safety: the function reads exactly `n_in` f64s from `inputs` and writes exactly
         // `n_out` f64s to `out`; the asserts above guarantee both slices are large enough.
         unsafe { (self.func)(inputs.as_ptr(), out.as_mut_ptr()) }
     }
@@ -285,10 +285,10 @@ pub fn compile(lowered: &LoweredFn) -> Result<CompiledFn, JitError> {
     let mut flags = settings::builder();
     flags.set("use_colocated_libcalls", "false").unwrap();
     flags.set("is_pic", "false").unwrap();
-    // optimize: the JIT'd kernel runs the WHOLE per-cell body (godunov + source) per cell, so the
+    // optimize: the JIT'd kernel runs the whole per-cell body (godunov + source) per cell, so the
     // codegen quality matters — Cranelift defaults to `opt_level=none`, which leaves it well behind
-    // the AOT rustc `-O` kernels. "speed" enables GVN / LICM / redundant-load elimination / better
-    // regalloc WITHOUT FP reassociation or auto-FMA (Cranelift never contracts FMA), so the
+    // the AOT rustc `-O` kernels. "speed" enables GVN / licm / redundant-load elimination / better
+    // regalloc without FP reassociation or auto-FMA (Cranelift never contracts FMA), so the
     // bit-identity still holds (interp == cranelift).
     flags.set("opt_level", "speed").unwrap();
     let isa = cranelift_native::builder()
@@ -331,7 +331,7 @@ pub fn compile(lowered: &LoweredFn) -> Result<CompiledFn, JitError> {
     let inputs_ptr = b.block_params(entry)[0];
     let outputs_ptr = b.block_params(entry)[1];
 
-    // import the shims into THIS function -> FuncRef by name.
+    // import the shims into this function -> FuncRef by name.
     let mut shim_refs: HashMap<&'static str, (cranelift_codegen::ir::FuncRef, usize)> =
         HashMap::new();
     for (name, (id, arity)) in &shim_ids {
@@ -384,7 +384,7 @@ pub fn compile(lowered: &LoweredFn) -> Result<CompiledFn, JitError> {
         .finalize_definitions()
         .map_err(|e| JitError::Codegen(format!("finalize: {e}")))?;
     let code = module.get_finalized_function(func_id);
-    // SAFETY: `code` is the finalized entry whose signature is `(*const f64, *mut f64) -> ()`.
+    // safety: `code` is the finalized entry whose signature is `(*const f64, *mut f64) -> ()`.
     let func: unsafe extern "C" fn(*const f64, *mut f64) = unsafe { std::mem::transmute(code) };
 
     Ok(CompiledFn {
@@ -440,8 +440,8 @@ fn collect_let_defs<'a>(stmts: &'a [ScalarStmt], out: &mut HashMap<String, &'a S
     }
 }
 
-/// the flat index, axis-0-fastest ("physical-x-fastest") to EXACTLY match `interp::flat_index`
-/// AND the real `symbi_grid` `Field`/`View` storage (`symbi_algebra::strides_from_extent`):
+/// the flat index, axis-0-fastest ("physical-x-fastest") to exactly match `interp::flat_index`
+/// and the real `symbi_grid` `Field`/`View` storage (`symbi_algebra::strides_from_extent`):
 /// `stride[0]=1, stride[ax]=stride[ax-1]*extent[ax-1]`. axis 0 is fastest-varying in memory. this
 /// is the convention the AOT kernels read real fields with — last-axis-fastest would transpose
 /// axes for D>=2 and mis-read every off-diagonal stencil neighbor.
@@ -457,7 +457,7 @@ fn emit_flat_index(b: &mut FunctionBuilder, coord: &[Value], ctx: &StencilCtx) -
     idx
 }
 
-/// translate a `FieldLoadAt` COMPONENT (integer coord arithmetic) to an i64 `Value`. the
+/// translate a `FieldLoadAt` component (integer coord arithmetic) to an i64 `Value`. the
 /// component is `_coord_N (+/-/* const offset)` — exact integers, so this matches the
 /// interpreter's `f64.round() as i64` exactly while staying in integer registers.
 fn translate_index_expr(
@@ -530,7 +530,7 @@ fn translate_expr(
             let xv = translate_expr(b, x, vars, shims, stencil)?;
             match op {
                 UnaryKind::Neg => b.ins().fneg(xv),
-                // logical NOT on an i8 bool: xor with 1.
+                // logical not on an i8 bool: xor with 1.
                 UnaryKind::Not => {
                     let one = b.ins().iconst(types::I8, 1);
                     b.ins().bxor(xv, one)
@@ -574,7 +574,7 @@ fn translate_expr(
                 "floor" => return Ok(b.ins().floor(recv)),
                 "ceil" => return Ok(b.ins().ceil(recv)),
                 "trunc" => return Ok(b.ins().trunc(recv)),
-                // abs/min/max as a TERNARY (fcmp + select), NOT
+                // abs/min/max as a ternary (fcmp + select), not
                 // libdevice fabs/fmin/fmax — bit-matches the cuda emit, the interp,
                 // and the f64/f32 `Numeric` carrier at NaN / signed-zero.
                 // CLIF select is a value with no lexical scope, so there is no
@@ -708,7 +708,7 @@ fn fconst(b: &mut FunctionBuilder, fty: cranelift_codegen::ir::Type, v: f64) -> 
     }
 }
 
-/// resolve a name that MUST be a mutable `Variable` (target of `Assign`/`CompoundAssign`).
+/// resolve a name that must be a mutable `Variable` (target of `Assign`/`CompoundAssign`).
 fn expect_var(vars: &HashMap<String, LocalSlot>, name: &str) -> Result<Variable, JitError> {
     match vars.get(name) {
         Some(LocalSlot::Var(v)) => Ok(*v),
@@ -740,8 +740,8 @@ fn translate_stmts(
                 element,
                 value,
             } => {
-                // integer-typed lets are CSE'd stencil INDEX offsets (e.g., `__cse_1 = _coord_0 + 1`),
-                // used ONLY inside `FieldLoadAt` components — which the index translator resolves
+                // integer-typed lets are CSE'd stencil index offsets (e.g., `__cse_1 = _coord_0 + 1`),
+                // used only inside `FieldLoadAt` components — which the index translator resolves
                 // separately via `let_defs` in the integer domain. translating them here as f64 body
                 // statements would emit `fadd(f64_coord, i32_const)` (a verifier type error). skip
                 // them; a (hypothetical) float use elsewhere hits `UnboundVar`, a clean reject that
@@ -856,7 +856,7 @@ fn translate_stmts(
             ScalarStmt::Scope {
                 name, body, result, ..
             } => {
-                // a bounded-pressure scope is a renderer register-pressure HINT; the JIT does its
+                // a bounded-pressure scope is a renderer register-pressure hint; the JIT does its
                 // own regalloc, so flatten it: run the body inline (its lets are SSA + dominate),
                 // then bind `name = result`.
                 let flow = translate_stmts(b, body, vars, shims, stencil, next_var, loop_exit)?;
@@ -872,8 +872,8 @@ fn translate_stmts(
                 then_body,
                 else_body,
             } => {
-                // a data-dependent branch where ONLY the taken arm runs. each result slot is a mutable
-                // `Variable` declared BEFORE the branch; every arm ends with `Assign { outs[j], .. }`, so
+                // a data-dependent branch where only the taken arm runs. each result slot is a mutable
+                // `Variable` declared before the branch; every arm ends with `Assign { outs[j], .. }`, so
                 // the slot is defined on both paths and live at the merge (Cranelift inserts the phi on
                 // seal). arm-internal lets die at the arm's block — only the taken arm's ops execute.
                 for (name, element) in outs {
@@ -913,7 +913,7 @@ fn translate_stmts(
 }
 
 // =============================================================================
-// stencil KERNELS: JIT a scalarized kernel — cell loads + `FieldLoadAt`
+// stencil kernels: JIT a scalarized kernel — cell loads + `FieldLoadAt`
 // stencil reads + scalars -> multi-output, mapped over a domain. the v1-kernel subset is
 // `Let` bodies (no `For`/reductions yet). all buffers share one `(lo, extent)` layout.
 // =============================================================================
@@ -921,7 +921,7 @@ fn translate_stmts(
 /// a JIT-compiled stencil kernel: a per-cell `extern "C"` fn over field buffers + the metadata
 /// to drive it over a domain. `Send + Sync` (a bare code pointer + counts).
 pub struct CompiledKernel {
-    // SAFETY: same as `CompiledFn` — the module is kept only to keep the code mapped; the entry
+    // safety: same as `CompiledFn` — the module is kept only to keep the code mapped; the entry
     // is a stateless code pointer, sound to call concurrently for disjoint cells.
     _module: JITModule,
     cell: unsafe extern "C" fn(
@@ -942,7 +942,7 @@ unsafe impl Send for CompiledKernel {}
 unsafe impl Sync for CompiledKernel {}
 
 /// raw input/output buffer bases shared across rayon threads in [`CompiledKernel::run_parallel`].
-/// SAFETY of the `Send + Sync` impls: inputs are read-only; each cell writes ONLY its own (disjoint)
+/// safety of the `Send + Sync` impls: inputs are read-only; each cell writes only its own (disjoint)
 /// flat output index, so concurrent access through these bases is race-free by construction.
 struct SharedBufs {
     in_ptrs: Vec<*const f64>,
@@ -952,7 +952,7 @@ unsafe impl Send for SharedBufs {}
 unsafe impl Sync for SharedBufs {}
 
 impl CompiledKernel {
-    /// map the per-cell kernel over `[dom_lo, dom_lo + grid)`, in the SAME order as
+    /// map the per-cell kernel over `[dom_lo, dom_lo + grid)`, in the same order as
     /// `Cpu::run_kernel`. all input/output buffers share the `(lo, extent)` layout (v1-kernel).
     #[allow(clippy::too_many_arguments)]
     pub fn run(
@@ -983,7 +983,7 @@ impl CompiledKernel {
             let coord: Vec<i64> = (0..ndim)
                 .map(|ax| dom_los[ax] as i64 + idx[ax] as i64)
                 .collect();
-            // SAFETY: the kernel reads n_in bases + n_scalar scalars and writes n_out bases at the
+            // safety: the kernel reads n_in bases + n_scalar scalars and writes n_out bases at the
             // flat index of `coord` within the shared (lo, extent) layout; the asserts size them.
             unsafe {
                 (self.cell)(
@@ -999,9 +999,9 @@ impl CompiledKernel {
     }
 
     /// the parallel twin of [`Self::run`]: maps the per-cell kernel over the domain with rayon.
-    /// each flat cell index reconstructs a UNIQUE coord, and each cell writes ONLY its own flat
-    /// output index (bijective coord->index), so the writes are DISJOINT and the shared `*mut`
-    /// output bases are race-free BY CONSTRUCTION. the result is bit-identical to [`Self::run`]:
+    /// each flat cell index reconstructs a unique coord, and each cell writes only its own flat
+    /// output index (bijective coord->index), so the writes are disjoint and the shared `*mut`
+    /// output bases are race-free by construction. the result is bit-identical to [`Self::run`]:
     /// reordering independent per-cell ops changes no single cell's value. this is the production
     /// driver for the fused godunov+source kernel; `run` stays the serial oracle.
     #[allow(clippy::too_many_arguments)]
@@ -1019,7 +1019,7 @@ impl CompiledKernel {
         assert_eq!(out_bufs.len(), self.n_out);
         let in_bases: Vec<*const f64> = in_bufs.iter().map(|b| b.as_ptr()).collect();
         let out_bases: Vec<*mut f64> = out_bufs.iter_mut().map(|b| b.as_mut_ptr()).collect();
-        // SAFETY: `run_parallel` is given DISTINCT (non-aliasing) input + output slices by the
+        // safety: `run_parallel` is given distinct (non-aliasing) input + output slices by the
         // borrow checker, so the raw bases below alias nothing. (the in-place dispatch path uses
         // `run_parallel_raw` directly, where aliasing a read+write buffer is intentional + sound.)
         unsafe {
@@ -1029,18 +1029,18 @@ impl CompiledKernel {
         }
     }
 
-    /// the raw-base parallel driver — the dispatch primitive. takes input/output buffer BASES as
-    /// pointers so an IN-PLACE field (one the kernel both reads and writes, e.g., `cons.den` in the
-    /// fused godunov) can be bound as the SAME pointer in both `in_bases` and `out_bases`. that
-    /// aliasing is SOUND: `compile_kernel` loads every input at the cell's flat index at function
-    /// ENTRY, then stores every output at the same index at EXIT (read-before-write per cell), and
+    /// the raw-base parallel driver — the dispatch primitive. takes input/output buffer bases as
+    /// pointers so an in-place field (one the kernel both reads and writes, e.g., `cons.den` in the
+    /// fused godunov) can be bound as the same pointer in both `in_bases` and `out_bases`. that
+    /// aliasing is sound: `compile_kernel` loads every input at the cell's flat index at function
+    /// entry, then stores every output at the same index at exit (read-before-write per cell), and
     /// distinct cells write distinct indices on distinct threads. this mirrors how the AOT
     /// `dispatch_named` binds in-place `cons.*` once and lets the kernel read+write one pointer.
     ///
-    /// SAFETY (caller contract): every base must point to a buffer at least as large as the
+    /// safety (caller contract): every base must point to a buffer at least as large as the
     /// `(lo, extent)` layout addresses; `in_bases.len() == n_in`, `out_bases.len() == n_out`,
     /// `scalars.len() == n_scalar`; output buffers (modulo intentional in-place aliasing with their
-    /// own input) must not alias EACH OTHER or any read-only input.
+    /// own input) must not alias each other or any read-only input.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn run_parallel_raw(
         &self,
@@ -1074,7 +1074,7 @@ impl CompiledKernel {
         let ndim = self.ndim;
         let total: usize = grid_sizes.iter().map(|&g| g as usize).product();
         // the iteration extent, hoisted; `unflatten` (symbi-algebra) owns the flat -> coord map so
-        // this driver visits cells in the SAME order as the emitted kernels and the interpreter.
+        // this driver visits cells in the same order as the emitted kernels and the interpreter.
         // walking the slowest axis fastest is cell-disjoint (hence correct, hence invisible to every
         // correctness test) while striding the hot loop by extent[0]*extent[1] on every cell.
         let mut ext = [1usize; MAX_NDIM];
@@ -1089,8 +1089,8 @@ impl CompiledKernel {
             for ax in 0..ndim {
                 coord[ax] = dom_los[ax] as i64 + idx[ax] as i64;
             }
-            // SAFETY: per the function contract — the kernel reads n_in bases + n_scalar scalars
-            // and writes n_out bases at THIS coord's flat index; cell-disjoint write indices make
+            // safety: per the function contract — the kernel reads n_in bases + n_scalar scalars
+            // and writes n_out bases at this coord's flat index; cell-disjoint write indices make
             // the shared bases sound to share across threads (in-place aliasing read-before-write).
             unsafe {
                 (self.cell)(
@@ -1105,17 +1105,17 @@ impl CompiledKernel {
         });
     }
 
-    /// the CACHE-TILED raw-base driver: fan the kernel over a disjoint block cover of the exec
-    /// window in ONE fork-join, walking each block SERIALLY with axis 0 innermost. this is the JIT
+    /// the cache-tiled raw-base driver: fan the kernel over a disjoint block cover of the exec
+    /// window in one fork-join, walking each block serially with axis 0 innermost. this is the JIT
     /// twin of the AOT `ExecPolicy::Cover` (`symbi-exec/src/policy.rs`) — a stencil kernel re-reads
     /// each cell's neighbors across adjacent output cells, and on a full-grid sweep the reuse
-    /// distance along the slow axes exceeds cache, so every neighbor read hits RAM. a small block
+    /// distance along the slow axes exceeds cache, so every neighbor read hits ram. a small block
     /// keeps that reuse L1-resident.
     ///
-    /// bit-identical to [`run_parallel_raw`]: the blocks PARTITION the window, so every cell is
+    /// bit-identical to [`run_parallel_raw`]: the blocks partition the window, so every cell is
     /// computed exactly once by the same kernel on the same inputs; only the visit order differs.
     ///
-    /// SAFETY: the same caller contract as [`run_parallel_raw`] — blocks are cell-disjoint, so the
+    /// safety: the same caller contract as [`run_parallel_raw`] — blocks are cell-disjoint, so the
     /// in-place `cons.*` read-before-write aliasing stays sound across threads.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn run_cover_raw(
@@ -1160,7 +1160,7 @@ impl CompiledKernel {
 
         (0..total_blocks).into_par_iter().for_each(|bi| {
             let shared = &shared;
-            // block coordinate, then its half-open cell bounds in WINDOW-index space (clamped to
+            // block coordinate, then its half-open cell bounds in window-index space (clamped to
             // the window so the last block on a non-divisible axis is short, never over-runs).
             let (mut b_lo, mut b_hi) = ([0usize; MAX_NDIM], [1usize; MAX_NDIM]);
             // block-space index -> block coordinate, through the same owner as the cell-space map.
@@ -1181,7 +1181,7 @@ impl CompiledKernel {
                 for ax in 0..ndim {
                     coord[ax] = dom_los[ax] as i64 + (b_lo[ax] + idx[ax]) as i64;
                 }
-                // SAFETY: per the function contract; blocks partition the window so writes are
+                // safety: per the function contract; blocks partition the window so writes are
                 // cell-disjoint across threads (in-place aliasing is read-before-write per cell).
                 unsafe {
                     (self.cell)(
@@ -1259,10 +1259,10 @@ pub fn compile_kernel_prec(
     let mut flags = settings::builder();
     flags.set("use_colocated_libcalls", "false").unwrap();
     flags.set("is_pic", "false").unwrap();
-    // optimize: the JIT'd kernel runs the WHOLE per-cell body (godunov + source) per cell, so the
+    // optimize: the JIT'd kernel runs the whole per-cell body (godunov + source) per cell, so the
     // codegen quality matters — Cranelift defaults to `opt_level=none`, which leaves it well behind
-    // the AOT rustc `-O` kernels. "speed" enables GVN / LICM / redundant-load elimination / better
-    // regalloc WITHOUT FP reassociation or auto-FMA (Cranelift never contracts FMA), so the
+    // the AOT rustc `-O` kernels. "speed" enables GVN / licm / redundant-load elimination / better
+    // regalloc without FP reassociation or auto-FMA (Cranelift never contracts FMA), so the
     // bit-identity still holds (interp == cranelift).
     flags.set("opt_level", "speed").unwrap();
     let isa = cranelift_native::builder()
@@ -1419,7 +1419,7 @@ pub fn compile_kernel_prec(
         .finalize_definitions()
         .map_err(|e| JitError::Codegen(format!("finalize: {e}")))?;
     let code = module.get_finalized_function(func_id);
-    // SAFETY: the finalized entry has the 6-pointer signature declared above.
+    // safety: the finalized entry has the 6-pointer signature declared above.
     let cell = unsafe {
         std::mem::transmute::<
             *const u8,
@@ -1445,7 +1445,7 @@ pub fn compile_kernel_prec(
 }
 
 /// JIT a traced `GvKernel` (e.g., the combined godunov+source stage) via `compile_kernel`, mapping
-/// the kernel's ABI manifest. `writes` are the trace's `(key, runtime, node)` outputs. THE BRIDGE
+/// the kernel's ABI manifest. `writes` are the trace's `(key, runtime, node)` outputs. the bridge
 /// for v2 fusion: build the godunov+source `GvKernel` (`splice_fused_sources_to_contribs` /
 /// `godunov_stage_gv_with_fused_sources`), JIT it here, dispatch the fused single-pass kernel.
 pub fn compile_gv_kernel(
@@ -1486,9 +1486,9 @@ mod tests {
     use symbi_ir::passes::scalarize::{LoweredParam, scalarize};
 
     /// build a graph (the closure adds its own params + returns the output node), scalarize,
-    /// and assert the Cranelift-compiled fn is BIT-IDENTICAL to the interpreter over many
+    /// and assert the Cranelift-compiled fn is bit-identical to the interpreter over many
     /// random input vectors. inputs are passed in `LoweredFn::params` order
-    /// to BOTH paths, so the exact param order is irrelevant.
+    /// to both paths, so the exact param order is irrelevant.
     fn assert_jit_matches_interp(build: impl Fn(&mut Graph) -> NodeId) {
         let mut g = Graph::new();
         let out = build(&mut g);
@@ -1498,11 +1498,11 @@ mod tests {
         assert_eq!(compiled.n_inputs(), n);
         assert_eq!(compiled.n_outputs(), 1);
 
-        // deterministic xorshift inputs (no rng dep). the domain is DELIBERATELY HARSH — negatives,
+        // deterministic xorshift inputs (no rng dep). the domain is deliberately harsh — negatives,
         // the zero-crossing, signed zeros, and magnitude extremes — to stress the native CLIF ops
         // (fcmp/select/div/sqrt/neg) at the edges a narrow positive range never reaches. interp ==
         // cranelift must hold on NaN/Inf too: every native op is IEEE-754 on both sides, every
-        // MethodCall routes through the SAME std shim. (this reference check catches a
+        // MethodCall routes through the same std shim. (this reference check catches a
         // codegen divergence; a narrow fuzz domain is exactly how a min/max-style NaN bug hides.)
         let mut state = 0x2545F4914F6CDD1Du64;
         let mut next = || {
@@ -1524,7 +1524,7 @@ mod tests {
             let want = Cpu.eval_elemental(&lowered, &inputs)[0];
             let mut got = [0.0f64];
             compiled.call(&inputs, &mut got);
-            // bit-equal, OR both NaN (a NaN output is correct on either side; the payload may differ).
+            // bit-equal, or both NaN (a NaN output is correct on either side; the payload may differ).
             let ok = want.to_bits() == got[0].to_bits() || (want.is_nan() && got[0].is_nan());
             assert!(
                 ok,
@@ -1935,7 +1935,7 @@ mod tests {
     #[test]
     fn kernel_run_parallel_ghost_offset_matches_interp() {
         // the production layout: the iteration window (interior) starts at allocated index `g`, and
-        // the buffer's `lo` is NEGATIVE (ghost cells), e.g., alo=[-2,-2], dom_lo=[0,0]. the godunov
+        // the buffer's `lo` is negative (ghost cells), e.g., alo=[-2,-2], dom_lo=[0,0]. the godunov
         // dispatch runs exactly this (alo=[-2,-2], dlo=[0,0]). a stencil read `f[c+e]` + flat_index
         // must subtract the (negative) `lo` correctly. gated run_parallel == interp, bit-for-bit.
         use symbi_ir::Symbol;
@@ -2028,10 +2028,10 @@ mod tests {
 
     #[test]
     fn run_parallel_raw_in_place_alias_matches_interp() {
-        // the IN-PLACE dispatch primitive, in the EXACT shape the fused godunov produces:
+        // the in-place dispatch primitive, in the exact shape the fused godunov produces:
         //   x[c] = x[c] + 2*f[c+1] - f[c]
-        // `x` is read at its OWN cell AND written (the in-place `cons.*` field), while the only
-        // NEIGHBOUR read (`f[c+1]`) is of a SEPARATE read-only field (the godunov's fluxes). this
+        // `x` is read at its own cell and written (the in-place `cons.*` field), while the only
+        // neighbour read (`f[c+1]`) is of a separate read-only field (the godunov's fluxes). this
         // is the soundness boundary of the aliasing: an in-place field is read only at its own
         // index (read-before-write per cell), never at a neighbor (which would be a cross-cell
         // read-after-write race). dispatched via `run_parallel_raw` with `x`'s buffer aliased as
@@ -2106,13 +2106,13 @@ mod tests {
             &[0],
         );
 
-        // jit: `x`'s ONE buffer aliased as both an input base and the output base; `f` read-only.
+        // jit: `x`'s one buffer aliased as both an input base and the output base; `f` read-only.
         let kernel = compile_kernel(&g, &["x".into(), "f".into()], &[], &[("x".into(), out)], 1)
             .expect("jit compile_kernel (in-place)");
         let mut buf = x0.clone();
         let base = buf.as_mut_ptr();
-        // SAFETY: `base` is the live `buf` allocation, sized to the (lo=0, extent) layout; aliasing
-        // it as `x`'s read input AND the write output is the intended in-place dispatch pattern;
+        // safety: `base` is the live `buf` allocation, sized to the (lo=0, extent) layout; aliasing
+        // it as `x`'s read input and the write output is the intended in-place dispatch pattern;
         // `f0` is a distinct read-only buffer.
         unsafe {
             kernel.run_parallel_raw(
@@ -2139,10 +2139,10 @@ mod tests {
 
     #[test]
     fn run_cover_raw_matches_run_parallel_raw_3d() {
-        // the cache-tiled cover must be a pure REORDERING of the flat parallel driver: the blocks
-        // PARTITION the window, so every cell is computed exactly once on the same inputs. the
-        // discriminating case is a 3D stencil with a neighbor read on EVERY axis (the slow-axis
-        // reads are the ones tiling makes cache-resident) over a window divisible by NO block edge,
+        // the cache-tiled cover must be a pure reordering of the flat parallel driver: the blocks
+        // partition the window, so every cell is computed exactly once on the same inputs. the
+        // discriminating case is a 3D stencil with a neighbor read on every axis (the slow-axis
+        // reads are the ones tiling makes cache-resident) over a window divisible by no block edge,
         // so the last block on each axis is short and the clamp is exercised.
         use symbi_ir::Symbol;
 
@@ -2190,7 +2190,7 @@ mod tests {
 
         // the flat driver is the reference.
         let mut buf_par = x0.clone();
-        // SAFETY: `p` is the live `buf_par` allocation over the (lo=0, ext) layout, aliased as `x`'s
+        // safety: `p` is the live `buf_par` allocation over the (lo=0, ext) layout, aliased as `x`'s
         // read input and the write output (the intended in-place pattern); `f0` is distinct + read-only.
         unsafe {
             let p = buf_par.as_mut_ptr();
@@ -2216,7 +2216,7 @@ mod tests {
         // trailing blocks, a ragged edge, a block larger than the window (one block), and edge 1.
         for block in [[8usize, 8, 8], [4, 3, 2], [32, 32, 32], [1, 1, 1]] {
             let mut buf_cov = x0.clone();
-            // SAFETY: as above; the cover's blocks are cell-disjoint, so writes never race.
+            // safety: as above; the cover's blocks are cell-disjoint, so writes never race.
             unsafe {
                 let c = buf_cov.as_mut_ptr();
                 kernel.run_cover_raw(

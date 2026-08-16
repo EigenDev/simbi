@@ -4,15 +4,15 @@
 // compile-time dimensional analysis for the afterglow physics (CGS gaussian).
 // a `Quantity<M, L, T>` is an f64 tagged with type-level mass/length/time exponents:
 // multiplying or dividing quantities tracks the resulting dimensions, and adding
-// mismatched dimensions is a COMPILE error.
+// mismatched dimensions is a compile error.
 //
-// exponents are HALF-INTEGER-ENCODED: each type parameter is twice the physical
+// exponents are half-integer-encoded: each type parameter is twice the physical
 // exponent (typenum `P2` => power 1), because gaussian electromagnetism is
 // intrinsically half-integer (gauss = g^{1/2} cm^{-1/2} s^{-1}, so the equipartition
 // relation B = sqrt(energy density) must type-check). this keeps every afterglow
 // exponent an integer typenum constant while still supporting the one fractional
 // operation the physics needs — sqrt (halve the exponents). charge and temperature
-// are NOT separate base dimensions: gaussian charge is g^{1/2} cm^{3/2} s^{-1} (pure
+// are not separate base dimensions: gaussian charge is g^{1/2} cm^{3/2} s^{-1} (pure
 // M,L,T) and temperature is unused here, so three dimensions suffice.
 //
 // why typenum: stable rust cannot evaluate `quantity<{M1+M2}>` exponent arithmetic in
@@ -21,7 +21,7 @@
 // arithmetic is the portable, stable mechanism — the same one `uom` is built on.
 //
 // usage:
-//  let b: MagneticField = (8.0 * PI * eps_b * rho_e).sqrt(); // rho_e: EnergyDensity
+//  let b: MagneticField = (8.0 * pi * eps_b * rho_e).sqrt(); // rho_e: EnergyDensity
 //  let nu_g: Frequency  = (E_CHARGE / (M_E * C_LIGHT)) * b;
 //  let raw: f64         = b.value(); // exit the type system at a serialization boundary
 // =============================================================================
@@ -65,7 +65,7 @@ impl<M, L, T> Quantity<M, L, T> {
 }
 
 // quantity is just an f64 in memory; clone/copy/debug/ordering are hand-written so they
-// do NOT spuriously bound the phantom exponents (derive would require M,L,T: Trait).
+// do not spuriously bound the phantom exponents (derive would require M,L,T: Trait).
 impl<M, L, T> Clone for Quantity<M, L, T> {
     #[inline]
     fn clone(&self) -> Self {
@@ -118,7 +118,7 @@ impl<M, L, T> Neg for Quantity<M, L, T> {
     }
 }
 
-// multiplication ADDS exponents, division SUBTRACTS them (the dimensional bookkeeping).
+// multiplication adds exponents, division subtracts them (the dimensional bookkeeping).
 impl<M1, L1, T1, M2, L2, T2> Mul<Quantity<M2, L2, T2>> for Quantity<M1, L1, T1>
 where
     M1: Add<M2>,
@@ -159,7 +159,7 @@ impl<M, L, T> Div<f64> for Quantity<M, L, T> {
         Quantity(self.0 / s, PhantomData)
     }
 }
-// `f64 * quantity` preserves dimensions; `f64 / quantity` INVERTS them (negates exponents).
+// `f64 * quantity` preserves dimensions; `f64 / quantity` inverts them (negates exponents).
 impl<M, L, T> Mul<Quantity<M, L, T>> for f64 {
     type Output = Quantity<M, L, T>;
     #[inline]
@@ -181,7 +181,7 @@ where
 }
 
 impl<M, L, T> Quantity<M, L, T> {
-    /// dimensional square root: HALVES every exponent. a compile error unless each
+    /// dimensional square root: halves every exponent. a compile error unless each
     /// exponent is even in half-integer encoding (i.e., the dimension is a perfect
     /// square) — `PartialDiv` has no impl otherwise. this is what makes
     /// `sqrt(energy density) -> magnetic field` legal and `sqrt(length)` illegal.
@@ -195,7 +195,7 @@ impl<M, L, T> Quantity<M, L, T> {
         Quantity(self.0.sqrt(), PhantomData)
     }
 
-    /// dimensional square: DOUBLES every exponent.
+    /// dimensional square: doubles every exponent.
     #[inline]
     pub fn squared(self) -> Quantity<Prod<M, P2>, Prod<L, P2>, Prod<T, P2>>
     where
@@ -206,7 +206,7 @@ impl<M, L, T> Quantity<M, L, T> {
         Quantity(self.0 * self.0, PhantomData)
     }
 
-    /// dimensional cube: TRIPLES every exponent.
+    /// dimensional cube: triples every exponent.
     #[inline]
     pub fn cubed(self) -> Quantity<Prod<M, P3>, Prod<L, P3>, Prod<T, P3>>
     where

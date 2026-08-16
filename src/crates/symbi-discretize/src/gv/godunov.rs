@@ -187,7 +187,7 @@ pub fn c2p_status_gv(
 /// ghost-band fail-loud probe: write 1 where the density is non-finite (NaN or +-inf via
 /// `(rho - rho) != 0`), else 0. run over the allocated domain (interior + ghosts): first-order flux
 /// correction keeps the interior finite and acts on the interior alone, so a poisoned boundary
-/// (a driven-inflow expression producing NaN, a broken BC) leaves a non-finite ghost beyond FOFC's
+/// (a driven-inflow expression producing NaN, a broken bc) leaves a non-finite ghost beyond FOFC's
 /// reach. a max-reduce > 0 forces the CFL rate to +inf (dt -> 0, the driver halts) — the fail-loud that
 /// survives FOFC recovery. density-only, so regime- and energy-independent (one kernel per dimension);
 /// a poison in any primitive reaches the density within one c2p / flux divergence.

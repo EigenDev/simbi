@@ -1,7 +1,7 @@
 // =============================================================================
 // wb_cost_gpu.rs
 //
-// measurement instrument, not a gate: the DEVICE wall-clock cost of the balanced
+// measurement instrument, not a gate: the device wall-clock cost of the balanced
 // (hydrostatic-departure) reconstruction relative to plain, on the same sealed
 // plummer column the cpu probe times (sealed_column_unclamped::wb_cost_probe).
 // the balanced arm pays a powf per face side (the isentrope ratio); how that

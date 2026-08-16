@@ -1,7 +1,7 @@
 # =============================================================================
 # test_census_roundtrip.py
 #
-# the census END TO END: register one on a running problem, let the backend evaluate and
+# the census end to end: register one on a running problem, let the backend evaluate and
 # write it, and read it back with the reader. this is the only place the reader's assumed
 # checkpoint layout meets the writer's actual one — every other reader test builds the file
 # itself and so agrees with whatever the reader expects by construction.
@@ -93,7 +93,7 @@ def test_binned_census_round_trips_through_the_reader() -> None:
     assert (mass > 0.0).all(), f"an empty bin: {mass}"
 
     # the mass-weighted position per bin must land inside that bin. this is the assertion a
-    # TRANSPOSED reshape fails: the values are all plausible, but bin k would carry the
+    # transposed reshape fails: the values are all plausible, but bin k would carry the
     # centroid of some other bin.
     x_bar = c.favre("mass_x", "mass")[0]
     edges = c.axis_edges[0]
@@ -116,7 +116,7 @@ def test_axis_free_census_is_a_single_global_reduction() -> None:
 
 
 # =============================================================================
-# the registration CONTROLS, end to end
+# the registration controls, end to end
 #
 # each of these is an inert default that a stale backend accepts and ignores: the wire fields
 # carry serde defaults, so a run declaring them produces entirely correct output at the wrong
@@ -146,7 +146,7 @@ def test_an_accumulating_census_writes_one_row_that_is_the_sum_of_the_samples() 
     assert acc.n_rows == 1
     assert int(acc.n_samples.sum()) == plain.n_rows
 
-    # exactness: the fold is the same additive reduce, so the row IS the sum of the samples.
+    # exactness: the fold is the same additive reduce, so the row is the sum of the samples.
     np.testing.assert_allclose(
         acc.value("mass")[0], plain.value("mass").sum(axis=0), rtol=1e-12
     )
@@ -177,7 +177,7 @@ def test_a_declared_sample_interval_reaches_the_backend() -> None:
 def test_the_declared_cadence_travels_with_the_file() -> None:
     # a single-level run samples identically under either cadence — what is checkable here is
     # that the declaration reached the backend and was recorded, so a consumer reading the file
-    # knows which sampling produced it. the per-level BEHAVIOR is gated on a refined hierarchy
+    # knows which sampling produced it. the per-level behavior is gated on a refined hierarchy
     # in the rust suite, where a second level exists to sample at its own rate.
     c = _run(with_axis=False, steps=2, cadence=expr.Cadence.PER_LEVEL_STEP)
     assert c.cadence == "per_level_step"
@@ -185,4 +185,3 @@ def test_the_declared_cadence_travels_with_the_file() -> None:
 
     default = _run(with_axis=False, steps=2)
     assert default.cadence == "root_step"
-

@@ -18,7 +18,7 @@ use symbi_aot::kernel_by_name;
 // `super::layout::{alloc_layout, exec_layout, expect_kernel}` paths resolve.
 pub use symbi_exec::layout::{alloc_layout, exec_layout, expect_kernel};
 
-// the kernel-name suffix protocol is defined ONCE in symbi-discretize::kernel_slug and shared with
+// the kernel-name suffix protocol is defined once in symbi-discretize::kernel_slug and shared with
 // the AOT bake (build.rs), so bake and dispatch cannot drift. re-exported here so the substrate's
 // `super::layout::{coord_suffix, geom_suffix, ...}` paths resolve unchanged.
 pub use symbi_discretize::kernel_slug::{
@@ -26,7 +26,7 @@ pub use symbi_discretize::kernel_slug::{
     mhd_flux_suffix, mhd_geom_suffix, penalize_name, spacetime_slug, viscous_ortho_name,
 };
 
-// the per-axis geometry scalars a CURVILINEAR kernel expects, in the order cell_geometry
+// the per-axis geometry scalars a curvilinear kernel expects, in the order cell_geometry
 // interns them: interleaved (x_lo_ax, dx_ax) per axis. Cartesian kernels take dx (or
 // inv_dx) instead; the caller pushes those directly.
 pub fn push_curvilinear_geom<Sc: Scalar + OrderedNumeric, const D: usize>(

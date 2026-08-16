@@ -45,7 +45,7 @@ fn parse_arg<T: std::str::FromStr>(flag: &str, default: T) -> T {
 }
 
 // generate a million-cell field of physically-realistic RMHD prims. uses a
-// deterministic LCG so both paths see exactly the same input — any disagreement
+// deterministic lcg so both paths see exactly the same input — any disagreement
 // is then pure floating-point pattern from the shared input.
 fn make_fields(
     n: usize,
@@ -109,7 +109,7 @@ fn main() {
     // mirrors rmhd_wave_speed_map_gv's loop body exactly: per-axis magnetosonic
     // cfl speeds, max |s_l|/|s_r| * inv_dx_d, max over axes. nothing else.
     //
-    // PARALLELISM: path B uses `into_par_iter` (emitted by the renderer); to
+    // parallelism: path B uses `into_par_iter` (emitted by the renderer); to
     // compare codegen and not threading models, path A must use rayon over the
     // same outer iteration. with_min_len(16) matches the emitted kernel.
     use rayon::prelude::*;
@@ -222,7 +222,7 @@ fn main() {
 
     // ---------- numerical sanity ----------
     // path A and path B must agree on every cell (carrier-equivalence). a
-    // small ULP gap is OK (rustc may re-associate); a wide gap means the two
+    // small ULP gap is ok (rustc may re-associate); a wide gap means the two
     // paths aren't comparing the same algorithm.
     let mut max_rel = 0.0_f64;
     let mut max_abs = 0.0_f64;

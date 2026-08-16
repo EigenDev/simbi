@@ -125,7 +125,7 @@ fn geometric_momentum_sources_gv(
             // pressure: a gridded coordinate is the one carrying a pressure gradient;
             // written in the divergence's (ptot*A_hi - ptot*A_lo)*inv_V form so a v=0
             // uniform-ptot state cancels the pressure flux divergence bit-exactly
-            // (well-balanced HSE).
+            // (well-balanced hse).
             let mut s = if let Some(d) = axes.iter().position(|&c| c == coord) {
                 (ptot * geo.area_hi[d] - ptot * geo.area_lo[d]) * geo.inv_volume
             } else {
@@ -162,7 +162,7 @@ pub(crate) fn gv_geometric_source(
     // when this stage is fused with the cell-B predictor (which binds `bc_k` in-place), reading mag
     // via that same `bc_k` key lets try_fuse merge the two cell-B reads into one binding; keeping
     // them apart leaves `prim.mag[k]` and `bc_k` as distinct manifest entries that both resolve to
-    // bcell[k] at runtime, aliasing a read-only input to an in-place output (UB on CPU). both keys
+    // bcell[k] at runtime, aliasing a read-only input to an in-place output (ub on CPU). both keys
     // carry the same old-bcell value (the predictor writes after the source evaluates), so it is
     // bit-identical.
     let mag_field = |k: usize| -> Gv {

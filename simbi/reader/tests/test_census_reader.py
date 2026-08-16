@@ -219,7 +219,7 @@ def test_a_file_predating_accumulation_reads_as_a_per_sample_history(tmp_path):
 
 def test_an_accumulated_row_averages_back_by_its_sample_count(tmp_path):
     # the whole point of the mode: the samples are gone, so the count is the only thing that can
-    # turn the stored running sum back into a mean. an average taken over the ROWS instead would
+    # turn the stored running sum back into a mean. an average taken over the rows instead would
     # divide by one and report the sum as though it were the average.
     values = np.array([[[10.0], [20.0], [30.0]]])  # one row, three bins, one accumulator
     p = _write(
@@ -331,7 +331,7 @@ def test_series_join_is_idempotent_and_order_free(tmp_path):
     a = _write(tmp_path / "a.h5", times=(0.0, 1.0))
     b = _write(tmp_path / "b.h5", times=(2.0, 3.0))
     once = read_census_series([a, b], "shells")
-    assert once.n_rows == 4  # genuinely disjoint segments DO concatenate
+    assert once.n_rows == 4  # genuinely disjoint segments do concatenate
     for paths in ([a, b, a, b], [b, a], [a, a, b]):
         again = read_census_series(paths, "shells")
         assert np.array_equal(again.time, once.time)

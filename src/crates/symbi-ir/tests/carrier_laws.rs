@@ -1,10 +1,10 @@
 // =============================================================================
 // carrier_laws.rs
 //
-// the `algebra::laws` module DOCUMENTS the laws every `Scalar` carrier must satisfy
+// the `algebra::laws` module documents the laws every `Scalar` carrier must satisfy
 // (ring + abelian group, comparisons, select, sqrt/transcendental identities,
-// hyperbolics, NaN). this test PROMOTES that prose to executable properties: each law
-// is swept over a deterministic sample grid (no rng — the determinism mandate) on BOTH
+// hyperbolics, NaN). this test promotes that prose to executable properties: each law
+// is swept over a deterministic sample grid (no rng — the determinism mandate) on both
 // concrete carriers (f64 + f32, the precision axis of "carrier-generic"). the Gv carrier's
 // homomorphism (f64 == traced-Gv) is covered separately in `carrier_oracle_new.rs`; the
 // concrete carriers are pinned as honest models of the documented algebra.
@@ -51,7 +51,7 @@ macro_rules! carrier_law_suite {
                 assert!(cond, "exact law violated: {law}");
             }
 
-            // ---- ring + abelian group: the EXACT laws ----
+            // ---- ring + abelian group: the exact laws ----
             #[test]
             fn ring_exact_laws() {
                 let zero = 0.0 as S;
@@ -67,7 +67,7 @@ macro_rules! carrier_law_suite {
                     for &y in &grid() {
                         exact(x + y == y + x, "additive commutativity");
                         exact(x * y == y * x, "multiplicative commutativity");
-                        // Sub IS Add-of-Neg by definition — must be bit-exact.
+                        // Sub is Add-of-Neg by definition — must be bit-exact.
                         exact(x - y == x + (-y), "sub-via-neg x-y==x+(-y)");
                         exact(x.min(y) == y.min(x), "min commutative");
                         exact(x.max(y) == y.max(x), "max commutative");
@@ -76,7 +76,7 @@ macro_rules! carrier_law_suite {
                 }
             }
 
-            // ---- ring: the FLOATING laws (associativity/distributivity are NOT bit-exact) ----
+            // ---- ring: the floating laws (associativity/distributivity are not bit-exact) ----
             #[test]
             fn ring_floating_laws() {
                 for &x in &grid() {

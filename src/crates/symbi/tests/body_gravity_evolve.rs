@@ -1,11 +1,11 @@
 // =============================================================================
 // body_gravity_evolve.rs
 //
-// the immersed-boundary forward gravity, END TO END on the substrate: a fixed central
+// the immersed-boundary forward gravity, end to end on the substrate: a fixed central
 // point mass pulls a fluid inward through the real evolve() loop (the body_source
 // KernelSet method, dispatched per RK stage when has_bodies()).
 //
-//   - cpu: uniform fluid at rest around a central mass develops INWARD radial momentum,
+//   - cpu: uniform fluid at rest around a central mass develops inward radial momentum,
 //     stays finite, conserves mass (gravity touches only mom/nrg, so den is invariant).
 //   - cuda: the body_gravity_source kernel runs on device and matches CPU < 1e-9.
 //
@@ -43,13 +43,13 @@ fn central_mass() -> BodyCollection<f64, 2> {
 
 // -----------------------------------------------------------------------------
 // regression: the FOFC redo must re-apply the immersed-body source. a FOFC-firing
-// substage RESTORES the stage-input state and re-runs the godunov + additive source; without
+// substage restores the stage-input state and re-runs the godunov + additive source; without
 // re-applying the body source there too, a FO/freeze-selected cell near a body loses its gravity
-// kick for that substage. discriminating A/B on ONE forward-Euler substage (so a flagged cell
-// cannot recover gravity on a later substage): identical FOFC-firing ICs, one run WITH the central
-// mass and one WITHOUT. the flux/godunov is bit-identical from identical ICs (the body source is
-// applied AFTER it), so mom_B - mom_A isolates the body impulse — which must be present and INWARD
-// at every checked cell, INCLUDING the ones that fired FOFC (where the bug drops it).
+// kick for that substage. discriminating A/B on one forward-Euler substage (so a flagged cell
+// cannot recover gravity on a later substage): identical FOFC-firing ICs, one run with the central
+// mass and one without. the flux/godunov is bit-identical from identical ICs (the body source is
+// applied after it), so mom_B - mom_A isolates the body impulse — which must be present and inward
+// at every checked cell, including the ones that fired FOFC (where the bug drops it).
 // -----------------------------------------------------------------------------
 #[test]
 fn fofc_redo_preserves_body_gravity() {
@@ -57,7 +57,7 @@ fn fofc_redo_preserves_body_gravity() {
     use symbi::sim::refinement::Hierarchy;
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
-    // two streams moving APART across x = 0.4 (a double rarefaction): a near-vacuum opens there, so
+    // two streams moving apart across x = 0.4 (a double rarefaction): a near-vacuum opens there, so
     // the high-order c2p goes negative and FOFC fires along the strip (the redo restores + re-fluxes).
     // gravity is velocity-independent, so the body impulse D = mom_B - mom_A is unaffected by the flow.
     let ic = |[x, _y]: [f64; 2]| Prim {
@@ -115,13 +115,13 @@ fn fofc_redo_preserves_body_gravity() {
     );
     let a = run(false); // no body
 
-    // the body pulls toward the origin: the impulse D = mom_B - mom_A must point INWARD
+    // the body pulls toward the origin: the impulse D = mom_B - mom_A must point inward
     // (D . (-r_hat) > 0). the flux is identical in A and B over one step, so D is purely the body
-    // source. a redo that restores u_stage and re-runs only the godunov leaves EVERY cell at
+    // source. a redo that restores u_stage and re-runs only the godunov leaves every cell at
     // D == 0 exactly, so a single cell with an inward kick is impossible unless the redo
     // re-applies the body source. the majority bound (not all) tolerates the far cells
     // whose softened kick falls below the 1e-6 test floor; the freeze tier is covered by the
-    // dedicated `fofc_freeze_preserves_body_gravity` gate below. no cell may get a spurious OUTWARD
+    // dedicated `fofc_freeze_preserves_body_gravity` gate below. no cell may get a spurious outward
     // kick.
     let mut checked = 0usize;
     let mut got_body = 0usize;
@@ -155,17 +155,17 @@ fn fofc_redo_preserves_body_gravity() {
 }
 
 // -----------------------------------------------------------------------------
-// FOFC FREEZE-tier body source: the last-resort freeze holds the stage input `u_stage` (pre-body)
+// FOFC freeze-tier body source: the last-resort freeze holds the stage input `u_stage` (pre-body)
 // on a cell no first-order flux can update admissibly. the plain `fofc_select` leaves that cell with
-// ZERO body impulse; the `_with_body` freeze-select instead evolves the parachute by the body source
+// zero body impulse; the `_with_body` freeze-select instead evolves the parachute by the body source
 // (gravity + accretion) over the substage, guarded to a physical state.
 //
-// this is an A/B on the SELECT KERNEL itself, isolated from the flux dynamics: the freeze set in a
+// this is an A/B on the select kernel itself, isolated from the flux dynamics: the freeze set in a
 // live run is body-dependent (the redo's body_apply can rescue a cell from the freeze) and cannot be
 // cleanly separated at the sim output, so the kernel is driven directly. a hand-built state gives a
-// PHYSICAL uniform stage input (u_stage: rho=1, v=0, p=1) and a first-order result whose PRIM is
-// unphysical (p < 0) in an inner band (so the select FREEZES there) and physical in an outer band
-// (so the select KEEPS the marker there). the only difference between the two kernels is the body
+// physical uniform stage input (u_stage: rho=1, v=0, p=1) and a first-order result whose prim is
+// unphysical (p < 0) in an inner band (so the select freezes there) and physical in an outer band
+// (so the select keeps the marker there). the only difference between the two kernels is the body
 // source, so `with_body - plain` on the frozen cells is exactly the inward gravity impulse; without
 // the with-body select it is identically zero and got_body collapses.
 // -----------------------------------------------------------------------------
@@ -261,7 +261,7 @@ fn fofc_freeze_preserves_body_gravity() {
             worst_outward = worst_outward.min(inward);
             frozen += 1;
         } else if kept_band(r) {
-            // a physical first-order cell is KEPT by both selects: momentum stays the marker exactly.
+            // a physical first-order cell is kept by both selects: momentum stays the marker exactly.
             if (bx - KEPT_MARKER).abs() < 1e-12 && (px - KEPT_MARKER).abs() < 1e-12 {
                 kept_ok += 1;
             }
@@ -284,7 +284,7 @@ fn fofc_freeze_preserves_body_gravity() {
 }
 
 // -----------------------------------------------------------------------------
-// ISOTHERMAL freeze-tier body source (thin-disk sims): the energy-free twin of the gate above. the
+// isothermal freeze-tier body source (thin-disk sims): the energy-free twin of the gate above. the
 // iso freeze parachute uses the isothermal EOS (p = cs^2 * rho, always positive with the density) so
 // only the density guard applies, and the eos param is the sound speed cs. same A/B on the two
 // select kernels: `with_body` must add the inward gravity impulse to every frozen cell.
@@ -304,7 +304,7 @@ fn fofc_freeze_preserves_body_gravity_iso() {
     let frozen_band = |r: f64| (0.30..0.60).contains(&r);
     let kept_band = |r: f64| (0.70..0.90).contains(&r);
 
-    // physical uniform stage input (v = 0) + a first-order result whose prim DENSITY is unphysical in
+    // physical uniform stage input (v = 0) + a first-order result whose prim density is unphysical in
     // the frozen band. iso keeps pressure in a separate cs^2 buffer (no sim prim pre), so its select
     // — like the plain iso `fofc_select` — gates freeze on the density alone; a negative x_rho fires it.
     let build = || -> Sim {
@@ -403,7 +403,7 @@ fn fofc_freeze_preserves_body_gravity_iso() {
 fn central_gravity_pulls_fluid_inward_through_evolve() {
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
-    // uniform fluid AT REST: no pressure gradient, so the ONLY force is gravity -> the fluid
+    // uniform fluid at rest: no pressure gradient, so the only force is gravity -> the fluid
     // accelerates purely radially inward. (mom=0, nrg=1/(gamma-1) <=> vel=0, pre=1.0.)
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N, N])
@@ -447,14 +447,14 @@ fn central_gravity_pulls_fluid_inward_through_evolve() {
             mx.is_finite() && my.is_finite(),
             "momentum non-finite at {c:?}"
         );
-        // gravity conserves mass; with no pressure gradient + outflow BC, den stays ~1 in the
+        // gravity conserves mass; with no pressure gradient + outflow bc, den stays ~1 in the
         // interior over a few steps.
         assert!(
             *rho.view().at(c) > 0.0,
             "prim.rho must stay positive at {c:?}"
         );
 
-        // away from the softened core + the boundary, the radial momentum must be INWARD.
+        // away from the softened core + the boundary, the radial momentum must be inward.
         if (0.3..0.8).contains(&r)
             && c[0] >= 3
             && c[0] < N as isize - 3
@@ -514,7 +514,7 @@ fn body_gravity_gpu_matches_cpu() {
             }
         })
         .build()
-        // a BLACK HOLE (gravity + Bondi-Hoyle accretion) so the GPU diff covers both effects.
+        // a black hole (gravity + Bondi-Hoyle accretion) so the GPU diff covers both effects.
         .with_bodies(BodyCollection::new().add(Body::black_hole(
             0,
             Tensor::new([0.0, 0.0]),
@@ -584,8 +584,8 @@ fn body_gravity_gpu_matches_cpu() {
 #[test]
 fn black_hole_records_accretion_without_changing_mass() {
     // a black hole (gravity + accretion) embedded in dense fluid: the fluid is removed by the
-    // sink + the accretion RECORDED into the diagnostic (total_accreted_mass), but the BH's
-    // GRAVITATING mass is held FIXED (fixed-potential sink — the central potential must not
+    // sink + the accretion recorded into the diagnostic (total_accreted_mass), but the BH's
+    // gravitating mass is held fixed (fixed-potential sink — the central potential must not
     // drift).
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
@@ -628,7 +628,7 @@ fn black_hole_records_accretion_without_changing_mass() {
     evolve(&mut sim, &sub, 0.05).expect("evolution with accreting black hole failed");
 
     let body = sim.immersed.as_ref().unwrap().bodies.get(0);
-    // the gravitating mass is UNCHANGED — the accretion never touches body.mass.
+    // the gravitating mass is unchanged — the accretion never touches body.mass.
     assert_eq!(
         body.mass, m_init,
         "BH gravitating mass must stay fixed: {} -> {}",
@@ -649,7 +649,7 @@ fn black_hole_records_accretion_without_changing_mass() {
             "total_accreted_mass non-finite"
         );
         // the recorded accretion ~ the fluid mass the sink removed (same sign + order; the
-        // outflow BC + 1st-order feedback timing make this approximate).
+        // outflow bc + 1st-order feedback timing make this approximate).
         let mut fluid_mass1 = 0.0;
         for c in sim.geom.interior.iter() {
             fluid_mass1 += *sim.fields.cons.den.view().at(c);
@@ -773,7 +773,7 @@ fn body_feedback_gpu_matches_cpu() {
 }
 
 // -----------------------------------------------------------------------------
-// curvilinear (polar r-phi) body gravity: a central mass must produce PURELY RADIAL
+// curvilinear (polar r-phi) body gravity: a central mass must produce purely radial
 // gravity in the physical (r, phi) momentum components.
 // -----------------------------------------------------------------------------
 #[test]
@@ -938,7 +938,7 @@ fn curvilinear_body_source_gpu_matches_cpu() {
 }
 
 // -----------------------------------------------------------------------------
-// 3D spherical body gravity: a central mass must produce PURELY RADIAL gravity in the
+// 3D spherical body gravity: a central mass must produce purely radial gravity in the
 // physical (r, theta, phi) components.
 // -----------------------------------------------------------------------------
 #[test]

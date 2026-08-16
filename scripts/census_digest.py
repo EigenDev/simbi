@@ -1,7 +1,7 @@
 # =============================================================================
 # census_digest.py
 #
-# collapse a directory of checkpoints into ONE small file holding only their census
+# collapse a directory of checkpoints into one small file holding only their census
 # groups. a census is ~0.02% of a checkpoint's bytes, so a record that costs hundreds of
 # gigabytes to copy whole costs tens of megabytes as a digest.
 #
@@ -16,10 +16,10 @@
 # every earlier row; concatenating them blindly would count a sample many times over and the
 # duplicates are invisible afterwards, since a repeated sample looks exactly like a real one.
 #
-# --append MERGES INTO AN EXISTING DIGEST, which is what makes a queue-limited campaign
+# --append merges into an existing digest, which is what makes a queue-limited campaign
 # recoverable. a census history lives in process memory and starts empty on resume, so each
 # job segment holds only its own samples; a segment killed by the wall clock writes them to
-# a checkpoint named `interrupted`, and that name is FIXED, so the next segment overwrites
+# a checkpoint named `interrupted`, and that name is fixed, so the next segment overwrites
 # it. when a segment is shorter than the dump interval -- many hours of integration per dump
 # is routine at depth -- every segment but the one that finally reaches a dump loses its
 # record that way. digesting the interrupted checkpoint after each segment preserves all of
@@ -31,7 +31,7 @@
 # usage:
 #  python census_digest.py RUN_DIR [RUN_DIR ...] --out digest.h5
 #  python census_digest.py RUN_DIR --census shells --out shells.h5
-#  python census_digest.py RUN/chkpt.interrupted.h5 --out archive.h5 --append
+#  python census_digest.py run/chkpt.interrupted.h5 --out archive.h5 --append
 # =============================================================================
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ def main() -> None:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    # an existing digest is read in full BEFORE the output is opened for writing, so the
+    # an existing digest is read in full before the output is opened for writing, so the
     # archive is a source like any checkpoint and h5py never holds the same path twice.
     carried: dict[str, tuple] = {}
     if args.append and out.exists():

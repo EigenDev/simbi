@@ -1,14 +1,14 @@
 // =============================================================================
 // resistive_adjoint_3d.rs
 //
-// the mimetic-adjoint oracle for 3D CURVILINEAR resistive MHD (spherical, cylindrical). the same
+// the mimetic-adjoint oracle for 3D curvilinear resistive MHD (spherical, cylindrical). the same
 // metric-free difference curl that serves 3D cartesian is the exact adjoint of the 3D curvilinear
 // induction curl (whose metric lives in C + the physical face-area weights), certified by the
 // geometry-agnostic dissipation identity
 //
 //     <B, curl(J B)>_F = <J B, J B>_E >= 0     (eta = 1),
 //
-// to machine precision, across all three edges/faces. DEC weights: w_{B_k} = product of the OTHER two
+// to machine precision, across all three edges/faces. dec weights: w_{B_k} = product of the other two
 // scale factors at the k-face; w_{E_k} = h_k at the k-edge. random compact-support fields keep every
 // stencil in the full-stencil interior so the identity is exact.
 // =============================================================================
@@ -34,7 +34,7 @@ enum Chart {
     Sph,
     Cyl,
 }
-// (h0, h1, h2) at coordinate (x0, x1, x2). MUST match Metric::scale_factors of the chart.
+// (h0, h1, h2) at coordinate (x0, x1, x2). must match Metric::scale_factors of the chart.
 fn h(chart: Chart, x: [f64; 3]) -> [f64; 3] {
     match chart {
         Chart::Sph => [1.0, x[0], x[0] * x[1].sin()], // (h_r, h_theta=r, h_phi=r sin theta)
@@ -75,7 +75,7 @@ fn pos(fs: &Store, c: [isize; 3], face_axis: usize) -> [f64; 3] {
         }
     })
 }
-// the edge along axis k: axis k at the cell CENTER, the two transverse axes on faces.
+// the edge along axis k: axis k at the cell center, the two transverse axes on faces.
 fn pos_edge(fs: &Store, c: [isize; 3], edge_axis: usize) -> [f64; 3] {
     std::array::from_fn(|a| {
         let base = fs.geom.x_lo[a];
@@ -122,7 +122,7 @@ fn assert_adjoint_3d(fs: &Store, chart: Chart, label: &str) {
         }
     }
     ct_curl::<3, 3, HostMemory, f64>(fs, 1.0);
-    // <B, curl(J B)>_F = sum_k sum_face B_k*(-bface[k])*w_{B_k}, w_{B_k} = prod of the OTHER two h.
+    // <B, curl(J B)>_F = sum_k sum_face B_k*(-bface[k])*w_{B_k}, w_{B_k} = prod of the other two h.
     let mut pair_f = 0.0;
     for k in 0..3 {
         for c in m.bface[k].domain().iter() {

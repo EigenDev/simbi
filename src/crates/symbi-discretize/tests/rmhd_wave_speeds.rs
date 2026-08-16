@@ -279,7 +279,7 @@ fn rmhd_wave_speed_map_bounds_cpp_quartic() {
             "map state {i}: bound {} under-estimates exact quartic {exact} -> CFL-unsafe",
             got[i]
         );
-        // the bound MAY exceed c = 1 by design (a simplified discriminant that over-estimates
+        // the bound may exceed c = 1 by design (a simplified discriminant that over-estimates
         // only shrinks dt — safe). it must stay finite, though: a NaN would poison the dt
         // max-reduction. (per rmhd_magnetosonic_cfl_speeds: "over-estimating only shrinks dt".)
         assert!(

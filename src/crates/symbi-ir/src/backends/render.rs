@@ -6,7 +6,7 @@
 // FieldLoadAt -> buffer-index rewrite, the base-cell-read gate, the skeleton
 // sequencing — and a per-backend `KernelRenderer` supplies the language
 // spelling alone (types, the signature/qualifier, the cell loop vs thread index, the
-// flat-index cast, statement/expression syntax). adding a backend (HIP, SYCL,
+// flat-index cast, statement/expression syntax). adding a backend (HIP, sycl,
 // Metal) is one `KernelRenderer` impl; a feature is one edit here, shared by
 // all parallel emitters.
 //
@@ -72,7 +72,7 @@ pub trait KernelRenderer {
     fn index_lang(&self) -> crate::emit::IndexLang;
     /// when `true`, `render` rewrites eligible float bool/if bodies into the
     /// branch-free `cmp_*` / `S::select` spelling ahead of emission (see
-    /// `passes::mask_form`) — a straight-line body LLVM's SLP vectorizer can
+    /// `passes::mask_form`) — a straight-line body LLVM's slp vectorizer can
     /// fuse. the serialized `Prepared` artifact is untouched (the rewrite runs
     /// on the render-time copy). default = `false`; the Rust CPU renderer
     /// exposes it behind the SYMBI_MASK_FORM a/b knob — `select` computes both
@@ -619,7 +619,7 @@ fn render_source<R: KernelRenderer>(
     for param in &scalarized.params {
         if !declared.contains(param.name.as_str()) {
             out.push_str(&format!(
-                "    // WARNING: scalarizer introduced undeclared param '{}'; \
+                "    // warning: scalarizer introduced undeclared param '{}'; \
                 this is a wiring bug — caller must pass it via field_inputs or scalar_params\n",
                 param.name
             ));
@@ -704,7 +704,7 @@ fn rewrite_field_load_at<R: KernelRenderer>(
                 }
             };
         }
-        // every other node recurses into its SSOT children.
+        // every other node recurses into its ssot children.
         _ => {
             for c in e.children_mut() {
                 rewrite_field_load_at(c, ndim, key_to_buf, tile, r);

@@ -2,17 +2,17 @@
 # mhd_energy_conservation.py
 #
 # periodic 2d relativistic MHD shock (colliding v = +0.95 / -0.94 streams, p = 1e-4,
-# uniform transverse By) — a magnetized shock that does NOT fire the FOFC fallback, so
-# it exercises the BASE constrained-transport scheme. the total energy tau is the sum
+# uniform transverse By) — a magnetized shock that does not fire the FOFC fallback, so
+# it exercises the base constrained-transport scheme. the total energy tau is the sum
 # of the conserved buffer over the periodic interior; a conservative scheme holds it to
-# machine roundoff at EVERY resolution.
+# machine roundoff at every resolution.
 #
-# this is the base-scheme energy-conservation instrument. a magnetic-energy PATCH
+# this is the base-scheme energy-conservation instrument. a magnetic-energy patch
 # (`nrg += 1/2 d|bcell|^2`, applied outside the flux) makes tau drift ~2e-4 at nx=256
-# and GROW with resolution (6e-4 at nx=512) — the signature of genuine
+# and grow with resolution (6e-4 at nx=512) — the signature of genuine
 # non-conservation, since truncation error would shrink with resolution. deriving cell B
 # from the CT face field with no patch leaves tau conserved by the Poynting-carrying
-# Godunov flux, at roundoff drift that does NOT grow with resolution.
+# Godunov flux, at roundoff drift that does not grow with resolution.
 # =============================================================================
 
 from functools import partial

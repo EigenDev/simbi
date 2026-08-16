@@ -40,10 +40,10 @@ class Spacetime(str, ExtendedEnum):
     # the background spacetime, orthogonal to the spatial coord_system and the regime.
     # minkowski is flat (every existing run); the curved charts select the GR metric
     # (lapse / densitization / GR-wavespeed kernels). every curved chart here is
-    # HORIZON-PENETRATING: the areal schwarzschild chart is not evolvable, since its
+    # horizon-penetrating: the areal schwarzschild chart is not evolvable, since its
     # coordinate singularity at r = 2M puts the horizon outside the domain by construction.
     MINKOWSKI = "minkowski"
-    # ingoing kerr-schild: the same physical schwarzschild vacuum in a HORIZON-PENETRATING chart
+    # ingoing kerr-schild: the same physical schwarzschild vacuum in a horizon-penetrating chart
     # (regular across r = 2M) — the shift-advection-flux + KS densitization/wavespeed kernels.
     SCHWARZSCHILD_KS = "schwarzschild_ks"
     # spinning kerr in ingoing kerr-schild coordinates: horizon-penetrating, non-diagonal
@@ -159,7 +159,7 @@ class Eos(str, ExtendedEnum):
 
 
 class Limiter(str, ExtendedEnum):
-    # the slope limiter for PLM reconstruction (mirrors the C++ LIMITER enum). MINMOD is the
+    # the slope limiter for PLM reconstruction (mirrors the C++ limiter enum). minmod is the
     # theta-MC family parameterised by `plm_theta` (1 = pure minmod, 2 = MC); VAN_LEER is the smooth
     # harmonic limiter (ignores plm_theta). PPM carries its own monotonicity constraint and takes
     # no limiter.
@@ -367,14 +367,14 @@ class Metadata:
     schwarzschild_mass: float = 0.0
 
     # the equation-of-state closure the run was written with ("ideal" / "synge").
-    # EMPTY means the checkpoint predates the attribute, which is a different fact
+    # empty means the checkpoint predates the attribute, which is a different fact
     # from "ideal": the restart must fall back to the config's own closure rather
     # than silently declaring a gamma-law one.
     eos: str = ""
 
     # whether reconstruction ran on departures from the local hydrostatic isentrope.
     # None means the attribute is absent from the file, which for `solver = hllc_lm`
-    # identifies the RETIRED clamped scheme (the attribute and the published-ramp
+    # identifies the retired clamped scheme (the attribute and the published-ramp
     # meaning of the name entered the format together): a different fact from False.
     wb_reconstruction: bool | None = None
     # the mach threshold of the low-mach acoustic-speed ramp; None on files
@@ -383,7 +383,7 @@ class Metadata:
 
     # the stationary target the run is well-balanced against, as the serialized expression
     # wire. it is not a field, so nothing else in the file records it, and a run resumed
-    # against a DIFFERENT target integrates different equations while looking identical from
+    # against a different target integrates different equations while looking identical from
     # the outside. empty on runs that declare none and on checkpoints written before the
     # attribute existed.
     equilibrium_target: str = ""

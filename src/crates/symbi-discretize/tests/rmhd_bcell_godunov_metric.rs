@@ -2,13 +2,13 @@
 // rmhd_bcell_godunov_metric.rs
 //
 // metric-consistency regressions for the cell-B flux predictor (rmhd_bcell_godunov_euler), which
-// evolves the OUT-OF-PLANE (non-CT) cell B components as a flux divergence — the in-plane
+// evolves the out-of-plane (non-CT) cell B components as a flux divergence — the in-plane
 // components live on faces and are re-derived by bcell_from_bface, so the predictor leaves them
 // alone (oop_predictor_spec.md). the out-of-plane divergence operator depends on the chart, the
 // gridded plane, and the component storage:
 //
-// flat (PHYSICAL components), out-of-plane curl per plane:
-//   - cyl r-z (axes [0,2]): (curl E)_phi = d_z E_r - d_r E_z is METRIC-FREE; the gas
+// flat (physical components), out-of-plane curl per plane:
+//   - cyl r-z (axes [0,2]): (curl E)_phi = d_z E_r - d_r E_z is metric-free; the gas
 //     area-weighted divergence (h_phi = r in the volume) would inject a spurious -F_r/r.
 //   - sph r-theta (axes [0,1]): d_t B_phi = -(1/r)[d_r(r F^r) + d_theta F^theta] — face
 //     weights (r, 1) on the r dr dtheta measure; the gas r^2 sin(theta) measure would inject
@@ -109,7 +109,7 @@ fn cyl_rz_out_of_plane_bphi_uses_metric_free_divergence() {
 
     let bphi_new = out.values("bc_1_new").to_vec();
 
-    // B_phi must be UNCHANGED (plain div of a uniform flux = 0). the bug would give
+    // B_phi must be unchanged (plain div of a uniform flux = 0). the bug would give
     // B0 - dt*C/r_c (decaying with 1/r), which at r_c in [1.05, 1.75] is a ~0.09..0.14 drop.
     let mut max_dev = 0.0_f64;
     for i in 0..MR {
@@ -139,7 +139,7 @@ fn oop_comps(axes: &[usize]) -> Vec<usize> {
 
 /// run the euler cell-B predictor on an 8x8 grid with uniform B0 in every component and the
 /// uniform induction flux `bflux(d, c)`; returns the `bc_c_new` grid per component, `Some` for the
-/// OUT-OF-PLANE components the predictor writes and `None` for the in-plane (CT) components it
+/// out-of-plane components the predictor writes and `None` for the in-plane (CT) components it
 /// leaves untouched.
 fn run_bcell_euler(
     coords: Coords,
@@ -192,7 +192,7 @@ fn sph_rtheta_out_of_plane_bphi_uses_curl_weighted_divergence() {
         ("dx_1", dth),
     ];
 
-    // uniform RADIAL flux F^r = C: update = -C/r_c (arithmetic midpoint; the r-weight is
+    // uniform radial flux F^r = C: update = -C/r_c (arithmetic midpoint; the r-weight is
     // linear so the midpoint form is exact). the gas r^2 sin(theta) divergence gives ~2C/r_c.
     let rad = run_bcell_euler(
         Coords::Spherical,
@@ -202,7 +202,7 @@ fn sph_rtheta_out_of_plane_bphi_uses_curl_weighted_divergence() {
         |d, c| if d == 0 && c == 2 { CFLUX } else { 0.0 },
         B0,
     );
-    // uniform THETA flux F^theta = C: d_theta F^theta = 0, so B_phi is UNCHANGED. the gas
+    // uniform theta flux F^theta = C: d_theta F^theta = 0, so B_phi is unchanged. the gas
     // sin(theta) face weights give a spurious -C cot(theta)/r drive.
     let ang = run_bcell_euler(
         Coords::Spherical,
@@ -302,7 +302,7 @@ fn schwarzschild_ks_sph_bcell_predictor_applies_lapse_weight() {
             uniform_radial,
             B0,
         );
-        // per-component UPDATE (B0 - bnew), the divergence signal itself.
+        // per-component update (B0 - bnew), the divergence signal itself.
         b.into_iter()
             .map(|g| g.map(|grid| grid.iter().map(|v| B0 - v).collect::<Vec<f64>>()))
             .collect::<Vec<Option<Vec<f64>>>>()

@@ -3,15 +3,15 @@
 //
 // the MHD correctness contract for multi-gpu domain decomposition: a 2d
 // RMHD grid split into a 2x2 tile grid, evolved in lockstep with the same-level halo exchange,
-// must reproduce the monolithic run to round-off AND keep div(B) at machine zero across the
+// must reproduce the monolithic run to round-off and keep div(B) at machine zero across the
 // tile cuts. the second check is the MHD-specific one: a wrong staggered `bface` exchange
 // compiles fine and runs, but silently creates a magnetic monopole at the tile boundary.
 //
 // cpu-only + 2d on purpose: 2d is the minimal constrained-transport case (one E_z edge), and a
-// host run exercises the SAME exchange index math (`exchange_faces`/`face_ghost_strip`) as the
+// host run exercises the same exchange index math (`exchange_faces`/`face_ghost_strip`) as the
 // gpu path -- so this is the fast iteration loop for the staggered exchange.
 //
-// the property under test: only the TRANSVERSE bface halos need exchanging; the normal
+// the property under test: only the transverse bface halos need exchanging; the normal
 // (shared interface) face stays bit-identical by construction. a div(B) drift means the exchange
 // needs the shared face synced as well.
 // =============================================================================
@@ -169,8 +169,8 @@ fn tiles_div_b_max(tiles: &[(Sim, Kern)]) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
-// scatter cell-centered B component `comp` (0..3) into one global N^2 grid. the REAL MHD check:
-// the CT curl preserves div(B) for ANY emf, so div(B)==0 does not prove the field is right --
+// scatter cell-centered B component `comp` (0..3) into one global N^2 grid. the real MHD check:
+// the CT curl preserves div(B) for any emf, so div(B)==0 does not prove the field is right --
 // only `bcell` value equivalence vs the monolithic run does.
 fn global_bcell(tiles: &[(Sim, Kern)], counts: [usize; 2], comp: usize) -> Vec<f64> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
@@ -187,7 +187,7 @@ fn global_bcell(tiles: &[(Sim, Kern)], counts: [usize; 2], comp: usize) -> Vec<f
     out
 }
 
-// scatter the CURRENT edge EMF (efield.e[slot]) -- the freshly recomputed stage-2 emf, before
+// scatter the current edge EMF (efield.e[slot]) -- the freshly recomputed stage-2 emf, before
 // post_godunov averages it with efield_n and curls it into bface.
 fn global_ef(tiles: &[(Sim, Kern)], counts: [usize; 2], slot: usize) -> Vec<f64> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
@@ -204,7 +204,7 @@ fn global_ef(tiles: &[(Sim, Kern)], counts: [usize; 2], slot: usize) -> Vec<f64>
     out
 }
 
-// scatter the SAVED stage-1 edge EMF (efield_n.e[slot]) read at each interior cell's corner.
+// scatter the saved stage-1 edge EMF (efield_n.e[slot]) read at each interior cell's corner.
 // stage 2 averages this into the CT curl; if it diverges, the corrector's emf is inconsistent.
 fn global_efn(tiles: &[(Sim, Kern)], counts: [usize; 2], slot: usize) -> Vec<f64> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
@@ -249,9 +249,9 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         "some global cells were never written (gather bug)"
     );
     // density equivalence: decomposed == monolithic to round-off.
-    // diagnostics FIRST (B-field, the source; then density, downstream), then assert. the curl
+    // diagnostics first (B-field, the source; then density, downstream), then assert. the curl
     // preserves div(B) for any emf, so div(B)==0 is necessary but not sufficient -- the bcell
-    // VALUE equivalence is the real field check.
+    // value equivalence is the real field check.
     let (di, de) = argmax_diff(&mono_vals, &dec_vals);
     for comp in 0..3 {
         let mb = global_bcell(&mono, [1; 2], comp);
@@ -289,7 +289,7 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
     assert!(de < 1e-11, "{counts:?} {ts:?} density err {de:e}");
 }
 
-// a diagnostic bisection: step mono and the 2x2 decomposition in lockstep through ONE RK2 step,
+// a diagnostic bisection: step mono and the 2x2 decomposition in lockstep through one RK2 step,
 // comparing the cell-centered B after prime, stage 1, and stage 2. RK2 stage 1 (a0=0,ac=1) is an
 // Euler step, so a divergence that appears only in stage 2 localizes to the corrector.
 #[test]
@@ -303,7 +303,7 @@ fn mhd_debug_rk2_stages() {
         let devs = vec![0i32; tiles.len()];
         exchange_grid(&stores, counts, &devs, &LocalCopy);
     };
-    // prime BEFORE cfl: cfl reads prim, which c2p populates (otherwise it returns inf).
+    // prime before cfl: cfl reads prim, which c2p populates (otherwise it returns inf).
     let prime = |tiles: &[(Sim, Kern)], counts: [usize; 2]| {
         for (s, k) in tiles {
             k.c2p(&**s);
@@ -342,7 +342,7 @@ fn mhd_debug_rk2_stages() {
     prime(&mono, [1, 1]);
     prime(&dec, [2, 2]);
     cmp("prime ");
-    // cfl AFTER prime (prim is now valid). per-run dt, exactly as evolve_decomposed does.
+    // cfl after prime (prim is now valid). per-run dt, exactly as evolve_decomposed does.
     let dt_mono = mono
         .iter()
         .map(|(s, k)| k.cfl(&**s))
@@ -377,8 +377,8 @@ fn mhd_debug_rk2_stages() {
             bi % N
         );
     }
-    // dump ACTUAL field values around the REAL corner (x-cut x=16, bottom outflow y=0). INDEX
-    // LOCALLY: global (gx, gy) -> owning tile (gx/16, gy/16) at interior-lo + the in-tile offset.
+    // dump actual field values around the real corner (x-cut x=16, bottom outflow y=0). index
+    // locally: global (gx, gy) -> owning tile (gx/16, gy/16) at interior-lo + the in-tile offset.
     let dump = |label: &str, sim: &Sim, gx: usize, gy: usize, tx: usize, ty: usize| {
         let i = &sim.geom.interior;
         let c = [
@@ -404,7 +404,7 @@ fn mhd_debug_rk2_stages() {
         dump("mono", &mono[0].0, gx, gy, 0, 0);
         dump("dec ", &dec[flatten([tx, 0], [2, 2])].0, gx, gy, tx, 0);
     }
-    // stage 2 SPLIT: run wave_speeds+flux+efield (recompute the corrector emf), capture it, then
+    // stage 2 split: run wave_speeds+flux+efield (recompute the corrector emf), capture it, then
     // finish (godunov, post_godunov averages+curls, c2p, ghost_fill). this isolates whether the
     // recomputed stage-2 efield (vs efield_n) is the inconsistent input.
     for (s, k) in &mono {
@@ -465,7 +465,7 @@ fn mhd_rk2_two_tile_x_cut() {
 }
 
 // the y-cut counterpart of the x-cut RK2 test. if this passes but the 2x2 fails, the bug needs
-// BOTH cuts (the corner); if it fails, it's single-cut + RK2 + the outflow boundary.
+// both cuts (the corner); if it fails, it's single-cut + RK2 + the outflow boundary.
 #[test]
 fn mhd_rk2_two_tile_y_cut() {
     assert_matches([1, 2], Timestepping::Rk2);
@@ -476,7 +476,7 @@ fn mhd_euler_quad_tile_2d_grid() {
     assert_matches([2, 2], Timestepping::Euler);
 }
 
-// the 2x2 corner under RK2 -- the hard case. ghost_fill must run AFTER the cut exchange: if it
+// the 2x2 corner under RK2 -- the hard case. ghost_fill must run after the cut exchange: if it
 // ran before, a domain-boundary ghost at a boundary-meets-cut corner would read a stale
 // unexchanged cut cell -> spurious edge-EMF, exposed by the RK2 corrector averaging the saved
 // stage-1 emf. with ghost_fill after the exchange, div(B) is exact and decomposed == monolithic
@@ -486,10 +486,10 @@ fn mhd_rk2_quad_tile_2d_grid() {
     assert_matches([2, 2], Timestepping::Rk2);
 }
 
-// the OUTPUT path: `gather_interiors` (cells + cell B) + `gather_faces` (staggered B) must
+// the output path: `gather_interiors` (cells + cell B) + `gather_faces` (staggered B) must
 // reassemble the decomposed tiles into one global sim equal to the monolithic run -- this is what
 // the python checkpoint writer serializes. the per-tile `global_bcell`/`global_den` helpers above
-// prove the field VALUES match; this proves the GATHER functions the binding actually calls
+// prove the field values match; this proves the gather functions the binding actually calls
 // reproduce them (cell den + all three bcell components + both staggered bface axes).
 #[test]
 fn mhd_gather_reassembles_global() {

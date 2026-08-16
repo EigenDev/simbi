@@ -2,8 +2,8 @@
 // input.rs
 //
 // non-blocking keyboard reader for the live dashboard. relies on the terminal
-// being in non-canonical mode — `ScreenGuard` disables ICANON + ECHO but LEAVES
-// ISIG set — so bytes arrive per keystroke while Ctrl-C still raises SIGINT for
+// being in non-canonical mode — `ScreenGuard` disables icanon + echo but leaves
+// isig set — so bytes arrive per keystroke while Ctrl-C still raises sigint for
 // the graceful-interrupt path and never surfaces here as a key. the reader
 // never enables crossterm raw mode and never changes termios; it only reads. it
 // is a no-op off a tty, and never blocks beyond an explicit poll timeout.
@@ -47,17 +47,17 @@ pub fn poll_key_timeout(timeout_ms: i32) -> Option<Key> {
         events: libc::POLLIN,
         revents: 0,
     };
-    // SAFETY: poll on the stdin fd for `timeout_ms`; a single valid pollfd.
+    // safety: poll on the stdin fd for `timeout_ms`; a single valid pollfd.
     let n = unsafe { libc::poll(&mut pfd, 1 as libc::nfds_t, timeout_ms) };
     if n <= 0 || (pfd.revents & libc::POLLIN) == 0 {
         return None;
     }
-    // 64 bytes holds a full SGR mouse report (up to ~17 bytes) plus a keystroke:
-    // with mouse tracking pinning the wheel, reports must land in ONE read so the
+    // 64 bytes holds a full sgr mouse report (up to ~17 bytes) plus a keystroke:
+    // with mouse tracking pinning the wheel, reports must land in one read so the
     // escape-sequence discard sees the whole sequence (a split report's tail would
     // decode as stray printable chars).
     let mut buf = [0u8; 64];
-    // SAFETY: read the pending keystroke bytes into a stack buffer. ICANON is off
+    // safety: read the pending keystroke bytes into a stack buffer. icanon is off
     // so this returns immediately with whatever the terminal has queued.
     let r = unsafe { libc::read(0, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
     if r <= 0 {
@@ -67,7 +67,7 @@ pub fn poll_key_timeout(timeout_ms: i32) -> Option<Key> {
 }
 
 /// decode the leading keypress from a slice of raw terminal input. handles plain
-/// printable chars, tab/enter, a bare escape, and the CSI arrow / shift-tab
+/// printable chars, tab/enter, a bare escape, and the csi arrow / shift-tab
 /// sequences; control bytes and unrecognized escape sequences yield `None` (so a
 /// stray Ctrl-C byte, were it ever delivered, is never mistaken for a key).
 fn parse_key(b: &[u8]) -> Option<Key> {
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn control_bytes_are_not_keys() {
-        // Ctrl-C (0x03) never reaches the parser — ISIG turns it into SIGINT — but even if
+        // Ctrl-C (0x03) never reaches the parser — isig turns it into sigint — but even if
         // it did it must not decode as a printable key.
         assert_eq!(parse_key(&[0x03]), None);
         assert_eq!(parse_key(&[]), None);

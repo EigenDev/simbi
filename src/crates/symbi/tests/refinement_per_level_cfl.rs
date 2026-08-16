@@ -34,7 +34,7 @@ const N: usize = 16;
 type Sim = SimState<Newtonian, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kset = AdiabaticSubstrateKernelSet<HostMemory, f64, 3>;
 
-/// quiet ambient gas with a hot blob spanning [0, 2)^3 FINE cells at the box
+/// quiet ambient gas with a hot blob spanning [0, 2)^3 fine cells at the box
 /// center: pressure 200x ambient over one coarse cell's worth of fine cells.
 fn fill(sim: &Sim) {
     let cnrg = sim.fields.cons.nrg_field().unwrap();

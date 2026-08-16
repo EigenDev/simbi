@@ -1,7 +1,7 @@
 // =============================================================================
 // layout.rs
 //
-// the MEMORY-LAYOUT primitive: `Layout<D>` is the single type that knows a
+// the memory-layout primitive: `Layout<D>` is the single type that knows a
 // buffer's memory shape — its per-axis origin (`lo`), allocated `extent`, and
 // the `strides` that map a coordinate to a flat offset. one definition of the
 // physical-x-fastest stride formula, shared by every view (`Domain`, the runtime
@@ -52,10 +52,10 @@ where
 /// while the memory-access pattern degrades, which correctness tests are blind to.
 pub const CONTIGUOUS_AXIS: usize = 0;
 
-/// the INVERSE of the flat index: recover a coordinate from a canonical iteration index, with
-/// [`CONTIGUOUS_AXIS`] varying FASTEST. this is the map every flat driver (`0..total` parallel
+/// the inverse of the flat index: recover a coordinate from a canonical iteration index, with
+/// [`CONTIGUOUS_AXIS`] varying fastest. this is the map every flat driver (`0..total` parallel
 /// sweeps, block covers, the IR interpreter) needs; centralizing it here keeps every driver off
-/// the trap of walking the SLOWEST axis fastest, which strides the hot loop by
+/// the trap of walking the slowest axis fastest, which strides the hot loop by
 /// `extent[0]*extent[1]` on every cell.
 ///
 /// the defining law, pinned by `unflatten_inverts_the_flat_offset`: for a buffer whose extent equals
@@ -69,7 +69,7 @@ pub fn unflatten(mut flat: usize, extent: &[usize], out: &mut [usize]) {
     }
 }
 
-/// the canonical loop-nest order: OUTERMOST axis first, innermost last. the innermost axis is always
+/// the canonical loop-nest order: outermost axis first, innermost last. the innermost axis is always
 /// [`CONTIGUOUS_AXIS`], so the hot loop advances the flat offset by exactly one element per iteration
 /// — the precondition both for cache-line reuse and for a compiler to prove a unit-stride access and
 /// vectorize the body.
@@ -180,7 +180,7 @@ mod laws {
         }
     }
 
-    // AXIOM: the canonical formula is type-agnostic — usize and i32 give the same
+    // axiom: the canonical formula is type-agnostic — usize and i32 give the same
     // stride sequence for the same extent (so geometry and the kernel ABI agree).
     #[test]
     fn strides_formula_is_type_agnostic() {
@@ -200,7 +200,7 @@ mod laws {
         }
     }
 
-    // AXIOM (the index-equivalence GATE): Layout::at reproduces Domain::flat_index
+    // axiom (the index-equivalence gate): Layout::at reproduces Domain::flat_index
     // exactly — the View-based offset == the manual offset the kernels compute.
     #[test]
     fn at_equals_domain_flat_index() {
@@ -227,7 +227,7 @@ mod laws {
         }
     }
 
-    // AXIOM: co-location — the layout is a pure function of the domain (two views
+    // axiom: co-location — the layout is a pure function of the domain (two views
     // over the same allocated domain share one Layout).
     #[test]
     fn layout_is_a_pure_function_of_the_domain() {
@@ -260,7 +260,7 @@ mod laws {
     }
 
     /// `unflatten` is the exact inverse of the layout's flat index. a driver that unflattens the
-    /// OTHER way round (slowest axis fastest) still visits every cell exactly once — so no
+    /// other way round (slowest axis fastest) still visits every cell exactly once — so no
     /// correctness test catches it — but it strides the hot loop by `extent[0]*extent[1]`. this law
     /// is what surfaces that as a compile-time-visible bug; without it the mistake is a silent 2x.
     #[test]
@@ -303,7 +303,7 @@ mod laws {
         }
     }
 
-    /// the loop nest's INNERMOST axis is the contiguous one. an emitter that nests the contiguous
+    /// the loop nest's innermost axis is the contiguous one. an emitter that nests the contiguous
     /// axis outermost produces a correct kernel whose hot loop strides across memory — the exact
     /// shape that denies vectorization and thrashes the line.
     #[test]

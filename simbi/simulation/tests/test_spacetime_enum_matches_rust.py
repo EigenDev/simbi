@@ -12,7 +12,7 @@
 # variant by one refactor.
 #
 # the dispatch coverage gate does not reach this: it checks that every kernel the
-# DISPATCH MATRIX accepts is baked, which says nothing about a name the python layer can
+# dispatch matrix accepts is baked, which says nothing about a name the python layer can
 # produce and the rust layer cannot parse.
 # =============================================================================
 
@@ -55,7 +55,7 @@ def test_every_python_spacetime_has_a_rust_variant() -> None:
         pytest.skip("the rust workspace is not present in this checkout")
 
     rust = _rust_variants()
-    # PREMISE: the parse actually found the enum. an empty set would make every
+    # premise: the parse actually found the enum. an empty set would make every
     # comparison below vacuously interesting rather than meaningful.
     assert len(rust) >= 3, (
         f"parsed only {rust} from {_METRIC_RS.name} -- the enum shape changed and this "

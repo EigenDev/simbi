@@ -3,10 +3,10 @@
 //
 // an accreting immersed body and the passive scalar.
 //
-// a sink is a MASS drain: it swallows gas parcels whole, and the dye dissolved in them goes with
+// a sink is a mass drain: it swallows gas parcels whole, and the dye dissolved in them goes with
 // the gas. so the concentration of what remains is untouched — `D_chi = rho chi` scales by exactly
 // the factor the density does. the failure this gate exists to catch is the drain removing mass
-// while leaving `cons.chi` alone, which reads downstream as the sink CONCENTRATING the dye in the
+// while leaving `cons.chi` alone, which reads downstream as the sink concentrating the dye in the
 // surviving gas: smooth, bounded, positive, and wrong.
 //
 // a uniform dye is the sharpest probe. under the correct rule it stays uniform at its seeded value
@@ -52,7 +52,7 @@ fn build() -> Sim {
         .build()
         .with_bodies(
             BodyCollection::new().add(
-                // a bare drain: no wall channels, so the ONLY thing acting is the mass sink and any
+                // a bare drain: no wall channels, so the only thing acting is the mass sink and any
                 // dye error cannot be attributed to a momentum or thermal channel.
                 Body::rigid_sphere(
                     0,
@@ -69,7 +69,7 @@ fn build() -> Sim {
         .with_passive_scalar()
         .expect("chi alloc");
     // no explicit shape: a bare sphere drain uses the analytic mask. attaching an SdfExpr would
-    // route the dispatch to the SHAPED porous kernel, whose porosity dials a Drain surface has.
+    // route the dispatch to the shaped porous kernel, whose porosity dials a Drain surface has.
     // uniform concentration over the whole allocated grid, consistent with the seeded density.
     let cons_chi = sim.fields.cons.chi_field().expect("cons chi");
     let prim_chi = sim.fields.prim.chi_field().expect("prim chi");
@@ -107,7 +107,7 @@ fn a_sink_removes_mass_and_its_dye_together() {
         "the sink drained only a fraction {swallowed:e} of the mass; the gate is vacuous"
     );
 
-    // the concentration of the surviving gas is unchanged. checked on the CONSERVED dye against the
+    // the concentration of the surviving gas is unchanged. checked on the conserved dye against the
     // conserved density, so this is independent of when the dye c2p last ran.
     let cons_chi = sim.fields.cons.chi_field().expect("cons chi");
     let (mut worst, mut worst_at) = (0.0_f64, [0isize; 2]);

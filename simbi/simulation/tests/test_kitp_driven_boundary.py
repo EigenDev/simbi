@@ -1,13 +1,13 @@
 # =============================================================================
 # test_kitp_driven_boundary.py
 #
-# the kitp thin-disk config (Duffell+2024 comparison) runs with DYNAMIC
+# the kitp thin-disk config (Duffell+2024 comparison) runs with dynamic
 # (dirichlet-to-equilibrium) boundaries on all four faces plus the buffer
 # sponge, under the locally isothermal closure. this gate drives the full
 # stack a few steps at reduced resolution and pins the three failure modes this
 # combination admits:
 # - the driven prescription must lower against the isothermal regime spec
-#   ([rho, vx, vy], no pressure slot) and fill EVERY ghost cell, corners
+#   ([rho, vx, vy], no pressure slot) and fill every ghost cell, corners
 #   included (an interior-clamped driven band left corner ghosts at rho = 0,
 #   which a viscous 3x3 stencil reads as gas);
 # - the ghost temperature must be the clamped continuation of the initial

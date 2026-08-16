@@ -9,7 +9,7 @@
 //
 // for isothermal flows, use ConsG<S, D, IsoModel> — the energy/pressure slot
 // is zero-sized (Zero<S>). accessing .nrg on isothermal cons returns Zero<S>, a
-// ZST; arithmetic with f64 on that slot does not compile.
+// zst; arithmetic with f64 on that slot does not compile.
 //
 // usage:
 //   let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
@@ -25,21 +25,21 @@ use symbi_ir::algebra::Scalar;
 // ---- generic state types ----
 
 /// conservative variables parameterized by energy model.
-/// adiabatic: nrg is S (real energy). isothermal: nrg is Zero<S> (ZST).
+/// adiabatic: nrg is S (real energy). isothermal: nrg is Zero<S> (zst).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic, X: DyeModel = Undyed> {
     pub den: S,
-    /// momentum density. INVARIANT: PHYSICAL (orthonormal-frame) components, `rho*V_a` with
+    /// momentum density. invariant: physical (orthonormal-frame) components, `rho*V_a` with
     /// `V_a = h_a v^a` — the frame the conservation form is written in. it is left
     /// a bare `Tensor` on purpose (no `symbi_algebra::Physical` wrapper): the interior physics is
-    /// frame-CONSISTENT by construction (the Riemann solver / flux / wave-speeds are locally flat
+    /// frame-consistent by construction (the Riemann solver / flux / wave-speeds are locally flat
     /// and never mix frames), so typing it would be a ~500-site tax that catches zero bugs. frames
-    /// are crossed ONLY at boundaries, through the typed `Metric` morphisms (`to_physical` /
+    /// are crossed only at boundaries, through the typed `Metric` morphisms (`to_physical` /
     /// `vector_to_cartesian`); a `.raw()` there is the audited escape hatch.
     pub mom: Tensor<S, D>,
     pub nrg: E::Slot<S>,
     /// the conserved passive scalar `D_chi = rho chi`. zero-sized unless the run carries a dye, so
-    /// an undyed state is byte-identical to one without the slot. it lives HERE, in the conserved
+    /// an undyed state is byte-identical to one without the slot. it lives here, in the conserved
     /// vector, so that any operation rebuilding a conserved state has to say what happens to the
     /// dye — a mass drain that forgets it would otherwise raise the concentration of the gas it
     /// leaves behind, silently and only on whichever code path did the forgetting.
@@ -47,11 +47,11 @@ pub struct ConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic, X: DyeMo
 }
 
 /// primitive variables parameterized by energy model.
-/// adiabatic: pre is S (real pressure). isothermal: pre is Zero<S> (ZST).
+/// adiabatic: pre is S (real pressure). isothermal: pre is Zero<S> (zst).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PrimG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
     pub rho: S,
-    /// velocity. INVARIANT: PHYSICAL (orthonormal-frame) components `V_a` (= `Physical` in
+    /// velocity. invariant: physical (orthonormal-frame) components `V_a` (= `Physical` in
     /// `symbi_algebra`); these orthonormal-frame values are distinct from the coordinate `v^i` — see `ConsG::mom` for why it stays a bare `Tensor`.
     pub vel: Tensor<S, D>,
     pub pre: E::Slot<S>,
@@ -61,7 +61,7 @@ pub struct PrimG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
 
 /// decompose a regime's conserved state into the hydro `ConsG` (mass / momentum /
 /// energy, scattered to the cons FieldGroup) plus the optional magnetic 3-vector
-/// (scattered to the MHD bcell). this is the ONE join that lets a single IC entry
+/// (scattered to the MHD bcell). this is the one join that lets a single IC entry
 /// point (`SimState::seed_cell`) seed every regime — energy-bearing or not (the
 /// `EnergyModel` slot abstracts pressure/energy presence), MHD or pure hydro — via
 /// `to_conserved` + `scatter_from`, with no per-regime hand-built `Cons { .. }`.
@@ -69,13 +69,13 @@ pub trait SeedableCons<S: Scalar, const D: usize> {
     type Energy: EnergyModel;
     fn hydro_part(&self) -> ConsG<S, D, Self::Energy>;
     fn mag_part(&self) -> Option<Tensor<S, D>>;
-    /// reassemble from the hydro conserved state + the optional magnetic 3-vector — the INVERSE
+    /// reassemble from the hydro conserved state + the optional magnetic 3-vector — the inverse
     /// of `hydro_part`/`mag_part`, for cell read-back (`SimState::cons_at`). pure hydro ignores
     /// `mag`; MHD requires it (`Some`).
     fn from_parts(hydro: ConsG<S, D, Self::Energy>, mag: Option<Tensor<S, D>>) -> Self;
 }
 
-/// marker: a conserved state that carries NO magnetic field (pure hydro). gates the typestate
+/// marker: a conserved state that carries no magnetic field (pure hydro). gates the typestate
 /// `set_initial` that reaches `Ready` in one call (no staggered faces owed). disjoint from
 /// [`Magnetic`] by concrete type (`ConsG` vs `MhdConsG`) — no coherence overlap.
 pub trait NonMagnetic {}
@@ -87,7 +87,7 @@ pub trait Magnetic {}
 // every pure-hydro ConsG is NonMagnetic.
 impl<S: Scalar, const D: usize, E: EnergyModel> NonMagnetic for ConsG<S, D, E> {}
 
-// pure hydro: the conserved state IS the hydro ConsG; no magnetic field.
+// pure hydro: the conserved state is the hydro ConsG; no magnetic field.
 impl<S: Scalar, const D: usize, E: EnergyModel> SeedableCons<S, D> for ConsG<S, D, E> {
     type Energy = E;
     #[inline]
@@ -367,7 +367,7 @@ unsafe impl<const D: usize> FieldElement for PrimG<f32, D, Adiabatic> {
     type Scalar = f32;
 }
 
-// safety: ConsG<f64, D, IsoModel> is (f64, Tensor<f64, D>) — Zero<f64> is ZST.
+// safety: ConsG<f64, D, IsoModel> is (f64, Tensor<f64, D>) — Zero<f64> is zst.
 // zero bytes produce valid values.
 unsafe impl<const D: usize> FieldElement for ConsG<f64, D, IsoModel> {
     type Scalar = f64;
@@ -376,7 +376,7 @@ unsafe impl<const D: usize> FieldElement for ConsG<f32, D, IsoModel> {
     type Scalar = f32;
 }
 
-// safety: PrimG<f64, D, IsoModel> is (f64, Tensor<f64, D>) — Zero<f64> is ZST.
+// safety: PrimG<f64, D, IsoModel> is (f64, Tensor<f64, D>) — Zero<f64> is zst.
 unsafe impl<const D: usize> FieldElement for PrimG<f64, D, IsoModel> {
     type Scalar = f64;
 }

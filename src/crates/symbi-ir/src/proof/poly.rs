@@ -1,7 +1,7 @@
 // =============================================================================
 // poly.rs
 //
-// the COEFFICIENT RING of the div(curl B)=0 proof: an integer multivariate
+// the coefficient ring of the div(curl B)=0 proof: an integer multivariate
 // polynomial `Poly` (in scalar-param names) and a rational function `RatFun`
 // (num/den over `Poly`) for the curvilinear scale-factor weights. plus the
 // `FieldTerm` leaf key (field name + integer stencil offset) and the covariant
@@ -123,7 +123,7 @@ impl Poly {
 
     /// substitute the variable `name -> name + delta` (integer shift), expanding
     /// `name^k -> (name + delta)^k` exactly by the binomial theorem (repeated
-    /// multiply). this is the CURVILINEAR shift's effect on a coefficient that
+    /// multiply). this is the curvilinear shift's effect on a coefficient that
     /// depends on the cell coord `c_N`: translating the cell by `delta` along axis
     /// N shifts the geometry r/sin arguments built from `c_N`. the cartesian proof
     /// did not need this (its coefficients are translation-invariant constants).
@@ -137,7 +137,7 @@ impl Poly {
         let mut out = Poly::zero();
         for (mono, &c) in &self.terms {
             let pow = mono.get(name).copied().unwrap_or(0);
-            // the part of the monomial WITHOUT `name`.
+            // the part of the monomial without `name`.
             let mut rest_mono = mono.clone();
             rest_mono.remove(name);
             let mut term = Poly::zero();
@@ -175,7 +175,7 @@ impl Poly {
     }
 
     /// the opaque `cos(theta at half-unit offset `two_m`)` symbol as a degree-1
-    /// monomial — the cos analog of `sin_sym`, keyed the SAME way (`cos_th@<2m>`).
+    /// monomial — the cos analog of `sin_sym`, keyed the same way (`cos_th@<2m>`).
     /// the spherical r-face solid angle Omega = (cos(theta_lo) - cos(theta_hi)) dphi
     /// uses these; keyed by the global theta edge so adjacent cells share the symbol.
     pub fn cos_sym(two_m: i64) -> Poly {
@@ -186,12 +186,12 @@ impl Poly {
         p
     }
 
-    /// the opaque `sqrt(f(r))` metric-lapse symbol at RADIAL half-unit offset `two_m` — the GR
+    /// the opaque `sqrt(f(r))` metric-lapse symbol at radial half-unit offset `two_m` — the GR
     /// analog of `sin_sym`, keyed by the radial (axis 0) offset the sqrt argument resolves to (a
     /// face has two_m = 2*offset, a cell center two_m = 2*c + 1). the GR curl's `sqrt(gamma)` weight
     /// (Schwarzschild r/sqrt(f), Kerr-Schild r*sqrt(h)) carries this factor at each radial face;
     /// keying by the global radial edge lets the div-weight `sqrt(f)@<2m>` cancel the curl's
-    /// `1/sqrt(f)@<2m>` at the SAME face (a rational num/den cancellation), and lets `shift_poly_coords`
+    /// `1/sqrt(f)@<2m>` at the same face (a rational num/den cancellation), and lets `shift_poly_coords`
     /// remap it across the divergence stencil so adjacent faces stay distinct. distinct offsets have
     /// no polynomial relation (sqrt(f) at r vs r+dr do not simplify), so an opaque symbol is exact.
     pub fn sqrt_f_sym(two_m: i64) -> Poly {
@@ -202,11 +202,11 @@ impl Poly {
         p
     }
 
-    /// a STABLE canonical string of this polynomial — the `terms` map is a `BTreeMap` (sorted by
-    /// monomial then var), so the debug form is deterministic. used to key an OPAQUE metric symbol by
-    /// its argument's exact structure when the argument is NOT the affine radius the offset reader
+    /// a stable canonical string of this polynomial — the `terms` map is a `BTreeMap` (sorted by
+    /// monomial then var), so the debug form is deterministic. used to key an opaque metric symbol by
+    /// its argument's exact structure when the argument is not the affine radius the offset reader
     /// handles (a nested `sqrt(R^2 + z^2)`, Kerr's `Sigma`, ...): two occurrences of the same argument
-    /// expression at the same face produce the SAME key, so they cancel locally (num/den).
+    /// expression at the same face produce the same key, so they cancel locally (num/den).
     pub fn canonical(&self) -> String {
         format!("{:?}", self.terms)
     }
@@ -221,38 +221,38 @@ impl Poly {
 }
 
 // =============================================================================
-// RATIONAL-FUNCTION coefficient layer — the CURVILINEAR extension.
+// rational-function coefficient layer — the curvilinear extension.
 //
 // the spherical CT curl multiplies edge EMFs by scale-factor weights h_p (= r,
 // r*sin(theta)) and divides by the face-center prefactor 1/(h_p1c h_p2c) and the
-// transverse widths. so its coefficients are RATIONAL FUNCTIONS. the variable set is:
-//   - x_lo_0, dx_0, c_0   : `r` at any offset is AFFINE x_lo_0 + (c_0 + off)*dx_0,
+// transverse widths. so its coefficients are rational functions. the variable set is:
+//   - x_lo_0, dx_0, c_0   : `r` at any offset is affine x_lo_0 + (c_0 + off)*dx_0,
 //                           a real polynomial (r^2 in an area equals r*r in an
 //                           h-product — r must be a true symbol; an opaque r blocks that equality).
-//   - x_lo_1, dx_1, c_1   : the theta argument is likewise affine, but enters ONLY
+//   - x_lo_1, dx_1, c_1   : the theta argument is likewise affine, but enters only
 //                           through sin(.) — see below.
 //   - x_lo_2, dx_2, c_2   : phi; appears only in widths (sin has no phi dep).
 //   - dt
-//   - sin_th@<2m>         : sin(theta at offset m*dx_1 from the cell) is an OPAQUE
+//   - sin_th@<2m>         : sin(theta at offset m*dx_1 from the cell) is an opaque
 //                           variable keyed by 2m (half-units, so cell-center 1/2
-//                           offsets are integral keys). there is NO polynomial
-//                           relation between sin at distinct offsets; the SAME
-//                           global theta-edge maps to the SAME symbol in adjacent
+//                           offsets are integral keys). there is no polynomial
+//                           relation between sin at distinct offsets; the same
+//                           global theta-edge maps to the same symbol in adjacent
 //                           cells — that shared-symbol property makes the
 //                           divergence telescope.
-// the coord-shift is COVARIANT: shifting the cell by e_dir shifts the field reads
-// AND the c_N / sin@m the coefficients depend on (geometry at cell c+e_dir differs
+// the coord-shift is covariant: shifting the cell by e_dir shifts the field reads
+// and the c_N / sin@m the coefficients depend on (geometry at cell c+e_dir differs
 // from geometry at cell c). this mirrors the numerical test's absolute-index area
 // weights area_r/area_th/area_ph.
 // =============================================================================
 
-/// a rational function num/den over `Poly`. INVARIANT: `den` is never the zero
+/// a rational function num/den over `Poly`. invariant: `den` is never the zero
 /// polynomial — denominators are products of nonzero affine r-polys, opaque sin
 /// symbols, and nonzero integer constants, so cross-multiplication never divides
 /// by zero. `is_zero` is `num.is_zero()` (the denominator is structurally
 /// nonzero); equality is by cross-multiplied numerator difference. no gcd
-/// reduction is performed — common-denominator + numerator-zero suffices to PROVE
-/// cancellation, which is all the div(curl B)=0 checker needs (KISS).
+/// reduction is performed — common-denominator + numerator-zero suffices to prove
+/// cancellation, which is all the div(curl B)=0 checker needs (kiss).
 #[derive(Clone, Debug)]
 pub struct RatFun {
     pub(crate) num: Poly,
@@ -267,13 +267,13 @@ impl RatFun {
         }
     }
 
-    /// a STABLE canonical string of this rational function (num + den), for keying an opaque metric
+    /// a stable canonical string of this rational function (num + den), for keying an opaque metric
     /// symbol by its exact argument. see [`Poly::canonical`].
     pub fn canonical(&self) -> String {
         format!("{}//{}", self.num.canonical(), self.den.canonical())
     }
 
-    /// the reciprocal `den/num` (swap). lets a proof recover the FACE AREA `w` from a flux-form GR
+    /// the reciprocal `den/num` (swap). lets a proof recover the face area `w` from a flux-form GR
     /// curl whose edge-emf coefficient is `dt/w`: `w = dt * coeff.reciprocal()`. panics on a zero
     /// numerator (the reciprocal would divide by zero).
     pub fn reciprocal(&self) -> RatFun {
@@ -348,7 +348,7 @@ impl RatFun {
         }
     }
 
-    /// apply the covariant coord shift to BOTH num and den: c_N -> c_N + delta_N
+    /// apply the covariant coord shift to both num and den: c_N -> c_N + delta_N
     /// and sin_th@<2m>/cos_th@<2m> -> @<2m + 2*delta_theta>. public so a
     /// conservation test can form `area_lo.shift_coords(&e_r)` directly.
     pub fn shift_coords(&self, delta: &[i64]) -> RatFun {
@@ -358,7 +358,7 @@ impl RatFun {
         }
     }
 
-    /// EXACT symbolic equality: `self - other` is the zero rational function (the
+    /// exact symbolic equality: `self - other` is the zero rational function (the
     /// cross-multiplied numerator difference cancels to no terms). the public
     /// conservation-proof primitive (area_hi == area_lo-shifted).
     pub fn equals(&self, other: &RatFun) -> bool {
@@ -370,7 +370,7 @@ impl RatFun {
 /// substitute each `c_N -> c_N + delta[N]` and remap every opaque sin/cos symbol
 /// `@<2m>` to `@<2m + 2*delta[1]>` (theta is axis 1; the trig argument translates
 /// by delta[1] cells). a shift with delta[1] == 0 (e.g. the r-direction step) leaves
-/// every theta-keyed symbol UNTOUCHED — the remap is purely along axis 1.
+/// every theta-keyed symbol untouched — the remap is purely along axis 1.
 pub(crate) fn shift_poly_coords(p: &Poly, delta: &[i64]) -> Poly {
     let mut out = p.clone();
     for (ax, &d) in delta.iter().enumerate() {
@@ -414,7 +414,7 @@ fn remap_edge_symbols(p: &mut Poly, prefixes: &[&str], shift: i64) {
     }
 }
 
-/// a field read at a known integer stencil offset — the LEAF of a curl DAG. the
+/// a field read at a known integer stencil offset — the leaf of a curl DAG. the
 /// key is the IR field-load name (e.g. `e_p1`); the offset is the per-axis
 /// integer shift the `LoadAt` (or direct `Param`) read resolves to.
 pub type FieldTerm = (String, Vec<i32>);

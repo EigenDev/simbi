@@ -3,11 +3,11 @@
 //
 // per-cell primitive and conservative state types for MHD (magnetohydrodynamics).
 // extends the hydro state types with a magnetic field vector via composition,
-// generic over scalar `S`, spatial dimension `D`, AND the energy model `E`
-// (Adiabatic -> the energy/pressure slot is a scalar; IsoModel -> Zero<S> ZST,
-// so isothermal MHD carries NO energy at zero memory/FLOP cost).
+// generic over scalar `S`, spatial dimension `D`, and the energy model `E`
+// (Adiabatic -> the energy/pressure slot is a scalar; IsoModel -> Zero<S> zst,
+// so isothermal MHD carries no energy at zero memory/flop cost).
 //
-// the magnetic field B appears in BOTH primitive and conserved states because B
+// the magnetic field B appears in both primitive and conserved states because B
 // is evolved by the induction equation (constrained transport), independent of the
 // conservation-law update. B is the same physical field in both representations.
 //
@@ -31,8 +31,8 @@ use symbi_algebra::{FieldElement, Tensor};
 use symbi_ir::algebra::Scalar;
 
 /// MHD primitive variables: hydro primitives + magnetic field, generic over the
-/// energy model `E` (Adiabatic scalar pressure slot, or IsoModel Zero<S> ZST).
-/// (PartialEq is intentionally NOT derived — E::Slot is not PartialEq generically.)
+/// energy model `E` (Adiabatic scalar pressure slot, or IsoModel Zero<S> zst).
+/// (PartialEq is intentionally not derived — E::Slot is not PartialEq generically.)
 #[derive(Clone, Copy, Debug)]
 pub struct MhdPrimG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
     pub hydro: PrimG<S, D, E>,
@@ -77,7 +77,7 @@ impl<S: Scalar, const D: usize, E: EnergyModel> crate::state::SeedableCons<S, D>
 pub type MhdPrim<S, const D: usize> = MhdPrimG<S, D, Adiabatic>;
 pub type MhdCons<S, const D: usize> = MhdConsG<S, D, Adiabatic>;
 
-/// isothermal MHD state — no energy/pressure slot (Zero<S> ZST).
+/// isothermal MHD state — no energy/pressure slot (Zero<S> zst).
 pub type IsoMhdPrim<S, const D: usize> = MhdPrimG<S, D, IsoModel>;
 pub type IsoMhdCons<S, const D: usize> = MhdConsG<S, D, IsoModel>;
 

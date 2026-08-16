@@ -2,7 +2,7 @@
 // census_expressions.rs
 //
 // the user-facing half of a binned reduction: a census whose bin axes and accumulators
-// are EXPRESSIONS, lowered from the serialized wire form the python front door emits and
+// are expressions, lowered from the serialized wire form the python front door emits and
 // compiled through the same path a source term takes.
 //
 // what these gates establish:
@@ -10,7 +10,7 @@
 //     `density * cell_volume` summed over a spherical grid is the conservation
 //     diagnostic's total mass. this is the dV leaf's only binding, and the spherical
 //     r^2 dr measure is what makes the check non-vacuous.
-//   - an accumulator can RECONSTRUCT a conserved quantity from primitives — the
+//   - an accumulator can reconstruct a conserved quantity from primitives — the
 //     energy census below is p/(gamma-1) + rho v^2/2, written as a dag.
 //   - the bin axes and the values share one graph, so a coordinate used by both is
 //     evaluated once.
@@ -63,7 +63,7 @@ fn build_sim() -> SimSph {
             pre: pressure_at(x[0]),
         })
         .build();
-    // seeding writes the CONSERVED state; the primitives a census reads are produced by
+    // seeding writes the conserved state; the primitives a census reads are produced by
     // the conserved-to-primitive recovery, which the evolve loop runs each stage. recover
     // once here so the sampled state is the live one a census sees in production.
     let sub =
@@ -300,7 +300,7 @@ fn ghost_cells_are_excluded_rather_than_binned() {
 
 #[test]
 fn a_census_sampled_before_the_recovery_fails_loudly() {
-    // seeding writes the CONSERVED state; the primitives a census reads come from the
+    // seeding writes the conserved state; the primitives a census reads come from the
     // conserved-to-primitive recovery. sampling before that ran would report a total
     // mass of zero with no complaint, which reads as physics rather than as a mistake.
     let sim = SimSph::build(Newtonian, IdealGas { gamma: GAMMA }, Spherical)
@@ -418,7 +418,7 @@ fn a_census_reading_pressure_is_refused_on_a_regime_without_one() {
 
 #[test]
 fn a_covered_region_is_excluded_so_a_refined_grid_counts_it_once() {
-    // the LEAF predicate. on a refined hierarchy the coarse cells a finer level resolves are
+    // the leaf predicate. on a refined hierarchy the coarse cells a finer level resolves are
     // not the coarse level's to count: the finer level contributes the same physical volume at
     // its own resolution. counting both inflates every extensive total by exactly the refined
     // volume — smooth, positive, of the right order, and wrong.

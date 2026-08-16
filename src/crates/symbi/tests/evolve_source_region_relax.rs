@@ -1,7 +1,7 @@
 // =============================================================================
 // evolve_source_region_relax.rs
 //
-// region + relax axes, END-TO-END through the live evolve loop (the runtime user-source path:
+// region + relax axes, end-to-end through the live evolve loop (the runtime user-source path:
 // json -> build_user_source -> SourceEvaluator -> source_apply). proves the region and relax
 // axes change the physics of the solution:
 //
@@ -36,7 +36,7 @@ fn build_box() -> Sim {
 #[test]
 fn region_masked_force_acts_only_in_the_left_half() {
     // force a = [0.5, 0], region chi = (x_0 < 0.5) ? 1 : 0. masked S_mom_0 = chi * rho * 0.5.
-    // nodes: 0=PARAM p0 (=accel), 1=CONST 0, 2=VAR_X1, 3=CONST 0.5, 4=LT(2,3), 5=CONST 1,
+    // nodes: 0=param p0 (=accel), 1=const 0, 2=VAR_X1, 3=const 0.5, 4=LT(2,3), 5=const 1,
     //        6=IF_THEN_ELSE(cond=4, then=5, else=1). outputs=[0,1], region=6.
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "region": 6, "params": [0.5],

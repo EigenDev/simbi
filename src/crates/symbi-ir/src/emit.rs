@@ -3,7 +3,7 @@
 //
 // the target/precision descriptors + the shared device-source helpers
 // (`header`, `global_qualifier`, the flat-index stride formula) consumed by the
-// LIVE tensor IR emitters (`tensor/emit_kernel.rs`, `tensor::emit_cuda` /
+// live tensor IR emitters (`tensor/emit_kernel.rs`, `tensor::emit_cuda` /
 // `tensor::emit_cpu`).
 //
 // the live emitters walk the tensor IR directly. only the descriptors + the
@@ -100,18 +100,18 @@ pub(crate) fn global_qualifier(target: Target) -> &'static str {
 }
 
 // =============================================================================
-// SINGLE SOURCE OF TRUTH for index arithmetic. every kernel emitter — CPU, CUDA,
+// single source of truth for index arithmetic. every kernel emitter — CPU, CUDA,
 // the reduction kernel — derives its `__idx_cell_buf{N}` declaration and its
-// per-load flat index from these two functions. the formula lives ONCE; any new
+// per-load flat index from these two functions. the formula lives once; any new
 // backend gets a new arm of the inner `match`, reusing the one formula.
 //
-// the per-buffer ABI here is FIXED:
+// the per-buffer ABI here is fixed:
 //   * `ii`, `jj`, `kk` are the absolute cell coords (i32 / int)
 //   * `buf_lo_{b}_{a}` is buffer b's per-axis origin (i32)
 //   * `ny_{b}` / `nz_{b}` (CPU) or `(int)_ny_{b}` / `(int)_nz_{b}` (CUDA) are
 //     the per-buffer per-axis extents (the stride product is computed inline)
 //
-// this is the DRY consolidation of the per-buffer index arithmetic.
+// this is the dry consolidation of the per-buffer index arithmetic.
 // =============================================================================
 
 /// which source language the emitter renders to. drives the small syntactic
@@ -122,24 +122,24 @@ pub enum IndexLang {
     Cuda,
 }
 
-/// drop the `* strides[CONTIGUOUS_AXIS]` factor from the cell index. this is an IDENTITY:
+/// drop the `* strides[CONTIGUOUS_AXIS]` factor from the cell index. this is an identity:
 /// `strides_from_extent` sets that stride to exactly 1 for every buffer, so the emitted
-/// address is unchanged. what changes is what the compiler can PROVE — with the multiply present the
+/// address is unchanged. what changes is what the compiler can prove — with the multiply present the
 /// index advances by an opaque runtime `i32` per iteration of the innermost loop, so LLVM cannot show
 /// the access is unit-stride and will not vectorize the load. with it gone the index is affine in the
 /// inner coord with coefficient 1.
 ///
-/// the axis is DERIVED from the layout (`CONTIGUOUS_AXIS`), never assumed: the physical-x-fastest
-/// convention makes axis 0 the contiguous one (column-major, unlike C row-major's last axis). Rust (CPU) only — the CUDA arm is SIMT and
+/// the axis is derived from the layout (`CONTIGUOUS_AXIS`), never assumed: the physical-x-fastest
+/// convention makes axis 0 the contiguous one (column-major, unlike C row-major's last axis). Rust (CPU) only — the CUDA arm is simt and
 /// maps `threadIdx.x` onto the same axis, so it needs no index rewrite.
 const fn unit_stride_contiguous(lang: IndexLang) -> bool {
     matches!(lang, IndexLang::Rust)
 }
 
-/// emit ONE `__idx_cell_buf{b}` declaration: the flat offset of cell `(ii, jj, kk)`
+/// emit one `__idx_cell_buf{b}` declaration: the flat offset of cell `(ii, jj, kk)`
 /// for buffer `b`. the per-cell hoist that every subsequent load delta-adds to.
 ///
-/// the formula references the buffer's `lo` and `strides` ARRAYS (pre-multiplied
+/// the formula references the buffer's `lo` and `strides` arrays (pre-multiplied
 /// at View construction). every backend uses the same formula — `IndexLang`
 /// only picks the let/int decl syntax. adding a new backend is one new arm.
 pub fn emit_cell_index_base(lang: IndexLang, ndim: u8, buf: u32, coalesce: bool) -> String {
@@ -160,7 +160,7 @@ pub fn emit_cell_index_base(lang: IndexLang, ndim: u8, buf: u32, coalesce: bool)
         let coords = ["ii", "jj", "kk"];
         let nd = ndim as usize;
         // the unit-stride term belongs to CONTIGUOUS_AXIS — the axis `strides_from_extent` gives a
-        // stride of 1. dropping the multiply on any OTHER axis silently mis-indexes the buffer.
+        // stride of 1. dropping the multiply on any other axis silently mis-indexes the buffer.
         let terms: Vec<String> = (0..nd)
             .map(|a| {
                 if a == symbi_algebra::CONTIGUOUS_AXIS {
@@ -242,7 +242,7 @@ pub fn emit_flat_index(lang: IndexLang, ndim: u8, buf: u32, comps: &[&str]) -> S
 }
 
 // ---- reduction op (the device reduction descriptor's combine semantics). the
-// LAUNCH-level whole-field combine, distinct from `graph::ReduceOp` (the traced
+// launch-level whole-field combine, distinct from `graph::ReduceOp` (the traced
 // axis-reduction tag): the two never convert -- a graph reduce lowers to loop
 // code inside a kernel, this one names the combine of a dedicated reduction
 // kernel over a field. ----

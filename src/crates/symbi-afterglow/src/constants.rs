@@ -7,7 +7,7 @@
 // dimensional mistake is a compile error. `PI` stays a bare f64 (it is dimensionless).
 //
 // usage:
-//  let b: MagneticField = (8.0 * PI * eps_b * rho_e).sqrt(); // rho_e: EnergyDensity
+//  let b: MagneticField = (8.0 * pi * eps_b * rho_e).sqrt(); // rho_e: EnergyDensity
 //  let n_e: NumberDensity = rho_cgs / M_P;                    // rho_cgs: MassDensity
 // =============================================================================
 

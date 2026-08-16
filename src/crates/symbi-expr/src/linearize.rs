@@ -7,7 +7,7 @@
 //
 // variable registers are fixed: x1=0, x2=1, x3=2, t=3. computed nodes draw
 // from a recycling pool starting at register 4, so the bank has to hold the
-// values simultaneously LIVE rather than one per node.
+// values simultaneously live rather than one per node.
 //
 // usage:
 //   let (instrs, output_regs) = linearize(dag.nodes(), &[root_idx]);
@@ -54,11 +54,11 @@ fn find_reachable(nodes: &[Node], outputs: &[usize]) -> Vec<bool> {
     reachable
 }
 
-/// evaluation order (leaves first): the reachable nodes in INDEX order.
+/// evaluation order (leaves first): the reachable nodes in index order.
 ///
 /// the dag is append-only and a node can only name children that already exist, so a
 /// child's index is always below its parent's and index order is a valid topological
-/// order by construction. it is also the order the expression was BUILT in, which is
+/// order by construction. it is also the order the expression was built in, which is
 /// what keeps register pressure low: a value is created near the point it is consumed,
 /// so its live range is short.
 ///
@@ -98,10 +98,10 @@ pub fn linearize(nodes: &[Node], outputs: &[usize]) -> (Vec<Instr>, Vec<usize>) 
     // takes one from a free pool, and a register returns to the pool once the value it
     // holds has been read for the last time.
     //
-    // RECYCLING IS WHAT MAKES LARGE EXPRESSIONS REPRESENTABLE. allocating a fresh
-    // register per node makes the register count equal the NODE count, so the fixed
+    // recycling is what makes large expressions representable. allocating a fresh
+    // register per node makes the register count equal the node count, so the fixed
     // bank caps an expression at a couple of hundred nodes — while the number of values
-    // simultaneously LIVE is a property of the expression's shape, not its size, and
+    // simultaneously live is a property of the expression's shape, not its size, and
     // stays small for the wide sums and products configs actually build (a sum of a
     // thousand terms holds one accumulator plus the term under construction).
     let mut reg_map: Vec<Option<usize>> = vec![None; nodes.len()];
@@ -141,7 +141,7 @@ pub fn linearize(nodes: &[Node], outputs: &[usize]) -> (Vec<Instr>, Vec<usize>) 
 
     for (step, &idx) in order.iter().enumerate() {
         // release everything whose final read was strictly before this instruction. a
-        // source of THIS instruction has last_use >= step, so it is never recycled into
+        // source of this instruction has last_use >= step, so it is never recycled into
         // the destination it is about to be read for.
         if step > 0 {
             for &done in &expiring[step - 1] {
@@ -319,7 +319,7 @@ mod tests {
         let result = dag.if_then_else(cond, x, neg_x);
         let (instrs, out_regs) = linearize(dag.nodes(), &[result]);
         assert_eq!(out_regs.len(), 1);
-        // find the ITE instruction
+        // find the ite instruction
         let ite = instrs.iter().find(|ii| ii.op == Op::IfThenElse).unwrap();
         assert_eq!(ite.dst, out_regs[0]);
     }
@@ -349,7 +349,7 @@ mod tests {
     }
 
     /// a wide sum is the shape configs actually build (a mode sum, a multi-term
-    /// source), and its NODE count is unbounded while only a couple of values are
+    /// source), and its node count is unbounded while only a couple of values are
     /// live at once. without register recycling the allocator hands out one register
     /// per node and the stream indexes past the bank — which panicked as an opaque
     /// out-of-bounds rather than reporting an expression too large to represent.
@@ -405,7 +405,7 @@ mod tests {
         assert_eq!(outputs[0], 7.0 + depth as f64);
     }
 
-    /// a value read by several later instructions has to survive until the LAST of
+    /// a value read by several later instructions has to survive until the last of
     /// them; freeing at the first read would corrupt every consumer after it.
     #[test]
     fn a_shared_subexpression_survives_until_its_final_read() {
@@ -434,7 +434,7 @@ mod tests {
     }
 
     /// a vector field whose components share per-term temporaries — the shape of any
-    /// mode sum — is where the EVALUATION ORDER decides whether the expression is
+    /// mode sum — is where the evaluation order decides whether the expression is
     /// representable at all. finishing one output before starting the next holds every
     /// shared temporary live across the whole first component, giving pressure that
     /// grows with the term count; building in index order retires each term's
@@ -446,7 +446,7 @@ mod tests {
         let x = dag.var_x1();
         let mut acc = [dag.constant(0.0), dag.constant(0.0), dag.constant(0.0)];
         for ii in 0..terms {
-            // one shared temporary per term, read by ALL THREE outputs
+            // one shared temporary per term, read by all three outputs
             let c = dag.constant(ii as f64);
             let scaled = dag.mul(c, x);
             let shared = dag.sin(scaled);

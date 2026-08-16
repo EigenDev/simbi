@@ -5,7 +5,7 @@ edition = "2024"
 description = "schema-driven serialization for symbi — one Schema feeds HDF5 checkpoint, JSON introspection, and ASCII / symbi-display table renderers."
 
 [dependencies]
-# the SHARED canonical regime / field-spec metadata. drives field discovery so
+# the shared canonical regime / field-spec metadata. drives field discovery so
 # the I/O layer never hand-spells m1..mD again — `regime.fields()` is the
 # source of truth.
 symbi-hydro = { path = "../symbi-hydro" }

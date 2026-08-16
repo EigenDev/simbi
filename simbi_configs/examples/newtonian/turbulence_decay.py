@@ -27,7 +27,7 @@ from simbi.types import (
 from simbi.types.typing import GasStateGenerator, InitialStateType
 
 # the seed only breaks symmetry; the saturated statistics are seed-independent,
-# and a FIXED seed makes any two runs differ only in the numerics under test.
+# and a fixed seed makes any two runs differ only in the numerics under test.
 SEED = 20260803
 
 

@@ -64,7 +64,7 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, 
 /// `rho = den`, `vel = mom / rho` kinematics) plus the `Isothermal::pressure` closure
 /// `p = cs^2 * rho` — at `S = Gv`. replaces the hand-written `iso_c2p` Expr builder.
 ///
-/// `IsoModel`'s `prim.pre` is a ZST: the host runtime elides pressure storage and
+/// `IsoModel`'s `prim.pre` is a zst: the host runtime elides pressure storage and
 /// recomputes `cs^2 * rho` in the flux. the substrate stores a real `prim.pre` field
 /// (the iso face flux PLM-reconstructs it), so the materialized closure is traced
 /// explicitly here — the value (`cs^2 * rho`) is the single source either way.
@@ -535,7 +535,7 @@ pub fn imhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
         },
         mag: Tensor::new(mag),
     };
-    // imhd_recover is pure kinematics, so the EOS argument is inert; Gv::ZERO keeps `cs`
+    // imhd_recover is pure kinematics, so the EOS argument is inert; Gv::zero keeps `cs`
     // out of the manifest.
     let prim = imhd_recover(&Isothermal { cs: Gv::ZERO }, &cons);
 

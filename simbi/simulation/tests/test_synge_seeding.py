@@ -2,14 +2,14 @@
 # test_synge_seeding.py
 #
 # the initial condition of a synge (taub-mathews) run must be the one the config
-# declared. seeding converts the config's PRIMITIVES to conserved variables through
+# declared. seeding converts the config's primitives to conserved variables through
 # the closure the sim state carries, while every cons->prim recovery afterwards runs
 # the closure the kernels were baked with; if the two name different gases the run
 # starts somewhere other than where it was pointed. the signature is specific —
 # D = rho W needs no closure and survives, so the corruption lands entirely in the
 # rho/W split and in the pressure.
 #
-# the probe is a UNIFORM hot relativistic state (theta = p/rho = 20, W = 20), which
+# the probe is a uniform hot relativistic state (theta = p/rho = 20, W = 20), which
 # a conservative scheme preserves exactly: whatever comes back differs from what
 # went in only through the seeding conversion. the enthalpies of the two closures
 # stand ~36% apart there, so the round trip has something to fail.

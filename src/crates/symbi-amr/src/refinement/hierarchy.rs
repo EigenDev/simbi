@@ -17,7 +17,7 @@
 // advance_level re-sequences the SSP stage loop (sim/evolve.rs::step) so the
 // register accumulation slots between flux() and the stage update.
 //
-// levels share ABSOLUTE index space: a fine level covering coarse cells
+// levels share absolute index space: a fine level covering coarse cells
 // [cov_lo, cov_hi) lives at fine indices [2*cov_lo, 2*cov_hi), and every level
 // keeps the same global physical origin — `geom.centroid` is correct on every
 // level with the same formula, and no coverage-relative translation exists.
@@ -783,7 +783,7 @@ where
         })
     }
 
-    /// resolve a ROOT-level index to the finest level covering it and read the
+    /// resolve a root-level index to the finest level covering it and read the
     /// field there — the axis-general coverage descent (the display slice builds
     /// the root index per its own orientation/zoom and hands it here).
     fn sample_finest_at(&self, mut idx: [isize; NDIM], kind: FieldKind) -> f64 {
@@ -1293,7 +1293,7 @@ where
         hit
     }
 
-    /// the LOCAL half of the decomposed body step: reduce this tile's finest-level
+    /// the local half of the decomposed body step: reduce this tile's finest-level
     /// backward feedback (force/torque/accreted mass receipts) into its diagnostics
     /// accumulator. the caller consolidates the partials across tiles and applies the
     /// identical global delta everywhere via `apply_global_body_deltas`.
@@ -1327,7 +1327,7 @@ where
         deltas
     }
 
-    /// the GLOBAL half of the decomposed body step: apply the cross-tile-summed deltas +
+    /// the global half of the decomposed body step: apply the cross-tile-summed deltas +
     /// the prescribed orbit advance to this tile's finest bodies (identical input on every
     /// tile -> identical body state, the lockstep contract), record the global per-step
     /// exchange in the history, sync the advanced positions/velocities to the coarser
@@ -1654,8 +1654,8 @@ where
 
     /// the cfl-limited root dt this hierarchy would take, ahead of the t_final clamp: the min over
     /// every level of `cfl(level) * RATIO^level` (covered coarse cells are conservative averages,
-    /// so a fast fine-only feature is diluted out of the root cfl; level l subcycles RATIO^l times,
-    /// so its limit enters scaled by RATIO^l). exposed for the decomposed driver: it takes the
+    /// so a fast fine-only feature is diluted out of the root cfl; level l subcycles ratio^l times,
+    /// so its limit enters scaled by ratio^l). exposed for the decomposed driver: it takes the
     /// global min of this across tiles, then drives each tile with `evolve(t + global_dt)` -- since
     /// the global dt is the min, each tile's internal `dt_cfl.min(global_dt)` collapses to
     /// global_dt, so the existing clamp alone produces a lockstep root step.
@@ -1688,8 +1688,8 @@ where
     /// advance, then the root clock + body state. every level limits the root
     /// step — covered coarse cells are conservative averages of fine data, so
     /// a fast feature resolved only on the fine level is diluted out of the
-    /// root's own cfl; level l subcycles RATIO^l times, so its limit enters
-    /// scaled by RATIO^l.
+    /// root's own cfl; level l subcycles ratio^l times, so its limit enters
+    /// scaled by ratio^l.
     fn step_root(&mut self, t_final: f64) {
         // the coarse-fine invariant: the prolongation's smooth-data polynomial degree
         // must be at least the evolution reconstruction's stencil reach (= its degree
@@ -1912,7 +1912,7 @@ where
 
     /// advance one level by dt, then subcycle the finer level, restrict, and
     /// reflux. `alpha0` is this level's substep start as a fraction of the
-    /// PARENT's step; 0.0 on the root. the coarse-fine ghosts are
+    /// parent's step; 0.0 on the root. the coarse-fine ghosts are
     /// stage-correct in time: the prolong feeding stage k reconstructs at the
     /// shu-osher stage time `alpha0 + c_k / RATIO` (see
     /// stage_time_fractions), which restores second-order temporal coupling
@@ -1954,8 +1954,8 @@ where
 
     /// step prologue: snapshot this level's prims (for the finer level's time-interpolated ghost
     /// prolongation) + the rk u_n snapshot. `advance_level` calls begin / stage* / tail in order;
-    /// splitting them out lets the DECOMPOSED root driver drive the root stages one at a time with
-    /// a root halo exchange BETWEEN stages (rk2-root requires the
+    /// splitting them out lets the decomposed root driver drive the root stages one at a time with
+    /// a root halo exchange between stages (rk2-root requires the
     /// corrector to read each neighbor's stage-1 update, exactly like the single-level exchange).
     pub fn level_step_begin(&mut self, level: usize, dt: f64) {
         let has_finer = level + 1 < self.levels.len();
@@ -2128,7 +2128,7 @@ where
             HookPoint::BeforeGhostFill => {
                 // c2p over the full allocated domain recomputed the coarse-fine
                 // prim ghosts from stale cons; re-prolong them at the time of
-                // the state entering the NEXT stage before the physical fill
+                // the state entering the next stage before the physical fill
                 // reads corners.
                 if has_coarser {
                     this.prolong_cf(level, alpha0 + stage_time[ii] / RATIO as f64);
@@ -2529,10 +2529,10 @@ where
         }
     }
 
-    /// the MONOLITHIC finer-level subcycle: RATIO substeps of level `level+1`, each prolonged from
-    /// this level's time-interpolated prims. the DECOMPOSED driver REPLICATES this loop but drives
+    /// the monolithic finer-level subcycle: ratio substeps of level `level+1`, each prolonged from
+    /// this level's time-interpolated prims. the decomposed driver replicates this loop but drives
     /// each fine substep's stages with a fine-level halo exchange between them (the fine patch may
-    /// span a tile cut), so this method is the single-tile reference. PURE EXTRACTION.
+    /// span a tile cut), so this method is the single-tile reference. pure extraction.
     fn level_subcycle(&mut self, level: usize, dt: f64) -> bool {
         let fine_dt = dt / RATIO as f64;
         for sub in 0..RATIO {
@@ -2599,7 +2599,7 @@ where
         prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
     }
 
-    /// advance this level's clock (fine levels only; the root clock is the driver's). PURE EXTRACTION.
+    /// advance this level's clock (fine levels only; the root clock is the driver's). pure extraction.
     fn level_clock(&mut self, level: usize, dt: f64) {
         if level > 0 {
             let s = &mut self.levels[level].state;
@@ -2630,7 +2630,7 @@ where
     }
 
     /// fill level `level`'s coarse-fine prim ghosts from its parent's
-    /// time-interpolated prims: `(1 - alpha)*prim_old + alpha*prim_new`. pub so the DECOMPOSED
+    /// time-interpolated prims: `(1 - alpha)*prim_old + alpha*prim_new`. pub so the decomposed
     /// driver can drive the fine subcycle (prolong -> fine ghost -> fine stages with exchange).
     pub fn prolong_cf(&self, level: usize, alpha: f64) {
         let parent = &self.levels[level - 1];
@@ -2723,7 +2723,7 @@ where
                 }
             }
         }
-        // the bface TRANSVERSE HALO at coarse-fine sides: the scalar ghost
+        // the bface transverse halo at coarse-fine sides: the scalar ghost
         // fill skips CF faces, so the transversely-extended flux sweep would
         // read stale normal-B there — prolong it from the coarse face lattice
         // (divB and conservation are indifferent to these values; this is the
@@ -3038,7 +3038,7 @@ where
             return None;
         }
 
-        // the cells the question can be ASKED of. truncation error is a statement about a
+        // the cells the question can be asked of. truncation error is a statement about a
         // solution the grid resolves; where the target changes by a large factor across one cell
         // the reconstruction is clipping rather than approximating, and its error carries no
         // order. such cells are real and are corrected like any other — they are silent on whether
@@ -3254,7 +3254,7 @@ where
 /// how a declared stationary target's discrete imbalance behaves under one halving of the cell
 /// width, per conserved component.
 pub struct ImbalanceConvergence {
-    /// median over RESOLVED coarse cells of `|R_coarse(cell)| / mean |R_fine(its children)|`.
+    /// median over resolved coarse cells of `|R_coarse(cell)| / mean |R_fine(its children)|`.
     /// truncation error gives `2^p` (4 for a second-order scheme); a continuum residual gives 1.
     pub ratio: Vec<f64>,
     /// the largest single-cell `|R|` over the resolved cells — the scale below which a
@@ -3315,7 +3315,7 @@ fn for_each_child<const D: usize>(c: [isize; D], ratio: usize, mut f: impl FnMut
 }
 
 
-/// the per-stage EFFECTIVE flux weights of an ssp scheme: stage i's operator
+/// the per-stage effective flux weights of an ssp scheme: stage i's operator
 /// enters the step total with `ac_i * prod_{k>i} ac_k` (each later convex
 /// combine rescales the accumulated state by its ac). euler -> [1]; rk2 ->
 /// [1/2, 1/2]; rk3 -> [1/6, 1/6, 2/3]. the weights sum to 1; the register
@@ -3333,7 +3333,7 @@ fn flux_weights(stages: &[(f64, f64)]) -> Vec<f64> {
         .collect()
 }
 
-/// is this level on a uniform cartesian grid — the flux register's KERNEL
+/// is this level on a uniform cartesian grid — the flux register's kernel
 /// path (cpu + gpu, constant area/volume scales)? curvilinear levels keep
 /// the per-coordinate host loops.
 fn uniform_cartesian<R, const NDIM: usize, const DOF: usize, M, E, S, Mem>(
@@ -3352,7 +3352,7 @@ where
 /// snapshot a level's prims (+ cell/face B for mhd) into the *_old buffers
 /// via the copy kernel — parallel on the host, device-side on a gpu backend
 /// (no host touch on unified memory). a serial host memcpy here was a
-/// measured per-root-step stall at production sizes (~0.7 GB per step at
+/// measured per-root-step stall at production sizes (~0.7 gb per step at
 /// n = 256); the dispatch setup only matters on demo grids where the copy
 /// is microseconds anyway.
 fn save_prim_old<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
@@ -3439,7 +3439,7 @@ fn region_to_domain<const D: usize>(
 /// the coverage must sit inside the parent interior, and on every coarse-fine
 /// (non-touching) side leave enough parent cells that the prolongation's
 /// deepest read — the parent of the outermost fine ghost minus the stencil
-/// halfwidth — stays inside the parent ALLOCATED domain.
+/// halfwidth — stays inside the parent allocated domain.
 fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     coverage: &Domain<D>,
     parent: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
@@ -3489,8 +3489,8 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
 /// the sub-grid of tiles that carry the first fine level. for SMR (one refined box per level) the
 /// refined tiles form a contiguous rectangle; `order[k]` is the tile index at fine-flatten position
 /// `k`, and `devices[k]`/`counts` give that sub-grid's device map + shape for `exchange_grid`. when
-/// the patch is TILE-LOCAL the sub-grid is 1x1, so the fine exchange is a no-op; when
-/// the patch SPANS cuts the sub-grid has internal cuts and the fine halos are exchanged.
+/// the patch is tile-local the sub-grid is 1x1, so the fine exchange is a no-op; when
+/// the patch spans cuts the sub-grid has internal cuts and the fine halos are exchanged.
 pub struct FineSubgrid<const NDIM: usize> {
     pub counts: [usize; NDIM],
     pub order: Vec<usize>,
@@ -3714,10 +3714,10 @@ pub fn gather_decomposed_hierarchy_tracers<
     }
 }
 
-/// exchange one LEVEL's halos across an ordered set of tiles (a sub-grid of shape `counts`), then
+/// exchange one level's halos across an ordered set of tiles (a sub-grid of shape `counts`), then
 /// per-tile `ghost_fill` at that level. `order[k]` is the tile index at flatten position `k`;
 /// `devices[k]` is order-aligned. cut faces are `CoarseFine` (so `ghost_fill` leaves them for the
-/// exchange); the sub-grid's OUTER faces are the patch's coarse-fine boundary (prolong-filled) or a
+/// exchange); the sub-grid's outer faces are the patch's coarse-fine boundary (prolong-filled) or a
 /// physical boundary, neither of which `exchange_grid` touches (it moves only internal cuts).
 fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
@@ -3976,7 +3976,7 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
                 }
             });
         }
-        // the FINE subcycle, decomposed across the refined tiles: RATIO substeps, each fine substep
+        // the fine subcycle, decomposed across the refined tiles: ratio substeps, each fine substep
         // driven stage-by-stage with a fine halo exchange (a no-op for a tile-local 1x1 sub-grid).
         if let Some(fg) = &fine {
             let fine_dt = gdt / RATIO as f64;

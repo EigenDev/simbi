@@ -1,7 +1,7 @@
 # =============================================================================
 # nmhd_rotor.py
 #
-# the magnetized rotor test (Balsara & Spicer 1999; Toth 2000 test 1) in NEWTONIAN
+# the magnetized rotor test (Balsara & Spicer 1999; Toth 2000 test 1) in newtonian
 # ideal mhd, HLLD by default. a dense disk spins inside a uniform Bx field; the
 # rotation winds the field into torsional alfven waves — a low-beta robustness +
 # div(B) stress test. genuine 2.5d (spatial d=2, vector dof=3).

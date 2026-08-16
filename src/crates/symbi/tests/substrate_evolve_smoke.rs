@@ -1,4 +1,4 @@
-// smoke: a full time-marched isothermal Euler evolution where EVERY operator in
+// smoke: a full time-marched isothermal Euler evolution where every operator in
 // the RK2 step (ghost_fill, c2p, cfl, flux, godunov_euler, godunov_rk2, snapshot)
 // is the substrate-generated kernel — no hand-written kernel touched.
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
@@ -81,8 +81,8 @@ fn locally_isothermal_cs2_derived_from_ic_and_held() {
     let n = 64usize;
     let dx = 1.0 / n as f64;
     let pi = std::f64::consts::PI;
-    // a VARYING local temperature cs^2(x) = p_IC(x)/rho_IC(x): a locally isothermal IC.
-    // cs^2 is a DERIVED quantity — the user sets density + pressure, nothing else.
+    // a varying local temperature cs^2(x) = p_IC(x)/rho_IC(x): a locally isothermal IC.
+    // cs^2 is a derived quantity — the user sets density + pressure, nothing else.
     let cs2_of = |x: f64| 0.5 + 0.3 * (2.0 * pi * x).sin();
     let rho_of = |x: f64| 1.0 + 0.05 * (2.0 * pi * x).cos();
     // at rest; the cs^2 gradient drives it.
@@ -135,7 +135,7 @@ fn locally_isothermal_cs2_derived_from_ic_and_held() {
 
 #[test]
 fn locally_isothermal_ghost_temperature_is_the_clamped_interior_value() {
-    // a locally isothermal run derives cs^2(x) = p_IC/rho_IC over the INTERIOR; the ghost
+    // a locally isothermal run derives cs^2(x) = p_IC/rho_IC over the interior; the ghost
     // cells must then receive the clamped zero-gradient continuation of that field. left
     // at the constructor's uniform cs^2 they poison every boundary flux: the ghost-pressure
     // pass books p = cs2_ghost * rho into the boundary reconstruction, and a cold disk edge
@@ -206,7 +206,7 @@ fn locally_isothermal_ghost_temperature_is_the_clamped_interior_value() {
     );
 
     // integration: recover the interior prims, then fill ghosts — the ghost pressure
-    // must obey the LOCAL closure p = cs2*rho using the per-cell cs^2.
+    // must obey the local closure p = cs2*rho using the per-cell cs^2.
     sub.c2p(&sim);
     sub.ghost_fill(&sim);
     for c in sim.geom.allocated.iter() {

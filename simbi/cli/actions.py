@@ -31,7 +31,7 @@ _EXCLUDED_DIRS = frozenset(
     }
 )
 
-# a simbi config DEFINES a SimbiProblem subclass — directly, or by subclassing a
+# a simbi config defines a SimbiProblem subclass — directly, or by subclassing a
 # base config it imports from another simbi_configs module. `_defines_a_config`
 # recognizes both from the ast without importing (importing every candidate would
 # be slow and run module side effects across a symlinked tree). config bases live

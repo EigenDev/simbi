@@ -4,12 +4,12 @@
 // the evolve-loop lift of the kernel-level fused-vs-additive equivalence. the
 // kernel proof
 // (`symbi-discretize::godunov_with_fused_source::fused_stage_equals_plain_plus_
-// additive_pass`) asserts a SINGLE stage of fused-godunov is bit-identical to
+// additive_pass`) asserts a single stage of fused-godunov is bit-identical to
 // plain-godunov + the standalone `source_apply` pass. this test lifts that to
-// the production `evolve()` loop: a full multi-step march with the SAME source
+// the production `evolve()` loop: a full multi-step march with the same source
 // run two ways —
-//   - FUSED:    `with_fused_source(b)`    -> source folded into the godunov kernel
-//   - ADDITIVE: `with_additive_source(b)` -> plain godunov + per-stage source_apply
+//   - fused:    `with_fused_source(b)`    -> source folded into the godunov kernel
+//   - additive: `with_additive_source(b)` -> plain godunov + per-stage source_apply
 // must produce bit-for-bit identical conserved state at every interior cell,
 // every step. SSP-RK2 is used so the FP-sensitive corrector stage (a0=ac=0.5,
 // where the fused kernel adds the source as a separate `+ ac*dt*S` term) is
@@ -140,7 +140,7 @@ fn adiabatic_uniform_accel_additive_equals_fused_rk2() {
 #[test]
 fn adiabatic_point_mass_additive_equals_fused_rk2() {
     // 2D ideal-gas Euler under point-mass gravity, SSP-RK2. exercises the lazily-
-    // declared centroid scalars (x_lo_k, dx_k) AND the energy overlay in 2D.
+    // declared centroid scalars (x_lo_k, dx_k) and the energy overlay in 2D.
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let n = 24usize;
     let bound = 2.0_f64;

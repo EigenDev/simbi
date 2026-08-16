@@ -9,30 +9,30 @@
 // (the rmhd_ct_curl kernel formula). across a coarse-fine interface the
 // restriction replaces the covered faces (interface included) with the fine
 // area-averages — equivalent to a CT update with the time/length-averaged
-// FINE edge EMFs. the outside faces adjacent to the interface edges were
-// updated with the COARSE EMFs; this register accumulates the mismatch
+// fine edge EMFs. the outside faces adjacent to the interface edges were
+// updated with the coarse EMFs; this register accumulates the mismatch
 //   dPhi(edge) = sum_substeps dt_f * (length-avg fine EMF) - dt * (coarse EMF)
-// and corrects each adjacent NON-restricted face with the curl coefficient —
+// and corrects each adjacent non-restricted face with the curl coefficient —
 // div(curl) = 0 cell-by-cell, so the staggered divB stays at machine zero
 // across the level jump.
 //
-// SLAB-FIELD storage, all kernels (cpu + gpu through the dispatch boundary): for
-// each edge direction t and each coarse-fine SIDE PLANE (axis b != t, side s,
+// slab-field storage, all kernels (cpu + gpu through the dispatch boundary): for
+// each edge direction t and each coarse-fine side plane (axis b != t, side s,
 // skipped where the coverage touches the coarse interior), one thin Field
 // over the in-plane t-edge slab (t cells x a nodes at the plane's b node,
 // a = the third axis). a box-corner edge lies in two side slabs — both copies
 // accumulate the identical value (same inputs, same kernels) and each side's
-// apply consumes its own copy for a DIFFERENT face set, so no dedup is needed:
+// apply consumes its own copy for a different face set, so no dedup is needed:
 //   zero            — field_fill per slab
 //   accumulate_*    — field_axpy_shift (coarse, arg 0, scale -dt) /
 //                     refine_acc_edge (fine sub-edge pair, scale dt_f/ratio)
-//   apply           — ONE field_axpy_shift gather per slab: the outside
+//   apply           — one field_axpy_shift gather per slab: the outside
 //                     a-faces at b-cell (cov.lo-1 | cov.hi) each read their
 //                     single in-plane edge (arg_b = +1 | 0) with the curl
 //                     coefficient sign(t, a, side) * 1/dx_b. the restricted
 //                     faces never appear in these sets by construction.
 //
-// both levels' effective per-step EMF is read from the efield buffers AFTER a
+// both levels' effective per-step EMF is read from the efield buffers after a
 // level's stage loop (post_godunov writes the rk2 time-average in place before
 // the single curl; euler keeps the raw stage EMF). cartesian only — the curl
 // coefficients are 1/dx.
@@ -104,10 +104,10 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
                         let (lo, hi) = if ax == bb {
                             (plane, plane + 1)
                         } else if ax == aa {
-                            // a-NODE range, both extremes (the box corners).
+                            // a-node range, both extremes (the box corners).
                             (s.lo, s.hi + 1)
                         } else {
-                            // t-CELL range along the edge direction.
+                            // t-cell range along the edge direction.
                             (s.lo, s.hi)
                         };
                         Space {
@@ -205,7 +205,7 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
                 (false, false) => 1.0,
             };
             let scale = sign * inv_dx[bb];
-            // exec = the outside a-face slab: b at the outside CELL, the edge
+            // exec = the outside a-face slab: b at the outside cell, the edge
             // read shifted back onto the plane node.
             let cov = &self.coverage;
             let dom = Domain::new(std::array::from_fn(|ax| {
@@ -299,8 +299,8 @@ mod tests {
         // t = 0 (x): planes b in {1} (y CF both sides; z touches) -> 2 slabs.
         // t = 1 (y): planes b in {0} -> 2. t = 2 (z): b in {0, 1} -> 4.
         assert_eq!(reg.slabs.len(), 8);
-        // a z-edge slab on the x-lo plane: x fixed at node 4, y spans NODES
-        // [4, 9), z spans CELLS [0, 2).
+        // a z-edge slab on the x-lo plane: x fixed at node 4, y spans nodes
+        // [4, 9), z spans cells [0, 2).
         let s = reg
             .slabs
             .iter()
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn corner_edges_live_in_two_slabs() {
-        // the box corner edge (t = 2 at x-node 4, y-node 4) appears in BOTH
+        // the box corner edge (t = 2 at x-node 4, y-node 4) appears in both
         // the x-lo and y-lo slabs — each side's apply consumes its own copy
         // for a different face set, so the overlap is by design.
         let reg = EmfRegister::<3, symbi_xpu::HostMemory>::new(&cov3(), &interior3()).unwrap();

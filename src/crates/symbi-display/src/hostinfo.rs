@@ -3,7 +3,7 @@
 //
 // host machine + process resource sampling for the dashboard's machine card:
 // hostname, logical cpu count, and this process's resident memory against the
-// node's physical ram. sampled on the SOLVER side (the compute node), so an
+// node's physical ram. sampled on the solver side (the compute node), so an
 // attach client sees the compute node running the job even when the ui renders elsewhere.
 //
 // stdlib + libc only; every value is best-effort (0 / "?" on an unsupported
@@ -36,7 +36,7 @@ pub struct HostStats {
 /// runtime, so the values are handed in by the driver that owns the device binding.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DeviceStats {
-    /// the vendor's device name, e.g. "AMD Instinct MI250X".
+    /// the vendor's device name, e.g. "amd Instinct MI250X".
     pub name: String,
     /// devices visible to this process.
     pub count: usize,

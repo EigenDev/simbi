@@ -1,13 +1,13 @@
 # =============================================================================
 # test_mhd_oop_energy_conservation.py
 #
-# the reduced-dimension OUT-OF-PLANE energy-conservation gate.
+# the reduced-dimension out-of-plane energy-conservation gate.
 # on a smooth periodic 1.5D relativistic-MHD flow whose transverse By is a cell-centered
 # conserved variable (flux-evolved by the out-of-plane predictor), the
-# total energy tau must hold to machine roundoff at EVERY resolution. this is the companion to
+# total energy tau must hold to machine roundoff at every resolution. this is the companion to
 # test_mhd_energy_conservation (which covers the in-plane/CT energy with a zero out-of-plane
 # field): it witnesses that the Poynting gas flux F_tau conserves the out-of-plane magnetic
-# energy By^2/2 exactly, with NO magnetic-energy patch — the property that lets the delicate
+# energy By^2/2 exactly, with no magnetic-energy patch — the property that lets the delicate
 # relativistic c2p recover a physical state (a drifting tau would desync from |B|^2 and fail).
 # =============================================================================
 import glob

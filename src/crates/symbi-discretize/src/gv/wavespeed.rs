@@ -671,7 +671,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     (end_trace(), writes)
 }
 
-/// the source-admissibility CFL for GR-RMHD — the wu 2017 `lambda_S` mechanism. the covariant
+/// the source-admissibility CFL for gr-rmhd — the wu 2017 `lambda_S` mechanism. the covariant
 /// geodesic + EM-stress source advances `U -> U + dt S`, and the step must leave the result inside
 /// the admissible set: `D > 0`, `q(U) = E - sqrt(D^2 + |S|^2) > 0` and `psi(U) > 0` (wu & tang,
 /// theorem 2.1).
@@ -1276,7 +1276,7 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
     (end_trace(), writes)
 }
 
-/// the FOFC admissible-boundary projection for GR-MHD — the magnetized twin of
+/// the FOFC admissible-boundary projection for gr-mhd — the magnetized twin of
 /// [`fofc_project_gr_gv`], and the provable replacement for the RMHD freeze parachute.
 ///
 /// two facts make the hydro projection carry over unchanged:

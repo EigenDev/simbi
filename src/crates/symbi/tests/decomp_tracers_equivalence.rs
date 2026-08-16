@@ -10,14 +10,14 @@
 // whose ghost band the halo exchange filled from the neighbor, so the velocity it
 // samples is the same the monolithic grid would; migration only re-homes it to
 // the tile that now contains it. escape (leaving the whole domain) and sink
-// crossing are scanned against the GLOBAL box, not the tile slab.
+// crossing are scanned against the global box, not the tile slab.
 //
 // setup: a uniform diagonal drift carries a mass-weighted tracer population
 // (clustered on a density blob) across the 2x2 grid's cuts. tracers are seeded
-// ONCE from a reference grid and partitioned by position, so the monolithic and
+// once from a reference grid and partitioned by position, so the monolithic and
 // decomposed runs start from the identical population (same ids, same positions).
 // the comparison sorts by id; a non-vacuity guard requires tracers to have moved
-// AND at least one to have crossed a cut, or the migration is never exercised.
+// and at least one to have crossed a cut, or the migration is never exercised.
 // =============================================================================
 
 use symbi::regimes::substrate_gpu::device_sync;
@@ -53,8 +53,8 @@ fn sync_devices() {
     }
 }
 
-// a density + PRESSURE blob off-center: the drift carries it (and the tracers seeded on it)
-// across the central cut, while the pressure bump makes the velocity SPATIALLY VARYING. that
+// a density + pressure blob off-center: the drift carries it (and the tracers seeded on it)
+// across the central cut, while the pressure bump makes the velocity spatially varying. that
 // non-uniformity is what makes migration load-bearing -- a mis-homed tracer whose sampler
 // clamps past the ghost band would read a different velocity than the tile that truly owns it.
 // a uniform-velocity drift would leave the trajectory identical regardless of migration.

@@ -2,13 +2,13 @@
 // json.rs
 //
 // `JsonBackend` — schema-only introspection. writes the tree's metadata +
-// dataset shapes (NOT the field data) as a small JSON document. lets a tool
+// dataset shapes (not the field data) as a small JSON document. lets a tool
 // dump "what's in this checkpoint" without h5py:
 //
 //   symbi-io --inspect kepler_final.h5 > schema.json
 //
 // matched with a small `Display` impl so the same Tree prints as a clean
-// ASCII tree at the terminal (no JSON tooling required).
+// ascii tree at the terminal (no JSON tooling required).
 // =============================================================================
 
 use std::fmt::Write;
@@ -17,7 +17,7 @@ use crate::attr::Attr;
 use crate::tree::{Dataset, Tree};
 
 /// render a `Tree` as a JSON object describing the schema. dataset data is
-/// NOT serialized — only `name`, `shape`, and `dtype`. attributes carry
+/// not serialized — only `name`, `shape`, and `dtype`. attributes carry
 /// their typed value (so the JSON is self-describing — no schema-side
 /// document required).
 pub fn schema_json(tree: &Tree<'_>) -> String {

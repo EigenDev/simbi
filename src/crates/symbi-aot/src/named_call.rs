@@ -2,8 +2,8 @@
 // named_call.rs
 //
 // the name-keyed CPU-kernel invocation for host + test code. resolves an emitted
-// kernel and its buffer/scalar manifest by name, binds every buffer + scalar BY
-// FIELD NAME (order-independent), then runs the structured slice ABI.
+// kernel and its buffer/scalar manifest by name, binds every buffer + scalar by
+// field name (order-independent), then runs the structured slice ABI.
 //
 // this is the only sanctioned way for host code to call an emitted kernel. the
 // positional `__raw(field0, field1, .., gamma)` form is codegen-internal: its
@@ -78,7 +78,7 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
         self
     }
 
-    /// bind a read-only input with an EXPLICIT layout (staggered / multi-axis domains).
+    /// bind a read-only input with an explicit layout (staggered / multi-axis domains).
     pub fn input_at(mut self, name: &str, data: &'a [S], lo: &'a [i32], extent: &'a [u32]) -> Self {
         self.bufs.push(Binding {
             name: name.to_string(),
@@ -88,7 +88,7 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
         self
     }
 
-    /// bind an output with an EXPLICIT layout (staggered / multi-axis domains).
+    /// bind an output with an explicit layout (staggered / multi-axis domains).
     pub fn output_at(
         mut self,
         name: &str,
@@ -232,7 +232,7 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
                     // became a runtime scalar means. a log-spacing test supplies `map_kind_{ax}`
                     // = 1 explicitly (its analytic expectations fail loudly if it forgets).
                     //
-                    // `x_lo_{ax}` joins them because a kernel that only DIFFERENCES widths reads
+                    // `x_lo_{ax}` joins them because a kernel that only differences widths reads
                     // the axis origin solely through the mapped arm of that selector; the uniform
                     // map bypasses that arm — so the origin is unread and any value serves. a
                     // kernel that positions a cell absolutely (a moving mesh, a curvilinear
@@ -283,7 +283,7 @@ mod tests {
         let (mut rho, mut vel, mut pre) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
         let grid = [n as u32];
         let dom = [0i32];
-        // deliberately bind in a SCRAMBLED order to prove binding keys on field name; positional order is ignored.
+        // deliberately bind in a scrambled order to prove binding keys on field name; positional order is ignored.
         NamedKernel::new("rhd_c2p_1d")
             .output("prim.pre", &mut pre)
             .input("cons.nrg", &nrg)

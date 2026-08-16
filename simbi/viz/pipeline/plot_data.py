@@ -107,7 +107,7 @@ def apply_slicing(
 
     sliced_fields: list[FieldData] = []
     for field in fields:
-        # plan and execute the slice for THIS field's domain
+        # plan and execute the slice for this field's domain
         # find_slice_index uses physical position, so works across levels
         plan = plan_slice(field.domain, slice_spec)
         sliced_values, sliced_domain = execute_slice(

@@ -75,7 +75,7 @@ def extract_timestep(filename: str | Path) -> float:
     """
     name = Path(filename).name
 
-    # try standard simbi format: chkpt.NNNN.h5 (supports underscore separators)
+    # try standard simbi format: chkpt.nnnn.h5 (supports underscore separators)
     match = re.search(r"chkpt\.(\d[\d_]*(?:\.\d[\d_]*)?)", name)
     if match:
         return float(match.group(1).replace("_", ""))

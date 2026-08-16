@@ -1,13 +1,13 @@
 // =============================================================================
 // imhd_divb_under_evolve.rs
 //
-// end-to-end validation of the ISOTHERMAL-MHD substrate (Mignone 2007): run the full
+// end-to-end validation of the isothermal-mhd substrate (Mignone 2007): run the full
 // no-energy KernelSet (c2p -> ghost_fill -> flux per dir -> cfl -> snapshot -> godunov
 // -> post_godunov[CT] -> rk2) for ~10 steps with periodic BCs and assert
 //   (a) the discrete staggered div(B) stays at machine zero (the shared CT stack is
-//       correctly wired through the energy-OPTIONAL mhd_substrate path, and the
-//       iso `bcell_from_bface` — interpolation only, NO 1/2|B|^2 correction — works), and
-//   (b) the state stays PHYSICAL (rho > 0, finite) — the trivial iso c2p cannot fail.
+//       correctly wired through the energy-optional mhd_substrate path, and the
+//       iso `bcell_from_bface` — interpolation only, no 1/2|B|^2 correction — works), and
+//   (b) the state stays physical (rho > 0, finite) — the trivial iso c2p cannot fail.
 //
 // IC: Orszag-Tang vortex, analytically div-free B, isothermal closure (cs = 1).
 // =============================================================================
@@ -46,7 +46,7 @@ fn make_sim() -> Sim {
     let dz = 1.0 / NZ as f64;
 
     // analytically div-free staggered B (seed_faces reads face_coord — face-midpoint sampling).
-    // iso primitive: no energy slot (pre is ZST). set_initial seeds the conserved (den, mom =
+    // iso primitive: no energy slot (pre is zst). set_initial seeds the conserved (den, mom =
     // rho*v) from the prim and the cell-centered B from prim mag.
     Sim::build(IsothermalMhd, Isothermal { cs: CS }, Cartesian)
         .cells([NX, NY, NZ])
@@ -139,7 +139,7 @@ fn run_solver(solver: Solver) {
         "iso evolve produced only {steps_seen} steps — gate barely exercised"
     );
 
-    // PHYSICALITY: the trivial iso c2p is rho = den; every interior cell must stay positive.
+    // physicality: the trivial iso c2p is rho = den; every interior cell must stay positive.
     for c in sim.geom.interior.iter() {
         let rho = *sim.fields.cons.den.view().at(c);
         assert!(rho.is_finite() && rho > 0.0, "cell {c:?}: rho = {rho}");

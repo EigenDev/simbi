@@ -4,15 +4,15 @@
 // proves the stage-0 `u_stage` elision is a pure removal of redundant work.
 //
 // at the first stage of a multi-stage SSP scheme, `snapshot` has just copied `cons -> u_n` and
-// nothing has touched cons since — so `u_n` ALREADY holds the stage input, and the separate
+// nothing has touched cons since — so `u_n` already holds the stage input, and the separate
 // `cons -> u_stage` copy moves a full-grid conserved set for no information. the driver therefore
 // sets `stage_input_is_un` and skips `snapshot_stage`, and `FieldStore::stage_input()` binds `u_n`
 // for that stage.
 //
-// the risk this gates: `snapshot` fills the ALLOCATED domain while `snapshot_stage` fills only the
-// INTERIOR, so the two buffers differ in the ghost band. if any consumer of the stage input ever
+// the risk this gates: `snapshot` fills the allocated domain while `snapshot_stage` fills only the
+// interior, so the two buffers differ in the ghost band. if any consumer of the stage input ever
 // read a ghost cell, the alias would silently change physics. it must not — so the same initial
-// state, evolved with the elision ON and with it forced OFF (`elide_stage_snapshot = false`, the
+// state, evolved with the elision on and with it forced off (`elide_stage_snapshot = false`, the
 // reference path), must produce a bit-for-bit identical trajectory.
 //
 // a runtime user source is attached because `source_apply` is the consumer that reads the stage
@@ -55,8 +55,8 @@ fn stage0_un_alias_matches_the_snapshot_stage_copy() {
     let n = 32usize;
     let t_final = 0.05;
 
-    // an external acceleration; build_user_source wraps it into the momentum AND energy overlays,
-    // both of which evaluate S at the STAGE INPUT — the buffer under test.
+    // an external acceleration; build_user_source wraps it into the momentum and energy overlays,
+    // both of which evaluate S at the stage input — the buffer under test.
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.7, -0.4],
         "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "PARAMETER", "param_idx": 1} ]
@@ -85,7 +85,7 @@ fn stage0_un_alias_matches_the_snapshot_stage_copy() {
         sim
     };
 
-    // REFERENCE: force the `cons -> u_stage` copy at every stage, eliding nothing.
+    // reference: force the `cons -> u_stage` copy at every stage, eliding nothing.
     let mut sim_ref = build();
     sim_ref
         .workspace
@@ -97,7 +97,7 @@ fn stage0_un_alias_matches_the_snapshot_stage_copy() {
     );
     evolve(&mut sim_ref, &sub_ref, t_final).expect("reference evolve");
 
-    // ELIDED: production default — stage 0 binds u_n and skips the copy.
+    // elided: production default — stage 0 binds u_n and skips the copy.
     let mut sim_elide = build();
     assert!(
         sim_elide
@@ -112,7 +112,7 @@ fn stage0_un_alias_matches_the_snapshot_stage_copy() {
     );
     evolve(&mut sim_elide, &sub_elide, t_final).expect("elided evolve");
 
-    // GUARD: the alias really engaged. RK2 leaves the flag set from its LAST stage, which is the
+    // guard: the alias really engaged. RK2 leaves the flag set from its last stage, which is the
     // corrector (ii = 1) -> false. so the assertion targets the invariant that makes the elision legal:
     // multi-stage, and the reference genuinely took the other branch.
     assert!(

@@ -1,8 +1,8 @@
 # =============================================================================
 # test_refined_driven_boundary.py
 #
-# driven (DYNAMIC) boundaries on a REFINED run, end to end through the wheel:
-# the config's boundary prescriptions must register on the base AND every fine
+# driven (dynamic) boundaries on a refined run, end to end through the wheel:
+# the config's boundary prescriptions must register on the base and every fine
 # kernel set (a fine level flush against a driven face inherits Driven(id) and
 # resolves it against its own registration). the invariant is exact: uniform gas
 # with every face driven at the same uniform state must stay uniform on both

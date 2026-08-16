@@ -1,16 +1,16 @@
 // =============================================================================
 // decomp_driven_equivalence.rs
 //
-// the DRIVEN-boundary correctness contract for multi-gpu domain decomposition: a domain split
-// into tiles, each registering the SAME boundary DAG, must reproduce the monolithic run to
+// the driven-boundary correctness contract for multi-gpu domain decomposition: a domain split
+// into tiles, each registering the same boundary DAG, must reproduce the monolithic run to
 // round-off. only edge tiles carry a Driven face (interior cuts are CoarseFine, halo-exchanged);
-// each tile evaluates the coordinate prescription at its own GLOBAL coordinates.
+// each tile evaluates the coordinate prescription at its own global coordinates.
 //
-// the prescription is a POSITION-DEPENDENT inflow on x_lo: rho = 2 + 0.2*y (VARIABLE_X2 -> the
-// cell's global y). this is the decisive cross-tile test: with the domain cut ALONG the driven
+// the prescription is a position-dependent inflow on x_lo: rho = 2 + 0.2*y (VARIABLE_X2 -> the
+// cell's global y). this is the decisive cross-tile test: with the domain cut along the driven
 // face ([1, N] tiling), a tile that evaluated the prescription at its tile-local y would inject
 // the wrong density on every non-origin tile. a constant inflow could not catch that bug. the
-// [N, 1] tiling drives the inflow ACROSS the cut, exercising the halo exchange downstream of the
+// [N, 1] tiling drives the inflow across the cut, exercising the halo exchange downstream of the
 // driven fill.
 // =============================================================================
 
@@ -37,7 +37,7 @@ type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
 fn boundary_json() -> String {
-    // rho = 2 + 0.2*y as node 2' = ADD(node 3 (=2.0), node 2 (=0.2*y)); assembled here so the
+    // rho = 2 + 0.2*y as node 2' = add(node 3 (=2.0), node 2 (=0.2*y)); assembled here so the
     // node list stays readable: outputs are [rho, v1, v2, p].
     r#"{
         "kind": "dirichlet", "dim": 2, "outputs": [4, 5, 6, 7], "params": [],
@@ -202,7 +202,7 @@ fn driven_inflow_cut_perpendicular_to_the_face() {
 
 #[test]
 fn driven_inflow_cut_along_the_face() {
-    // [1, 2]: BOTH tiles own a piece of the driven face; the y-dependent prescription is evaluated
+    // [1, 2]: both tiles own a piece of the driven face; the y-dependent prescription is evaluated
     // at each tile's global y, so a local-coordinate bug diverges here.
     assert_driven_matches([1, 2]);
 }

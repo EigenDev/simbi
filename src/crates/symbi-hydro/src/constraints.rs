@@ -18,23 +18,23 @@
 //
 // the axioms, each carrying a proof obligation:
 //
-//  A1 CONCAVITY.   every `c_k` is concave in U, so `{c_k >= 0}` is convex and `G intersect C` inherits the
+//  A1 concavity.   every `c_k` is concave in U, so `{c_k >= 0}` is convex and `G intersect C` inherits the
 //                  convexity of G (Wu & Tang, arXiv:1709.05838, theorem 2.2). this is what makes the
 //                  segment projection well-posed: a concave `c_k` restricted to the segment is
 //                  concave in the blend parameter, so `{t : c_k >= 0}` is a single interval and the
 //                  boundary is crossed once. `concavity_violation` checks it numerically, and
 //                  membership in the family is conditional on passing, whatever the constraint
 //                  models. a Lorentz-factor ceiling is the standard example of one that fails.
-//  A2 PROJECTION.  the corrective operator is a projection: identity on `G intersect C` (an acceptable state
+//  A2 projection.  the corrective operator is a projection: identity on `G intersect C` (an acceptable state
 //                  passes through bit-for-bit), idempotent, and minimal along the correction segment.
-//  A3 SIMULTANEOUS. the family is applied as a single projection onto the intersection. a sequence
+//  A3 simultaneous. the family is applied as a single projection onto the intersection. a sequence
 //                  of clamps would be order-dependent and would lose idempotence — the second clamp
 //                  can push the state back out of the first's set.
-//  A4 SINGLE SITE. the projection is applied at exactly one point in the operator sequence; c2p and
+//  A4 single site. the projection is applied at exactly one point in the operator sequence; c2p and
 //                  the Riemann solver pass the state through untouched.
-//  A5 ACCOUNTING.  every firing emits `dU = Pi(U) - U`, booked per constraint. non-conservation
+//  A5 accounting.  every firing emits `dU = Pi(U) - U`, booked per constraint. non-conservation
 //                  surfaces as a reported budget with a constraint's name attached to it.
-//  A6 VANISHING.   a constraint standing in for truncation error carries a scale that vanishes with
+//  A6 vanishing.   a constraint standing in for truncation error carries a scale that vanishes with
 //                  the mesh, so the injected quantity vanishes under refinement. a constraint
 //                  standing in for physics (vacuum modeled as low-density gas) holds a finite scale
 //                  under refinement and declares that by `is_model_term`, so the budget separates
@@ -415,7 +415,7 @@ where
 /// `c((U1+U2)/2) >= (c(U1) + c(U2)) / 2` over the supplied sample pairs, normalized by the residual
 /// scale. a non-positive result certifies concavity across the sample set.
 ///
-/// this exists so a constraint proposed months from now is graded by CI in the session it is written,
+/// this exists so a constraint proposed months from now is graded by ci in the session it is written,
 /// while the failure is still local to one commit. it is the test that predicts the Lorentz-factor
 /// ceiling's pathology numerically, ahead of any hand derivation.
 pub fn concavity_violation<C>(
@@ -1050,7 +1050,7 @@ mod tests {
         // the binding constraint's own residual is zero at the joint blend; the other is satisfied.
         assert!(temp.residual(&blend(joint)).expect("applicable") >= -1e-12);
         assert!(sigma.residual(&blend(joint)).expect("applicable") >= -1e-12);
-        // and going past it violates the binding one, so the blend is MINIMAL (A2).
+        // and going past it violates the binding one, so the blend is minimal (A2).
         let past = joint + 1e-3;
         assert!(
             temp.residual(&blend(past)).expect("applicable") < 0.0

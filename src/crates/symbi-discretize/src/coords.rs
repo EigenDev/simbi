@@ -1,7 +1,7 @@
 // =============================================================================
 // coords.rs
 //
-// the substrate coordinate-system + spacing TYPES: the two codegen-time enums
+// the substrate coordinate-system + spacing types: the two codegen-time enums
 // every gv geometry builder takes. pure data (no logic) — the coordinate system
 // selects which analytic finite-volume closed form `cell_geometry_gv` emits, and
 // the per-axis spacing selects the index -> coordinate map branch.
@@ -33,7 +33,7 @@ pub enum Coords {
 }
 
 /// the spacetime background — selects the GR lapse / sqrt(gamma) densitization in the gv stage
-/// (`gv_lapse_weight`). ORTHOGONAL to `Coords` (spatial) and to the physics regime: GR is a
+/// (`gv_lapse_weight`). orthogonal to `Coords` (spatial) and to the physics regime: GR is a
 /// spacetime axis independent of the physics regime, so any SR regime composes with any spacetime. defaults to `Minkowski`
 /// (flat: the densitization is a no-op -> bit-identical), so existing kernels need no annotation.
 /// the codegen-time mirror of `symbi_geometry::Spacetime` (like `Coords` mirrors `Geometry`).
@@ -43,12 +43,12 @@ pub enum Spacetime {
     Minkowski,
     /// static spherically-symmetric vacuum: lapse alpha = sqrt(1 - 2M/r), shift = 0. the codegen
     /// schwarzschild in ingoing kerr-schild coords: lapse alpha = 1/sqrt(1 + 2M/r), radial shift
-    /// beta^r = 2M/(r + 2M), gamma_rr = 1 + 2M/r. horizon-penetrating codegen TAG selecting the
+    /// beta^r = 2M/(r + 2M), gamma_rr = 1 + 2M/r. horizon-penetrating codegen tag selecting the
     /// shift-advection flux + KS densitization path. mirrors `symbi_geometry::Spacetime::SchwarzschildKS`.
     SchwarzschildKS,
     /// spinning kerr in ingoing kerr-schild coords: Sigma = r^2 + a^2 cos^2(theta), b = 2Mr/Sigma,
-    /// lapse alpha = 1/sqrt(1 + b) (THETA-dependent), radial shift beta^r = b/(1 + b),
-    /// NON-DIAGONAL gamma_{r phi} (frame dragging). requires the covariant valencia storage and
+    /// lapse alpha = 1/sqrt(1 + b) (theta-dependent), radial shift beta^r = b/(1 + b),
+    /// non-diagonal gamma_{r phi} (frame dragging). requires the covariant valencia storage and
     /// the azimuthal momentum DOF (the `_sph_swirl` family). the mass M and spin a ride as the
     /// `schwarzschild_mass` / `kerr_spin` kernel scalars. mirrors `symbi_geometry::Spacetime::KerrKS`.
     KerrKS,
@@ -57,7 +57,7 @@ pub enum Spacetime {
 /// the evolution face reconstruction — a codegen-time choice. pcm and plm share one
 /// baked kernel (the runtime `theta` scalar selects: theta = 0 collapses the limited
 /// slope to piecewise-constant), so only stencil-width changes appear here: ppm widens
-/// the load stencil from -2..+1 to -3..+2 and is therefore a DISTINCT baked kernel.
+/// the load stencil from -2..+1 to -3..+2 and is therefore a distinct baked kernel.
 /// defaults to `Plm` (the theta-parameterized kernel), so existing builders need no
 /// annotation and their kernel names are unchanged.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
@@ -111,7 +111,7 @@ impl Recon {
 
 /// the equation-of-state closure — a codegen-time choice for the relativistic
 /// family. the gamma-law is a runtime scalar (one kernel serves every gamma),
-/// so only CLOSURE-STRUCTURE changes appear here: the taub-mathews synge-gas
+/// so only closure-structure changes appear here: the taub-mathews synge-gas
 /// approximation replaces the gamma-law algebra throughout the traced physics
 /// and is therefore a distinct baked kernel. defaults to `IdealGamma`, so
 /// existing builders need no annotation and their kernel names are unchanged.

@@ -1,7 +1,7 @@
 // =============================================================================
 // aot_rmhd_briowu.rs
 //
-// the first END-TO-END substrate RMHD evolution: a 1D relativistic Brio-Wu MHD
+// the first end-to-end substrate RMHD evolution: a 1D relativistic Brio-Wu MHD
 // shock tube driven entirely by the build-time-compiled substrate kernels
 // (rmhd_c2p_1d + rmhd_face_flux_1d), with a host godunov flux-difference and
 // outflow ghosts. one full step is:
@@ -10,7 +10,7 @@
 // B evolves through the induction flux (F(Bx)=0 keeps Bx constant; By/Bz advect).
 // dt = cfl*dx is CFL-safe (relativistic |lambda| <= 1).
 //
-// this is a SHORT SMOKE (a handful of steps): assert the evolution stays physical
+// this is a short smoke (a handful of steps): assert the evolution stays physical
 // (rho>0, p>0, |v|<1, finite) and that the shock actually develops. the
 // quantitative Brio-Wu profile vs the reference is a longer run, left to the
 // user.
@@ -18,7 +18,7 @@
 
 use symbi_aot::NamedKernel;
 
-// thin shims binding the emitted kernels BY FIELD NAME (NamedKernel) — order-
+// thin shims binding the emitted kernels by field name (NamedKernel) — order-
 // independent, and a missing/renamed field panics with the manifest's expected
 // names, catching a drift that would otherwise pass silently. all buffers here are 1D (lo = 0).
 #[allow(clippy::too_many_arguments)]
@@ -116,8 +116,8 @@ fn rmhd_face_flux_1d(
 ) {
     // the refactored flux reads the per-cell Davis fan speeds (ws_l/ws_r), produced in
     // the live solver by rmhd_wave_speeds_cell (the exact quartic). this test binds the
-    // global relativistic LIGHT-SPEED bound ws_l = -1, ws_r = +1 — valid because |lambda|
-    // <= c = 1, giving the (more diffusive) Rusanov/LLF member of the HLLE family. still
+    // global relativistic light-speed bound ws_l = -1, ws_r = +1 — valid because |lambda|
+    // <= c = 1, giving the (more diffusive) Rusanov/llf member of the HLLE family. still
     // physical, still develops the shock; the exact-quartic profile is the longer run.
     let wsl = vec![-1.0f64; rho.len()];
     let wsr = vec![1.0f64; rho.len()];
@@ -132,7 +132,7 @@ fn rmhd_face_flux_1d(
         .input("prim.mag[0]", bx)
         .input("prim.mag[1]", by)
         .input("prim.mag[2]", bz)
-        // the flux now reads the NORMAL field from the staggered FACE field (Gardiner-Stone CT
+        // the flux now reads the normal field from the staggered face field (Gardiner-Stone CT
         // coupling); in 1D Brio-Wu Bx is constant, so the cell bx array equals the face field.
         .input("bface_n", bx)
         .input("wave_speed_l[0]", &wsl)

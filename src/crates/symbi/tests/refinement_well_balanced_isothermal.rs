@@ -1,7 +1,7 @@
 // =============================================================================
 // refinement_well_balanced_isothermal.rs
 //
-// the same well-balancing on an ENERGY-FREE regime.
+// the same well-balancing on an energy-free regime.
 //
 // an isothermal run stores no pressure: its equation of state supplies `p = cs^2 rho` from
 // the density alone. every piece of the machinery therefore carries one fewer component —
@@ -10,7 +10,7 @@
 // test. a wire that reads its components positionally will misalign here and nowhere else.
 //
 // the physics differs too, not just the bookkeeping. with `p = cs^2 rho` hydrostatic balance
-// is `grad(ln rho) = -grad phi / cs^2`, so the atmosphere is EXPONENTIAL in the potential
+// is `grad(ln rho) = -grad phi / cs^2`, so the atmosphere is exponential in the potential
 // rather than a power of it, and the density contrast is set by the potential depth measured
 // in units of `cs^2`.
 //
@@ -126,7 +126,7 @@ fn composite_mass(hier: &Hier) -> f64 {
 
 #[test]
 fn an_energy_free_regime_holds_its_declared_target() {
-    // NON-VACUITY of the setup itself: an isothermal atmosphere shallow enough to be nearly
+    // non-vacuity of the setup itself: an isothermal atmosphere shallow enough to be nearly
     // uniform would be interpolated exactly by the transfer and would exercise nothing.
     let contrast = isothermal_atmosphere([0.0]).rho / isothermal_atmosphere([1.0]).rho;
     println!("\nisothermal atmosphere, density contrast across the domain: {contrast:.2}x");
@@ -205,7 +205,7 @@ fn the_captured_target_carries_no_energy_component() {
         );
     }
 
-    // and the imbalance that IS carried has to be real, or the absence above is trivial.
+    // and the imbalance that is carried has to be real, or the absence above is trivial.
     let measured = hier
         .target_imbalance_convergence(0)
         .expect("levels 0 and 1 share an interior to compare over");

@@ -118,7 +118,7 @@ impl Renderer {
         self.layout.padding = terminal::padding_for_width(term_width);
         self.layout.widths = vec![0; n_cols];
 
-        // minimum widths = max(header_len, data_len). measure DISPLAY
+        // minimum widths = max(header_len, data_len). measure display
         // columns (char count); cells may carry multibyte glyphs
         // (em-dash, unicode paths) and a byte count would over-reserve width.
         for ii in 0..n_cols {
@@ -322,8 +322,8 @@ impl Renderer {
         buf.push_str(color::RESET);
         buf.push('\n');
 
-        // bar content: "│ " + bar + " XX% │"
-        let bar_width = width.saturating_sub(9); // 2 borders + 2 spaces + 5 for " XX% "
+        // bar content: "│ " + bar + " xx% │"
+        let bar_width = width.saturating_sub(9); // 2 borders + 2 spaces + 5 for " xx% "
         let filled = (bar_width * percent) / 100;
 
         buf.push_str(color::BORDER);

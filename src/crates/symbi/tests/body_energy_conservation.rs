@@ -4,12 +4,12 @@
 // the gas+body energy conservation law for a two-way immersed wall. the gas total
 // energy the wall exchanges is booked exactly as `BodyDelta::energy_delta`
 // (nrg_old - nrg_new, summed over the masked cells); the body's mechanical KE
-// (`Body::mechanical_ke`) changes from the SAME force/torque receipts via the
+// (`Body::mechanical_ke`) changes from the same force/torque receipts via the
 // equations of motion. a free (two-way) spinner in still gas drags the gas up and
-// spins DOWN: it loses rotational KE and the gas gains exactly that energy.
+// spins down: it loses rotational KE and the gas gains exactly that energy.
 //
-// the penalization writes the gas total energy to change by the WORK DONE ON THE
-// WALL (momentum transfer . local wall velocity), so summed `energy_delta` equals
+// the penalization writes the gas total energy to change by the work done on the
+// wall (momentum transfer . local wall velocity), so summed `energy_delta` equals
 // the body's mechanical work and -d(KE_body) == sum(energy_delta) to round-off; the
 // frictional dissipation stays in the gas as internal energy (heat), never leaking.
 // =============================================================================
@@ -106,8 +106,8 @@ fn two_way_body_ke_change_balances_gas_energy() {
         "the gas did not gain energy ({gas_energy_change:e})"
     );
 
-    // CONSERVATION: the body's mechanical KE change equals the gas total-energy change. energy_delta
-    // is (nrg_old - nrg_new), NEGATIVE when the gas gains, so it matches d(KE_body) < 0. the
+    // conservation: the body's mechanical KE change equals the gas total-energy change. energy_delta
+    // is (nrg_old - nrg_new), negative when the gas gains, so it matches d(KE_body) < 0. the
     // dissipation stays in the gas as heat and never leaves the ledger. the residual is O(dt): the
     // gas energy is booked at penalize time while the body KE updates at the step midpoint, so the
     // two agree to the timestep's order. penalization that omits the work done on the wall instead

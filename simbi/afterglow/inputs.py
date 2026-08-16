@@ -136,7 +136,7 @@ def build_mesh(data: Any, mirror_equator: bool = False) -> dict[str, Any]:
         theta = _cell_centers(data.mesh.x2v)
         if mirror_equator:
             _assert_mirrorable(data)
-            # the mirrored centers are pi - theta REVERSED, so the joined axis stays
+            # the mirrored centers are pi - theta reversed, so the joined axis stays
             # ascending across the equator -- which the imager's cell walk requires.
             theta = np.concatenate([theta, (np.pi - theta)[::-1]])
         mesh["x2"] = np.ascontiguousarray(theta)
@@ -160,7 +160,7 @@ def build_velocity(data: Any, mirror_equator: bool = False) -> dict[str, NDArray
     for ax in range(1, int(data.metadata.dimensions) + 1):
         arr = np.asarray(data.get_field(f"v{ax}"), dtype=np.float64)
         if mirror_equator:
-            # v_theta (axis 2) is the ONLY component the reflection flips: a parcel
+            # v_theta (axis 2) is the only component the reflection flips: a parcel
             # moving away from the pole in the north moves away from it in the south
             # too, which is the opposite theta direction. leaving the sign alone would
             # give the mirrored hemisphere a lateral velocity converging on the

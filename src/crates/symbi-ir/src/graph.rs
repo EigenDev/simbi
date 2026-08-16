@@ -222,7 +222,7 @@ pub enum ElementWiseOp {
     BitOr,
     BitXor,
     // bitwise / logical unary. on integer inputs: bitwise complement.
-    // on Bool inputs: logical NOT (Rust's `!`). result element matches input.
+    // on Bool inputs: logical not (Rust's `!`). result element matches input.
     // backs the `Mask: Not` requirement on the carrier `Scalar::Mask`.
     BitNot,
 }
@@ -493,7 +493,7 @@ pub enum Op {
     /// on GPU; rewritten away at the emit_kernel layer.
     ///
     /// the kernel-coord field-read pattern (Param + emit_kernel prelude)
-    /// is the right primitive when the read coordinate IS the kernel
+    /// is the right primitive when the read coordinate is the kernel
     /// iteration; LoadAt covers the second case (gather at a runtime
     /// source coord, e.g., ghost-fill remap).
     LoadAt(Symbol, Vec<NodeId>),
@@ -728,7 +728,7 @@ impl Op {
 
             // the IfElse dual: cond + both arm bodies + both result vecs are
             // all NodeId edges. listing the bodies alongside the results keeps
-            // arm-internal nodes reachable for DCE — same rule as Op::Scope.
+            // arm-internal nodes reachable for dce — same rule as Op::Scope.
             Op::IfElse {
                 cond,
                 then_body,
@@ -1342,17 +1342,17 @@ impl Graph {
     }
 
     /// arithmetic-identity peephole used by `element_wise`. returns the folded
-    /// `NodeId` if an identity matches; `None` otherwise. SAFE patterns only:
+    /// `NodeId` if an identity matches; `None` otherwise. safe patterns only:
     ///   `x + 0` / `0 + x` -> `x`
     ///   `x - 0`           -> `x`
     ///   `x * 1` / `1 * x` -> `x`
     ///   `x / 1`           -> `x`
     /// shape-preserving and IEEE-safe across all numeric element types.
     ///
-    /// the absorbing pattern `x * 0 -> 0` is DELIBERATELY ABSENT — IEEE-754
+    /// the absorbing pattern `x * 0 -> 0` is deliberately absent — IEEE-754
     /// `inf * 0 = NaN` and the project's `feedback_no_silent_floors` policy
     /// requires NaN to propagate. the sibling fold in
-    /// `passes/scalarize.rs::fold_arith_identity` MUST match this set
+    /// `passes/scalarize.rs::fold_arith_identity` must match this set
     /// exactly (`{ Add[0], Sub[0], Mul[1], Div[1] }`); changes to either
     /// layer require a matching change to the other.
     fn fold_arith_identity(&self, op: ElementWiseOp, a: NodeId, b: NodeId) -> Option<NodeId> {
@@ -1575,7 +1575,7 @@ impl Graph {
         // value; only Op::Apply consumes it directly.
         let nid = self.push(Op::Lambda(fn_id), TensorTy::scalar(ElementTy::F64), span);
         // register the by-name index so subsequent
-        // `get_or_register_lambda` calls return THIS NodeId, reusing the
+        // `get_or_register_lambda` calls return this NodeId, reusing the
         // single Lambda for the same function.
         self.lambda_index.entry(name).or_insert(nid);
         nid
@@ -1828,7 +1828,7 @@ impl Graph {
         self.push(Op::Scope { body, result }, ty, span)
     }
 
-    /// the DUAL of `iterate_inline`: build an `Op::IfElse` node — a real
+    /// the dual of `iterate_inline`: build an `Op::IfElse` node — a real
     /// data-dependent branch. `cond` is a rank-0 Bool. `then_body`/`else_body`
     /// list the NodeIds created inside each arm's `S::cond` closure (insertion
     /// order, via the `(snapshot..)` range — same convention as `scope_op`).
@@ -1969,17 +1969,17 @@ impl Graph {
     // ----- cross-graph splice -----
 
     /// graft the pure sub-DAG rooted at `root` (living in `src`) into `self`, returning the
-    /// `NodeId` in `self` that computes the same value. each source node is RECREATED via the
+    /// `NodeId` in `self` that computes the same value. each source node is recreated via the
     /// structural builders, so `self`'s hash-consing + type inference run on the imported
     /// nodes (shared structure dedups against what `self` already holds — CSE across the splice
     /// boundary). a memo keyed on the source `NodeId` keeps shared subterms shared.
     ///
-    /// LEAF resolution: every `Param(sym)` is handed to `resolve_leaf`. return `Some(dst)` to
+    /// leaf resolution: every `Param(sym)` is handed to `resolve_leaf`. return `Some(dst)` to
     /// bind the leaf to an existing node in `self` (the splice point — e.g., a field read the
     /// destination already built); return `None` to recreate it as a fresh param of the same
     /// type. constants are recreated verbatim.
     ///
-    /// this is the POINTWISE-physics splice (the use case: a carrier-generic `Regime::wave_speeds`
+    /// this is the pointwise-physics splice (the use case: a carrier-generic `Regime::wave_speeds`
     /// traced at `S = Gv` grafted into a substrate kernel that owns the geometry). it handles the
     /// pointwise op subset; iteration / lambda / opaque-call / implicit-cast
     /// nodes panic loudly — grafting a whole iterative or lambda-bearing kernel is out of scope.
@@ -2005,7 +2005,7 @@ impl Graph {
         }
         // clone the op to release the `src` borrow before recursing / mutating `self`.
         let op = src.node(src_id).op.clone();
-        // SPECIAL cases — cross-graph semantics that `dispatch_builder` can't
+        // special cases — cross-graph semantics that `dispatch_builder` can't
         // express. everything else goes through the generic recurse-+-remap-+-
         // dispatch path below (same contract as splice).
         let dst = match op {
@@ -2040,7 +2040,7 @@ impl Graph {
             // every dispatchable variant — same contract as splice.rs.
             mut generic => {
                 // first pass: populate `memo` for every child. this resolves
-                // ALL recursive imports before mutating `generic`'s NodeId
+                // all recursive imports before mutating `generic`'s NodeId
                 // fields, sidestepping the `&mut self` aliasing a per-variant
                 // scatter would otherwise require.
                 let mut children: Vec<NodeId> = Vec::new();
@@ -2075,7 +2075,7 @@ impl Graph {
         // `Op::Scope` bypasses hash-cons too. each
         // `Gv::scope` call site is a distinct lexical region; deduping two
         // scopes with identical body+result vectors would collapse them into
-        // one, but they could be CALLED from different outer contexts where
+        // one, but they could be called from different outer contexts where
         // identity matters (e.g., two scopes inside an `Op::Fold` body would
         // each iterate, and merging them would conflate iterations).
         let bypass = matches!(
@@ -2919,7 +2919,7 @@ mod tests {
 
     #[test]
     fn hashcons_different_const_distinct() {
-        // sanity: hash-cons must NOT merge structurally-different values.
+        // sanity: hash-cons must not merge structurally-different values.
         let mut g = Graph::new();
         let a = g.add_const(ConstValue::F64(2.5), None);
         let b = g.add_const(ConstValue::F64(3.5), None);
@@ -2957,7 +2957,7 @@ mod tests {
     #[test]
     fn hashcons_input_order_matters() {
         // (a + b) is structurally different from (b + a) at the IR
-        // level (the inputs vec is ordered). hash-cons must NOT merge
+        // level (the inputs vec is ordered). hash-cons must not merge
         // them — that would be an unproven algebraic-equivalence claim.
         // simple operand-swap normalization belongs
         // in a separate canonicalization pass.
@@ -3105,7 +3105,7 @@ mod tests {
         let l1 = g.get_or_register_lambda(build_square_fn(), None);
         let l2 = g.get_or_register_lambda(build_square_fn(), None);
         assert_eq!(l1, l2, "second call must return the existing Lambda");
-        // and the lambdas table holds ONE entry — the second call
+        // and the lambdas table holds one entry — the second call
         // skipped the add path because the name was already known.
         assert_eq!(g.fn_defs().len(), 1);
     }
@@ -3119,7 +3119,7 @@ mod tests {
     #[test]
     fn apply_via_get_or_register_lambda_shares_lambda_nid() {
         // build the Lambda twice via get_or_register; both Apply nodes
-        // reference the SAME lambda NodeId, so Apply hash-cons
+        // reference the same lambda NodeId, so Apply hash-cons
         // collapses them.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);

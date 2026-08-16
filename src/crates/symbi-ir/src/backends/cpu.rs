@@ -341,8 +341,8 @@ fn emit_const(out: &mut String, v: &ConstValue, generic: bool) {
     }
 }
 
-// `generic` spells the symbi_algebra::Scalar API: associated consts INFINITY /
-// NEG_INFINITY / NAN and the `from_f64` constructor; `!generic` (elemental) stays
+// `generic` spells the symbi_algebra::Scalar API: associated consts infinity /
+// NEG_INFINITY / nan and the `from_f64` constructor; `!generic` (elemental) stays
 // concrete f64.
 fn emit_float_const(out: &mut String, x: f64, generic: bool) {
     if x.is_nan() {

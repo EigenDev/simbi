@@ -1,29 +1,29 @@
 // =============================================================================
 // mesh_motion_graded.rs
 //
-// homologous expansion on a GRADED (non-uniform) mesh, on both a curvilinear and a cartesian
+// homologous expansion on a graded (non-uniform) mesh, on both a curvilinear and a cartesian
 // chart, for each axis map that grades: logarithmic and geometric.
 //
 // homologous motion multiplies every coordinate by one a(t). a graded axis therefore stays graded
-// with its ratios untouched, because scaling the axis START and the axis LENGTH parameter while
-// leaving the DIMENSIONLESS shape parameter alone reproduces the whole face list scaled:
+// with its ratios untouched, because scaling the axis start and the axis length parameter while
+// leaving the dimensionless shape parameter alone reproduces the whole face list scaled:
 //   log        face(i) = start 10^(i s)               -> a start 10^(i s)            = a face(i)
 //   geometric  face(i) = start + w (q^i - 1)/(q - 1)  -> a start + a w (q^i-1)/(q-1) = a face(i)
 // the split between "length" (start, width, dx) and "shape" (s, q) is what makes this exact for
 // every map rather than for one of them.
 //
-// the probe is a state at rest in COMOVING coordinates with a uniform comoving density. that is
-// the EXACT solution of the expanding equations -- physically free expansion, v = H r, the
+// the probe is a state at rest in comoving coordinates with a uniform comoving density. that is
+// the exact solution of the expanding equations -- physically free expansion, v = H r, the
 // physical density falling as a^-p for a cell volume going as r^p -- so the comoving state must
-// not move AT ALL, on any mesh. the exactness is what makes this a gate rather than a convergence
+// not move at all, on any mesh. the exactness is what makes this a gate rather than a convergence
 // study.
 //
-// the cancellation it rests on is mesh-INDEPENDENT. in spherical geometry the grid-velocity mass
+// the cancellation it rests on is mesh-independent. in spherical geometry the grid-velocity mass
 // flux through a face is rho H r * 4 pi r^2, so its divergence over a cell is
 //   [4 pi H rho r_hi^3 - 4 pi H rho r_lo^3] / [(4 pi/3)(r_hi^3 - r_lo^3)] = 3 H rho,
-// which is exactly the dilution `mesh_hdil = 3 H` for ANY face positions; the cartesian case is
+// which is exactly the dilution `mesh_hdil = 3 H` for any face positions; the cartesian case is
 // the same telescope with area 1 and volume (x_hi - x_lo), giving 1 H rho. it therefore holds only
-// while the grid velocity and the cell geometry agree on where each face IS -- and the bug this
+// while the grid velocity and the cell geometry agree on where each face is -- and the bug this
 // gate was written for was precisely that `vface` reconstructed the face as `x_lo + i*dx` while
 // the volumes and areas used the axis map. on a log mesh spanning a decade that mismatch corrupted
 // a state that cannot move by 65 percent, growing outward with the cell width.
@@ -158,7 +158,7 @@ fn width_span<M: Metric<f64, 1>>(sim: &Sim<M>) -> f64 {
         / widths.iter().cloned().fold(f64::INFINITY, f64::min)
 }
 
-/// NON-VACUITY: a near-uniform mesh would make a per-cell scaling error look like a uniform one,
+/// non-vacuity: a near-uniform mesh would make a per-cell scaling error look like a uniform one,
 /// and every claim resting on it would hold for the wrong reason.
 fn assert_actually_graded(span: f64, grading: Grading) {
     assert!(
@@ -194,7 +194,7 @@ fn a_graded_mesh_expands_homologously() {
             a > 1.4,
             "the scale factor only reached {a:.4}; the mesh barely expanded"
         );
-        // a comoving-static uniform state is the EXACT solution and may not develop structure.
+        // a comoving-static uniform state is the exact solution and may not develop structure.
         assert!(
             flatness < 1.0e-11,
             "the comoving density developed {flatness:.3e} of structure on an expanding \
@@ -211,8 +211,8 @@ fn a_graded_mesh_expands_homologously() {
 
 #[test]
 fn the_expansion_is_carried_by_the_scale_factor() {
-    // spherical volumes go as r^3, so homologous expansion dilutes the PHYSICAL density as
-    // a^-3 however the radial axis is graded. what the state stores is the COMOVING density,
+    // spherical volumes go as r^3, so homologous expansion dilutes the physical density as
+    // a^-3 however the radial axis is graded. what the state stores is the comoving density,
     // which must therefore not move at all.
     for grading in GRADED {
         let mut sim = build(Spherical, grading, true);
@@ -266,7 +266,7 @@ fn grading_costs_no_accuracy_under_expansion() {
 fn a_graded_cartesian_mesh_expands_homologously() {
     // the cartesian charts reach the mesh through a different width path than the curvilinear
     // ones: their lame factors are all 1, so a single precomputed inverse width is enough for a
-    // uniform axis and is WRONG for a graded one -- both for the divergence and, separately, for
+    // uniform axis and is wrong for a graded one -- both for the divergence and, separately, for
     // the CFL length, where using one width for a mesh that has many prices the step off cells
     // that are not the narrowest.
     for grading in GRADED {
@@ -314,7 +314,7 @@ fn a_graded_cartesian_mesh_is_stepped_on_its_own_narrowest_cell() {
     // the CFL length is the fault the state-at-rest probe above cannot see: a state that does
     // not move is stable at any timestep, so it reports nothing about whether the step was
     // priced correctly. a graded mesh whose step came from one uniform width would take the
-    // SAME step as the uniform mesh; the correct step is set by the NARROWEST cell, which is
+    // same step as the uniform mesh; the correct step is set by the narrowest cell, which is
     // narrower than uniform by construction, so the two must differ by that ratio.
     for grading in GRADED {
         let graded = build(Cartesian, grading, false);
@@ -328,7 +328,7 @@ fn a_graded_cartesian_mesh_is_stepped_on_its_own_narrowest_cell() {
         let narrowest = widths.iter().cloned().fold(f64::INFINITY, f64::min);
         let uniform_width = (R_HI - R_LO) / N as f64;
 
-        // the CFL reduces over the ALLOCATED domain, so the ghost bands have to hold real gas
+        // the CFL reduces over the allocated domain, so the ghost bands have to hold real gas
         // before it is meaningful -- an unfilled ghost carries rho = 0 and its sound speed is
         // 0/0. this is the same prologue `evolve` runs before its first timestep.
         let dt_of = |sim: &mut Sim<Cartesian>| {

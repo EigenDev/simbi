@@ -2,7 +2,7 @@
 # isothermal_sod.py
 #
 # a globally-isothermal shock tube (p = cs^2 rho, no energy equation). the
-# isothermal closure is a REGIME — the primitive is (rho, v) with no
+# isothermal closure is a regime — the primitive is (rho, v) with no
 # pressure slot. exercises the IsoNewtonian path end-to-end.
 # =============================================================================
 from typing import Annotated

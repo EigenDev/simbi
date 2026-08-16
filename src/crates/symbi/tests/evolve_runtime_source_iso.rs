@@ -1,11 +1,11 @@
 // =============================================================================
 // evolve_runtime_source_iso.rs
 //
-// the runtime user-source mechanism is regime-agnostic: the SAME mechanism that drives the
-// adiabatic set (evolve_runtime_source.rs) drives the ISOTHERMAL set with NO energy equation. a
+// the runtime user-source mechanism is regime-agnostic: the same mechanism that drives the
+// adiabatic set (evolve_runtime_source.rs) drives the isothermal set with no energy equation. a
 // force `a = [p0, 0]` (p0 = 0.5) loaded at runtime (python -> json -> SourceConfig) accelerates the
 // gas; iso momentum is rho*v, so total x-momentum grows as rho*g*t*ncells exactly — and crucially
-// NO `nrg` overlay is emitted (iso has no energy field), exercising the `has_energy = false` path.
+// no `nrg` overlay is emitted (iso has no energy field), exercising the `has_energy = false` path.
 // cooling / nrg-targeted sources are rejected at `build_user_source(&cfg, &ISO_NEWTONIAN_SPEC)`,
 // covered by the expr_bridge validation unit tests.
 // =============================================================================
@@ -36,7 +36,7 @@ fn runtime_loaded_force_accelerates_iso_gas() {
         "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "CONSTANT", "value": 0.0} ]
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse config");
-    // validated against the ISO spec: the nrg overlay is dropped (no energy), mom survives.
+    // validated against the iso spec: the nrg overlay is dropped (no energy), mom survives.
     let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("wrap source");
     assert_eq!(
         built.len(),

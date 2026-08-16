@@ -9,7 +9,7 @@
 // dispatch. both were compiled and reviewed but unexercised, which is the failure class this repo
 // has been bitten by before — an excision path that was dead on one of its two entry points.
 //
-// each gate asserts the DEVICE result against the value the CPU path is separately gated on, so a
+// each gate asserts the device result against the value the CPU path is separately gated on, so a
 // silently wrong GPU write fails here rather than producing a plausible-looking field.
 //
 // run: cargo test -p symbi --features cuda --test dye_gpu

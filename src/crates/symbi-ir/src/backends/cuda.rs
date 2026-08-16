@@ -516,7 +516,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
 fn emit_const(out: &mut String, v: &ConstValue) {
     match v {
         // non-finite consts spell the IEEE bit pattern via device intrinsics. the
-        // <math.h> macros (INFINITY) and functions (nan) reach nvcc through its implicit
+        // <math.h> macros (infinity) and functions (nan) reach nvcc through its implicit
         // math.h include; NVRTC leaves that include out, so `INFINITY` is undefined under
         // runtime compilation. __longlong_as_double / __int_as_float are header-free
         // CUDA+HIP device builtins that reinterpret the exact bits, so the emitted value

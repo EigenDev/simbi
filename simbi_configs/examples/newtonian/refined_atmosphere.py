@@ -1,7 +1,7 @@
 # =============================================================================
 # refined_atmosphere.py
 #
-# a stratified atmosphere held EXACTLY across a coarse-fine interface.
+# a stratified atmosphere held exactly across a coarse-fine interface.
 #
 # a hydrostatic atmosphere solves the continuum equations, not the discrete ones, so any
 # scheme leaves a residual at truncation order and gas seeded on the exact profile starts
@@ -10,12 +10,12 @@
 # coarse cells at the interface as a force. that force is lower order than either grid, so
 # it caps the convergence rate of any stratified problem.
 #
-# declaring the atmosphere as the run's STATIONARY TARGET removes it. the backend measures
+# declaring the atmosphere as the run's stationary target removes it. the backend measures
 # the target's discrete imbalance once per level and adds it back at every stage, and the
 # flux registers difference deviations from the target rather than the state, which holds
 # the atmosphere to roundoff on every level while conserving mass exactly.
 #
-# the potential is declared ONCE. the equilibrium is the closed-form inversion of hydrostatic
+# the potential is declared once. the equilibrium is the closed-form inversion of hydrostatic
 # balance against it, and the gravity source is its gradient, so the profile and the force it
 # balances cannot disagree — which is the mistake that otherwise produces a smooth, plausible,
 # slowly-collapsing atmosphere.
@@ -107,7 +107,7 @@ class RefinedAtmosphere(SimbiProblem):
     ]
 
     # seed every level from the declared target rather than from a pointwise sample of the
-    # profile: cells covered by the fine level carry the RESTRICTION of the fine target,
+    # profile: cells covered by the fine level carry the restriction of the fine target,
     # which is what the hierarchy's own restriction reproduces every parent step.
     seed_from_equilibrium: Annotated[
         bool,

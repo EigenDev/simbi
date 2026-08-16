@@ -2,10 +2,10 @@
 // rmhd_edge_emf.rs
 //
 // validates the substrate rmhd_edge_emf (the CT edge-EMF gather + soft-sign
-// gardiner-stone blend) against an INDEPENDENT straight-Rust transcription of the
+// gardiner-stone blend) against an independent straight-Rust transcription of the
 // production ct_edge_emf (kernels_shared.rs) + soft_upwind. this is the gather
 // geometry — the error-prone 12-input staggered stencil — checked against the
-// working production reference, on a NON-uniform field (so the offsets + the
+// working production reference, on a non-uniform field (so the offsets + the
 // soft-upwind sign actually matter), for every edge axis dir=0/1/2.
 //
 // p1=(dir+1)%3, p2=(dir+2)%3. corners (cell E_dir = v_p2*b_p1 - v_p1*b_p2) at
@@ -33,7 +33,7 @@ fn dec(c: [usize; 3], ax: usize) -> [usize; 3] {
 }
 
 // soft-sign upwind (the production soft_upwind).
-// the soft-sign switch. `eps` is RELATIVE to the local density-flux magnitude: an absolute
+// the soft-sign switch. `eps` is relative to the local density-flux magnitude: an absolute
 // floor lets a near-static edge (every |f| far below it) drive `s` from roundoff, so two
 // mirror-symmetric edges pick opposite upwind sides. a fully zero flux stencil leaves the
 // denominator at 0 and the blend degenerates to the plain average.

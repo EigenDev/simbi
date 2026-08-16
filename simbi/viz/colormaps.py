@@ -3,7 +3,7 @@
 #
 # composite / on-the-fly colormap construction for the viz backend. every builder
 # returns a matplotlib Colormap and, by default, registers it under `name` so the
-# result is usable anywhere a colormap NAME is accepted -- the `quad.cmap=<name>`
+# result is usable anywhere a colormap name is accepted -- the `quad.cmap=<name>`
 # override, a yaml theme, the tui, an animation -- with no renderer change. this is
 # the extensibility contract: a user composes a colormap once and refers to it by
 # string everywhere thereafter.
@@ -27,7 +27,7 @@ from matplotlib.colors import Colormap, LinearSegmentedColormap, ListedColormap,
 
 # a color argument is anything matplotlib accepts: a name, hex, or rgb(a) tuple.
 ColorLike = Union[str, tuple]
-# a named colormap OR an already-built Colormap instance.
+# a named colormap or an already-built Colormap instance.
 CmapLike = Union[str, Colormap]
 
 
@@ -164,10 +164,10 @@ def blend_cmaps(
 
 
 # =============================================================================
-# spec strings: build a composite from a single colormap NAME, so the whole thing is
+# spec strings: build a composite from a single colormap name, so the whole thing is
 # expressible inline wherever a cmap name is accepted (e.g. `--props quad.cmap=...`).
 # grammar (everything else falls through to a plain matplotlib lookup, incl `_r` reverse):
-#   join:LO,HI[,at=F|@V][,blend=F]   crossfade LO (low values) into HI (high values); `at`
+#   join:lo,hi[,at=F|@V][,blend=F]   crossfade lo (low values) into hi (high values); `at`
 #                                    is a [0,1] fraction, or `@DATA` resolved through the
 #                                    plot's norm (so `at=@1e-5` splits at that data value)
 #   stack:C@lo:hi,C@lo:hi[,blend=F]  segmented palette over [0,1] fractions, seams blended

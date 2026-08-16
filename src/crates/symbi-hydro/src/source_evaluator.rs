@@ -8,18 +8,18 @@
 // `source_spec` use).
 //
 // **what this layer is and isn't:**
-//   - IS: the runtime evaluation hook an evolve loop calls per cell to get
+//   - is: the runtime evaluation hook an evolve loop calls per cell to get
 //     the source-term contribution at that cell. one cache-hit per cell;
-//     scalarize runs ONCE per field at construction.
-//   - IS: the symmetry between the data layer and the runtime layer
+//     scalarize runs once per field at construction.
+//   - is: the symmetry between the data layer and the runtime layer
 //     made explicit — every component of every law / overlay produces
 //     an evaluatable `LoweredFn`, and there is exactly one path from spec
 //     data to runtime numbers.
-//   - ISN'T: the GPU path. CUDA NVRTC compilation needs hardware (covered
+//   - isn'T: the GPU path. CUDA NVRTC compilation needs hardware (covered
 //     structurally by the emit tests). the CPU interpreter path
 //     here is the analogous workflow at `S = f64` — same `BuiltSource`
 //     graph, different lowering target.
-//   - ISN'T: the substrate codegen-driver. AOT-baking spec compositions
+//   - isn'T: the substrate codegen-driver. AOT-baking spec compositions
 //     into the binary (extending `symbi-aot/build.rs`) is a separate
 //     layer that needs compile-time spec definitions.
 //
@@ -54,11 +54,11 @@ struct FieldKernel {
     /// callers pass values by name; the evaluator routes by position.
     params: Vec<String>,
     /// pre-scalarized per-component kernels. `eval` calls each with the
-    /// same `inputs` vec and collects the results. KEPT as the interpreter
-    /// ORACLE / fallback even when the JIT path is available.
+    /// same `inputs` vec and collects the results. kept as the interpreter
+    /// oracle / fallback even when the JIT path is available.
     components: Vec<LoweredFn>,
     /// the native-compiled twin (the CPU's NVRTC): one `CompiledFn` per
-    /// component, in the SAME order as `components`. `Some` only when EVERY
+    /// component, in the same order as `components`. `Some` only when every
     /// component compiled (an out-of-subset node makes the whole field fall
     /// back to the interpreter). a `CompiledFn` is allocation-free + `Send +
     /// Sync`, so the per-cell source pass runs native + block-parallel.
@@ -68,7 +68,7 @@ struct FieldKernel {
 impl FieldKernel {
     /// build a field kernel from its per-component lowered fns, JIT-compiling each
     /// (the interpreter `components` stay as oracle/fallback). compilation happens
-    /// ONCE here at construction; the string->register resolution it does is what
+    /// once here at construction; the string->register resolution it does is what
     /// deletes the interpreter's per-cell `HashMap`.
     fn build(params: Vec<String>, components: Vec<LoweredFn>) -> Self {
         let jit: Option<Vec<symbi_jit::CompiledFn>> = components
@@ -108,7 +108,7 @@ impl SourceEvaluator {
     /// build the evaluator from spec data. validates the composition
     /// (clause-2 cross-checks via `SimulationLaws::validate`) before
     /// scalarizing. returns `Err` if validation fails — the runtime
-    /// catches malformed compositions BEFORE the time-loop starts.
+    /// catches malformed compositions before the time-loop starts.
     pub fn new(
         laws: &SimulationLaws,
         d: usize,
@@ -142,8 +142,8 @@ impl SourceEvaluator {
     }
 
     /// build the evaluator directly from already-lowered `(target_field, BuiltSource)` pairs — the
-    /// RUNTIME path. unlike [`Self::new`] (which composes a `SimulationLaws` of compile-time
-    /// fn-builders, AOT), this takes `BuiltSource` VALUES — e.g., `expr_bridge::build_user_source`'s
+    /// runtime path. unlike [`Self::new`] (which composes a `SimulationLaws` of compile-time
+    /// fn-builders, AOT), this takes `BuiltSource` values — e.g., `expr_bridge::build_user_source`'s
     /// output from a `SourceConfig` loaded at sim startup (python -> json, no recompile). each
     /// field's `BuiltSource` is scalarized into per-component `LoweredFn`s, exactly as `new` does.
     /// panics on a duplicate target field (the caller should pre-merge same-field sources).
@@ -208,7 +208,7 @@ impl SourceEvaluator {
     }
 
     /// the native-compiled per-component kernels for `field`, in `params_for` input order.
-    /// `Some` only when the WHOLE field JIT-compiled — the caller takes the allocation-free
+    /// `Some` only when the whole field JIT-compiled — the caller takes the allocation-free
     /// native path; `None` means use the interpreter (`eval`) for this field.
     pub fn jit_components(&self, field: &str) -> Option<&[symbi_jit::CompiledFn]> {
         self.field_kernels.get(field).and_then(|k| k.jit.as_deref())
@@ -325,7 +325,7 @@ mod tests {
     fn evaluator_composes_geometric_plus_gravity_additively() {
         // the load-bearing run: a Kepler-disk overlay stack (cylindrical
         // geometric source + point-mass gravity) evaluated at one cell
-        // returns the SUM of the two contributions. proves that the
+        // returns the sum of the two contributions. proves that the
         // runtime hook delivers the composed result of both
         // overlays.
         use crate::source_spec::cylindrical_geometric_sources;
@@ -381,7 +381,7 @@ mod tests {
         //                 but gravity uses cartesian-style distance — the
         //                 spec treats `x` as the field-point components in
         //                 the regime's coord system. the evaluator agrees
-        //                 with the data; this test asserts CONSISTENCY
+        //                 with the data; this test asserts consistency
         //                 between evaluator and data, making no claim about
         //                 physical meaningfulness in a curvilinear mix.)
         let dx_sq: f64 = r * r + phi * phi + z * z;
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn evaluator_fields_iterator_matches_overlay_targets() {
-        // structural canary: the evaluator exposes EXACTLY the fields with
+        // structural canary: the evaluator exposes exactly the fields with
         // overlays — no extras (no fake fields), no missing (no skipped
         // overlays). the runtime walks this list to know which kernels
         // to call per step.
@@ -443,7 +443,7 @@ mod tests {
         // **the runtime-side clause-3 canary**: the IB penalty's mask
         // discipline (S::select on a carrier-generic mask) survives
         // through scalarize + interp. outside the body, the runtime
-        // evaluator returns EXACTLY 0.0 per component.
+        // evaluator returns exactly 0.0 per component.
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_ib(rigid_body_penalty_sources(3));
         let evaluator = SourceEvaluator::new(&sim, 3).expect("composes");
 

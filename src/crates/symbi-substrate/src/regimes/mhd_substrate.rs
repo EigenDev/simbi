@@ -1,10 +1,10 @@
 // =============================================================================
 // regimes/mhd_substrate.rs
 //
-// the REGIME-AGNOSTIC MHD substrate dispatch: the godunov gas stage + the full
+// the regime-agnostic MHD substrate dispatch: the godunov gas stage + the full
 // constrained-transport stack (snapshot, ghost fill, edge EMF, RK2 save/average,
 // curl bface update, face->cell B interpolation with the magnetic-energy
-// correction) factored OUT of the per-regime KernelSet. these touch only the
+// correction) factored out of the per-regime KernelSet. these touch only the
 // regime-independent SimState fields (cons / prim / flux / workspace.u_n / mhd /
 // geom) and dispatch the `rmhd_*` / EOS-generic AOT kernels, which are identical
 // for every MHD regime (B evolution is Faraday; the gas stage is a runtime-
@@ -12,7 +12,7 @@
 // only flux / c2p / cfl (the regime physics) stay per-regime.
 //
 // the 1/2|B|^2 magnetic-energy correction in `rmhd_bcell_from_bface` is the
-// NEWTONIAN form exactly (it is only an approximation for RMHD), so sharing it is
+// newtonian form exactly (it is only an approximation for RMHD), so sharing it is
 // correct for both.
 //
 // usage:
@@ -60,8 +60,8 @@ pub(crate) fn exec_layout<const D: usize>(dom: &Domain<D>) -> ([u32; D], [i32; D
     (grid, dlo)
 }
 
-// per-field layout (lo / extent / volume) from the field's OWN domain — bface
-// and efield live on STAGGERED domains (face / edge), off the cell-centered
+// per-field layout (lo / extent / volume) from the field's own domain — bface
+// and efield live on staggered domains (face / edge), off the cell-centered
 // allocated domain, so their descriptor lo/extent must come from the field itself.
 pub(crate) fn field_layout<const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
     f: &Field<Sc, D, Mem>,
@@ -136,12 +136,12 @@ where
     }
 }
 
-/// shift the magnetic energy `1/2|B|^2` INTO (`sign = +1`) or OUT OF (`sign = -1`) the
+/// shift the magnetic energy `1/2|B|^2` into (`sign = +1`) or out of (`sign = -1`) the
 /// total energy `cons.nrg`, cell by cell over the whole allocated buffer, from the
 /// cell-centered `bcell`. bracketing the immersed-body drain with `-1` before and `+1`
-/// after presents the drain a valid HYDRO conserved state (`nrg = gas energy`), then
+/// after presents the drain a valid hydro conserved state (`nrg = gas energy`), then
 /// restores the field energy. the drain never writes `bcell`, so the two shifts cancel
-/// EXACTLY on every cell it did not touch — a whole-buffer pass is correct with no need to
+/// exactly on every cell it did not touch — a whole-buffer pass is correct with no need to
 /// mask the body's footprint. a no-op for isothermal MHD (no `nrg` slot).
 pub(crate) fn shift_magnetic_energy<const D: usize, Mem, Sc>(
     sim: &FieldStore<D, 3, Mem, Sc>,
@@ -174,7 +174,7 @@ pub(crate) fn shift_magnetic_energy<const D: usize, Mem, Sc>(
 ///
 /// the caller supplies the face map, because the two scalars carried alongside the prim state want
 /// different treatment on the faces an external pass owns. the FOFC fallback flag takes the prim
-/// table, so a face straddling the periodic wrap takes ONE first-order decision from both sides and
+/// table, so a face straddling the periodic wrap takes one first-order decision from both sides and
 /// the flux splice stays conservative. the dye takes the scalar table, where a gradient face is a
 /// zero-derivative copy rather than a skip.
 pub(crate) fn flag_ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
@@ -222,14 +222,14 @@ pub(crate) fn flag_ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
 // =============================================================================
 
 /// the MHD gas stage (D/S_k/tau via the runtime-coefficient `_stage` kernel:
-/// `cons = a0*u_n + ac*fe`) FUSED or not with the CT cell-B predictor. cell B
+/// `cons = a0*u_n + ac*fe`) fused or not with the CT cell-B predictor. cell B
 /// evolves through the CT path; this owns only the gas + the bcell flux-evolve.
 /// curvilinear adds the geometric momentum source (reads prim + bcell ahead of
 /// the fluxes); Cartesian is pure area-weighted divergence (regime-agnostic).
 pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
-    // the regime's COMPILE-TIME energy flag (`R::SPEC.has_energy`), threaded from the caller.
-    // NOT derived from `sim.fields.cons.has_energy()`: the MHD cons buffer carries an `nrg` slot
+    // the regime's compile-time energy flag (`R::SPEC.has_energy`), threaded from the caller.
+    // not derived from `sim.fields.cons.has_energy()`: the MHD cons buffer carries an `nrg` slot
     // even for the isothermal regime, so storage allocation != the regime's energy semantics.
     has_energy: bool,
     gas_prefix: &str,
@@ -297,19 +297,19 @@ fn godunov_stage_impl<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    // mhd_geom_suffix keys on the GRID-AXIS SET (sim.geom.axes): cyl r-z [0,2] -> "_cyl_rz",
+    // mhd_geom_suffix keys on the grid-axis set (sim.geom.axes): cyl r-z [0,2] -> "_cyl_rz",
     // r-phi disk [0,1] -> "_cyl_rphi", identity geometries -> "" / "_sph" / "_cyl". a curved
-    // spacetime appends the spacing + spacetime slugs on BOTH the gas stage and the bcell
+    // spacetime appends the spacing + spacetime slugs on both the gas stage and the bcell
     // predictor (each carries the covariant measure).
     let base_sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     let st = crate::regimes::substrate_kernels::spacetime_slug(sim.geom.spacetime);
-    // the geometry / spacing / spacetime slugs ALL ride the name — a log-radial grid selects the
+    // the geometry / spacing / spacetime slugs all ride the name — a log-radial grid selects the
     // geometric-mean cell geometry (`_logr`), exactly like the GR and hydro stages. uniform grids
-    // get sp = "" so the name is unchanged; a log-radial FLAT MHD run selects the `_logr` kernel
+    // get sp = "" so the name is unchanged; a log-radial flat MHD run selects the `_logr` kernel
     // (baked for the curvilinear charts); silently reusing the uniform-geometry one would mis-weight it.
     let sfx = format!("{base_sfx}{st}");
 
-    // the gas + bcell stages all bind BY MANIFEST (dispatch_named) — no hand-built buffer list.
+    // the gas + bcell stages all bind by manifest (dispatch_named) — no hand-built buffer list.
     // `kernel_geom` gives the log-aware per-axis scalars (face-0 start + linear width / log decade-
     // slope keyed on each axis map), which the in-kernel `gv_axis_face_at` reads via `map_kind`; on a
     // uniform static grid it reproduces the raw linear (x_lo, dx) bit-identically.
@@ -371,10 +371,10 @@ fn godunov_stage_impl<const D: usize, const DOF: usize, Mem, Sc>(
          got (a0,ac)=({a0},{ac})."
     );
 
-    // the GAS conserved update (D/S_k/tau or D/S_k) via the runtime-coefficient stage kernel, bound
-    // BY MANIFEST through `dispatch_named`. the IN-PLANE cell B is a DERIVED quantity — after the CT
+    // the gas conserved update (D/S_k/tau or D/S_k) via the runtime-coefficient stage kernel, bound
+    // by manifest through `dispatch_named`. the in-plane cell B is a derived quantity — after the CT
     // curl, `bcell_from_bface` overwrites it with `interp(bface)` — but the gas energy flux F_tau
-    // carries the magnetic energy (the Poynting term), so tau is conserved by the flux WITHOUT any
+    // carries the magnetic energy (the Poynting term), so tau is conserved by the flux without any
     // magnetic-energy patch. the curvilinear geo-source prim reads are regime-specific (RMHD
     // rho/vel/pre/mag, NMHD/IMHD vel/mag/pre), so the buffer layout tracks the kernel artifact (a
     // hand-built list would scramble NMHD/IMHD when DOF != D).
@@ -409,16 +409,16 @@ fn godunov_stage_impl<const D: usize, const DOF: usize, Mem, Sc>(
         &gscalars,
     );
 
-    // the cell-B induction-flux predictor for the OUT-OF-PLANE (non-CT) magnetic components: By,Bz in
+    // the cell-B induction-flux predictor for the out-of-plane (non-CT) magnetic components: By,Bz in
     // 1.5D and Bz in 2.5D (curvilinear: Bphi) have no staggered face to curl and are cell-centered
     // conserved variables evolved here by the induction-flux divergence. the in-plane
-    // components are re-derived by `bcell_from_bface` and are NOT touched by the predictor — flux-
+    // components are re-derived by `bcell_from_bface` and are not touched by the predictor — flux-
     // evolving them would poison the FOFC/c2p recoverability probe now that the magnetic-energy patch
-    // is gone. a fully-gridded chart (D == DOF, i.e. 3D) has NO
+    // is gone. a fully-gridded chart (D == DOF, i.e. 3D) has no
     // out-of-plane component, so the predictor is a no-op and is not dispatched. forward-Euler (0,1)
     // steps bcell; SSP-RK2 (1/2,1/2) combines with bcell_n (both guaranteed by the assert above). the
     // predictor is always the rmhd_* kernel (Faraday induction is regime-agnostic); its name carries
-    // the same geometry/spacetime slug `sfx` as the gas stage. bound BY MANIFEST.
+    // the same geometry/spacetime slug `sfx` as the gas stage. bound by manifest.
     if D < DOF {
         let bname = if is_euler {
             format!("rmhd_bcell_godunov_euler{sfx}_{D}d")
@@ -451,7 +451,7 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     let bc = to_bc_array::<D>(&sim.boundaries);
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
 
-    // spinning kerr: the frame-dragging ghost (velocity w = v^phi + q v^r AND cell B^phi w_B copy),
+    // spinning kerr: the frame-dragging ghost (velocity w = v^phi + q v^r and cell B^phi w_B copy),
     // which reads the metric mass/spin + the radial grid map beyond the generic vel_sign reflect.
     // spherical-azimuth only: the cartesian kerr chart has no coordinate azimuth and copies raw prims.
     let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::KerrKS)
@@ -472,8 +472,8 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     );
     GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
         |region, p| {
-            // the generic ghost is float-only (vel_sign); the kerr instance is MIXED (map_type/arg ints
-            // + vel_sign/mass/spin/grid floats), so it routes BY MANIFEST through resolve_params.
+            // the generic ghost is float-only (vel_sign); the kerr instance is mixed (map_type/arg ints
+            // + vel_sign/mass/spin/grid floats), so it routes by manifest through resolve_params.
             let (ints, scalars): (Vec<i32>, Vec<Sc>) = if is_kerr {
                 crate::regimes::substrate_kernels::resolve_params(
                     &gname,
@@ -526,7 +526,7 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
                 }
                 (ints, scalars)
             };
-            // bind BY MANIFEST: the in-place prim.{rho,vel,pre?} + bcell writes (read-at-source /
+            // bind by manifest: the in-place prim.{rho,vel,pre?} + bcell writes (read-at-source /
             // write-at-cell, over all DOF B-components). prim.pre is a real output for energy; iso
             // passes a dummy. no hand-ordered list.
             let pre_bind = if has_energy {
@@ -547,14 +547,14 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
         },
     );
 
-    // the staggered bface TRANSVERSE-HALO fill. bface[d] carries a +/-1 halo on
+    // the staggered bface transverse-halo fill. bface[d] carries a +/-1 halo on
     // every axis t != d, read by the transversely-extended flux sweep (the
     // Gardiner-Stone normal-B override at ghost-row faces) and hence by the
     // boundary-edge EMFs. nothing else writes it — without this fill it stays
     // at its allocation zeros, the boundary EMFs are wrong from the first step,
     // and the two periodic wrap copies of every face drift apart (the
     // single-level mass leak the amr budget probe surfaced). the driver runs
-    // over the FACE field's own (owned, owned+halo) domain pair, so only the
+    // over the face field's own (owned, owned+halo) domain pair, so only the
     // transverse halo slabs produce regions; the component is tangential to
     // every halo wall it crosses, so a reflect map contributes the component's
     // own axis sign (vel_sign[dir]), exactly as the cell-B fill does.
@@ -613,7 +613,7 @@ pub(crate) fn snapshot<const D: usize, const DOF: usize, Mem, Sc>(
         lo: &alo,
         extent: &aext,
     };
-    // the gas snapshot binds BY MANIFEST: cons.{den,mom,(nrg)} reads -> u_n.{den,mom,(nrg)}
+    // the gas snapshot binds by manifest: cons.{den,mom,(nrg)} reads -> u_n.{den,mom,(nrg)}
     // writes (State{Cons}/State{UN}). no hand-ordered list; reads no prim.pre (dummy override).
     let sname = if has_energy {
         format!("rmhd_snapshot_{D}d")
@@ -655,7 +655,7 @@ pub(crate) fn snapshot<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// the `(live, saved)` field pairing of the step-entry rollback snapshot: the gas conserved
-/// vector plus BOTH magnetic representations. rolling `bface` back exactly is what keeps
+/// vector plus both magnetic representations. rolling `bface` back exactly is what keeps
 /// `div(B) = 0` across a rejection — the replay re-curls from the step-entry face field rather
 /// than compounding the rejected curl. empty where the regime cannot reject a step, in which
 /// case the snapshot storage was never allocated.
@@ -734,9 +734,9 @@ pub(crate) fn restore_step<const D: usize, const DOF: usize, Mem, Sc>(
     fofc_copy_fields(&pairs);
 }
 
-/// snapshot the stage-INPUT GAS conserved (den, mom, [nrg]) into `u_stage`, the
+/// snapshot the stage-input gas conserved (den, mom, [nrg]) into `u_stage`, the
 /// pre-godunov state the additive `source_apply` evaluates `S` at, the same state the fused
-/// path evaluates it at. gas-only: B is not a source target, so bcell is NOT
+/// path evaluates it at. gas-only: B is not a source target, so bcell is not
 /// captured here. mirrors `snapshot` (which targets u_n) but writes u_stage.
 pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -799,8 +799,8 @@ pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// copy a list of (src, dst) field pairs (host memcpy / device pointwise-copy), each by its OWN
-/// layout — so it serves cell-centered (bcell/bflux) AND staggered (bface/efield) fields.
+/// copy a list of (src, dst) field pairs (host memcpy / device pointwise-copy), each by its own
+/// layout — so it serves cell-centered (bcell/bflux) and staggered (bface/efield) fields.
 fn fofc_copy_fields<const D: usize, Sc, Mem>(pairs: &[(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)])
 where
     Sc: Scalar + OrderedNumeric,
@@ -865,7 +865,7 @@ pub(crate) fn fofc_ct_save<const D: usize, const DOF: usize, Mem, Sc>(
 /// predictor + the recomputed edge EMF read the correct base (matching the high-order
 /// stage). the accessor resolves the stage-0 elision: `snapshot_stage` (which captures
 /// `bcell -> bcell_stage`) is skipped at the first stage, where `bcell_n` — the
-/// step-entry snapshot, never elided — IS the stage input; a direct `bcell_stage`
+/// step-entry snapshot, never elided — is the stage input; a direct `bcell_stage`
 /// read there restores a stale field and the redone EMF leaks energy.
 pub(crate) fn fofc_restore_bcell_stage<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -987,20 +987,20 @@ pub(crate) fn fofc_emf_splice<const D: usize, const DOF: usize, Mem, Sc>(
 // the staggered de Rham complex for D-dimensional constrained transport.
 //
 // CT is the discrete exterior derivative on the staggered grid: B is a 2-form (faces),
-// E a 1-form (edges), dB/dt = -dE (the curl), div B = dd = 0. the arity is a PURE
-// FUNCTION OF D — there is no per-dimensionality branch, only this table:
+// E a 1-form (edges), dB/dt = -dE (the curl), div B = dd = 0. the arity is a pure
+// function of D — there is no per-dimensionality branch, only this table:
 //
 //   edges (E 1-forms): one per unordered axis-pair (p1,p2) whose dual axis is k; an
-//     edge is present iff BOTH plane axes are in-grid (< D). count = C(D,2):
+//     edge is present iff both plane axes are in-grid (< D). count = C(D,2):
 //       1D -> 0 (no CT; B is pure flux divergence — the 1.5D rule, the empty product)
 //       2D -> 1 (the corner E_z, dual k=2, plane (0,1) — the 2.5D rule)
 //       3D -> 3 (the cyclic edge EMFs, dual k=0,1,2)
-//   faces (B 2-forms): the DOF B-components partition into IN-PLANE (c < D, face-
-//     staggered, CT-evolved) and OUT-OF-PLANE (c >= D, cell-centered, flux-evolved —
+//   faces (B 2-forms): the DOF B-components partition into in-plane (c < D, face-
+//     staggered, CT-evolved) and out-of-plane (c >= D, cell-centered, flux-evolved —
 //     never in the complex, so "Bz rides the induction-flux divergence" is not special).
 //
 // efield[slot] stores edge `slot` (enumeration position, < C(D,2) <= D for D<=3).
-// 1.5D / 2.5D / 3D are the SAME dispatch evaluated at different D.
+// 1.5D / 2.5D / 3D are the same dispatch evaluated at different D.
 // =============================================================================
 
 // the grid-axis -> vector-component map (the axis-set seam) lives on the sim:
@@ -1023,7 +1023,7 @@ struct CtEdge {
     g2: usize,
 }
 
-// edge dual-k is present iff its two plane physical components are both IN-PLANE (grid axes).
+// edge dual-k is present iff its two plane physical components are both in-plane (grid axes).
 #[inline]
 fn ct_edge_present(k: usize, axes: &[usize]) -> bool {
     (0..3).filter(|&c| c != k).all(|c| axes.contains(&c))
@@ -1066,7 +1066,7 @@ fn ct_face_curl(dir: usize, axes: &[usize]) -> (Vec<usize>, Vec<usize>) {
         .iter()
         .filter_map(|&pk| edges.iter().find(|e| e.name_k == pk).map(|e| e.slot))
         .collect();
-    // the transverse GRID axes whose inverse-widths the cartesian curl reads (in-plane comps).
+    // the transverse grid axes whose inverse-widths the cartesian curl reads (in-plane comps).
     let id_axes = plane
         .iter()
         .filter(|&&pk| axes.contains(&pk))
@@ -1091,10 +1091,10 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
 {
     // the RMHD UCT-HLLD edge EMF declares the EOS scalar (gamma); the UCT edge EMFs declare the PLM
     // slope limiter (theta, for the transverse R+/- reconstruction of the staggered fields); the rest
-    // have an empty scalar manifest. resolve BY MANIFEST so one call serves all.
+    // have an empty scalar manifest. resolve by manifest so one call serves all.
     let st = spacetime_slug(sim.geom.spacetime);
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
-    // the GR EMF reads the metric mass (+ spin) and the LOG-AWARE face-position scalars.
+    // the GR EMF reads the metric mass (+ spin) and the log-aware face-position scalars.
     let (x_lo_k, dx_k) = kernel_geom(
         &sim.geom.x_lo,
         &sim.geom.dx,
@@ -1143,7 +1143,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
         // classical ideal-gas lambda* kernel (NMHD only). the kernel manifest declares the
         // slots it reads (bface_a/b, wsr/wsl, + rho/pre/bcell for HLLC), bound below.
         let name = match ct_method {
-            // GR-UCT: the densitized master-form corner EMF. HLLD gas -> the ORTHONORMAL-frame
+            // GR-UCT: the densitized master-form corner EMF. HLLD gas -> the orthonormal-frame
             // MUB09 wave-sum EMF (the sharp Alfven-resolving one, telescopes to the coordinate B_t
             // flux); everything else -> the regime-generic HLL corner EMF.
             CtMethod::Uct if !st.is_empty() && matches!(solver, Solver::Hlld) => {
@@ -1158,7 +1158,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
             CtMethod::Contact => format!("rmhd_edge_emf_{D}d_{}", edge.name_k),
             // UCT EMF family follows the gas solver: HLLD gas -> the five-wave HLLD EMF (the genuine
             // less-diffusive one, classical NMHD only); everything else -> the regime-generic HLL
-            // EMF (which IS the EMF's HLLC for B_x != 0 — the contact doesn't resolve B_t, p.11).
+            // EMF (which is the EMF's HLLC for B_x != 0 — the contact doesn't resolve B_t, p.11).
             CtMethod::Uct => match (solver, prefix) {
                 (Solver::Hlld, "nmhd") => format!("nmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),
                 // isothermal HLLD: M&DZ Appendix A (no contact mode; chi~ from the HLL central state).
@@ -1168,8 +1168,8 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
                 _ => format!("rmhd_edge_emf_uct_{D}d_{}", edge.name_k),
             },
         };
-        // bind BY MANIFEST: the kernel declares COMPONENT-AGNOSTIC generic slots (`vel_p1`,
-        // `bflux_a`, `emf`, ...); map each to THIS edge's actual field, then order inputs/outputs
+        // bind by manifest: the kernel declares component-agnostic generic slots (`vel_p1`,
+        // `bflux_a`, `emf`, ...); map each to this edge's actual field, then order inputs/outputs
         // by the recorded manifest so the bind cannot drift from the producer's slot sequence (a
         // missing/extra slot panics). per-buffer layout (`dispatch_fields_each` -> `Field::domain()`)
         // binds the staggered `efield` output and the cell inputs each in its own domain; the exec
@@ -1178,7 +1178,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
             match s {
                 "vel_p1" => &sim.fields.prim.vel[p1],
                 "vel_p2" => &sim.fields.prim.vel[p2],
-                // out-of-plane velocity (RMHD-HLLD: the full relativistic prim for the MUB09 fan).
+                // out-of-plane velocity (rmhd-hlld: the full relativistic prim for the MUB09 fan).
                 "vel_out" => &sim.fields.prim.vel[p_out],
                 "bcell_p1" => &mhd.bcell[p1],
                 "bcell_p2" => &mhd.bcell[p2],
@@ -1186,7 +1186,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
                 "bflux_b" => &mhd.bflux[g2][p1],
                 "fden_p1" => &sim.fields.flux[g1].den,
                 "fden_p2" => &sim.fields.flux[g2].den,
-                // UCT-only slots: the staggered FACE B (for the resistive jumps) and the per-cell
+                // UCT-only slots: the staggered face B (for the resistive jumps) and the per-cell
                 // Riemann wave speeds in both transverse grid directions (for the HLL weights).
                 "bface_a" => &mhd.bface[g1],
                 "bface_b" => &mhd.bface[g2],
@@ -1194,7 +1194,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
                 "wsl_p1" => &mhd.wave_speed_l[g1],
                 "wsr_p2" => &mhd.wave_speed_r[g2],
                 "wsl_p2" => &mhd.wave_speed_l[g2],
-                // UCT-HLLC-only slots: the full cell prim (rho/pre + the out-of-plane B) for the
+                // uct-hllc-only slots: the full cell prim (rho/pre + the out-of-plane B) for the
                 // in-kernel classical contact speed lambda* = m_n^hll/rho^hll.
                 "rho" => &sim.fields.prim.rho,
                 "pre" => sim
@@ -1231,7 +1231,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// the CT corrector: RK2 E save (stage 1) / time-average (stage 2) over the complex's
 /// edges, then the curl bface update (per in-plane face axis, from its incident edges)
-/// + the face->cell B interpolation with the 1/2|B|^2 magnetic-energy correction. ONE
+/// + the face->cell B interpolation with the 1/2|B|^2 magnetic-energy correction. one
 /// code path for every D — driven by the `StaggerComplex` table, no per-D branch.
 pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -1328,7 +1328,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         }
     }
 
-    // FOFC: snapshot bface -> bface_n BEFORE the curl. only the CURLING stages reach here (the
+    // FOFC: snapshot bface -> bface_n before the curl. only the curling stages reach here (the
     // predictor returned above after saving its EMF), so this captures `bface^n` — the value the
     // CT redo restores before re-applying the curl exactly once from the spliced edge EMF.
     {
@@ -1337,21 +1337,21 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         fofc_copy_fields(&pairs);
     }
 
-    // OHMIC RESISTIVITY: add `eta * J` to the edge EMF so the curl carries the resistive
-    // diffusion `eta * lap(B)`, div-B-clean via the SAME curl. `eta = 0` (ideal MHD) skips it;
+    // ohmic resistivity: add `eta * J` to the edge EMF so the curl carries the resistive
+    // diffusion `eta * lap(B)`, div-B-clean via the same curl. `eta = 0` (ideal MHD) skips it;
     // chart routing (cartesian 2.5D/3D, cyl r-z/r-phi, sph r-theta, 3D sph/cyl) lives in
     // apply_resistive_emf, which refuses any chart without an adjoint-verified resistive curl.
     if eta > 0.0 {
-        // OHMIC HEATING IS AUTOMATIC + energy-conserving here: nrg is the TOTAL energy (conserved by
+        // ohmic heating is automatic + energy-conserving here: nrg is the total energy (conserved by
         // the godunov flux), and `bcell_from_bface` reconciles it with the resistively-decayed B, so
         // the dissipated magnetic energy 1/2 B^2 becomes gas internal energy exactly, to machine
-        // precision. NO separate Joule-source term is needed.
+        // precision. no separate Joule-source term is needed.
         apply_resistive_emf::<D, DOF, Mem, Sc>(sim, eta);
     }
 
     // body-localized Ohmic resistivity: each immersed body running `MagneticSpec::Resistive` adds its
     // masked `eta*chi*J` to the same edge EMF before the curl. no-op with no immersed body / no
-    // resistive body. rides the SAME curl, so it is div-B-clean and dissipation-only exactly like the
+    // resistive body. rides the same curl, so it is div-B-clean and dissipation-only exactly like the
     // uniform resistivity above.
     body_resistive_emf::<D, DOF, Mem, Sc>(sim);
 
@@ -1363,12 +1363,12 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// dispatch the Ohmic resistive edge EMF `efield += eta * J` for the running chart, where `J` is the
-/// mimetic ADJOINT of the induction curl with respect to the physical DEC energy weights. the
-/// adjoint is METRIC-FREE on every orthogonal chart (the metric lives in the induction curl and
+/// mimetic adjoint of the induction curl with respect to the physical dec energy weights. the
+/// adjoint is metric-free on every orthogonal chart (the metric lives in the induction curl and
 /// the face-area weights and cancels in the transpose), so the plain staggered difference serves
 /// 3D cartesian/spherical/cylindrical alike; the 2.5D charts key on the in-plane handedness (cyl
 /// r-z is left-handed, its own kernel; the ortho kernel serves cyl r-phi and sph r-theta).
-/// EXPLICIT LIMITATION, fail-loud (never a hidden floor): any other chart has no adjoint-verified
+/// explicit limitation, fail-loud (never a hidden floor): any other chart has no adjoint-verified
 /// resistive curl, so refuse; silently running as if ideal would drop the resistive term.
 pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -1381,9 +1381,9 @@ pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     match (sim.geom.coords, D) {
         (Cartesian, 2) => resistive_emf_2d::<D, DOF, Mem, Sc>(sim, eta),
-        // the resistive J is METRIC-FREE for every orthogonal chart (the metric lives in the induction
+        // the resistive J is metric-free for every orthogonal chart (the metric lives in the induction
         // curl + the physical energy weights), so the plain difference curl is the adjoint in 3D
-        // cartesian AND 3D curvilinear (identity axes -> the cyclic curl is right-handed for all of
+        // cartesian and 3D curvilinear (identity axes -> the cyclic curl is right-handed for all of
         // cartesian / spherical / cylindrical); a geometry-agnostic reference verifies each.
         (Cartesian, 3) | (Spherical, 3) | (Cylindrical, 3) => {
             resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta)
@@ -1404,7 +1404,7 @@ pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// dispatch the COVARIANT orthogonal-chart resistive edge EMF (`rmhd_resistive_emf{sfx}`): the DEC
+/// dispatch the covariant orthogonal-chart resistive edge EMF (`rmhd_resistive_emf{sfx}`): the dec
 /// codifferential written through the chart's Lamé scale factors, binding the poloidal face field
 /// (`b0`/`b1`) + the log-aware face-position geom scalars. serves cyl r-phi and spherical r-theta.
 fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
@@ -1460,10 +1460,10 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// dispatch the immersed-body LOCALIZED resistive edge EMF for every body running
+/// dispatch the immersed-body localized resistive edge EMF for every body running
 /// `MagneticSpec::Resistive { eta }`: `efield[0] += eta*chi(x)*J_z` over the body's mask, added to the
 /// same edge EMF the curl consumes (div-B-clean, dissipation-only). the field threading the body is
-/// dissipated; the exterior flux (where `chi = 0`) is untouched. EXPLICIT LIMITATION, fail-loud: the
+/// dissipated; the exterior flux (where `chi = 0`) is untouched. explicit limitation, fail-loud: the
 /// masked adjoint J + body-mask SDF are the cartesian 2.5D pair only; a resistive body on any other
 /// chart/dimension panics; silently ignoring the coupling would drop the body term.
 pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
@@ -1665,7 +1665,7 @@ fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// add the 2.5D cylindrical r-z Ohmic resistive edge EMF `eta * J_phi` to the corner `efield[0]`
 /// (`E_phi`) in place, from the poloidal face field (`B_r = bface[0]`, `B_z = bface[1]`). `J_phi` is
-/// the MIMETIC ADJOINT of the cyl-rz induction curl, so once the curl consumes the augmented EMF the
+/// the mimetic adjoint of the cyl-rz induction curl, so once the curl consumes the augmented EMF the
 /// resistive operator `-curl(eta J)` is negative-definite (stable Ohmic decay), div-B-clean via the
 /// same curl. binds the face-position geom scalars by manifest (log-radial aware), like the curl.
 fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
@@ -1720,7 +1720,7 @@ fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// the CT curl `bface -= dt*curl(efield)` per IN-PLANE face axis (`dir`), from that face's incident
+/// the CT curl `bface -= dt*curl(efield)` per in-plane face axis (`dir`), from that face's incident
 /// edge EMFs. cartesian binds the transverse inverse-widths; curvilinear the per-cell geom weights;
 /// GR the densitized coordinate lengths + metric scalars. a face with no incident edges (e.g. Bx in
 /// 1.5D) is not updated. reads `efield` (whatever is currently there — the HO averaged EMF in the HO
@@ -1757,7 +1757,7 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
         // densitized-space curl (coordinate lengths + the per-face sqrt(gamma) weight).
         let ct_name = format!("rmhd_ct_curl_{D}d_{dir}{sfx}{st}");
         let scalars: Vec<Sc> = if !st.is_empty() || curvilinear {
-            // by MANIFEST (dt + the log-aware grid scalars incl. the per-axis map_kind + the metric
+            // by manifest (dt + the log-aware grid scalars incl. the per-axis map_kind + the metric
             // mass/spin on GR). manifest-driven so a curvilinear kernel that grew the `map_kind`
             // spacing selector is resolved by name from the manifest; the mass/spin arms
             // are simply never requested by a flat curvilinear kernel's manifest.
@@ -1790,7 +1790,7 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
                 }
             })
         } else {
-            // flat CARTESIAN curl: metric-free, so no face-position map (no x_lo/dx/map_kind) — just
+            // flat cartesian curl: metric-free, so no face-position map (no x_lo/dx/map_kind) — just
             // dt + the per-in-plane-axis inverse width.
             let mut s = vec![Sc::from_f64(dt)];
             for &a in &id_axes {
@@ -1798,7 +1798,7 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
             }
             s
         };
-        // bind BY MANIFEST: slot `b` (the in-place bface) + the incident edges (`e_p1`/`e_p2` in
+        // bind by manifest: slot `b` (the in-place bface) + the incident edges (`e_p1`/`e_p2` in
         // 3D, `ez` in 2.5D) -> this face's actual fields, ordered by the recorded manifest.
         let slot = |s: &str| -> &Field<Sc, D, Mem> {
             match s {
@@ -1833,12 +1833,12 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
 /// face->cell B interpolation (the D in-plane components) + magnetic-energy correction, in place on
 /// bcell + cons.nrg over the interior. `bcell = interp(bface)` and `nrg += (1/2)(gamma_ij B^i B^j |
 /// interp - | bcell_old)` keeps the cell B and the total energy consistent with the CT-updated face
-/// field. bind BY MANIFEST: the kernel is component-agnostic (positional), each slot mapped to its
+/// field. bind by manifest: the kernel is component-agnostic (positional), each slot mapped to its
 /// actual field, axis-role'd, ordered by the recorded manifest: `bf_{c}` (grid face c) -> bface[c];
 /// `bc_{c}` (in-place cell, grid face c carries physical component axes[c]) -> bcell[axes[c]]; `nrg`
-/// -> cons.nrg. IDEMPOTENT: once `bcell == interp(bface)` a second call adds a zero energy patch, so
+/// -> cons.nrg. idempotent: once `bcell == interp(bface)` a second call adds a zero energy patch, so
 /// the gas-only FOFC redo re-runs it to re-attach the consistent cell B + patch onto the FOFC'd gas
-/// (the redo feeds the cell-B predictor the HIGH-ORDER induction flux, so `bcell_old` is the HO
+/// (the redo feeds the cell-B predictor the high-order induction flux, so `bcell_old` is the HO
 /// predictor and the patch is the small HO reconciliation (no shock).
 pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -1863,7 +1863,7 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     let gr = !st.is_empty();
     let bname = if gr {
         // the GR interpolation: the energy patch contracts through the spatial metric, and the
-        // kernel's bc_ indices are PHYSICAL components (all three enter the contraction).
+        // kernel's bc_ indices are physical components (all three enter the contraction).
         format!("rmhd_bcell_from_bface{sfx}{st}_{D}d")
     } else if has_energy {
         format!("rmhd_bcell_from_bface_{D}d")

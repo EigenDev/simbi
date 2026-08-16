@@ -4,23 +4,23 @@
 # the magnetized michel monopole — the GRMHD wiring gate: the
 # exact michel (1972) transonic hydro profile threaded by a radial monopole field
 # sqrt(gamma) B^r = const on the schwarzschild grid. a radial field aligned with a
-# radial flow exerts ZERO lorentz force (E = -v x B = 0, J = 0), so the stationary
-# solution is EXACTLY the unmagnetized michel hydro profile — while the magnetic
+# radial flow exerts zero lorentz force (E = -v x B = 0, J = 0), so the stationary
+# solution is exactly the unmagnetized michel hydro profile — while the magnetic
 # terms in U, F, the covariant source, and the KKC recovery are all fully engaged
 # and must cancel: any wrong magnetic term breaks a known hold. the induction
 # equation is trivially static in 1D (the radial B row's flux is identically
-# zero), so B^r must not change AT ALL.
+# zero), so B^r must not change at all.
 #
 # the field: div(B) = (1/sqrt(gamma)) d_r (sqrt(gamma) B^r) = 0. sqrt(gamma) is
-# CHART DEPENDENT -- r^2/sqrt(f) in schwarzschild, r^2 sqrt(1+2M/r) in kerr-schild --
-# so the profile is too, and `monopole` carries both. `b_ref` sets B^r at the INNER
+# chart dependent -- r^2/sqrt(f) in schwarzschild, r^2 sqrt(1+2M/r) in kerr-schild --
+# so the profile is too, and `monopole` carries both. `b_ref` sets B^r at the inner
 # boundary radius (the strongest-field point, where sigma = b^2/rho peaks).
 #
-# the chart is kerr-schild because the SPLIT into (lorentz factor, three-velocity) is
+# the chart is kerr-schild because the split into (lorentz factor, three-velocity) is
 # taken against the chart's normal observer. schwarzschild's is static and sees the
 # infalling gas at a lorentz factor that climbs toward the horizon (W = 1.95 at
 # 1.25 r_+), which closes the admissible margin q = E - sqrt(D^2 + |S|^2) and hands
-# the timestep to those cells. kerr-schild's observer falls WITH the flow, so W stays
+# the timestep to those cells. kerr-schild's observer falls with the flow, so W stays
 # near unity all the way in (1.018 at the same radius). measured on this problem:
 # 4000 steps stalling at t = 0.32 in schwarzschild against 203 steps reaching t = 1 in
 # kerr-schild, with the timestep 540x larger and no limiter firing at all.

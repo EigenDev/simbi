@@ -2,7 +2,7 @@
 // penalize_law.rs
 //
 // the [Drain] penalization kernel's gates: the
-// compiled kernel is BIT-IDENTICAL to the f64 host chain built from the same
+// compiled kernel is bit-identical to the f64 host chain built from the same
 // carrier-generic functions (sphere SDF chi -> Relax -> penalize_cell), the
 // per-cell deltas equal the gas's conserved loss exactly, and the blob
 // declares its support ball.
@@ -22,7 +22,7 @@ const DX: f64 = 0.05;
 const POS: [f64; 2] = [0.11, -0.07];
 const RACC: f64 = 0.15;
 const C_DRAIN: f64 = 1.0;
-/// the accretor mass. chosen so the FREE-FALL floor binds: with `RACC = 0.15` the free-fall rate
+/// the accretor mass. chosen so the free-fall floor binds: with `RACC = 0.15` the free-fall rate
 /// `sqrt(MASS/RACC^3)` is 34.4 against a sound-crossing rate `CS/(C_DRAIN*DX)` of about 20, so
 /// these oracles exercise the floor arm rather than passing through the sound-crossing arm and
 /// leaving the new path unchecked.
@@ -160,7 +160,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             CpuField::from_layout(&my, &lo, &ext),
             CpuField::from_layout(&nrg, &lo, &ext),
         ];
-        // SAFETY-free aliasing dance: run_parallel-style in-place needs the
+        // safety-free aliasing dance: run_parallel-style in-place needs the
         // same buffer in both lists; the generated kernel reads before it
         // writes per cell. bind fresh output views over clones instead — the
         // kernel's outputs land in the clones, inputs stay pristine.
@@ -199,7 +199,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
     // the f64 host chain: the same carrier-generic functions per cell.
     let sphere = SdfExpr::<f64, 2>::sphere(POS, RACC);
     // the kernel's volume comes from the geometry scaffold: per-axis widths
-    // as FACE differences (x_lo + (i+1)dx) - (x_lo + i dx), the product
+    // as face differences (x_lo + (i+1)dx) - (x_lo + i dx), the product
     // reciprocated twice (dv = 1/inv_volume). mirror the exact chain.
     let width = |i: usize| (X_LO + (i as f64 + 1.0) * DX) - (X_LO + i as f64 * DX);
     let mut interior_nonzero = 0usize;
@@ -212,7 +212,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
                 mom: Tensor::new([host_in.1[c], host_in.2[c]]),
                 nrg: host_in.3[c],
             };
-            // the kernel's centroid is the arithmetic mid of the FACE
+            // the kernel's centroid is the arithmetic mid of the face
             // positions; the algebraically equal x_lo + (i+0.5)dx differs in the last
             // bit, so mirror the face-mid form.
             let mid = |i: usize| ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5;
@@ -272,7 +272,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
     );
 }
 
-// the ISOTHERMAL kernel: constant sound speed, no energy channel — the same
+// the isothermal kernel: constant sound speed, no energy channel — the same
 // bit-identity gate against the same carrier-generic chain at IsoModel.
 #[test]
 fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
@@ -405,7 +405,7 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
     assert!(fired > 20, "the iso drain never fired");
 }
 
-// the CYLINDRICAL (R, phi) iso drain gate: the mask distance maps the coordinate
+// the cylindrical (R, phi) iso drain gate: the mask distance maps the coordinate
 // centroid to Cartesian, so the mask is a coordinate ball (a cylinder about the
 // axis) and the cell volume is the curvilinear int r dr dphi. bit-identical to the
 // f64 chain built from cell_geometry's cylindrical formulas + the CylindricalRPhi
@@ -521,8 +521,8 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
     let cnum = |i: usize| (rh(i) * rh(i) * rh(i) - rl(i) * rl(i) * rl(i)) / 3.0;
     let cr = |i: usize| cnum(i) / ir2(i);
     let cphi = |j: usize| ((PHI_LO + j as f64 * DPHI) + (PHI_LO + (j as f64 + 1.0) * DPHI)) * 0.5;
-    // the phi extent is the FACE difference (phi_hi - phi_lo), which rounds
-    // differently from DPHI itself — the cell volume int r dr dphi uses it.
+    // the phi extent is the face difference (phi_hi - phi_lo), which rounds
+    // differently from dphi itself — the cell volume int r dr dphi uses it.
     let iphi = |j: usize| (PHI_LO + (j as f64 + 1.0) * DPHI) - (PHI_LO + j as f64 * DPHI);
     let min_w = DR.min(DPHI);
     let mut fired = 0usize;
@@ -575,7 +575,7 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
     );
 }
 
-// the CYLINDRICAL (R, phi) torque-free accretor gate: the surface normal is
+// the cylindrical (R, phi) torque-free accretor gate: the surface normal is
 // rotated into the physical frame (e_R for a centered accretor, so tangential ==
 // phi == the angular-momentum direction), and the torque is the lab-frame
 // r_cart x F_cart. bit-identical to the f64 chain, and xi = 0 reduces to the
@@ -767,7 +767,7 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
                 delta.mass_delta.to_bits(),
                 "mass at ({ii},{jj})"
             );
-            // the force receipt is booked in the CARTESIAN world frame: local
+            // the force receipt is booked in the cartesian world frame: local
             // physical components rotate cell to cell, so only the cartesian-frame
             // sum represents the net force on the body.
             let e = metric.vector_to_cartesian(
@@ -797,7 +797,7 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
     }
 }
 
-// the ISOTHERMAL torque-free accretor kernel. the compiled
+// the isothermal torque-free accretor kernel. the compiled
 // kernel is bit-identical to the f64 chain (guarded sphere normal ->
 // TorqueFreeAccretor contribute + retention floor -> penalize_cell at IsoModel),
 // and xi = 0 reduces to the iso drain kernel bit-for-bit (the tangential
@@ -990,7 +990,7 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
 // the [PorousAccretor] kernel: the compiled kernel is
 // bit-identical to the f64 chain (guarded sphere normal -> PorousAccretor
 // contribute -> penalize_cell), free-slip (k_eta_t = 0) leaves the tangential
-// velocity bit-untouched THROUGH the compiled path, and porosity = 1 reduces
+// velocity bit-untouched through the compiled path, and porosity = 1 reduces
 // the porous kernel to the drain kernel bit-for-bit on the same inputs.
 #[test]
 fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
@@ -1197,7 +1197,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
             if out.4[c] != 0.0 {
                 fired += 1;
             }
-            // free-slip through the COMPILED path: inside the ball, the
+            // free-slip through the compiled path: inside the ball, the
             // tangential projection of the velocity change is exactly the
             // drain scaling's (u unchanged) — pin the tangential component of
             // u against the pre-state where the drain leaves u invariant.
@@ -1254,7 +1254,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
     }
 }
 
-// the ISOTHERMAL porous twin: porosity = 1 equals the isothermal drain, bit for bit
+// the isothermal porous twin: porosity = 1 equals the isothermal drain, bit for bit
 // (the wall channels carry an exact (1 - p) = 0). proves the regime twin is wired.
 #[test]
 fn iso_porous_reduces_to_iso_drain_at_p1() {
@@ -1307,7 +1307,7 @@ fn iso_porous_reduces_to_iso_drain_at_p1() {
     assert!(fired > 20, "the iso porous drain never fired");
 }
 
-// the ADIABATIC torque-free twin: xi = 0 equals the adiabatic drain, bit for bit.
+// the adiabatic torque-free twin: xi = 0 equals the adiabatic drain, bit for bit.
 #[test]
 fn adiabatic_torque_free_reduces_to_drain_at_xi0() {
     let (tf, tir) = kernel_by_name::<f64>("penalize_torque_free_2d").expect("adiabatic tf");
@@ -1361,7 +1361,7 @@ fn adiabatic_torque_free_reduces_to_drain_at_xi0() {
     assert!(fired > 20, "the adiabatic torque-free drain never fired");
 }
 
-// OFF-CENTER body: with the body position given in Cartesian (the convention on
+// off-center body: with the body position given in Cartesian (the convention on
 // any grid), the cylindrical drain masks a physical ball around that Cartesian
 // point — a curved region in (R, phi) enclosing the off-axis Cartesian point. bit-identical to the
 // f64 chain, proving the general (non-e_r) off-center case.

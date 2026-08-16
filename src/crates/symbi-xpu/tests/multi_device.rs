@@ -1,8 +1,8 @@
 // =============================================================================
 // multi_device.rs
 //
-// validates the device-binding infrastructure WITHOUT a second
-// gpu: logical device 1 round-robins onto the one physical card as a SECOND cuda context.
+// validates the device-binding infrastructure without a second
+// gpu: logical device 1 round-robins onto the one physical card as a second cuda context.
 // each context has its own module table, so the per-device dispatcher must jit + launch in
 // the right context -- a single shared dispatcher would launch device 0's module in device
 // 1's context and hit "invalid resource handle". running a kernel under each `with_device`
@@ -24,8 +24,8 @@ extern "C" __global__ void fill(double* out, double val, unsigned int n) {
 }
 "#;
 
-// allocate a unified buffer in the CURRENT context, fill it via a kernel launched through
-// the CURRENT device's dispatcher, sync, and read cell 0 back.
+// allocate a unified buffer in the current context, fill it via a kernel launched through
+// the current device's dispatcher, sync, and read cell 0 back.
 fn fill_on_current_device(val: f64) -> f64 {
     let n = 64usize;
     let mut buf = MemoryBlock::<UnifiedMemory>::for_elements::<f64>(n).expect("alloc");

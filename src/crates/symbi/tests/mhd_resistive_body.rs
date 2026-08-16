@@ -1,9 +1,9 @@
 // =============================================================================
 // mhd_resistive_body.rs
 //
-// the immersed-body LOCALIZED Ohmic resistivity (`MagneticSpec::Resistive`): a body dissipates the
-// magnetic field THREADING it (`eta*chi*J` added to the edge EMF, masked by the body indicator chi)
-// while the exterior flux is left to ideal constrained transport. the kernel is exercised DIRECTLY
+// the immersed-body localized Ohmic resistivity (`MagneticSpec::Resistive`): a body dissipates the
+// magnetic field threading it (`eta*chi*J` added to the edge EMF, masked by the body indicator chi)
+// while the exterior flux is left to ideal constrained transport. the kernel is exercised directly
 // (one masked-resistive EMF + one induction curl), pinning the two defining properties:
 //   - localization: the added EMF is nonzero near the body (chi > 0) and exactly zero far away,
 //     even though the field itself is nonzero everywhere. a `MagneticSpec::None` body leaves the
@@ -171,7 +171,7 @@ fn resistive_body_localizes_and_dissipates() {
         "the resistive EMF is not localized to the body mask: far_max = {far_max}, near_max = {near_max}"
     );
 
-    // DISSIPATION: curl the masked EMF and confirm the magnetic-energy change is negative (cartesian
+    // dissipation: curl the masked EMF and confirm the magnetic-energy change is negative (cartesian
     // face weights are unity). dW = sum_f B_f*(bface_after - B_f); ct_curl does bface -= dt*curl(E).
     ct_curl::<2, 3, HostMemory, f64>(&sim, 1.0);
     let mut dw = 0.0_f64;
@@ -189,7 +189,7 @@ fn resistive_body_localizes_and_dissipates() {
         "the resistive body did not dissipate magnetic energy (dW = {dw} >= 0): it is not negative-definite"
     );
 
-    // a MagneticSpec::None body adds NOTHING: the EMF stays exactly zero.
+    // a MagneticSpec::None body adds nothing: the EMF stays exactly zero.
     let sim_none = make_sim(MagneticSpec::None);
     seed_field(&sim_none);
     body_resistive_emf::<2, 3, HostMemory, f64>(&sim_none);
@@ -307,12 +307,12 @@ fn resistive_body_localizes_under_full_evolution() {
     };
     let (near_res, far_res) = run(MagneticSpec::Resistive { eta: 0.03 });
     let (near_none, far_none) = run(MagneticSpec::None);
-    // the near-body field decays substantially more WITH the resistive body...
+    // the near-body field decays substantially more with the resistive body...
     assert!(
         near_res < near_none - 0.05,
         "resistive body did not locally dissipate under evolution: near ratios resistive={near_res:.4}, none={near_none:.4}"
     );
-    // ...while the FAR field is left untouched (the coupling is local).
+    // ...while the far field is left untouched (the coupling is local).
     assert!(
         (far_res - far_none).abs() < 0.02 * far_none,
         "the resistive body perturbed the far field under evolution: far resistive={far_res:.4}, none={far_none:.4}"
@@ -422,7 +422,7 @@ fn resistive_body_3d_localizes_and_dissipates() {
     seed_field3(&sim);
     body_resistive_emf::<3, 3, HostMemory, f64>(&sim);
 
-    // LOCALIZATION: some edge EMF is nonzero near the body and every edge EMF is ~zero far from it.
+    // localization: some edge EMF is nonzero near the body and every edge EMF is ~zero far from it.
     let (mut near_max, mut far_max) = (0.0_f64, 0.0_f64);
     {
         let m = sim.fields.mhd.as_ref().unwrap();
@@ -448,7 +448,7 @@ fn resistive_body_3d_localizes_and_dissipates() {
         "the 3D resistive EMF is not localized: far_max = {far_max}, near_max = {near_max}"
     );
 
-    // DISSIPATION: the div-B-clean 3D curl consumes the masked EMF and the magnetic-energy change is
+    // dissipation: the div-B-clean 3D curl consumes the masked EMF and the magnetic-energy change is
     // negative (cartesian face weights are unity). dW = sum_{k,f} B_f*(bface_after - B_f).
     ct_curl::<3, 3, HostMemory, f64>(&sim, 1.0);
     let mut dw = 0.0_f64;
@@ -465,7 +465,7 @@ fn resistive_body_3d_localizes_and_dissipates() {
         "the 3D resistive body did not dissipate magnetic energy (dW = {dw} >= 0)"
     );
 
-    // a MagneticSpec::None body adds NOTHING to any edge EMF.
+    // a MagneticSpec::None body adds nothing to any edge EMF.
     let sim_none = make_sim3(MagneticSpec::None);
     seed_field3(&sim_none);
     body_resistive_emf::<3, 3, HostMemory, f64>(&sim_none);

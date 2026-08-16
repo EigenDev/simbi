@@ -14,8 +14,8 @@
 //   area_lo_0 = r_lo^2 * Omega,   area_hi_0 = r_hi^2 * Omega
 // with Omega = (cos(theta_lo) - cos(theta_hi)) * dphi the solid-angle measure and
 // r_lo = x_lo_0 + c_0 dx_0, r_hi = x_lo_0 + (c_0+1) dx_0. Omega is c_0-independent
-// (it lives entirely on axes 1 and 2) and is a COMMON factor of both faces, so under
-// the r-shift e_r = [1,0,0] it is UNTOUCHED (the shift remaps trig symbols only along
+// (it lives entirely on axes 1 and 2) and is a common factor of both faces, so under
+// the r-shift e_r = [1,0,0] it is untouched (the shift remaps trig symbols only along
 // axis 1) and cancels identically in the equality — no pi, no Omega survives. the
 // consistency reduces to r_hi(c)^2 == r_lo(c+1)^2, i.e. the squared shared-edge radius
 // is single-valued: r_lo(c_0+1) = x_lo_0 + (c_0+1) dx_0 = r_hi(c_0). the cos symbols

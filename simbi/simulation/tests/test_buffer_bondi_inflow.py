@@ -9,7 +9,7 @@
 #
 #     v(r) = lambda rho_inf R_B^2 cs / (rho_ref r^2),
 #
-# which is 0.199 cs at r_0 for gamma = 5/3. relaxing the shell's momentum to ZERO holds
+# which is 0.199 cs at r_0 for gamma = 5/3. relaxing the shell's momentum to zero holds
 # that inflow at rest, which raises the question this measures: whether the reservoir the
 # interior draws from is instead a wall it has to push through.
 #
@@ -20,7 +20,7 @@
 # than any point in the initial collapse transient.
 #
 # the grid is coarse and unrefined on purpose. r_0 sits at two thirds of the domain radius
-# and is resolved on the root grid; the ladder exists to resolve the SINK, which this
+# and is resolved on the root grid; the ladder exists to resolve the sink, which this
 # boundary measurement does not touch. that makes the whole comparison a few tens of
 # seconds rather than cluster time.
 # =============================================================================
@@ -145,7 +145,7 @@ def _steady_flux(problem, data_dir: Path, label: str) -> float:
         f"the {label} run reached only t = {t_last:.4g} in {_MAX_STEPS} steps. the flux at "
         "r_0 is still in the collapse transient there, so it is not the steady supply"
     )
-    # NON-VACUITY: a plateau is what makes the two runs comparable at all. two samples
+    # non-vacuity: a plateau is what makes the two runs comparable at all. two samples
     # still drifting would mean the numbers below are two arbitrary points on two curves.
     drift = abs(last - prev) / abs(last)
     assert drift < _STEADY_TOL, (
@@ -209,7 +209,7 @@ def test_the_bondi_target_adds_supply_in_the_direction_it_pushes(_flux):
         "the shell toward an inward v(r) = -lambda rho_inf R_B^2 cs / (rho_ref r^2), so this "
         "is backwards and the sign of v_r in the momentum target is the first thing to check"
     )
-    # NON-VACUITY: the flag has to change the run at all. were the momentum target dropped
+    # non-vacuity: the flag has to change the run at all. were the momentum target dropped
     # on the way to the backend, both runs would be one run and the comparison would be a
     # statement about nothing.
     assert excess > 0.01 * target, (

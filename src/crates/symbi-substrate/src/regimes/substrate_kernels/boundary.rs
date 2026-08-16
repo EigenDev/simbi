@@ -1,10 +1,10 @@
 // =============================================================================
 // regimes/substrate_kernels/boundary.rs
 //
-// DRIVEN BOUNDARIES. the `(Coord, Assign)` instance of the unified DAG
+// driven boundaries. the `(Coord, Assign)` instance of the unified DAG
 // operator: the kernel-set holds boundary DAGs (`Arc<RuntimeSource>`), the sim's
-// `Boundaries` marks WHICH faces are `Driven(id)`, and after the standard ghost-fill SKIPS
-// those faces, this pass PRESCRIBES their ghost prim state by evaluating the DAG over the
+// `Boundaries` marks which faces are `Driven(id)`, and after the standard ghost-fill skips
+// those faces, this pass prescribes their ghost prim state by evaluating the DAG over the
 // face's ghost band — CPU interpreter on host, the boundary NVRTC kernel on device.
 // =============================================================================
 
@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use symbi_sim::state::BoundaryType;
 
 /// the ghost-cell slab of one face: the ghost cells on `(axis, side)` (side 0 = lo, 1 = hi), with
-/// the transverse axes spanning the FULL ALLOCATION so the slab covers the edge/corner ghost
+/// the transverse axes spanning the full allocation so the slab covers the edge/corner ghost
 /// blocks shared with adjacent faces. the standard pullback never writes a ghost region whose
 /// contacting faces are all driven (they are Skip to it), so an interior-clamped band would leave
 /// those corners at their allocation zeros — a rho = 0 ghost that any multi-dimensional stencil
@@ -66,7 +66,7 @@ fn ghost_band_domain<const D: usize>(
 
 /// run every `Driven(id)` face's prescription. iterates the sim's per-axis `Boundaries`; for each
 /// driven face, looks up the DAG (`dags[id]`) and dispatches `boundary_fill` over its ghost band.
-/// called at the TAIL of a regime's `ghost_fill`, after the standard pullback has skipped these faces.
+/// called at the tail of a regime's `ghost_fill`, after the standard pullback has skipped these faces.
 pub fn dispatch_driven_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dags: &[Arc<RuntimeSource>],
@@ -98,7 +98,7 @@ pub fn dispatch_driven_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// CPU: prescribe the ghost prim state over `band` by evaluating the boundary DAG per cell. reads
-/// ONLY the cell coordinate `x` + time `t` + params (`Coord` state — no interior read), and ASSIGNS
+/// only the cell coordinate `x` + time `t` + params (`Coord` state — no interior read), and assigns
 /// `prim.{rho,vel_k,pre}` (the `den`/`mom`/`nrg` slots). host-memory only.
 fn apply_boundary_dag_cpu<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -154,7 +154,7 @@ fn apply_boundary_dag_cpu<const D: usize, const DOF: usize, Mem, Sc>(
                     .set(c, Sc::from_f64(s[0])),
                 // MHD cell-B prescription (prim.mag == mhd.bcell). a purely toroidal driven
                 // boundary sets the in-plane B to 0 and the out-of-plane B_phi to the injected
-                // value; the in-plane FACE B is left to the CT ghost-fill (div-free).
+                // value; the in-plane face B is left to the CT ghost-fill (div-free).
                 "bcell" => {
                     let mhd = sim
                         .fields
@@ -186,7 +186,7 @@ fn apply_boundary_dag_cpu<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// GPU: prescribe the ghost prim state over `band` via the boundary NVRTC kernel (the `(Coord,
 /// Assign)` instance), built lazily + module-cached in the DAG's `gpu_ir`. binds `prim.*` outputs by
-/// manifest; scalars are geom (`x_lo_k`/`dx_k`) + time `t` + params `p_i` (NO `dt` — Assign has no
+/// manifest; scalars are geom (`x_lo_k`/`dx_k`) + time `t` + params `p_i` (no `dt` — Assign has no
 /// weight).
 fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -233,10 +233,10 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 // =============================================================================
-// GRADIENT BOUNDARIES (Neumann / Robin) — the registry-driven convenience short-circuit for the
+// gradient boundaries (Neumann / Robin) — the registry-driven convenience short-circuit for the
 // classical prescribed-gradient / mixed walls. mirrors the driven-boundary pass: the standard
-// pullback SKIPS Neumann/Robin faces, and this pass prescribes their ghost prim state from the
-// boundary-adjacent interior cell (the outflow EDGE source) + the registered per-variable
+// pullback skips Neumann/Robin faces, and this pass prescribes their ghost prim state from the
+// boundary-adjacent interior cell (the outflow edge source) + the registered per-variable
 // coefficients, via the baked `neumann_ghost_fill` / `robin_ghost_fill` kernels. the general path
 // for an arbitrary user boundary is a custom (driven) boundary; this is the ergonomic wall.
 // =============================================================================
@@ -254,7 +254,7 @@ pub enum GradientBc {
 /// (`neu_q_{rho,v{k},pre}` / `rob_{a,b,c}_{rho,v{k},pre}`). the variable order matches the kernel's
 /// write order: rho, then the `DOF` velocity components, then pre.
 ///
-/// `iso_cs2 = Some(cs^2)` re-derives the PRESSURE coefficients from the DENSITY ones so the shared
+/// `iso_cs2 = Some(cs^2)` re-derives the pressure coefficients from the density ones so the shared
 /// energy kernel reproduces the isothermal closure `pre = cs^2*rho` at the ghost: for Neumann the
 /// pre gradient is `cs^2 * q_rho`; for Robin the pre triple is `(a_rho, b_rho, cs^2*c_rho)` — both
 /// exact because the fills are linear in `u_edge` and `pre_edge = cs^2*rho_edge`. energy regimes
@@ -312,7 +312,7 @@ fn gradient_spec_map<const DOF: usize>(
 
 /// run every Neumann/Robin face's ghost fill. iterates the sim's per-axis boundaries; for each
 /// gradient face, dispatches the baked `{neumann,robin}_ghost_fill{sfx}_{D}d` kernel over the face's
-/// ghost band, binding the outflow EDGE source (`map_type = 3`, `arg = the boundary-adjacent interior
+/// ghost band, binding the outflow edge source (`map_type = 3`, `arg = the boundary-adjacent interior
 /// cell`) on the boundary axis, the spacing-aware geometry, and the per-variable coefficients (spec
 /// scalars). called at the tail of a regime's `ghost_fill`, after the standard pullback skipped these
 /// faces. `iso_cs2 = Some(cs^2)` re-derives the pressure coefficients from the density ones so the
@@ -352,7 +352,7 @@ pub fn dispatch_gradient_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
             let spec = gradient_spec_map::<DOF>(entry, iso_cs2);
             let name = format!("{kind}_ghost_fill{sfx}_{D}d");
             let band = ghost_band_domain(&sim.geom.allocated, &sim.geom.interior, axis, side);
-            // the outflow EDGE cell along the boundary axis: the first interior cell on the lo side,
+            // the outflow edge cell along the boundary axis: the first interior cell on the lo side,
             // the last interior cell on the hi side (the `map_type = 3` source clamps to it).
             let edge = (if side == 0 {
                 sim.geom.interior.spaces[axis].lo

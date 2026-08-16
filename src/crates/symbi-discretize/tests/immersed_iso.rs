@@ -103,7 +103,7 @@ fn rel(a: f64, b: f64) -> f64 {
 fn iso_gravity_matches_adiabatic_exactly() {
     // gravity-only (sink=0): den_dot = 0, so the softened gravity alone drives the den/mom
     // updates, and it is EOS-independent. choose an adiabatic energy whose
-    // recovered cs equals the iso CS so the two kernels are on equal footing — then
+    // recovered cs equals the iso cs so the two kernels are on equal footing — then
     // their den/mom writes must be bitwise-identical.
     let (den, m0, m1) = (2.0, 0.6, -0.4);
     // adiabatic: cs = sqrt(gamma*(gamma-1)*e_int) ... easiest: pick nrg s.t. p matches.
@@ -166,7 +166,7 @@ fn iso_source_gravity_only_matches_analytic() {
 
 #[test]
 fn iso_source_accretion_matches_spec() {
-    // gravity + the well-posed uniform-scaling DRAIN (docs/ideas/accretor.md), cs = CS from
+    // gravity + the well-posed uniform-scaling drain (docs/ideas/accretor.md), cs = cs from
     // prim.pre, no energy. per cell: gravity is an additive momentum source, then each conserved
     // component is scaled by f = exp(-drain_rate*dt) -- so den and mom shrink by the same factor
     // (the velocity is invariant, the design invariant).
@@ -216,9 +216,9 @@ fn iso_source_accretion_matches_spec() {
 #[test]
 fn iso_feedback_matches_adiabatic_when_cs_matches() {
     // the feedback force/torque/mass are EOS-independent given the same cs. pick an
-    // adiabatic state whose recovered cs == CS, then the iso + adiabatic feedback writes
+    // adiabatic state whose recovered cs == cs, then the iso + adiabatic feedback writes
     // must agree. recovered cs = sqrt(gamma*p/den), p=(gamma-1)(nrg-ke). with mom=0:
-    // cs = sqrt(gamma*(gamma-1)*nrg/den). solve nrg for cs=CS, gamma=1.4.
+    // cs = sqrt(gamma*(gamma-1)*nrg/den). solve nrg for cs=cs, gamma=1.4.
     let (den, gamma) = (1.5, 1.4);
     let nrg = CS * CS * den / (gamma * (gamma - 1.0)); // mom=0 -> ke=0
     let iso = KernelRun::new(body_feedback_iso_gv(2, Coords::Cartesian, 2, 2, &[0, 1]))

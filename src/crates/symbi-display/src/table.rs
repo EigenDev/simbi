@@ -136,12 +136,12 @@ fn opt_hist(q: &VecDeque<f64>) -> Option<Vec<f64>> {
 }
 
 impl Table {
-    /// create a new table. if `dynamic` is true AND stdout is a terminal, each
+    /// create a new table. if `dynamic` is true and stdout is a terminal, each
     /// refresh clears the screen; when output is redirected to a file/pipe the
     /// table falls back to static output so no ansi escapes are embedded.
     pub fn new(title: &str, dynamic: bool) -> Self {
-        // a table that ASKED to be live but has no terminal (a cluster job writing
-        // to a .out file) degrades to LOG semantics: the static cards once, then one
+        // a table that asked to be live but has no terminal (a cluster job writing
+        // to a .out file) degrades to log semantics: the static cards once, then one
         // progress line per refresh and each message as it arrives -- the file grows
         // by lines, stays greppable, and tails cleanly from a login node. a table
         // constructed static on purpose (final summaries, tests) keeps the full
@@ -220,7 +220,7 @@ impl Table {
 
     /// set (or clear) the live field-heatmap slice for the overview hero. cheap:
     /// the slice is already decimated to screen resolution by the caller. the
-    /// colormap range is slow-followed (EMA) across frames so it doesn't flicker
+    /// colormap range is slow-followed (ema) across frames so it doesn't flicker
     /// when the per-frame extrema jitter; values outside it clip to the endpoints.
     pub fn set_field(&mut self, field: Option<crate::live::FieldSlice>) {
         self.field = field.map(|mut f| {
@@ -345,7 +345,7 @@ impl Table {
         self.progress = percent.min(100);
     }
 
-    /// toggle the clearing redraw. flip to `false` to render a single STATIC
+    /// toggle the clearing redraw. flip to `false` to render a single static
     /// frame (no screen clear) onto the primary buffer after an alternate-screen
     /// live session ends, so the run's final state persists in scrollback. only
     /// ever dynamic on a tty.
@@ -564,7 +564,7 @@ impl Table {
         let mut widest: [&str; 3] = headers;
         for r in rows {
             for i in 0..3 {
-                // compare DISPLAY width in chars; utf-8 byte length would overcount multibyte glyphs.
+                // compare display width in chars; utf-8 byte length would overcount multibyte glyphs.
                 if r[i].chars().count() > widest[i].chars().count() {
                     widest[i] = r[i].as_str();
                 }
@@ -604,7 +604,7 @@ impl Table {
         });
 
         // trim to capacity
-        // the retained HISTORY is sized for the live dashboard's log tab
+        // the retained history is sized for the live dashboard's log tab
         // (which shows a full pane of tail lines); the static board trims
         // itself to max_messages() at render time, so the small cap there
         // never needs to bound the buffer.
@@ -646,7 +646,7 @@ impl Table {
                 msg.text,
             );
 
-            // measure DISPLAY columns (char count); messages carry
+            // measure display columns (char count); messages carry
             // em-dashes / arrows whose utf-8 byte length exceeds their width,
             // which would otherwise under-pad and drift the right border left.
             let mut cols = line.chars().count();
@@ -720,7 +720,7 @@ fn max_messages() -> usize {
     available.clamp(3, 10)
 }
 
-/// format current local time as "HH:MM:SS".
+/// format current local time as "hh:mm:SS".
 fn timestamp() -> String {
     #[cfg(unix)]
     {
@@ -746,7 +746,7 @@ fn timestamp() -> String {
 
         let mut now: i64 = 0;
         let mut tm = std::mem::MaybeUninit::<Tm>::zeroed();
-        // SAFETY: standard posix time/localtime_r. writing to stack locals.
+        // safety: standard posix time/localtime_r. writing to stack locals.
         unsafe {
             time(&mut now);
             localtime_r(&now, tm.as_mut_ptr());
@@ -862,7 +862,7 @@ mod tests {
     #[test]
     fn timestamp_format() {
         let ts = timestamp();
-        assert_eq!(ts.len(), 8); // "HH:MM:SS"
+        assert_eq!(ts.len(), 8); // "hh:mm:SS"
         assert_eq!(&ts[2..3], ":");
         assert_eq!(&ts[5..6], ":");
     }

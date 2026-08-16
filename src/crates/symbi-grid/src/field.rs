@@ -45,7 +45,7 @@ impl Locality {
 /// (cell / face-d / edge-d). default is `Cell`, so 3-arg uses
 /// `Field<T, D, M>` keep working unchanged. the centering is phantom —
 /// zero runtime cost — and exists for compile-time type safety in
-/// staggered-grid morphisms (Curl, FaceAvg, Diff<AX>).
+/// staggered-grid morphisms (Curl, FaceAvg, Diff<ax>).
 pub struct Field<T, const D: usize, M: MemorySpace = DefaultMemory, C: Centering = Cell> {
     storage: SharedHandle<MemoryBlock<M>>,
     pub domain: Domain<D>,

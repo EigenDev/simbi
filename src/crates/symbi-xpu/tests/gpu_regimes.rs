@@ -2,7 +2,7 @@
 // gpu_regimes.rs
 //
 // GPU<->CPU runtime validation for the iso / adiabatic / RHD c2p + flux + snapshot
-// + wave-speed + mass + ghost-fill kernels: the SAME substrate IR graph emitted to
+// + wave-speed + mass + ghost-fill kernels: the same substrate IR graph emitted to
 // two backends — the CPU Rust fn (`symbi_aot::*_1d__raw`) and the neutral IR blob
 // (`symbi_aot::*_IR`), rendered to CUDA source at test time via `render_from_ir`.
 // each test nvcc-compiles the CUDA to PTX, launches it on the
@@ -10,12 +10,12 @@
 //
 // ABI: the CPU `__raw` fns take view-wrapped
 // buffers (`CpuField` / `CpuFieldMut`, carrying lo+strides) + `grid_size_0` +
-// `dom_lo_0` + the per-kernel scalar tail (NO per-buffer `buf_lo` args — folded into
+// `dom_lo_0` + the per-kernel scalar tail (no per-buffer `buf_lo` args — folded into
 // the view). the GPU kernels take the matching `__symbi_View` structs by value
 // (`DeviceView` Rust mirror; see device_view_abi.rs) + the same scalar tail. the
 // flux / wave-speed kernels carry geometry scalars (mesh_adot / x_lo / dx /
 // mesh_vtrans); cartesian = all-zero geometry, dx arbitrary (cartesian flux is
-// position-independent), passed IDENTICALLY to both backends so the comparison holds.
+// position-independent), passed identically to both backends so the comparison holds.
 //
 // the godunov euler/rk2 integrators are AOT-emitted as part of the unified
 // `*_godunov_stage_*` family; their GPU<->CPU validation lives in
@@ -167,10 +167,10 @@ fn launch_1d(
         .collect()
 }
 
-// raw launcher for kernels whose buffers are NOT a clean in-then-out split (in-place
+// raw launcher for kernels whose buffers are not a clean in-then-out split (in-place
 // updates: ghost_fill gathers in-place). allocates one unified buffer per `bufs` entry
 // (all `buf_len` long), launches with the View prefix then the scalar params as `i32`s
-// followed by `f64`s (the order these kernels declare them), and reads ALL buffers back.
+// followed by `f64`s (the order these kernels declare them), and reads all buffers back.
 fn launch_raw(
     cuda: &str,
     name: &str,
@@ -518,7 +518,7 @@ fn iso_wave_speed_map_gpu_matches_cpu() {
 
 #[test]
 fn godunov_mass_gpu_matches_cpu() {
-    // single mass law to a SEPARATE buffer: rho_new = rho - dt*div(mass_flux). the
+    // single mass law to a separate buffer: rho_new = rho - dt*div(mass_flux). the
     // flux is read at ii and ii+1, so pad all buffers to n+1 and iterate 0..n.
     let n = 8usize;
     let den: Vec<f64> = (0..=n).map(|i| 1.0 + 0.1 * i as f64).collect();
@@ -550,7 +550,7 @@ fn godunov_mass_gpu_matches_cpu() {
 #[test]
 fn iso_ghost_fill_gpu_matches_cpu() {
     // lattice-map pullback (in-place gather): prim[ii] = map(prim[src]). exercise the
-    // REFLECT map (map_type=2: src = arg - coord) with a vel sign flip. iterate a
+    // reflect map (map_type=2: src = arg - coord) with a vel sign flip. iterate a
     // left-ghost range [0,2) whose source cells [5,6] are disjoint -> no in-place
     // read/write hazard, so parallel (GPU) == sequential (CPU).
     let n = 8usize;

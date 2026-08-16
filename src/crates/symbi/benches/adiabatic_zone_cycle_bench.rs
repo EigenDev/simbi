@@ -5,8 +5,8 @@
 // substrate, in Mzcps (million zone-cycles per second). one zone-cycle = one full
 // RK step of a cell: c2p -> ghost_fill -> flux x2 dirs -> cfl -> godunov -> rk2.
 //
-// this drives the RAW substrate via `evolve_with_callback` — NO AMR hierarchy, NO
-// FOFC pass, NO TUI. so it isolates the kernel cost from the driver overhead, the
+// this drives the raw substrate via `evolve_with_callback` — no AMR hierarchy, no
+// FOFC pass, no tui. so it isolates the kernel cost from the driver overhead, the
 // instrument for separating "the flux kernel got slow" (kernel-bound) from
 // "driver overhead accreted" (FOFC probe/reduce, snapshot_stage, AMR wrapper).
 //
@@ -38,7 +38,7 @@ use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 
-// square grid N^2; override with SYMBI_BENCH_N (KH configs run 256^2 / 512^2).
+// square grid N^2; override with SYMBI_BENCH_N (kh configs run 256^2 / 512^2).
 fn grid_n() -> usize {
     std::env::var("SYMBI_BENCH_N")
         .ok()
@@ -117,8 +117,8 @@ fn main() {
             "ghost" => sub.ghost_fill(&sim),
             other => panic!("SYMBI_PHASE: unknown phase '{other}'"),
         };
-        // SYMBI_POLLUTE=1: run snapshot_stage (the ~2.6 MB full-cons copy the AMR level_stage runs
-        // before flux every substage) UNTIMED before each timed phase call — same timed kernel, but
+        // SYMBI_POLLUTE=1: run snapshot_stage (the ~2.6 mb full-cons copy the AMR level_stage runs
+        // before flux every substage) untimed before each timed phase call — same timed kernel, but
         // cold cache. if the timed flux jumps to the driver's ~40 ns/zc, the level_stage snapshot copy
         // is the cache polluter inflating flux.
         let pollute = std::env::var("SYMBI_POLLUTE").is_ok();

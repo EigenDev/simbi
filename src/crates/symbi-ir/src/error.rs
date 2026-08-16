@@ -68,7 +68,7 @@ pub enum ShapeError {
 
 impl ShapeError {
     /// the first span attached to this error (the "primary" location
-    /// for IDE highlight), if any.
+    /// for ide highlight), if any.
     pub fn primary_span(&self) -> Option<Span> {
         match self {
             ShapeError::DimMismatch { span_a, span_b, .. } => span_a.or(*span_b),

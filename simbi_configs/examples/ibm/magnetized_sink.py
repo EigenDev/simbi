@@ -7,13 +7,13 @@
 # Resistive`). the accretion flow drags the frozen-in field inward; near the sink
 # the converging streamlines compress it (flux freezing would pile |B| up without
 # bound at the point mass), and the body's resistivity reconnects/annihilates that
-# accumulating flux -> a STEADY central field set by the advection-diffusion
+# accumulating flux -> a steady central field set by the advection-diffusion
 # balance v_in |B| ~ eta |B| / L, so the field-annihilation region has size
 # L ~ eta / v_in. larger eta => a broader, weaker central field.
 #
 # this replaces the earlier static field-loop-in-a-periodic-box demo, whose
 # signal was contaminated by boundary wrap and the loop's own edge + center
-# artifacts. here the interesting physics sits DEEP in the interior around the
+# artifacts. here the interesting physics sits deep in the interior around the
 # accretor while the outer boundary is a plain outflow far away, so real physics
 # is cleanly separable from boundary effects, and the flow reaches a steady state.
 #
@@ -22,7 +22,7 @@
 # a tracer of the flow the resistive sink acts on. 3D cartesian (a genuine point
 # mass; a 2d sink would represent an infinite current-carrying cylinder).
 #
-# stability note: the resistivity REGULATES the field pileup, so the run is stable
+# stability note: the resistivity regulates the field pileup, so the run is stable
 # only once eta is large enough to diffuse flux out of the sink faster than the
 # inflow drags it in (advection-diffusion balance). at very small eta the frozen-in
 # field piles up near-singularly at the point mass and the step stiffens; use the
@@ -149,7 +149,7 @@ class MagnetizedBondiSink(SimbiProblem):
         ProblemParam(CellSpacing.LINEAR, description="grid spacing in x1"),
     ]
 
-    # accretion sink: only the mask RADIUS is a config knob. the drain RATE is not
+    # accretion sink: only the mask radius is a config knob. the drain rate is not
     # exposed -- it is pinned to the saturated (sound-crossing) value so the removed
     # mass is flow-limited. thin-disk / point-mass accretion has no
     # analytic attractor (unlike bondi), so a tunable rate would be a numerical
@@ -234,7 +234,7 @@ class MagnetizedBondiSink(SimbiProblem):
         body = ImmersedBodyConfig(
             capability=BodyCapability.ACCRETION | BodyCapability.GRAVITATIONAL,
             mass=self.central_mass,
-            # the mask-gate scale for BOTH the drain and the magnetic indicator chi.
+            # the mask-gate scale for both the drain and the magnetic indicator chi.
             radius=r_acc,
             position=(0.0, 0.0, 0.0),
             velocity=(0.0, 0.0, 0.0),

@@ -92,7 +92,7 @@ fn sample_ms(n_values: usize, reps: usize) -> f64 {
 }
 
 /// milliseconds per accepted hydro step on the same grid — the thing a census cost is a fraction
-/// OF. measured through the production driver so it carries the whole step: stages, flux, godunov,
+/// of. measured through the production driver so it carries the whole step: stages, flux, godunov,
 /// recovery, boundaries.
 fn hydro_step_ms(window: f64) -> f64 {
     use symbi_amr::refinement::Hierarchy;
@@ -101,7 +101,7 @@ fn hydro_step_ms(window: f64) -> f64 {
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
     let mut hier = Hierarchy::single(sim, sub);
     // a warmup step pages the fields in and warms the dispatch caches, then the timed window is a
-    // BOUNDED slice of simulation time — the step count that falls out is whatever the cfl gives,
+    // bounded slice of simulation time — the step count that falls out is whatever the cfl gives,
     // and dividing by it makes the result per-step regardless.
     hier.evolve(1.0e-9).expect("warmup step");
     let t_start = hier.levels[0].state.time;
@@ -160,7 +160,7 @@ fn the_census_cost_tracks_the_graph_not_the_accumulator_count() {
          small for this to measure anything"
     );
 
-    // the CLAIM: eight accumulators over one shared graph cost far less than eight times one.
+    // the claim: eight accumulators over one shared graph cost far less than eight times one.
     // the per-cell graph is evaluated once either way; what grows is the reduction's value count.
     // a census that re-walked the dag per accumulator would land near 8x.
     let ratio = eight / one;
@@ -176,7 +176,7 @@ fn the_census_cost_tracks_the_graph_not_the_accumulator_count() {
 fn the_scratch_is_allocated_once_and_reused_across_samples() {
     // the artifacts of a census have a fixed shape for the life of a run — one full-grid field per
     // accumulator plus the bucket — so reallocating them per sample moves that memory for no
-    // information. at three million cells with sixteen accumulators that is order 384 MB churned
+    // information. at three million cells with sixteen accumulators that is order 384 mb churned
     // per sample, which is the reason this is a gate and not a preference.
     //
     // identity rather than wall-clock: an allocator that happened to hand back the same pages would
@@ -213,7 +213,7 @@ fn the_scratch_is_allocated_once_and_reused_across_samples() {
     );
     assert_eq!(first.0.len(), 3, "one value buffer per accumulator");
 
-    // the premise: a genuinely fresh allocation must be DISTINGUISHABLE from the pooled one, or
+    // the premise: a genuinely fresh allocation must be distinguishable from the pooled one, or
     // the equality above holds for reasons that have nothing to do with reuse.
     let fresh = sim
         .census_scratch(&sim.store.censuses[0].evaluator)
@@ -228,7 +228,7 @@ fn the_scratch_is_allocated_once_and_reused_across_samples() {
 
 #[test]
 fn a_reused_scratch_carries_nothing_from_the_previous_sample() {
-    // the hazard reuse introduces. a fill that wrote only SOME cells would leave the rest holding
+    // the hazard reuse introduces. a fill that wrote only some cells would leave the rest holding
     // the previous sample's values and buckets, and the reduction would fold them again — a total
     // that is stale rather than wrong-shaped, so every downstream check still passes.
     let mut sim = build();
@@ -267,7 +267,7 @@ fn a_reused_scratch_carries_nothing_from_the_previous_sample() {
 #[test]
 fn a_cell_that_becomes_covered_is_excluded_on_the_reused_scratch() {
     // the specific way a skip-based fill breaks under reuse. a covered cell belongs to the finer
-    // level, so it must carry the exclusion marker — but if the fill SKIPS it rather than marking
+    // level, so it must carry the exclusion marker — but if the fill skips it rather than marking
     // it, the scratch still holds the bucket that cell was assigned when it was a leaf, and the
     // reduction counts that volume on both levels. the total is wrong by exactly the refined
     // volume and otherwise entirely plausible.

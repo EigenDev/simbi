@@ -262,7 +262,7 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
     let f_rho = (-(relax.lambda_rho * dt)).exp();
     let g_n = S::ONE - (-(relax.lambda_un * dt)).exp();
     // tangential growth factor, capped. for a decaying wall (lambda_ut >= 0) the
-    // factor is <= 1 and the cap (INFINITY by default) is inert; for the
+    // factor is <= 1 and the cap (infinity by default) is inert; for the
     // torque-free channel (lambda_ut < 0) it grows, and the cap bounds the
     // retained-momentum velocity boost so a vanishing remnant stays finite
     // (the retention floor).
@@ -755,7 +755,7 @@ mod tests {
     }
 
     // the raw (uncapped) coupling, which is what the retention floor exists to
-    // bound. built by hand so the tangential growth cap is INFINITY (the
+    // bound. built by hand so the tangential growth cap is infinity (the
     // Property sets a finite cap). two regimes:
     //   (1) strong-but-finite drain: tangential momentum retained (bounded) while
     //       the primitive velocity u'_t = du_t / f_rho diverges.
@@ -775,7 +775,7 @@ mod tests {
             nrg: den * (e_int + 0.5 * u.dot(&u)),
         };
 
-        // (1) lambda_rho dt = 30 -> f_rho ~ 9e-14, finite. cap = INFINITY (raw).
+        // (1) lambda_rho dt = 30 -> f_rho ~ 9e-14, finite. cap = infinity (raw).
         let mut acc = Relax::<f64, 2>::none();
         acc.lambda_rho = 30.0;
         acc.lambda_ut = -30.0; // xi = 1, uncapped

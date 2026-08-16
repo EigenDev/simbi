@@ -1,7 +1,7 @@
 // =============================================================================
 // decomp_equivalence.rs
 //
-// the correctness contract for multi-gpu domain decomposition, validated IN-PROCESS
+// the correctness contract for multi-gpu domain decomposition, validated in-process
 // on the cpu -- no second device, no peer copy, no mpi.
 //
 // the base contract every transport rests on: a domain split into a
@@ -13,7 +13,7 @@
 // a decomposition is a per-axis tile count `counts: [usize; D]`. the monolithic run is
 // just `counts = [1; D]` (one tile, no cuts), so the same code path validates both.
 // the harness drives the stage loop itself (not `step_once`), so it works for both
-// forward euler (one stage) and rk2 (two stages, with a halo exchange BETWEEN stages).
+// forward euler (one stage) and rk2 (two stages, with a halo exchange between stages).
 //
 // coverage (dimension x integrator x topology):
 //   - 1d euler 2-tile, 1d rk2/rk3 4-tile (interior tile fed from both neighbors)
@@ -21,16 +21,16 @@
 //   - 3d euler 2x2x2 grid (edges + corners in 3d)
 //
 // cut faces are `BoundaryType::CoarseFine` (ghost_fill skips them, so the exchange owns
-// them). the exchange is a TWO-PASS scheme (`exchange_grid`): process axes in order; a
-// cut face's transverse extent is INTERIOR for cut axes not yet exchanged, FULL
+// them). the exchange is a two-pass scheme (`exchange_grid`): process axes in order; a
+// cut face's transverse extent is interior for cut axes not yet exchanged, full
 // otherwise. that carries corner ghosts to the diagonal neighbor without explicit
-// diagonal communication. only the PRIM components the flux reconstructs from are
+// diagonal communication. only the prim components the flux reconstructs from are
 // copied; cons ghosts are never read.
 //
 // the `decomp_harness!` macro emits a concrete harness per dimension: a generic-over-D
 // harness drowns in `Cartesian: Metric<f64,D>` / `Regime` / KernelSet bounds.
 //
-// device binding: each tile is bound to a LOGICAL device, round-robin
+// device binding: each tile is bound to a logical device, round-robin
 // over `NDEV`. on the one physical card those logical ordinals fold onto distinct cuda
 // contexts (the modulo map in cuda.rs), so a tile's allocation + every physics kernel run
 // in their own context while the host-orchestrated exchange runs on device 0 over the
@@ -76,8 +76,8 @@ macro_rules! decomp_harness {
             type Sim = SimState<Newtonian, $d, Cartesian, IdealGas<f64>, $space, $mem>;
             type Kern = AdiabaticSubstrateKernelSet<$mem, f64, $d>;
 
-            // spread decomposed tiles across this many LOGICAL devices (round-robin by tile
-            // index). on the single physical card they fold onto NDEV distinct contexts, so
+            // spread decomposed tiles across this many logical devices (round-robin by tile
+            // index). on the single physical card they fold onto ndev distinct contexts, so
             // the device-binding path is exercised without a second gpu. the monolithic run
             // is one tile -> device 0, so it is unaffected.
             const NDEV: i32 = 2;
@@ -151,10 +151,10 @@ macro_rules! decomp_harness {
                     .collect()
             }
 
-            // drive the PRODUCTION decomposed evolve loop (symbi-sim::decomp) over this
+            // drive the production decomposed evolve loop (symbi-sim::decomp) over this
             // harness's tiles. exercises the same function the multi-gpu python entry runs, so
             // a divergence between test and production is
-            // impossible. interval = u64::MAX: no mid-run callback, the equivalence check
+            // impossible. interval = u64::max: no mid-run callback, the equivalence check
             // reads the final state via `global_den`.
             fn run(tiles: &mut [(Sim, Kern)], counts: [usize; $d], ts: Timestepping) {
                 let devices: Vec<i32> = (0..tiles.len()).map(tile_device).collect();
@@ -200,14 +200,14 @@ macro_rules! decomp_harness {
             }
 
             // the dye rides the mass flux, so a cut only exercises chi exchange if mass actually
-            // crosses it AND the dye has a gradient there. the bump is centered on the domain
+            // crosses it and the dye has a gradient there. the bump is centered on the domain
             // (x = 0.5), so at a cut sitting on it the flux is ~zero by symmetry -- which makes a
-            // cut-centered dye gate vacuous. the chi runs therefore add a uniform DIAGONAL drift
+            // cut-centered dye gate vacuous. the chi runs therefore add a uniform diagonal drift
             // so every cut is flux-bearing, and paint the dye as a diagonal ramp so every cut
-            // carries a gradient; then dropping the exchange on ANY axis breaks the match.
+            // carries a gradient; then dropping the exchange on any axis breaks the match.
             const CHI_DRIFT: f64 = 0.4; // subsonic (cs ~ 1.18 here), same on every axis
 
-            // the dye concentration at a GLOBAL point: a ramp along the space diagonal, so it has
+            // the dye concentration at a global point: a ramp along the space diagonal, so it has
             // a gradient across every axis's cut. evaluated at the cell center so mono and every
             // tile seed the identical value.
             fn chi_ic(x: [f64; $d]) -> f64 {
@@ -309,7 +309,7 @@ macro_rules! decomp_harness {
                     $d
                 );
 
-                // ALSO exercise `gather_interiors` -- the production checkpoint gather the python
+                // also exercise `gather_interiors` -- the production checkpoint gather the python
                 // multi-gpu path runs. reassemble the decomposed tiles into a
                 // full-size global sim and confirm its density equals the direct read. this covers
                 // the gather index arithmetic (mirror of the IC scatter) across every topology
@@ -333,7 +333,7 @@ macro_rules! decomp_harness {
             }
 
             // the passive-scalar gate: with a dye field allocated, a decomposition must reproduce
-            // the monolithic DYE field to round-off -- which it can only do if prim.chi is
+            // the monolithic dye field to round-off -- which it can only do if prim.chi is
             // exchanged across every cut. the dye is derived into the transport set from the
             // store, so this is what proves the derivation actually carries it.
             pub fn assert_chi_matches(counts: [usize; $d], ts: Timestepping) {
@@ -350,7 +350,7 @@ macro_rules! decomp_harness {
                     "some dye cells were never written (gather bug)"
                 );
 
-                // NON-VACUITY: the flow must have actually MOVED the dye, or a decomposition that
+                // non-vacuity: the flow must have actually moved the dye, or a decomposition that
                 // never exchanges chi would match the monolithic run trivially and the gate would
                 // test nothing. compare the evolved monolithic dye to its analytic IC and require a
                 // real change -- the dye rides the bump-driven mass flux across the cut.
@@ -396,7 +396,7 @@ decomp_harness!(gpu_d1, 1, DeviceSpace, DeviceMemory, DeviceCopy);
 // the 2x2 grid exercises StagedCopy: the gather/scatter pack/unpack that peer-copy reuses.
 #[cfg(feature = "gpu")]
 decomp_harness!(gpu_d2, 2, DeviceSpace, DeviceMemory, StagedCopy);
-// the peer-copy transport: tiles round-robin onto NDEV LOGICAL devices, so on a 2+ gpu node
+// the peer-copy transport: tiles round-robin onto ndev logical devices, so on a 2+ gpu node
 // the 2x2 grid drives real cross-device `cuMemcpyPeer` halos. self-skips on a single card (a
 // device cannot peer with itself); the equivalence check still applies, now across real devices.
 #[cfg(feature = "gpu")]
@@ -407,7 +407,7 @@ fn euler_two_tile_1d() {
     d1::assert_matches([2], Timestepping::Euler);
 }
 
-// rk2 + an interior tile fed from both neighbors. rk2 exercises the BETWEEN-stage halo
+// rk2 + an interior tile fed from both neighbors. rk2 exercises the between-stage halo
 // exchange (the cut ghosts must be refreshed from each neighbor's stage-1 interior).
 #[test]
 fn rk2_four_tile_1d() {
@@ -477,7 +477,7 @@ fn gpu_rk2_quad_tile_2d_grid() {
 
 // the multi-gpu peer transport, which is the universal transport. `PeerCopy` is adaptive: on a
 // single card the two logical devices fold onto the same physical gpu, cannot peer, and it stages
-// over managed memory; on a 2+ gpu node the SAME code moves halos with `cuMemcpyPeer` over
+// over managed memory; on a 2+ gpu node the same code moves halos with `cuMemcpyPeer` over
 // nvlink. so this runs on every configuration -- no self-skip -- and pins the one transport that
 // ships to the cluster. `enable_peer_mesh` is a no-op when no pair can peer.
 #[cfg(feature = "gpu")]

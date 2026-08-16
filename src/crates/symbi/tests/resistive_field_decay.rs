@@ -4,7 +4,7 @@
 // the analytic oracle for generic Ohmic resistivity: a sheared field `B_x = B0 sin(k y)` threading
 // still gas decays as `exp(-eta k^2 t)` under the resistive induction diffusion `dB/dt = eta lap(B)`
 // (the resistive edge EMF `eta J` riding the CT curl). `B0` is tiny so the ideal
-// Alfven/magnetic-pressure dynamics are negligible over the run. `eta = 0` must NOT decay -- the
+// Alfven/magnetic-pressure dynamics are negligible over the run. `eta = 0` must not decay -- the
 // bug-injection that proves the resistive term is what does it.
 // =============================================================================
 
@@ -150,7 +150,7 @@ fn evolve_3d(eta: f64) -> f64 {
 
 #[test]
 fn resistive_field_decays_at_eta_k_squared_3d() {
-    // the same B_x = B0 sin(k y) diffusion, through the THREE-edge 3D resistive EMF (only J_z is
+    // the same B_x = B0 sin(k y) diffusion, through the three-edge 3D resistive EMF (only J_z is
     // nonzero for a y-only field, but the full 3-edge dispatch runs). must match exp(-eta k^2 t).
     let eta = 0.05;
     let ratio = evolve_3d(eta);
@@ -164,7 +164,7 @@ fn resistive_field_decays_at_eta_k_squared_3d() {
 #[test]
 fn resistivity_dominates_the_ideal_numerical_diffusion() {
     // bug-injection: eta = 0 (ideal MHD) still loses a little field to the scheme's own
-    // finite-resolution numerical diffusion. the resistive term must cause SUBSTANTIALLY more loss
+    // finite-resolution numerical diffusion. the resistive term must cause substantially more loss
     // than that floor -- otherwise the decay in the companion test could be a numerical artifact.
     // eta=0.05 decays to ~0.37, the ideal floor only to ~0.90.
     let ideal = evolve(0.0);

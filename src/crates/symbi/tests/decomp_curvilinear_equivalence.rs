@@ -1,14 +1,14 @@
 // =============================================================================
 // decomp_curvilinear_equivalence.rs
 //
-// the correctness contract for multi-gpu domain decomposition on a CURVILINEAR
+// the correctness contract for multi-gpu domain decomposition on a curvilinear
 // chart, validated in-process on the cpu. decomp_equivalence.rs proves the
 // cartesian case; this proves the case that actually matters for disks and
 // accretors, where the metric varies with radius.
 //
 // on a cylindrical (r, z) or spherical (r, theta) grid the wave speeds, the
 // geometric source, and the face areas all depend on r. so a radial cut hands
-// each tile a DIFFERENT r-range: a tile is not a translate of its neighbor the
+// each tile a different r-range: a tile is not a translate of its neighbor the
 // way a cartesian tile is. the only thing that makes the decomposed run
 // reproduce the monolithic one is a per-tile radial origin placed so the tile's
 // local cell i sits at the same physical r as the undecomposed grid's global
@@ -21,7 +21,7 @@
 // exchange would match a frozen field trivially).
 //
 // r starts at R_LO > 0: the axis r = 0 is a coordinate singularity and no cut is
-// placed on it. the harness drives the PRODUCTION `evolve_decomposed` loop, the
+// placed on it. the harness drives the production `evolve_decomposed` loop, the
 // same one the multi-gpu python entry runs.
 // =============================================================================
 
@@ -53,15 +53,15 @@ fn pulse(r: f64) -> f64 {
     0.2 * (-((r - 1.5) / 0.08).powi(2)).exp()
 }
 
-// the log radial slope spanning [R_LO, R_HI] over NR cells: face(i) = R_LO * 10^(i*slope).
+// the log radial slope spanning [R_LO, R_HI] over nr cells: face(i) = R_LO * 10^(i*slope).
 fn log_slope() -> f64 {
     (R_HI / R_LO).log10() / NR as f64
 }
 
 // the per-tile radial origin and coordinate maps for a tile whose first radial cell is the
-// global cell `tc0*m0`. UNIFORM: the radial axis starts at R_LO + tc0*m0*DR and the builder's
-// origin+spacing define the geometry (maps = None). LOG: the start is advanced
-// MULTIPLICATIVELY (R_LO * 10^(tile_lo*slope)) and a shifted Log map with the SAME slope carries
+// global cell `tc0*m0`. uniform: the radial axis starts at R_LO + tc0*m0*dr and the builder's
+// origin+spacing define the geometry (maps = None). log: the start is advanced
+// multiplicatively (R_LO * 10^(tile_lo*slope)) and a shifted Log map with the same slope carries
 // the geometry -- mirroring the production per-tile map shift, so a tile's local cell i sits at
 // the identical physical r as the undecomposed grid's global cell tc0*m0 + i.
 fn tile_radial(mode: u8, tc0: usize, m0: usize, z0: f64) -> (f64, Option<[AxisMap; 2]>) {
@@ -263,7 +263,7 @@ macro_rules! curvilinear_harness {
                     "some global cells were never written (gather bug)"
                 );
 
-                // NON-VACUITY: the pulse must have actually moved off its IC, or a broken exchange
+                // non-vacuity: the pulse must have actually moved off its IC, or a broken exchange
                 // would match a frozen field and the gate would prove nothing.
                 let max_move = mono_vals
                     .iter()
@@ -356,7 +356,7 @@ fn sph_geometric_radial_four_tile_rk2() {
 // scale factor h3 = r) onto the 2D grid. it is advected by the in-plane radial flow and
 // carries an angular-momentum geometric source; the decomposition must exchange it across
 // a radial cut like any other momentum component (the transport ranges over mom[0..DOF]).
-// the DOF = D assumption lives only in the BUILD macro, never in the transport.
+// the DOF = D assumption lives only in the build macro, never in the transport.
 mod swirl {
     use super::*;
 
@@ -373,7 +373,7 @@ mod swirl {
         }
     }
 
-    // a localized azimuthal-velocity blob, NOT rigid rotation (which would be a discrete
+    // a localized azimuthal-velocity blob, not rigid rotation (which would be a discrete
     // null and never move); the radial pulse's flow advects it across the cut.
     fn vphi(r: f64) -> f64 {
         0.3 * (-((r - 1.5) / 0.1).powi(2)).exp()
@@ -502,7 +502,7 @@ mod swirl {
             "some global cells were never written"
         );
 
-        // NON-VACUITY: the azimuthal momentum must have moved off its IC, or a broken
+        // non-vacuity: the azimuthal momentum must have moved off its IC, or a broken
         // exchange of the out-of-plane slot would match a frozen field trivially.
         let max_move = mono_vals
             .iter()
@@ -527,7 +527,7 @@ mod swirl {
     }
 }
 
-// the radial cut is load-bearing: the two tiles carry different r-ranges AND the azimuthal
+// the radial cut is load-bearing: the two tiles carry different r-ranges and the azimuthal
 // momentum must cross the cut. 4-tile rk2 puts an interior tile between two cuts.
 #[test]
 fn swirl_radial_two_tile_euler() {

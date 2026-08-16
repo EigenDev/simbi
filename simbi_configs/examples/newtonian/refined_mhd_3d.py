@@ -1,10 +1,10 @@
 # =============================================================================
 # refined_mhd_3d.py
 #
-# a 3d MHD run on a STATICALLY REFINED mesh — the orszag-tang vortex extruded
+# a 3d MHD run on a statically refined mesh — the orszag-tang vortex extruded
 # along z (uniform in z), with one fine box covering the central vortex. the
 # point is the constrained-transport invariant: the fine staggered B is seeded
-# by DIVERGENCE-FREE prolongation of the coarse faces, so div(B)=0 holds on BOTH
+# by divergence-free prolongation of the coarse faces, so div(B)=0 holds on both
 # levels and across the coarse-fine boundary. mhd refinement is 3d-cartesian only.
 # =============================================================================
 import math

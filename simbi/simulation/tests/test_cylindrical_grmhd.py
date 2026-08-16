@@ -3,9 +3,9 @@
 #
 # the cylindrical kerr-schild GRMHD constrained-transport gates:
 # a poloidal field loop on the 2.5D (R, z) plane and an in-plane loop on the (R, phi)
-# equatorial DISK, each seeded div-free through the metric-weighted curl of a vector
+# equatorial disk, each seeded div-free through the metric-weighted curl of a vector
 # potential. the chart-generic densitized curl + the two-component-shift corner EMF
-# must PRESERVE the w-weighted div(B) = sum sqrt(gamma)(face) x coordinate-length x
+# must preserve the w-weighted div(B) = sum sqrt(gamma)(face) x coordinate-length x
 # B_face to machine precision as the gas free-falls, and run stably (p > 0, |B|
 # bounded, finite — no floors). sqrt(det gamma) = R sqrt(1 + 2M/r), r = sqrt(R^2 + z^2)
 # (the disk is the r = R equatorial slice). the gas flux is the HLLE fan. both charts
@@ -76,10 +76,10 @@ def _run(p, d, ct, end_time=2.5, solver=None):
 
 
 # the (R, z) 2.5D poloidal chart: the CT (contact + UCT-HLL) addresses the true in-plane axes via
-# gr_ct_plane, so the GAPPED grid-axis set [0, 2] reconstructs the staggered field along the axis
-# whose transverse halo it carries. t = 0.7 keeps the loop clean at BOTH CT methods — the poloidal
+# gr_ct_plane, so the gapped grid-axis set [0, 2] reconstructs the staggered field along the axis
+# whose transverse halo it carries. t = 0.7 keeps the loop clean at both CT methods — the poloidal
 # free-fall converges and piles B up at the inner R boundary, and the sharp UCT does not diffuse it
-# (a physical/BC effect the disk avoids, infalling only radially at fixed z). div(B) stays machine-zero.
+# (a physical/bc effect the disk avoids, infalling only radially at fixed z). div(B) stays machine-zero.
 @needs_backend
 @pytest.mark.parametrize("ct", [CtMethod.CONTACT, CtMethod.UCT])
 def test_cylindrical_rz_field_loop_preserves_divergence(ct) -> None:
@@ -99,8 +99,8 @@ def test_cylindrical_rz_field_loop_preserves_divergence(ct) -> None:
     assert md < 1e-12 * max(sc, 1.0), f"(R,z) w-div(B) broke at {ct}: {md:.3e} (scale {sc:.3e})"
 
 
-# the sharp UCT-HLLD wave-sum edge EMF on the GAPPED (R, z) grid axes [0, 2]: the tetrad HLLD fan
-# reads a full 3-vector prim + the world (R, z) metric, so the kernel assembles the prim in WORLD
+# the sharp UCT-HLLD wave-sum edge EMF on the gapped (R, z) grid axes [0, 2]: the tetrad HLLD fan
+# reads a full 3-vector prim + the world (R, z) metric, so the kernel assembles the prim in world
 # order (v[pc]=..) and solves along the world normal (dir = pc); gr_ct_plane maps the gapped axes.
 # the two-component shift (beta^R, beta^z) rides both fans. div(B) machine-zero + stable at t = 0.7.
 @needs_backend

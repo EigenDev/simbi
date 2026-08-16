@@ -4,7 +4,7 @@
 // the behavioral law of the HLLC-LM compressibility-consistency clamp: the
 // low-mach dissipation reduction survives in the regime it exists for. the
 // clamp restores classical dissipation on stratified-balance faces (gated by
-// the sealed-column entropy floor in gravity_source_entropy.rs); HERE the
+// the sealed-column entropy floor in gravity_source_entropy.rs); here the
 // complementary side is pinned — in smooth subsonic vortical flow the clamped
 // scheme must remain strictly less dissipative than classical HLLC, or the
 // clamp has crept into the turbulence and quietly reverted the solver.

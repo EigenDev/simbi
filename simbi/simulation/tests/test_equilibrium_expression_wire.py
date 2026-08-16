@@ -6,7 +6,7 @@
 # symbi-expr's load.rs parses and `Hierarchy::with_equilibrium_expression`
 # evaluates per cell centre.
 #
-# a target is a STATE, not a source: it carries no conservation law to be wrapped
+# a target is a state, not a source: it carries no conservation law to be wrapped
 # in and no conserved slot to target, so the payload has no `kind` and the runner
 # must not demand one. what it does have to carry is exactly the primitive
 # components the regime evolves, since a missing or extra one silently shifts

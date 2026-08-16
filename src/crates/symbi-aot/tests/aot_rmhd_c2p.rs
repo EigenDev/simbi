@@ -1,15 +1,15 @@
 // =============================================================================
 // aot_rmhd_c2p.rs
 //
-// numerical validation of the BUILD-TIME-GENERATED RMHD cons->prim kernel — the
+// numerical validation of the build-time-generated RMHD cons->prim kernel — the
 // deepest substrate regime (a KKC vector-state bracketed false-position over
 // kkc_fmu44, find_mu_plus + Illinois half-damp, 100-step bound baked at codegen,
 // lowered + emitted to compiled Rust via the DAG-preserving lowering). this is the
-// proof the COMPILED kernel produces correct numbers at run time
+// proof the compiled kernel produces correct numbers at run time
 // (the IR graph itself is validated against the reference c2p in
 // symbi-discretize/tests/rmhd_c2p.rs).
 //
-// ROUND-TRIP: pick analytic primitives (rho, 3-velocity v, p, lab B), forward-map
+// round-trip: pick analytic primitives (rho, 3-velocity v, p, lab B), forward-map
 // to the conserved (D, S_k, tau, B_k) via the RMHD relations, run the compiled
 // c2p, assert it recovers the originals (3-velocity; use_four_velocity = false).
 //
@@ -21,7 +21,7 @@
 
 use symbi_aot::NamedKernel;
 
-// shim binding the emitted c2p BY FIELD NAME (NamedKernel) — order-independent,
+// shim binding the emitted c2p by field name (NamedKernel) — order-independent,
 // loud + named on manifest drift. all buffers here are 1D (lo = 0).
 #[allow(non_snake_case, clippy::too_many_arguments)]
 fn rmhd_c2p_1d(

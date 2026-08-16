@@ -1,11 +1,11 @@
 # =============================================================================
 # lightcurve.py
 #
-# observer light curve F_nu(t), STREAMED over checkpoints via the cpu_ext catalog
+# observer light curve F_nu(t), streamed over checkpoints via the cpu_ext catalog
 # path. each checkpoint -> in-process synchrotron catalog -> EATS reduce into the
-# fixed time bins -> accumulate -> DISCARD the events. memory is O(time_bins x freqs),
+# fixed time bins -> accumulate -> discard the events. memory is O(time_bins x freqs),
 # so it scales to many checkpoints (fine time binning) without
-# holding every photon. this is the SINGLE afterglow path (replaces symbi-rad-py's
+# holding every photon. this is the single afterglow path (replaces symbi-rad-py's
 # self-contained read_cells/rad_hydro.lightcurve), so it inherits the lab-radius,
 # 2d-revolve, and units fixes.
 # usage:
@@ -55,7 +55,7 @@ def stream_lightcurve(
     edges = [float(t) for t in time_edges]
     freqs = [float(f) for f in frequencies]
 
-    # each hydro checkpoint emits over the lab-time interval it REPRESENTS (its trapezoidal
+    # each hydro checkpoint emits over the lab-time interval it represents (its trapezoidal
     # share of the snapshot-time axis) — weighting by the CFL dt would
     # undercount the emitted energy by (checkpoint cadence) / (CFL dt), typically ~1e5.
     hydro_paths = sorted(
@@ -80,7 +80,7 @@ def stream_lightcurve(
         total = np.asarray(fl) if total is None else total + np.asarray(fl)
 
     for path in checkpoints:
-        # accept EITHER an events catalog (read it back) or a hydro checkpoint (generate in
+        # accept either an events catalog (read it back) or a hydro checkpoint (generate in
         # place) — the events file is the canonical product, but a checkpoint works directly too.
         if _is_event_catalog(path):
             n = cpu_ext.photon_event_count(path)

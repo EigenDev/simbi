@@ -355,14 +355,14 @@ def rex_invariance(mdot: Array, r: Array, radii: Sequence[float]) -> dict[str, A
 
 
 # =============================================================================
-# the RUNTIME horizon ledger (the first-class immersed-boundary diagnostic)
+# the runtime horizon ledger (the first-class immersed-boundary diagnostic)
 #
 # the excision horizon is auto-created as a first-class BodyKind::Horizon for a
 # cartesian kerr-schild excision run. each step the substrate reduces the shell
 # flux (a GPU Add-reduction of the outward boundary flux through a coordinate
 # sphere at diagnostic_radius) into the body's ledger, checkpointed under the
-# `bodies` group. UNLIKE `accretion_rate` above (a post-hoc surface integral),
-# this is the flux the scheme ACTUALLY applied, and -- because the code evolves
+# `bodies` group. unlike `accretion_rate` above (a post-hoc surface integral),
+# this is the flux the scheme actually applied, and -- because the code evolves
 # the covariant (killing) energy -- Edot is diagnostic_radius-invariant to
 # roundoff at steady state.
 # =============================================================================

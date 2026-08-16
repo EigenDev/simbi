@@ -107,7 +107,7 @@ pub fn try_compile_cuda_with_includes(
 /// determine the host-compiler args nvcc needs to compile here, cached per
 /// process (one rustc per crate, so at most one probe/warning per crate).
 /// returns Some(extra args) — empty if the default host compiler
-/// works, or `-ccbin <PATH g++>` if the default failed but a PATH g++ works
+/// works, or `-ccbin <PATH g++>` if the default failed but a path g++ works
 /// (the common distrobox case) — or None if nvcc is unable to compile at all
 /// (warns once; caller falls back to NVRTC).
 fn nvcc_host_ccbin(nvcc: &str) -> Option<Vec<String>> {
@@ -116,7 +116,7 @@ fn nvcc_host_ccbin(nvcc: &str) -> Option<Vec<String>> {
         if probe_nvcc(nvcc, &[]) {
             return Some(vec![]);
         }
-        // the default host compiler failed; retry with a PATH g++ if the configured
+        // the default host compiler failed; retry with a path g++ if the configured
         // NVCC_CCBIN is untrustworthy (shared policy with symbi/build.rs).
         if let Some(retry) = ccbin_retry_candidate() {
             let args = vec!["-ccbin".to_string(), retry.gxx.clone()];
@@ -150,7 +150,7 @@ pub struct CcbinRetry {
 /// the configured NVCC_CCBIN is untrustworthy — unset (nvcc fell back to an absent
 /// hard-wired g++), or set to a path missing from disk (a stale value leaked from
 /// another machine via a shared env; env vars carry no provenance, so a missing
-/// target is the signal it's stale) — and a `g++`/`c++` is resolvable on PATH. a
+/// target is the signal it's stale) — and a `g++`/`c++` is resolvable on path. a
 /// real-but-failing NVCC_CCBIN is the user's deliberate choice, left alone
 /// (`None`). the caller verifies the candidate actually works in its own context
 /// (a trivial probe at runtime, the real stub compile at build time). the shared
@@ -196,7 +196,7 @@ fn probe_nvcc(nvcc: &str, extra: &[String]) -> bool {
     ok
 }
 
-/// first of `names` resolvable on PATH (absolute path), for nvcc -ccbin fallback.
+/// first of `names` resolvable on path (absolute path), for nvcc -ccbin fallback.
 pub fn which_first(names: &[&str]) -> Option<String> {
     for n in names {
         if let Ok(out) = Command::new("which").arg(n).output() {
@@ -211,7 +211,7 @@ pub fn which_first(names: &[&str]) -> Option<String> {
     None
 }
 
-/// find nvcc on the system. checks CUDA_HOME / CUDA_PATH, then PATH.
+/// find nvcc on the system. checks CUDA_HOME / CUDA_PATH, then path.
 fn find_nvcc() -> Option<String> {
     if let Ok(cuda_home) = std::env::var("CUDA_HOME") {
         let nvcc = format!("{}/bin/nvcc", cuda_home);

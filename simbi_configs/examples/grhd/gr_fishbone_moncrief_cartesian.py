@@ -1,8 +1,8 @@
 # =============================================================================
 # gr_fishbone_moncrief_cartesian.py
 #
-# the fishbone-moncrief torus on the FULL 3D CARTESIAN kerr-schild grid, at
-# GENERAL SPIN: the same exact equilibrium as the spherical-chart version, but
+# the fishbone-moncrief torus on the full 3D cartesian kerr-schild grid, at
+# general spin: the same exact equilibrium as the spherical-chart version, but
 # with no polar axis anywhere — the torus resolves its poles like any other
 # direction, and the funnel region above the hole is ordinary grid. the
 # horizon-penetrating chart carries the flow smoothly through r = r_+; the
@@ -186,7 +186,7 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
             mm, aa = self.schwarzschild_mass, self.kerr_spin
             self.excision_radius = 0.7 * (mm + math.sqrt(max(mm * mm - aa * aa, 0.0)))
         # the pressure-matched surface replaces torus gas colder than the corona,
-        # so a corona pressure approaching the torus PEAK pressure erases the torus
+        # so a corona pressure approaching the torus peak pressure erases the torus
         # entirely (a near-marginal kappa ~ 1 torus is nearly pressureless: p_max =
         # (h_max - 1) rho_max (gamma-1)/gamma with h_max - 1 ~ 1e-4). fail loud.
         torus = self.torus()
@@ -284,7 +284,7 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
                         theta = math.acos(max(-1.0, min(1.0, z / r)))
                         rho_a, pre_a = self.atmosphere(r, torus.r_max)
                         state = torus.primitive(r, theta)
-                        # PRESSURE-MATCHED surface: the corona replaces torus gas
+                        # pressure-matched surface: the corona replaces torus gas
                         # whose polytropic pressure falls below the local corona
                         # pressure (a pure contact interface, no crush wave).
                         if state is None or state[3] < pre_a:

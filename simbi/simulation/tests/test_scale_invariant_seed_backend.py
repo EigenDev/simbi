@@ -1,7 +1,7 @@
 # =============================================================================
 # test_scale_invariant_seed_backend.py
 #
-# the velocity seed's trip through the BACKEND: the mode table crossing the
+# the velocity seed's trip through the backend: the mode table crossing the
 # python/rust boundary and the per-level application on a real hierarchy. these
 # evolve, so they live apart from the seed's pure-python invariance gates -- a
 # module that calls the driver is marked `simulation` wholesale, and folding
@@ -9,7 +9,7 @@
 #
 # what only an end-to-end run can see:
 # - the payload's shape contract in both directions. the seedless payload (an
-#   empty mode table and an empty taper) is what EVERY config emits by default,
+#   empty mode table and an empty taper) is what every config emits by default,
 #   so a backend that rejects it breaks every run in the repository rather than
 #   just the seeded ones.
 # - that the seed is applied per level rather than to the root and prolonged.

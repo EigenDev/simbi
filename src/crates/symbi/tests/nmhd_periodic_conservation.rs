@@ -7,7 +7,7 @@
 // then wrong from the first step, the two periodic wrap copies of every face
 // drift apart, and the flux telescoping leaks mass ~1e-9/step (hydro stays
 // exact, and divB stays clean since CT preserves it for any EMF). with the
-// halo filled the wrap copies stay BIT-identical by induction and the periodic
+// halo filled the wrap copies stay bit-identical by induction and the periodic
 // totals are conserved to machine precision.
 //
 // pins, on a single-level orszag-tang run with periodic walls:
@@ -45,7 +45,7 @@ fn nmhd_periodic_run_conserves_and_keeps_wrap_copies_locked() {
     let dz = 1.0 / NZ as f64;
     let rho0 = GAMMA * GAMMA;
     let p0 = GAMMA;
-    // staggered bface is the CELL-AVERAGED analytic field (integral of the OT sin over the face's
+    // staggered bface is the cell-averaged analytic field (integral of the OT sin over the face's
     // transverse cell width); seed_faces reconstructs the cell edges from the face midpoint + dx.
     // bcell is point-sampled from the cell-centered prim mag (via set_initial) — they intentionally
     // differ, as in the original IC.
@@ -93,7 +93,7 @@ fn nmhd_periodic_run_conserves_and_keeps_wrap_copies_locked() {
 
     evolve_with_callback(&mut sim, &k, 0.06, 1, |s| {
         let mhd = s.fields.mhd.as_ref().unwrap();
-        // the wrap copies of the normal faces are the SAME physical face:
+        // the wrap copies of the normal faces are the same physical face:
         // they must stay bit-identical under evolution.
         for j in 0..n {
             for kk in 0..NZ as isize {

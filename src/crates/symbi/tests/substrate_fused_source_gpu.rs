@@ -3,20 +3,20 @@
 //
 // GPU validation: every fused-source godunov kernel must run on
 // the GPU and match the CPU result modulo nvcc FMA fusion. proves that
-// the spec -> AOT -> substrate pipeline closes on-device for BOTH position-
-// independent overlays (uniform_accel) AND position-dependent overlays
+// the spec -> AOT -> substrate pipeline closes on-device for both position-
+// independent overlays (uniform_accel) and position-dependent overlays
 // (point_mass_grav — the more interesting case, since `cell_geometry_gv`'s
 // in-kernel centroid arithmetic from `x_lo + i*dx` has to compile and
 // execute correctly under NVRTC).
 //
-// the test pattern mirrors `substrate_hydro_gpu.rs`: build TWO identical
+// the test pattern mirrors `substrate_hydro_gpu.rs`: build two identical
 // SimStates (host = CpuSpace/HostMemory, device = CudaSpace/UnifiedMemory),
-// configure the SAME `FusedSourceBinding` on both kernel sets, run
+// configure the same `FusedSourceBinding` on both kernel sets, run
 // godunov_euler (and godunov_rk2 for the harder integrator path), diff
 // every conserved field — relative tolerance < 1e-9, the FMA-fusion budget a
 // single kernel launch can spend.
 //
-// runs ONLY with --features cuda; needs a CUDA-capable GPU. NVRTC compiles the
+// runs only with --features cuda; needs a CUDA-capable GPU. NVRTC compiles the
 // kernels, so no nvcc host compiler is required.
 //
 // run: cargo test -p symbi --features cuda --test substrate_fused_source_gpu
@@ -135,11 +135,11 @@ where
     .build()
 }
 
-// drive the SAME pre-godunov pipeline (c2p, ghost_fill, flux per dir) on BOTH
+// drive the same pre-godunov pipeline (c2p, ghost_fill, flux per dir) on both
 // sims, then run godunov_euler + godunov_rk2 with the supplied binding, and
 // diff every cons field. the flux step builds non-uniform face fluxes — the
 // fused source's spec contribution is then the load-bearing diff between the
-// unfused output and the new output. asserts the FULL substrate path closes.
+// unfused output and the new output. asserts the full substrate path closes.
 fn check_adiabatic_fused<const D: usize>(binding: FusedSourceBinding)
 where
     Cartesian: Metric<f64, D>,
@@ -164,7 +164,7 @@ where
         dset.flux(&dev, dir);
     }
 
-    // **the load-bearing step**: the FUSED godunov on BOTH backends.
+    // **the load-bearing step**: the fused godunov on both backends.
     hset.godunov_stage(&host, 0.01, 0.0, 1.0);
     dset.godunov_stage(&dev, 0.01, 0.0, 1.0);
     cmp(
@@ -268,7 +268,7 @@ where
     }
 }
 
-// ----- uniform_accel: POSITION-INDEPENDENT fused source ---------------------
+// ----- uniform_accel: position-independent fused source ---------------------
 //
 // the spec source declares only `g_ext_k` runtime scalars. these stress the
 // scalar manifest path (the FusedSourceBinding's `scalars: HashMap` makes it
@@ -306,12 +306,12 @@ fn iso_uniform_accel_gpu_3d() {
     check_iso_fused::<3>(accel_binding::<3>(&[-9.81, 0.5, 0.3]));
 }
 
-// ----- point_mass_grav: POSITION-DEPENDENT fused source ---------------------
+// ----- point_mass_grav: position-dependent fused source ---------------------
 //
 // the harder case: the spec source declares `xm_k` + `gm` scalars and `x_k`
 // Params — and the position-dependent binding ties `x_k` to in-kernel cell centroids
 // computed from `x_lo_k + i*dx_k`. that arithmetic must compile and execute
-// CORRECTLY on the GPU; otherwise position-dependent overlays are broken
+// correctly on the GPU; otherwise position-dependent overlays are broken
 // on-device. body offset slightly from the grid center so |x - xm| != 0
 // everywhere (avoids the singularity in 1/|x-xm|^3).
 

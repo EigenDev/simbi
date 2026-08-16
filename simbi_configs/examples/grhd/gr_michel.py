@@ -2,9 +2,9 @@
 # gr_michel.py
 #
 # michel (1972) steady transonic accretion onto a schwarzschild black hole — the
-# EXACT GRHD solution, initialized directly on the grid. the flow is isentropic
+# exact GRHD solution, initialized directly on the grid. the flow is isentropic
 # (p = K rho^gamma with one global K), so it solves the adiabatic GRHD equations,
-# and it is STATIONARY: a correct scheme must hold the profile, with the residual
+# and it is stationary: a correct scheme must hold the profile, with the residual
 # shrinking at the truncation order under grid refinement. this makes the config
 # the accuracy benchmark for the schwarzschild valencia path (flux densitization,
 # geodesic sources, banyuls-font wave speeds), complementing the uniform-gas
@@ -21,7 +21,7 @@
 # per branch, found by bisection bracketed against u_s.
 #
 # code variables at radius r (f = 1 - 2M/r): W = sqrt((f + u^2)/f), the valencia
-# CONTRAVARIANT radial velocity v^r = u^r / W = -u sqrt(f) / sqrt(f + u^2), and
+# contravariant radial velocity v^r = u^r / W = -u sqrt(f) / sqrt(f + u^2), and
 # p = K rho^gamma. the initial state samples the profile at each cell's
 # volume-weighted centroid r_vw = (3/4)(rh^4 - rl^4)/(rh^3 - rl^3) — the same
 # radius the backend evaluates the metric at, so the stored conserved state is the

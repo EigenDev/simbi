@@ -1,13 +1,13 @@
 // =============================================================================
 // decomp_driven_mhd_equivalence.rs
 //
-// the DRIVEN-boundary correctness contract for decomposed MHD: a 2d RMHD grid split into
-// tiles, each registering the SAME boundary DAG, must reproduce the monolithic run to
-// round-off AND keep div(B) at machine zero across the tile cuts. the prescription covers
+// the driven-boundary correctness contract for decomposed MHD: a 2d RMHD grid split into
+// tiles, each registering the same boundary DAG, must reproduce the monolithic run to
+// round-off and keep div(B) at machine zero across the tile cuts. the prescription covers
 // the hydro prims + the cell B; the staggered face B rides the CT ghost fill and the
 // transverse halo exchange.
 //
-// the inflow is POSITION-DEPENDENT (rho = 2 + 0.2*y, the cell's GLOBAL y) and carries an
+// the inflow is position-dependent (rho = 2 + 0.2*y, the cell's global y) and carries an
 // out-of-plane B_z (cell-centered, div-free by construction — no CT face sub-problem). the
 // cut-along-the-face tiling is the decisive case: a tile evaluating the prescription at its
 // tile-local y injects the wrong profile on every non-origin tile.
@@ -255,7 +255,7 @@ fn driven_mhd_inflow_four_tiles() {
 
 #[test]
 fn iso_mhd_driven_inflow_decomposed_matches_monolithic() {
-    // the ISOTHERMAL-MHD instance of the same contract: prescription [rho, v.., B..] (no
+    // the isothermal-mhd instance of the same contract: prescription [rho, v.., B..] (no
     // pressure slot; p = cs^2 rho), the cut along the driven face (both tiles own a piece),
     // mono == decomposed to round-off. pins the imhd decomposed registration.
     use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet;
@@ -372,7 +372,7 @@ fn iso_mhd_driven_inflow_decomposed_matches_monolithic() {
         out
     };
 
-    let counts = [1, 2]; // the cut ALONG the driven face — the global-coordinate-decisive tiling
+    let counts = [1, 2]; // the cut along the driven face — the global-coordinate-decisive tiling
     let mut mono = grid([1, 1]);
     run_i(&mut mono, [1, 1]);
     let mut dec = grid(counts);

@@ -35,7 +35,7 @@ const L: f64 = 1.2;
 const MASS: f64 = 0.3; // r_+ = 0.6 on the grid
 const R_EXC: f64 = 0.35; // inside r_+, above the metric guard M/2
 const R_DIAG: f64 = 0.9; // 3M, outside the horizon, on the grid
-// sized for a DEBUG gate: the uniform ambient against the vacuum-floor rim
+// sized for a debug gate: the uniform ambient against the vacuum-floor rim
 // drives heavy fofc traffic, so the run is small, hot (pressure-supported),
 // and short — a handful of steps is enough for a nonzero shell flux.
 const T_FINAL: f64 = 0.05;

@@ -1,13 +1,13 @@
 // =============================================================================
 // refine_divb_under_evolve.rs
 //
-// div(B)-preservation gate: a 2-level static nesting of the NEWTONIAN-MHD
+// div(B)-preservation gate: a 2-level static nesting of the newtonian-mhd
 // substrate (orszag-tang, periodic, the fine level covering the vortex core)
-// keeps the discrete staggered div(B) at machine zero on BOTH levels under
+// keeps the discrete staggered div(B) at machine zero on both levels under
 // evolve — the area-weighted bface restriction + the edge-EMF reflux preserve
 // the constraint across the coarse-fine boundary — while the composite gas
 // mass and momentum stay conserved (the hydro flux registers, magnetic stress
-// included). total energy is NOT asserted to machine precision: the CT
+// included). total energy is not asserted to machine precision: the CT
 // magnetic-energy correction (bcell_from_bface) is deliberately
 // non-conservative, on a single level exactly as here.
 //
@@ -43,9 +43,9 @@ const V0: f64 = 0.5;
 const B0: f64 = 1.0;
 const DIVB_TOL: f64 = 1e-12;
 
-/// the orszag-tang field with FACE-AVERAGED staggered B, z-invariant: exact
+/// the orszag-tang field with face-averaged staggered B, z-invariant: exact
 /// face integrals of the continuum div-free field are discretely div-free on
-/// EVERY level AND coarse-fine consistent (a coarse face integral equals the
+/// every level and coarse-fine consistent (a coarse face integral equals the
 /// mean of its fine sub-face integrals identically) — the consistency the
 /// init restriction + divB gate require. point sampling would be div-free per
 /// level but inconsistent across levels. the same closure fills every level
@@ -214,7 +214,7 @@ fn nmhd_two_level_preserves_divb_across_the_interface() {
 
     let (m0, p0) = composite_mass_momx(&hier);
 
-    // march 10 root steps, asserting divB on BOTH levels after every step —
+    // march 10 root steps, asserting divB on both levels after every step —
     // any leak at the coarse-fine interface compounds and trips immediately.
     let mut max_rel = 0.0_f64;
     for step in 0..10u64 {
@@ -234,7 +234,7 @@ fn nmhd_two_level_preserves_divb_across_the_interface() {
 
     // composite gas conservation: the hydro reflux is exact (the budget
     // identity holds to 1e-15 on the fine side), but the MHD substrate itself
-    // drifts mass ~1e-9/step across periodic walls EVEN ON A SINGLE LEVEL —
+    // drifts mass ~1e-9/step across periodic walls even on A single level —
     // the flux reads the CT-evolved bface, and the two stored copies of each
     // periodic wrap face drift apart under the boundary-edge EMF stencils, so
     // the wrap telescoping leaks. measure that single-level control drift on
@@ -255,7 +255,7 @@ fn nmhd_two_level_preserves_divb_across_the_interface() {
         rel(p1, p0, m0)
     );
 
-    // the fine bface transverse halo at the CF sides is PROLONGED coarse data
+    // the fine bface transverse halo at the CF sides is prolonged coarse data
     // (it was allocation zeros before the staggered CF prolongation): spot a
     // halo row of bface[0] (y = fine interior lo - 1) — the OT bx field is
     // O(B0) there, so a stale halo reads exactly 0.

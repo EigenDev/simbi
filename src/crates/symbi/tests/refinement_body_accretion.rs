@@ -2,7 +2,7 @@
 // refine_body_accretion.rs
 //
 // per-level immersed bodies on the static-refinement hierarchy (the accretion
-// spec sim's wiring): the FINEST level owns the sink + diagnostics, coarser
+// spec sim's wiring): the finest level owns the sink + diagnostics, coarser
 // levels carry gravity-only proxies (same mass/softening/motion, sink_rate=0),
 // body motion advances once per root step on the finest and syncs outward.
 //
@@ -10,7 +10,7 @@
 // covering the sink:
 //   (a) accretion is recorded on the finest level's body; the gravitating
 //       mass stays fixed (fixed-potential sink),
-//   (b) the coarse proxy has gravity but NO accretion capability,
+//   (b) the coarse proxy has gravity but no accretion capability,
 //   (c) gravity acts on the coarse level too (inward momentum outside the
 //       coverage) and the sink drains fluid on the fine level,
 //   (d) restriction consistency holds with body sources active,
@@ -52,7 +52,7 @@ fn dense_gas(sim: &Sim) {
 /// a 2-level hierarchy on [x0, x0+1)^3 with the middle half refined. periodic
 /// walls: an outflow boundary feeds gravity-driven inflow that swamps the sink
 /// in the mass budget. the prescribed binary rotates about the coordinate
-/// ORIGIN, so the binary test centers the domain there (x0 = -0.5); the static
+/// origin, so the binary test centers the domain there (x0 = -0.5); the static
 /// central-mass test keeps the unit box.
 fn two_level(x0: f64, bodies: BodyCollection<f64, 3>) -> Hier {
     let dx = 1.0 / N as f64;
@@ -251,7 +251,7 @@ fn central_bh_accretes_on_the_finest_level_only() {
     );
 
     // the mass budget: the sink removed fluid (gravity-driven inflow piles gas
-    // up at the center, so a local density check is meaningless — the COMPOSITE
+    // up at the center, so a local density check is meaningless — the composite
     // mass must drop, and by an amount commensurate with the recorded
     // accretion; the feedback reduction runs at root cadence while the source
     // removes per stage, so the two agree only to a factor).
@@ -268,7 +268,7 @@ fn central_bh_accretes_on_the_finest_level_only() {
          {total_accreted_mass:e} (ratio {ratio:.2})"
     );
 
-    // gravity acts on the COARSE level outside the coverage: the cell just
+    // gravity acts on the coarse level outside the coverage: the cell just
     // outside the box on the x axis gains momentum toward the center.
     let coarse = &hier.levels[0].state;
     let momx_out = *coarse.fields.cons.mom[0].view().at([3, 8, 8]);
@@ -363,7 +363,7 @@ fn shaped_rigid_wall_crossing_refinement_boundary_acts_on_both_levels() {
 
 #[test]
 fn prescribed_binary_positions_stay_synced_across_levels() {
-    // the prescribed keplerian advance rotates about the ORIGIN: domain
+    // the prescribed keplerian advance rotates about the origin: domain
     // centered there, binary on the x axis.
     let sep = 0.08f64;
     let omega_v = (0.05 / sep.powi(3)).sqrt() * (sep / 2.0);
@@ -432,7 +432,7 @@ fn prescribed_binary_positions_stay_synced_across_levels() {
     }
 }
 
-// the ISOTHERMAL twin of the finest-owns-bodies gate: the iso kernel set's
+// the isothermal twin of the finest-owns-bodies gate: the iso kernel set's
 // body source / feedback / penalize run on a refined hierarchy, accretion is
 // recorded on the finest level, and the gravitating mass stays fixed. iso,
 // refinement, and immersed bodies therefore compose in one run.

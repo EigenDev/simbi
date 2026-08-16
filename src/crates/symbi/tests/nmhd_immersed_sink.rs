@@ -2,9 +2,9 @@
 // nmhd_immersed_sink.rs
 //
 // the immersed-body drain under Newtonian MHD via the 1/2|B|^2 sandwich. the drain
-// acts on the hydro conserved state, whose `nrg` is the TOTAL energy
+// acts on the hydro conserved state, whose `nrg` is the total energy
 // `p/(g-1) + 1/2 rho v^2 + 1/2|B|^2`; stripping `1/2|B|^2` before the drain and
-// restoring it after makes the drain see the GAS energy alone, so the plasma (mass,
+// restoring it after makes the drain see the gas energy alone, so the plasma (mass,
 // momentum, gas energy) is removed while the magnetic field is left to constrained
 // transport. this pins the well-posedness of a subgrid sink in MHD: mass drops, the
 // cell-centered B is bit-unchanged, and 1/2|B|^2 is exactly invariant.
@@ -89,9 +89,9 @@ fn bcell_snapshot(s: &Sim) -> Vec<f64> {
 }
 
 /// per interior cell: density, the total energy `nrg`, and the magnetic energy `1/2|B|^2`
-/// from the (drain-invariant) cell-centered B. with `v = 0`, `nrg - 1/2|B|^2` is the GAS
+/// from the (drain-invariant) cell-centered B. with `v = 0`, `nrg - 1/2|B|^2` is the gas
 /// internal energy, and a uniform drain scales it and the density by the same factor, so
-/// the SPECIFIC internal energy `(nrg - 1/2|B|^2) / den` is invariant. that is the sandwich
+/// the specific internal energy `(nrg - 1/2|B|^2) / den` is invariant. that is the sandwich
 /// property: without it the naive drain scales the total energy — magnetic part included —
 /// so the recovered gas energy comes out low and the specific internal energy drops.
 fn cell_state(s: &Sim) -> Vec<(f64, f64, f64)> {
@@ -166,7 +166,7 @@ fn nmhd_sink_drains_plasma_and_leaves_the_field_untouched() {
     // and the magnetic energy read from B is unchanged (trivially, since B is untouched).
     assert_eq!(magnetic_energy(&sim), mag_e0);
 
-    // the real sandwich property: in every drained cell the SPECIFIC INTERNAL energy is
+    // the real sandwich property: in every drained cell the specific internal energy is
     // preserved -- the drain removed gas energy in proportion to mass.
     let after = cell_state(&sim);
     let mut drained = 0;
@@ -191,9 +191,9 @@ fn nmhd_sink_drains_plasma_and_leaves_the_field_untouched() {
 
 #[test]
 fn nmhd_naive_drain_without_the_sandwich_corrupts_the_gas_energy() {
-    // bug-injection: the SAME sink, but the bare hydro drain WITHOUT the 1/2|B|^2 bracket.
+    // bug-injection: the same sink, but the bare hydro drain without the 1/2|B|^2 bracket.
     // it scales the total energy -- magnetic part included -- so the recovered gas energy is
-    // low and the specific internal energy DROPS. this is exactly what the sandwich prevents;
+    // low and the specific internal energy drops. this is exactly what the sandwich prevents;
     // if this ever stops dropping, the sandwich has become a silent no-op.
     let sim = setup(0.5);
     let before = cell_state(&sim);
@@ -219,7 +219,7 @@ fn nmhd_naive_drain_without_the_sandwich_corrupts_the_gas_energy() {
     );
     // the deeply-masked cells (drain factor well below 1) leak visibly; mask-boundary cells
     // (factor ~1) corrupt below 1e-9. it is enough that a substantial set is corrupted -- that
-    // is what the sandwich makes exact for EVERY cell in the companion test.
+    // is what the sandwich makes exact for every cell in the companion test.
     assert!(
         corrupted >= MIN_DRAINED_CELLS,
         "the naive drain left the gas energy intact ({corrupted} of {drained} corrupted) -- \
@@ -230,7 +230,7 @@ fn nmhd_naive_drain_without_the_sandwich_corrupts_the_gas_energy() {
 #[test]
 fn c_fast_makes_a_low_beta_sink_stiffer() {
     // the fast-magnetosonic rate: the wall relaxes on c_fast = sqrt(c_s^2 + c_a^2), c_a^2 =
-    // |B|^2/rho, so the SAME sink in the SAME gas drains MORE per step in a strong (low-beta)
+    // |B|^2/rho, so the same sink in the same gas drains more per step in a strong (low-beta)
     // field than a weak one. here c_s ~ 1.3; b0 = 5 gives c_a ~ 5, a several-fold stiffer wall.
     // the gas state is identical for both (same rho/p/v), so the only difference is the rate --
     // if c_a^2 were dropped from it, the two would drain identically.

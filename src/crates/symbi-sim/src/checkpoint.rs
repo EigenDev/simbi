@@ -4,7 +4,7 @@
 // HDF5 checkpoint API for SimState. a thin builder that maps SimState onto a
 // `symbi_io::Tree` schema and hands off to `symbi_io::Hdf5Backend`. the I/O
 // concerns (file format, field naming, error handling) live in the symbi-io
-// crate; this module only describes WHAT SimState contributes to the schema.
+// crate; this module only describes what SimState contributes to the schema.
 //
 // extras ride in as a typed `symbi_io::Metadata` — callers build
 // `Metadata::new().with("key", value)` with naked typed values — and
@@ -28,7 +28,7 @@ use symbi_io::{DataRef, Dataset, Hdf5Backend, IoBackend, Tree, TreeBuf};
 /// the homologous mesh-motion factor applied to axis `ax` of a `d`-dimensional
 /// grid: cartesian expands every axis, spherical the radius only, cylindrical
 /// the in-plane r and axial z slots. shared by the checkpoint writer (which
-/// stores PHYSICAL, scaled bounds) and the restart region check (which must
+/// stores physical, scaled bounds) and the restart region check (which must
 /// unscale them back to the comoving grid) so the two cannot disagree about
 /// which axes a stored bound was scaled by.
 fn motion_axis_scale(geometry: symbi_geometry::Geometry, ax: usize, d: usize, a: f64) -> f64 {
@@ -83,7 +83,7 @@ pub fn time_at_or_after(time: f64, boundary: f64) -> bool {
 }
 
 // =============================================================================
-// Snapshot — the materialized Vec<f64> buffers a write needs to BORROW
+// Snapshot — the materialized Vec<f64> buffers a write needs to borrow
 // when building the Tree. one struct, holds every field's interior data,
 // no copies during Tree construction.
 // =============================================================================
@@ -95,13 +95,13 @@ pub fn time_at_or_after(time: f64, boundary: f64) -> bool {
 /// hand-spells "m1..mD".
 struct Snapshot<const D: usize> {
     resolution: Vec<u64>,
-    // the ALLOCATED (padded) cell extent per axis = interior + 2*ng. cell-centered
+    // the allocated (padded) cell extent per axis = interior + 2*ng. cell-centered
     // field datasets are written at this full extent so a restart restores the
     // entire field — ghost zones included — not just the interior (which would
     // truncate the halo the next step's stencil reads before the first ghost-fill).
     // the reader trims `halo_radius` (= ng) back to the interior for plotting.
     data_shape: Vec<u64>,
-    // interior cell counts in STORAGE (reversed) axis order for the reader's
+    // interior cell counts in storage (reversed) axis order for the reader's
     // `mesh/global_cells` ([nx3,nx2,nx1]); matches the reversed field `shape` so the
     // plot axes are not transposed (a non-square grid otherwise crashes pcolormesh).
     mesh_cells: Vec<u64>,
@@ -109,7 +109,7 @@ struct Snapshot<const D: usize> {
     x_lo_phys: Vec<f64>,
     conserved: Vec<(String, Vec<f64>)>,
     primitive: Vec<(String, Vec<f64>)>,
-    bface: Vec<(String, Vec<f64>)>, // canonical "B1".."BD" face-centered B, MHD only
+    bface: Vec<(String, Vec<f64>)>, // canonical "B1".."bd" face-centered B, MHD only
     // per-face (start, fin) index bounds for the reader's `magnetic/Bn/domain` group.
     bface_dom: Vec<(Vec<i64>, Vec<i64>)>,
     // single-partition owned cell range for the `partition_0` group the frozen
@@ -118,9 +118,9 @@ struct Snapshot<const D: usize> {
     owned_fin: Vec<i64>,
 }
 
-/// visit every cell of `domain` in AXIS-0-FASTEST order (x varies fastest) — the on-disk
+/// visit every cell of `domain` in axis-0-fastest order (x varies fastest) — the on-disk
 /// checkpoint layout, so numpy `arr.reshape((Nz, Ny, Nx))` puts physical x on the horizontal
-/// `imshow` axis. gather (`extract_field`) and scatter (`restore_field`) MUST share this one
+/// `imshow` axis. gather (`extract_field`) and scatter (`restore_field`) must share this one
 /// walk: if their orders diverge, a written-then-loaded D>=2 field comes back transposed.
 fn for_each_cell_axis0<const D: usize>(
     domain: &symbi_algebra::Domain<D>,
@@ -154,7 +154,7 @@ fn extract_field<const D: usize, Mem: MemorySpace>(
 /// member or returns `None` when the field isn't allocated for this regime
 /// (e.g., iso has no cons.nrg, non-MHD has no mhd.bcell). returns the
 /// `(name, data)` vec the snapshot uses. each cell-centered field is gathered
-/// over its OWN allocated domain (`field.domain()` — interior + ghosts), so the
+/// over its own allocated domain (`field.domain()` — interior + ghosts), so the
 /// written buffer carries the halo and a restart is not truncated.
 fn collect_bucket<'a, F, const D: usize, Mem: MemorySpace>(
     fields: &[FieldSpec],
@@ -189,10 +189,10 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
-    // before READING fields here, sync the device so the host sees the
+    // before reading fields here, sync the device so the host sees the
     // committed state from the last RK2 stage (removing the per-launch `ctx_sync()`
     // was a production pipelining win). gate on `IS_DEVICE_ACCESSIBLE`; the cuda
-    // feature alone is insufficient: a HOST-memory sim in a cuda-feature build has no CUDA context, so
+    // feature alone is insufficient: a host-memory sim in a cuda-feature build has no CUDA context, so
     // an unconditional `cuCtxSynchronize` panics (CUDA_ERROR_INVALID_CONTEXT). only
     // device-resident memory needs the sync; host memory is already coherent.
     #[cfg(feature = "gpu")]
@@ -211,8 +211,8 @@ where
         .rev()
         .map(|ax| interior.spaces[ax].size() as u64)
         .collect();
-    // homologous expansion is RADIAL: a(t) scales the radial coordinate (and, in cartesian,
-    // every coordinate isotropically), but NEVER an angular one (theta/phi) — a moving spherical
+    // homologous expansion is radial: a(t) scales the radial coordinate (and, in cartesian,
+    // every coordinate isotropically), but never an angular one (theta/phi) — a moving spherical
     // mesh must not report theta -> a*theta. mirror the per-geometry volume jacobian (block.rs:
     // spherical ~a^3 = only r; cylindrical ~a^2 = r,z; cartesian ~a^D = all). axis 0 is x1 (r).
     let metric_geom = sim.physics.metric.geometry();
@@ -242,7 +242,7 @@ where
         "mag" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
         other => panic!("checkpoint write: unknown conserved field '{other}'"),
     });
-    // the passive scalar is a RUN-level opt-in, not a regime field, so it rides
+    // the passive scalar is a run-level opt-in, not a regime field, so it rides
     // outside the spec iteration: present iff allocated.
     if let Some(chi) = sim.fields.cons.chi_field() {
         conserved.push(("chi".to_string(), extract_field(chi, chi.domain())));
@@ -288,10 +288,10 @@ where
             (Vec::new(), Vec::new())
         };
 
-    // the owned interior index range [0, ncells) per axis, in the SAME reversed (storage) axis order
-    // as `mesh_cells` and the `dim_*` geometry. WITHOUT the reverse, owned is (x, y, ..) while
+    // the owned interior index range [0, ncells) per axis, in the same reversed (storage) axis order
+    // as `mesh_cells` and the `dim_*` geometry. without the reverse, owned is (x, y, ..) while
     // global_cells / dims are (.., y, x): the reader then pairs the y geometry with the x extent, and
-    // a NON-square AMR fine patch renders transposed / offset (a square grid hides it -- both orders
+    // a non-square AMR fine patch renders transposed / offset (a square grid hides it -- both orders
     // agree). matches the `(0..D).rev()` walk used for `mesh_cells` above.
     let owned_start: Vec<i64> = vec![0; D];
     let owned_fin: Vec<i64> = (0..D)
@@ -404,7 +404,7 @@ where
             "coord_system",
             Attr::Str(coord_name(sim.physics.metric.geometry()).into()),
         ),
-        // the background spacetime chart — ORTHOGONAL to coord_system. GR readers need
+        // the background spacetime chart — orthogonal to coord_system. GR readers need
         // this to select the metric (lapse, shift, densitization) when reducing fluxes.
         (
             "spacetime",
@@ -426,7 +426,7 @@ where
         ));
     }
     let mut meta = Tree::new("metadata");
-    // explicit user extras WIN. start with them, then fill in any built-in
+    // explicit user extras win. start with them, then fill in any built-in
     // the user didn't override.
     for (k, v) in extras {
         meta.push_attr(k.to_string(), v.clone());
@@ -470,11 +470,11 @@ where
     // so this layout serves external readers without breaking restart.
     let mut geometry =
         Tree::new("geometry").with_attr("metric", coord_name(sim.physics.metric.geometry()));
-    // mesh metadata (global_cells + per-dim geometry) is written in STORAGE
+    // mesh metadata (global_cells + per-dim geometry) is written in storage
     // (reversed) axis order so it matches the reversed field `shape` below and the
-    // reader's [nx3,nx2,nx1] expectation: dim_0 is the SLOWEST-varying screen axis,
+    // reader's [nx3,nx2,nx1] expectation: dim_0 is the slowest-varying screen axis,
     // dim_{D-1} the fastest (x1). without the reverse, global_cells/dims are
-    // transposed vs the data -> a SQUARE grid plots mis-oriented and a NON-square
+    // transposed vs the data -> a square grid plots mis-oriented and a non-square
     // grid crashes pcolormesh ("C dims should be one smaller than X and Y").
     for (slot, ax) in (0..D).rev().enumerate() {
         // the interior lower edge — honors an AMR fine level whose interior
@@ -522,11 +522,11 @@ where
         ))
         .with_group(geometry);
 
-    // declare shape in REVERSED axis order so it matches the on-disk layout
-    // `extract_field` produces (axis-0-fastest in memory -> axis-0 is the LAST
+    // declare shape in reversed axis order so it matches the on-disk layout
+    // `extract_field` produces (axis-0-fastest in memory -> axis-0 is the last
     // dim of the numpy shape). numpy/matplotlib then put physical x on the
     // horizontal screen axis. for 2D OT: shape = [Ny, Nx]; for 3D: [Nz, Ny, Nx].
-    // cell datasets carry the PADDED extent (interior + 2*ng); the reader trims
+    // cell datasets carry the padded extent (interior + 2*ng); the reader trims
     // `halo_width` per side back to the interior `global_cells` for plotting.
     let shape: Vec<usize> = (0..D)
         .rev()
@@ -544,7 +544,7 @@ where
     }
     let mut hydro = Tree::new("hydro").with_group(prim);
 
-    // face-centered B (MHD) under hydro/magnetic — each B-face as the GROUP the
+    // face-centered B (MHD) under hydro/magnetic — each B-face as the group the
     // frozen reader expects: `Bn/{domain/{start,fin}, data}`.
     if !snap.bface.is_empty() {
         let interior = &sim.geom.interior;
@@ -601,7 +601,7 @@ where
 
 // =============================================================================
 // body state round-trip: the per-body kinematic + accretion ledger a restart
-// must restore. bodies re-attach from the CONFIG on restart, so without this
+// must restore. bodies re-attach from the config on restart, so without this
 // group a moving body's orbit phase and a sink's cumulative accreted mass
 // silently reset — wrong physics for binaries, a broken cumulative ledger for
 // accretors.
@@ -1052,7 +1052,7 @@ where
     // the per-step body-gas exchange series (immersed runs): Mdot(t) is
     // mass_delta/dt, the accretion drag is force. shapes: time/dt [len],
     // mass_delta/energy_delta [len, nb], force [len, nb, D]. the series covers
-    // THIS run segment only (it restarts empty on checkpoint load).
+    // this run segment only (it restarts empty on checkpoint load).
     if let Some(im) = sim.immersed.as_ref()
         && !im.history.is_empty()
     {
@@ -1142,7 +1142,7 @@ where
     let snap = snapshot(sim);
     let mut tree = build_tree(sim, &snap, extras);
     // per-body kinematic + accretion state (restart round-trip): derived
-    // buffers, so they live HERE and the tree borrows them.
+    // buffers, so they live here and the tree borrows them.
     let body_snap = sim.immersed.as_ref().map(body_state_snap);
     if let Some(bs) = body_snap.as_ref() {
         tree.push_group(body_state_group::<D>(bs));
@@ -1158,7 +1158,7 @@ where
     write_tree_atomic(Path::new(path), &tree)
 }
 
-/// **AMR checkpoint** — write an entire refinement hierarchy into ONE file as
+/// **AMR checkpoint** — write an entire refinement hierarchy into one file as
 /// `/level_0`, `/level_1`, ... sibling groups (the frozen v2.0 reader walks
 /// `while level_i in f`). `levels[0]` is the coarse level and authors the global
 /// `/metadata`; every level carries its own mesh + fields. this is the
@@ -1270,7 +1270,7 @@ where
                 )),
         );
     }
-    // the censuses live on the ROOT level's store, which is where both drivers register and
+    // the censuses live on the root level's store, which is where both drivers register and
     // sample them; a refined hierarchy is refused at the sampling site rather than reduced
     // across levels, so there is no second level's history to merge here.
     for group in census_groups(levels[0]) {
@@ -1367,7 +1367,7 @@ where
 
 /// how many refinement levels a checkpoint carries.
 ///
-/// a restart may run DEEPER than the file it resumes from — that is the whole point of a
+/// a restart may run deeper than the file it resumes from — that is the whole point of a
 /// bootstrap ladder, where each rung converges at its own resolution and the next adds one. the
 /// levels the file has are loaded; the rest are initialized from their parents. counting them is
 /// what tells the two apart, and the count comes from the file rather than from the config so a
@@ -1384,10 +1384,10 @@ pub fn checkpoint_level_count(path: &str) -> Result<usize> {
     Ok(n)
 }
 
-/// check that a checkpoint's level `level_index` describes the SAME grid this run built for it.
+/// check that a checkpoint's level `level_index` describes the same grid this run built for it.
 ///
 /// a deeper restart only works because level `i` occupies the same region at every depth — true
-/// when a config's refinement regions are fixed geometry, FALSE for any schedule that derives them
+/// when a config's refinement regions are fixed geometry, false for any schedule that derives them
 /// from the level count. in the second case the loaded data would be laid over a different region
 /// and produce a field that is smooth, finite and wrong everywhere, with the error appearing as an
 /// unexplained profile rather than as a failure.
@@ -1419,9 +1419,9 @@ where
     };
     for ax in 0..D {
         let want = sim.geom.interior.spaces[ax].size();
-        // `mesh/global_cells` is written in REVERSED (storage) axis order, matching the reversed
+        // `mesh/global_cells` is written in reversed (storage) axis order, matching the reversed
         // dataset shapes so a reader's plot axes are not transposed — see `mesh_cells`. reading it
-        // forward compares axis 0 against the LAST axis's count, which agrees only on a cubic grid
+        // forward compares axis 0 against the last axis's count, which agrees only on a cubic grid
         // and rejects every anisotropic one.
         let got = *cells.get(D - 1 - ax).unwrap_or(&0) as usize;
         if got != want {
@@ -1438,9 +1438,9 @@ where
     let geometry = mesh
         .find_group("geometry")
         .ok_or_else(|| IoError::MissingPath(format!("{name}/mesh/geometry")))?;
-    // the writer stores PHYSICAL bounds — the comoving faces scaled by the mesh-motion
+    // the writer stores physical bounds — the comoving faces scaled by the mesh-motion
     // factor a(t) at write time on the expanding axes — while this sim is freshly built
-    // on the COMOVING grid (a = 1; the motion re-derives a(t) from the resume time, it
+    // on the comoving grid (a = 1; the motion re-derives a(t) from the resume time, it
     // is never integrated state). unscale the stored bounds by the checkpoint's own
     // scale factor so the comparison is comoving against comoving; a checkpoint from a
     // static-mesh run carries a = 1 and is unchanged.
@@ -1453,7 +1453,7 @@ where
         })
         .unwrap_or(1.0);
     for ax in 0..D {
-        // the geometry groups are named by STORAGE slot, `(0..D).rev().enumerate()` in the writer,
+        // the geometry groups are named by storage slot, `(0..D).rev().enumerate()` in the writer,
         // so slot `D - 1 - ax` holds axis `ax`. the same reversal as `global_cells`, and equally
         // invisible on a cubic grid or in one dimension.
         let slot = D - 1 - ax;
@@ -1473,7 +1473,7 @@ where
             motion_axis_scale(sim.physics.metric.geometry(), ax, D, a_checkpoint);
         let start = start / unscale;
         let end = end / unscale;
-        // the run's comoving bounds, by the WRITER's own face arithmetic (the coordinate
+        // the run's comoving bounds, by the writer's own face arithmetic (the coordinate
         // maps when present, the uniform formula otherwise) so the two sides can only
         // differ by a genuine region mismatch, never by formula drift.
         let lo_index = sim.geom.interior.spaces[ax].lo;
@@ -1516,7 +1516,7 @@ where
     Mem: MemorySpace,
 {
     let tree = Hdf5Backend.read(Path::new(path))?;
-    // the conserved group is the restart primary, so its MEASURE must match what this run
+    // the conserved group is the restart primary, so its measure must match what this run
     // evolves. a densitized GR-hydro run reading an undensitized file (or the reverse) differs by
     // a per-cell sqrt(-g) and would restart onto a physically different state without any symptom
     // the first step could not explain away.
@@ -1579,7 +1579,7 @@ where
         }
     }
     // the passive scalar rides outside the spec iteration (run-level opt-in):
-    // restored iff this run allocated it AND the file carries it — a dyed
+    // restored iff this run allocated it and the file carries it — a dyed
     // restart of an undyed file starts from chi = 0 rather than failing.
     if let Some(chi) = sim.fields.cons.chi_field() {
         if cons.find_dataset("chi").is_some() {
@@ -1938,7 +1938,7 @@ fn restore_field<const D: usize, Mem: MemorySpace>(
         });
     }
     let view = field.view_mut();
-    // SAME axis-0-fastest walk as `extract_field` — written-then-loaded is the identity by
+    // same axis-0-fastest walk as `extract_field` — written-then-loaded is the identity by
     // construction. a `(0..D).rev()` walk would transpose every D>=2 restart.
     let mut ii = 0usize;
     for_each_cell_axis0(domain, |coord| {
@@ -1951,11 +1951,11 @@ fn restore_field<const D: usize, Mem: MemorySpace>(
 // =============================================================================
 // tests
 //
-// the checkpoint mesh-coordinate gate for a NONZERO interior origin lives in-crate
+// the checkpoint mesh-coordinate gate for a nonzero interior origin lives in-crate
 // because it exercises `SimStateGeneric::new_at` — the absolute-index amr-internal
 // constructor (pub(crate); the public path is `SimBuilder`, which always grids at
 // interior_lo = [0; D]). amr fine levels live at absolute indices, so their written
-// mesh/x{1,2,3} centers must equal geom.centroid of the ACTUAL interior cells.
+// mesh/x{1,2,3} centers must equal geom.centroid of the actual interior cells.
 // =============================================================================
 #[cfg(test)]
 mod tests {
@@ -1994,7 +1994,7 @@ mod tests {
         write_checkpoint(&sim, path, &Metadata::new()).unwrap();
 
         // the frozen v2.0 reader rebuilds cell centers from the geometry
-        // description (global_cells + per-dim start/end), so verify THAT honors
+        // description (global_cells + per-dim start/end), so verify that honors
         // the interior origin — reconstruct centers exactly as the reader does
         // (center_i = start + (i + 0.5) * (end - start) / n) and match centroid.
         let tree = Hdf5Backend.read(std::path::Path::new(path)).unwrap();
@@ -2087,7 +2087,7 @@ mod tests {
     #[test]
     fn checkpoint_roundtrip_preserves_field_layout_2d() {
         // **restart round-trip gate**: write a checkpoint then load it; the conserved state must
-        // come back IDENTICAL. a NON-SQUARE grid (5x3) seeded with an ASYMMETRIC pattern
+        // come back identical. a non-square grid (5x3) seeded with an asymmetric pattern
         // (value = i + 100*j, distinct per field) makes any axis transpose between the gather
         // (`extract_field`) and scatter (`restore_field`) a loud failure — the bug that shipped
         // when the two walks used opposite axis orders (`0..D` vs `(0..D).rev()`).
@@ -2351,10 +2351,10 @@ mod tests {
 
     #[test]
     fn checkpoint_saves_full_allocated_field_including_ghosts() {
-        // **truncation gate**: a cell-centered dataset must carry the FULL allocated extent
+        // **truncation gate**: a cell-centered dataset must carry the full allocated extent
         // (interior + 2*ng) — otherwise a restart loses the halo the
         // next stencil reads before the first ghost-fill, and the reader's `halo_width` trim
-        // would over-cut interior-only data. seed EVERY allocated cell (ghosts included) with a
+        // would over-cut interior-only data. seed every allocated cell (ghosts included) with a
         // coord-unique value; assert (a) the on-disk dataset volume is the padded volume, and
         // (b) every ghost cell survives the write -> load round-trip byte-for-byte.
         type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -2391,7 +2391,7 @@ mod tests {
         let path = path.to_str().unwrap();
         write_checkpoint(&sim, path, &Metadata::new()).unwrap();
 
-        // (a) the den dataset must hold the PADDED volume (5+2*ng)x(3+2*ng).
+        // (a) the den dataset must hold the padded volume (5+2*ng)x(3+2*ng).
         let tree = Hdf5Backend.read(std::path::Path::new(path)).unwrap();
         let den_ds = tree
             .find_group("level_0")
@@ -2408,7 +2408,7 @@ mod tests {
             alloc.volume()
         );
 
-        // (b) every allocated cell — ESPECIALLY the ghosts outside the interior — round-trips.
+        // (b) every allocated cell — especially the ghosts outside the interior — round-trips.
         let mut loaded = build();
         load_checkpoint(&mut loaded, path).unwrap();
         let interior = sim.geom.interior.clone();
@@ -2604,7 +2604,7 @@ mod tests {
     fn isothermal_checkpoints_record_the_sound_speed() {
         // the isothermal eos closes with p = cs^2 rho and stores no pressure
         // dataset, so cs must travel in metadata for readers to reconstruct
-        // pressure-dependent fields. energy regimes must NOT carry the attr:
+        // pressure-dependent fields. energy regimes must not carry the attr:
         // their sound speed varies per cell and a constant would be a lie.
         use symbi_hydro::IsoNewtonian;
         use symbi_hydro::eos::Isothermal;
@@ -2668,7 +2668,7 @@ mod tests {
 
 /// the recorded census groups of a store, one per registration carrying at least one sample.
 ///
-/// EXTRACTED so BOTH checkpoint writers emit them. the uni-grid writer and the hierarchy writer
+/// extracted so both checkpoint writers emit them. the uni-grid writer and the hierarchy writer
 /// build their trees separately, and a census group written by only one of them leaves every run
 /// on the other driver recording nothing — a checkpoint with no census group reads exactly like a
 /// run that registered none, so the omission carries no signal at all.
@@ -2683,7 +2683,7 @@ where
     Mem: symbi_xpu::MemorySpace,
 {
     // the registered binned reductions, one group each. like the body series these cover
-    // THIS RUN SEGMENT ONLY and restart empty on checkpoint load, so a restart chain
+    // this run segment only and restart empty on checkpoint load, so a restart chain
     // concatenates offline rather than the run carrying its whole history forward.
     let mut out = Vec::new();
     for registered in &sim.censuses {
@@ -2703,8 +2703,8 @@ where
             // the size of the compiled per-cell graph: what a census actually costs, since
             // the cost scales with the dag rather than with the accumulator count.
             .with_attr("node_count", registered.evaluator.node_count() as u64)
-            // an ACCUMULATING census stores one row folded from many samples rather than a row
-            // apiece, so the row alone does not say what it is an accumulation OF. the count and
+            // an accumulating census stores one row folded from many samples rather than a row
+            // apiece, so the row alone does not say what it is an accumulation of. the count and
             // the two endpoints make it self-describing: a reader forms the time average by
             // dividing an additive row by the count, and two run segments combine as a
             // count-weighted sum without either having stored its samples.

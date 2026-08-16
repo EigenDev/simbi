@@ -1,7 +1,7 @@
 // =============================================================================
 // seed_admissibility_fallback.rs
 //
-// fine-level IC seeding must deliver an ADMISSIBLE conserved state. the seed
+// fine-level IC seeding must deliver an admissible conserved state. the seed
 // path prolongs each conserved component independently at high order, and no
 // component-wise prolongation preserves E >= |m|^2/(2 rho): across a steep
 // velocity ramp the limited slope of `m` and the limited slope of `E` are cut
@@ -12,10 +12,10 @@
 // cold background — which is why a weak subsonic seed never trips it.
 //
 // gates:
-// - a transonic ramp on a cold background FORCES the parent-injection fallback
+// - a transonic ramp on a cold background forces the parent-injection fallback
 //   (count > 0, so the gate cannot pass vacuously), and every fine cell is
 //   admissible afterward;
-// - a deeply subsonic ramp takes ZERO fallbacks, so admissible initial data is
+// - a deeply subsonic ramp takes zero fallbacks, so admissible initial data is
 //   seeded bit-identically to the path without the audit.
 // =============================================================================
 
@@ -40,11 +40,11 @@ type Hier = Hierarchy<Newtonian, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostM
 
 /// a 2-level hierarchy on [0,1)^3, middle half refined, holding a cold uniform
 /// gas with an x-velocity wave of amplitude `amp` at 4 coarse cells per
-/// wavelength. the kinetic energy density rides at DOUBLE the wavenumber — two
+/// wavelength. the kinetic energy density rides at double the wavenumber — two
 /// cells per wavelength, the grid nyquist — so the energy's reconstruction and
 /// the momentum's cannot agree near the wave's extrema. internal energy density
-/// is PRE / (gamma - 1) = 0.009, so an amplitude of order one puts the wave's
-/// kinetic energy density far above it. a linear or quadratic PROFILE would be
+/// is pre / (gamma - 1) = 0.009, so an amplitude of order one puts the wave's
+/// kinetic energy density far above it. a linear or quadratic profile would be
 /// reproduced exactly by the parabolic stencil; the oscillation is what makes
 /// the component-wise prolongation inconsistent.
 fn ramp_hierarchy(amp: f64) -> Hier {

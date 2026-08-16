@@ -4,8 +4,8 @@
 // the **schema tree** — `Tree` describes everything that can live in a
 // checkpoint as a graph of `Group` nodes, each holding a list of named
 // `Attr`s and `Dataset`s. one Schema feeds every backend (HDF5 / JSON /
-// ASCII tree / symbi-display table) — write + read + display walk the
-// SAME tree, never two parallel mirror functions.
+// ascii tree / symbi-display table) — write + read + display walk the
+// same tree, never two parallel mirror functions.
 //
 // nodes are the stable identity, edges are name-keyed lookups, leaves
 // carry typed payloads. data lives behind a borrowing `DataRef` so building the tree
@@ -219,7 +219,7 @@ impl<'a> Tree<'a> {
     }
 }
 
-// ---- TreeBuf — the OWNED tree the read side materializes into ------------
+// ---- TreeBuf — the owned tree the read side materializes into ------------
 
 /// owned counterpart of `Tree` — what the read side returns. groups carry
 /// owned attrs + owned datasets (Vec<f64> etc.).

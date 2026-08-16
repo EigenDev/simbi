@@ -1,18 +1,18 @@
 # =============================================================================
 # gr_bondi_ks.py
 #
-# spherical (bondi) accretion onto a schwarzschild black hole in INGOING KERR-SCHILD
+# spherical (bondi) accretion onto a schwarzschild black hole in ingoing kerr-schild
 # (eddington-finkelstein) coordinates — the same physical spacetime as gr_bondi.py,
 # in a horizon-penetrating chart that is regular across r = 2M. started from a
 # uniform gas at rest.
 #
-# the payoff of the KS chart: the inner boundary sits BELOW the horizon (r < 2M),
+# the payoff of the KS chart: the inner boundary sits below the horizon (r < 2M),
 # where the transport velocity tilde v^r = v^r - beta^r/alpha is negative for every
 # subluminal fluid — every characteristic points inward, so zero-gradient outflow is
 # unconditionally causal and the gas simply crosses r = 2M and leaves through the
 # excised interior.
 # no coordinate singularity, no subsonic-inner-boundary fragility (contrast the
-# schwarzschild-coordinate gr_bondi.py, whose boundary must be held OUTSIDE 2M).
+# schwarzschild-coordinate gr_bondi.py, whose boundary must be held outside 2M).
 #
 # radial zones are log-spaced (geometric-mean cell centers): the finest zones sit
 # near the inner boundary where the flow is ultra-relativistic.
@@ -61,7 +61,7 @@ class GrBondiKS(SimbiProblem):
         ),
     ]
 
-    # domain — radial, from INSIDE the horizon (r < 2M) to beyond the bondi radius
+    # domain — radial, from inside the horizon (r < 2M) to beyond the bondi radius
     resolution: Annotated[
         int, ProblemParam(512, cli=True, description="radial grid resolution")
     ]

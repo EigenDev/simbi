@@ -1,9 +1,9 @@
 // =============================================================================
 // symbi-discretize
 //
-// the SRP-clean bridge between the carrier-generic physics (symbi-hydro over
+// the srp-clean bridge between the carrier-generic physics (symbi-hydro over
 // `S: Scalar`) and the discrete-IR layer (symbi-ir). instantiating that physics
-// at `S = Gv` TRACES it into a stencil DAG `Graph` — Gv is the sole IR front end.
+// at `S = Gv` traces it into a stencil DAG `Graph` — Gv is the sole IR front end.
 //
 // the substrate cut:
 //
@@ -103,11 +103,11 @@ pub use symbi_ir::{Gv, GvKernel};
 /// cell-centered kernels — c2p (cons<->prim), wave-speed maps (prim -> scalar
 /// scratch), and the pure-hydro adiabatic/rhd face flux (no staggered ct efield).
 /// false for mhd `*face_flux*` (writes a staggered edge efield) and amr
-/// prolong/restrict (read one grid, write another). classified by kernel name HERE
+/// prolong/restrict (read one grid, write another). classified by kernel name here
 /// in the hydro layer so the IR (`KernelEmitInputs::coalesce_layout`) stays
 /// domain-agnostic and merely carries the producer-set flag. the carrier oracle
 /// catches any misclassification (a wrong index diverges from the f64 oracle).
-/// PROTOTYPE: to be replaced by real per-field layout identity.
+/// prototype: to be replaced by real per-field layout identity.
 pub fn kernel_coalesces_layout(kernel_name: &str) -> bool {
     kernel_name.contains("c2p")
         || kernel_name.contains("wave_speed_map")

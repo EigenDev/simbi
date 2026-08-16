@@ -1,15 +1,15 @@
 # =============================================================================
 # flat_srmhd_monopole.py
 #
-# the FLAT (Minkowski) SRMHD analog of the magnetized-michel monopole — the
-# control that isolates INHERENT HLLD-RMHD fragility from any GR-generalization
+# the flat (Minkowski) srmhd analog of the magnetized-michel monopole — the
+# control that isolates inherent hlld-rmhd fragility from any GR-generalization
 # effect. a theta-uniform radial monopole B^r = C/r^2 (divergence-free on the
 # flat spherical (r, theta) wedge, since div B = (1/r^2) d_r(r^2 B^r) = 0) in a
 # uniform gas with a radial inflow. E_phi = v_theta B_r - v_r B_theta = 0
-# pointwise, so B must stay static and no theta-momentum may grow — under ANY
+# pointwise, so B must stay static and no theta-momentum may grow — under any
 # consistent scheme. if flat HLLD develops the same resolution-growing
 # theta-momentum mode the schwarzschild monopole does, the fragility is inherent
-# to HLLD-RMHD (not the curved-metric generalization).
+# to hlld-rmhd (not the curved-metric generalization).
 #
 # usage:
 #   simbi run flat_srmhd_monopole.py --solver hlld --ct-method uct

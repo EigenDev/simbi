@@ -128,14 +128,14 @@ fn point_mass_gravity_aot_kernel_binds_x_to_centroid_not_scalar() {
     // declares `xm_k` + `gm` as scalar params (body parameters, runtime-
     // bound), and the cell position `x_k` binds to the in-kernel centroid
     // computed from `x_lo + i*dx`. proves the position-dependent overlay
-    // actually fused (the spec's `x_k` Params resolved INSIDE the trace at
+    // actually fused (the spec's `x_k` Params resolved inside the trace at
     // codegen time).
     let (_kfn, ir_blob) = kernel_by_name::<f64>("adiabatic_godunov_stage_with_point_mass_grav_2d")
         .expect("adiabatic point_mass_grav 2D must be AOT-baked");
     assert!(!ir_blob.is_empty());
 
-    // the kernel manifest lists scalars. xm_0, xm_1, gm MUST appear (body
-    // parameters); x_0, x_1 MUST NOT appear (those bind to centroid IN
+    // the kernel manifest lists scalars. xm_0, xm_1, gm must appear (body
+    // parameters); x_0, x_1 must not appear (those bind to centroid in
     // the kernel from x_lo + i*dx).
     let scalars = symbi_ir::kernel_scalar_params_typed_from_ir(ir_blob);
     let scalar_names: Vec<String> = scalars.iter().map(|(b, _)| b.name()).collect();
@@ -161,7 +161,7 @@ fn point_mass_gravity_aot_kernel_binds_x_to_centroid_not_scalar() {
         "x_1 leaked into scalars — the centroid binding broke; scalars = {scalar_names:?}",
     );
 
-    // and the geometry scalars ARE present (the centroid is computed from them).
+    // and the geometry scalars are present (the centroid is computed from them).
     assert!(
         scalar_names.contains(&"x_lo_0"),
         "x_lo_0 missing (centroid needs the grid origin)"

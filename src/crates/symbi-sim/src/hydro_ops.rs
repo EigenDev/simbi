@@ -2,7 +2,7 @@
 // hydro_ops.rs
 //
 // free helper functions that operate on SimState fields directly (not a trait).
-//   - scan_c2p_errors            — bitwise OR of the c2p error codes over interior
+//   - scan_c2p_errors            — bitwise or of the c2p error codes over interior
 //   - mhd_init_bface_from_bcell  — seed face B from cell-centered B (MHD IC setup)
 //   - mhd_init_bcell_from_bface  — seed cell B from face-centered B (MHD IC setup)
 // =============================================================================
@@ -23,7 +23,7 @@ fn host_read_barrier<Mem: MemorySpace>() {
     }
 }
 
-/// scan the c2p error field and return the bitwise OR of all error codes.
+/// scan the c2p error field and return the bitwise or of all error codes.
 /// zero = all cells clean. nonzero = at least one cell had a recovery.
 pub fn scan_c2p_errors<
     const D: usize,

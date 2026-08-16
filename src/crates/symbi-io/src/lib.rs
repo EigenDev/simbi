@@ -8,7 +8,7 @@
 //   - `JsonBackend`  — schema introspection (`schema_json`)
 //   - `symbi-display`-side table renderer (via `Tree::iter_attrs`)
 //
-// the writer and reader walk the SAME Tree — no parallel mirror code, no
+// the writer and reader walk the same Tree — no parallel mirror code, no
 // hand-spelled field names in two places. typed `Attr` + `Metadata::with(..)`
 // fluent builder keeps examples free of `to_string()` boilerplate.
 // `field_layout` exposes the canonical on-disk naming so it

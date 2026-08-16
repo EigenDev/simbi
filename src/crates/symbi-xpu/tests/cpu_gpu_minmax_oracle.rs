@@ -1,15 +1,15 @@
 // =============================================================================
 // cpu_gpu_minmax_oracle.rs
 //
-// a REAL CPU<->GPU numeric equivalence oracle for `min` / `max` /
+// a real CPU<->GPU numeric equivalence oracle for `min` / `max` /
 // `abs`. the carrier oracle (interp) shares CPU std semantics, so it is
-// structurally BLIND to the documented CPU<->GPU divergence: CUDA renders these
+// structurally blind to the documented CPU<->GPU divergence: CUDA renders these
 // ops as order-asymmetric ternaries while the f64 std methods are NaN-symmetric.
-// this test renders ONE source kernel computing `min(a,b)`, `max(a,b)`, `abs(a)`,
-// runs it on the device, evaluates the SAME graph through the interpreter, and
+// this test renders one source kernel computing `min(a,b)`, `max(a,b)`, `abs(a)`,
+// runs it on the device, evaluates the same graph through the interpreter, and
 // bit-compares over an IEEE-edge input sweep (NaN / +-Inf / +-0.0 / negatives).
 //
-// they MUST agree bit-for-bit because both backends emit each op from one
+// they must agree bit-for-bit because both backends emit each op from one
 // definition: scalarize lowers Min/Max/Abs to Select+cmp, and the f64 carrier
 // matches the same ternary.
 //

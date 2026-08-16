@@ -1,14 +1,14 @@
 // =============================================================================
 // regimes/substrate.rs
 //
-// IsoSubstrateKernelSet<Mem, Sc, const D> — the D-GENERIC isothermal (Newtonian
+// IsoSubstrateKernelSet<Mem, Sc, const D> — the D-generic isothermal (Newtonian
 // Euler, p = cs^2*rho) KernelSet, every method dispatched to a build-time AOT
 // substrate kernel through the structured binding ABI, the instance resolved by name
 // (regime, ndim, dir) via the generated `kernel_by_name` registry. one struct serves
 // 1D/2D/3D.
 //
 // the isothermal regime carries no energy law: cons / flux / u_n have den + momentum
-// only. the closure p = cs^2*rho is materialized as a SUBSTRATE-OWNED pressure
+// only. the closure p = cs^2*rho is materialized as a substrate-owned pressure
 // primitive (`self.pre`) — kept off the global iso field ABI, which does not allocate
 // prim.pre on CPU — so the flux + cfl read a per-cell sound speed sqrt(gamma*p/rho)
 // (gamma = ISO_GAMMA = 1), letting a locally-varying sound speed hold. c2p writes self.pre, the
@@ -59,15 +59,15 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// shear operator and caps dt at C_visc dx^2 / nu.
     pub viscosity: f64,
     /// Shakura-Sunyaev alpha. >0 selects the alpha viscous
-    /// operator nu(x) = alpha cs^2 / Omega_k(r) (TAKES PRECEDENCE over the
+    /// operator nu(x) = alpha cs^2 / Omega_k(r) (takes precedence over the
     /// constant-nu `viscosity`); requires a central body. 0 = off.
     pub alpha: f64,
     pub cfl_number: f64,
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
     pub theta: f64,
-    /// the PRESCRIBED per-cell sound-speed-squared `cs^2` (read-only; the local
+    /// the prescribed per-cell sound-speed-squared `cs^2` (read-only; the local
     /// "temperature"). c2p reads it -> `prim.pre = cs2*rho`. `new` fills it uniformly with
-    /// `cs^2` (globally isothermal); for a LOCALLY isothermal run, overwrite it at IC time
+    /// `cs^2` (globally isothermal); for a locally isothermal run, overwrite it at IC time
     /// (e.g., `cs2(x) ~ 1/r` for a disk) before the first step.
     pub cs2: Field<Sc, D, Mem>,
     /// the substrate-owned pressure primitive (off the global iso field ABI). c2p writes
@@ -78,21 +78,21 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// (`iso_godunov_euler_with_{source_id}_{D}d`). `None` => the unfused kernel
     /// (the original default; bit-identical behavior for all existing callers).
     /// `Some(...)` => `godunov_euler` / `godunov_rk2` route to the fused variant
-    /// in ONE launch with the binding's `scalars` filled into the kernel.
+    /// in one launch with the binding's `scalars` filled into the kernel.
     pub fused_source: Option<FusedSourceBinding>,
-    /// the NON-fused (additive) source overlay. `Some` => the step loop
+    /// the non-fused (additive) source overlay. `Some` => the step loop
     /// snapshots `u_stage` + runs the standalone `iso_source_with_{slug}_{D}d`
     /// pass after each godunov stage (`cons += ac*dt*S`). proven bit-for-bit
     /// equal to `fused_source` with the same binding (proven at the evolve level by
     /// `additive_source_matches_fused_trajectory`). mutually exclusive with
     /// `fused_source` in practice — the same physics, two execution strategies.
     pub additive_source: Option<FusedSourceBinding>,
-    /// **Gap B**: a RUNTIME-loaded user source (python -> json -> `build_user_source`). regime-
+    /// **Gap B**: a runtime-loaded user source (python -> json -> `build_user_source`). regime-
     /// agnostic mechanism (shared with the energy regimes); iso stamps `has_energy = false`, so a
     /// `cooling` or `nrg`-targeted source was already rejected at `build_user_source`.
     pub runtime_source: Option<Arc<RuntimeSource>>,
-    /// when true AND a `runtime_source` is attached, the runtime user source is
-    /// FUSED into the godunov stage as ONE Cranelift-JIT'd host kernel, replacing the two-pass.
+    /// when true and a `runtime_source` is attached, the runtime user source is
+    /// fused into the godunov stage as one Cranelift-JIT'd host kernel, replacing the two-pass.
     /// opt-in + gated (host + f64); falls back to the two-pass otherwise. bit-for-bit identical
     /// to the two-pass path.
     pub fuse_runtime: bool,
@@ -161,7 +161,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             return 0.0;
         }
         // nu grows outward (nu ~ R^{3/2}), so nu_max sits at the largest orbital
-        // radius. on a cylindrical (R, phi) grid R IS that radius, so nu_max is at
+        // radius. on a cylindrical (R, phi) grid R is that radius, so nu_max is at
         // the outer R edge. cartesian forms it as the farthest domain corner from
         // the body in the disk plane (the first two axes; the vertical z in 3D does
         // not enter Omega_k) — matching the kernel's nu(x, y) exactly.
@@ -191,7 +191,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self.alpha * self.cs * self.cs / omega_min
     }
 
-    /// register a NEUMANN / ROBIN gradient boundary (the convenience short-circuit). the id
+    /// register a neumann / robin gradient boundary (the convenience short-circuit). the id
     /// (registration order) is what the sim's `Boundaries` carries as `BoundaryType::Neumann(id)` /
     /// `Robin(id)`. `coeffs` are the per-variable coefficients in prim order `[rho, vel.., pre]` (the
     /// pressure coefficient is ignored — iso re-derives pre = cs^2*rho at the ghost).
@@ -201,8 +201,8 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         (self, id)
     }
 
-    /// **Gap B**: attach a RUNTIME-loaded user source (the regime-agnostic mechanism). build it
-    /// against the ISO spec so ill-posed configs (cooling / `nrg` target — iso has no energy) are
+    /// **Gap B**: attach a runtime-loaded user source (the regime-agnostic mechanism). build it
+    /// against the iso spec so ill-posed configs (cooling / `nrg` target — iso has no energy) are
     /// rejected up front:
     /// `let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC)?;`
     /// `let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());`
@@ -211,12 +211,12 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         built: Vec<(String, BuiltSource)>,
         params: Vec<f64>,
     ) -> Self {
-        // has_energy = false is the AUTHORITY here (iso's RegimeSpec): no `nrg` write is emitted.
+        // has_energy = false is the authority here (iso's RegimeSpec): no `nrg` write is emitted.
         self.runtime_source = Some(RuntimeSource::new(built, params, false));
         self
     }
 
-    /// attach a runtime user source AND route it through the FUSED host path (the
+    /// attach a runtime user source and route it through the fused host path (the
     /// source rides inside the Cranelift-JIT'd godunov stage, one launch). same physics as
     /// `with_runtime_source`, bit-for-bit identical; host + f64 only,
     /// else it falls back to the two-pass.
@@ -245,7 +245,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self
     }
 
-    /// bind the SAME source as a NON-fused additive pass (plain godunov +
+    /// bind the same source as a non-fused additive pass (plain godunov +
     /// per-stage `source_apply`).
     /// the general execution path; bit-for-bit equal to `with_fused_source` for a
     /// baked family (the dispatch prefers fused-when-baked, falls back
@@ -271,7 +271,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         }
     }
 
-    /// register a DRIVEN boundary DAG; the returned id (registration order) is what the sim's
+    /// register a driven boundary DAG; the returned id (registration order) is what the sim's
     /// `Boundaries` must carry as `BoundaryType::Driven(id)` on the prescribed face. build
     /// `built` from `expr_bridge::build_boundary_dag(&cfg, &ISO_NEWTONIAN_SPEC)` — the
     /// prescription is `[rho, vel..]` only (no pressure slot; the isothermal closure re-derives
@@ -290,7 +290,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
 
     /// extend the per-cell `cs2` into every ghost cell by clamping each axis into the
     /// interior — the zero-gradient continuation of the fixed temperature field, covering
-    /// faces, edges, and corners in one pass. without this a LOCALLY isothermal run keeps
+    /// faces, edges, and corners in one pass. without this a locally isothermal run keeps
     /// the constructor's uniform `cs^2` in the ghosts (the interior-only derive never
     /// touches them), and the `p = cs2 * rho` ghost-pressure pass then books that alien
     /// temperature into every boundary flux — for a cold disk edge (`cs2 ~ 1e-3`) against
@@ -331,8 +331,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     for IsoSubstrateKernelSet<Mem, Sc, D>
 {
     fn flux(&self, sim: &FieldStore<D, D, Mem, Sc>, dir: usize) {
-        // the gv iso flux IS the Newtonian flux at gamma->1: it reconstructs prim.pre
-        // (= cs^2(x)*rho) and takes cs = sqrt(gamma*p/rho) = sqrt(p/rho) = the LOCAL sound
+        // the gv iso flux is the Newtonian flux at gamma->1: it reconstructs prim.pre
+        // (= cs^2(x)*rho) and takes cs = sqrt(gamma*p/rho) = sqrt(p/rho) = the local sound
         // speed, so a locally isothermal cs2(x) flows through naturally. gamma = ISO_GAMMA = 1;
         // no flux.nrg (the energy U/F is dead-code-eliminated). + the theta-MC limiter.
         // iso is HLLE-only by physics (no contact wave); the substrate enforces it
@@ -345,7 +345,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // reading prim.* outside the evolve loop checks this before trusting it.
         sim.mark_primitives_recovered();
         // inputs (manifest order): cons den, mom_0.., then the prescribed cs2 field.
-        // outputs: prim rho, vel_0.., self.pre (= cs2*rho). cs2 is a read-only FIELD,
+        // outputs: prim rho, vel_0.., self.pre (= cs2*rho). cs2 is a read-only field,
         // so the run can be locally isothermal. no scalar params.
         let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
         for k in 0..D {
@@ -371,7 +371,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     }
 
     fn godunov_stage(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
-        // immersed bodies: gravity + accretion are FUSED into the godunov update
+        // immersed bodies: gravity + accretion are fused into the godunov update
         // (one launch, additive convention), so `body_source` is a no-op. cs feeds
         // the accretion rate cap (iso passes the constant self.cs). the fused kernel
         // is baked for Cartesian; curvilinear falls back to the separate body_source
@@ -383,7 +383,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // the geometric-source pressure is the substrate-owned self.pre (= cs^2*rho).
         // fused_source: None => unfused kernel (the default), Some => AOT-baked
         // fused variant in one launch (`iso_godunov_stage_with_{source_id}_{D}d`).
-        // the FUSED runtime-source path (one JIT'd godunov+source launch); gated host+f64, the
+        // the fused runtime-source path (one JIT'd godunov+source launch); gated host+f64, the
         // source's separate pass skipped in `source_apply` under the same predicate. iso reads the
         // substrate-owned pressure `&self.pre` (= cs^2*rho); geo = Hydro{inertial:true} matches the
         // AOT `iso` godunov.
@@ -415,7 +415,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
 
     fn cfl(&self, sim: &FieldStore<D, D, Mem, Sc>) -> f64 {
         // iso wave-speed map (cs = sqrt(gamma*p/rho) from the substrate-owned self.pre);
-        // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
+        // the shared cfl dispatch binds the field buffers by manifest + owns the reduction.
         let dt_hydro = cfl_wave_speed(
             sim,
             &self.pre,
@@ -442,7 +442,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         };
         let dt = if nu_max > 0.0 {
             const C_VISC: f64 = 0.1;
-            // the diffusion cap uses the PHYSICAL min cell size. cylindrical (R, phi)
+            // the diffusion cap uses the physical min cell size. cylindrical (R, phi)
             // has a coordinate azimuthal width dphi, so its physical extent is R dphi,
             // smallest at the inner edge — using the raw angle would leave the inner
             // annulus under-resolved and unstable. cartesian widths are already
@@ -483,7 +483,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                     outputs.push(&sim.fields.prim.vel[k]);
                 }
                 outputs.push(&self.pre);
-                // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
+                // params by name via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
                 // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int \sqcup float
                 // coproduct).
                 let (ints, scalars) = resolve_params(
@@ -512,7 +512,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             },
         );
         // the driven faces (skipped by the pullback: Driven -> Skip): prescribe their ghost
-        // [rho, vel..] from the registered boundary DAGs. the pressure is NOT prescribed —
+        // [rho, vel..] from the registered boundary DAGs. the pressure is not prescribed —
         // the eos pass below re-derives it as cs2 * rho over every ghost the fill wrote.
         if !self.boundary_dags.is_empty() {
             dispatch_driven_boundaries(sim, &self.boundary_dags);
@@ -528,7 +528,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                 Some(self.cs * self.cs),
             );
         }
-        // re-derive the eos law p = cs^2 * rho over the FULL allocated lattice. the
+        // re-derive the eos law p = cs^2 * rho over the full allocated lattice. the
         // substrate pressure lives outside the prim batch, so the coarse-fine ghost
         // prolongation (which fills prim rho/vel) never writes it, and the pullback above
         // skips coarse-fine faces — without this pass the face reconstruction at a level
@@ -560,7 +560,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
     }
 
-    /// the interface dye flux, written during the FLUX phase so the coarse-fine registers sample it
+    /// the interface dye flux, written during the flux phase so the coarse-fine registers sample it
     /// alongside the gas fluxes. the dye kernels read only the mass flux and `prim.chi`, so the same
     /// baked instances serve every regime.
     fn chi_flux(&self, sim: &FieldStore<D, D, Mem, Sc>) {
@@ -579,7 +579,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         if !sim.has_passive_scalar() {
             return;
         }
-        // the dye divergence divides by the PHYSICAL cell width, so its geom scalars resolve
+        // the dye divergence divides by the physical cell width, so its geom scalars resolve
         // through the same motion-aware path the gas godunov uses: on a homologously expanding
         // mesh `dx` carries a(t) on the expanding axes, and the comoving width would be short by
         // exactly that factor. reproduces the raw linear (x_lo, dx) bit-identically on a static grid.

@@ -1,7 +1,7 @@
 // =============================================================================
 // support.rs
 //
-// the SUPPORT of a kernel output: a region outside which its value is exactly
+// the support of a kernel output: a region outside which its value is exactly
 // zero in f64 — not just mathematically. the minimal
 // lattice:
 //   Everywhere — no bound is known (always sound)
@@ -87,7 +87,7 @@ impl std::ops::Mul for ParamExpr {
 pub enum Support {
     Everywhere,
     /// exactly zero outside |x - center| > radius, in the grid's coordinate
-    /// space, for EVERY field input value. one center component per grid axis.
+    /// space, for every field input value. one center component per grid axis.
     Ball {
         center: Vec<ParamExpr>,
         radius: ParamExpr,

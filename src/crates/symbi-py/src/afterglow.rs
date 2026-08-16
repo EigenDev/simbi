@@ -5,8 +5,8 @@
 // `simbi afterglow generate` workflow crosses into rust here:
 //   - generate_photon_events: python dicts (sim_cond, qscales, fields, mesh) ->
 //     rust SimConditions / QuantScales / HydroFields / Mesh, dispatch on the mesh
-//     data_dim (1 = the spherical BMK path), returns an opaque PhotonEvents handle.
-//   - monte_carlo_radiative_transfer: run MCRT in place on the handle.
+//     data_dim (1 = the spherical bmk path), returns an opaque PhotonEvents handle.
+//   - monte_carlo_radiative_transfer: run mcrt in place on the handle.
 //   - write_photon_events: serialize the handle to HDF5, byte-compatible with the
 //     python `postprocess.read_photon_events` schema (root datasets + root attrs).
 //
@@ -184,7 +184,7 @@ fn mesh_data(dict: &Bound<'_, PyDict>) -> PyResult<MeshData> {
 
 /// generate relativistically-beamed synchrotron photon packets from a hydro snapshot.
 /// dispatches on `mesh["data_dim"]`: 1 uses the spherical generator (a synthesized
-/// equal-solid-angle sphere from the 1d radial profile — the BMK target); 2/3 use the
+/// equal-solid-angle sphere from the 1d radial profile — the bmk target); 2/3 use the
 /// general mesh generator. `seed` makes the catalog reproducible, `max_events` caps it.
 #[pyfunction]
 #[pyo3(name = "generate_photon_events")]
@@ -217,7 +217,7 @@ fn generate_photon_events_py(
     let md = mesh_data(mesh)?;
 
     let events = if md.data_dim <= 1 {
-        // the spherical BMK path: synthesize a full sphere from the 1d radial profile, with
+        // the spherical bmk path: synthesize a full sphere from the 1d radial profile, with
         // the angular tessellation sized from the budget so every radial cell emits (see
         // `spherical_tessellation_for_budget`); full sphere (theta_max = pi).
         let ppd = if photons_per_cell > 0 {

@@ -5,17 +5,17 @@
 #
 # stone et al., "AthenaK: A Performance-Portable Version of the Athena++ AMR
 # Framework", section 5.1: performance is measured with the newtonian hydro
-# solver running a LINEAR WAVE convergence test on a UNIFORM mesh, on CPUs using
-# a SINGLE 128^3 MeshBlock and all available cores. their reported figures:
+# solver running a linear wave convergence test on a uniform mesh, on CPUs using
+# a single 128^3 MeshBlock and all available cores. their reported figures:
 #
 #   Apple M1 pro (8 cores):   hydro 34 Mzc/s,  MHD 11 Mzc/s
 #   Intel Xeon Gold 6326 (32 cores):  hydro 63,  MHD 33,  SR-hydro 16
 #
-# this config is the ONLY simbi configuration directly comparable to those
+# this config is the only simbi configuration directly comparable to those
 # numbers: cartesian, uniform, periodic, newtonian hydro, no sources, no
 # immersed bodies, no mesh refinement, no curvilinear geometry. any of those
 # additions costs a multiple (their own table 2 shows hydro 63 -> SR-hydro 16 on
-# one machine), so a spherical/AMR/body problem is NOT a valid comparison point.
+# one machine), so a spherical/AMR/body problem is not a valid comparison point.
 #
 # physics: a right-going linearized sound wave on a uniform background. with
 # rho0 = 1 and p0 = 1/gamma the sound speed is cs = sqrt(gamma p0 / rho0) = 1, so
@@ -30,12 +30,12 @@
 # crossing at t = 1, so the final state should equal the initial state to
 # truncation error -- a free correctness check on the benchmark itself.
 #
-# throughput (MZCS) is cell-updates per wall-second and is INDEPENDENT of the cfl
+# throughput (MZCS) is cell-updates per wall-second and is independent of the cfl
 # number; cfl only sets how many steps a given end_time takes.
 #
-# the problem is RANK-GENERIC: `dim` follows len(resolution), and the wave always
-# travels along x1, so 1d / 2d / 3d run the IDENTICAL physics and solver. that makes
-# throughput comparable ACROSS ranks -- comparing a 3d wave against a 2d shear
+# the problem is rank-generic: `dim` follows len(resolution), and the wave always
+# travels along x1, so 1d / 2d / 3d run the identical physics and solver. that makes
+# throughput comparable across ranks -- comparing a 3d wave against a 2d shear
 # instability measures the choice of problem, with the dimension confounded. at equal cell counts:
 #
 #   1d: --resolution 262144
@@ -44,7 +44,7 @@
 #
 # all three are 262144 cells, all above the host cover's WHOLE_BELOW_CELLS cutoff.
 # per-cell work should rise with rank (flux directions D, conserved fields 2 + D),
-# so MZCS should FALL from 1d -> 3d. if it stays flat, a fixed per-cell cost
+# so MZCS should fall from 1d -> 3d. if it stays flat, a fixed per-cell cost
 # dominates and memory traffic is not the bottleneck.
 #
 # usage:
@@ -151,7 +151,7 @@ class LinearWave(SimbiProblem):
             group="output",
         ),
     ]
-    # a 128^3 checkpoint is ~84 MB; the base default (0.1) writes ten of them over a
+    # a 128^3 checkpoint is ~84 mb; the base default (0.1) writes ten of them over a
     # crossing and the i/o would land inside the timed region. only the final state.
     checkpoint_interval: Annotated[
         float,
@@ -187,7 +187,7 @@ class LinearWave(SimbiProblem):
             dx = (x1 - x0) / nx
             k = 2.0 * np.pi / (x1 - x0)
 
-            # the wave depends on x1 ALONE. evaluate it once per x1-column (nx values) and
+            # the wave depends on x1 alone. evaluate it once per x1-column (nx values) and
             # re-emit the row: a per-cell sin() at 128^3 is 2.1M transcendentals and would
             # dominate startup before a single step runs.
             xc = x0 + (np.arange(nx) + 0.5) * dx

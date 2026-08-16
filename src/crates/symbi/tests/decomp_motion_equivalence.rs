@@ -1,11 +1,11 @@
 // =============================================================================
 // decomp_motion_equivalence.rs
 //
-// MESH MOTION x DECOMPOSITION: tiles evolving a homologously expanding (or uniformly
+// mesh motion x decomposition: tiles evolving a homologously expanding (or uniformly
 // translating) mesh must reproduce the monolithic single-grid run to round-off. every tile
-// carries the IDENTICAL motion state and the decomposed loop advances all tile clocks and
+// carries the identical motion state and the decomposed loop advances all tile clocks and
 // scale factors in lockstep with the shared global dt — identical dt sequence, identical
-// a(t) sequence, bit-for-bit. the cuts sit at fixed COMOVING indices, so the halo exchange
+// a(t) sequence, bit-for-bit. the cuts sit at fixed comoving indices, so the halo exchange
 // is untouched by the expansion. the monolithic reference is the production single-grid
 // `evolve` loop (its own per-step motion advance), so this oracle pins the decomposed
 // advance semantics against the canonical ones — a tile that failed to advance its clock or

@@ -1,12 +1,12 @@
 # =============================================================================
 # conftest.py
 #
-# the test-layer contract: PYTHON PROVES WIRING, RUST PROVES PHYSICS.
+# the test-layer contract: python proves wiring, rust proves physics.
 #
 # a python test may drive the solver only far enough to show the plumbing connects
 # -- the config validates, the intended dispatch arm is selected, a step completes,
 # the checkpoint carries the expected schema. the moment an assertion is about a
-# NUMBER THE PHYSICS PRODUCED (a convergence order, a hold against an analytic
+# number the physics produced (a convergence order, a hold against an analytic
 # solution, a conservation drift), it belongs in a rust integration test, which runs
 # in-process, in parallel, and can see intermediate state a checkpoint never exposes.
 #
@@ -17,7 +17,7 @@
 # cannot use more than about one core. rust runs 2400+ tests in three minutes for
 # exactly the opposite reasons.
 #
-# the split is ENFORCED, not documented: `_step_budget_guard` fails any driver call
+# the split is enforced, not documented: `_step_budget_guard` fails any driver call
 # that is unbounded or too large. a science run cannot be written as a python test.
 #
 # tiers:
@@ -39,11 +39,11 @@ _backend_gate_reason = "backend not built"
 # a call into the solver driver: the definition of "this test evolves a grid".
 _driver_call = re.compile(r"runner\.run\(|\.simulate\(|\.run\(compute")
 
-# the cost ceiling for ONE driver call in a python test, in zone-cycles
+# the cost ceiling for one driver call in a python test, in zone-cycles
 # (interior cells x steps). the solver reports its own throughput in these units, so
 # the budget is stated in the same currency the run is measured in.
 #
-# the STEP BOUND above is the real control; this catches the outliers a small step
+# the step bound above is the real control; this catches the outliers a small step
 # count cannot. it is deliberately generous: a few steps at a production resolution is
 # cheap and worth keeping, because some config-level defects (an unfilled driven
 # corner ghost) only appear on the grid the config actually declares, and shrinking
@@ -51,7 +51,7 @@ _driver_call = re.compile(r"runner\.run\(|\.simulate\(|\.run\(compute")
 # run, which is a science campaign regardless of how small the grid is.
 MAX_ZONE_CYCLES_PER_RUN = 50_000_000
 
-# a driver call must also declare a STEP BOUND. running to an `end_time` makes the
+# a driver call must also declare a step bound. running to an `end_time` makes the
 # cost a function of the CFL condition, so it cannot be checked before the run and
 # drifts silently when the physics changes the timestep.
 _UNBOUNDED = (

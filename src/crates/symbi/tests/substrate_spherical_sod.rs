@@ -1,7 +1,7 @@
 // =============================================================================
 // substrate_spherical_sod.rs
 //
-// the curvilinear-integration capstone: a full SPHERICAL adiabatic Euler Sod
+// the curvilinear-integration capstone: a full spherical adiabatic Euler Sod
 // evolution where the M-generic AdiabaticSubstrateKernelSet runs on a
 // SimState<Newtonian, 1, Spherical, ..> through the real evolve() loop. the
 // metric M=Spherical flows to PartitionGeometry.coords, which makes the kernelset
@@ -9,9 +9,9 @@
 // iso_wave_speed_map_sph_1d) — the area-weighted divergence + the well-balanced
 // geometric pressure source (2p/r in the radial continuum limit) + per-cell CFL.
 //
-// proof the spherical geometric source actually engages: run the IDENTICAL grid +
+// proof the spherical geometric source actually engages: run the identical grid +
 // initial state under M=Spherical and M=Cartesian; the spherical geometric source
-// changes the solution, so the radial density profiles must DIFFER measurably. a
+// changes the solution, so the radial density profiles must differ measurably. a
 // missing _sph kernel would panic in kernel_by_name, so a clean run also proves the
 // curvilinear instances are registered and dispatched.
 // =============================================================================
@@ -87,7 +87,7 @@ where
 
 #[test]
 fn full_substrate_spherical_adiabatic_sod() {
-    // the SAME M-generic kernelset serves both metrics; the SimState's M drives the
+    // the same M-generic kernelset serves both metrics; the SimState's M drives the
     // curvilinear kernel selection (sim.geom.coords).
     let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &{
         // a throwaway allocated domain only to size the cfl scratch (N + 2*ng).
@@ -145,7 +145,7 @@ fn full_substrate_spherical_adiabatic_sod() {
     }
     assert!(max_vel > 0.05, "gas did not move (max |v| = {max_vel})");
 
-    // geometry is ACTIVE: the IDENTICAL grid + IC under Cartesian gives a DIFFERENT
+    // geometry is active: the identical grid + IC under Cartesian gives a different
     // profile (no 2p/r geometric source, flat divergence). compare radial density.
     let mut cart = SimCart::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N])
@@ -308,7 +308,7 @@ fn full_substrate_spherical_rhd() {
 }
 
 // D-generic radial-gradient ICs for the ndim>=2 curvilinear smokes (rho or p decreasing in
-// r, v=0): the radial gradient breaks the well-balanced HSE so the area-weighted divergence
+// r, v=0): the radial gradient breaks the well-balanced hse so the area-weighted divergence
 // + geometric pressure source drive flow the flat Cartesian divergence lacks. radially
 // symmetric (transverse v = 0), so the dominant geometry terms are exercised; the inertial
 // centrifugal/coriolis source is validated analytically in geometry_algebra.rs. annular
@@ -352,7 +352,7 @@ fn set_grad_rhd<M, const D: usize>(
     }
 }
 
-// iso has no energy: a radial DENSITY gradient (p = cs^2 rho recovered in c2p); the
+// iso has no energy: a radial density gradient (p = cs^2 rho recovered in c2p); the
 // geometric pressure source cs^2 rho * (A_hi-A_lo)/V drives the flow.
 fn set_grad_iso<M, const D: usize>(
     sim: &mut SimState<IsoNewtonian, D, M, Isothermal<f64>, CpuSpace, HostMemory>,
@@ -449,8 +449,8 @@ fn full_substrate_spherical_2d_adiabatic() {
 
 // ---- ndim>=2 spherical smokes: close the (regime x dim x spherical) matrix ----
 // each runs the M-generic _sph kernel through evolve() on an annular wedge and asserts a
-// finite/positive/(subluminal) state + geometry ACTIVE (the radial profile differs from
-// the IDENTICAL Cartesian run; a Cartesian-vs-Cartesian run is bit-identical, diff 0). a
+// finite/positive/(subluminal) state + geometry active (the radial profile differs from
+// the identical Cartesian run; a Cartesian-vs-Cartesian run is bit-identical, diff 0). a
 // missing _sph kernel would panic in kernel_by_name, so a clean run proves dispatch too.
 // the cells covered here are adiabatic 3D, iso 2D/3D, and rhd 2D/3D.
 

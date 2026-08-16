@@ -4,16 +4,16 @@
 // shared structured-binding-ABI plumbing for the D-generic hydro SubstrateKernelSets
 // (iso / adiabatic / rhd). each method gathers its cell-centered field refs
 // (inputs-then-outputs, in the generated kernel's binding order), names the kernel
-// instance by (regime, ndim, dir), and routes ONE KernelInvocation through the
+// instance by (regime, ndim, dir), and routes one KernelInvocation through the
 // CPU/GPU dispatch seam. the kernel instance is resolved by name
 // via the generated `symbi_aot::kernel_by_name` registry — no hand-maintained
 // `match (D, dir)` per regime.
 //
 // the RMHD set keeps its own copies of these layout helpers: it also drives
-// STAGGERED face/edge buffers (bface/efield on non-allocated domains), which these
+// staggered face/edge buffers (bface/efield on non-allocated domains), which these
 // cell-centered hydro helpers do not model.
 //
-// the responsibilities are split into one submodule each (SRP), re-exported flat so
+// the responsibilities are split into one submodule each (srp), re-exported flat so
 // every item resolves at `crate::regimes::substrate_kernels::<name>` exactly as before:
 //   types          — the Solver / RegimeKind classification enums
 //   layout         — per-axis layouts + kernel-name suffixes + registry lookups
@@ -41,7 +41,7 @@ pub use types::*;
 // bind generic slots positionally, ordered by the recorded manifest.
 pub(crate) use binding::kernel_field_binds;
 // the typed (field, is_output) manifest: what a kernel actually reads and writes. public so a
-// caller deciding whether to run a PRODUCER can ask the consumer instead of re-deriving which
+// caller deciding whether to run a producer can ask the consumer instead of re-deriving which
 // solver arm consumes what.
 pub use binding::kernel_bindings;
 pub mod census_compiled;
@@ -51,4 +51,4 @@ pub use params::*;
 pub use runtime_source::*;
 // binding holds only crate-internal helpers (resolve_path / bind_manifest / kernel_bindings /
 // parse_*), reached by the sibling submodules via `super::binding::*` — no external `substrate_kernels::`
-// consumer, so it is NOT re-exported at the module root.
+// consumer, so it is not re-exported at the module root.

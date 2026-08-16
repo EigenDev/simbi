@@ -9,9 +9,9 @@
 # the three roles bondi.py splits between an immersed point mass and a sponge are
 # played here by the spacetime itself:
 #   - gravity is the kerr-schild geodesic source (no immersed body),
-#   - the accretion sink is HORIZON EXCISION: the cells inside r_exc = 0.7 r_+ are
+#   - the accretion sink is horizon excision: the cells inside r_exc = 0.7 r_+ are
 #     overwritten each step (the physical horizon replaces the point-mass drain),
-#   - the far field is held by DRIVEN boundary faces relaxed to the ambient
+#   - the far field is held by driven boundary faces relaxed to the ambient
 #     reservoir (rho_inf, v = 0, p_inf) — a relativistic conserved-state sponge is
 #     unavailable, so a dirichlet reservoir is the buffer.
 #
@@ -22,7 +22,7 @@
 # the fill).
 #
 # the accretion diagnostic is the rest-mass flux through a coordinate sphere,
-# well-posed OUTSIDE the horizon; its r-invariance once steady is the certificate:
+# well-posed outside the horizon; its r-invariance once steady is the certificate:
 #   from simbi.reader import read_simulation
 #   from simbi.reader.gr_accretion import ring_accretion_from_checkpoint
 #   mdot, cert = ring_accretion_from_checkpoint(read_simulation("...h5"))

@@ -1,12 +1,12 @@
 // =============================================================================
 // cfl_nan_reduction.rs
 //
-// no silent floors: a SINGLE NaN cell in the
+// no silent floors: a single NaN cell in the
 // wave-speed scratch must propagate through the CFL max-reduction so the
-// downstream dt guard fires. f64::max(finite, NaN) == finite silently DROPS the
+// downstream dt guard fires. f64::max(finite, NaN) == finite silently drops the
 // NaN, which would let garbage advance past check_dt_or_panic to checkpoint.
 //
-// this pins the HOST fold path (runs without cuda). the device kernel + its
+// this pins the host fold path (runs without cuda). the device kernel + its
 // host-side partials fold get the same NaN-propagation; the cuda-gated diff test
 // in substrate_rmhd_gpu.rs exercises that on a GPU.
 // =============================================================================

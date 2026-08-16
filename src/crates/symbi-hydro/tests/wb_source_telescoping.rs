@@ -10,14 +10,14 @@
 //
 // and on a discretely balanced isentrope -- where the balanced reconstruction
 // makes every face pressure the equilibrium pressure p_eq(phi_face) and the
-// cell pressure IS p_eq(phi_c) -- the sum vanishes identically when
+// cell pressure is p_eq(phi_c) -- the sum vanishes identically when
 //
 //     S_grav = [A_hi (p_eq(phi_hi) - p_eq(phi_c)) - A_lo (p_eq(phi_lo) - p_eq(phi_c))] / V.
 //
 // checked per chart with the chart's own exact finite-volume factors (cartesian
 // A = 1, V = dr; cylindrical A = r, V = (r_hi^2 - r_lo^2)/2; spherical A = r^2,
-// V = (r_hi^3 - r_lo^3)/3) and the SAME `LocalEquilibrium` profile the kernels
-// trace. the face pressures come from the NEIGHBOR cell's equilibrium, so the
+// V = (r_hi^3 - r_lo^3)/3) and the same `LocalEquilibrium` profile the kernels
+// trace. the face pressures come from the neighbor cell's equilibrium, so the
 // residual also carries the reconstruction-consistency statement (both anchors
 // give the face the same value to roundoff) rather than assuming it. positive
 // control: the analytic `rho g` source leaves a truncation-scale residual on
@@ -106,7 +106,7 @@ fn the_wb_source_telescopes_against_divergence_and_geometric_source_per_chart() 
             let (rho_c, p_c) = isentrope(r_c);
             let eq = LocalEquilibrium::through(rho_c, p_c, phi(r_c), GAMMA);
 
-            // face pressures as the balanced scheme produces them: the NEIGHBOR
+            // face pressures as the balanced scheme produces them: the neighbor
             // cell's equilibrium evaluated at the shared face, so the identity is
             // exercised across the reconstruction-consistency seam rather than
             // against the cell's own profile alone.
@@ -169,8 +169,8 @@ fn the_wb_source_telescopes_against_divergence_and_geometric_source_per_chart() 
 #[test]
 fn the_wb_source_telescopes_on_a_log_spaced_axis() {
     // the identity is position-blind: it holds at whatever face/anchor positions the
-    // three terms share. what a LOG axis adds is the anchor convention -- the cell
-    // position is the map's own center, the GEOMETRIC mean sqrt(r_lo r_hi), not the
+    // three terms share. what a log axis adds is the anchor convention -- the cell
+    // position is the map's own center, the geometric mean sqrt(r_lo r_hi), not the
     // arithmetic midpoint -- and the graded faces make every A/V ratio cell-dependent.
     // the arithmetic-anchor control below shows the identity is anchor-consistent
     // rather than anchor-forgiving: telescoping needs the same anchor in all three
@@ -206,7 +206,7 @@ fn the_wb_source_telescopes_on_a_log_spaced_axis() {
             let (rho_c, p_c) = isentrope(r_c);
             let eq = LocalEquilibrium::through(rho_c, p_c, phi(r_c), GAMMA);
 
-            // face pressures from the NEIGHBOR cells' equilibria, as in the uniform
+            // face pressures from the neighbor cells' equilibria, as in the uniform
             // test: the identity is exercised across the reconstruction-consistency
             // seam.
             let eq_dn = {

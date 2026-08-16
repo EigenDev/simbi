@@ -1,17 +1,17 @@
 // =============================================================================
 // decomp_shaped_wall_equivalence.rs
 //
-// the SHAPED rigid-wall correctness contract under domain decomposition: a domain
-// split into tiles, each carrying the SAME shaped (CSG) rigid wall at the global
+// the shaped rigid-wall correctness contract under domain decomposition: a domain
+// split into tiles, each carrying the same shaped (CSG) rigid wall at the global
 // position, evolved through `evolve_decomposed`, must reproduce the monolithic run
 // to round-off for the fluid (den/mom/nrg).
 //
-// the shaped penalization is POINTWISE (each cell relaxes its momentum toward the
-// wall from the body's GLOBAL position via the mask at that cell), and the per-body
+// the shaped penalization is pointwise (each cell relaxes its momentum toward the
+// wall from the body's global position via the mask at that cell), and the per-body
 // force/torque receipts are reduced per-tile then summed across tiles
 // (step_bodies_decomposed) -- the tile interiors partition the global interior, so
 // the sum is the monolithic reduction. hence decomposed == monolithic by
-// construction; this pins it. the wall sits on the 2x2 tile CORNER so its support
+// construction; this pins it. the wall sits on the 2x2 tile corner so its support
 // straddles every cut -- the worst case. a tile that dispatched the shaped bbox at a
 // wrong local coordinate, or clipped the support wrong at a cut, would diverge here.
 //
@@ -44,7 +44,7 @@ const T_FINAL: f64 = 0.03;
 type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
-// a fresh sealed capped-cylinder rigid wall at the GLOBAL origin, per tile.
+// a fresh sealed capped-cylinder rigid wall at the global origin, per tile.
 fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)

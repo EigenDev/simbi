@@ -4,7 +4,7 @@
 // isothermal ideal-MHD regime (Mignone 2007). the energy equation is dropped and
 // the gas is closed by p = a^2 rho (a = constant isothermal sound speed). built on
 // the energy-model-generic MhdConsG/MhdPrimG at E = IsoModel, so the energy/pressure
-// slots are Zero<S> (ZST) — NO energy field, no wasted memory/FLOPS/bandwidth.
+// slots are Zero<S> (zst) — no energy field, no wasted memory/flops/bandwidth.
 //
 // physics (carrier-generic over S: Scalar, valid at S = f64 and S = Gv):
 //   to_conserved:  U = (rho, rho v, B)                       (no energy)
@@ -17,7 +17,7 @@
 //     cf^2 = 1/2 [ (a^2 + cA^2) + sqrt( (a^2 + cA^2)^2 - 4 a^2 cAn^2 ) ]
 //     return (vn - cf, vn + cf)
 //
-// the contact/entropy mode is ABSENT (no energy) — see riemann::hlld_isothermal
+// the contact/entropy mode is absent (no energy) — see riemann::hlld_isothermal
 // (the 3-state Mignone solver). mirrors `NewtonianMhd` and `IsoNewtonian`.
 //
 // usage:
@@ -39,7 +39,7 @@ use symbi_ir::algebra::Scalar;
 #[derive(Clone, Copy, Debug)]
 pub struct IsothermalMhd;
 
-/// conserved-to-primitive recovery — the carrier-safe PURE math (no comparisons,
+/// conserved-to-primitive recovery — the carrier-safe pure math (no comparisons,
 /// no error codes -> traces at S = Gv). trivial in isothermal MHD: rho = den,
 /// v = mom/den (no pressure slot). the single source the Gv c2p builder traces.
 #[inline]

@@ -9,7 +9,7 @@
 // on a small 1d problem — so a cadence that quietly degraded to every-step would be paying that
 // on every step forever while reporting the same physics.
 //
-// the interval is in TIME rather than steps because dt varies over a run, so a fixed step stride
+// the interval is in time rather than steps because dt varies over a run, so a fixed step stride
 // samples the physics non-uniformly and the spacing of the series becomes an artifact of the
 // timestepper.
 // =============================================================================

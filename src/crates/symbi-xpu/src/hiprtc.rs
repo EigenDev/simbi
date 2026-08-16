@@ -1,7 +1,7 @@
 // =============================================================================
 // hiprtc.rs
 //
-// hipRTC: AMD's runtime HIP compiler (libhiprtc.so, often folded into libamdhip64).
+// hipRTC: amd's runtime HIP compiler (libhiprtc.so, often folded into libamdhip64).
 // compiles a HIP/cuda-c++ source string straight to a code object in-process -- the
 // hip analog of nvrtc. same rule: every
 // accelerator compiles at runtime via its own runtime compiler, no shelled toolchain.

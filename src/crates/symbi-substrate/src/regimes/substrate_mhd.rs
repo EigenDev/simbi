@@ -1,10 +1,10 @@
 // =============================================================================
 // regimes/substrate_mhd.rs
 //
-// MhdSubstrateKernelSet<R, Mem, Sc, D> — the ONE ideal-MHD KernelSet, generic over the
+// MhdSubstrateKernelSet<R, Mem, Sc, D> — the one ideal-MHD KernelSet, generic over the
 // regime `R` (RMHD / NewtonianMhd / IsothermalMhd; DOF = 3 fixed).
 //
-// the three MHD families differ ONLY by data read off `R::SPEC`:
+// the three MHD families differ only by data read off `R::SPEC`:
 //   - `Self::kernel_prefix()`                     -> the AOT kernel-name prefix (rmhd / nmhd / imhd)
 //   - `R::SPEC.has_energy`               -> whether the pre / nrg field rows are bound
 //                                           (gamma EOS scalar vs the iso `cs`)
@@ -12,12 +12,12 @@
 //                                           `wave_speeds` pass for the HLLE flux to read;
 //                                           NMHD/iMHD compute the magnetosonic speed inline
 //
-// on a CURVED chart that pass is conditional rather than regime-fixed, because two independent
+// on a curved chart that pass is conditional rather than regime-fixed, because two independent
 // kernels may consume its output: the HLL face flux (which reads the per-cell speeds instead of
 // solving its own fan — unlike the HLLD and rusanov arms) and the UCT edge EMF. the condition is
-// read off the flux kernel's OWN manifest, so it cannot drift from what that kernel actually does.
-// the gas godunov + the ENTIRE constrained-transport stack are regime-agnostic and delegate
-// to `mhd_substrate` (the SAME AOT kernels). the per-regime structs (`RmhdSubstrateKernelSet`
+// read off the flux kernel's own manifest, so it cannot drift from what that kernel actually does.
+// the gas godunov + the entire constrained-transport stack are regime-agnostic and delegate
+// to `mhd_substrate` (the same AOT kernels). the per-regime structs (`RmhdSubstrateKernelSet`
 // etc.) are now back-compat type aliases of this one.
 //
 // usage:
@@ -67,10 +67,10 @@ fn host_scale_factor(coords: symbi_geometry::Geometry, ci: usize, pos: &[f64; 3]
     }
 }
 
-/// the MAX inverse PHYSICAL cell width over the interior, `max_{cell, axis} 1/(h_a * dx_a)` (i.e. the
-/// reciprocal of the SMALLEST physical cell). the diagonal-metric scale factors are extremized at the
+/// the max inverse physical cell width over the interior, `max_{cell, axis} 1/(h_a * dx_a)` (i.e. the
+/// reciprocal of the smallest physical cell). the diagonal-metric scale factors are extremized at the
 /// coordinate boundaries (min r, pole-closest theta), so the smallest physical cell sits at a domain
-/// CORNER — evaluate the `2^D` corner cells, O(1). the resistive diffusion crosses PHYSICAL widths, so
+/// corner — evaluate the `2^D` corner cells, O(1). the resistive diffusion crosses physical widths, so
 /// a curvilinear grid (small r / near the poles) is stiffer than its coordinate spacing suggests;
 /// Cartesian falls through to `1/dx` (h = 1).
 pub(crate) fn max_inv_physical_width<const D: usize>(
@@ -86,7 +86,7 @@ pub(crate) fn max_inv_physical_width<const D: usize>(
                 s.hi - 1
             }
         });
-        // physical cell-center per COORDINATE axis (for the scale factors), mirroring driven_inflow_lambda.
+        // physical cell-center per coordinate axis (for the scale factors), mirroring driven_inflow_lambda.
         let mut pos = [0.0f64; 3];
         for d in 0..D {
             let c = match &geom.maps {
@@ -107,7 +107,7 @@ pub(crate) fn max_inv_physical_width<const D: usize>(
 }
 
 /// the relativistic driven-inflow CFL bound: `max` over the interior cells adjacent to every
-/// DRIVEN boundary face of `1 / (h_d * width_d)` (the inverse physical cell width, the steepest
+/// driven boundary face of `1 / (h_d * width_d)` (the inverse physical cell width, the steepest
 /// per-axis). a relativistic signal travels at most `c = 1`, so this is the `lambda` a wind
 /// injected at that face imposes — invisible to the interior-only wave-speed map. returns 0 when
 /// there are no driven faces (the `max` is then a no-op).
@@ -136,7 +136,7 @@ where
                 symbi_algebra::Side::Hi
             };
             for coord in geom.interior.boundary(a, s, 1).iter() {
-                // physical cell-center per COORDINATE axis (for the scale factors).
+                // physical cell-center per coordinate axis (for the scale factors).
                 let mut pos = [0.0f64; 3];
                 for d in 0..D {
                     let c = match &geom.maps {
@@ -164,7 +164,7 @@ where
 
 /// the unified D-dimensional ideal-MHD `KernelSet`, regime supplied as `R` (carries `SPEC`).
 pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
-    /// the EOS scalar, TAGGED by meaning: the adiabatic index on energy-carrying
+    /// the EOS scalar, tagged by meaning: the adiabatic index on energy-carrying
     /// regimes, the constant sound speed on isothermal ones. the tag comes from
     /// `R::SPEC.has_energy` at construction, so a kernel reading the wrong wire
     /// name panics at the resolver instead of silently receiving the other physics.
@@ -178,7 +178,7 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// it charges rather than reporting one aggregate number.
     pub constraint_theta: Field<Sc, D, Mem>,
     pub constraint_binding: Field<Sc, D, Mem>,
-    /// the run's DECLARED constraint family parameters. neutral by default — nothing is floored
+    /// the run's declared constraint family parameters. neutral by default — nothing is floored
     /// unless a caller asks, so there is no hidden default floor.
     pub constraints: crate::regimes::substrate_kernels::ConstraintParams,
     /// Riemann solver — HLLE (default) / HLLC / HLLD; validated against the regime at attach.
@@ -193,7 +193,7 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// `kind="raw"` reaches here. targets the hydro conserved slots (den/mom/nrg);
     /// B is evolved by CT. None for source-free runs.
     pub runtime_source: Option<Arc<RuntimeSource>>,
-    /// driven (DYNAMIC) boundary prescriptions, indexed by `BoundaryType::Driven(id)`. each is a
+    /// driven (dynamic) boundary prescriptions, indexed by `BoundaryType::Driven(id)`. each is a
     /// complete prim DAG `[rho, vel.., pre, B..]`; the standard ghost-fill skips the driven face,
     /// then `dispatch_driven_boundaries` assigns its ghost state. empty => no driven faces.
     pub boundary_dags: Vec<Arc<RuntimeSource>>,
@@ -211,10 +211,10 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// density and pressure of the absorbing atmosphere inside the excision surface.
     pub excision_rho: f64,
     pub excision_pre: f64,
-    /// shakura-sunyaev alpha with the LOCAL sound speed (energy regimes only);
+    /// shakura-sunyaev alpha with the local sound speed (energy regimes only);
     /// takes precedence over the constant nu when positive.
     pub alpha: f64,
-    /// constant kinematic viscosity `nu` (the Navier-Stokes shear on the velocity, ORTHOGONAL to the
+    /// constant kinematic viscosity `nu` (the Navier-Stokes shear on the velocity, orthogonal to the
     /// resistive diffusion of B). 0 = inviscid. >0 runs the viscous force + (energy regime) the viscous
     /// heating onto the total energy; B is untouched, so the heat warms the gas with 1/2 B^2 preserved.
     /// finite magnetic Prandtl number Pm = nu / eta. cartesian; full 3D (D==DOF), 2.5D via the
@@ -231,7 +231,7 @@ where
 {
     /// the field bound to the kernel ABI's pressure slot: the pressure itself on an
     /// energy-carrying regime, the conserved density on isothermal ones. the ABI is
-    /// uniform across the regime family, so the slot must carry SOME live field on
+    /// uniform across the regime family, so the slot must carry some live field on
     /// iso; density is the regime's own positivity-bearing quantity, which is what
     /// the c2p probes anchor on there.
     fn pressure_slot<'a, const DOF: usize>(
@@ -282,7 +282,7 @@ where
         }
     }
 
-    /// register a DRIVEN (DYNAMIC) boundary. the returned id (registration order) is what the
+    /// register a driven (dynamic) boundary. the returned id (registration order) is what the
     /// sim's `Boundaries` carries as `BoundaryType::Driven(id)` on the prescribed face. build
     /// `built` from `expr_bridge::build_boundary_dag(&cfg, R::SPEC)` — a complete prim prescription
     /// `[rho, vel.., pre, B..]`. for a purely toroidal injection the in-plane B is 0 and the
@@ -340,7 +340,7 @@ where
         self
     }
 
-    // the AOT kernel-name PREFIX (build.rs's family token). distinct from `SPEC.name` (the
+    // the AOT kernel-name prefix (build.rs's family token). distinct from `SPEC.name` (the
     // canonical/diagnostic name): the MHD kernels were emitted under abbreviations (`nmhd`/`imhd`)
     // that the canonical names (`newtonian_mhd`/`iso_mhd`) do not match. one bridge, here.
     #[inline]
@@ -362,7 +362,7 @@ where
     /// the face-flux kernel name for one sweep direction. flat charts key on the geometry + the
     /// solver's own suffix; curved charts key on the metric-aware valencia family, where the solver
     /// tag is "" (HLLE), "_hlld" (tetrad MUB09) or "_rusanov" (the light-cone Lax-Friedrichs fan the
-    /// first-order flux correction falls back to). the SINGLE spelling of the name — anything that
+    /// first-order flux correction falls back to). the single spelling of the name — anything that
     /// needs to know what the sweep will run asks here rather than re-deriving it.
     fn flux_kernel_name(
         sim: &FieldStore<D, 3, Mem, Sc>,
@@ -370,13 +370,13 @@ where
         flat_suffix: &str,
         gr_solver: &str,
     ) -> String {
-        // ONE composition, both backgrounds. these were two `format!`s with the chart and the
-        // solver in OPPOSITE orders -- flat spelled `{chart}{solver}`, curved `{solver}{chart}`
+        // one composition, both backgrounds. these were two `format!`s with the chart and the
+        // solver in opposite orders -- flat spelled `{chart}{solver}`, curved `{solver}{chart}`
         // -- inside this one function. they never collided because the flat branch's chart is
         // non-empty on exactly one grid (cylindrical r-z), so the disagreement was invisible
-        // until a solver was selected there. the SEGMENTS still differ by background (flat keys
+        // until a solver was selected there. the segments still differ by background (flat keys
         // the chart on the r-z plane alone; curved keys it on the full grid-axis set, since a
-        // curved kernel is baked per chart), and that difference is real; the ORDER is not, and
+        // curved kernel is baked per chart), and that difference is real; the order is not, and
         // now lives in `face_flux_name` with every other flux.
         let flat = spacetime_slug(sim.geom.spacetime).is_empty();
         let (solver_sfx, chart_sfx) = if flat {
@@ -402,7 +402,7 @@ where
         .build()
     }
 
-    /// the face-flux kernel the PRODUCTION sweep runs for `dir` under the configured solver.
+    /// the face-flux kernel the production sweep runs for `dir` under the configured solver.
     fn face_flux_kernel(&self, sim: &FieldStore<D, 3, Mem, Sc>, dir: usize) -> String {
         let gr_solver = if matches!(self.solver, Solver::Hlld) {
             "_hlld"
@@ -413,7 +413,7 @@ where
     }
 
     /// the flux sweep, parameterized by the flat solver suffix, the GR HLLD toggle, and the slope
-    /// limiter `theta` — so FOFC can re-run it at FIRST ORDER (HLLE + theta = 0) through the same
+    /// limiter `theta` — so FOFC can re-run it at first order (HLLE + theta = 0) through the same
     /// code path the production sweep uses. the production `flux` calls this with the configured
     /// solver + `self.theta`.
     fn flux_impl(
@@ -455,20 +455,20 @@ where
         dispatch_named(sim, pre_bind, None, dir, &flux_name, &face, &[], &scalars);
     }
 
-    /// FIRST-ORDER FLUX CORRECTION for the MHD regimes: the shared face-based gas redo (first-order
-    /// flux = the light-cone Lax-Friedrichs / Rusanov fan) PLUS the constrained-transport re-sync.
-    /// the induction/CT subsystem is INVARIANT under a gas FOFC — B evolves by curl-of-EMF,
-    /// independent of the gas c2p — so the face field, EMF, and curl stay HIGH-ORDER; the redo only
+    /// first-order flux correction for the MHD regimes: the shared face-based gas redo (first-order
+    /// flux = the light-cone Lax-Friedrichs / Rusanov fan) plus the constrained-transport re-sync.
+    /// the induction/CT subsystem is invariant under a gas FOFC — B evolves by curl-of-EMF,
+    /// independent of the gas c2p — so the face field, EMF, and curl stay high-order; the redo only
     /// (a) restores the HO induction flux for the cell-B predictor so its magnetic-energy patch is
     /// the small HO reconciliation (not the FO-vs-HO shock), and (b) re-runs `bcell_from_bface` on the
     /// patch stages to re-attach `bcell = interp(bface_HO)` + the patch onto the corrected gas.
     ///
-    /// on a CURVED background the redo continues into the conservative source replay: with the
+    /// on a curved background the redo continues into the conservative source replay: with the
     /// spliced flux and EMF fixed, the pointwise geometric source is scaled per cell to the
     /// largest fraction of the source ray that stays inside the GRMHD admissible set (Wu & Tang,
     /// arXiv:1709.05838, theorem 2.1). nothing shared between neighbors moves, so the update
     /// telescopes and `div(B)` is untouched; the only clipped quantity is a local, already
-    /// non-conservative metric source. an anchor that is inadmissible with NO source at all is a
+    /// non-conservative metric source. an anchor that is inadmissible with no source at all is a
     /// timestep failure and rejects the step (`true`).
     fn fofc_impl(
         &self,
@@ -479,8 +479,8 @@ where
         stage: u8,
     ) -> bool {
         let pre_bind = self.pressure_slot(sim);
-        // `bcell_from_bface` (the face->cell interp + magnetic-energy patch) runs on the SINGLE
-        // (Euler, tag 0) and CORRECTOR (rk2, tag 2) stages, never the predictor (tag 1, which leaves
+        // `bcell_from_bface` (the face->cell interp + magnetic-energy patch) runs on the single
+        // (Euler, tag 0) and corrector (rk2, tag 2) stages, never the predictor (tag 1, which leaves
         // bcell flux-predicted). re-sync exactly there.
         let patch_stage = stage == 0 || stage == 2;
         let has_energy = R::SPEC.has_energy;
@@ -522,12 +522,12 @@ where
             || self.source_apply(sim, ac * dt),
             || {}, // MHD has no immersed-body source (trait-default no-op)
             || {
-                // TIER 2, below the conservative source limiter: the limiter SCALES a source and
+                // tier 2, below the conservative source limiter: the limiter scales a source and
                 // therefore cannot act on a cell that is already outside G with no source left to
                 // scale. this projects such a cell onto the boundary of `G \cap C` — the admissible
-                // set intersected with the run's DECLARED constraint family — along the segment to
+                // set intersected with the run's declared constraint family — along the segment to
                 // the admissible stage-input anchor. admissibility is simply the always-present
-                // member, so floors and the sufficient condition are enforced in ONE operation
+                // member, so floors and the sufficient condition are enforced in one operation
                 // rather than as two projections that could disagree.
                 // exact passthrough on an admissible cell (theta = 1, bit-for-bit), so it is a
                 // no-op everywhere except the states nothing above it can resolve. the cell-B
@@ -543,11 +543,11 @@ where
                         .as_ref()
                         .expect("the GRMHD projection requires magnetic fields");
                     // the state-constraint family projection (`constraint_projection`) anchors on
-                    // the stage-input CONSERVED state, which is wrong here: constrained transport
-                    // has already advanced B, so `u_stage` paired with the CANDIDATE's cell B is a
+                    // the stage-input conserved state, which is wrong here: constrained transport
+                    // has already advanced B, so `u_stage` paired with the candidate's cell B is a
                     // hybrid with no admissibility guarantee, and the projection cannot recover the
                     // cell at any blend. a sound anchor is rebuilt by p2c from the stage-input
-                    // PRIMITIVES with the candidate's B (and raised to the margin), exactly as this
+                    // primitives with the candidate's B (and raised to the margin), exactly as this
                     // kernel does — substituting the family without that reconstruction collapses
                     // the magnetized torus from t = 4.02 to a dt underflow at t = 2.286.
                     crate::regimes::substrate_kernels::fofc_project(
@@ -585,7 +585,7 @@ where
                 use crate::regimes::mhd_substrate as ct;
                 // the cfl scratch carries the per-cell source weight (first the anchor's zero,
                 // then the inadmissibility mask, then theta). the CFL reduction runs between
-                // steps and the freeze probe re-uses the same buffer only AFTER this replay has
+                // steps and the freeze probe re-uses the same buffer only after this replay has
                 // consumed theta, so the three lifetimes never overlap.
                 let source_weight = &self.cfl_scratch;
                 let cons = &sim.fields.cons;
@@ -614,8 +614,8 @@ where
                     }
                 };
 
-                // the ANCHOR: the same conservative flux + CT update with the geometric source
-                // switched OFF (weight 0). that operator is the low-order physical-constraint-
+                // the anchor: the same conservative flux + CT update with the geometric source
+                // switched off (weight 0). that operator is the low-order physical-constraint-
                 // preserving one, so under the CFL its output is admissible — unless the timestep
                 // itself is too large, which no source fraction can repair.
                 ct::fill_cell_field(sim, source_weight, 0.0);
@@ -637,8 +637,8 @@ where
                 if crate::regimes::fofc::fofc_flag_count(sim, &sim.fields.c2p_error) != 0 {
                     // the source-free low-order anchor is itself inadmissible, so there is no
                     // admissible endpoint to measure a source fraction against — this tier cannot
-                    // act. hand the substage to the ORDINARY redo, whose projection maps the cell
-                    // onto partial-G. shrinking the timestep is NOT the answer here: the anchor is
+                    // act. hand the substage to the ordinary redo, whose projection maps the cell
+                    // onto partial-G. shrinking the timestep is not the answer here: the anchor is
                     // inadmissible because the state cannot be represented, not because the step
                     // was too long, so rejecting merely replays the same failure at half dt.
                     restore_stage();
@@ -671,7 +671,7 @@ where
 
                 // replay once more with only the local metric source scaled by theta. the flux
                 // divergence and the CT curl are re-run bit-identically, so every face still
-                // carries ONE flux and div(B) is untouched — only the pointwise, non-conservative
+                // carries one flux and div(B) is untouched — only the pointwise, non-conservative
                 // geometric source is clipped, and only on the cells that needed it.
                 restore_stage();
                 ct::godunov_stage_pcp(sim, self.eos_param.value(), dt, a0, ac, source_weight);
@@ -700,7 +700,7 @@ where
         self
     }
     fn with_alpha(mut self, alpha: f64) -> Self {
-        // nu = alpha (gamma p/rho)/Omega_K with the LOCAL sound speed — energy
+        // nu = alpha (gamma p/rho)/Omega_K with the local sound speed — energy
         // regimes only (iso MHD has no pressure field to read cs^2 from).
         assert!(
             R::SPEC.has_energy,
@@ -802,7 +802,7 @@ where
 
     fn penalize(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) {
         // the immersed-body penalization under MHD, via the 1/2|B|^2 sandwich: strip
-        // the magnetic energy so the (unchanged) hydro drain acts on the GAS energy alone, run
+        // the magnetic energy so the (unchanged) hydro drain acts on the gas energy alone, run
         // it, then restore the field energy. the drain never touches bcell, so B and 1/2|B|^2
         // are exactly invariant and the flux is left to constrained transport. host-only (the
         // immersed dispatch is host + f64); with no body the shifts would be a wasted no-op.
@@ -848,8 +848,8 @@ where
             ),
             o => panic!("{} c2p: unexpected scalar {o:?}", Self::kernel_prefix()),
         });
-        // bind BY MANIFEST: cons.{den,mom,nrg?} + bcell(3) reads -> prim.{rho,vel,pre?} writes.
-        // the energy regimes' `prim.pre` is an OUTPUT here, so `pre` binds the real field.
+        // bind by manifest: cons.{den,mom,nrg?} + bcell(3) reads -> prim.{rho,vel,pre?} writes.
+        // the energy regimes' `prim.pre` is an output here, so `pre` binds the real field.
         let pre_bind = self.pressure_slot(sim);
         dispatch_named(
             sim,
@@ -871,13 +871,13 @@ where
             || (self.ct_method == CtMethod::Uct
                 && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
         let st = spacetime_slug(sim.geom.spacetime);
-        // GR: the per-cell speeds have TWO consumers — the GR-UCT edge EMF (its corner
+        // GR: the per-cell speeds have two consumers — the GR-UCT edge EMF (its corner
         // coefficients) and the GR HLL flux fan, which reads `wave_speed_{l,r}[dir]` from the two
         // cells sharing each face (davis estimate). the HLLD arm solves its own five-wave fan and
         // the rusanov fallback uses the state-independent light-cone bound, so neither reads them.
-        // ASK THE KERNEL rather than re-deriving which arm reads what: a flux that consumes the
+        // ask the kernel rather than re-deriving which arm reads what: a flux that consumes the
         // fields while this pass is skipped sees their zero initialization, which collapses the fan
-        // onto the shift alone and leaves ZERO dissipation on every axis whose shift component
+        // onto the shift alone and leaves zero dissipation on every axis whose shift component
         // vanishes — a one-sided, odd-even-decoupled sweep that grows a grid-scale checkerboard.
         if !st.is_empty() {
             let reads_speeds = |name: &str| {
@@ -943,7 +943,7 @@ where
                 Self::kernel_prefix()
             ),
         });
-        // bind BY MANIFEST: prim + bcell reads -> the per-axis `wave_speed_{l,r}[k]` writes (typed
+        // bind by manifest: prim + bcell reads -> the per-axis `wave_speed_{l,r}[k]` writes (typed
         // `WaveSpeedL/R(k)`). energy regimes have prim.pre; isothermal (no pressure) passes den as
         // the leading window field (mirrors the cfl dispatch).
         let pre_bind = self.pressure_slot(sim);
@@ -1001,7 +1001,7 @@ where
             Self::kernel_prefix(),
             mhd_geom_suffix(geom.coords, &geom.axes)
         );
-        // scalars BY NAME (the kernel's declared set drives it): eos param + the per-axis CFL
+        // scalars by name (the kernel's declared set drives it): eos param + the per-axis CFL
         // widths (cartesian `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`); the mhd substrates run static,
         // so the motion rates bind 0. `kernel_geom` gives the log-aware per-axis scalars the in-kernel
         // `gv_axis_face_at` reads via `map_kind`; on a uniform static grid it is bit-identical to the
@@ -1049,7 +1049,7 @@ where
             }
         };
         let scalars = scalars_for(&wname, &resolve_scalar);
-        // bind BY MANIFEST: prim + bcell reads -> the `scratch` lambda write (the cfl_scratch
+        // bind by manifest: prim + bcell reads -> the `scratch` lambda write (the cfl_scratch
         // field, supplied as the scratch override). iso passes a dummy pre (reads cs^2*rho).
         let pre_bind = self.pressure_slot(sim);
         dispatch_named(
@@ -1072,17 +1072,17 @@ where
         // under a timestep that also keeps U + dt S admissible. this kernel reads the flux light-cone
         // rate already in the scratch and adds the source characteristic rate
         // lambda_S = (|S_tau| + ||S_mom||_gamma)/q(U) in place, so the reduction sizes dt against both
-        // (dt (lambda_flux + lambda_S) < 1). baked for GR-RMHD only.
+        // (dt (lambda_flux + lambda_S) < 1). baked for gr-rmhd only.
         //
-        // KEPT for GRMHD even though the projection enforces the SUFFICIENT admissibility condition
+        // kept for GRMHD even though the projection enforces the sufficient admissibility condition
         // (wu & tang, arXiv:1709.05838, theorem 2.1), unlike the GR-hydro path where the same
         // projection retires it. enforcing sufficiency is necessary for the retirement but not enough
         // to license it, because an a-posteriori projection is not the physical-constraint-preserving
-        // LIMITER those theorems assume: the limiter bounds the RECONSTRUCTION at every quadrature
+        // limiter those theorems assume: the limiter bounds the reconstruction at every quadrature
         // point of every cell and the CFL still carries lambda_S alongside it, whereas this projection
         // maps the already-updated state and only runs when some cell has tripped the correction flag.
         // dropping the rate leaves two residual violations, both measured on the magnetized torus at
-        // native resolution: the recovered gas pressure reaches -8.3e-10, which is what projecting ONTO
+        // native resolution: the recovered gas pressure reaches -8.3e-10, which is what projecting onto
         // the admissible boundary gives once downstream rounding crosses it, and the field mirror
         // symmetry degrades to 5.3e-13 against a 1e-14 stencil bound, because the boundary crossing is
         // ill-conditioned where psi approaches it tangentially and amplifies a roundoff-scale asymmetry
@@ -1114,7 +1114,7 @@ where
             crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior);
         if diagnose_cfl {
             let call = MHD_CFL_DIAGNOSTIC_CALLS.fetch_add(1, Ordering::Relaxed);
-            // `SIMBI_CFL_DIAGNOSTICS=all` reports EVERY call. the sampled cadence shows the
+            // `SIMBI_CFL_DIAGNOSTICS=all` reports every call. the sampled cadence shows the
             // steady state but never the excursion that actually halts a run: a rate spike lasts
             // one step, so sampling every hundredth call is guaranteed to miss it.
             let every = std::env::var("SIMBI_CFL_DIAGNOSTICS").is_ok_and(|v| v == "all");
@@ -1156,11 +1156,11 @@ where
                 );
             }
         }
-        // OHMIC RESISTIVE CFL: explicit induction diffusion is stable for `dt <= dx^2 / (2 D eta)`;
+        // ohmic resistive CFL: explicit induction diffusion is stable for `dt <= dx^2 / (2 D eta)`;
         // fold the equivalent rate `2 D eta / min(dx)^2` (an inverse timescale, like the wave rate)
         // into lambda_max so the shared `dt = cfl / lambda_max` bounds the step. 0 off resistive MHD.
-        // the resistive rate is set by the STIFFEST diffusivity present: the uniform bulk resistivity
-        // OR any immersed body's localized `MagneticSpec::Resistive` eta (chi <= 1, so the body eta is
+        // the resistive rate is set by the stiffest diffusivity present: the uniform bulk resistivity
+        // or any immersed body's localized `MagneticSpec::Resistive` eta (chi <= 1, so the body eta is
         // its own upper bound). fold the max so a resistive sink cannot outrun the diffusion limit.
         let body_eta_max = sim.immersed.as_ref().map_or(0.0, |im| {
             (0..im.bodies.len())
@@ -1172,14 +1172,14 @@ where
         });
         let eta_eff = self.resistivity.max(body_eta_max);
         if eta_eff > 0.0 {
-            // the diffusion crosses PHYSICAL cell widths h*dx (the coordinate dx alone omits the metric factor h); on a curvilinear grid
+            // the diffusion crosses physical cell widths h*dx (the coordinate dx alone omits the metric factor h); on a curvilinear grid
             // the smallest physical cell (min r / near the poles) sets the tightest bound. inv_w =
             // 1/min_physical_width, so 2 D eta / width_min^2 = 2 D eta * inv_w^2.
             let inv_w = max_inv_physical_width(geom);
             lambda_max = lambda_max.max(2.0 * (D as f64) * eta_eff * inv_w * inv_w);
         }
-        // VISCOUS CFL: the momentum diffusion obeys the same parabolic limit as the
-        // resistive one; fold the equivalent rate for the constant nu OR the alpha
+        // viscous CFL: the momentum diffusion obeys the same parabolic limit as the
+        // resistive one; fold the equivalent rate for the constant nu or the alpha
         // bound (largest local sound speed at the slowest orbit).
         let nu_eff = if self.alpha > 0.0 {
             crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(
@@ -1194,7 +1194,7 @@ where
             let inv_w = max_inv_physical_width(geom);
             lambda_max = lambda_max.max(2.0 * (D as f64) * nu_eff * inv_w * inv_w);
         }
-        // DRIVEN-INFLOW CFL CAP: the per-cell wave-speed map only scans the INTERIOR, so a driven
+        // driven-inflow CFL cap: the per-cell wave-speed map only scans the interior, so a driven
         // boundary's inflow state (which lives in the ghost band) is invisible to it — a relativistic
         // wind from a cold-ambient inner boundary would size dt off the slow interior and then get
         // pulled across the first inner face at a dt ~1e4x too large -> NaN. a relativistic signal
@@ -1204,7 +1204,7 @@ where
         if R::SPEC.is_relativistic {
             lambda_max = lambda_max.max(driven_inflow_lambda(sim));
         }
-        // GHOST-BAND FAIL-LOUD: a poisoned boundary leaves a non-finite ghost that FOFC never touches;
+        // ghost-band fail-loud: a poisoned boundary leaves a non-finite ghost that FOFC never touches;
         // force the rate to +inf (dt -> 0, halt) if any zone in the allocated domain is non-finite.
         if !crate::regimes::substrate_kernels::state_finite_over_allocated(
             sim,
@@ -1214,7 +1214,7 @@ where
             lambda_max = f64::INFINITY;
         }
         let dt = cfl_from_lambda(lambda_max, self.cfl_number);
-        // the parabolic viscous cap dt <= C_visc dx^2 / nu (C_visc = 0.1), ON TOP of the wave +
+        // the parabolic viscous cap dt <= C_visc dx^2 / nu (C_visc = 0.1), on top of the wave +
         // resistive rate. cartesian 3D only (where MHD viscosity is built), so coordinate dx is
         // physical. the resistive and viscous limits stack: a resistive-viscous run is bounded by
         // whichever diffusion is stiffer.

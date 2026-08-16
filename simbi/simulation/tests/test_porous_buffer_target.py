@@ -1,18 +1,18 @@
 # =============================================================================
 # test_porous_buffer_target.py
 #
-# the porous accretor's reservoir must relax to a STATIC isentrope, at every porosity.
+# the porous accretor's reservoir must relax to a static isentrope, at every porosity.
 #
 # two properties are being protected, and they fail differently.
 #
-# the sponge must impose no MASS CURRENT. its inflow variant builds a momentum target from
+# the sponge must impose no mass current. its inflow variant builds a momentum target from
 # the analytic Bondi coefficient lambda = 1/4, which writes the analytic accretion rate into
 # the boundary condition of the experiment whose measurement is the accretion rate. the
 # static target fixes the reservoir's thermodynamic state and leaves the throughput to be
 # selected by the interior — and it is not limiting, supplying a measured 2.13-2.29x the
 # Bondi rate against 2.38-2.62x for the inflow variant.
 #
-# and the target must be the SAME at every porosity. the claim under test is a step in the
+# and the target must be the same at every porosity. the claim under test is a step in the
 # surface; a boundary condition that changed with porosity would step alongside it, and any
 # measured step would be partly attributable to the boundary rather than the surface. that
 # failure is silent — every run completes and the profiles look plausible.
@@ -39,7 +39,7 @@ def momentum_reference(problem: PorousTurbulentAccretor) -> list[float]:
 
 @pytest.mark.parametrize("porosity", POROSITIES)
 def test_the_reservoir_imposes_no_mass_current(porosity: float) -> None:
-    # checked on the EMITTED source rather than the model flag: a wire that dropped the
+    # checked on the emitted source rather than the model flag: a wire that dropped the
     # setting would leave the flag reading correctly while the run carried a momentum target.
     problem = PorousTurbulentAccretor(porosity=porosity)
     assert problem.buffer_bondi_inflow is False
@@ -68,13 +68,13 @@ def test_the_inflow_variant_is_still_reachable() -> None:
     assert any(abs(v) > 1.0e-12 for v in momentum), (
         "the inflow variant produced no momentum target, so the A/B compares nothing"
     )
-    # and it must point INWARD: sampled on the +x axis, the x-momentum is negative.
+    # and it must point inward: sampled on the +x axis, the x-momentum is negative.
     assert momentum[0] < 0.0, f"the bondi target points outward: {momentum}"
 
 
 @pytest.mark.parametrize("porosity", POROSITIES)
 def test_the_thermodynamic_reference_is_the_isentrope(porosity: float) -> None:
-    # the reservoir still has to SUPPLY something: density and pressure follow the hydrostatic
+    # the reservoir still has to supply something: density and pressure follow the hydrostatic
     # isentrope, which is what makes it a reservoir rather than a wall.
     problem = PorousTurbulentAccretor(porosity=porosity)
     graph = expr.ExprGraph()
@@ -85,7 +85,7 @@ def test_the_thermodynamic_reference_is_the_isentrope(porosity: float) -> None:
     gamma = problem.adiabatic_index
     # the sponge guards its radius against a division by zero at the origin with a fixed
     # 1e-10 offset; the reference is evaluated at that same guarded radius so the comparison
-    # is of the PROFILE and not of the guard, which shifts the result by 7e-11 relative here.
+    # is of the profile and not of the guard, which shifts the result by 7e-11 relative here.
     guarded = radius + 1.0e-10
     expected = problem.ambient_density * (
         1.0 + (gamma - 1.0) * problem.central_mass / (problem.ambient_sound_speed**2 * guarded)

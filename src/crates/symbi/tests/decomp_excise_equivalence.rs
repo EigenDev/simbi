@@ -4,10 +4,10 @@
 // the tiling-invariance contract for horizon excision on the decomposed path:
 // a cartesian kerr-schild box with the black hole at the origin, excised, must
 // evolve identically whether it runs as one tile or as a 2x2 grid whose cuts
-// pass THROUGH the excised sphere. the fill is pointwise — every cell inside
+// pass through the excised sphere. the fill is pointwise — every cell inside
 // the excision radius is frozen at the cold vacuum floor from its own state —
 // so tiling invariance rests on each tile classifying its own cells against the
-// same global level set, and on the rim gas, which rarefies INTO the vacuum,
+// same global level set, and on the rim gas, which rarefies into the vacuum,
 // reading exchange-fresh halos. the uniform infall
 // develops real dynamics (the KS chart accretes from rest), so the excised
 // rim, the fill, and the conserved rebuild are all genuinely exercised.

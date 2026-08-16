@@ -3,13 +3,13 @@
 //
 // the Alfven-stiffness (c_a2) decomposition contract for an MHD immersed wall: the
 // wall relaxation is lifted to the fast-magnetosonic speed via
-// c_a2 = max_interior |B|^2/rho, and that max is a GLOBAL property of the domain.
-// under domain decomposition each tile must see the SAME global c_a2, else the same
+// c_a2 = max_interior |B|^2/rho, and that max is a global property of the domain.
+// under domain decomposition each tile must see the same global c_a2, else the same
 // wall cell relaxes at a different rate in a tile than in the monolithic run.
 //
 // the setup isolates c_a2: uniform (div-free) B, so the base MHD decomposition is
-// already bit-equivalent (decomp_mhd_equivalence), plus a sharp DENSITY DIP in the
-// far (right) tile that drives c_a2 = |B|^2/rho to its global max THERE -- away from
+// already bit-equivalent (decomp_mhd_equivalence), plus a sharp density dip in the
+// far (right) tile that drives c_a2 = |B|^2/rho to its global max there -- away from
 // the sealed shaped wall on the tile cut. a per-tile c_a2 makes the near-wall tile
 // use its small local max while the monolithic run uses the far dip's global max, so
 // the wall penalization diverges at the cut. with a correct global c_a2 the
@@ -41,7 +41,7 @@ const R_BODY: f64 = 0.2;
 type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>;
 type Kern = NewtonianMhdSubstrateKernelSet<HostMemory, f64, 2>;
 
-// a sharp density dip centered at (0.75, 0.5) -- the RIGHT half -- so |B|^2/rho peaks there
+// a sharp density dip centered at (0.75, 0.5) -- the right half -- so |B|^2/rho peaks there
 // (rho -> 0.1, c_a2 -> ~13.4), far from the wall on the x = 0.5 cut where rho ~ 1 (c_a2 ~ 1.34).
 fn ic(x: f64, y: f64) -> MhdPrim<f64, 3> {
     let r2 = (x - 0.75).powi(2) + (y - 0.5).powi(2);

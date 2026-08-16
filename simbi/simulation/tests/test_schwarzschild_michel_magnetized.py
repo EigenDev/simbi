@@ -5,22 +5,22 @@
 # the exact michel transonic hydro profile threaded by the divergence-free radial
 # field sqrt(gamma) B^r = const on the schwarzschild grid. a radial field aligned
 # with a radial flow exerts zero lorentz force, so the stationary solution is the
-# UNMAGNETIZED michel profile while every magnetic term in U, F, the covariant
+# unmagnetized michel profile while every magnetic term in U, F, the covariant
 # source, and the KKC recovery is engaged — the cancellations are the gate:
 #
-#   identity-class: the staggered B^r is BITWISE static (the 1D induction flux is
+#   identity-class: the staggered B^r is bitwise static (the 1D induction flux is
 #   identically zero by the shared-face antisymmetry), and the azimuthal/polar
 #   momentum rows generate nothing (measured 0.0 and 1.6e-23).
 #
-#   consistency-class: the hydro hold against the michel solution CONVERGES under
-#   refinement, the hydro profile is FIELD-INDEPENDENT (a radial field along a
+#   consistency-class: the hydro hold against the michel solution converges under
+#   refinement, the hydro profile is field-independent (a radial field along a
 #   radial flow exerts no force, so the evolved gas must not know the field
 #   strength), and the one-step den/m1/nrg residuals converge. a wrong magnetic
-#   term is a resolution-independent floor, so the ORDER is what discriminates.
+#   term is a resolution-independent floor, so the order is what discriminates.
 #
-# every consistency assertion is stated WITHOUT a grid in it -- a measured order and
+# every consistency assertion is stated without a grid in it -- a measured order and
 # an extrapolated error constant (see convergence.py) rather than an absolute
-# tolerance at one resolution. an absolute bound encodes the resolution AND the
+# tolerance at one resolution. an absolute bound encodes the resolution and the
 # scheme's dissipation, so a sharper wave-speed estimate reads as a physics failure.
 #
 # requires the built cpu_ext backend; skipped otherwise.
@@ -46,7 +46,7 @@ needs_backend = pytest.mark.skipif(
     _BACKEND is None, reason="rust cpu_ext backend not built"
 )
 
-# the hold is measured on the HORIZON-PENETRATING chart, at a time where the state has
+# the hold is measured on the horizon-penetrating chart, at a time where the state has
 # actually evolved.
 #
 # t = 0.1 is too early to measure a convergence order: the state has barely departed
@@ -57,7 +57,7 @@ needs_backend = pytest.mark.skipif(
 _HOLD_TIME = 0.5
 # measured in kerr-schild at t = 0.5: L1 rho vs michel 1.076e-5 (128) -> 3.353e-6 (256),
 # order p = 1.68, constant C = 3.78e-2, with dt at 0.31 / 0.71 of the light-crossing
-# step and ZERO limiter activations at either resolution. the same hold in schwarzschild
+# step and zero limiter activations at either resolution. the same hold in schwarzschild
 # coordinates converged at only p = 0.53 and, past t ~ 0.2, stopped converging at all as
 # the timestep collapsed -- the chart, not the scheme.
 #
@@ -68,12 +68,12 @@ _HOLD_TIME = 0.5
 _HOLD_MIN_ORDER = 1.0
 _HOLD_MAX_CONSTANT = 1.2e-1
 # a smooth stationary solution needs no limiter, and its step must stay within reach of
-# the light-crossing step. both fail FIRST if the timestep collapse ever migrates in.
+# the light-crossing step. both fail first if the timestep collapse ever migrates in.
 _HOLD_MIN_DT_FRACTION = 0.05
-# the one-step residual gate, stated WITHOUT reference to a grid.
+# the one-step residual gate, stated without reference to a grid.
 #
 # an absolute tolerance on |dU/dt| pins the resolution into the number, so it reports a
-# physics failure whenever the discretization's error CONSTANT moves for a legitimate
+# physics failure whenever the discretization's error constant moves for a legitimate
 # reason: a sharper wave-speed estimate changes the HLLE dissipation and lifts every row
 # by about a factor of three at unchanged convergence order, which a fixed absolute bound
 # reports as a wrong magnetic term.
@@ -147,12 +147,12 @@ def test_magnetized_michel_holds_and_field_is_bitwise_static() -> None:
     l1_lo, db_lo, _, frac_lo, guards_lo = _hold(128, 0.5)
     l1_hi, db_hi, _, frac_hi, guards_hi = _hold(256, 0.5)
     # identity: the 1D induction flux of B^r is exactly zero (the normal field is the
-    # SHARED staggered face value on both riemann sides), so B^r must not move AT ALL.
+    # shared staggered face value on both riemann sides), so B^r must not move at all.
     assert db_lo == 0.0, f"staggered B^r moved: {db_lo:.3e}"
     assert db_hi == 0.0, f"staggered B^r moved at 256: {db_hi:.3e}"
     # the discretization is healthy where the hold is read: no limiter fires on a smooth
     # stationary solution, and the step stays within reach of the light-crossing step.
-    # these fail FIRST if the timestep collapse ever migrates earlier in the evolution, so
+    # these fail first if the timestep collapse ever migrates earlier in the evolution, so
     # the convergence assertion can never silently invert instead.
     for n, frac, (fb, fz) in ((128, frac_lo, guards_lo), (256, frac_hi, guards_hi)):
         assert (fb, fz) == (0, 0), (
@@ -218,7 +218,7 @@ def test_one_step_residual_is_truncation_and_converges() -> None:
             max_constant=max_c,
             label=f"one-step {k} residual",
         )
-    # the rows with NO generator: azimuthal/polar momentum (radial flow, radial B,
+    # the rows with no generator: azimuthal/polar momentum (radial flow, radial B,
     # axisymmetric metric) and the radial induction row. these are exact cancellations,
     # so the claim is structural -- zero, not small -- and carries no resolution
     # dependence to normalize away.

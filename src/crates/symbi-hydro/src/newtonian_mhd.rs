@@ -3,7 +3,7 @@
 //
 // newtonian (non-relativistic) ideal-MHD regime. implements the Regime trait
 // over the shared MhdPrim/MhdCons states with closed-form wave speeds and an
-// ALGEBRAIC conserved-to-primitive (no iteration -> cannot fail the way RMHD's
+// algebraic conserved-to-primitive (no iteration -> cannot fail the way RMHD's
 // iterative inversion does in current sheets).
 //
 // physics (carrier-generic over S: Scalar, valid at S = f64 and S = Gv):
@@ -40,7 +40,7 @@ use symbi_ir::algebra::Scalar;
 #[derive(Clone, Copy, Debug)]
 pub struct NewtonianMhd;
 
-/// algebraic conserved-to-primitive recovery — the carrier-safe PURE math (no
+/// algebraic conserved-to-primitive recovery — the carrier-safe pure math (no
 /// comparisons, no error codes -> traces at S = Gv). strip the magnetic energy
 /// 1/2|B|^2 from the total, then invert the hydro energy. mirrors `rmhd_recover`
 /// (the iterative analogue) as the single source the Gv c2p builder traces; the

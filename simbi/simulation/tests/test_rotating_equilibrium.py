@@ -2,7 +2,7 @@
 # test_rotating_equilibrium.py
 #
 # the rotating-balance precision gates on the surface-free constant-l equilibrium
-# (gr_fishbone_moncrief.RotatingEquilibrium) with all four boundaries DRIVEN —
+# (gr_fishbone_moncrief.RotatingEquilibrium) with all four boundaries driven —
 # ghost bands pinned to the analytic state (a theta-stratified equilibrium is
 # mathematically incompatible with mirror/copy ghosts: they impose dp/dtheta = 0
 # where the state requires the centrifugal-balancing gradient). parametrized over
@@ -12,7 +12,7 @@
 #
 # one-step residual: the sharpest instrument. an exact stationary state's discrete
 # time derivative is pure truncation — smooth and second-order — so every conserved
-# component's one-step residual must CONVERGE under refinement. a wrong term shows
+# component's one-step residual must converge under refinement. a wrong term shows
 # up as a resolution-independent residual in its component: the covariant S_theta
 # law's correct angular face weight is the coordinate alpha sqrt(gamma) measure;
 # an orthonormal (arc-length) weight gives an O(1e-2) non-converging m2 residual,
@@ -46,10 +46,10 @@ needs_backend = pytest.mark.skipif(
 # m1 3.5e-5, m2 1.1e-4, m3 2.5e-4, nrg 7.0e-6 (the dropped shift advection put
 # den/m1/m3/nrg at 4e-3 .. 2e-1 with ratio 1.0-2.0).
 #
-# the a = 0 transport residuals sit a few times above what the SINGULAR chart gave, and the energy
+# the a = 0 transport residuals sit a few times above what the singular chart gave, and the energy
 # residual an order below, because the two charts hold this state through different terms. against
 # static observers the equilibrium has v^r identically zero, so its transported components cancel
-# analytically and only the angular truncation survives; against the INFALLING observers of a
+# analytically and only the angular truncation survives; against the infalling observers of a
 # horizon-penetrating chart the same state carries the drift v^r = beta^r/alpha, so the radial
 # transport terms are genuinely nonzero and their truncation appears in den/m1/m3. the killing
 # energy improves for the complementary reason — the chart has no coordinate singularity stretching
@@ -85,11 +85,11 @@ def _run(nr: int, npolar: int, t_end: float, spin: float):
     p.data_directory = d
     p.checkpoint_interval = max(t_end, 1.0)
     runner.run(p, compute_mode="cpu", max_steps=400)
-    # GUARD-ACTIVATION CENSUS: this is an EXACT stationary solution, smooth and warm — no limiter
+    # guard-activation census: this is an exact stationary solution, smooth and warm — no limiter
     # has any physical business firing on it, at either spin. a nonzero count would mean the
     # equilibrium is being held by a floor rather than by the scheme, which would also silently
     # contaminate the one-step residual this file measures. the count covers the whole defensive
-    # surface: the admissible-boundary projection and the first-order redo run INSIDE
+    # surface: the admissible-boundary projection and the first-order redo run inside
     # `fofc_orchestrate` (which early-returns when nothing is flagged), and the relativistic
     # velocity ceiling only binds an out-of-cone state — exactly what sets the flag.
     fallback, freeze, _, _ = _BACKEND.guard_census()

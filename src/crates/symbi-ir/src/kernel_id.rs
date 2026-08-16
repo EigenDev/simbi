@@ -5,16 +5,16 @@
 // that links a generated kernel (build.rs `emit_gv`) to its dispatch lookup
 // (`kernel_by_name`).
 //
-// that key was minted as a bare `format!("refine_prolong_{tag}_{ndim}d")` on BOTH
+// that key was minted as a bare `format!("refine_prolong_{tag}_{ndim}d")` on both
 // sides (build.rs and the per-field dispatch in transfer.rs / the registers).
 // two `format!` patterns that must agree is a drift surface — and the dispatch
 // copy ran in the AMR hot loop, allocating a `String` per field per slab per
 // call (the measured prolong overhead).
 //
-// `KernelId` mints each name in ONE place: `name()` is a `&'static str` (no
-// allocation, ever) and is the sole source the registry generator AND the
+// `KernelId` mints each name in one place: `name()` is a `&'static str` (no
+// allocation, ever) and is the sole source the registry generator and the
 // dispatch read. they cannot disagree, and a new kernel in the family is a
-// COMPILE error until `name()` covers it. golden tests pin every string so the
+// compile error until `name()` covers it. golden tests pin every string so the
 // on-disk registry ABI cannot silently shift under a refactor.
 //
 // scope: the AMR-transfer + field-op family (the hot, drift-prone path). other
@@ -48,7 +48,7 @@ pub enum KernelId {
     RefineRestrict { ndim: u8 },
     /// cell prolongation (coarse -> fine) at reconstruction `order`.
     RefineProlong { order: ProlongTag, ndim: u8 },
-    /// MULTI-FIELD cell prolongation: one launch over `ncomp` co-located fields
+    /// multi-field cell prolongation: one launch over `ncomp` co-located fields
     /// (the prim batch), sharing the per-cell stencil geometry. generated for the
     /// 3D hot path only (ncomp 4 = isothermal, 5 = adiabatic/rhd).
     RefineProlongMulti {
@@ -56,7 +56,7 @@ pub enum KernelId {
         ncomp: u8,
         ndim: u8,
     },
-    /// MULTI-FIELD single-snapshot cell prolongation: the leaf reads ONE
+    /// multi-field single-snapshot cell prolongation: the leaf reads one
     /// pre-lerped coarse buffer per component (a `FieldLerpMulti` pass hoisted
     /// the time interpolation to once per coarse cell — half the gather
     /// traffic of the time-pair kernel). same generation envelope as
@@ -66,15 +66,15 @@ pub enum KernelId {
         ncomp: u8,
         ndim: u8,
     },
-    /// MULTI-FIELD pointwise time interpolation `dst_k = (1-alpha)*old_k +
+    /// multi-field pointwise time interpolation `dst_k = (1-alpha)*old_k +
     /// alpha*new_k` — the coarse-side pass feeding `RefineProlongMulti1t`.
     FieldLerpMulti { ncomp: u8, ndim: u8 },
-    /// the balance-aware coarse-fine ENCODE: fused time lerp over the coarse
+    /// the balance-aware coarse-fine encode: fused time lerp over the coarse
     /// parent region with rho/pre written as departures from one hydrostatic
     /// anchor equilibrium (the anchor re-lerped in-thread from the raw
     /// inputs). cartesian gamma-law prim sets, ncomp = ndim + 2.
     WbCfLerpEncode { ndim: u8 },
-    /// the balance-aware coarse-fine DECODE: the fine ghost rho/pre add back
+    /// the balance-aware coarse-fine decode: the fine ghost rho/pre add back
     /// the anchor equilibrium at the ghost's own potential, the anchor
     /// re-lerped in-thread from the coarse rho/pre snapshots.
     WbCfDecode { ndim: u8 },
@@ -105,7 +105,7 @@ pub enum KernelId {
     /// conservative shear-stress flux divergence, but with a spatially varying
     /// nu(x) = alpha c_s^2 / Omega_k(r) about the central body. isothermal, 2D.
     ViscousIsoAlpha { ndim: u8 },
-    /// ONE PASS of the axis-split prolongation: the 1d
+    /// one pass of the axis-split prolongation: the 1d
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
     /// the interp evaluations.

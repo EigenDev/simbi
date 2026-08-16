@@ -2,17 +2,17 @@
 // nmhd_brio_wu.rs
 //
 // the Brio-Wu (1988) MHD shock tube — the canonical 1D ideal-MHD Riemann problem
-// — validates that `hllc_newtonian` / `hlld_newtonian` produce a CORRECT,
-// NON-OSCILLATORY shock structure (the question the noisy 2D OT run raised).
+// — validates that `hllc_newtonian` / `hlld_newtonian` produce a correct,
+// non-oscillatory shock structure (the question the noisy 2D OT run raised).
 //
 // pure host physics: a 1D PLM(minmod) + forward-Euler godunov over the carrier-
 // generic solvers at S = f64. no CT (Bx is the normal field: F(Bx)=0 keeps it
-// constant in 1D, div(B)=0 trivially), no substrate — this isolates the RIEMANN
-// SOLVER itself. the discriminator: HLLE is the most diffusive solver and is
+// constant in 1D, div(B)=0 trivially), no substrate — this isolates the riemann
+// solver itself. the discriminator: HLLE is the most diffusive solver and is
 // guaranteed monotone, so its total variation is the non-oscillatory baseline.
 // a correct sharper solver has ~the same TV (a monotone profile's TV is
-// diffusion-independent); a BUGGY solver oscillates -> TV inflates. so:
-//   TV(hlld) <~ TV(hlle)  AND  ||rho_hlld - rho_hlle||_1 small  ==>  HLLD is clean.
+// diffusion-independent); a buggy solver oscillates -> TV inflates. so:
+//   TV(hlld) <~ TV(hlle)  and  ||rho_hlld - rho_hlle||_1 small  ==>  HLLD is clean.
 // =============================================================================
 
 use symbi_algebra::Tensor;
@@ -157,7 +157,7 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
     let by_e = interior(&p_hlle, |p| p.mag[1]);
     let by_d = interior(&p_hlld, |p| p.mag[1]);
 
-    // - PHYSICAL everywhere (the algebraic c2p must recover rho,p > 0).
+    // - physical everywhere (the algebraic c2p must recover rho,p > 0).
     for (label, ps) in [("hllc", &p_hllc), ("hlld", &p_hlld)] {
         for (i, pi) in ps[NG..NG + N].iter().enumerate() {
             assert!(
@@ -173,7 +173,7 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
         }
     }
 
-    // - Bx (normal field) stays EXACTLY constant (induction F(Bx)=0 in 1D).
+    // - Bx (normal field) stays exactly constant (induction F(Bx)=0 in 1D).
     for pi in &p_hlld[NG..NG + N] {
         assert!(
             (pi.mag[0] - 0.75).abs() < 1e-12,
@@ -182,8 +182,8 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
         );
     }
 
-    // - NON-OSCILLATORY: HLLE is the monotone baseline; a buggy solver oscillates
-    //    -> TV inflates. a correct SHARPER solver keeps TV ~ the same (a monotone
+    // - non-oscillatory: HLLE is the monotone baseline; a buggy solver oscillates
+    //    -> TV inflates. a correct sharper solver keeps TV ~ the same (a monotone
     //    profile's TV is diffusion-independent). this is the direct "noise" test.
     let (tv_re, tv_rc, tv_rd) = (
         total_variation(&rho_e),
@@ -206,7 +206,7 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
         "HLLD By OSCILLATES: TV {tv_bd:.4} vs hlle {tv_be:.4}"
     );
 
-    // - SAME solution as HLLE, only sharper: small L1 distance.
+    // - same solution as HLLE, only sharper: small L1 distance.
     assert!(
         l1_diff(&rho_d, &rho_e) < 0.05,
         "HLLD rho diverges from HLLE: L1 {}",
@@ -218,7 +218,7 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
         l1_diff(&rho_c, &rho_e)
     );
 
-    // - HLLD actually SHARPENS, confirming the HLLD path is active:
+    // - HLLD actually sharpens, confirming the HLLD path is active:
     //    the steepest density gradient is larger than HLLE's.
     let max_grad = |f: &[f64]| {
         f.windows(2)

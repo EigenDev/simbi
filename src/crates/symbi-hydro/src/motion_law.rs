@@ -1,12 +1,12 @@
 // =============================================================================
 // motion_law.rs
 //
-// expression-driven mesh-motion scale factor. a(t) and a_dot(t) arrive as a TWO-output traced
+// expression-driven mesh-motion scale factor. a(t) and a_dot(t) arrive as a two-output traced
 // expression (python `CompiledExpr.serialize_motion` -> the SourceConfig wire), lowered to the
-// symbi-ir Graph and scalarized ONCE; evaluated EXACTLY in the time loop per (sub)stage — no
+// symbi-ir Graph and scalarized once; evaluated exactly in the time loop per (sub)stage — no
 // linearization, no python in the loop. a_dot is autodiff'd from a in python (`a.diff(t)`); at
 // construction a_dot is finite-difference-checked against a over the run's time window, so an
-// inconsistent OR non-smooth derivative fails loudly before any stepping.
+// inconsistent or non-smooth derivative fails loudly before any stepping.
 //
 // usage:
 //  let law = MotionLaw::from_json(&json, t0, t_end)?;
@@ -49,7 +49,7 @@ impl MotionLaw {
         let nodes = nodes_from_descs(&cfg.nodes).map_err(|e| format!("motion nodes: {e}"))?;
         let built = lower_dag_to_builtsource(&nodes, &cfg.outputs)
             .map_err(|e| format!("motion lower: {e:?}"))?;
-        // a(t) is a function of TIME ONLY: every declared param must be `t` (no spatial/field leaves).
+        // a(t) is a function of time only: every declared param must be `t` (no spatial/field leaves).
         for p in &built.params {
             if p != "t" {
                 return Err(format!(
@@ -85,9 +85,9 @@ impl MotionLaw {
         self.eval(&self.adot, t)
     }
 
-    /// the strict-correctness guard: a_dot MUST equal da/dt. central finite difference at five times
-    /// spanning the run; a wrong autodiff rule OR a non-smooth a(t) (a kink, a t-dependent branch)
-    /// makes AD and FD disagree past a relative tolerance and the run is refused.
+    /// the strict-correctness guard: a_dot must equal da/dt. central finite difference at five times
+    /// spanning the run; a wrong autodiff rule or a non-smooth a(t) (a kink, a t-dependent branch)
+    /// makes ad and fd disagree past a relative tolerance and the run is refused.
     fn fd_check(&self, t0: f64, t_end: f64) -> Result<(), String> {
         let (lo, hi) = if t_end > t0 {
             (t0, t_end)

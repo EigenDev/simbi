@@ -3,7 +3,7 @@
 #
 # the gpu backend allocates fields as unified/managed memory. on amd such an
 # allocation only migrates onto the device if the gpu can fault on an absent
-# page, which requires XNACK -- disabled by default on gfx90a. a run without it
+# page, which requires xnack -- disabled by default on gfx90a. a run without it
 # leaves every field host-resident and reads it across the host bus at a ~24x
 # throughput cost, silently.
 #

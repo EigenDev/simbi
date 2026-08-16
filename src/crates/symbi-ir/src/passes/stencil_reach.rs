@@ -449,7 +449,7 @@ mod tests {
         // cse hoists index arithmetic into immutable lets (`__cse_0 =
         // _coord_0 - 2`) and the load component becomes a bare var; the
         // classification must see through the binding. a LetMut accumulator
-        // of the same shape must NOT resolve — its value changes.
+        // of the same shape must not resolve — its value changes.
         let idx = ScalarExpr::BinOp(
             BinaryKind::Add,
             Box::new(coord(0)),

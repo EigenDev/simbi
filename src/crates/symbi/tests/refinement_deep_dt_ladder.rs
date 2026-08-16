@@ -1,7 +1,7 @@
 // =============================================================================
 // refinement_deep_dt_ladder.rs
 //
-// how the root timestep behaves on a DEEP hierarchy over a gravitational sound-speed profile —
+// how the root timestep behaves on a deep hierarchy over a gravitational sound-speed profile —
 // the regime a nested accretion ladder runs in, and one no existing gate reaches.
 //
 // the root step is the minimum over levels of `cfl(level_l) * 2^l`. which level attains that
@@ -11,9 +11,9 @@
 // over a Bondi-like profile `c^2 = 1 + (gamma - 1) R_B / r`, an accretor at the box center means
 // each level's innermost resolved radius is its own cell width. far outside the Bondi radius the
 // sound speed is flat, so `cfl_l ~ dx_l ~ 2^{-l}` and the product `cfl_l * 2^l` is level
-// INDEPENDENT — every level limits the root equally and the minimum is degenerate. well inside it
+// independent — every level limits the root equally and the minimum is degenerate. well inside it
 // the sound speed goes as `r^{-1/2}`, so `cfl_l ~ 2^{-3l/2}` and the product falls as `2^{-l/2}`:
-// the minimum moves decisively onto the FINEST level, and the root is driven far below its own
+// the minimum moves decisively onto the finest level, and the root is driven far below its own
 // stability limit.
 //
 // both regimes are asserted here, and so is the crossover between them. the failure mode is cost,
@@ -44,7 +44,7 @@ const CFL: f64 = 0.4;
 /// twice the resolution, which is the nesting a centered accretor ladder uses.
 const N: usize = 32;
 /// the root half-width. with `N` cells the root's innermost resolved radius is `L0 / N`, which must
-/// sit well OUTSIDE the Bondi radius for the ladder to descend through the crossover — that is what
+/// sit well outside the Bondi radius for the ladder to descend through the crossover — that is what
 /// puts the flat and the gravitational regimes in one hierarchy.
 const L0: f64 = 8.0;
 /// the Bondi radius, small enough that the root resolves only the flat part of the profile
@@ -182,7 +182,7 @@ fn the_root_step_is_set_by_the_finest_level_once_the_ladder_reaches_inside_the_b
         (2.0f64).powf(-((LEVELS - 1) as f64) / 2.0)
     );
 
-    // the PRODUCTION selection, tied to the ladder above. everything else in this file reads the
+    // the production selection, tied to the ladder above. everything else in this file reads the
     // per-level cfl and forms `dt * 2^l` itself, which tests the sound-speed profile but not the
     // code that consumes it — a driver that took the unscaled minimum, or ignored the finer levels
     // entirely, would leave every assertion here intact.
@@ -208,7 +208,7 @@ fn the_root_step_is_set_by_the_finest_level_once_the_ladder_reaches_inside_the_b
          ladder, so it must not be a surprise"
     );
 
-    // the collapse itself: the root runs far below its OWN stability limit, because the finest
+    // the collapse itself: the root runs far below its own stability limit, because the finest
     // level's requirement is what it inherits.
     let collapse = scaled[LEVELS - 1] / own[0];
     assert!(
@@ -242,7 +242,7 @@ fn far_outside_the_bondi_radius_every_level_limits_the_root_equally() {
     );
 }
 
-/// a ladder entirely OUTSIDE the Bondi radius: the same nesting, shifted out so the profile is
+/// a ladder entirely outside the Bondi radius: the same nesting, shifted out so the profile is
 /// flat across every level.
 fn shallow_flat_ladder(
     levels: usize,
@@ -289,7 +289,7 @@ fn shallow_flat_ladder(
 
 #[test]
 fn the_rung_decay_follows_the_sound_speed_profile_it_is_driven_by() {
-    // the SHAPE of the collapse, not just its direction. with `c ~ r^{-1/2}` and each level's
+    // the shape of the collapse, not just its direction. with `c ~ r^{-1/2}` and each level's
     // innermost radius equal to its own cell width, `cfl_l ~ dx_l / c(dx_l) ~ 2^{-3l/2}`, so the
     // rung `cfl_l * 2^l` falls as `2^{-l/2}` — a factor of `sqrt(2)` per level.
     //
@@ -326,7 +326,7 @@ fn the_rung_decay_follows_the_sound_speed_profile_it_is_driven_by() {
 
 #[test]
 fn the_step_the_driver_takes_is_the_step_it_reports() {
-    // the root-dt formula exists TWICE — once in `root_cfl_dt`, which the decomposed driver calls
+    // the root-dt formula exists twice — once in `root_cfl_dt`, which the decomposed driver calls
     // to take a global minimum across tiles, and once inside the root step itself. two copies of a
     // rule that decides every run's timestep is a drift hazard with no symptom: the monolithic and
     // decomposed drivers would simply take different steps, each internally consistent.

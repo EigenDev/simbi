@@ -2,7 +2,7 @@
 // excise_law.rs
 //
 // the horizon-excision kernels' gates: the compiled vacuum-sink fill pair +
-// the covariant conserved rebuild are BIT-IDENTICAL to the f64 host chain built
+// the covariant conserved rebuild are bit-identical to the f64 host chain built
 // from the same carrier-generic pieces (the vacuum floor, `RhdGr::to_conserved`
 // on the guarded cartesian kerr-schild metric), run as the same sequence
 // (K sweeps, then the rebuild). the geometry mirror uses the kernel's own
@@ -347,8 +347,8 @@ fn compiled_excise_sequence_matches_the_f64_chain_bitwise() {
 
 #[test]
 fn uniform_state_round_trips_bitwise() {
-    // uniform primitives with per-cell self-consistent conserved fields: the LIVE cells pass
-    // through the whole sequence as the bitwise identity, while every EXCISED cell is overwritten
+    // uniform primitives with per-cell self-consistent conserved fields: the live cells pass
+    // through the whole sequence as the bitwise identity, while every excised cell is overwritten
     // with the cold vacuum floor + its covariant conserved rebuild (the one-way absorbing horizon).
     let mut g = smooth_grid();
     let uni = Prim::<f64, 2> {

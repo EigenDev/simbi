@@ -1,7 +1,7 @@
 // =============================================================================
 // aot_ghost_fill.rs
 //
-// run the BUILD-TIME-GENERATED lattice-map pullback ghost fill,
+// run the build-time-generated lattice-map pullback ghost fill,
 // compiled into this crate from the substrate, and check it against the lattice-
 // map definition: read prim at the integer source coord (periodic / reflect /
 // outflow), write at the cell, velocity picks up the per-axis Jacobian sign.
@@ -68,7 +68,7 @@ fn fill_low(
     vel_sign: f64,
 ) {
     // in-place (read at source, write at cell) over the low-ghost window; the
-    // allocated buffer starts at lo = LO (= -NG), so the field views need the
+    // allocated buffer starts at lo = lo (= -NG), so the field views need the
     // explicit layout. map_type / arg are INT scalars, vel_sign FLOAT — the
     // harness routes each by name into the right ABI tail.
     let lo_arr = [LO];

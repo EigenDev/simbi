@@ -1,7 +1,7 @@
 // =============================================================================
 // regimes/substrate_kernels/binding.rs
 //
-// the BUFFER half of the metadata-driven ABI: parse a kernel's
+// the buffer half of the metadata-driven ABI: parse a kernel's
 // serialized manifest into typed `FieldRef` / `ScalarBind` bindings (cached per name),
 // split them into (inputs, outputs) via `bind_manifest`, and resolve each `FieldRef`
 // to the backing sim `Field` via `resolve_path`. one resolver serves every regime +
@@ -62,7 +62,7 @@ where
     (inputs, outputs)
 }
 
-// project a TYPED serialized manifest (`FieldBind`) onto the dispatch's closed `FieldRef`
+// project a typed serialized manifest (`FieldBind`) onto the dispatch's closed `FieldRef`
 // vocabulary. the manifest is born typed at codegen, so no string parse happens here — a
 // `Ref` passes through, a `Raw` is a loud bug: hand-built staggered/ct/geom kernels carry
 // `Raw` paths but never route through this typed dispatch (they bind positionally). keeping
@@ -79,18 +79,18 @@ pub(crate) fn parse_manifest(ctx: &str, raw: Vec<(FieldBind, bool)>) -> Vec<(Fie
         .collect()
 }
 
-/// the RAW field manifest (un-projected `FieldBind`, `Ref` OR `Raw`), cached per name. the
-/// component-agnostic CT kernels (edge EMF / curl) declare GENERIC slot names (`vel_p1`, `bflux_a`,
+/// the raw field manifest (un-projected `FieldBind`, `Ref` or `Raw`), cached per name. the
+/// component-agnostic CT kernels (edge EMF / curl) declare generic slot names (`vel_p1`, `bflux_a`,
 /// `emf`) that are `Raw` by construction — they bind positionally, so `kernel_bindings`'s
 /// `FieldRef` projection would (correctly) panic on them. this accessor preserves the slot names so
-/// the runtime can order its per-edge field bind BY MANIFEST (no hand-sequenced buffer list).
+/// the runtime can order its per-edge field bind by manifest (no hand-sequenced buffer list).
 pub(crate) fn kernel_field_binds(name: &str) -> Arc<[(FieldBind, bool)]> {
     static CACHE: OnceLock<RwLock<HashMap<String, Arc<[(FieldBind, bool)]>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
     if let Some(b) = cache.read().unwrap().get(name) {
         return Arc::clone(b);
     }
-    // the parse happens OUTSIDE the lock. `expect_kernel` panics on an unbaked kernel, and
+    // the parse happens outside the lock. `expect_kernel` panics on an unbaked kernel, and
     // a panic while holding the write guard would poison this lock for the life of the
     // process, turning one missing kernel into a failure of every later dispatch.
     let (_, ir) = expect_kernel::<f64>(name);
@@ -115,7 +115,7 @@ pub fn kernel_bindings(name: &str) -> Arc<[(FieldRef, bool)]> {
     }
     // slow path: first time this name is seen. double-checked under the write lock
     // so two threads racing the miss don't parse twice (one inserts, the other's
-    // parse is dropped). the string -> FieldRef parse is paid ONCE per kernel name here.
+    // parse is dropped). the string -> FieldRef parse is paid once per kernel name here.
     let (_, ir) = expect_kernel::<f64>(name);
     let parsed: Arc<[(FieldRef, bool)]> =
         parse_manifest(name, symbi_ir::kernel_bindings_from_ir(ir)).into();
@@ -128,7 +128,7 @@ pub fn kernel_bindings(name: &str) -> Arc<[(FieldRef, bool)]> {
     )
 }
 
-/// the TYPE-SORTED scalar manifest of a kernel, cached: each scalar param as a typed `ScalarBind`
+/// the type-sorted scalar manifest of a kernel, cached: each scalar param as a typed `ScalarBind`
 /// paired with its int/float sort (`true` = int), in declared order. the parameter set is a
 /// disjoint union `IntNames \sqcup FloatNames`; this is the index family a dispatch resolves by ref +
 /// routes by sort. the IR manifest is born typed (`ScalarBind`), so this is a straight read — no
@@ -150,7 +150,7 @@ pub(crate) fn kernel_scalar_kinds(name: &str) -> Arc<[(ScalarBind, bool)]> {
     )
 }
 
-/// the declared OUTPUT SUPPORT of a kernel, cached: the
+/// the declared output support of a kernel, cached: the
 /// region outside which every output is exactly zero, as serialized in the
 /// neutral IR blob. `None` = the artifact declares nothing (= Everywhere).
 /// dispatch evaluates a Ball's center/radius against its own scalar table to
@@ -172,7 +172,7 @@ pub(crate) fn kernel_output_support(name: &str) -> Option<Arc<symbi_ir::Support>
         .clone()
 }
 
-/// a kernel's scalar manifest with MATERIALIZED param names, cached: one
+/// a kernel's scalar manifest with materialized param names, cached: one
 /// `(name, bind)` per scalar param, in declared order. the names are allocated
 /// once per kernel per process, so a per-step by-name lookup (the support
 /// ball's param evaluation) compares `&str` without allocating.
@@ -195,8 +195,8 @@ pub(crate) fn kernel_scalar_names(name: &str) -> Arc<[(String, ScalarBind)]> {
 }
 
 /// resolve a kernel's recorded runtime path to the sim field that backs it. the path is
-/// parsed ONCE into a typed `FieldRef` (the trace <-> dispatch ABI vocabulary, minted in
-/// `symbi_ir`) and matched EXHAUSTIVELY — adding a field variant is then a compile error
+/// parsed once into a typed `FieldRef` (the trace <-> dispatch ABI vocabulary, minted in
+/// `symbi_ir`) and matched exhaustively — adding a field variant is then a compile error
 /// here until it is bound, and the wire name can no longer drift from the producer.
 ///
 /// `pre` overrides `prim.pre` (iso's substrate-owned pressure vs the Newtonian prim.pre —
@@ -223,8 +223,8 @@ where
         let group = match slot {
             StateSlot::Cons => &f.cons,
             StateSlot::UN => &sim.workspace.u_n,
-            // the stage INPUT — `u_n` at the first stage of a multi-stage scheme (the driver elides
-            // the redundant copy there), else the `u_stage` snapshot. resolved by the ONE accessor.
+            // the stage input — `u_n` at the first stage of a multi-stage scheme (the driver elides
+            // the redundant copy there), else the `u_stage` snapshot. resolved by the one accessor.
             StateSlot::UStage => sim.stage_input(),
             StateSlot::Flux => &f.flux[dir],
         };
@@ -239,14 +239,14 @@ where
     };
     let mhd = || f.mhd.as_ref().expect("mhd path requires MHD fields");
 
-    // the path was parsed to a typed `FieldRef` ONCE at manifest load (kernel_bindings /
+    // the path was parsed to a typed `FieldRef` once at manifest load (kernel_bindings /
     // dispatch_runtime_ir); the dispatch hot path is string-free. this is an
     // exhaustive match: adding a `FieldRef` variant is a compile error until bound.
     match fref {
         FieldRef::PrimRho => &f.prim.rho,
-        // pressure is supplied by the CALLER as `pre` — energy regimes pass `sim.fields.prim.pre`,
+        // pressure is supplied by the caller as `pre` — energy regimes pass `sim.fields.prim.pre`,
         // iso passes the kernel-set's substrate-owned pressure (`cs^2*rho`). the override is
-        // authoritative: iso ALSO allocates `sim.fields.prim.pre` for GPU as an empty field, so
+        // authoritative: iso also allocates `sim.fields.prim.pre` for GPU as an empty field, so
         // deriving pressure from the sim binds the wrong, unfilled buffer.
         FieldRef::PrimPre => {
             pre.expect("resolve_path: 'prim.pre' bound but no pressure override provided")
@@ -283,7 +283,7 @@ where
         // per-axis wave-speed scratch (RMHD quartic materialization), indexed by the ref.
         FieldRef::WaveSpeedL(k) => &mhd().wave_speed_l[k as usize],
         FieldRef::WaveSpeedR(k) => &mhd().wave_speed_r[k as usize],
-        // the conserved magnetic field IS the cell B (ideal MHD); the induction flux is bflux
+        // the conserved magnetic field is the cell B (ideal MHD); the induction flux is bflux
         // in the dispatch's sweep direction.
         FieldRef::ConsMag(c) => &mhd().bcell[c as usize],
         FieldRef::FluxMag(c) => &mhd().bflux[dir][c as usize],
@@ -295,7 +295,7 @@ mod cache_poisoning_tests {
     use super::*;
 
     /// asking for a kernel that was never baked panics, which is correct. that panic must
-    /// stay LOCAL to the caller.
+    /// stay local to the caller.
     ///
     /// these caches memoize a pure function of the kernel name. computing the value while
     /// holding the write guard made the panic poison the lock for the life of the process,
@@ -314,7 +314,7 @@ mod cache_poisoning_tests {
             "the miss must name the missing kernel; got: {first}"
         );
 
-        // the second miss must report the SAME thing. a poisoned lock would replace this
+        // the second miss must report the same thing. a poisoned lock would replace this
         // with `PoisonError`, hiding which kernel was actually absent.
         let second = std::panic::catch_unwind(|| kernel_scalar_kinds(MISSING))
             .expect_err("the second miss must still fail");
@@ -324,7 +324,7 @@ mod cache_poisoning_tests {
             "a failed lookup must not poison the cache; got: {second}"
         );
 
-        // and a kernel that DOES exist still resolves, so unrelated dispatch is unaffected
+        // and a kernel that does exist still resolves, so unrelated dispatch is unaffected
         // by the failed lookup above.
         let good = std::panic::catch_unwind(|| kernel_scalar_kinds("adiabatic_c2p_1d"));
         assert!(

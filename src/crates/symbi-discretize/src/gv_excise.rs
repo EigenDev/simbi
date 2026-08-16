@@ -12,7 +12,7 @@
 // the vacuum is a one-way absorbing accretion boundary: the exterior gas rarefies
 // into the vacuum at the excision faces (material crosses in and stays), the
 // physical horizon. a zero-gradient / outward-copy fill would instead be a
-// transmissive outflow BC — on the staircased cartesian surface the per-axis sweep
+// transmissive outflow bc — on the staircased cartesian surface the per-axis sweep
 // speeds carry both signs, so a transmissive interior leaks back into the
 // exterior flux; accretion and outflow are different boundary conditions, and the
 // absorber is the one a black hole obeys.
@@ -122,7 +122,7 @@ fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, Writes) {
     let excised = excised_mask_2d(&x);
     // the vacuum-floor sink: an excised (inside-horizon) cell is frozen at a cold c2p-safe vacuum;
     // live cells keep their own state. the boundary riemann then rarefies the exterior gas into the
-    // vacuum -- a one-way absorbing accretion BC (material crosses in and stays), the physical horizon.
+    // vacuum -- a one-way absorbing accretion bc (material crosses in and stays), the physical horizon.
     let filled: Vec<Gv> = (0..nf)
         .map(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]))
         .collect();
@@ -414,7 +414,7 @@ pub fn excise_fill_3d_gv() -> (GvKernel, Writes) {
     let excised = excised_mask_3d(&x);
     // the vacuum-floor sink: an excised (inside-horizon) cell is frozen at a cold c2p-safe vacuum;
     // live cells keep their own state. the boundary riemann rarefies the exterior gas into the
-    // vacuum -- a one-way absorbing accretion BC (material crosses in and stays), the physical horizon.
+    // vacuum -- a one-way absorbing accretion bc (material crosses in and stays), the physical horizon.
     let filled: [Gv; 5] =
         std::array::from_fn(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]));
 

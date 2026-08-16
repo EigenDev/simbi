@@ -145,7 +145,7 @@ fn fgb(c: Color) -> Style {
     Style::default().fg(c).add_modifier(Modifier::BOLD)
 }
 
-/// format seconds as MM:SS.
+/// format seconds as mm:SS.
 pub fn fmt_wall(s: f64) -> String {
     let s = s as u64;
     format!("{:02}:{:02}", s / 60, s % 60)
@@ -231,7 +231,7 @@ fn render_header(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
             cols[1],
         );
     } else {
-        // the unfilled track is DIM so it stays visible (BORDER would read as near-background) — at low
+        // the unfilled track is dim so it stays visible (border would read as near-background) — at low
         // progress the bar is almost all track, so an invisible track reads as just
         // a stray percentage. a leading label marks it unambiguously as progress.
         let gauge = LineGauge::default()
@@ -410,7 +410,7 @@ const MAGMA: [(u8, u8, u8); 9] = [
     (252, 253, 191),
 ];
 
-/// map a normalized value [0,1] to a truecolor via a lerped colormap LUT.
+/// map a normalized value [0,1] to a truecolor via a lerped colormap lut.
 fn colormap(t: f64, cmap: Colormap) -> Color {
     let stops: &[(u8, u8, u8); 9] = match cmap {
         Colormap::Viridis => &VIRIDIS,
@@ -430,7 +430,7 @@ fn colormap(t: f64, cmap: Colormap) -> Color {
 
 /// average the slice over the fractional box [u0, u1) x [v0, v1) (unit slice
 /// coordinates), NaN-aware; entirely outside or all-NaN -> NaN. when the slice is
-/// FINER than the panel this is the panel-side block average: nearest sampling at
+/// finer than the panel this is the panel-side block average: nearest sampling at
 /// a 2:1 downsample drops half the slice pixels and turns a thin bright ring into
 /// a dotted arc — the display-side twin of the producer's footprint supersampling.
 fn box_avg(field: &FieldSlice, u0: f64, u1: f64, v0: f64, v1: f64) -> f64 {
@@ -962,7 +962,7 @@ fn render_config(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     // render each section under a full-width divider header (`SECTION ────────`), blank line between.
-    // sections are taken in first-seen order, CASE-INSENSITIVELY merged — so a config's `physics`
+    // sections are taken in first-seen order, case-insensitively merged — so a config's `physics`
     // group folds into the core `Physics` section under one header. rows within
     // a section keep input order.
     let width = inner.width as usize;
@@ -972,7 +972,7 @@ fn render_config(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
             sections.push(s.as_str());
         }
     }
-    // label column sized to the LONGEST label panel-wide (values stay aligned
+    // label column sized to the longest label panel-wide (values stay aligned
     // across sections), floored so short-label configs keep the classic look
     // and capped to leave the value at least a third of the panel. the
     // explicit two-space gap survives even at the cap, so a long label can
@@ -1094,7 +1094,7 @@ mod tests {
         let d = dump(&v);
         assert!(!d.contains("div·B"));
         assert!(d.contains("conservation & constraints"));
-        // max W is relativistic-only: OMITTED when max_w is None, so dt history
+        // max W is relativistic-only: omitted when max_w is None, so dt history
         // takes the full row.
         assert!(!d.contains("max W"));
         assert!(d.contains("dt history"));
@@ -1166,7 +1166,7 @@ mod tests {
     #[test]
     fn thin_ring_survives_panel_downsampling() {
         // a one-pixel-wide bright horizontal line in a 200x200 slice, box-averaged
-        // down to a ~90-column panel: EVERY column's covering half-pixel must blend
+        // down to a ~90-column panel: every column's covering half-pixel must blend
         // the line in (nearest sampling would drop it on ~half the columns).
         let (w, h) = (200usize, 200usize);
         let mut data = vec![1.0f32; w * h];
@@ -1234,7 +1234,7 @@ mod tests {
 
     #[test]
     fn colormap_endpoints_and_clamp() {
-        // clamps out-of-range and hits the LUT endpoints.
+        // clamps out-of-range and hits the lut endpoints.
         assert_eq!(colormap(-1.0, Colormap::Viridis), Color::Rgb(68, 1, 84));
         assert_eq!(colormap(2.0, Colormap::Inferno), Color::Rgb(252, 255, 164));
     }

@@ -3,14 +3,14 @@
 //
 // bonded rigid fragments (a rubble-pile cluster) under multi-gpu domain
 // decomposition. a fragment feels a fluid drag force booked by the penalization
-// over ITS cells; the bonded DEM subcycle (bonds + contact + gravity + drag) then
+// over its cells; the bonded dem subcycle (bonds + contact + gravity + drag) then
 // moves the cluster. when a bond spans a tile cut, one fragment's cells sit in one
 // tile and the other's in the neighbor, so each tile books only its own fragment's
-// drag -- the decomposed body step must SUM those per-fragment loads across tiles
+// drag -- the decomposed body step must sum those per-fragment loads across tiles
 // and run the fragment subcycle on the total, replicated identically on every tile.
 //
 // the contract: decomposed fragment trajectories == monolithic to round-off. the
-// gate is self-non-vacuous: a decomposed step WITHOUT the fragment subcycle leaves
+// gate is self-non-vacuous: a decomposed step without the fragment subcycle leaves
 // the fragments frozen at their seed while the monolithic cluster drifts downstream,
 // so the position comparison fails hard. a bond spanning the cut is asserted so the
 // cross-tile reduction is genuinely exercised.
@@ -60,7 +60,7 @@ fn fragment(x: f64, y: f64) -> Body<f64, 2> {
 }
 
 // a bonded pair straddling y = 0: fragment 0 at y = -0.35, fragment 1 at y = +0.35. each fragment
-// (radius 0.15) lies entirely on its side of the cut, but the BOND crosses it. a FRESH collection +
+// (radius 0.15) lies entirely on its side of the cut, but the bond crosses it. a fresh collection +
 // bonds per tile (with_bodies / attach_fragment_physics take ownership), identical everywhere.
 fn attach_fragments(sim: Sim) -> Sim {
     let coll = BodyCollection::new()
@@ -173,7 +173,7 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
     run(&mut dec, counts, ts);
     let dec_st = fragment_state(&dec);
 
-    // NON-VACUITY: the wind drag must have moved the cluster downstream, or a frozen-fragment
+    // non-vacuity: the wind drag must have moved the cluster downstream, or a frozen-fragment
     // decomposed run would match a frozen monolithic run and the subcycle would be untested.
     let drift = mono_st.iter().map(|(p, _)| p[0]).fold(0.0_f64, f64::max);
     assert!(
@@ -198,7 +198,7 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
 }
 
 // the y-cut is the load-bearing case: the bond spans it, so each fragment's drag is booked by a
-// DIFFERENT tile and the decomposed body step must sum them before the subcycle. the 2x2 grid adds
+// different tile and the decomposed body step must sum them before the subcycle. the 2x2 grid adds
 // the transverse x-cut (the wind direction).
 #[test]
 fn fragment_bond_across_y_cut_rk2() {

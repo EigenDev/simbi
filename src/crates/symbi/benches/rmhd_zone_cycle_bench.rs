@@ -2,7 +2,7 @@
 // rmhd_zone_cycle_bench.rs
 //
 // full-timestep ("zone-cycle") throughput of the production RMHD substrate, in
-// Mzcps (million zone-cycles per second) — the SAME unit AthenaK reports
+// Mzcps (million zone-cycles per second) — the same unit AthenaK reports
 // (Stone et al. 2024, Tables 1-2). one zone-cycle = one full RK step of a cell:
 // c2p -> ghost_fill -> flux x3 dirs -> cfl -> snapshot -> godunov -> CT -> rk2.
 //
@@ -89,7 +89,7 @@ fn main() {
     evolve_with_callback(&mut sim, &sub, 0.02, 1, |_| {}).expect("warmup failed");
     let warm_iter = sim.iteration;
 
-    // per-phase diagnostic: time ONE kernel phase in isolation over the whole grid
+    // per-phase diagnostic: time one kernel phase in isolation over the whole grid
     // at the RAYON_NUM_THREADS in force, to separate memory-bound (poor isolated
     // scaling) from step-context/barrier effects (good isolated scaling).
     // SYMBI_PHASE=flux|godunov|c2p|ghost. min-of-reps ns per cell-sweep.

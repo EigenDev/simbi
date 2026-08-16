@@ -1,7 +1,7 @@
 # =============================================================================
 # nmhd_orszag_tang.py
 #
-# the orszag-tang vortex in NEWTONIAN ideal mhd, run with the 5-wave HLLD solver.
+# the orszag-tang vortex in newtonian ideal mhd, run with the 5-wave HLLD solver.
 # the algebraic nmhd c2p cannot fail in the current sheets the way the relativistic
 # inversion can, so it is the robustness payoff. genuine 2.5d (spatial d=2, vector
 # dof=3): resolution (nx, ny, 1).
@@ -133,7 +133,7 @@ class NewtonianOrszagTang(SimbiProblem):
                 for jj in range(nj + (bn == "by")):
                     for ii in range(ni + (bn == "bx")):
                         if bn == "bx":
-                            # bx lives on the x-face: sample the TRANSVERSE y at
+                            # bx lives on the x-face: sample the transverse y at
                             # the cell center (jj+0.5), so the discrete field is
                             # symmetric about the domain center. sampling y at the
                             # edge (jj*dy) breaks the OT 180-degree point symmetry

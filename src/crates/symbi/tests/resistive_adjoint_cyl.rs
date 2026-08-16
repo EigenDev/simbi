@@ -2,9 +2,9 @@
 // resistive_adjoint_cyl.rs
 //
 // the mimetic-adjoint oracle for the cylindrical r-z Ohmic resistive edge EMF. the resistive current
-// J_phi must be the discrete ADJOINT of the induction curl C w.r.t. the physical (volume-weighted)
-// inner products, so that the resistive operator -curl(eta J) is symmetric NEGATIVE-definite and the
-// magnetic energy can only DECAY. the certificate is the discrete dissipation identity
+// J_phi must be the discrete adjoint of the induction curl C w.r.t. the physical (volume-weighted)
+// inner products, so that the resistive operator -curl(eta J) is symmetric negative-definite and the
+// magnetic energy can only decay. the certificate is the discrete dissipation identity
 //
 //     <B, curl(J B)>_F = <J B, J B>_E >= 0
 //
@@ -37,8 +37,8 @@ const GAMMA: f64 = 5.0 / 3.0;
 const R_MIN: f64 = 1.0; // stay off the r=0 axis (the metric is singular there)
 const R_MAX: f64 = 3.0;
 const Z_MAX: f64 = 1.0;
-// compact support: random fields live in [PAD, N-PAD) on both axes so curl(J .) (a two-cell reach)
-// only ever samples full-stencil interior cells -> the discrete adjoint identity is EXACT.
+// compact support: random fields live in [pad, N-pad) on both axes so curl(J .) (a two-cell reach)
+// only ever samples full-stencil interior cells -> the discrete adjoint identity is exact.
 const PAD: isize = 3;
 
 // a deterministic per-coordinate pseudo-random value in [-0.5, 0.5] (splitmix-style hash). keeps the
@@ -159,7 +159,7 @@ fn cyl_rz_resistive_current_is_the_curl_adjoint() {
     }
 
     // the identity: the face-pairing equals the (strictly positive) edge-norm to machine precision.
-    // a wrong r-weight breaks the equality; a flipped sign makes pair_f negative (energy GROWTH).
+    // a wrong r-weight breaks the equality; a flipped sign makes pair_f negative (energy growth).
     assert!(
         norm_e > 1e-6,
         "degenerate oracle: <J B, J B>_E = {norm_e} is ~0, the test proves nothing"
@@ -235,7 +235,7 @@ fn evolve_decay(eta: f64) -> f64 {
 fn cyl_rz_resistivity_dominates_the_ideal_numerical_diffusion() {
     // the end-to-end production path: the resistive CFL fold keeps the diffusion stable and
     // post_godunov routes the cyl chart through the adjoint resistive EMF. proof that the resistive
-    // term is ACTIVE (not silently skipped or a no-op): eta > 0 must lose substantially more field
+    // term is active (not silently skipped or a no-op): eta > 0 must lose substantially more field
     // than the ideal scheme's own finite-resolution numerical diffusion floor.
     let ideal = evolve_decay(0.0);
     let resistive = evolve_decay(0.05);

@@ -5,7 +5,7 @@
 // (covariant conserved momentum `S_i = (rho h W^2 + B^2) v_i - (v.B) B_i`) with the
 // fast-magnetosonic bound through the Banyuls-Font coordinate wave-speed transform. it
 // is the flat `Rmhd` regime with the metric threaded through every contraction, and
-// reduces to `Rmhd` at identity gamma + lapse 1, which leaves flat SRMHD intact. carries
+// reduces to `Rmhd` at identity gamma + lapse 1, which leaves flat srmhd intact. carries
 // gamma/gamma^{-1} (via `SpatialMetric`) + the lapse `alpha`, exactly like `RhdGr`.
 //
 // the GR flux kernel uses this via `riemann::hlle_with_speeds` + the shift-in-the-fan,
@@ -265,7 +265,7 @@ mod tests {
         (a - b).abs() < 1e-12 * a.abs().max(b.abs()).max(1.0)
     }
 
-    /// a kerr-like non-diagonal SPD spatial metric (gamma_{r phi} != 0) with its exact inverse.
+    /// a kerr-like non-diagonal spd spatial metric (gamma_{r phi} != 0) with its exact inverse.
     fn curved_metric() -> SpatialMetric<f64, 3> {
         let gamma = Matrix::<f64, 3> {
             data: [[1.5, 0.0, -0.3], [0.0, 9.0, 0.0], [-0.3, 0.0, 4.0]],
@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn rmhd_gr_wave_speed_bound_contains_flat_fan_at_identity() {
-        // at identity/1 the BF-transformed bound contains the exact flat MDZ fan
+        // at identity/1 the BF-transformed bound contains the exact flat mdz fan
         // (the bound is c_ms >= every magnetosonic speed) and stays inside the light cone.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let flat = Rmhd;

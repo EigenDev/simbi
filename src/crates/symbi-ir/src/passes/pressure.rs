@@ -7,7 +7,7 @@
 // — bindings declared inside die at the closing brace; only `name` (the
 // scope's result) survives into the outer scope.
 //
-// the metric is an UPPER BOUND on true register pressure: a let bound on
+// the metric is an upper bound on true register pressure: a let bound on
 // line 1 and last-used on line 2 still occupies a slot here for the rest of
 // its enclosing block. but it's the metric the *scope structure* directly
 // bounds — and the one the algebra (`seq`/`par`/`scope`/`share`)
@@ -45,7 +45,7 @@ pub struct PressureReport {
     pub at_scope_path: Vec<String>,
 }
 
-/// run peak-pressure analysis over a top-level body. ENTRY POINT.
+/// run peak-pressure analysis over a top-level body. entry point.
 pub fn peak_pressure(body: &[ScalarStmt]) -> PressureReport {
     let mut state = PressureState {
         peak: 0,
@@ -124,14 +124,14 @@ fn walk(body: &[ScalarStmt], live_in: usize, state: &mut PressureState) {
             } => {
                 // *** the load-bearing case: a scope closes its own bindings. ***
                 //
-                // inside the scope BODY, peak = max(scope_internal_peak)
+                // inside the scope body, peak = max(scope_internal_peak)
                 //   — the body inherits `live` (outer bindings still visible)
                 //   — and the body's own `Let`s add on top of that.
-                // outer bindings that were live BEFORE the scope opened
+                // outer bindings that were live before the scope opened
                 // remain live (they may be referenced inside). that's the
                 // baseline.
                 //
-                // after the scope CLOSES, the body's internal lets DIE (the
+                // after the scope closes, the body's internal lets die (the
                 // `}` reaps them). only the scope's named result survives,
                 // adding +1 to the outer's live count.
                 state.current_path.push(name.clone());
@@ -249,8 +249,8 @@ mod tests {
         );
     }
 
-    /// the seq law: `peak(seq(K1, K2)) = max(peak(K1), peak(K2))` ONLY when
-    /// neither leaks. for FLAT seq (no scope between), they DO leak (K1's
+    /// the seq law: `peak(seq(K1, K2)) = max(peak(K1), peak(K2))` only when
+    /// neither leaks. for flat seq (no scope between), they do leak (K1's
     /// bindings remain live during K2). this test pins the flat case.
     #[test]
     fn flat_seq_accumulates() {
@@ -312,7 +312,7 @@ mod tests {
         assert_eq!(r.at_scope_path, vec!["k2".to_string()]);
     }
 
-    /// nested scopes: inner peak is INSIDE the inner; outer-after-inner
+    /// nested scopes: inner peak is inside the inner; outer-after-inner
     /// retains only the inner's named result.
     #[test]
     fn nested_scopes_isolate_inner_peak() {
@@ -327,7 +327,7 @@ mod tests {
         //       // live = 1 + 1 + 1 = 3
         //   }
         //   // outer closes; +1 for outer_name. live = 1 + 1 = 2.
-        // peak = 7, INSIDE inner_name within outer_name.
+        // peak = 7, inside inner_name within outer_name.
         let inner_body: Vec<ScalarStmt> = (0..5)
             .map(|i| let_f64(&format!("i{i}"), lit(i as f64)))
             .collect();
@@ -359,8 +359,8 @@ mod tests {
         assert_eq!(r.peak, 200);
     }
 
-    /// SAME computation phrased as 4 scopes of 50 lets each peaks at 50
-    /// internal + 4 surviving phase results = 52 -> still under 60. THE WIN.
+    /// same computation phrased as 4 scopes of 50 lets each peaks at 50
+    /// internal + 4 surviving phase results = 52 -> still under 60. the win.
     #[test]
     fn scoped_200_temps_peaks_at_phase_size() {
         let phase = |prefix: &str| -> Vec<ScalarStmt> {
@@ -381,7 +381,7 @@ mod tests {
             r.peak, 53,
             "scoped form peaks at phase-internal + prior surviving results"
         );
-        // and the peak is observed INSIDE phase3 — the last scope's body.
+        // and the peak is observed inside phase3 — the last scope's body.
         assert_eq!(r.at_scope_path, vec!["phase3".to_string()]);
     }
 

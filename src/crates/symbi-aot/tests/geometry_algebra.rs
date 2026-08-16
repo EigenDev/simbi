@@ -12,7 +12,7 @@
 
 use symbi_aot::NamedKernel;
 
-// all kernels bind BY FIELD NAME (NamedKernel) — order-independent, loud + named
+// all kernels bind by field name (NamedKernel) — order-independent, loud + named
 // on manifest drift. buffers are 1D flat; the 2D/3D probes here run on grids whose
 // trailing axes are length 1 (nr x 1, nr x 1 x 1), so the default 1D buffer layout
 // gives the identical flat index — only `grid`/`dom_lo` carry the kernel's rank.
@@ -89,7 +89,7 @@ fn spherical_uniform_1d_matches_analytic() {
         close(al[i], eal, "area_lo", i);
         close(ah[i], eah, "area_hi", i);
         close(ct[i], ect, "centroid", i);
-        // the volume-weighted centroid sits ABOVE the arithmetic midpoint (more
+        // the volume-weighted centroid sits above the arithmetic midpoint (more
         // volume at larger r) — the whole point of distinguishing them.
         assert!(
             ct[i] > 0.5 * (r_lo + r_hi),
@@ -134,10 +134,10 @@ fn spherical_log_1d_matches_analytic() {
     );
 }
 
-// the analytic AREA-WEIGHTED divergence. the spherical mass-law godunov computes
+// the analytic area-weighted divergence. the spherical mass-law godunov computes
 // `rho_new = rho - dt*div(F)` with `div = (1/V)(F_hi*A_hi - F_lo*A_lo)`. with rho=0,
 // dt=1, F=1 everywhere: rho_new = -div = -(A_hi - A_lo)/V = -3(r_hi^2-r_lo^2)/(r_hi^3-r_lo^3)
-// — NONZERO (a Cartesian flat divergence of a constant flux would be exactly 0; the
+// — nonzero (a Cartesian flat divergence of a constant flux would be exactly 0; the
 // spherical one is the geometric divergence from the radially growing face area).
 #[test]
 fn spherical_weighted_divergence_matches_analytic() {
@@ -175,7 +175,7 @@ fn spherical_weighted_divergence_matches_analytic() {
     );
 }
 
-// exact discrete HYDROSTATIC BALANCE. the spherical adiabatic godunov_euler with
+// exact discrete hydrostatic balance. the spherical adiabatic godunov_euler with
 // the well-balanced geometric momentum source. set a v=0 uniform-pressure state — the
 // momentum face flux is then p, the mass/energy fluxes are 0 — and assert the momentum
 // stays exactly 0: the source `(p*A_hi - p*A_lo)/V` bit-cancels the pressure flux
@@ -197,7 +197,7 @@ fn spherical_hydrostatic_balance_exact() {
     let dt = 0.01_f64;
 
     // the godunov-stage kernel reads the u_n snapshot per law + the SSP (a0, ac) coefficients.
-    // HSE is a forward-Euler step (a0=0, ac=1): u_n is the initial state (multiplied by 0, so it
+    // hse is a forward-Euler step (a0=0, ac=1): u_n is the initial state (multiplied by 0, so it
     // drops out of the result). buffer order (per the stage ABI): prim.pre, then per law the
     // (u_n, flux) pair, then the in-place cons outputs. scalar order [dt, a0, ac, x_lo, dx].
     let (u_n_den, u_n_mom, u_n_nrg) = (den.clone(), mom.clone(), nrg.clone());
@@ -241,9 +241,9 @@ fn spherical_hydrostatic_balance_exact() {
     }
 }
 
-// per-cell PHYSICAL CFL widths. the iso wave-speed map on a LOG-spaced spherical
+// per-cell physical CFL widths. the iso wave-speed map on a log-spaced spherical
 // radial grid (v=0): lambda[i] = cs / (h_r * dr_i) = cs / dr_i (h_r=1). the log zones
-// GROW, so lambda must shrink cell-to-cell — a single uniform inv_dx would give a
+// grow, so lambda must shrink cell-to-cell — a single uniform inv_dx would give a
 // constant value and mis-estimate the CFL. proves the metric-correct per-cell width.
 #[test]
 fn log_spherical_cfl_uses_per_cell_widths() {
@@ -282,7 +282,7 @@ fn log_spherical_cfl_uses_per_cell_widths() {
     }
 }
 
-// the centrifugal/coriolis INERTIAL geometric source, REGIME-AGNOSTIC via the
+// the centrifugal/coriolis inertial geometric source, regime-agnostic via the
 // conserved momentum. a 2D spherical grid with a single theta cell isolates the radial
 // centrifugal: with cons.mom = (density factor)*v and v_r, v_theta set, the source per
 // cell is s_0 = mom_theta*v_theta/r_c (centrifugal, outward) and s_1 = -mom_r*v_theta/r_c
@@ -355,9 +355,9 @@ fn spherical_inertial_source_matches_analytic() {
     }
 }
 
-// the FULL relativistic-MHD geometric source via the RMHD adapter onto the
-// same regime-generic builder — TOTAL-pressure source + gas inertial (wgam2 v^2) +
-// magnetic tension (-bmu^2). validates the RADIAL source s_0 (no cot term; the angular
+// the full relativistic-MHD geometric source via the RMHD adapter onto the
+// same regime-generic builder — total-pressure source + gas inertial (wgam2 v^2) +
+// magnetic tension (-bmu^2). validates the radial source s_0 (no cot term; the angular
 // extent cancels in (A_hi-A_lo)*inv_V): exercises all three RMHD-specific quantities
 // (ptot, the gas momentum density wgam2 = rho h W^2, and the magnetic four-vector bmu).
 #[test]
@@ -427,7 +427,7 @@ fn rmhd_spherical_source_radial_matches_analytic() {
     }
 }
 
-// the FULL relativistic-MHD geometric source (cylindrical) on a (r, phi, z) grid via
+// the full relativistic-MHD geometric source (cylindrical) on a (r, phi, z) grid via
 // the same coord-generic builder as spherical — only the Christoffel changes (cylindrical has the
 // r-phi pair; z carries no inertial/tension and, with uniform ptot, no pressure source). validates
 // all three components against the analytic centrifugal + magnetic-tension forms. proves the

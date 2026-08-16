@@ -7,7 +7,7 @@
 # the canonical spinning-hole initial data: the same construction at a != 0
 # seeds Kerr runs.
 #
-# floor-less caveats: the a = 0 torus is intrinsically COLD (p/rho ~ 4e-3 in the
+# floor-less caveats: the a = 0 torus is intrinsically cold (p/rho ~ 4e-3 in the
 # core at the paper parameters; hotter placements unbind the equipotential), so
 # its surface cells sit close to the physicality boundary tau + D >=
 # sqrt(D^2 + |S|^2). the warm hydrostatic corona (h alpha = const, an exact
@@ -17,7 +17,7 @@
 # avoids the spherical coordinate singularity while retaining nearly the full
 # meridional domain; the torus surface stays off those walls.
 #
-# the solution (FM 1976; G = c = 1): constant specific angular momentum
+# the solution (fm 1976; G = c = 1): constant specific angular momentum
 # l = u^t u_phi, u^r = u^theta = 0, and the enthalpy potential ln h(r, theta).
 # written here at a = 0 (boyer-lindquist == schwarzschild coordinates), where
 # with f = 1 - 2M/r and g_pp = r^2 sin^2(theta):
@@ -85,12 +85,12 @@ class GrFishboneMoncrief(SimbiProblem):
     rho_torus_max: Annotated[
         float, ProblemParam(1.0, description="torus density normalization")
     ]
-    # dilute HYDROSTATIC isentropic corona outside the torus surface: relativistic
+    # dilute hydrostatic isentropic corona outside the torus surface: relativistic
     # hydrostatic equilibrium on a static metric is h(r) alpha(r) = const, which the
     # well-balanced discrete pressure form holds quietly — no cold supersonic infall
     # to break the c2p at the torus skin. dynamically irrelevant to the torus core
     # (density contrast ~ 1e-5).
-    # the corona must be WARM: a stationary cell's distance from the physicality
+    # the corona must be warm: a stationary cell's distance from the physicality
     # boundary tau + D >= sqrt(D^2 + |S|^2) is its thermal margin ~ p/(tau + D), and
     # the discrete stationarity residual erodes that margin at a constant rate — a
     # cold surface cell (margin ~ 1e-4) dies in ~15 M, a warm one holds. the corona
@@ -197,7 +197,7 @@ class GrFishboneMoncrief(SimbiProblem):
         mm = self.schwarzschild_mass
         h_ref = 1.0 + gm / gm1 * self.atm_pre_frac
         # the static-observer redshift sqrt(-g_tt) = sqrt(1 - 2Mr/Sigma); on the
-        # equator this is sqrt(1 - 2M/r) at EVERY spin. no static observers exist
+        # equator this is sqrt(1 - 2M/r) at every spin. no static observers exist
         # inside the ergosphere (r < 2M equatorially) — floor the factor there:
         # that corona gas sits at/inside the horizon and free-falls regardless.
         redshift = lambda rr: math.sqrt(max(1.0 - 2.0 * mm / rr, 1.0e-2))
@@ -229,7 +229,7 @@ class GrFishboneMoncrief(SimbiProblem):
                     r = 0.75 * (rh**4 - rl**4) / (rh**3 - rl**3)
                     rho_a, pre_a = self.atmosphere(r, torus.r_max)
                     state = torus.primitive(r, theta)
-                    # PRESSURE-MATCHED surface: the corona replaces torus gas whose
+                    # pressure-matched surface: the corona replaces torus gas whose
                     # polytropic pressure falls below the local corona pressure. the
                     # interface is a pure contact (continuous p, a static-corona slip
                     # in v^phi that HLLE handles) — no crush wave, and the c2p-fragile

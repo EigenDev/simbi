@@ -11,7 +11,7 @@
 // assignment that double-counts or loses cells, which no per-bucket value alone would
 // reveal.
 //
-// the grid is SPHERICAL on purpose. the cell measure is r^2 dr, so a census that
+// the grid is spherical on purpose. the cell measure is r^2 dr, so a census that
 // weighted cells uniformly (or by a cartesian dx) would land on a visibly different
 // total. a cartesian grid with uniform spacing would pass under a wrong measure and
 // prove nothing about the volume weight.

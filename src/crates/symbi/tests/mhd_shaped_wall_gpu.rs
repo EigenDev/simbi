@@ -1,16 +1,16 @@
 // =============================================================================
 // mhd_shaped_wall_gpu.rs
 //
-// device parity for a SHAPED (CSG) rigid immersed wall on a 2.5D MHD sim
+// device parity for a shaped (CSG) rigid immersed wall on a 2.5D MHD sim
 // (NewtonianMhd, D=2, DOF=3) — the magnetized shaped-wall path. the shaped
 // penalize binds c_a2 = max |B|^2/rho to lift the wall relaxation to the fast
 // magnetosonic speed; it rewrites the cell-centered gas state (den, all 3 mom,
 // nrg) in place while the staggered CT faces stay untouched. this gates that the
 // runtime NVRTC render of the 2.5D shaped kernel + the host-side c_a2 reduction
 // behave identically on device.
-// - PENALIZE: one shaped penalization matches host==device on cons + the force
+// - penalize: one shaped penalization matches host==device on cons + the force
 //   receipt; the cell B is untouched by penalize, so it stays bit-equal;
-// - EVOLVED: a handful of RK2 steps through the production loop (godunov + CT +
+// - evolved: a handful of RK2 steps through the production loop (godunov + CT +
 //   shaped penalize each step) keep cons + cell B bit-close host==device.
 //
 // runs on the host GPU (NVRTC needs no nvcc). run:

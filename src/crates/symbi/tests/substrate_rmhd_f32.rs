@@ -6,9 +6,9 @@
 // the f64 make_sim init (uniform div-free B + smooth periodic hydro) but with f32
 // fields, then drives the full per-step kernel chain (c2p -> ghost_fill -> flux
 // per dir -> cfl -> snapshot -> godunov_euler -> post_godunov) and asserts every
-// resulting prim / cons field and the cfl dt are FINITE over the interior.
+// resulting prim / cons field and the cfl dt are finite over the interior.
 //
-// this is NOT a physics-accuracy test (no parity vs f64); it only proves the f32
+// this is not a physics-accuracy test (no parity vs f64); it only proves the f32
 // instantiation type-checks and the substrate kernels execute without NaN/inf.
 // =============================================================================
 

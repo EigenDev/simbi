@@ -2,20 +2,20 @@
 // dual.rs
 //
 // `Dual<S>` — a forward-mode automatic-differentiation carrier: a value paired with its
-// tangent (derivative w.r.t. a single seeded input). it impls `Scalar` (over ANY inner
-// `S: Scalar` — f64 for host validation, Gv for the trace), so ANY carrier-generic function is
+// tangent (derivative w.r.t. a single seeded input). it impls `Scalar` (over any inner
+// `S: Scalar` — f64 for host validation, Gv for the trace), so any carrier-generic function is
 // differentiable by evaluating it at `Dual` with the input of interest seeded via
 // `Dual::variable`. the codebase anticipates this (algebra.rs: "future `Dual<C>` carries
 // derivatives").
 //
 // the motivating use: evaluate a `Metric`'s lapse / shift / spatial_metric at `Dual` seeded on
-// the radial coordinate to obtain the ANALYTIC radial derivatives (and, downstream, the
+// the radial coordinate to obtain the analytic radial derivatives (and, downstream, the
 // christoffels) automatically — retiring hand-derived metric derivatives, which for spinning /
 // non-diagonal metrics are dozens of error-prone terms.
 //
-// LIMITATION: `iterate` / `iterate_vec` (the c2p fixed-point machinery) are NOT differentiated
+// limitation: `iterate` / `iterate_vec` (the c2p fixed-point machinery) are not differentiated
 // (the derivative of a fixed point needs the implicit-function theorem, out of scope) — they
-// panic. this is fine for STRAIGHT-LINE geometry (metrics use only arithmetic + sqrt + the
+// panic. this is fine for straight-line geometry (metrics use only arithmetic + sqrt + the
 // transcendentals below); do not evaluate an iterative solver at `Dual`.
 //
 // usage:
@@ -37,7 +37,7 @@ pub struct Dual<S> {
 }
 
 impl<S: Scalar> Dual<S> {
-    /// a CONSTANT (derivative zero): a value that does not depend on the seeded input.
+    /// a constant (derivative zero): a value that does not depend on the seeded input.
     #[inline]
     pub fn constant(value: S) -> Self {
         Self {
@@ -46,7 +46,7 @@ impl<S: Scalar> Dual<S> {
         }
     }
 
-    /// the SEEDED variable (derivative one): the single input differentiated with respect to.
+    /// the seeded variable (derivative one): the single input differentiated with respect to.
     #[inline]
     pub fn variable(value: S) -> Self {
         Self {
@@ -228,7 +228,7 @@ impl<S: Scalar> Scalar for Dual<S> {
         self.value.to_f64() // host-boundary read: the value (the tangent is separate diagnostics)
     }
 
-    // comparisons decide on the VALUE (the tangent does not order points).
+    // comparisons decide on the value (the tangent does not order points).
     #[inline]
     fn cmp_lt(self, b: Self) -> S::Mask {
         self.value.cmp_lt(b.value)
@@ -252,7 +252,7 @@ impl<S: Scalar> Scalar for Dual<S> {
 
     #[inline]
     fn select(m: S::Mask, t: Self, f: Self) -> Self {
-        // piecewise-differentiable: pick the value AND the matching tangent branch.
+        // piecewise-differentiable: pick the value and the matching tangent branch.
         Self {
             value: S::select(m, t.value, f.value),
             tangent: S::select(m, t.tangent, f.tangent),

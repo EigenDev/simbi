@@ -9,18 +9,18 @@
 // leaves it at the level it was seeded with.
 //
 // the mechanism this exercises is exactly the one Fleischmann, Adami & Adams
-// (J. Comput. Phys. 423:109762, 2020) identify: TRANSVERSE to a grid-aligned shock
+// (J. Comput. Phys. 423:109762, 2020) identify: transverse to a grid-aligned shock
 // the velocity component vanishes, so those Riemann problems run at a local mach
 // number near zero, where a classical HLLC flux applies acoustic dissipation scaled
 // by the sound speed rather than by the flow speed.
 //
 // the diagnostic is the transverse kinetic energy in the post-shock region,
-// measured against the seeded perturbation. it is a GROWTH test, not a threshold:
+// measured against the seeded perturbation. it is a growth test, not a threshold:
 // what distinguishes a stable solver from an unstable one is whether the
 // perturbation grows by orders of magnitude, which is a question the seeded
 // amplitude answers on its own without a tuned bound.
 //
-// classical HLLC is included as the POSITIVE CONTROL. it is the solver the
+// classical HLLC is included as the positive control. it is the solver the
 // instability is documented for, so if it does not grow here the setup is not
 // exercising the mechanism and every other arm's result is vacuous.
 // =============================================================================
@@ -45,12 +45,12 @@ const NX: usize = 320;
 const NY: usize = 24;
 const MACH: f64 = 10.0;
 /// the seeded perturbation: a relative density zig-zag on alternating transverse rows
-/// of the gas AHEAD of the shock, so the front runs into it. perturbing the DATA
+/// of the gas ahead of the shock, so the front runs into it. perturbing the data
 /// rather than the interface position is what keeps it from quantizing away — a
 /// sub-cell shift of the interface is sampled identically on every row and seeds
 /// nothing at all.
 const SEED: f64 = 1.0e-6;
-/// the shock must still be INSIDE the domain at the end, or the box is uniform and
+/// the shock must still be inside the domain at the end, or the box is uniform and
 /// the transverse velocity is trivially zero. asserted below rather than assumed.
 const T_FINAL: f64 = 0.06;
 const T_MID: f64 = 0.03;
@@ -69,7 +69,7 @@ fn post_shock(m: f64) -> (f64, f64, f64) {
 
 /// a duct with a planar shock at x = 0.1 travelling in +x, and the interface
 /// displaced by a half-cell zig-zag on alternating transverse rows — Quirk's
-/// perturbation, applied to the DATA rather than to the mesh so the grid stays
+/// perturbation, applied to the data rather than to the mesh so the grid stays
 /// uniform and the effect cannot be confused with a metric term.
 fn shocked_duct() -> Sim {
     let dx = 1.0 / NX as f64;
@@ -102,7 +102,7 @@ fn shocked_duct() -> Sim {
 }
 
 /// transverse kinetic energy per unit mass, over cells that have been shocked.
-/// the transverse velocity is identically zero in the exact solution, so ALL of
+/// the transverse velocity is identically zero in the exact solution, so all of
 /// this is numerical — it is the instability's amplitude and nothing else.
 fn transverse_energy(sim: &Sim) -> f64 {
     let mut total = 0.0;
@@ -120,7 +120,7 @@ fn transverse_energy(sim: &Sim) -> f64 {
     if mass > 0.0 { total / mass } else { 0.0 }
 }
 
-/// does the domain still hold BOTH shocked and unshocked gas? if the front has left,
+/// does the domain still hold both shocked and unshocked gas? if the front has left,
 /// the box is uniform and the transverse velocity is zero for a reason that has
 /// nothing to do with the solver.
 fn shock_is_interior(sim: &Sim) -> bool {
@@ -136,7 +136,7 @@ fn shock_is_interior(sim: &Sim) -> bool {
     hot && cold
 }
 
-/// transverse energy at mid-run and at the end, plus the step count. the GROWTH
+/// transverse energy at mid-run and at the end, plus the step count. the growth
 /// between the two is the instability's signature — a stable scheme holds the
 /// seeded perturbation, an unstable one amplifies it.
 fn run(solver: Solver) -> (f64, f64, u64) {
@@ -181,7 +181,7 @@ fn the_acoustic_scaling_is_shock_stable_on_quirks_test() {
     let fleischmann = rows[1].1;
     let acoustic = rows[2].1;
 
-    // POSITIVE CONTROL. the instability is documented for classical HLLC; if this
+    // positive control. the instability is documented for classical HLLC; if this
     // setup does not provoke it there, it is not exercising the mechanism and the
     // other two arms prove nothing.
     assert!(
@@ -192,7 +192,7 @@ fn the_acoustic_scaling_is_shock_stable_on_quirks_test() {
     );
 
     // the claim: the acoustic scaling suppresses the instability at least as well as
-    // the scheme it generalizes. a LESS dissipative solver that traded shock stability
+    // the scheme it generalizes. a less dissipative solver that traded shock stability
     // away would show up right here.
     assert!(
         acoustic <= fleischmann * 10.0,

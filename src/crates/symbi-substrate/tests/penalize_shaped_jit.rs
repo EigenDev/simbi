@@ -2,7 +2,7 @@
 // penalize_shaped_jit.rs
 //
 // the make-or-break gate for the runtime-JIT arbitrary-shape rigid wall: the
-// setup-built shaped penalization kernel MUST cranelift-compile on host. its
+// setup-built shaped penalization kernel must cranelift-compile on host. its
 // surface normal is the SDF gradient (Dual-derived CSG min/max branches), so
 // this pins that the shaped kernel's op set lies inside the JIT subset — else
 // the moving arbitrary-shape body would have no host execution path.
@@ -58,7 +58,7 @@ fn capped_cylinder_penalize_jit_compiles_on_host() {
 
 #[test]
 fn shaped_rotated_penalize_jit_compiles() {
-    // a ROTATED box (static tilt): the Rotated node is affine (multiply/add), so it must lie in
+    // a rotated box (static tilt): the Rotated node is affine (multiply/add), so it must lie in
     // the JIT subset — the same runtime kernel bakes the orientation matrix as constants.
     let tilt = [
         [0.7071, -0.7071, 0.0],
@@ -98,7 +98,7 @@ fn shaped_penalize_jit_compiles_curvilinear() {
 
 #[test]
 fn spinning_penalize_jit_compiles() {
-    // the SPINNING wall: the mask is rotated by R(body_0_angle) built from Gv cos/sin (runtime
+    // the spinning wall: the mask is rotated by R(body_0_angle) built from Gv cos/sin (runtime
     // angle), and the surface velocity carries omega x r. both the adiabatic and iso kernels must
     // JIT — cos/sin are in the cranelift subset.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3]);
@@ -128,7 +128,7 @@ fn shaped_iso_porous_penalize_jit_compiles() {
 
 #[test]
 fn shaped_penalize_jit_compiles_f32() {
-    // the reduced-precision (f32) runtime-JIT path: the SAME CSG graph must cranelift-compile at
+    // the reduced-precision (f32) runtime-JIT path: the same CSG graph must cranelift-compile at
     // f32 (the f32 transcendental shims for tanh/sin/cos, f32 loads/consts/strides). covers the
     // CSG union (min/max kinks + Dual normal), the spinning kernel (f32 sin/cos shims), and the
     // iso curvilinear path (centroid_to_cartesian at f32).

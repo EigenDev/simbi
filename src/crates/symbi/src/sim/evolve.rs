@@ -22,7 +22,7 @@ use symbi_xpu::{ExecutionSpace, MemorySpace};
 // resolves for downstream callers.
 pub use crate::sim::substrate_seam::KernelSet;
 // shared driver primitives (dt guard, stage bookkeeping, profiler, body coupling) live in the
-// sim-state core so the AMR driver shares them DRY. the public profiler API is
+// sim-state core so the AMR driver shares them dry. the public profiler API is
 // re-exported at the `sim::evolve::` path for the bench examples.
 use crate::sim::driver::{
     advance_state_clock, book_horizon_receipt, evolve_bodies, horizon_request, needs_step_snapshot,

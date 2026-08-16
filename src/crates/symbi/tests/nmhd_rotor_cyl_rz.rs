@@ -1,18 +1,18 @@
 // =============================================================================
 // nmhd_rotor_cyl_rz.rs
 //
-// the magnetized ROTOR in CYLINDRICAL r-z AXISYMMETRIC newtonian MHD —
+// the magnetized rotor in cylindrical r-z axisymmetric newtonian MHD —
 // the curvilinear sibling of nmhd_rotor_2p5d, validating the cyl r-z constrained-transport
-// stack: the SINGLE out-of-plane corner EMF E_phi, the metric in-plane curl
+// stack: the single out-of-plane corner EMF E_phi, the metric in-plane curl
 //   dB_r/dt = +d_z E_phi          (flat, h_z = 1),
 //   dB_z/dt = -(1/r) d_r(r E_phi) (the cylindrical metric on the radial derivative),
 // plus the DOF-lifted (DOF=3, grid D=2) gas + geometric source. a dense disk spins in the
-// MERIDIONAL (r, z) plane inside a uniform vertical B_z, winding B_r out of the advected
+// meridional (r, z) plane inside a uniform vertical B_z, winding B_r out of the advected
 // vertical field. asserts:
-//   (a) the staggered CYLINDRICAL div(B) = (1/r) d_r(r B_r) + d_z B_z stays at machine zero
+//   (a) the staggered cylindrical div(B) = (1/r) d_r(r B_r) + d_z B_z stays at machine zero
 //       (the discrete d-of-d the metric curl must preserve — the whole point of CT),
 //   (b) the state stays physical (rho>0, p>0, finite),
-//   (c) the field WINDS — B_r (zero in the IC) develops from the poloidal advection of B_z,
+//   (c) the field winds — B_r (zero in the IC) develops from the poloidal advection of B_z,
 //       proving the E_phi edge binds the right in-plane components (v_r, v_z, B_r, B_z) and
 //       the metric curl actually evolves the in-plane field.
 // =============================================================================
@@ -46,14 +46,14 @@ const RC: f64 = 1.5;
 const ZC: f64 = 0.5;
 const R0: f64 = 0.15;
 const R1: f64 = 0.18;
-const OMEGA: f64 = 2.0; // poloidal angular rate (core edge speed OMEGA*R0 ~ 0.3).
+const OMEGA: f64 = 2.0; // poloidal angular rate (core edge speed omega*R0 ~ 0.3).
 const B0: f64 = 1.0; // uniform vertical field B_z.
 const T_FINAL: f64 = 0.04;
 
-// the rotor primitive at physical (r, z): a dense core in solid-body POLOIDAL rotation
-// v = OMEGA * (e_phi x displacement) = (-OMEGA*(z-zc), OMEGA*(r-rc)) in the (r, z) plane,
+// the rotor primitive at physical (r, z): a dense core in solid-body poloidal rotation
+// v = omega * (e_phi x displacement) = (-omega*(z-zc), omega*(r-rc)) in the (r, z) plane,
 // tapered to the ambient over [R0, R1]. v_phi (the swirl) stays zero — this test exercises
-// the IN-PLANE CT (E_phi edge). returns (rho, v_r, v_z).
+// the in-plane CT (E_phi edge). returns (rho, v_r, v_z).
 fn rotor_state(r: f64, z: f64) -> (f64, f64, f64) {
     let (dr, dz) = (r - RC, z - ZC);
     let rad = (dr * dr + dz * dz).sqrt();
@@ -79,7 +79,7 @@ fn make_sim() -> Sim {
         .expect("cyl r-z rotor sim")
         .set_initial(|[r, z]| {
             let (rho, vr, vz) = rotor_state(r, z);
-            // velocity is COORDINATE-indexed (0 = r, 1 = phi, 2 = z); B = (B_r, B_phi, B_z) = (0, 0, B0).
+            // velocity is coordinate-indexed (0 = r, 1 = phi, 2 = z); B = (B_r, B_phi, B_z) = (0, 0, B0).
             MhdPrim {
                 hydro: Prim {
                     rho,
@@ -95,7 +95,7 @@ fn make_sim() -> Sim {
         .build()
 }
 
-// the staggered CYLINDRICAL div(B), normalized by |B|: the metric divergence the CT curl
+// the staggered cylindrical div(B), normalized by |B|: the metric divergence the CT curl
 // must hold at machine zero. (1/r_c)*(r_hi*B_r_hi - r_lo*B_r_lo)/dr + (B_z_hi - B_z_lo)/dz.
 fn rel_divb(s: &Sim) -> f64 {
     let mhd = s.fields.mhd.as_ref().unwrap();
@@ -132,7 +132,7 @@ fn nmhd_rotor_cyl_rz_preserves_divb_winds_field_stays_physical() {
 
     // the curvilinear metric curl carries the r_hi/r_lo + 1/r_c factors (O(1) cancellation), so
     // its div(B) roundoff floor sits an order above the cartesian ~1e-13. assert div(B) stays at
-    // a BOUNDED machine-zero (< 1e-11) every step — a sign/metric bug would leak SECULARLY.
+    // a bounded machine-zero (< 1e-11) every step — a sign/metric bug would leak secularly.
     let mut steps = 0u64;
     let mut max_rel = 0.0_f64;
     evolve_with_callback(&mut sim, &sub, T_FINAL, 1, |s| {
@@ -151,7 +151,7 @@ fn nmhd_rotor_cyl_rz_preserves_divb_winds_field_stays_physical() {
         "cyl r-z rotor produced only {steps} steps — gate barely exercised"
     );
 
-    // physicality through the spun-up core + the field has WOUND (B_r developed from 0).
+    // physicality through the spun-up core + the field has wound (B_r developed from 0).
     let eos = IdealGas { gamma: GAMMA };
     let mhd = sim.fields.mhd.as_ref().unwrap();
     let cnrg = sim.fields.cons.nrg_field().unwrap();

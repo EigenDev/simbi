@@ -8,16 +8,16 @@
 // potential), the sign / contraction / boundedness lemmas by dense sampling of the actual f64 forms.
 //
 // -----------------------------------------------------------------------------
-// THEOREM 1 (conservative gravity).  g(x) = -grad phi(x), with
+// theorem 1 (conservative gravity).  g(x) = -grad phi(x), with
 //     phi(x)   = -M / r_eff,     r_eff = sqrt(|r|^2 + eps^2),   r = x - x_body.
-//   PROOF.  d/dx_j (1/r_eff) = -(1/2)(|r|^2+eps^2)^{-3/2} d/dx_j |r|^2, and d/dx_j |r|^2 = 2 r_j,
+//   proof.  d/dx_j (1/r_eff) = -(1/2)(|r|^2+eps^2)^{-3/2} d/dx_j |r|^2, and d/dx_j |r|^2 = 2 r_j,
 //   so d/dx_j (1/r_eff) = -r_j / r_eff^3.  hence
-//     -d phi/dx_j = M d/dx_j (1/r_eff) = -M r_j / r_eff^3 = g_j.   QED.
-//   COROLLARY.  curl g = -curl(grad phi) = 0: the work integral around any closed loop vanishes, so
+//     -d phi/dx_j = M d/dx_j (1/r_eff) = -M r_j / r_eff^3 = g_j.   qed.
+//   corollary.  curl g = -curl(grad phi) = 0: the work integral around any closed loop vanishes, so
 //   the energy the immersed body exchanges with the gas is bookkept by phi alone.  (mixed partials
 //   of the smooth phi commute — softening makes phi C^infinity everywhere, r = 0 included.)
 //
-// THEOREM 2 (drain is a contraction on the intensive state).  For rate >= 0, dt >= 0,
+// theorem 2 (drain is a contraction on the intensive state).  For rate >= 0, dt >= 0,
 //     f = exp(-rate dt)  in  (0, 1]   (mathematically),
 //   so U -> U f is positivity-preserving and non-expansive at every dt — the sink is
 //   unconditionally stable, free of any CFL restriction.
@@ -31,13 +31,13 @@
 //   that is the well-posedness guarantee, and it is why the exact-exponential drain
 //   retired the KMK04 min-gate: an operator that is a contraction by construction.
 //
-// THEOREM 3 (softening regularizes the singularity — bounded, lipschitz force).
+// theorem 3 (softening regularizes the singularity — bounded, lipschitz force).
 //     |g| = M |r| / (|r|^2 + eps^2)^{3/2}  <=  C M / eps^2,     C = 2 / (3 sqrt 3) ~ 0.3849,
 //   attained at |r| = eps / sqrt 2.  the bare 1/r^2 force diverges as r -> 0; the softened
 //   force has a finite maximum set by eps, so g is globally bounded and lipschitz — the softening
 //   is what makes the source well-posed at the body.
-//   PROOF.  maximize h(s) = s/(s^2+eps^2)^{3/2}.  h'(s) = (eps^2 - 2 s^2)/(s^2+eps^2)^{5/2} = 0 at
-//   s = eps/sqrt 2, where h = (eps/sqrt2)/((3 eps^2/2)^{3/2}) = 2/(3 sqrt 3 eps^2).   QED.
+//   proof.  maximize h(s) = s/(s^2+eps^2)^{3/2}.  h'(s) = (eps^2 - 2 s^2)/(s^2+eps^2)^{5/2} = 0 at
+//   s = eps/sqrt 2, where h = (eps/sqrt2)/((3 eps^2/2)^{3/2}) = 2/(3 sqrt 3 eps^2).   qed.
 // -----------------------------------------------------------------------------
 //
 // run: cargo test -p symbi-discretize --test ibm_wellposedness
@@ -49,7 +49,7 @@ use symbi_discretize::ibm::{
 };
 use symbi_ir::dual::Dual;
 
-// the analytic bound constant C = 2/(3 sqrt 3) from THEOREM 3.
+// the analytic bound constant C = 2/(3 sqrt 3) from theorem 3.
 fn bound_const() -> f64 {
     2.0 / (3.0 * 3.0_f64.sqrt())
 }
@@ -70,7 +70,7 @@ fn sweep<F: FnMut(f64, f64, f64, f64)>(mut f: F) {
     }
 }
 
-// THEOREM 1 — conservative gravity: g = -grad phi, checked by autodiff on the real potential.
+// theorem 1 — conservative gravity: g = -grad phi, checked by autodiff on the real potential.
 #[test]
 fn gravity_is_conservative_grad_of_potential() {
     // put the body off-origin so every coordinate stays nonzero, and spread r over the 3 axes.
@@ -105,7 +105,7 @@ fn gravity_is_conservative_grad_of_potential() {
             let phi = softened_potential(rvec, Dual::constant(mass), Dual::constant(soft));
             let dphi_dxj = phi.tangent; // exact d phi / d x_j
 
-            // THEOREM 1: g_j = -d phi/d x_j. autodiff vs the direct formula differ only by
+            // theorem 1: g_j = -d phi/d x_j. autodiff vs the direct formula differ only by
             // floating-point reassociation -> a tight relative tolerance.
             let scale = g[j].abs().max(dphi_dxj.abs()).max(1.0);
             assert!(
@@ -118,7 +118,7 @@ fn gravity_is_conservative_grad_of_potential() {
     });
 }
 
-// THEOREM 1 corollary — curl g = 0, checked directly by autodiff: d g_i/d x_k = d g_k/d x_i for all
+// theorem 1 corollary — curl g = 0, checked directly by autodiff: d g_i/d x_k = d g_k/d x_i for all
 // i, k (the symmetric hessian of phi), so every curl component vanishes.
 #[test]
 fn gravity_is_curl_free() {
@@ -150,7 +150,7 @@ fn gravity_is_curl_free() {
     });
 }
 
-// THEOREM 2 — the drain is a contraction: rate >= 0 for physical inputs, and f = exp(-rate dt) in
+// theorem 2 — the drain is a contraction: rate >= 0 for physical inputs, and f = exp(-rate dt) in
 // (0, 1] for every dt >= 0.
 #[test]
 fn drain_factor_is_a_contraction() {
@@ -168,7 +168,7 @@ fn drain_factor_is_a_contraction() {
                             rate <= sink.min(cs / min_w) + 1e-12,
                             "rate exceeds the mask cap"
                         );
-                        // THEOREM 2: den -> den f lands in [0, den] at every dt (the sink is
+                        // theorem 2: den -> den f lands in [0, den] at every dt (the sink is
                         // CFL-free) — nonnegative (positivity-preserving) and non-expansive.
                         for &dt in &[0.0_f64, 1e-6, 0.03, 5.0, 1e6] {
                             let f = drain_factor(rate, dt);
@@ -187,7 +187,7 @@ fn drain_factor_is_a_contraction() {
     }
 }
 
-// THEOREM 3 — softening bounds the force: |g| <= C M / eps^2, and the bound is tight (attained at
+// theorem 3 — softening bounds the force: |g| <= C M / eps^2, and the bound is tight (attained at
 // |r| = eps/sqrt2), so it is the exact supremum.
 #[test]
 fn softened_gravity_is_bounded_by_softening() {
@@ -216,7 +216,7 @@ fn softened_gravity_is_bounded_by_softening() {
     }
 }
 
-// THEOREM 5 — the compact field is conservative: g = -grad phi, by autodiff on the real potential,
+// theorem 5 — the compact field is conservative: g = -grad phi, by autodiff on the real potential,
 // sampled across the match radius, the transition itself included.
 #[test]
 fn compact_gravity_is_conservative_grad_of_potential() {
@@ -255,7 +255,7 @@ fn compact_gravity_is_conservative_grad_of_potential() {
     });
 }
 
-// THEOREM 6 — compact support. outside the match radius the field is the bare point mass, to the
+// theorem 6 — compact support. outside the match radius the field is the bare point mass, to the
 // last bit. a Plummer sphere departs from the point mass at every radius and every softening
 // length, so this property is what lets `h` be chosen for regularity near the body while a power
 // law measured outside it stays unbiased.
@@ -313,7 +313,7 @@ fn the_compact_field_is_exactly_newtonian_outside_the_match_radius() {
     }
 }
 
-// THEOREM 7 — the peak field is bounded by the match radius alone, at 1.242 mass/h^2 (attained at
+// theorem 7 — the peak field is bounded by the match radius alone, at 1.242 mass/h^2 (attained at
 // r = sqrt(5/9) h). resolution-independent, where a Plummer sphere accurate at `h` peaks as
 // 1/eps^2 and takes the timestep with it.
 #[test]

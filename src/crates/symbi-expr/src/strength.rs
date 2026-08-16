@@ -4,11 +4,11 @@
 // constant-power strength reduction on the expression DAG: `pow(x, c)` for a
 // small integer or half-integer constant `c` becomes a multiply / divide /
 // sqrt chain. a user config writing `r ** (-2.0)` otherwise lowers to a libm
-// `powf` call at EVERY cell of EVERY stage — ~50-100 cycles for what is
+// `powf` call at every cell of every stage — ~50-100 cycles for what is
 // algebraically two operations.
 //
-// runs on the loaded node array BEFORE either consumer (the f64 coordinate VM
-// and the IR bridge), so both evaluate the SAME reduced form and the
+// runs on the loaded node array before either consumer (the f64 coordinate VM
+// and the IR bridge), so both evaluate the same reduced form and the
 // kernel-vs-reference oracle stays exact. the reduced chain is not bit-equal
 // to libm `pow` (the exact product is at least as accurate), which is why the
 // reduction must sit at this single seam and not in one consumer.

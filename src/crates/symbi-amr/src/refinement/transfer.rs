@@ -4,7 +4,7 @@
 // the inter-level field-transfer driver: selects the
 // regions and dispatches the aot amr kernels (refine_restrict_{D}d /
 // refine_prolong_{order}_{D}d, built in symbi-discretize gv_refinement.rs) per field
-// component through `dispatch_fields_each` — each buffer resolves the ABSOLUTE
+// component through `dispatch_fields_each` — each buffer resolves the absolute
 // level-global thread coordinate against its own lo, so no index translation
 // appears here.
 //
@@ -104,24 +104,24 @@ pub fn prolong_tag(order: ProlongOrder) -> ProlongTag {
 /// slab per CoarseFine face. transverse extents include the allocated ghosts
 /// on sides that are themselves CoarseFine (prolongation owns those corners)
 /// and clip to the interior on physical sides (the physical ghost fill owns
-/// those). CF-CF corners appear in both axis slabs — the double write is the
+/// those). cf-cf corners appear in both axis slabs — the double write is the
 /// same value.
 pub fn cf_ghost_slabs<const D: usize>(
     allocated: &Domain<D>,
     interior: &Domain<D>,
     boundaries: &Boundaries<D>,
 ) -> Vec<Domain<D>> {
-    // POLICY: which ghosts come from the coarser level. `cf_region` is the
-    // interior grown out to `allocated` ONLY on coarse-fine sides — physical
+    // policy: which ghosts come from the coarser level. `cf_region` is the
+    // interior grown out to `allocated` only on coarse-fine sides — physical
     // boundary ghosts are filled by the bc kernel, so those sides
     // stay clamped to `interior`. the cells to prolong are then exactly
     // `cf_region \ interior`.
     //
-    // GEOMETRY: `guillotine_difference` (symbi-algebra) returns that set as the
+    // geometry: `guillotine_difference` (symbi-algebra) returns that set as the
     // minimal disjoint cover — `2*D` boxes, no overlap. this is union-equivalent
     // to overlapping per-face slabs (identical cell set; prolongation is a pure
     // function of (coarse state, fine coord), so the 2-3x edge/corner
-    // double-writes of an overlapping cover are redundant yet still correct) but writes each cell ONCE: the
+    // double-writes of an overlapping cover are redundant yet still correct) but writes each cell once: the
     // ~19% cell reduction on binary_disk, in the same `2*D` dispatches (not the
     // `3^D-1` of a maximal split, whose tiny corner boxes drown in launch cost).
     // the disjointness also makes the cover safe to fan out in one parallel pass.
@@ -177,7 +177,7 @@ pub fn prolong_prims<const D: usize, const DOF: usize, Mem: MemorySpace>(
     // component order: rho, vel[0..DOF], pre (when present).
     let has_pre = old.pre_field().is_some();
     let ncomp = 1 + DOF + has_pre as usize;
-    // multi-field BATCH: one dispatch (one rayon launch) over the whole prim set
+    // multi-field batch: one dispatch (one rayon launch) over the whole prim set
     // collapsing `ncomp` separate launches — the per-dispatch fork-join was the
     // dominant prolong cost. generated for the 3D hot path (ncomp 4 = isothermal,
     // 5 = adiabatic/rhd); anything else falls back to the single-field path.
@@ -296,7 +296,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> ProlongSweepScratch<D, 
     }
 }
 
-/// prolong the prim batch as THREE axis-split sweep passes over the lerped
+/// prolong the prim batch as three axis-split sweep passes over the lerped
 /// coarse scratch: interp along axis 0 into A (fine-x,
 /// coarse-yz), along axis 1 into B (fine-xy, coarse-z), along axis 2 into
 /// `dst` — bit-identical to the fused tensor-product kernel at ~1/17 the
@@ -384,7 +384,7 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
 /// prolong the prim batch through the hydrostatic-equilibrium decomposition:
 ///
 ///   encode  — the time-lerped coarse (rho, pre) over the stencil's parent region
-///             become departures from ONE `LocalEquilibrium` anchor per slab (the
+///             become departures from one `LocalEquilibrium` anchor per slab (the
 ///             coarse parent of the slab's center cell); velocities are lerped
 ///             unchanged.
 ///   prolong — the existing kernels, unchanged, act on (d_rho, vel.., d_pre).
@@ -393,8 +393,8 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
 ///             departure. velocities pass through untouched.
 ///
 /// on a coarse stencil lying on one isentrope every departure is identically zero,
-/// so the fine ghosts land exactly on the isentrope at ANY prolongation order and
-/// ANY limiter — the transfer's polynomial bias has nothing to act on. that is the
+/// so the fine ghosts land exactly on the isentrope at any prolongation order and
+/// any limiter — the transfer's polynomial bias has nothing to act on. that is the
 /// premise a balanced reconstruction needs its ghosts to satisfy; prolonging the
 /// raw state instead deposits an O(dx^2) one-signed entropy drain at the first
 /// uncovered coarse cell every subcycle. any on-column anchor reproduces the whole
@@ -406,7 +406,7 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
 ///
 /// both passes are baked kernels (`wb_cf_lerp_encode` / `wb_cf_decode`), so the
 /// same transfer runs on host and device memory. the anchor state is re-lerped
-/// IN-THREAD from the raw coarse snapshots in both kernels — the encode's output
+/// in-thread from the raw coarse snapshots in both kernels — the encode's output
 /// holds a zero departure at the anchor, and an in-place encode would race every
 /// thread's anchor read against the anchor thread's write. `scratch` is a
 /// caller-owned coarse buffer covering the parent stencil region (the lerp
@@ -539,10 +539,10 @@ fn push_body_slot_scalars<const D: usize>(
 }
 
 /// prolong the prim batch through a pre-lerped coarse scratch: one `field_lerp`
-/// pass time-interpolates the coarse snapshots ONCE PER COARSE CELL over the
+/// pass time-interpolates the coarse snapshots once per coarse cell over the
 /// parent region of `region` (+ stencil halo), then the single-snapshot prolong
 /// reads the lerped buffer — half the gather traffic of the fused time-pair
-/// kernel (which re-lerps the whole stencil neighborhood per FINE cell), with
+/// kernel (which re-lerps the whole stencil neighborhood per fine cell), with
 /// bit-identical output (the lerp expression and its consumption are unchanged;
 /// only where the intermediate lives moves). `lerp` is a caller-owned coarse
 /// scratch (allocated once — the step loop allocates nothing per call). falls
@@ -633,10 +633,10 @@ pub fn restrict_cons<const D: usize, const DOF: usize, Mem: MemorySpace>(
 }
 
 /// the coarse-fine halo slabs of the staggered face field bface[d] in absolute
-/// fine FACE indices: one single-row slab per CF transverse side (the +/-1
+/// fine face indices: one single-row slab per CF transverse side (the +/-1
 /// transverse halo the flux sweep's Gardiner-Stone override reads). spans the
 /// full owned face extent on the normal axis; the other transverse axis
-/// extends into ITS halo where that side is also CF (corner rows) and clips
+/// extends into its halo where that side is also CF (corner rows) and clips
 /// to the interior on physical sides (the scalar ghost fill owns those).
 pub fn bface_cf_halo_slabs<const D: usize>(
     interior: &Domain<D>,
@@ -713,7 +713,7 @@ pub fn prolong_face_field<const D: usize, Mem: MemorySpace>(
 }
 
 /// restrict the staggered face field bface[axis] (area-weighted average of the
-/// `2^(D-1)` coincident fine faces) over the coverage FACE domain — the
+/// `2^(D-1)` coincident fine faces) over the coverage face domain — the
 /// coverage extended by one face index on the normal axis, interface faces
 /// included.
 pub fn restrict_bface<const D: usize, Mem: MemorySpace>(
@@ -773,7 +773,7 @@ mod tests {
 
     // ─── reference construction ──────────────────────────────────────────────
     // the overlapping per-face slab construction. the disjoint `cf_ghost_slabs`
-    // must cover the EXACT same cell set — the union-equivalence contract that
+    // must cover the exact same cell set — the union-equivalence contract that
     // makes the disjoint form numerically indistinguishable.
     fn old_overlapping_slabs<const D: usize>(
         allocated: &Domain<D>,
@@ -826,7 +826,7 @@ mod tests {
         slabs.iter().flat_map(|d| d.iter()).collect()
     }
 
-    // LAW: a partition is disjoint — no two boxes share a cell.
+    // law: a partition is disjoint — no two boxes share a cell.
     fn assert_disjoint<const D: usize>(slabs: &[Domain<D>]) {
         for ii in 0..slabs.len() {
             for jj in (ii + 1)..slabs.len() {
@@ -838,7 +838,7 @@ mod tests {
         }
     }
 
-    // LAW: disjointness + union-equivalence to the reference construction, over a
+    // law: disjointness + union-equivalence to the reference construction, over a
     // sweep of boundary configurations (every subset of the 6 faces being CF).
     fn check_laws<const D: usize>(allocated: &Domain<D>, interior: &Domain<D>) {
         for mask in 0u32..(1 << (2 * D)) {
@@ -862,7 +862,7 @@ mod tests {
                 "mask {mask:#b}: boxes not disjoint by volume"
             );
 
-            // union-equivalence: the disjoint partition covers the SAME cells
+            // union-equivalence: the disjoint partition covers the same cells
             // the overlapping construction did.
             assert_eq!(
                 new_cells,
@@ -963,7 +963,7 @@ mod tests {
     #[test]
     fn cf_slabs_fully_embedded_is_the_disjoint_shell_and_strictly_smaller() {
         // every face coarse-fine: the shell is exactly allocated\interior,
-        // tiled by 3^D-1 disjoint boxes, and STRICTLY fewer cells than an
+        // tiled by 3^D-1 disjoint boxes, and strictly fewer cells than an
         // overlapping construction (the measured ~19% win on binary_disk).
         let ng = 3isize;
         let n = 24isize;
@@ -988,7 +988,7 @@ mod tests {
         let new_vol: usize = new.iter().map(|d| d.volume()).sum();
         assert_eq!(new_vol, allocated.volume() - interior.volume());
 
-        // the overlapping-slab decomposition sums to MORE cells than the disjoint shell —
+        // the overlapping-slab decomposition sums to more cells than the disjoint shell —
         // that gap is the redundant edge/corner prolongation the disjoint shell avoids.
         let old_vol: usize = old_overlapping_slabs(&allocated, &interior, &b)
             .iter()

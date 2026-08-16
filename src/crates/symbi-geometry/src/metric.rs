@@ -192,10 +192,10 @@ pub trait Metric<S: Scalar, const D: usize> {
     /// transform from cartesian to this coordinate system.
     fn from_cartesian(&self, x: Tensor<S, D>) -> Tensor<S, D>;
 
-    /// the frame morphism `Ortho -> Cart`: rotate a PHYSICAL (orthonormal-frame) vector into the
+    /// the frame morphism `Ortho -> Cart`: rotate a physical (orthonormal-frame) vector into the
     /// global Cartesian frame. default: identity (cartesian: Ortho == Cart); override for
     /// non-cartesian (the rotation by the orthonormal basis directions). typed so the review's
-    /// `vector_to_cartesian(lower(v))` is now a COMPILE ERROR — `lower` yields `Covariant`
+    /// `vector_to_cartesian(lower(v))` is now a compile error — `lower` yields `Covariant`
     /// (coordinate basis), this wants `Physical` (orthonormal).
     fn vector_to_cartesian(&self, x: Tensor<S, D>, v: Physical<S, D>) -> Embedded<S, D>
     where
@@ -205,7 +205,7 @@ pub trait Metric<S: Scalar, const D: usize> {
         Embedded::new(v.into_raw())
     }
 
-    /// the frame morphism `Cart -> Ortho`: rotate a Cartesian vector into this system's PHYSICAL
+    /// the frame morphism `Cart -> Ortho`: rotate a Cartesian vector into this system's physical
     /// (orthonormal) frame. default: identity (cartesian); override for non-cartesian.
     fn vector_from_cartesian(&self, x: Tensor<S, D>, v: Embedded<S, D>) -> Physical<S, D>
     where
@@ -215,7 +215,7 @@ pub trait Metric<S: Scalar, const D: usize> {
         Physical::new(v.into_raw())
     }
 
-    /// the SCALE-FACTOR BRIDGE `CoordUp -> Ortho`: `V_a = h_a v^a`. the one place where the metric
+    /// the scale-factor bridge `CoordUp -> Ortho`: `V_a = h_a v^a`. the one place where the metric
     /// enters the (otherwise flat) orthonormal frame the substrate computes in. requires
     /// [`DiagonalMetric`] (the orthonormal frame exists only for a diagonal metric; a non-diagonal
     /// metric replaces this with a tetrad).
@@ -316,7 +316,7 @@ pub trait Metric<S: Scalar, const D: usize> {
 /// use symbi_geometry::Metric;
 /// use symbi_algebra::Tensor;
 /// fn h<M: Metric<f64, 2>>(m: &M, x: Tensor<f64, 2>) -> Tensor<f64, 2> {
-///     m.scale_factors(x) // ERROR: the bound `M: DiagonalMetric<f64, 2>` is not satisfied
+///     m.scale_factors(x) // error: the bound `M: DiagonalMetric<f64, 2>` is not satisfied
 /// }
 /// ```
 pub trait DiagonalMetric<S: Scalar, const D: usize>: Metric<S, D> {}
@@ -548,7 +548,7 @@ impl<S: Scalar> Metric<S, 2> for Spherical {
     }
 
     /// 2D spherical inertial: centrifugal + coriolis, no pressure. regime-agnostic via the
-    /// CONSERVED momentum density `mom`: S = -Gamma(mom, v).
+    /// conserved momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
         &self,
         x: Tensor<S, 2>,
@@ -656,7 +656,7 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
     }
 
     /// 3D spherical inertial: centrifugal + coriolis, no pressure. regime-agnostic via the
-    /// CONSERVED momentum density `mom`: S = -Gamma(mom, v).
+    /// conserved momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
         &self,
         x: Tensor<S, 3>,
@@ -682,18 +682,18 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
 
 // ============================================================
 // schwarzschild metric (standard / schwarzschild coords): x = (r, theta, phi)
-//   the STATIC spherically-symmetric vacuum. f(r) = 1 - 2M/r.
+//   the static spherically-symmetric vacuum. f(r) = 1 - 2M/r.
 //   lapse  alpha    = sqrt(f),  shift beta = 0
-//   gamma_{ij}      = diag(1/f, r^2, r^2 sin^2 theta)   (DIAGONAL -> DiagonalMetric)
+//   gamma_{ij}      = diag(1/f, r^2, r^2 sin^2 theta)   (diagonal -> DiagonalMetric)
 //   sqrt(gamma)     = r^2 sin(theta) / sqrt(f)
 //   sqrt(-g)        = alpha sqrt(gamma) = r^2 sin(theta)   (the flat spherical area)
 //
-//   the SPATIAL coordinate geometry is spherical (geometry() = Spherical); the CURVATURE lives in
+//   the spatial coordinate geometry is spherical (geometry() = Spherical); the curvature lives in
 //   the radial stretch 1/f and the lapse. this coordinate gamma feeds densitization / lower-raise /
 //   the christoffel gravity source; the hydro's physical-frame metric stays
 //   identity in the orthonormal convention (the lapse enters the kernel via `gv_lapse_weight`).
 //
-//   reduced dims mirror Spherical: 1D (r) radial, 2D (r, theta). valid OUTSIDE the horizon r > 2M
+//   reduced dims mirror Spherical: 1D (r) radial, 2D (r, theta). valid outside the horizon r > 2M
 //   (f > 0); r <= 2M makes sqrt(f) imaginary — the coordinate singularity, physical.
 //
 //   the momentum source (geodesic gravity) is the connection of the full 4-metric; left at
@@ -702,7 +702,7 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
 
 // ============================================================
 // schwarzschild in ingoing kerr-schild (eddington-finkelstein) coords: x = (r, theta, phi)
-//   the same physical vacuum as `Schwarzschild`, in a horizon-penetrating chart. ingoing EF line
+//   the same physical vacuum as `Schwarzschild`, in a horizon-penetrating chart. ingoing ef line
 //   element (h(r) = 1 + 2M/r):
 //     ds^2 = -(1 - 2M/r) dt^2 + (4M/r) dt dr + h dr^2 + r^2 dOmega^2
 //   3+1 decomposition:
@@ -724,7 +724,7 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
 /// for the covariant storage.
 #[derive(Debug, Clone, Copy)]
 pub struct SchwarzschildKS<S> {
-    /// the geometric mass M (units G = c = 1); the horizon is at r = 2M. CARRIER-GENERIC over `S`
+    /// the geometric mass M (units G = c = 1); the horizon is at r = 2M. carrier-generic over `S`
     /// (an `f64` host value or a `Gv::scalar` in the trace), exactly like [`Schwarzschild::mass`].
     pub mass: S,
 }
@@ -965,7 +965,7 @@ impl<S: Scalar> DiagonalMetric<S, 3> for SchwarzschildKS<S> {}
 /// shift `beta^i` spread along all cartesian axes. impls `Metric` alone.
 #[derive(Debug, Clone, Copy)]
 pub struct SchwarzschildKSCartesian<S> {
-    /// the geometric mass M (units G = c = 1); the horizon is at r = 2M. CARRIER-GENERIC over `S`
+    /// the geometric mass M (units G = c = 1); the horizon is at r = 2M. carrier-generic over `S`
     /// (an `f64` host value or a `Gv::scalar` in the trace), exactly like [`SchwarzschildKS::mass`].
     pub mass: S,
 }
@@ -1027,7 +1027,7 @@ macro_rules! impl_schwarzschild_ks_cartesian {
                 let (_r, two_h, ll2) = self.radius_two_h(x);
                 S::ONE / (S::ONE + two_h * ll2).sqrt()
             }
-            // alpha^2 = 1/(1 + 2H |l|^2) in EXACT closed form (no sqrt round-trip; the GR CFL
+            // alpha^2 = 1/(1 + 2H |l|^2) in exact closed form (no sqrt round-trip; the GR CFL
             // depends on it). |l| = 1 outside the radius clamp, where this is 1/(1 + 2M/r).
             fn lapse_sq(&self, x: Tensor<S, $d>) -> S {
                 let (_r, two_h, ll2) = self.radius_two_h(x);
@@ -1050,7 +1050,7 @@ macro_rules! impl_schwarzschild_ks_cartesian {
                 })
             }
             // gamma^{ij} = delta_ij - (2H / (1 + 2H |l|^2)) l^i l^j (sherman-morrison on the
-            // rank-1 update; the ACTUAL |l|^2, so the inverse stays the true inverse of the
+            // rank-1 update; the actual |l|^2, so the inverse stays the true inverse of the
             // matrix above inside the radius clamp where |l| < 1).
             fn spatial_metric_inv(&self, x: Tensor<S, $d>) -> Matrix<S, $d> {
                 let (r, two_h, ll2) = self.radius_two_h(x);
@@ -1308,7 +1308,7 @@ pub struct KerrKSCylindrical<S> {
 impl<S: Scalar> KerrKSCylindrical<S> {
     /// (2H, covariant l, |l|^2_{g0}) at (R, phi, z); the kerr-schild radius is clamped
     /// at r >= M/2 (the same frozen-core treatment as every KS chart). |l|^2 is taken
-    /// with the INVERSE base metric (l contracted g0^{ij} l), the quantity the rank-1
+    /// with the inverse base metric (l contracted g0^{ij} l), the quantity the rank-1
     /// determinant and sherman-morrison forms need on a non-identity base.
     #[inline]
     fn ks_quantities(&self, x: Tensor<S, 3>) -> (S, [S; 3], S) {
@@ -1451,7 +1451,7 @@ pub struct SchwarzschildKSCylindrical<S> {
 }
 
 impl<S: Scalar> SchwarzschildKSCylindrical<S> {
-    /// (r, 2H) at (R, z): r = sqrt(R^2 + z^2) is the SPHERICAL (BH) radius built from cylindrical R and z,
+    /// (r, 2H) at (R, z): r = sqrt(R^2 + z^2) is the spherical (BH) radius built from cylindrical R and z,
     /// and 2H = 2M/r.
     #[inline]
     fn radius_two_h(&self, big_r: S, z: S) -> (S, S) {
@@ -1645,7 +1645,7 @@ impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
     }
 }
 
-/// spinning Kerr in INGOING KERR-SCHILD coordinates (horizon-penetrating, spherical (r, theta,
+/// spinning Kerr in ingoing kerr-schild coordinates (horizon-penetrating, spherical (r, theta,
 /// phi)). Sigma = r^2 + a^2 cos^2(theta), b = 2 M r / Sigma:
 ///
 ///   alpha      = 1 / sqrt(1 + b)
@@ -1830,7 +1830,7 @@ impl<S: Scalar> Metric<S, 2> for KerrKS<S> {
     fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
         x
     }
-    // the SCALAR pieces of the (r, theta) grid view — lapse, shift, and the proper volume
+    // the scalar pieces of the (r, theta) grid view — lapse, shift, and the proper volume
     // element (which includes the suppressed phi direction) — are exact; only the 2x2 spatial
     // matrix restriction is meaningless (the frame-dragging gamma_{r phi} row has no slot).
     fn lapse(&self, x: Tensor<S, 2>) -> S {
@@ -2049,7 +2049,7 @@ impl<S: Scalar> Metric<S, 3> for Cylindrical {
     }
 
     /// 3D cylindrical inertial: centrifugal + coriolis, no pressure. regime-agnostic via the
-    /// CONSERVED momentum density `mom`: S = -Gamma(mom, v).
+    /// conserved momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
         &self,
         x: Tensor<S, 3>,
@@ -2064,9 +2064,9 @@ impl<S: Scalar> Metric<S, 3> for Cylindrical {
     }
 }
 
-/// 2D cylindrical DISK in the (r, phi) plane — the accretion-disk reduction (z razor-thin /
-/// integrated out), DISTINCT from the (r, z) axisymmetric `impl Metric<S, 2> for Cylindrical`.
-/// component 1 (phi) is the RESOLVED swirl, so the inertial source is NONZERO (centrifugal +
+/// 2D cylindrical disk in the (r, phi) plane — the accretion-disk reduction (z razor-thin /
+/// integrated out), distinct from the (r, z) axisymmetric `impl Metric<S, 2> for Cylindrical`.
+/// component 1 (phi) is the resolved swirl, so the inertial source is nonzero (centrifugal +
 /// coriolis), unlike the (r, z) case. mirror of `Cylindrical`'s 3D (r, phi, z) impl with z dropped.
 ///   gamma_{ij} = diag(1, r^2),  sqrt(gamma) = r,  h = (1, r)
 #[derive(Debug, Clone, Copy)]
@@ -2136,7 +2136,7 @@ impl<S: Scalar> Metric<S, 2> for CylindricalRPhi {
         Tensor::new([(rho * vp * vp + p) / r, S::ZERO - rho * vr * vp / r])
     }
 
-    /// 2D (r, phi) disk inertial: centrifugal + coriolis, regime-agnostic via the CONSERVED
+    /// 2D (r, phi) disk inertial: centrifugal + coriolis, regime-agnostic via the conserved
     /// momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
         &self,
@@ -2894,7 +2894,7 @@ mod tests {
 
     #[test]
     fn test_cylindrical_rphi_2d_disk() {
-        // the (r, phi) disk: phi is the RESOLVED swirl, so the inertial is NONZERO — unlike the
+        // the (r, phi) disk: phi is the resolved swirl, so the inertial is nonzero — unlike the
         // (r, z) axisymmetric Cylindrical<2>, which is identically zero. this is the distinction
         // that makes the new type necessary for 2D disk sims.
         let r = 3.0;
@@ -2915,7 +2915,7 @@ mod tests {
         assert!(approx(full[0], inertial[0] + p / r));
         assert!(approx(full[1], inertial[1]));
 
-        // sqrt(gamma) = r — DISTINCT from the (r, z) reduction, which zeroes this exact swirl.
+        // sqrt(gamma) = r — distinct from the (r, z) reduction, which zeroes this exact swirl.
         assert!(approx(CylindricalRPhi.sqrt_det_gamma(x), r));
         let rz = Cylindrical.momentum_source_inertial(x, mom, vel);
         assert!(approx(rz[0], 0.0) && approx(rz[1], 0.0));
@@ -2946,7 +2946,7 @@ mod tests {
 
     #[test]
     fn kerr_metric_satisfies_the_adm_identities() {
-        // the spinning kerr-schild block against the KNOWN kerr line element: g_tt = b - 1,
+        // the spinning kerr-schild block against the known kerr line element: g_tt = b - 1,
         // g_{t phi} = -a b sin^2(theta), g_{r phi} = -a sin^2(theta)(1 + b), det gamma =
         // Sigma^2 sin^2(theta) (1 + b), and gamma * gamma^{-1} = identity — off the equator,
         // inside and outside the horizon, prograde and retrograde.
@@ -3098,7 +3098,7 @@ mod tests {
         // (r < 2M). the mass is a constant dual (differentiation is w.r.t. r; M is held fixed).
         use symbi_ir::dual::Dual;
         // dr balances central-diff truncation (O(dr^2)) against subtractive roundoff (O(eps/dr)):
-        // 1e-4 keeps both ~1e-8, so an FD-appropriate relative tolerance of 1e-5 is safe.
+        // 1e-4 keeps both ~1e-8, so an fd-appropriate relative tolerance of 1e-5 is safe.
         let dr = 1e-4;
         let close = |a: f64, b: f64| (a - b).abs() < 1e-5 * (1.0 + a.abs().max(b.abs()));
         let fd = |f: &dyn Fn(f64) -> f64, r: f64| (f(r + dr) - f(r - dr)) / (2.0 * dr);
@@ -3134,7 +3134,7 @@ mod tests {
 
     #[test]
     fn test_lapse_sq_is_exact_closed_form_not_sqrt_roundtrip() {
-        // alpha^2 must be the EXACT closed form 1/(1 + 2M/r); `lapse()` squared is
+        // alpha^2 must be the exact closed form 1/(1 + 2M/r); `lapse()` squared is
         // (1/sqrt(1 + 2M/r))^2, which rounds differently. the GR CFL radial factor depends on this
         // being bitwise the closed form, so the genericized wave-speed map bit-diffs against it.
         let ks = SchwarzschildKS { mass: 1.0_f64 };
@@ -3432,8 +3432,8 @@ mod tests {
 
     #[test]
     fn cartesian_ks_autodiff_derivs_match_finite_difference() {
-        // the geodesic source gets its metric derivatives from FORWARD-MODE AUTODIFF w.r.t. the
-        // CARTESIAN coordinates (one seeded axis per Dual pass). this is the load-bearing check that
+        // the geodesic source gets its metric derivatives from forward-mode autodiff w.r.t. the
+        // cartesian coordinates (one seeded axis per Dual pass). this is the load-bearing check that
         // the covariant source works in the cartesian chart: d_k gamma_ij and d_k (lapse, shift) via
         // Dual must equal a central finite difference of the metric's own components. off-axis so all
         // three coordinate derivatives are nontrivial, and inside the horizon (r < 2M) too.
@@ -3519,7 +3519,7 @@ mod tests {
                     );
                 }
             }
-            // beta_i = gamma_ij beta^j = 2H l_i. NOTE: l_i is the coordinate-basis covector, so the
+            // beta_i = gamma_ij beta^j = 2H l_i. note: l_i is the coordinate-basis covector, so the
             // azimuthal beta_phi = 0 (l_phi = 0) even though gamma_phi-phi = R^2.
             let beta_low: [f64; 3] =
                 std::array::from_fn(|ii| (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum());
@@ -3555,8 +3555,8 @@ mod tests {
     #[test]
     fn cylindrical_ks_det_g_flat_is_the_cylindrical_measure() {
         // alpha sqrt(gamma) = R = the flat cylindrical volume element (sqrt(-g) chart-independent);
-        // the densitization path relies on this. also checks the TWO-radii structure: the lapse
-        // depends on the SPHERICAL radius sqrt(R^2 + z^2), combining R and z.
+        // the densitization path relies on this. also checks the two-radii structure: the lapse
+        // depends on the spherical radius sqrt(R^2 + z^2), combining R and z.
         let bh = SchwarzschildKSCylindrical { mass: 0.8_f64 };
         let x = Tensor::new([3.0_f64, 1.1, 4.0]); // r_sph = 5
         assert!(approx(bh.lapse(x) * bh.volume_factor(x), 3.0)); // alpha sqrt(gamma) = R = 3
@@ -3684,7 +3684,7 @@ mod tests {
 
     #[test]
     fn cylindrical_ks_equatorial_disk_is_diagonal_and_correct() {
-        // the D = 2 (R, phi) EQUATORIAL DISK: on the equator r = R, so the kerr-schild off-diagonal
+        // the D = 2 (R, phi) equatorial disk: on the equator r = R, so the kerr-schild off-diagonal
         // vanishes -> gamma = diag(1 + 2M/R, R^2), alpha sqrt(gamma) = R, agreeing with the (R, z)
         // D = 3 view at z = 0. beta_R = gamma_RR beta^R = 2M/R (g_tR); beta_phi = 0.
         let close = |x: f64, y: f64| (x - y).abs() < 1e-12 * (1.0 + x.abs().max(y.abs()));

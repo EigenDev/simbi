@@ -122,7 +122,7 @@ fn meridional_orientation_puts_small_theta_at_the_top() {
 #[test]
 fn quadrant_wedge_gets_a_tight_square_box() {
     // theta in [0, pi/2] (the thermal-bomb quadrant): the display box must hug the
-    // wedge — x, y in [0, 1], a SQUARE slice with the pole up the left edge and the
+    // wedge — x, y in [0, 1], a square slice with the pole up the left edge and the
     // equator along the bottom — not float in a mostly-NaN full half-plane.
     let (nr, nt) = (64usize, 48usize);
     let sim = SimState::<Newtonian, 2, Spherical, IdealGas<f64>, CpuSpace, HostMemory>::build(
@@ -210,8 +210,8 @@ fn cylindrical_rphi_slice_is_a_disk_with_wraparound() {
 fn thin_shell_on_a_fine_grid_renders_as_a_continuous_arc() {
     // a 2-cell-thick bright shell on a 1024-cell radial grid: each display pixel
     // spans ~8 radial cells, so an undersampled inverse map aliases the shell into
-    // a DOTTED arc (some rays hit it, some miss). footprint-matched supersampling
-    // must catch the shell on EVERY ray: each display row crossing the shell's
+    // a dotted arc (some rays hit it, some miss). footprint-matched supersampling
+    // must catch the shell on every ray: each display row crossing the shell's
     // radius carries at least one shell-brightened pixel.
     let (nr, nt) = (1024usize, 256usize);
     let sim = SimState::<Newtonian, 2, Spherical, IdealGas<f64>, CpuSpace, HostMemory>::build(

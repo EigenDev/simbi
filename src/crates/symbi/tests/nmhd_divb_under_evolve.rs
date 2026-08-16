@@ -1,12 +1,12 @@
 // =============================================================================
 // nmhd_divb_under_evolve.rs
 //
-// validation of the Newtonian-MHD substrate: run the ENTIRE
+// validation of the Newtonian-MHD substrate: run the entire
 // production NMHD KernelSet (c2p -> ghost_fill -> flux per dir -> cfl -> snapshot ->
 // godunov_euler -> post_godunov[CT] -> rk2) for ~10 steps with periodic BCs and assert
 //   (a) the discrete staggered div(B) stays at machine zero (the CT stack — reused
 //       from RMHD — is correctly wired for the Newtonian regime), and
-//   (b) the state stays PHYSICAL (rho > 0, p > 0, finite) — the algebraic NMHD c2p
+//   (b) the state stays physical (rho > 0, p > 0, finite) — the algebraic NMHD c2p
 //       cannot fail the way RMHD's iterative inversion does.
 //
 // IC: Orszag-Tang vortex — analytically div-free B (Bx = -B0\cdot sin(2\pi y), By =
@@ -155,7 +155,7 @@ fn nmhd_orszag_tang_preserves_divb_and_stays_physical() {
         steps_seen,
     );
 
-    // PHYSICALITY: recover the primitives from the evolved conserved state via the
+    // physicality: recover the primitives from the evolved conserved state via the
     // algebraic NMHD c2p; every interior cell must be physical (rho>0, p>0, finite).
     let eos = IdealGas { gamma: GAMMA };
     let mhd = sim.fields.mhd.as_ref().expect("mhd");

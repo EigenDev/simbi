@@ -1,7 +1,7 @@
 // =============================================================================
 // extract.rs
 //
-// the IR-DAG -> symbolic-form extraction: recursively interpret a curl(-of-edge-
+// the ir-dag -> symbolic-form extraction: recursively interpret a curl(-of-edge-
 // emf) DAG node into a `Value` (integer-poly path) or `RValue` (rational-function
 // curvilinear path), then expose the entry points `LinForm::extract` /
 // `LinFormR::extract_rat`. depends on the coefficient ring (poly) and the
@@ -36,7 +36,7 @@ impl LinFormR {
     }
 }
 
-/// extract a field-FREE geometry node as a pure rational-function scalar. a geometry
+/// extract a field-free geometry node as a pure rational-function scalar. a geometry
 /// factor (face area, inverse volume, centroid) reads no fields, so `eval_rat`
 /// returns `RValue::Scalar`; this returns that RatFun. panics if the node turns out
 /// to be field-dependent (a `Lin`) — that would mean the wrong root was passed. the
@@ -110,17 +110,17 @@ fn eval_rat(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> RVa
         }
         Op::ElementWise(op, ins) => eval_rat_elementwise(graph, *op, ins, fields, scalars),
         // the spacing map's runtime `map_kind` cond (`map_kind > 0.5 ? log-face : uniform-face`) — a
-        // LEAF reparametrization of the cell/face position. the discrete curl telescopes to
-        // div(curl) = 0 INDEPENDENTLY of the face-position map: the two cells sharing a face use the
-        // SAME position (whichever arm), so the cancellation is structural. both arms
+        // leaf reparametrization of the cell/face position. the discrete curl telescopes to
+        // div(curl) = 0 independently of the face-position map: the two cells sharing a face use the
+        // same position (whichever arm), so the cancellation is structural. both arms
         // carry the identical curl stencil; extract the uniform (else) arm — the canonical
         // instantiation, and the exact DAG this proof verified before spacing became a runtime scalar.
         Op::IfElse { else_results, .. } => eval_rat(graph, else_results[0], fields, scalars),
-        // a metric COEFFICIENT guarded by a position predicate — the kerr-schild radius floor
+        // a metric coefficient guarded by a position predicate — the kerr-schild radius floor
         // selects |l|^2 = 1 outside it and |x|^2 / r_floor^2 within. like the spacing map above,
         // this is a leaf reparametrization the curl telescopes through: two cells sharing a face
-        // evaluate the predicate at the SAME position and so take the SAME arm, making
-        // div(curl) = 0 structural in either. extract the TRUE arm — the exterior, where the
+        // evaluate the predicate at the same position and so take the same arm, making
+        // div(curl) = 0 structural in either. extract the true arm — the exterior, where the
         // kerr-schild null condition holds and the DAG is the canonical unit-l instantiation.
         Op::Select(_cond, then_id, _else_id) => eval_rat(graph, *then_id, fields, scalars),
         other => panic!("proof(rat): unsupported op in curvilinear curl DAG: {other:?}"),
@@ -156,7 +156,7 @@ fn eval_rat_elementwise(
             RValue::Lin(lf) => RValue::Lin(lf.neg_form()),
         },
         ElementWiseOp::Abs => {
-            // the ONLY abs in a metric volume factor is |sin(theta)| (sqrt_det_gamma's angular
+            // the only abs in a metric volume factor is |sin(theta)| (sqrt_det_gamma's angular
             // measure); the CT domain theta in (0, pi) has sin >= 0, so |sin| = sin. the opaque
             // sin_th@ symbol already denotes that non-negative quantity, hence abs is the identity
             // here. (a field-linear argument would be a nonlinear |B|, which no curl weight contains.)
@@ -183,7 +183,7 @@ fn eval_rat_elementwise(
             combine_rat_div(a, b)
         }
         ElementWiseOp::Sin => {
-            // sin of an AFFINE theta argument x_lo_1 + (c_1 + m)*dx_1 -> the opaque
+            // sin of an affine theta argument x_lo_1 + (c_1 + m)*dx_1 -> the opaque
             // symbol sin_th@<2m>. resolving the offset m off the argument poly is
             // the heart of the curvilinear representation.
             let arg = match eval_rat(graph, ins[0], fields, scalars) {
@@ -195,7 +195,7 @@ fn eval_rat_elementwise(
             RValue::Scalar(RatFun::from_poly(sin_symbol(&arg)))
         }
         ElementWiseOp::Cos => {
-            // cos of the SAME affine theta argument -> the opaque cos_th@<2m> symbol,
+            // cos of the same affine theta argument -> the opaque cos_th@<2m> symbol,
             // keyed identically to sin so the same global theta-edge shares the symbol.
             // the spherical r-face solid angle Omega = (cos(tl) - cos(th)) dphi uses this.
             let arg = match eval_rat(graph, ins[0], fields, scalars) {
@@ -217,11 +217,11 @@ fn eval_rat_elementwise(
                     panic!("proof(rat): sqrt of a field-dependent argument — nonlinear")
                 }
             };
-            // an AFFINE radial argument keys by its radial offset (`sqrt_f@<2m>`, shift-remappable —
-            // the spherical Schwarzschild/Kerr-Schild path). a NON-affine one (nested sqrt(R^2+z^2),
+            // an affine radial argument keys by its radial offset (`sqrt_f@<2m>`, shift-remappable —
+            // the spherical Schwarzschild/Kerr-Schild path). a non-affine one (nested sqrt(R^2+z^2),
             // Kerr Sigma) keys by its exact canonical form: two occurrences of the same argument at
             // the same face share the atom, so the div-weight's `1/sqrt` cancels the curl's `sqrt`
-            // LOCALLY (num/den) with no shift-remap needed (the caller cancels the metric before any
+            // locally (num/den) with no shift-remap needed (the caller cancels the metric before any
             // divergence shift).
             let atom = match radial_offset_two_m(&arg) {
                 Some(two_m) => Poly::sqrt_f_sym(two_m),
@@ -231,9 +231,9 @@ fn eval_rat_elementwise(
         }
         ElementWiseOp::Max => {
             // max of two field-independent metric factors (the r >= M/2 singular-core
-            // clamp: max(sqrt(x^2 + ...), M/2)) -> ONE opaque atom keyed by BOTH
-            // operands' canonical forms. the div(curl) telescope is STRUCTURAL — each
-            // face weight must merely be THE SAME expression in the two adjacent cell
+            // clamp: max(sqrt(x^2 + ...), M/2)) -> one opaque atom keyed by both
+            // operands' canonical forms. the div(curl) telescope is structural — each
+            // face weight must merely be the same expression in the two adjacent cell
             // divergences — so the proof needs max only as a shared atom and can
             // ignore its semantics. atomization is conservative: it can only fail to prove a
             // true zero, never prove a false one. max of a field-dependent argument
@@ -260,8 +260,8 @@ fn eval_rat_elementwise(
 }
 
 /// turn an affine theta argument into the opaque `sin_th@<2m>` symbol. the
-/// argument is `x_lo_1 + (c_1 + m)*dx_1` for a CONSTANT offset `m` (in units of
-/// dx_1) — so the symbol depends only on the GLOBAL theta offset m (the shared-edge
+/// argument is `x_lo_1 + (c_1 + m)*dx_1` for a constant offset `m` (in units of
+/// dx_1) — so the symbol depends only on the global theta offset m (the shared-edge
 /// property the telescope relies on). m may be half-integral (the (face0+face1)/2
 /// cell-center average makes the argument a 1/2-denominator rational), so the key
 /// is 2m as an integer.
@@ -274,7 +274,7 @@ fn sin_symbol(arg: &RatFun) -> Poly {
     Poly::sin_sym(theta_offset_two_m(arg, "sin"))
 }
 
-/// cos of the SAME affine theta argument -> `cos_th@<2m>`, keyed identically to sin
+/// cos of the same affine theta argument -> `cos_th@<2m>`, keyed identically to sin
 /// (the global theta edge maps to the same half-unit offset 2m), so the spherical
 /// solid-angle cos(tl)-cos(th) shares the edge symbol across adjacent cells.
 fn cos_symbol(arg: &RatFun) -> Poly {
@@ -313,8 +313,8 @@ fn theta_offset_two_m(arg: &RatFun, trig: &str) -> i64 {
     twice / d
 }
 
-/// resolve the RADIAL half-unit offset 2m off a `sqrt(f(r))` argument. the argument is a radial
-/// metric factor f(r) = (r +- 2M)/r, whose DENOMINATOR is the radius r = x_lo_0 + (c_0 + m)*dx_0
+/// resolve the radial half-unit offset 2m off a `sqrt(f(r))` argument. the argument is a radial
+/// metric factor f(r) = (r +- 2M)/r, whose denominator is the radius r = x_lo_0 + (c_0 + m)*dx_0
 /// (affine in c_0; a cell center clears to a /2 denominator, so the coefficients scale by D). read
 /// the offset off the denominator exactly as `theta_offset_two_m` reads it off the trig argument:
 /// D is the x_lo_0 coefficient (1 for a face, 2 for a cleared /2 center), the c_0*dx_0 coefficient
@@ -322,8 +322,8 @@ fn theta_offset_two_m(arg: &RatFun, trig: &str) -> i64 {
 /// numerator, so the denominator is a clean radius — the offset is unambiguous.)
 fn radial_offset_two_m(arg: &RatFun) -> Option<i64> {
     // affine radial factor f(r) = (r +- 2M)/r with r = x_lo_0 + (c_0 + m) dx_0: the denominator is
-    // that AFFINE radius, so `x_lo_0` and `c_0*dx_0` both appear with the same nonzero coefficient D.
-    // a NON-affine argument (a nested sqrt(R^2+z^2), Kerr's Sigma, ...) has no linear x_lo_0 term in
+    // that affine radius, so `x_lo_0` and `c_0*dx_0` both appear with the same nonzero coefficient D.
+    // a non-affine argument (a nested sqrt(R^2+z^2), Kerr's Sigma, ...) has no linear x_lo_0 term in
     // its denominator -> D = 0 -> None (the caller falls back to a canonical-argument atom).
     let d = arg.den.coefficient_of(&["x_lo_0"]);
     if d == 0 {
@@ -341,7 +341,7 @@ fn radial_offset_two_m(arg: &RatFun) -> Option<i64> {
 }
 
 /// the integer value of a constant polynomial (the empty monomial's coefficient if
-/// it is the ONLY term), else None.
+/// it is the only term), else None.
 fn const_value(p: &Poly) -> Option<i64> {
     if p.terms.is_empty() {
         return Some(0);
@@ -420,7 +420,7 @@ impl LinForm {
 
 /// the result of interpreting a DAG subtree: either a pure scalar polynomial (no
 /// field reads — a coefficient) or a full linear form (field reads scaled by
-/// scalar polynomials). keeping the two apart lets `Mul` require exactly one PURE
+/// scalar polynomials). keeping the two apart lets `Mul` require exactly one pure
 /// side (a field*field product would be nonlinear and is rejected — the cartesian
 /// curl never produces one).
 enum Value {
@@ -430,7 +430,7 @@ enum Value {
 
 /// recursively interpret the DAG node as a `Value`. panics on any op the
 /// cartesian curl does not produce (field*field, transcendental on a field,
-/// etc.) — a curl that hit one would be NONLINEAR and the symbolic proof would
+/// etc.) — a curl that hit one would be nonlinear and the symbolic proof would
 /// not apply; loudly failing is correct.
 fn eval(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> Value {
     let node = graph.node(id);
@@ -443,7 +443,7 @@ fn eval(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> Value {
         Op::Const(ConstValue::F64(v)) => {
             // a float literal coefficient (0.5, 1.0, etc.). it must be integral
             // for the integer-polynomial representation; the cartesian curl only
-            // uses 0/1 literals (the curvilinear inv_pref path uses Gv::ONE only).
+            // uses 0/1 literals (the curvilinear inv_pref path uses Gv::one only).
             let r = v.round();
             assert!(
                 (v - r).abs() < 1e-12,
@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn sqrt_f_symbol_keys_radial_offset_and_shifts() {
-        // f(r) = (r +- 2M)/r; only the DENOMINATOR r = x_lo_0 + (c_0 + m) dx_0 carries the radial
+        // f(r) = (r +- 2M)/r; only the denominator r = x_lo_0 + (c_0 + m) dx_0 carries the radial
         // offset, so the numerator is immaterial. face offset 0 -> sqrt_f@0.
         let mut r0 = Poly::var("x_lo_0");
         r0.add_assign(&Poly::var("c_0").mul(&Poly::var("dx_0")));
@@ -634,13 +634,13 @@ mod tests {
             radial_offset_two_m(&RatFun::new(Poly::constant(1), rc)),
             Some(1)
         );
-        // a NON-affine denominator (an opaque atom, no linear x_lo_0) -> None (canonical-key path).
+        // a non-affine denominator (an opaque atom, no linear x_lo_0) -> None (canonical-key path).
         assert_eq!(
             radial_offset_two_m(&RatFun::new(Poly::constant(1), Poly::var("sqrt[inner]"))),
             None
         );
-        // the atom remaps under a RADIAL (axis 0) shift — sqrt_f@0 -> sqrt_f@2 (one cell = +2
-        // half-units) — and is UNTOUCHED by a theta (axis 1) shift, so it telescopes only radially.
+        // the atom remaps under a radial (axis 0) shift — sqrt_f@0 -> sqrt_f@2 (one cell = +2
+        // half-units) — and is untouched by a theta (axis 1) shift, so it telescopes only radially.
         let atom = RatFun::from_poly(Poly::sqrt_f_sym(0));
         assert!(
             atom.shift_coords(&[1, 0])

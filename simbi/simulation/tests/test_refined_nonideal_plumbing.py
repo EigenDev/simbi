@@ -1,16 +1,16 @@
 # =============================================================================
 # test_refined_nonideal_plumbing.py
 #
-# the config-to-fine-level plumbing gate for the non-ideal knobs on REFINED
-# runs. the hierarchy applies the viscous pass on the FINEST level only (the
+# the config-to-fine-level plumbing gate for the non-ideal knobs on refined
+# runs. the hierarchy applies the viscous pass on the finest level only (the
 # refined patch is where the resolved dynamics live), so a fine kernel set
-# built without the viscosity coefficient makes the ENTIRE refined run
+# built without the viscosity coefficient makes the entire refined run
 # silently inviscid — the base level never applies it, and the fine level has
 # nu = 0. the resistive edge EMF likewise rides each level's own CT, so a fine
 # set without eta runs the refined patch ideal. these gates pin the sharp
 # symptom: a refined run with the knob on must evolve differently from the
 # refined run with it off — a fine builder that drops the knob makes the two
-# BIT-IDENTICAL.
+# bit-identical.
 # =============================================================================
 import glob
 import os
@@ -96,7 +96,7 @@ def _run_viscous(nu: float) -> np.ndarray:
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     assert finals, f"refined viscous run (nu={nu}) crashed"
     with h5py.File(finals[0], "r") as h:
-        # the FINE level is where the viscous pass acts; read its velocity.
+        # the fine level is where the viscous pass acts; read its velocity.
         prims = h["level_1/partition_0/hydro/primitives"]
         return prims["v1"][...]
 

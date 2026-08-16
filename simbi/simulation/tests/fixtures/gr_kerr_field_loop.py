@@ -1,14 +1,14 @@
 # =============================================================================
 # gr_kerr_field_loop.py
 #
-# a poloidal field loop advected radially through a SPINNING kerr (r, theta)
+# a poloidal field loop advected radially through a spinning kerr (r, theta)
 # wedge (ingoing kerr-schild coords) — the GRMHD smoke/dispatch gate.
 # it is the gr_field_loop probe lifted to the kerr metric:
-# a weak passive loop, seeded div-free via the METRIC-WEIGHTED discrete curl of a
-# localized A_phi with the KERR sqrt(gamma) = Sigma sin(theta) sqrt(1 + 2Mr/Sigma)
+# a weak passive loop, seeded div-free via the metric-weighted discrete curl of a
+# localized A_phi with the kerr sqrt(gamma) = Sigma sin(theta) sqrt(1 + 2Mr/Sigma)
 # (so the w-weighted divergence is machine zero by construction on the kerr grid),
 # carried inward through a uniform inflow. it exercises the full spinning-kerr
-# RMHD kernel path — the tetrad HLLD on the NON-DIAGONAL gamma_{r phi}, the
+# RMHD kernel path — the tetrad HLLD on the non-diagonal gamma_{r phi}, the
 # moving-interface radial shift, the covariant EM-stress source with the swirl
 # (3-component) momentum, the metric-aware c2p, and the kerr-wired contact CT.
 #
@@ -110,7 +110,7 @@ class GrKerrFieldLoop(SimbiProblem):
     def compute_defaults(self) -> "GrKerrFieldLoop":
         self.resolution = (self.nr, self.npolar)
         theta_c = math.pi / 2.0
-        # domain OUTSIDE the outer horizon r_+ = M + sqrt(M^2 - a^2).
+        # domain outside the outer horizon r_+ = M + sqrt(M^2 - a^2).
         r_plus = self.schwarzschild_mass + math.sqrt(
             max(self.schwarzschild_mass**2 - self.kerr_spin**2, 0.0)
         )

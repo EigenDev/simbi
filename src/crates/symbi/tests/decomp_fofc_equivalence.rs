@@ -2,13 +2,13 @@
 // decomp_fofc_equivalence.rs
 //
 // the tiling-invariance contract for the first-order flux correction on the
-// decomposed path: an EXCISED cartesian kerr-schild box carrying a cold
+// decomposed path: an excised cartesian kerr-schild box carrying a cold
 // atmosphere in prescribed mach-17 radial infall trips the correction where the
 // supersonic stream meets the excision rim's vacuum-floor cells, while staying
-// recoverable — an unexcised clamped core is a PERSISTENT poison that (correctly)
+// recoverable — an unexcised clamped core is a persistent poison that (correctly)
 // fires the freeze-streak fail-loud instead. the per-tile redo — driven from
 // exchange-fresh stage-input halos with the failure reduction evaluated per tile —
-// reproduces the monolithic correction bit-for-bit, THROUGH genuine correction
+// reproduces the monolithic correction bit-for-bit, through genuine correction
 // events (the fallback counters assert non-vacuity).
 //
 // the infall is prescribed in the initial data, so the correction fires from the
@@ -64,11 +64,11 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
     .allocate()
     .expect("sim construction failed")
     // a cold atmosphere (p/rho = 1e-6, so cs = sqrt(gamma p / rho) = 1.155e-3) falling
-    // radially inward at 0.2c — mach 173. the infall is PRESCRIBED in the initial data, so
+    // radially inward at 0.2c — mach 173. the infall is prescribed in the initial data, so
     // the correction fires from the first step at a rate set by the initial data alone,
     // independent of how fast the well steepens the flow. the supersonic stream meets the excision rim's
     // vacuum-floor cells and the high-order c2p there leaves the physical set
-    // intermittently: the deliberate, RECOVERABLE FOFC trigger.
+    // intermittently: the deliberate, recoverable FOFC trigger.
     //
     // p/rho = 1e-6 is deliberately colder than the correction needs: the admissibility
     // rate of the geometric source is charged against the covariant energy, whose

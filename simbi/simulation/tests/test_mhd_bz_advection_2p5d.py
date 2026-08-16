@@ -3,8 +3,8 @@
 #
 # the 2.5D out-of-plane predictor gate. the transverse Bz on a 2D
 # cartesian grid has no staggered face (only Bx,By are CT) and is a cell-centered conserved
-# variable evolved SOLELY by the out-of-plane cell-B flux predictor. a force-balanced Bz(x,y)
-# advects rigidly at the flow velocity; after a HALF period the exact solution is the IC
+# variable evolved solely by the out-of-plane cell-B flux predictor. a force-balanced Bz(x,y)
+# advects rigidly at the flow velocity; after a half period the exact solution is the IC
 # shifted by half the domain in each direction. a working predictor lands on that shift; a
 # frozen predictor leaves Bz at the IC.
 # =============================================================================
@@ -54,5 +54,5 @@ def test_bz_advection_2p5d_out_of_plane_predictor() -> None:
 
     # the predictor advected Bz onto the analytic half-period shift (small truncation error).
     assert l1_shift < 1.5e-2, f"Bz did not advect to the analytic half-period shift: L1={l1_shift:.3e}"
-    # and it genuinely MOVED — a frozen out-of-plane predictor would leave Bz at the IC (L1~0).
+    # and it genuinely moved — a frozen out-of-plane predictor would leave Bz at the IC (L1~0).
     assert l1_ic > 0.2, f"Bz did not move from its IC (L1={l1_ic:.3e}) — the out-of-plane predictor is frozen"

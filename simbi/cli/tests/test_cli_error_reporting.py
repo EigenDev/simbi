@@ -45,7 +45,7 @@ def test_bare_run_parses_and_defers_to_the_executor(capsys):
 
 
 def test_real_flag_error_message_surfaces(capsys):
-    # a wrong-arity/invalid flag must show ITS message.
+    # a wrong-arity/invalid flag must show its message.
     with pytest.raises(SystemExit) as exc:
         _parse(["plot"])
     assert exc.value.code == 2

@@ -144,7 +144,7 @@ fn rhd_face_flux_1d_lowers_and_emits() {
         src.contains(".sqrt()"),
         "missing sqrt (Lorentz / wave speeds):\n{src}"
     );
-    // a face flux is a STENCIL — PLM reconstruction reads shifted neighbors.
+    // a face flux is a stencil — PLM reconstruction reads shifted neighbors.
     assert!(
         src.contains("] = ") && src.contains("buf"),
         "missing reads/writes:\n{src}"

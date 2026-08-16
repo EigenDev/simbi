@@ -1,11 +1,11 @@
 // =============================================================================
 // adiabatic_viscous_heating.rs
 //
-// the ADIABATIC viscous operator books the viscous HEATING in addition to the shear force. a decaying
+// the adiabatic viscous operator books the viscous heating in addition to the shear force. a decaying
 // shear layer v_x = V sin(k y) in a periodic box must, under viscosity:
-//   - CONSERVE total energy (the viscous energy flux div(tau.v) is conservative, like the ideal
+//   - conserve total energy (the viscous energy flux div(tau.v) is conservative, like the ideal
 //     godunov flux) -- Sum nrg is invariant to round-off,
-//   - DISSIPATE kinetic energy into INTERNAL energy (the gas heats up).
+//   - dissipate kinetic energy into internal energy (the gas heats up).
 // the inviscid twin (nu = 0) loses far less kinetic energy (only the scheme's numerical diffusion) and
 // heats far less, isolating the physical viscous dissipation from the numerical floor.
 // =============================================================================
@@ -103,7 +103,7 @@ fn adiabatic_viscosity_conserves_energy_and_heats() {
         "viscous run did not heat the gas: internal {ie0} -> {ie1}"
     );
 
-    // isolate the PHYSICAL dissipation from the scheme's numerical floor: the inviscid twin loses far
+    // isolate the physical dissipation from the scheme's numerical floor: the inviscid twin loses far
     // less kinetic energy and heats far less.
     let (_, ke0_i, _, ke1_i) = run(0.0);
     let visc_loss = ke0 - ke1;

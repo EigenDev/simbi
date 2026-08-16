@@ -1,9 +1,9 @@
 // =============================================================================
 // substrate_imhd_spherical.rs
 //
-// the curvilinear ISOTHERMAL-MHD wiring proof: IsothermalMhdSubstrateKernelSet3D on
-// a SPHERICAL shell through the real evolve() loop, exercising the iso _sph kernels
-// — imhd_godunov_stage_sph_3d (area-weighted divergence + the ISOTHERMAL geometric
+// the curvilinear isothermal-mhd wiring proof: IsothermalMhdSubstrateKernelSet3D on
+// a spherical shell through the real evolve() loop, exercising the iso _sph kernels
+// — imhd_godunov_stage_sph_3d (area-weighted divergence + the isothermal geometric
 // momentum source: cs^2*rho + 1/2|B|^2 pressure + inertial + lab-frame-B tension,
 // GeoSource::IsothermalMhd), imhd_wave_speed_map_sph_3d, and the shared spherical CT.
 //
@@ -106,7 +106,7 @@ fn full_substrate_spherical_imhd_smoke() {
         "coords must be Spherical"
     );
 
-    // geometry ACTIVE in the wave-speed map: the spherical CFL dt differs from Cartesian.
+    // geometry active in the wave-speed map: the spherical CFL dt differs from Cartesian.
     let mut cart = make_cart();
     set_ic(&mut cart);
     sub.c2p(&sph);
@@ -122,7 +122,7 @@ fn full_substrate_spherical_imhd_smoke() {
         "spherical and cartesian CFL dt identical ({dt_sph} vs {dt_cart}) — wave_speed_map_sph did not engage",
     );
 
-    // the full curvilinear evolve exercises imhd_godunov_stage_sph_3d (the ISOTHERMAL
+    // the full curvilinear evolve exercises imhd_godunov_stage_sph_3d (the isothermal
     // geometric source) + the spherical CT.
     evolve(&mut sph, &sub, T_FINAL).expect("spherical iso-MHD evolution failed");
 

@@ -2,7 +2,7 @@
 # test_cli_resolution_and_errors.py
 #
 # two contracts of the CLI input path:
-#  - a SHORT resolution input is padded to the field's declared tuple arity with
+#  - a short resolution input is padded to the field's declared tuple arity with
 #    singleton trailing axes, so a 2d run on a 3-component (mhd) config needs
 #    only `--resolution nx,ny`; the unused nz=1 is filled in.
 #  - bad cli input surfaces as a clean, traceback-free `ConfigError`: an invalid
@@ -35,7 +35,7 @@ def test_full_resolution_is_unchanged() -> None:
 
 
 def test_overlong_resolution_raises_config_error() -> None:
-    # too MANY axes is a real error — surfaced clean, with no padding or truncation.
+    # too many axes is a real error — surfaced clean, with no padding or truncation.
     with pytest.raises(ConfigError) as exc:
         OrszagTang.from_cli(["--resolution", "64,64,64,64"])
     assert "resolution" in str(exc.value)
@@ -47,12 +47,12 @@ def test_non_numeric_resolution_raises_config_error() -> None:
         OrszagTang.from_cli(["--resolution", "abc,64"])
     msg = str(exc.value)
     assert "resolution" in msg
-    # the whole model-input dict must NOT be echoed into the message.
+    # the whole model-input dict must not be echoed into the message.
     assert "cfl_number" not in msg
 
 
 def test_bad_enum_raises_config_error_with_choices() -> None:
-    # a bad enum value must surface as a ConfigError, never a raw KeyError('BOGUS').
+    # a bad enum value must surface as a ConfigError, never a raw KeyError('bogus').
     with pytest.raises(ConfigError) as exc:
         OrszagTang.from_cli(["--resolution", "64,64", "--solver", "bogus"])
     msg = str(exc.value)
@@ -75,5 +75,5 @@ class _VariadicRes(SimbiProblem):
 
 
 def test_variadic_tuple_field_has_no_fixed_arity() -> None:
-    # a `tuple[int, ...]` field must NOT be padded (arity is None).
+    # a `tuple[int, ...]` field must not be padded (arity is None).
     assert _VariadicRes._tuple_field_arity("resolution") is None

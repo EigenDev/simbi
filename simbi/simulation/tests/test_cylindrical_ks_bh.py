@@ -1,15 +1,15 @@
 # =============================================================================
 # test_cylindrical_ks_bh.py
 #
-# GRHD in the CYLINDRICAL kerr-schild chart — a schwarzschild BH on
-# a 2.5D axisymmetric (R, z) grid with the azimuthal v_phi DOF. the metric is EXACTLY
+# GRHD in the cylindrical kerr-schild chart — a schwarzschild BH on
+# a 2.5D axisymmetric (R, z) grid with the azimuthal v_phi DOF. the metric is exactly
 # symmetric under z -> -z (r = sqrt(R^2 + z^2) is even in z; gamma_Rz and beta^z flip
 # sign with the z-momentum), so a z-symmetric initial state on a grid symmetric about
-# z = 0 must evolve z-REFLECTION symmetrically to roundoff: rho / pre EVEN in z, v_z ODD,
-# v_R EVEN. this is the oracle-free correctness gate for the cylindrical chart (the analog
+# z = 0 must evolve z-reflection symmetrically to roundoff: rho / pre even in z, v_z odd,
+# v_R even. this is the oracle-free correctness gate for the cylindrical chart (the analog
 # of the cartesian x <-> y test), catching any coordinate-role or one-axis-shift bug — in
 # particular the densitization-lapse "R as the radius" trap (the lapse must use the
-# SPHERICAL r = sqrt(R^2 + z^2)). also a stability check: horizon-penetrating, no floors.
+# spherical r = sqrt(R^2 + z^2)). also a stability check: horizon-penetrating, no floors.
 # requires the built cpu_ext backend; skipped otherwise.
 # =============================================================================
 import glob
@@ -69,7 +69,7 @@ def test_cylindrical_ks_bh_runs_stably_and_is_z_reflection_symmetric() -> None:
     assert pre.min() > 0.0, f"pressure went non-positive: {pre.min():.3e}"
     assert rho.min() > 0.0, f"density went non-positive: {rho.min():.3e}"
 
-    # z -> -z reflection: rho / pre EVEN, v_z ODD, v_R EVEN — to roundoff over the run.
+    # z -> -z reflection: rho / pre even, v_z odd, v_R even — to roundoff over the run.
     def rel(a: np.ndarray, b: np.ndarray) -> float:
         return float(np.abs(a - b).max() / (np.abs(a).max() + 1e-300))
 

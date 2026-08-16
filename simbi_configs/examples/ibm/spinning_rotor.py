@@ -9,7 +9,7 @@
 # at a prescribed rate. an odd blade count keeps the wake free of the
 # grid-aligned four-lobe pattern a crossed-box rotor imprints.
 #
-# showcases: DYNAMIC rotation of an arbitrary-shape immersed wall (the mask +
+# showcases: dynamic rotation of an arbitrary-shape immersed wall (the mask +
 # its SDF-gradient normal track the spin), static CSG rotations composed under
 # the runtime spin, and the omega x r surface velocity that spins the fluid
 # up. the reaction torque is written to diagnostics.dat.

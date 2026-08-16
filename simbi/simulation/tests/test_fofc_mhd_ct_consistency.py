@@ -1,15 +1,15 @@
 # =============================================================================
 # test_fofc_mhd_ct_consistency.py
 #
-# a gas-only FOFC redo must leave the CELL B consistent with the (unchanged,
-# high-order) staggered FACE field, bcell == interp(bface). the shared face-based redo
+# a gas-only FOFC redo must leave the cell B consistent with the (unchanged,
+# high-order) staggered face field, bcell == interp(bface). the shared face-based redo
 # re-advances cell B from the first-order induction flux; without the constrained-
 # transport re-sync (restore the high-order induction flux for the cell-B predictor +
 # re-run bcell_from_bface) that cell B diverges from interp(bface) by 2.75e-2 on a
 # firing corrector, while the re-sync holds the two together to roundoff.
 #
 # flat cartesian makes interp(bface) the trivial 0.5 face-average (no metric weight),
-# so the invariant is checked externally. the run is SHORT (deterministic; fires FOFC
+# so the invariant is checked externally. the run is short (deterministic; fires FOFC
 # on a corrector without hitting the persistent-freeze halt).
 # =============================================================================
 import glob
@@ -70,7 +70,7 @@ def test_fofc_mhd_cell_face_consistency() -> None:
 
 
 def test_fofc_mhd_divb_preserved() -> None:
-    # the CT redo splices a SINGLE-VALUED edge EMF and curls it, so the discrete div(B) of the
+    # the CT redo splices a single-valued edge EMF and curls it, so the discrete div(B) of the
     # staggered face field stays at machine zero through the firing substages. gas D/S conservation
     # of the shared splice is asserted in the hydro FOFC conservation test; the MHD freeze tier
     # leaks a bounded amount of D/S, so conservation is not asserted here.

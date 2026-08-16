@@ -4,14 +4,14 @@
 // the spinning-kerr cylindrical chart (R, phi, z), full 3D: the rank-1
 // kerr-schild metric on the diag(1, R^2, 1) base with the frame dragging in
 // the covariant l_phi. two oracle-free gates on an annular grid whose inner
-// radius sits ABOVE the metric guard M/2 (no frozen clamped core on-grid, so
+// radius sits above the metric guard M/2 (no frozen clamped core on-grid, so
 // the chart equivalences hold to roundoff everywhere):
-// - a = 0 reduces the chart EXACTLY to the cylindrical kerr-schild one: the
+// - a = 0 reduces the chart exactly to the cylindrical kerr-schild one: the
 //   evolved states agree to accumulated roundoff (different expression trees,
 //   identical algebra);
 // - the frame dragging is real and antisymmetric in the spin: a phi-uniform
 //   (axisymmetric) state evolves identically in rho for +-a while the
-//   azimuthal velocity develops NONZERO and flips sign exactly with a.
+//   azimuthal velocity develops nonzero and flips sign exactly with a.
 // =============================================================================
 
 use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
@@ -93,7 +93,7 @@ fn zero_spin_reduces_to_the_kerr_schild_chart() {
     // non-vacuous: the infall genuinely developed.
     let dmax = den_k.iter().cloned().fold(0.0_f64, f64::max);
     assert!(dmax > 1.02, "no accretion developed (max den {dmax:.4})");
-    // no clamped core on-grid: the two expression trees agree to roundoff EVERYWHERE.
+    // no clamped core on-grid: the two expression trees agree to roundoff everywhere.
     let err = den_k
         .iter()
         .zip(&den_s)
@@ -122,7 +122,7 @@ fn frame_dragging_is_real_and_antisymmetric_in_the_spin() {
         }
     );
     // a phi-uniform state stays discretely axisymmetric, and the metric's only
-    // odd-in-a piece is the azimuthal l: rho evolves IDENTICALLY for +-a.
+    // odd-in-a piece is the azimuthal l: rho evolves identically for +-a.
     let derr = den_p
         .iter()
         .zip(&den_m)

@@ -81,7 +81,7 @@ fn mhd_builder_requires_faces_then_builds() {
     }
 }
 
-// the fallible config surface: a zero cell count is rejected BEFORE allocation.
+// the fallible config surface: a zero cell count is rejected before allocation.
 #[test]
 fn allocate_rejects_nonpositive_cells() {
     let r = Hydro::build(Newtonian, IdealGas { gamma: 1.4 }, Cartesian)

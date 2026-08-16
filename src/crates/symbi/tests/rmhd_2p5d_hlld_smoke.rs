@@ -6,7 +6,7 @@
 // rmhd_face_flux_hlld_2d_0"). this pins the 2D RMHD HLLD fluxes (cartesian; r-phi reuses them;
 // cyl r-z has its own "_cyl_rz" variants).
 //
-// hllc IS valid for rmhd (hllc-mhd = the contact-resolving hllc flux + the hll edge emf); hllc-lm
+// hllc is valid for rmhd (hllc-mhd = the contact-resolving hllc flux + the hll edge emf); hllc-lm
 // is rejected because the low-mach correction is a non-relativistic gas closure. the (solver,
 // regime) matrix is enforced at bind time in `with_solver` (`Solver::valid_for`). the hllc-lm case
 // below pins that rejection (a `SolverRegimeMismatch` config error).
@@ -61,9 +61,9 @@ fn rmhd_2p5d_runs_with_hlld() {
     }
 }
 
-// the bind-time solver matrix for rmhd: hllc is VALID (hllc-mhd = the contact-resolving hllc
+// the bind-time solver matrix for rmhd: hllc is valid (hllc-mhd = the contact-resolving hllc
 // flux + the hll edge emf — the contact carries no transverse field for B_x != 0, M&DZ p.11);
-// hllc-lm is REJECTED (the low-mach correction is a non-relativistic gas closure).
+// hllc-lm is rejected (the low-mach correction is a non-relativistic gas closure).
 #[test]
 fn rmhd_2p5d_solver_matrix() {
     let sim = build_sim();

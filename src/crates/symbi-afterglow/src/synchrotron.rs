@@ -108,9 +108,9 @@ pub fn delta_doppler(w: f64, beta_vec: [f64; 3], nhat: [f64; 3]) -> f64 {
     1.0 / (w * (1.0 - dot))
 }
 
-/// the DIMENSIONLESS broken-power-law synchrotron shape (Sari, Piran & Narayan 1998), normalized
+/// the dimensionless broken-power-law synchrotron shape (Sari, Piran & Narayan 1998), normalized
 /// to 1 at the spectral peak, at emitter-frame frequency `nu_prime` with breaks `nu_c`, `nu_m`.
-/// this is `powerlaw_flux` factored out of its units carrier, so a per-frequency EMISSIVITY (not
+/// this is `powerlaw_flux` factored out of its units carrier, so a per-frequency emissivity (not
 /// just a per-electron power) can be scaled by the same spectrum — the deterministic deposition
 /// reducer needs `emissivity * spectral_shape`. slow cooling is nu_c > nu_m.
 pub fn spectral_shape(p: f64, nu_prime: Frequency, nu_c: Frequency, nu_m: Frequency) -> f64 {
@@ -134,7 +134,7 @@ pub fn spectral_shape(p: f64, nu_prime: Frequency, nu_c: Frequency, nu_m: Freque
 
 /// the piecewise power-law decomposition of `spectral_shape` restricted to `[nu_lo, nu_hi]`:
 /// three segments split at the (band-clamped) spectral breaks, each an exact `A nu^a` with the
-/// SAME normalization as `spectral_shape` (amplitudes anchored at the true, unclamped breaks, so
+/// same normalization as `spectral_shape` (amplitudes anchored at the true, unclamped breaks, so
 /// `amps[k] * nu^exps[k] == spectral_shape(nu)` inside segment k). this is the single source of
 /// the spectrum's segment structure — the frequency sampler and the band-energy integral both
 /// consume it, so the monte-carlo packets and the deterministic deposit share one emissivity.
@@ -149,7 +149,7 @@ pub fn spectral_segments(p: f64, nu_lo: f64, nu_hi: f64, nu_c: f64, nu_m: f64) -
     let slow_cool = nu_c > nu_m;
     let mid = if slow_cool { -0.5 * (p - 1.0) } else { -0.5 };
     let exps = [1.0 / 3.0, mid, -0.5 * p];
-    // true break locations (b1 = spectral peak where the shape is 1). an INFINITE break (no
+    // true break locations (b1 = spectral peak where the shape is 1). an infinite break (no
     // cooling within the emitter time) leaves its segment empty; anchor its amplitude at the
     // band top so the algebra stays finite (the amplitude of an empty segment never enters).
     let b1 = nu_m.min(nu_c);
@@ -311,7 +311,7 @@ mod tests {
         assert!((slope - (-0.5)).abs() < 1e-6);
     }
 
-    // the segment decomposition reproduces spectral_shape POINTWISE in every segment and for
+    // the segment decomposition reproduces spectral_shape pointwise in every segment and for
     // both cooling orders — the single-source guarantee that lets the sampler and the band
     // integral share the deposit's spectrum.
     #[test]

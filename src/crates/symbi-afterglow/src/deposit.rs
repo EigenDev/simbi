@@ -1,7 +1,7 @@
 // =============================================================================
 // deposit.rs
 //
-// DETERMINISTIC sky-map deposition (Zrake, Xie & MacFadyen 2018): each fluid patch
+// deterministic sky-map deposition (Zrake, Xie & MacFadyen 2018): each fluid patch
 // deposits its lab-frame monochromatic synchrotron
 // emissivity directly onto the sky-plane pixel it projects to, gated by the
 // equal-arrival-time surface. no shot noise -> a continuous gradient at any resolution.
@@ -9,14 +9,14 @@
 // two paths share one emissivity (`emissivity x spectral_shape`, the same normalization
 // the monte-carlo packets carry):
 //   - `compute_skymap_deposit_spherical`: a 1d radial profile. the image is a function of
-//     projected radius alone, so the azimuth is integrated ANALYTICALLY (exact, fast).
+//     projected radius alone, so the azimuth is integrated analytically (exact, fast).
 //   - `compute_skymap_deposit`: the general spherical mesh (1/2/3d). each (r, theta) cell
-//     sweeps a ring in azimuth; the in-window azimuth ARCS are found analytically, sampled
-//     at pixel resolution, and the arrival window selects an EXACT radial sub-interval of
+//     sweeps a ring in azimuth; the in-window azimuth arcs are found analytically, sampled
+//     at pixel resolution, and the arrival window selects an exact radial sub-interval of
 //     the cell along each ray. an optional velocity field captures lateral spreading.
 //
 // flux bookkeeping (both paths): the image accumulates
-// `delta^doppler_power * j'_nu'(nu') * dV_lab * dt_lab` with the ANGLE-INTEGRATED comoving
+// `delta^doppler_power * j'_nu'(nu') * dV_lab * dt_lab` with the angle-integrated comoving
 // emissivity, so the caller reaches a flux density as F_nu = image.sum() / (4 pi d_L^2 dt_obs)
 // — the standard optically-thin L_nu / (4 pi d_L^2). doppler_power = 2 is the j_nu / nu^2
 // invariant for volume deposition.
@@ -33,7 +33,7 @@ use crate::units::Frequency;
 use crate::{HydroFields, Mesh, QuantScales, SimConditions};
 
 /// optional three-velocity components (units of c) on the mesh's coordinate axes, flat arrays
-/// indexed like the hydro fields. when absent the flow is taken RADIAL with speed derived from
+/// indexed like the hydro fields. when absent the flow is taken radial with speed derived from
 /// `gamma_beta` — sufficient for a spherical blast, wrong for a laterally-spreading jet.
 #[derive(Clone, Copy)]
 pub struct VelComponents<'a> {
@@ -89,7 +89,7 @@ fn cic_deposit(image: &mut [f64], n_pix: usize, half_width: f64, q1: f64, q2: f6
     }
 }
 
-/// per-cell angular edges from an ascending array of cell CENTERS: arithmetic midpoints
+/// per-cell angular edges from an ascending array of cell centers: arithmetic midpoints
 /// between neighbors, boundary cells extended by their adjacent half-gap.
 #[inline]
 fn angular_edges(centers: &[f64], j: usize) -> (f64, f64) {
@@ -111,7 +111,7 @@ fn angular_edges(centers: &[f64], j: usize) -> (f64, f64) {
     (lo, hi)
 }
 
-/// the interval of ray cosines c = cos(angle to the observer) for which SOME radius in
+/// the interval of ray cosines c = cos(angle to the observer) for which some radius in
 /// [r_lo, r_hi] projects into the arrival slab [proj_lo, proj_hi] (i.e. r*c lands in it).
 /// the admissible set is a single interval because both signed branches touch c = 0 when
 /// the slab straddles zero.
@@ -130,8 +130,8 @@ fn ray_cos_bounds(r_lo: f64, r_hi: f64, proj_lo: f64, proj_hi: f64) -> Option<(f
     (c_min <= c_max).then_some((c_min, c_max))
 }
 
-/// DETERMINISTIC sky-map deposition for a spherically-symmetric (1d radial) blast: the image
-/// is a function of the projected radius ALONE, so the 1d radial flux profile is accumulated
+/// deterministic sky-map deposition for a spherically-symmetric (1d radial) blast: the image
+/// is a function of the projected radius alone, so the 1d radial flux profile is accumulated
 /// (the azimuth integral is the analytic factor 2 pi) and rendered as
 /// image[x, y] = profile(sqrt(x^2 + y^2)). the EATS at t_obs selects, per shell radius r, the
 /// cone cos(alpha) = r.n / r inside the arrival window; that ring projects to rho = r sin(alpha).
@@ -190,9 +190,9 @@ pub fn compute_skymap_deposit_spherical(
 
         let (x1l, x1r) = radial_shell_edges(x1, ii);
         let cell = cell_state(cond, scales, fields, ii, p, t_prime_s);
-        // the ANGLE-INTEGRATED comoving emissivity [erg/(s Hz cm^3)]: the caller's flux
+        // the angle-integrated comoving emissivity [erg/(s Hz cm^3)]: the caller's flux
         // bookkeeping is F_nu = sum / (4 pi d_L^2 dt_obs), the standard optically-thin
-        // L_nu / (4 pi d_L^2) with L_nu = int emissivity dV — so the emissivity must NOT be
+        // L_nu / (4 pi d_L^2) with L_nu = int emissivity dV — so the emissivity must not be
         // reduced to per-steradian here (that double-counts the 4 pi and dims the flux by it).
         // lab transform j_nu = delta^2 j'_nu' (the j_nu / nu^2 invariant), applied below as
         // delta^doppler_power. this normalization is packet-exact: a delta = 1 emitter's
@@ -205,7 +205,7 @@ pub fn compute_skymap_deposit_spherical(
 
         // sample the band uniformly in the polar angle alpha, weighting each sample by its
         // dcos = sin(alpha) dalpha. uniform-in-cos samples space as drho = r (cos/sin) dcos on
-        // the sky plane — arbitrarily SPARSE near the image center (sin -> 0), leaving interior
+        // the sky plane — arbitrarily sparse near the image center (sin -> 0), leaving interior
         // radial bins unfilled. uniform alpha bounds the rho spacing by r dalpha; the step is
         // sized to ~half a radial bin so every bin the band crosses receives flux.
         let a_lo = cos_hi.clamp(-1.0, 1.0).acos();
@@ -220,14 +220,14 @@ pub fn compute_skymap_deposit_spherical(
             let delta = 1.0 / (cell.w * (1.0 - cell.beta * cos_a));
             let nu_prime = Frequency::new(frequency_hz * one_plus_z / delta);
             let j_nu = j_peak * spectral_shape(p, nu_prime, nu_c, nu_m);
-            // the FULL ring at rho = r sin_a: its azimuth integral is the factor 2 pi
+            // the full ring at rho = r sin_a: its azimuth integral is the factor 2 pi
             // (dV = shell_vol dcos dpsi, integrated over psi -> shell_vol dcos 2 pi).
             let ring_flux =
                 delta.powf(doppler_power) * j_nu * shell_vol * dcos * 2.0 * PI * emit_dt_s;
             let rho = r * sin_a;
             // cloud-in-cell deposit between the two adjacent radial bins (bin centers at
             // (k + 1/2) drho): rings land at discrete projected radii, and a nearest-bin
-            // deposit leaves interleaving bins EMPTY — holes orders of magnitude deep that a
+            // deposit leaves interleaving bins empty — holes orders of magnitude deep that a
             // post-hoc smoothing kernel smears anisotropically on the square pixel lattice.
             let s = (rho / half_width * n_rho as f64 - 0.5).max(0.0);
             let k = s as usize;
@@ -241,7 +241,7 @@ pub fn compute_skymap_deposit_spherical(
         }
     }
 
-    // render the radial profile as a CONTINUOUS surface-brightness density: each bin's flux
+    // render the radial profile as a continuous surface-brightness density: each bin's flux
     // over its exact annulus area pi (rho_hi^2 - rho_lo^2), linearly interpolated at the
     // pixel's radius. the pixel value depends on its radius alone, so the image is exactly
     // azimuthally symmetric and radially smooth. the image is then rescaled so image.sum()
@@ -281,15 +281,15 @@ pub fn compute_skymap_deposit_spherical(
     image
 }
 
-/// DETERMINISTIC sky-map deposition for a general SPHERICAL mesh (1/2/3d). a 1d radial
+/// deterministic sky-map deposition for a general spherical mesh (1/2/3d). a 1d radial
 /// profile routes to the exact analytic-azimuth path. for 2d (r, theta) axisymmetric and 3d
 /// (r, theta, phi) data, each cell's ring/sector is swept in azimuth:
-///   - the in-window azimuth ARCS are found analytically per (cell, theta) — the arrival
+///   - the in-window azimuth arcs are found analytically per (cell, theta) — the arrival
 ///     projection along a ring is A cos(phi - phi0) + B, so the EATS gate is a cosine band,
 ///   - each azimuth sample is stepped at ~half-pixel resolution on the sky,
-///   - the arrival window selects an EXACT radial sub-interval of the cell along each ray
+///   - the arrival window selects an exact radial sub-interval of the cell along each ray
 ///     (no radial sub-sampling needed),
-///   - the contribution delta^doppler_power * j'(nu') * dV_lab * dt_lab is CIC-deposited at
+///   - the contribution delta^doppler_power * j'(nu') * dV_lab * dt_lab is cic-deposited at
 ///     the projected position.
 ///
 /// `vels` supplies the three-velocity components for lateral spreading; absent, the flow is
@@ -367,7 +367,7 @@ pub fn compute_skymap_deposit(
 
     for kk in 0..nk {
         // azimuth domain: the cell's own extent for resolved-phi 3d data; the full circle for
-        // axisymmetric 2d data (each (r, theta) cell IS a ring).
+        // axisymmetric 2d data (each (r, theta) cell is a ring).
         let (cell_phi_lo, cell_phi_hi) = if resolved_phi {
             angular_edges(mesh.x3.unwrap(), kk)
         } else {
@@ -559,9 +559,9 @@ mod tests {
         (t_mid, 1.05 * r_max / c)
     }
 
-    // the deterministic deposit renders a CONTINUOUS radial brightness profile: rings land at
+    // the deterministic deposit renders a continuous radial brightness profile: rings land at
     // discrete projected radii, so a nearest-bin deposit leaves half-pixel radial bins with no
-    // flux — holes four decades deep that gaussian smoothing then smears ANISOTROPICALLY on the
+    // flux — holes four decades deep that gaussian smoothing then smears anisotropically on the
     // square lattice (a dark cross along the image axes). the gate: inside the lit disk, no
     // pixel may sit far below its radial neighbors.
     #[test]
@@ -621,7 +621,7 @@ mod tests {
         }
     }
 
-    // a 2d (r, theta) mesh with UNIFORM fields describes the same sphere as the 1d radial
+    // a 2d (r, theta) mesh with uniform fields describes the same sphere as the 1d radial
     // profile: the general deposit must reproduce the analytic-azimuth 1d image — total flux
     // and radial brightness profile alike. this is the dimensional-equivalence gate for the
     // generalization.
@@ -814,7 +814,7 @@ mod tests {
     }
 
     // a relativistic polar-cap jet is doppler-beamed along its axis: the on-axis observer
-    // integrates far more flux than one at 60 degrees, and providing the velocity FIELD with
+    // integrates far more flux than one at 60 degrees, and providing the velocity field with
     // a lateral (theta) component toward the observer brightens the image relative to the
     // same jet spreading away — the signature a radial-only treatment cannot produce.
     #[test]

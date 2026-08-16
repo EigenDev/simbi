@@ -83,10 +83,10 @@ fn minmod3<S: Scalar>(x: S, y: S, z: S) -> S {
     S::select(all_pos, mn, S::select(all_neg, mx, S::ZERO))
 }
 
-/// van leer harmonic slope limiter: `2 dl dr/(dl+dr)` for same-sign slopes, `0` otherwise. SMOOTH
+/// van leer harmonic slope limiter: `2 dl dr/(dl+dr)` for same-sign slopes, `0` otherwise. smooth
 /// (C^1, no kink at the origin — unlike minmod), so the reconstructed staggered field stays clean.
 /// the MHD-friendly limiter: keeps the L/R jumps small enough that the HLLD EMF's intermediate-field
-/// overshoot (-> anti-diffusive `d`, see the d-sign analysis) stays SUBCRITICAL without a clamp.
+/// overshoot (-> anti-diffusive `d`, see the d-sign analysis) stays subcritical without a clamp.
 /// selected in `plm_theta_gv` when `theta < 0`.
 fn van_leer<S: Scalar>(dl: S, dr: S) -> S {
     let prod = dl * dr;
@@ -96,7 +96,7 @@ fn van_leer<S: Scalar>(dl: S, dr: S) -> S {
     S::select(pos, two * prod / denom, S::ZERO)
 }
 
-/// PLM reconstruct with a runtime-selectable limiter, keyed on the SIGN of the `theta` scalar param:
+/// PLM reconstruct with a runtime-selectable limiter, keyed on the sign of the `theta` scalar param:
 ///   theta >= 0 -> theta-MC minmod: `minmod3((vc-vl)*theta, (vr-vl)*0.5, (vr-vc)*theta)`, theta in
 ///                 [1,2] tuning compression (1 == plain minmod, 0 == pcm/first-order).
 ///   theta <  0 -> van leer (the smooth, MHD-friendly limiter; the magnitude is unused).
@@ -117,9 +117,9 @@ fn plm_theta_gv(
     plm_theta_from_stencil(qm2, qm1, q0, qp1, theta)
 }
 
-/// the theta-MC / van-leer PLM face pair from FOUR stencil VALUES (offsets -2..+1 along the
+/// the theta-MC / van-leer PLM face pair from four stencil values (offsets -2..+1 along the
 /// sweep) — the limiter core of `plm_theta_gv`, exposed so a reconstruction can run in a
-/// TRANSFORMED variable (values built from several fields + analytic coefficients) rather
+/// transformed variable (values built from several fields + analytic coefficients) rather
 /// than a raw field.
 pub(crate) fn plm_theta_from_stencil(qm2: Gv, qm1: Gv, q0: Gv, qp1: Gv, theta: Gv) -> (Gv, Gv) {
     let half = Gv::from_f64(0.5);
@@ -205,9 +205,9 @@ fn ppm_cell_interfaces_ep<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S) -> (
     let u_l = (seven * (vm1 + vc) - (vm2 + vp1)) * twelve_inv;
     let u_r = (seven * (vc + vp1) - (vm1 + vp2)) * twelve_inv;
 
-    // an interface value OUTSIDE its neighbor-average range is legitimate on smooth
+    // an interface value outside its neighbor-average range is legitimate on smooth
     // data whenever the profile's extremum sits near the interface — the point value
-    // there exceeds both adjacent AVERAGES by O(h^2), so the plain neighbor-range
+    // there exceeds both adjacent averages by O(h^2), so the plain neighbor-range
     // clamp is itself a second-order error source. instead rebuild the out-of-range
     // value from `u = (a_j + a_{j+1})/2 - d2/6` with the second derivative limited
     // over the same-signed {interface-implied, left, right} candidates; mixed signs
@@ -232,7 +232,7 @@ fn ppm_cell_interfaces_ep<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S) -> (
     let u_l = iface(vm2, vm1, vc, vp1, u_l);
     let u_r = iface(vm1, vc, vp1, vp2, u_r);
 
-    // the two-clause extremum test: face-implied ((u_r - a)(a - u_l) <= 0) OR
+    // the two-clause extremum test: face-implied ((u_r - a)(a - u_l) <= 0) or
     // cell-average ((a_{j+1} - a)(a - a_{j-1}) <= 0) — the second clause catches the
     // cell whose extremum sits at an interface, where the face-implied product is
     // merely zero-adjacent and the cw84 overshoot arm would inject an O(h^2) face.
@@ -285,14 +285,14 @@ fn ppm_cell_interfaces_ep<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S) -> (
     )
 }
 
-/// PPM reconstruct: the monotonized-parabola face pair from SIX stencil VALUES (offsets
+/// PPM reconstruct: the monotonized-parabola face pair from six stencil values (offsets
 /// -3..+2 along the sweep). the face sits between cells -1 and 0: `left` is cell -1's
 /// corrected right-interface value, `right` is cell 0's corrected left-interface value.
-/// method-of-lines form — the parabola supplies face STATES for the riemann solver
+/// method-of-lines form — the parabola supplies face states for the riemann solver
 /// under an ssp-rk update; characteristic tracing belongs to the lagrangian-remap
 /// formulation and has no role here. values in, face pair out, so a reconstruction can
 /// run in a transformed variable exactly as `plm_theta_from_stencil` does. evolution
-/// uses the EXTREMUM-PRESERVING monotonization; the coarse-fine prolongation keeps the
+/// uses the extremum-preserving monotonization; the coarse-fine prolongation keeps the
 /// flatten-at-extremum form (`ppm_cell_interfaces`), whose conservative sub-cell
 /// averages are the safer transfer.
 pub(crate) fn ppm_from_stencil(qm3: Gv, qm2: Gv, qm1: Gv, q0: Gv, qp1: Gv, qp2: Gv) -> (Gv, Gv) {
@@ -345,10 +345,10 @@ pub(crate) fn recon_gv(
 }
 
 // =============================================================================
-// the lattice-map GHOST FILL in Gv — the boundary pullback: read the
-// primitives at the per-axis integer SOURCE coord (periodic shift / reflect pivot / outflow
+// the lattice-map ghost fill in Gv — the boundary pullback: read the
+// primitives at the per-axis integer source coord (periodic shift / reflect pivot / outflow
 // clamp on a runtime `map_type`), write at the cell (in place), with the grade-1 jacobian
-// `vel_sign` flip on the velocity (and B for RMHD). the source coord is PURE INTEGER (the
+// `vel_sign` flip on the velocity (and B for RMHD). the source coord is pure integer (the
 // `_coord_N` + the I32 `map_type`/`arg` params), so the read is an ordinary multi-axis
 // `load_at` — no gather, no float->int cast. the gv multi-axis stencil cap (the integer
 // `field_at`) that ghost + CT share, mirroring `pullback::{source_axis, iso_ghost_fill}`.
@@ -795,7 +795,7 @@ mod tests {
     fn rmhd_c2p_traces_the_real_bracketed_physics_to_a_kernel() {
         // the last + hardest c2p: symbi-hydro's `rmhd_recover` (KKC false-position) at
         // S=Gv yields a dispatchable kernel — 8 conserved reads + gamma, the 4 prim writes,
-        // and the bracketed solve as a MULTI-accumulator IterateInline (the false-position's
+        // and the bracketed solve as a multi-accumulator IterateInline (the false-position's
         // 6-state bracket). proves iterate_vec carries the carrier-generic RMHD c2p.
         let (k, writes) = rmhd_c2p_gv(100);
         assert_eq!(
@@ -845,7 +845,7 @@ mod tests {
 
     #[test]
     fn adiabatic_flux_traces_recon_plus_hlle_to_a_kernel() {
-        // the first gv FLUX: PLM reconstruction (a stencil -> LoadAt) composed with the
+        // the first gv flux: PLM reconstruction (a stencil -> LoadAt) composed with the
         // carrier-generic riemann::hlle (-> Select branches). proves Gv::field_shifted +
         // symbi-hydro's hlle build a dispatchable face-flux kernel — no rhd_side-style
         // hand-written per-component U/F. manifest + writes match the substrate hlle_flux.
@@ -935,8 +935,8 @@ mod tests {
     #[test]
     fn iso_flux_traces_the_newtonian_hlle_minus_energy() {
         // the iso flux is the newtonian flux at gamma->1 (sound speed sqrt(p/rho) from the
-        // reconstructed prim.pre = cs^2(x)*rho — locally isothermal) MINUS the energy flux.
-        // so it reconstructs prim.pre and writes only den + mom. it is gamma-INDEPENDENT (the
+        // reconstructed prim.pre = cs^2(x)*rho — locally isothermal) minus the energy flux.
+        // so it reconstructs prim.pre and writes only den + mom. it is gamma-independent (the
         // sound speed comes from the reconstructed pressure), so the only scalar is
         // the PLM limiter `theta`.
         let (k, writes) = iso_flux_gv::<1>(0);
@@ -979,7 +979,7 @@ mod tests {
     #[test]
     fn rmhd_flux_traces_the_mhd_hlle_to_a_kernel() {
         // RMHD flux: theta-MC PLM (the free-theta limiter) over rho/vel(3)/pre/mag(3),
-        // composed with riemann::hlle_with_speeds at the Rmhd regime. the flux READS the
+        // composed with riemann::hlle_with_speeds at the Rmhd regime. the flux reads the
         // per-cell quartic wave_speed_l/r (ws_l/ws_r, bound after the 8 prim) and forms the
         // davis fan. 8 conserved fluxes (D, S_k, tau, B_k).
         let (k, writes) = rmhd_flux_gv(1, 0, 0);
@@ -1018,7 +1018,7 @@ mod tests {
             "graph errors: {:?}",
             k.graph.errors()
         );
-        // the quartic's resolvent-cubic transcendentals are ABSENT from the flux — they live
+        // the quartic's resolvent-cubic transcendentals are absent from the flux — they live
         // only in rmhd_wave_speeds_cell_gv, computed once per cell.
         use symbi_ir::graph::ElementWiseOp as E;
         let has_transcendental = (0..k.graph.len()).any(|i| {
@@ -1219,8 +1219,8 @@ mod tests {
             out_data[0]
         }
 
-        // converges within the count: keep-OLD freezes at the last pre-threshold value
-        // (4: at prev=4, cur=5 trips `cur >= 5`, so the OLD 4 is kept). the traced loop
+        // converges within the count: keep-old freezes at the last pre-threshold value
+        // (4: at prev=4, cur=5 trips `cur >= 5`, so the old 4 is kept). the traced loop
         // must freeze there at 4, short of the full count=20.
         let host = ramp::<f64>(0.0, 20, 5.0);
         let gv = run_gv(20, 5.0, 0.0);
@@ -1387,7 +1387,7 @@ mod tests {
             )
         }
 
-        // TRACE STRUCTURE: two Op::Proj over one Op::IfElse with 2 results.
+        // trace structure: two Op::Proj over one Op::IfElse with 2 results.
         begin_trace();
         let xp = Gv::param("x");
         let out = pick2::<Gv>(xp);
@@ -1412,9 +1412,9 @@ mod tests {
             }
         }
 
-        // CARRIER EQUIVALENCE + shared-arm: run pick2::<Gv> (both outputs)
+        // carrier equivalence + shared-arm: run pick2::<Gv> (both outputs)
         // via the CPU interp, compare bit-for-bit to pick2::<f64> on both
-        // arms; assert the emitted source computes acosh exactly ONCE.
+        // arms; assert the emitted source computes acosh exactly once.
         fn run_gv(x: f64) -> [f64; 2] {
             begin_trace();
             let xf = Gv::field("x", "x");
@@ -2021,7 +2021,7 @@ mod tests {
     }
 
     /// the extremum-preserving interface pair at S = f64 on smooth data: fed exact cell
-    /// AVERAGES of sin(2 pi x), the corrected interfaces must converge to the profile's
+    /// averages of sin(2 pi x), the corrected interfaces must converge to the profile's
     /// interface point values at 4th order (the unlimited stencil's order), i.e. halving
     /// h cuts the error ~16x. a limiter arm that engages spuriously on smooth data (or a
     /// mis-centered stencil) shows up as a collapsed ratio here, independent of any

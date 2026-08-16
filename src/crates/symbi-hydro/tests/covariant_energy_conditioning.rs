@@ -10,7 +10,7 @@
 // the surviving relative precision is roughly eps |ehat| / (alpha tau) — the
 // colder the gas at fixed lapse, the fewer digits survive.
 //
-// these are DISCRIMINATORS, not tuning knobs: they measure the conversion pair
+// these are discriminators, not tuning knobs: they measure the conversion pair
 // in isolation, with no grid, no flux, and no time integration, so a failure
 // here is a conditioning fact about the variable, and a pass here proves any
 // run-level error lives in the discretization instead.
@@ -40,7 +40,7 @@ fn ks_regime(r: f64) -> RhdGr<f64, 1> {
         metric,
         alpha: 1.0 / (1.0 + a2).sqrt(),
         shift: Tensor::new([2.0 / (r + 2.0)]),
-        // the FULL spherical measure r^2 sin(theta) sqrt(gamma_rr) at the equator: the round trip
+        // the full spherical measure r^2 sin(theta) sqrt(gamma_rr) at the equator: the round trip
         // measured here is the one the code performs, densitization multiply and divide included.
         sqrt_gamma: r * r * grr.sqrt(),
     }
@@ -91,7 +91,7 @@ fn the_round_trip_degrades_as_the_gas_gets_cold() {
 #[test]
 fn warm_gas_round_trips_to_roundoff_on_every_chart_depth() {
     // at the pressures a warm torus actually carries, the tau <-> E_hat conversion pair is exact
-    // to roundoff, which separates a DISCRETIZATION defect from a conditioning limit of the
+    // to roundoff, which separates a discretization defect from a conditioning limit of the
     // energy variable.
     for &r in &[3.0_f64, 4.0, 6.0, 10.0, 30.0] {
         for &pre in &[1.0e-1_f64, 1.0e-2, 1.0e-3] {
@@ -107,7 +107,7 @@ fn warm_gas_round_trips_to_roundoff_on_every_chart_depth() {
     }
 }
 
-/// the same round trip on a FLAT block (unit lapse, zero shift, identity gamma),
+/// the same round trip on a flat block (unit lapse, zero shift, identity gamma),
 /// where `ehat` reduces to `tau` and no binding term is ever subtracted.
 fn flat_round_trip_pressure_error(rho: f64, pre: f64, vel: f64) -> f64 {
     let eos = IdealGas { gamma: GAMMA };
@@ -131,7 +131,7 @@ fn flat_round_trip_pressure_error(rho: f64, pre: f64, vel: f64) -> f64 {
 fn the_cold_gas_error_floor_is_the_solver_not_the_binding_term() {
     // if the cold-gas error came from cancelling the binding term (alpha - 1) D
     // against alpha tau, it would grow as the lapse drops. it does not: the floor is
-    // the SAME deep in the well, far outside it, and on a flat block that subtracts
+    // the same deep in the well, far outside it, and on a flat block that subtracts
     // no binding term at all. the floor is therefore the recovery newton's own
     // convergence tolerance on a vanishing pressure — a property the covariant
     // energy variable inherits rather than causes.

@@ -1,14 +1,14 @@
 # =============================================================================
 # test_softening_kind_wire.py
 #
-# the softening-FAMILY wire: a config declaring `softening_kind="compact"` must reach the backend
+# the softening-family wire: a config declaring `softening_kind="compact"` must reach the backend
 # as the `gravitational.softening_kind` key the rust body parser reads. the parser resolves the
 # family with `sub_str(body, "gravitational", "softening_kind", "plummer")`, so a key that never
 # arrives is indistinguishable from one that says "plummer" -- the run proceeds silently on the
 # wrong gravitational field.
 #
 # the two families are not small perturbations of each other. plummer is an extended profile whose
-# field sits below newtonian at EVERY radius (0.354 of it at r = h, reaching 0.99 only past r = 5h),
+# field sits below newtonian at every radius (0.354 of it at r = h, reaching 0.99 only past r = 5h),
 # so a length chosen to keep the field finite near a sink biases gravity across the whole domain.
 # compact truncates the source at h: outside it the field is the bare point mass exactly. a
 # measurement that fits a power law in radius therefore reads a different exponent depending on

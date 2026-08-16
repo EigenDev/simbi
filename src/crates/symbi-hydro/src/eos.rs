@@ -22,7 +22,7 @@ pub trait Eos<S: Scalar>: Copy {
     /// adiabatic sound speed: a = sqrt(dp/drho|_s)
     fn sound_speed(&self, rho: S, pre: S) -> S;
 
-    /// adiabatic sound speed SQUARED: a^2 = dp/drho|_s. the default squares
+    /// adiabatic sound speed squared: a^2 = dp/drho|_s. the default squares
     /// `sound_speed`, but EOS impls override to skip the sqrt-then-square — the
     /// relativistic c2p Newton + wave speeds need cs^2, never cs, and a stray
     /// `sqrt(x).powi(2)` is a redundant transcendental per cell (and per Newton
@@ -68,7 +68,7 @@ pub trait Eos<S: Scalar>: Copy {
     }
 
     /// the scalar a substrate `KernelSet` constructor takes — gamma for an ideal-gas regime,
-    /// the sound speed `cs` for an isothermal one. DISTINCT from `gamma_for_ops` (which returns
+    /// the sound speed `cs` for an isothermal one. distinct from `gamma_for_ops` (which returns
     /// cs^2 for isothermal — the in-kernel form): the constructor wants `cs` itself. used by
     /// `SimState::substrate()` to build the matched KernelSet from the sim's EOS.
     fn substrate_param(&self) -> f64 {
@@ -182,7 +182,7 @@ impl<S: Scalar> Eos<S> for Isothermal<S> {
 /// the form saturates the taub inequality as an identity, `(h - theta)(h - 4 theta) = 1`
 /// exactly, and inverts in closed form: `e = h - 1 - theta` gives
 /// `p = rho e (e + 2) / (3 (e + 1))`, so the cons->prim newton needs no inner
-/// root-find. `sound_speed_sq` returns the NEWTONIAN-FORM value
+/// root-find. `sound_speed_sq` returns the newtonian-form value
 /// `theta (5h - 8 theta) / (3 (h - theta))` — the quantity whose division by `h`
 /// in `rhd::sound_speed_sq` yields the exact relativistic cs^2 of this gas
 /// (1/3 in the hot limit, (5/3) theta cold). relativistic regimes only: the
@@ -230,7 +230,7 @@ impl<S: Scalar> Eos<S> for TaubMathews {
         0.0
     }
 
-    /// the COLD-limit index. the effective adiabatic index of this gas is set by the
+    /// the cold-limit index. the effective adiabatic index of this gas is set by the
     /// temperature — it walks from 5/3 at theta = p/rho -> 0 to 4/3 at theta -> infinity —
     /// so no constant describes it. the cold end is what the single-number reporting slot
     /// (the checkpoint's `gamma` attribute, which post-processing divides by `gamma - 1`)
@@ -242,11 +242,11 @@ impl<S: Scalar> Eos<S> for TaubMathews {
 
 /// a closure selected from a value rather than a type — the kernel builders pick
 /// gamma-law or taub-mathews from a bake-time tag, and a single generic call site
-/// (the traced physics) receives ONE concrete `Eos` impl. the match resolves when
+/// (the traced physics) receives one concrete `Eos` impl. the match resolves when
 /// each method runs, which for a traced carrier is trace time: the emitted graph
 /// carries only the selected closure's operations, never a runtime branch.
 ///
-/// on a concrete scalar (`f64`) the same type is the HOST-side closure a `SimState`
+/// on a concrete scalar (`f64`) the same type is the host-side closure a `SimState`
 /// carries, and it must name the same gas as the compiled kernels. the two are read at
 /// different moments and cannot be allowed to disagree: seeding converts the initial
 /// primitives to conserved variables through the state's EOS, while every subsequent
@@ -262,7 +262,7 @@ pub enum EosSelect<S: Scalar> {
 
 impl<S: Scalar> Eos<S> for EosSelect<S> {
     // every method is delegated explicitly, including the ones the trait defaults: a default
-    // left in place here would evaluate the gamma-law form for BOTH arms.
+    // left in place here would evaluate the gamma-law form for both arms.
     #[inline]
     fn sound_speed(&self, rho: S, pre: S) -> S {
         match self {
@@ -413,7 +413,7 @@ mod tests {
         2.5 * theta + (2.25 * theta * theta + 1.0).sqrt()
     }
 
-    /// the taub inequality saturates as an IDENTITY for this enthalpy:
+    /// the taub inequality saturates as an identity for this enthalpy:
     /// (h - theta)(h - 4 theta) = 1 exactly, by construction of the sqrt form.
     /// this is the sharpest possible pin on the closure — any algebraic drift in
     /// `internal_energy` breaks it at roundoff, across twelve decades of theta.

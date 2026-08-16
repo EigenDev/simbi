@@ -1,7 +1,7 @@
 // =============================================================================
 // regimes/substrate_kernels/params.rs
 //
-// the SCALAR half of the metadata-driven ABI: the typed `ScalarBind` vocabulary +
+// the scalar half of the metadata-driven ABI: the typed `ScalarBind` vocabulary +
 // the by-ref / by-sort resolvers (`resolve_params`, `scalars_for`) and the geometry /
 // mesh-motion / immersed-body scalar value resolvers (`geom_scalar`, `motion_scalar`,
 // `physical_geom`, `axis_expands`, `dilution_power`, `body_scalar`, `resolve_body_scalars`).
@@ -20,13 +20,13 @@ use symbi_sim::state::FieldStore;
 
 use super::binding::kernel_scalar_kinds;
 
-/// resolve a kernel's scalar parameters BY TYPED REF, routed BY SORT — the type-sorted analog of
+/// resolve a kernel's scalar parameters by typed ref, routed by sort — the type-sorted analog of
 /// `resolve_path` for buffers, and the unified scalar half of the metadata-driven ABI. reads the
 /// kernel's declared `IntNames \sqcup FloatNames` family and maps each `ScalarBind` through the matching
 /// resolver into its ABI lane: int params -> the `ints` tail, float params -> the `scalars` tail,
-/// each in the kernel's declared order. so a MIXED kernel (ghost-fill: int `map_type`/`arg` + float
-/// `vel_sign`) resolves fully — the KERNEL dictates order + lane, never the caller. the resolver
-/// matches EXHAUSTIVELY on `ScalarRef` for the closed vocabulary; a spec kernel's resolver also
+/// each in the kernel's declared order. so a mixed kernel (ghost-fill: int `map_type`/`arg` + float
+/// `vel_sign`) resolves fully — the kernel dictates order + lane, never the caller. the resolver
+/// matches exhaustively on `ScalarRef` for the closed vocabulary; a spec kernel's resolver also
 /// handles the open `Spec` knob (its string-keyed scalar map).
 pub(crate) fn resolve_params<Sc: Scalar + OrderedNumeric>(
     name: &str,
@@ -61,11 +61,11 @@ pub(crate) fn scalars_for<Sc: Scalar + OrderedNumeric>(
     scalars
 }
 
-/// resolve a GEOMETRY scalar ref to its grid value: `InvDx(ax)` (1/dx, the cartesian CFL width),
+/// resolve a geometry scalar ref to its grid value: `InvDx(ax)` (1/dx, the cartesian CFL width),
 /// `XLo(ax)` (axis origin), `Dx(ax)` (axis step / log-slope), `MapKind(ax)` (the per-axis spacing
 /// selector the in-kernel face map branches on: 0 = uniform, 1 = log). `None` for a non-geometry
 /// ref — the caller's resolver then handles the regime scalars (gamma/theta/dt). because the
-/// kernel's declared refs drive resolution, the SAME resolver serves cartesian (`inv_dx`) and
+/// kernel's declared refs drive resolution, the same resolver serves cartesian (`inv_dx`) and
 /// curvilinear (`x_lo`/`dx`/`map_kind`) kernels with no per-geometry branch at the call site.
 pub(crate) fn geom_scalar<const D: usize>(
     x_lo: &[f64; D],
@@ -98,7 +98,7 @@ pub(crate) fn geom_scalar<const D: usize>(
 }
 
 /// does grid axis `axis` expand under homologous motion? cartesian scales
-/// every axis; the curvilinear geometries scale the RADIAL coordinate only
+/// every axis; the curvilinear geometries scale the radial coordinate only
 /// (axis 0 by convention) — angles are dimensionless.
 pub(crate) fn axis_expands(coords: symbi_geometry::Geometry, axis: usize) -> bool {
     match coords {
@@ -109,7 +109,7 @@ pub(crate) fn axis_expands(coords: symbi_geometry::Geometry, axis: usize) -> boo
 
 /// the physical-volume growth exponent: V_phys = a^p * V_com. cartesian
 /// scales every grid axis; spherical volumes go as r^3 and cylindrical as
-/// r^2 REGARDLESS of the grid dimension (the angular extents ride along).
+/// r^2 regardless of the grid dimension (the angular extents ride along).
 pub(crate) fn dilution_power(coords: symbi_geometry::Geometry, ndim: usize) -> f64 {
     match coords {
         symbi_geometry::Geometry::Cartesian => ndim as f64,
@@ -118,9 +118,9 @@ pub(crate) fn dilution_power(coords: symbi_geometry::Geometry, ndim: usize) -> f
     }
 }
 
-/// the PHYSICAL geometry scalar arrays for a moving mesh: expanding axes
-/// scale by a (cartesian: all; curvilinear: the radial axis only — ANGLES DO
-/// NOT SCALE), so the in-kernel metric widths, centroids, and geometric
+/// the physical geometry scalar arrays for a moving mesh: expanding axes
+/// scale by a (cartesian: all; curvilinear: the radial axis only — angles do
+/// not scale), so the in-kernel metric widths, centroids, and geometric
 /// sources see physical radii while angular coordinates stay angular. exact
 /// identities at a = 1.
 pub(crate) fn physical_geom<const D: usize>(
@@ -136,10 +136,10 @@ pub(crate) fn physical_geom<const D: usize>(
     )
 }
 
-/// the per-axis (x_lo, dx) the CURVILINEAR kernel reads as its `x_lo_{ax}` / `dx_{ax}` geom scalars.
+/// the per-axis (x_lo, dx) the curvilinear kernel reads as its `x_lo_{ax}` / `dx_{ax}` geom scalars.
 /// uniform axes pass the face-0 position + the linear cell width; log axes pass the face-0 position
 /// + the log decade-slope, since the kernel's face map is `face(i) = start * 10^(i * dx_{ax})` (the
-/// `gv_axis_face_at` Log branch) — the decade-slope IS the per-axis `dx` parameter for a log axis; a
+/// `gv_axis_face_at` Log branch) — the decade-slope is the per-axis `dx` parameter for a log axis; a
 /// uniform axis's `dx` is its linear cell width. homologous
 /// mesh motion scales the radial face-0 start by a (the slope/width are comoving). without maps the
 /// grid is uniform and this is bit-identical to `physical_geom`.
@@ -165,9 +165,9 @@ pub(crate) fn kernel_geom<const D: usize>(
 }
 
 /// the moving-mesh scalar bindings shared by the flux / wave-speed / godunov
-/// dispatches. geometry scalars bind PHYSICAL when motion is active
+/// dispatches. geometry scalars bind physical when motion is active
 /// (`x_lo * a`, `dx * a` — see the call sites), so the homologous rate is the
-/// HUBBLE rate `H = a_dot / a` (vface = H * r_phys = a_dot * x_com) and the
+/// hubble rate `H = a_dot / a` (vface = H * r_phys = a_dot * x_com) and the
 /// curvilinear metric/source terms see physical radii for free. per-axis:
 /// `mesh_adot_N` is H on expanding axes, zero otherwise; `mesh_vtrans_N` the
 /// uniform-translation rate on axis 0. `mesh_hdil` is the physical volume
@@ -185,7 +185,7 @@ pub(crate) fn motion_scalar(
         0.0
     };
     let vtrans = if motion.homologous { 0.0 } else { motion.a_dot };
-    // resolve via the typed `MeshScalar` (the SAME family the trace declares with), so the
+    // resolve via the typed `MeshScalar` (the same family the trace declares with), so the
     // per-axis convention is shared and the match is exhaustive — a new mesh scalar cannot be
     // added without a binding here. a non-mesh ref is `None` (the caller handles it).
     let ScalarRef::Mesh(m) = sref else {
@@ -205,7 +205,7 @@ pub(crate) fn motion_scalar(
 // ---- immersed-body forward source: gravity + accretion ----------
 
 /// resolve a body scalar ref `body_{idx}_{field}` to its value: `{mass,soft,racc,sink,delta}` and
-/// the per-axis `{pos,vel}_{ax}`. the branch-free-loop conventions: an INACTIVE slot
+/// the per-axis `{pos,vel}_{ax}`. the branch-free-loop conventions: an inactive slot
 /// (idx >= n_bodies) or a non-gravitating body -> mass=0 (zero gravity), soft=1 (r_eff>=1);
 /// a non-accreting body -> sink=0 (zero accretion), racc=1, delta=1.
 pub(crate) fn body_scalar<const D: usize>(
@@ -258,15 +258,15 @@ pub(crate) fn body_scalar<const D: usize>(
 }
 
 /// dispatch the forward body source (`body_source_{D}d`): a cons->cons in-place update
-/// `cons += dt * (S_grav + S_accretion)`. the scalar tail is resolved BY NAME from the kernel
+/// `cons += dt * (S_grav + S_accretion)`. the scalar tail is resolved by name from the kernel
 /// manifest (`dt`, `gamma`, the per-axis `x_lo`/`dx`, and the MAX_SOURCE_BODIES body params packed
 /// from the immersed side-car), so the runtime never hand-orders it. body-free sims are gated by the caller.
-/// resolve a body kernel's scalar tail BY NAME: `dt`, `gamma`, the per-axis `x_lo`/`dx`, and
+/// resolve a body kernel's scalar tail by name: `dt`, `gamma`, the per-axis `x_lo`/`dx`, and
 /// the MAX_SOURCE_BODIES body params from the immersed side-car. shared by the forward source + the backward
 /// feedback (both kernels take the same scalar set).
 
 /// whether the IBM penalization owns accretion on this sim:
-/// cartesian (adiabatic AND isothermal kernels are baked). where true,
+/// cartesian (adiabatic and isothermal kernels are baked). where true,
 /// every legacy sink-rate scalar resolves to zero (an exact no-op in the
 /// traced drain) and `dispatch_penalize` performs the drain instead.
 pub fn penalize_owns_accretion<const D: usize, const DOF: usize, Mem, Sc>(
@@ -286,7 +286,7 @@ where
     true
 }
 
-/// the one runtime EOS scalar a kernel family binds, TAGGED by meaning: the
+/// the one runtime EOS scalar a kernel family binds, tagged by meaning: the
 /// adiabatic index of an energy-carrying gas or the constant isothermal sound
 /// speed. these traveled as a bare f64 whose meaning flipped on `has_energy`,
 /// so a kernel asking for `gamma` could silently receive a sound speed; the tag
@@ -326,8 +326,8 @@ impl EosParam {
     }
 }
 
-/// the ONE mhd scalar cascade: eos_param for `Gamma | Cs`, `theta`, the spacetime scalars,
-/// then MESH MOTION, then geometry, panicking with the caller's label on anything else.
+/// the one mhd scalar cascade: eos_param for `Gamma | Cs`, `theta`, the spacetime scalars,
+/// then mesh motion, then geometry, panicking with the caller's label on anything else.
 ///
 /// five hand-copied variants of this cascade lived in `substrate_mhd.rs`, differing only in
 /// the panic string -- and four of them dropped the `motion_scalar` link, so an MHD run on a
@@ -379,7 +379,7 @@ where
 {
     let geom = &sim.geom;
     // the body kernels read cell/face positions through the runtime spacing map, so the
-    // per-axis (x_lo, dx) they bind must be the MAP's parameters (face-0 position + linear
+    // per-axis (x_lo, dx) they bind must be the map's parameters (face-0 position + linear
     // width / log slope / geometric seed width) — the raw uniform grid scalars are wrong on
     // a mapped axis. identical values on an unmapped grid; body kernels are static-mesh
     // (a = 1).

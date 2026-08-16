@@ -1,12 +1,12 @@
 // =============================================================================
 // viscous_alpha_adiabatic.rs
 //
-// the shakura-sunyaev alpha viscosity with the LOCAL adiabatic sound speed,
+// the shakura-sunyaev alpha viscosity with the local adiabatic sound speed,
 // nu(x) = alpha (gamma p / rho) / Omega_K(r) about immersed body 0. one
 // viscous application on a sheared uniform-cs disk gates:
 // - the operator genuinely acts (momenta change where the shear lives) and
-//   carries the viscous HEATING (total energy rises where shear dissipates);
-// - the LOCAL-cs law: on a uniform (p, rho) state the local cs^2 is the one
+//   carries the viscous heating (total energy rises where shear dissipates);
+// - the local-cs law: on a uniform (p, rho) state the local cs^2 is the one
 //   constant gamma p0/rho0, so the alpha update must differ from a
 //   constant-nu update (nu varies with radius through Omega_K) — a kernel
 //   that dropped the radial law would match it;
@@ -110,8 +110,8 @@ fn alpha_viscosity_acts_heats_and_carries_the_radial_law() {
     );
 
     // the radial law: a constant-nu pass with nu = alpha cs0^2 / Omega_K(r_ref)
-    // matches the alpha pass ONLY at r_ref; anywhere else Omega_K differs, so the
-    // two updates must NOT coincide globally (an alpha kernel that dropped the
+    // matches the alpha pass only at r_ref; anywhere else Omega_K differs, so the
+    // two updates must not coincide globally (an alpha kernel that dropped the
     // radial dependence would match it bit-for-bit on this uniform-cs state).
     let cs2 = GAMMA * 1.0 / 1.0;
     let r_ref = 0.5_f64;
@@ -135,7 +135,7 @@ fn alpha_viscosity_acts_heats_and_carries_the_radial_law() {
 
 #[test]
 fn alpha_and_constant_nu_both_cap_the_timestep() {
-    // the parabolic viscous limit dt <= 0.1 dx^2 / nu_max must bind for BOTH
+    // the parabolic viscous limit dt <= 0.1 dx^2 / nu_max must bind for both
     // paths: a large constant nu and a large alpha (whose nu_max is the largest
     // local sound speed at the slowest orbit) each pull dt well below the
     // inviscid wave-speed value.
@@ -162,7 +162,7 @@ fn alpha_and_constant_nu_both_cap_the_timestep() {
         dt_alpha < 0.5 * dt_inviscid,
         "alpha cap did not bind: {dt_alpha:e} vs inviscid {dt_inviscid:e}"
     );
-    // the alpha bound uses the LARGEST (p/rho) at the SLOWEST orbit: on this
+    // the alpha bound uses the largest (p/rho) at the slowest orbit: on this
     // uniform state, nu_max = alpha gamma (p0/rho0) / Omega_K(r_corner).
     let r_corner = (2.0_f64).sqrt() * L;
     let nu_max = 50.0 * GAMMA * 1.0 / (1.0 / (r_corner * r_corner * r_corner)).sqrt();

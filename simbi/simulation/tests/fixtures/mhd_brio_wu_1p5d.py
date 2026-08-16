@@ -1,9 +1,9 @@
 # =============================================================================
 # mhd_brio_wu_1p5d.py
 #
-# the canonical Brio & Wu (1988) MHD shock tube on a GENUINE 1D grid (D=1, DOF=3) —
-# the 1.5D newtonian-MHD instrument. 1.5D has NO constrained transport (C(1,2)=0 edges),
-# so the normal field Bx is carried on its (thin) face and NEVER curled (it must stay at
+# the canonical Brio & Wu (1988) MHD shock tube on a genuine 1D grid (D=1, DOF=3) —
+# the 1.5D newtonian-MHD instrument. 1.5D has no constrained transport (C(1,2)=0 edges),
+# so the normal field Bx is carried on its (thin) face and never curled (it must stay at
 # its constant IC), while the transverse By,Bz are cell-centered conserved variables
 # evolved by the out-of-plane cell-B flux predictor. this exercises the out-of-plane
 # predictor end-to-end through the python runner.

@@ -2,9 +2,9 @@
 // aot_kernel_invocation.rs
 //
 // the structured binding ABI — proof that routing a
-// generated kernel through `KernelInvocation::run_cpu` produces BYTE-IDENTICAL
+// generated kernel through `KernelInvocation::run_cpu` produces byte-identical
 // output to calling the descriptor wrapper directly with `&[CpuField]` /
-// `&mut [CpuFieldMut]`. the invocation is the backend-NEUTRAL boundary (handle +
+// `&mut [CpuFieldMut]`. the invocation is the backend-neutral boundary (handle +
 // layout + params); the CPU mapping just splits the buffers back into the
 // generated fn's args. (the CPU path is the scope here; the device-pointer handle
 // and GPU launch route through a separate kernel invocation test.)
@@ -34,7 +34,7 @@ fn kernel_invocation_run_cpu_matches_direct_descriptor_call() {
     let grid = [N as u32];
     let dom_lo = [0i32];
     // the generated signature order is [dt, map_kind_0, x_lo_0, dx_0, map_param_0]: the face
-    // map is selected at RUNTIME, so the kernel carries the selector and both maps' parameters
+    // map is selected at runtime, so the kernel carries the selector and both maps' parameters
     // on every chart. map_kind 0 is the uniform map `x_lo + i*dx`, under which the origin and
     // the grading ratio go unread.
     let scalars = [DT, 0.0, 0.0, DX, 0.0];

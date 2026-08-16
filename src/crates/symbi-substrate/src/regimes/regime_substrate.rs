@@ -7,8 +7,8 @@
 // regime at 100+ call sites). the EOS parameter (gamma for ideal-gas regimes, cs for isothermal)
 // comes from `Eos::substrate_param`; CFL + the allocated domain come from the sim.
 //
-// PURELY ADDITIVE — the explicit `*SubstrateKernelSet::new(..)` path is untouched. each regime
-// maps to exactly ONE KernelSet (the `IsoNewtonian` / `IsothermalMhd` regimes are distinct types,
+// purely additive — the explicit `*SubstrateKernelSet::new(..)` path is untouched. each regime
+// maps to exactly one KernelSet (the `IsoNewtonian` / `IsothermalMhd` regimes are distinct types,
 // so the mapping is one-to-one). theta defaults to 1.0 (minmod) via `substrate()`; tune it with
 // the `.theta(..)` builder on the returned set.
 //

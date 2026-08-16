@@ -2,11 +2,11 @@
 // refinement_covered_restriction_sync.rs
 //
 // after every root step the hierarchy overwrites the covered coarse cells with the
-// conservative restriction of their fine children (level_restrict_reflux), so BETWEEN
+// conservative restriction of their fine children (level_restrict_reflux), so between
 // root steps — where a checkpoint is written — the covered coarse conserved state must
-// BE the restriction, bit-for-bit. this gate evolves a rotating density bump across a
+// be the restriction, bit-for-bit. this gate evolves a rotating density bump across a
 // level seam and asserts that re-running the restriction into a scratch field changes
-// nothing, for the adiabatic AND the isothermal kernel sets. a mismatch means some
+// nothing, for the adiabatic and the isothermal kernel sets. a mismatch means some
 // post-restriction pass (reflux, source, drain, eos) modified covered cells out of
 // sync with the fine level.
 // =============================================================================
@@ -88,7 +88,7 @@ fn covered_coarse_cells_are_the_restriction_adiabatic() {
         Kset::new(GAMMA, CFL, &s.geom.allocated)
     })
     .unwrap();
-    // refinement allocates the fine level ZEROED; the coarse initial condition has to be
+    // refinement allocates the fine level zeroed; the coarse initial condition has to be
     // prolonged into its interior. an unseeded fine level restricts vacuum into the covered
     // coarse cells, which the equality below would then confirm against vacuum.
     hier.seed_fine_from_coarse().expect("fine-level seed");
@@ -150,7 +150,7 @@ fn covered_coarse_cells_are_the_restriction_iso() {
         IKset::new(cs, CFL, &s.geom.allocated)
     })
     .unwrap();
-    // refinement allocates the fine level ZEROED; the coarse initial condition has to be
+    // refinement allocates the fine level zeroed; the coarse initial condition has to be
     // prolonged into its interior. an unseeded fine level restricts vacuum into the covered
     // coarse cells, which the equality below would then confirm against vacuum.
     hier.seed_fine_from_coarse().expect("fine-level seed");

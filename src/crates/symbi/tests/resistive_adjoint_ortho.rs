@@ -1,17 +1,17 @@
 // =============================================================================
 // resistive_adjoint_ortho.rs
 //
-// the mimetic-adjoint oracle for the COVARIANT orthogonal-chart resistive EMF, across every 2.5D
-// chart: cyl r-z, cyl r-phi, spherical r-theta. one kernel (the DEC codifferential via the chart's
+// the mimetic-adjoint oracle for the covariant orthogonal-chart resistive EMF, across every 2.5D
+// chart: cyl r-z, cyl r-phi, spherical r-theta. one kernel (the dec codifferential via the chart's
 // Lame scale factors) must be the exact adjoint of that chart's induction curl, certified by the
 // geometry-agnostic dissipation identity
 //
 //     <B, curl(J B)>_F = <J B, J B>_E >= 0     (eta = 1),
 //
-// to machine precision, with the DEC Hodge weights w_E = h2, w_{B0} = h1 h2, w_{B1} = h0 h2 (h2 the
+// to machine precision, with the dec Hodge weights w_E = h2, w_{B0} = h1 h2, w_{B1} = h0 h2 (h2 the
 // out-of-plane scale factor). random compact-support fields keep every stencil in the full-stencil
 // interior so the identity is exact. cyl r-z carries no metric factor in its current; cyl r-phi and
-// spherical exercise the (1/r) d_r(r .) metric — the proof that ONE covariant kernel serves all
+// spherical exercise the (1/r) d_r(r .) metric — the proof that one covariant kernel serves all
 // charts.
 // =============================================================================
 
@@ -31,8 +31,8 @@ const N: usize = 24;
 const GAMMA: f64 = 5.0 / 3.0;
 const PAD: isize = 3; // compact support keeps curl(J .) (two-cell reach) in the full-stencil interior
 
-// the in-plane axis-0, in-plane axis-1, and OUT-OF-PLANE Lame scale factors at coordinate (x0, x1).
-// these MUST match Metric::scale_factors the kernel bakes: cyl -> CylindricalRPhi, sph -> Spherical.
+// the in-plane axis-0, in-plane axis-1, and out-of-plane Lame scale factors at coordinate (x0, x1).
+// these must match Metric::scale_factors the kernel bakes: cyl -> CylindricalRPhi, sph -> Spherical.
 #[derive(Clone, Copy)]
 enum Chart {
     CylRz,

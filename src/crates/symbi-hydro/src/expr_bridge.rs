@@ -969,7 +969,7 @@ mod tests {
 
     #[test]
     fn python_sponge_json_loads_and_lowers() {
-        // the exact json python's serialize_source(SourceKind.SPONGE, dim=3, params=[inv_gm1]) emits.
+        // the exact json python's serialize_source(SourceKind.sponge, dim=3, params=[inv_gm1]) emits.
         // outputs = [kappa, den_ref, mom_ref_0..2, nrg_ref] mapped to node indices; here kappa=2,
         // den_ref=1, mom_ref=(x_0,x_1,x_2) (reads position), nrg_ref=10, inv_gm1=2.5. pins the
         // cross-language wire for the buffer-zone sponge.
@@ -1138,7 +1138,7 @@ mod tests {
         // the Duffell & MacFadyen 2015 collimated engine on SRHD (dim=2): one nozzle power
         // S_0 drives three coupled conserved-rate channels — S_den = S_0/eta_0, S_mom_r =
         // S_0*sqrt(1-1/gamma_0^2), S_mom_theta = 0 (purely radial), S_nrg = S_0. here S_0=10,
-        // eta_0=100 (node DIVIDE -> 0.1), S_mom_r=9.998, mirroring the axis_jet source shape.
+        // eta_0=100 (node divide -> 0.1), S_mom_r=9.998, mirroring the axis_jet source shape.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":2, "outputs":[2,3,4,0], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":10.0}, {"op":"CONSTANT","value":100.0},
@@ -1150,7 +1150,7 @@ mod tests {
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["den", "mom", "nrg"]
         );
-        // S_den = S_0/eta_0 = 10/100 = 0.1 (the DIVIDE channel).
+        // S_den = S_0/eta_0 = 10/100 = 0.1 (the divide channel).
         let (_, den) = &built[0];
         assert_eq!(den.outputs.len(), 1);
         assert!((eval_lowered(den, den.outputs[0], &[]) - 0.1).abs() < 1e-12);
@@ -1268,7 +1268,7 @@ mod tests {
     fn region_masks_the_contribution() {
         // force a = [p0, 0], region chi = x_0 (a linear ramp). the lift is linear, so the masked
         // momentum source is S_mom_0 = rho * (chi * a_0) = rho * x_0 * p0.
-        // nodes: 0=PARAM p0, 1=CONST 0, 2=VARIABLE_X1 (chi). outputs=[0,1], region=2.
+        // nodes: 0=param p0, 1=const 0, 2=VARIABLE_X1 (chi). outputs=[0,1], region=2.
         let cfg = cfg_from(
             r#"{ "kind":"force", "dim":2, "outputs":[0,1], "region":2, "params":[0.5],
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"CONSTANT","value":0.0},
@@ -1379,7 +1379,7 @@ mod tests {
 
     #[test]
     fn sponge_relaxes_full_state_toward_reference() {
-        // outputs = [kappa, den_ref, mom_ref_0, mom_ref_1, nrg_ref] as CONSTANT nodes (the reference
+        // outputs = [kappa, den_ref, mom_ref_0, mom_ref_1, nrg_ref] as constant nodes (the reference
         // is a pure function of position — params carries only inv_gm1). the
         // three channels each relax toward the reference conserved value.
         //   kappa=2, den_ref=1, mom_ref=[0.5,0], nrg_ref=10, inv_gm1=2.5 (gamma=1.4).
@@ -1462,8 +1462,8 @@ mod tests {
     fn raw_source_reads_density_and_pressure() {
         // a radiative-cooling-style rate S_nrg = -(C * rho * pre): the user expression reads the
         // per-cell state (density + pressure) — the capability that lets adiabatic cooling
-        // Lambda(rho, T), T = pre/rho, be user-defined. nodes: 0=PARAM C, 1=VARIABLE_RHO,
-        // 2=VARIABLE_PRESSURE, 3=MUL(C,rho), 4=MUL(3,pre), 5=NEG(4). outputs=[5], target=nrg.
+        // Lambda(rho, T), T = pre/rho, be user-defined. nodes: 0=param C, 1=VARIABLE_RHO,
+        // 2=VARIABLE_PRESSURE, 3=mul(C,rho), 4=mul(3,pre), 5=neg(4). outputs=[5], target=nrg.
         let cfg = cfg_from(
             r#"{ "kind":"raw", "dim":1, "outputs":[5], "params":[0.25], "target":"nrg",
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"VARIABLE_RHO"},

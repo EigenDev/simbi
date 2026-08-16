@@ -6,7 +6,7 @@
 // a dye is carried by the mass flux, so refinement exposes it in three separate places: the fine
 // level's ghost band has to receive the concentration by prolongation, the covered coarse cells
 // have to receive it back by restriction, and the conserved dye at the interface has to be
-// refluxed from the interface flux MISMATCH the way mass is. drop any one of those and the dye
+// refluxed from the interface flux mismatch the way mass is. drop any one of those and the dye
 // still advects, still stays bounded, and still looks like a plausible tracer field — it is only
 // the total that goes wrong, quietly, in proportion to how much dye crossed the interface.
 //
@@ -47,7 +47,7 @@ const V: f64 = 0.5;
 // the refined patch, in domain coordinates.
 const PATCH_LO: f64 = 0.375;
 const PATCH_HI: f64 = 0.625;
-// the dye starts as a step occupying [0, FRONT) and advects right at V.
+// the dye starts as a step occupying [0, front) and advects right at V.
 const FRONT: f64 = 0.25;
 
 fn kset(sim: &Sim) -> AdiabaticSubstrateKernelSet<HostMemory, f64, 1> {
@@ -72,7 +72,7 @@ fn coarse_sim() -> Sim {
         .expect("chi alloc")
 }
 
-/// seed the dye step over the WHOLE allocated grid of one level, so the first stage's upwind
+/// seed the dye step over the whole allocated grid of one level, so the first stage's upwind
 /// stencil reads consistent ghosts before any fill runs.
 fn seed_chi(sim: &Sim, dx: f64, x_origin: f64) {
     let cons_chi = sim.fields.cons.chi_field().expect("cons chi");
@@ -86,7 +86,7 @@ fn seed_chi(sim: &Sim, dx: f64, x_origin: f64) {
     }
 }
 
-/// conserved dye summed over LEAF cells: coarse cells outside the refined coverage plus every
+/// conserved dye summed over leaf cells: coarse cells outside the refined coverage plus every
 /// fine cell, each weighted by its own cell width. this is the quantity a missing reflux or a
 /// missing restriction breaks.
 fn composite_dye(hier: &Hier) -> f64 {

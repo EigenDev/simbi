@@ -114,7 +114,7 @@ fn build_n(balanced: bool, n: usize) -> Hier {
             symbi_algebra::Tensor::new([-G_OFFSET]),
             symbi_algebra::Tensor::zeros(),
             GM,
-            // radius (mask) stays effectively pointlike; SOFT rides the softening slot so
+            // radius (mask) stays effectively pointlike; soft rides the softening slot so
             // the body's field is the same plummer potential the column is built from --
             // passed via the radius slot, the field is bare and the column carries a
             // benign ~1e-6 mismatch, which is what set the old measured floor.

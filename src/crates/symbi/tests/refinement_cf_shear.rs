@@ -1,10 +1,10 @@
 // =============================================================================
 // refine_cf_shear.rs
 //
-// coarse-fine SUPERSONIC TANGENTIAL SHEAR gate, one test per regime
+// coarse-fine supersonic tangential shear gate, one test per regime
 // (newtonian, isothermal, nmhd, imhd, rmhd): a kinetic-dominated parallel
 // shear flow vx(y) = V0 sin(2 pi y) with uniform rho, p, and uniform B along
-// x — an exact equilibrium in EVERY regime (all flux divergences vanish for
+// x — an exact equilibrium in every regime (all flux divergences vanish for
 // parallel flow; v x B = 0 kills the induction) — crossing a static nested
 // box, held for 50 root steps at full cfl on a fully periodic domain. the CF
 // y-faces at +/-0.25 carry the peak tangential speed (mach ~8 for the
@@ -18,8 +18,8 @@
 // is armed; the isothermal regimes pin the advection/CT coupling).
 //
 // this is the one member of the coarse-fine gate family that holds
-// kinetic-dominated flow ALONG an interface; the conservation and divb gates
-// push waves THROUGH one instead.
+// kinetic-dominated flow along an interface; the conservation and divb gates
+// push waves through one instead.
 //
 // usage:
 //  cargo test -p symbi --release --test refine_cf_shear

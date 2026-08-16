@@ -1,7 +1,7 @@
 # =============================================================================
 # test_arity_example_sweep.py
 #
-# the arity guard must accept EVERY shipped example config (zero false
+# the arity guard must accept every shipped example config (zero false
 # positives): each config is discovered, instantiated with defaults, its gas
 # generator's first tuple peeked, and the tuple passed through the same
 # first-tuple contract check the runner applies. a config whose actual yield
@@ -73,7 +73,7 @@ def test_every_example_config_passes_the_arity_guard(module_name: str) -> None:
         expected = problem.expected_primitive_arity()
         if expected is not None:
             assert expected[0] >= 3, f"{cls.__name__}: nonsense exact arity {expected}"
-        # the decisive check: the config's OWN first yielded tuple passes the
+        # the decisive check: the config's own first yielded tuple passes the
         # guard and replays intact through the returned iterator.
         prim_iterator, _ = _get_iterators(problem)
         out = _check_first_tuple(problem, prim_iterator)

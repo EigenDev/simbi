@@ -4,10 +4,10 @@
 // proves the immersed-body fold into `godunov_stage_gv_with_fused_built` (n_bodies > 0)
 // is bit-for-bit identical to the standalone two-pass execution: plain `godunov_stage_gv`
 // followed by the `body_source_gv` pass. this is the correctness gate that lets the body
-// ride INSIDE the single fused update sweep (one launch), sparing a separate full-grid
-// CONS read+write.
+// ride inside the single fused update sweep (one launch), sparing a separate full-grid
+// cons read+write.
 //
-// the body is a POST-combine operator `(cons_g + ac_dt*S_grav) * exp(-drain*ac_dt)`, so the
+// the body is a post-combine operator `(cons_g + ac_dt*S_grav) * exp(-drain*ac_dt)`, so the
 // fused kernel wraps the godunov-combined nodes with it while the two-pass writes cons_g to a
 // buffer and the body reads it back. an f64 store/load is exact, so the register-resident
 // cons_g the fused body reads equals the memory value the standalone body reads — the two must
@@ -85,7 +85,7 @@ fn assert_bits_eq(a: f64, b: f64, cell: [usize; 2], name: &str) {
     );
 }
 
-// axis-0-fastest flat index over GRID, matching the harness/`Field` layout.
+// axis-0-fastest flat index over grid, matching the harness/`Field` layout.
 fn flat(c: &[usize]) -> usize {
     c[0] + c[1] * GRID[0]
 }
@@ -114,7 +114,7 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
     let mut stage_scalars: Vec<(&str, f64)> = vec![("dt", DT), ("a0", a0), ("ac", ac)];
     stage_scalars.extend(geom_and_body_scalars());
 
-    // FUSED: godunov + body welded into one kernel (n_bodies = 1, no user sources).
+    // fused: godunov + body welded into one kernel (n_bodies = 1, no user sources).
     let out_fused = KernelRun::new(godunov_stage_gv_with_fused_built(
         Coords::Cartesian,
         Spacetime::Minkowski,
@@ -134,7 +134,7 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
     .scalars(&stage_scalars)
     .run();
 
-    // TWO-PASS reference, first pass: the plain godunov stage (n_bodies = 0).
+    // two-pass reference, first pass: the plain godunov stage (n_bodies = 0).
     let out_god = KernelRun::new(godunov_stage_gv(
         Coords::Cartesian,
         Spacetime::Minkowski,
@@ -151,7 +151,7 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
     .scalars(&stage_scalars)
     .run();
 
-    // TWO-PASS reference, second pass: the standalone body pass, reading the godunov output. its `dt` scalar is the
+    // two-pass reference, second pass: the standalone body pass, reading the godunov output. its `dt` scalar is the
     // SSP stage weight ac*dt — the same product the fused kernel forms internally as ac_dt.
     let den_buf: Vec<f64> = out_god.values("rho").to_vec();
     let m0_buf: Vec<f64> = out_god.values("mom_0").to_vec();
@@ -161,7 +161,7 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
     let mut body_scalars: Vec<(&str, f64)> = vec![("dt", ac * DT)];
     body_scalars.extend(geom_and_body_scalars());
 
-    // the body pass evaluates its contribution at the STAGE INPUT and applies it to the
+    // the body pass evaluates its contribution at the stage input and applies it to the
     // godunov-advanced state, so both are bound: `den`/`mom_*`/`nrg` carry the godunov output,
     // `us_*` the state the stage began from — the same values this test handed the godunov
     // kernel. the fused sweep reads that stage input straight out of its own registers, which is

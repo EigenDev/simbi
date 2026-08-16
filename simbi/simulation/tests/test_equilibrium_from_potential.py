@@ -1,13 +1,13 @@
 # =============================================================================
 # test_equilibrium_from_potential.py
 #
-# an equilibrium and the force it balances, derived from ONE declared potential.
+# an equilibrium and the force it balances, derived from one declared potential.
 #
 # the failure this construction exists to prevent is a profile that balances one gravity
 # while the run applies another: smooth, positive, monotone, and wrong by a constant in a
 # single term. deriving both sides from the same expression graph makes that
 # unrepresentable, and the test that matters is the one asserting the derived state really
-# does solve `grad p = -rho grad phi` — checked SYMBOLICALLY, by differentiating the derived
+# does solve `grad p = -rho grad phi` — checked symbolically, by differentiating the derived
 # pressure on the same graph, so it is exact rather than a finite-difference approximation.
 # =============================================================================
 import math
@@ -47,7 +47,7 @@ def test_the_derived_state_satisfies_hydrostatic_balance() -> None:
     for sample in (0.05 * ii for ii in range(1, 20)):
         imbalance, dpdx, density = compiled.evaluate(x1=sample)
         # relative to the size of the terms being cancelled, so this measures the
-        # CANCELLATION rather than the magnitude of either side.
+        # cancellation rather than the magnitude of either side.
         scale = max(abs(dpdx), abs(density * GM / (sample + OFFSET) ** 2))
         worst = max(worst, abs(imbalance) / scale)
     print(f"largest relative hydrostatic imbalance of the derived state: {worst:.3e}")

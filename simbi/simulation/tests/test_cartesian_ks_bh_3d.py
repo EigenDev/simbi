@@ -1,9 +1,9 @@
 # =============================================================================
 # test_cartesian_ks_bh_3d.py
 #
-# GRHD on the FULL 3D cartesian kerr-schild chart. the a = 0 metric
+# GRHD on the full 3D cartesian kerr-schild chart. the a = 0 metric
 # gamma_ij = delta_ij + 2M x_i x_j / r^3 and shift beta^i = 2M x_i/(r^2(r+2M))
-# are exactly symmetric under ANY coordinate permutation, so a symmetric
+# are exactly symmetric under any coordinate permutation, so a symmetric
 # initial state in a cube must evolve symmetrically under every axis transpose
 # to roundoff — the oracle-free correctness gate for the 3d chart-generic GR
 # chain (metric-aware flux with the shift on every sweep, metric-aware c2p,
@@ -122,9 +122,9 @@ def test_cartesian_ks_bh_3d_exterior_excision_leakage_is_bounded_and_decays() ->
     )
     # in the continuum the exterior is causally disconnected from the excised
     # sphere; discretely the reconstruction stencil reaches across the horizon,
-    # so a SMALL difference leaks outward and is damped as it goes. the honest
+    # so a small difference leaks outward and is damped as it goes. the honest
     # invariants: the leakage just outside the horizon is bounded well below the
-    # dynamic range, and it DECAYS with distance from the horizon.
+    # dynamic range, and it decays with distance from the horizon.
     diff = np.abs(a["rho"] - b["rho"])
     scale = np.abs(a["rho"]).max()
     near = (r > 2.0 + 2.0 * dx) & (r < 3.0)

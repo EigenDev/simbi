@@ -1,4 +1,4 @@
-// a theta-independent state on a 1024 x 699 spherical-polar quarter wedge MUST
+// a theta-independent state on a 1024 x 699 spherical-polar quarter wedge must
 // render an angularly uniform arc — any modulation along the arc is a sampling
 // artifact.
 use symbi::sim::state::*;
@@ -31,7 +31,7 @@ fn thermal_bomb_shape_renders_an_angularly_uniform_arc() {
         pre: 1.0,
     })
     .build();
-    // sedov-like radial profile, THETA-INDEPENDENT: evacuated interior, thin
+    // sedov-like radial profile, theta-independent: evacuated interior, thin
     // bright shell (2 cells) at r = 0.25, ambient outside.
     let r_sh = 0.25f64;
     for c in sim.geom.interior.iter() {
@@ -81,11 +81,11 @@ fn thermal_bomb_shape_renders_an_angularly_uniform_arc() {
         "arc max per ray: lo={lo:.3} hi={hi:.3} spread={:.3}",
         hi - lo
     );
-    // the bright rim shimmers under HONEST block averaging (a 2-cell shell next to
+    // the bright rim shimmers under honest block averaging (a 2-cell shell next to
     // an evacuated interior dilutes by pixel phase — the cartesian path decimates
-    // identically); the gate is the VISIBLE structure: every ray must cross the
+    // identically); the gate is the visible structure: every ray must cross the
     // dark evacuated band continuously, and no ray may show a spurious bright gap
-    // ABOVE ambient (a spurious bright gap signals dropped samples, a rendering bug distinct from honest dilution).
+    // above ambient (a spurious bright gap signals dropped samples, a rendering bug distinct from honest dilution).
     assert!(
         hi <= 2.0 + 1e-6,
         "averaging can never exceed the shell peak: hi={hi}"

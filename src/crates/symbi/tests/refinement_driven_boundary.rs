@@ -2,14 +2,14 @@
 // refinement_driven_boundary.rs
 //
 // driven (dirichlet) boundaries on a refined hierarchy. the mechanics under test:
-// - a fine level flush against a driven physical face INHERITS `Driven(id)` there and
+// - a fine level flush against a driven physical face inherits `Driven(id)` there and
 //   evaluates the same coordinate graph at its own finer ghost coordinates (the graphs are
 //   registered on every level's kernel set);
 // - an interior fine level carries CoarseFine faces throughout and leaves the graphs untouched;
 // - the fill ordering (prolong_cf, then ghost_fill whose tail is the driven pass) gives the
 //   driven prescription deterministic ownership of the driven/coarse-fine corner overlap.
 // three oracles: exact uniform preservation with all faces driven at the uniform state, the
-// prescription landing verbatim in the FINE level's ghost band on a flush face, and the
+// prescription landing verbatim in the fine level's ghost band on a flush face, and the
 // covered-coarse == restriction sync surviving a driven inflow.
 // =============================================================================
 
@@ -132,8 +132,8 @@ fn uniform_gas_stays_uniform_with_all_faces_driven() {
 
 #[test]
 fn fine_level_flush_against_a_driven_face_holds_the_prescription() {
-    // the refined region touches x_lo, so the fine level INHERITS Driven(0) there; after
-    // evolution its x_lo ghost slab must hold the DAG values evaluated at the FINE ghost
+    // the refined region touches x_lo, so the fine level inherits Driven(0) there; after
+    // evolution its x_lo ghost slab must hold the DAG values evaluated at the fine ghost
     // coordinates — proving the inheritance, the per-level registration, and the fill.
     let (rho_in, vx_in, pre_in) = (2.0, 0.5, 3.0);
     let boundaries = Boundaries::<2>::per_axis([
@@ -193,7 +193,7 @@ fn fine_level_flush_against_a_driven_face_holds_the_prescription() {
 #[test]
 fn covered_restriction_sync_survives_a_driven_inflow() {
     // an interior fine box with a driven inflow washing over it: the covered coarse
-    // conserved cells must still BE the restriction of the fine children after every step.
+    // conserved cells must still be the restriction of the fine children after every step.
     let boundaries = Boundaries::<2>::per_axis([
         [BoundaryType::Driven(0), BoundaryType::Outflow],
         [BoundaryType::Outflow, BoundaryType::Outflow],

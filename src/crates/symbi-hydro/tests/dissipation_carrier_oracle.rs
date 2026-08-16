@@ -4,14 +4,14 @@
 // unit + carrier-equivalence coverage for the adaptive-dissipation detectors in
 // `symbi_hydro::dissipation` (fleischmann_phi, local_mach).
 // these are carrier-generic over `S: Scalar` and used in the HLLC riemann path, so each one
-// needs a Gv-equivalence test that ALSO renders to device source.
+// needs a Gv-equivalence test that also renders to device source.
 //
 // two layers:
 // - f64 unit tests that straddle every codim-1 branch-switch surface (the cmp/
 //   select thresholds): strong vs weak shock, aligned vs misaligned, interface vs
 //   smooth, plus the threshold-boundary flips and the division-by-zero guards.
 // - a carrier oracle per function: trace at S = Gv, scalarize, CPU-interpret, and
-//   assert bit/ULP agreement with the SAME function at S = f64 on NON-trivial
+//   assert bit/ULP agreement with the same function at S = f64 on non-trivial
 //   states that drive the branches. an emit step proves the graph renders to
 //   CPU + CUDA source.
 //
@@ -51,8 +51,8 @@ where
     Cpu.eval_elemental(&lowered, inputs)[0]
 }
 
-/// the LOWERABILITY half of the carrier gate: the traced single-root graph must
-/// emit non-empty CPU (rust) AND CUDA source. an unlowerable op panics here.
+/// the lowerability half of the carrier gate: the traced single-root graph must
+/// emit non-empty CPU (rust) and CUDA source. an unlowerable op panics here.
 fn assert_lowers<F>(physics: F, param_names: &[&str])
 where
     F: FnOnce(&[Gv]) -> Gv,
@@ -99,7 +99,7 @@ where
 const GAMMA: f64 = 1.4;
 
 // the carrier-generic detectors take Prim<S, D> / Tensor<S, D>. these builders
-// assemble those structs from a flat carrier-param slice so ONE physics body runs
+// assemble those structs from a flat carrier-param slice so one physics body runs
 // at both S = f64 and S = Gv. layout for D = 2: [rho_l, vx_l, vy_l, pre_l, rho_r,
 // vx_r, vy_r, pre_r, nx, ny], gamma appended as p[10] when present.
 const D: usize = 2;
@@ -138,7 +138,7 @@ fn names_with_gamma() -> Vec<&'static str> {
     PARAM_NAMES.iter().copied().chain(["gamma"]).collect()
 }
 
-/// the solver's OWN call shape for the scaling: project both velocities onto the face normal and
+/// the solver's own call shape for the scaling: project both velocities onto the face normal and
 /// take each side's sound speed from its regime. kept here so the tests below read in terms of
 /// states while exercising the same scalar interface the riemann solvers call.
 fn phi_of(l: &Prim<f64, D>, r: &Prim<f64, D>, n: &Tensor<f64, D>) -> f64 {
@@ -226,7 +226,7 @@ fn local_mach_carrier_equivalence() {
 
 // =============================================================================
 // fleischmann_phi — the published acoustic-dissipation ramp, and nothing else:
-// phi = sin(min(Ma_local / 0.1, 1) * pi/2), with Ma_local the FACE-NORMAL mach number.
+// phi = sin(min(Ma_local / 0.1, 1) * pi/2), with Ma_local the face-normal mach number.
 // =============================================================================
 
 #[test]
@@ -269,12 +269,12 @@ fn ramp_f64_saturates_above_the_limit() {
 #[test]
 fn ramp_is_the_published_sine_on_any_face() {
     // `phi = sin(min(1, Ma_local / Ma_limit) * pi/2)` — Fleischmann, Adami & Adams 2020 eq 24 —
-    // against the closed form at several mach numbers, on faces with NO pressure jump. there the
+    // against the closed form at several mach numbers, on faces with no pressure jump. there the
     // compressibility-consistency clamp is an exact zero, so the ramp is the whole law and the
     // scheme's low dissipation is fully realized: equal-pressure faces are the contact
     // discontinuities and shock-transverse faces the reduction exists for, and nothing may add
     // dissipation there. (faces whose pressure jump exceeds the incompressible `dp/p ~ gamma Ma^2`
-    // scale are OUTSIDE the ramp's derivation and are governed by the clamp — see the
+    // scale are outside the ramp's derivation and are governed by the clamp — see the
     // stratified-face tests below and the sealed-column entropy floor law in symbi.)
     let n = Tensor::<f64, D>::unit(0);
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
@@ -295,7 +295,7 @@ fn ramp_is_the_published_sine_on_any_face() {
         );
     }
 
-    // a density jump at fixed pressure and fixed low mach — a contact discontinuity — must NOT
+    // a density jump at fixed pressure and fixed low mach — a contact discontinuity — must not
     // raise phi. this is the configuration a "detect the interface and restore dissipation" term
     // fires on, and it is precisely where the scheme's low dissipation at the contact is the
     // benefit being sought.
@@ -310,7 +310,7 @@ fn ramp_is_the_published_sine_on_any_face() {
         pre: 1.0,
     };
     let phi = phi_of(&l, &r, &n);
-    // eq 25 takes the max over the two sides, each with its OWN sound speed — the denser side here
+    // eq 25 takes the max over the two sides, each with its own sound speed — the denser side here
     // is the colder one, so it sets the mach number.
     let ma = (1e-3 / (GAMMA * l.pre / l.rho).sqrt()).max(1e-3 / (GAMMA * r.pre / r.rho).sqrt());
     let expect = want(ma);
@@ -326,9 +326,9 @@ fn the_mach_number_is_the_face_normal_component_not_the_speed() {
     // velocity component dependent on the direction of the cell-face Riemann problem".
     //
     // this is the whole mechanism. a grid-aligned shock (their fig 1) carries a large velocity along
-    // its propagation direction and a vanishing component transverse to it, so the TRANSVERSE faces
+    // its propagation direction and a vanishing component transverse to it, so the transverse faces
     // run at a local mach number near zero — and it is the acoustic dissipation there that scales
-    // wrongly and drives the instability. keyed on the SPEED instead, those faces read as
+    // wrongly and drives the instability. keyed on the speed instead, those faces read as
     // supersonic, phi = 1, and the correction does nothing on the only faces it was built for.
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
     let l = Prim::<f64, D> {
@@ -418,7 +418,7 @@ mod acoustic_sensor {
 
     const GAMMA: f64 = 5.0 / 3.0;
 
-    /// the relative precision with which a face's pressure JUMP survives being formed
+    /// the relative precision with which a face's pressure jump survives being formed
     /// from two absolute pressures. a low-mach face carries `dp/p ~ Ma^2`, so the
     /// subtraction loses `eps * p / dp` of it — the low-mach roundoff problem itself,
     /// present in the test's construction rather than in the sensor.
@@ -443,7 +443,7 @@ mod acoustic_sensor {
         (phi, local_mach(vl, vr, cs, cs))
     }
 
-    /// THE low-mach requirement, checked as a scaling across decades: in smooth flow the
+    /// the low-mach requirement, checked as a scaling across decades: in smooth flow the
     /// unsupported pressure jump is `O(Ma^2)` and the mach term governs, so the sensor
     /// must equal the face's own local mach number with no offset and no threshold. a
     /// reference mach number anywhere inside would show up as a departure at the low end.
@@ -491,7 +491,7 @@ mod acoustic_sensor {
     }
 
     /// a wave obeying the impedance relation `dp = rho c du` is scaled by its own
-    /// amplitude in acoustic units — a WEAK wave needs little dissipation, which is the
+    /// amplitude in acoustic units — a weak wave needs little dissipation, which is the
     /// whole point of a low-dissipation solver, and a wave whose velocity jump reaches
     /// the sound speed gets the classical dissipation in full.
     #[test]
@@ -518,7 +518,7 @@ mod acoustic_sensor {
         assert_eq!(phi, 1.0);
     }
 
-    /// a contact carries a density jump and no pressure jump. AT REST it presents
+    /// a contact carries a density jump and no pressure jump. at rest it presents
     /// nothing for the acoustic dissipation to act on and the scaling vanishes; in
     /// motion it is scaled by the flow's mach number like any other face. either way
     /// the contact itself rides on the contact wave, which this scaling never touches.
@@ -536,11 +536,11 @@ mod acoustic_sensor {
         );
     }
 
-    /// the carbuncle mechanism, as the paper states it: the face TRANSVERSE to a
+    /// the carbuncle mechanism, as the paper states it: the face transverse to a
     /// grid-aligned shock sees a smooth front — near-uniform pressure along it and a
-    /// vanishing transverse velocity — so BOTH terms are small and the acoustic
+    /// vanishing transverse velocity — so both terms are small and the acoustic
     /// dissipation is reduced. taking the larger of the two is what makes this work; a
-    /// sensor built as their RATIO diverges here instead, restoring the dissipation that
+    /// sensor built as their ratio diverges here instead, restoring the dissipation that
     /// drives the instability (measured in `odd_even_decoupling.rs`).
     #[test]
     fn a_grid_aligned_shock_reduces_transverse_but_not_normal_dissipation() {
@@ -558,11 +558,11 @@ mod acoustic_sensor {
         assert_eq!(normal, 1.0, "the shock-normal face must keep full dissipation");
     }
 
-    /// force balance. an UNSUPPORTED pressure jump sets a floor proportional to itself,
+    /// force balance. an unsupported pressure jump sets a floor proportional to itself,
     /// so a stratified face is dissipated whatever its mach number — which is what damps
     /// a hydrostatic residual. supply the balance and the floor empties, leaving the
     /// low-mach scaling intact across the stratification instead of switched off
-    /// throughout it; supply only part of it and the REMAINDER sets the floor.
+    /// throughout it; supply only part of it and the remainder sets the floor.
     #[test]
     fn a_balanced_face_is_only_dissipated_through_its_residual() {
         let (rho, p, cs) = (1.0, 1.0, (GAMMA * 1.0 / 1.0f64).sqrt());

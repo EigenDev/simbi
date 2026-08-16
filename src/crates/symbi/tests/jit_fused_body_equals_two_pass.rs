@@ -1,10 +1,10 @@
 // =============================================================================
 // jit_fused_body_equals_two_pass.rs
 //
-// with the fused runtime-source path ON by default, a Newtonian run carrying BOTH a
-// user source AND an immersed body must produce a bit-for-bit identical trajectory whether the update
-// is FUSED (one Cranelift-JIT'd godunov that folds the user source AND the body wrap) or run as the
-// TWO-PASS (plain AOT godunov -> `apply_runtime_source` -> `body_source`, three separate CONS sweeps).
+// with the fused runtime-source path on by default, a Newtonian run carrying both a
+// user source and an immersed body must produce a bit-for-bit identical trajectory whether the update
+// is fused (one Cranelift-JIT'd godunov that folds the user source and the body wrap) or run as the
+// two-pass (plain AOT godunov -> `apply_runtime_source` -> `body_source`, three separate cons sweeps).
 //
 // resolving the RHS once must generalize over every contribution: geometric source, active user
 // source, and immersed body all ride the single update sweep and match the standalone chain to the
@@ -39,7 +39,7 @@ fn assert_cons_bit_identical<const D: usize>(
     }
 }
 
-// a central accreting mass at the domain center: gravity (softened) + a Bondi-Hoyle sink, so BOTH
+// a central accreting mass at the domain center: gravity (softened) + a Bondi-Hoyle sink, so both
 // body operators — the additive gravity force and the multiplicative accretion drain — are live.
 fn central_black_hole() -> BodyCollection<f64, 2> {
     BodyCollection::new().add(Body::black_hole(
@@ -57,7 +57,7 @@ fn central_black_hole() -> BodyCollection<f64, 2> {
 
 #[test]
 fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
-    // the two-pass is the default; this test pins the FUSED kernel as live, so
+    // the two-pass is the default; this test pins the fused kernel as live, so
     // opt in before the policy OnceLock latches.
     unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
@@ -96,7 +96,7 @@ fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
         }
     };
 
-    // TWO-PASS: plain AOT godunov + the per-cell apply_runtime_source pass + the standalone body_source.
+    // two-pass: plain AOT godunov + the per-cell apply_runtime_source pass + the standalone body_source.
     let mut sim_two = build(true);
     let sub_two = sim_two.substrate().with_runtime_source(
         build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(),
@@ -104,7 +104,7 @@ fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
     );
     evolve(&mut sim_two, &sub_two, t_final).expect("two-pass evolve");
 
-    // FUSED: one JIT'd godunov folding the user source AND the immersed-body wrap; source_apply and
+    // fused: one JIT'd godunov folding the user source and the immersed-body wrap; source_apply and
     // body_source both skip.
     let mut sim_fused = build(true);
     let sub_fused = sim_fused.substrate().with_fused_runtime_source(
@@ -113,7 +113,7 @@ fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
     );
     evolve(&mut sim_fused, &sub_fused, t_final).expect("fused evolve");
 
-    // GUARD: the fused kernel actually JIT-compiled (else this compares two-pass vs two-pass).
+    // guard: the fused kernel actually JIT-compiled (else this compares two-pass vs two-pass).
     assert_eq!(
         sub_fused.runtime_source.as_ref().unwrap().fused_cpu_state(),
         Some(true),
@@ -141,8 +141,8 @@ fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
     );
     assert_cons_bit_identical(interior, nf, nt, "cons.nrg");
 
-    // NON-VACUITY: the body must actually change the trajectory (else the fused body wrap could be a
-    // no-op and the equivalence would prove nothing). compare against the same fused run WITHOUT a body.
+    // non-vacuity: the body must actually change the trajectory (else the fused body wrap could be a
+    // no-op and the equivalence would prove nothing). compare against the same fused run without a body.
     let mut sim_nobody = build(false);
     let sub_nobody = sim_nobody.substrate().with_fused_runtime_source(
         build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(),
@@ -161,10 +161,10 @@ fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
 
 #[test]
 fn adiabatic_body_only_fused_equals_two_pass_rk2() {
-    // the two-pass is the default; this test pins the FUSED kernel as live, so
+    // the two-pass is the default; this test pins the fused kernel as live, so
     // opt in before the policy OnceLock latches.
     unsafe { std::env::set_var("SYMBI_FUSE", "1") };
-    // the body-WITHOUT-a-user-source path: a pure gravity/accretion run. `with_source_fusion()` folds
+    // the body-without-a-user-source path: a pure gravity/accretion run. `with_source_fusion()` folds
     // the immersed body into godunov (one launch, no user source to carry it) and must match the
     // standalone `body_source` pass bit-for-bit. proves the fused path is not gated on a runtime source.
     type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
@@ -192,12 +192,12 @@ fn adiabatic_body_only_fused_equals_two_pass_rk2() {
         sim.with_bodies(central_black_hole())
     };
 
-    // TWO-PASS: plain godunov + the standalone body_source pass (no fusion flag).
+    // two-pass: plain godunov + the standalone body_source pass (no fusion flag).
     let mut sim_two = build();
     let sub_two = sim_two.substrate();
     evolve(&mut sim_two, &sub_two, t_final).expect("two-pass evolve");
 
-    // FUSED: body folded into godunov via with_source_fusion (no user source).
+    // fused: body folded into godunov via with_source_fusion (no user source).
     let mut sim_fused = build();
     let sub_fused = sim_fused.substrate().with_source_fusion();
     evolve(&mut sim_fused, &sub_fused, t_final).expect("body-only fused evolve");

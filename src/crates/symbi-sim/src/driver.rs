@@ -2,7 +2,7 @@
 // driver.rs
 //
 // shared timestep-driver primitives that operate on `SimStateGeneric`.
-// these are NOT specific to the single-grid integrator — both the top-level
+// these are not specific to the single-grid integrator — both the top-level
 // `evolve` loop (symbi) and the AMR hierarchy driver (symbi-amr) need them, so they
 // live in the sim-state core below both drivers:
 // - check_dt / check_dt_or_panic — dt-livelock guard (NaN/Inf/non-positive)
@@ -146,7 +146,7 @@ pub fn report_profile() -> Vec<(&'static str, f64)> {
 /// `c_{k+1} = ac*(c_k + 1)` — euler -> [1]; rk2 -> [1, 1]; rk3 -> [1, 1/2, 1].
 /// consumers: the amr coarse-fine ghost time interpolation (stage k+1
 /// reconstructs from that state) and the mesh-motion stage clock (a stage's
-/// ENTRY time is the previous stage's exit).
+/// entry time is the previous stage's exit).
 pub fn stage_time_fractions(stages: &[(f64, f64)]) -> Vec<f64> {
     let mut c = 0.0;
     stages
@@ -291,7 +291,7 @@ pub fn stage_tag(ii: usize, n: usize) -> u8 {
 
 /// per-step immersed-body bookkeeping: consolidate the feedback diagnostics (force / torque /
 /// would-be accreted mass) recorded by the kernel `body_feedback` pass into the bodies, then
-/// advance prescribed binary orbital (Keplerian) motion. DIAGNOSTICS-only for the gravitating
+/// advance prescribed binary orbital (Keplerian) motion. diagnostics-only for the gravitating
 /// mass (fixed-potential sink); no kernel dispatch — pure host bookkeeping over the sim.
 pub fn evolve_bodies<R: Regime<f64, D>, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
@@ -315,10 +315,10 @@ pub fn evolve_bodies<R: Regime<f64, D>, const D: usize, const DOF: usize, M, E, 
     );
     let step_deltas = im.diagnostics.consolidate();
 
-    // record feedback as DIAGNOSTICS + advance the prescribed binary orbit (the body's GRAVITATING
-    // mass is held FIXED -- a fixed-potential sink: the fluid is removed + accretion measured, but
+    // record feedback as diagnostics + advance the prescribed binary orbit (the body's gravitating
+    // mass is held fixed -- a fixed-potential sink: the fluid is removed + accretion measured, but
     // the central potential does not drift; force/torque are recorded for output only; the
-    // prescribed motion does not consume them). the SAME apply the decomposed body step uses with its cross-tile sum.
+    // prescribed motion does not consume them). the same apply the decomposed body step uses with its cross-tile sum.
     // only the source prefix integrates here; fragment motion belongs to the
     // bonded subcycle below.
     symbi_ib::apply_body_deltas(&mut im.bodies, &step_deltas, dt);

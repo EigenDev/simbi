@@ -1,7 +1,7 @@
 # =============================================================================
 # nmhd_rotor_cyl.py
 #
-# a rotating magnetized disk on a genuine CYLINDRICAL (r, phi) grid — the
+# a rotating magnetized disk on a genuine cylindrical (r, phi) grid — the
 # curvilinear sibling of nmhd_rotor.py. exercises the cylindrical r-phi
 # constrained-transport path (out-of-plane B_z is the cell-centered field).
 # planar_cylindrical => the (r, phi) disk plane.

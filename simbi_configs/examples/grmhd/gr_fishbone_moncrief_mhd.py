@@ -1,16 +1,16 @@
 # =============================================================================
 # gr_fishbone_moncrief_mhd.py
 #
-# the MAGNETIZED Fishbone-Moncrief torus (the MRI seed configuration): the
-# GrFishboneMoncrief hydro torus threaded with a WEAK poloidal seed field, run on
+# the magnetized Fishbone-Moncrief torus (the MRI seed configuration): the
+# GrFishboneMoncrief hydro torus threaded with a weak poloidal seed field, run on
 # the spinning-kerr RMHD kernel path (tetrad HLLD flux + UCT-HLLD sharp CT +
 # frame-dragging w-reconstruction + B^phi dragging ghost). the field is seeded
 # div-free from a single azimuthal vector potential A_phi(r, theta) = max(rho/
 # rho_max - rho_cut, 0) — concentric poloidal loops confined to the dense torus
-# interior — via the METRIC-WEIGHTED discrete curl (so the w-weighted div(B) is
+# interior — via the metric-weighted discrete curl (so the w-weighted div(B) is
 # machine zero on the kerr grid). the amplitude is set by the target minimum
 # plasma beta = p_gas/(b^2/2): the standard MRI initial condition. the weak field
-# is magneto-rotationally UNSTABLE inside the differentially-rotating torus; the
+# is magneto-rotationally unstable inside the differentially-rotating torus; the
 # fastest-growing mode has lambda_MRI ~ 2 pi v_A / Omega, and the turbulence it
 # drives transports angular momentum outward and accretes the torus onto the hole.
 #
@@ -43,7 +43,7 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
             description="dimensionless kerr spin",
         ),
     ]
-    # a FAT torus (r_max ~ 12 M, the classic Gammie 2003 / HARM MRI torus) — well-resolved on the
+    # a fat torus (r_max ~ 12 M, the classic Gammie 2003 / HARM MRI torus) — well-resolved on the
     # log grid, unlike the thin kappa ~ 1.01 gate torus.
     kappa: Annotated[
         float,
@@ -101,7 +101,7 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
         r_c = [0.5 * (rf[i] + rf[i + 1]) for i in range(nr)]
         th_c = [0.5 * (tf[j] + tf[j + 1]) for j in range(npolar)]
 
-        # A_phi = max(rho/rho_max - rho_cut, 0) sampled at every FACE CORNER, ONCE against a
+        # A_phi = max(rho/rho_max - rho_cut, 0) sampled at every face corner, once against a
         # single torus. torus construction runs a 4096-point scan + a 200-step bisection for
         # r_max, so re-deriving the potential per gather point (curl stencils x beta scan x the
         # three staggered generators = O(nr*npolar) evaluations) dominates the ic cost. the curl,
@@ -131,10 +131,10 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
             w = self._sqrtg(r_c[i], tf[j]) * (rf[i + 1] - rf[i])
             return -(aphi[i + 1][j] - aphi[i][j]) / w
 
-        # beta normalization: the minimum plasma beta over the DENSE CORE (rho > 0.5 of the actual
+        # beta normalization: the minimum plasma beta over the dense core (rho > 0.5 of the actual
         # grid-peak density). the cut excludes the low-pressure torus surface, where beta is small
         # for any field and would otherwise pin the amplitude to a truncation-noise edge cell (the
-        # standard FM-MRI recipe). the threshold adapts to the resolved peak.
+        # standard fm-mri recipe). the threshold adapts to the resolved peak.
         rho_peak = max(
             (cell[ii][jj] or (0.0,))[0] for jj in range(npolar) for ii in range(nr)
         )

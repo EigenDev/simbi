@@ -29,7 +29,7 @@ impl ElementTy {
         }
     }
 
-    /// the C/CUDA/HIP spelling of this element type -- the ONE table every
+    /// the C/CUDA/HIP spelling of this element type -- the one table every
     /// emitter and signature builder reads. a second table diverging from this
     /// one is how an f32 kernel signature ends up wrapping a double-typed body.
     pub fn c_type(self) -> &'static str {

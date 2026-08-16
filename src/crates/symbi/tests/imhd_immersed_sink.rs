@@ -1,11 +1,11 @@
 // =============================================================================
 // imhd_immersed_sink.rs
 //
-// the immersed-body drain under ISOTHERMAL MHD. isothermal has NO energy equation
-// (nrg is a ZST), so there is no 1/2|B|^2 in any energy to corrupt — the 1/2|B|^2
+// the immersed-body drain under isothermal MHD. isothermal has no energy equation
+// (nrg is a zst), so there is no 1/2|B|^2 in any energy to corrupt — the 1/2|B|^2
 // sandwich is a correct no-op and the drain simply removes (den, mom) while the
 // magnetic field is left to constrained transport. the wall/drain still relaxes on the
-// FAST MAGNETOSONIC speed c_fast = sqrt(cs^2 + c_a^2), so a low-beta iso sink is stiffer.
+// fast magnetosonic speed c_fast = sqrt(cs^2 + c_a^2), so a low-beta iso sink is stiffer.
 // this pins: the sink drains plasma, B is untouched, and c_fast bites.
 // =============================================================================
 

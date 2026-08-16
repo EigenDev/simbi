@@ -4,10 +4,10 @@
 # periodic 1d colliding relativistic streams (v = +0.99 / -0.96, p = 1e-3): the
 # collision shocks at x = 0.5 and at the periodic wrap drive the high-order c2p
 # unphysical, so the first-order flux-correction fallback fires on a few hundred
-# substages over the run (a marti & muller pressure jump alone does NOT fire it —
+# substages over the run (a marti & muller pressure jump alone does not fire it —
 # the probe finds no unphysical zone and the pass early-returns). the velocity
 # asymmetry keeps the total momentum drift from cancelling by symmetry. the
-# stream strength is tuned so the first-order redo RECOVERS every flagged cell
+# stream strength is tuned so the first-order redo recovers every flagged cell
 # (the freeze tier — the one non-conservative FOFC operation — never fires), so a
 # correct face-based redo conserves the total to roundoff. periodicity makes the
 # total conserved state (sum of D, S, tau over the interior) an exact invariant

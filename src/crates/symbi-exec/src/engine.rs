@@ -24,7 +24,7 @@ use symbi_aot::{compute_strides, copy_extent, copy_lo};
 use symbi_ir::emit::ReductionOp;
 use symbi_xpu::MemorySpace;
 
-/// host-side POD that matches the CUDA `__symbi_View` struct emitted by
+/// host-side pod that matches the CUDA `__symbi_View` struct emitted by
 /// `crate::backends::kernel::CRenderer::preamble` — 8-byte ptr + 16 bytes lo +
 /// 16 bytes strides + 16 bytes extent = 56 bytes, naturally 8-byte aligned. one
 /// of these is passed by value per buffer to every GPU kernel. cfg-gated to
@@ -778,7 +778,7 @@ static RENDER_CACHE: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
 
 /// the per-block dynamic-smem budget tiled launches are sized against. Turing (sm_75,
-/// the RTX 2070 dev part) grants 48 KB of dynamic `__shared__` by default, below the
+/// the rtx 2070 dev part) grants 48 KB of dynamic `__shared__` by default, below the
 /// threshold where the `cudaFuncSetAttribute` opt-in is needed; staying under it keeps
 /// the launch portable.
 #[cfg(feature = "gpu")]

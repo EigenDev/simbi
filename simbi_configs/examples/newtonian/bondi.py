@@ -131,15 +131,15 @@ class SphericalBondiTest(SimbiProblem):
     ]
 
     # =========================================================================
-    # accretion (the well-posed uniform-scaling DRAIN, docs/ideas/accretor.md)
+    # accretion (the well-posed uniform-scaling drain, docs/ideas/accretor.md)
     #
-    # the drain scales EVERY conserved component inside the mask by exp(-dt/tau) with
+    # the drain scales every conserved component inside the mask by exp(-dt/tau) with
     # tau = c_drain * dx / c_s, the local sound-crossing time: the intensive gas state is invariant
-    # (no acoustic injection), positivity is unconditional, and the accretion rate is EMERGENT -- a
+    # (no acoustic injection), positivity is unconditional, and the accretion rate is emergent -- a
     # functional of the solved flow, never a target. the sonic surface regulates it, so long as
     # r_acc sits inside the sonic radius r_s.
     #
-    # THERE IS NO RATE DIAL. the penalization surface owns accretion and c_drain is fixed at 1
+    # there is no rate dial. the penalization surface owns accretion and c_drain is fixed at 1
     # (accretor.md C_drain = 1, the fast drain), which is the saturated / plateau case this setup
     # wants. the dial lives on the substrate kernel set and is not exposed to the configuration
     # layer.
@@ -285,7 +285,7 @@ class SphericalBondiTest(SimbiProblem):
         """
         super().setup()
 
-        # gamma = 1 IS the isothermal equation of state: the adiabatic branch
+        # gamma = 1 is the isothermal equation of state: the adiabatic branch
         # is degenerate there (sound speed gamma(gamma-1)e = 0 -> zero wave
         # speed -> one unbounded dt). select the genuine isothermal regime,
         # whose sound speed is `ambient_sound_speed`.

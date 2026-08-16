@@ -1,7 +1,7 @@
 # =============================================================================
 # resistive_orszag_tang.py
 #
-# the orszag-tang vortex (Orszag & Tang 1979) in NON-IDEAL newtonian mhd: the
+# the orszag-tang vortex (Orszag & Tang 1979) in non-ideal newtonian mhd: the
 # ideal setup plus a uniform ohmic resistivity eta, so the induction equation
 # carries a diffusive emf eta*J. resistivity is the physical control on the
 # central current sheet: as the two field null-lines are driven together the

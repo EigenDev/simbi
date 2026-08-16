@@ -2,7 +2,7 @@
 // event.rs
 //
 // the lab-frame photon packet — the data product of the monte-carlo transfer path.
-// a packet carries TWO distinct physical
+// a packet carries two distinct physical
 // quantities that must not be conflated into a single `energy` field:
 //   - `nu_emit`       : the comoving (emitter-frame) photon frequency [Hz], sampled
 //                       from the cell's synchrotron spectrum — this is what sets the
@@ -11,12 +11,12 @@
 //   - `energy_weight` : the comoving energy [erg] the packet represents (equal per
 //                       cell) — this is what accumulates into flux / intensity.
 // keeping them separate is what lets the monte-carlo spectrum reproduce the analytic
-// broken power law; a single `energy` field (used BOTH as a weight AND, via
+// broken power law; a single `energy` field (used both as a weight and, via
 // energy/h, as a frequency) could not.
 //
-// the fields are raw f64 (CGS): a `Vec<PhotonEvent>` IS the serialization boundary
+// the fields are raw f64 (CGS): a `Vec<PhotonEvent>` is the serialization boundary
 // — written to disk, reduced into observables, and (eventually) handed to numpy. the
-// dimensional `units` system guards the physics that PRODUCES these numbers
+// dimensional `units` system guards the physics that produces these numbers
 // (src/transfer.rs); the events themselves are where the type system is exited.
 //
 // usage:
@@ -25,7 +25,7 @@
 // =============================================================================
 
 /// one lab-frame photon packet. polarization is zero for RHD (no field geometry);
-/// SRMHD runs populate the stokes parameters from the magnetic-field geometry.
+/// srmhd runs populate the stokes parameters from the magnetic-field geometry.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PhotonEvent {
     /// emission time in the lab frame [s].
@@ -55,8 +55,8 @@ pub struct PhotonEvent {
 
     /// doppler boost factor toward the packet's own emission direction (set at generation).
     pub doppler_factor: f64,
-    /// the emitting fluid element's lab-frame three-velocity (units of c), as a Cartesian VECTOR
-    /// — not assumed radial. this is what lets the image beam toward ANY observer and capture a
+    /// the emitting fluid element's lab-frame three-velocity (units of c), as a Cartesian vector
+    /// — not assumed radial. this is what lets the image beam toward any observer and capture a
     /// laterally-spreading jet/ring: the observer-direction doppler is recomputed from this.
     pub beta_vec: [f64; 3],
     /// optical depth integrated along the path (filled by the transfer step).

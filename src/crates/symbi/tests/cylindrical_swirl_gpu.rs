@@ -2,10 +2,10 @@
 // cylindrical_swirl_gpu.rs
 //
 // the GPU<->CPU validation for the DOF != NDIM kernels: the cylindrical r-z
-// AXISYMMETRIC adiabatic family (ncomp = 3 on a 2-axis grid, swirl v_phi). builds
-// TWO identical sims — host (CpuSpace/HostMemory, AOT CPU fn) and unified
-// (CudaSpace/UnifiedMemory, render IR -> NVRTC -> launch) — drives the SAME
-// DOF-generic AdiabaticSubstrateKernelSet on each, and diffs EVERY _cyl kernel
+// axisymmetric adiabatic family (ncomp = 3 on a 2-axis grid, swirl v_phi). builds
+// two identical sims — host (CpuSpace/HostMemory, AOT CPU fn) and unified
+// (CudaSpace/UnifiedMemory, render IR -> NVRTC -> launch) — drives the same
+// DOF-generic AdiabaticSubstrateKernelSet on each, and diffs every _cyl kernel
 // (snapshot / c2p / ghost_fill / cfl / flux per dir / godunov_euler / rk2) GPU == CPU
 // to rel < 1e-9 (modulo nvcc FMA fusion). proves the metadata-driven dispatch +
 // the _cyl ncomp=3 kernels run correctly on device.

@@ -3,14 +3,14 @@
 #
 # exact conservation of the first-order flux-correction fallback. on a periodic
 # cartesian grid every face-telescoping finite-volume update conserves the total
-# D, S, tau in the CONSERVED buffer to accumulated roundoff. the FOFC fallback
+# D, S, tau in the conserved buffer to accumulated roundoff. the FOFC fallback
 # must preserve that: the face-based redo splices the first-order flux onto only
-# the faces adjacent to a flagged (fallback) cell and re-runs ONE godunov, so
+# the faces adjacent to a flagged (fallback) cell and re-runs one godunov, so
 # every face still carries a single flux and the sum telescopes. the superseded
 # per-cell state replacement applied two different fluxes to the two sides of a
 # flag-boundary face and created/destroyed conserved quantities there.
 #
-# the metric is the CONSERVED buffer (level_0/conserved): reconstructing the
+# the metric is the conserved buffer (level_0/conserved): reconstructing the
 # primitives' D = rho*W from the stored (rho, v) amplifies the
 # c2p round-trip error by dW/dv ~ W^3*v, which for the W ~ 7 collision here is
 # ~1e-3 even for a perfectly conservative scheme — it measures c2p accuracy. the
@@ -50,7 +50,7 @@ def _conserved_totals(end_time: float) -> tuple[float, float, float]:
         den = np.asarray(c["den"][:], dtype=np.float64)
         mom = np.asarray(c["m1"][:], dtype=np.float64)
         nrg = np.asarray(c["nrg"][:], dtype=np.float64)
-    # the checkpoint stores the ALLOCATED grid (ghost halo included); the
+    # the checkpoint stores the allocated grid (ghost halo included); the
     # conservation invariant holds over the interior only.
     ng = (len(den) - prob.resolution) // 2
     assert ng > 0, f"expected a ghost halo (got {len(den)} cells for {prob.resolution})"

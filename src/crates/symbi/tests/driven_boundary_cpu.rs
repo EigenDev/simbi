@@ -1,9 +1,9 @@
 // =============================================================================
 // driven_boundary_cpu.rs
 //
-// a DRIVEN boundary prescribes its ghost prim state from a user DAG (CPU).
-// the standard ghost-fill SKIPS the driven face (Driven -> BcType::Skip); the driven pass then
-// evaluates the boundary DAG over that face's ghost band and ASSIGNS prim.{rho,vel,pre}.
+// a driven boundary prescribes its ghost prim state from a user DAG (CPU).
+// the standard ghost-fill skips the driven face (Driven -> BcType::Skip); the driven pass then
+// evaluates the boundary DAG over that face's ghost band and assigns prim.{rho,vel,pre}.
 //
 // a steady inflow on x_lo (rho=2, v=[1,0], p=3) prescribed by constants; after ghost_fill the x_lo
 // ghost band must hold exactly that state, independent of the interior — the (Coord, Assign)
@@ -30,7 +30,7 @@ fn driven_inflow_prescribes_the_ghost_state() {
         .boundaries(boundaries)
         .finish()
         .unwrap();
-    // interior at rest, density 1 — DELIBERATELY different from the inflow, so the test proves the
+    // interior at rest, density 1 — deliberately different from the inflow, so the test proves the
     // ghost state comes from the DAG; had it been copied from the interior it would carry density 1.
     sim.seed_cells(|_| Prim {
         rho: 1.0,
@@ -87,11 +87,11 @@ fn driven_inflow_prescribes_the_ghost_state() {
 #[test]
 fn all_driven_faces_fill_the_corner_ghosts() {
     // every face driven with the same constant prescription. the standard pullback skips a
-    // ghost region whose contacting faces are ALL driven (they are Skip to it), so the
+    // ghost region whose contacting faces are all driven (they are Skip to it), so the
     // edge/corner ghost blocks are written only if each driven slab spans the full allocation
     // on its transverse axes; an interior-clamped band leaves them at their allocation zeros,
     // and a rho = 0 corner ghost is read as gas by any multi-dimensional stencil (a viscous
-    // 3x3, a CT corner EMF). after ghost_fill EVERY ghost cell must hold the prescription.
+    // 3x3, a CT corner EMF). after ghost_fill every ghost cell must hold the prescription.
     let boundaries = Boundaries::<2>::per_axis([
         [BoundaryType::Driven(0), BoundaryType::Driven(1)],
         [BoundaryType::Driven(2), BoundaryType::Driven(3)],
@@ -155,7 +155,7 @@ fn iso_mhd_driven_inflow_prescribes_the_ghost_state() {
     // the isothermal-MHD driven prescription is [rho, v1, v2, v3, B1, B2, B3] (no pressure
     // slot; the eos closure p = cs^2 rho covers the ghosts). a purely out-of-plane B_z is
     // div-free by construction, so the cell-B prescription needs no CT face sub-problem.
-    // x_lo driven, everything else outflow: after ghost_fill the ENTIRE x_lo ghost slab —
+    // x_lo driven, everything else outflow: after ghost_fill the entire x_lo ghost slab —
     // corners included — holds the prescribed inflow.
     use symbi_hydro::ISO_MHD_SPEC;
     use symbi_hydro::eos::Isothermal;

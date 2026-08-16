@@ -3,7 +3,7 @@
 #
 # the base-scheme CT energy-conservation gate. on a periodic magnetized relativistic
 # shock the total energy tau (conserved buffer, interior sum) must hold to machine
-# roundoff — AND not grow with resolution. a magnetic-energy patch applied outside the
+# roundoff — and not grow with resolution. a magnetic-energy patch applied outside the
 # flux drifts tau ~2e-4 at nx=256, growing to ~6e-4 at nx=512. with cell B a derived
 # quantity (interp of the CT face field) and no patch, tau is conserved by the
 # Poynting-carrying Godunov flux to roundoff.
@@ -39,7 +39,7 @@ def _tau_sum(nx: int, end_time: float) -> float:
 def test_mhd_total_energy_conserved_and_resolution_independent() -> None:
     tol = 1e-11
     drifts = {}
-    # conservation must hold at EVERY resolution; a bookkeeping error GROWS with nx.
+    # conservation must hold at every resolution; a bookkeeping error grows with nx.
     for nx in (64, 128, 256):
         t0 = _tau_sum(nx, 0.0)
         t1 = _tau_sum(nx, 0.1)

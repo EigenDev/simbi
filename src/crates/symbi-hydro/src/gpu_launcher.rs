@@ -11,7 +11,7 @@
 //   - `SourceEvaluator::eval(field, values)` — CPU, per-cell, f64 vec out.
 //   - `launch_source_kernel(...)`            — GPU, per-domain, double* buffers.
 //
-// the IR is THE SAME `BuiltSource.graph` for both paths (A1). this layer
+// the IR is the same `BuiltSource.graph` for both paths (A1). this layer
 // is the GPU dispatch; the CPU equivalent's interpreter call is its peer.
 //
 // **what's tested separately** (`tests/gpu_source_launch.rs`):
@@ -89,7 +89,7 @@ pub fn launch_source_kernel(
         );
     }
 
-    // allocate unified memory for inputs + outputs. unified is host- AND
+    // allocate unified memory for inputs + outputs. unified is host- and
     // device-addressable (no explicit copies; the GPU dereferences the
     // same pointer the host writes to). matches the existing substrate
     // conventions (`substrate_hydro_gpu`-style).

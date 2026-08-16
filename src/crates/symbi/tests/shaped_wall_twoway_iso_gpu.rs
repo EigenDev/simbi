@@ -2,12 +2,12 @@
 // shaped_wall_twoway_iso_gpu.rs
 //
 // device parity gates for two shaped-wall paths:
-// - TWO-WAY torque spin-up: a free (two_way) shaped spinner in still gas is
+// - two-way torque spin-up: a free (two_way) shaped spinner in still gas is
 //   dragged toward rest by the reaction torque. the spinning kernel's torque
 //   diagnostic + the integrated body omega must match host==device — the
 //   two-way path, where the reduced torque steers omega, as distinct from a
 //   prescribed spin;
-// - ISO shaped wall: an energy-free shaped obstacle (no nrg channel) penalizes
+// - iso shaped wall: an energy-free shaped obstacle (no nrg channel) penalizes
 //   identically on device, cons + force receipt bit-close to the CPU run.
 //
 // runs on the host GPU (NVRTC needs no nvcc). run:
@@ -73,7 +73,7 @@ fn build_twoway<S: ExecutionSpace, Mem: MemorySpace>() -> TwSim<S, Mem> {
     sim
 }
 
-// compare two f64 values against the force/torque MAGNITUDE with an absolute floor: the
+// compare two f64 values against the force/torque magnitude with an absolute floor: the
 // transverse / near-zero receipt components differ at round-off across the host slab-order and
 // device block-order folds (allowed by the deterministic-fold contract).
 fn close(a: f64, b: f64, scale: f64, tag: &str) {
@@ -114,7 +114,7 @@ fn two_way_spin_torque_matches_cpu_on_device() {
     );
 
     // the reaction-torque diagnostic (the spinning kernel's z-moment) agrees, then the
-    // host-side apply_body_deltas integrates the SAME torque to the SAME omega on both.
+    // host-side apply_body_deltas integrates the same torque to the same omega on both.
     let dh = h.immersed.as_ref().unwrap().diagnostics.consolidate();
     let dd = d.immersed.as_ref().unwrap().diagnostics.consolidate();
     let scale = dh[0].torque_delta[2].abs().max(1e-12);

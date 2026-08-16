@@ -1,17 +1,17 @@
 // =============================================================================
 // census_refined.rs
 //
-// a census on a REFINED hierarchy, where the reduction is a sum over levels rather than over one
+// a census on a refined hierarchy, where the reduction is a sum over levels rather than over one
 // grid.
 //
 // this is where a census is most exposed. a cell a finer level resolves is excluded from its
 // coarse parent — counting both would inflate every extensive total by the refined volume — so the
-// refined region enters the sum ONLY through the fine level's own contribution. if that
+// refined region enters the sum only through the fine level's own contribution. if that
 // contribution is absent for any reason, the total is short by exactly the refined volume, and
 // there is nothing in the number to say so: it is smooth, positive, of the right order, and
 // drifts in a way that reads as a boundary loss.
 //
-// the composite total is therefore checked against the ONE quantity that cannot lie about it — the
+// the composite total is therefore checked against the one quantity that cannot lie about it — the
 // conserved mass the hierarchy itself tracks over the same leaf cells.
 // =============================================================================
 
@@ -47,7 +47,7 @@ fn kset(sim: &Sim) -> AdiabaticSubstrateKernelSet<HostMemory, f64, 1> {
     AdiabaticSubstrateKernelSet::new(GAMMA, CFL, &sim.geom.allocated)
 }
 
-/// a global mass census: no bins, so the sample IS the composite total and any shortfall is
+/// a global mass census: no bins, so the sample is the composite total and any shortfall is
 /// arithmetic rather than binning.
 fn mass_census() -> CensusConfig {
     mass_census_at("root_step")
@@ -113,7 +113,7 @@ fn coarse_sim() -> Sim {
         .build()
 }
 
-/// the conserved mass over LEAF cells, summed across levels — the same predicate a census uses,
+/// the conserved mass over leaf cells, summed across levels — the same predicate a census uses,
 /// computed directly from the conserved density so it shares no code with the census path.
 fn leaf_mass(hier: &Hier) -> f64 {
     let mut total = 0.0;
@@ -200,7 +200,7 @@ fn a_refined_hierarchy_censuses_the_whole_composite_domain() {
     );
 }
 
-/// the mass at the time of the FIRST sample. on a periodic domain with no sources the leaf mass is
+/// the mass at the time of the first sample. on a periodic domain with no sources the leaf mass is
 /// conserved, so the initial value is the reference throughout — asserted rather than assumed.
 fn leaf_mass_at_first_sample(hier: &Hier, initial: f64) -> f64 {
     let now = leaf_mass(hier);
@@ -280,7 +280,7 @@ fn a_per_level_census_records_each_level_on_its_own_subcycle() {
 
 #[test]
 fn a_root_step_census_is_not_also_sampled_per_level() {
-    // the two cadences are exclusive. a census recorded by BOTH paths would enter its history
+    // the two cadences are exclusive. a census recorded by both paths would enter its history
     // twice per root step under two different level tags — the same physical state counted as two
     // independent samples, which biases every time average toward whichever level sampled more.
     let mut hier = refined_with(&mass_census());

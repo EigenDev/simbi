@@ -2,13 +2,13 @@
 # gr_disk_field_loop.py
 #
 # an in-plane magnetic field loop on the equatorial (R, phi) cylindrical kerr-schild
-# DISK — the constrained-transport probe for the razor-thin disk
+# disk — the constrained-transport probe for the razor-thin disk
 # chart. on the equator (z = 0, r = R) the kerr-schild off-diagonal vanishes so the
-# metric is DIAGONAL (gamma = diag(1 + 2M/R, R^2), alpha = 1/sqrt(1 + 2M/R), beta^R =
+# metric is diagonal (gamma = diag(1 + 2M/R, R^2), alpha = 1/sqrt(1 + 2M/R), beta^R =
 # 2M/(R + 2M), beta^phi = 0), sqrt(det gamma) = R sqrt(1 + 2M/R). a compact in-plane
 # loop (B_R, B_phi) is seeded div-free through the metric-weighted discrete curl of a
 # localized vertical A_z, and the curved-CT machinery (out-of-plane corner EMF E_z)
-# must PRESERVE the w-weighted div(B) as the gas free-falls radially. the vertical
+# must preserve the w-weighted div(B) as the gas free-falls radially. the vertical
 # field B_z starts at zero.
 #
 # what it certifies: the chart-generic densitized curl + corner EMF hold div(B) at

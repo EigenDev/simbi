@@ -1,14 +1,14 @@
 // =============================================================================
 // refine_conservation.rs
 //
-// 2-level STATIC nesting gate: subcycling +
+// 2-level static nesting gate: subcycling +
 // refluxing conserves the composite-grid totals (coarse cells outside the
 // coverage + fine cells inside) to machine precision while waves cross the
 // coarse-fine interface, the restriction keeps coarse == average(fine
 // children) in the overlap, and a static-nested run matches the equivalent
 // uniform-fine run on a smooth problem to truncation error.
 //
-// absolute indices: the fine level's cell f IS the uniform-fine run's cell f
+// absolute indices: the fine level's cell f is the uniform-fine run's cell f
 // (same global origin, same dx), so the smooth-problem comparison reads
 // matching absolute coordinates directly.
 // =============================================================================
@@ -139,10 +139,10 @@ fn visit_children<const D: usize>(c: &[isize; D], f: &mut impl FnMut(&[isize; D]
 
 #[test]
 fn sod_1d_two_level_conserves_composite_totals() {
-    // periodic walls: mass, momentum AND energy are exactly conserved (an
+    // periodic walls: mass, momentum and energy are exactly conserved (an
     // outflow boundary leaks the pressure flux (p_l - p_r)*t into momentum).
     // the coverage edge at x=0.6 sits in the shock's path — by t=0.1 the
-    // shock (speed ~1.75) has CROSSED the coarse-fine interface, so the
+    // shock (speed ~1.75) has crossed the coarse-fine interface, so the
     // conservation check exercises the refluxed interface.
     let n = 200usize;
     let dx = 1.0 / n as f64;
@@ -259,7 +259,7 @@ fn smooth_pulse_two_level_matches_uniform_fine() {
     let fk = kset(&fine_ref);
     evolve(&mut fine_ref, &fk, t_final).unwrap();
 
-    // compare the fine level against the reference at matching ABSOLUTE fine
+    // compare the fine level against the reference at matching absolute fine
     // indices, well inside the coverage (the pulse stays in [0.35, 0.65]).
     let fine = &hier.levels[1].state;
     let lo = (0.35 / (dx / 2.0)).round() as isize;

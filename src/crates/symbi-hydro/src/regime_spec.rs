@@ -1,14 +1,14 @@
 // =============================================================================
 // regime_spec.rs
 //
-// `RegimeSpec` — physics regime metadata as a first-class DATA VALUE, built
+// `RegimeSpec` — physics regime metadata as a first-class data value, built
 // against the `symbi-hydro::Regime` spine.
 //
 // the invariant this module encodes:
 //
 //   **`Rhd` and `Rmhd` collapse to consts-plus-c2p-hook.**
 //
-// every regime is identical at the metadata layer EXCEPT for:
+// every regime is identical at the metadata layer except for:
 //   - a small set of `bool` / `u8` flag constants (is_relativistic, is_mhd,
 //     has_energy, field count for the magnetic field),
 //   - the conservative-to-primitive recovery function — algebraic for
@@ -69,7 +69,7 @@ pub enum EosKind {
 
 /// the divergence of one regime from "the prototype" (newtonian).
 /// `Rhd` and `Rmhd` are claims-to-collapse against this: at the metadata
-/// layer their `RegimeSpec` differs from `NEWTONIAN_SPEC` by EXACTLY:
+/// layer their `RegimeSpec` differs from `NEWTONIAN_SPEC` by exactly:
 ///   - the flag bits in this struct (filled by `RegimeSpec::diff_flags`);
 ///   - the value of `c2p_kind` (algebraic vs iterative);
 ///   - (for RMHD) an extra `mag` field in the field list.
@@ -89,7 +89,7 @@ pub struct RegimeSpec {
     /// **primitive-side field manifest** (rho / vel / pre / bcell ...).
     /// drives the I/O writer and reader's primitive-group iteration:
     /// `symbi-io::iter_components` consumes it to generate the on-disk dataset
-    /// names, so `write_level_fields` and `read_level_fields` share ONE naming
+    /// names, so `write_level_fields` and `read_level_fields` share one naming
     /// source of truth per regime.
     pub primitive_fields: &'static [FieldSpec],
     /// the EOS the regime is parametric on. checked against the runtime EOS.
@@ -101,18 +101,18 @@ pub struct RegimeSpec {
     pub is_mhd: bool,
     /// false for isothermal (no energy equation, `nrg` field absent).
     pub has_energy: bool,
-    /// MHD: whether the flux reads PRE-MATERIALIZED per-cell wave speeds (RMHD: the
+    /// MHD: whether the flux reads pre-materialized per-cell wave speeds (RMHD: the
     /// Mignone-Del Zanna quartic is too costly to inline per face, so a `wave_speeds`
     /// pass writes `wave_speed_l/r[d]` for the HLLE flux to read) vs computing the
-    /// magnetosonic speed INLINE from the reconstructed L/R states (NMHD/iMHD closed
+    /// magnetosonic speed inline from the reconstructed L/R states (NMHD/iMHD closed
     /// form). drives the `wave_speeds` pass + the flux's `ws_l/ws_r` binding. false for
     /// non-MHD regimes.
     pub materializes_wave_speeds: bool,
-    /// the c2p flavor — the ONE piece of physics that doesn't collapse to
+    /// the c2p flavor — the one piece of physics that doesn't collapse to
     /// data because the recovery iteration is regime-specific.
     pub c2p_kind: C2pKind,
     /// the conservation laws this regime evolves — one `LawSpec` per
-    /// conserved field, declaring `(field, kind)` only. the flux EQUATIONS
+    /// conserved field, declaring `(field, kind)` only. the flux equations
     /// are the carrier-generic `Regime::to_flux` (single source of truth);
     /// this list is metadata consumed by `simulation_laws::validate`.
     pub laws: &'static [LawSpec],
@@ -172,7 +172,7 @@ pub enum LawKind {
 }
 
 /// the declarative description of one conservation law — the conserved
-/// field name plus its law kind. the FLUX EQUATION is deliberately NOT
+/// field name plus its law kind. the flux equation is deliberately not
 /// carried here: the single source of truth for every regime's flux is the
 /// carrier-generic `Regime::to_flux` (run at `S = f64`, traced at `S = Gv`
 /// by the carrier gate). carrying a second hand-transcribed flux-as-`Graph`
@@ -182,7 +182,7 @@ pub enum LawKind {
 /// every overlay/law targets a field the regime declares).
 ///
 /// **identity by physics**: the `(field, kind)` pair
-/// IS the physical declaration; textual form carries no identity.
+/// is the physical declaration; textual form carries no identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LawSpec {
     /// the conserved field this law evolves. matches a `FieldSpec.name`
@@ -213,8 +213,8 @@ pub(crate) fn build_dot(g: &mut Graph, a: &[NodeId], b: &[NodeId]) -> NodeId {
 // =============================================================================
 // section 1.6 — the per-regime law manifests (metadata only).
 //
-// each `*_LAWS` array declares WHICH conserved fields a regime evolves and
-// the archetypal kind of each. the flux EQUATIONS live in the
+// each `*_LAWS` array declares which conserved fields a regime evolves and
+// the archetypal kind of each. the flux equations live in the
 // carrier-generic `Regime::to_flux` (single source of truth, traced at
 // `S = Gv` by the carrier gate). `simulation_laws::validate` consumes these
 // arrays to check that every law/overlay targets a declared field.
@@ -367,7 +367,7 @@ const ISO_NEWTONIAN_PRIMS: &[FieldSpec] = &[
     // iso has no energy law; `pre` is substrate-owned (Option<...>),
     // written conditionally by the I/O writer when present.
 ];
-// BYTE-ALIASED to the newtonian consts, exactly as RMHD/NMHD already share theirs:
+// byte-aliased to the newtonian consts, exactly as RMHD/NMHD already share theirs:
 // `primitive_fields` drives the HDF5 dataset names, so an independent copy that drifted
 // would silently give RHD checkpoints a different on-disk schema. the collapse test
 // asserts prims and laws equality alongside the conserved fields.
@@ -393,7 +393,7 @@ const RMHD_PRIMS: &[FieldSpec] = &[
 ];
 
 /// isothermal: newtonian minus the energy field. matches `IsoCons<S, D>`'s
-/// `Zero<S>` energy slot (the ZST elision).
+/// `Zero<S>` energy slot (the zst elision).
 const ISO_NEWTONIAN_FIELDS: &[FieldSpec] = &[
     FieldSpec {
         name: "den",
@@ -405,7 +405,7 @@ const ISO_NEWTONIAN_FIELDS: &[FieldSpec] = &[
     },
 ];
 
-/// RHD: same field SHAPE as newtonian (den = rho*W, mom = rho*h*W^2*v,
+/// RHD: same field shape as newtonian (den = rho*W, mom = rho*h*W^2*v,
 /// nrg = tau). the names and structural kinds match — only the *semantics*
 /// of each conserved component differs.
 const RHD_FIELDS: &[FieldSpec] = &[
@@ -447,7 +447,7 @@ const RMHD_FIELDS: &[FieldSpec] = &[
 ];
 
 /// isothermal MHD: RMHD fields minus the energy slot (den, mom, mag). matches
-/// `IsoMhdCons<S, D>`'s `Zero<S>` energy slot (ZST elision).
+/// `IsoMhdCons<S, D>`'s `Zero<S>` energy slot (zst elision).
 const ISO_MHD_FIELDS: &[FieldSpec] = &[
     FieldSpec {
         name: "den",
@@ -463,7 +463,7 @@ const ISO_MHD_FIELDS: &[FieldSpec] = &[
     },
 ];
 
-/// isothermal MHD primitives: rho, vel, bcell — NO `pre` (substrate-owned,
+/// isothermal MHD primitives: rho, vel, bcell — no `pre` (substrate-owned,
 /// written conditionally by the I/O writer, mirroring ISO_NEWTONIAN_PRIMS).
 const ISO_MHD_PRIMS: &[FieldSpec] = &[
     FieldSpec {
@@ -511,7 +511,7 @@ pub const ISO_NEWTONIAN_SPEC: RegimeSpec = RegimeSpec {
 
 /// special-relativistic hydrodynamics — newtonian + relativistic
 /// + Newton-iterate c2p. **the collapse claim:** this spec differs from
-/// `NEWTONIAN_SPEC` ONLY in `name`, `is_relativistic`, and `c2p_kind`.
+/// `NEWTONIAN_SPEC` only in `name`, `is_relativistic`, and `c2p_kind`.
 pub const RHD_SPEC: RegimeSpec = RegimeSpec {
     name: "rhd",
     fields: RHD_FIELDS,
@@ -526,8 +526,8 @@ pub const RHD_SPEC: RegimeSpec = RegimeSpec {
 };
 
 /// relativistic MHD — RHD + magnetic field + KKC c2p. **the collapse claim:**
-/// this spec differs from `RHD_SPEC` ONLY in `name`, `is_mhd`, `c2p_kind`,
-/// AND the addition of the `mag` field (the ONE structural extension; every
+/// this spec differs from `RHD_SPEC` only in `name`, `is_mhd`, `c2p_kind`,
+/// and the addition of the `mag` field (the one structural extension; every
 /// other piece collapses).
 pub const RMHD_SPEC: RegimeSpec = RegimeSpec {
     name: "rmhd",
@@ -542,7 +542,7 @@ pub const RMHD_SPEC: RegimeSpec = RegimeSpec {
     laws: RMHD_LAWS,
 };
 
-/// newtonian ideal MHD. collapses to `RMHD_SPEC` EXCEPT `name`,
+/// newtonian ideal MHD. collapses to `RMHD_SPEC` except `name`,
 /// `is_relativistic` (false), and `c2p_kind` (algebraic, a closed-form inversion where RMHD iterates) — the
 /// conserved/primitive layout and the conservation laws are identical (MHD is
 /// MHD; only the c2p inversion and the lorentz factors differ).
@@ -560,7 +560,7 @@ pub const NEWTONIAN_MHD_SPEC: RegimeSpec = RegimeSpec {
 };
 
 /// isothermal ideal MHD — newtonian MHD minus the energy equation, closed by
-/// p = a^2 rho (Mignone 2007). collapses to `NEWTONIAN_MHD_SPEC` EXCEPT `name`,
+/// p = a^2 rho (Mignone 2007). collapses to `NEWTONIAN_MHD_SPEC` except `name`,
 /// `eos` (Isothermal), `has_energy` (false), and the field/law lists (no energy
 /// field/law). conserved = {den, mom, mag}; primitive = {rho, vel, bcell}.
 pub const ISO_MHD_SPEC: RegimeSpec = RegimeSpec {
@@ -587,7 +587,7 @@ pub const ISO_MHD_SPEC: RegimeSpec = RegimeSpec {
 mod tests {
     use super::*;
 
-    /// the RHD vs newtonian collapse: every spec field MUST match EXCEPT
+    /// the RHD vs newtonian collapse: every spec field must match except
     /// `name`, `is_relativistic`, and `c2p_kind`. this is the load-bearing
     /// assertion of the "consts-plus-c2p-hook" claim.
     #[test]
@@ -596,8 +596,8 @@ mod tests {
         let s = &RHD_SPEC;
 
         // structurally identical fields (same names, same kinds, same order).
-        // the SEMANTICS of each conserved field differ (newtonian den = rho;
-        // rhd den = rho * W) but the LAYOUT collapses.
+        // the semantics of each conserved field differ (newtonian den = rho;
+        // rhd den = rho * W) but the layout collapses.
         assert_eq!(n.fields, s.fields);
     assert_eq!(
         n.primitive_fields, s.primitive_fields,
@@ -616,7 +616,7 @@ mod tests {
         assert_ne!(n.c2p_kind, s.c2p_kind);
     }
 
-    /// the RMHD vs RHD collapse: every spec field MUST match EXCEPT
+    /// the RMHD vs RHD collapse: every spec field must match except
     /// `name`, `is_mhd`, `c2p_kind`, and the addition of the `mag` field.
     /// proves "MHD is RHD + magnetic-field-as-data".
     #[test]
@@ -634,8 +634,8 @@ mod tests {
         assert_ne!(s.is_mhd, r.is_mhd);
         assert_ne!(s.c2p_kind, r.c2p_kind);
 
-        // structural extension: RMHD has the same field NAMES as RHD in order (den, mom,
-        // nrg) plus `mag` appended. the hydro prefix names match, but RMHD PROMOTES mom to a
+        // structural extension: RMHD has the same field names as RHD in order (den, mom,
+        // nrg) plus `mag` appended. the hydro prefix names match, but RMHD promotes mom to a
         // fixed 3-vector (vs RHD's D-vector) — MHD vectors are always 3-component.
         let s_count = s.fields.len();
         let r_count = r.fields.len();
@@ -656,7 +656,7 @@ mod tests {
         );
     }
 
-    /// the newtonian-MHD vs RMHD collapse: every spec field MUST match EXCEPT
+    /// the newtonian-MHD vs RMHD collapse: every spec field must match except
     /// `name`, `is_relativistic` (false), and `c2p_kind` (algebraic, a
     /// closed-form inversion). proves "newtonian MHD is RMHD minus relativity minus the
     /// iterative inversion" — identical layout and laws, simpler physics.
@@ -693,7 +693,7 @@ mod tests {
         assert!(!n.is_mhd && !i.is_mhd);
         assert_eq!(n.c2p_kind, i.c2p_kind); // both Algebraic
 
-        // structural reduction: iso DROPS the trailing `nrg` field.
+        // structural reduction: iso drops the trailing `nrg` field.
         let i_count = i.fields.len();
         assert_eq!(i_count, n.fields.len() - 1);
         assert_eq!(i.fields, &n.fields[..i_count]);
@@ -728,7 +728,7 @@ mod tests {
     fn rhd_total_components_match_newtonian_at_every_dimension() {
         // the collapse claim extends to runtime layout: RHD's component
         // count equals newtonian's at every D (because the field list is
-        // bit-identical). only the SEMANTICS of each component differs.
+        // bit-identical). only the semantics of each component differs.
         for d in [1usize, 2, 3] {
             assert_eq!(
                 NEWTONIAN_SPEC.total_components_at(d),
@@ -740,8 +740,8 @@ mod tests {
 
     #[test]
     fn rmhd_adds_three_components_for_the_magnetic_field() {
-        // RMHD field count is D-INDEPENDENT: den(1) + mom(3) + nrg(1) + mag(3) = 8 at every
-        // D, because the MHD momentum AND magnetic field are fixed 3-vectors (DOF=3), unlike
+        // RMHD field count is D-independent: den(1) + mom(3) + nrg(1) + mag(3) = 8 at every
+        // D, because the MHD momentum and magnetic field are fixed 3-vectors (DOF=3), unlike
         // RHD's D-vector momentum. (the spatial dimension is independent of the vector DOF count.)
         for d in [1usize, 2, 3] {
             assert_eq!(
@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn trait_bool_methods_route_through_spec() {
-        // proves the wiring: a regime's trait-method bool MUST equal its
+        // proves the wiring: a regime's trait-method bool must equal its
         // SPEC's flag. closes the "consts collapse" claim end-to-end —
         // future regimes that forget to wire SPEC fail this test.
         use crate::{IsoNewtonian, Newtonian, Regime, Rhd, Rmhd};
@@ -790,7 +790,7 @@ mod tests {
             assert_eq!(r.is_mhd(), spec.is_mhd);
             assert_eq!(r.has_energy(), spec.has_energy);
             // value equality: `pub const` synthesizes a fresh `&` per use site
-            // (no stable memory location), so compare by VALUE.
+            // (no stable memory location), so compare by value.
             assert_eq!(<R as Regime<S, D>>::SPEC, spec);
             assert_eq!(<R as Regime<S, D>>::SPEC.name, spec.name);
         }
@@ -807,7 +807,7 @@ mod tests {
     fn newtonian_laws_match_the_field_layout() {
         // structural check: one law per conserved field, in the same order,
         // each with the expected kind. proves the laws table is a
-        // STRUCTURAL declaration of "which physical quantities this regime
+        // structural declaration of "which physical quantities this regime
         // evolves," fixed in order and kind.
         let spec = &NEWTONIAN_SPEC;
         assert_eq!(spec.laws.len(), spec.fields.len());
@@ -822,7 +822,7 @@ mod tests {
     #[test]
     fn rhd_iso_laws_unchanged_by_b4iv() {
         // sanity check that adding RMHD laws didn't touch
-        // the RHD / ISO law tables.
+        // the RHD / iso law tables.
         assert_eq!(RHD_LAWS.len(), 3);
         assert_eq!(ISO_NEWTONIAN_LAWS.len(), 2);
     }

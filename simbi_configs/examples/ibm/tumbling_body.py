@@ -1,7 +1,7 @@
 # =============================================================================
 # tumbling_body.py
 #
-# a free, asymmetric rigid body cast into a 3D wind: it TUMBLES and DRIFTS. the
+# a free, asymmetric rigid body cast into a 3D wind: it tumbles and drifts. the
 # body is a flat elongated block (a card) with anisotropic principal moments, so
 # Euler's gyroscopic term makes it precess/nutate; the gas reaction torque drives
 # its spin and the drag pushes it downstream. everything is two-way: the flow
@@ -10,7 +10,7 @@
 #
 # showcases: full rigid-body rotation of an immersed wall — a runtime orientation
 # matrix + angular-velocity vector, anisotropic-inertia gyroscopic tumbling, and
-# two-way force- AND torque-driven motion. the body's position, velocity,
+# two-way force- and torque-driven motion. the body's position, velocity,
 # orientation-driven torque, and drag are written to diagnostics.dat.
 #
 # usage:
@@ -141,7 +141,7 @@ class TumblingBody(SimbiProblem):
                     k_eta_t=50.0,
                     shape=card,
                     omega=self.spin,
-                    # spin cast about a TILTED axis (not a principal axis), so the
+                    # spin cast about a tilted axis (not a principal axis), so the
                     # anisotropic moments drive a torque-free precession from the start.
                     spin_axis=(0.3, 1.0, 0.2),
                     # anisotropic principal moments (I1 < I2 < I3): the card tumbles.

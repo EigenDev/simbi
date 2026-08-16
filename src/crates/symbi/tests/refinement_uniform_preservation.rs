@@ -6,7 +6,7 @@
 // every face (including the coarse-fine seam ghosts) is the flux of identical
 // states, so any drift — especially a ring at the level boundary — is a
 // defect in prolongation, restriction, or the subcycle sequencing, not
-// physics. gated for BOTH the adiabatic and the isothermal kernel sets: the
+// physics. gated for both the adiabatic and the isothermal kernel sets: the
 // coupling must be regime-generic.
 // =============================================================================
 

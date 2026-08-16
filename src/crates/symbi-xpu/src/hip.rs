@@ -1,7 +1,7 @@
 // =============================================================================
 // hip.rs
 //
-// AMD HIP/ROCm execution space and managed memory space. raw driver API bindings,
+// amd HIP/ROCm execution space and managed memory space. raw driver API bindings,
 // no external crate dependencies -- just extern "C" to libamdhip64.so.
 //
 // the sibling of cuda.rs. the key difference: HIP has no context

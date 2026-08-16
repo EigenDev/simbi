@@ -3,13 +3,13 @@
 //
 // throwaway driver for the tabbed dashboard. it owns a dummy xorshift
 // integrator that random-walks a snapshot, projects it into a `live::DiagnosticView`,
-// and renders through the SHARED production render (`symbi_display::live`) — so
+// and renders through the shared production render (`symbi_display::live`) — so
 // look-and-feel iterates here (compile ~0.4s, no maturin) and production inherits
 // exactly the same output.
 //
-// it drives the terminal via the REAL production path: SignalGuard owns the
-// graceful-interrupt flag (Ctrl-C -> SIGINT, never a keystroke), ScreenGuard owns
-// the alt screen + termios (ICANON/ECHO off, ISIG on), and poll_key reads the
+// it drives the terminal via the real production path: SignalGuard owns the
+// graceful-interrupt flag (Ctrl-C -> sigint, never a keystroke), ScreenGuard owns
+// the alt screen + termios (icanon/echo off, isig on), and poll_key reads the
 // remaining keys over that mode. no crossterm raw mode is enabled anywhere.
 //
 // run:  cargo run -p symbi-display --example dashboard_skeleton
@@ -285,9 +285,9 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
     // tier-2a architecture under test: SignalGuard owns the graceful-interrupt flag,
-    // ScreenGuard owns the alt screen + termios, and a dedicated RENDER THREAD
+    // ScreenGuard owns the alt screen + termios, and a dedicated render thread
     // (LiveDashboard) owns the terminal + input, drawing at ~30 fps. this main thread
-    // is the (dummy) SOLVER: it steps, publishes a snapshot, and reads the render
+    // is the (dummy) solver: it steps, publishes a snapshot, and reads the render
     // thread's control flags — it never touches the terminal.
     let _sig = SignalGuard::install();
     let mut screen = ScreenGuard::enter();
@@ -300,7 +300,7 @@ fn main() -> io::Result<()> {
     };
 
     let mut app = App::new();
-    // a deliberately SLOW dummy step (200ms) so the responsiveness win is obvious:
+    // a deliberately slow dummy step (200ms) so the responsiveness win is obvious:
     // tab / pause stay instant (30 fps render thread) while the "solver" crawls.
     let step_time = Duration::from_millis(200);
 

@@ -1,7 +1,7 @@
 // =============================================================================
 // gv_carrier_equivalence.rs
 //
-// CARRIER-EQUIVALENCE ACCEPTANCE for the `symbi_ir::algebra::Scalar` impl on
+// carrier-equivalence acceptance for the `symbi_ir::algebra::Scalar` impl on
 // `Gv`. proves the homomorphism law end-to-end, against the same physics
 // templated over `S: Scalar` and run two ways:
 //
@@ -10,10 +10,10 @@
 // every load-bearing surface of the trait gets a test: ring arithmetic,
 // sqrt + transcendentals, IEEE consts, comparisons returning `Self::Mask`,
 // `select`/`branch` through the Mask + `Selectable`, hyperbolics, and
-// `iterate` with the FREEZE LAW (kepler c2p regression class).
+// `iterate` with the freeze law (kepler c2p regression class).
 //
 // pattern: physics fn is generic over `S: Scalar` and gets instantiated at
-// both carriers. for Gv, the trace is scalarized in KERNEL mode -- the only path
+// both carriers. for Gv, the trace is scalarized in kernel mode -- the only path
 // that partitions an `IterateInline` acc-dependent cone into the loop body -- and
 // evaluated via the CPU interpreter at f64. tight tolerance (~1e-12) because
 // every op is f64 in both paths.
@@ -26,7 +26,7 @@ use symbi_ir::{Backend, Cpu, Gv, begin_trace, end_trace};
 /// run a Scalar-generic physics function at S = Gv, scalarize the resulting
 /// graph, and evaluate the LoweredFn at the given f64 inputs.
 ///
-/// KERNEL-MODE scalarization, because `Op::IterateInline` partitions its
+/// kernel-mode scalarization, because `Op::IterateInline` partitions its
 /// acc-dependent cone into the loop body and only this path establishes that
 /// context. the single-output path lowers `IterAcc` outside any loop, so it
 /// cannot represent an iterate at all — which would leave the freeze law, the
@@ -67,7 +67,7 @@ fn close(a: f64, b: f64, what: &str) {
 // =============================================================================
 
 fn ring_arithmetic<S: Scalar>(a: S, b: S, c: S) -> S {
-    // exercises Add/Sub/Mul/Div + Self::ONE (the augmented trait surface).
+    // exercises Add/Sub/Mul/Div + Self::one (the augmented trait surface).
     (a * b - c) / (a + b + S::ONE)
 }
 
@@ -89,7 +89,7 @@ fn ring_arithmetic_matches_f64() {
 
 fn rel_sound_speed_sq<S: Scalar>(gamma: S, p: S, rho: S) -> S {
     // cs^2 = gamma * p / (rho * h),  h = 1 + gamma * p / (rho * (gamma - 1))
-    // exercises Sub/Mul/Div/Add + Self::ONE.
+    // exercises Sub/Mul/Div/Add + Self::one.
     let h = S::ONE + gamma * p / (rho * (gamma - S::ONE));
     (gamma * p) / (rho * h)
 }
@@ -146,7 +146,7 @@ fn max_via_select_matches_f64() {
 
 fn branch_two_arms<S: Scalar>(a: S, b: S) -> S {
     // exercises Scalar::branch (defaulted via Selectable::select). on Gv this
-    // BUILDS both arms into the graph and selects — the A1-safe pattern.
+    // builds both arms into the graph and selects — the A1-safe pattern.
     let cond = a.cmp_ge(b);
     S::branch(cond, || a * a, || b + b)
 }
@@ -183,16 +183,16 @@ fn cubic_resolvent_real_matches_f64() {
 }
 
 // =============================================================================
-// iterate — the FREEZE LAW
+// iterate — the freeze law
 // =============================================================================
 
 fn newton_sqrt<S: Scalar>(a: S, x0: S, conv_tol: f64) -> S {
     // Newton sqrt: x_{n+1} = 0.5 * (x_n + a / x_n). converges quadratically.
-    // FREEZE LAW: the returned acc is BEFORE the converging step. on Gv this
+    // freeze law: the returned acc is before the converging step. on Gv this
     // becomes a fixed-count IterateInline with `select(converged, acc, body(acc))`,
     // so the returned value matches the host's early-break value.
     //
-    // `conv_tol` is a parameter because the freeze is only OBSERVABLE while the
+    // `conv_tol` is a parameter because the freeze is only observable while the
     // iteration still has distance to travel. at a tight tolerance newton has already
     // reached its fixed point, every remaining step is a no-op, and a frozen accumulator
     // is bit-identical to an unfrozen one.
@@ -204,13 +204,13 @@ fn newton_sqrt<S: Scalar>(a: S, x0: S, conv_tol: f64) -> S {
     )
 }
 
-// the FREEZE LAW under carrier equivalence, which no other gate reaches.
+// the freeze law under carrier equivalence, which no other gate reaches.
 //
 // the f64 side is pinned independently (`f64_iterate_freeze_holds_pre_convergence_value`
 // in algebra.rs). the Gv side is exercised by rhd/rmhd c2p round-trips elsewhere, but a
 // round-trip cannot see the freeze: the recovery converges far below the 1e-9 round-trip
-// tolerance, so returning the accumulator one step LATE reproduces the input just as
-// well. only comparing the two carriers on a function whose answer depends on WHICH
+// tolerance, so returning the accumulator one step late reproduces the input just as
+// well. only comparing the two carriers on a function whose answer depends on which
 // iterate the accumulator is read from can distinguish them, which is what this does.
 //
 #[test]
@@ -229,8 +229,8 @@ fn iterate_matches_f64_at_a_converged_fixed_point() {
 
 #[test]
 fn iterate_freezes_the_accumulator_at_the_same_step_on_both_carriers() {
-    // THE FREEZE LAW under carrier equivalence. the host breaks out of its loop; the Gv
-    // trace runs a FIXED count and emits `select(converged, acc, body(acc))`, so the two
+    // the freeze law under carrier equivalence. the host breaks out of its loop; the Gv
+    // trace runs a fixed count and emits `select(converged, acc, body(acc))`, so the two
     // agree only if the select holds the accumulator from the same iterate onward.
     //
     // a loose predicate is what makes the law observable: it fires while newton still has
@@ -240,7 +240,7 @@ fn iterate_freezes_the_accumulator_at_the_same_step_on_both_carriers() {
     // cannot serve as this gate, converging as they do far below their own tolerance.
     let (a, x0, conv_tol) = (9.0_f64, 4.0, 1e-2);
 
-    // NON-VACUITY: a predicate that never fires runs all 20 steps to the root. the frozen
+    // non-vacuity: a predicate that never fires runs all 20 steps to the root. the frozen
     // answer must differ from that by more than the comparison tolerance, or the
     // equivalence below holds for a scheme with no freeze at all. tightening conv_tol
     // trips this assertion instead of silently retiring the law.
@@ -262,12 +262,12 @@ fn iterate_freezes_the_accumulator_at_the_same_step_on_both_carriers() {
 }
 
 // =============================================================================
-// IEEE consts — INFINITY participates in min/max sentinels
+// IEEE consts — infinity participates in min/max sentinels
 // =============================================================================
 
 fn min_fold_with_inf_init<S: Scalar>(a: S, b: S, c: S) -> S {
     // initialise an accumulator at +inf, fold via min — pattern that wave-speed
-    // maps and similar use. exercises Self::INFINITY const.
+    // maps and similar use. exercises Self::infinity const.
     S::INFINITY.min(a).min(b).min(c)
 }
 

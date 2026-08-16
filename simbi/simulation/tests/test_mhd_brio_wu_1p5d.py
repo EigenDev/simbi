@@ -2,8 +2,8 @@
 # test_mhd_brio_wu_1p5d.py
 #
 # the reduced-dimension out-of-plane predictor gate. on a 1.5D newtonian-MHD Brio-Wu
-# shock tube (D=1, DOF=3) the transverse By,Bz have NO staggered face and are
-# cell-centered conserved variables evolved SOLELY by the out-of-plane cell-B flux
+# shock tube (D=1, DOF=3) the transverse By,Bz have no staggered face and are
+# cell-centered conserved variables evolved solely by the out-of-plane cell-B flux
 # predictor. a missing predictor freezes By at its sharp +-1 IC jump and drives the gas
 # pressure negative; the correct out-of-plane evolution develops the Brio-Wu compound
 # wave (By reverses through intermediate values) and stays physical.
@@ -60,7 +60,7 @@ def test_brio_wu_1p5d_out_of_plane_predictor() -> None:
     assert abs(by[3] - 1.0) < 0.05, f"left end By={by[3]:.4f} (expected ~1.0)"
     assert abs(by[-4] + 1.0) < 0.05, f"right end By={by[-4]:.4f} (expected ~-1.0)"
 
-    # the compound wave: By transitions +1 -> -1, so it changes sign in the interior AND passes
+    # the compound wave: By transitions +1 -> -1, so it changes sign in the interior and passes
     # through intermediate values. a frozen By keeps the sharp +-1 step (no intermediate values).
     assert int(np.sum(by[:-1] * by[1:] < 0)) >= 1, "By never changed sign — compound-wave structure absent"
     assert np.any(np.abs(by) < 0.9), "By took no intermediate value — it is frozen at the +-1 IC jump"

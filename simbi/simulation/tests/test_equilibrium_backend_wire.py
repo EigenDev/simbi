@@ -1,7 +1,7 @@
 # =============================================================================
 # test_equilibrium_backend_wire.py
 #
-# the declared stationary target reaches the BACKEND and acts there.
+# the declared stationary target reaches the backend and acts there.
 #
 # every other test of this feature checks one layer: the python serializer emits the right
 # schema, the rust hierarchy holds a target it is handed directly. between them sits the
@@ -9,7 +9,7 @@
 # perfectly, simply without well-balancing, and the only symptom is an atmosphere that drifts
 # as it always did.
 #
-# so the gate runs the real backend and demands the target CHANGE something. it declares a
+# so the gate runs the real backend and demands the target change something. it declares a
 # target that balances half the gravity the run applies, which the backend's refinement check
 # must reject; a wire that never delivered the target would run happily to completion. the
 # companion case, the correct target on the same config, must run — otherwise the rejection
@@ -76,7 +76,7 @@ def test_the_correct_target_runs(capfd) -> None:
 
 @pytest.mark.simulation
 def test_a_target_that_is_not_a_steady_state_is_reported_by_the_backend(capfd) -> None:
-    # the backend measures the target's imbalance on two levels and REPORTS -- never refuses --
+    # the backend measures the target's imbalance on two levels and reports -- never refuses --
     # a component whose imbalance fails to shrink when the cell width halves. truncation error
     # falls by at least 2 under refinement; a continuum residual does not.
     #

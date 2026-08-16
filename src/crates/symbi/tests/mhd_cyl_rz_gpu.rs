@@ -1,12 +1,12 @@
 // =============================================================================
 // mhd_cyl_rz_gpu.rs
 //
-// GPU<->CPU parity for the CURVILINEAR 2.5D cyl r-z MHD path — the carrier gate for the
+// GPU<->CPU parity for the curvilinear 2.5D cyl r-z MHD path — the carrier gate for the
 // cyl-rz substrate kernels (the cartesian 2.5D
-// parity lives in mhd_2p5d_gpu.rs; cyl HYDRO in cylindrical_swirl/disk_gpu). builds
-// the SAME poloidal-rotor-in-B_z sim on host (CpuSpace/HostMemory) and device
+// parity lives in mhd_2p5d_gpu.rs; cyl hydro in cylindrical_swirl/disk_gpu). builds
+// the same poloidal-rotor-in-B_z sim on host (CpuSpace/HostMemory) and device
 // (CudaSpace/UnifiedMemory), evolves a handful of RK2 steps through the production
-// loop, and asserts the conserved state + cell B + the staggered FACE B agree over
+// loop, and asserts the conserved state + cell B + the staggered face B agree over
 // the interior. exercises the device cyl-rz metric curl (-(1/r)d_r(r E_phi)), the
 // E_phi corner EMF, and the manifest-driven curvilinear godunov (unfused on device:
 // curvilinear MHD takes the alias-free non-fused path).
@@ -74,7 +74,7 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
     .expect("cyl r-z sim")
     .set_initial(|[r, z]| {
         let (rho, vr, vz) = rotor_state(r, z);
-        // velocity is COORDINATE-indexed (0=r, 1=phi, 2=z); B = (B_r, B_phi, B_z) = (0, 0, B0).
+        // velocity is coordinate-indexed (0=r, 1=phi, 2=z); B = (B_r, B_phi, B_z) = (0, 0, B0).
         MhdPrim {
             hydro: Prim {
                 rho,
@@ -163,7 +163,7 @@ fn nmhd_cyl_rz_evolve_gpu_matches_cpu() {
             );
         }
     }
-    // the STAGGERED face B — the cyl-rz metric curl writes these on device (B_r on r-faces,
+    // the staggered face B — the cyl-rz metric curl writes these on device (B_r on r-faces,
     // B_z on z-faces). diff over each face domain to gate the device curl directly.
     for d in 0..2 {
         for fc in hmhd.bface[d].domain().clone().iter() {

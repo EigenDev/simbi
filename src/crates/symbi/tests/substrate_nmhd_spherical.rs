@@ -2,8 +2,8 @@
 // substrate_nmhd_spherical.rs
 //
 // the curvilinear Newtonian-MHD wiring proof: NewtonianMhdSubstrateKernelSet3D on
-// a SPHERICAL shell through the real evolve() loop, exercising the NMHD _sph
-// kernels — nmhd_godunov_stage_sph_3d (the area-weighted divergence + the NEWTONIAN
+// a spherical shell through the real evolve() loop, exercising the NMHD _sph
+// kernels — nmhd_godunov_stage_sph_3d (the area-weighted divergence + the newtonian
 // geometric momentum source: pressure + inertial + magnetic tension via the
 // lab-frame B, GeoSource::NewtonianMhd), nmhd_wave_speed_map_sph_3d (per-cell
 // physical CFL widths), and the spherical CT curl (rmhd_ct_curl_3d_*_sph, shared).
@@ -124,7 +124,7 @@ fn full_substrate_spherical_nmhd_smoke() {
         "coords must be Spherical"
     );
 
-    // geometry is ACTIVE in the wave-speed map: the spherical CFL dt (r-weighted angular
+    // geometry is active in the wave-speed map: the spherical CFL dt (r-weighted angular
     // widths) differs from the Cartesian dt on the same state -> nmhd_wave_speed_map_sph engaged.
     let mut cart = make_cart();
     set_ic(&mut cart);

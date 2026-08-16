@@ -1,7 +1,7 @@
 // =============================================================================
 // mhd_cyl_rz_logr.rs
 //
-// end-to-end validation of the LOG-RADIAL 2.5D cylindrical (r-z) Newtonian-MHD kernels — the
+// end-to-end validation of the log-radial 2.5D cylindrical (r-z) Newtonian-MHD kernels — the
 // `_cyl_rz_logr` gas godunov, wave-speed map, out-of-plane bcell predictor, and the metric CT
 // curl `rmhd_ct_curl_2d_{dir}_cyl_rz_logr`. the spacing slug is what selects the geometric-mean
 // cell geometry; omitting it silently resolves the uniform-geometry kernel on a log grid, which
@@ -11,10 +11,10 @@
 //   (a) the discrete area-weighted div(B) of the staggered in-plane field
 //       div(B) = 2 (r_hi B_r_hi - r_lo B_r_lo)/(r_hi^2 - r_lo^2) + (B_z_hi - B_z_lo)/dz
 //       stays at machine zero (the corner E_phi CT holds the constraint on the geometric-mean grid),
-//   (b) the gas stays PHYSICAL (rho>0, p>0, finite) as a radial pressure bump drives a flow through
+//   (b) the gas stays physical (rho>0, p>0, finite) as a radial pressure bump drives a flow through
 //       the log-spaced cells (a wrong log geometry -> wrong CFL widths / fluxes -> NaN or negative p).
 // div(B) preservation is structural (the single-valued corner EMF telescopes on any grid); the
-// load-bearing check for the log GEOMETRY is the physicality under a real flow.
+// load-bearing check for the log geometry is the physicality under a real flow.
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
@@ -44,7 +44,7 @@ const DIVB_TOL: f64 = 1e-11;
 
 fn make_sim() -> Sim {
     let dz = (Z_HI - Z_LO) / NZ as f64;
-    // face(i) = R_LO * 10^(i * log_slope); log_slope spans [R_LO, R_HI] over NR cells.
+    // face(i) = R_LO * 10^(i * log_slope); log_slope spans [R_LO, R_HI] over nr cells.
     let log_slope = (R_HI / R_LO).log10() / NR as f64;
     let maps = [
         AxisMap::Log {

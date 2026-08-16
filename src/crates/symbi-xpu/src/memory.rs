@@ -1,8 +1,8 @@
 // =============================================================================
 // memory.rs
 //
-// memory space trait and memory block. the memory space defines WHERE data
-// lives (host, device, unified). the memory block provides RAII ownership
+// memory space trait and memory block. the memory space defines where data
+// lives (host, device, unified). the memory block provides raii ownership
 // of an allocation in a given space.
 //
 // design:
@@ -45,7 +45,7 @@ pub trait MemorySpace: 'static + Send + Sync + Sized {
 // memory block
 // =============================================================================
 
-/// RAII memory ownership. move-only. drop frees the allocation.
+/// raii memory ownership. move-only. drop frees the allocation.
 /// the block knows its size and memory space but not its layout.
 pub struct MemoryBlock<M: MemorySpace> {
     ptr: *mut u8,

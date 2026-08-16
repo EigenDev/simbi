@@ -3,12 +3,12 @@
 //
 // the passive scalar on a homologously expanding mesh.
 //
-// expansion is a GEOMETRIC operation: a(t) stretches the physical cell width on the expanding
+// expansion is a geometric operation: a(t) stretches the physical cell width on the expanding
 // axes, and the conserved densities dilute accordingly. `D_chi = rho chi` is a density like `rho`,
-// so both dilute by the same factor and the CONCENTRATION `chi` is invariant under pure expansion.
+// so both dilute by the same factor and the concentration `chi` is invariant under pure expansion.
 //
 // the failure mode is narrow and silent: the dye divergence divides by a cell width, and if it
-// resolves the COMOVING width while the gas resolves the physical one, the dye is advected against
+// resolves the comoving width while the gas resolves the physical one, the dye is advected against
 // a grid a factor a(t) too small. a uniform dye is the sharpest probe — under the correct rule it
 // stays exactly uniform however far the mesh expands, and any mismatch between the two widths
 // shows up immediately as structure in a field that has no reason to develop any.

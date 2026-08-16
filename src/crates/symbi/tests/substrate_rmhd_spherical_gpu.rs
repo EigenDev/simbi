@@ -1,8 +1,8 @@
 // =============================================================================
 // substrate_rmhd_spherical_gpu.rs
 //
-// GPU<->CPU parity for 3D CURVILINEAR (spherical) RMHD — the gate for the
-// curvilinear FUSED god+bcell kernel on device. 3D + curvilinear +
+// GPU<->CPU parity for 3D curvilinear (spherical) RMHD — the gate for the
+// curvilinear fused god+bcell kernel on device. 3D + curvilinear +
 // energy => fusable, so on GPU this sim runs the fused gas+bcell launch whose geo source
 // reads cell-B via the predictor's `bc_k` key (the codegen dedup that makes the fuse
 // alias-free). builds one div-free B_r = B0/r^2 + pressure-bump shell on host and

@@ -94,7 +94,7 @@ impl<const R: usize> Domain<R> {
 
     fn compute_strides(spaces: &[Space; R]) -> [usize; R] {
         // **physical-x-fastest convention**: axis 0 has stride 1, axis N has
-        // stride = product of all lower-axis extents. matches standard CFD
+        // stride = product of all lower-axis extents. matches standard cfd
         // row-major layout (`field[k][j][i]` with `i` fastest) when the caller pins
         // axis 0 to the physical fast axis (= simbi convention: x at axis 0).
         //
@@ -282,21 +282,21 @@ impl<const R: usize> Domain<R> {
         result
     }
 
-    /// minimal disjoint cover of `self \ other` — the GUILLOTINE difference.
+    /// minimal disjoint cover of `self \ other` — the guillotine difference.
     ///
     /// like [`difference`](Self::difference) it returns disjoint boxes whose
     /// union is exactly the set difference, but it cuts the shell with `2*R`
     /// half-open guillotine slabs, fewer pieces than the `3^R - 1` product cells. axis
     /// `ax` owns the two slabs lying outside the overlap on axis `ax`, taken at
-    /// FULL extent on the higher axes (`aa > ax`) and CLIPPED to the overlap on
+    /// full extent on the higher axes (`aa > ax`) and clipped to the overlap on
     /// the lower axes (`aa < ax`); a cell outside the overlap on several axes is
-    /// therefore owned by its LOWEST such axis, which makes the slabs pairwise
+    /// therefore owned by its lowest such axis, which makes the slabs pairwise
     /// disjoint while still tiling `self \ other`.
     ///
     /// at most `2*R` boxes (vs up to `3^R - 1` for `difference`). use this when
-    /// the cover is DISPATCHED (one kernel per box): the per-box launch cost
+    /// the cover is dispatched (one kernel per box): the per-box launch cost
     /// makes the fewest-boxes partition the right one. use `difference` when the
-    /// per-cell CLASSIFICATION of the shell matters (faces vs edges vs corners).
+    /// per-cell classification of the shell matters (faces vs edges vs corners).
     pub fn guillotine_difference(&self, other: &Domain<R>) -> Vec<Domain<R>> {
         // no overlap -> self is untouched.
         if !self.overlaps(other) {
@@ -435,7 +435,7 @@ impl<const R: usize> Domain<R> {
 
     /// convert flat index back to domain coordinates via divmod on strides.
     ///
-    /// processes axes in DECREASING-stride order (highest axis first) so the
+    /// processes axes in decreasing-stride order (highest axis first) so the
     /// divmod chain peels the slowest-varying axis off first. with the
     /// physical-x-fastest convention (`strides[0] == 1`, `strides[R-1]` =
     /// product of lower extents), that means iterating `R-1 -> 0`.
@@ -1155,7 +1155,7 @@ mod laws {
     const N2: [&str; 2] = ["i", "j"];
     const ITERS: usize = 4000;
 
-    // AXIOM: intersect == set meet (when non-empty), commutative, idempotent.
+    // axiom: intersect == set meet (when non-empty), commutative, idempotent.
     #[test]
     fn intersect_is_set_meet() {
         let mut rng = Rng(0x1234_5678);
@@ -1183,7 +1183,7 @@ mod laws {
         }
     }
 
-    // AXIOM: hull is the box-lattice JOIN — least box containing both operands.
+    // axiom: hull is the box-lattice join — least box containing both operands.
     #[test]
     fn hull_is_least_upper_bound() {
         let mut rng = Rng(0xA1B2_C3D4);
@@ -1195,7 +1195,7 @@ mod laws {
             // upper bound: contains both.
             assert!(ca.is_subset(&ch), "hull does not contain a");
             assert!(cb.is_subset(&ch), "hull does not contain b");
-            // LEAST such box: every face is tight, so pulling any face in by one
+            // least such box: every face is tight, so pulling any face in by one
             // must drop a cell of a or b (otherwise a smaller upper bound exists).
             for ax in 0..3 {
                 for face in [h.extend(ax, 1, 0), h.extend(ax, 0, -1)] {
@@ -1211,7 +1211,7 @@ mod laws {
         }
     }
 
-    // AXIOM: difference is a DISJOINT partition of the set difference A \ B.
+    // axiom: difference is a disjoint partition of the set difference A \ B.
     #[test]
     fn difference_is_a_disjoint_partition_of_set_difference() {
         let mut rng = Rng(0xDEAD_BEEF);
@@ -1231,11 +1231,11 @@ mod laws {
             let vol_sum: usize = parts.iter().map(|d| d.volume()).sum();
             assert_eq!(union.len(), vol_sum, "parts not disjoint by volume");
 
-            // CORRECTNESS: union == set difference cells(a) \ cells(b).
+            // correctness: union == set difference cells(a) \ cells(b).
             let expected: HashSet<[isize; 3]> = &cells(&a) - &cells(&b);
             assert_eq!(union, expected, "difference != set difference");
 
-            // RECONSTRUCTION: the guillotine difference A\B, disjointly unioned with the
+            // reconstruction: the guillotine difference A\B, disjointly unioned with the
             // overlap of A and B, is exactly A.
             let inter = &cells(&a) & &cells(&b);
             assert_eq!(
@@ -1246,7 +1246,7 @@ mod laws {
         }
     }
 
-    // AXIOM: guillotine_difference is ALSO a disjoint partition of A \ B (same
+    // axiom: guillotine_difference is also a disjoint partition of A \ B (same
     // set as `difference`), but with at most 2*R boxes.
     #[test]
     fn guillotine_difference_is_minimal_disjoint_set_difference() {
@@ -1286,7 +1286,7 @@ mod laws {
         }
     }
 
-    // AXIOM: expand and contract_axis are inverse on a single axis.
+    // axiom: expand and contract_axis are inverse on a single axis.
     #[test]
     fn expand_contract_are_inverse() {
         let mut rng = Rng(0x0F0F_0F0F);
@@ -1305,7 +1305,7 @@ mod laws {
         }
     }
 
-    // AXIOM: `contains` is exactly set membership.
+    // axiom: `contains` is exactly set membership.
     #[test]
     fn contains_is_set_membership() {
         let mut rng = Rng(0xCAFE_F00D);
@@ -1321,7 +1321,7 @@ mod laws {
         }
     }
 
-    // AXIOM: flat_index and unflatten are mutual inverses, and flat_index is a
+    // axiom: flat_index and unflatten are mutual inverses, and flat_index is a
     // bijection onto [0, volume).
     #[test]
     fn flat_index_unflatten_bijection() {

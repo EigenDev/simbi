@@ -1,21 +1,21 @@
 // =============================================================================
 // proof/mod.rs
 //
-// symbolic div(curl B) = 0 checker over the traced IR DAG. it EXTRACTS the exact
-// symbolic linear combination of edge-emf field reads the curl produces and PROVES
+// symbolic div(curl B) = 0 checker over the traced IR DAG. it extracts the exact
+// symbolic linear combination of edge-emf field reads the curl produces and proves
 // the constraint by polynomial-coefficient cancellation to the zero polynomial.
 //
-// the curl-of-an-edge-emf is LINEAR in the staggered field reads: the only
+// the curl-of-an-edge-emf is linear in the staggered field reads: the only
 // nonlinearity is multiplication by uniform scalar params (dt, inverse widths).
 // so a curl node lowers to a `LinForm` = a map from a field read `(key, offset)`
 // to a `Poly` (a multivariate polynomial in the scalar-param names with integer
-// coefficients). the divergence stencil is applied symbolically by SHIFTING the
+// coefficients). the divergence stencil is applied symbolically by shifting the
 // offsets; the contribution must vanish as the zero LinForm — that is the proof.
 //
 // the module splits by responsibility:
 // - poly:    the coefficient ring (Poly, RatFun, FieldTerm, shift_poly_coords).
 // - linform: the telescoping space (LinForm, LinFormR) and its pure transforms.
-// - extract: the IR-DAG -> symbolic-form extraction (eval/eval_rat + the
+// - extract: the ir-dag -> symbolic-form extraction (eval/eval_rat + the
 //            LinForm::extract / LinFormR::extract_rat entry points).
 //
 // usage:
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn linform_shift_and_cancel() {
         // a single read e@[0,0,0] minus the same read shifted by [0,0,0] = 0;
-        // shifted by [1,0,0] does NOT cancel (distinct offset key).
+        // shifted by [1,0,0] does not cancel (distinct offset key).
         let lf = LinForm::from_term(("e".into(), vec![0, 0, 0]), Poly::constant(1));
         let mut same = lf.clone();
         same.add(&lf.shifted(&[0, 0, 0]).neg());

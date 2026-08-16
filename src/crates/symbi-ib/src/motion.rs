@@ -190,7 +190,7 @@ pub fn keplerian_binary<S: Scalar>(
     let m1 = total_mass / one_plus_q;
     let m2 = total_mass - m1;
 
-    // body 1 (heavier for q<1) is closer to COM
+    // body 1 (heavier for q<1) is closer to com
     let a1 = semi_major * mass_ratio / one_plus_q;
     let a2 = semi_major - a1;
 

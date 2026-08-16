@@ -5,11 +5,11 @@
 //
 // the GpuRuntime trait is the single abstraction that backends implement.
 // KernelDispatcher<R> wraps a runtime with a thread-safe kernel cache.
-// adding a new backend (HIP, Metal, SYCL) = implement GpuRuntime.
+// adding a new backend (HIP, Metal, sycl) = implement GpuRuntime.
 //
 // usage (internal — hidden from users):
-//   let kernel = DISPATCHER.jit_kernel_keyed(source, cache_key, entry_name);
-//   DISPATCHER.runtime().launch(&kernel, config, args);
+//   let kernel = dispatcher.jit_kernel_keyed(source, cache_key, entry_name);
+//   dispatcher.runtime().launch(&kernel, config, args);
 // =============================================================================
 
 use crate::config::LaunchConfig;
@@ -27,7 +27,7 @@ pub trait GpuRuntime: 'static + Send + Sync {
     type Module: Send + Sync;
     type Kernel: Send + Sync + Copy;
 
-    /// compile kernel source to a loadable binary (PTX, HSACO) with the backend's
+    /// compile kernel source to a loadable binary (PTX, hsaco) with the backend's
     /// own in-process runtime compiler — NVRTC for CUDA, hiprtc for HIP — compiling
     /// entirely in-process. default: the backend has no in-process compiler, so
     /// source dispatch is unsupported (override to enable JIT).
@@ -40,7 +40,7 @@ pub trait GpuRuntime: 'static + Send + Sync {
         })
     }
 
-    /// load a pre-compiled binary (PTX, HSACO, metallib) into a module.
+    /// load a pre-compiled binary (PTX, hsaco, metallib) into a module.
     fn load_binary(&self, binary: &[u8]) -> crate::Result<Self::Module>;
 
     /// extract a named kernel entry point from a loaded module.

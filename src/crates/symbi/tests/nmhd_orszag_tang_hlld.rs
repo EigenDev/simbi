@@ -1,12 +1,12 @@
 // =============================================================================
 // nmhd_orszag_tang_hlld.rs
 //
-// the Newtonian-MHD HLLD payoff: the Orszag-Tang vortex evolved with the FULL
+// the Newtonian-MHD HLLD payoff: the Orszag-Tang vortex evolved with the full
 // 5-wave HLLD solver (`Solver::Hlld`) through the production substrate, into the
 // developing-turbulence regime where current sheets form. the win is robustness:
-// the ALGEBRAIC NMHD c2p cannot fail the way RMHD's iterative inversion does in
+// the algebraic NMHD c2p cannot fail the way RMHD's iterative inversion does in
 // those sheets, and the closed-form HLLD resolves the contact/alfven structure
-// HLLE smears. the run must stay PHYSICAL (rho>0, p>0, finite) and div(B)-clean
+// HLLE smears. the run must stay physical (rho>0, p>0, finite) and div(B)-clean
 // every step — that is the "OT-with-HLLD is stable" proof.
 // =============================================================================
 

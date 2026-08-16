@@ -69,7 +69,7 @@ def test_swept_dials_append_their_segments(porous_cls, tmp_path, monkeypatch) ->
 
 def test_segments_key_on_the_declared_defaults(porous_cls, tmp_path, monkeypatch) -> None:
     # the comparison must read the model's own default, so passing the default
-    # value EXPLICITLY still lands on the segment-free path -- the same run point
+    # value explicitly still lands on the segment-free path -- the same run point
     # is the same directory however it was spelled on the command line.
     for name in ("buffer_time_fraction", "buffer_index", "mach_limit"):
         default = porous_cls.model_fields[name].default

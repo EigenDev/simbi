@@ -1,7 +1,7 @@
 // =============================================================================
 // support_infer.rs
 //
-// support PROPAGATION over the traced graph: derive a kernel's output support
+// support propagation over the traced graph: derive a kernel's output support
 // automatically from builder-tagged mask nodes. a tag asserts "this node's
 // value is exactly zero (f64) outside this
 // ball, for every field input" — the saturation lemma lives where the mask is
@@ -16,7 +16,7 @@
 // is Eq to its own field's offset-0 read is unchanged-valued outside the ball
 // and contributes it too; anything else widens the kernel to Everywhere —
 // a structural change that breaks the mask chain degrades the support
-// FAIL-SAFE to a too-wide region; a stale narrow ball would be unsound.
+// fail-safe to a too-wide region; a stale narrow ball would be unsound.
 //
 // usage:
 //   tag_support_ball(&chi, center_exprs, radius_expr);   // at the mask seam
@@ -48,7 +48,7 @@ enum Class {
 }
 
 // join two "outside" regions: the combined statement holds outside the union.
-// None is the empty region (the statement holds everywhere). two DIFFERENT
+// None is the empty region (the statement holds everywhere). two different
 // balls have no expressible enclosing ball in the ParamExpr language — the
 // caller degrades to Unknown (sound).
 fn join(a: &Option<SupportBall>, b: &Option<SupportBall>) -> Result<Option<SupportBall>, ()> {
@@ -122,7 +122,7 @@ fn classify_op(
                         (One(a), One(b)) => {
                             return join(a, b).map(One).unwrap_or(Unknown);
                         }
-                        // x * 1 == x: outside the one-ball the product IS the
+                        // x * 1 == x: outside the one-ball the product is the
                         // other operand; a one-everywhere factor is transparent.
                         (One(None), _) => return cb,
                         (_, One(None)) => return ca,
@@ -229,7 +229,7 @@ fn classify_op(
                     return one_vs_const(&cb, ins[0]);
                 }
                 // f(0) = 0 exactly in f64 (sin/sinh/asinh trace as element-wise ops).
-                // `Asinh` was classified only on the TRANSCENDENTAL twin of this table while
+                // `Asinh` was classified only on the transcendental twin of this table while
                 // `.asinh()` traces through the element-wise op, so every traced asinh lost
                 // zero-propagation and silently degraded its kernel's support to Everywhere.
                 // two op enums carrying the same math is the root defect; until they merge,
@@ -345,7 +345,7 @@ fn classify_op(
 
 /// derive the kernel-level output support from the tagged mask nodes:
 /// - a write classified Zero contributes its ball (None contributes nothing);
-/// - an in-place write classified Eq to its OWN field's offset-0 read is
+/// - an in-place write classified Eq to its own field's offset-0 read is
 ///   unchanged-valued outside the ball and contributes it;
 /// - anything else widens to Everywhere.
 /// no tags -> Everywhere (nothing to propagate from).
@@ -365,7 +365,7 @@ pub fn derive_output_support(
         let contribution: Option<SupportBall> = match classify(graph, tags, &mut memo, *root) {
             Class::Zero(b) => b,
             Class::Eq(m, b) => {
-                // the write must equal ITS OWN field outside the ball: find the
+                // the write must equal its own field outside the ball: find the
                 // offset-0 read param bound to the same runtime field.
                 let same_field_read = field_inputs
                     .iter()
@@ -417,7 +417,7 @@ mod tests {
     fn derive(f: impl FnOnce(Gv) -> Writes) -> Support {
         begin_trace();
         let den = Gv::field("den", FieldRef::cons_den());
-        // the stand-in mask: a field-dependent value the builder ASSERTS is
+        // the stand-in mask: a field-dependent value the builder asserts is
         // ball-supported (the lemma is the tag here; the algebra carries no support fact).
         let chi = Gv::field("mask", FieldRef::PrimRho);
         tag_support_ball(&chi, ball().center, ball().radius);
@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn in_place_write_against_a_different_field_widens() {
-        // out bound to cons.nrg but equal to the DEN read outside the ball:
+        // out bound to cons.nrg but equal to the den read outside the ball:
         // that is a genuine change to nrg everywhere — Everywhere.
         let s = derive(|chi| {
             let den = Gv::field("den2", FieldRef::cons_den());

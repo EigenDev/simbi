@@ -3,13 +3,13 @@
 //
 // GPU<->CPU runtime validation of the RHD cons->prim kernel — the final leg of
 // the substrate verification gate (CPU numerics + nvcc PTX + on-device run). the
-// SAME substrate IR graph is emitted to two backends: the CPU Rust fn
+// same substrate IR graph is emitted to two backends: the CPU Rust fn
 // `symbi_aot::rhd_c2p_1d` and the neutral IR blob `symbi_aot::RHD_C2P_1D_IR`,
 // rendered to CUDA source at test time via `render_from_ir`.
 // the CUDA is nvcc-compiled to PTX, launched on the GPU; the test asserts the
-// device output matches BOTH the CPU kernel AND the analytic primitives the
+// device output matches both the CPU kernel and the analytic primitives the
 // conserved states were built from. proves the iterative kernel (20-step masked
-// Newton, lowered to nested SELECT) computes correct physics ON THE DEVICE.
+// Newton, lowered to nested select) computes correct physics on the device.
 //
 // run (in the symbi-cuda distrobox; NVCC_CCBIN points nvcc at gcc-11):
 //   NVCC_CCBIN=/usr/bin/g++ cargo test -p symbi-xpu --features cuda --test gpu_rhd_c2p
@@ -135,7 +135,7 @@ fn rhd_c2p_gpu_matches_cpu_and_analytic() {
         );
     }
 
-    // ---- GPU backend (the CUDA emit of the SAME IR graph) ----
+    // ---- GPU backend (the CUDA emit of the same IR graph) ----
     let exec = Executor::<CudaSpace>::new(0).unwrap();
     let ptx = compile_to_ptx(&cuda_src(RHD_C2P_1D_IR));
     let module = CudaSpace::load_module(&ptx).unwrap();

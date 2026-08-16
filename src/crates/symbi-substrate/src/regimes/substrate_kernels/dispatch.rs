@@ -269,7 +269,7 @@ where
         }
     }
     // ghost-band fail-loud: a poisoned boundary (a driven-inflow expression producing NaN, a broken
-    // BC) leaves a non-finite ghost, and first-order flux correction acts on the interior, which is
+    // bc) leaves a non-finite ghost, and first-order flux correction acts on the interior, which is
     // also the reach of the finiteness guard folded into the wave-speed map above. probe the density
     // over the allocated domain and force the rate to +inf (dt -> 0, the driver halts) when any zone
     // is non-finite. legitimate boundaries fill finite ghosts, so the halt fires on real poison.
@@ -616,7 +616,7 @@ impl Default for ConstraintParams {
 
 /// drop the causally disconnected cells from an anchor-failure mask: nothing inside the outer
 /// horizon reaches the exterior, and an excised cell is frozen at the vacuum floor the horizon
-/// fill writes, so neither says anything about whether the TIMESTEP was admissible. the
+/// fill writes, so neither says anything about whether the timestep was admissible. the
 /// threshold is `max(r_+, r_exc)` on the kerr-schild radius — the same surface the
 /// source-admissibility CFL masks on, so the veto and the timestep bound agree cell for cell.
 pub fn fofc_exterior_mask<const D: usize, const DOF: usize, Mem, Sc>(
@@ -685,8 +685,8 @@ pub fn fofc_exterior_mask<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// the GR horizon accretion diagnostic: run the shell-flux emit `shell_{quantity}_flux_{D}d` over
-/// the per-cell OUTWARD boundary flux of `Omega = { r_ks < diagnostic_radius }`, reduce by ADD (the
-/// GPU-native block reduction), and NEGATE for the accretion rate (INTO the hole). returns
+/// the per-cell outward boundary flux of `Omega = { r_ks < diagnostic_radius }`, reduce by add (the
+/// GPU-native block reduction), and negate for the accretion rate (into the hole). returns
 /// `(mdot, edot)`: rest mass + covariant (killing) energy per unit time crossing the diagnostic
 /// shell. the `mass_flux` / `nrg_flux` fields are the ones the godunov just consumed, so the
 /// diagnostic is divergence-theorem-consistent with the flow the scheme applied -- and with the
@@ -736,8 +736,8 @@ where
             &[],
             &scalars,
         );
-        // the emit writes the OUTWARD contribution; Add telescopes to the net outward flux through
-        // the shell, and the hole accretes the INWARD flux = its negation.
+        // the emit writes the outward contribution; Add telescopes to the net outward flux through
+        // the shell, and the hole accretes the inward flux = its negation.
         rates[i] = -field_reduce(scratch, &geom.interior, ReductionOp::Add);
     }
     (rates[0], rates[1])
@@ -891,7 +891,7 @@ pub fn dispatch_c2p_status<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// the WELL-BALANCED forward body source: gravity as the (curvilinear: area-weighted)
+/// the well-balanced forward body source: gravity as the (curvilinear: area-weighted)
 /// equilibrium-pressure difference at the cell faces, paired with the balanced
 /// reconstruction per chart (gravity-only -- the production drain lives in the
 /// penalization stack, whose kernels are untouched by balance).
@@ -1127,7 +1127,7 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 return s.clone();
             }
             // the axis map when the radial axis is non-uniform (log / geometric); the plain
-            // affine face otherwise. inverting `x_lo + i dx` would read an INDEX coordinate as a
+            // affine face otherwise. inverting `x_lo + i dx` would read an index coordinate as a
             // radius on a log grid.
             let face = |i: isize| match &geom.maps {
                 Some(m) => m[0].face(i),
@@ -1391,11 +1391,11 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// dispatch the alpha VISCOUS operator (`viscous_iso_alpha_2d`):
+/// dispatch the alpha viscous operator (`viscous_iso_alpha_2d`):
 /// like `dispatch_viscous` but with a spatially varying `nu(x) = alpha cs^2 /
 /// Omega_k(r)` about the central body. resolves the body position/mass (body 0),
 /// the sound speed (the `cs`/`gamma` eos slot), and `alpha`. requires a body.
-/// nu_max for the ADIABATIC alpha viscous CFL cap: nu(x) = alpha (gamma p/rho) / Omega_K(r)
+/// nu_max for the adiabatic alpha viscous CFL cap: nu(x) = alpha (gamma p/rho) / Omega_K(r)
 /// is bounded by alpha gamma (p/rho)_max / Omega_K(r_max) — the largest sound speed anywhere
 /// times the slowest orbit (the farthest domain corner from body 0, matching the kernel's
 /// radial law). the (p/rho) maximum is a host interior scan (the alpha kernels are host-only);
@@ -1561,7 +1561,7 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// dispatch the backward body FEEDBACK (`body_feedback_2d`): run the per-cell per-body
+/// dispatch the backward body feedback (`body_feedback_2d`): run the per-cell per-body
 /// force[ndim]/torque[3]/mass/energy kernel into MAX_SOURCE_BODIES*(D+5) scratch fields, reduce each
 /// (device sum over the interior), assemble each body's BodyDelta (the drag force, accretion
 /// torque, emergent mass, and accretion power), and accumulate into the immersed side-car's
@@ -1580,7 +1580,7 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     // cartesian grids take the split path: the gravity reaction reduces globally over
     // one streamed field, the drain-weighted quantities over the sink support box —
     // the combined kernel wrote MAX_SOURCE_BODIES*(D+5) full-domain scratch fields per step
-    // (~800 MB of traffic at 128^3) to integrate quantities supported on the sink.
+    // (~800 mb of traffic at 128^3) to integrate quantities supported on the sink.
     // curvilinear grids keep the combined kernel: the support box is a coordinate
     // ball spanning a non-rectangular index region, which the box restriction requires.
     if sim.geom.coords == symbi_geometry::Geometry::Cartesian {
@@ -1654,7 +1654,7 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// the workspace-cached feedback reduction scratch: `n` full-domain fields,
 /// allocated once on the first feedback dispatch and reused every call (the
-/// per-call alloc + zero moved ~800 MB/step at 128^3 for nothing — the kernels
+/// per-call alloc + zero moved ~800 mb/step at 128^3 for nothing — the kernels
 /// assign-write their whole dispatch region before the reduction reads it).
 /// the OnceLock is sized by the first caller; both feedback paths of one sim
 /// request the same `n`, asserted here.
@@ -1814,7 +1814,7 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
             assert_eq!(center.len(), D, "support ball rank != grid dim");
             let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
                 let s = &geom.interior.spaces[a];
-                // index anchor: `x = x_lo + i*dx` with ABSOLUTE index i
+                // index anchor: `x = x_lo + i*dx` with absolute index i
                 // (stagger_coord), no interior offset in the map.
                 let lo_x = (center[a] - r_cut - geom.x_lo[a]) / geom.dx[a];
                 let hi_x = (center[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
@@ -1895,9 +1895,9 @@ pub fn dispatch_penalize<const D: usize, const DOF: usize, Mem, Sc>(
     });
 }
 
-/// a runtime-built + cranelift-JIT'd penalization kernel for an arbitrary CSG shape — the HOST
+/// a runtime-built + cranelift-JIT'd penalization kernel for an arbitrary CSG shape — the host
 /// form of the shaped wall. the shape geometry is baked into the kernel as constants; the body
-/// position + porous dials stay runtime scalars, so a MOVING body reuses the same compiled kernel.
+/// position + porous dials stay runtime scalars, so a moving body reuses the same compiled kernel.
 /// every orthogonal chart (the mask distance is physical: the coordinate centroid maps to cartesian
 /// inside the kernel), both the energy-bearing and isothermal regimes; the JIT buffer ABI is raw
 /// f64. the device form renders the same GvKernel to CUDA (see `ShapedIr`).
@@ -1919,8 +1919,8 @@ struct ShapedIr {
 }
 
 /// build the shaped porous GvKernel + its write manifest for one (chart, dim, dof, regime, spin)
-/// combination — the SOLE trace front end shared by the host (cranelift) and device (CUDA) paths.
-/// the mask distance is PHYSICAL: the kernel maps the coordinate centroid to Cartesian (baked per
+/// combination — the sole trace front end shared by the host (cranelift) and device (CUDA) paths.
+/// the mask distance is physical: the kernel maps the coordinate centroid to Cartesian (baked per
 /// chart), so a spherical / cylindrical grid measures the true distance to the shape.
 fn shaped_penalize_gv(
     coords: symbi_discretize::Coords,
@@ -2007,8 +2007,8 @@ fn shaped_penalize_ir(
 }
 
 /// build (or fetch from the process cache) the shaped porous kernel for a distinct geometry. keyed
-/// by the shape's structural repr + dimension: the same shape across bodies OR across steps of a
-/// moving body compiles ONCE. `None` if the shape is unbounded (a complement) or falls outside the
+/// by the shape's structural repr + dimension: the same shape across bodies or across steps of a
+/// moving body compiles once. `None` if the shape is unbounded (a complement) or falls outside the
 /// cranelift JIT subset.
 fn shaped_penalize_kernel(
     coords: symbi_discretize::Coords,
@@ -2080,7 +2080,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     let cartesian = matches!(coords, symbi_discretize::Coords::Cartesian);
     let has_energy = sim.fields.cons.nrg_field().is_some();
     // the rotating kernel (runtime R(angle) mask + omega x r wall) is selected by a nonzero
-    // prescribed spin OR two-way coupling — a two-way body must run the spinning kernel even at
+    // prescribed spin or two-way coupling — a two-way body must run the spinning kernel even at
     // omega = 0 so the reaction torque can spin it up from rest.
     let body = im.bodies.get(b);
     let w = body.omega;
@@ -2099,10 +2099,10 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         symbi_ir::emit::Precision::F64
     };
 
-    // the bbox. on a CARTESIAN grid the shape's bounding ball floors/ceils to an index box: a
-    // STATIC body uses the tight ball at the body position (center pos+lc, radius lr); a SPINNING
+    // the bbox. on a cartesian grid the shape's bounding ball floors/ceils to an index box: a
+    // static body uses the tight ball at the body position (center pos+lc, radius lr); a spinning
     // body sweeps its shape through every orientation, so the mask reaches |lc| + lr from the
-    // position (center pos). OFF-Cartesian the support is a COORDINATE ball spanning a
+    // position (center pos). off-Cartesian the support is a coordinate ball spanning a
     // non-rectangular index region (a centered body masks a full theta/phi ring), so dispatch over
     // the whole interior — the mask is
     // an exact zero outside the physical ball by tanh saturation, so this is correct, just
@@ -2211,7 +2211,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
             .collect();
         let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
         let (grid, dlo) = exec_layout(&bbox);
-        // SAFETY: shared allocated layout; each cons.* field is bound as one base in
+        // safety: shared allocated layout; each cons.* field is bound as one base in
         // `in_bases` and `out_bases` (in-place, read-before-write per cell); every scratch output
         // is a distinct allocation; distinct cells write distinct flat indices on distinct threads.
         unsafe {
@@ -2277,12 +2277,12 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     let Some(im) = sim.immersed.as_ref() else {
         return;
     };
-    // the DRAIN surface is baked for every chart (the mask distance maps the cell
+    // the drain surface is baked for every chart (the mask distance maps the cell
     // centroid to Cartesian); porous / torque-free stay Cartesian until the
     // physical-frame normal is baked off-chart. no blanket curvilinear early return.
     let nrg = sim.fields.cons.nrg_field();
     let geom = &sim.geom;
-    // the (r, z) axisymmetric section admits ON-AXIS sphere bodies only: the
+    // the (r, z) axisymmetric section admits on-axis sphere bodies only: the
     // ring radius (slot 0 of the cartesian position/velocity) must be zero —
     // an off-axis "point" is a ring, a different object — and a CSG shape in
     // the section is a surface of revolution, a separate mask story.
@@ -2350,7 +2350,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             },
         }
     };
-    // the force-normal receipt (form-drag / pressure) is APPENDED after mass/force/energy/torque so
+    // the force-normal receipt (form-drag / pressure) is appended after mass/force/energy/torque so
     // no existing slot index shifts: D slots at [n_delta + n_torque .. + D]. the kernels write it
     // last; the drain writes zero (no wall normal). the tangential (skin-friction) part is derived
     // downstream as force - force_normal.
@@ -2359,7 +2359,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         im.reset_accretion_receipts(geom.interior.volume());
     }
     for b in 0..bodies.len() {
-        // penalize every body that runs a surface stack (accretor OR rigid wall); a body
+        // penalize every body that runs a surface stack (accretor or rigid wall); a body
         // with no mask (passive / purely gravitational) contributes no penalization.
         if bodies.get(b).mask_radius().is_none() {
             continue;
@@ -2421,7 +2421,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         let name: &str = &name_owned;
         // the reduction/dispatch box. on a Cartesian grid the kernel's declared
         // support ball clamps to an index box (identical to the feedback
-        // drain). off Cartesian the support ball is a COORDINATE ball
+        // drain). off Cartesian the support ball is a coordinate ball
         // spanning a non-rectangular index region (a centered accretor masks a full
         // phi-ring, whose index extent spans every phi cell), so dispatch
         // over the full interior — the mask is an exact zero outside the physical
@@ -2530,7 +2530,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// ISOTHERMAL forward body source: like `dispatch_body_source` but the kernel reads
+/// isothermal forward body source: like `dispatch_body_source` but the kernel reads
 /// `prim.pre` (= cs^2(x)*rho) for the sound speed and updates only den/mom (no energy).
 /// `pre` is the substrate's iso pressure field, bound as the `prim.pre` override.
 pub fn dispatch_body_source_iso<const D: usize, const DOF: usize, Mem, Sc>(
@@ -2675,7 +2675,7 @@ pub fn dispatch_godunov_with_body_source<const D: usize, const DOF: usize, Mem, 
     dispatch_named(sim, pre, None, 0, &name, &geom.interior, &[], &scalars);
 }
 
-/// the face-flux SCHEME as one value: solver x reconstruction x eos closure x the
+/// the face-flux scheme as one value: solver x reconstruction x eos closure x the
 /// scheme dials. these traveled as eight positional arguments, several of them
 /// same-typed floats -- a transposition typechecked and silently dispatched a
 /// different scheme. the per-call context (field store, sweep direction, the
@@ -2695,12 +2695,12 @@ pub struct FluxSpec {
     // full <= onset — is the pure parabola; only the ppm kernels declare the
     // scalars, so the values are inert on every other reconstruction.
     pub flatten: (f64, f64),
-    // the reference mach number the PUBLISHED low-mach ramp saturates at, bound to the
+    // the reference mach number the published low-mach ramp saturates at, bound to the
     // clamp-free kernel's `mach_limit` scalar. only that arm declares it, so this value is
     // inert on every other solver.
     pub mach_limit: f64,
-    // whether the face reconstruction limits the STATE or its departure from local hydrostatic
-    // equilibrium. an axis of the RECONSTRUCTION, orthogonal to the solver, so every pairing is
+    // whether the face reconstruction limits the state or its departure from local hydrostatic
+    // equilibrium. an axis of the reconstruction, orthogonal to the solver, so every pairing is
     // dispatchable -- including the balanced HLLE the first-order redo needs.
     pub balance: symbi_discretize::coords::Balance,
     pub rusanov: bool,
@@ -2709,7 +2709,7 @@ pub struct FluxSpec {
 impl FluxSpec {
     /// the positivity-preserving first-order redo derived from the evolution
     /// scheme: hlle at theta = 0 (pcm) on the plm kernel, flatten-free. the eos
-    /// closure and the reconstruction balance are KEPT -- a gamma-law fallback
+    /// closure and the reconstruction balance are kept -- a gamma-law fallback
     /// against taub-mathews states would splice a different physics into the
     /// troubled faces, and a plain-reconstruction fallback under a balanced
     /// evolution would deposit the hydrostatic residual it was invoked to avoid.
@@ -2749,7 +2749,7 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     if eos == symbi_discretize::EosArm::TaubMathews {
         // the tm flux twins are chart-free like every DOF == D rhd flux (the
         // curvilinear factors ride godunov + the wave-speed map), but they are
-        // baked for the FLAT spacetime and the plain momentum layout only.
+        // baked for the flat spacetime and the plain momentum layout only.
         assert!(
             prefix == "rhd"
                 && sim.geom.spacetime == symbi_geometry::Spacetime::Minkowski
@@ -2954,18 +2954,18 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
     // the spacetime tag: flat -> "", Schwarzschild -> "_schw" (the lapse-densitized GR kernel).
-    // ORTHOGONAL to the spatial `sfx`.
+    // orthogonal to the spatial `sfx`.
     let st_sfx = spacetime_slug(geom.spacetime);
     let name = format!("{prefix}_godunov_stage{sfx}{st_sfx}_{D}d");
-    // scalars BY NAME: dt + the SSP Shu-Osher convex coefficients (a0, ac) + the per-axis grid
+    // scalars by name: dt + the SSP Shu-Osher convex coefficients (a0, ac) + the per-axis grid
     // scalars. the single stage kernel `cons = a0*u_n + ac*fe` serves every explicit SSP scheme
     // — the driver feeds the per-stage (a0, ac); forward-Euler is (0, 1). the kernel's declared
     // order drives it (cartesian [dt, a0, ac, dx..]; curvilinear [x_lo,dx.., dt, a0, ac]) — no
-    // geometry branch at the call site. the BUFFER manifest (cons in-place + the u_n snapshot
+    // geometry branch at the call site. the buffer manifest (cons in-place + the u_n snapshot
     // reads, per-comp flux dirs, the curvilinear source's vel reads incl the axis-role gather for
     // DOF>NDIM) comes from the artifact via dispatch_named.
     // mesh motion: the divergence + the curvilinear geometric source run over
-    // PHYSICAL geometry (expanding axes scaled by a), and mesh_hdil carries
+    // physical geometry (expanding axes scaled by a), and mesh_hdil carries
     // the physical volume-growth rate; all exact identities on a static mesh.
     let (x_lo_phys, dx_phys) = kernel_geom(
         &geom.x_lo,
@@ -3036,7 +3036,7 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
     let name = format!("{prefix}_source_with_{}{sfx}_{D}d", binding.source_id);
     let scalars = scalars_for(&name, |bind| {
         match bind {
-            // the NAME is `dt` but the VALUE is the SSP stage weight ac*dt at this call site.
+            // the name is `dt` but the value is the SSP stage weight ac*dt at this call site.
             ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(weight),
             // lazily-declared centroid params (x_lo_k, dx_k).
             ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, &sim.geom.maps, *sref)

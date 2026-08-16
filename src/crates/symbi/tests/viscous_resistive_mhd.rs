@@ -1,12 +1,12 @@
 // =============================================================================
 // viscous_resistive_mhd.rs
 //
-// resistive-VISCOUS MHD (finite magnetic Prandtl number Pm = nu/eta): both diffusivities active at
-// once in a full-3D Newtonian MHD flow. viscosity diffuses the VELOCITY (and heats the gas via the
-// energy flux); resistivity diffuses the MAGNETIC field -- ORTHOGONAL, independent operators. a
+// resistive-viscous MHD (finite magnetic Prandtl number Pm = nu/eta): both diffusivities active at
+// once in a full-3D Newtonian MHD flow. viscosity diffuses the velocity (and heats the gas via the
+// energy flux); resistivity diffuses the magnetic field -- orthogonal, independent operators. a
 // sheared v_x = V sin(k y) + a sheared B_x = B0 sin(k y) must, with both on:
-//   - lose more KINETIC energy than the ideal run (viscosity is acting),
-//   - lose more MAGNETIC energy than the ideal run (resistivity is acting),
+//   - lose more kinetic energy than the ideal run (viscosity is acting),
+//   - lose more magnetic energy than the ideal run (resistivity is acting),
 //   - gain gas internal energy (viscous heating and Ohmic heating both warm the gas -- each dissipation
 //     is conservatively booked into the internal energy),
 //   - evolve stably.
@@ -111,14 +111,14 @@ fn resistive_viscous_mhd_runs_both_diffusivities() {
     // sanity: the seeds carry kinetic + magnetic energy.
     assert!(b0.0 > 0.0 && b0.1 > 0.0, "degenerate seed");
 
-    // viscosity dissipates far more KINETIC energy than the ideal numerical floor.
+    // viscosity dissipates far more kinetic energy than the ideal numerical floor.
     let ke_loss_visc = b0.0 - b1.0;
     let ke_loss_ideal = i0.0 - i1.0;
     assert!(
         ke_loss_visc > 3.0 * ke_loss_ideal,
         "viscosity not acting: KE loss viscous {ke_loss_visc:.3e} vs ideal {ke_loss_ideal:.3e}"
     );
-    // resistivity dissipates far more MAGNETIC energy than the ideal floor.
+    // resistivity dissipates far more magnetic energy than the ideal floor.
     let me_loss_res = b0.1 - b1.1;
     let me_loss_ideal = i0.1 - i1.1;
     assert!(

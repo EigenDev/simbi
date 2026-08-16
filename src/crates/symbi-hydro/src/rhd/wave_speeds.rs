@@ -2,7 +2,7 @@
 // rhd/wave_speeds.rs
 //
 // the RHD relativistic acoustic wave speeds (Mignone & Bodo 2005). the core
-// `rhd_speeds_from_vn` is a pure function of (cs^2, normal velocity) — the SINGLE
+// `rhd_speeds_from_vn` is a pure function of (cs^2, normal velocity) — the single
 // source both the nhat Riemann projection and the CFL axis projection call.
 // =============================================================================
 
@@ -13,7 +13,7 @@ use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
 
 /// the Mignone & Bodo (2005) relativistic acoustic wave speeds (eqs. 21-23) as a function of
-/// the sound speed squared and the NORMAL velocity `vn` — the single core both projections
+/// the sound speed squared and the normal velocity `vn` — the single core both projections
 /// call: the nhat Riemann form (`vn = vel . nhat`) and the CFL axis form (`vn = vel[axis]`).
 /// accounts for the relativistic dispersion relation; tighter than davis.
 #[inline]
@@ -26,20 +26,20 @@ pub(crate) fn rhd_speeds_from_vn<S: Scalar>(cs_sq: S, vn: S) -> (S, S) {
     ((vn - fac) * qf, (vn + fac) * qf)
 }
 
-/// the Banyuls-Font COORDINATE-frame acoustic speeds on a STATIC DIAGONAL metric (shift beta = 0),
-/// Font (2008) eq (37). CRITICAL: it takes TWO distinct velocities that a single-argument form would
+/// the Banyuls-Font coordinate-frame acoustic speeds on a static diagonal metric (shift beta = 0),
+/// Font (2008) eq (37). critical: it takes two distinct velocities that a single-argument form would
 /// wrongly conflate:
-///   - `vn` = the CONTRAVARIANT normal velocity v^n = v^i n_i (Font's `v^x`), in the transport term
-///     AND inside the radical's second term.
-///   - `v_sq` = gamma_ij v^i v^j, the PHYSICAL speed squared (|V|^2), ONLY in the `(1 - v^2)` factors.
+///   - `vn` = the contravariant normal velocity v^n = v^i n_i (Font's `v^x`), in the transport term
+///     and inside the radical's second term.
+///   - `v_sq` = gamma_ij v^i v^j, the physical speed squared (|V|^2), only in the `(1 - v^2)` factors.
 ///   `disc = (1 - v_sq)( gamma_nn (1 - v_sq cs^2) - vn^2 (1 - cs^2) )`
 ///   `lambda_pm = alpha [ vn(1 - cs^2) +/- cs sqrt(disc) ] / (1 - v_sq cs^2)`, `gamma_nn = gamma^{nn}`.
-/// feeding the PHYSICAL velocity to BOTH slots drives `disc < 0` once |V| approaches
+/// feeding the physical velocity to both slots drives `disc < 0` once |V| approaches
 /// alpha (near the horizon), collapsing the Riemann fan to NaN.
 /// with the correct split, cauchy-schwarz `vn^2 <= gamma^{nn} v_sq` guarantees `disc >= gamma^{nn}
 /// (1 - v_sq)^2 >= 0`; for Schwarzschild (`gamma^{rr} = alpha^2`, v^r = alpha V) `disc = alpha^2
 /// (1-V^2)^2` and `lambda_pm = alpha^2 (V +/- cs)/(1 +/- V cs)` (sonic point at |V| = cs).
-/// at `gamma_nn = 1, alpha = 1, v_sq = vn^2` it reduces EXACTLY to the flat `rhd_speeds_from_vn`.
+/// at `gamma_nn = 1, alpha = 1, v_sq = vn^2` it reduces exactly to the flat `rhd_speeds_from_vn`.
 #[inline]
 pub(crate) fn rhd_speeds_from_vn_gr<S: Scalar>(
     cs_sq: S,
@@ -123,8 +123,8 @@ mod tests {
     fn schwarzschild_ks_coordinate_speed_is_ingoing_at_and_inside_horizon() {
         // the horizon-penetrating CFL guarantee. the kerr-schild coordinate wave speed is the
         // factored form the CFL map uses, lambda_coord = alpha^2 * lambda^SR - beta^r, with
-        // alpha^2 = 1/(1 + 2M/r) and beta^r = 2M/(r + 2M) (M = 1). BOTH characteristic roots are
-        // strictly < 0 at and inside the horizon r <= 2M for EVERY physical fluid state, so the
+        // alpha^2 = 1/(1 + 2M/r) and beta^r = 2M/(r + 2M) (M = 1). both characteristic roots are
+        // strictly < 0 at and inside the horizon r <= 2M for every physical fluid state, so the
         // numerical domain of dependence is entirely interior-directed and the inner outflow
         // boundary is causal. |lambda^SR| < 1 subluminal => alpha^2 |lambda^SR| < alpha^2 = beta^r
         // at the horizon, so lambda_coord < 0.
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn gr_speeds_reduce_to_flat_exactly() {
-        // the Banyuls-Font path at (gamma_nn = 1, alpha = 1, v_sq = vn^2) reduces EXACTLY (to 1e-12)
+        // the Banyuls-Font path at (gamma_nn = 1, alpha = 1, v_sq = vn^2) reduces exactly (to 1e-12)
         // to the SR form across the state space -> Minkowski wave speeds are unchanged.
         for &cs_sq in &[0.05_f64, 0.2, 0.33] {
             for &vn in &[-0.8_f64, -0.3, 0.0, 0.3, 0.8] {
@@ -222,12 +222,12 @@ mod tests {
 
     #[test]
     fn gr_speeds_match_schwarzschild_closed_form() {
-        // Schwarzschild (gamma^{rr} = f = alpha^2, v^r = alpha V): the discriminant is a PERFECT
-        // SQUARE, disc = alpha^2 (1 - V^2)^2 >= 0, so lambda_pm = alpha^2 (V +/- cs)/(1 +/- V cs)
-        // with the sonic point exactly at |V| = cs. this is the value the fan MUST return; the old
+        // Schwarzschild (gamma^{rr} = f = alpha^2, v^r = alpha V): the discriminant is a perfect
+        // square, disc = alpha^2 (1 - V^2)^2 >= 0, so lambda_pm = alpha^2 (V +/- cs)/(1 +/- V cs)
+        // with the sonic point exactly at |V| = cs. this is the value the fan must return; the old
         // bug (physical velocity in both slots) drove disc < 0 -> NaN for V >~ alpha.
         for &f in &[0.8_f64, 0.5, 0.34] {
-            // f = 1 - 2M/r; alpha = sqrt(f), gamma^{rr} = f. sweep the PHYSICAL velocity V incl. V > alpha.
+            // f = 1 - 2M/r; alpha = sqrt(f), gamma^{rr} = f. sweep the physical velocity V incl. V > alpha.
             let (alpha, grr_inv) = (f.sqrt(), f);
             for &cs_sq in &[0.05_f64, 0.2, 0.33] {
                 for &big_v in &[-0.9_f64, -0.5, -0.1, 0.0, 0.3, 0.7, 0.9] {
@@ -257,7 +257,7 @@ mod tests {
     fn gr_fan_is_finite_at_transonic_inner_state() {
         // at the near-horizon steady inner state of a spherical accretion flow (r ~ 3.05, M=1, so
         // f ~ 0.344, alpha ~ 0.587) with a transonic physical velocity |V| ~ 0.64 > alpha, the fan
-        // MUST be real: a negative discriminant here would collapse both wave speeds to NaN.
+        // must be real: a negative discriminant here would collapse both wave speeds to NaN.
         let (cs_sq, alpha) = (0.0132_f64, 0.587_f64); // cs ~ 0.115, alpha^2 ~ f
         let grr_inv = alpha * alpha; // gamma^{rr} = alpha^2
         for &big_v in &[-0.64_f64, -0.7, -0.85, -0.95] {
@@ -272,25 +272,25 @@ mod tests {
 
     #[test]
     fn conflating_the_physical_velocity_into_the_contravariant_slot_collapses_the_fan() {
-        // asserting the fan is REAL at a transonic near-horizon state says nothing on its own — a
+        // asserting the fan is real at a transonic near-horizon state says nothing on its own — a
         // formula that never produced a NaN would satisfy it too. this pins the other side: the
-        // specific slot conflation DOES collapse the fan at that same state, so the finiteness
+        // specific slot conflation does collapse the fan at that same state, so the finiteness
         // assertion exerts real pressure rather than passing vacuously.
         //
-        // the defect is a slot conflation. `vn` is the CONTRAVARIANT normal velocity v^n and
-        // `v_sq` the PHYSICAL speed squared gamma_ij v^i v^j; on a static diagonal chart they are
+        // the defect is a slot conflation. `vn` is the contravariant normal velocity v^n and
+        // `v_sq` the physical speed squared gamma_ij v^i v^j; on a static diagonal chart they are
         // related by v^n = alpha V, so passing the physical V into the contravariant slot inflates
         // vn by 1/alpha. the discriminant carries `- vn^2 (1 - cs^2)`, so the inflated value drives
         // it negative once |V| approaches alpha and the square root returns NaN.
         //
-        // this is CHART-INDEPENDENT, which is why it belongs here rather than in an accretion run:
+        // this is chart-independent, which is why it belongs here rather than in an accretion run:
         // it needs only gamma_nn != 1 and a fast enough flow, not a particular problem on a
         // particular chart whose observer happens to see the gas approach c.
         let (cs_sq, alpha) = (0.0132_f64, 0.587_f64);
         let grr_inv = alpha * alpha;
         let mut collapsed = 0;
         for &big_v in &[-0.64_f64, -0.7, -0.85, -0.95] {
-            // the CONFLATION: the physical velocity handed to the contravariant slot.
+            // the conflation: the physical velocity handed to the contravariant slot.
             let (sl, sr) = rhd_speeds_from_vn_gr(cs_sq, big_v, big_v * big_v, grr_inv, alpha);
             if !(sl.is_finite() && sr.is_finite()) {
                 collapsed += 1;
@@ -306,12 +306,12 @@ mod tests {
 
     #[test]
     fn the_discriminant_is_non_negative_for_every_admissible_state() {
-        // the THEOREM behind the slot split, exercised directly instead of through a problem that
+        // the theorem behind the slot split, exercised directly instead of through a problem that
         // happens to reach the dangerous regime. with the slots split correctly, cauchy-schwarz gives
         // vn^2 <= gamma^{nn} v_sq, hence
         //   disc = (1 - v^2)( gamma^{nn}(1 - v^2 cs^2) - vn^2 (1 - cs^2) ) >= gamma^{nn}(1 - v^2)^2
         // which is non-negative for any subluminal state on any positive-definite metric. so the
-        // fan is real EVERYWHERE, not merely at the states some accretion run visits: no chart, no
+        // fan is real everywhere, not merely at the states some accretion run visits: no chart, no
         // lapse and no flow speed can produce the NaN, which is a strictly stronger statement than
         // any single-problem regression can make.
         for &gamma_nn in &[0.2_f64, 0.5, 1.0, 2.5, 8.0] {

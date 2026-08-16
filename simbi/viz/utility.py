@@ -8,7 +8,7 @@ import astropy.units as units
 import numpy as np
 from numpy.typing import NDArray
 
-# FONT SIZES
+# font sizes
 SMALL_SIZE = 6
 DEFAULT_SIZE = 10
 BIGGER_SIZE = 12

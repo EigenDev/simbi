@@ -1,9 +1,9 @@
 # =============================================================================
 # test_disk_ks_bh.py
 #
-# GRHD in the equatorial (R, phi) DISK chart — a schwarzschild BH in the
+# GRHD in the equatorial (R, phi) disk chart — a schwarzschild BH in the
 # diagonal cylindrical kerr-schild metric gamma = diag(1 + 2M/R, R^2) (the z = 0 razor-
-# thin accretion-disk plane). the metric is AXISYMMETRIC (phi-independent), so a
+# thin accretion-disk plane). the metric is axisymmetric (phi-independent), so a
 # phi-uniform initial state must stay phi-uniform to roundoff — the oracle-free
 # correctness gate for the disk chart, catching any azimuthal coordinate-role bug. also a
 # stability check: horizon-penetrating, no floors. requires the built cpu_ext backend.

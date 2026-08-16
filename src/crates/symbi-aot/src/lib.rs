@@ -3,7 +3,7 @@
 //
 // build-time AOT kernel library. build.rs
 // runs the substrate to lower every kernel to IR and emit it as both compilable
-// Rust source (via emit_kernel_cpu) and a serialized backend-NEUTRAL lowered IR
+// Rust source (via emit_kernel_cpu) and a serialized backend-neutral lowered IR
 // blob (the Prepared artifact, via prepare + prepared_to_ir), then writes one
 // registry module that `include!`s every CPU kernel and exposes every kernel's IR
 // blob as a `<KERNEL>_IR` const. the blob renders to any backend at runtime via
@@ -14,13 +14,13 @@
 // each generated `pub fn` is a normal compiled function exported from this crate;
 // downstream consumers (the tests here, `symbi`'s SubstrateKernelSet) call them
 // directly. the generated kernels are self-contained Rust over slices — this crate
-// has no RUNTIME dependency on the substrate (only the build does).
+// has no runtime dependency on the substrate (only the build does).
 // =============================================================================
 
 // the CPU field descriptor the generated kernels take. carries the buffer
 // pointer plus its pre-multiplied row-major strides, so a kernel's per-cell index
 // arithmetic reads `lo` / `strides` off a single descriptor and indexes `data`
-// directly. the strides are computed ONCE at construction (host-side, per kernel
+// directly. the strides are computed once at construction (host-side, per kernel
 // launch) from `symbi_algebra::strides_from_extent`, the single definition of the
 // stride formula.
 //
@@ -58,7 +58,7 @@ pub struct CpuFieldMut<'a, T = f64> {
 
 /// strides from extent under the **physical-x-fastest convention**:
 /// `strides[0] = 1`, `strides[d] = prod(extent[0..d])`. axis 0 is the
-/// fastest-varying in memory — under the CFD-standard mapping (axis 0 = x),
+/// fastest-varying in memory — under the cfd-standard mapping (axis 0 = x),
 /// adjacent CUDA `threadIdx.x` lanes hit adjacent bytes (coalesced reads).
 ///
 /// delegates to `symbi_algebra::strides_from_extent` — the single definition of
@@ -105,7 +105,7 @@ pub fn copy_extent(extent: &[u32]) -> [i32; 4] {
 
 impl<'a, T> CpuField<'a, T> {
     /// construct from runtime slices (the substrate / dispatcher path). computes
-    /// strides ONCE; subsequent accesses use the cached values.
+    /// strides once; subsequent accesses use the cached values.
     #[inline]
     pub fn from_layout(data: &'a [T], lo: &[i32], extent: &[u32]) -> Self {
         Self {
@@ -129,8 +129,8 @@ impl<'a, T> CpuFieldMut<'a, T> {
 
 // ---- the structured binding ABI ----
 //
-// the backend-NEUTRAL kernel invocation. the call site builds one
-// `KernelInvocation`: an ordered buffer list (each a data HANDLE + its layout) +
+// the backend-neutral kernel invocation. the call site builds one
+// `KernelInvocation`: an ordered buffer list (each a data handle + its layout) +
 // the packed params, keeping the CPU-specific `&[CpuField]` / `&mut [CpuFieldMut]`
 // host slices (a host-memory-ism) out of the call site. the same invocation maps to a CPU
 // call (`run_cpu`, below) or a GPU launch, by interpreting the handle. the

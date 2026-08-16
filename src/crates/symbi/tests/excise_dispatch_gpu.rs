@@ -3,8 +3,8 @@
 //
 // the device twin of excise_dispatch: horizon excision on an origin-containing
 // cartesian kerr-schild box, run on device memory (NVRTC render of the AOT
-// excise_fill / excise_writeback / excise_p2c kernels) and asserted BIT-CLOSE to
-// the CPU pass. the excision fill is a DIRICHLET VACUUM SINK (rho = 1e-10,
+// excise_fill / excise_writeback / excise_p2c kernels) and asserted bit-close to
+// the CPU pass. the excision fill is a dirichlet vacuum sink (rho = 1e-10,
 // v = 0, p = 1e-12; gv_excise.rs): every cell inside the excised sphere is
 // rewritten to that floor each pass. the fill + valencia rebuild + the
 // source-CFL mask behave identically on device — the far field stays untouched
@@ -53,7 +53,7 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>(
     .expect("sim")
     .set_initial(|x| init(x))
     .build();
-    // the builder stores CONSERVED state; the excision pass reads current prims (materialized
+    // the builder stores conserved state; the excision pass reads current prims (materialized
     // by c2p in production). populate the prim fields directly to model the post-c2p state.
     for c in sim.geom.interior.iter() {
         let lo = sim.geom.interior.spaces[0].lo;

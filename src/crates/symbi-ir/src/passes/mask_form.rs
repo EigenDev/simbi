@@ -4,13 +4,13 @@
 // branch-free spelling of a scalarized kernel body: float comparisons become
 // `Scalar::cmp_*` method calls (returning `S::Mask`) and float-valued
 // `Select` becomes the `S::select(mask, then, else)` free call, so the emitted
-// Rust body is straight-line and LLVM's SLP vectorizer can fuse it.
+// Rust body is straight-line and LLVM's slp vectorizer can fuse it.
 //
-// DEFAULT ON, COST-GATED: `select` computes BOTH arms of every conditional,
+// default on, cost-gated: `select` computes both arms of every conditional,
 // so the spelling pays only where arms are cheap. the arm gate below rejects
 // transcendental / multi-division arms (the hllc star fan measured 2.6x
-// SLOWER mask-formed) and tolerates a single guarded division (the van-leer
-// limiter idiom measured FASTER eager than branched). the win depends on
+// slower mask-formed) and tolerates a single guarded division (the van-leer
+// limiter idiom measured faster eager than branched). the win depends on
 // long unit-stride trips — the row-elongated cover blocks are this
 // spelling's other half.
 //
@@ -19,7 +19,7 @@
 // if/else spelling. the trace carrier (Gv) already evaluates both arms of
 // every select, so any kernel valid under tracing is valid here.
 //
-// a kernel is eligible only if it has NO statement-level control flow
+// a kernel is eligible only if it has no statement-level control flow
 // (`For`/`Break`/`If`/`IfElse`/assignments — the iterative c2p class) and
 // every bool-typed value is provably a mask: bool locals are retyped to
 // `S::Mask` wholesale, so any native bool left in mask position (an integer
@@ -41,7 +41,7 @@ use std::collections::HashMap;
 /// rewrite `scalarized` into the mask/select spelling if eligible. returns
 /// whether the rewrite was applied; ineligible bodies are left untouched.
 pub fn apply(scalarized: &mut KernelScalarized) -> bool {
-    // a bool scalar param is a HOST bool; it cannot join mask arithmetic.
+    // a bool scalar param is a host bool; it cannot join mask arithmetic.
     if scalarized
         .params
         .iter()
@@ -194,10 +194,10 @@ fn body_eligible(body: &[ScalarStmt], env: &mut HashMap<String, ElementTy>) -> b
 }
 
 fn expr_eligible(e: &ScalarExpr, env: &HashMap<String, ElementTy>) -> bool {
-    // after the rewrite EVERY bool-typed value in the body must be an
+    // after the rewrite every bool-typed value in the body must be an
     // `S::Mask` — a float `cmp_*` result or Not/And/Or combinations of them —
     // because bool locals are retyped to the mask type wholesale. anything
-    // that would leave a NATIVE bool in mask position bails the kernel:
+    // that would leave a native bool in mask position bails the kernel:
     // integer comparisons, bool literals, bool-xor (Mask has no BitXor),
     // integer-valued selects (their `if` needs a native bool cond).
     match e {
@@ -220,9 +220,9 @@ fn expr_eligible(e: &ScalarExpr, env: &HashMap<String, ElementTy>) -> bool {
             if !(is_float(infer(then, env)) || is_float(infer(else_, env))) {
                 return false;
             }
-            // `select` evaluates BOTH arms every cell, where the `if` spelling
+            // `select` evaluates both arms every cell, where the `if` spelling
             // evaluates one behind a (usually well-predicted) branch. an arm
-            // whose INLINE cost is heavy — a division, an expensive method, a
+            // whose inline cost is heavy — a division, an expensive method, a
             // free call — makes the trade a measured loss (the hllc star-state
             // fan runs 2.6x slower mask-formed). cse-hoisted lets referenced by
             // the arm are shared straight-line work outside the arm cost, so the walk
@@ -238,9 +238,9 @@ fn expr_eligible(e: &ScalarExpr, env: &HashMap<String, ElementTy>) -> bool {
 
 // inline arm cost gate for the select rewrite: transcendental / power methods
 // and free calls dominate the cost of computing a discarded arm, and so do
-// MULTIPLE divisions. a SINGLE division is tolerated: the guarded-denominator
+// multiple divisions. a single division is tolerated: the guarded-denominator
 // limiter idiom `select(pos, 2ab/select(pos, a+b, 1), 0)` carries exactly one
-// safe division per arm, and computing it eagerly measured FASTER than the
+// safe division per arm, and computing it eagerly measured faster than the
 // branchy spelling (the mask-form flux body with van-leer arms ran 16.4
 // vs 18.5 ns/zone bool/if) — the branch costs more than one discarded fdiv.
 fn arm_is_expensive(e: &ScalarExpr) -> bool {
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn integer_select_in_body_bails_whole_kernel() {
-        // a body-space integer pick needs a NATIVE bool `if`, which cannot
+        // a body-space integer pick needs a native bool `if`, which cannot
         // coexist with mask-typed bool locals — the kernel keeps bool/if form.
         let sel = ScalarExpr::Select {
             cond: Box::new(ScalarExpr::BinOp(
@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn multiple_divisions_in_select_arm_bail_whole_kernel() {
-        // both select arms run every cell under mask form; a MULTI-division
+        // both select arms run every cell under mask form; a multi-division
         // arm is the hllc-class regression (one guarded division is tolerated
         // — the limiter idiom measured faster eager). the kernel keeps
         // bool/if form.

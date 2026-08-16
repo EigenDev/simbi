@@ -67,7 +67,7 @@ const THETA: f64 = 1.5; // plm-theta (the kernel's reconstruction slope limiter)
 // anti-upwind scheme, which amplifies it -> the discriminating instability. the smooth
 // loop carries resolved scales alone, where the two pairings agree (by_w ~ by_e); the
 // seed is the minimal feature that makes the upwind/downwind choice bite.
-const SEED: f64 = 5.0e-5; // << A0*RAD (the loop A_z); the field stays weak/passive
+const SEED: f64 = 5.0e-5; // << A0*rad (the loop A_z); the field stays weak/passive
 
 // axis-0-fastest flat index over the full (ghosted) buffer, matching the harness /
 // interpreter / canonical Field convention. (i, j) are buffer-local (ghosts included).
@@ -100,8 +100,8 @@ fn az_loop(x: f64, y: f64) -> f64 {
 // the corner vector potential at corner (i, j) = loop + the div-free odd-even seed.
 // the seed is a checkerboard (-1)^(i+j) on the corner lattice -> its discrete curl is a
 // pure grid-scale div-free B mode. defined on the grid-index corner so the periodicity
-// and the checkerboard phase are exact (period NX/NY must be even for the wrap to align;
-// NX=NY=24 is even).
+// and the checkerboard phase are exact (period nx/ny must be even for the wrap to align;
+// nx=ny=24 is even).
 fn az_corner(i: usize, j: usize) -> f64 {
     let parity = if (i + j) % 2 == 0 { 1.0 } else { -1.0 };
     az_loop(xcorner(i), ycorner(j)) + SEED * parity
@@ -125,7 +125,7 @@ struct Sim {
 
 impl Sim {
     // initialize the supersonically-advected field loop. velocity is diagonal v=(2,1)
-    // scaled to |v| = SPEED; B is the discrete curl of A_z (div-free to machine zero).
+    // scaled to |v| = speed; B is the discrete curl of A_z (div-free to machine zero).
     fn new() -> Sim {
         let norm = 5.0_f64.sqrt();
         let vx = SPEED * 2.0 / norm;
@@ -159,7 +159,7 @@ impl Sim {
 
     // periodic wrap of one staggered face buffer: copy the interior into the ghost
     // halo so the stencils read the wrapped neighbor. cell-indexed staggering with
-    // NX/NY interior cells -> period NX (x), NY (y).
+    // nx/ny interior cells -> period nx (x), ny (y).
     fn wrap(buf: &mut [f64]) {
         // x ghosts
         for j in 0..BY {
@@ -295,7 +295,7 @@ fn build_emf_inputs(sim: &Sim) -> EmfInputs {
     e
 }
 
-// run the production NMHD UCT-HLLC edge EMF kernel over the interior corners. returns
+// run the production NMHD uct-hllc edge EMF kernel over the interior corners. returns
 // the full Ez buffer (corner field, cell-indexed: ez[i,j] = E_z at corner (i-1/2,j-1/2)).
 fn run_edge_emf(sim: &Sim) -> Vec<f64> {
     let inp = build_emf_inputs(sim);

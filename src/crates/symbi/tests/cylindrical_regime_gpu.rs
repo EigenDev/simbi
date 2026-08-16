@@ -52,7 +52,7 @@ fn cmp<const D: usize, MH: MemorySpace, MD: MemorySpace>(
 }
 
 // diff godunov_euler (all cons fields) + cfl dt between an already-IC'd host + dev sim.
-// HKS / DKS are distinct types (the kernelset is generic over the memory space).
+// hks / dks are distinct types (the kernelset is generic over the memory space).
 fn diff_godunov_cfl<const D: usize, R, E, HKS, DKS>(
     host: &SimStateGeneric<R, D, D, Cylindrical, E, CpuSpace, HostMemory>,
     dev: &SimStateGeneric<R, D, D, Cylindrical, E, CudaSpace, UnifiedMemory>,

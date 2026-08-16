@@ -3,17 +3,17 @@
 #
 # the curved-CT instrument: the michel transonic profile on
 # the (r, theta) wedge threaded by the theta-uniform radial monopole, run through
-# the FULL 2D GRMHD machinery — the densitized corner EMF (contact assembly), the
+# the full 2D GRMHD machinery — the densitized corner EMF (contact assembly), the
 # densitized-space curl, the metric-contracted face->cell interpolation, and the
 # covariant bcell predictor. the gates:
 #
 #   identity-class: the w-weighted divergence of the staggered field (w =
 #   sqrt(gamma)(face center) x coordinate length — the discrete divergence the
-#   curl preserves by construction) stays MACHINE ZERO through the full t = 10
+#   curl preserves by construction) stays machine zero through the full t = 10
 #   evolution (measured 6.3e-15 against a 0.29 flux scale over ~5000 steps); the
 #   one-step b1/m3 rows are exactly 0.0 and m2/b2 sit at cancellation roundoff.
 #
-#   consistency-class: the hold L1 rho vs the michel solution EQUALS the 1D gate's
+#   consistency-class: the hold L1 rho vs the michel solution equals the 1D gate's
 #   value (1.192e-4 at nr = 128 — the wedge adds nothing), the one-step
 #   den/m1/nrg residuals equal the 1D values and converge (ratios 2.1-2.6), and
 #   the staggered field drift is roundoff-accumulation only (measured 4.3e-10
@@ -45,13 +45,13 @@ needs_backend = pytest.mark.skipif(
 )
 
 _NR, _NP = 128, 16
-# the hold is measured while the discretization is still HEALTHY. past t ~ 0.2 this
+# the hold is measured while the discretization is still healthy. past t ~ 0.2 this
 # configuration develops a timestep collapse -- dt falls to ~2e-3 of the light-crossing
 # step, the run stalls near t = 0.318, and cells begin tripping the first-order fallback
-# every step. it is INDEPENDENT OF THE FIELD (identical at b_ref = 0), so it belongs to
+# every step. it is independent of the field (identical at b_ref = 0), so it belongs to
 # the GRHD path rather than to the magnetic terms this file gates; measuring through it
 # inverts the convergence order, because the finer grid stalls sooner and so carries
-# MORE error. see the 1D file for the measurements.
+# more error. see the 1D file for the measurements.
 _HOLD_TIME = 0.1
 # stated without a grid in it (see convergence.py): a measured order and an extrapolated
 # error constant, so refining the test leaves the assertion standing.
@@ -63,8 +63,8 @@ _DB_TOL = 1e-8      # measured 4.3e-10 (roundoff accumulation over t=10)
 _DIV_TOL = 1e-12    # measured 6.3e-15 absolute vs a 0.29 flux scale
 # measured one-step L1 at 128x16 == the 1D values: den 9.1e-5, m1 7.2e-4, nrg 3.3e-4
 # (ratios 2.6/2.1/2.1 to 256x32); m2 4.9e-12, m3 0.0, b1 0.0, b2 1.6e-25.
-# measured NR 128 -> 256: den p=1.59 C=7.30e-1 | m1 p=0.82 C=1.37e-1 | nrg p=0.93
-# C=7.74e-2 -- IDENTICAL to the 1D gate, which is what this file exists to assert.
+# measured nr 128 -> 256: den p=1.59 C=7.30e-1 | m1 p=0.82 C=1.37e-1 | nrg p=0.93
+# C=7.74e-2 -- identical to the 1D gate, which is what this file exists to assert.
 _RESID_MIN_ORDER = 0.5
 _RESID_MAX_CONSTANT = {"den": 2.5, "m1": 5.0e-1, "nrg": 3.0e-1}
 _SILENT_TOL = 1e-10
@@ -141,7 +141,7 @@ def test_curved_ct_holds_michel_and_divergence() -> None:
     ref = np.array([sol.primitive(r, michel_chart(p.spacetime))[0] for r in rc])
     interior = (slice(2, _NP - 2), slice(2, _NR - 2))
     l1 = float(np.abs(rho[interior] / ref[None, 2 : _NR - 2] - 1.0).mean())
-    # the hold, stated grid-free at ONE resolution: divide out the expected scaling and
+    # the hold, stated grid-free at one resolution: divide out the expected scaling and
     # what remains is the scheme's error constant, so changing _NR leaves the bound
     # standing. measured C = 2.04e-4 here against 2.00e-4 for the 1D gate -- the curved
     # CT reproduces the 1D result, which is what this file exists to assert.
@@ -184,7 +184,7 @@ def test_one_step_residual_matches_1d_and_converges() -> None:
             max_constant=max_c,
             label=f"2d one-step {k} residual",
         )
-    # rows with NO generator on the theta-uniform radial monopole: the theta/azimuthal
+    # rows with no generator on the theta-uniform radial monopole: the theta/azimuthal
     # momenta and both staggered induction rows.
     for k in ("m2", "m3", "b1", "b2"):
         assert_structurally_silent(r_lo[k], tol=_SILENT_TOL, label=f"2d one-step {k}")

@@ -1,8 +1,8 @@
 // =============================================================================
 // rmhd_divb_under_evolve.rs
 //
-// the FULL-EVOLVE divergence-cleaning gate. rmhd_ct_curl_divb (in
-// symbi-discretize) covers the CT operator in ISOLATION — one step, one EMF.
+// the full-evolve divergence-cleaning gate. rmhd_ct_curl_divb (in
+// symbi-discretize) covers the CT operator in isolation — one step, one EMF.
 // this test runs the entire production RMHD substrate (c2p -> ghost_fill -> flux
 // per dir -> cfl -> snapshot -> godunov_euler -> post_godunov[CT] -> rk2) for
 // STEPS_TARGET steps with periodic BCs and asserts the discrete staggered
@@ -61,7 +61,7 @@ fn make_sim() -> Sim {
     let p0 = GAMMA;
 
     // analytically div-free staggered B. seed_faces reads face_coord (on the d-face,
-    // cell-CENTERED transverse) — no hand-written half-cell offset.
+    // cell-centered transverse) — no hand-written half-cell offset.
     //   Bx on x-faces: Bx = -B0\cdot sin(2\pi y),  By on y-faces: By = B0\cdot sin(4\pi x),  Bz = 0
     // cell-centered B from analytic eval at cell centers (consistent with bface); hydro:
     // v from the OT velocity field.
@@ -128,7 +128,7 @@ fn rmhd_orszag_tang_preserves_divb_under_full_evolve() {
     let idz = NZ as f64;
 
     // sanity: the analytic IC is divergence-free to machine precision on the
-    // staggered mesh BEFORE any kernel runs.
+    // staggered mesh before any kernel runs.
     let (div0, b0_max, _) = max_divb_and_b(&sim, idx, idy, idz);
     assert!(
         div0 / b0_max.max(1.0) < 1e-13,

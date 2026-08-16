@@ -6,7 +6,7 @@
 # (which reads every key with a silent default). covers:
 #   - AccretionProperties physical bounds
 #   - a capability bit requires its property block
-#   - unwired capabilities (ELASTIC / DEFORMABLE) are rejected
+#   - unwired capabilities (elastic / deformable) are rejected
 #   - raw body dicts are rejected in favor of the validated dataclass
 # =============================================================================
 
@@ -46,7 +46,7 @@ def test_any_nonzero_sink_rate_rejected(rate: float) -> None:
     # sound-crossing rate `c_s / (c_drain * dx)`, and the sink scalar is bound to zero wherever a
     # surface exists — which `penalize_owns_accretion` makes unconditional.
     #
-    # ANY nonzero value is refused, not merely a negative one. a positive value is the dangerous
+    # any nonzero value is refused, not merely a negative one. a positive value is the dangerous
     # case: it is silently ignored, so a run asserts control over its accretion rate that it does not
     # have, and the resulting Mdot is entirely reasonable-looking — it is simply the sound-crossing
     # drain, whatever the dial said. three shipped configs built scientific arguments on this dial,

@@ -1,15 +1,15 @@
 // =============================================================================
 // excise_law_sph.rs
 //
-// the SPHERICAL horizon-excision kernels' gates. the compiled fill/writeback/rebuild chain is
-// BIT-IDENTICAL to an f64 host chain built from the same carrier-generic pieces (the vacuum floor,
-// `RhdGr::to_conserved` on the ingoing kerr-schild metric), on both a UNIFORM and a LOG radial
+// the spherical horizon-excision kernels' gates. the compiled fill/writeback/rebuild chain is
+// bit-identical to an f64 host chain built from the same carrier-generic pieces (the vacuum floor,
+// `RhdGr::to_conserved` on the ingoing kerr-schild metric), on both a uniform and a log radial
 // axis.
 //
 // the log axis is the point of this file. on a chart whose radial coordinate is r, the excision
 // mask is `r < r_exc` — but "r" has to be the cell's actual radius, and the face positions are
-// selected at RUNTIME by `map_kind_0` (0 = uniform, 1 = log). a kernel that instead read the
-// affine `x_lo + i dx` would be reading an INDEX coordinate on a log grid: at the parameters
+// selected at runtime by `map_kind_0` (0 = uniform, 1 = log). a kernel that instead read the
+// affine `x_lo + i dx` would be reading an index coordinate on a log grid: at the parameters
 // below that expression reaches 0.5 only at i = 10 while the true radius reaches it at i = 4, so a
 // wrong reading excises six extra shells of live gas. the uniform case leaves that error
 // undetected — the two formulas agree there — which is why both are run against the same kernel.

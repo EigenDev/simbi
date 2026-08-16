@@ -7,7 +7,7 @@
 // driven fill: prims + cell B prescribed by the coordinate DAG, staggered face B left to
 // the CT ghost fill. two oracles: exact uniform preservation (uniform B_x, all faces
 // driven at the uniform state, both levels, div(B) at machine zero), and the prescription
-// landing verbatim — including the cell B — in the FINE level's ghost slab on a flush
+// landing verbatim — including the cell B — in the fine level's ghost slab on a flush
 // driven face while div(B) stays clean under the resulting inflow.
 // =============================================================================
 

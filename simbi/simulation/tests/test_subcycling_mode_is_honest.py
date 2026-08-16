@@ -5,12 +5,12 @@
 #
 # only the fixed-ratio schedule exists: level `l` advances `2^l` times per root step, and the root
 # step is the minimum over levels of that level's own cfl limit times `2^l`, so every level lands
-# inside its own cfl. `refinement_subcycling_mode` and `refinement_substeps` reach NO backend code —
+# inside its own cfl. `refinement_subcycling_mode` and `refinement_substeps` reach no backend code —
 # they are validated here and dropped at the binding.
 #
-# the failure this closes is not a crash. two production configs declared ADAPTIVE and received the
+# the failure this closes is not a crash. two production configs declared adaptive and received the
 # fixed schedule, and their surrounding reasoning about timestep depth was written against the
-# declaration rather than against what runs. the two differ: under the fixed schedule the ROOT is
+# declaration rather than against what runs. the two differ: under the fixed schedule the root is
 # throttled by the finest level's requirement — measured at roughly twenty times more root steps
 # than its own cfl needs on a fourteen-level gravitational ladder. bounded (the finest level
 # dominates the work either way, so an ideal schedule saves order twenty percent), but not nothing.
@@ -42,7 +42,7 @@ def test_an_unimplemented_schedule_is_refused(mode: SubCycleMode) -> None:
 
 @pytest.mark.parametrize("mode", [SubCycleMode.STANDARD, SubCycleMode.NONE])
 def test_the_implemented_schedule_is_accepted(mode: SubCycleMode) -> None:
-    # NONE and STANDARD both name the fixed-ratio schedule and are equivalent. the premise: the
+    # none and standard both name the fixed-ratio schedule and are equivalent. the premise: the
     # refusal must be specific to the unimplemented modes, not a blanket rejection of anything set
     # explicitly.
     problem = _refined(refinement_subcycling_mode=mode)

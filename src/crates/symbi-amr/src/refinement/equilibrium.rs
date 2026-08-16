@@ -1,7 +1,7 @@
 // =============================================================================
 // equilibrium.rs
 //
-// the pieces for evolving a refinement level against a STATIONARY TARGET state: stash and restore
+// the pieces for evolving a refinement level against a stationary target state: stash and restore
 // the live gas state, snapshot the target's materialized flux, and hold the target's discrete
 // imbalance so a stage can subtract it.
 //
@@ -9,28 +9,28 @@
 // scheme leaves a residual
 //   R := div_h F_h(qt) - s_h(qt),
 // nonzero at truncation order, and that residual is what makes an atmosphere seeded on the exact
-// hydrostatic profile start moving. worse, R is GRID-DEPENDENT: a coarse grid and a fine grid
+// hydrostatic profile start moving. worse, R is grid-dependent: a coarse grid and a fine grid
 // reduce the same exact solution to different face values, so the coarse-fine flux register
 // differences two unequal reconstructions and applies the difference to the coarse cells at the
 // interface as a spurious force.
 //
-// the cure is to evolve the DEVIATION from the target
+// the cure is to evolve the deviation from the target
 // (Berberich, Chandrashekar & Klingenberg, Computers and Fluids 219 (2021) 104858). the numerical
 // flux becomes
 //   F_hat(Q_L, Q_R) := F(Q_L, Q_R) - F(qt_L, qt_R)                              (eq. 8)
 // and the source `s(qt + dq) - s(qt)`, which for a source linear in the conserved state at fixed
 // potential — gravity, `s = (0, rho g, m . g)` — is just `s(dq)`. summed over a cell the two
 // subtractions are exactly `+R`, so the whole method reduces to adding `R` back at every stage,
-// which makes the target an EXACT fixed point of the scheme.
+// which makes the target an exact fixed point of the scheme.
 //
 // both halves are required and neither suffices alone. subtracting only at the coarse-fine
 // interface leaves the fine cells sharing that face still transporting `F(qt)`, so what the coarse
 // cell receives and what the fine cells send no longer agree and the composite leaks. correcting
 // only the interiors leaves the register differencing two reconstructions of the target. together
 // the interface flux is single-valued in the deviation, so the deviation is conserved exactly, and
-// a time-independent target adds a constant — so the TOTAL is conserved exactly too.
+// a time-independent target adds a constant — so the total is conserved exactly too.
 //
-// the subtracted flux is the NUMERICAL flux applied to the target, per level. the analytic flux at
+// the subtracted flux is the numerical flux applied to the target, per level. the analytic flux at
 // the physical face carries no grid dependence, cancels from both sides of the register
 // difference, and would therefore remove exactly nothing.
 //
@@ -151,7 +151,7 @@ pub fn imbalance_from_stage<const NDIM: usize, const DOF: usize, Mem: MemorySpac
 /// the volume-weighted L1 norm of each conserved component of a residual over `domain`:
 /// `sum |R_i| V_i`, one entry per component in component order.
 ///
-/// a bulk magnitude, for reporting how large an imbalance is. it is NOT the statistic that decides
+/// a bulk magnitude, for reporting how large an imbalance is. it is not the statistic that decides
 /// whether a target is stationary: a sum is dominated by wherever the imbalance happens to be
 /// largest, which for a target with an unresolved feature is a handful of cells that carry no
 /// information about the rest. that question is answered per cell — see

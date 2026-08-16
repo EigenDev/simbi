@@ -3,20 +3,20 @@
 //
 // the checkpoint adapter: read a symbi HDF5 checkpoint (any geometry the hydro ran —
 // Cartesian / Spherical / Cylindrical, in 1/2/3D) into the afterglow's neutral, Cartesian
-// `Cell` list. this is the last hop that lets the afterglow module observe REAL simulation
+// `Cell` list. this is the last hop that lets the afterglow module observe real simulation
 // output end-to-end.
 //
-// it owns the geometry's AXIS-ROLE layout (the bit that differs from sim to sim):
+// it owns the geometry's axis-role layout (the bit that differs from sim to sim):
 //   Cartesian 3D : (x1,x2,x3) = (x, y, z)
 //   Spherical 3D : (x1,x2,x3) = (r, theta, phi)
 //   Spherical 2D : (x1,x2)    = (r, theta), phi synthesized (axisymmetric)
 //   Spherical 1D : (x1)       = (r), theta & phi synthesized
 //   Cylindrical 3D: (x1,x2,x3)= (r, phi, z)
-//   Cylindrical 2D: (x1,x2)   = (r, z),    phi synthesized  [note: x2 is z, the THIRD role]
+//   Cylindrical 2D: (x1,x2)   = (r, z),    phi synthesized  [note: x2 is z, the third role]
 // for reduced-dimension (axisymmetric / radial) runs it synthesizes the missing angular grid
 // and broadcasts the data over it, weighting cell volume by the geometry's volume element.
 //
-// the checkpoint is in CODE units; `CgsScales` converts length/density/pressure/time to CGS.
+// the checkpoint is in code units; `CgsScales` converts length/density/pressure/time to CGS.
 // velocity is the relativistic three-velocity (already in units of c). proper cell volumes are
 // computed from the coordinate cell widths and the geometry's volume factor.
 //
@@ -103,7 +103,7 @@ fn usize_dataset(g: &TreeBuf, name: &str) -> Result<Vec<usize>> {
     }
 }
 
-// string metadata (regime / coord_system / ..) rides as an HDF5 string ATTRIBUTE
+// string metadata (regime / coord_system / ..) rides as an HDF5 string attribute
 // (the v2.0 convention symbi-io writes and the python reader reads); it is not a byte
 // dataset.
 fn str_attr(g: &TreeBuf, name: &str) -> Result<String> {
@@ -148,7 +148,7 @@ fn read_raw(path: &Path) -> Result<Raw> {
         .find_group("mesh")
         .ok_or_else(|| IoError::MissingPath("level_0/mesh".into()))?;
 
-    // v2.0 mesh: cell centers are REBUILT from the geometry description
+    // v2.0 mesh: cell centers are rebuilt from the geometry description
     // (global_cells + per-dim start/end attrs); no coordinate arrays are stored.
     let geometry = mesh
         .find_group("geometry")
@@ -326,7 +326,7 @@ fn build_cells(raw: &Raw, scales: &CgsScales, synth: &Synth, t_emission: f64) ->
             }
         }
         (Coords::Cylindrical, 2) => {
-            // axisymmetric (r, z): x1 = r, x2 = z (the THIRD coordinate role); phi synthesized.
+            // axisymmetric (r, z): x1 = r, x2 = z (the third coordinate role); phi synthesized.
             let dphi = 2.0 * std::f64::consts::PI / synth.n_phi as f64;
             for kphi in 0..synth.n_phi {
                 let ph = (kphi as f64 + 0.5) * dphi;
@@ -371,7 +371,7 @@ fn build_cells(raw: &Raw, scales: &CgsScales, synth: &Synth, t_emission: f64) ->
     Ok(cells)
 }
 
-/// read ONE checkpoint into Cartesian cells. the emission timestep each cell radiates over (the
+/// read one checkpoint into Cartesian cells. the emission timestep each cell radiates over (the
 /// checkpoint cadence) is the caller's `Microphysics.dt` at `generate_events_from_cells` — it is
 /// not a property of the cell, so it is not stored here.
 pub fn read_cells(path: &Path, scales: &CgsScales, synth: &Synth) -> Result<Vec<Cell>> {
@@ -380,11 +380,11 @@ pub fn read_cells(path: &Path, scales: &CgsScales, synth: &Synth) -> Result<Vec<
     build_cells(&raw, scales, synth, t_emission)
 }
 
-/// read a TIME SEQUENCE of checkpoints into one concatenated cell list — the multi-checkpoint
+/// read a time sequence of checkpoints into one concatenated cell list — the multi-checkpoint
 /// EATS workflow (each cell carries its checkpoint's lab emission time, so the EATS integrates
 /// over the outflow's evolution). returns `(cells, dt_seconds)` where `dt_seconds` is the
 /// checkpoint cadence to use as `Microphysics.dt` (the gap between the first two checkpoints).
-/// ASSUMES a ~uniform cadence (the common case: fixed dump interval); a strongly non-uniform
+/// assumes a ~uniform cadence (the common case: fixed dump interval); a strongly non-uniform
 /// cadence would need a per-checkpoint emission window, which the single-`dt` weighting here does
 /// not model. loads every checkpoint's primitives into memory — for very large sequences, call
 /// `read_cells` per file and weight each batch with its own `Microphysics.dt`.
@@ -473,7 +473,7 @@ mod tests {
         }
     }
 
-    // cylindrical 2D (r, z): the SECOND mesh axis is z (the third coordinate role), and the
+    // cylindrical 2D (r, z): the second mesh axis is z (the third coordinate role), and the
     // stored v2 maps to v_z — so beta_vec has the right out-of-plane (z) component.
     #[test]
     fn cylindrical_2d_axis_roles() {

@@ -2,11 +2,11 @@
 # test_problem_class_discovery.py
 #
 # regression for the run-command loader (_discover_problem_classes): a config that
-# inherits from an IMPORTED base config must be discovered as runnable. an ast
-# base-NAME scan cannot do this: it resolves a base only when the name is literally
+# inherits from an imported base config must be discovered as runnable. an ast
+# base-name scan cannot do this: it resolves a base only when the name is literally
 # "SimbiProblem" or a class defined in the same file, so `class Mine(ImportedBase)`
 # surfaces no runnable class. the import-based loader tests the real
-# subclass relationship and returns the classes DEFINED in the script, excluding the
+# subclass relationship and returns the classes defined in the script, excluding the
 # imported base and any non-SimbiProblem helpers.
 # =============================================================================
 from pathlib import Path
@@ -23,7 +23,7 @@ def test_discovers_config_subclassing_an_imported_base(tmp_path: Path) -> None:
     )
     found = _discover_problem_classes(str(tmp_path / "derived_cfg.py"))
     # the derived config is runnable; the imported base is defined in base_cfg,
-    # so it is NOT surfaced.
+    # so it is not surfaced.
     assert [name for name, _ in found] == ["DerivedCfg"]
 
 

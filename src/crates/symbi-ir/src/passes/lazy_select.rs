@@ -2,7 +2,7 @@
 // lazy_select.rs
 //
 // automatic lazy scheduling of expensive select arms. a `select(c, t, f)`
-// evaluates BOTH arms at every cell; when one arm is expensive (a `powf`
+// evaluates both arms at every cell; when one arm is expensive (a `powf`
 // pressure estimate, a root-heavy fallback) and the condition usually picks
 // the other, the discarded work dominates the kernel. this pass rewrites a
 // float-valued `let x = select(c, t, f)` whose arm-exclusive cost crosses a
@@ -11,7 +11,7 @@
 //   let x: S;
 //   if c { <arm-exclusive lets> x = t; } else { <...> x = f; }
 //
-// sinking: after cse the expensive subexpressions live in SEPARATE top-level
+// sinking: after cse the expensive subexpressions live in separate top-level
 // lets. a let sinks into an arm body iff every transitive use ends in that
 // one arm of that one select; anything reaching the condition, an output,
 // another statement kind, or a second arm stays rooted. per-cell values are
@@ -120,7 +120,7 @@ pub fn apply(scalarized: &mut KernelScalarized) -> usize {
         .map(|(ci, c)| (c.stmt_idx, ci))
         .collect();
 
-    // placement analysis, bottom-up: a use contributes the USER's placement
+    // placement analysis, bottom-up: a use contributes the user's placement
     // (root for outputs / conditions; the arm slot for a candidate's arm; the
     // user-let's own placement otherwise). candidate lets themselves stay
     // rooted — no nested sinking in this pass.
@@ -157,7 +157,7 @@ pub fn apply(scalarized: &mut KernelScalarized) -> usize {
             // it is never sunk itself: pin it to root.
             placement.insert(name.clone(), Placement::Root);
         } else {
-            // a normal let: its value's vars inherit THIS let's placement.
+            // a normal let: its value's vars inherit this let's placement.
             let here = placement.get(name).copied().unwrap_or(Placement::Root);
             let mut vars = Vec::new();
             collect_vars(value, &mut vars);
@@ -196,7 +196,7 @@ pub fn apply(scalarized: &mut KernelScalarized) -> usize {
         return 0;
     }
 
-    // rewrite: walk the body once; lets placed in a FIRING candidate's arm
+    // rewrite: walk the body once; lets placed in a firing candidate's arm
     // move into that arm's pending list (original order); a firing candidate
     // becomes an IfElse whose arms are its pending lets plus the result
     // assignment. lets placed in a non-firing candidate's arm stay rooted.
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn expensive_exclusive_arm_converts_and_sinks() {
-        // heavy = x.powf(0.3) feeds ONLY the then-arm: it must sink into the
+        // heavy = x.powf(0.3) feeds only the then-arm: it must sink into the
         // if-body and the select becomes an IfElse.
         let mut k = kernel(
             vec![
@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn let_shared_by_both_arms_stays_rooted() {
-        // shared feeds BOTH arms: it must not sink; with only Var arms left
+        // shared feeds both arms: it must not sink; with only Var arms left
         // the exclusive cost is zero and the select stays eager.
         let mut k = kernel(
             vec![
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn let_used_by_output_stays_rooted() {
-        // heavy feeds the then-arm AND an output: it cannot sink, and the
+        // heavy feeds the then-arm and an output: it cannot sink, and the
         // remaining arm-inline cost (a var) is below threshold.
         let mut k = kernel(
             vec![
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn arms_of_two_different_selects_stay_rooted() {
-        // heavy feeds arms of TWO selects: exclusive to neither.
+        // heavy feeds arms of two selects: exclusive to neither.
         let mut k = kernel(
             vec![
                 let_f("heavy", powf(var("x"), f(0.3))),
@@ -447,7 +447,7 @@ mod tests {
     #[test]
     fn converted_kernel_evaluates_identically() {
         // the strongest gate: interpret original vs converted on inputs that
-        // exercise BOTH branch directions; values must be bit-equal.
+        // exercise both branch directions; values must be bit-equal.
         use crate::backends::interp::{Backend, Cpu};
         use crate::passes::scalarize::{LoweredFn, LoweredParam};
         let build = || {

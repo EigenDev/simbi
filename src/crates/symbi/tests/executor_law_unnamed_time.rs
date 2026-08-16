@@ -8,7 +8,7 @@
 // can silently swallow a third of a run's wall time — and fails this law instead.
 //
 // the profiler is env-gated through a process-global OnceLock, so this binary
-// holds ONLY this law (the flag must be set before the first `prof` call).
+// holds only this law (the flag must be set before the first `prof` call).
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;

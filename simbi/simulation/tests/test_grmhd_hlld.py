@@ -1,18 +1,18 @@
 # =============================================================================
 # test_grmhd_hlld.py
 #
-# the GR-HLLD gates: the ORTHONORMAL-frame MUB09 five-wave
+# the gr-hlld gates: the orthonormal-frame MUB09 five-wave
 # relativistic-MHD Riemann solver on a curved background.
 #
 # the GR solve maps the diagonal spatial metric to the local orthonormal frame
-# (V_hat^i = sqrt(g_i) v^i, B_hat^i = sqrt(g_i) B^i), runs the VALIDATED flat
+# (V_hat^i = sqrt(g_i) v^i, B_hat^i = sqrt(g_i) B^i), runs the validated flat
 # MUB09 solver there, and maps the flux back exactly (F_D /= sqrt(g_n),
 # F_S_j *= sqrt(g_j)/sqrt(g_n), F_B^i /= sqrt(g_i) sqrt(g_n)). this reduces to
 # F(U) in the smooth limit and to the SR solver at identity gamma (both proven in
 # riemann/hlld.rs), so it holds the transonic magnetized-michel monopole exactly
-# as HLLE does -- the coordinate-frame reconstruction did NOT (its transverse
+# as HLLE does -- the coordinate-frame reconstruction did not (its transverse
 # star fields carried spurious sqrt(gamma) factors that grew a theta-momentum
-# mode). the same orthonormal map drives the GR-UCT-HLLD wave-sum edge EMF, whose
+# mode). the same orthonormal map drives the gr-uct-hlld wave-sum edge EMF, whose
 # Phi telescopes to the coordinate B_t flux.
 #
 # gates: HLLD flux + UCT-HLLD EMF holds the michel monopole to the 1D L1 with the
@@ -57,7 +57,7 @@ def _run_michel(solver: Solver, ct: CtMethod):
 
 @needs_backend
 def test_gr_hlld_flux_uct_hlld_emf_holds_the_michel_monopole() -> None:
-    # the ORTHONORMAL-frame GR HLLD gas flux with the GR-UCT-HLLD wave-sum EMF must hold the
+    # the orthonormal-frame GR HLLD gas flux with the gr-uct-hlld wave-sum EMF must hold the
     # transonic magnetized monopole to the 1D L1 gate, positive pressure, and keep the staggered
     # B static (the smooth-field EMF is zero). this is the profile the coordinate-frame HLLD grew.
     p, first, final = _run_michel(Solver.HLLD, CtMethod.UCT)

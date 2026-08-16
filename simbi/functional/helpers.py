@@ -363,7 +363,7 @@ def print_progress(
     - sleep_time: delay between simulated steps (useful for tests)
     - console: optional console instance to bind the progress display to
     """
-    # try the project's shared progress bar factory first (keeps UI consistent)
+    # try the project's shared progress bar factory first (keeps ui consistent)
     try:
         try:
             # prefer the central factory if available

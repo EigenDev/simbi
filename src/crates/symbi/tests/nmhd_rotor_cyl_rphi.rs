@@ -1,20 +1,20 @@
 // =============================================================================
 // nmhd_rotor_cyl_rphi.rs
 //
-// the magnetized ROTOR in the CYLINDRICAL r-phi DISK plane — the
+// the magnetized rotor in the cylindrical r-phi disk plane — the
 // curvilinear sibling of nmhd_rotor_cyl_rz, validating the r-phi constrained-transport
-// stack: the SINGLE out-of-plane corner EMF E_z (reused from cartesian, identity axes),
+// stack: the single out-of-plane corner EMF E_z (reused from cartesian, identity axes),
 // the metric in-plane curl
 //   dB_r/dt   = -(1/r) d_phi E_z   (the 1/r metric on the phi-derivative),
-//   dB_phi/dt = +d_r E_z           (flat, NO metric — mirror of r-z),
+//   dB_phi/dt = +d_r E_z           (flat, no metric — mirror of r-z),
 // the gas + geometric source on the (r, phi) disk, and the `with_cyl_plane(RPhi)` selector
 // (grid axes [0,1], out-of-plane vertical B_z). a dense disk spins in the (r, phi) disk
 // plane inside a uniform toroidal B_phi, winding B_r out of the advected
 // azimuthal field. asserts:
-//   (a) the staggered CYLINDRICAL div(B) = (1/r) d_r(r B_r) + (1/r) d_phi B_phi stays at
+//   (a) the staggered cylindrical div(B) = (1/r) d_r(r B_r) + (1/r) d_phi B_phi stays at
 //       machine zero (the discrete d-of-d the metric curl must preserve),
 //   (b) the state stays physical (rho>0, p>0, finite),
-//   (c) the field WINDS — B_r (zero in the IC) develops from the in-plane advection of B_phi,
+//   (c) the field winds — B_r (zero in the IC) develops from the in-plane advection of B_phi,
 //       proving the E_z edge binds the right in-plane components (v_r, v_phi, B_r, B_phi) and
 //       the (1/r) d_phi metric curl actually evolves the in-plane field.
 // =============================================================================
@@ -37,14 +37,14 @@ const RC: f64 = 1.5;
 const PHIC: f64 = 0.5;
 const R0: f64 = 0.15;
 const R1: f64 = 0.18;
-const OMEGA: f64 = 2.0; // in-plane angular rate (core edge speed OMEGA*R0 ~ 0.3).
+const OMEGA: f64 = 2.0; // in-plane angular rate (core edge speed omega*R0 ~ 0.3).
 const B0: f64 = 1.0; // uniform toroidal field B_phi.
 const T_FINAL: f64 = 0.04;
 
-// the rotor primitive at physical (r, phi): a dense core in solid-body rotation in the DISK
-// plane about (RC, PHIC). the physical displacement is (dr, r_c*dphi) (the azimuthal arc-length
-// uses the metric), and v = OMEGA x displacement = (-OMEGA*r_c*dphi, OMEGA*dr) in (r, phi).
-// v_z (the out-of-plane) stays zero — this exercises the IN-PLANE CT (E_z edge). returns
+// the rotor primitive at physical (r, phi): a dense core in solid-body rotation in the disk
+// plane about (rc, phic). the physical displacement is (dr, r_c*dphi) (the azimuthal arc-length
+// uses the metric), and v = omega x displacement = (-omega*r_c*dphi, omega*dr) in (r, phi).
+// v_z (the out-of-plane) stays zero — this exercises the in-plane CT (E_z edge). returns
 // (rho, v_r, v_phi).
 fn rotor_state(r: f64, phi: f64) -> (f64, f64, f64) {
     let dr = r - RC;
@@ -71,7 +71,7 @@ fn make_sim() -> Sim {
         .expect("cyl r-phi disk sim");
     // uniform toroidal B_phi on the phi-faces (bface[1]); B_r stays zero — the CT ground truth.
     sim.seed_face(1, B0);
-    // the rotor IC, from physical (r, phi). velocity is COORDINATE-indexed (0=r, 1=phi, 2=z);
+    // the rotor IC, from physical (r, phi). velocity is coordinate-indexed (0=r, 1=phi, 2=z);
     // B = (B_r, B_phi, B_z) = (0, B0, 0).
     sim.seed_cells(|[r, phi]| {
         let (rho, vr, vphi) = rotor_state(r, phi);
@@ -87,7 +87,7 @@ fn make_sim() -> Sim {
     sim
 }
 
-// the staggered CYLINDRICAL div(B), normalized by |B|: the metric divergence the CT curl must
+// the staggered cylindrical div(B), normalized by |B|: the metric divergence the CT curl must
 // hold at machine zero. (1/(r_c dr))(r_hi B_r_hi - r_lo B_r_lo) + (1/(r_c dphi))(B_phi_hi - B_phi_lo).
 fn rel_divb(s: &Sim) -> f64 {
     let mhd = s.fields.mhd.as_ref().unwrap();
@@ -121,8 +121,8 @@ fn nmhd_rotor_cyl_rphi_preserves_divb_winds_field_stays_physical() {
         .expect("valid solver/regime pair");
 
     // the curvilinear metric curl carries the r_hi/r_lo + 1/r factors (O(1) cancellation), so its
-    // div(B) roundoff floor sits an order above cartesian ~1e-13. assert div(B) stays at a BOUNDED
-    // machine-zero (< 1e-11) every step — a sign/metric bug would leak SECULARLY.
+    // div(B) roundoff floor sits an order above cartesian ~1e-13. assert div(B) stays at a bounded
+    // machine-zero (< 1e-11) every step — a sign/metric bug would leak secularly.
     let mut steps = 0u64;
     let mut max_rel = 0.0_f64;
     evolve_with_callback(&mut sim, &sub, T_FINAL, 1, |s| {
@@ -141,7 +141,7 @@ fn nmhd_rotor_cyl_rphi_preserves_divb_winds_field_stays_physical() {
         "cyl r-phi rotor produced only {steps} steps — gate barely exercised"
     );
 
-    // physicality through the spun-up core + the field has WOUND (B_r developed from 0).
+    // physicality through the spun-up core + the field has wound (B_r developed from 0).
     let mhd = sim.fields.mhd.as_ref().unwrap();
     let mut max_br = 0.0_f64;
     for c in sim.geom.interior.iter() {

@@ -1,7 +1,7 @@
 // =============================================================================
 // cylindrical_disk_gpu.rs
 //
-// the GPU<->CPU validation for the cylindrical r-phi DISK family (DOF == NDIM == 2):
+// the GPU<->CPU validation for the cylindrical r-phi disk family (DOF == NDIM == 2):
 // the natural cylindrical plane, distinct from the r-z axisymmetric set
 // (cylindrical_swirl_gpu.rs, DOF=3). builds two identical sims — host (AOT CPU) and
 // unified (render IR -> NVRTC -> launch) — drives the DOF-generic

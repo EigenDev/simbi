@@ -421,7 +421,7 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> PolygonData:
     # finest level first, so a coarse cell is dropped wherever a finer one
     # already covers it
     for field in reversed(fields_2d):
-        # field.domain is in DATA-STORAGE order (slow..fast = [y, x] for 2D), matching the
+        # field.domain is in data-storage order (slow..fast = [y, x] for 2D), matching the
         # values array shape (ny, nx) -- see prepare_field_level. unpack it the same way, as
         # [y, x]: unpacking as (x, y) makes the y-edges drive the x-loop and `values[j, i]` run off axis 0 on a
         # non-square (refined) patch. a square level hides the swap (both edge arrays are equal).

@@ -1,8 +1,8 @@
 // =============================================================================
 // no_legacy_scalar.rs
 //
-// the carrier-generic surface has exactly ONE home: `symbi_ir::algebra`
-// (`Scalar`, `Selectable`, `Mask`). this test BANS a second source by greping
+// the carrier-generic surface has exactly one home: `symbi_ir::algebra`
+// (`Scalar`, `Selectable`, `Mask`). this test bans a second source by greping
 // every `.rs` file in the workspace's `crates/` tree for
 // `symbi_algebra::Scalar` / `symbi_algebra::Selectable` and failing the build
 // if any reference survives.
@@ -52,7 +52,7 @@ fn no_legacy_scalar_imports_in_workspace() {
 
     // the test file itself: skip by relative-path suffix (the walker produces
     // paths anchored at CRATES_ROOT). this match deliberately uses a string
-    // CONTAINS check on the file name so the file's own grep patterns above
+    // contains check on the file name so the file's own grep patterns above
     // don't trigger a self-match.
     let self_filename = "no_legacy_scalar.rs";
 
@@ -98,7 +98,7 @@ fn no_legacy_scalar_imports_in_workspace() {
 
 #[test]
 fn gate_self_check_finds_workspace_rs_files() {
-    // sanity: the walker DID find files. if the path resolution drifts the
+    // sanity: the walker did find files. if the path resolution drifts the
     // gate would silently pass — this asserts it sees a plausible workspace.
     let mut rs_files = Vec::new();
     walk_rs(Path::new(CRATES_ROOT), &mut rs_files);

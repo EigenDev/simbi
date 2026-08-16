@@ -1,9 +1,9 @@
 // =============================================================================
 // resistive_cfl_curvilinear.rs
 //
-// the resistive CFL must bound dt by the smallest PHYSICAL cell, `dt <= min(h_a dx_a)^2 / (2 D eta)`,
+// the resistive CFL must bound dt by the smallest physical cell, `dt <= min(h_a dx_a)^2 / (2 D eta)`,
 // not the coordinate spacing `dx`. on a near-pole spherical grid the physical azimuthal cell
-// `h_phi dphi = r sin(theta) dphi` is MUCH smaller than `dphi`, so the coordinate-width bound would
+// `h_phi dphi = r sin(theta) dphi` is much smaller than `dphi`, so the coordinate-width bound would
 // pick a dt many times too large -> the explicit resistive diffusion amplifies the pole modes -> NaN.
 // this pins that the fold uses the physical width: the returned dt sits far below the coordinate bound.
 // =============================================================================
@@ -56,7 +56,7 @@ fn resistive_cfl_uses_the_physical_cell_width() {
     .with_resistivity(ETA);
     let dt = sub.cfl(&sim);
 
-    // the resistive dt bound formed from the COORDINATE width, which the physical bound must beat.
+    // the resistive dt bound formed from the coordinate width, which the physical bound must beat.
     let dx_min = sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
     let dt_coord = CFL * dx_min * dx_min / (2.0 * 3.0 * ETA);
 

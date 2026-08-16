@@ -2,9 +2,9 @@
 // lattice.rs
 //
 // the lattice-map / pullback algebra. a `LatticeMap` is an
-// INTEGER rule "destination cell -> source cell": boundary conditions, AMR
-// restrict/prolong, staggered-grid shifts, and MPI halos all reduce to one. it
-// pairs with a field PULLBACK — read the source cell, then transform the value by
+// integer rule "destination cell -> source cell": boundary conditions, AMR
+// restrict/prolong, staggered-grid shifts, and mpi halos all reduce to one. it
+// pairs with a field pullback — read the source cell, then transform the value by
 // a rule the field's grade fixes (a density copies; a velocity flips its
 // wall-normal component at a mirror). that makes `ghost_fill` a pure data map.
 //
@@ -35,13 +35,13 @@ pub enum LatticeMap {
     /// interior cell).
     Outflow { axis: u8, edge: i64 },
     /// refinement-lattice child read: `source[axis] = dest[axis] * ratio + offset`.
-    /// the amr RESTRICTION pullback — a coarse cell reads its fine children with
+    /// the amr restriction pullback — a coarse cell reads its fine children with
     /// `offset` in `0..ratio`. levels share absolute index space (fine index
     /// `ratio*c .. ratio*c + ratio` covers coarse cell `c`), so no coverage-relative
     /// translation appears anywhere.
     Refine { axis: u8, ratio: i64, offset: i64 },
     /// refinement-lattice parent read: `source[axis] = floor_div(dest[axis], ratio)`.
-    /// the amr PROLONGATION pullback — a fine cell (ghost indices included, hence
+    /// the amr prolongation pullback — a fine cell (ghost indices included, hence
     /// floor division for negatives) reads its coarse parent in absolute indices.
     Coarsen { axis: u8, ratio: i64 },
     /// apply both maps (e.g., a 2D corner ghost: periodic in x and reflect in y).

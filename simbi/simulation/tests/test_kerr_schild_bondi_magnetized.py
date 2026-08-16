@@ -3,16 +3,16 @@
 #
 # the `_ks` GRMHD gates: magnetized through-horizon bondi accretion on the
 # ingoing kerr-schild chart (gr_bondi_ks_magnetized.py). the load-bearing term is
-# the shifted riemann fan's induction TRANSPOSE `+(beta^i/alpha) B^n`: the true
+# the shifted riemann fan's induction transpose `+(beta^i/alpha) B^n`: the true
 # mag-row flux is (alpha v^n - beta^n) B^i - (alpha v^i - beta^i) B^n, so the
 # fan's uniform -(beta^n/alpha) U subtraction alone would advect the radial field
 # with the shift and B^r would drift through the accretion transient. the gates:
 #
-#   identity-class: the staggered B^r is BITWISE static through horizon-crossing
+#   identity-class: the staggered B^r is bitwise static through horizon-crossing
 #   accretion (measured 0.0 over t = 10 at b_ref = 0.5).
 #
 #   consistency-class: the radial monopole is force-free (radial B, radial v), so
-#   the t = 10 transient must be FIELD-INDEPENDENT at the truncation floor
+#   the t = 10 transient must be field-independent at the truncation floor
 #   (measured b = 0 vs b = 0.5 at 128: rho 3.7e-5, v1 2.8e-4, pre 8.1e-4
 #   relative — the bound fan's dissipation shifts with c_ms, so the transient
 #   separates at truncation, unlike the stationary michel hold's 4e-8), and the

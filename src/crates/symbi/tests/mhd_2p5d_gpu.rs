@@ -3,7 +3,7 @@
 //
 // GPU<->CPU parity for the genuine 2.5D MHD path (D=2, DOF=3) — the carrier gate
 // for the 2.5D substrate kernels (the 3D parity lives in
-// substrate_rmhd_gpu.rs). builds the SAME Orszag-Tang-with-Bz 2.5D sim on host
+// substrate_rmhd_gpu.rs). builds the same Orszag-Tang-with-Bz 2.5D sim on host
 // (CpuSpace/HostMemory) and device (CudaSpace/UnifiedMemory), evolves a handful of
 // RK2 steps through the production loop, and asserts the conserved state + cell B
 // agree over the interior. the efield save/avg/snapshot copies must be dimensioned

@@ -3,12 +3,12 @@
 #
 # the spinning fishbone-moncrief torus on the 3d cartesian kerr chart with the
 # oblate-spheroidal horizon excision — the end-to-end composition of the
-# spinning cartesian metric, the FM equilibrium at spin, and the level-set
+# spinning cartesian metric, the fm equilibrium at spin, and the level-set
 # excision. the gates:
 # - the run completes finite and positive with the torus surviving (the
 #   equilibrium is discretely near-stationary; a coarse grid diffuses but must
 #   not destroy the pressure maximum within a few M of evolution);
-# - the FM initial data is axisymmetric and equatorially symmetric, and the
+# - the fm initial data is axisymmetric and equatorially symmetric, and the
 #   spinning metric shares both, so the evolved state holds the quarter-turn
 #   (x, y) -> (-y, x) and z -> -z grid symmetries to roundoff — the sharp
 #   coordinate-role gate for the torus jacobian + spheroidal excision compose;
@@ -56,22 +56,22 @@ def _run(spin: float) -> np.ndarray:
     )
     # enough steps for the near-horizon infall to engage the excised-region source
     # mask -- the regime the invariants are about -- and few enough to run in
-    # seconds. every property asserted here is a property of the STATE at whatever
+    # seconds. every property asserted here is a property of the state at whatever
     # step it is read, so this number sets cost, not sensitivity. whether the torus
-    # survives to t = 5 is a SOAK, a different question at three orders more cost;
+    # survives to t = 5 is a soak, a different question at three orders more cost;
     # it belongs to a campaign launched from simbi_configs/examples/grhd.
     runner.run(p, compute_mode="cpu", max_steps=150)
-    # GUARD-ACTIVATION CENSUS. the two limiter tiers are NOT the same kind of event and must not be
+    # guard-activation census. the two limiter tiers are not the same kind of event and must not be
     # gated the same way:
-    #   FALLBACK — the high-order c2p was unphysical, so the cell takes the first-order redo. that is
-    #     the scheme correctly REDUCING ORDER on an under-resolved feature, which is what the tier is
-    #     for. measured here: ~2.0e4 cell-steps over 2000 steps (~10 cells/step) at 48^3, ALL of them
+    #   fallback — the high-order c2p was unphysical, so the cell takes the first-order redo. that is
+    #     the scheme correctly reducing order on an under-resolved feature, which is what the tier is
+    #     for. measured here: ~2.0e4 cell-steps over 2000 steps (~10 cells/step) at 48^3, all of them
     #     in the physical near-horizon exterior — the redshift-pileup infall just outside r_+, the
     #     stiffest gas in the domain and genuinely under-resolved at this resolution (the torus
     #     completes cleanly at 96^3). reported, not gated: a count is not a defect.
-    #   FREEZE — no flux could update the cell admissibly. THAT is a breakdown, and the
+    #   freeze — no flux could update the cell admissibly. that is a breakdown, and the
     #     admissible-boundary projection exists precisely so it cannot happen while the stage-input
-    #     anchor is admissible. it is gated at ZERO in the physical exterior.
+    #     anchor is admissible. it is gated at zero in the physical exterior.
     # the interior (r < r_+) is causally disconnected fiction and is exempt from both; measured 0 for
     # both here anyway, since excision plus the projection leave it completely clean.
     fb, fz, fb_h, fz_h = _BACKEND.guard_census()
@@ -112,7 +112,7 @@ def test_spinning_fm_torus_with_spheroidal_excision() -> None:
     rho = _run(0.9)
     assert np.isfinite(rho).all(), "non-finite state in the spinning torus run"
     assert rho.min() > 0.0, "density went non-positive"
-    # the torus is PRESENT AND SURVIVES, asserted in ITS OWN equatorial band —
+    # the torus is present and survives, asserted in its own equatorial band —
     # the global density maximum is the floored-redshift corona pileup at the
     # horizon, which exists whether or not the torus does (a global-max assert
     # is vacuous for torus presence: the corona once silently swallowed a

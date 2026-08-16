@@ -154,7 +154,7 @@ pub trait Scalar:
     /// the carrier-polymorphic boolean. `bool` for `f64`; a node handle for `Gv`.
     type Mask: Mask;
 
-    // `ZERO`, `ONE`, `from_f64`, `sqrt`, `abs`, `min`, `max` are inherited from
+    // `ZERO`, `one`, `from_f64`, `sqrt`, `abs`, `min`, `max` are inherited from
     // the `symbi_algebra::algebra::Numeric` super-trait and stay declared there
     // alone; a second declaration here would make name resolution ambiguous.
     // Numeric is a structural sub-bag needed by `Tensor` / `Matrix` / `Indexed`
@@ -171,7 +171,7 @@ pub trait Scalar:
     /// where `x == x` fails), so `is_nan(x)` is the test that detects it.
     const NAN: Self;
 
-    // ── method-form alias of `Numeric::ZERO` / `Numeric::ONE` (ergonomics) ─
+    // ── method-form alias of `Numeric::ZERO` / `Numeric::one` (ergonomics) ─
     #[inline]
     fn zero() -> Self {
         <Self as symbi_algebra::algebra::Numeric>::ZERO
@@ -453,7 +453,7 @@ where
     }
 }
 
-/// fixed-rank vector lift: select each component independently. lives HERE so
+/// fixed-rank vector lift: select each component independently. lives here so
 /// it can refer to the production trait while keeping `Tensor` in
 /// `symbi-algebra`.
 impl<S: Scalar, const N: usize> Selectable<S> for symbi_algebra::Tensor<S, N>
@@ -568,7 +568,7 @@ impl Default for RenderPolicy {
 impl Scalar for f64 {
     type Mask = bool;
 
-    // ZERO / ONE inherited from `Numeric for f64`.
+    // zero / one inherited from `Numeric for f64`.
     const INFINITY: f64 = f64::INFINITY;
     const NEG_INFINITY: f64 = f64::NEG_INFINITY;
     const NAN: f64 = f64::NAN;
@@ -753,7 +753,7 @@ impl Scalar for f64 {
 
 // f32 mirrors f64 with the same impl pattern. the workspace's
 // `ConsG<f32, ...>` / `PrimG<f32, ...>` types in symbi-hydro state.rs require
-// `f32: Scalar` to satisfy the struct's `S: Scalar` bound. ZERO / ONE / from_f64
+// `f32: Scalar` to satisfy the struct's `S: Scalar` bound. zero / one / from_f64
 // / sqrt / abs / min / max inherited from `Numeric for f32`.
 impl Scalar for f32 {
     type Mask = bool;

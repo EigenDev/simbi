@@ -12,7 +12,7 @@
 // (signature, thread indexing, bounds check, per-buffer loads/stores)
 // is target-parameterized via `TargetConfig`; CUDA, HIP, and Metal
 // share the same shape via `header()` / `global_qualifier()`
-// in `symbi_ir::emit`. SYCL/FPGA would slot in as sibling emitters
+// in `symbi_ir::emit`. sycl/fpga would slot in as sibling emitters
 // (the IR is target-agnostic; only the source text shifts).
 //
 // the macro layer wraps each ndim in {1,2,3} in its own invocation to
@@ -87,7 +87,7 @@ pub struct KernelEmitInputs<'a> {
 /// CUDA and HIP. produces an `extern "C" __global__` kernel over raw
 /// `<precision>*` buffers (the per-cell view ABI shape); the header + global qualifier
 /// vary by `target.target` (`emit::header` / `global_qualifier`), so HIP is a
-/// pure token-map with zero physics edits. Metal (MSL: buffer-index ABI, f32-only)
+/// pure token-map with zero physics edits. Metal (msl: buffer-index ABI, f32-only)
 /// takes its own renderer.
 pub struct CRenderer {
     pub target: TargetConfig,
@@ -105,7 +105,7 @@ impl KernelRenderer for CRenderer {
         // structs — one struct per buffer carrying
         // ptr + lo + pre-multiplied strides. emit the struct typedef once in the
         // preamble so the kernel signature can spell `__symbi_View field0`.
-        // the host side packs a matching POD into the kernel arg buffer (see
+        // the host side packs a matching pod into the kernel arg buffer (see
         // `substrate_gpu::DeviceView`).
         let mut s = String::from(emit::header(self.target.target));
         s.push_str(&format!(
@@ -436,7 +436,7 @@ pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelD
         // global-qualifier by `Target` (emit::header / global_qualifier), so HIP
         // drops in as a token-map with zero physics edits.
         Target::Cuda | Target::Hip => render(prepared, &CRenderer { target: tcfg }),
-        // Metal (MSL) is f32-only and takes its own renderer (the binding-index ABI
+        // Metal (msl) is f32-only and takes its own renderer (the binding-index ABI
         // + the f32 capability gate); it lands with that backend.
         Target::Metal => unimplemented!(
             "Metal renderer not implemented; render from IR once \
@@ -447,9 +447,9 @@ pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelD
 
 // the NVRTC-safe identity + combine for a grid reduction at `precision`. min/max
 // use the inline ternary: fmin/fmax live in <math.h>, which NVRTC leaves out (the
-// same gap an INFINITY literal in a flux kernel falls into), and the ternary matches
+// same gap an infinity literal in a flux kernel falls into), and the ternary matches
 // the CPU carrier's min/max semantics. the identities are plain finite literals,
-// keeping the INFINITY macro out of the emitted source.
+// keeping the infinity macro out of the emitted source.
 fn reduction_identity_combine(
     op: ReductionOp,
     precision: Precision,
@@ -463,7 +463,7 @@ fn reduction_identity_combine(
             format!("({a} * {b})")
         }),
         // sentinels safely beyond any physical value, and finite, since NVRTC leaves
-        // the INFINITY macro out. min/max propagate NaN so a poisoned cell surfaces at
+        // the infinity macro out. min/max propagate NaN so a poisoned cell surfaces at
         // the host dt guard ([[feedback_no_silent_floors]]); the bare ternary
         // `a < b ? a : b` silently drops a NaN operand (NaN compares false). `x != x`
         // is the NVRTC-safe NaN test (isnan lives in <math.h>), matching the host fold

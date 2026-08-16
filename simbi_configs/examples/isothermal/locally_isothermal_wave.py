@@ -1,8 +1,8 @@
 # =============================================================================
 # locally_isothermal_wave.py
 #
-# a LOCALLY isothermal 1d test: the sound speed varies in space, cs^2(x), and is
-# HELD fixed for the run (the position-dependent "temperature"). the user supplies
+# a locally isothermal 1d test: the sound speed varies in space, cs^2(x), and is
+# held fixed for the run (the position-dependent "temperature"). the user supplies
 # density rho(x) and an initial pressure p(x); the backend derives cs^2(x)=p/rho
 # once and freezes it. primitive is (rho, v, p_local) when locally_isothermal.
 # =============================================================================

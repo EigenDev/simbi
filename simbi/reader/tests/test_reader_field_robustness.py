@@ -61,7 +61,7 @@ def test_purely_toroidal_field_has_nonzero_magnetic_pressure():
 
 
 def test_relativistic_magnetic_pressure_uses_comoving_field():
-    # rmhd magnetic pressure is b^2/2 in the FLUID frame: b^2 = B^2/W^2 + (v.B)^2. a radial flow
+    # rmhd magnetic pressure is b^2/2 in the fluid frame: b^2 = B^2/W^2 + (v.B)^2. a radial flow
     # with a toroidal field (v perpendicular to B, so v.B = 0) reduces to B_phi^2 / (2 W^2).
     from simbi.reader.computation import magnetic_pressure
 
@@ -150,7 +150,7 @@ def test_first_tuple_validation_names_the_contract():
     with pytest.raises(ValueError, match="non-finite"):
         it = iter([(float("nan"), 0.1, 1.0)])
         _check_first_tuple(_P(), it)
-    # a good tuple is REPLAYED.
+    # a good tuple is replayed.
     it = _check_first_tuple(_P(), iter([(1.0, 0.1, 1.0), (2.0, 0.2, 2.0)]))
     assert next(it) == (1.0, 0.1, 1.0)
     assert next(it) == (2.0, 0.2, 2.0)

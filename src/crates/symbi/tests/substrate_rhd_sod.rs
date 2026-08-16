@@ -1,9 +1,9 @@
 // =============================================================================
 // substrate_rhd_sod.rs
 //
-// the CARTESIAN sharp relativistic Sod through the real evolve() loop — RHD
-// robustness against a DISCONTINUITY, as opposed to a smooth pulse.
-// it proves the BASE RHD scheme (full relativistic HLLE wave speeds + flux +
+// the cartesian sharp relativistic Sod through the real evolve() loop — RHD
+// robustness against a discontinuity, as opposed to a smooth pulse.
+// it proves the base RHD scheme (full relativistic HLLE wave speeds + flux +
 // the iterative pressure-Newton c2p) handles a strong discontinuity and keeps
 // the flow subluminal — i.e., the relativistic structure is correct.
 //

@@ -1,16 +1,16 @@
 # =============================================================================
 # mhd_oop_energy_1p5d.py
 #
-# a smooth 1.5D RELATIVISTIC-MHD out-of-plane energy instrument (D=1, DOF=3). the
+# a smooth 1.5D relativistic-mhd out-of-plane energy instrument (D=1, DOF=3). the
 # transverse By has no staggered face and is a cell-centered conserved variable evolved by
 # the out-of-plane cell-B flux predictor; the in-plane (normal) Bx = const rides its thin
 # face. the state is a smooth, force-balanced periodic profile — uniform rho and velocity,
 # a smooth By(x), and gas pressure p = P0 - By^2/2 so the total pressure is uniform — so By
 # advects with the flow and no shock forms.
 #
-# the point is ENERGY: with no non-conservative magnetic-energy patch outside the flux,
+# the point is energy: with no non-conservative magnetic-energy patch outside the flux,
 # the total energy tau must be conserved to machine roundoff by the Poynting-carrying gas
-# flux ALONE, even though the out-of-plane magnetic energy By^2/2 lives on a cell-centered
+# flux alone, even though the out-of-plane magnetic energy By^2/2 lives on a cell-centered
 # component that is flux-evolved (not CT-interpolated). the relativistic c2p is a delicate
 # nonlinear solve, so a tau that drifts out of sync with |B|^2 would fail to recover — a
 # roundoff-tight, physical run witnesses the out-of-plane energy bookkeeping is exact.

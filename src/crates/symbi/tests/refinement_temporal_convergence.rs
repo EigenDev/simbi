@@ -3,7 +3,7 @@
 //
 // temporal-order gate for the coarse-fine ghost coupling: a smooth entropy
 // wave advecting diagonally through a static nested box (2d, periodic, rk2),
-// dt self-convergence on a FIXED composite grid — the same hierarchy run at
+// dt self-convergence on a fixed composite grid — the same hierarchy run at
 // cfl, cfl/2, and a cfl/16 reference, compared cell-by-cell at the same
 // physical time, so the (fixed) spatial error cancels and only the temporal
 // error remains. the boundary-sensitive norm (cells within two cells of the
@@ -138,7 +138,7 @@ fn cf_ghost_coupling_is_second_order_in_time() {
     // 1.14 (and 4-14x larger absolute errors); stage-correct interpolation
     // gives 1.62 at this cfl pair. the deep-dt slope saturates near 1.3 — a
     // mixed spatio-temporal term in the prolongation (ppm in space x linear
-    // in time), first-order in dt only at FIXED dx; under cfl-coupled
+    // in time), first-order in dt only at fixed dx; under cfl-coupled
     // refinement (dt ~ dx) it contributes at third order. the 1.4 bound
     // separates the broken and correct couplings with margin on both sides.
     assert!(

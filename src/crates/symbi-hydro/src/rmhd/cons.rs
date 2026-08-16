@@ -28,7 +28,7 @@ const FIND_MU_PLUS_ITERS: usize = 54;
 
 /// KKC Eq. 49 auxiliary function (enthalpy limit h0 = 1): `f_a(mu) = mu*sqrt(1 + rbar_sq(mu)) - 1`.
 /// smooth, strictly increasing, EOS-independent; its unique root `mu_+` in `(0, 1]` is the tight
-/// upper bracket for the master root (KKC Sec. II F). carrier-generic. `find_mu_plus` bisects it.
+/// upper bracket for the master root (KKC Sec. ii F). carrier-generic. `find_mu_plus` bisects it.
 fn kkc_fmu49<S: Scalar>(mu: S, bee_sq: S, rdb_sq: S, r: S) -> S {
     let x = S::ONE / (S::ONE + mu * bee_sq);
     let rbar_sq = r * r * x * x + mu * x * (S::ONE + x) * rdb_sq;
@@ -67,8 +67,8 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
 /// KKC `find_mu_plus` — the tight upper bracket `mu_+` for the master root, defined as the
 /// unique root of the auxiliary `kkc_fmu49` (KKC Eq. 49) on `(0, 1/h0]` with `h0 = 1`.
 ///
-/// KKC prove (Sec. II F, Eq. 54) that `f(mu_+) >= 0` while `f(0) < 0`, so the master root lies
-/// in `(0, mu_+]`, and (Sec. II G) that it is the unique root there. beyond `mu_+` the velocity
+/// KKC prove (Sec. ii F, Eq. 54) that `f(mu_+) >= 0` while `f(0) < 0`, so the master root lies
+/// in `(0, mu_+]`, and (Sec. ii G) that it is the unique root there. beyond `mu_+` the velocity
 /// cutoff in `kkc_fmu44` (the `v_limit` clamp) induces a "strong kink" that can produce a second,
 /// spurious root corresponding to a superluminal, negative-pressure state.
 ///
@@ -118,7 +118,7 @@ fn find_mu_plus<S: Scalar>(bee_sq: S, rdb_sq: S, r: S) -> S {
             let below = ff.cmp_lt(S::ZERO); // f_a(mu) < 0 => root above mu => raise lo, keep hi
             let lo_n = S::select(below, mu, lo);
             let hi_n = S::select(below, hi, mu);
-            // Illinois: half-damp the RETAINED endpoint's function value (hi when below, else lo).
+            // Illinois: half-damp the retained endpoint's function value (hi when below, else lo).
             let f_lo_n = S::select(below, ff, half * f_lo);
             let f_hi_n = S::select(below, half * f_hi, ff);
             let conv = ff.abs().min(hi_n - lo_n).cmp_lt(eps);
@@ -130,12 +130,12 @@ fn find_mu_plus<S: Scalar>(bee_sq: S, rdb_sq: S, r: S) -> S {
     )
 }
 
-/// the branch-free RMHD cons->prim recovery — THE single-source physics: the rescale
+/// the branch-free RMHD cons->prim recovery — the single-source physics: the rescale
 /// (KKC Eqs. 22-25), the KKC false-position root `mu` (the 6-state bracket `[mu_lo,
 /// mu_hi, f_lo, f_hi, mu, done]` over `kkc_fmu44`, Illinois half-damp, sticky `done`),
-/// and the algebraic recovery (Eqs. 26/38/39/32/41/42/43/68). NO guards — the host
+/// and the algebraic recovery (Eqs. 26/38/39/32/41/42/43/68). no guards — the host
 /// `rmhd_to_primitive` wrapper adds the C2pResult diagnostics post-hoc. traced at
-/// `S = Gv` (`symbi_discretize::rmhd_c2p_gv`) it lowers to ONE multi-accumulator
+/// `S = Gv` (`symbi_discretize::rmhd_c2p_gv`) it lowers to one multi-accumulator
 /// `IterateInline`; at `S = f64/f32` it is the false-position loop. `use_four_velocity
 /// = false`: the returned velocity is the 3-velocity. RMHD vectors are always 3-comp.
 pub fn rmhd_recover<S: Scalar, const D: usize>(
@@ -156,18 +156,18 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let isqrtd = inv_d.sqrt();
     let qq = tau * inv_d;
     let rvec = cons.mom.scale(inv_d);
-    // r is COVARIANT (rescaled conserved momentum) -> raise: |r|^2 = gamma^{ij} r_i r_j. flat = euclidean.
+    // r is covariant (rescaled conserved momentum) -> raise: |r|^2 = gamma^{ij} r_i r_j. flat = euclidean.
     let r_sq = metric.norm_sq_cov(&rvec);
     let r_mag = r_sq.sqrt();
     let hvec = bfield.scale(isqrtd);
-    // h is CONTRAVARIANT (rescaled B^i) -> lower: |h|^2 = gamma_{ij} h^i h^j.
+    // h is contravariant (rescaled B^i) -> lower: |h|^2 = gamma_{ij} h^i h^j.
     let bee_sq = metric.norm_sq_contra(&hvec);
     let bee_sq_safe = S::select(bee_sq.cmp_gt(S::ZERO), bee_sq, S::ONE);
-    // r.h = r_i h^i is a COVARIANT*CONTRAVARIANT pairing -> METRIC-FREE (no gamma factor); stays `.dot()`.
+    // r.h = r_i h^i is a covariant*contravariant pairing -> metric-free (no gamma factor); stays `.dot()`.
     let rdb = rvec.dot(&hvec);
     let rdb_sq = rdb * rdb;
     // the perp invariant |r_perp|^2 = gamma^{ij} (r - r_par)_i (r - r_par)_j with the parallel
-    // projection LOWERED to match r's variance: r_par_i = (r.b / |b|^2) h_i. identity gamma ->
+    // projection lowered to match r's variance: r_par_i = (r.b / |b|^2) h_i. identity gamma ->
     // the euclidean decomposition bit-for-bit (lower = id, norm_sq_cov = dot).
     let rparr = metric.lower(&hvec).scale(rdb / bee_sq_safe);
     let rperp = rvec - rparr;
@@ -177,7 +177,7 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let kkc = |mu: S| kkc_fmu44(mu, r_mag, rp_sq, bee_sq, rdb_sq, qq, dd, gamma);
 
     // KKC false-position over `kkc_fmu44`, producing the root `mu`. the 6-state bracket
-    // freezes on the OLD sticky `done` so the iteration that first converges still WRITES
+    // freezes on the old sticky `done` so the iteration that first converges still writes
     // its mu and the next freezes it (do-while semantics; see iterate_vec).
     let muu0 = find_mu_plus(bee_sq, rdb_sq, r_mag);
     let f_lower0 = kkc(S::ZERO);
@@ -193,32 +193,32 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
             let cond = (ff * f_hi).cmp_lt(S::ZERO);
             let mul_n = S::select(cond, muu, mul);
             let f_lo_n = S::select(cond, f_hi, half * f_lo);
-            // post-update test: |mul-muu| <= eps OR |ff| <= eps.
+            // post-update test: |mul-muu| <= eps or |ff| <= eps.
             let conv = (mul_n - mu).abs().min(ff.abs()).cmp_lt(eps);
             let done_n = done.max(S::select(conv, S::ONE, S::ZERO)); // sticky
             [mul_n, mu, f_lo_n, ff, mu, done_n]
         },
-        |s, _next| half.cmp_lt(s[5]), // freeze once `done` was ALREADY set last step
+        |s, _next| half.cmp_lt(s[5]), // freeze once `done` was already set last step
         4,                            // result = mu
     );
-    // bracketing guarantee (KKC Sec. II F, Eqs. 49-54): the false-position needs f_lower0 = kkc(0)
+    // bracketing guarantee (KKC Sec. ii F, Eqs. 49-54): the false-position needs f_lower0 = kkc(0)
     // and f_upper0 = kkc(muu0 = mu_+) to straddle zero, where mu_+ = find_mu_plus is the root of
     // the auxiliary f_a. f_lower0 = -muhat(0) < 0 always (muhat > 0). f_upper0 = f(mu_+) >= 0 by
     // KKC Eq. 54. crucially the interval is [0, mu_+]: on (0, mu_+] the velocity stays
     // below v0 < 1 (kkc_fmu49 root definition) so the v_limit cutoff in kkc_fmu44 never binds and
-    // the master function has a UNIQUE root (KKC Sec. II G); beyond mu_+ the cutoff kink can create
-    // a SECOND, spurious superluminal root that the [0, 1] bracket would wrongly select whenever
+    // the master function has a unique root (KKC Sec. ii G); beyond mu_+ the cutoff kink can create
+    // a second, spurious superluminal root that the [0, 1] bracket would wrongly select whenever
     // r >= h0 (a shock-normal field, r.b != 0). a cold/unphysical state whose true root sits at the
     // ceiling recovers p <= 0, which the post-hoc c2p diagnostic (`relativistic_c2p_code`) flags as
-    // a FAILURE, routing the zone through first-order correction; no silent floor is applied.
+    // a failure, routing the zone through first-order correction; no silent floor is applied.
 
     // recovery (Eqs. 26/38/39/32/41/42/43/68); use_four_velocity = false.
     let x = S::ONE / (S::ONE + mu * bee_sq);
     let mu2 = mu * mu;
     let rbar_sq = r_sq * x * x + mu * x * (S::ONE + x) * rdb_sq;
     let qbar = qq - half * (bee_sq + mu2 * x * x * bee_sq * rp_sq);
-    // MIRROR the root-finder's velocity ceiling (the shared c2p ceiling v_limit^2 = r^2/(1+r^2)). the
-    // recovery must apply the SAME cap: a strong-field root sits at the ceiling, so the uncapped
+    // mirror the root-finder's velocity ceiling (the shared c2p ceiling v_limit^2 = r^2/(1+r^2)). the
+    // recovery must apply the same cap: a strong-field root sits at the ceiling, so the uncapped
     // vsq = mu^2 rbar_sq can reach >= 1, giving gbsq < -1 and ww = sqrt(1+gbsq) = NaN — a NaN rho/p
     // that poisons neighbors; the intended behavior is a clean fail-loud (p <= 0 flagged below). capped,
     // ww/rho/p stay finite and the q(U) verdict routes the zone through first-order correction.
@@ -228,11 +228,11 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let rho = dd / ww;
     let eps_e = ww * (qbar - mu * rbar_sq) + gbsq / (S::ONE + ww);
     let rho_gm1 = rho * (gamma - S::ONE);
-    // NO pressure floor: raw p = (gamma-1) rho eps. an unphysical negative eps yields a negative
+    // no pressure floor: raw p = (gamma-1) rho eps. an unphysical negative eps yields a negative
     // pressure the post-hoc diagnostic flags; no silently-floored spurious-physical state is produced.
     let pre = rho_gm1 * eps_e;
-    // EXACT admissibility (wu 2017 cone) folded into the pressure verdict. the velocity-ceiling
-    // clamp (mu -> muu0, v -> v_limit) recovers a cold near-light-speed state that IS superluminal:
+    // exact admissibility (wu 2017 cone) folded into the pressure verdict. the velocity-ceiling
+    // clamp (mu -> muu0, v -> v_limit) recovers a cold near-light-speed state that is superluminal:
     // q(U)/D = (tau/D + 1) - sqrt(1 + gamma^{ij} S_i S_j / D^2) < 0. the raw (rho > 0 & pre > 0)
     // test accepts such a clamped state (pre from eps_e stays > 0), so its face state poisons a
     // neighbor's first-order redo -> a freeze. forcing the pressure non-positive when q(U) <= 0
@@ -241,7 +241,7 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let pre = S::select(cone_ok, pre, crate::c2p_result::c2p_cone_fail_pressure(dd));
     let mu_x = mu * x;
     let rdb_mu = rdb * mu;
-    // the CONTRAVARIANT valencia velocity v^i = mu x (gamma^{ij} r_j + mu (r.b) h^i) — the
+    // the contravariant valencia velocity v^i = mu x (gamma^{ij} r_j + mu (r.b) h^i) — the
     // covariant momentum part raised before adding the contravariant field part. identity
     // gamma -> the euclidean form bit-for-bit (raise = id).
     let vel = (metric.raise(&rvec) + hvec.scale(rdb_mu)).scale(mu_x);
@@ -373,7 +373,7 @@ mod tests {
     #[test]
     fn find_mu_plus_is_the_kkc_fmu49_root() {
         // find_mu_plus returns mu_+, the root of the auxiliary kkc_fmu49 (KKC Eq. 49). verify it
-        // is a genuine root (|f_a(mu_+)| ~ 0) and a valid UPPER bracket (f_a(mu_+) >= 0 >= f_a below
+        // is a genuine root (|f_a(mu_+)| ~ 0) and a valid upper bracket (f_a(mu_+) >= 0 >= f_a below
         // it). the r >= 1 cases are exactly where a fixed `mu_upper = 1` bracket would span the
         // spurious second root of the master function.
         let cases = [
@@ -390,8 +390,8 @@ mod tests {
                 mu_plus > 0.0 && mu_plus <= 1.0,
                 "mu_+ out of (0,1] for r={r}: {mu_plus}"
             );
-            // the correctness invariant is a TIGHT UPPER bracket: f_a(mu_+) >= 0 (so it exceeds the
-            // f_a root => f_master(mu_+) >= 0, straddle holds) AND close to the root (Illinois returns
+            // the correctness invariant is a tight upper bracket: f_a(mu_+) >= 0 (so it exceeds the
+            // f_a root => f_master(mu_+) >= 0, straddle holds) and close to the root (Illinois returns
             // the hi endpoint within ~tol of the root, so f_a(hi) ~ f_a'*tol, a few e-12).
             assert!(
                 f_at >= 0.0,
@@ -438,7 +438,7 @@ mod tests {
         // at mu = 0, x = 1 and rbar_sq = r^2, so f_a(0) = -1 for every state. for mu >= 0 and
         // b^2 >= 0, x lies in (0, 1], so both terms of rbar_sq are non-negative whenever
         // (r.b)^2 >= 0, giving f_a(1) = sqrt(1 + rbar_sq(1)) - 1 >= 0. an f_a(1) < 0 anywhere on
-        // this lattice IS the condition the escalation exists to handle, and would mean the
+        // this lattice is the condition the escalation exists to handle, and would mean the
         // bracket can open below the root and admit the spurious superluminal branch.
         for (bee_sq, rdb_sq, r) in admissible_bracket_invariants() {
             let at_zero = kkc_fmu49::<f64>(0.0, bee_sq, rdb_sq, r);
@@ -480,7 +480,7 @@ mod tests {
     #[test]
     fn a_signed_field_momentum_pairing_would_open_the_bracket_below_the_root() {
         // the (r.b)^2 >= 0 hypothesis is load-bearing rather than incidental, and the recovery
-        // supplies it by squaring the metric-free pairing r_i h^i. feeding the SIGNED pairing of
+        // supplies it by squaring the metric-free pairing r_i h^i. feeding the signed pairing of
         // an anti-aligned field drives rbar_sq negative and f_a(1) below zero -- the exact
         // condition under which [0, 1] no longer brackets. this gate fails if a refactor ever
         // hands the bracket the pairing itself, which on any shock with an anti-aligned normal
@@ -502,8 +502,8 @@ mod tests {
     #[test]
     fn rmhd_recover_selects_physical_root_with_normal_field() {
         // regression: mignone & bodo (2006) test 1, the discontinuity cell after ~29 forward-euler
-        // steps. the conserved state is IN-CONE (q(U)/D > 0) with a shock-normal field (Bx = 0.5,
-        // r.b != 0, r_mag ~ 2.43 > h0 = 1). the master function has TWO roots under the velocity
+        // steps. the conserved state is in-cone (q(U)/D > 0) with a shock-normal field (Bx = 0.5,
+        // r.b != 0, r_mag ~ 2.43 > h0 = 1). the master function has two roots under the velocity
         // cutoff: the physical mu ~ 0.198 (|v| ~ 0.474, p ~ 0.38) and a spurious mu ~ 0.995 (|v| ~
         // 2.37, p < 0) in the post-mu_+ kink region. the [0, mu_+] bracket must select the physical
         // one; a fixed `mu_upper = 1` bracket selects the spurious root, p ~ -0.88, v ~ 1.45.
@@ -626,7 +626,7 @@ mod tests {
             let cond = ff * f_hi < 0.0;
             let mul_n = if cond { muu } else { mul };
             let f_lo_n = if cond { f_hi } else { 0.5 * f_lo };
-            // post-update convergence (matches production: |mul-mu| OR |f| below tol).
+            // post-update convergence (matches production: |mul-mu| or |f| below tol).
             let bracket_tight = (mul_n - mu_new).abs() < tol;
             let func_tight = ff.abs() < tol;
             if bracket_tight || func_tight {
@@ -822,12 +822,12 @@ mod tests {
 
     // `find_mu_plus` is proven against kkc_fmu49, but the root actually solved is kkc_fmu44,
     // so the bracket has to be established for kkc_fmu44 separately. these
-    // EVOLVED-state cases (high Lorentz W, strong AND weak magnetization, low density —
+    // evolved-state cases (high Lorentz W, strong and weak magnetization, low density —
     // the regime t=0 orszag_tang never reaches, where r can exceed 1) exercise the
-    // production rmhd_recover end to end and confirm PHYSICAL (warm, p > 0) states ALWAYS
+    // production rmhd_recover end to end and confirm physical (warm, p > 0) states always
     // bracket and recover finite. zero non-bracketing cells => no kernel-path bracket guard
     // needed (the v_limit ceiling forces f_upper0 >= 0 for any warm state; see rmhd_recover).
-    // there is NO pressure floor — the recovered pressure is the raw round-trip value.
+    // there is no pressure floor — the recovered pressure is the raw round-trip value.
     #[test]
     fn rmhd_recover_brackets_evolved_high_w_high_b_states() {
         let eos = IdealGas { gamma: 4.0 / 3.0 };
@@ -873,7 +873,7 @@ mod tests {
             );
             // floor-less KKC: without the eps_min zero-T floor smoothing the master function near
             // the velocity ceiling, false-position converges to ~1e-5 at the pathological W~71 low-
-            // density case (r_mag ~ 2900, root sits ON the ceiling where mu ~ mu_+) within the
+            // density case (r_mag ~ 2900, root sits on the ceiling where mu ~ mu_+) within the
             // 100-iter cap (realistic W ~ a few recover to ~1e-9). the exact root gives p to ~4e-12;
             // the residual is bracket-trajectory-dependent iteration precision at this extreme corner,
             // it is not a physics error. the bracket (the real robustness invariant) still straddles.

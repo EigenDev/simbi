@@ -2,7 +2,7 @@
 // penalize_shaped_cuda_smoke.rs
 //
 // the device twin of the shaped-wall JIT gate: the runtime-built shaped
-// penalization kernel MUST render to CUDA and survive NVRTC. its surface normal
+// penalization kernel must render to CUDA and survive NVRTC. its surface normal
 // is the SDF gradient (Dual-derived CSG min/max branches), so this pins that the
 // shaped kernel's op set lowers to a compilable __global__ — the device analogue
 // of the cranelift-subset gate. min/max lower to the ternary form (matching the

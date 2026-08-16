@@ -1,26 +1,26 @@
 # =============================================================================
 # test_kerr_schild_bondi_transient.py
 #
-# the TRANSIENT positivity + accretion regression for the Valencia GRHD scheme on a
-# horizon-penetrating (ingoing kerr-schild) background. the conserved momentum is the COVARIANT
+# the transient positivity + accretion regression for the Valencia GRHD scheme on a
+# horizon-penetrating (ingoing kerr-schild) background. the conserved momentum is the covariant
 # S_r = rho h W^2 gamma_rr v^r, recovered/fluxed with the spatial metric and densitized on both the
-# flux divergence AND the geodesic source (font 2008). an error in the inward gravity/densitization
+# flux divergence and the geodesic source (font 2008). an error in the inward gravity/densitization
 # balance over-accelerates the gas, pumps excess kinetic energy, and drives the recovered pressure
 # p = (tau - KE)/3 negative near the hole, collapsing the wave speed.
 #
-# WHY TRANSIENT: a steady state cannot see a densitization-power error at all — at d_t = 0 the
+# why transient: a steady state cannot see a densitization-power error at all — at d_t = 0 the
 # equation reduces to div(F) = S regardless of what power of the lapse multiplies both sides. only
 # a developing flow, a uniform gas at rest accreting into a transonic profile, separates them. this
-# is the complement of the michel gates, which measure how exactly a KNOWN stationary solution is
+# is the complement of the michel gates, which measure how exactly a known stationary solution is
 # held and are blind to precisely this defect.
 #
-# WHY THIS CHART: the flow crosses r = 2M. on the singular chart the inflow becomes
+# why this chart: the flow crosses r = 2M. on the singular chart the inflow becomes
 # ultra-relativistic there (V -> 1, W -> infinity) purely as an artifact of the static observer, so
 # the inner boundary has to be parked outside the horizon and the gas piles against a wall it
 # should cross freely. here the horizon is an ordinary surface, the domain spans it, and the
 # excised interior is a one-way absorber.
 #
-# the banyuls-font wave-speed discriminant is NOT probed here. that defect — the physical velocity
+# the banyuls-font wave-speed discriminant is not probed here. that defect — the physical velocity
 # sqrt(gamma_nn) v^n conflated into the contravariant v^n slot — is a chart-independent algebra
 # error, and it is gated directly in rust (`rhd/wave_speeds.rs`), where the cauchy-schwarz bound
 # disc >= gamma^{nn} (1 - v^2)^2 is asserted across the whole parameter space rather than at the
@@ -94,7 +94,7 @@ def test_bondi_transient_crosses_the_horizon_with_positive_pressure() -> None:
         rho, pre, vel = _read_interior(finals[0])
         r = _radii(p)
 
-        # the PREMISE: the domain must actually span the horizon and the excision surface, with
+        # the premise: the domain must actually span the horizon and the excision surface, with
         # live cells on both sides. a grid that stopped outside r_+ would test an inner wall, not a
         # horizon, and every through-horizon assertion would be vacuous.
         assert r[0] < _R_EXCISION < _R_HORIZON < r[-1], (
@@ -104,7 +104,7 @@ def test_bondi_transient_crosses_the_horizon_with_positive_pressure() -> None:
         exterior = r > _R_EXCISION
         assert exterior.sum() > 0.5 * _RESOLUTION, "too few live cells outside the excision surface"
 
-        # NO FLOOR: the pressure must stay strictly positive on its own across the live region.
+        # no floor: the pressure must stay strictly positive on its own across the live region.
         # an error in the gravity/densitization balance drives it negative near the inner
         # boundary.
         assert pre[exterior].min() > 0.0, (
@@ -114,23 +114,23 @@ def test_bondi_transient_crosses_the_horizon_with_positive_pressure() -> None:
         assert np.isfinite(vel).all(), "velocity went non-finite"
 
         # the physical signature of correct inward densitization: gas accretes, so the density
-        # RISES above ambient as it approaches the hole. a densitization imbalance does the
-        # opposite, DEPLETING the inner density before the negative-pressure crash, so the
-        # DIRECTION of the change discriminates, not its size.
+        # rises above ambient as it approaches the hole. a densitization imbalance does the
+        # opposite, depleting the inner density before the negative-pressure crash, so the
+        # direction of the change discriminates, not its size.
         inner = np.argmax(exterior)  # innermost live cell
         assert rho[inner] > 1.1 * _RHO_AMBIENT, (
             f"density did not rise at the innermost live cell: rho = {rho[inner]:.3f} "
             f"(ambient {_RHO_AMBIENT}) — the gas is not accreting"
         )
 
-        # the flow must actually be INWARD there: an accreting solution has v^r < 0 through the
+        # the flow must actually be inward there: an accreting solution has v^r < 0 through the
         # horizon. a density rise with no inflow would be a static pile-up against a wall.
         assert vel[inner] < 0.0, (
             f"the innermost live cell is not inflowing (v^r = {vel[inner]:.3e}); "
             "the gas is piling up rather than accreting"
         )
 
-        # the horizon is one-way: no limiter may fire OUTSIDE the excision surface. inside it the
+        # the horizon is one-way: no limiter may fire outside the excision surface. inside it the
         # state is numerical padding the exterior never sees, so guards there are expected.
         fallback, freeze, fb_h, fz_h = _BACKEND.guard_census()
         assert (freeze - fz_h) == 0, (

@@ -1,7 +1,7 @@
 // =============================================================================
 // stage.rs
 //
-// THE per-RK-stage phase sequence, in one place. every driver — the uni-grid
+// the per-RK-stage phase sequence, in one place. every driver — the uni-grid
 // evolve loop, the hierarchy's level stage (single and refined), and the
 // decomposed (gpus > 1) tile loop — folds this same table through the same
 // function, so a phase added here exists on every driver by construction.
@@ -9,12 +9,12 @@
 // dead GR accretion ledger on whichever driver the tests do not exercise — so the
 // sequence lives once and the fold makes divergence unrepresentable.
 //
-// driver-specific structure enters ONLY through `HookPoint` callbacks fired
+// driver-specific structure enters only through `HookPoint` callbacks fired
 // between phases with no field borrow held: the hierarchy accumulates its
 // coarse/fine flux registers AfterFlux (sampling the high-order fluxes before
 // fofc may splice them), removes a declared stationary target's discrete
 // imbalance BeforeC2p, and re-prolongs coarse-fine ghosts BeforeGhostFill;
-// the decomposed loop's halo exchange + second ghost fill happen OUTSIDE the
+// the decomposed loop's halo exchange + second ghost fill happen outside the
 // fold (after it, per stage), which is its documented sequence delta.
 //
 // usage:
@@ -139,7 +139,7 @@ pub struct Phase {
     pub gate: Gate,
 }
 
-/// the canonical stage order. this list IS the sequence — every driver folds it.
+/// the canonical stage order. this list is the sequence — every driver folds it.
 pub const STAGE_PIPELINE: &[Phase] = &[
     Phase {
         name: "snapshot_stage",
@@ -193,8 +193,8 @@ pub const STAGE_PIPELINE: &[Phase] = &[
     Phase {
         name: "body_source",
         kind: PhaseKind::BodySource,
-        // USTAGE because the body contribution is evaluated at the stage input, the state this
-        // stage's flux divergence was also evaluated at, and applied to the advanced CONS. an
+        // ustage because the body contribution is evaluated at the stage input, the state this
+        // stage's flux divergence was also evaluated at, and applied to the advanced cons. an
         // explicit scheme sums the flux and every source over one state; evaluating a complete
         // source operator on an already-advanced state composes them sequentially instead, which
         // is first order in dt at any Runge-Kutta order.
@@ -219,7 +219,7 @@ pub const STAGE_PIPELINE: &[Phase] = &[
         writes: FieldSet::PRIM,
         gate: Gate::Fofc,
     },
-    // the dye rides AFTER fofc: it consumes the (possibly spliced) mass flux
+    // the dye rides after fofc: it consumes the (possibly spliced) mass flux
     // and divides by the stage-final density.
     Phase {
         name: "chi_update",
@@ -243,7 +243,7 @@ pub const STAGE_PIPELINE: &[Phase] = &[
 #[derive(Clone, Copy, PartialEq)]
 pub enum HookPoint {
     /// after every flux direction, before efield: the hierarchy samples its
-    /// coarse/fine flux registers HERE, on the high-order fluxes, before a
+    /// coarse/fine flux registers here, on the high-order fluxes, before a
     /// fofc firing may splice them.
     AfterFlux,
     /// after chi_update, before ghost_fill: the hierarchy re-prolongs the
@@ -252,7 +252,7 @@ pub enum HookPoint {
     /// after every source, before the conserved-to-primitive recovery: the last point at which
     /// the stage-final conserved state can still be adjusted and have the primitives, the
     /// admissibility redo, and the ghost band all follow from it. a well-balanced hierarchy
-    /// removes its stationary target's discrete imbalance HERE.
+    /// removes its stationary target's discrete imbalance here.
     BeforeC2p,
 }
 
@@ -277,7 +277,7 @@ pub enum StageOutcome {
     RetryStep,
 }
 
-/// fold ONE RK stage of the canonical pipeline over a kernel set.
+/// fold one RK stage of the canonical pipeline over a kernel set.
 pub fn fold_stage<const D: usize, const DOF: usize, Mem, Sc, K>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     kernels: &K,
@@ -294,8 +294,8 @@ where
     let bodies = sim.has_bodies();
     let chi = sim.has_passive_scalar();
 
-    // at the FIRST stage of a multi-stage scheme the per-step snapshot wrote
-    // `cons -> u_n` and nothing has touched cons since, so u_n ALREADY holds
+    // at the first stage of a multi-stage scheme the per-step snapshot wrote
+    // `cons -> u_n` and nothing has touched cons since, so u_n already holds
     // the stage input: flag it and skip the copy — `stage_input()` binds u_n
     // for this stage. forward-Euler takes no per-step snapshot, so the copy
     // stands there.
@@ -318,7 +318,7 @@ where
     // arm the stage-local write audit for the duration of this stage. the fluxes and per-cell wave
     // speeds carry nothing across a stage boundary — whatever a previous stage left in them
     // describes a state that no longer exists — so each stage starts from an empty ledger and every
-    // read of one is checked against THIS stage's producers. the guard disarms on every exit path,
+    // read of one is checked against this stage's producers. the guard disarms on every exit path,
     // including the fofc retry.
     #[cfg(debug_assertions)]
     let _audit = StageWriteAudit::arm(sim);
@@ -340,7 +340,7 @@ where
         );
         match ph.kind {
             PhaseKind::SnapshotStage => prof("snapshot_stage", || {
-                // marked BEFORE the copy: the snapshot resolves its own destination buffer
+                // marked before the copy: the snapshot resolves its own destination buffer
                 // through `stage_input()`, so the flag has to hold by the time it runs. this
                 // phase is the statement that this stage's input is captured.
                 sim.mark_stage_input_captured();

@@ -143,7 +143,7 @@ class OrszagTang(SimbiProblem):
                 for jj in range(nj + (bn == "by")):
                     for ii in range(ni + (bn == "bx")):
                         if bn == "bx":
-                            # bx lives on the x-face: sample the TRANSVERSE y at
+                            # bx lives on the x-face: sample the transverse y at
                             # the cell center (jj+0.5), so the discrete field is
                             # symmetric about the domain center. sampling y at the
                             # edge (jj*dy) breaks the OT 180-degree point symmetry

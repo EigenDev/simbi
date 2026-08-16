@@ -3,12 +3,12 @@
 //
 // the carrier-gate oracle for the fused-runtime host path: the actual
 // fused godunov+source `GvKernel` (multi-output, F64 CSE lets, per-output stencil
-// reads), JIT-compiled via `compile_gv_kernel`, must compute BIT-FOR-BIT the same
+// reads), JIT-compiled via `compile_gv_kernel`, must compute bit-for-bit the same
 // outputs as the interpreter `Cpu::run_kernel` over random buffers. the simple
-// hand-built symbi-jit oracles do NOT exercise this kernel's shape; a miscompile
+// hand-built symbi-jit oracles do not exercise this kernel's shape; a miscompile
 // here is exactly the bug class the dispatch-level evolve oracle surfaces as a
-// trajectory divergence. NO aliasing here (separate in/out buffers) — this isolates
-// the JIT CODEGEN of the godunov from the dispatch's in-place binding.
+// trajectory divergence. no aliasing here (separate in/out buffers) — this isolates
+// the JIT codegen of the godunov from the dispatch's in-place binding.
 //
 // run: cargo test -p symbi --test jit_godunov_kernel_oracle
 // =============================================================================
@@ -163,9 +163,9 @@ fn jit_fused_godunov_matches_interp_bitwise() {
         );
     }
 
-    // ---- jit via run_parallel_raw with IN-PLACE ALIASED cons.* (the dispatch's exact pattern) ----
+    // ---- jit via run_parallel_raw with in-place aliased cons.* (the dispatch's exact pattern) ----
     // outputs are cons.den/mom_0/mom_1/nrg; each aliases its own input buffer. start the aliased
-    // buffers from a COPY of the inputs, run, compare to interp (which read the originals).
+    // buffers from a copy of the inputs, run, compare to interp (which read the originals).
     let out_keys: Vec<&str> = writes.iter().map(|(k, _, _)| k.as_str()).collect();
     // map each write key to its input-buffer index (in-place: same ir-key appears as input + write).
     let in_key_idx: HashMap<&str, usize> = gvk

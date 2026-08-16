@@ -10,7 +10,7 @@
 //
 // usage:
 //   let cons: ConsG<f64, 2, Adiabatic> = ...; // has .nrg: f64
-//   let iso:  ConsG<f64, 2, IsoModel>  = ...; // has .nrg: Zero<f64> (ZST)
+//   let iso:  ConsG<f64, 2, IsoModel>  = ...; // has .nrg: Zero<f64> (zst)
 // =============================================================================
 
 use std::fmt::Debug;
@@ -22,7 +22,7 @@ use symbi_ir::algebra::Scalar;
 /// operations on a scalar-or-absent energy/pressure slot. adiabatic implements
 /// this with S directly; isothermal implements with Zero<S> (all ops are no-ops).
 ///
-/// **PartialEq deliberately NOT a super-trait** (Tier 1.7): native `==` on a
+/// **PartialEq deliberately not a super-trait** (Tier 1.7): native `==` on a
 /// generic `S: Scalar` is an A1 violation (Gv's `PartialEq` is non-physical
 /// via `ord_key`). use `S::cmp_eq` returning `Self::Mask` for equality in
 /// carrier-generic code; tests can `assert_eq!` on concrete `f64` values
@@ -34,7 +34,7 @@ pub trait EnergySlot<S: Scalar>: Copy + Default + Debug + Send + Sync + 'static 
     fn neg(self) -> Self;
     fn scale(self, s: S) -> Self;
 
-    /// extract the scalar value. adiabatic: returns self. isothermal: returns S::ZERO.
+    /// extract the scalar value. adiabatic: returns self. isothermal: returns S::zero.
     fn value(self) -> S;
 
     /// construct from a scalar. adiabatic: identity. isothermal: discards the value.
@@ -44,7 +44,7 @@ pub trait EnergySlot<S: Scalar>: Copy + Default + Debug + Send + Sync + 'static 
     fn select_mask(m: S::Mask, yes: Self, no: Self) -> Self;
 }
 
-// ---- adiabatic: slot IS the scalar ----
+// ---- adiabatic: slot is the scalar ----
 
 impl<S: Scalar> EnergySlot<S> for S {
     #[inline(always)]
@@ -84,7 +84,7 @@ impl<S: Scalar> EnergySlot<S> for S {
 // ---- isothermal: zero-sized energy slot ----
 
 /// zero-sized placeholder for the energy/pressure slot in isothermal flows.
-/// all arithmetic operations are no-ops. accessing .value() returns S::ZERO.
+/// all arithmetic operations are no-ops. accessing .value() returns S::zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Zero<S>(PhantomData<S>);
 
@@ -167,7 +167,7 @@ impl EnergyModel for IsoModel {
 /// to energy.
 ///
 /// the point of putting the dye in the conserved state rather than carrying it alongside is that
-/// EVERY operation which changes mass must change `D_chi` in proportion. expressed as a slot, an
+/// every operation which changes mass must change `D_chi` in proportion. expressed as a slot, an
 /// operation that rebuilds a conserved state cannot omit the dye without failing to compile —
 /// where a hand-wired dye can be, and has been, silently dropped by one path out of several.
 ///

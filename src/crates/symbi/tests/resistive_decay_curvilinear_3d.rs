@@ -1,20 +1,20 @@
 // =============================================================================
 // resistive_decay_curvilinear_3d.rs
 //
-// the EVOLUTION gate for 3D curvilinear (spherical, cylindrical) Ohmic resistivity: a smooth
-// compact div-free field threading still gas, run through the ENTIRE production NMHD kernel set
+// the evolution gate for 3D curvilinear (spherical, cylindrical) Ohmic resistivity: a smooth
+// compact div-free field threading still gas, run through the entire production NMHD kernel set
 // with eta > 0, must
-//   (a) lose magnetic energy STRICTLY monotonically step over step (the resistive edge EMF is the
+//   (a) lose magnetic energy strictly monotonically step over step (the resistive edge EMF is the
 //       mimetic adjoint of the induction curl, so -curl(eta J) is negative-definite in the
-//       DEC-weighted energy norm), and
-//   (b) keep the h-weighted staggered div(B) at machine zero (the resistive EMF rides the SAME
+//       dec-weighted energy norm), and
+//   (b) keep the h-weighted staggered div(B) at machine zero (the resistive EMF rides the same
 //       constrained-transport curl, so it can diffuse but never create monopoles).
 // bug-injections: eta = 0 loses only the scheme's numerical-diffusion floor (the resistive term
-// must dominate it), and resistivity = 0 declared is BIT-identical to resistivity never declared
+// must dominate it), and resistivity = 0 declared is bit-identical to resistivity never declared
 // (the disabled resistive path leaves no trace in the arithmetic).
 //
 // the seed: bface = the production ct-curl of a smooth windowed edge potential A (dt = 1 on a
-// zero field), so the initial div(B) is machine zero in EXACTLY the discrete divergence the curl
+// zero field), so the initial div(B) is machine zero in exactly the discrete divergence the curl
 // preserves — no analytic-vs-discrete mismatch enters. the window vanishes well inside the
 // boundary, so the outflow boundaries stay quiescent for the whole run.
 // =============================================================================
@@ -52,7 +52,7 @@ enum Chart {
     Sph,
     Cyl,
 }
-// lame scale factors (h0, h1, h2) at coordinate x. MUST match Metric::scale_factors of the chart.
+// lame scale factors (h0, h1, h2) at coordinate x. must match Metric::scale_factors of the chart.
 fn h(chart: Chart, x: [f64; 3]) -> [f64; 3] {
     match chart {
         Chart::Sph => [1.0, x[0], x[0] * x[1].sin()], // (h_r, h_theta = r, h_phi = r sin theta)
@@ -102,7 +102,7 @@ fn pos_edge(fs: &Store, c: [isize; 3], edge_axis: usize) -> [f64; 3] {
     })
 }
 
-// seed bface = ct_curl(A) through the PRODUCTION curl (dt = 1 on a zero field): div-free by the
+// seed bface = ct_curl(A) through the production curl (dt = 1 on a zero field): div-free by the
 // discrete d-of-d in exactly the divergence the evolution preserves. bcell is the face average,
 // and cons is rebuilt so the total energy carries the seeded magnetic contribution.
 fn seed<M>(sim: &mut SimState<NewtonianMhd, 3, M, IdealGas<f64>, CpuSpace, HostMemory>, chart: Chart)
@@ -163,8 +163,8 @@ where
     }
 }
 
-// the DEC-weighted magnetic energy: sum_k B_k^2 * w_{B_k} over the interior low faces, with
-// w_{B_k} = product of the OTHER two scale factors at the k-face (the norm the adjoint identity
+// the dec-weighted magnetic energy: sum_k B_k^2 * w_{B_k} over the interior low faces, with
+// w_{B_k} = product of the other two scale factors at the k-face (the norm the adjoint identity
 // makes monotone under the resistive EMF). the seed is compact, so the uncounted high-boundary
 // faces carry no field.
 fn e_face(fs: &Store, chart: Chart) -> f64 {
@@ -372,7 +372,7 @@ fn spherical_3d_resistivity_dominates_the_ideal_numerical_diffusion() {
 
 #[test]
 fn eta_zero_is_bit_identical_to_never_enabled() {
-    // resistivity declared as 0 must leave NO trace: the disabled resistive path (the dispatch
+    // resistivity declared as 0 must leave no trace: the disabled resistive path (the dispatch
     // gate, the cfl fold) is exactly the ideal path, bit for bit, on a curvilinear 3D chart.
     let mut never = make_sph();
     evolve_ledger(&mut never, Chart::Sph, None);

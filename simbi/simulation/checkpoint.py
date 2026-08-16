@@ -63,7 +63,7 @@ def metadata_to_config_dict(
         metadata: checkpoint metadata
         mesh_shape: mesh shape from data.mesh.shape (includes ghost zones)
     """
-    # mesh_shape is in STORAGE order (x_n, ..., x2, x1) — REVERSED, matching the bounds/spacing
+    # mesh_shape is in storage order (x_n, ..., x2, x1) — reversed, matching the bounds/spacing
     # `[::-1]` the parser applies. un-reverse to the forward (x1, x2, x3) the config expects, and pad
     # a lower-dimensional run (2D / 2.5D) up to the 3-tuple resolution field with trailing 1s.
     resolution = tuple(int(n) for n in reversed(tuple(mesh_shape)))
@@ -86,7 +86,7 @@ def metadata_to_config_dict(
         "checkpoint_index": int(metadata.checkpoint_index),
     }
 
-    # the backend stores the KERNEL spelling of the limiter choice: plm_theta < 0
+    # the backend stores the kernel spelling of the limiter choice: plm_theta < 0
     # means van leer (the model field itself is constrained to (0, 2], so the raw
     # -1 must map back to the limiter selection).
     if float(metadata.plm_theta) < 0.0:
@@ -176,7 +176,7 @@ def _assert_same_equilibrium_target(
 
     from .problem import ConfigError
 
-    # SCHEME-CHANGE GUARD. `solver = hllc_lm` changed meaning on 2026-08-15: the clamped
+    # scheme-change guard. `solver = hllc_lm` changed meaning on 2026-08-15: the clamped
     # variant was retired and the name now denotes the published Fleischmann ramp. a series
     # recorded under the old meaning must not be continued under the new one -- same string,
     # different numerics, and nothing downstream could ever tell. the discriminator is the
@@ -336,10 +336,10 @@ def merge_with_checkpoint(
                         pass
             return value
 
-    # the flags the user EXPLICITLY chose: from_cli records the argv-provided
+    # the flags the user explicitly chose: from_cli records the argv-provided
     # dests; a directly-constructed problem carries the same fact in
     # model_fields_set. a class default that merely differs from the checkpoint
-    # is NOT an override — the checkpoint wins silently.
+    # is not an override — the checkpoint wins silently.
     cli_explicit = getattr(problem, "_cli_explicit", None)
     explicit = cli_explicit if cli_explicit is not None else problem.model_fields_set
 
@@ -352,7 +352,7 @@ def merge_with_checkpoint(
             if field_name in immutable_fields:
                 # must use checkpoint value, but coerce to field's expected type
                 coerced = coerce_to_field_type(checkpoint_value, field_info)
-                # an EXPLICIT user demand for a different value on an immutable
+                # an explicit user demand for a different value on an immutable
                 # field cannot be honored — refuse loudly; silently running the
                 # checkpoint's setting under the user's flag would hide the conflict.
                 if field_name in explicit and not _values_agree(user_value, coerced):
@@ -372,10 +372,10 @@ def merge_with_checkpoint(
             # field not in checkpoint, use user value
             merged_data[field_name] = user_value
 
-    # the CLOSURE is not a knob a restart may drift on: the state in the file was integrated
+    # the closure is not a knob a restart may drift on: the state in the file was integrated
     # under one equation of state, and continuing it under another is a different physics
     # problem wearing the same file name. unlike every other immutable field this refuses even
-    # when the config merely DEFAULTS to the other closure — a config EDITED between the
+    # when the config merely defaults to the other closure — a config edited between the
     # original run and the restart (gamma-law -> synge, say) carries no explicit flag to catch,
     # and the silent checkpoint-wins rule would resume the old equations under a source file
     # that reads as the new ones.
@@ -383,7 +383,7 @@ def merge_with_checkpoint(
     if recorded_closure is not None and recorded_closure != problem.eos:
         from .problem import ConfigError
 
-        # the repair is a CONFIG edit, not a flag: `--eos` alone flips the closure without
+        # the repair is a config edit, not a flag: `--eos` alone flips the closure without
         # the adiabatic_index that has to appear (ideal) or disappear (synge) alongside it,
         # so the model validator refuses the problem before the merge is ever reached.
         if recorded_closure == Eos.SYNGE:
@@ -401,11 +401,11 @@ def merge_with_checkpoint(
             f"to use the new closure, start a fresh run (no --checkpoint)."
         )
 
-    # the synge (taub-mathews) closure declares NO adiabatic index: the model validator
-    # REFUSES a user-supplied one and then writes the inert placeholder 5/3 itself, purely
+    # the synge (taub-mathews) closure declares no adiabatic index: the model validator
+    # refuses a user-supplied one and then writes the inert placeholder 5/3 itself, purely
     # so the plumbing has a float to carry. the backend records that placeholder as the
     # checkpoint's `gamma`, so the merge above hands it straight back to the constructor —
-    # where it reads as a DECLARED index and the validator kills the restart. drop it and
+    # where it reads as a declared index and the validator kills the restart. drop it and
     # let the closure re-supply its own placeholder. a gamma-law restart is untouched:
     # its checkpoint gamma is real physics and stays immutable.
     if merged_data.get("eos") == Eos.SYNGE:
@@ -413,14 +413,14 @@ def merge_with_checkpoint(
 
     _assert_same_equilibrium_target(problem, metadata)
 
-    # RESUME at the checkpoint's physical time. start_time is the
+    # resume at the checkpoint's physical time. start_time is the
     # sim clock (sim.time): a restart must continue from where the checkpoint left off, regardless
-    # of what the config (or its validators) set start_time to. the LOG-checkpoint anchor is a
-    # SEPARATE field (checkpoint_log_anchor) so the cadence stays fixed across the restart.
+    # of what the config (or its validators) set start_time to. the log-checkpoint anchor is a
+    # separate field (checkpoint_log_anchor) so the cadence stays fixed across the restart.
     if "start_time" in checkpoint_config:
         merged_data["start_time"] = checkpoint_config["start_time"]
 
-    # the checkpoint INDEX is resume state: the next dump must continue the
+    # the checkpoint index is resume state: the next dump must continue the
     # monotonic numbering from where the run stopped (chkpt.030 -> chkpt.031), so force it from the
     # checkpoint like start_time. it is checkpoint_safe (serializable, user-visible), so the generic
     # field merge would otherwise reset it to the config default 0 and re-number every restart from

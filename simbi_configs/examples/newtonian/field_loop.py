@@ -2,14 +2,14 @@
 # field_loop.py
 #
 # the magnetic field-loop advection test (Gardiner & Stone 2005, section 8.6) —
-# THE canonical constrained-transport / checkerboard probe. a weak, passive
+# the canonical constrained-transport / checkerboard probe. a weak, passive
 # magnetic loop is advected diagonally across a periodic domain at a constant
-# velocity. the exact solution is the loop translating UNDISTORTED with its
+# velocity. the exact solution is the loop translating undistorted with its
 # magnetic energy conserved.
 #
 # the diagnostic is the in-plane current density J_z = (curl B)_z: a CT scheme
-# with INSUFFICIENT edge-EMF dissipation (arithmetic / contact) seeds a
-# grid-scale "checkerboard" odd-even mode INSIDE the loop, visible as salt-and-
+# with insufficient edge-EMF dissipation (arithmetic / contact) seeds a
+# grid-scale "checkerboard" odd-even mode inside the loop, visible as salt-and-
 # pepper noise in J_z; the upwind schemes (UCT-HLL / UCT-HLLD) damp it and keep
 # J_z smooth. compare --ct-method contact vs uct (+ --solver hlld).
 #
@@ -21,9 +21,9 @@
 # 0.33% (UCT-HLL) / 0.37% (UCT-HLLD) — a ~20x checkerboard suppression; UCT-HLLD
 # retains ~27% more field than UCT-HLL (less diffusive). all stable, gas uniform.
 #
-# NOTE the velocity MUST be supersonic (default |v|=sqrt5, M&DZ v=(2,1)) — the test
+# note the velocity must be supersonic (default |v|=sqrt5, M&DZ v=(2,1)) — the test
 # is designed so numerical diffusion is set by cell-crossing;
-# subsonic advection smears the loop. caveat: the RELATIVISTIC gas HLLD flux is
+# subsonic advection smears the loop. caveat: the relativistic gas HLLD flux is
 # fragile on this beta>>1 passive loop (use --regime nmhd, or --solver hllc for srmhd).
 # =============================================================================
 import math
@@ -59,7 +59,7 @@ class FieldLoop(SimbiProblem):
     speed: Annotated[
         float,
         ProblemParam(
-            math.sqrt(5.0),  # Gardiner-Stone / M&DZ: v = (2,1) => |v| = sqrt(5), SUPERSONIC (cs~1.29).
+            math.sqrt(5.0),  # Gardiner-Stone / M&DZ: v = (2,1) => |v| = sqrt(5), supersonic (cs~1.29).
             cli=True,
             description="advection |v| (sqrt5 = paper's supersonic v=(2,1); use <1 subluminal for SRMHD)",
         ),
@@ -115,8 +115,8 @@ class FieldLoop(SimbiProblem):
             dy = (y1 - y0) / nj
             a0, rad = self.amplitude, self.loop_radius
 
-            # vector potential at a CORNER (x, y): A_z = A0 (R - r) inside the loop, 0 outside.
-            # the staggered B = discrete curl of A_z is EXACTLY divergence-free.
+            # vector potential at a corner (x, y): A_z = A0 (R - r) inside the loop, 0 outside.
+            # the staggered B = discrete curl of A_z is exactly divergence-free.
             def az(x: float, y: float) -> float:
                 r = math.hypot(x, y)
                 return a0 * (rad - r) if r < rad else 0.0

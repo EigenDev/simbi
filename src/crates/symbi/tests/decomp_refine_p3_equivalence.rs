@@ -1,16 +1,16 @@
 // =============================================================================
 // decomp_refine_p3_equivalence.rs
 //
-// REFINEMENT x DECOMPOSITION: a refined patch that SPANS a tile cut. the FINE level is
+// refinement x decomposition: a refined patch that spans a tile cut. the fine level is
 // itself split across tiles, so on top of the root halo exchange the driver must exchange
-// the FINE-level halos between the fine tiles at the shared cut. the flux/emf reflux registers stay
-// TILE-LOCAL (a coarse cell + the fine cells at its face are co-located), so the only new coupling
+// the fine-level halos between the fine tiles at the shared cut. the flux/emf reflux registers stay
+// tile-local (a coarse cell + the fine cells at its face are co-located), so the only new coupling
 // is the fine-level exchange.
 //
 // the patch [0.375,0.625]^2 straddles the x-cut at x=0.5: tile 0 refines its left half, tile 1 its
 // right half; the two fine grids share the cut (each inherits a CoarseFine boundary there from its
 // root tile, so fine ghost_fill leaves it for the fine exchange). a smooth bump centered on the cut
-// makes the fine dynamics cross it. decomposed == CANONICAL monolithic (hier.evolve) to round-off.
+// makes the fine dynamics cross it. decomposed == canonical monolithic (hier.evolve) to round-off.
 // cpu-only + 2d hydro; euler + rk2 root (rk2 also exchanges between the fine stages).
 // =============================================================================
 
@@ -43,13 +43,13 @@ fn kset(sim: &Sim) -> Kern {
     Kern::new(GAMMA, CFL, &sim.geom.allocated)
 }
 
-// a smooth bump centered ON the cut (0.5, 0.5), inside the patch -> the fine dynamics straddle the
+// a smooth bump centered on the cut (0.5, 0.5), inside the patch -> the fine dynamics straddle the
 // fine cut, exercising the fine-level exchange. waves stay interior over T_FINAL.
 fn bump(x: f64, y: f64) -> f64 {
     0.3 * (-(((x - 0.5) / 0.08).powi(2) + ((y - 0.5) / 0.08).powi(2))).exp()
 }
 
-// the GLOBAL refined patch, straddling the x-cut at 0.5.
+// the global refined patch, straddling the x-cut at 0.5.
 const PX_LO: f64 = 0.375;
 const PX_HI: f64 = 0.625;
 const PY_LO: f64 = 0.375;
@@ -76,7 +76,7 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Times
         .build()
 }
 
-// the CANONICAL monolithic reference: full-grid root + the spanning patch, run via hier.evolve().
+// the canonical monolithic reference: full-grid root + the spanning patch, run via hier.evolve().
 fn build_mono(ts: Timestepping) -> Hier {
     let root = build_root(
         [N, N],
@@ -96,7 +96,7 @@ fn build_mono(ts: Timestepping) -> Hier {
     h
 }
 
-// 2 root tiles (x-cut); BOTH refine -- each clips the global patch to its own physical x-range, so
+// 2 root tiles (x-cut); both refine -- each clips the global patch to its own physical x-range, so
 // the two fine grids meet at the cut. the fine sub-grid is therefore the same [2,1] as the root.
 fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
@@ -139,11 +139,11 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
         };
         tiles.push(h);
     }
-    // seeding is DECOMPOSITION-AWARE: the fine interiors are prolonged only after the root
+    // seeding is decomposition-aware: the fine interiors are prolonged only after the root
     // conserved cut halos carry the neighbor tiles' data. seeding per tile inside the loop
     // reads each tile's standalone boundary fill through the cut and the composite differs
     // from the monolithic hierarchy before any evolution. `prime` runs a c2p audit on every
-    // level, so it must see the SEEDED fine level and runs after.
+    // level, so it must see the seeded fine level and runs after.
     seed_decomposed_fine_from_coarse(&tiles, counts, &vec![0; tiles.len()], &LocalCopy)
         .expect("decomposed fine seed");
     for h in tiles.iter_mut() {
@@ -152,9 +152,9 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
     tiles
 }
 
-// drive the tiles through the PRODUCTION decomposed-hierarchy loop (symbi-amr). the SAME lib fn
+// drive the tiles through the production decomposed-hierarchy loop (symbi-amr). the same lib fn
 // `evolve_hierarchy_decomposed` handles the tile-local case (fine sub-grid 1x1) and the spanning case
-// (the patch spans the cut, so the fine sub-grid has an internal cut and the FINE halos are exchanged)
+// (the patch spans the cut, so the fine sub-grid has an internal cut and the fine halos are exchanged)
 // -- this test proves the spanning-patch path. host: all tiles on "device 0".
 fn run_p3(tiles: &mut [Hier], counts: [usize; 2], t_final: f64, ts: Timestepping) {
     let devices: Vec<i32> = vec![0; tiles.len()];
@@ -172,8 +172,8 @@ fn run_p3(tiles: &mut [Hier], counts: [usize; 2], t_final: f64, ts: Timestepping
 }
 
 // scatter every tile's root (outside coverage) + fine density into one global 2N x 2N composite,
-// keyed by GLOBAL fine index (root cell g -> its 2x2 fine block; fine cell -> its global fine index
-// = tile_root_offset*RATIO + local fine offset).
+// keyed by global fine index (root cell g -> its 2x2 fine block; fine cell -> its global fine index
+// = tile_root_offset*ratio + local fine offset).
 fn composite_fine(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
     let fn_n = RATIO * N;
     let mut out = vec![f64::NAN; fn_n * fn_n];
@@ -200,11 +200,11 @@ fn composite_fine(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
         if h.levels.len() > 1 {
             let fine = &h.levels[1].state;
             let flo: [isize; 2] = std::array::from_fn(|a| fine.geom.interior.spaces[a].lo);
-            // the coverage lo in this tile's GLOBAL root cells (tile offset + its interior offset).
+            // the coverage lo in this tile's global root cells (tile offset + its interior offset).
             let cov = h.levels[0].coverage.as_ref().unwrap();
             let clo: [isize; 2] = std::array::from_fn(|a| cov.spaces[a].lo);
             for c in fine.geom.interior.iter() {
-                // global fine index = (global root cell of the coverage start)*RATIO + the fine
+                // global fine index = (global root cell of the coverage start)*ratio + the fine
                 // cell's offset within the fine interior. this is consistent between the monolithic
                 // (one tile, full patch) and decomposed (per-tile clipped patch) runs.
                 let gf: [usize; 2] = std::array::from_fn(|a| {
@@ -227,7 +227,7 @@ fn max_err(a: &[f64], b: &[f64]) -> f64 {
 
 fn assert_p3_matches(counts: [usize; 2], ts: Timestepping) {
     let mut mono = build_mono(ts);
-    // CONSTRUCTION GATE, before either side evolves: the seeded composites must already agree.
+    // construction gate, before either side evolves: the seeded composites must already agree.
     // this is what localizes a future regression to seeding rather than to the driver -- the
     // divergence this test caught lived here, was smoothed by evolution, and read as a
     // dynamics bug for six hypotheses straight.
@@ -266,7 +266,7 @@ fn assert_p3_matches(counts: [usize; 2], ts: Timestepping) {
     );
 }
 
-// the PYTHON OUTPUT path: gather each decomposed level into a global hierarchy (root over `counts`,
+// the python output path: gather each decomposed level into a global hierarchy (root over `counts`,
 // fine over the `fine_subgrid` sub-grid) via `gather_interiors`, and confirm it equals the
 // monolithic hierarchy level-for-level. this is exactly what `run_refined_decomposed_loop` does to
 // write a multi-level checkpoint; the per-tile evolve is the same path the assert_p3 tests prove.

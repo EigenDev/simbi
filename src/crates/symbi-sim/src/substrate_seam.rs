@@ -1,21 +1,21 @@
 // =============================================================================
 // substrate_seam.rs
 //
-// the sim <-> substrate seam: the abstractions the sim core needs to TALK ABOUT
+// the sim <-> substrate seam: the abstractions the sim core needs to talk about
 // substrates without depending on any concrete regime KernelSet.
 // homing `KernelSet` and the `Solver`/`RegimeKind` enums here keeps
-// `FieldStore`/`state.rs` from depending UP into `regimes` (which would be a cycle).
+// `FieldStore`/`state.rs` from depending up into `regimes` (which would be a cycle).
 //
-// homed here in `symbi-sim`, every reference from the sim core points DOWN; the
-// concrete kernelsets in the `symbi` crate's `regimes/` IMPLEMENT `KernelSet` and
-// depend DOWN on this module.
+// homed here in `symbi-sim`, every reference from the sim core points down; the
+// concrete kernelsets in the `symbi` crate's `regimes/` implement `KernelSet` and
+// depend down on this module.
 //
 // contents:
 // - KernelSet      — one method per physics operation; the integrator calls only these.
 // - Solver / RegimeKind — the Riemann-solver + regime-family classification enums.
 //
 // the regime -> concrete-KernelSet map (`RegimeSubstrate`) and the `sim.substrate()`
-// convenience are NOT here: they name concrete kernelsets, so they live in the substrate
+// convenience are not here: they name concrete kernelsets, so they live in the substrate
 // layer (the `symbi` crate). the orphan rule enforces this — a trait mapping the foreign
 // `Regime` types to local kernelsets must be local to the crate that owns the kernelsets.
 //
@@ -43,10 +43,10 @@ use crate::state::FieldStore;
 /// (e.g., body_mass = 0.0). no separate source passes.
 /// `NDIM` = grid dimension, `DOF` = vector (momentum-component) dimension;
 /// they coincide for the natural case and diverge for axisymmetric (DOF>NDIM).
-// the kernel-set sees ONLY the `FieldStore`: its 4 storage params, never
+// the kernel-set sees only the `FieldStore`: its 4 storage params, never
 // the physics tags `R`/`M`/`E` or the executor `S` (the concrete set bakes `R::SPEC` /
 // `eos_param` at construction — it does not read them off the sim). this is the keystone
-// decoupling: 4 params, and the energy/schema bounds off `R` stay LOCAL to
+// decoupling: 4 params, and the energy/schema bounds off `R` stay local to
 // `FieldStore`. impls name the `&FieldStore` argument `sim`.
 pub trait KernelSet<const NDIM: usize, const DOF: usize, Mem, Sc>
 where
@@ -55,7 +55,7 @@ where
 {
     fn flux(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>, dir: usize);
 
-    /// whether the face reconstruction limits DEPARTURES from the local hydrostatic
+    /// whether the face reconstruction limits departures from the local hydrostatic
     /// equilibrium rather than the state itself (the kaeppeli-mishra balance). the
     /// refinement hierarchy reads this: a balanced level's premise is that stencil
     /// data on one isentrope present no face jump, and a coarse-fine ghost prolonged
@@ -83,14 +83,14 @@ where
     fn ghost_fill(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>);
     fn snapshot(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>);
 
-    /// FIRST-ORDER FLUX CORRECTION, run per RK substage AFTER c2p: any zone whose high-order c2p
+    /// first-order flux correction, run per RK substage after c2p: any zone whose high-order c2p
     /// went unphysical (p <= 0, rho <= 0, NaN) is redone with first-order (PCM + HLLE) fluxes
-    /// reconstructed from the PHYSICAL stage-input state (`u_stage`), and the sharp high-order state
+    /// reconstructed from the physical stage-input state (`u_stage`), and the sharp high-order state
     /// is kept everywhere else. a floor-free robustness layer: cells the sharp scheme cannot recover
     /// fall back to the diffusive-but-robust first-order update with no pressure floor. host-gated
     /// on a failure reduction, so a clean substage pays only the scan. default: no-op.
     ///
-    /// returns whether the WHOLE STEP must be rejected: GRMHD limits the geometric source against
+    /// returns whether the whole step must be rejected: GRMHD limits the geometric source against
     /// a source-free low-order anchor, and an anchor that is itself inadmissible is a statement
     /// about the timestep, not the source. the driver then rolls the step back through
     /// `restore_step` and replays it at a smaller dt.
@@ -114,12 +114,12 @@ where
 
     /// retain the complete state needed to replay a rejected explicit step. paired with
     /// `restore_step`; a kernel set that implements one must implement the other, and a driver
-    /// must gate BOTH on `fofc_active` — restoring from a snapshot that was never taken would
+    /// must gate both on `fofc_active` — restoring from a snapshot that was never taken would
     /// overwrite the live state with zeros.
     fn snapshot_retry(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
     /// restore the complete step-entry state after `fofc` requests a retry: the conserved gas
-    /// state, the staggered and cell-centered magnetic field, AND the primitives derived from
+    /// state, the staggered and cell-centered magnetic field, and the primitives derived from
     /// them. the retried step re-enters at `wave_speeds`/`flux`, which reconstruct from `prim`,
     /// so an implementation that rolls back only the conserved state would reconstruct the
     /// rejected attempt's primitives.
@@ -131,7 +131,7 @@ where
     /// electric field computation (MHD). default: no-op.
     fn efield(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
-    /// materialize per-cell wave speeds BEFORE the flux reads them (RMHD: the exact quartic
+    /// materialize per-cell wave speeds before the flux reads them (RMHD: the exact quartic
     /// into wave_speed_l/r, so the flux does a cheap Davis fan without re-solving the
     /// quartic per face). runs each stage after the prim is current (post c2p+ghost). default:
     /// no-op — regimes with cheap algebraic wave speeds keep computing them inline in the flux.
@@ -144,29 +144,29 @@ where
     /// the passive-scalar (dye) stage update: `cons.chi` advances on the
     /// materialized mass flux (donor-cell upwind) in the same SSP form as the
     /// gas, then the concentration `prim.chi = cons.chi/den` is recovered. runs
-    /// AFTER the fofc phase so a spliced mass flux and the stage-final density
+    /// after the fofc phase so a spliced mass flux and the stage-final density
     /// are what the dye rides. default: no-op (regimes without the dye wired).
     fn chi_update(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _a0: f64, _ac: f64) {}
 
     /// the per-axis interface dye flux `flux[d].chi = mass_flux_d * upwind(prim.chi)`, written
-    /// during the FLUX phase so the coarse-fine registers sample it alongside the gas fluxes they
+    /// during the flux phase so the coarse-fine registers sample it alongside the gas fluxes they
     /// correct. separate from `chi_update` for that reason alone: the divergence that consumes it
     /// runs later, after fofc has settled the mass flux it rides.
     /// default: no-op (regimes without the dye wired).
     fn chi_flux(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
-    /// does this kernel set carry a NON-fused (additive) source overlay? gates the per-stage
+    /// does this kernel set carry a non-fused (additive) source overlay? gates the per-stage
     /// `snapshot_stage` + `source_apply` in `step()`. default: false (fused / source-free sets).
     fn has_additive_source(&self) -> bool {
         false
     }
 
-    /// snapshot the stage-INPUT cons into `u_stage`, BEFORE the godunov stage overwrites it.
+    /// snapshot the stage-input cons into `u_stage`, before the godunov stage overwrites it.
     /// the additive `source_apply` then evaluates `S` at this state — the same state the fused
     /// stage uses — making `plain + additive == fused` bit-for-bit. default: no-op.
     fn snapshot_stage(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
-    /// the additive source pass: `cons += weight * S(u_stage)`, applied per RK stage AFTER
+    /// the additive source pass: `cons += weight * S(u_stage)`, applied per RK stage after
     /// godunov, with the SSP stage weight `weight = ac*dt`. the general (non-fused) source
     /// execution; default: no-op.
     fn source_apply(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _weight: f64) {}
@@ -190,7 +190,7 @@ where
 
     /// the immersed-boundary penalization: the property-
     /// algebra surface physics (drain, walls, porosity, thermal surfaces),
-    /// applied post-source each substage — the ONE body
+    /// applied post-source each substage — the one body
     /// mechanism. default: no-op (regimes without a baked penalize envelope).
     fn penalize(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 
@@ -206,7 +206,7 @@ where
     /// once per step after the RK combination. magnetized
     /// sets rebuild with the cell's own B; the staggered faces stay CT-owned.
     /// default: no-op (flat backgrounds, and regimes without the baked kernels).
-    /// composed from the sweep/finalize pieces so the DECOMPOSED loop can drive the
+    /// composed from the sweep/finalize pieces so the decomposed loop can drive the
     /// passes itself, exchanging halos around them: the pass count comes from the
     /// store, so both drivers run the same number, and the exchange after the
     /// rebuild publishes the finalized excised state into the neighbors' halos
@@ -223,7 +223,7 @@ where
         0
     }
 
-    /// ONE fill pass (fill + writeback) of the excision region; no-op default.
+    /// one fill pass (fill + writeback) of the excision region; no-op default.
     fn excise_sweep(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
     /// the conserved rebuild of the excised cells after the last sweep; no-op default.
@@ -231,7 +231,7 @@ where
 }
 
 /// stash the config's constant-nu viscosity onto a kernel set.
-/// a SEPARATE (non-const-generic) trait so the build chain can call it on the
+/// a separate (non-const-generic) trait so the build chain can call it on the
 /// concrete set without the `KernelSet<NDIM, DOF, ..>` inference ambiguity. the
 /// default is a no-op (regimes with no viscous kernel ignore it);
 /// `IsoSubstrateKernelSet` overrides it to store the value.
@@ -279,7 +279,7 @@ pub trait WithExcision: Sized {
 pub enum Solver {
     Hlle,
     Hllc,
-    /// HLLC with the Fleischmann (2020) low-mach correction EXACTLY AS PUBLISHED: the sine
+    /// HLLC with the Fleischmann (2020) low-mach correction exactly as published: the sine
     /// ramp on the acoustic signal speeds, cut off at the runtime reference mach number
     /// (newtonian and RHD). it leaves the hydrostatic residual of a stagnant stratified
     /// column undamped, so that regime wants the well-balanced reconstruction underneath it
@@ -291,7 +291,7 @@ pub enum Solver {
     /// series recorded under this name with a config lacking `wb_reconstruction` are
     /// clamp-era and are refused on restart.
     HllcLm,
-    /// HLLC whose acoustic dissipation is scaled by the ACOUSTIC CONTENT of the face data —
+    /// HLLC whose acoustic dissipation is scaled by the acoustic content of the face data —
     /// the fraction of the impedance relation `dp = rho c du` the jumps actually carry —
     /// rather than by the local mach number against a reference value. newtonian only.
     /// recovers the `phi ~ Ma` scaling the low-mach asymptotics require, with no tuned
@@ -301,7 +301,7 @@ pub enum Solver {
 }
 
 impl Solver {
-    /// every variant, in declaration order. gates and sweeps MUST iterate this rather than a
+    /// every variant, in declaration order. gates and sweeps must iterate this rather than a
     /// hand-written array: both coverage gates listed solvers by hand and both silently omitted
     /// `HllcAcoustic` for as long as it has shipped, so the gate whose whole job is "no accepted
     /// (solver, regime) pair lacks a baked kernel" was blind to one of them. a `match` here
@@ -326,21 +326,21 @@ impl Solver {
         }
     }
 
-    /// whether this solver is physically valid for `regime`. ENCODES the runtime `dispatch_flux`
+    /// whether this solver is physically valid for `regime`. encodes the runtime `dispatch_flux`
     /// assert as a checkable predicate: HLLE is universal; HLLC resolves a contact wave but no
     /// magnetic structure (non-MHD only); HLLD is the MHD 5-wave solver (MHD only). this is the
-    /// matrix `valid_for` validation reads BEFORE building a substrate.
+    /// matrix `valid_for` validation reads before building a substrate.
     pub fn valid_for(self, regime: RegimeKind) -> bool {
         match self {
             Solver::Hlle => true,
             // HLLC resolves the gas contact in the normal flux. valid for every regime with a
             // contact-resolving HLLC flux kernel: all hydro/RHD, plus the energy-carrying MHD
             // regimes NMHD and RMHD (the UCT edge EMF reduces to the HLL EMF for B_x != 0 — the
-            // contact carries no transverse field, M&DZ p.11 — so HLLC-MHD = HLLC flux + HLL EMF).
-            // EXCLUDED: isothermal MHD (no thermal contact, no HLLC flux kernel built).
-            // an ISOTHERMAL regime carries no thermal contact wave, so there is no third wave for
+            // contact carries no transverse field, M&DZ p.11 — so hllc-mhd = HLLC flux + HLL EMF).
+            // excluded: isothermal MHD (no thermal contact, no HLLC flux kernel built).
+            // an isothermal regime carries no thermal contact wave, so there is no third wave for
             // HLLC to resolve and no HLLC flux kernel is built for it — stated positively here
-            // rather than as "not mhd", which admitted isothermal HYDRO and left a selectable
+            // rather than as "not mhd", which admitted isothermal hydro and left a selectable
             // solver whose kernel panics at the first dispatch.
             Solver::Hllc => matches!(
                 regime,
@@ -351,18 +351,19 @@ impl Solver {
             ),
             // HLLC-LM: HLLC with the acoustic dissipation scaled down at low local mach number
             // (Fleischmann, Adami & Adams 2020). available wherever a contact-resolving HLLC flux
-            // exists AND the central reformulation its scaling acts on is an identity — which needs
+            // exists and the central reformulation its scaling acts on is an identity — which needs
             // the star states to satisfy the jump conditions across both outer waves and the
             // contact. that holds for newtonian euler and for the Mignone-Bodo relativistic star
             // states (both pinned by per-face gates).
             //
-            // EXCLUDED: isothermal (no contact wave to resolve, hence no HLLC flux kernel), and the
+            // excluded: isothermal (no contact wave to resolve, hence no HLLC flux kernel), and the
             // MHD regimes, whose star states carry the null vs non-null normal-field branches — the
             // reformulation has not been shown to be an identity there, and a scaling applied to a
             // non-identity is a different solver rather than a modified one.
             Solver::HllcLm => matches!(regime, RegimeKind::Newtonian | RegimeKind::Rhd),
-            // HLLC-ACOUSTIC: the same centralized reformulation as HLLC-LM with a different
-            // sensor, so it inherits that arm's requirement exactly. NEWTONIAN ONLY for now:
+            // hllc-acoustic: the same centralized reformulation as HLLC-LM with a different
+            // sensor, so it inherits that arm's requirement exactly. the implementation supports
+            // newtonian flow:
             // the impedance relation `dp = rho c du` the sensor measures against is the
             // newtonian acoustic one, and its relativistic form carries the specific enthalpy —
             // a different sensor, not the same one on a different state.
@@ -372,7 +373,7 @@ impl Solver {
     }
 }
 
-/// the regime FAMILY — the coarse classification a `Regime`'s `SPEC` resolves to, sufficient to
+/// the regime family — the coarse classification a `Regime`'s `SPEC` resolves to, sufficient to
 /// validate the (solver, regime) matrix. derived from `Regime::SPEC` via [`RegimeKind::of`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegimeKind {
@@ -444,10 +445,10 @@ mod solver_matrix_tests {
             assert!(!Solver::Hlld.valid_for(r), "hlld is MHD-only: {r:?}");
         }
 
-        // HLLC resolves a CONTACT wave, so it needs one to exist. an isothermal closure
+        // HLLC resolves a contact wave, so it needs one to exist. an isothermal closure
         // `p = c^2 rho` leaves no independent thermodynamic degree of freedom and hence no entropy
         // wave — the characteristic families are `u +/- c` alone and HLLC degenerates to HLL. that
-        // is a property of the closure, not of the magnetic field, so it rules out isothermal HYDRO
+        // is a property of the closure, not of the magnetic field, so it rules out isothermal hydro
         // exactly as it rules out isothermal MHD; no HLLC kernel is baked for either.
         for r in [
             RegimeKind::Newtonian,
@@ -466,10 +467,10 @@ mod solver_matrix_tests {
         }
 
         // HLLC-LM is HLLC plus the low-mach acoustic-dissipation scaling, so it is admissible
-        // wherever HLLC is AND the central reformulation the scaling acts on is an identity — which
+        // wherever HLLC is and the central reformulation the scaling acts on is an identity — which
         // requires the star states to satisfy the jump conditions across both outer waves and the
         // contact. verified for newtonian euler and for the Mignone-Bodo relativistic star states;
-        // NOT established for the MHD star states, whose null vs non-null normal-field branches make
+        // not established for the MHD star states, whose null vs non-null normal-field branches make
         // the reformulation a separate question.
         for r in [RegimeKind::Newtonian, RegimeKind::Rhd] {
             assert!(Solver::HllcLm.valid_for(r), "hllc-lm valid for {r:?}");
@@ -492,7 +493,7 @@ mod solver_matrix_tests {
     }
 }
 
-/// ADDING A VARIANT WITHOUT EXTENDING `Solver::ALL` FAILS HERE. the match is exhaustive, so a
+/// adding A variant without extending `Solver::ALL` fails here. the match is exhaustive, so a
 /// new variant is a compile error rather than a silently-unswept solver; the arm's only job is
 /// to state the count that `ALL` must have.
 const _: () = {

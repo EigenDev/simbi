@@ -4,7 +4,7 @@
 // the GRMHD rejected-step transaction law. the physical-constraint-preserving
 // fofc redo replays a whole explicit step at half the timestep when its
 // source-free low-order anchor is itself inadmissible, so the step must be a
-// TRANSACTION: `restore_step` has to put back everything an accepted step
+// transaction: `restore_step` has to put back everything an accepted step
 // touched, or the replay starts from a hybrid of the rejected attempt and the
 // step-entry state.
 //
@@ -62,7 +62,7 @@ fn swirl_prim(x: f64, y: f64, z: f64) -> MhdPrim<f64, 3> {
     }
 }
 
-/// every value of a field over its OWN domain (cell fields on the allocated
+/// every value of a field over its own domain (cell fields on the allocated
 /// domain, each face field on its staggered domain).
 fn dump(field: &Field<f64, 3, HostMemory>) -> Vec<f64> {
     let view = field.view();
@@ -99,7 +99,7 @@ fn kerr_sim() -> KerrSim {
         spin: SPIN,
     };
     // the box sits outside the horizon (x_lo = 1.2 puts every cell at
-    // r >= sqrt(3) * 1.2, well beyond r_+ < 2M = 0.4). seed the DENSITIZED face
+    // r >= sqrt(3) * 1.2, well beyond r_+ < 2M = 0.4). seed the densitized face
     // flux uniform so the staggered divergence starts at machine zero.
     KerrSim::build(Rmhd, IdealGas { gamma: GAMMA }, metric)
         .cells([N; 3])

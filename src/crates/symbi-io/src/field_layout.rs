@@ -4,10 +4,10 @@
 // regimespec-driven field naming. `RegimeSpec.fields` declares every
 // conservation law (`den`, `mom`, `nrg`, `mag`) with its
 // `FieldKind::{Scalar, DimVector, FixedVector}`, so the i/o layer walks
-// THAT to spell the on-disk names such as `rho`, `v1..vD`,
+// that to spell the on-disk names such as `rho`, `v1..vD`,
 // `den`, `m1..mD`, `nrg`, `b1..bD`.
 //
-// this module exposes the canonical naming convention as DATA — one match
+// this module exposes the canonical naming convention as data — one match
 // per (FieldKind, per-component index), shared by writer and
 // reader. callers ask `cons_field_names(D, regime_spec)` and get the exact
 // list of strings the on-disk layout uses.
@@ -15,12 +15,12 @@
 
 use symbi_hydro::{FieldKind, FieldSpec};
 
-/// the canonical on-disk dataset name for one COMPONENT of one FieldSpec.
+/// the canonical on-disk dataset name for one component of one FieldSpec.
 /// - `Scalar`           -> `fs.name` ("den", "nrg", "rho", ...)
 /// - `DimVector`        -> `m1..mD` for momentum, `v1..vD` for velocity, ...
 /// - `FixedVector { n }`-> `b1..bn`  (e.g., magnetic, always 3-component)
 ///
-/// the (NAME -> SUFFIX) mapping is the canonical on-disk convention — existing
+/// the (name -> suffix) mapping is the canonical on-disk convention — existing
 /// checkpoint files + every `scripts/plot_*.py` read identical paths.
 pub fn dataset_name(fs: &FieldSpec, idx: usize) -> String {
     match fs.kind {

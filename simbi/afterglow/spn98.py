@@ -3,7 +3,7 @@
 #
 # the sari, piran & narayan (1998) analytic synchrotron afterglow: the closed-form
 # spectrum + light curve of a decelerating adiabatic relativistic blast wave in a
-# uniform medium. this is the ANALYTIC BENCHMARK the numerical (catalog-integrated)
+# uniform medium. this is the analytic benchmark the numerical (catalog-integrated)
 # light curve is validated against -- it pins both the temporal slope and the
 # absolute normalization of F_nu(nu, t).
 #
@@ -12,7 +12,7 @@
 #
 # reference: sari, piran & narayan 1998, apj 497, l17 (eqs 7, 8, 11). slow cooling
 # is nu_m < nu_c (late times); fast cooling is nu_c < nu_m (early times). this is a
-# LOCAL-source benchmark (luminosity distance d_l, no cosmological convolution); run
+# local-source benchmark (luminosity distance d_l, no cosmological convolution); run
 # the comparison at z ~ 0 so SPN98's source-frame relations apply directly.
 #
 # usage:

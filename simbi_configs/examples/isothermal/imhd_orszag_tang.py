@@ -1,9 +1,9 @@
 # =============================================================================
 # imhd_orszag_tang.py
 #
-# the orszag-tang vortex in ISOTHERMAL ideal mhd (Mignone 2007), HLLD by default.
+# the orszag-tang vortex in isothermal ideal mhd (Mignone 2007), HLLD by default.
 # the isothermal closure p = cs^2 rho drops the energy equation: the primitive is
-# (rho, vx, vy, vz) with NO pressure slot. genuine 2.5d (spatial d=2, dof=3).
+# (rho, vx, vy, vz) with no pressure slot. genuine 2.5d (spatial d=2, dof=3).
 # =============================================================================
 import math
 from functools import partial
@@ -131,7 +131,7 @@ class IsothermalOrszagTang(SimbiProblem):
                 for jj in range(nj + (bn == "by")):
                     for ii in range(ni + (bn == "bx")):
                         if bn == "bx":
-                            # bx lives on the x-face: sample the TRANSVERSE y at
+                            # bx lives on the x-face: sample the transverse y at
                             # the cell center (jj+0.5), so the discrete field is
                             # symmetric about the domain center. sampling y at the
                             # edge (jj*dy) breaks the OT 180-degree point symmetry

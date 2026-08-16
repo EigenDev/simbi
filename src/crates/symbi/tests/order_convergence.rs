@@ -1,16 +1,16 @@
 // =============================================================================
 // order_convergence.rs
 //
-// a MEASURED spatial order-of-accuracy gate. every other order-sensitive check in the suite
+// a measured spatial order-of-accuracy gate. every other order-sensitive check in the suite
 // passes at first order (positivity / finiteness / edge smoke), so a silent drop to first order —
 // an unapplied reconstruction slope limiter, say — sails through unnoticed while quietly halving
 // the convergence rate.
 //
-// vehicle: a smooth uniform-pressure, uniform-velocity ENTROPY WAVE. `rho = 1 + A sin(2 pi x)`,
-// `v = V`, `p = P` (both constant) is an EXACT solution of the Euler equations — with no pressure
+// vehicle: a smooth uniform-pressure, uniform-velocity entropy wave. `rho = 1 + A sin(2 pi x)`,
+// `v = V`, `p = P` (both constant) is an exact solution of the Euler equations — with no pressure
 // gradient the momentum/energy equations are trivially satisfied and the density advects passively
 // at V. advected one full period on a periodic unit domain it returns to its initial profile, so the
-// final L1 density error IS the scheme's accumulated truncation error. halving dx must cut it by
+// final L1 density error is the scheme's accumulated truncation error. halving dx must cut it by
 // ~2^p; PLM + SSP-RK2 is second order, so the ratio is ~4. a ratio below 3 means the reconstruction
 // collapsed to first order.
 //
@@ -81,7 +81,7 @@ fn assert_second_order(solver: Solver, tag: &str) {
         ratio.log2()
     );
     // 2nd order -> ratio ~4; 1st order -> ~2. the > 3 threshold cleanly separates them and leaves
-    // margin for the smooth-problem constant. a NON-decreasing error (ratio <= 1) means the scheme
+    // margin for the smooth-problem constant. a non-decreasing error (ratio <= 1) means the scheme
     // is not even converging.
     assert!(
         e2 < e1 && ratio > 3.0,
@@ -101,16 +101,16 @@ fn adiabatic_plm_rk2_second_order_hlle() {
 }
 
 // --- PPM: the same entropy wave under SSP-RK3. the extremum-preserving interfaces --------------
-// (colella & sekora 2008) are 4th-order on smooth data INCLUDING at the sine crest and trough —
+// (colella & sekora 2008) are 4th-order on smooth data including at the sine crest and trough —
 // both the flatten-at-extremum form and the plain neighbor-range interface clamp inject O(h^2)
 // there (the interface point value legitimately exceeds both adjacent cell averages when the
 // extremum sits near a face), and either one drags the whole scheme's L1 to second order. on
 // this pure-advection exact solution the L1 error tracks the interface order: measured ratios
 // 15.7-15.9 per halving at 32..256, cfl-independent (identical at cfl 0.05).
-/// the exact CELL AVERAGE of the entropy-wave density over a width-`h` cell centered at
+/// the exact cell average of the entropy-wave density over a width-`h` cell centered at
 /// `x`: averaging `1 + A sin(2 pi x)` gives `1 + A sin(2 pi x) * sinc(pi h)`. the scheme
 /// evolves cell averages, and average vs center-point sample differ at O(h^2) — sampling
-/// the profile at centers would cap ANY measured convergence at second order, hiding a
+/// the profile at centers would cap any measured convergence at second order, hiding a
 /// third-order scheme behind the initialization. momentum and energy are linear in rho at
 /// constant v and p, so building cons from this averaged rho is exact in every field.
 fn rho_exact_avg(x: f64, h: f64) -> f64 {
@@ -186,7 +186,7 @@ fn adiabatic_ppm_rk3_beats_second_order() {
     );
 }
 
-// --- RHD (special-relativistic) — the SAME exact-solution trick, subluminal. -----------------
+// --- RHD (special-relativistic) — the same exact-solution trick, subluminal. -----------------
 // a uniform-p, uniform-v smooth density wave is an exact SRHD solution too: with no pressure
 // gradient the momentum/energy equations reduce to advection, and the conserved D = rho W (W const
 // at v const) advects at v, so the primitive rho does. v = 0.5 is subluminal; one period is t = 2.

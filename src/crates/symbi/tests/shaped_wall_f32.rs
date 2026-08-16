@@ -3,7 +3,7 @@
 //
 // the reduced-precision (f32) runtime-JIT shaped rigid wall on host: the
 // generic-precision cranelift codegen must produce f32 results physically close
-// to the f64 reference. builds the SAME sealed shaped-sphere wall in a uniform
+// to the f64 reference. builds the same sealed shaped-sphere wall in a uniform
 // stream at f64 and f32, runs one penalization on each, and asserts the f32 cons
 // + force receipt track the f64 run at f32 tolerance (the physics is correct at
 // reduced precision). this exercises the f32 field

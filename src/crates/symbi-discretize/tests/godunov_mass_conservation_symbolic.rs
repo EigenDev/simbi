@@ -37,7 +37,7 @@ fn flux_only(mut lf: LinFormR) -> LinFormR {
 }
 
 // the per-direction face-flux function `G_d = (-dt/dx_d) * mass_flux_d`, as a
-// single-term linear form at the cell's LOW face (offset 0).
+// single-term linear form at the cell's low face (offset 0).
 fn g_face(d: usize) -> LinFormR {
     let key = format!("mass_flux_{d}");
     LinFormR::single_var((key, vec![0; NDIM]), "dt").scale_rat(&RatFun::new(

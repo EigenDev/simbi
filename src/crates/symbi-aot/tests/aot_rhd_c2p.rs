@@ -1,17 +1,17 @@
 // =============================================================================
 // aot_rhd_c2p.rs
 //
-// numerical validation of the BUILD-TIME-GENERATED RHD cons->prim kernel — the
-// first ITERATIVE substrate kernel (a fixed-bound masked Newton-Raphson for the
+// numerical validation of the build-time-generated RHD cons->prim kernel — the
+// first iterative substrate kernel (a fixed-bound masked Newton-Raphson for the
 // relativistic pressure, `operators::iterate`, lowered + emitted to compiled Rust
 // via the DAG-preserving lowering). this is the proof the deep
-// iterate produces CORRECT numbers at run time.
+// iterate produces correct numbers at run time.
 //
 // two independent checks on the same compiled kernel `rhd_c2p_1d`:
-//   - ROUND-TRIP: pick analytic primitives (rho, v, p), forward-map to the
+//   - round-trip: pick analytic primitives (rho, v, p), forward-map to the
 //     conserved (D, S, tau) via the standard RHD relations, run c2p, and assert
 //     it recovers the originals. this is the physical ground truth.
-//   - REFERENCE: an independent Rust `rhd_to_primitive` (a do-while Newton
+//   - reference: an independent Rust `rhd_to_primitive` (a do-while Newton
 //     iteration run to convergence) on the same conserved
 //     states; the compiled 20-step masked unroll must match it.
 //
@@ -23,7 +23,7 @@
 
 use symbi_aot::NamedKernel;
 
-// shim binding the emitted c2p BY FIELD NAME (NamedKernel) — order-independent,
+// shim binding the emitted c2p by field name (NamedKernel) — order-independent,
 // loud + named on manifest drift. every buffer here is 1D (lo = 0).
 #[allow(non_snake_case, clippy::too_many_arguments)]
 fn rhd_c2p_1d(
@@ -113,7 +113,7 @@ const CASES: &[(f64, f64, f64)] = &[
     (1.0, -0.7, 1.0),
 ];
 
-// run the compiled kernel over the conserved states built from CASES.
+// run the compiled kernel over the conserved states built from cases.
 fn run_kernel(den: &[f64], mom: &[f64], nrg: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let n = den.len();
     let mut prim_rho = vec![0.0_f64; n];
@@ -166,9 +166,9 @@ fn rhd_c2p_round_trips_prim_to_cons() {
 
 #[test]
 fn rhd_face_flux_uniform_state_is_consistent() {
-    // HLLE consistency: for a UNIFORM field (PLM gives L == R), the HLLE flux
+    // HLLE consistency: for a uniform field (PLM gives L == R), the HLLE flux
     // equals the analytic physical flux F(U) exactly — independent of the wave
-    // speeds. so this RUNS the compiled relativistic flux kernel and checks its
+    // speeds. so this runs the compiled relativistic flux kernel and checks its
     // U(prim)/F(U) against the closed-form RHD fluxes.
     let (rho, v, p) = (1.5_f64, 0.4_f64, 0.8_f64);
     let n = 8usize;

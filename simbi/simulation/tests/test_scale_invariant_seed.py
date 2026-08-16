@@ -1,7 +1,7 @@
 # =============================================================================
 # test_scale_invariant_seed.py
 #
-# the scale-invariant velocity seed's DESIGN PROPERTY, measured on the mode table
+# the scale-invariant velocity seed's design property, measured on the mode table
 # the config emits.
 #
 # the seed exists to remove a scale mismatch: a band-limited seed lives at
@@ -13,7 +13,7 @@
 #
 #     xi = v_perp sqrt(r / GM)  and  Ma = v / cs
 #
-# is then the SAME in every radial decade, so an ignition outcome cannot depend on
+# is then the same in every radial decade, so an ignition outcome cannot depend on
 # r_acc/R_B -- which is the property that makes one endpoint pair sufficient and a
 # ladder protocol unnecessary.
 #
@@ -167,7 +167,7 @@ def test_seed_mach_number_follows_the_atmosphere_at_fixed_amplitude() -> None:
         f"the seed reaches mach {mach.max():.3f}; a seed that steepens on arrival "
         "supplies the turbulence instead of letting convection make it"
     )
-    # the atmosphere factor must actually VARY over the sampled range, or the test
+    # the atmosphere factor must actually vary over the sampled range, or the test
     # would pass on a flat profile and prove nothing about the decomposition.
     assert np.ptp(predicted) / predicted.mean() > 0.1, (
         "the sampled radii see an essentially constant v_K/cs, so this gate cannot "
@@ -249,7 +249,7 @@ def test_seed_requires_the_stratified_start() -> None:
 #
 # a non-rotating hydrostatic column at constant Theta = r <p/rho> / GM obeys
 # Theta (n + 1) = 1 exactly, so p = K rho^Gamma with Gamma = 1 + 1/n lies on
-# S = 2 Theta = 2/(n+1). that curve carries BOTH branch endpoints -- n = 1 gives
+# S = 2 Theta = 2/(n+1). that curve carries both branch endpoints -- n = 1 gives
 # S = 1, n = 3/2 gives S = 4/5 -- which is what makes the starting index a choice
 # of initial support rather than a numerical convenience, and what lets a run
 # start between the two answers instead of on top of one.

@@ -1,7 +1,7 @@
 # =============================================================================
 # refined_kh.py
 #
-# the SAME kelvin-helmholtz problem as kh.py, on a STATICALLY REFINED mesh: one
+# the same kelvin-helmholtz problem as kh.py, on a statically refined mesh: one
 # fine box over the central shear region where the vortex roll-ups live. the IC
 # is byte-identical to kh.py (so a refined run and a uniform kh.py run are the
 # same physics, only the grid differs). the hierarchy is checkpointed as level_0

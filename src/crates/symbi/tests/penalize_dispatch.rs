@@ -3,7 +3,7 @@
 //
 // the [Drain] penalization dispatch, end to end on a
 // real sim: the kernel runs over the body's declared support box only, drains
-// the masked cells in place, leaves the far field BIT-untouched, and the
+// the masked cells in place, leaves the far field bit-untouched, and the
 // reduced deltas land in the diagnostics accumulator — gas loss == body gain
 // to machine precision.
 // =============================================================================
@@ -113,11 +113,11 @@ fn penalize_drains_the_mask_and_conserves_gas_plus_body() {
     );
 }
 
-// the LEDGER LAW through the full RK evolve loop: with periodic boundaries the
+// the ledger law through the full RK evolve loop: with periodic boundaries the
 // drain is the only mass sink, so the accumulated per-step receipts must equal
 // the gas's total conserved loss. an RK2 stage-weight over-count double-counts
 // the receipts (measured 1.5x on bondi), and a stage-blended penalize placement
-// fails the same way — the penalize runs ONCE per step after the RK combination
+// fails the same way — the penalize runs once per step after the RK combination
 // precisely so this holds.
 #[test]
 fn ledger_equals_gas_loss_through_the_rk_loop() {
@@ -243,7 +243,7 @@ fn iso_dispatch_drains_directly() {
     );
 }
 
-// the ANGULAR-MOMENTUM receipt: the reduced torque_delta is
+// the angular-momentum receipt: the reduced torque_delta is
 // the moment of the gas's momentum loss about the body center, machine-exact.
 // gas in rigid rotation about the body makes the receipt decisively nonzero
 // (a drain removes the local angular momentum along with the mass).
@@ -327,7 +327,7 @@ fn torque_receipt_equals_the_moment_of_the_momentum_loss() {
 
 // the porous surface through the dispatch: the body's
 // declared SurfaceSpec picks the kernel, and the porosity endpoints hold
-// end to end — p = 0 books EXACTLY zero mass receipts (a sealed wall absorbs
+// end to end — p = 0 books exactly zero mass receipts (a sealed wall absorbs
 // momentum but never mass), p > 0 drains.
 #[test]
 fn porous_surface_endpoints_hold_through_the_dispatch() {
@@ -471,7 +471,7 @@ fn porous_absorption_converges_under_grid_refinement() {
     );
 }
 
-// a RIGID (non-accreting) body reaches the penalize dispatch through the mask_radius
+// a rigid (non-accreting) body reaches the penalize dispatch through the mask_radius
 // gate: mask_radius is defined for every body, while accretion_radius is None for a
 // non-accreting one. it penalizes (the wall pushes back) while removing exactly zero
 // mass, and the feedback ledger consolidates a non-black-hole body without panicking.
@@ -536,7 +536,7 @@ fn rigid_wall_non_accreting_penalizes_without_draining() {
     );
 }
 
-// an ARBITRARY-SHAPE rigid body: a box. its penalization kernel is runtime-built +
+// an arbitrary-shape rigid body: a box. its penalization kernel is runtime-built +
 // cranelift-JIT'd (the box geometry baked as constants, the body position a runtime scalar), then
 // executed over the shape's bounding box through the standalone `run_parallel_raw`. it must
 // penalize (the wall pushes back) while removing exactly zero mass — the full host runtime-JIT path
@@ -598,7 +598,7 @@ fn shaped_box_rigid_wall_penalizes_via_runtime_jit() {
     );
 }
 
-// the ISO shaped wall: an arbitrary-shape rigid obstacle in an energy-free flow (the common
+// the iso shaped wall: an arbitrary-shape rigid obstacle in an energy-free flow (the common
 // obstacle case). the runtime-JIT'd iso kernel drops the nrg channel; the sealed wall still
 // penalizes (force) and removes no mass.
 #[test]
@@ -660,7 +660,7 @@ fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
     );
 }
 
-// TWO-WAY rotational coupling: a free (two_way) spinner in STILL fluid is dragged toward rest —
+// two-way rotational coupling: a free (two_way) spinner in still fluid is dragged toward rest —
 // the reaction torque of the gas it spins up decelerates it. one evolve step (dispatch fills the
 // torque diagnostic, apply_body_deltas integrates I domega = torque dt) must reduce omega.
 // this also pins the sign of the coupling.
@@ -713,7 +713,7 @@ fn two_way_spin_is_dragged_to_a_stop() {
     assert!(omega > 0.0, "one step should not reverse the spin: {omega}");
 }
 
-// force-driven TRANSLATION: a two-way rigid obstacle in a +x flow is pushed downstream — the drag
+// force-driven translation: a two-way rigid obstacle in a +x flow is pushed downstream — the drag
 // it exerts on the gas reacts back (mass dv = force_delta dt), so its velocity and position advance
 // in the flow direction over one evolve step.
 #[test]
@@ -771,7 +771,7 @@ fn two_way_body_is_pushed_downstream_by_the_flow() {
     );
 }
 
-// ARBITRARY-AXIS 3D spin: a box spinning about the X axis in still 3D fluid
+// arbitrary-axis 3D spin: a box spinning about the X axis in still 3D fluid
 // must book its reaction torque about X — proving the mask uses Rodrigues(axis, angle) and the wall
 // velocity is omega x r about the config axis.
 #[test]
@@ -827,7 +827,7 @@ fn spinning_box_about_x_axis_imparts_torque_3d() {
     );
 }
 
-// an arbitrary-shape rigid wall on a CURVILINEAR (r-phi disk) grid: the mask distance is physical
+// an arbitrary-shape rigid wall on a curvilinear (r-phi disk) grid: the mask distance is physical
 // (the coordinate centroid maps to Cartesian), and off-Cartesian the dispatch runs the whole
 // interior. a box at an off-origin Cartesian point must penalize the flow (mass 0, force nonzero).
 #[test]
@@ -891,9 +891,9 @@ fn shaped_box_rigid_wall_cylindrical_penalizes() {
     );
 }
 
-// a SPINNING rigid box in initially-STILL fluid must drag the gas around: the no-slip surface
+// a spinning rigid box in initially-still fluid must drag the gas around: the no-slip surface
 // relaxes the velocity toward omega x r, so the wall imparts angular momentum and books a nonzero
-// reaction torque about z. an identical NON-spinning wall in still fluid imparts ~nothing.
+// reaction torque about z. an identical non-spinning wall in still fluid imparts ~nothing.
 #[test]
 fn spinning_box_wall_imparts_torque_to_still_fluid() {
     use symbi_ib::SurfaceSpec;
@@ -949,7 +949,7 @@ fn spinning_box_wall_imparts_torque_to_still_fluid() {
         "the spinning wall imparted no torque to the still fluid: {tau}"
     );
 
-    // baseline: the SAME wall with no spin leaves still fluid still — negligible torque.
+    // baseline: the same wall with no spin leaves still fluid still — negligible torque.
     let still = build(0.0);
     dispatch_penalize(&still, 1e-3, GAMMA, 1.0);
     let d0 = still.immersed.as_ref().unwrap().diagnostics.consolidate();
@@ -964,14 +964,14 @@ fn spinning_box_wall_imparts_torque_to_still_fluid() {
     );
 }
 
-// the (r, z) AXISYMMETRIC section: an on-axis sphere sink is the axisymmetric
+// the (r, z) axisymmetric section: an on-axis sphere sink is the axisymmetric
 // point body. the mask distance is the plain euclidean |(r, z - z0)| (identity
 // section embedding), the cell volume is the ring measure r dr dz, the net
 // world force is z only (ring-radial cancels identically), and the axis torque
 // is r * f_phi from the drained out-of-plane momentum. gates:
 // - mass ledger: gas loss == the booked receipt to machine precision;
 // - localization: cells beyond the mask ball are bit-untouched;
-// - a swirling gas (v_phi != 0, dof = 3) books a POSITIVE axis torque (the
+// - a swirling gas (v_phi != 0, dof = 3) books a positive axis torque (the
 //   sink absorbs prograde angular momentum) and zero radial world force.
 #[test]
 fn rz_on_axis_sink_drains_conserves_and_books_axis_torque() {
@@ -1007,7 +1007,7 @@ fn rz_on_axis_sink_drains_conserves_and_books_axis_torque() {
             racc,
         )));
 
-    // ring-measure cell volume mirror: the FULL ring, dv = pi (r_hi^2 - r_lo^2) dz —
+    // ring-measure cell volume mirror: the full ring, dv = pi (r_hi^2 - r_lo^2) dz —
     // the same finite-volume weight the kernel's geometry scaffold integrates.
     let ilo: [isize; 2] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
     let dv = |c: [isize; 2]| -> f64 {

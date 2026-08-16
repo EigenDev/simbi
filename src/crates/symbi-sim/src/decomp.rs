@@ -4,8 +4,8 @@
 // same-level domain decomposition: halo exchange between neighboring subdomains on a
 // grid, behind a transport interface.
 //
-// the exchange LOGIC (which cells move where) is fixed: a decomposed run reproduces the
-// monolithic one. the TRANSPORT (how the bytes move) varies
+// the exchange logic (which cells move where) is fixed: a decomposed run reproduces the
+// monolithic one. the transport (how the bytes move) varies
 // behind `HaloTransport`: a local memory copy, a gpu peer copy, or an mpi
 // pack/send/unpack. swapping the transport never touches the decomposition.
 //
@@ -35,11 +35,11 @@ use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock, with_device};
 
 /// move `src` over `src_region` into `dst` over `dst_region`, cell-for-cell. the two
 /// regions have identical shape (same per-axis extents); the transport pairs them by
-/// iteration order. `src_dev`/`dst_dev` are the LOGICAL devices the two fields live on --
+/// iteration order. `src_dev`/`dst_dev` are the logical devices the two fields live on --
 /// the one piece of device identity a cross-device exchange genuinely needs (the rest of the
 /// code uses the ambient current-device model). single-device transports
 /// (`LocalCopy`, `DeviceCopy`, `StagedCopy`) ignore them; `PeerCopy` uses them to drive
-/// a device-to-device peer copy between the two devices. the transport is BACKEND-GENERIC —
+/// a device-to-device peer copy between the two devices. the transport is backend-generic —
 /// `symbi_xpu::memcpy_peer` resolves to `cuMemcpyPeer` on nvidia and `hipMemcpyPeer` on amd — and it
 /// is correct whether or not peer access could be enabled for the pair: without it the driver stages
 /// through host memory, which costs bandwidth but never correctness.
@@ -100,7 +100,7 @@ extern "C" __global__ void halo_copy(
 // strip geometry is fixed across steps, so this reuses the same device allocations and
 // avoids a `cuMemAllocManaged` per `copy_region` (the dominant per-exchange cost). thread-local
 // so it needs no Send/Sync on the raw device pointers; the parallel test threads each pool
-// their own. the per-cell index WRITE still happens each call (cheap host memory writes).
+// their own. the per-cell index write still happens each call (cheap host memory writes).
 #[cfg(feature = "gpu")]
 struct HaloIdxBufs {
     sidx: MemoryBlock<DeviceMemory>,
@@ -222,13 +222,13 @@ fn ghost_strip<const D: usize>(
     strip
 }
 
-/// every per-cell DATA component a checkpoint needs: the conserved set (den, momentum, energy)
+/// every per-cell data component a checkpoint needs: the conserved set (den, momentum, energy)
 /// plus the primitives (rho, velocity, pressure), and -- for MHD -- the cell-centered B `bcell`
 /// (the checkpoint writer reads it for both the `mag` conserved slot and the `bcell` primitive).
 /// used by `gather_interiors` to reassemble a decomposed run into one global store for output --
 /// the gathered global then writes through the existing single-grid checkpoint path unchanged.
-/// the STAGGERED `bface` lives on a face domain, so it is gathered separately
-/// by `gather_faces`. the cell-centered set is DERIVED from the store's populated slots
+/// the staggered `bface` lives on a face domain, so it is gathered separately
+/// by `gather_faces`. the cell-centered set is derived from the store's populated slots
 /// (`ConsFields::exchange_fields` + `PrimFields::exchange_fields`), so an optional field like the
 /// passive scalar rides along automatically and no hand-listed set can drop it. hydro/iso stores
 /// have no `mhd`, so the bcell tail is empty there; global and tiles share a regime and dye opt-in,
@@ -244,7 +244,7 @@ fn data_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     fields
 }
 
-/// reassemble a decomposed run into one full-size `global` store: copy each tile's INTERIOR
+/// reassemble a decomposed run into one full-size `global` store: copy each tile's interior
 /// (cons + prim) into the matching sub-box of `global`. the inverse of the
 /// tile build's IC scatter; the gathered `global` is then written by the existing single-grid
 /// checkpoint writer, so decomposed output is byte-identical in format to a single-device run.
@@ -278,7 +278,7 @@ pub fn gather_interiors<const D: usize, const DOF: usize, M: MemorySpace>(
     }
 }
 
-/// gather the STAGGERED face-normal B `bface[d]` from every tile into `global` (MHD only). the
+/// gather the staggered face-normal B `bface[d]` from every tile into `global` (MHD only). the
 /// cell gather (`gather_interiors`) cannot carry `bface`: each axis-`d` face field lives on the
 /// interior face domain (cells extended +1 on `d`). for each tile and axis,
 /// copy the tile's interior face box into the matching sub-box of the global face domain. the
@@ -365,17 +365,17 @@ pub fn gather_faces<const D: usize, const DOF: usize, M: MemorySpace>(
     }
 }
 
-/// the CELL-CENTERED components the flux stage reconstructs from, DERIVED from the store's
+/// the cell-centered components the flux stage reconstructs from, derived from the store's
 /// populated primitive slots (`PrimFields::exchange_fields`): rho, each velocity, pressure, the
 /// passive scalar when present, and -- for MHD -- the cell-centered magnetic field `bcell` (the
 /// reconstruction reads it like any other primitive). hydro/iso stores have no `mhd`, so the bcell
-/// tail is empty there and the exchange is unchanged. the STAGGERED `bface` is exchanged separately
+/// tail is empty there and the exchange is unchanged. the staggered `bface` is exchanged separately
 /// (`bface_strips`), since its faces live on a different domain than the cells.
-/// which field set a cut exchange moves. the steady-state loop exchanges PRIMITIVES (plus the
+/// which field set a cut exchange moves. the steady-state loop exchanges primitives (plus the
 /// mhd cell/face fields): the flux stage reconstructs from prim, and its doc's invariant --
 /// "cons ghosts are never read by the flux stage" -- is true for every stage of the evolve loop.
-/// CONSTRUCTION breaks it: seeding a fine level whose coverage touches a cut prolongs the
-/// CONSERVED components through the root's cut ghosts, so a decomposed seeding pass must first
+/// construction breaks it: seeding a fine level whose coverage touches a cut prolongs the
+/// conserved components through the root's cut ghosts, so a decomposed seeding pass must first
 /// move the conserved set. one strip computation serves both; only the field list differs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ExchangeSet {
@@ -403,9 +403,9 @@ fn prim_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     fields
 }
 
-/// the ghost strip on a STAGGERED face field's own allocated domain (for MHD `bface`). mirrors
+/// the ghost strip on a staggered face field's own allocated domain (for MHD `bface`). mirrors
 /// `ghost_strip` but takes the field's own `alloc` domain, and
-/// extends the interior by one on the field's NORMAL axis `d` (a face field has one extra face
+/// extends the interior by one on the field's normal axis `d` (a face field has one extra face
 /// past the last cell on its normal axis). used only for `d != axis`, where `axis` is transverse
 /// to the face and indexes like cells.
 fn face_ghost_strip<const D: usize>(
@@ -493,10 +493,10 @@ fn exchange_faces_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
         transport.copy_region(fl, &lo_src, fr, &hi_ghost, lo_dev, hi_dev);
     }
 
-    // MHD: exchange the STAGGERED face-B transverse halos. only `bface[d]` with `d != axis`
+    // MHD: exchange the staggered face-B transverse halos. only `bface[d]` with `d != axis`
     // carries a halo on `axis` (the face is transverse to the cut, so `axis` indexes it like
-    // cells); fill that halo from the neighbor exactly like the cell ghosts. the NORMAL face
-    // `bface[axis]` (the shared interface face) is NOT copied: it is seeded identically and both
+    // cells); fill that halo from the neighbor exactly like the cell ghosts. the normal face
+    // `bface[axis]` (the shared interface face) is not copied: it is seeded identically and both
     // tiles apply the same CT curl -- the consistent edge emfs come from the exchanged transverse
     // halos + prim + bcell -- so it stays bit-identical and div(B) is preserved.
     if set == ExchangeSet::Cons {
@@ -504,10 +504,10 @@ fn exchange_faces_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     }
     if let (Some(lo_mhd), Some(hi_mhd)) = (lo.fields.mhd.as_ref(), hi.fields.mhd.as_ref()) {
         for d in 0..D {
-            // the NORMAL face (d == axis) is the shared interface, owned by both tiles. it must
-            // NOT be copied: it is the result of each tile's CT curl, and the discrete div(B)=0
+            // the normal face (d == axis) is the shared interface, owned by both tiles. it must
+            // not be copied: it is the result of each tile's CT curl, and the discrete div(B)=0
             // depends on it being the curl output (overwriting it injects a monopole -- confirmed
-            // empirically). only the TRANSVERSE faces carry a halo across this cut.
+            // empirically). only the transverse faces carry a halo across this cut.
             if d == axis {
                 continue;
             }
@@ -527,7 +527,7 @@ fn exchange_faces_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     }
 }
 
-// prime factors of `n` in DESCENDING order (largest first), so the decomposition places the
+// prime factors of `n` in descending order (largest first), so the decomposition places the
 // big cuts before the small ones onto the longest axes.
 fn prime_factors_desc(mut n: usize) -> Vec<usize> {
     let mut factors = Vec::new();
@@ -547,7 +547,7 @@ fn prime_factors_desc(mut n: usize) -> Vec<usize> {
 }
 
 /// choose a per-axis tile count whose product is `n_parts`, minimizing halo surface by cutting
-/// the LONGEST axes first, subject to each axis count evenly dividing that axis's cells. errors
+/// the longest axes first, subject to each axis count evenly dividing that axis's cells. errors
 /// if no such factorization exists (e.g. a prime `n_parts` that divides no axis). `n_parts == 1`
 /// is the monolithic `[1; D]`.
 ///
@@ -593,7 +593,7 @@ pub fn decompose_grid<const D: usize>(
 }
 
 // row-major (axis-0 slowest) flat index over a box of size `dims`, and its inverse. the
-// tile grid uses this ONE convention for both construction and neighbor lookup (a `Domain`
+// tile grid uses this one convention for both construction and neighbor lookup (a `Domain`
 // is avoided here on purpose: its iter order and flat_index order differ, which is a
 // footgun for tile bookkeeping; `Domain` does its job at the cell level in `exchange_faces`).
 pub fn flatten<const D: usize>(idx: [usize; D], dims: [usize; D]) -> usize {
@@ -679,7 +679,7 @@ fn exchange_grid_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
     }
 }
 
-/// exchange the CONSERVED-field cut halos. construction-time only: the evolve loop never reads
+/// exchange the conserved-field cut halos. construction-time only: the evolve loop never reads
 /// cons ghosts, but seeding a fine level whose coverage touches a cut prolongs the conserved
 /// components through them. see [`ExchangeSet`].
 pub fn exchange_grid_cons<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
@@ -755,7 +755,7 @@ fn exchange_ito_coefficients<const D: usize, const DOF: usize, M: MemorySpace, T
     }
 }
 
-// drain every UNIQUE tile device's context so async writes are visible to a consumer running
+// drain every unique tile device's context so async writes are visible to a consumer running
 // in another context (the cross-device read barrier). no-op on a host backend. mirrors the
 // equivalence test's `sync_devices`.
 #[cfg(feature = "gpu")]
@@ -775,9 +775,9 @@ pub fn drain_devices<M: MemorySpace>(devices: &[i32]) {
 #[cfg(not(feature = "gpu"))]
 pub fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
 
-/// drive a decomposed simulation: `stores.len()` tiles evolved in LOCKSTEP at a shared dt,
+/// drive a decomposed simulation: `stores.len()` tiles evolved in lockstep at a shared dt,
 /// with a same-level halo exchange after each ssp stage. the multi-gpu python entry and the
-/// decomposition-equivalence checks drive this same loop, so there is ONE tested path.
+/// decomposition-equivalence checks drive this same loop, so there is one tested path.
 ///
 /// - `stores[i]` / `kernels[i]`: tile i's field store + kernel set, in flat tile order
 ///   (matching `flatten(tile_coord, counts)`).
@@ -790,13 +790,13 @@ pub fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
 ///   callback can read coherent tile state for output.
 ///
 /// the global dt is the min over all tiles' cfl -- identical to a monolithic run, since the
-/// union of the tile interiors is the monolithic interior. rk2 exchanges BETWEEN stages so the
+/// union of the tile interiors is the monolithic interior. rk2 exchanges between stages so the
 /// corrector reconstructs from each neighbor's stage-updated interior.
-/// the per-step immersed-body bookkeeping for a DECOMPOSED run. each tile's `body_feedback` has
-/// already reduced its LOCAL interior force/torque/accreted-mass into its own (interior-mutable)
-/// diagnostics; this SUMS those partials across tiles into a global per-body delta (the true
+/// the per-step immersed-body bookkeeping for a decomposed run. each tile's `body_feedback` has
+/// already reduced its local interior force/torque/accreted-mass into its own (interior-mutable)
+/// diagnostics; this sums those partials across tiles into a global per-body delta (the true
 /// disk-on-body reaction, == the monolithic single-grid reduction since the tile interiors
-/// partition the global interior), then applies the IDENTICAL global delta to EVERY tile's bodies +
+/// partition the global interior), then applies the identical global delta to every tile's bodies +
 /// advances the prescribed binary orbit identically + resets each accumulator. identical input ->
 /// identical body state, so all tiles stay in lockstep and the next step's body_source reads the
 /// same body positions everywhere. no-op for tiles without bodies.
@@ -826,7 +826,7 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
             continue;
         };
         apply_body_deltas(&mut im.bodies, &global, dt);
-        // bonded fragments: the cross-tile-summed fluid loads drive the DEM subcycle (bonds +
+        // bonded fragments: the cross-tile-summed fluid loads drive the dem subcycle (bonds +
         // contact + mutual gravity + gas drag), replicated identically on every tile. the bodies
         // and the summed external loads are identical on every tile, so the fragment motion is
         // too -- the decomposed analog of the single-grid `evolve_bodies` fragment step. a fragment
@@ -1317,7 +1317,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         [lo, hi]
     }));
 
-    // a fresh SHARED reborrow of the tiles for the field phases (kernels / exchange / checkpoint).
+    // a fresh shared reborrow of the tiles for the field phases (kernels / exchange / checkpoint).
     // rebuilt per phase so the per-step body bookkeeping can take `&mut` between phases -- the
     // bodies live on the same FieldStore the fields do, so the shared slice must be dropped before
     // `step_bodies_decomposed` mutates them.
@@ -1339,9 +1339,9 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         }
         drain_devices::<M>(devices);
         exchange_grid(&sh, counts, devices, transport);
-        // re-fill PHYSICAL boundary ghosts AFTER the exchange. at a corner where a domain-boundary
+        // re-fill physical boundary ghosts after the exchange. at a corner where a domain-boundary
         // (outflow/reflect) meets a tile cut, the boundary ghost is derived from cells that include
-        // the cut halo -- only valid post-exchange. with ghost_fill BEFORE the exchange, that corner
+        // the cut halo -- only valid post-exchange. with ghost_fill before the exchange, that corner
         // reads a stale (unexchanged) cut cell; for hydro it is harmless (uniform corners), but for
         // mhd the edge-EMF there is spurious and poisons the RK2 corrector. no-op interior cost.
         for i in 0..n {
@@ -1374,7 +1374,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         };
         // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
         // scalars from the tile's motion state, which must hold a(t) at the stage's
-        // shu-osher ENTRY time — the same per-stage refresh the single-grid step performs,
+        // shu-osher entry time — the same per-stage refresh the single-grid step performs,
         // applied in lockstep on every tile (identical inputs -> identical a). `a` is
         // restored to the step-entry value after the stages; the canonical step advance
         // lives at the step tail. static meshes assign a_n back to itself — no change.
@@ -1421,7 +1421,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     );
                 }
                 let sh = shared!();
-                // the stage TAG is minted canonically inside the fold
+                // the stage tag is minted canonically inside the fold
                 // (stage_tag: euler = 0, rk2 = 1 then 2). a per-driver `sidx + 1`
                 // instead labels forward-euler as tag 1, which is the rk2-predictor
                 // identity — the shared fold makes that divergence unrepresentable.
@@ -1431,17 +1431,17 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                         // / post_godunov are the MHD constrained-transport hooks; they are no-op
                         // defaults for hydro + iso, so this is byte-identical to the prior sequence
                         // there, and drives the CT curl (edge emf -> bface -> bcell) for mhd.
-                        // snapshot_stage / source_apply are the ADDITIVE (non-fused) source pass: gated
+                        // snapshot_stage / source_apply are the additive (non-fused) source pass: gated
                         // on `has_additive_source`, so source-free runs of every regime skip them and
                         // stay byte-identical. body_source is the forward immersed-body pass (gravity +
-                        // accretion sink), POINTWISE from the body's GLOBAL position so each tile
+                        // accretion sink), pointwise from the body's global position so each tile
                         // applies it to its own cells -- no cross-tile coupling. all of these are
                         // pointwise/local; the only cross-tile work is the post-stage halo exchange.
                         // the shared stage table (symbi-sim::stage): identical
                         // phase sequence to every other driver. this loop never
                         // elides the stage-input copy (no cross-tile alias
                         // tracking); the halo exchange + second ghost fill
-                        // follow OUTSIDE the fold — the decomposed sequence's
+                        // follow outside the fold — the decomposed sequence's
                         // documented delta.
                         crate::stage::fold_stage(
                             sh[i],
@@ -1531,7 +1531,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 break 'attempt injection_ledgers;
             }
             // per-tile rollback restores the fields and each tracer's step-entry ancestry, but the
-            // stage loop MIGRATES tracer records between tiles as they cross a cut. a migrated
+            // stage loop migrates tracer records between tiles as they cross a cut. a migrated
             // record now lives in a different tile's storage and no per-tile restore puts it back.
             assert!(
                 !has_discrete_tracers && !has_continuous_tracers,
@@ -1676,12 +1676,12 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     });
                 horizon_receipt = Some((index, mdot, edot));
             }
-            // backward immersed-body feedback (per STEP, after all stages): each tile reduces its
-            // LOCAL interior force/torque/accreted-mass into its own accumulator. the cross-tile sum
+            // backward immersed-body feedback (per step, after all stages): each tile reduces its
+            // local interior force/torque/accreted-mass into its own accumulator. the cross-tile sum
             // + the prescribed-orbit advance happen in `step_bodies_decomposed` below, which needs
-            // `&mut` -- so `sh` (a shared reborrow of `stores`) MUST be dropped first.
+            // `&mut` -- so `sh` (a shared reborrow of `stores`) must be dropped first.
             if has_bodies {
-                // the wall relaxation's Alfven stiffness c_a2 = max|B|^2/rho is a GLOBAL max over
+                // the wall relaxation's Alfven stiffness c_a2 = max|B|^2/rho is a global max over
                 // the domain; reduce the per-tile maxima and publish the global value to every tile
                 // so a magnetized wall straddling a cut relaxes at the monolithic rate (a per-tile
                 // local max would diverge from the monolithic single-grid run). inert (0) off MHD.
@@ -1701,7 +1701,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                         .collect();
                 }
                 for i in 0..n {
-                    // IBM surface physics ONCE per step, after all stages
+                    // IBM surface physics once per step, after all stages
                     // (receipt == removal; see evolve.rs), then the feedback —
                     // gated like the other drivers: only bodies whose dynamics
                     // consume the reduction (two-way or accreting) pay for it.
@@ -1763,7 +1763,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         // every tile -> identical scale factors; the cuts sit at fixed comoving indices, so the
         // halo exchange is unaffected). the tile time feeds time-dependent driven-boundary
         // prescriptions and the checkpoint metadata. the homologous linear advance matches the
-        // single-grid step; a traced motion law is then sampled EXACTLY at the new time
+        // single-grid step; a traced motion law is then sampled exactly at the new time
         // (a constant-rate extrapolation would overshoot a decelerating mesh).
         for s in stores.iter_mut() {
             advance_state_clock(&mut **s, dt);
@@ -1840,9 +1840,9 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// staged device transport: gather the strided strip into a CONTIGUOUS device buffer, then
+/// staged device transport: gather the strided strip into a contiguous device buffer, then
 /// scatter it into the destination. on a single device the buffer is the staging area
-/// (gather then scatter, no move). ACROSS devices the contiguous buffer is exactly what a
+/// (gather then scatter, no move). across devices the contiguous buffer is exactly what a
 /// a peer copy over the intra-node device fabric moves between
 /// the two ranks -- so this validates the pack/unpack halves of the multi-gpu transport on
 /// a single card; only the move in the middle is added on real hardware. host fallback for
@@ -1918,7 +1918,7 @@ impl HaloTransport for StagedCopy {
                     .expect("halo_gather launch failed");
             }
 
-            // MOVE: single device -- the buffer IS the staging, nothing to move. across devices
+            // move: single device -- the buffer is the staging, nothing to move. across devices
             // this is where the peer copy moves `buf` to the neighbor's
             // buffer before the scatter runs there.
 
@@ -1945,7 +1945,7 @@ impl HaloTransport for StagedCopy {
     }
 }
 
-// pooled staging buffers for `PeerCopy`, one set PER logical device: the index array (a strip
+// pooled staging buffers for `PeerCopy`, one set per logical device: the index array (a strip
 // is gathered/scattered on its own device) and the contiguous f64 buffer the peer move
 // transfers. allocated in the owning device's context so each buffer is resident on its gpu.
 #[cfg(feature = "gpu")]
@@ -1985,7 +1985,7 @@ thread_local! {
         const { std::cell::RefCell::new([[-1i8; MAX_GPUS]; MAX_GPUS]) };
 }
 
-/// can logical device `src` DIRECTLY peer-access `dst`? memoized. false when they fold onto the
+/// can logical device `src` directly peer-access `dst`? memoized. false when they fold onto the
 /// same physical card (a device cannot peer with itself) or there is no p2p link -- in which
 /// case `PeerCopy` stages over managed memory instead. this is the single switch that makes one
 /// transport correct on every machine.
@@ -2029,9 +2029,9 @@ pub fn enable_peer_mesh(_devices: &[i32]) {}
 /// the cross-device halo transport: gather the strip into the source
 /// device's contiguous buffer, peer-copy it to the destination device's buffer over the
 /// intra-node device fabric, then scatter it into the destination strip. the gather and
-/// scatter ARE `StagedCopy`'s proven halves; only the peer move in the middle is new. when
+/// scatter are `StagedCopy`'s proven halves; only the peer move in the middle is new. when
 /// `src_dev == dst_dev` there is nothing to move across, so it defers to the proven
-/// single-device `StagedCopy`. host fallback for a cpu backend. NOT exercisable on one gpu (a
+/// single-device `StagedCopy`. host fallback for a cpu backend. not exercisable on one gpu (a
 /// device cannot peer with itself); the equivalence test runs it on a real multi-gpu node.
 #[cfg(feature = "gpu")]
 pub struct PeerCopy;
@@ -2052,8 +2052,8 @@ impl HaloTransport for PeerCopy {
             return;
         }
         // fall back to the staged copy (contiguous gather/scatter over managed memory, correct
-        // for ANY device pair) unless the two logical devices can DIRECTLY peer. this is the
-        // universal-transport invariant: the SAME `PeerCopy` works on one card (logical devices
+        // for any device pair) unless the two logical devices can directly peer. this is the
+        // universal-transport invariant: the same `PeerCopy` works on one card (logical devices
         // fold onto the same physical gpu -> no peer -> staged), on a node whose devices can peer
         // (direct fast path), and on a node without peer access (staged) -- for any gpu count, no
         // machine-specific code. only a genuine cross-device link takes the peer path below.

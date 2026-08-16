@@ -3,7 +3,7 @@
 //
 // the curvilinear twin of `sealed_column_unclamped`: the balanced triple
 // (reconstruction + area-weighted equilibrium-pressure source + balance-aware
-// ghosts) holding a sealed, stagnant, strongly stratified RADIAL column on the
+// ghosts) holding a sealed, stagnant, strongly stratified radial column on the
 // spherical and cylindrical charts. the chart is what changes the statement:
 // the momentum update now carries the area-weighted pressure flux divergence
 // together with the geometric pressure source `p (A_hi - A_lo)/V`, and the equilibrium
@@ -13,12 +13,12 @@
 //   S_m = [A_hi (p_eq(phi_hi) - p_eq(phi_c)) - A_lo (p_eq(phi_lo) - p_eq(phi_c))] / V
 //
 // with A/V the same `cell_geometry` factors the divergence and the geometric
-// source use. the PLAIN arm at the same clock is each gate's positive control:
+// source use. the plain arm at the same clock is each gate's positive control:
 // its analytic rho*g source mismatches the discrete pressure gradient at
 // truncation order and its mirrored ghosts kick the walls, so it must vent
 // measurably or the balanced arm's stagnation proves nothing.
 //
-// the column is the isentrope of the PLUMMER-SOFTENED potential of a central
+// the column is the isentrope of the plummer-softened potential of a central
 // point mass at the chart origin -- the same `body_potential` family the
 // reconstruction, source and ghosts all evaluate, so the only remaining
 // imbalance is roundoff.
@@ -60,7 +60,7 @@ fn phi(r: f64) -> f64 {
 
 /// the isentropic column in hydrostatic balance against the softened field, from the
 /// bernoulli invariant `gamma K0/(gamma-1) rho^(gamma-1) + phi = const`, normalized to
-/// `rho = 1` at the outer wall (r = 2). the hydrostatic ODE `dp/dr = -rho dphi/dr`
+/// `rho = 1` at the outer wall (r = 2). the hydrostatic ode `dp/dr = -rho dphi/dr`
 /// carries no chart factor -- the geometric terms of a radial momentum balance cancel
 /// between the area-weighted divergence and the geometric source -- so one profile
 /// serves both charts.
@@ -110,7 +110,7 @@ macro_rules! sealed_radial_gate {
                         symbi_algebra::Tensor::new([0.0]),
                         symbi_algebra::Tensor::zeros(),
                         GM,
-                        // pointlike mask; SOFT rides the softening slot so the body's
+                        // pointlike mask; soft rides the softening slot so the body's
                         // field is the same plummer potential the column is built from.
                         1.0e-6,
                         SOFT,

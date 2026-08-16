@@ -1,14 +1,14 @@
 // =============================================================================
 // boundary_term.rs
 //
-// carrier-generic GHOST-CELL FILLS for the classical boundary conditions, written
-// ONCE over `S: Scalar` — evaluated at S=f64 (the analytical reference) and traced
-// at S=Gv (the rendered ghost-fill kernel) from the SAME definition, the boundary
+// carrier-generic ghost-cell fills for the classical boundary conditions, written
+// once over `S: Scalar` — evaluated at S=f64 (the analytical reference) and traced
+// at S=Gv (the rendered ghost-fill kernel) from the same definition, the boundary
 // analogue of the source lifts in `source_term.rs`.
 //
-// the existing lattice-map ghost fills are the two DEGENERATE members of this family:
-//   - a grade-0 COPY at the outflow edge cell IS zero-gradient Neumann (q = 0).
-//   - a REFLECT (mirror + normal-sign flip) about the wall IS the homogeneous
+// the existing lattice-map ghost fills are the two degenerate members of this family:
+//   - a grade-0 copy at the outflow edge cell is zero-gradient Neumann (q = 0).
+//   - a reflect (mirror + normal-sign flip) about the wall is the homogeneous
 //     Dirichlet member (the wall value is held at 0 for the normal component).
 // `neumann_ghost` / `robin_ghost` generalize these to a prescribed normal gradient
 // and a prescribed mixed (Robin) relation, so the ghost value is a function of the
@@ -16,7 +16,7 @@
 // coefficients — no new access pattern beyond the edge read the outflow map already
 // performs.
 //
-// conventions (n = OUTWARD unit normal; the ghost cell lies along +n from the edge):
+// conventions (n = outward unit normal; the ghost cell lies along +n from the edge):
 //   - `dist >= 0`  : edge-cell-center -> ghost-cell-center separation along n.
 //   - `h    >  0`  : same separation used as the face-centered finite difference
 //                    stencil width for the Robin normal derivative.
@@ -26,7 +26,7 @@
 
 use crate::Scalar;
 
-/// NEUMANN ghost fill — prescribe the OUTWARD normal derivative `dU/dn = q` at the boundary.
+/// neumann ghost fill — prescribe the outward normal derivative `dU/dn = q` at the boundary.
 /// given the boundary-adjacent interior ("edge") value `u_edge` and the outward edge->ghost
 /// separation `dist >= 0`, the linear extrapolation
 ///   `U_ghost = u_edge + q * dist`
@@ -36,8 +36,8 @@ pub fn neumann_ghost<S: Scalar>(u_edge: S, q: S, dist: S) -> S {
     u_edge + q * dist
 }
 
-/// ROBIN ghost fill — prescribe the mixed relation `a*U_face + b*(dU/dn) = c` at the boundary
-/// FACE, with the face midway between the edge interior cell and the ghost cell (separation `h`
+/// robin ghost fill — prescribe the mixed relation `a*U_face + b*(dU/dn) = c` at the boundary
+/// face, with the face midway between the edge interior cell and the ghost cell (separation `h`
 /// along the outward normal). approximating the face state and normal derivative by the
 /// two-point stencil
 ///   `U_face = (u_edge + U_ghost)/2`,   `dU/dn = (U_ghost - u_edge)/h`

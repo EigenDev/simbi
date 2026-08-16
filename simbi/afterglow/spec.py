@@ -2,10 +2,10 @@
 # spec.py
 #
 # the dimensionful + observation spec for afterglow post-processing. the sim is
-# SCALE-FREE; this module is the single source of dimensionful truth, split in two:
+# scale-free; this module is the single source of dimensionful truth, split in two:
 # - SystemManifest: the physical system (code->cgs scales, regime), auto-discovered
 #   as `system.yaml` next to the checkpoints (config-emitted) or hand-written.
-# - ObserverParams: the OBSERVATION choices (redshift, distance, microphysics,
+# - ObserverParams: the observation choices (redshift, distance, microphysics,
 #   frequencies) — a separate yaml so nobody types them on the command line.
 # usage:
 #  manifest = SystemManifest.resolve(checkpoint_path, scale_fallback="blandford-mckee")
@@ -174,7 +174,7 @@ class SystemManifest:
 
 
 # =============================================================================
-# observer params (the OBSERVATION choices — not a property of the system)
+# observer params (the observation choices — not a property of the system)
 # =============================================================================
 
 

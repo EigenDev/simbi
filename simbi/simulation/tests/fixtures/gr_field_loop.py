@@ -3,15 +3,15 @@
 #
 # a poloidal field loop advected radially through a schwarzschild (r, theta)
 # wedge — the GR constrained-transport probe. a weak passive
-# loop, seeded div-free via the METRIC-WEIGHTED discrete curl of a localized
+# loop, seeded div-free via the metric-weighted discrete curl of a localized
 # A_phi (so the w-weighted divergence w = sqrt(gamma)(face) x coordinate length is
 # machine zero by construction), carried inward through a uniform inflow. it
-# exercises the full curved CT machinery on a GENUINELY 2D poloidal field (unlike
-# the theta-uniform monopole), at BOTH the contact and the GR-UCT-HLL edge EMF.
+# exercises the full curved CT machinery on a genuinely 2D poloidal field (unlike
+# the theta-uniform monopole), at both the contact and the gr-uct-hll edge EMF.
 #
 # what it certifies: both CT methods preserve the w-weighted div(B) to machine
-# precision and run stably (no floors, no crash) on the nontrivial field. NOTE it
-# is NOT a clean quantitative checkerboard-suppression demonstration: the radial
+# precision and run stably (no floors, no crash) on the nontrivial field. note it
+# is not a clean quantitative checkerboard-suppression demonstration: the radial
 # inflow compresses the loop and the HLLE gas flux is already diffusive, so the
 # UCT-vs-contact grid-scale separation is small and resolution-sensitive here.
 # the sharp, resolution-robust separation needs the UCT-HLLD wave-sum EMF on a

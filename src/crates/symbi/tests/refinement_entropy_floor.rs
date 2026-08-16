@@ -1,23 +1,23 @@
 // =============================================================================
 // refinement_entropy_floor.rs
 //
-// crossing a refinement boundary must not DESTROY entropy.
+// crossing a refinement boundary must not destroy entropy.
 //
 // entropy is one-way. a smooth subsonic flow generates almost none, a shock generates
 // some, and nothing takes any away — so `K = p / rho^gamma` may rise and must never fall
 // below its initial value. that is a physical law, not a tolerance, which is what makes it
 // assertable without a reference solution.
 //
-// the setup is an ISENTROPIC gaussian bump at rest: one K everywhere, but a real density
+// the setup is an isentropic gaussian bump at rest: one K everywhere, but a real density
 // and pressure gradient, released with no gravity and no sources. the gas expands smoothly
-// and subsonically, so the exact answer stays isentropic. a UNIFORM state would pass this
+// and subsonically, so the exact answer stays isentropic. a uniform state would pass this
 // vacuously -- interpolating a constant is exact at any order -- so the bump is placed with
 // its steepest flank straddling the fine-patch edge, where prolongation and restriction
 // have to reconstruct a curved profile.
 //
-// the two runs differ ONLY in whether that patch exists. the single-grid case is the
+// the two runs differ only in whether that patch exists. the single-grid case is the
 // control: it isolates the reconstruction and the riemann solver. the refined case adds the
-// coarse-fine transfer, which interpolates the CONSERVED state and then recovers pressure
+// coarse-fine transfer, which interpolates the conserved state and then recovers pressure
 // nonlinearly, so `p / rho^gamma` is not automatically carried across a level edge.
 // =============================================================================
 
@@ -169,7 +169,7 @@ fn crossing_a_refinement_boundary_does_not_destroy_entropy() {
         x_hi: [PATCH[1]],
     }]);
 
-    // NON-VACUITY: the patch has to exist, and the gradient has to actually live on its
+    // non-vacuity: the patch has to exist, and the gradient has to actually live on its
     // edge. a bump that had already flattened by the patch boundary would make the
     // transfer interpolate a constant, which is exact at any order and proves nothing.
     assert!(hier.levels.len() > 1, "the refined case is unrefined");
@@ -221,7 +221,7 @@ fn the_entropy_deficit_does_not_grow_with_refinement_depth() {
     // would be concentrated exactly where the levels are deepest.
     //
     // the flow, the resolution, the end time and the initial condition are identical across
-    // the sweep. ONLY the number of nested patches changes, so any trend is the transfer.
+    // the sweep. only the number of nested patches changes, so any trend is the transfer.
     let mut worsts = Vec::new();
     for levels in 1..=4usize {
         let mut hier = build(&nested(levels));
@@ -244,7 +244,7 @@ fn the_entropy_deficit_does_not_grow_with_refinement_depth() {
         worsts.push(worst);
     }
 
-    // NON-VACUITY: the deepest case must actually have run a lot more fine steps than the
+    // non-vacuity: the deepest case must actually have run a lot more fine steps than the
     // shallowest, or "no trend with depth" is a statement about nothing.
     assert!(worsts.len() == 4, "the sweep did not complete");
 
@@ -348,7 +348,7 @@ fn kset_balanced(s: &Sim) -> Kset {
 /// 5-point gauss-legendre cell average of the hydrostatic profile over cell `ii`
 /// of an `n`-cell grid. average-consistent seeding: restriction is arithmetic
 /// averaging, so data seeded this way make it exactly consistent (the average of
-/// fine averages IS the coarse average), while point-seeded data hand the first
+/// fine averages is the coarse average), while point-seeded data hand the first
 /// uncovered coarse cell an average-valued neighbor offset by (dx^2/24) rho''
 /// from the pointwise isentrope its own reconstruction anchors on.
 fn hydrostatic_avg(ii: usize, n: usize) -> Prim<f64, 1> {
@@ -430,7 +430,7 @@ fn build_gravity_wb(
     hier
 }
 
-/// the K/K0 span and floor over the ROOT-level window straddling the patch's upper
+/// the K/K0 span and floor over the root-level window straddling the patch's upper
 /// edge (the first uncovered coarse cells are where the dipole lives), plus the
 /// coordinate of the root minimum.
 fn seam_span(
@@ -516,7 +516,7 @@ fn diagnose_cf_dipole_attribution() {
     }
 }
 
-/// the locality arm: the drain against the position of the patch's LOWER edge
+/// the locality arm: the drain against the position of the patch's lower edge
 /// (the deep, steep side -- the balanced-arm deficit sits at the first uncovered
 /// coarse cell there). if the drain scales with the local dx/H of the edge, the
 /// mechanism is the seam transfer's one-signed limiter bias on the stratification,
@@ -572,10 +572,10 @@ fn diagnose_cf_dipole_locality_arm() {
     }
 }
 
-/// the semantics arm: the drain when the initial state carries CELL AVERAGES of
+/// the semantics arm: the drain when the initial state carries cell averages of
 /// the hydrostatic profile rather than point values. restriction is arithmetic
 /// averaging, so average-seeded data make it exactly consistent (the average of
-/// fine averages IS the coarse average), while point-seeded data hand the first
+/// fine averages is the coarse average), while point-seeded data hand the first
 /// uncovered coarse cell an average-valued neighbor offset by (dx^2/24) rho''
 /// from the pointwise isentrope its own reconstruction anchors on. if the drain
 /// dies here, restriction semantics is the mechanism.
@@ -716,7 +716,7 @@ fn diagnose_cf_transfer_ghost_exactness() {
 /// patch's upper edge grows 1.8e-3 -> 9.3e-2 from t = 0.03 to t = 8 with no
 /// saturation, the minimum one cell outside the patch (x = 0.707 for the
 /// [0.3, 0.7] region at n = 128). the state is balanced to 8e-15 after one step,
-/// so the dipole DEVELOPS -- consistent with the coarse-fine ghost prolongation
+/// so the dipole develops -- consistent with the coarse-fine ghost prolongation
 /// interpolating the conserved state (never a hydrostatic state) and being
 /// re-imposed every subcycle.
 ///
@@ -724,7 +724,7 @@ fn diagnose_cf_transfer_ghost_exactness() {
 #[test]
 #[ignore = "diagnostic: coarse-fine entropy dipole growth in time, plain vs balanced"]
 fn diagnose_cf_dipole_growth() {
-    // the single-grid balanced control: whatever floor drift survives WITHOUT any
+    // the single-grid balanced control: whatever floor drift survives without any
     // seam is the background (the stage-work bias of the source, the wall) and is
     // the number the seam arms must be read against.
     {
@@ -763,19 +763,19 @@ fn the_balanced_seam_transfer_holds_the_entropy_floor() {
     // ghost's own potential — then coarse stencil data on one isentrope land the
     // fine ghosts exactly back on it, at any prolongation order and any limiter.
     // measured: the fine coarse-fine ghosts sit on the coarse isentrope to 2e-16
-    // where raw prolongation leaves them 4.6e-5 off (a one-signed K EXCESS: the
+    // where raw prolongation leaves them 4.6e-5 off (a one-signed K excess: the
     // prolong kernels are cell-average operators, and averaging convex isentropic
     // data overshoots K by jensen), and the balanced 2-level deficit at t = 2
     // drops 1.7e-4 -> 1.8e-5.
     //
-    // the residual 1.8e-5 is a SEPARATE, OPEN layer, suspected restriction:
+    // the residual 1.8e-5 is a separate, open layer, suspected restriction:
     // conservative averaging of on-isentrope fine data lands the covered coarse
     // cells at K above K0 by the same one-signed jensen O(dx^2) excess, and the
     // first uncovered neighbor vents against the junction. it survives with the
     // transfer exact (ghosts at 2e-16), and it shrinks but persists under
     // average-consistent seeding (3.6e-5 at t = 8 against 6.8e-5 point-seeded),
     // so no ghost-transfer policy can close it. the bounds here therefore sit
-    // BETWEEN the transfer's contribution and that residual: 5e-5 is 2.7x above
+    // between the transfer's contribution and that residual: 5e-5 is 2.7x above
     // the measured post-transfer deficit and 3.4x below the deficit the transfer's
     // absence restores, so the same constant separates both arms.
     const T_GATE: f64 = 2.0;
@@ -784,7 +784,7 @@ fn the_balanced_seam_transfer_holds_the_entropy_floor() {
         x_hi: [0.7],
     };
 
-    // positive control: the PLAIN 2-level seam vents visibly by this clock
+    // positive control: the plain 2-level seam vents visibly by this clock
     // (measured 1.2e-2). if this stops tripping, the setup no longer stresses the
     // seam and the quiet balanced arms below would be quiet about nothing.
     let mut plain = build_gravity_wb(&[region()], N, false, false);
@@ -815,7 +815,7 @@ fn the_balanced_seam_transfer_holds_the_entropy_floor() {
          0.976185775495; the balance-aware transfer is leaking into plain hierarchies"
     );
 
-    // the transfer is the load-bearing piece: the balanced RECONSTRUCTION alone,
+    // the transfer is the load-bearing piece: the balanced reconstruction alone,
     // with the equilibrium transfer forced off, still vents well past the bound
     // below (measured 1.7e-4) — raw-state prolongation keeps knocking the ghosts
     // off the isentrope faster than the interior can hold the floor.
@@ -853,16 +853,16 @@ fn the_balanced_seam_transfer_holds_the_entropy_floor() {
 
 #[test]
 fn a_refinement_ladder_does_not_compound_the_gravitational_entropy_error() {
-    // what a deep ladder must not do is ACCUMULATE. level `l` subcycles `2^l` times per root
+    // what a deep ladder must not do is accumulate. level `l` subcycles `2^l` times per root
     // step, so if each coarse-fine interface shed entropy into the level below it, an eight-level
     // production ladder would carry eight interfaces' worth and the deficit would deepen with
     // every rung added.
     //
     // it does not. each level's deficit is set by that level's own cell width and is unchanged by
-    // how many finer levels sit above it, and the FINEST level -- the one resolving the flow --
-    // holds the floor. the deficit that the coarser levels do carry sits AT the patch edge (on a
+    // how many finer levels sit above it, and the finest level -- the one resolving the flow --
+    // holds the floor. the deficit that the coarser levels do carry sits at the patch edge (on a
     // root grid with the level-1 patch at [0.3, 0.7], the minimum lands at x = 0.707, one cell
-    // outside it): the coarse-fine ghost fill interpolates the CONSERVED state, which has no
+    // outside it): the coarse-fine ghost fill interpolates the conserved state, which has no
     // reason to preserve the discrete cancellation between the pressure gradient and the gravity
     // source, so the interface behaves like any other boundary that cannot hold hydrostatic
     // equilibrium exactly.
@@ -879,7 +879,7 @@ fn a_refinement_ladder_does_not_compound_the_gravitational_entropy_error() {
             let rho = st.fields.prim.rho.view();
             let pre = st.fields.prim.pre.as_ref().expect("adiabatic").view();
             let cells: Vec<_> = st.geom.interior.iter().collect();
-            // skip the wall band: a reflecting boundary mirrors the state but NOT the
+            // skip the wall band: a reflecting boundary mirrors the state but not the
             // gravitational source, so it cannot hold the equilibrium the interior holds.
             let skip = cells.len() / 5;
             let mut worst = f64::INFINITY;
@@ -900,7 +900,7 @@ fn a_refinement_ladder_does_not_compound_the_gravitational_entropy_error() {
         finest.push(*per_level.last().unwrap());
     }
 
-    // NON-VACUITY: the deepest ladder has to have actually built the levels it was asked for and
+    // non-vacuity: the deepest ladder has to have actually built the levels it was asked for and
     // stepped them, or "no compounding" is a statement about a run that did nothing.
     assert_eq!(coarsest.len(), 4, "the sweep did not complete");
 
@@ -928,8 +928,8 @@ fn a_refinement_ladder_does_not_compound_the_gravitational_entropy_error() {
 
 #[test]
 fn scratch_restriction_vs_register() {
-    // do the COVERED region (written by restriction, away from the patch edge) and the EDGE
-    // (written by the flux register) shrink at the SAME rate? same rate means one root cause and
+    // do the covered region (written by restriction, away from the patch edge) and the edge
+    // (written by the flux register) shrink at the same rate? same rate means one root cause and
     // one well-balanced fix; different rates mean two independent defects and fixing the register
     // alone would leave the other behind looking like a partial success.
     //

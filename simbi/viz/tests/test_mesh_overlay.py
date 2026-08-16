@@ -5,7 +5,7 @@
 # a moving mesh moves its vertices between checkpoints. two things separate a
 # faithful overlay from a decorative one:
 #
-#   - the lines live in DATA coordinates, so on a spherical (polar) chart a
+#   - the lines live in data coordinates, so on a spherical (polar) chart a
 #     constant-radius edge is an arc at that radius and a constant-angle edge
 #     is a ray. lines drawn in axes-fraction coordinates look plausible and
 #     annotate nothing.

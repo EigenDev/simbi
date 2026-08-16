@@ -70,7 +70,7 @@ def _collect_custom_params(problem: SimbiProblem) -> list[list[str]]:
             continue
         group = get_param_metadata(finfo).group or "Parameters"
         rows.append([group, fname.replace("_", " "), formatted])
-    # the config's DERIVED quantities (the summary() hook): same panel, own
+    # the config's derived quantities (the summary() hook): same panel, own
     # groups — the declared dials and the numbers computed from them side by
     # side, rendered by the dashboard.
     for group, label, value in problem.summary():
@@ -100,7 +100,7 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         model_dict = problem.model_dump()
         # the synge closure is parameter-free; the model carries adiabatic_index = None. the
         # kernel ABI still binds a gamma scalar (taub-mathews never reads it), so the inert
-        # placeholder enters HERE, on the wire dict alone -- the model itself never holds it.
+        # placeholder enters here, on the wire dict alone -- the model itself never holds it.
         if model_dict.get("adiabatic_index") is None:
             model_dict["adiabatic_index"] = 5.0 / 3.0
 
@@ -195,7 +195,7 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         model_dict["nvars"] = nvars
 
     # bodies: model_dump carries the raw computed-field values; replace them with
-    # the backend wire from the single serialization SSOT (simbi.types.bodies).
+    # the backend wire from the single serialization ssot (simbi.types.bodies).
     model_dict.pop("body_system", None)
     model_dict.pop("immersed_bodies", None)
     model_dict.pop("bonded_assembly", None)
@@ -696,7 +696,7 @@ def validate_problem(problem: SimbiProblem, compute_mode: str = "cpu") -> None:
     backend.validate_simulation(sim_info=exec_dict)
     # the registered binned reductions, reported alongside the validation because every number in
     # them is fixed at registration and each one decides a cost paid for the whole job. the report is
-    # a COURTESY: the backend has already returned its verdict, so a malformed payload surfaces here
+    # a courtesy: the backend has already returned its verdict, so a malformed payload surfaces here
     # as a note on the report and leaves that verdict standing.
     from ..expression.census import describe as describe_censuses
 
@@ -810,7 +810,7 @@ def run(
     if gpu_blocks is not None:
         exec_dict["gpu_block_dims"] = tuple(gpu_blocks)
 
-    # get fresh iterators — ONE initial_primitive_state() call for both, so a
+    # get fresh iterators — one initial_primitive_state() call for both, so a
     # stochastic IC seeds gas and B from the same draw.
     prim_iterator, bfield_iterators = _get_iterators(problem)
     # first-tuple contract check, always on: one tuple costs nothing and catches
@@ -883,7 +883,7 @@ def _check_first_tuple(problem: SimbiProblem, it: GasStateGenerator) -> GasState
             )
     else:
         # velocities are never optional: every regime carries at least one velocity
-        # per spatial dimension (curvilinear/relativistic charts may carry MORE —
+        # per spatial dimension (curvilinear/relativistic charts may carry more —
         # transverse components — which is why this is a floor).
         # only the trailing pressure is optional, and only for isothermal.
         isothermal = getattr(problem, "isothermal", False)

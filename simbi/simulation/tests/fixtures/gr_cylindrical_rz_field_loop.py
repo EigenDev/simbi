@@ -3,11 +3,11 @@
 #
 # a poloidal magnetic field loop on the 2.5D cylindrical kerr-schild (R, z) plane
 # the constrained-transport probe for the axisymmetric poloidal
-# chart. the (R, z) spatial metric is NON-DIAGONAL (gamma_Rz = 2H R z / r^2, r =
+# chart. the (R, z) spatial metric is non-diagonal (gamma_Rz = 2H R z / r^2, r =
 # sqrt(R^2 + z^2)), sqrt(det gamma) = R sqrt(1 + 2M/r), and the shift is nonzero on
-# BOTH poloidal axes (beta^R, beta^z). a compact poloidal loop (B_R, B_z) is seeded
+# both poloidal axes (beta^R, beta^z). a compact poloidal loop (B_R, B_z) is seeded
 # div-free through the metric-weighted discrete curl of a localized toroidal A_phi,
-# and the full curved-CT machinery must PRESERVE the w-weighted div(B) as the gas
+# and the full curved-CT machinery must preserve the w-weighted div(B) as the gas
 # free-falls under the covariant geodesic source. the out-of-plane toroidal field
 # B_phi starts at zero (a pure poloidal loop).
 #
@@ -93,7 +93,7 @@ class GrCylindricalRzFieldLoop(SimbiProblem):
     # the poloidal (R, z) free-fall converges and piles up at the inner R boundary (unlike the disk,
     # which infalls only radially at fixed z). the sharp UCT-HLL EMF does not diffuse the pileup, so
     # |B| there grows quickly past t ~ 0.7 (contact's dissipation smears it); t = 0.7 keeps the loop
-    # clean at BOTH CT methods. the w-weighted div(B) stays machine-zero throughout regardless.
+    # clean at both CT methods. the w-weighted div(B) stays machine-zero throughout regardless.
     end_time: Annotated[
         float, ProblemParam(0.7, cli=True, checkpoint_safe=True, description="end time")
     ]

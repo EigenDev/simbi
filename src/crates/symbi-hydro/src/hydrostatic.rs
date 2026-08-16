@@ -2,18 +2,18 @@
 // hydrostatic.rs
 //
 // hydrostatic reconstruction for the euler equations with a gravitational source:
-// reconstruct the DEVIATION from the local hydrostatic profile through each cell
+// reconstruct the deviation from the local hydrostatic profile through each cell
 // rather than the state itself, so a discretely balanced atmosphere presents no
 // face jump at all.
 //
 // the residual this removes is the reason a low-dissipation riemann solver cannot
-// be used on a stagnant stratified column. a hydrostatic state solves the CONTINUUM
+// be used on a stagnant stratified column. a hydrostatic state solves the continuum
 // equations, not the discrete ones: a limited reconstruction leaves an O(dx^2) face
 // jump on a curved profile, the numerical flux at rest is the upwind dissipation
 // acting on that jump, and the deposit is one-signed every step. classical dissipation
 // damps the resulting ring; a scheme that reduces acoustic dissipation at low mach
 // number removes exactly the damping and the ring survives as an entropy error. the
-// cure adopted here removes the JUMP instead of restoring the damping, so the low-mach
+// cure adopted here removes the jump instead of restoring the damping, so the low-mach
 // reduction and the entropy floor stop competing.
 //
 // the local profile is the isentrope through the cell state that satisfies
@@ -22,7 +22,7 @@
 //   rho_eq(phi) = rho_i [1 + (gamma - 1)(phi_i - phi) / cs_i^2]^(1/(gamma - 1)),
 //   p_eq(phi)   = p_i   [rho_eq(phi) / rho_i]^gamma,     cs_i^2 = gamma p_i / rho_i.
 //
-// written as a RATIO against the cell's own state rather than through an absolute
+// written as a ratio against the cell's own state rather than through an absolute
 // enthalpy constant. that is not cosmetic: at phi = phi_i the bracket is exactly 1.0
 // and 1.0^x is exact in IEEE arithmetic, so the profile reproduces the cell state
 // bit-for-bit, which is what makes the gravity-free reduction bit-identical to plain
@@ -41,10 +41,10 @@ use symbi_ir::algebra::Scalar;
 /// carries the cell's own state rather than a derived constant, so every evaluation is a
 /// ratio against it and the point `phi = phi_ref` is reproduced exactly.
 ///
-/// GAMMA-LAW ONLY. the profile solves `dp/dphi = -rho` along `p = K rho^gamma`, and the
+/// gamma-law only. the profile solves `dp/dphi = -rho` along `p = K rho^gamma`, and the
 /// `cs2_ref = gamma p / rho` it derives is the ideal-gas sound speed spelled out -- on the
 /// isothermal or taub-mathews closures this curve is not the eos's isentrope, so a transform
-/// built from it REINTRODUCES the face jump it exists to remove. the dispatch refuses the
+/// built from it reintroduces the face jump it exists to remove. the dispatch refuses the
 /// pairing; a non-ideal balanced reconstruction needs its own profile through the eos's
 /// actual `sound_speed_sq` and isentrope integral.
 #[derive(Clone, Copy, Debug)]
@@ -100,7 +100,7 @@ impl<S: Scalar> LocalEquilibrium<S> {
         self.pre_ref * self.enthalpy_ratio(phi).powf(self.gamma / (self.gamma - one))
     }
 
-    /// both components at once, sharing ONE `powf`.
+    /// both components at once, sharing one `powf`.
     ///
     /// the pressure exponent exceeds the density exponent by exactly one —
     /// `gamma/(gamma-1) - 1/(gamma-1) = 1` — so `ratio^(gamma/(gamma-1))` is
@@ -118,7 +118,7 @@ impl<S: Scalar> LocalEquilibrium<S> {
     }
 }
 
-/// the van leer harmonic slope, BYTE-matching the kernel limiter's theta < 0 arm
+/// the van leer harmonic slope, byte-matching the kernel limiter's theta < 0 arm
 /// (`gv/mod.rs::van_leer`): `2 dl dr / (dl + dr)` for same-signed one-sided slopes, zero
 /// otherwise, with the denominator selected to one on the zero branch so no division by a
 /// vanishing sum is ever formed.
@@ -134,7 +134,7 @@ fn van_leer<S: Scalar>(dl: S, dr: S) -> S {
 /// the 3-way minmod for the theta-MC limiter, carrier-generic and branchless: the
 /// common-signed minimum-magnitude argument iff x, y, z share a strict sign, else 0.
 /// identical in form to the substrate limiter the flux kernels emit, so the reconstruction
-/// under test differs from the plain one only in WHAT is limited, never in HOW.
+/// under test differs from the plain one only in what is limited, never in how.
 #[inline]
 fn minmod3<S: Scalar>(x: S, y: S, z: S) -> S {
     let mn = x.min(y).min(z);
@@ -145,15 +145,15 @@ fn minmod3<S: Scalar>(x: S, y: S, z: S) -> S {
 }
 
 /// the stencil's departures from the hydrostatic profile through the cell at `anchor`, each
-/// evaluated at its own potential. THIS is the whole well-balancing transform, and it is
+/// evaluated at its own potential. this is the whole well-balancing transform, and it is
 /// independent of which reconstruction consumes it: feed the departures to any operator that
 /// reproduces constants, add the profile back at the face, and the scheme is well-balanced.
 /// PLM and PPM therefore need no separate derivation — only the same wrapper around their own
 /// limiter.
 ///
-/// ANCHOR AT THE CELL BEING RECONSTRUCTED, always. the departure at the anchor is then exactly
+/// anchor at the cell being reconstructed, always. the departure at the anchor is then exactly
 /// zero, so the operator's one-sided differences about it reduce to `0 - d` and `d - 0`, which
-/// are the plain differences EXACTLY rather than to rounding. that is what carries the
+/// are the plain differences exactly rather than to rounding. that is what carries the
 /// gravity-free bit-identity through the transform, and it is why a face's two sides must be
 /// built from two separate anchors instead of one shared pass: an anchor on the far cell would
 /// leave both differences as `(q_j - c) - (q_k - c)`, equal to `q_j - q_k` only to roundoff.
@@ -200,12 +200,12 @@ pub fn hydrostatic_face<S: Scalar>(
     let eq = LocalEquilibrium::through(rho[1], pre[1], phi[1], gamma);
     let half = S::from_f64(0.5);
 
-    // departures via the ONE transform text the kernel path also compiles.
+    // departures via the one transform text the kernel path also compiles.
     let (d_rho, d_pre) = hydrostatic_departures(&rho, &pre, &phi, 1, gamma);
-    // the centre departure is exactly zero, so the one-sided differences ARE the departures.
-    // the LIMITER SELECTION mirrors the kernel's `plm_theta_from_stencil` exactly: theta-MC
+    // the centre departure is exactly zero, so the one-sided differences are the departures.
+    // the limiter selection mirrors the kernel's `plm_theta_from_stencil` exactly: theta-MC
     // minmod for theta >= 0, the smooth van leer harmonic for theta < 0. a reference that
-    // hard-wired minmod fed a NEGATIVE theta straight into `minmod3(a*theta, ...)` -- a
+    // hard-wired minmod fed a negative theta straight into `minmod3(a*theta, ...)` -- a
     // sign-flipped slope -- and the theorem battery, running only positive theta, was blind
     // to it. T1/T2 now run both signs.
     let slope = |dm: S, dp: S| -> S {

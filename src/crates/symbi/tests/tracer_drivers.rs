@@ -32,7 +32,7 @@ type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory
 
 fn build() -> Sim {
     let dx = 2.0 * L / N as f64;
-    // a dense shear band in a lighter ambient: nontrivial velocities AND a
+    // a dense shear band in a lighter ambient: nontrivial velocities and a
     // density contrast for the seeding assertion.
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N, N])

@@ -1,12 +1,12 @@
 # =============================================================================
 # test_kerr_schild_sources.py
 #
-# the KS geodesic-source ORACLE: the closed-form kerr-schild momentum + energy
-# sources (mirrored in symbi-discretize gv/godunov.rs) validated against a DIRECT
+# the KS geodesic-source oracle: the closed-form kerr-schild momentum + energy
+# sources (mirrored in symbi-discretize gv/godunov.rs) validated against a direct
 # numerical tensor computation of the valencia source vector on the ingoing
 # kerr-schild metric — `(1/2) T^{mn} d_r g` (momentum) and
 # `alpha(T^{m0} d_m ln alpha - T^{mn} Gamma^0)` (energy), with christoffels from a
-# finite-differenced metric. checked at radii spanning OUTSIDE -> INSIDE the
+# finite-differenced metric. checked at radii spanning outside -> inside the
 # horizon (2M = 2), so the sources are verified where the schwarzschild chart
 # cannot reach. pure numpy; no built backend required.
 # =============================================================================

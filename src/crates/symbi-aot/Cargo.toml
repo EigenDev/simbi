@@ -3,18 +3,17 @@ name = "symbi-aot"
 version = "0.1.0"
 edition = "2024"
 
-# P2.2 of docs/design/10: the build-time AOT round-trip. build.rs runs the
-# substrate (discretize/ir) to generate kernels as Rust source via
+# build.rs runs the substrate (discretize/ir) to generate kernels as rust source via
 # emit_kernel_cpu; this crate include!s and compiles them. the substrate is a
-# BUILD-dependency only. the one RUNTIME dependency is symbi-algebra: the generated
-# kernels are generic `fn k<S: Scalar>` (docs/design/15 §4), and `Scalar` is
-# symbi-algebra's — the SAME trait the physics layer (Regime/Eos/Metric/Field)
+# build-dependency only. the one runtime dependency is symbi-algebra: the generated
+# kernels are generic `fn k<S: Scalar>`, and `Scalar` is
+# symbi-algebra's — the same trait the physics layer (Regime/Eos/Metric/Field)
 # uses, so one scalar threads through both.
 
 [dependencies]
 symbi-algebra    = { path = "../symbi-algebra" }
 symbi-ir         = { path = "../symbi-ir" }
-# **B11** — the AOT CPU kernels emitted by the Rust renderer parallelize the
+# the AOT CPU kernels emitted by the rust renderer parallelize the
 # outer cell loop via `rayon::iter::IntoParallelIterator`. one threading
 # backend, no manual stack of dim-N nested fors.
 rayon            = "1"
@@ -33,21 +32,21 @@ symbi-algebra    = { path = "../symbi-algebra" }
 # single-sources MAX_BODIES for the immersed-body kernel codegen (body_source /
 # body_feedback) so the generated scalar-param count cannot drift from the runtime.
 symbi-ib         = { path = "../symbi-ib" }
-# B6-iii (Phase 3): the FUSED-source godunov AOT-bakes a SourceSpec into the
+# the fused-source godunov AOT-bakes a SourceSpec into the
 # kernel at build time (one launch covers div(F) + integrator + spliced source).
 # symbi-hydro owns the SourceSpec library (uniform_acceleration, point_mass_grav,
 # etc.); the build needs it to enumerate the (regime, dim, source) instances.
 symbi-hydro      = { path = "../symbi-hydro" }
 
 [dev-dependencies]
-# the penalize kernel's f64 oracle chain (docs/design/50): SdfExpr + penalize_cell.
+# the penalize kernel's f64 reference chain uses SdfExpr + penalize_cell.
 symbi-ib         = { path = "../symbi-ib" }
-# the CPU-side regression for docs/design/15 §3: render the generated `_IR` blobs
-# back to source (render_from_ir) to prove they deserialize + render. NOT a runtime
-# dep — symbi-aot stays a thin artifact holder; the render lives in symbi-ir.
+# render the generated `_IR` blobs back to source to check deserialization and rendering.
+# this is a development dependency; symbi-aot stays a thin artifact holder and the render lives
+# in symbi-ir.
 symbi-ir         = { path = "../symbi-ir" }
 # carrier-equivalence tests: run the host physics (f<f64>) against the compiled
-# kernel (f traced at Gv) at the SAME baked iteration count.
+# kernel (f traced at Gv) at the same baked iteration count.
 symbi-hydro      = { path = "../symbi-hydro" }
 # curvilinear penalize gate: the coordinate->Cartesian centroid map (Metric).
 symbi-geometry   = { path = "../symbi-geometry" }

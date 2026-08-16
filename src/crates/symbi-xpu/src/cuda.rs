@@ -103,11 +103,11 @@ unsafe extern "C" {
     fn cuCtxEnablePeerAccess(peer_ctx: CUcontext, flags: c_uint) -> CUresult;
 }
 
-// CUdevice_attribute enum values (cuda.h): the SM compute capability of a device.
+// CUdevice_attribute enum values (cuda.h): the sm compute capability of a device.
 const CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR: c_int = 75;
 const CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR: c_int = 76;
 
-/// the (major, minor) compute capability of device 0, e.g., (7, 5) for an RTX 2070.
+/// the (major, minor) compute capability of device 0, e.g., (7, 5) for an rtx 2070.
 /// NVRTC needs it to pick `--gpu-architecture=compute_<major><minor>` so the PTX it
 /// emits matches the GPU the driver will JIT it onto, queried live from the driver
 /// for device-agnostic behavior.
@@ -140,7 +140,7 @@ pub fn device_compute_capability() -> error::Result<(i32, i32)> {
 }
 
 /// **B10 — device info** for the live progress table. queries device 0 (the
-/// one symbi launches kernels on) for its name, total VRAM in bytes, and
+/// one symbi launches kernels on) for its name, total vram in bytes, and
 /// compute capability. used by `symbi-display::system_info_rows` to populate
 /// the System Info table at the top of every run.
 #[derive(Clone, Debug)]

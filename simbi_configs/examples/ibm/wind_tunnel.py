@@ -1,7 +1,7 @@
 # =============================================================================
 # wind_tunnel.py
 #
-# supersonic flow past a RIGID immersed obstacle of arbitrary (CSG) shape: a
+# supersonic flow past a rigid immersed obstacle of arbitrary (CSG) shape: a
 # classic wind tunnel. a Mach-2 freestream is driven in through the left face
 # and meets a rounded bluff body (a box fused with a spherical nose), forming a
 # detached bow shock and a low-pressure wake. the obstacle is a no-slip wall

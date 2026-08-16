@@ -319,16 +319,16 @@ fn t4_the_residual_is_first_order_in_the_entropy_variation() {
 }
 
 // =============================================================================
-// T5/T6 — the transform is RECONSTRUCTION-AGNOSTIC
+// T5/T6 — the transform is reconstruction-agnostic
 //
 // the well-balancing lives entirely in the departure transform, not in the limiter that
-// consumes it. these check that against a PARABOLIC operator of ppm's shape, so ppm inherits
+// consumes it. these check that against a parabolic operator of ppm's shape, so ppm inherits
 // the property rather than needing its own derivation:
 //
 //   T5 a parabolic reconstruction of the departures still cancels at the face on a balanced
 //      isentrope (well-balanced), and
-//   T6 with no gravity it still returns the plain parabolic result BIT-for-bit, which holds
-//      only because each side is anchored on its OWN cell.
+//   T6 with no gravity it still returns the plain parabolic result bit-for-bit, which holds
+//      only because each side is anchored on its own cell.
 // =============================================================================
 
 use symbi_hydro::hydrostatic::hydrostatic_departures;
@@ -390,14 +390,14 @@ fn t5_a_parabolic_operator_inherits_the_well_balanced_property() {
 
 #[test]
 fn t6_the_parabolic_path_matches_plain_reconstruction_to_roundoff_without_gravity() {
-    // T2's BIT-identity does NOT carry to a parabola, and the reason is structural rather than
+    // T2's bit-identity does not carry to a parabola, and the reason is structural rather than
     // a tolerance to be tuned. plm's face value is `q_anchor + slope/2` built from one-sided
-    // DIFFERENCES about the anchor; anchoring on the reconstructed cell makes that departure
+    // differences about the anchor; anchoring on the reconstructed cell makes that departure
     // exactly zero, so the differences reduce to `0 - d` and `d - 0` and no rounding enters.
-    // a parabola is a WEIGHTED SUM over four cells: shifting all four by the anchor value and
+    // a parabola is a weighted sum over four cells: shifting all four by the anchor value and
     // adding it back is exact in real arithmetic and lands within a few ulp in floating point,
     // because the weights sum to one only after rounding. the honest statement is therefore
-    // agreement to roundoff, MEASURED here rather than asserted, with the bit-exact claim kept
+    // agreement to roundoff, measured here rather than asserted, with the bit-exact claim kept
     // where it is actually true (T2, the linear operator).
     let cases: [([f64; 6], [f64; 6]); 3] = [
         ([1.0, 2.5, 0.3, 7.25, 4.0, 0.125], [0.5, 1.5, 0.25, 3.0, 2.0, 0.0625]),

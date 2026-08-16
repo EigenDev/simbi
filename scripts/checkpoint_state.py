@@ -28,7 +28,7 @@ class CheckpointState:
 
 
 # tie-break precedence when two checkpoints share an evolution point. a run whose last
-# scheduled dump lands exactly on the end time writes two files at the SAME time and
+# scheduled dump lands exactly on the end time writes two files at the same time and
 # iteration -- the dump, which reads as still running, and the authoritative terminator --
 # and ordering on the pair alone resolves that arbitrarily, by directory order. a terminal
 # status is never the arbitrary answer: a crash outranks a completion so a failure is never

@@ -7,9 +7,9 @@
 # - calls the symbi-afterglow rust binding (cpu_ext) to generate + transfer photons
 # - writes the lab-frame catalog to HDF5 (postprocess.read_photon_events schema)
 #
-# a grb afterglow observation integrates emission over the EQUAL-ARRIVAL-TIME surface,
-# which draws from a RANGE of emission epochs -- so the catalog must span an ARRAY of
-# snapshots. each snapshot emits over the lab-time interval it REPRESENTS (its
+# a grb afterglow observation integrates emission over the equal-arrival-time surface,
+# which draws from a range of emission epochs -- so the catalog must span an array of
+# snapshots. each snapshot emits over the lab-time interval it represents (its
 # trapezoidal share of the snapshot-time axis); weighting by
 # the represented interval is what makes the stacked snapshots tile the blast's history.
 # a single snapshot has no interval to tile with -- it is one t_em slice.
@@ -109,7 +109,7 @@ def generate_from_files(
     if qscales is None:
         qscales = build_qscales(scale_model)
 
-    # SORT the snapshots by lab time and weight each by the interval it REPRESENTS, so the
+    # sort the snapshots by lab time and weight each by the interval it represents, so the
     # stacked emission tiles the blast history (a single emit-duration = the tiny CFL dt would
     # under-count and mis-weight). a lone snapshot has no interval -> warn; the EATS integral
     # over epochs is undefined from one t_em slice.
@@ -150,7 +150,7 @@ def generate_from_files(
         mesh = build_mesh(data)
 
         # emission duration = the lab-time interval this snapshot represents; a lone snapshot
-        # (duration 0) falls back to the CFL dt so it still produces SOMETHING (with the warning).
+        # (duration 0) falls back to the CFL dt so it still produces something (with the warning).
         emit_dt = durations[idx] if durations[idx] > 0.0 else data.metadata.dt
         sim_cond["dt"] = emit_dt
         sim_cond["adiabatic_index"] = data.metadata.gamma

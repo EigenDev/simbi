@@ -1,16 +1,16 @@
 // =============================================================================
 // zero_panic.rs
 //
-// the algebraic core MUST contain NO `panic!`, `.unwrap()`, or `.expect(` in
+// the algebraic core must contain no `panic!`, `.unwrap()`, or `.expect(` in
 // production code. admitted panics live only at I/O / driver boundaries (config parse,
 // NVRTC compile, HDF5 write) — those happen in other files. these are the substrate
 // constitution and they are zero-panic by invariant.
 //
-// membership is DISCOVERED rather than listed: a file joins the constitution by
+// membership is discovered rather than listed: a file joins the constitution by
 // declaring
 //   #![deny(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
 // which is the same contract `cargo clippy` enforces during development. this test is
-// the CI-side complement — it runs under plain `cargo test` with no clippy required.
+// the ci-side complement — it runs under plain `cargo test` with no clippy required.
 //
 // deriving the set from the contract means a new core file is covered the moment it
 // declares one, and a file cannot quietly leave the set: dropping the attribute empties
@@ -36,7 +36,7 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// whether a source declares the zero-panic contract as a FILE-LEVEL deny.
+/// whether a source declares the zero-panic contract as a file-level deny.
 ///
 /// each `#![deny(..)]` span is examined on its own, so an item-level
 /// `#[allow(clippy::unwrap_used)]` — a deliberate opt-out — cannot pull a file into the
@@ -66,7 +66,7 @@ fn zero_panic_in_constitution_files() {
     rust_sources(Path::new("src"), &mut sources);
     sources.sort();
 
-    // the walk reaching the tree is a PREMISE of everything below: a gate that discovers
+    // the walk reaching the tree is a premise of everything below: a gate that discovers
     // nothing passes forever while checking nothing. the crate carries dozens of sources,
     // so a handful means the walk found the wrong directory or none at all.
     assert!(
@@ -100,10 +100,10 @@ fn zero_panic_in_constitution_files() {
 
     for (path, content) in &constitution {
         let name = path.display();
-        // production code is everything BEFORE the first `#[cfg(test)]` guard. the
+        // production code is everything before the first `#[cfg(test)]` guard. the
         // in-file test module is allowed to use panic-style macros (it's test code;
         // asserts are normal). this is a coarse heuristic; if a production block ever
-        // lands AFTER a test module, this test misses it — but the file-level deny lints
+        // lands after a test module, this test misses it — but the file-level deny lints
         // catch that.
         let prod_code = content.split("#[cfg(test)]").next().unwrap_or("");
 

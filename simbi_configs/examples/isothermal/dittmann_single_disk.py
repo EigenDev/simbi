@@ -2,7 +2,7 @@
 # dittmann_single_disk.py
 #
 # the single-object accretion disk of dittmann & ryan (2021), section 3: a
-# geometrically thin (mach ~ 10), locally isothermal disk around ONE accretor,
+# geometrically thin (mach ~ 10), locally isothermal disk around one accretor,
 # the sharpest test of a sink prescription. a standard sink removes the full
 # local angular momentum and its steady-state surface density depends on the
 # sink rate even outside r_s (their figure 1); a torque-free sink removes mass
@@ -90,7 +90,7 @@ class DittmannSingleDisk(SimbiProblem):
 
     # buffer zone: a sponge that relaxes the outer annulus toward the initial
     # disk equilibrium, so the flow reaches a steady state
-    # (dittmann uses a dirichlet outer BC).
+    # (dittmann uses a dirichlet outer bc).
     use_buffer: Annotated[
         bool,
         ProblemParam(

@@ -7,7 +7,7 @@
 //
 // these helpers exist because ~60% of a KernelSet impl is identical across
 // regimes: face-domain construction, ghost region analysis with per-axis
-// BC parameterization, cfl scaling.
+// bc parameterization, cfl scaling.
 //
 // usage:
 //   // face-parallel dispatch domain for axis `dir`
@@ -61,10 +61,10 @@ pub fn to_bc_array<const D: usize>(boundaries: &Boundaries<D>) -> [[BcType; 2]; 
             BoundaryType::Outflow => BcType::Outflow,
             BoundaryType::Reflect => BcType::Reflect,
             BoundaryType::CoarseFine => BcType::Skip,
-            // driven faces are SKIPPED by the standard pullback; the
+            // driven faces are skipped by the standard pullback; the
             // driven-boundary pass prescribes their ghost state from the DAG afterward.
             BoundaryType::Driven(_) => BcType::Skip,
-            // neumann / robin faces are likewise SKIPPED here; the gradient-boundary pass fills
+            // neumann / robin faces are likewise skipped here; the gradient-boundary pass fills
             // them from the boundary-adjacent interior cell + the registry coefficients.
             BoundaryType::Neumann(_) | BoundaryType::Robin(_) => BcType::Skip,
         };
@@ -76,12 +76,12 @@ pub fn to_bc_array<const D: usize>(boundaries: &Boundaries<D>) -> [[BcType; 2]; 
 /// concentration), which has no entry in the per-variable gradient registry and no slot in the
 /// driven DAG's prim writes.
 ///
-/// gradient faces become OUTFLOW rather than skip: a prescribed normal derivative applies per
+/// gradient faces become outflow rather than skip: a prescribed normal derivative applies per
 /// primitive variable, and a scalar with no prescription has `dchi/dn = 0`, which is exactly the
 /// nearest-interior copy the outflow map performs. leaving them skipped instead would hand the
 /// sweep an unwritten ghost band.
 ///
-/// driven faces stay SKIPPED: the dye of injected fluid is independent of the interior state, so it
+/// driven faces stay skipped: the dye of injected fluid is independent of the interior state, so it
 /// is prescribed by the driven pass from an explicit `chi` slot. coarse-fine faces stay skipped for
 /// the usual reason -- the refinement prolongation owns them.
 pub fn to_bc_array_scalar<const D: usize>(boundaries: &Boundaries<D>) -> [[BcType; 2]; D] {
@@ -122,7 +122,7 @@ pub struct GhostMapParams<const D: usize> {
     pub clamp_val: [f64; D],
     pub vel_sign: [f64; D],
     /// the lattice-map source-coord arg, one integer per axis,
-    /// for the substrate `iso_ghost_fill` kernel: a SIGNED periodic shift
+    /// for the substrate `iso_ghost_fill` kernel: a signed periodic shift
     /// (`+len` on a low-side ghost, `-len` on a high side), a reflect `pivot2`, or
     /// an outflow edge cell. `src[ax] = c+arg | arg-c | arg` by `map_type`. derived
     /// from the i64 domain bounds (the side is known here), cast to the kernel's
@@ -133,10 +133,10 @@ pub struct GhostMapParams<const D: usize> {
 /// build the launch domain for the (`axis`, `side`) sweep step of `drive_sweep`.
 ///
 /// - axis `axis`: a halo slab (allocated-side <-> interior-side boundary)
-/// - axes in `done` (axes already swept): full ALLOCATED extent — the slab
+/// - axes in `done` (axes already swept): full allocated extent — the slab
 ///   covers x-halo positions whose `axis`-halo will be filled now (this is
 ///   what fills the corners/edges via successive sweeps)
-/// - other axes (not yet swept): INTERIOR extent — their halos haven't been
+/// - other axes (not yet swept): interior extent — their halos haven't been
 ///   filled yet, so must not be read from
 fn sweep_domain<const D: usize>(
     allocated: &Domain<D>,
@@ -192,7 +192,7 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
     /// 26-box scheme: classifies `allocated.difference(interior)`
     /// into up to `3^D - 1` axis-aligned regions (faces + edges + corners)
     /// and dispatches once per non-skip box. correct, but pays per-launch
-    /// overhead x 26 per step AND launches with shapes the dispatcher's
+    /// overhead x 26 per step and launches with shapes the dispatcher's
     /// block-picker handles poorly (tiny corners, axis-thin edges). prefer
     /// `drive_sweep` for hot paths — same semantics, 6 launches max.
     pub fn drive<F>(&self, mut dispatch: F)
@@ -212,14 +212,14 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
 
     /// **axis-sequential sweep**: fill the halo in 3 axis passes (x2 sides per
     /// axis = up to `2*D` launches), each pass a single thick slab. produces
-    /// the SAME result as `drive` for periodic / reflect / outflow / skip BCs,
-    /// but with `2*D` launches in place of `3^D - 1` AND each launch is a
+    /// the same result as `drive` for periodic / reflect / outflow / skip BCs,
+    /// but with `2*D` launches in place of `3^D - 1` and each launch is a
     /// rectangular slab the block-picker handles well.
     ///
     /// **invariant**: after sweep `k`, every halo cell whose halo-axes are a
     /// subset of `{0..=k}` is filled. each sweep `k > 0` reads from cells
     /// already filled by earlier sweeps — that's why sweep `k`'s domain
-    /// extends over the FULL allocated extent on axes `0..k` (so e.g., a
+    /// extends over the full allocated extent on axes `0..k` (so e.g., a
     /// y-sweep at an x-halo position reads the x-halo source that sweep 0
     /// just produced). without this expansion, xy-edges and xyz-corners
     /// would never be filled.
@@ -304,8 +304,8 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
                     p.map_type[ax] = 1.0;
                     p.start[ax] = lo as f64;
                     p.len[ax] = (hi - lo) as f64;
-                    // signed shift: a low-side ghost reads one period UP, a
-                    // high-side ghost one period DOWN (the region is one-sided, so
+                    // signed shift: a low-side ghost reads one period up, a
+                    // high-side ghost one period down (the region is one-sided, so
                     // the shift is uniform — no modulo needed).
                     let period = (hi - lo) as i32;
                     p.arg[ax] = if side == FaceSide::Minus {
@@ -661,7 +661,7 @@ mod tests {
         assert_eq!(dispatches, 1, "only the non-skip side should dispatch");
     }
 
-    /// the coverage invariant: the union of all sweep domains covers the SAME
+    /// the coverage invariant: the union of all sweep domains covers the same
     /// halo cells as `allocated.difference(interior)`. proves the sweep scheme
     /// fills the same set of cells the 26-box scheme does — no cell missed.
     #[test]
@@ -709,7 +709,7 @@ mod tests {
         // expected total halo cells = allocated.volume() - interior.volume()
         let expected_halo_count = alloc.volume() - interior.volume();
 
-        // build the union of sweep domains. sweeps are DISJOINT by construction
+        // build the union of sweep domains. sweeps are disjoint by construction
         // because each sweep `k > 0` only writes the halo on axis k (at axes
         // 0..k allocated, axes >k interior), and a cell can be in only one
         // sweep — the first axis where it's in the halo.

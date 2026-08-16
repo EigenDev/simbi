@@ -1,11 +1,11 @@
 # =============================================================================
 # gr_cylindrical_ks_bh.py
 #
-# a schwarzschild black hole in the CYLINDRICAL kerr-schild chart
+# a schwarzschild black hole in the cylindrical kerr-schild chart
 # — the 2.5D axisymmetric (R, z) grid carrying the azimuthal v_phi DOF, the natural
 # chart for relativistic jets and accretion disks around a hole. the metric is
 # gamma_RR = 1 + 2H R^2/r^2, gamma_zz = 1 + 2H z^2/r^2, gamma_Rz = 2H Rz/r^2,
-# gamma_phi-phi = R^2, with r = sqrt(R^2 + z^2) the SPHERICAL (BH) radius; alpha =
+# gamma_phi-phi = R^2, with r = sqrt(R^2 + z^2) the spherical (BH) radius; alpha =
 # 1/sqrt(1 + 2H), shift beta^R, beta^z (beta^phi = 0), alpha sqrt(gamma) = R. the
 # domain is an off-axis (R > 0), z-symmetric annular patch so no interior excision is
 # needed and the metric is smooth throughout. uniform gas at rest free-falls under the
@@ -52,7 +52,7 @@ class GrCylindricalKsBH(SimbiProblem):
 
     # an off-axis (R > 0), z-symmetric annular patch: r = sqrt(R^2 + z^2) spans ~4 to ~12.6,
     # all outside the horizon r = 2M — no interior excision, smooth metric. the z bounds are
-    # EQUAL-and-opposite so z -> -z is an exact grid symmetry.
+    # equal-and-opposite so z -> -z is an exact grid symmetry.
     bounds: Annotated[
         list[tuple[float, float]],
         ProblemParam(

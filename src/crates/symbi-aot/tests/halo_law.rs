@@ -14,7 +14,7 @@
 //   - refinement transfers (refine_*): cross-grid addressing through scaled
 //     coords (fine = 2*coarse); the transfer layer computes its own reach
 //   - field_axpy_shift: reads at a runtime shift parameter bounded by dispatch
-// an unbounded kernel OUTSIDE these families fails the law.
+// an unbounded kernel outside these families fails the law.
 // =============================================================================
 
 use symbi_aot::IR_BLOBS;

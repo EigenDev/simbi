@@ -2,7 +2,7 @@
 // executor.rs
 //
 // the executor owns a stream and launches pre-compiled kernels.
-// move-only. RAII — drop destroys the stream.
+// move-only. raii — drop destroys the stream.
 // all fallible operations return Result<T, XpuError>.
 // =============================================================================
 

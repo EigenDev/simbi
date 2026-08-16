@@ -2,13 +2,13 @@
 // perturb_seed.rs
 //
 // per-level primitive perturbation (`Hierarchy::perturb_cells` + `sync_perturbed`):
-// a closure evaluated at every level's OWN cell centers must land each level's
+// a closure evaluated at every level's own cell centers must land each level's
 // full resolvable content, where the prolongation-only IC path hands fine levels
 // nothing below the coarse nyquist.
 //
 // gates:
 // - the fine level's stored velocity matches the analytic field at its own cell
-//   centers to conversion roundoff, INCLUDING a mode above the root nyquist that
+//   centers to conversion roundoff, including a mode above the root nyquist that
 //   prolongation cannot deliver;
 // - a velocity-only perturbation leaves every level's density field bit-identical
 //   (the primitive round-trip must not smear rho or pre through the kinetic term);
@@ -181,7 +181,7 @@ fn curl_construction_is_divergence_free_under_the_grid_difference() {
     // from the edge). the low-k mode at 16 fine cells per wavelength carries
     // (k dx)^2 / 6 ~ 2.6e-2 discrete-operator error; the nyquist-of-the-root mode at
     // 4 fine cells per wavelength carries ~0.4 but rides at a third the amplitude.
-    // the RATIO gate at 0.15 catches a broken construction (a taper without its
+    // the ratio gate at 0.15 catches a broken construction (a taper without its
     // gradient term reads ~1) while admitting the operator's own truncation.
     let fine = &hier.levels[1].state;
     let dx = fine.geom.dx;

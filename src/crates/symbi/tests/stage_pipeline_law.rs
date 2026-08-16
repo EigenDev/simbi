@@ -1,9 +1,9 @@
 // =============================================================================
 // stage_pipeline_law.rs
 //
-// the STAGE-SEQUENCE EQUALITY LAW: the uni-grid driver (`sim::evolve::step`,
+// the stage-sequence equality law: the uni-grid driver (`sim::evolve::step`,
 // folding STAGE_PIPELINE) and the hierarchy driver (`Hierarchy::level_stage`,
-// a hand-maintained copy) must issue the IDENTICAL per-stage kernel-call
+// a hand-maintained copy) must issue the identical per-stage kernel-call
 // sequence under every gate combination. the two sequences are hand-copies of
 // one another, and a phase added to one but not the other runs silently
 // short on whichever driver a run happens to take — the python frontend
@@ -12,9 +12,9 @@
 //
 // mechanism: a recording kernel set logs every trait-method call; both
 // drivers advance the same tiny sim for the same steps; the logs must be
-// EQUAL (not merely same-set: ordering and per-stage multiplicity count) for
+// equal (not merely same-set: ordering and per-stage multiplicity count) for
 // all 2^3 combinations of (additive source, fofc, passive scalar). immersed
-// bodies are excluded: their per-STEP machinery (penalize/feedback/motion)
+// bodies are excluded: their per-step machinery (penalize/feedback/motion)
 // legitimately differs between drivers and is gated by its own equivalence
 // suite (decomp_body_equivalence).
 //
@@ -160,7 +160,7 @@ fn tiny_sim(with_chi: bool) -> Sim {
     }
 }
 
-// the per-STEP extras (viscous, excise, horizon ledger, penalize, feedback)
+// the per-step extras (viscous, excise, horizon ledger, penalize, feedback)
 // under the same equality demand. an extra present in one driver only — a
 // horizon-ledger booking, say — reports zero on every run that takes the other
 // driver, and only a per-step sequence comparison catches it.
@@ -168,7 +168,7 @@ fn tiny_sim(with_chi: bool) -> Sim {
 fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
     const T: f64 = 2.5e-3;
     // three body configurations: none; a one-way gravitational mass (feedback
-    // reduction skipped by the needs_feedback gate on BOTH drivers); a two-way
+    // reduction skipped by the needs_feedback gate on both drivers); a two-way
     // rigid body plus a GR horizon diagnostic body (penalize + feedback +
     // shell-flux ledger all active).
     let configs: Vec<(&str, Option<symbi_ib::BodyCollection<f64, 2>>)> = vec![
@@ -251,9 +251,9 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
     }
 }
 
-// the DECOMPOSED (gpus > 1) driver against the canonical sequence, modulo its
-// three DOCUMENTED structural deltas — anything else is drift:
-//   - no stage-input elision: snapshot_stage runs at EVERY gated stage,
+// the decomposed (gpus > 1) driver against the canonical sequence, modulo its
+// three documented structural deltas — anything else is drift:
+//   - no stage-input elision: snapshot_stage runs at every gated stage,
 //     including stage 0 of a multi-stage scheme (the uni-grid driver elides
 //     that copy into the per-step snapshot);
 //   - a second ghost_fill per stage, after the halo exchange (cut-corner
@@ -323,10 +323,10 @@ fn decomposed_driver_matches_the_canonical_sequence_modulo_documented_deltas() {
     }
 }
 
-// the decomposed driver's per-STEP extras (viscous / penalize / gated
+// the decomposed driver's per-step extras (viscous / penalize / gated
 // feedback) against the canonical order, with a two-way body active — the
 // same transform as the stage law (excise family normalized: the decomposed
-// sweep protocol has its own oracle; body MOTION is driver-level shared code,
+// sweep protocol has its own oracle; body motion is driver-level shared code,
 // invisible to the recorder on every driver).
 #[test]
 fn decomposed_per_step_extras_match_the_canonical_order() {
@@ -398,12 +398,12 @@ fn decomposed_per_step_extras_match_the_canonical_order() {
     assert!(expected.contains(&"viscous".to_string()));
 }
 
-// LAW COMPLETENESS: every phase in the canonical table must actually appear in
+// law completeness: every phase in the canonical table must actually appear in
 // the recorded logs when its gate is on. this closes the recorder-coupling
 // gap: a phase added to STAGE_PIPELINE whose recorder method is missing would
 // no-op identically on every driver — the equality laws would still pass while
 // their coverage silently shrank. iterating the exported table makes that
-// impossible: the new phase's name never appears and THIS test names it.
+// impossible: the new phase's name never appears and this test names it.
 #[test]
 fn every_canonical_phase_appears_in_the_recorded_union() {
     const T: f64 = 2.5e-3;

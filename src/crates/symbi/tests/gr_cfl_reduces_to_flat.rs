@@ -1,8 +1,8 @@
 // =============================================================================
 // gr_cfl_reduces_to_flat.rs
 //
-// kerr-schild at M = 0 IS minkowski (alpha = 1, beta = 0, gamma = delta), so
-// the GR RMHD CFL wave-speed map must produce the SAME timestep as the flat
+// kerr-schild at M = 0 is minkowski (alpha = 1, beta = 0, gamma = delta), so
+// the GR RMHD CFL wave-speed map must produce the same timestep as the flat
 // map on identical primitive state. the two kernels assemble the same
 // magnetosonic bound through different operation orders, so the comparison is
 // roundoff-tight, not bitwise. one kernel-set call each — no evolve, no CT —

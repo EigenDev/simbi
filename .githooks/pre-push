@@ -7,7 +7,7 @@
 # breakage class -- a signature change that misses a call site, a stale example
 # -- in well under a minute, without codegen or running the test farm.
 #
-# it deliberately does NOT run the test suite. release builds + heavy
+# it deliberately does not run the test suite. release builds + heavy
 # integration/convergence tests take many minutes and belong in CI, not in the
 # push path. run them yourself when relevant:
 #   cargo test --release --manifest-path src/Cargo.toml --workspace

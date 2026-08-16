@@ -1,7 +1,7 @@
 # =============================================================================
 # test_ot_bfield_symmetry.py
 #
-# regression: the staggered orszag-tang B-field IC must sample its TRANSVERSE
+# regression: the staggered orszag-tang B-field IC must sample its transverse
 # coordinate at the cell center. Bx = -b0 sin(2 pi y) lives on
 # the x-face; its y must be (jj+0.5)*dy so the discrete field is antisymmetric
 # about the domain center (exact 180-degree point symmetry) and aligned with the
@@ -42,7 +42,7 @@ def test_bx_transverse_is_cell_centered_and_symmetric(cls) -> None:
     )
 
     col = bx[:, 0]
-    # cell-CENTER sampling: Bx[jj] = -b0 sin(2 pi (jj+0.5) dy).
+    # cell-center sampling: Bx[jj] = -b0 sin(2 pi (jj+0.5) dy).
     expected = np.array(
         [-b0 * math.sin(2.0 * math.pi * (jj + 0.5) * dy) for jj in range(_N)]
     )

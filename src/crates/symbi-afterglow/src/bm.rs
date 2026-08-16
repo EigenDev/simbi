@@ -4,7 +4,7 @@
 // the Blandford-McKee (1976) self-similar ultrarelativistic blast wave for a
 // homogeneous external medium (k = 0) — the synthetic test bed for afterglow
 // imaging. `bm_profile` returns the radial fluid profile at one lab time; it feeds
-// the spherical photon generator to make synthetic GRB afterglow observations.
+// the spherical photon generator to make synthetic grb afterglow observations.
 //
 // self-similar solution (k = 0), with chi = [1 + 2(m+1) gamma_sh^2](1 - r/ct), m = 3:
 //   gamma^2(chi) = gamma_sh^2 / (2 chi)            (fluid lorentz factor)
@@ -14,8 +14,8 @@
 // lorentz factor is gamma_sh^2 = 17 E / (8 pi rho_1 c^5 t^3), rho_1 = n_0 m_p.
 //
 // `synthesize_afterglow_events` builds an image-ready photon catalog by integrating
-// the EATS across the blast's TIME EVOLUTION: a single snapshot cannot reproduce the
-// canonical limb-brightened ring (the line-of-sight image center samples the LATER,
+// the EATS across the blast's time evolution: a single snapshot cannot reproduce the
+// canonical limb-brightened ring (the line-of-sight image center samples the later,
 // decelerated, dimmer blast while the limb samples the bright blast at the current
 // time), so it generates spherical events at a range of lab times and accumulates.
 //
@@ -104,9 +104,9 @@ pub fn bm_profile(e_iso: f64, n0: f64, t: f64, chi_max: f64, n_cells: usize) -> 
 ///
 /// lab times are sampled log-spaced over `[lo_factor, hi_factor] * t_obs_s/(1+z)` (the limb of
 /// the image comes from `t ~ t_obs`, the center from much later/decelerated stages, so the span
-/// must reach beyond `t_obs`); each lab-time snapshot is a BM profile generated over a synthesized
-/// equal-solid-angle cone (sector) of half-angle `theta_sector` about the +z axis (use PI for a
-/// full sphere, a smaller angle for a collimated jet OR any angularly-bounded relativistic outflow
+/// must reach beyond `t_obs`); each lab-time snapshot is a bm profile generated over a synthesized
+/// equal-solid-angle cone (sector) of half-angle `theta_sector` about the +z axis (use pi for a
+/// full sphere, a smaller angle for a collimated jet or any angularly-bounded relativistic outflow
 /// — a ring/partial shell), weighted by its lab-time bin width.
 /// the returned events
 /// are reduced into an image by `compute_skymap` for a chosen observer direction (which applies the
@@ -254,7 +254,7 @@ mod tests {
         best
     }
 
-    // the synthetic BM afterglow image is LIMB-BRIGHTENED: integrating the EATS across the
+    // the synthetic bm afterglow image is limb-brightened: integrating the EATS across the
     // blast's time evolution and applying delta^3 beaming, the radial surface-brightness profile
     // peaks off-center with a dimmer center (the canonical Granot-Sari ring). this is the payoff
     // test for the whole imaging path; the profile is printed on failure for calibration.

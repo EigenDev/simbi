@@ -4,11 +4,11 @@
 // the evolve equivalence check for the fused runtime-source host path. it is the
 // runtime-user-source twin of
 // `additive_source_equals_fused_evolve` (which proves it for AOT-baked sources):
-// the SAME runtime-loaded user source (python -> json -> build_user_source DAG) is
+// the same runtime-loaded user source (python -> json -> build_user_source DAG) is
 // run two ways through the production `evolve()` loop —
-//   - TWO-PASS: `with_runtime_source(..)`        -> plain AOT godunov + the per-cell
+//   - two-pass: `with_runtime_source(..)`        -> plain AOT godunov + the per-cell
 //                                                   `apply_runtime_source` pass
-//   - FUSED:    `with_fused_runtime_source(..)`  -> ONE Cranelift-JIT'd godunov+source
+//   - fused:    `with_fused_runtime_source(..)`  -> one Cranelift-JIT'd godunov+source
 //                                                   host kernel (run_parallel_raw)
 // and must produce bit-for-bit identical conserved state at every interior cell.
 //
@@ -52,7 +52,7 @@ fn assert_cons_bit_identical<const D: usize>(
 
 #[test]
 fn adiabatic_runtime_force_fused_equals_two_pass_rk2() {
-    // the two-pass is the default; this test pins the FUSED kernel as live, so
+    // the two-pass is the default; this test pins the fused kernel as live, so
     // opt in before the policy OnceLock latches.
     unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
@@ -61,8 +61,8 @@ fn adiabatic_runtime_force_fused_equals_two_pass_rk2() {
     let t_final = 0.04;
 
     // the runtime user source: external acceleration a = [p0, p1] (force kind). for an
-    // energy regime build_user_source wraps it into BOTH the momentum overlay (S_mom = rho*a)
-    // and the energy overlay (S_nrg = rho*v.a) — so this exercises the in-place mom_k AND nrg
+    // energy regime build_user_source wraps it into both the momentum overlay (S_mom = rho*a)
+    // and the energy overlay (S_nrg = rho*v.a) — so this exercises the in-place mom_k and nrg
     // writes of the fused godunov.
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.5, -0.3],
@@ -91,7 +91,7 @@ fn adiabatic_runtime_force_fused_equals_two_pass_rk2() {
         sim
     };
 
-    // TWO-PASS: plain AOT godunov + the per-cell apply_runtime_source pass.
+    // two-pass: plain AOT godunov + the per-cell apply_runtime_source pass.
     let mut sim_two = build();
     let sub_two = sim_two.substrate().with_runtime_source(
         build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(),
@@ -99,7 +99,7 @@ fn adiabatic_runtime_force_fused_equals_two_pass_rk2() {
     );
     evolve(&mut sim_two, &sub_two, t_final).expect("two-pass evolve");
 
-    // FUSED: one Cranelift-JIT'd godunov+source launch.
+    // fused: one Cranelift-JIT'd godunov+source launch.
     let mut sim_fused = build();
     let sub_fused = sim_fused.substrate().with_fused_runtime_source(
         build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(),
@@ -107,7 +107,7 @@ fn adiabatic_runtime_force_fused_equals_two_pass_rk2() {
     );
     evolve(&mut sim_fused, &sub_fused, t_final).expect("fused evolve");
 
-    // GUARD: the fused kernel actually JIT-compiled + ran (else this would compare two-pass vs
+    // guard: the fused kernel actually JIT-compiled + ran (else this would compare two-pass vs
     // two-pass and pass vacuously — the exact trap this test exists to avoid).
     assert_eq!(
         sub_fused.runtime_source.as_ref().unwrap().fused_cpu_state(),
@@ -148,7 +148,7 @@ fn adiabatic_runtime_force_fused_equals_two_pass_rk2() {
 
 #[test]
 fn iso_runtime_force_fused_equals_two_pass_rk2() {
-    // the two-pass is the default; this test pins the FUSED kernel as live, so
+    // the two-pass is the default; this test pins the fused kernel as live, so
     // opt in before the policy OnceLock latches.
     unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     // the iso analogue: no energy law, so the fused kernel writes only den + mom_k (no nrg).
@@ -223,11 +223,11 @@ fn iso_runtime_force_fused_equals_two_pass_rk2() {
 
 #[test]
 fn adiabatic_fused_equals_two_pass_on_the_cache_tiled_cover() {
-    // the two-pass is the default; this test pins the FUSED kernel as live, so
+    // the two-pass is the default; this test pins the fused kernel as live, so
     // opt in before the policy OnceLock latches.
     unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     // the other force tests run 24^2 = 576 interior cells, below `WHOLE_BELOW_CELLS` — so their
-    // fused dispatch takes `ExecPolicy::Whole` (the flat driver) and the CACHE-TILED cover is never
+    // fused dispatch takes `ExecPolicy::Whole` (the flat driver) and the cache-tiled cover is never
     // exercised. this runs a domain large enough that `policy_for` returns `Cover`, so the fused
     // godunov executes through `run_cover_raw` (blocks fanned out, serial axis-0-innermost within).
     // the cover must be a pure reordering: bit-for-bit equal to the two-pass trajectory.
@@ -278,13 +278,13 @@ fn adiabatic_fused_equals_two_pass_on_the_cache_tiled_cover() {
     );
     evolve(&mut sim_fused, &sub_fused, t_final).expect("fused evolve");
 
-    // GUARD 1: the fused kernel compiled (else two-pass vs two-pass).
+    // guard 1: the fused kernel compiled (else two-pass vs two-pass).
     assert_eq!(
         sub_fused.runtime_source.as_ref().unwrap().fused_cpu_state(),
         Some(true),
         "fused godunov+source kernel did not compile",
     );
-    // GUARD 2: the domain really does select the tiled cover (else this duplicates the Whole-path
+    // guard 2: the domain really does select the tiled cover (else this duplicates the Whole-path
     // oracles and proves nothing about `run_cover_raw`).
     assert!(
         matches!(

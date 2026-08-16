@@ -1,7 +1,7 @@
 // =============================================================================
 // census_sample.rs
 //
-// taking one census sample, for BOTH drivers. the uni-grid loop and the refinement hierarchy
+// taking one census sample, for both drivers. the uni-grid loop and the refinement hierarchy
 // each run their own step, and a sampling call that lived in only one of them would leave the
 // other silently recording nothing — a census that writes no rows is indistinguishable from a
 // run that was never asked for one.
@@ -23,12 +23,12 @@ use symbi_xpu::{ExecutionSpace, MemorySpace};
 ///
 /// the samples are collected before any is recorded because evaluating a census borrows the
 /// state immutably while appending to its series needs it mutably.
-/// reduce one LEVEL's leaf cells into a partial sample per registered census.
+/// reduce one level's leaf cells into a partial sample per registered census.
 ///
 /// `covered` is the region a finer level resolves; those cells are not this level's to count.
 /// returns one `(values, dropped)` per registration, in registration order.
 ///
-/// the registrations are supplied rather than read from `sim`, because a census is registered ONCE
+/// the registrations are supplied rather than read from `sim`, because a census is registered once
 /// — on the root, which owns the history — while every level of a hierarchy must be reduced
 /// against it. reading them from each level instead makes a refined run silently omit its refined
 /// volume: the covered coarse cells are excluded from the parent, and a fine level holding no
@@ -54,7 +54,7 @@ where
         .iter()
         .enumerate()
         .map(|(index, registered)| {
-            // NOT DUE: an empty partial, which `combine_partials` folds as a no-op and
+            // not due: an empty partial, which `combine_partials` folds as a no-op and
             // `record_samples` skips. the alternative — dropping the entry — would misalign every
             // registration after it, since partials are matched to registrations by position.
             // and a registration whose declared cadence is not the one being driven here: a
@@ -68,9 +68,9 @@ where
                 return (Vec::new(), 0u64);
             }
             let spec = registered.evaluator.spec();
-            // the COMPILED map first — the same traced kernel a device runs — falling back to the
+            // the compiled map first — the same traced kernel a device runs — falling back to the
             // per-cell interpreter when it does not apply. both write into the same scratch, whose
-            // every cell starts EXCLUDED, so whichever runs leaves untouched cells out of the
+            // every cell starts excluded, so whichever runs leaves untouched cells out of the
             // reduction rather than in bucket zero.
             let fields = census_map_fields(sim, censuses, index, &registered.evaluator, covered).unwrap_or_else(|| {
                 panic!(
@@ -95,7 +95,7 @@ where
 
 /// fold one level's partial into a running total, per registration.
 ///
-/// the combine is the census's OWN reduce op, which is why an accumulator has to be a
+/// the combine is the census's own reduce op, which is why an accumulator has to be a
 /// commutative monoid: the same operator that merges two cells merges two levels, in whatever
 /// order the levels happen to be visited.
 pub fn combine_partials(
@@ -187,7 +187,7 @@ pub fn record_samples_at_level<R, const D: usize, const DOF: usize, M, E, S, Mem
 ///
 /// neither fill honours a finer level's coverage — both sweep the whole interior — so the covered
 /// cells are marked excluded afterwards, uniformly. that ordering is what makes the scratch
-/// reusable: a fill that SKIPPED covered cells would leave the previous sample's bucket standing in
+/// reusable: a fill that skipped covered cells would leave the previous sample's bucket standing in
 /// a cell that is no longer this level's to count.
 pub fn census_map_fields<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
@@ -219,14 +219,14 @@ where
     Some(scratch)
 }
 
-/// mark a level's covered cells EXCLUDED: the cells a finer level resolves are counted there, not
+/// mark a level's covered cells excluded: the cells a finer level resolves are counted there, not
 /// here, so they must carry the marker that keeps them out of the reduction.
 ///
 /// a constant fill over the covered region, dispatched through the same generic kernel path every
 /// other field operation uses, so a device-resident hierarchy excludes on the device. walking the
 /// region on the host instead would work only where the fields happen to be host-accessible — and
 /// where they are not, the covered cells keep the bucket the map assigned them and the refined
-/// volume is counted on BOTH levels, inflating every extensive total by exactly that volume.
+/// volume is counted on both levels, inflating every extensive total by exactly that volume.
 fn exclude_covered<const D: usize, Mem: MemorySpace>(
     ev: &symbi_sim::census::CensusEvaluator,
     segment: &symbi_grid::Field<f64, D, Mem>,

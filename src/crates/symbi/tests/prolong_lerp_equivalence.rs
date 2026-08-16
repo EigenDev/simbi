@@ -3,21 +3,21 @@
 //
 // the gates for the lerp-then-prolong split:
 //
-//   - BIT EQUALITY: the two-pass path (field_lerp over the coarse parent
+//   - bit equality: the two-pass path (field_lerp over the coarse parent
 //     region + the single-snapshot prolong) reproduces the fused time-pair
 //     prolong kernel bit-for-bit on every fine cell, every order, at a
 //     nontrivial alpha. the lerp expression and its consumption are unchanged
 //     — only where the intermediate lives moves (register -> coarse cell) —
 //     so any difference is a wiring bug.
 //
-//   - LINEAR EXACTNESS: a field linear in the coarse index with dyadic
+//   - linear exactness: a field linear in the coarse index with dyadic
 //     coefficients prolongs to the exact linear value at each fine sub-cell
 //     position (plm: the van-leer slope of equal one-sided differences is the
 //     difference itself; ppm: the parabola of linear data is the line, the
 //     monotonizer is a no-op, the sub-cell average is the midpoint value).
 //     every operation is dyadic-exact, so the assert is ==.
 //
-//   - PPM CONSERVATION: the ratio^D children of a parent average back to the
+//   - PPM conservation: the ratio^D children of a parent average back to the
 //     parent value (the sub-cell averages partition the parent integral).
 //
 // these laws also gate any replacement pipeline (axis-split sweeps, per-parent
@@ -132,7 +132,7 @@ fn lerp_then_prolong_is_bit_identical_to_the_time_pair_kernel() {
 
 // the axis-split sweep chain against the fused tensor-product
 // kernel: bit identity at every order and a nontrivial alpha. the sweeps
-// materialize the SAME per-axis composition through f64 intermediates, so any
+// materialize the same per-axis composition through f64 intermediates, so any
 // bit difference is a wiring bug (pass order, operand order, a frac spelled
 // differently) — never loosen this to a tolerance.
 #[test]
@@ -185,7 +185,7 @@ fn linear_coarse_data_prolongs_exactly() {
 
         for (kk, field) in comps(&dst).iter().enumerate() {
             for c in region.iter() {
-                // the fine cell's position in COARSE index coordinates:
+                // the fine cell's position in coarse index coordinates:
                 // parent + (parity + 1/2)/2 - 1/2 per axis.
                 let pos = |f: isize| -> f64 {
                     let p = f.div_euclid(2) as f64;

@@ -1,8 +1,8 @@
 // =============================================================================
 // substrate_adiabatic_sod.rs
 //
-// the end-to-end gate for the adiabatic substrate: a full ADIABATIC (ideal-gas)
-// Euler Sod shock-tube evolution where EVERY operator in the RK2 step — c2p,
+// the end-to-end gate for the adiabatic substrate: a full adiabatic (ideal-gas)
+// Euler Sod shock-tube evolution where every operator in the RK2 step — c2p,
 // ghost_fill, cfl, flux, godunov_euler, godunov_rk2, snapshot — is the
 // substrate-generated kernel (AdiabaticSubstrateKernelSet), run through the real
 // `evolve()` loop on a real Newtonian `SimState`.

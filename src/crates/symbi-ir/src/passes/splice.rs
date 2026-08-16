@@ -106,8 +106,8 @@ pub fn splice_graph(
 
     for (src_id, node, src_ty) in source.iter() {
         // Param + Lambda need cross-graph context (param substitution / FnDef
-        // cloning) — handle them specially. every OTHER variant is "pure":
-        // clone the op, remap its NodeId fields ONCE via the canonical
+        // cloning) — handle them specially. every other variant is "pure":
+        // clone the op, remap its NodeId fields once via the canonical
         // `Op::try_map_inputs`, then dispatch to the matching builder. the
         // remap+dispatch reads like the IR shape with no per-variant
         // duplication.
@@ -136,13 +136,13 @@ pub fn splice_graph(
                 target.add_lambda(fn_def, node.span)
             }
             _ => {
-                // SINGLE remap call: `try_map_inputs` knows which
+                // single remap call: `try_map_inputs` knows which
                 // fields are NodeIds for each variant. lookup forwards into
                 // `remap[..]`; a missing entry is an `OutputOutOfRange` error.
                 let mut op = node.op.clone();
                 op.try_map_inputs(|id| remap[id.0 as usize].ok_or(SpliceError::OutputOutOfRange))?;
                 // dispatch via `Op::dispatch_builder` —
-                // the SINGLE per-variant Op->target-builder dispatcher in
+                // the single per-variant Op->target-builder dispatcher in
                 // graph.rs (alongside `try_map_inputs`). adding a new variant
                 // touches `try_map_inputs` + `dispatch_builder` and nothing
                 // else; this site stays variant-free. Param/Lambda are
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn splice_multi_output_shares_intermediate_nodes() {
         // source: inv = 1.0 / x; (a = inv * y, b = inv * z). two outputs
-        // share `inv`. splicing both in one call must produce ONE inv
+        // share `inv`. splicing both in one call must produce one inv
         // node in target.
         let mut src = Graph::new();
         let x = src.add_scalar_param("x", ElementTy::F64);

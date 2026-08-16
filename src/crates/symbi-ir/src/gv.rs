@@ -914,7 +914,7 @@ impl DivAssign for Gv {
 
 impl std::iter::Sum for Gv {
     fn sum<I: Iterator<Item = Gv>>(iter: I) -> Gv {
-        // direct construction; ZERO comes from `<Gv as crate::algebra::Scalar>::ZERO`
+        // direct construction; zero comes from `<Gv as crate::algebra::Scalar>::ZERO`
         // but qualifying inline keeps this independent of import scope.
         iter.fold(Gv(GvVal::Lit(0.0)), |a, b| a + b)
     }
@@ -1028,7 +1028,7 @@ impl crate::algebra::Mask for GvMask {}
 impl crate::algebra::Scalar for Gv {
     type Mask = GvMask;
 
-    // ZERO / ONE inherited from `Numeric for Gv`.
+    // zero / one inherited from `Numeric for Gv`.
     const INFINITY: Gv = Gv(GvVal::Lit(f64::INFINITY));
     const NEG_INFINITY: Gv = Gv(GvVal::Lit(f64::NEG_INFINITY));
     const NAN: Gv = Gv(GvVal::Lit(f64::NAN));
@@ -1289,7 +1289,7 @@ impl crate::algebra::Scalar for Gv {
         self.unop(ElementWiseOp::Atanh)
     }
 
-    // ── HIGHER-ORDER: iterate + iterate_vec with the FREEZE LAW ───────────
+    // ── higher-order: iterate + iterate_vec with the freeze law ───────────
     fn iterate(
         self,
         max_steps: usize,

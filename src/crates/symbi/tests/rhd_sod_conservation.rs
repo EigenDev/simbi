@@ -1,14 +1,14 @@
 // =============================================================================
 // rhd_sod_conservation.rs
 //
-// the RHD multi-step CONSERVATION + CFL + POSITIVITY gate. it samples the integral
+// the RHD multi-step conservation + CFL + positivity gate. it samples the integral
 // invariants every SAMPLE_EVERY steps rather than checking one end state, so a
 // regression in consolidated IR, identity folding, or view-struct buffer ABIs
 // surfaces here as drift in a conserved global.
 //
 // IC: Marti-Mueller relativistic Sod (\gamma = 5/3): (\rho, p) = (1, 1) | (0.125, 0.1),
 // v = 0. reflective walls keep the integral diagnostics fully closed (no
-// boundary flux of mass / energy) — the test asserts ABSOLUTE conservation up to
+// boundary flux of mass / energy) — the test asserts absolute conservation up to
 // floating drift (1e-9 mass, 1e-8 energy).
 //
 // step count: t_final chosen so the cfl-driven loop runs \approx 200 steps. waves
@@ -151,7 +151,7 @@ fn rhd_sod_conserves_mass_energy_and_respects_cfl() {
             max_lambda = max_lambda.max(max_wavespeed_estimate(rho, p, v));
         }
 
-        // CFL bound: the kernel's NEXT dt — same call evolve uses — must
+        // CFL bound: the kernel's next dt — same call evolve uses — must
         // respect dt * max|\lambda| / dx <= CFL. if the kernel returns a dt that
         // violates the CFL on the actual state, this fires.
         let dt_next = sub.cfl(s);

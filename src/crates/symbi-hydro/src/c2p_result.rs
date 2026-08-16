@@ -19,7 +19,7 @@ pub const C2P_MAX_ITER: usize = 100;
 
 /// bitflag error code for cons-to-prim recovery.
 /// zero = success. nonzero = something went wrong but the value is safe to use.
-/// flags can be combined via `merge` (bitwise OR).
+/// flags can be combined via `merge` (bitwise or).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct ErrorCode(pub u8);
@@ -152,11 +152,11 @@ impl<T: Copy> C2pResult<T> {
 /// recovery. the error code is authoritative and the value must never enter evolution.
 pub const C2P_FAILURE_SENTINEL: f64 = 1.0;
 
-// the shared relativistic c2p diagnostic contract (RHD + RMHD). ONE source so the two
+// the shared relativistic c2p diagnostic contract (RHD + RMHD). one source so the two
 // regimes' threshold conventions cannot drift (tier-1 #5: the density-scaled-vs-absolute
 // pressure floor, the superluminal margin, and the input-NaN check had all diverged).
 //
-// these are POST-HOC flags on the RAW recovered state — NO silent floor: the caller returns
+// these are post-hoc flags on the raw recovered state — no silent floor: the caller returns
 // the raw recovery value, this only reports what is non-physical.
 // thresholds are dimensionally clean:
 //   * NON_FINITE       : rho or pressure is NaN.
@@ -164,7 +164,7 @@ pub const C2P_FAILURE_SENTINEL: f64 = 1.0;
 //                        valid cold limit; the zero-pressure boundary is not
 //                        in the strict admissible interior used by the flux
 //                        and fofc kernels.
-//   * SUPERLUMINAL     : v^2 >= 1 (the Lorentz factor is finite only for v^2 < 1) or v^2
+//   * superluminal     : v^2 >= 1 (the Lorentz factor is finite only for v^2 < 1) or v^2
 //                        is NaN. no luminal margin.
 pub fn relativistic_c2p_code<S: symbi_ir::algebra::Scalar + symbi_algebra::OrderedNumeric>(
     rho: S,
@@ -212,9 +212,9 @@ pub fn c2p_cone_fail_pressure<S: symbi_ir::algebra::Scalar>(den: S) -> S {
 
 /// the shared relativistic-c2p velocity ceiling, squared: `v_limit^2 = r^2 / (1 + r^2)` with
 /// `r = |S| / D` the rescaled conserved-momentum magnitude (enthalpy floor `h0 = 1`; KKC/Kastaun
-/// 2021 Eq. 40). the true 3-velocity of ANY in-cone state with `p >= 0` satisfies `v <= v_limit`,
+/// 2021 Eq. 40). the true 3-velocity of any in-cone state with `p >= 0` satisfies `v <= v_limit`,
 /// so clamping a recovered `v^2` to this leaves a valid recovery unchanged while keeping the
-/// Lorentz factor / density finite for an out-of-cone input — no NaN. ONE source shared by
+/// Lorentz factor / density finite for an out-of-cone input — no NaN. one source shared by
 /// `rhd_recover` and `rmhd_recover` so the two regimes cannot drift. carrier-generic.
 #[inline]
 pub fn relativistic_velocity_ceiling_sq<S: symbi_ir::algebra::Scalar>(r_sq: S) -> S {

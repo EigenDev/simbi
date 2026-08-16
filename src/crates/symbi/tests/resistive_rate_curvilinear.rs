@@ -1,18 +1,18 @@
 // =============================================================================
 // resistive_rate_curvilinear.rs
 //
-// the RATE certificate for curvilinear resistive MHD: the adjoint oracle proves the operator is a
-// stable (negative-definite) diffusion, but not that it diffuses at the CORRECT physical rate. this
-// seeds the analytic free-decay EIGENMODES and confirms the discrete operator returns their
+// the rate certificate for curvilinear resistive MHD: the adjoint oracle proves the operator is a
+// stable (negative-definite) diffusion, but not that it diffuses at the correct physical rate. this
+// seeds the analytic free-decay eigenmodes and confirms the discrete operator returns their
 // eigenvalue via the Rayleigh quotient
 //
 //     lambda = - <B, L B>_F / (eta <B, B>_F)  ==  k^2     (L B = eta grad^2 B),
 //
-// with the physical DEC weights, over an interior sub-window (so boundary conditions never enter).
-//   - CYLINDRICAL: the poloidal B_z(r) = J_0(k r) mode diffuses by the scalar cyl Laplacian
+// with the physical dec weights, over an interior sub-window (so boundary conditions never enter).
+//   - cylindrical: the poloidal B_z(r) = J_0(k r) mode diffuses by the scalar cyl Laplacian
 //     (1/r) d_r(r d_r .), eigenvalue k^2 (Bessel's equation). J_0 via Abramowitz & Stegun 9.4.
-//   - SPHERICAL: the l=1 dipole free-decay mode from the vector potential A_phi = j_1(k r) sin(theta)
-//     (spherical Bessel j_1 -- ELEMENTARY -- times the Legendre P_1^1 = sin theta), eigenvalue k^2
+//   - spherical: the l=1 dipole free-decay mode from the vector potential A_phi = j_1(k r) sin(theta)
+//     (spherical Bessel j_1 -- elementary -- times the Legendre P_1^1 = sin theta), eigenvalue k^2
 //     of the l=1 radial operator d_rr + (2/r) d_r - 2/r^2. this is the textbook magnetic-dipole decay.
 // the discrete Rayleigh quotient matches k^2 to the O(dx^2) truncation error -- the metric is handled
 // correctly (it lives in the induction curl + the weights).

@@ -74,7 +74,7 @@ class FishboneMoncrief:
         self.ell = math.sqrt(kappa) * self._ell_of(r_in)
         # the surface potential: ln h vanishes at the inner edge on the equator.
         self._lnh_in = self._lnh_raw(r_in, math.pi / 2.0)
-        # the pressure maximum: the OUTER root of l(r) = l on the chosen branch
+        # the pressure maximum: the outer root of l(r) = l on the chosen branch
         # (|l(r)| falls to its minimum near the marginally stable orbit and grows
         # outward). dense log scan for the outer crossing, then bisection.
         target = abs(self.ell)
@@ -223,7 +223,7 @@ class RotatingEquilibrium:
         chart: str = "bl",
     ) -> None:
         # a stationary constant-l azimuthal flow needs a timelike LNRF (Delta > 0):
-        # the equilibrium exists OUTSIDE the horizon only. the wedge must not
+        # the equilibrium exists outside the horizon only. the wedge must not
         # penetrate — unlike the infall problems, this state has no through-horizon
         # continuation.
         r_plus = mass + math.sqrt(max(mass * mass - spin * spin, 0.0))
@@ -233,7 +233,7 @@ class RotatingEquilibrium:
             )
         # place the potential's pressure maximum at r_max: with r_in = 0.9 r_max the
         # required kappa is (l(r_max)/l(r_in))^2 (both on the outer branch of the
-        # eq. 3.8 circular-orbit relation at THIS spin — a probe instance supplies it).
+        # eq. 3.8 circular-orbit relation at this spin — a probe instance supplies it).
         probe = FishboneMoncrief(
             mass=mass,
             r_in=0.9 * r_max,

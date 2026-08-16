@@ -6,7 +6,7 @@
 //   - `symbi_io::Hdf5Backend` (production checkpoint)
 //   - `symbi_io::JsonBackend` (introspection)
 //   - `symbi_display::render_metadata` / `render_tree_buf` (this file —
-//     framed, column-aligned tables suitable for the live-monitor UI).
+//     framed, column-aligned tables suitable for the live-monitor ui).
 //
 // the tables use the existing `terminal::ansi` + box-drawing characters from
 // `renderer::BoxChars`, so they match the look of the live `Table` widget

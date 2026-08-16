@@ -3,12 +3,12 @@
 //
 // the device twin of rigid_curvilinear_wall: the runtime-JIT shaped rigid wall on
 // the cylindrical (R, phi) chart, run on device memory (NVRTC render of the same
-// GvKernel the host cranelift-compiles) and asserted BIT-CLOSE to the CPU run.
+// GvKernel the host cranelift-compiles) and asserted bit-close to the CPU run.
 // gates the three host discriminators through the GPU dispatch:
-// - NO-PENETRATION: the penalized cons field matches the CPU cons field;
-// - RECEIPT FRAME: the force receipt (a cartesian world vector) matches the CPU
+// - no-penetration: the penalized cons field matches the CPU cons field;
+// - receipt frame: the force receipt (a cartesian world vector) matches the CPU
 //   receipt (an x-stream pushes +x with the y component cancelling);
-// - TARGET FRAME: a wall translating through still gas produces the same receipt
+// - target frame: a wall translating through still gas produces the same receipt
 //   on device as on host (the frame rotation is baked into the emitted kernel).
 // the per-body delta reductions must land the same value on both backends (the
 // fixed-order fold contract), so the receipt is a parity discriminator too.
@@ -57,7 +57,7 @@ fn stream_prim(phi: f64, v: f64) -> Prim<f64, 2> {
 }
 
 // build the shaped-wall cylindrical sim on any (space, memory) — the host and device
-// runs bake the SAME CSG sphere, differing only in where the kernel executes.
+// runs bake the same CSG sphere, differing only in where the kernel executes.
 fn build<S: ExecutionSpace, Mem: MemorySpace>(
     vel_x: f64,
     with_body: bool,
@@ -138,7 +138,7 @@ fn cons_rel_gap(h: &HostSim, d: &DevSim) -> f64 {
     gap
 }
 
-// run ONE shaped penalization on host + device and return their force receipts.
+// run one shaped penalization on host + device and return their force receipts.
 fn penalize_once(
     vel_x: f64,
     body_vel: [f64; 2],
@@ -156,7 +156,7 @@ fn penalize_once(
 }
 
 // the host + device force receipts agree when each component matches to a combined
-// rel+abs tolerance against the force MAGNITUDE. the transverse component is a
+// rel+abs tolerance against the force magnitude. the transverse component is a
 // numerical zero (mirror cancellation about phi = pi/2), where the host slab-order
 // fold and the device block-order fold differ at round-off — bounded by the absolute
 // floor (the fixed-order fold is reproducible per backend).

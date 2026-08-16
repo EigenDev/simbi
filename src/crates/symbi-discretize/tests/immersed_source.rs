@@ -3,7 +3,7 @@
 //
 // validates the substrate body_source builder against an
 // independent inline implementation of the same spec: an interpreter run on a known
-// state with one ACTIVE body + one INACTIVE body (mass=0, sink=0) to prove the
+// state with one active body + one inactive body (mass=0, sink=0) to prove the
 // branch-free MAX_SOURCE_BODIES loop contributes exactly zero for inactive slots.
 //
 //   gravity:   g = -mass (x - x_b) / (|x-x_b|^2 + soft^2)^{3/2}
@@ -99,11 +99,11 @@ fn rel(a: f64, b: f64) -> f64 {
 fn body_source_gravity_only_matches_analytic() {
     // sink=0 -> accretion off; only gravity acts.
     //
-    // this pass is an ADDITIVE source: the explicit scheme it feeds evaluates the flux
+    // this pass is an additive source: the explicit scheme it feeds evaluates the flux
     // divergence and every source at the stage input and sums them into one convex update, and
     // the stage weights then reconstruct the second-order part of the work. so the energy the
     // pass contributes is the work rate `m.g` alone, at the state the force was evaluated at, and
-    // the `0.5 rho |g|^2 dt^2` that closes a STANDALONE kick would be double-counted here.
+    // the `0.5 rho |g|^2 dt^2` that closes a standalone kick would be double-counted here.
     //
     // the standalone form still exists and still carries that term — see
     // `a_standalone_body_kick_leaves_internal_energy_exactly_fixed`, which is the contract the
@@ -333,7 +333,7 @@ fn a_standalone_body_kick_leaves_internal_energy_exactly_fixed() {
             );
         }
     }
-    // NON-VACUITY: gravity has to have actually kicked the momentum, or an unchanged internal
+    // non-vacuity: gravity has to have actually kicked the momentum, or an unchanged internal
     // energy says only that nothing happened.
     assert!(
         kicked,

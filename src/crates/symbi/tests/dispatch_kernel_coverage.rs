@@ -1,29 +1,29 @@
 // =============================================================================
 // dispatch_kernel_coverage.rs
 //
-// every CLI-reachable (regime x dimension x geometry) must have EVERY kernel family its substrate
+// every CLI-reachable (regime x dimension x geometry) must have every kernel family its substrate
 // requests emitted in the AOT registry, spanning past the face-flux family alone. per step the
-// substrate builds, on a FLAT (Minkowski) metric:
+// substrate builds, on a flat (Minkowski) metric:
 //   - `{prefix}_godunov_stage{geom}_{D}d`   (the conserved update)
 //   - `{prefix}_wave_speed_map{geom}_{D}d`  (the CFL bound)
 //   - `rmhd_bcell_godunov_{euler,rk2}{geom}_{D}d`   (mhd out-of-plane B predictor, D < DOF)
 //   - `rmhd_ct_curl_2d_{dir}{geom}`                 (mhd 2D in-plane metric CT curl)
-// a `(dims, coords)` whose dispatch arm exists but whose kernel was never baked panics MID-RUN at
+// a `(dims, coords)` whose dispatch arm exists but whose kernel was never baked panics mid-run at
 // `expect_kernel` (symbi-exec/layout.rs). this asserts each name the flat dispatch can request either
-// resolves in the registry OR is a KNOWN_UNBAKED gap with a recorded reason — so a NEW gap (a chart
+// resolves in the registry or is a KNOWN_UNBAKED gap with a recorded reason — so a new gap (a chart
 // that regresses out of the bake) fails at this gate ahead of a user's first step.
 //
-// SPACING IS NOT IN THE NAME: it is a per-axis RUNTIME kernel scalar (`map_kind_{ax}`: 0 uniform,
-// 1 log), so ONE kernel per (regime, geometry) serves uniform, log-radial, log-theta, ... — there is
+// spacing is not in the name: it is a per-axis runtime kernel scalar (`map_kind_{ax}`: 0 uniform,
+// 1 log), so one kernel per (regime, geometry) serves uniform, log-radial, log-theta, ... — there is
 // no `_logr` name axis to enumerate. the log paths are exercised by physics gates (gr_bondi,
 // mhd_cyl_rz_logr, michel-logr).
 //
-// PREFIX MAP (the name protocol is per-family, each family picking its own prefix): the godunov + c2p families
+// prefix map (the name protocol is per-family, each family picking its own prefix): the godunov + c2p families
 // use the regime prefix; the wave-speed family uses rhd->"rhd" but adiabatic->"iso" (Newtonian
 // shares the isothermal cs map) and iso->"iso"; the mhd families use the regime prefix; the bcell
 // predictor + ct curl are always "rmhd_" (faraday induction is regime-agnostic).
 //
-// SCOPE: flat spacetime only. non-minkowski combinations are guarded arm-or-Err
+// scope: flat spacetime only. non-minkowski combinations are guarded arm-or-Err
 // (`test_dispatch_rejects_unbaked_gr`). the c2p family is geometry-light on a flat metric, so it is
 // enumerated by the curved-family gates instead.
 // =============================================================================
@@ -31,11 +31,11 @@
 use symbi::regimes::substrate_kernels::{geom_suffix, kernel_exists, mhd_geom_suffix};
 use symbi_geometry::Geometry;
 
-// known-unbaked flat combos the dispatch can request that are DELIBERATELY not baked (they fail
+// known-unbaked flat combos the dispatch can request that are deliberately not baked (they fail
 // loud at dispatch). the list is empty: every flat combination the dispatch can request — including
 // 1D curvilinear MHD (spherical + cylindrical), 2D spherical nmhd/imhd wave speeds, and the
 // log-radial charts (spacing is a runtime scalar, so they share the uniform kernel) — is baked. a
-// NEW gap fails the test until it is baked or listed here.
+// new gap fails the test until it is baked or listed here.
 const KNOWN_UNBAKED: &[&str] = &[];
 
 fn assert_family(missing: &mut Vec<String>, name: String) {
@@ -45,7 +45,7 @@ fn assert_family(missing: &mut Vec<String>, name: String) {
 }
 
 // the hydro godunov + wave-speed families. on a flat metric every hydro dispatch arm has DOF == D
-// (the azimuthal-momentum swirl lift, DOF > D, appears ONLY on the curved-spacetime arms), so the
+// (the azimuthal-momentum swirl lift, DOF > D, appears only on the curved-spacetime arms), so the
 // geometry suffix is coord-only (`geom_suffix(c, D, D)` = "" / "_sph" / "_cyl"). the godunov name
 // uses the regime prefix; the CFL wave-speed name uses "rhd" for rhd and "iso" for both adiabatic
 // (shares the cs map) and iso. rhd + adiabatic + iso reach cartesian / spherical / cylindrical 1-3D.
@@ -90,7 +90,7 @@ fn every_hydro_stage_and_cfl_kernel_is_emitted() {
 
 // the balance-carrying body-source / ghost-fill pair. both are baked per chart — the potential is
 // evaluated at chart positions through the cartesian embedding — and both names are spelled at
-// dispatch with `coord_suffix`, exactly as here. the balanced FLUX arms are enumerated by the
+// dispatch with `coord_suffix`, exactly as here. the balanced flux arms are enumerated by the
 // solver-matrix gate below; this covers the other two legs of the balanced triple, whose names no
 // physics gate reaches on the 2D/3D charts.
 #[test]
@@ -189,19 +189,19 @@ fn chi_family_is_baked_for_every_dimension() {
 }
 
 // =============================================================================
-// the CURVED-spacetime families.
+// the curved-spacetime families.
 //
-// the gates above are FLAT-only, and they enumerate the four families a flat step
+// the gates above are flat-only, and they enumerate the four families a flat step
 // requests. the curved-only families — the wu 2017 source-admissibility CFL
 // and the admissible-boundary projection — are enumerated here: they appear on no flat
 // arm, so nothing above reaches them.
 //
 // the failure mode is a chart-segment disagreement between the dispatch and the bake. MHD
-// carries no momentum-DOF lift, which invites an EMPTY chart segment on the dispatch side,
+// carries no momentum-DOF lift, which invites an empty chart segment on the dispatch side,
 // while the bake names the kernel with the grid-axis chart segment. the two then agree only
 // on cartesian (segment empty either way) and diverge on every curvilinear chart, so the
 // spherical GRMHD projection panics the first time a cell needs it, in 1D and 2D alike. a
-// name divergence must fail HERE, at a gate that builds both sides, ahead of a physics test
+// name divergence must fail here, at a gate that builds both sides, ahead of a physics test
 // whose failure names a missing kernel instead of a bug.
 //
 // the arms mirror the curved match arms of `hydro_dispatch!` / `mhd_dispatch!` in
@@ -278,7 +278,7 @@ fn curved_mhd_arms() -> Vec<CurvedArm> {
 fn every_curved_admissibility_kernel_is_emitted() {
     let mut missing = Vec::new();
 
-    // GRHD: the chart segment comes from the SAME derivation the dispatch runs. calling
+    // GRHD: the chart segment comes from the same derivation the dispatch runs. calling
     // `geom_suffix` directly here would re-spell it, and a gate that re-spells the thing it
     // is checking passes whatever the dispatch does — including an empty segment on both
     // sides.
@@ -324,16 +324,16 @@ fn every_curved_admissibility_kernel_is_emitted() {
     );
 }
 
-// the GRMHD HLL face flux does not compute its own fan: it READS `wave_speed_l[dir]` and
+// the GRMHD HLL face flux does not compute its own fan: it reads `wave_speed_l[dir]` and
 // `wave_speed_r[dir]` from the two cells sharing each face (the davis estimate), and a separate
 // per-cell pass materializes them. that producer/consumer coupling is invisible in the names, and
 // its failure mode is silent rather than loud: with the producer absent the flux reads the fields'
-// ZERO initialization, so both fan speeds collapse onto the shift and every axis whose shift
+// zero initialization, so both fan speeds collapse onto the shift and every axis whose shift
 // component vanishes loses its dissipation entirely. the sweep on that axis becomes one-sided and
 // odd-even decoupled — no crash, no missing-kernel panic, just a smooth stationary state growing a
 // grid-scale checkerboard over tens of dynamical times.
 //
-// so assert BOTH halves: the producer exists for every curved family whose HLL flux exists, and the
+// so assert both halves: the producer exists for every curved family whose HLL flux exists, and the
 // flux really is a consumer (otherwise the pairing is vacuous and would keep passing if the flux
 // were later changed to compute its speeds inline).
 #[test]
@@ -383,7 +383,7 @@ fn every_curved_hll_flux_has_the_wave_speeds_it_reads() {
 #[test]
 fn the_projection_name_is_built_once_for_both_sides() {
     // the bake and the dispatch must not be able to spell this kernel two ways. they call
-    // ONE builder, so the chart segment and the spacetime slug appear in one order, in one
+    // one builder, so the chart segment and the spacetime slug appear in one order, in one
     // place. this pins the resulting shape so a change to it is a deliberate edit rather
     // than a silent divergence that only shows up on one chart.
     assert_eq!(
@@ -404,12 +404,12 @@ fn the_projection_name_is_built_once_for_both_sides() {
 }
 
 // =============================================================================
-// the SOLVER matrix. `Solver::valid_for(regime)` is what a config is checked against, so every pair
+// the solver matrix. `Solver::valid_for(regime)` is what a config is checked against, so every pair
 // it accepts is a pair a user can select — and selecting one whose face-flux kernel was never baked
 // panics at `expect_kernel` on the first step, after the queue slot is spent.
 //
 // nothing else covers this. the families above enumerate (regime x dimension x geometry) at the
-// DEFAULT solver; widening the matrix to admit a new (solver, regime) pair leaves them all green.
+// default solver; widening the matrix to admit a new (solver, regime) pair leaves them all green.
 // =============================================================================
 
 #[test]
@@ -426,7 +426,7 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
         (RegimeKind::Rmhd, "rmhd", &[1, 3][..]),
         (RegimeKind::NewtonianMhd, "nmhd", &[1, 3][..]),
     ];
-    // ENUMERATE FROM THE TYPE. a hand-written array is what let `HllcAcoustic` ship unswept:
+    // enumerate from the type. a hand-written array is what let `HllcAcoustic` ship unswept:
     // this gate's own header claims "widening the matrix to admit a new (solver, regime) pair
     // leaves them all green", and that is exactly what happened.
     let solvers = Solver::ALL;
@@ -441,7 +441,7 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
             for &ndim in dims {
                 for dir in 0..ndim {
                     // the reconstruction axis: the ppm twin exists for every solver the
-                    // NEWTONIAN matrix accepts (the runtime `.reconstruction(Ppm)` composes
+                    // newtonian matrix accepts (the runtime `.reconstruction(Ppm)` composes
                     // with any adiabatic solver); every other regime is plm-only and its
                     // dispatch refuses ppm before a name is formed.
                     let recons: &[symbi_discretize::Recon] = if regime == RegimeKind::Newtonian {
@@ -460,7 +460,7 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                     } else {
                         &[symbi_discretize::EosArm::IdealGamma]
                     };
-                    // the BALANCE axis, and the CHART axis that rides with it. a well-balanced
+                    // the balance axis, and the chart axis that rides with it. a well-balanced
                     // reconstruction reads cartesian positions, so it is baked per chart while
                     // every plain flux stays chart-agnostic -- and this gate spelled the name
                     // itself, with no chart segment at all, which is how twelve curvilinear
@@ -500,7 +500,7 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                                 };
                                 for &chart in charts {
                                     checked += 1;
-                                    // through the SAME composer the bake and the dispatch use.
+                                    // through the same composer the bake and the dispatch use.
                                     let name = symbi_discretize::kernel_slug::FaceFluxName {
                                         prefix,
                                         solver: solver.kernel_suffix(),
@@ -535,11 +535,11 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
     // gate silently vacuous.
     println!("coverage matrix: {checked} combinations");
     assert!(
-        // MEASURED, not guessed: the sweep over
+        // measured, not guessed: the sweep over
         // (regime x solver x dim x dir x recon x eos x balance x chart) is exactly 168
         // combinations today -- it was 180 until 2026-08-15, when the clamped hllc_lm
         // variant was retired and its solver row left the matrix (the surviving hllc_lm
-        // carries the balance x chart arms the retired name introduced). the floor sits AT
+        // carries the balance x chart arms the retired name introduced). the floor sits at
         // the measurement so any silent collapse of any axis fails here; move it only with
         // a deliberate matrix change, recorded like this one.
         checked >= 168,

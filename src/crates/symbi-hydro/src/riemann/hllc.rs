@@ -34,7 +34,7 @@ use symbi_ir::algebra::{Scalar, Selectable};
 // =============================================================================
 
 /// wave properties for newtonian HLLC: signal speeds + contact speed.
-/// implements toro section 9.5.2 adaptive estimates (PVRS / two-rarefaction
+/// implements toro section 9.5.2 adaptive estimates (pvrs / two-rarefaction
 /// / two-shock). returns `(s_l, s_r, s_star)`.
 #[inline]
 fn wave_properties<S: Scalar>(

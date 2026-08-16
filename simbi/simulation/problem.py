@@ -123,7 +123,7 @@ def _humanize_validation_error(setup_name: str, exc: ValidationError) -> str:
         # in the before-validator) already name the field in the message.
         loc = ".".join(str(p) for p in err["loc"])
         line = f"  {loc}: {msg}" if loc else f"  {msg}"
-        # echo the offending value only for FIELD-scoped errors; a model-level
+        # echo the offending value only for field-scoped errors; a model-level
         # error carries the whole input dict as `input`, which is noise.
         if "input" in err and err["loc"] and not isinstance(err["input"], dict):
             line += f"  (got: {err['input']!r})"
@@ -148,7 +148,7 @@ class SimbiProblem(BaseModel):
 
     # extra="forbid": a typo'd constructor kwarg (cfl_numbr=0.9) must fail loudly,
     # not vanish while the field keeps its default. assignment constraints are
-    # enforced FIELD-ONLY via __setattr__ — pydantic's validate_assignment
+    # enforced field-only via __setattr__ — pydantic's validate_assignment
     # would re-run every model validator per assignment, which recurses infinitely
     # for the common pattern of a validator that assigns fields.
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
@@ -156,7 +156,7 @@ class SimbiProblem(BaseModel):
     # per-field TypeAdapter cache for the field-only assignment validation.
     _field_adapters: ClassVar[dict[str, Any]] = {}
 
-    # the flags the user EXPLICITLY passed on the command line. from_cli fills it
+    # the flags the user explicitly passed on the command line. from_cli fills it
     # (possibly with the empty set — no flags passed); None marks a problem that
     # never went through the cli, where model_fields_set carries the same fact.
     # the checkpoint merge uses it to distinguish "user demanded --solver hllc"
@@ -164,9 +164,9 @@ class SimbiProblem(BaseModel):
     _cli_explicit: Optional[set[str]] = PrivateAttr(default=None)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        # enforce the FIELD's own constraints (type, ge/gt/le) on every assignment
+        # enforce the field's own constraints (type, ge/gt/le) on every assignment
         # — an out-of-range value written in setup() or user code must not reach
-        # the backend — WITHOUT re-running the model validators (whole-model
+        # the backend — without re-running the model validators (whole-model
         # consistency is _finalize's job, once, after setup).
         fields = type(self).model_fields
         if name in fields:
@@ -250,10 +250,10 @@ class SimbiProblem(BaseModel):
             None,
             ge=1.0,
             le=2.0,
-            # cli-exposed HERE, as the core physics knob it is, alongside solver /
+            # cli-exposed here, as the core physics knob it is, alongside solver /
             # reconstruction / cfl_number. it was previously left to each config to
             # re-declare with cli=True, which most did -- so the flag appeared generic
-            # right up until a config that did NOT declare it (one on the synge closure,
+            # right up until a config that did not declare it (one on the synge closure,
             # which owns no gamma) was asked to run a gamma-law arm, and `--adiabatic-index`
             # came back "unrecognized" for the first time. _field_is_cli inherits the
             # exposure across the mro, so a config that still declares its own keeps its
@@ -608,7 +608,7 @@ class SimbiProblem(BaseModel):
         bool, ProblemParam(False, description="enable mesh refinement")
     ]
     # seeding from the declared stationary target rather than from a pointwise sample of it:
-    # cells covered by a finer level carry the RESTRICTION of the finer target, which is what
+    # cells covered by a finer level carry the restriction of the finer target, which is what
     # the hierarchy's own restriction produces and re-produces every parent step. a pointwise
     # sample sits a truncation-order distance off the state the well-balancing preserves, and
     # that distance evolves like any other perturbation.
@@ -1021,11 +1021,11 @@ class SimbiProblem(BaseModel):
                     f"(e.g., 256,256), got {raw!r}"
                 ) from None
 
-        # pad a SHORT resolution to the field's declared tuple arity with singleton
+        # pad a short resolution to the field's declared tuple arity with singleton
         # trailing axes: a 2d input (1024,1024) satisfies a 3-component field as
         # (1024,1024,1), so a 2d problem stored as a flat 3d slab (the mhd
         # convention, nz=1) need not spell out the unused axis.
-        # an OVER-long input is left for validation to reject with a clear message.
+        # an over-long input is left for validation to reject with a clear message.
         if "resolution" in data and isinstance(data["resolution"], tuple):
             arity = cls._tuple_field_arity("resolution")
             res = data["resolution"]
@@ -1068,7 +1068,7 @@ class SimbiProblem(BaseModel):
                 int(x.strip()) for x in data["refinement_substeps"].split(",")
             ]
 
-        # boundary_conditions: "periodic,outflow" -> [BoundaryCondition.PERIODIC, BoundaryCondition.OUTFLOW]
+        # boundary_conditions: "periodic,outflow" -> [BoundaryCondition.periodic, BoundaryCondition.outflow]
         if "boundary_conditions" in data and isinstance(
             data["boundary_conditions"], str
         ):
@@ -1191,10 +1191,10 @@ class SimbiProblem(BaseModel):
                     "the synge (taub-mathews) closure is parameter-free — its "
                     "effective gamma is set by the temperature"
                 )
-            # the model KEEPS adiabatic_index = None: "no index" stays representable, so a
+            # the model keeps adiabatic_index = None: "no index" stays representable, so a
             # reader can tell a parameter-free closure from a user's 5/3. the inert
             # placeholder the kernel plumbing binds (taub-mathews never reads it) is
-            # injected at the SERIALIZATION boundary in runner.py, never onto the model --
+            # injected at the serialization boundary in runner.py, never onto the model --
             # the previous in-place mutation here leaked 5/3 into every downstream
             # consumer, and the checkpoint reader grew a special case to undo it.
         return self
@@ -1210,7 +1210,7 @@ class SimbiProblem(BaseModel):
             raise ValueError(
                 "plm_theta must be in (0, 2] when using PLM with the minmod limiter"
             )
-        # the van leer limiter is spelled theta = -1 ONLY at the execution-dict
+        # the van leer limiter is spelled theta = -1 only at the execution-dict
         # boundary (runner.py); the validated model keeps the user's positive
         # compression so the field's own gt=0 constraint holds on every path a
         # model round-trips (assignment validation, checkpoint restore).
@@ -1224,7 +1224,7 @@ class SimbiProblem(BaseModel):
             # limiter moved off its declared default would be dead configuration —
             # surface that, never swallow it. (the config plumbing passes every field
             # explicitly, so presence in model_fields_set cannot distinguish a user
-            # choice from a passthrough default; a changed VALUE can.)
+            # choice from a passthrough default; a changed value can.)
             fields = SimbiProblem.model_fields
             stray = [
                 name
@@ -1242,9 +1242,9 @@ class SimbiProblem(BaseModel):
                     "flatten is on (equal or inverted dials silently disable it)"
                 )
         else:
-            # a config class may DECLARE its ppm pairing (nonzero dial defaults)
+            # a config class may declare its ppm pairing (nonzero dial defaults)
             # while defaulting to plm — the dials are inert there and activate
-            # when the run selects ppm. what is rejected is a USER moving a dial
+            # when the run selects ppm. what is rejected is a user moving a dial
             # off the declaring class's own default on a non-ppm run: that is
             # dead configuration. subclass defaults, not the base's, are the
             # reference (type(self).model_fields carries the override).
@@ -1340,15 +1340,15 @@ class SimbiProblem(BaseModel):
                     f"refinement_region[{ii}] has {len(region)} coords, expected {expected_coords}"
                 )
 
-        # the backend subcycles at a FIXED refinement ratio: level l advances 2^l times per root
+        # the backend subcycles at a fixed refinement ratio: level l advances 2^l times per root
         # step, and the root step is min over levels of (that level's own cfl limit) * 2^l, so every
         # level lands inside its own cfl. neither an adaptive substep count nor a hand-specified one
         # is implemented — `refinement_subcycling_mode` and `refinement_substeps` reach no backend
         # code at all.
         #
-        # refused rather than ignored. a config that declares ADAPTIVE and silently receives the
+        # refused rather than ignored. a config that declares adaptive and silently receives the
         # fixed schedule invites reasoning built on a knob that does nothing, and the two are not
-        # equivalent: under the fixed schedule the ROOT is throttled by the finest level's
+        # equivalent: under the fixed schedule the root is throttled by the finest level's
         # requirement, taking around twenty times more steps than its own cfl would need on a deep
         # gravitational ladder. that is a bounded cost (the finest level dominates the work either
         # way, so an ideal schedule saves order twenty percent) but it is not nothing, and it is not
@@ -1541,7 +1541,7 @@ class SimbiProblem(BaseModel):
         parser = argparse.ArgumentParser(add_help=False)
         cls.setup_cli(parser)
 
-        # parse into existing namespace (if provided). REJECT unrecognized flags; a typo'd
+        # parse into existing namespace (if provided). reject unrecognized flags; a typo'd
         # or unsupported flag must fail loudly here, since silently ignoring it would run
         # with the default and mislead the user.
         parsed, extras = parser.parse_known_args(argv, namespace)
@@ -1552,7 +1552,7 @@ class SimbiProblem(BaseModel):
             )
         if parsed is None:
             raise ValueError("failed to parse cli arguments for problem")
-        # record which flags the user EXPLICITLY passed: a second parse with every
+        # record which flags the user explicitly passed: a second parse with every
         # default suppressed leaves only the argv-provided dests in the namespace.
         # the checkpoint merge reads this to tell a demanded override apart from a
         # class default that merely differs from the checkpoint.

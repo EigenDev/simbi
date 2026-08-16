@@ -33,7 +33,7 @@ use symbi_ir::emit::ReductionOp;
 /// something other than physical gas. distinct from a cell that falls outside the declared bin
 /// edges, which was in scope and is a genuine shortfall of the binning, counted as such.
 ///
-/// an OFFSET rather than a fixed sentinel because the segment travels on the scalar carrier, so
+/// an offset rather than a fixed sentinel because the segment travels on the scalar carrier, so
 /// every marker must stay a small integer to be exact in f32 as well as f64.
 pub use symbi_ir::SEGMENT_EXCLUDED_OFFSET;
 
@@ -370,7 +370,7 @@ impl CensusSpec {
     /// the segment index to write for a cell, ready for the segmented reduction: the
     /// bucket if the cell bins, else an index past the last bucket so the reduction counts
     /// it as outside the binning.
-    /// delegates to the CARRIER-GENERIC form, so the host and any traced device kernel run the
+    /// delegates to the carrier-generic form, so the host and any traced device kernel run the
     /// same binning by construction rather than by two implementations happening to agree.
     pub fn segment_marker(&self, coords: &[f64]) -> u32 {
         segment_marker_generic::<f64>(&self.axes, coords, self.n_segments()) as u32
@@ -488,17 +488,17 @@ impl CensusEvaluator {
     }
 
     /// the declared per-cell parameter names, in the order the compiled kernel expects them.
-    /// a content hash of the REGISTRATION: two evaluators share it iff they describe the same
+    /// a content hash of the registration: two evaluators share it iff they describe the same
     /// census, whatever they are named.
     ///
-    /// the name is NOT a usable identity for a cached artifact. names are unique within a run —
+    /// the name is not a usable identity for a cached artifact. names are unique within a run —
     /// the registration refuses a duplicate — but a process may run several sims, and a parameter
     /// sweep naturally reuses one name for censuses whose graphs differ. keying a compiled kernel
     /// on the name hands the second run the first one's kernel, which is a shape mismatch at best
     /// and silently wrong numbers at worst.
     pub fn content_key(&self) -> u64 {
         use std::hash::{Hash, Hasher};
-        // the DEBUG rendering rather than a serializer: `CensusConfig` derives `Debug`, the
+        // the debug rendering rather than a serializer: `CensusConfig` derives `Debug`, the
         // rendering is total over its fields, and this is an in-process cache key — it never
         // crosses a process or a version boundary, so stability across builds is not required of
         // it, only that two distinct registrations render differently.
@@ -508,7 +508,7 @@ impl CensusEvaluator {
     }
 
     /// lower the registration again, for a caller tracing the same expressions into a kernel.
-    /// the SAME `CensusConfig` the interpreter was built from, so the two cannot describe
+    /// the same `CensusConfig` the interpreter was built from, so the two cannot describe
     /// different censuses.
     pub fn lower(&self) -> Result<symbi_hydro::source_spec::BuiltSource, String> {
         symbi_hydro::expr_bridge::build_census_expressions(&self.cfg)
@@ -576,7 +576,7 @@ fn resolve_census_param<const D: usize>(
 /// the per-sample time series a registered census produces, columnar so the checkpoint
 /// writer borrows each series as one flat dataset.
 ///
-/// the series covers THIS RUN SEGMENT ONLY and restarts empty on checkpoint load — earlier
+/// the series covers this run segment only and restarts empty on checkpoint load — earlier
 /// segments live in the earlier checkpoint files, and segments concatenate offline. keeping
 /// the accumulator out of restart state is what lets a chain of restarts be combined by a
 /// reader without the run having to carry the whole history forward.
@@ -589,7 +589,7 @@ pub struct CensusHistory {
     /// fold every sample into one row rather than storing a row apiece.
     accumulate: bool,
     /// simulation time of each stored row: shape [len]. for an accumulating row this is the time
-    /// of the LAST sample folded into it; `t_start` carries the other end.
+    /// of the last sample folded into it; `t_start` carries the other end.
     time: Vec<f64>,
     /// which refinement level produced each row: shape [len]. always zero for a census sampled at
     /// root-step cadence, where every level's partial is combined into one row before it is
@@ -604,7 +604,7 @@ pub struct CensusHistory {
     /// samples folded into each row: shape [len]. all ones unless accumulating, and the divisor
     /// that turns an accumulated additive row back into a time average.
     n_samples: Vec<u64>,
-    /// simulation time of the FIRST sample folded into each row: shape [len].
+    /// simulation time of the first sample folded into each row: shape [len].
     t_start: Vec<f64>,
 }
 
@@ -641,10 +641,10 @@ impl CensusHistory {
     /// record one sample from refinement level `level`. the accumulator count is fixed by the
     /// registration, so a mismatch is a wiring error rather than a data condition.
     ///
-    /// accumulating, the sample is FOLDED into that level's existing row with the census's reduce
+    /// accumulating, the sample is folded into that level's existing row with the census's reduce
     /// op rather than appended — the same operator that merges two refinement levels' partials, so
     /// a row is the reduction over its whole space-time segment and no separate combining rule
-    /// exists to disagree with the spatial one. the fold is PER LEVEL: levels subcycle at
+    /// exists to disagree with the spatial one. the fold is per level: levels subcycle at
     /// different rates and cover different volumes, so merging their rows would weight the segment
     /// by the subcycle ratio rather than by anything physical.
     pub fn push_at_level(&mut self, time: f64, level: u64, values: &[f64], dropped: u64) {
@@ -730,7 +730,7 @@ impl CensusHistory {
 
 /// fold two accumulator values with a reduce op.
 ///
-/// the ONE definition of a census's combining rule outside the rendered reduction kernel: it
+/// the one definition of a census's combining rule outside the rendered reduction kernel: it
 /// merges two refinement levels' partials and two samples of an accumulating history. requiring
 /// one commutative monoid for both is what makes those combinations order-agnostic — levels are
 /// visited in whatever order the hierarchy holds them, and samples arrive at whatever cadence the
@@ -748,7 +748,7 @@ pub fn combine(op: ReductionOp, a: f64, b: f64) -> f64 {
 pub struct RegisteredCensus {
     pub evaluator: CensusEvaluator,
     pub history: CensusHistory,
-    /// the time of the most recent sample PER REFINEMENT LEVEL, or `None` before the first.
+    /// the time of the most recent sample per refinement level, or `None` before the first.
     ///
     /// per level because levels subcycle independently: a shared marker would let whichever level
     /// happened to sample first satisfy the interval for all of them, so the coarse levels would
@@ -808,7 +808,7 @@ impl std::fmt::Debug for RegisteredCensus {
 /// the per-cell artifacts a census sample reduces over: one field per accumulator, plus the
 /// destination bucket of every cell.
 ///
-/// DOUBLE precision independent of the simulation's own carrier. an extensive accumulator is a sum
+/// double precision independent of the simulation's own carrier. an extensive accumulator is a sum
 /// over every cell of a bin, so on a few million cells a single-precision running sum outgrows the
 /// terms still being added to it and absorbs the whole tail — a total that is smooth, positive and
 /// wrong in its third digit. the artifacts are the census's own, so widening them here costs one
@@ -830,13 +830,13 @@ where
     /// evaluate a census over this level's interior, producing the value fields and the
     /// bucket assignment a segmented reduction consumes.
     ///
-    /// the bin coordinates and the values come from ONE compiled graph per cell, so a
+    /// the bin coordinates and the values come from one compiled graph per cell, so a
     /// subexpression shared between an axis and a value is evaluated once. the `dv` leaf
     /// resolves to the block geometry's lab-frame cell volume — the same measure the
     /// finite-volume update uses — which is what keeps an extensive sum correct on a
     /// curvilinear grid.
     ///
-    /// `covered` is this level's cells that a FINER level resolves. they are excluded from the
+    /// `covered` is this level's cells that a finer level resolves. they are excluded from the
     /// reduction: the finer level contributes the same physical volume at its own resolution, so
     /// counting both would add the refined region twice — a total that is wrong by exactly the
     /// refined volume and otherwise entirely plausible. a level with no finer neighbor passes
@@ -861,14 +861,14 @@ where
     ///
     /// the artifacts of a census have a fixed shape for the life of a run — one full-grid field per
     /// accumulator plus the bucket — so reallocating them per sample moves that memory for no
-    /// information. reuse is sound because a fill writes EVERY interior cell and the ghosts, which
+    /// information. reuse is sound because a fill writes every interior cell and the ghosts, which
     /// are the only cells a fill does not reach, are excluded once at allocation and never move.
     ///
     /// the pool is built for every registration at once, since it is published through a single
     /// write; `index` is a position in `censuses`.
     ///
     /// the registration list is passed in rather than read from this store because on a refinement
-    /// hierarchy the registrations live on the ROOT alone, while the scratch they are evaluated
+    /// hierarchy the registrations live on the root alone, while the scratch they are evaluated
     /// into belongs to whichever level is being reduced.
     pub fn census_scratch_pooled(
         &self,
@@ -893,9 +893,9 @@ where
         pool.get(index)
     }
 
-    /// allocate the per-cell artifacts with every cell EXCLUDED.
+    /// allocate the per-cell artifacts with every cell excluded.
     ///
-    /// separated from the fill so a COMPILED map can write into the same scratch: the exclusion
+    /// separated from the fill so a compiled map can write into the same scratch: the exclusion
     /// default is what makes ghosts, and any cell a fill skips, absent from the reduction rather
     /// than silently binned into bucket zero.
     pub fn census_scratch(&self, ev: &CensusEvaluator) -> Option<CensusFields<D, Mem>> {
@@ -916,7 +916,7 @@ where
 
     /// mark a level's covered cells excluded, after a fill that did not know about them.
     ///
-    /// HOST ONLY, and reachable only behind the per-cell interpreter, which refuses a
+    /// host only, and reachable only behind the per-cell interpreter, which refuses a
     /// device-resident store. the production path dispatches a constant fill over the covered
     /// region instead, because walking it here on a device-resident hierarchy would leave the
     /// covered cells carrying the bucket the map assigned them — counting the refined volume on
@@ -939,7 +939,7 @@ where
         }
     }
 
-    /// evaluate the registered expressions into `fields` over EVERY interior cell.
+    /// evaluate the registered expressions into `fields` over every interior cell.
     ///
     /// a finer level's coverage is not honoured here: `census_exclude_covered` marks those cells
     /// afterwards. skipping them during the walk instead would leave whatever the scratch already
@@ -952,7 +952,7 @@ where
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
         }
-        // a census reads the PRIMITIVES, and seeding writes only the conserved state. on a
+        // a census reads the primitives, and seeding writes only the conserved state. on a
         // store whose primitives have never been recovered they are still zeros, so a
         // census sampled there would report a total mass of zero as though it were physics.
         assert!(
@@ -972,7 +972,7 @@ where
 
         let bg = self.geom.block_geometry(self.physics.metric);
         // the lab-frame measure: on a homologously expanding mesh the conserved density
-        // multiplies the PHYSICAL volume, so an extensive total stays constant as a(t) grows.
+        // multiplies the physical volume, so an extensive total stays constant as a(t) grows.
         let a = self.motion.a;
         let n_axes = ev.spec.axes().len();
         let n_values = ev.spec.n_values();
@@ -1128,7 +1128,7 @@ mod tests {
     #[test]
     fn a_cell_outside_any_axis_falls_outside_the_binning() {
         // the bucket is a point in the outer product, so a cell inside the radial edges but
-        // outside the angular ones has no bucket. binning it on the axes that DID match
+        // outside the angular ones has no bucket. binning it on the axes that did match
         // would silently attribute it to the wrong shell.
         let spec = CensusSpec::new(
             "phase",
@@ -1147,7 +1147,7 @@ mod tests {
         // counted as outside the binning rather than folded into bucket zero.
         assert_eq!(spec.segment_marker(&[0.5, 50.0]), 2);
         assert!(spec.segment_marker(&[0.5, 50.0]) >= spec.n_segments() as u32);
-        // and it is NOT the excluded marker, which sits strictly further out: this cell was
+        // and it is not the excluded marker, which sits strictly further out: this cell was
         // meant to be reduced and simply fell outside the edges, which is a shortfall to report
         // rather than a cell that was never part of the reduction.
         assert!(
@@ -1208,10 +1208,10 @@ mod generic_binning_tests {
         CensusSpec::new("t", axes, vec!["v".to_string()], ReductionOp::Add).expect("spec")
     }
 
-    /// the carrier-generic binning must agree EXACTLY with the independent partition-point
+    /// the carrier-generic binning must agree exactly with the independent partition-point
     /// implementation, on every coordinate a cell can present.
     ///
-    /// compared against `segment` — the `edges.partition_point` search — and NOT against
+    /// compared against `segment` — the `edges.partition_point` search — and not against
     /// `segment_marker`, which now delegates to the generic form and would compare the function
     /// to itself. two genuinely different searches (a binary partition versus a linear count of
     /// edges at or below x) agreeing on the whole edge-case sweep is the evidence; the delegation
@@ -1229,7 +1229,7 @@ mod generic_binning_tests {
         for axes in cases {
             let sp = spec(axes.clone());
             let n_seg = sp.n_segments();
-            // a sweep that lands ON every edge, just inside and just outside each, between
+            // a sweep that lands on every edge, just inside and just outside each, between
             // edges, far outside both ends, and NaN — the coordinates where a binning rule
             // differs from a neighboring one.
             let mut probes: Vec<f64> = vec![f64::NAN, -1.0e300, 1.0e300];
@@ -1256,7 +1256,7 @@ mod generic_binning_tests {
         }
     }
 
-    /// the outer edge is IN the last bin, not one past it: a value sitting exactly on the
+    /// the outer edge is in the last bin, not one past it: a value sitting exactly on the
     /// domain's outer boundary is real data, and dropping it would quietly under-count the
     /// outermost shell of every profile.
     #[test]

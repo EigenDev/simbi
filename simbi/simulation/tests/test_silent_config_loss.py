@@ -1,7 +1,7 @@
 # =============================================================================
 # test_silent_config_loss.py
 #
-# regression gates against SILENT config loss: a typo'd kwarg, an out-of-range
+# regression gates against silent config loss: a typo'd kwarg, an out-of-range
 # assignment, a restart flag conflict, and the van leer limiter spelling must all
 # fail loudly or round-trip correctly, so a run with a default value cannot
 # silently swallow the config.
@@ -28,7 +28,7 @@ def test_typoed_cli_flag_is_rejected():
 
 
 def test_out_of_range_assignment_is_rejected():
-    # field constraints re-validate on ASSIGNMENT: a setup() or
+    # field constraints re-validate on assignment: a setup() or
     # user-code mutation cannot smuggle an invalid value to the backend.
     p = GrBondiKS.from_cli([])
     with pytest.raises(ValueError, match="cfl_number"):
@@ -54,7 +54,7 @@ def test_vanleer_limiter_keeps_the_model_theta_positive():
 def test_ppm_rejects_stray_plm_knobs():
     # ppm carries its own monotonicity constraint; a plm_theta or limiter moved off
     # its default alongside ppm is dead configuration — rejected, never silently
-    # ignored. (a knob AT its default is indistinguishable from the passthrough and
+    # ignored. (a knob at its default is indistinguishable from the passthrough and
     # is inert either way, so it passes.)
     with pytest.raises((ValidationError, ConfigError), match="PPM"):
         GrBondiKS.from_cli(["--reconstruction", "ppm", "--plm-theta", "1.8"])
@@ -161,7 +161,7 @@ def test_from_cli_records_explicit_flags():
 
 
 def test_restart_conflict_on_explicit_immutable_flag(monkeypatch, tmp_path):
-    # restarting an hlle checkpoint with an EXPLICIT --solver hllc must refuse
+    # restarting an hlle checkpoint with an explicit --solver hllc must refuse
     # loudly; without the flag the checkpoint value wins silently.
     from simbi.simulation import checkpoint as cp
 
@@ -300,7 +300,7 @@ def _synge_meta(**overrides):
 
 
 def test_synge_restart_does_not_choke_on_placeholder_gamma(monkeypatch, tmp_path):
-    # the synge closure REJECTS a declared adiabatic_index and then writes the inert
+    # the synge closure rejects a declared adiabatic_index and then writes the inert
     # placeholder 5/3 itself; the backend records it as the checkpoint's `gamma`. handing
     # that back to the constructor read as a user declaration and killed every synge
     # restart on the validator. the merge must drop it and let the closure re-supply it.
@@ -320,7 +320,7 @@ def test_synge_restart_does_not_choke_on_placeholder_gamma(monkeypatch, tmp_path
 
 
 def test_synge_restart_from_checkpoint_predating_the_eos_attr(monkeypatch, tmp_path):
-    # an OLDER checkpoint records no eos at all. the merge must fall back to the config's
+    # an older checkpoint records no eos at all. the merge must fall back to the config's
     # declared closure rather than reading the absent attribute as "ideal" — which would
     # both revive the placeholder gamma and silently swap the equations of state.
     from simbi.simulation import checkpoint as cp
@@ -368,14 +368,14 @@ def test_restart_refuses_a_closure_swapped_by_a_config_edit(monkeypatch, tmp_pat
             _synge_problem_class().from_cli([]), tmp_path / "fake.h5"
         )
 
-    # the repair it names must be a CONFIG edit carrying the recorded gamma. `--eos ideal`
+    # the repair it names must be a config edit carrying the recorded gamma. `--eos ideal`
     # alone cannot be the advice: the synge config declares no adiabatic_index, so the flag
     # dies on the model validator before the merge is reached.
     assert "adiabatic_index = 1.3333333333333333" in str(exc.value)
     with pytest.raises(ConfigError, match="require an adiabatic_index"):
         _synge_problem_class().from_cli(["--eos", "ideal"])
 
-    # a config that DOES declare the recorded closure resumes without complaint.
+    # a config that does declare the recorded closure resumes without complaint.
     merged = cp.merge_with_checkpoint(GrBondiKS.from_cli([]), tmp_path / "fake.h5")
     assert merged.adiabatic_index == 4.0 / 3.0
 

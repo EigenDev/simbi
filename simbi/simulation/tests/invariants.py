@@ -1,17 +1,17 @@
 # =============================================================================
 # invariants.py
 #
-# the CHEAP diagnostic battery for a relativistic run: the properties that are
-# pathological IMMEDIATELY when the discretization is wrong, so they need tens of
+# the cheap diagnostic battery for a relativistic run: the properties that are
+# pathological immediately when the discretization is wrong, so they need tens of
 # steps rather than thousands.
 #
-# the organizing observation is that these are properties of the STATE, not of the
+# the organizing observation is that these are properties of the state, not of the
 # history. given a state, the timestep the scheme selects, the guards it fired, the
 # admissibility of every cell and the divergence of the field are all computable
 # right there. a long run adds only "and it stayed that way", which is a soak — it
 # answers a different question, and it answers it at a thousand times the cost.
 #
-# THE TIMESTEP FLOOR is the sharpest of them. nothing propagates faster than light,
+# the timestep floor is the sharpest of them. nothing propagates faster than light,
 # so the largest step a hyperbolic system admits is the light-crossing step
 #
 #     dt_light = cfl * min_i (sqrt(gamma_ii) dx^i / alpha)

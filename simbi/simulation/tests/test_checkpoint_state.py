@@ -58,7 +58,7 @@ def test_outcome_belongs_to_latest_state_only(tmp_path: Path) -> None:
 
 def test_a_terminator_outranks_a_dump_at_the_same_evolution_point(tmp_path: Path) -> None:
     # a run clamps its last step to land exactly on the end time, so the final scheduled dump
-    # and the authoritative terminator carry identical time AND iteration. ranking on that
+    # and the authoritative terminator carry identical time and iteration. ranking on that
     # pair alone picks between them by directory order, and picking the dump reports a
     # finished run as still running -- which makes a restart chain resubmit forever, every
     # link exiting cleanly the moment it sees there is nothing left to integrate.
@@ -86,7 +86,7 @@ def test_a_crash_at_the_same_point_is_not_reported_as_a_completion(tmp_path: Pat
 
 
 def test_a_later_dump_still_beats_an_earlier_terminator(tmp_path: Path) -> None:
-    # status breaks TIES only. a resumed run whose schedule was extended past a previous
+    # status breaks ties only. a resumed run whose schedule was extended past a previous
     # end time carries a stale terminator, and treating that as authoritative would refuse
     # to continue a run that genuinely has integrating left to do.
     write_checkpoint(tmp_path / "run.chkpt.final.h5", 40.0, 212207)

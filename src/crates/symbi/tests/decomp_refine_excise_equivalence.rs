@@ -1,8 +1,8 @@
 // =============================================================================
 // decomp_refine_excise_equivalence.rs
 //
-// REFINEMENT x DECOMPOSITION x EXCISION on a kerr-schild chart. the excised core is owned by the
-// ROOT level (the refinement request gate forbids a fine patch overlapping it), so a decomposed
+// refinement x decomposition x excision on a kerr-schild chart. the excised core is owned by the
+// root level (the refinement request gate forbids a fine patch overlapping it), so a decomposed
 // refined run has to excise its root exactly as the monolithic one does.
 //
 // the failure this exists to catch is silent: the decomposed driver builds its own step, and a root
@@ -14,7 +14,7 @@
 //   - the decomposed refined excised composite matches the monolithic one to roundoff, for every
 //     tile topology (x-cut, y-cut, 2x2 -- the 2x2 cut point is the chart origin, so every tile owns
 //     one quadrant of the excised sphere and the excised rim straddles all four cuts);
-//   - the excise DEMONSTRABLY fires: the excised core differs from the same run with excision off.
+//   - the excise demonstrably fires: the excised core differs from the same run with excision off.
 //     without this the equivalence above would pass just as happily if both sides excised nothing.
 // =============================================================================
 use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
@@ -54,7 +54,7 @@ fn kset_unexcised(sim: &Sim) -> Kern {
 }
 
 // the fine patch sits in the far field, clear of the excised sphere: the excise pass runs on the
-// level that OWNS the excised region, and a fine patch overlapping it would evolve its own copy and
+// level that owns the excised region, and a fine patch overlapping it would evolve its own copy and
 // restrict un-excised values back over the fill. the request gate enforces this separation, so the
 // oracle honors it.
 fn patch() -> RefinementRegion<2> {
@@ -151,7 +151,7 @@ fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2]) {
     );
 }
 
-// the ROOT density over the whole box, in global root-index order. the excised core lives on the
+// the root density over the whole box, in global root-index order. the excised core lives on the
 // root, so this is the field the excise pass actually writes.
 fn root_density(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
@@ -207,8 +207,8 @@ fn assert_matches(counts: [usize; 2]) {
         "{counts:?} refined+excised decomposed vs monolithic: err {e:e}"
     );
 
-    // NON-VACUITY: the excise must actually have fired. compare the excised core against the same
-    // run with excision OFF -- if the pass never ran, the two are identical and the equivalence
+    // non-vacuity: the excise must actually have fired. compare the excised core against the same
+    // run with excision off -- if the pass never ran, the two are identical and the equivalence
     // above proves nothing about excision.
     let mut plain = vec![build_mono(kset_unexcised)];
     run_decomposed(&mut plain, [1, 1]);
@@ -243,7 +243,7 @@ fn refined_excised_decomposed_two_tile_y_cut() {
     assert_matches([1, 2]);
 }
 
-// the 2x2 cut point is EXACTLY the chart origin, so every tile owns one quadrant of the excised
+// the 2x2 cut point is exactly the chart origin, so every tile owns one quadrant of the excised
 // sphere and the excised rim straddles all four cuts.
 #[test]
 fn refined_excised_decomposed_quad_tile() {

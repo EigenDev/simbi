@@ -26,12 +26,12 @@ symbi-exec = { path = "../symbi-exec" }
 symbi-sim = { path = "../symbi-sim" }
 symbi-substrate = { path = "../symbi-substrate" }
 symbi-amr = { path = "../symbi-amr" }
-# runtime user-source kernels. the SAME gv builder build.rs AOT-bakes
+# runtime user-source kernels. the same gv builder build.rs AOT-bakes
 # (source_apply_from_built_gv) is invoked at runtime to JIT a loaded-DAG source into the
 # substrate IR -> NVRTC, so a python-authored source runs on-device with no recompile.
 symbi-discretize = { path = "../symbi-discretize" }
 # the CPU's NVRTC — Cranelift JIT of the fused godunov+source GvKernel, so a runtime user
-# source runs COMPILED + fused into the godunov stage on host (symmetric with the device NVRTC
+# source runs compiled + fused into the godunov stage on host (symmetric with the device NVRTC
 # path).
 symbi-jit = { path = "../symbi-jit" }
 symbi-display = { path = "../symbi-display" }

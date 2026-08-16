@@ -1,16 +1,16 @@
 // =============================================================================
 // fofc_finiteness_guard.rs
 //
-// the FOFC physicality gate guards the FULL state vector, reaching past density (and pressure where the
-// energy is modeled): a cell whose spliced first-order VELOCITY is non-finite — a NaN/inf momentum
-// with a finite density — must be FROZEN to the admissible stage input. the iso regime is the
+// the FOFC physicality gate guards the full state vector, reaching past density (and pressure where the
+// energy is modeled): a cell whose spliced first-order velocity is non-finite — a NaN/inf momentum
+// with a finite density — must be frozen to the admissible stage input. the iso regime is the
 // exposed case: density is its only other guard, so a NaN momentum otherwise rides through the FOFC
 // select until the next flux divergence poisons the density a step later.
 //
-// A/B on the select KERNEL, isolated from the flux dynamics (a live NaN propagates into the density
+// A/B on the select kernel, isolated from the flux dynamics (a live NaN propagates into the density
 // within one godunov, so a sim-level test cannot attribute the flag): a hand-built state gives a
 // physical uniform stage input (v = 0) and a first-order result with a finite rho/pre but a NaN
-// velocity band. `fofc_select` must leave EVERY cell's momentum finite (the band froze to u_stage,
+// velocity band. `fofc_select` must leave every cell's momentum finite (the band froze to u_stage,
 // the rest kept the first-order value). without the velocity finiteness check the NaN band is kept
 // and the finiteness assertion fails.
 // =============================================================================

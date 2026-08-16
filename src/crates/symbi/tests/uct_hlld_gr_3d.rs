@@ -7,13 +7,13 @@
 // zero under evolve (the curl-form update telescopes regardless of the
 // densitization convention, so a discretely div-free IC must stay div-free).
 // gates:
-// - schwarzschild KS: a magnetized swirl in a box OUTSIDE the horizon
+// - schwarzschild KS: a magnetized swirl in a box outside the horizon
 //   (r > 2M everywhere) evolves under UCT-HLLD with div(B) preserved;
 // - spinning kerr: the same contract on the a != 0 chart (nonzero shift
 //   enters the transport velocity and the moving-interface fan speeds);
 // - the M -> 0 oracle: the kerr-schild metric at zero mass reduces to minkowski
 //   (alpha = 1, beta = 0, gamma = delta, tetrad = identity), so the GR
-//   UCT-HLLD run must match the FLAT UCT-HLLD run (gated in uct_hlld_3d.rs)
+//   UCT-HLLD run must match the flat UCT-HLLD run (gated in uct_hlld_3d.rs)
 //   on identical initial data to roundoff.
 // =============================================================================
 
@@ -42,7 +42,7 @@ const B0: f64 = 0.1;
 const T_FINAL: f64 = 0.5;
 const DIVB_TOL: f64 = 1e-12;
 
-// the conserved discrete object on a curved chart is the DENSITIZED face flux
+// the conserved discrete object on a curved chart is the densitized face flux
 // sqrt(gamma)|face * B: the GR curl updates bface by curl(Etilde)/sqrt(gamma),
 // so the raw-B divergence drifts with the metric gradient while the densitized
 // one telescopes exactly. sqrt(gamma) is evaluated at each face's own center
@@ -114,7 +114,7 @@ macro_rules! gr_divb_gate {
     ($metric:expr, $metric_ty:ty, $x_lo:expr, $t_final:expr, $min_steps:expr, $solver:expr, $ct:expr, $what:literal) => {{
         type Sim = SimState<Rmhd, 3, $metric_ty, IdealGas<f64>, CpuSpace, HostMemory>;
         let dx = 1.0 / N as f64;
-        // seed the DENSITIZED flux uniform: bface = B0 / sqrt(gamma)(face), so
+        // seed the densitized flux uniform: bface = B0 / sqrt(gamma)(face), so
         // the densitized divergence is exactly zero at t = 0 (flat: sqrt = 1).
         let metric = $metric;
         let mut sim = Sim::build(Rmhd, IdealGas { gamma: GAMMA }, $metric)
@@ -206,12 +206,12 @@ fn spinning_kerr_3d_uct_hlld_preserves_divb() {
 }
 
 // M = 0 collapses the kerr-schild chart to minkowski exactly (the metric factors evaluate to exact
-// 1.0 / 0.0), so a GR chain must reproduce the FLAT chain on identical initial data, whatever
+// 1.0 / 0.0), so a GR chain must reproduce the flat chain on identical initial data, whatever
 // solver and CT method it runs. the two kernels assemble algebraically identical arithmetic through
 // different f64 operation orders, so the comparison is roundoff-tight rather than bitwise.
 //
 // this is the sharpest available probe of the wave-speed fan, because both chains build theirs the
-// same way: the flat and curved HLL fluxes alike READ the per-cell speeds a separate pass
+// same way: the flat and curved HLL fluxes alike read the per-cell speeds a separate pass
 // materializes. if either chain's substrate skips that pass its fan degenerates onto the shift
 // (zero on both sides at M = 0) while the other keeps the real magnetosonic bounds, and the two
 // disagree at O(1) rather than at roundoff.
@@ -318,7 +318,7 @@ fn zero_mass_ks_3d_matches_flat_to_roundoff() {
 #[test]
 fn zero_mass_ks_3d_hlle_contact_matches_flat_to_roundoff() {
     // the HLLE + contact combination, which neither the divergence gates above nor any other
-    // curved test exercises. it is the one arm whose fan is assembled ENTIRELY from the
+    // curved test exercises. it is the one arm whose fan is assembled entirely from the
     // materialized per-cell speeds — HLLD solves its own five-wave fan and the rusanov fallback
     // uses the state-independent light-cone bound, so both are blind to whether that pass ran, and
     // UCT forces it to run for its own edge coefficients. only here does the flux stand or fall on

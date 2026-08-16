@@ -3,9 +3,9 @@
 #
 # the schwarzschild GRHD accuracy gate: the exact michel (1972) transonic accretion
 # solution is stationary, so a correct valencia scheme (covariant momentum, uniform
-# lapse densitization, geodesic sources, banyuls-font fan) must HOLD it — the
+# lapse densitization, geodesic sources, banyuls-font fan) must hold it — the
 # evolved profile stays on the analytic one at truncation level, and the residual
-# SHRINKS under grid refinement. an equation-level error (a misplaced lapse power, a
+# shrinks under grid refinement. an equation-level error (a misplaced lapse power, a
 # wrong source term, a mis-sampled metric) shows up as a resolution-independent
 # drift and fails the convergence assertion; a stable-but-inaccurate scheme cannot
 # pass. complements the gr_bondi transient tests, which check development and
@@ -88,7 +88,7 @@ def test_michel_oracle_satisfies_the_flow_invariants() -> None:
         sol.u_sonic**2, sol.mass / (2.0 * sol.r_sonic), rel_tol=1e-12
     )
 
-    # the SCHWARZSCHILD split, explicitly: these invariants are written in the
+    # the schwarzschild split, explicitly: these invariants are written in the
     # static frame (the bernoulli constant is h^2 (f + u^2) with f = 1 - 2M/r), so this
     # is a statement about the analytic solution itself, not about whatever chart a
     # simulation happens to evolve in.
@@ -125,11 +125,11 @@ def _held_profile_errors(res: int):
         d = d + "/"
         p = _michel_problem(res, d)
         runner.run(p, compute_mode="cpu", max_steps=400)
-        # GUARD-ACTIVATION CENSUS: michel is smooth, warm and shock-free, so NO limiter has any
+        # guard-activation census: michel is smooth, warm and shock-free, so no limiter has any
         # physical business firing. a nonzero count means this gate is passing on life support —
         # the profile would be held by a floor rather than by the scheme. the count covers the whole
         # defensive surface, not just FOFC: the admissible-boundary projection and the first-order
-        # redo both run INSIDE `fofc_orchestrate`, which early-returns when nothing is flagged, and
+        # redo both run inside `fofc_orchestrate`, which early-returns when nothing is flagged, and
         # the relativistic velocity ceiling only binds an out-of-cone state — exactly what sets the
         # flag. so zero here proves none of them acted.
         fallback, freeze, _, _ = _BACKEND.guard_census()
@@ -162,7 +162,7 @@ def test_michel_profile_is_held_at_truncation_level_and_converges() -> None:
     assert l1_256 < _L1_TOL_256, f"256-zone interior L1 rho residual {l1_256:.3e}"
     assert emax_128 < _MAX_TOL_128, f"128-zone max rho residual {emax_128:.3e}"
 
-    # the residual must SHRINK under refinement — a resolution-independent floor
+    # the residual must shrink under refinement — a resolution-independent floor
     # means an equation-level error (lapse power, source term, metric sampling),
     # not truncation.
     assert l1_256 < _CONVERGENCE_RATIO * l1_128, (

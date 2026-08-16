@@ -16,12 +16,12 @@
 //   single-pass bottom-up hash recursion.
 //
 //   walk the tree once. at each node, recursively compute children's
-//   hashes FIRST, then combine them with the operator's hash to get
+//   hashes first, then combine them with the operator's hash to get
 //   the node's own hash. each subexpression is hashed exactly once;
 //   the resulting work is O(N) where N is the total number of nodes
 //   (including duplicated subtrees).
 //
-//   the first (count) pass returns each subexpression's hash AND
+//   the first (count) pass returns each subexpression's hash and
 //   increments a counter keyed by that hash. a subexpression appearing
 //   K times in the tree contributes K increments to its hash bucket;
 //   the work per increment is O(1).
@@ -32,10 +32,10 @@
 //   (once per hash), then replace the subexpression with Var(name).
 //
 // previous (broken) implementation: per-subexpression `key_of(e)`
-// built the FULL structural string of the subtree — O(subtree-size)
+// built the full structural string of the subtree — O(subtree-size)
 // work — and was invoked O(N) times. total work O(N^2) on duplicated
 // trees, which for RMHD kernels (deeply-spliced wave-speed bodies)
-// translated to multi-minute compile times and 50+ GiB rustc RSS.
+// translated to multi-minute compile times and 50+ GiB rustc rss.
 //
 // hash collisions: u64 + FxHash-style mixing is collision-safe for
 // the relevant sizes (a kernel has at most ~10^4 distinct
@@ -73,15 +73,15 @@ pub fn cse_kernel(k: &mut KernelScalarized) {
 
 fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefix: &str) {
     // scope-aware CSE. before the flat-pass below
-    // runs, recursively CSE each `Scope`'s body so duplicates LOCAL to a
+    // runs, recursively CSE each `Scope`'s body so duplicates local to a
     // scope land inside that scope's braces (the scope acts as a hoisting
     // barrier). this is the structural fix for the
     // `wave_speed_map` 239-`__cse_N`-temp pathology: putting the quartic-
     // coefficient phase inside `S::scope` localises its
     // intermediates and nvcc sees their lifetimes end at the `}`.
     //
-    // `recursive_cse_scopes` ALSO walks into `For` / `If` bodies — those
-    // stay opaque to the OUTER flat-pass below, but a `Scope`
+    // `recursive_cse_scopes` also walks into `For` / `If` bodies — those
+    // stay opaque to the outer flat-pass below, but a `Scope`
     // nested inside them still benefits from per-scope CSE.
     recursive_cse_scopes(body, prefix);
 
@@ -94,14 +94,14 @@ fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefi
         let _ = count_and_hash(out, &mut counts);
     }
 
-    // candidacy is COST-AWARE. the count map
+    // candidacy is cost-aware. the count map
     // is threaded as-is into the rewrite state; the threshold check happens
     // at each rewrite site, gated on `cost_class(expr)`. cheap ops (add /
     // sub / mul / neg / select / casts / comparisons) need >= 4 uses;
     // medium (div / sqrt / abs / min / max / floor / ceil) need >= 2;
     // expensive (transcendentals, free calls) and memory loads need >= 2.
     //
-    // early bail-out: nothing with count < 2 can EVER reach any threshold,
+    // early bail-out: nothing with count < 2 can ever reach any threshold,
     // so if no hash hit 2 there is no work. cheap-only kernels with all
     // shares at 2-3 also bail at the per-class check during pass 2.
     if !counts.values().any(|&c| c >= 2) {
@@ -110,13 +110,13 @@ fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefi
 
     // pass 2: rewrite + emit Lets just-in-time.
     //
-    // the scalarizer's `maybe_hoist_to_let` ALSO mints `{prefix}<n>` Lets, with a
+    // the scalarizer's `maybe_hoist_to_let` also mints `{prefix}<n>` Lets, with a
     // counter independent of this pass. when both fire (a large kernel where hoisting
     // misses some structural duplicates that the hash-based pass below catches —
     // first hit by the RHD iterate), the `next_id` starting at 0 would re-declare
     // a hoisted `{prefix}0`. Rust tolerates the shadowing (the CPU kernel compiled
     // + ran), but CUDA C rejects the re-declaration — the GPU PTX gate surfaced it.
-    // continue numbering ABOVE any pre-existing `{prefix}<n>` so names are unique
+    // continue numbering above any pre-existing `{prefix}<n>` so names are unique
     // on every backend. for kernels where hoisting de-duped everything the pass returned
     // early above, so this is a no-op there (output byte-identical).
     let next_id = max_temp_index(body, prefix).map_or(0, |m| m + 1);
@@ -149,20 +149,20 @@ fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefi
 // ---- pass 3: dead-let elimination ----
 //
 // the two-pass cse and the scalarizer's independent `maybe_hoist_to_let` can
-// both mint a `{prefix}<n>` Let for the SAME value: the scalarizer hoists it
-// once, then pass 2 (numbering ABOVE the scalarizer's temps) hoists the
-// identical value again under a fresh name and rewrites every USE site to the
+// both mint a `{prefix}<n>` Let for the same value: the scalarizer hoists it
+// once, then pass 2 (numbering above the scalarizer's temps) hoists the
+// identical value again under a fresh name and rewrites every use site to the
 // new temp — orphaning the scalarizer's Let (e.g., `__cse_0 = __cse_1`, read by
-// nobody). pass 2 only ever ADDS statements, so the orphan survives into the
+// nobody). pass 2 only ever adds statements, so the orphan survives into the
 // emitted kernel, inflating the body and the `pressure` metric (which counts
 // every live Let). this final sweep drops every immutable `Let` whose name is
-// read NOWHERE — in the body or the outputs — to a fixpoint (dropping one
+// read nowhere — in the body or the outputs — to a fixpoint (dropping one
 // orphan can reveal its operands as dead too).
 
-/// collect every variable NAME read by `e` into `out`.
+/// collect every variable name read by `e` into `out`.
 fn mark_expr_vars(e: &ScalarExpr, out: &mut HashSet<String>) {
-    // the var NAMES this node reads directly: a `Var`, or an `IndexInto`'s `container` (a bare name;
-    // `children()` only yields the index sub-expr). then recurse the SSOT
+    // the var names this node reads directly: a `Var`, or an `IndexInto`'s `container` (a bare name;
+    // `children()` only yields the index sub-expr). then recurse the ssot
     // children for every sub-expression.
     match e {
         ScalarExpr::Var(name) => {
@@ -179,15 +179,15 @@ fn mark_expr_vars(e: &ScalarExpr, out: &mut HashSet<String>) {
 }
 
 /// true if `e` contains a `FreeCall` — conservatively treated as possibly
-/// side-effecting, so a Let bound to such a value is NEVER dropped even if its
+/// side-effecting, so a Let bound to such a value is never dropped even if its
 /// name is unread. every other ScalarExpr form is a pure dataflow read.
 fn expr_has_free_call(e: &ScalarExpr) -> bool {
     matches!(e, ScalarExpr::FreeCall { .. }) || e.children().iter().any(|c| expr_has_free_call(c))
 }
 
-/// gather every NAME read anywhere in `body` — each statement's immediate
+/// gather every name read anywhere in `body` — each statement's immediate
 /// expression plus, recursively, its child statement bodies — into `out`.
-/// built on the ScalarStmt walk SSOT (`child_expr` / `child_stmt_bodies`) so a
+/// built on the ScalarStmt walk ssot (`child_expr` / `child_stmt_bodies`) so a
 /// new statement variant is covered for free.
 fn collect_reads(body: &[ScalarStmt], out: &mut HashSet<String>) {
     for stmt in body {
@@ -232,13 +232,13 @@ fn dce_in_place(body: &mut Vec<ScalarStmt>, outputs: &[ScalarExpr]) {
 }
 
 /// recurse into every `Scope` in `body` and run
-/// `cse_in_place` on its `(body, result)` pair, then ALSO walk through
+/// `cse_in_place` on its `(body, result)` pair, then also walk through
 /// `For` / `If` bodies to find Scopes nested deeper. each Scope is
-/// CSE'd INDEPENDENTLY with its own candidate set + `__cse_N` numbering —
+/// CSE'd independently with its own candidate set + `__cse_N` numbering —
 /// duplicates within a scope hoist to the scope's start, never escaping.
 ///
-/// the outer `cse_in_place` runs AFTER this, so the outer flat-pass sees
-/// the post-recursion body. it CAN'T peek inside a Scope (`count_in_stmt`
+/// the outer `cse_in_place` runs after this, so the outer flat-pass sees
+/// the post-recursion body. it can'T peek inside a Scope (`count_in_stmt`
 /// counts only immediate child expressions) — it only sees the Scope's
 /// `result` expression. that's the architectural intent: scopes are
 /// hoisting barriers.
@@ -260,7 +260,7 @@ fn recursive_cse_scopes(body: &mut Vec<ScalarStmt>, prefix: &str) {
                 *result = outputs.into_iter().next().expect("scope outputs vec");
             }
             ScalarStmt::For { body: for_body, .. } => {
-                // For/If bodies are opaque to the OUTER flat CSE (iter-var /
+                // For/If bodies are opaque to the outer flat CSE (iter-var /
                 // branch scope), but a Scope nested inside still benefits
                 // from per-scope CSE — recurse to find it.
                 recursive_cse_scopes(for_body, prefix);
@@ -273,7 +273,7 @@ fn recursive_cse_scopes(body: &mut Vec<ScalarStmt>, prefix: &str) {
                 else_body,
                 ..
             } => {
-                // both cond arms are opaque to the OUTER flat CSE (branch
+                // both cond arms are opaque to the outer flat CSE (branch
                 // scope), but a Scope nested inside an arm still benefits from
                 // per-scope CSE — recurse into each arm to find it.
                 recursive_cse_scopes(then_body, prefix);
@@ -284,7 +284,7 @@ fn recursive_cse_scopes(body: &mut Vec<ScalarStmt>, prefix: &str) {
     }
 }
 
-/// the highest `n` among `{prefix}{n}` Let/LetMut DECLARATIONS already present in
+/// the highest `n` among `{prefix}{n}` Let/LetMut declarations already present in
 /// `body` (recursing into For bodies). lets the CSE pass continue its numbering
 /// above names a prior pass (the scalarizer's hoist) minted with the same prefix,
 /// so no temp is declared twice. only declarations can collide — assignments and
@@ -314,7 +314,7 @@ fn max_temp_index(body: &[ScalarStmt], prefix: &str) -> Option<usize> {
 
 /// FxHash-like 64-bit mix. fast, deterministic, low collision in this
 /// regime. not cryptographic.
-const SEED: u64 = 0xcbf29ce484222325; // FNV-style seed
+const SEED: u64 = 0xcbf29ce484222325; // fnv-style seed
 const PRIME: u64 = 0x100000001b3;
 
 #[inline]
@@ -478,13 +478,13 @@ fn hash_expr_step(e: &ScalarExpr, child_hashes: &[u64]) -> u64 {
 
 /// register-pressure cost model.
 ///
-/// classify each ScalarExpr by the cost of RECOMPUTING it vs the cost of
-/// HOLDING it in a register across its live range. hoisting a value costs
-/// ~1 SM cycle stall risk per warp (register pressure -> spill); recomputing
+/// classify each ScalarExpr by the cost of recomputing it vs the cost of
+/// holding it in a register across its live range. hoisting a value costs
+/// ~1 sm cycle stall risk per warp (register pressure -> spill); recomputing
 /// a cheap op costs ~0-1 cycles. so cheap shared-twice values are a net
 /// loss when hoisted, and transcendentals shared once are mandatory hoists.
 ///
-/// the threshold table is fixed at build time. it is NOT a heuristic the
+/// the threshold table is fixed at build time. it is not a heuristic the
 /// kernel author can tune — that would make pressure unpredictable. instead
 /// the author opts into scoping (`S::scope`) to bound lifetimes; the cost
 /// model decides per-op whether the share-count justifies a Let.
@@ -493,13 +493,13 @@ enum CostClass {
     /// `Const`, `Var` — leaf-like, recomputed for free. never hoist.
     Trivial,
     /// `+`, `-`, `*`, `Neg`, `Not`, `Select`, comparisons, bitops, `Cast` —
-    /// one ALU op. hoist iff used >= 4 times.
+    /// one alu op. hoist iff used >= 4 times.
     Cheap,
-    /// `/`, `sqrt`, `abs`, `min`, `max`, `floor`, `ceil` — a few ALU
+    /// `/`, `sqrt`, `abs`, `min`, `max`, `floor`, `ceil` — a few alu
     /// ops or a single special-function unit op. hoist iff used >= 2 times.
     Medium,
     /// transcendentals: `sin`, `cos`, `tan`, `exp`, `ln`, `log10`, `pow`,
-    /// `atan2`, `hypot`, hyperbolics. SFU-bound, many cycles. always
+    /// `atan2`, `hypot`, hyperbolics. sfu-bound, many cycles. always
     /// hoist when shared (>= 2 uses).
     Expensive,
     /// `FieldLoadAt`, `IndexInto` — memory access. the load is the cost;
@@ -516,7 +516,7 @@ fn cost_class(e: &ScalarExpr) -> CostClass {
             // Div is the lone medium-cost binary op (FP divider).
             BinaryKind::Div => CostClass::Medium,
             // every other binary (add/sub/mul/comparisons/bitops) is
-            // one ALU op = cheap.
+            // one alu op = cheap.
             BinaryKind::Add
             | BinaryKind::Sub
             | BinaryKind::Mul
@@ -537,11 +537,11 @@ fn cost_class(e: &ScalarExpr) -> CostClass {
         ScalarExpr::Select { .. } => CostClass::Cheap,
         ScalarExpr::Cast { .. } => CostClass::Cheap,
         ScalarExpr::MethodCall { method, .. } => match method.as_str() {
-            // medium: few-cycle ALU specials.
+            // medium: few-cycle alu specials.
             "sqrt" | "abs" | "min" | "max" | "floor" | "ceil" | "is_finite" | "is_nan" => {
                 CostClass::Medium
             }
-            // expensive: SFU / library calls. transcendentals + pow.
+            // expensive: sfu / library calls. transcendentals + pow.
             "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2" | "exp" | "exp2" | "ln"
             | "log2" | "log10" | "sinh" | "cosh" | "tanh" | "asinh" | "acosh" | "atanh"
             | "powf" | "powi" | "hypot" => CostClass::Expensive,
@@ -557,7 +557,7 @@ fn cost_class(e: &ScalarExpr) -> CostClass {
 }
 
 /// the share-count threshold at which an expression of this class becomes
-/// worth hoisting. `usize::MAX` means never. this is the BASE threshold; the
+/// worth hoisting. `usize::MAX` means never. this is the base threshold; the
 /// effective threshold at a rewrite site is depth-adjusted by
 /// `effective_threshold` (a deep cheap chain is worth a register sooner).
 #[inline]
@@ -571,16 +571,16 @@ fn hoist_threshold(c: CostClass) -> usize {
     }
 }
 
-/// minimum subtree height at which a CHEAP share drops to the 2-use threshold.
-/// a `(v - w)` (height 1) stays inline at 2 uses; a `((a*b)*c)*d` ALU chain
+/// minimum subtree height at which a cheap share drops to the 2-use threshold.
+/// a `(v - w)` (height 1) stays inline at 2 uses; a `((a*b)*c)*d` alu chain
 /// (height >= 3) hoists at 2 — the recompute cost scales with chain depth, the
 /// register cost does not.
 const CHEAP_DEPTH_FLOOR: usize = 3;
 
 /// true iff `e`'s subtree height is at least `k`. height(leaf) = 0,
-/// height(node) = 1 + max(child heights). DEPTH-CAPPED: recurses at most `k`
+/// height(node) = 1 + max(child heights). depth-capped: recurses at most `k`
 /// levels (short-circuits on the first qualifying path), so it is O(k) per
-/// call — it does NOT re-walk the whole subtree and so does not reintroduce
+/// call — it does not re-walk the whole subtree and so does not reintroduce
 /// the O(N^2) the single-pass hash design eliminated.
 fn height_ge(e: &ScalarExpr, k: usize) -> bool {
     if k == 0 {
@@ -605,8 +605,8 @@ fn height_ge(e: &ScalarExpr, k: usize) -> bool {
 }
 
 /// the depth-aware share-count threshold for hoisting `e`. identical to the
-/// base `hoist_threshold` for every class EXCEPT a deep cheap subtree, which
-/// drops to 2 uses. only ever LOWERS a threshold, never raises one.
+/// base `hoist_threshold` for every class except a deep cheap subtree, which
+/// drops to 2 uses. only ever lowers a threshold, never raises one.
 fn effective_threshold(e: &ScalarExpr) -> usize {
     let class = cost_class(e);
     let base = hoist_threshold(class);
@@ -669,7 +669,7 @@ fn count_in_stmt(stmt: &ScalarStmt, counts: &mut HashMap<u64, usize>) {
 }
 
 /// recurse into children, compute their hashes, then combine into
-/// THIS node's hash. each subexpression is hashed exactly once and
+/// this node's hash. each subexpression is hashed exactly once and
 /// increments its hash bucket exactly once per occurrence in the tree.
 fn count_and_hash(e: &ScalarExpr, counts: &mut HashMap<u64, usize>) -> u64 {
     let child_hashes = match e {
@@ -736,14 +736,14 @@ fn rewrite_stmt(stmt: ScalarStmt, state: &mut RewriteState, out_body: &mut Vec<S
     // single source of truth via `with_child_expr`: thread the expression
     // rewriter through whatever expression this statement carries (none for
     // For / Break — both fall through). `rewrite_expr` may push CSE lets into
-    // `out_body` BEFORE the rewritten value is captured, preserving the
+    // `out_body` before the rewritten value is captured, preserving the
     // "introduce-then-use" ordering.
     let rewritten = stmt.with_child_expr(|e| rewrite_expr(e, state, out_body).0);
     out_body.push(rewritten);
 }
 
 /// recurse into children, rewriting them (and emitting any pending
-/// CSE Lets) FIRST, then decide for the current expression. returns
+/// CSE Lets) first, then decide for the current expression. returns
 /// the rewritten expression and its structural hash so the parent
 /// can compose its own hash without re-walking.
 fn rewrite_expr(
@@ -869,11 +869,11 @@ fn rewrite_expr(
     }
 
     // candidate iff share-count meets the
-    // cost-class threshold AND the expression is non-trivial AND F64.
+    // cost-class threshold and the expression is non-trivial and F64.
     // each gate is a load-bearing structural check:
     //   - count: pass-1 hash buckets (could exceed the threshold);
     //   - cost_class: per-op policy from the table above;
-    //   - is_trivial: defence in depth (Trivial class threshold is MAX, but
+    //   - is_trivial: defence in depth (Trivial class threshold is max, but
     //     a Const that hashes oddly should still bail);
     //   - is_f64_expr: element-tracking — Bool-typed exprs would need a
     //     separate Let element.
@@ -906,7 +906,7 @@ mod tests {
     }
 
     /// regression: commutative ops hash operand-order-independently, so
-    /// `a op b` and `b op a` produce the SAME hash (and collapse in cse);
+    /// `a op b` and `b op a` produce the same hash (and collapse in cse);
     /// non-commutative ops keep order-sensitive hashes. threshold-independent.
     #[test]
     fn commutative_ops_hash_order_independent() {
@@ -946,7 +946,7 @@ mod tests {
     /// regression: `a*b` and `b*a` are the same commutative value, so their
     /// uses sum toward the hoist threshold. five total occurrences of the
     /// product (3 as a*b, 2 as b*a) cross the cheap-class threshold of 4 and
-    /// collapse to ONE cse temp. before the commutative-hash fix the two
+    /// collapse to one cse temp. before the commutative-hash fix the two
     /// orderings hashed apart (3 and 2 uses) and neither hoisted.
     #[test]
     fn commutative_product_collapses_across_operand_order() {
@@ -972,8 +972,8 @@ mod tests {
         );
     }
 
-    /// regression: depth-aware cheap threshold. a DEEP cheap chain (height >= 3,
-    /// e.g., `((a*b)*c)*d`) shared twice hoists at 2 uses; a SHALLOW cheap share
+    /// regression: depth-aware cheap threshold. a deep cheap chain (height >= 3,
+    /// e.g., `((a*b)*c)*d`) shared twice hoists at 2 uses; a shallow cheap share
     /// (height 1, e.g., `a-b`) shared twice stays inline (base threshold 4).
     #[test]
     fn depth_aware_cheap_threshold() {
@@ -996,7 +996,7 @@ mod tests {
             body
         );
 
-        // a-b : height 1, cheap. shared twice -> must NOT hoist (base threshold 4).
+        // a-b : height 1, cheap. shared twice -> must not hoist (base threshold 4).
         let shallow = || ScalarExpr::BinOp(BinaryKind::Sub, Box::new(v("a")), Box::new(v("b")));
         assert!(!height_ge(&shallow(), 3));
         let mut body2: Vec<ScalarStmt> = vec![];
@@ -1100,9 +1100,9 @@ mod tests {
     #[test]
     fn cse_numbering_continues_above_pre_hoisted_names() {
         // regression for the RHD/GPU bug: the scalarizer's hoist pass already
-        // minted `__cse_0`; CSE must NOT re-declare it (Rust shadows, CUDA C
+        // minted `__cse_0`; CSE must not re-declare it (Rust shadows, CUDA C
         // errors). simulate a body that already declares `__cse_0`, then give the
-        // outputs a DISTINCT shared subexpr CSE has to hoist. fixture uses Div
+        // outputs a distinct shared subexpr CSE has to hoist. fixture uses Div
         // (medium-class, threshold 2) so the share triggers.
         let pre = ScalarExpr::BinOp(BinaryKind::Mul, Box::new(v("a")), Box::new(v("a")));
         let mut body: Vec<ScalarStmt> = vec![ScalarStmt::Let {
@@ -1110,7 +1110,7 @@ mod tests {
             element: crate::ElementTy::F64,
             value: pre,
         }];
-        // one output READS the pre-hoisted __cse_0 so it is live (a realistic
+        // one output reads the pre-hoisted __cse_0 so it is live (a realistic
         // scalarizer temp that is actually used) — otherwise pass-3 dce would
         // correctly drop it as dead and there would be no pre-hoisted name to
         // number above.
@@ -1214,7 +1214,7 @@ mod tests {
     /// would be quadratic-time under a key_of that re-serializes each
     /// subtree. this builds a 16-deep binary tree where each subtree is
     /// shared with its sibling — total node count is 2^17 - 1 = 131071, but
-    /// the number of DISTINCT subexpressions is only 17. a re-walking key_of
+    /// the number of distinct subexpressions is only 17. a re-walking key_of
     /// would call count_in_expr 131071 times, each walking the full subtree
     /// — ~10^10 character operations. CSE walks each node exactly once:
     /// ~10^5 ops total.
@@ -1278,10 +1278,10 @@ mod tests {
         }
     }
 
-    /// **the load-bearing law**: a duplicated subexpression INSIDE a Scope is
+    /// **the load-bearing law**: a duplicated subexpression inside a Scope is
     /// hoisted to that Scope's body, staying inside the scope's brace. this is
     /// exactly the structural property needed for `wave_speed_map` — the
-    /// quartic-coefficient phase's shared subexpressions should live INSIDE
+    /// quartic-coefficient phase's shared subexpressions should live inside
     /// the phase's `{ }`, dying at the closing brace.
     #[test]
     fn shared_subexpr_inside_scope_hoists_inside_scope() {
@@ -1291,7 +1291,7 @@ mod tests {
         //       z + 1
         //   };
         // Div is medium-class (threshold 2). Add (cheap, threshold 4)
-        // wouldn't hoist here. expected after CSE: the (x/y) hoists INSIDE
+        // wouldn't hoist here. expected after CSE: the (x/y) hoists inside
         // the scope's body.
         let xy_div = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("y")));
         let inner_let = let_f64(
@@ -1312,14 +1312,14 @@ mod tests {
         let mut outputs = vec![v("phase")];
         cse_in_place(&mut body, &mut outputs, "__cse_");
 
-        // the OUTER body must still be just the one Scope statement.
+        // the outer body must still be just the one Scope statement.
         assert_eq!(
             body.len(),
             1,
             "outer body should have exactly the Scope; got {:?}",
             body
         );
-        // the Scope's BODY must have grown from 1 stmt (the inner let) to 2
+        // the Scope's body must have grown from 1 stmt (the inner let) to 2
         // (a hoisted __cse_N let for x/y, then the original `z = ...`).
         match &body[0] {
             ScalarStmt::Scope {
@@ -1353,9 +1353,9 @@ mod tests {
         }
     }
 
-    /// **scope sealing**: a duplicate that appears in TWO sibling scopes is NOT
+    /// **scope sealing**: a duplicate that appears in two sibling scopes is not
     /// shared across them. each scope gets its own independent CSE pass. this
-    /// is the per-scope isolation property — fancy LCA is a separate refinement,
+    /// is the per-scope isolation property — fancy lca is a separate refinement,
     /// unnecessary for the wave-speed win.
     #[test]
     fn duplicate_across_sibling_scopes_stays_local() {
@@ -1429,7 +1429,7 @@ mod tests {
 
     // ----- cost-model CSE tests -----
     //
-    // each test exercises ONE class of the cost table at the threshold
+    // each test exercises one class of the cost table at the threshold
     // boundary: just-below stays inline (good — would have spent a register
     // for nothing), at-or-above hoists (good — actually saves recomputation
     // of an expensive node). transcendentals + memory + free-calls hoist at
@@ -1450,7 +1450,7 @@ mod tests {
             .collect()
     }
 
-    /// cheap-class at the threshold-1 boundary: a Mul shared 3 times must NOT
+    /// cheap-class at the threshold-1 boundary: a Mul shared 3 times must not
     /// hoist (cheap threshold = 4). a share count below the cheap threshold is
     /// left in place.
     #[test]
@@ -1466,7 +1466,7 @@ mod tests {
         );
     }
 
-    /// cheap-class at the threshold: a Mul shared 4 times MUST hoist.
+    /// cheap-class at the threshold: a Mul shared 4 times must hoist.
     #[test]
     fn cheap_at_threshold_hoists() {
         let mul = ScalarExpr::BinOp(BinaryKind::Mul, Box::new(v("x")), Box::new(v("y")));
@@ -1536,8 +1536,8 @@ mod tests {
         );
     }
 
-    /// expensive (exp) at single use: must NOT hoist. the policy
-    /// hoists only when a value is SHARED.
+    /// expensive (exp) at single use: must not hoist. the policy
+    /// hoists only when a value is shared.
     #[test]
     fn expensive_single_use_stays_inline() {
         let exp = ScalarExpr::MethodCall {
@@ -1581,7 +1581,7 @@ mod tests {
     /// trivial (Const, Var) at any share count: never hoists.
     #[test]
     fn trivial_never_hoists() {
-        // Var shared 10 times: must NOT hoist (it's already a register name).
+        // Var shared 10 times: must not hoist (it's already a register name).
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(v("x"), 10);
         cse_in_place(&mut body, &mut outputs, "__cse_");
@@ -1591,7 +1591,7 @@ mod tests {
             body
         );
 
-        // Const shared 10 times: must NOT hoist either.
+        // Const shared 10 times: must not hoist either.
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(ScalarExpr::Const(ConstValue::F64(2.5)), 10);
         cse_in_place(&mut body, &mut outputs, "__cse_");
@@ -1706,7 +1706,7 @@ mod tests {
         assert_eq!(cost_class(&load), CostClass::Memory);
     }
 
-    /// **threshold table**: trivial = MAX, cheap = 4, medium/expensive/memory = 2.
+    /// **threshold table**: trivial = max, cheap = 4, medium/expensive/memory = 2.
     #[test]
     fn hoist_threshold_table_is_exact() {
         assert_eq!(hoist_threshold(CostClass::Trivial), usize::MAX);
@@ -1723,10 +1723,10 @@ mod tests {
         // outer body:
         //   let r: f64 = scope outer {
         //       let m: f64 = scope inner {
-        //           let p = (x / y) * (x / y);   // (x/y) x2 INSIDE inner
+        //           let p = (x / y) * (x / y);   // (x/y) x2 inside inner
         //           p
         //       };
-        //       m + m                            // m x2 INSIDE outer, AFTER inner closes
+        //       m + m                            // m x2 inside outer, after inner closes
         //   };
         // Div is medium-class so the 2-share hoists.
         let x1 = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("y")));

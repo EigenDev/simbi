@@ -41,7 +41,7 @@ fn compile_stub_ptx(out_dir: &str) {
     };
 
     // nvcc auto-reads NVCC_CCBIN for its host compiler. on failure, retry once with a
-    // PATH g++ IF the configured NVCC_CCBIN is untrustworthy (unset, or a stale absent
+    // path g++ if the configured NVCC_CCBIN is untrustworthy (unset, or a stale absent
     // path) — the shared policy in symbi_xpu::compile_cuda, identical to the runtime AOT
     // path. a real-but-failing NVCC_CCBIN is the user's deliberate choice (no retry); the
     // panic below gives guidance instead.

@@ -1,23 +1,23 @@
 # =============================================================================
 # test_cartesian_kerr_bh_3d.py
 #
-# spinning-kerr GRHD on the FULL 3D cartesian kerr-schild chart (spin about z):
+# spinning-kerr GRHD on the full 3D cartesian kerr-schild chart (spin about z):
 # gamma_ij = delta_ij + 2H l_i l_j with the oblate-spheroidal radius and the
 # swirl components of l carrying the frame dragging. three oracle-free gates:
-# - a = 0 reduces the metric EXACTLY to the schwarzschild cartesian KS chart,
-#   so the spin-zero kerr run must match the kerr_schild run OUTSIDE the
+# - a = 0 reduces the metric exactly to the schwarzschild cartesian KS chart,
+#   so the spin-zero kerr run must match the kerr_schild run outside the
 #   frozen core: the r >= M/2 clamp fills the unphysical center with two
 #   different (both consistent) metric continuations, so the cores differ
 #   structurally while every physical cell agrees to amplified roundoff,
 #   decaying outward (the same bounded-leakage shape the excision gate pins);
-# - the metric at any spin is invariant under the QUARTER TURN about z,
+# - the metric at any spin is invariant under the quarter turn about z,
 #   (x, y) -> (-y, x), and under z -> -z, so a symmetric initial state must
 #   evolve symmetrically under both to roundoff — the coordinate-role gate
 #   for the swirl of l (a transpose-style bug breaks these exactly);
 # - the x <-> y transpose maps a -> -a exactly (reflection flips the spin
 #   axis sense), so the +a run transposed must equal the -a run to roundoff;
 #   the dragging swirl is nonzero and flips sign with a, while the a = 0 run
-#   stays swirl-free (non-vacuous: the spin genuinely acts). the SIGN of the
+#   stays swirl-free (non-vacuous: the spin genuinely acts). the sign of the
 #   coordinate swirl is chart-dependent (ingoing-KS phi differs from the
 #   boyer-lindquist azimuth by a radial offset, so infalling S_phi = 0 gas
 #   has v^phi_KS = omega + (dphi_KS/dr) v^r with the infall term dominant
@@ -121,11 +121,11 @@ def test_cartesian_kerr_a0_matches_kerr_schild() -> None:
     # non-vacuous: the infall genuinely developed (a pair of identically-floored
     # states would also "agree").
     assert a["rho"].max() > 1.05 * RHO0, "no accretion developed in the a = 0 kerr run"
-    # the a = 0 kerr metric is ALGEBRAICALLY the schwarzschild cartesian KS chart
-    # (2H = 2M/r, l = x/r), and both charts contract their rank-1 forms with the ACTUAL
-    # |l|^2, so they agree INSIDE the r < M/2 radius floor too — the floor drives |l|
+    # the a = 0 kerr metric is algebraically the schwarzschild cartesian KS chart
+    # (2H = 2M/r, l = x/r), and both charts contract their rank-1 forms with the actual
+    # |l|^2, so they agree inside the r < M/2 radius floor too — the floor drives |l|
     # below 1, where a unit-l assumption would continue the core differently in the two
-    # charts. the evolved states therefore agree to ROUNDOFF everywhere, not merely to a
+    # charts. the evolved states therefore agree to roundoff everywhere, not merely to a
     # bound that decays outward: measured 1.3e-14 (strong field) and 1.8e-14 (exterior).
     # no ratio between the two shells is asserted; with both at roundoff, their ratio
     # describes the leak instead of the law.
@@ -156,7 +156,7 @@ def test_cartesian_kerr_symmetries_and_frame_dragging() -> None:
 
     # the quarter turn about the spin axis, (x, y) -> (-y, x): storage is [k, j, i],
     # so the rotated field is rot90 in the (j, i) plane. exact metric symmetry at
-    # ANY spin — a swirl coordinate-role bug breaks it exactly.
+    # any spin — a swirl coordinate-role bug breaks it exactly.
     rot = np.rot90(rho, k=1, axes=(1, 2))
     err = np.abs(rho - rot).max()
     assert err < 1e-11, f"quarter-turn symmetry about the spin axis broken: {err:e}"
@@ -167,13 +167,13 @@ def test_cartesian_kerr_symmetries_and_frame_dragging() -> None:
 
     # the x <-> y transpose is a reflection, so it maps the spin a -> -a while
     # fixing everything else: the +a run transposed must equal the -a run to
-    # roundoff (a sharp equivalence at FULL spin, storage [k, j, i]).
+    # roundoff (a sharp equivalence at full spin, storage [k, j, i]).
     g = _run(Spacetime.KERR_KS, -0.9)
     err = np.abs(np.transpose(f["rho"], (0, 2, 1)) - g["rho"]).max()
     assert err < 1e-11, f"transpose(+a) != run(-a): {err:e}"
 
     # frame dragging is real: the near-hole swirl moment dwarfs the a = 0 run's
-    # roundoff floor and FLIPS SIGN with a (the coordinate sense is chart-dependent;
+    # roundoff floor and flips sign with a (the coordinate sense is chart-dependent;
     # the antisymmetry in a is the invariant).
     swirl = _vphi_moment(f)
     swirl_m = _vphi_moment(g)

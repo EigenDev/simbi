@@ -10,11 +10,11 @@
 //
 // these operate purely on the raw-f64 events (the serialization boundary), so they
 // carry no `units` types — they are binning + normalization over a fixed catalog.
-// absorbed packets are skipped; the arrival time is the SAME equal-arrival-time-surface
+// absorbed packets are skipped; the arrival time is the same equal-arrival-time-surface
 // form (1+z)(t_em - r.n/c) everywhere (light curve, sky map, polarization). the light
 // curve is the sky map integrated over the sky: identical per-packet selection (EATS,
 // observer-direction doppler delta^power, observed-frequency band) binned in observer
-// TIME (the sky map bins the same packets by sky position), so F_nu(t) and the image are the same physical quantity.
+// time (the sky map bins the same packets by sky position), so F_nu(t) and the image are the same physical quantity.
 //
 // usage:
 //  let lc = compute_lightcurve_from_events(&events, [s,0,c], &nus, z, d_l, &tbins, 3.0, 0.1);
@@ -45,7 +45,7 @@ pub struct ObserverLightcurve {
     pub frequencies: Vec<f64>,
 }
 
-/// a sky-plane surface-brightness image on a UNIFORM CARTESIAN pixel grid (not polar): the
+/// a sky-plane surface-brightness image on a uniform cartesian pixel grid (not polar): the
 /// afterglow image is a tiny patch of sky, so equal-area pixels are the natural, singularity-
 /// free representation — unlike a polar (theta, phi) grid whose `1/theta` cell area spuriously
 /// over-brightens the center and erases the limb-brightened ring. `intensity` is row-major
@@ -66,7 +66,7 @@ impl SkyImage {
         self.intensity[iy * self.n_pix + ix]
     }
 
-    /// the axisymmetric radial surface-brightness profile in `n_rings` EQUAL-AREA annuli
+    /// the axisymmetric radial surface-brightness profile in `n_rings` equal-area annuli
     /// (binned by `(R / half_width)^2`, so each ring covers the same sky area). ring 0 is the
     /// center; this is the limb-brightening diagnostic — a ring shows up as an off-center peak.
     pub fn radial_profile(&self, n_rings: usize) -> Vec<f64> {
@@ -124,13 +124,13 @@ fn bin_index(edges: &[f64], x: f64) -> Option<usize> {
     None
 }
 
-/// light curve for a chosen line of sight = the SKY MAP integrated over the sky. each
-/// non-absorbed packet is binned by its EATS arrival time and contributes the SAME beamed
+/// light curve for a chosen line of sight = the sky map integrated over the sky. each
+/// non-absorbed packet is binned by its EATS arrival time and contributes the same beamed
 /// flux the sky map would place on the image: `F_nu = energy * delta^doppler_power /
-/// (4 pi d_L^2 dt dnu)` in [mJy]. `time_bins` are day edges; `frequencies` are the CENTER
+/// (4 pi d_L^2 dt dnu)` in [mJy]. `time_bins` are day edges; `frequencies` are the center
 /// observed frequencies [Hz] (one light curve each), each with a monochromatic band of width
 /// `dnu = nu0 * frac_bandwidth`. because the catalog's `nu_emit` are importance-sampled from
-/// the SPN98 synchrotron spectrum, banding on the OBSERVED frequency recovers the true per-Hz
+/// the SPN98 synchrotron spectrum, banding on the observed frequency recovers the true per-Hz
 /// flux density (not the crude all-energy/dnu approximation). `doppler_power` is 3 for the
 /// specific-intensity (per-Hz) flux — see `DOPPLER_BAND`. additive across catalogs (streams).
 #[allow(clippy::too_many_arguments)]
@@ -157,7 +157,7 @@ pub fn compute_lightcurve_from_events(
         .collect();
 
     for evt in events.iter().filter(|e| !e.absorbed) {
-        // equal-arrival-time surface, IDENTICAL to compute_skymap: t_obs = (1+z)(t_em - r.n/c).
+        // equal-arrival-time surface, identical to compute_skymap: t_obs = (1+z)(t_em - r.n/c).
         let r_dot_n = evt.x * obs_hat[0] + evt.y * obs_hat[1] + evt.z * obs_hat[2];
         let t_arrival = one_plus_z * (evt.t_emission - r_dot_n / C_LIGHT.value());
         let Some(t_bin) = bin_index(&time_bins_s, t_arrival) else {
@@ -165,7 +165,7 @@ pub fn compute_lightcurve_from_events(
         };
         let dt = time_bins_s[t_bin + 1] - time_bins_s[t_bin];
 
-        // observer-direction doppler from the lab-frame fluid VELOCITY (not the random photon
+        // observer-direction doppler from the lab-frame fluid velocity (not the random photon
         // direction, which is a sampling artifact the sky map also ignores): delta = 1/(gamma(1-beta.n)).
         let b = evt.beta_vec;
         let beta_dot_n = b[0] * obs_hat[0] + b[1] * obs_hat[1] + b[2] * obs_hat[2];
@@ -194,8 +194,8 @@ pub fn compute_lightcurve_from_events(
 ///
 /// each in-window, in-band packet is projected onto the plane perpendicular to the line of
 /// sight `observer_direction` and binned into `n_pix * n_pix` equal-area pixels, weighted by
-/// the OBSERVER-DIRECTION doppler boost `delta^doppler_power` (delta recomputed from the fluid
-/// velocity — radial, magnitude from the stored lorentz factor — toward the line of sight, NOT
+/// the observer-direction doppler boost `delta^doppler_power` (delta recomputed from the fluid
+/// velocity — radial, magnitude from the stored lorentz factor — toward the line of sight, not
 /// the packet's own random emission direction). this is the relativistic beaming that produces
 /// the limb-brightened ring. the EATS arrival time
 /// t_obs = (1+z)(t_em - r.n/c) within `+/- time_window/2` selects the surface; the image extent
@@ -204,7 +204,7 @@ pub fn compute_lightcurve_from_events(
 /// `doppler_power` is the one physics knob: 3 for specific intensity (I_nu/nu^3 invariant),
 /// 4 bolometric — calibrate against the analytic Granot-Sari image.
 ///
-/// `frequency_hz > 0` selects the OBSERVED frequency band `nu0 +/- frac_bandwidth/2 * nu0`
+/// `frequency_hz > 0` selects the observed frequency band `nu0 +/- frac_bandwidth/2 * nu0`
 /// per packet (nu_obs = delta * nu_emit / (1+z), the same selection the light curve uses), so
 /// the image is the monochromatic per-Hz flux map a `1/dnu` calibration expects. 0 disables
 /// banding, giving an all-band energy image whose values carry no per-Hz normalization.
@@ -242,7 +242,7 @@ pub fn compute_skymap(
     // collect the in-window, in-band sky-plane offsets and their beamed weights.
     let mut pts: Vec<([f64; 2], f64)> = Vec::new();
     for evt in events.iter().filter(|e| !e.absorbed) {
-        // energy band filter on the PHOTON energy h*nu_emit, which sets the spectral band.
+        // energy band filter on the photon energy h*nu_emit, which sets the spectral band.
         let photon_energy = H_PLANCK.value() * evt.nu_emit;
         if photon_energy < energy_min || photon_energy > energy_max {
             continue;
@@ -253,14 +253,14 @@ pub fn compute_skymap(
             continue;
         }
 
-        // observer-direction doppler from the stored lab-frame fluid VELOCITY VECTOR — valid for
+        // observer-direction doppler from the stored lab-frame fluid velocity vector — valid for
         // any flow direction (radial or laterally spreading):
         // delta = 1 / (gamma (1 - beta . n)).
         let b = evt.beta_vec;
         let beta_dot_n = b[0] * n[0] + b[1] * n[1] + b[2] * n[2];
         let delta = 1.0 / (evt.lorentz_factor() * (1.0 - beta_dot_n));
 
-        // monochromatic band on the OBSERVED frequency (identical to the light curve's
+        // monochromatic band on the observed frequency (identical to the light curve's
         // selection), so the accumulated energy corresponds to the calibration bandwidth.
         if frequency_hz > 0.0 {
             let nu_obs = delta * evt.nu_emit / one_plus_z;
@@ -275,7 +275,7 @@ pub fn compute_skymap(
         pts.push(([proj1, proj2], weight));
     }
 
-    // image extent: a CALLER-FIXED half-width (a shared field of view, so per-checkpoint images
+    // image extent: a caller-fixed half-width (a shared field of view, so per-checkpoint images
     // accumulate onto one grid for streaming) when `fixed_half_width > 0`; else auto-size from the
     // in-window events with a little padding.
     let half_width = if fixed_half_width > 0.0 {
@@ -342,7 +342,7 @@ pub fn compute_polarization_from_events(
         .collect();
 
     for evt in events.iter().filter(|e| !e.absorbed) {
-        // energy band filter on the PHOTON energy h*nu_emit, which sets the spectral band.
+        // energy band filter on the photon energy h*nu_emit, which sets the spectral band.
         let photon_energy = H_PLANCK.value() * evt.nu_emit;
         if photon_energy < energy_min || photon_energy > energy_max {
             continue;
@@ -426,10 +426,10 @@ mod tests {
         let mut absorbed = visible;
         absorbed.absorbed = true;
 
-        // a single CENTER frequency at the packet's observed nu (delta=1 here -> nu_obs=1e15).
+        // a single center frequency at the packet's observed nu (delta=1 here -> nu_obs=1e15).
         let nus = vec![1.0e15];
         // EATS t_obs = (1+z)(t_em - r.n/c) = -(1e16/c) ~ -3.86 day: a near-side emitter (at +x,
-        // toward the +x observer) arrives EARLY relative to the origin -> inside [-10, 0] day.
+        // toward the +x observer) arrives early relative to the origin -> inside [-10, 0] day.
         let tbins = vec![-10.0, 0.0];
         let obs = [1.0, 0.0, 0.0];
 
@@ -448,7 +448,7 @@ mod tests {
         );
     }
 
-    // the monochromatic band selects only packets whose OBSERVED frequency brackets the target:
+    // the monochromatic band selects only packets whose observed frequency brackets the target:
     // a packet at nu_obs=1e15 lands in a band centered there but is absent from a far band.
     #[test]
     fn lightcurve_bands_by_observed_frequency() {
@@ -549,7 +549,7 @@ mod tests {
         best
     }
 
-    // the cartesian grid has NO central singularity: a uniform disk of (delta=1) emitters maps
+    // the cartesian grid has no central singularity: a uniform disk of (delta=1) emitters maps
     // to a roughly uniform image — no spurious bright center. (a polar 1/theta
     // normalization would spike the center; this pins that the cartesian binning does not.)
     #[test]
@@ -610,7 +610,7 @@ mod tests {
         );
     }
 
-    // the EATS time window slices the shell into a RING: the radial brightness profile peaks
+    // the EATS time window slices the shell into a ring: the radial brightness profile peaks
     // off-center and the image center is dark — the canonical limb-brightened appearance.
     #[test]
     fn eats_selects_off_center_ring() {

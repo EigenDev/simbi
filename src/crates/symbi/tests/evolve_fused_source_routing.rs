@@ -19,7 +19,7 @@
 //     with_fused_source(..)`).
 //
 // the physics claim is modest by design: the test only proves the binding
-// REACHES the kernel and the spec contribution actually applies (the gas
+// reaches the kernel and the spec contribution actually applies (the gas
 // moves in the prescribed direction by ~ \rho\cdot g\cdot t over the run). bit-equivalence
 // vs the unfused path is covered by the lower-layer unit tests; this
 // layer's job is end-to-end routing through the real evolve loop.
@@ -53,7 +53,7 @@ fn adiabatic_evolve_with_fused_uniform_accel_actually_accelerates_gas() {
     //     mom(t) = mom(0) + \rho\cdot g_ext\cdot t      = \rho\cdot g_ext\cdot t  (starting from rest)
     // which integrates to a velocity v(t) \approx g_ext\cdot t. for g_ext = 0.5 and
     // t_final \approx 0.05, v \approx 0.025 — clearly above any numerical noise floor
-    // and FAR less than cs \approx 1, so the flow stays subsonic + smooth.
+    // and far less than cs \approx 1, so the flow stays subsonic + smooth.
     let n = 32usize;
     let dx = 1.0 / n as f64;
     // uniform stationary state — every cell starts at rest, rho = 1, p = 1.
@@ -74,7 +74,7 @@ fn adiabatic_evolve_with_fused_uniform_accel_actually_accelerates_gas() {
     // a uniform_accel SourceSpec mapping `g_ext_0 = 0.5`.
     // the kernel-set's `godunov_euler` / `godunov_rk2` will now route through
     // `adiabatic_godunov_euler_with_uniform_accel_1d` — the AOT-baked fused
-    // kernel — in EVERY step of the real evolve() loop.
+    // kernel — in every step of the real evolve() loop.
     let g_ext_0 = 0.5_f64;
     let binding = FusedSourceBinding::new("uniform_accel", &[("g_ext_0", g_ext_0)]);
     let sub =
@@ -131,7 +131,7 @@ fn adiabatic_evolve_with_fused_uniform_accel_actually_accelerates_gas() {
 
 #[test]
 fn adiabatic_evolve_without_binding_stays_at_rest() {
-    // the negative control: the SAME setup but with NO `with_fused_source`
+    // the negative control: the same setup but with no `with_fused_source`
     // binding. evolve() runs the unfused path; gas stays at rest (mean v = 0
     // to floating-point noise). proves the binding is what causes the
     // acceleration.
@@ -152,7 +152,7 @@ fn adiabatic_evolve_without_binding_stays_at_rest() {
         .build();
 
     // no `with_fused_source` — the kernel-set has `fused_source: None`, so
-    // godunov_euler routes through the UNFUSED `dispatch_godunov`.
+    // godunov_euler routes through the unfused `dispatch_godunov`.
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
     evolve(&mut sim, &sub, 0.05).expect("unfused evolve failed");

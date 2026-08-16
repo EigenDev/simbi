@@ -1,7 +1,7 @@
 # =============================================================================
 # test_equilibrium_restart.py
 #
-# a restart must continue against the SAME stationary target it started with.
+# a restart must continue against the same stationary target it started with.
 #
 # the target is not a field: it leaves no trace in the checkpoint's data, so a run resumed
 # against a different one subtracts a different imbalance at every stage and holds a
@@ -103,7 +103,7 @@ def test_adding_a_target_on_restart_is_refused() -> None:
 def test_a_clamp_era_hllc_lm_checkpoint_is_refused() -> None:
     # `solver = hllc_lm` changed meaning when the clamped variant was retired: the name
     # now denotes the published fleischmann ramp. the wb_reconstruction attribute entered
-    # the checkpoint format together with the new scheme, so an hllc_lm file WITHOUT it
+    # the checkpoint format together with the new scheme, so an hllc_lm file without it
     # was written by the old numerics and must not be continued under the new ones.
     with pytest.raises(ConfigError, match="RETIRED clamped hllc_lm"):
         _assert_same_equilibrium_target(
@@ -113,7 +113,7 @@ def test_a_clamp_era_hllc_lm_checkpoint_is_refused() -> None:
 
 
 def test_a_post_collapse_hllc_lm_checkpoint_resumes() -> None:
-    # the attribute's PRESENCE is the discriminator, not its value: a new-scheme run
+    # the attribute's presence is the discriminator, not its value: a new-scheme run
     # with balance off records False and must resume, else every fresh hllc_lm series
     # would refuse its own first restart.
     for wb in (True, False):

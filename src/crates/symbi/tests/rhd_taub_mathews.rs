@@ -9,7 +9,7 @@
 // so a cold run must reproduce the ideal-5/3 evolution and a hot run the
 // ideal-4/3 one, to the accuracy the limit itself sets (the effective gamma sits
 // O(theta) from 5/3 cold and O(1/theta) from 4/3 hot). at theta ~ 1 the closure
-// is genuinely NEITHER — the non-vacuity of the sandwich.
+// is genuinely neither — the non-vacuity of the sandwich.
 //
 // run: cargo test -p symbi --test rhd_taub_mathews
 // =============================================================================
@@ -28,7 +28,7 @@ use symbi_xpu::{CpuSpace, HostMemory};
 const N: usize = 128;
 
 /// the host closure that names the same gas as a kernel arm. the state's own EOS turns
-/// the initial PRIMITIVES into conserved variables, and the arm recovers primitives from
+/// the initial primitives into conserved variables, and the arm recovers primitives from
 /// them on every step after: the two describe one gas or the initial condition is not the
 /// one the config asked for.
 fn host_eos(arm: EosArm, gamma: f64) -> EosSelect<f64> {
@@ -83,7 +83,7 @@ fn rel_linf(a: &[f64], b: &[f64]) -> f64 {
 }
 
 /// the trans-relativistic sod (theta ~ 1) under taub-mathews: finite, positive,
-/// subluminal, and genuinely a different scheme from BOTH ideal limits —
+/// subluminal, and genuinely a different scheme from both ideal limits —
 /// identical output would mean the eos dispatch silently fell through.
 #[test]
 fn taub_mathews_sod_evolves_and_is_neither_ideal_limit() {
@@ -189,7 +189,7 @@ fn taub_mathews_runs_the_spherical_blast_chart() {
     assert!(max_v > 0.3, "the blast never became relativistic (max |v| = {max_v})");
 }
 
-/// evolve a UNIFORM state and return its (rho, v, p) as recovered afterwards. a uniform
+/// evolve a uniform state and return its (rho, v, p) as recovered afterwards. a uniform
 /// state is an exact steady solution of a conservative cartesian scheme — every face flux
 /// cancels its neighbor — so whatever comes back differs from what went in only through
 /// the prim -> cons -> prim round trip, which is the seeding conversion followed by the
@@ -228,8 +228,8 @@ fn uniform_roundtrip(
 }
 
 /// a hot, fast, uniform gas must come back exactly as it was seeded. this is the seeding
-/// conversion under test: the primitives become conserved variables through the STATE's
-/// closure and are recovered through the ARM's, so a state seeded through a gamma law and
+/// conversion under test: the primitives become conserved variables through the state's
+/// closure and are recovered through the arm's, so a state seeded through a gamma law and
 /// recovered as a taub-mathews gas conserves only D = rho W (which needs no closure at
 /// all) and misplaces the split between rho and W. the effect is confined to t = 0 and is
 /// not small — a gamma_gas = 20 shell seeded that way returns at W = 28.6 with a third of
@@ -267,7 +267,7 @@ fn taub_mathews_seeding_round_trips_a_hot_relativistic_state() {
 }
 
 /// the taub-mathews gas is parameter-free: the adiabatic index bound into its kernel
-/// scalar slot is inert, so the same run must come out BIT-IDENTICAL whatever is bound
+/// scalar slot is inert, so the same run must come out bit-identical whatever is bound
 /// there. the state's closure reports 0 for that slot, and this is what licenses it.
 #[test]
 fn the_taub_mathews_arm_reads_no_adiabatic_index() {

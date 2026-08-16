@@ -77,7 +77,7 @@ def test_serialize_source_region_and_target_optional() -> None:
 
 def test_fluid_state_leaves_emit_state_ops() -> None:
     # state-dependent sources: density/velocity/pressure leaves -> the rust
-    # VARIABLE_RHO / VEL{1,2,3} / PRESSURE ops the bridge reads per cell.
+    # VARIABLE_RHO / vel{1,2,3} / pressure ops the bridge reads per cell.
     g = expr.ExprGraph()
     # cooling ~ C * rho^2
     rate = expr.parameter(0, g) * expr.density(g) * expr.density(g)
@@ -102,7 +102,7 @@ def test_velocity_axis_bounds() -> None:
 
 
 def test_rt_config_emits_force_source() -> None:
-    # the reference config: RT gravity is a `force` source with `dim` accel outputs.
+    # the reference config: rt gravity is a `force` source with `dim` accel outputs.
     prob = RayleighTaylor(g0=0.3)
     [src] = prob.source_expressions
     assert src["kind"] == "force"

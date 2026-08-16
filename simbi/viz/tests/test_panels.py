@@ -6,7 +6,7 @@
 # and four-velocity on the other, at one epoch, on a shared radial axis.
 #
 # what has to hold for that figure to mean anything:
-#   - the sectors are DISJOINT. two fields laid on the same angles paint over
+#   - the sectors are disjoint. two fields laid on the same angles paint over
 #     one another, and the survivor looks like a finished plot.
 #   - the reflection touches the angles only. a sector that rescaled the radii
 #     or reordered the values would put one field's shock at the other's radius.

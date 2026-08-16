@@ -2,7 +2,7 @@
 // exit.rs
 //
 // the run's final summary frame. after the live screen is left, one bounded,
-// state-colored `Block` is rendered OFF-SCREEN into a buffer, serialized to ansi,
+// state-colored `Block` is rendered off-screen into a buffer, serialized to ansi,
 // and printed onto the primary buffer so it persists in scrollback. rendering
 // off-screen avoids any cursor-position query, which could block once
 // ScreenGuard has restored the canonical termios.

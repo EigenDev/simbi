@@ -1,10 +1,10 @@
 // =============================================================================
 // refine_gpu.rs
 //
-// the amr gpu gate: the FULL 2-level berger-oliger driver (subcycle, prolong,
+// the amr gpu gate: the full 2-level berger-oliger driver (subcycle, prolong,
 // restrict, flux-register reflux, mhd staggered transfer + emf reflux) on the
 // CUDA backend (CudaSpace / UnifiedMemory), asserting the same invariants the
-// cpu gates pin AND bitwise-comparable agreement with a host run of the
+// cpu gates pin and bitwise-comparable agreement with a host run of the
 // identical problem. on the device backend the snapshots run the field_copy
 // kernel and the flux register the field_fill / field_axpy_shift /
 // refine_acc_face kernels — no per-cell host touch during compute (the emf

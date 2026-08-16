@@ -4,12 +4,12 @@
 # the generalized horizon excision: the excised region is the kerr-schild-radius
 # level set r_ks(x; a) < r_exc — the sphere at a = 0, the oblate spheroid
 # (x^2 + y^2)/(r_exc^2 + a^2) + z^2/r_exc^2 < 1 at spin — and the fill carries
-# the GAS primitives for hydro AND magnetized runs (the staggered faces stay
+# the gas primitives for hydro and magnetized runs (the staggered faces stay
 # CT-owned). three gates:
-# - SPINNING hydro excision genuinely acts (two radii give different interiors)
+# - spinning hydro excision genuinely acts (two radii give different interiors)
 #   while the exterior sees only bounded, outward-decaying leakage, and the
 #   excised run keeps the quarter-turn + z-reflection metric symmetries;
-# - MAGNETIZED excision runs, genuinely acts, and PRESERVES the densitized
+# - magnetized excision runs, genuinely acts, and preserves the densitized
 #   div(B) at machine zero — the fill never
 #   touches the staggered field, so the CT invariant survives by construction;
 # - the magnetized excised run agrees with the unexcised run outside the
@@ -114,23 +114,23 @@ def test_spinning_excision_acts_and_leakage_is_bounded() -> None:
         "the two excision radii produced identical interiors; the pass never ran"
     )
     # the exterior is causally disconnected in the continuum; discretely the reconstruction stencil
-    # leaks a difference across the excision surface. the LAW is not a magic magnitude — it is that
-    # the leak DECAYS STEEPLY OUTWARD and CONVERGES under refinement, i.e. it is an evanescent
+    # leaks a difference across the excision surface. the law is not a magic magnitude — it is that
+    # the leak decays steeply outward and converges under refinement, i.e. it is an evanescent
     # truncation-level influence of the surface rather than a standing error.
     #
-    # the bands are FIXED PHYSICAL radii, deliberately independent of dx. a dx-dependent band such
-    # as `r > 1.6 + 2*dx` has an inner edge that MOVES INWARD as the grid refines — it samples ever closer to
+    # the bands are fixed physical radii, deliberately independent of dx. a dx-dependent band such
+    # as `r > 1.6 + 2*dx` has an inner edge that moves inward as the grid refines — it samples ever closer to
     # r_+ (= 1.436), where the leak is naturally larger, so a converging leak reads as a growing one
     # and no fixed threshold on it can be resolution-honest (measured 1.34e-3 at 32^3 rising to
     # 1.64e-3 at 64^3 purely from the band moving).
     #
     # measured on these fixed bands, the leak is exponentially small in the surface-to-band distance
-    # and super-convergent (the surface sharpens AND the band recedes in cell units):
+    # and super-convergent (the surface sharpens and the band recedes in cell units):
     #   band        32^3       64^3      ratio
     #   [2.3, 3.0]  6.30e-4    3.04e-5    20.8x   (~4.4 order, vs the scheme's 2nd)
     #   [3.0, 4.0]  1.28e-5    1.28e-8      999x
     #   r > 4       6.75e-9    2.96e-14   2.3e5x
-    # the asserted bounds carry wide margin on the 32^3 values; a surface whose influence STANDS
+    # the asserted bounds carry wide margin on the 32^3 values; a surface whose influence stands
     # (resolution-independent) or fails to decay outward breaks them.
     diff = np.abs(a - b)
     scale = np.abs(a).max()
@@ -263,14 +263,14 @@ def test_mhd_excision_runs_and_preserves_densitized_divb() -> None:
     b = _run_mhd(1.4)
     r, dd = _grid_radii()
     assert np.isfinite(a["rho"]).all() and a["rho"].min() > 0.0, "excised MHD state broke"
-    # non-vacuous both ways: the field genuinely evolved AND the excision genuinely ran.
+    # non-vacuous both ways: the field genuinely evolved and the excision genuinely ran.
     assert np.abs(a["B1"]).max() > 1e-6, "B_x never developed; the CT never acted"
     inner = r < 1.2
     assert np.abs(a["rho"][inner] - b["rho"][inner]).max() > 1e-8, (
         "the two excision radii produced identical interiors; the MHD pass never ran"
     )
     # the defining invariant: the gas-only fill never writes a staggered face, so
-    # the densitized divergence recomputed from the EVOLVED faces stays at machine
+    # the densitized divergence recomputed from the evolved faces stays at machine
     # zero relative to the field scale — excision cannot break the CT constraint.
     dmax = _densitized_div(a, dd)
     bmax = max(float(np.abs(a["B1"]).max()), float(np.abs(a["B3"]).max()), 1e-300)

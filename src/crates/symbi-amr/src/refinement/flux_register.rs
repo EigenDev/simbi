@@ -2,7 +2,7 @@
 // flux_register.rs
 //
 // flux correction (refluxing) for static mesh refinement
-// (SMR). single-coverage cap: ONE register per coarse-fine level-pair, sized to
+// (SMR). single-coverage cap: one register per coarse-fine level-pair, sized to
 // the level's single refined box (`coverage`) — there is no per-patch register
 // fan-out, because a level refines exactly one box (this is SMR). accumulates the
 // mismatch between coarse- and fine-level face fluxes at coarse-fine
@@ -10,19 +10,19 @@
 //   accumulate_coarse:  R -= F_coarse * A_coarse * w
 //   accumulate_fine:    R += sum(F_fine * A_fine) * w
 //   apply:              U[cell] += sign * R / V[cell]
-//     sign = -1 on lo faces (the face is the corrected cell's RIGHT face),
-//     sign = +1 on hi faces (the corrected cell's LEFT face).
+//     sign = -1 on lo faces (the face is the corrected cell's right face),
+//     sign = +1 on hi faces (the corrected cell's left face).
 // per ssp stage the weight is `w = dt * ac_i * prod_{k>i} ac_k` (the stage's
 // effective flux weight after the convex recombination) so the per-step
 // weights sum to dt for every scheme.
 //
-// levels share ABSOLUTE index space: the fine faces covering coarse face
+// levels share absolute index space: the fine faces covering coarse face
 // `coord` start at `ratio * coord` — no coverage offset. component-wise over
 // den / mom[0..DOF] / optional nrg / optional chi (energy-optional regimes skip
 // nrg; runs without a passive scalar skip chi).
 //
-// two execution paths: UNIFORM-cartesian geometry runs substrate kernels
-// (field_fill / field_axpy_shift / refine_acc_face — cpu AND gpu through the
+// two execution paths: uniform-cartesian geometry runs substrate kernels
+// (field_fill / field_axpy_shift / refine_acc_face — cpu and gpu through the
 // kernel dispatch; the face area and cell volume are constant scales), while
 // curvilinear geometry keeps the per-coordinate host loops (cpu-only until
 // the register kernels learn in-kernel geometry). the budget diagnostics
@@ -86,7 +86,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
     /// allocate register faces at the boundary of `coverage` (absolute coarse
     /// indices) within `coarse_interior`; skip faces flush with the coarse
     /// interior boundary.
-    /// `has_energy` MUST match the registered sim's `cons.has_energy()`, and `has_dye` its
+    /// `has_energy` must match the registered sim's `cons.has_energy()`, and `has_dye` its
     /// `cons.chi_field().is_some()` — the register's per-face cons carries the same component set
     /// (den / mom / optional nrg / optional chi) so the positional reflux zip (`comps`) stays
     /// aligned. iso (no nrg) passes `false`; a run without a passive scalar passes `false` for the

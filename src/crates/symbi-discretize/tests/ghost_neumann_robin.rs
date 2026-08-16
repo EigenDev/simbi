@@ -2,7 +2,7 @@
 // ghost_neumann_robin.rs
 //
 // numeric checks for the prescribed-gradient (neumann) and mixed (robin) lattice-map ghost
-// fills. both reuse the outflow EDGE source coord (map_type = 3 -> arg = the boundary-adjacent
+// fills. both reuse the outflow edge source coord (map_type = 3 -> arg = the boundary-adjacent
 // interior cell) and apply the `symbi_hydro::boundary_term` lift per primitive variable, using
 // the outward edge->ghost centroid separation `dist` computed in-kernel from the geometry.
 //
@@ -16,7 +16,7 @@ use harness::KernelRun;
 
 use symbi_discretize::{Spacing, neumann_ghost_fill_gv, robin_ghost_fill_gv};
 
-const NX: usize = 5; // allocated [0,5); interior starts at EDGE, lo ghosts are {0, 1}.
+const NX: usize = 5; // allocated [0,5); interior starts at edge, lo ghosts are {0, 1}.
 const EDGE: usize = 2;
 const X0: f64 = 0.0;
 const DX: f64 = 0.1;
@@ -26,7 +26,7 @@ const RHO: f64 = 2.0;
 const VEL: f64 = 1.0;
 const PRE: f64 = 3.0;
 
-// outward edge->ghost distance for a lo-side ghost at index i: |centroid(i) - centroid(EDGE)|.
+// outward edge->ghost distance for a lo-side ghost at index i: |centroid(i) - centroid(edge)|.
 fn dist(i: usize) -> f64 {
     ((i as f64 + 0.5) - (EDGE as f64 + 0.5)).abs() * DX
 }
@@ -38,8 +38,8 @@ fn close(a: f64, b: f64, ctx: &str) {
 #[test]
 fn neumann_ghost_extrapolates_the_prescribed_gradient() {
     let (q_rho, q_vel, q_pre) = (0.5, -0.3, 1.0);
-    // NON-uniform density: only the EDGE cell holds RHO; the ghosts hold a decoy. this pins that the
-    // fill reads the EDGE (outflow source); a read of the ghost's own value would return the stale decoy.
+    // non-uniform density: only the edge cell holds rho; the ghosts hold a decoy. this pins that the
+    // fill reads the edge (outflow source); a read of the ghost's own value would return the stale decoy.
     let out = KernelRun::new(neumann_ghost_fill_gv(1, 1, true, &[Spacing::Uniform]))
         .grid([NX])
         .compute_window([0], [2]) // the two lo ghosts

@@ -337,7 +337,7 @@ where
     ///   - r^2 is degree 2 -> exact with 2-point Gauss in r
     ///   - sin(theta) is transcendental -> O(dx^4) accurate (excellent)
     /// for Kerr-Schild (volume_factor includes sqrt(1+2M/r)):
-    ///   - O(dx^4) accurate, consistent with the second-order PDE solver
+    ///   - O(dx^4) accurate, consistent with the second-order pde solver
     ///
     /// a single general path that works for every metric, the quadrature standing in for
     /// per-geometry formulas.
@@ -667,9 +667,9 @@ mod tests {
     fn logradial_divb_telescopes_to_machine_zero() {
         // the div(B) diagnostic (area-weighted, sum_d A_d^+ B_d^+ - A_d^- B_d^-) must read machine
         // zero for a field built div-free by the CT curl. the CT curl evaluates the metric at the
-        // ARITHMETIC face center (a_c = (a_lo + a_hi)/2); face_area must do the same. on a LOG-radial
-        // grid the cell centroid is the GEOMETRIC mean sqrt(r_lo r_hi) != arithmetic, so a face_area
-        // that evaluated the metric at the centroid injected a spurious ~1e-6 divergence (the FM
+        // arithmetic face center (a_c = (a_lo + a_hi)/2); face_area must do the same. on a log-radial
+        // grid the cell centroid is the geometric mean sqrt(r_lo r_hi) != arithmetic, so a face_area
+        // that evaluated the metric at the centroid injected a spurious ~1e-6 divergence (the fm
         // torus symptom). regression: face_position uses the arithmetic transverse center.
         let rmap = AxisMap::Log {
             start: 2.0,
@@ -691,7 +691,7 @@ mod tests {
             (0.4 * r).sin() * (1.3 * th).cos()
         };
         let thc = |j: isize| 0.5 * (tmap.face(j) + tmap.face(j + 1));
-        let rc = |i: isize| 0.5 * (rmap.face(i) + rmap.face(i + 1)); // ARITHMETIC (the curl's point)
+        let rc = |i: isize| 0.5 * (rmap.face(i) + rmap.face(i + 1)); // arithmetic (the curl's point)
 
         // B on the staggered faces, from the CT arithmetic-center curl weights (independent of
         // face_area — this is what the IC / curl produce).

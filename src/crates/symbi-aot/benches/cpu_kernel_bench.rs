@@ -7,14 +7,14 @@
 //
 // usage: cargo run -p symbi-aot --release --example cpu_kernel_bench
 //
-// A/B protocol: to measure a CODEGEN change, edit the emitter, `cargo clean -p
+// A/B protocol: to measure a codegen change, edit the emitter, `cargo clean -p
 // symbi-aot` (force kernel regen), rerun. physics/kernel definitions stay fixed;
 // only the generated cpu code changes. report min-of-reps ns/cell.
 // =============================================================================
 
 use std::hint::black_box;
 use std::time::Instant;
-// the bench resolves the kernels at COMPILE time (the slice-form `pub fn k<S>`),
+// the bench resolves the kernels at compile time (the slice-form `pub fn k<S>`),
 // not the per-call name-keyed NamedKernel — its IR parse would dominate the hot
 // loop and poison the timing. the slice ABI is still drift-stable (the signature
 // stays fixed as a builder adds a field; the buffer slice just grows).

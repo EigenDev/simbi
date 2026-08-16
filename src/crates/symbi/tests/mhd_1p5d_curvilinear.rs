@@ -1,7 +1,7 @@
 // =============================================================================
 // mhd_1p5d_curvilinear.rs
 //
-// end-to-end validation of the 1.5D CURVILINEAR Newtonian-MHD kernels (the spherical
+// end-to-end validation of the 1.5D curvilinear Newtonian-MHD kernels (the spherical
 // and cylindrical radial charts — `{n,r,i}mhd_godunov_stage_{sph,cyl}_1d`, the matching wave-speed
 // maps, and the `rmhd_bcell_godunov_euler_{sph,cyl}_1d` out-of-plane predictor). the cartesian 1.5D
 // MHD kernels do not cover the (1, spherical) / (1, cylindrical) charts. no
@@ -10,7 +10,7 @@
 //     B_r = B0/r^2 on spherical / B0/r on cylindrical, so the area-weighted radial divergence is
 //     zero), and stays at its IC to machine precision,
 //   - the out-of-plane toroidal B_phi rides the induction-flux divergence (the bcell predictor)
-//     and must actually EVOLVE as the radial pressure bump drives a radial flow,
+//     and must actually evolve as the radial pressure bump drives a radial flow,
 //   - the gas (rho, v, p) stays physical (positive, finite) on the curvilinear shell.
 // this gates the curvilinear-chart kernels' wiring + stability. it asserts structure and
 // physicality, the only checkable properties absent a closed-form curvilinear MHD reference.

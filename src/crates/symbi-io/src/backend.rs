@@ -7,7 +7,7 @@
 //
 // the contract: `write(path, tree)` walks the borrowed Tree and emits;
 // `read(path)` materializes a TreeBuf. by design, every backend uses the
-// SAME Tree representation, so adding a backend is a leaf concern, never
+// same Tree representation, so adding a backend is a leaf concern, never
 // a refactor of the schema or the call sites.
 // =============================================================================
 
@@ -25,7 +25,7 @@ pub trait IoBackend {
 
     /// read the full file into a TreeBuf. for HDF5 this is straightforward;
     /// for backends that support lazy reads, this materializes everything
-    /// (fine for typical checkpoint sizes; revisit for multi-GB
+    /// (fine for typical checkpoint sizes; revisit for multi-gb
     /// snapshots).
     fn read(&self, path: &Path) -> Result<TreeBuf>;
 }

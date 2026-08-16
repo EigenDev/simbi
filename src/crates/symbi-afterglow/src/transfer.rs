@@ -3,7 +3,7 @@
 //
 // the monte-carlo photon-transfer path:
 //   - `generate_photon_events` samples relativistically-beamed synchrotron photon
-//     packets from a hydro snapshot. each packet's COMOVING FREQUENCY is drawn from
+//     packets from a hydro snapshot. each packet's comoving frequency is drawn from
 //     the cell's broken-power-law synchrotron spectrum, and it carries an equal share
 //     of the cell's emitted energy. (this is the proper energy/frequency model:
 //     storing a single `energy` and misusing energy/h as a frequency would prevent the
@@ -18,7 +18,7 @@
 //
 // design properties:
 //   - the proper energy/frequency model above (separate nu_emit and energy_weight),
-//   - seeded deterministic RNG (src/rng.rs) for reproducibility,
+//   - seeded deterministic rng (src/rng.rs) for reproducibility,
 //   - correct relativistic-aberration beaming (a direction rotation),
 //   - per-photon absorption path length (0.1 * emission radius),
 //   - SSA / pair-production keyed on the photon energy h*nu_emit, which sets the spectral band.
@@ -53,7 +53,7 @@ fn norm(a: [f64; 3]) -> f64 {
 }
 
 /// the lower/upper radial edges of cell `i` as geometric midpoints between neighbors (boundary
-/// cells extrapolate the local ratio). works for ANY radial spacing — log-spaced sim meshes or
+/// cells extrapolate the local ratio). works for any radial spacing — log-spaced sim meshes or
 /// the quasi-linear Blandford-McKee shell alike — so the shell volume is correct either way.
 #[inline]
 pub(crate) fn radial_shell_edges(x1: &[f64], i: usize) -> (f64, f64) {
@@ -75,7 +75,7 @@ pub(crate) fn radial_shell_edges(x1: &[f64], i: usize) -> (f64, f64) {
     (lo, hi)
 }
 
-/// draw a frequency from `nu^a` on [lo, hi] by inverse-CDF of a uniform deviate `v`.
+/// draw a frequency from `nu^a` on [lo, hi] by inverse-cdf of a uniform deviate `v`.
 #[inline]
 fn sample_power_segment(a: f64, lo: f64, hi: f64, v: f64) -> f64 {
     if (a + 1.0).abs() < 1.0e-9 {
@@ -89,8 +89,8 @@ fn sample_power_segment(a: f64, lo: f64, hi: f64, v: f64) -> f64 {
 /// sample a comoving photon frequency from the broken-power-law synchrotron spectrum
 /// F_nu (Sari, Piran & Narayan 1998) on [nu_lo, nu_hi]. the spectrum is three power-law
 /// segments split at the breaks nu_m, nu_c; the frequency is drawn proportional to F_nu
-/// (energy spectrum) by an EXACT piecewise inverse-CDF: choose a segment with probability
-/// equal to its integrated energy, then invert the power-law CDF within it. equal-energy
+/// (energy spectrum) by an exact piecewise inverse-cdf: choose a segment with probability
+/// equal to its integrated energy, then invert the power-law cdf within it. equal-energy
 /// packets drawn this way reproduce F_nu when histogrammed as `sum(weight) / d_nu`.
 fn sample_emission_frequency(
     p: f64,
@@ -100,7 +100,7 @@ fn sample_emission_frequency(
     nu_m: f64,
     rng: &mut Rng,
 ) -> f64 {
-    // the segment structure is the SAME decomposition the band-energy integral uses
+    // the segment structure is the same decomposition the band-energy integral uses
     // (synchrotron::spectral_segments), so the sampled packet frequencies and the packet
     // energy normalization describe one spectrum by construction.
     let seg = spectral_segments(p, nu_lo, nu_hi, nu_c, nu_m);
@@ -127,7 +127,7 @@ fn sample_emission_frequency(
 /// (unit vector, fluid frame) by a fluid element moving along `rhat` (unit vector) with
 /// speed `beta` (units of c). relativistic aberration changes the angle to `rhat` from
 /// acos(mu') to acos((mu'+beta)/(1+beta mu')); the result is that rotation applied in the
-/// (rhat, nprime) plane — a proper rotation yielding a UNIT vector. (scaling
+/// (rhat, nprime) plane — a proper rotation yielding a unit vector. (scaling
 /// `nprime` by cos(rotation) would de-normalize the direction; the rotation does not.)
 fn beam_direction(rhat: [f64; 3], nprime: [f64; 3], beta: f64) -> [f64; 3] {
     let mu = dot(rhat, nprime);
@@ -165,7 +165,7 @@ pub(crate) struct CellState {
 impl CellState {
     /// the sampled comoving band [nu_lo, nu_hi] [Hz]: SPECTRUM_DECADES decades beyond the
     /// outer/inner spectral break, broad enough to cover the observable bands after boosting.
-    /// the frequency sampler and the packet energy normalization both use THIS band, so the
+    /// the frequency sampler and the packet energy normalization both use this band, so the
     /// equal-weight packets sum to exactly the band-integrated emitted energy.
     pub(crate) fn band(&self) -> (f64, f64) {
         let lo_break = self.nu_c.min(self.nu_m);
@@ -183,9 +183,9 @@ impl CellState {
     }
 
     /// the comoving synchrotron power density radiated in the sampled band [erg/(s cm^3)]:
-    /// `emissivity x int spectral_shape dnu` — the SAME per-Hz emissivity the deterministic
+    /// `emissivity x int spectral_shape dnu` — the same per-Hz emissivity the deterministic
     /// deposit integrates, so the monte-carlo catalog and the deposit share one normalization.
-    /// (a bolometric (4/3) sigma_T c gamma^2 u_B budget is NOT equivalent: for p < 3 the
+    /// (a bolometric (4/3) sigma_T c gamma^2 u_B budget is not equivalent: for p < 3 the
     /// gamma^2 average is dominated by the tail up to gamma_c and a gamma_min^2 truncation
     /// underestimates the radiated power by (p-1)/(3-p) (gamma_c/gamma_min)^{3-p}.)
     pub(crate) fn band_power_density(&self, p: f64) -> PowerDensity {
@@ -194,7 +194,7 @@ impl CellState {
             * band_integrated_shape(p, nu_lo, nu_hi, self.nu_c, self.nu_m)
     }
 
-    /// build from PHYSICAL cgs quantities: proper mass density `rho` [g/cm^3], pressure `pre`
+    /// build from physical cgs quantities: proper mass density `rho` [g/cm^3], pressure `pre`
     /// [erg/cm^3], speed `beta` (units of c), adiabatic index, microphysics, and the emitter-frame
     /// time `t_emitter_s` [s] (sets the cooling break). this is the geometry-agnostic entry shared
     /// by the radial mesh path and the coordinate-agnostic cell path.
@@ -255,7 +255,7 @@ pub(crate) fn cell_state(
 
 /// emit `n_packets` equal-weight packets from one cell at lab-frame `position` [cm] whose fluid
 /// moves along the unit direction `vhat` with speed `cell.beta`: each isotropic in the fluid
-/// frame, aberrated about the VELOCITY direction (not the radius — this is what captures lateral
+/// frame, aberrated about the velocity direction (not the radius — this is what captures lateral
 /// spreading), with a comoving frequency drawn from the cell's broken-power-law spectrum. shared
 /// by the radial mesh / spherical generators (vhat = rhat) and the cell path (vhat = velocity dir).
 #[allow(clippy::too_many_arguments)]
@@ -272,7 +272,7 @@ pub(crate) fn emit_packets(
     max_events: u64,
     cell_id: u32,
 ) {
-    // sample comoving frequencies over the SAME band the packet energy was integrated over,
+    // sample comoving frequencies over the same band the packet energy was integrated over,
     // so the equal-weight packets tile exactly the band-integrated emitted energy.
     let (nu_lo, nu_hi) = cell.band();
     let beta_vec = [
@@ -324,7 +324,7 @@ pub(crate) fn emit_packets(
 /// 0). each packet is emitted isotropically in the fluid frame, aberrated into the lab frame,
 /// and assigned a comoving frequency drawn from the cell's broken-power-law spectrum. `seed`
 /// makes the catalog reproducible; `max_events` caps total packets. RHD emission is
-/// unpolarized (stokes = [1,0,0,0]); SRMHD polarization is a later increment.
+/// unpolarized (stokes = [1,0,0,0]); srmhd polarization is a later increment.
 pub fn generate_photon_events(
     cond: &SimConditions,
     scales: &QuantScales,
@@ -352,8 +352,8 @@ pub fn generate_photon_events(
     let t_prime_s = t_prime.value();
     let dt = cond.dt * scales.time;
 
-    // a 2d (r, theta) sim is AXISYMMETRIC — the physical 3d blast is the slice swept around the
-    // jet axis. when phi is NOT a resolved data axis, REVOLVE each (r, theta) cell over this many
+    // a 2d (r, theta) sim is axisymmetric — the physical 3d blast is the slice swept around the
+    // jet axis. when phi is not a resolved data axis, revolve each (r, theta) cell over this many
     // azimuths to fill the ring (else everything collapses onto the phi=0 plane and the sky image
     // is a flat cross-section).
     const AXISYM_N_PHI: usize = 64;
@@ -388,7 +388,7 @@ pub fn generate_photon_events(
                 if events.len() as u64 >= max_events {
                     break;
                 }
-                // resolved phi cells in 3d, else REVOLVE the axisymmetric data: dphi =
+                // resolved phi cells in 3d, else revolve the axisymmetric data: dphi =
                 // 2pi / n_azimuth (summing over kk recovers 2pi).
                 let (phi_lo, dx3) = if resolved_phi {
                     let a = x3.unwrap();
@@ -413,7 +413,7 @@ pub fn generate_photon_events(
                 let total_energy: Energy = cell.band_power_density(p) * dvolume * dt;
                 let packet_weight = (total_energy / photons_target as f64).value();
 
-                // each packet's position is sampled CONTINUOUSLY within the cell (volume-weighted
+                // each packet's position is sampled continuously within the cell (volume-weighted
                 // radius, uniform mu and phi): cell-centered positions would quantize the EATS
                 // arrival time t_em - r.n/c onto the angular grid, biasing any observer window
                 // narrower than the lattice spacing. radial flow: velocity along the sampled rhat.
@@ -451,7 +451,7 @@ pub fn generate_photon_events(
 }
 
 /// the (n_mu, n_phi) angular tessellation that fits `max_events` over `ni` radial cells at
-/// `photons_per_dir` packets per direction — sized so EVERY radial cell emits. a fixed
+/// `photons_per_dir` packets per direction — sized so every radial cell emits. a fixed
 /// tessellation larger than the budget would make the `max_events` cap truncate the radial
 /// loop, silently dropping the outer shells (where the shock lives). packet positions are
 /// jittered uniformly within each (mu, phi) cell, so a coarse tessellation still covers the
@@ -469,14 +469,14 @@ pub fn spherical_tessellation_for_budget(
     (n_mu, n_phi)
 }
 
-/// generate photon packets from a 1D RADIAL profile over a SYNTHESIZED equal-solid-angle
+/// generate photon packets from a 1D radial profile over a synthesized equal-solid-angle
 /// sphere — the right tool for imaging a spherically-symmetric (e.g., Blandford-McKee) blast,
 /// where the emission sphere must be tessellated independently of the (degenerate) hydro
 /// angular mesh. directions are sampled as `mu = cos(theta)` uniform on `[cos(theta_max), 1]`
 /// (so every direction cell has equal solid angle) crossed with uniform `phi`; the radial
 /// profile (`fields` indexed by the radial cell, length `x1.len()`) is read at each direction.
 ///
-/// `theta_max` is the half-opening angle [rad] (use PI for a full sphere); `n_mu` x `n_phi` is
+/// `theta_max` is the half-opening angle [rad] (use pi for a full sphere); `n_mu` x `n_phi` is
 /// the angular resolution; `photons_per_dir` packets are emitted per (radius, direction) patch.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_photon_events_spherical(
@@ -519,7 +519,7 @@ pub fn generate_photon_events_spherical(
         // patch volume = (radial shell) x (solid angle dmu*dphi); same energy in every direction
         // because the profile is radial, so the packet weight is computed once per radius. the
         // energy is the band-integrated SPN98 emissivity x dV_lab x dt_lab (proper volume W dV
-        // and comoving interval dt/W cancel), the SAME normalization the deposit integrates.
+        // and comoving interval dt/W cancel), the same normalization the deposit integrates.
         let dvolume = ((1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) * dmu * dphi)
             * scales.length.cubed();
         let total_energy: Energy = cell.band_power_density(p) * dvolume * dt;
@@ -533,7 +533,7 @@ pub fn generate_photon_events_spherical(
                 if events.len() as u64 >= max_events {
                     break;
                 }
-                // every packet's position is sampled CONTINUOUSLY within its (r, mu, phi) cell —
+                // every packet's position is sampled continuously within its (r, mu, phi) cell —
                 // volume-weighted in radius, uniform in mu (solid angle) and phi. cell-centered
                 // positions would quantize the EATS arrival time t_em - r mu / c onto an n_mu
                 // lattice, so an observer window narrower than the lattice spacing catches either
@@ -576,8 +576,8 @@ pub fn generate_photon_events_spherical(
 
 /// synchrotron self-absorption optical depth over `path_length` (dimensionless). the SSA
 /// coefficient alpha ~ n_e B (nu_g/nu)^{(p+4)/2} below the synchrotron peak; the `3.3e-10`
-/// prefactor is an empirical GRB-afterglow calibration that absorbs implicit units, so this
-/// one product is computed in raw f64 — it sits OUTSIDE the dimensional system by design.
+/// prefactor is an empirical grb-afterglow calibration that absorbs implicit units, so this
+/// one product is computed in raw f64 — it sits outside the dimensional system by design.
 fn ssa_optical_depth(
     photon_energy: Energy,
     n_e: NumberDensity,
@@ -622,7 +622,7 @@ fn scatter_photon(photon: &mut PhotonEvent, rng: &mut Rng) {
 /// propagate `events` through the medium, filling `optical_depth` and updating `absorbed` /
 /// `n_scatter` in place. processes: synchrotron self-absorption + thomson scattering (an
 /// absorbed photon may instead scatter and survive), and optional gamma-gamma pair production
-/// above the ~0.5 MeV threshold. self-absorption and pair production are keyed on the PHOTON
+/// above the ~0.5 MeV threshold. self-absorption and pair production are keyed on the photon
 /// energy h*nu_emit (not the packet weight). `seed` makes the transfer reproducible.
 pub fn monte_carlo_radiative_transfer(
     events: &mut [PhotonEvent],
@@ -733,7 +733,7 @@ mod tests {
 
     // the frequency sampler reproduces the analytic broken power law: histogramming many
     // equal-weight draws as count/d_nu recovers the canonical Sari slopes in every segment.
-    // THIS is the "is the monte-carlo working" test bed — the MC spectrum == the analytic one.
+    // this is the "is the monte-carlo working" test bed — the MC spectrum == the analytic one.
     #[test]
     fn sampled_spectrum_matches_broken_power_law() {
         let p = 2.5;
@@ -936,7 +936,7 @@ mod tests {
         );
     }
 
-    // a budget-sized tessellation reaches the OUTERMOST radial cell: with a tessellation
+    // a budget-sized tessellation reaches the outermost radial cell: with a tessellation
     // larger than the budget, the max_events cap truncates the ascending radius loop and the
     // outer shells (the shock, in a blast-wave profile) silently never emit — a large flux
     // bias toward the blast interior.
@@ -969,7 +969,7 @@ mod tests {
         );
     }
 
-    // packet positions are sampled CONTINUOUSLY within their (r, mu, phi) cells, so EATS
+    // packet positions are sampled continuously within their (r, mu, phi) cells, so EATS
     // arrival times t_obs = t_em - r.n/c fill their span continuously.
     // cell-centered positions quantize the arrivals into n_mu discrete rings ~span/n_mu
     // apart; an observer window narrower than that spacing then catches either one full ring or
@@ -1002,8 +1002,8 @@ mod tests {
         let span = hi - lo;
         assert!(span > 0.0);
 
-        // 8 windows, each 1/8 of the OLD lattice spacing (span/n_mu), spread across the span:
-        // continuous sampling puts packets in EVERY one; lattice sampling leaves most empty.
+        // 8 windows, each 1/8 of the old lattice spacing (span/n_mu), spread across the span:
+        // continuous sampling puts packets in every one; lattice sampling leaves most empty.
         let w = span / (n_mu as f64 * 8.0);
         for k in 0..8 {
             let center = lo + span * (k as f64 + 0.5) / 8.0;
@@ -1031,8 +1031,8 @@ mod tests {
         );
     }
 
-    // THE UNIFICATION GATE: the monte-carlo packet catalog and the deterministic deposit
-    // measure the SAME flux density, because both are normalized by the SPN98 per-Hz
+    // the unification gate: the monte-carlo packet catalog and the deterministic deposit
+    // measure the same flux density, because both are normalized by the SPN98 per-Hz
     // emissivity (packets carry the band-integrated energy, importance-sampled in frequency;
     // the deposit integrates emissivity x shape directly). one wide observer-time bin over the
     // full arrival span, one frequency, z = 0: F_mc / F_deposit = 1 up to shot noise. the shared
@@ -1109,7 +1109,7 @@ mod tests {
         );
     }
 
-    // pair production destroys photons whose ENERGY h*nu_emit is above threshold.
+    // pair production destroys photons whose energy h*nu_emit is above threshold.
     #[test]
     fn pair_production_absorbs_high_energy() {
         let cond = conditions();

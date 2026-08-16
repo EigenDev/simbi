@@ -1,9 +1,9 @@
 // =============================================================================
 // cylindrical_disk_evolve.rs
 //
-// the cylindrical r-phi DISK plane on the substrate: a 2-axis (r, phi) grid carrying
+// the cylindrical r-phi disk plane on the substrate: a 2-axis (r, phi) grid carrying
 // a 2-component velocity (v_r, v_phi) — DOF == NDIM == 2,
-// the NATURAL cylindrical plane. distinct from the r-z axisymmetric family
+// the natural cylindrical plane. distinct from the r-z axisymmetric family
 // (cylindrical_swirl_evolve.rs, DOF=3 > NDIM=2): r-phi -> "_cyl" kernels, r-z ->
 // "_cyl_rz", discriminated by DOF-vs-ndim at dispatch (geom_suffix).
 //
@@ -13,13 +13,13 @@
 // instances. this is the disk-evolve hydro the immersed bodies ride.
 //
 // three checks, increasing in what they exercise:
-//   - the r-phi GEOMETRIC SOURCE (no body): a uniform swirl develops the 1/r
+//   - the r-phi geometric source (no body): a uniform swirl develops the 1/r
 //     centrifugal radial velocity — proves the godunov's curvature source is active
 //     on the r-phi plane (the r-z swirl test is the same check with phi ungridded).
-//   - a KEPLERIAN DISK HOLDS around a central point mass (the kepler core): with
+//   - a keplerian disk holds around a central point mass (the kepler core): with
 //     v_phi balanced against the softened gravity, the disk stays radially steady
 //     (v_r small, rho/v_phi bounded) over a fraction of an orbit.
-//   - an ORBITING OVERDENSITY advects in phi at the local Omega(r) without radial
+//   - an orbiting overdensity advects in phi at the local Omega(r) without radial
 //     drift — exercises the phi-flux + area-weighted phi-divergence (real azimuthal
 //     transport, the thing a disk does).
 // =============================================================================
@@ -141,12 +141,12 @@ fn rphi_centrifugal_source_holds_1_over_r() {
 fn keplerian_disk_holds_around_central_mass() {
     // the kepler core: a centrifugally-supported disk around a fixed central point mass.
     // v_phi = v_kepler balances the softened gravity exactly, p uniform (no pressure force),
-    // so the disk is in radial equilibrium and STAYS PUT (v_r ~ 0) as the gas orbits.
+    // so the disk is in radial equilibrium and stays put (v_r ~ 0) as the gas orbits.
     let (nr, nphi) = (40usize, 32usize);
     let (r_lo, r_hi) = (0.5_f64, 1.5_f64);
     let (mass, soft) = (1.0_f64, 0.1_f64);
     let (sim, dr, _dphi) = disk_sim(nr, nphi, r_lo, r_hi);
-    // a fixed GRAVITATIONAL central mass at the disk origin (no accretion -> disk not drained).
+    // a fixed gravitational central mass at the disk origin (no accretion -> disk not drained).
     // body position is ndim-D cartesian in the grid plane (r-phi -> x-y); origin -> [0, 0].
     let mut sim = sim.with_bodies(BodyCollection::new().add(Body::gravitational(
         0,
@@ -262,7 +262,7 @@ fn orbiting_overdensity_advects_in_phi() {
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, &sim.geom.allocated);
     evolve(&mut sim, &sub, t_final).expect("orbiting overdensity evolution failed");
 
-    // density-weighted centroid of the OVERDENSITY (den - 1, the perturbation) in (r, phi).
+    // density-weighted centroid of the overdensity (den - 1, the perturbation) in (r, phi).
     let rho = &sim.fields.prim.rho;
     let (mut wsum, mut r_cen, mut sin_acc, mut cos_acc) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
     for c in sim.geom.interior.iter() {

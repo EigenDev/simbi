@@ -7,7 +7,7 @@
 // renders them to CUDA source on the CPU (no GPU, no cuda feature, no nvcc).
 //
 // it covers two things beyond the synthetic round-trip proof (symbi-ir):
-//   - serde DESERIALIZATION of the deepest real graphs — the 100-iter RMHD c2p
+//   - serde deserialization of the deepest real graphs — the 100-iter RMHD c2p
 //     bracketed iterate — stays within serde_json's recursion limit.
 //   - the emitted blobs are well-formed: each renders to a named __global__.
 //

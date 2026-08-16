@@ -2,15 +2,15 @@
 # gr_rotating_equilibrium.py
 #
 # the surface-free constant-l rotating equilibrium held on the (r, theta) wedge
-# with DRIVEN boundaries — every ghost band pinned to the analytic state. the
+# with driven boundaries — every ghost band pinned to the analytic state. the
 # precision hold problem for the rotating balance (centrifugal + gravity +
 # pressure, both sweeps): a theta-stratified equilibrium is mathematically
 # incompatible with mirror/copy ghosts (they impose dp/dtheta = 0 where the state
 # requires the centrifugal-balancing gradient), so all four faces prescribe the
-# exact analytic continuation through the DYNAMIC boundary expressions.
+# exact analytic continuation through the dynamic boundary expressions.
 #
 # the state is the fishbone-moncrief constant-l potential with its integration
-# constant anchored at the DOMAIN MINIMUM (see `RotatingEquilibrium` in
+# constant anchored at the domain minimum (see `RotatingEquilibrium` in
 # gr_fishbone_moncrief.py), so the thermal margin p/rho is bounded below by
 # `p_rho_ref` everywhere — no cold near-equipotential cells.
 #
@@ -119,7 +119,7 @@ class GrRotatingEquilibrium(SimbiProblem):
     def compute_defaults(self) -> "GrRotatingEquilibrium":
         self.resolution = (self.nr, self.npolar)
         theta_c = math.pi / 2.0
-        # the domain stays OUTSIDE the horizon at every spin: a stationary constant-l azimuthal
+        # the domain stays outside the horizon at every spin: a stationary constant-l azimuthal
         # flow needs a timelike LNRF (Delta > 0), so this state has no through-horizon
         # continuation.
         self.bounds = [
@@ -185,11 +185,11 @@ class GrRotatingEquilibrium(SimbiProblem):
         zero = expr.constant(0.0, g)
         # the ingoing kerr-schild chart at every spin, a = 0 included (where it is the
         # schwarzschild kerr-schild metric): v^r = b/sqrt(1+b) is the orbiter's drift against the
-        # INFALLING eulerian observers, and v^phi = u^phi sqrt(1+b)/u^t. u^t is built from the LNRF
+        # infalling eulerian observers, and v^phi = u^phi sqrt(1+b)/u^t. u^t is built from the LNRF
         # and is chart-independent for this state, since u^r = 0 makes the BL -> KS map act only
         # through terms proportional to u^r.
         #
-        # keyed on the CHART, which is fixed: a branch keyed on the SPIN would hand a = 0 runs
+        # keyed on the chart, which is fixed: a branch keyed on the spin would hand a = 0 runs
         # boyer-lindquist initial data on a kerr-schild metric, which is not a visible failure —
         # the state simply is not the equilibrium the gate measures against.
         b = (2.0 * mm) * r / sigma

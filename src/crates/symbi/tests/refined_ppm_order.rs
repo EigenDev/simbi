@@ -11,7 +11,7 @@
 //
 // two pairings:
 // - plm evolution + ppm prolongation (the production default): ~2nd order;
-// - ppm evolution + quartic prolongation: must hold the rate WELL above the
+// - ppm evolution + quartic prolongation: must hold the rate well above the
 //   plm pairing's — the whole point of the degree-4 transfer.
 //
 // run: cargo test -p symbi --test refined_ppm_order -- --nocapture
@@ -131,8 +131,8 @@ fn plm_rate_holds_across_the_refinement_boundary() {
     );
 }
 
-/// the SPATIAL transfer property, isolated: the coarse ghost fill interpolates
-/// linearly in TIME between coarse steps, an O(dt_c^2) boundary term that no
+/// the spatial transfer property, isolated: the coarse ghost fill interpolates
+/// linearly in time between coarse steps, an O(dt_c^2) boundary term that no
 /// spatial prolongation can remove — it hides below plm's own O(h^2) interior
 /// but shows once the interior is fourth order. at cfl 0.1 that term recedes
 /// ~16x and the quartic transfer's spatial rate is exposed: measured ratio
@@ -154,7 +154,7 @@ fn ppm_quartic_spatial_rate_holds_across_the_refinement_boundary() {
 
 /// the production-cfl pin: at cfl 0.4 the linear-in-time ghost interpolation
 /// contributes an O(dt_c^2) composite term (measured ratio ~3.9 there), but its
-/// MAGNITUDE is what production feels — the composite error must stay far below
+/// magnitude is what production feels — the composite error must stay far below
 /// the plm pairing's at the same resolution (measured 3.3e-6 vs 2.5e-3, 770x),
 /// and the rate must not drop below the plm family's own.
 #[test]

@@ -2,7 +2,7 @@
 // viscous_law.rs
 //
 // the constant-nu viscous kernel's gate: the compiled
-// halo-1 stencil kernel is BIT-IDENTICAL to the f64 host chain built from the
+// halo-1 stencil kernel is bit-identical to the f64 host chain built from the
 // same carrier-generic `viscous_mom_update_2d` (read prim.vel/prim.rho on the
 // 3x3 stencil -> conservative shear-stress flux divergence -> accumulate into
 // cons.mom). dispatched over the interior so the +-1 stencil stays in bounds.
@@ -63,7 +63,7 @@ fn compiled_viscous_iso_matches_the_f64_chain_bitwise() {
 
     let lo = [0i32; 2];
     let ext = [N as u32; 2];
-    // dispatch over the INTERIOR only: the +-1 stencil reads must stay in bounds.
+    // dispatch over the interior only: the +-1 stencil reads must stay in bounds.
     let disp_lo = [1i32; 2];
     let disp_ext = [(N - 2) as u32; 2];
     {
@@ -113,7 +113,7 @@ fn compiled_viscous_iso_matches_the_f64_chain_bitwise() {
 }
 
 // the alpha kernel. nu(x) = alpha c_s^2 / Omega_k(r) is a
-// SPATIALLY VARYING viscosity (face-averaged in the core); the compiled kernel
+// spatially varying viscosity (face-averaged in the core); the compiled kernel
 // must be bit-identical to the f64 chain that computes the same per-cell nu.
 #[test]
 fn compiled_viscous_iso_alpha_matches_the_f64_chain_bitwise() {
@@ -185,7 +185,7 @@ fn compiled_viscous_iso_alpha_matches_the_f64_chain_bitwise() {
 
     // the per-cell alpha viscosity nu(x) = alpha cs^2 / Omega_k(r), Omega_k = sqrt(GM/r^3),
     // spelled as the kernel spells it: `alpha cs^2 sqrt(r^3/GM)`. dividing by
-    // `sqrt(GM/r^3)` is the same number in exact arithmetic and a DIFFERENT f64 operation
+    // `sqrt(GM/r^3)` is the same number in exact arithmetic and a different f64 operation
     // sequence — a reciprocal of a square root against a square root of a reciprocal — so a
     // bitwise law stated against that form is only accidentally true.
     let nu_at = |ii: usize, jj: usize| -> f64 {
@@ -347,7 +347,7 @@ fn compiled_viscous_iso_3d_matches_the_f64_chain_bitwise() {
     );
 }
 
-// the 3D alpha gate: nu(x,y) = alpha cs^2 / Omega_k(R) with R the CYLINDRICAL
+// the 3D alpha gate: nu(x,y) = alpha cs^2 / Omega_k(R) with R the cylindrical
 // radius, a function of x,y alone, so every k-slice of the nu stencil is equal.
 #[test]
 fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
@@ -494,7 +494,7 @@ fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
     );
 }
 
-// the GENERAL ORTHOGONAL kernel on the cylindrical chart: bit-identical to the f64
+// the general orthogonal kernel on the cylindrical chart: bit-identical to the f64
 // `viscous_mom_update_orthogonal_2d` fed the scale factors h = (1, R) that the
 // kernel reads from CylindricalRPhi::scale_factors (R = the cell centroid + offset).
 // every curvilinear chart routes through this single kernel.
@@ -624,7 +624,7 @@ fn compiled_viscous_iso_ortho_cyl_matches_the_f64_chain_bitwise() {
     );
 }
 
-// the GENERAL ORTHOGONAL ALPHA kernel on the cylindrical chart: nu(R) = alpha cs^2 /
+// the general orthogonal alpha kernel on the cylindrical chart: nu(R) = alpha cs^2 /
 // Omega_k(R) is filled into the ortho operator's nu stencil, R = x0 the radial
 // coordinate. bit-identical to the f64 chain.
 #[test]

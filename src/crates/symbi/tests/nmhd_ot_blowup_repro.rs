@@ -72,7 +72,7 @@ fn make_sim() -> Sim {
         .build()
 }
 
-// run OT to t=0.3 with a given solver; track the WORST (min) pressure + max density
+// run OT to t=0.3 with a given solver; track the worst (min) pressure + max density
 // seen, and the first negative-pressure step. returns (worst_pmin, max_rho, first_neg_iter).
 fn run_solver(solver: Solver) -> (f64, f64, Option<u64>) {
     let mut sim = make_sim();

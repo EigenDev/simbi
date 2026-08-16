@@ -1,14 +1,14 @@
 // =============================================================================
 // census_compiled.rs
 //
-// the census map as a COMPILED kernel instead of a per-cell interpreter walk.
+// the census map as a compiled kernel instead of a per-cell interpreter walk.
 //
 // this is the same traced kernel a device would run — `census_map_gv` — so wiring it in on the
 // host is not a separate implementation but the same one, exercised where it can be compared
 // against the interpreter cheaply. the two must agree cell for cell; a compiled map that read a
 // leaf differently or binned differently would still produce a smooth, plausible profile.
 //
-// the outputs bind POSITIONALLY. a census accumulator is not a member of the `FieldRef`
+// the outputs bind positionally. a census accumulator is not a member of the `FieldRef`
 // vocabulary — it is scratch allocated per sample, named `census_value_{k}` in the manifest — so
 // the caller supplies the fields in the order the writes declare them, values first and the
 // segment last.
@@ -51,12 +51,12 @@ where
     if Mem::IS_DEVICE_ACCESSIBLE || std::any::TypeId::of::<Sc>() != std::any::TypeId::of::<f64>() {
         return false;
     }
-    // the compiled kernel is CACHED across samples. tracing the graph and running the jit costs
+    // the compiled kernel is cached across samples. tracing the graph and running the jit costs
     // orders of magnitude more than the sweep it produces — measured at 4.3 ms per sample over
     // 4096 cells when rebuilt every time, which is far more than the hydro step it observes — so
     // recompiling per sample would make a census cost more than the physics it reports on.
     //
-    // the key is everything the traced kernel depends on: the registration's CONTENT — not its
+    // the key is everything the traced kernel depends on: the registration's content — not its
     // name, which is unique only within a run and is naturally reused across a sweep — plus the
     // grid's geometry, since the same census on a different chart or axis-role set traces a
     // different graph.
@@ -119,7 +119,7 @@ where
 
     let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
     let (grid, dlo) = exec_layout(&sim.geom.interior);
-    // SAFETY: the same contract the compiled source pass runs under — one shared allocated layout,
+    // safety: the same contract the compiled source pass runs under — one shared allocated layout,
     // cell-disjoint blocks, and outputs that alias no input (the accumulators and the segment are
     // scratch this call owns).
     unsafe {

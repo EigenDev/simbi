@@ -141,7 +141,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         let bn = metric.contract_contra(&prim.mag, nhat);
         let ww = rhd::lorentz_factor(metric.norm_sq_contra(&prim.vel));
 
-        // spatial magnetic four-vector (the SINGLE source, shared with the geometric tension).
+        // spatial magnetic four-vector (the single source, shared with the geometric tension).
         let b_mu = magnetic_four_vector_spatial(prim, &metric);
 
         let p_tot = total_pressure(prim, &metric);

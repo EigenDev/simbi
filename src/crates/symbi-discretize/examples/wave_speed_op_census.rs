@@ -23,8 +23,8 @@ type Writes = Vec<(String, symbi_ir::FieldBind, NodeId)>;
 
 // the expensive ops — each is a multi-cycle scalar instruction or a libm call.
 // textual occurrences in the rendered (CUDA C) body are counted. CSE has already
-// run, so every occurrence is a DISTINCT computation the cell performs. the
-// op COUNT is backend-independent: same post-CSE scalarized graph drives CPU
+// run, so every occurrence is a distinct computation the cell performs. the
+// op count is backend-independent: same post-CSE scalarized graph drives CPU
 // and CUDA alike — only the spelling differs (`asinh(x)` vs `x.asinh()`).
 const TRANSCENDENTALS: &[&str] = &[
     "asinh(", "acosh(", "atanh(", "asin(", "acos(", "atan(", "sinh(", "cosh(", "tanh(", "sin(",

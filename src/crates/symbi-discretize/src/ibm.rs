@@ -31,7 +31,7 @@ fn cube<S: Scalar>(a: S) -> S {
     a * a * a
 }
 
-/// softened newtonian gravity at a cell whose CARTESIAN displacement from the body is `rvec`:
+/// softened newtonian gravity at a cell whose cartesian displacement from the body is `rvec`:
 /// `g = -mass * rvec / r_eff^3`, `r_eff = sqrt(|rvec|^2 + soft^2)`. this is exactly `-grad` of
 /// [`softened_potential`] (the conservative-field proof differentiates that potential and recovers
 /// this), so the immersed-body force does no spurious work around a closed loop. the ops match the

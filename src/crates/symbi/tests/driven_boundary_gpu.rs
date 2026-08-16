@@ -3,7 +3,7 @@
 //
 // the driven-boundary pass on-device (GPU). the boundary NVRTC kernel (the
 // (Coord, Assign) instance of apply_dag_core_gv) prescribes the x_lo ghost band's prim state, built
-// lazily + module-cached. proves the boundary kernel renders + launches on the RTX 2070 and writes
+// lazily + module-cached. proves the boundary kernel renders + launches on the rtx 2070 and writes
 // the prescribed inflow into unified-memory ghosts, matching the CPU twin.
 //
 // run: cargo test -p symbi --features cuda --test driven_boundary_gpu

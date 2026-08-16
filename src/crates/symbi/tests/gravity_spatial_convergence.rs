@@ -5,8 +5,8 @@
 //
 // the hydrostatic equilibrium cannot measure this: the discrete flux gradient and the discrete
 // gravity source cancel there exactly, so the error is identically zero at every resolution and
-// the ratio is 0/0. an order measurement needs a flow that is SMOOTH (so the reconstruction runs
-// at its design order rather than clipping on an extremum) and NOT stationary (so gravity is
+// the ratio is 0/0. an order measurement needs a flow that is smooth (so the reconstruction runs
+// at its design order rather than clipping on an extremum) and not stationary (so gravity is
 // doing something whose discretization can be wrong).
 //
 // the setup is a small isentropic density perturbation released on the hydrostatic background.
@@ -15,7 +15,7 @@
 // the measurement — both of which are known to carry their own errors that would otherwise
 // dominate the norm.
 //
-// with no analytic solution available, the order comes from SELF-convergence: run at N, 2N and
+// with no analytic solution available, the order comes from self-convergence: run at N, 2N and
 // 4N, conservatively restrict each finer solution onto the next coarser grid, and take
 //
 //   p = log2( |u_N - R u_2N|_1 / |u_2N - R u_4N|_1 ).
@@ -145,7 +145,7 @@ fn the_gravitational_source_converges_at_the_order_of_the_scheme() {
     println!("no gravity: L1 {f1:.4e} -> {f2:.4e}   observed order {p_free:.3}");
     println!("gravity:    L1 {g1:.4e} -> {g2:.4e}   observed order {p_grav:.3}");
 
-    // NON-VACUITY: gravity must actually be shaping the solution, or the two orders would agree
+    // non-vacuity: gravity must actually be shaping the solution, or the two orders would agree
     // because they are measuring the same run. the stratified background alone is a factor of
     // nine in density across the domain.
     let contrast = background(1.0, GM) / background(1.0 + R_OFFSET, GM);
@@ -168,7 +168,7 @@ fn the_gravitational_source_converges_at_the_order_of_the_scheme() {
          {g1:.4e} -> {g2:.4e}). the source is folded into the same convex stage update as the \
          flux divergence, so it should not be limiting the scheme"
     );
-    // the real statement: gravity does not COST order. a source evaluated alongside the flux
+    // the real statement: gravity does not cost order. a source evaluated alongside the flux
     // inherits the scheme's accuracy; one composed sequentially with it caps the whole update at
     // first order however accurately either half is integrated.
     assert!(

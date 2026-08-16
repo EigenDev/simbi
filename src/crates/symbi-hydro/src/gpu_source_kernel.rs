@@ -14,7 +14,7 @@
 //   per-cell eval(values)  per-domain `__global__` launch
 //   f64 outputs            double* output buffers
 //
-// the IR is THE SAME `BuiltSource.graph` for both paths. the difference is
+// the IR is the same `BuiltSource.graph` for both paths. the difference is
 // the lowering target — A1 in action.
 //
 // **scope (what's structurally tested):**
@@ -142,9 +142,9 @@ impl GpuSourceKernel {
 
 // ---- private: wrap the primary per-cell emit into a __global__ --------------
 //
-// the CUDA wrapper layout (the source ABI) is built by the PRIMARY path's
+// the CUDA wrapper layout (the source ABI) is built by the primary path's
 // `symbi_ir::backends::cuda::emit_source_kernel` — scalarize + emit_stmt /
-// emit_expr, the SAME machinery the stencil kernel path uses. the source
+// emit_expr, the same machinery the stencil kernel path uses. the source
 // shape:
 //
 //   extern "C" __global__ void <field>_source(
@@ -159,7 +159,7 @@ impl GpuSourceKernel {
 //       { /* component k */ <body> out_<k>[i] = <result>; }    // scoped emit
 //   }
 //
-// the source builders (source_spec.rs) emit ONLY Const / Param / ElementWise /
+// the source builders (source_spec.rs) emit only Const / Param / ElementWise /
 // Transcendental(Cos,Sin) / Select — all of which scalarize + emit cleanly on
 // the primary path. there is no higher-order Op (LoadAt / IterateInline) on
 // this path, so the `UnsupportedOp` fallback has no live consumer.
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn gpu_kernel_composed_overlays_emit_one_kernel_per_field() {
-        // composition: geometric on momentum + gravity on momentum AND energy.
+        // composition: geometric on momentum + gravity on momentum and energy.
         // should emit two kernels — `mom_source` and `nrg_source`. each kernel
         // sums its respective overlay contributions internally.
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
@@ -293,7 +293,7 @@ mod tests {
         assert!(fields.contains("nrg"));
         assert!(!fields.contains("den"));
 
-        // each emitted source declares its OWN __global__ entry.
+        // each emitted source declares its own __global__ entry.
         let mom_src = k.cuda_source("mom").unwrap();
         let nrg_src = k.cuda_source("nrg").unwrap();
         assert!(mom_src.contains("__global__ void mom_source("));
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn gpu_kernel_uses_concrete_cuda_numerics_not_carrier_wrap() {
-        // **the symmetry-with-Cpu canary**: Cuda emit must NOT carry the
+        // **the symmetry-with-Cpu canary**: Cuda emit must not carry the
         // `S::from_f64(...)` wrap (that's the Cpu-only carrier-generic
         // form). raw `1.0` / `0.5` etc. survive into the GPU source.
         let sim =
@@ -324,7 +324,7 @@ mod tests {
         let k = GpuSourceKernel::new(&sim, 3).expect("ib validates");
         let src = k.cuda_source("mom").unwrap();
         // Cuda's Select renders as `(cond ? then : else)` (the C ternary).
-        // there MUST be at least one ternary in the kernel source.
+        // there must be at least one ternary in the kernel source.
         assert!(
             src.contains(" ? ") && src.contains(" : "),
             "IB kernel must contain the carrier-generic Select rendered as \

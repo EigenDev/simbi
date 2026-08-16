@@ -785,7 +785,7 @@ mod tests {
     fn braced_lattice_cantilever_matches_euler_bernoulli() {
         // a 2 x 12 pin-jointed strip, x-braced, clamped at column 0. bending
         // stiffness comes from chord stretching alone (k_t = 0): the truss
-        // flexural rigidity is EI = 2 (k_n L0)(d/2)^2 with chord spacing d.
+        // flexural rigidity is ei = 2 (k_n L0)(d/2)^2 with chord spacing d.
         const COLS: usize = 8;
         let idx = |col: usize, row: usize| col * 2 + row;
         let mut coll = BodyCollection::<f64, 2>::new();
@@ -878,7 +878,7 @@ mod tests {
         );
 
         let tip = tip_of(&coll);
-        // euler-bernoulli tip deflection P L^3 / (3 EI), beam length measured
+        // euler-bernoulli tip deflection P L^3 / (3 ei), beam length measured
         // clamp column to tip column.
         let ei = 2.0 * 4000.0 * 1.0 * 0.25;
         let l = (COLS - 1) as f64;

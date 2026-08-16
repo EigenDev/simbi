@@ -3,13 +3,13 @@
 //
 // the device twin of rigid_spin_axis: a 3D shaped (SDF sphere) rigid wall
 // spinning about the +x axis, run on device memory (NVRTC render of the
-// SPINNING shaped GvKernel — the runtime 3x3 mask rotation + omega x r wall
-// velocity) and asserted BIT-CLOSE to the CPU run. the spinning kernel path is
+// spinning shaped GvKernel — the runtime 3x3 mask rotation + omega x r wall
+// velocity) and asserted bit-close to the CPU run. the spinning kernel path is
 // selected by a nonzero omega, so this is the arbitrary-axis spin physics
 // running on a device, not merely compiling for one.
 // gates:
-// - PARITY: the evolved cons state matches the CPU run;
-// - AXIS: the circulation the drag sets up is about X (L_x grows, L_z at
+// - parity: the evolved cons state matches the CPU run;
+// - axis: the circulation the drag sets up is about X (L_x grows, L_z at
 //   roundoff) on device too — a z-hardcoded mask or wall velocity would swap it.
 //
 // runs on the host GPU (NVRTC needs no nvcc). run:
@@ -125,8 +125,8 @@ fn swirl(sim: &DevSim) -> (f64, f64) {
 }
 
 // a free (two-way) shaped spinner started about an off-axis direction: the gas reaction torque
-// decelerates it (drag) while the runtime orientation MATRIX advances each step (the mask rotates),
-// so the device kernel reads a fresh R + omega every step and the body EOM (feedback + step_bodies
+// decelerates it (drag) while the runtime orientation matrix advances each step (the mask rotates),
+// so the device kernel reads a fresh R + omega every step and the body eom (feedback + step_bodies
 // + advance_rotation) closes the two-way loop. the evolving-mask two-way path, on device.
 fn build_twoway<S: ExecutionSpace, Mem: MemorySpace>() -> Sim<S, Mem> {
     let sim = Sim::<S, Mem>::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
@@ -206,7 +206,7 @@ fn evolving_two_way_spinner_matches_cpu_on_device() {
         }
     }
     assert!(rgap < 1e-6, "orientation matrix host!=device: {rgap:e}");
-    // non-vacuous: the two-way spinner was dragged (omega magnitude decreased from OMEGA) and the
+    // non-vacuous: the two-way spinner was dragged (omega magnitude decreased from omega) and the
     // orientation actually advanced off identity.
     let omag = (ho[0] * ho[0] + ho[1] * ho[1] + ho[2] * ho[2]).sqrt();
     assert!(

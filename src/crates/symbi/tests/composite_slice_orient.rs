@@ -1,7 +1,7 @@
 // =============================================================================
 // composite_slice_orient.rs
 //
-// the AMR composite display slice through a NON-Z orientation: the coverage
+// the AMR composite display slice through a non-z orientation: the coverage
 // descent resolves each root cell to the finest level covering it for every
 // display plane at any orientation. the fine level is painted with a
 // sentinel value far outside the coarse range, so its appearance in the slice
@@ -53,7 +53,7 @@ fn composite_reads_fine_data_through_the_y_orientation() {
     })
     .unwrap();
     hier.seed_fine_from_coarse().unwrap();
-    // paint the FINE prim rho with the sentinel (the slice reads prims).
+    // paint the fine prim rho with the sentinel (the slice reads prims).
     let fine = &hier.levels[1].state;
     for c in fine.geom.interior.iter() {
         fine.fields.prim.rho.set(c, SENTINEL);
@@ -66,7 +66,7 @@ fn composite_reads_fine_data_through_the_y_orientation() {
         .field_slice_composite(64, 0, 1, 0)
         .expect("composite y-slice");
     // the y mid-plane (y = 0.5) intersects the refined box: samples with
-    // (x, z) inside [0.25, 0.75]^2 must carry the FINE sentinel; the far
+    // (x, z) inside [0.25, 0.75]^2 must carry the fine sentinel; the far
     // corner stays coarse.
     let sent = sl
         .data
