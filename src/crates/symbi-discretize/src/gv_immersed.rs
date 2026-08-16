@@ -49,7 +49,7 @@ struct BodyContributionGv {
 
 /// the CARTESIAN axes (0=x,1=y,2=z) a body's ndim-D position/velocity components map to — the
 /// grid-plane convention. identical to `immersed::body_cart_axes`.
-fn body_cart_axes(coords: Coords, ndim: usize, axes: &[usize]) -> Vec<usize> {
+pub(crate) fn body_cart_axes(coords: Coords, ndim: usize, axes: &[usize]) -> Vec<usize> {
     match coords {
         Coords::Cartesian => (0..ndim).collect(),
         Coords::Cylindrical => axes.to_vec(),
@@ -67,7 +67,7 @@ fn body_cart_axes(coords: Coords, ndim: usize, axes: &[usize]) -> Vec<usize> {
 // only the immersed source uses these; co-located with their consumer.
 
 /// the cell cartesian position from its coordinate-basis position (3D embedding).
-fn to_cartesian_gv(coords: Coords, coord: &[Gv; 3]) -> [Gv; 3] {
+pub(crate) fn to_cartesian_gv(coords: Coords, coord: &[Gv; 3]) -> [Gv; 3] {
     match coords {
         Coords::Cartesian => *coord,
         Coords::Cylindrical => {
@@ -140,7 +140,7 @@ fn vector_to_cartesian_gv(coords: Coords, coord: &[Gv; 3], v: &[Gv]) -> [Gv; 3] 
 // ---- gas state + per-cell scaffolding + per-body contribution -------------------------------
 
 // a body's 3D cartesian `pos`/`vel`: place its ndim components at `cart_axes`, 0 elsewhere.
-fn body_vec3(b: usize, ndim: usize, cart_axes: &[usize], name: &str) -> [Gv; 3] {
+pub(crate) fn body_vec3(b: usize, ndim: usize, cart_axes: &[usize], name: &str) -> [Gv; 3] {
     let mut v = [Gv::ZERO; 3];
     for g in 0..ndim {
         v[cart_axes[g]] = Gv::scalar(&format!("body_{b}_{name}_{g}"));
@@ -1051,18 +1051,26 @@ pub fn stencil_potential_gv(
         .sum::<Gv>()
 }
 
-/// the WELL-BALANCED forward body source, cartesian, gravity only: the momentum source is the
-/// difference of EQUILIBRIUM pressures at the cell's own faces,
+/// the WELL-BALANCED forward body source, gravity only, per chart. the momentum-d source is the
+/// area-weighted difference of EQUILIBRIUM pressures at the cell's own faces,
 ///
-///   S_m[ax] = -( p_eq(phi_hi) - p_eq(phi_lo) ) / dx_ax,     S_E = sum_ax v[ax] S_m[ax],
+///   S_m[d] = [ A_hi,d (p_eq(phi_hi) - p_eq(phi_c)) - A_lo,d (p_eq(phi_lo) - p_eq(phi_c)) ] / V,
+///   S_E    = sum_d v[d] S_m[d],
 ///
-/// with `p_eq` the isentrope through the cell's own stage-input state and `phi` the total body
-/// potential at the face positions (Kaeppeli & Mishra, J. Comput. Phys. 259:199, 2014). on a
-/// discretely balanced column this cancels the flux divergence of the balanced reconstruction's
-/// face states EXACTLY -- the reconstruction removes the face jump, and this removes the
-/// flux/source mismatch, which measured at O((dx/H)^2) per step is what still accelerates a
-/// steep column when only the reconstruction is balanced. off equilibrium it differs from
-/// `rho g` at second order, so smooth dynamics are unchanged at the scheme's order.
+/// with `p_eq` the isentrope through the cell's own stage-input state, `phi` the total body
+/// potential at the face and centroid positions (Kaeppeli & Mishra, J. Comput. Phys. 259:199,
+/// 2014), and A/V the SAME `cell_geometry_gv` factors the godunov divergence and the geometric
+/// pressure source use. on a discretely balanced column the three cancel by telescoping: the
+/// balanced reconstruction's face states make the pressure flux divergence
+/// `(A_hi p_eq(phi_hi) - A_lo p_eq(phi_lo))/V`, the geometric source contributes
+/// `p_eq(phi_c)(A_hi - A_lo)/V`, and this source is exactly their difference. `p_eq(phi_c)`
+/// is the cell's own stage-input pressure BIT-exactly (the isentrope is anchored there), so
+/// the reference term costs no transcendental. on a transverse axis the two face potentials
+/// coincide and the source vanishes in the same float arithmetic. cartesian keeps its landed
+/// `(p_eq(phi_hi) - p_eq(phi_lo))/dx` spelling — value-equal (A_hi = A_lo, V = A dx) but a
+/// different traced graph, so the chart match preserves the baked cartesian kernels byte-for-
+/// byte. off equilibrium the source differs from `rho g` at second order, so smooth dynamics
+/// are unchanged at the scheme's order.
 ///
 /// GRAVITY ONLY, on purpose: every accreting surface in this codebase drains through the
 /// penalization stack (`penalize_owns_accretion` = true), so the legacy in-source sink is
@@ -1070,6 +1078,7 @@ pub fn stencil_potential_gv(
 /// equilibrium to preserve. the dispatch refuses the pairing rather than approximating it.
 pub fn body_source_wb_gv(
     n_bodies: usize,
+    coords: Coords,
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
@@ -1094,7 +1103,10 @@ pub fn body_source_wb_gv(
     let p_us = (gamma - Gv::ONE) * us_den * e_int;
 
     let spacing = vec![Spacing::Uniform; ndim];
-    let coords = Coords::Cartesian;
+    // the curvilinear form needs the per-axis face areas and inverse volume; traced only on
+    // the curvilinear arms so the cartesian graph — and the baked cartesian kernels — carry
+    // not one extra node.
+    let geo = (coords != Coords::Cartesian).then(|| cell_geometry_gv(coords, &spacing, axes, ndim));
 
     let mut mom_new: Vec<Gv> = mom.clone();
     let mut nrg_new = nrg;
@@ -1107,12 +1119,20 @@ pub fn body_source_wb_gv(
         let eq = LocalEquilibrium::through(us_den, p_us, phi_c, gamma);
         let (_, p_lo) = eq.state_at(phi_lo);
         let (_, p_hi) = eq.state_at(phi_hi);
-        // at equilibrium `rho g = dp_eq/dx`, so the source IS the discrete equilibrium
-        // pressure gradient -- upper face minus lower. the flipped difference doubles the
-        // force the flux divergence carries instead of cancelling it, and a 400-step
-        // stagnant column measured |v| = 8.1 under it against 2.9e-2 with the analytic
-        // source: sign errors here announce themselves as detonations, not drifts.
-        let s_m = (p_hi - p_lo) / Gv::scalar(&format!("dx_{ax}"));
+        let s_m = match &geo {
+            // at equilibrium `rho g = dp_eq/dx`, so the source IS the discrete equilibrium
+            // pressure gradient -- upper face minus lower. the flipped difference doubles the
+            // force the flux divergence carries instead of cancelling it, and a 400-step
+            // stagnant column measured |v| = 8.1 under it against 2.9e-2 with the analytic
+            // source: sign errors here announce themselves as detonations, not drifts.
+            None => (p_hi - p_lo) / Gv::scalar(&format!("dx_{ax}")),
+            // the area-weighted form: `p_eq(phi_c)` is `p_us` bit-exactly (the isentrope's
+            // anchor point), so the reference term is the raw stage-input pressure. on a
+            // radial column the transverse axes see equal face potentials, equal `p_eq`,
+            // and a source of exactly zero.
+            Some(geo) => (geo.area_hi[ax] * (p_hi - p_us) - geo.area_lo[ax] * (p_lo - p_us))
+                * geo.inv_volume,
+        };
         mom_new[ax] = mom_new[ax] + dt * s_m;
         nrg_new = nrg_new + dt * us_vel[ax] * s_m;
     }

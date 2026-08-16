@@ -566,7 +566,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         let name = if self.balance == symbi_discretize::coords::Balance::Hydrostatic {
             assert!(
                 DOF == D,
-                "the balance-aware ghost fill is baked for DOF == D cartesian grids only"
+                "the balance-aware ghost fill is baked for DOF == D grids only; a swirl \
+                 (out-of-plane momentum) lift has no balanced ghost kernel"
             );
             // a periodic cut identifies two positions whose body potentials generally
             // differ, and the isentrope extension from one to the other is a real state
@@ -590,7 +591,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     }
                 }
             }
-            format!("wb_ghost_fill_{D}d")
+            // the balance-aware fill evaluates the body potential at chart positions, so it
+            // is baked per chart -- unlike the plain pullback, which is chart-free.
+            format!(
+                "wb_ghost_fill{}_{D}d",
+                symbi_discretize::kernel_slug::coord_suffix(sim.geom.coords)
+            )
         } else {
             format!("iso_ghost_fill{sfx}_{D}d")
         };

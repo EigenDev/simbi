@@ -88,6 +88,35 @@ fn every_hydro_stage_and_cfl_kernel_is_emitted() {
     );
 }
 
+// the balance-carrying body-source / ghost-fill pair. both are baked per chart — the potential is
+// evaluated at chart positions through the cartesian embedding — and both names are spelled at
+// dispatch with `coord_suffix`, exactly as here. the balanced FLUX arms are enumerated by the
+// solver-matrix gate below; this covers the other two legs of the balanced triple, whose names no
+// physics gate reaches on the 2D/3D charts.
+#[test]
+fn every_balanced_body_source_and_ghost_kernel_is_emitted() {
+    let mut missing = Vec::new();
+    let charts = [
+        Geometry::Cartesian,
+        Geometry::Spherical,
+        Geometry::Cylindrical,
+    ];
+    for coords in charts {
+        let sfx = symbi_discretize::kernel_slug::coord_suffix(coords);
+        for d in 1..=3usize {
+            assert_family(&mut missing, format!("body_source_wb{sfx}_{d}d"));
+            assert_family(&mut missing, format!("wb_ghost_fill{sfx}_{d}d"));
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "{} balanced body-source/ghost kernel(s) the dispatch can request are NOT emitted and \
+         are not in KNOWN_UNBAKED (mid-run expect_kernel panic):\n  {}",
+        missing.len(),
+        missing.join("\n  ")
+    );
+}
+
 // the mhd gas godunov + wave-speed + out-of-plane bcell predictor + 2D in-plane CT curl. the
 // geometry suffix keys on the grid-axis set (`mhd_geom_suffix`): 1D radial [0] -> "_cyl"/"_sph",
 // 2D cyl r-z [0,2] -> "_cyl_rz" / r-phi [0,1] -> "_cyl_rphi", 3D [0,1,2] -> "_cyl". the bcell

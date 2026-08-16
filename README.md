@@ -706,7 +706,10 @@ plain reconstruction slowly stirs it at truncation level. The balancing runs thr
 stack: the reconstruction, the source, reflecting-wall ghosts, the first-order flux-correction
 fallback, and the coarse-fine transfer under refinement all speak the same departure language,
 so refinement boundaries in a stratified atmosphere stop shedding entropy too. Scope: Newtonian
-gamma-law hydro on cartesian grids, with `HLLE`, `HLLC`, or `HLLC_LM`. It needs an immersed
+gamma-law hydro on cartesian, cylindrical, and spherical grids (uniform spacing), with `HLLE`,
+`HLLC`, or `HLLC_LM`. On the curvilinear charts the gravity source is the area-weighted
+equilibrium-pressure difference, so it telescopes exactly against the geometric pressure source
+and the flux divergence. It needs an immersed
 gravitating body to balance against, and costs some extra arithmetic per face (about 1.4x on
 the flux stage, less end to end) — paid only when the flag is on.
 
@@ -755,7 +758,7 @@ refused loudly when it falls outside the table, though it saves you a round trip
 |---|---|
 | `HLLC` / `HLLC_LM` | Newtonian hydro, RHD, and both MHD regimes (the ones carrying a contact wave). `HLLC_LM` is Newtonian + RHD |
 | `HLLD` | the MHD regimes |
-| `wb_reconstruction` | Newtonian gamma-law hydro, cartesian, with `HLLE`/`HLLC`/`HLLC_LM`; carries through refinement and needs a gravitating immersed body |
+| `wb_reconstruction` | Newtonian gamma-law hydro on cartesian, cylindrical, and spherical charts (`LINEAR` spacing), with `HLLE`/`HLLC`/`HLLC_LM`; carries through refinement and needs a gravitating immersed body |
 | viscosity | adiabatic and isothermal, on every chart: cartesian, cylindrical, and spherical, in 2D, 2.5D (3-component on a 2-axis grid), and 3D. `RHD` accepts the coefficient and silently ignores it |
 | alpha-disk viscosity | the same charts as constant-nu viscosity, and it needs a central immersed body |
 | resistivity | cartesian 2.5D/3D, cylindrical r-z and r-phi, spherical r-theta |

@@ -414,13 +414,15 @@ pub fn rmhd_kerr_ghost_fill_gv(
     (end_trace(), writes)
 }
 
-/// the WELL-BALANCED lattice-map ghost fill, cartesian: the velocity pulls back with the
+/// the WELL-BALANCED lattice-map ghost fill, per chart: the velocity pulls back with the
 /// wall-normal `vel_sign` flip exactly as the plain fill, but density and pressure are
 /// EXTENDED ALONG THE LOCAL ISENTROPE from the source cell to the ghost position,
 ///
 ///   (rho, p)_ghost = LocalEquilibrium::through((rho, p)_src, phi_src).state_at(phi_ghost),
 ///
-/// with `phi` the total body potential at each cell centroid. a mirrored copy of a
+/// with `phi` the total body potential at each cell's position — the per-axis arithmetic
+/// face midpoints, the same anchor ladder the balanced reconstruction evaluates, mapped to
+/// cartesian through the chart embedding on a curvilinear grid. a mirrored copy of a
 /// stratified column is not the column's continuation, so a plain reflect ghost presents
 /// the balanced reconstruction with departures that are pure boundary artifact -- measured
 /// as a 1.5e-2 entropy-floor loss on a sealed column that the interior scheme holds to
@@ -438,6 +440,7 @@ pub fn wb_ghost_fill_gv(
     ncomp: usize,
     axes: &[usize],
     n_bodies: usize,
+    coords: Coords,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
     begin_trace();
@@ -451,36 +454,73 @@ pub fn wb_ghost_fill_gv(
             * (gv_axis_face_at_index(ax, spacing[ax], i)
                 + gv_axis_face_at_index(ax, spacing[ax], i + Gv::ONE))
     };
-    // cartesian: grid axis positions ARE the cartesian coordinates; ungridded components 0.
-    let mut ghost_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
-    let mut src_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
-    for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
-        if coord_idx < 3 {
-            ghost_pos[coord_idx] = centroid(g, Gv::coord(g as u8));
-            src_pos[coord_idx] = centroid(g, Gv::of(src[g]));
-        }
-    }
-    let phi_at = |pos: &[Gv; 3]| -> Gv {
-        (0..n_bodies)
-            .map(|b| {
-                let mut bpos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
-                for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
-                    if coord_idx < 3 {
-                        bpos[coord_idx] = Gv::scalar(&format!("body_{b}_pos_{g}"));
-                    }
+    let (phi_src, phi_ghost) = match coords {
+        Coords::Cartesian => {
+            // cartesian: grid axis positions ARE the cartesian coordinates; ungridded components 0.
+            let mut ghost_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+            let mut src_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+            for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
+                if coord_idx < 3 {
+                    ghost_pos[coord_idx] = centroid(g, Gv::coord(g as u8));
+                    src_pos[coord_idx] = centroid(g, Gv::of(src[g]));
                 }
-                let rvec: [Gv; 3] = std::array::from_fn(|i| pos[i] - bpos[i]);
-                crate::ibm::body_potential(
-                    rvec,
-                    Gv::scalar(&format!("body_{b}_mass")),
-                    Gv::scalar(&format!("body_{b}_soft")),
-                    Gv::scalar(&format!("body_{b}_softkind")),
-                )
-            })
-            .sum::<Gv>()
+            }
+            let phi_at = |pos: &[Gv; 3]| -> Gv {
+                (0..n_bodies)
+                    .map(|b| {
+                        let mut bpos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+                        for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
+                            if coord_idx < 3 {
+                                bpos[coord_idx] = Gv::scalar(&format!("body_{b}_pos_{g}"));
+                            }
+                        }
+                        let rvec: [Gv; 3] = std::array::from_fn(|i| pos[i] - bpos[i]);
+                        crate::ibm::body_potential(
+                            rvec,
+                            Gv::scalar(&format!("body_{b}_mass")),
+                            Gv::scalar(&format!("body_{b}_soft")),
+                            Gv::scalar(&format!("body_{b}_softkind")),
+                        )
+                    })
+                    .sum::<Gv>()
+            };
+            let phi_src = phi_at(&src_pos);
+            let phi_ghost = phi_at(&ghost_pos);
+            (phi_src, phi_ghost)
+        }
+        // curvilinear: the per-axis midpoints are CHART coordinates (r, theta, ...); the
+        // potential is evaluated at their cartesian embedding, against body positions on
+        // the chart's grid-plane cartesian axes — the same convention the balanced
+        // reconstruction's potential ladder and the wb body source use, so the wall face
+        // the extension constructs is the one the interior scheme balances against.
+        _ => {
+            let cart_axes = crate::gv_immersed::body_cart_axes(coords, ndim, axes);
+            let mut ghost_c3 = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+            let mut src_c3 = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+            for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
+                if coord_idx < 3 {
+                    ghost_c3[coord_idx] = centroid(g, Gv::coord(g as u8));
+                    src_c3[coord_idx] = centroid(g, Gv::of(src[g]));
+                }
+            }
+            let phi_at = |coord3: &[Gv; 3]| -> Gv {
+                let pos = crate::gv_immersed::to_cartesian_gv(coords, coord3);
+                (0..n_bodies)
+                    .map(|b| {
+                        let bpos = crate::gv_immersed::body_vec3(b, ndim, &cart_axes, "pos");
+                        let rvec: [Gv; 3] = std::array::from_fn(|i| pos[i] - bpos[i]);
+                        crate::ibm::body_potential(
+                            rvec,
+                            Gv::scalar(&format!("body_{b}_mass")),
+                            Gv::scalar(&format!("body_{b}_soft")),
+                            Gv::scalar(&format!("body_{b}_softkind")),
+                        )
+                    })
+                    .sum::<Gv>()
+            };
+            (phi_at(&src_c3), phi_at(&ghost_c3))
+        }
     };
-    let phi_src = phi_at(&src_pos);
-    let phi_ghost = phi_at(&ghost_pos);
 
     let rho_src = gv_load_at("prim_rho", "prim.rho", &src);
     let pre_src = gv_load_at("prim_pre", "prim.pre", &src);

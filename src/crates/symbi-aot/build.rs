@@ -2359,12 +2359,18 @@ fn gen_rhd_wave_speed_map_eos(out_dir: &str, ndim: u8, geom: Geom, eos: EosArm) 
 // the cell, with vel_sign per momentum component. IN-PLACE (write path == input
 // path). dimension-generic; codegen instantiates the 1D kernel here.
 // the balance-aware ghost fill: velocity mirrors, (rho, p) extend along the local isentrope
-// to the ghost's potential. cartesian only, like every balance-carrying kernel.
-fn gen_wb_ghost_fill(out_dir: &str, ndim: u8) {
-    let g = Geom::identity(Coords::Cartesian, ndim);
-    let name = format!("wb_ghost_fill_{ndim}d");
-    let (k, writes) =
-        wb_ghost_fill_gv(ndim as usize, g.ncomp as usize, &g.axes, MAX_SOURCE_BODIES);
+// to the ghost's potential. per chart, like every balance-carrying kernel: the potential is
+// evaluated at chart positions through the cartesian embedding.
+fn gen_wb_ghost_fill(out_dir: &str, ndim: u8, coords: Coords) {
+    let g = Geom::identity(coords, ndim);
+    let name = format!("wb_ghost_fill{}_{ndim}d", coords_suffix(coords));
+    let (k, writes) = wb_ghost_fill_gv(
+        ndim as usize,
+        g.ncomp as usize,
+        &g.axes,
+        MAX_SOURCE_BODIES,
+        coords,
+    );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -2497,13 +2503,15 @@ fn gen_geometry_probe(out_dir: &str, ndim: u8, coords: Coords, spacing: &[Spacin
 // Newtonian GRAVITY + Bondi-Hoyle mass ACCRETION from MAX_SOURCE_BODIES point masses. in-place
 // writes cons.den (accretion removes mass) / cons.mom_* / cons.nrg; body params arrive as
 // scalar params packed by the runtime (MAX_SOURCE_BODIES imported from symbi-ib).
-// the WELL-BALANCED body source: gravity as the difference of equilibrium pressures at the
-// cell faces, paired with the balanced reconstruction. cartesian only, gravity only.
-fn gen_body_source_wb(out_dir: &str, ndim: u8) {
-    let g = Geom::identity(Coords::Cartesian, ndim);
-    let name = format!("body_source_wb_{ndim}d");
+// the WELL-BALANCED body source: gravity as the (curvilinear: area-weighted) difference of
+// equilibrium pressures at the cell faces, paired with the balanced reconstruction. per
+// chart, gravity only.
+fn gen_body_source_wb(out_dir: &str, ndim: u8, coords: Coords) {
+    let g = Geom::identity(coords, ndim);
+    let name = format!("body_source_wb{}_{ndim}d", coords_suffix(coords));
     let (k, writes) = symbi_discretize::body_source_wb_gv(
         MAX_SOURCE_BODIES,
+        coords,
         ndim as usize,
         g.ncomp as usize,
         &g.axes,
@@ -3435,9 +3443,17 @@ fn main() {
     // builder already handles them).
     for ndim in 1u8..=3 {
         gen_body_source(&out_dir, ndim, Coords::Cartesian);
-        gen_body_source_wb(&out_dir, ndim);
-        gen_wb_ghost_fill(&out_dir, ndim);
+        // the balance-carrying pair rides the chart axis exactly as the balanced flux does.
+        for cc in [Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {
+            gen_body_source_wb(&out_dir, ndim, cc);
+            gen_wb_ghost_fill(&out_dir, ndim, cc);
+        }
     }
+    // the 1D radial curvilinear plain body source: the analytic rho*g arm of a 1D
+    // spherical / cylindrical gravitating column (the balanced pair above already spans
+    // 1D; without this the plain comparison arm has no kernel).
+    gen_body_source(&out_dir, 1, Coords::Cylindrical);
+    gen_body_source(&out_dir, 1, Coords::Spherical);
     // curvilinear body source (one generic builder per geometry): cyl r-phi disk plane (2D) +
     // r-phi-z (3D); spherical meridional (2D) + full (3D). the r-z axisymmetric body shares the
     // cyl 2D name with r-phi, so distinguishing them needs a runtime axis-role that the
@@ -3453,6 +3469,8 @@ fn main() {
         for ndim in 1u8..=3 {
             gen_fofc_body_select(&out_dir, ndim, Coords::Cartesian, prefix, has_energy);
         }
+        gen_fofc_body_select(&out_dir, 1, Coords::Cylindrical, prefix, has_energy);
+        gen_fofc_body_select(&out_dir, 1, Coords::Spherical, prefix, has_energy);
         gen_fofc_body_select(&out_dir, 2, Coords::Cylindrical, prefix, has_energy);
         gen_fofc_body_select(&out_dir, 3, Coords::Cylindrical, prefix, has_energy);
         gen_fofc_body_select(&out_dir, 2, Coords::Spherical, prefix, has_energy);
