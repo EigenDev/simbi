@@ -381,6 +381,163 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
     });
 }
 
+/// prolong the prim batch through the hydrostatic-equilibrium decomposition:
+///
+///   encode  — the time-lerped coarse (rho, pre) over the stencil's parent region
+///             become departures from ONE `LocalEquilibrium` anchor per slab (the
+///             coarse parent of the slab's center cell); velocities are lerped
+///             unchanged.
+///   prolong — the existing kernels, unchanged, act on (d_rho, vel.., d_pre).
+///   decode  — each fine ghost rebuilds (rho, pre) as the anchor equilibrium
+///             evaluated at the ghost centroid's own potential plus the prolonged
+///             departure. velocities pass through untouched.
+///
+/// on a coarse stencil lying on one isentrope every departure is identically zero,
+/// so the fine ghosts land exactly on the isentrope at ANY prolongation order and
+/// ANY limiter — the transfer's polynomial bias has nothing to act on. that is the
+/// premise a balanced reconstruction needs its ghosts to satisfy; prolonging the
+/// raw state instead deposits an O(dx^2) one-signed entropy drain at the first
+/// uncovered coarse cell every subcycle. any on-column anchor reproduces the whole
+/// isentrope exactly; off-column the departures stay small and smooth over a
+/// ghost-width slab.
+///
+/// the time-lerp commutes with the encode (the equilibrium offset is
+/// time-independent), so lerping first and encoding the lerped slab once is exact.
+///
+/// both passes are baked kernels (`wb_cf_lerp_encode` / `wb_cf_decode`), so the
+/// same transfer runs on host and device memory. the anchor state is re-lerped
+/// IN-THREAD from the raw coarse snapshots in both kernels — the encode's output
+/// holds a zero departure at the anchor, and an in-place encode would race every
+/// thread's anchor read against the anchor thread's write. `scratch` is a
+/// caller-owned coarse buffer covering the parent stencil region (the lerp
+/// scratch). gamma-law only; the caller gates.
+#[allow(clippy::too_many_arguments)]
+pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    old: &PrimFieldsGeneric<D, DOF, Mem>,
+    new: &PrimFieldsGeneric<D, DOF, Mem>,
+    scratch: &PrimFieldsGeneric<D, DOF, Mem>,
+    dst: &PrimFieldsGeneric<D, DOF, Mem>,
+    region: &Domain<D>,
+    order: ProlongOrder,
+    alpha: f64,
+    gamma: f64,
+    coarse_x_lo: &[f64; D],
+    coarse_dx: &[f64; D],
+    fine_x_lo: &[f64; D],
+    fine_dx: &[f64; D],
+    coarse_bodies: &symbi_ib::BodyCollection<f64, D>,
+    fine_bodies: &symbi_ib::BodyCollection<f64, D>,
+) {
+    assert!(
+        gamma > 1.0,
+        "the balance-aware coarse-fine transfer is gamma-law only: LocalEquilibrium's \
+         isentrope is the ideal-gas one, and gamma = {gamma} does not describe it"
+    );
+    assert!(
+        DOF == D,
+        "the balance-aware coarse-fine transfer is baked for ncomp = D + 2 \
+         (rho + D velocities + pre); DOF = {DOF} on a {D}d grid has no kernel"
+    );
+    let has_pre = old.pre_field().is_some();
+    assert!(
+        has_pre,
+        "the balance-aware transfer requires an energy-carrying prim set"
+    );
+    let ncomp = 1 + DOF + 1;
+    let parents = coarse_parents(region, order.ghost_width() as isize);
+
+    // the anchor: the coarse parent of the slab's center cell (euclidean division —
+    // ghost slab indices are negative).
+    let anchor: [isize; D] = std::array::from_fn(|a| {
+        let s = &region.spaces[a];
+        (s.lo + (s.hi - 1 - s.lo) / 2).div_euclid(2)
+    });
+    let ints: Vec<i32> = anchor.iter().map(|&a| a as i32).collect();
+
+    // fused lerp + encode into the coarse scratch: every component time-lerped,
+    // rho/pre written as departures from the anchor equilibrium.
+    let (old_c, new_c, scratch_c) = (
+        prim_comps(old, has_pre),
+        prim_comps(new, has_pre),
+        prim_comps(scratch, has_pre),
+    );
+    let mut inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = Vec::with_capacity(2 * ncomp);
+    for k in 0..ncomp {
+        inputs.push(old_c[k]);
+        inputs.push(new_c[k]);
+    }
+    let mut scalars = vec![alpha, gamma];
+    scalars.extend_from_slice(coarse_x_lo);
+    scalars.extend_from_slice(coarse_dx);
+    push_body_slot_scalars(coarse_bodies, &mut scalars);
+    dispatch_fields_each::<f64, Mem, D>(
+        KernelId::WbCfLerpEncode { ndim: D as u8 }.name(),
+        &parents,
+        &inputs,
+        &scratch_c,
+        &ints,
+        &scalars,
+    );
+
+    // prolong the departures with the unchanged kernels. the scratch stands as both
+    // time endpoints: the lerp already happened in the encode.
+    prolong_prims(scratch, scratch, dst, region, order, 0.0);
+
+    // decode: fine ghost (rho, pre) += the anchor equilibrium at the fine
+    // centroid's potential. the anchor re-lerps from the raw coarse snapshots.
+    let pre = "the balance-aware transfer requires an energy-carrying prim set";
+    let b_inputs = [
+        &old.rho,
+        &new.rho,
+        old.pre_field().expect(pre),
+        new.pre_field().expect(pre),
+    ];
+    let b_outputs = [&dst.rho, dst.pre_field().expect(pre)];
+    let mut scalars = vec![alpha, gamma];
+    scalars.extend_from_slice(fine_x_lo);
+    scalars.extend_from_slice(fine_dx);
+    scalars.extend_from_slice(coarse_x_lo);
+    scalars.extend_from_slice(coarse_dx);
+    push_body_slot_scalars(fine_bodies, &mut scalars);
+    dispatch_fields_each::<f64, Mem, D>(
+        KernelId::WbCfDecode { ndim: D as u8 }.name(),
+        region,
+        &b_inputs,
+        &b_outputs,
+        &ints,
+        &scalars,
+    );
+}
+
+/// pack the balance-aware transfer's per-slot body scalars in the kernels'
+/// declared order: `pos[0..D], mass, soft, softkind` per slot, MAX_SOURCE_BODIES
+/// slots. an absent or non-gravitating slot carries mass = 0, which zeroes its
+/// potential identically (soft = 1 keeps the softened form regular at the slot's
+/// zero position).
+fn push_body_slot_scalars<const D: usize>(
+    bodies: &symbi_ib::BodyCollection<f64, D>,
+    scalars: &mut Vec<f64>,
+) {
+    for b in 0..symbi_ib::collection::MAX_SOURCE_BODIES {
+        if b < bodies.len() {
+            let body = bodies.get(b);
+            for ax in 0..D {
+                scalars.push(body.position[ax]);
+            }
+            scalars.push(if body.has_gravity() { body.mass } else { 0.0 });
+            scalars.push(body.softening().unwrap_or(1.0));
+            scalars.push(body.softening_kind().unwrap_or(0.0));
+        } else {
+            for _ in 0..D {
+                scalars.push(0.0);
+            }
+            scalars.push(0.0);
+            scalars.push(1.0);
+            scalars.push(0.0);
+        }
+    }
+}
+
 /// prolong the prim batch through a pre-lerped coarse scratch: one `field_lerp`
 /// pass time-interpolates the coarse snapshots ONCE PER COARSE CELL over the
 /// parent region of `region` (+ stencil halo), then the single-snapshot prolong

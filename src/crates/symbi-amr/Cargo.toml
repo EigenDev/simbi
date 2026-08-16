@@ -12,6 +12,7 @@ hip = ["gpu", "symbi-xpu/hip", "symbi-grid/hip", "symbi-sim/hip", "symbi-substra
 [dependencies]
 symbi-algebra = { path = "../symbi-algebra" }
 symbi-geometry = { path = "../symbi-geometry" }
+symbi-discretize = { path = "../symbi-discretize" }
 symbi-hydro = { path = "../symbi-hydro" }
 symbi-grid = { path = "../symbi-grid" }
 symbi-ir = { path = "../symbi-ir" }

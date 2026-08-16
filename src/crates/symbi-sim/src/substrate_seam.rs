@@ -55,6 +55,16 @@ where
 {
     fn flux(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>, dir: usize);
 
+    /// whether the face reconstruction limits DEPARTURES from the local hydrostatic
+    /// equilibrium rather than the state itself (the kaeppeli-mishra balance). the
+    /// refinement hierarchy reads this: a balanced level's premise is that stencil
+    /// data on one isentrope present no face jump, and a coarse-fine ghost prolonged
+    /// from the raw state does not land on the isentrope, so the seam re-introduces
+    /// exactly the jump the reconstruction removed. default: plain reconstruction.
+    fn hydrostatic_balance(&self) -> bool {
+        false
+    }
+
     /// stencil halfwidth of the evolution face reconstruction along the sweep:
     /// 2 for the plm family (pcm rides plm at theta = 0), 3 for ppm. the
     /// coarse-fine transfer must prolong one order higher than the evolution

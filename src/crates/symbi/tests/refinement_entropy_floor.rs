@@ -82,6 +82,31 @@ fn build(
 }
 
 /// the worst `K / K0` over every interior cell of every level, and where it sits.
+/// the global entropy minimum with its location: (K/K0, level, x of the minimum).
+fn worst_entropy_at(
+    hier: &Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset>,
+) -> (f64, usize, f64) {
+    let (mut worst, mut worst_level, mut worst_x) = (f64::INFINITY, 0usize, f64::NAN);
+    for (lvl, level) in hier.levels.iter().enumerate() {
+        let st = &level.state;
+        let rho = st.fields.prim.rho.view();
+        let pre = st.fields.prim.pre.as_ref().expect("adiabatic").view();
+        for c in st.geom.interior.iter() {
+            let r = *rho.at(c);
+            if r <= 0.0 {
+                continue;
+            }
+            let k = *pre.at(c) / r.powf(GAMMA) / K0;
+            if k < worst {
+                worst = k;
+                worst_level = lvl;
+                worst_x = st.geom.centroid([c[0] as isize])[0];
+            }
+        }
+    }
+    (worst, worst_level, worst_x)
+}
+
 fn worst_entropy_ratio(
     hier: &Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset>,
 ) -> (f64, usize) {
@@ -314,6 +339,516 @@ fn build_gravity(
     regions: &[RefinementRegion<1>],
 ) -> Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
     build_gravity_at(regions, N)
+}
+
+fn kset_balanced(s: &Sim) -> Kset {
+    Kset::new(GAMMA, CFL, &s.geom.allocated).well_balanced_reconstruction(true)
+}
+
+/// 5-point gauss-legendre cell average of the hydrostatic profile over cell `ii`
+/// of an `n`-cell grid. average-consistent seeding: restriction is arithmetic
+/// averaging, so data seeded this way make it exactly consistent (the average of
+/// fine averages IS the coarse average), while point-seeded data hand the first
+/// uncovered coarse cell an average-valued neighbor offset by (dx^2/24) rho''
+/// from the pointwise isentrope its own reconstruction anchors on.
+fn hydrostatic_avg(ii: usize, n: usize) -> Prim<f64, 1> {
+    let dx = 1.0 / n as f64;
+    let xc = (ii as f64 + 0.5) * dx;
+    let (mut rho, mut pre) = (0.0, 0.0);
+    let nodes = [
+        (-0.906179845938664, 0.236926885056189),
+        (-0.538469310105683, 0.478628670499366),
+        (0.0, 0.568888888888889),
+        (0.538469310105683, 0.478628670499366),
+        (0.906179845938664, 0.236926885056189),
+    ];
+    for (xi, w) in nodes {
+        let p = hydrostatic([xc + 0.5 * dx * xi]);
+        rho += 0.5 * w * p.rho;
+        pre += 0.5 * w * p.pre;
+    }
+    Prim {
+        rho,
+        vel: symbi_algebra::Tensor::new([0.0]),
+        pre,
+    }
+}
+
+/// the 2-level hydrostatic seam with the reconstruction balance and the seeding
+/// semantics selectable -- the dipole instrument's builder. identical to
+/// `build_gravity_ord` except for the kernel-set constructor and the optional
+/// average-consistent seeding.
+fn build_gravity_wb(
+    regions: &[RefinementRegion<1>],
+    ncells: usize,
+    balanced: bool,
+    average_seeded: bool,
+) -> Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
+    assert!(
+        regions.len() <= 1,
+        "the average seeding below assumes at most one fine level"
+    );
+    let seed_root = move |x: [f64; 1]| -> Prim<f64, 1> {
+        if average_seeded {
+            hydrostatic_avg((x[0] * ncells as f64) as usize, ncells)
+        } else {
+            hydrostatic(x)
+        }
+    };
+    let n_fine = 2 * ncells;
+    let seed_fine = move |x: [f64; 1]| -> Prim<f64, 1> {
+        if average_seeded {
+            hydrostatic_avg((x[0] * n_fine as f64) as usize, n_fine)
+        } else {
+            hydrostatic(x)
+        }
+    };
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([ncells])
+        .spacing([1.0 / ncells as f64])
+        .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim construction failed")
+        .set_initial(seed_root)
+        .build();
+    let make: fn(&Sim) -> Kset = if balanced { kset_balanced } else { kset };
+    let ck = make(&coarse);
+    let hier = Hierarchy::with_refinement(coarse, ck, regions, ProlongOrder::Ppm, make)
+        .unwrap()
+        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+            0,
+            symbi_algebra::Tensor::new([-G_OFFSET]),
+            symbi_algebra::Tensor::zeros(),
+            GM,
+            1.0e-3,
+            0.0,
+        )));
+    for lvl in 1..hier.levels.len() {
+        hier.levels[lvl].state.seed_cells(seed_fine);
+    }
+    hier
+}
+
+/// the K/K0 span and floor over the ROOT-level window straddling the patch's upper
+/// edge (the first uncovered coarse cells are where the dipole lives), plus the
+/// coordinate of the root minimum.
+fn seam_span(
+    hier: &Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset>,
+    window: (f64, f64),
+) -> (f64, f64, f64) {
+    let st = &hier.levels[0].state;
+    let rho = st.fields.prim.rho.view();
+    let pre = st.fields.prim.pre.as_ref().expect("adiabatic").view();
+    let n = st.geom.interior.spaces[0].hi - st.geom.interior.spaces[0].lo;
+    let ilo = st.geom.interior.spaces[0].lo;
+    let dx = 1.0 / n as f64;
+    let (mut kmin, mut kmax, mut xmin) = (f64::INFINITY, f64::NEG_INFINITY, f64::NAN);
+    for ii in st.geom.interior.spaces[0].lo..st.geom.interior.spaces[0].hi {
+        let x = ((ii - ilo) as f64 + 0.5) * dx;
+        if x < window.0 || x > window.1 {
+            continue;
+        }
+        let k = *pre.at([ii]) / rho.at([ii]).powf(GAMMA) / K0;
+        if k < kmin {
+            kmin = k;
+            xmin = x;
+        }
+        kmax = kmax.max(k);
+    }
+    (kmax - kmin, kmin, xmin)
+}
+
+/// the attribution arms: the balanced-arm residual drain against prolongation
+/// order and resolution. the suspect operator is `prolong_cf` -- fine coarse-fine
+/// ghosts are re-imposed every subcycle from a polynomial prolongation of the
+/// primitive state, which does not land on the hydrostatic profile; if that is
+/// the mechanism, the drain converges away at the prolongation order and steepens
+/// with resolution accordingly.
+///
+/// run: cargo test -p symbi --test refinement_entropy_floor -- --ignored attribution --nocapture
+#[test]
+#[ignore = "diagnostic: cf-drain scaling with prolongation order and resolution"]
+fn diagnose_cf_dipole_attribution() {
+    const T_SAMPLE: f64 = 2.0;
+    // the evolution reconstruction (plm, reach 2) admits only degree >= 2
+    // prolongations at the seam, so the order arm is ppm (degree 2) against the
+    // exact quartic (degree 4).
+    for (label, ord) in [("ppm", ProlongOrder::Ppm), ("p4", ProlongOrder::Quartic)] {
+        for n in [64usize, 128, 256] {
+            let region = RefinementRegion {
+                x_lo: [0.3],
+                x_hi: [0.7],
+            };
+            let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+                .cells([n])
+                .spacing([1.0 / n as f64])
+                .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+                .cfl(CFL)
+                .allocate()
+                .expect("sim construction failed")
+                .set_initial(hydrostatic)
+                .build();
+            let ck = kset_balanced(&coarse);
+            let mut hier =
+                Hierarchy::with_refinement(coarse, ck, &[region], ord, kset_balanced)
+                    .unwrap()
+                    .with_bodies(symbi_ib::BodyCollection::new().add(
+                        symbi_ib::Body::gravitational(
+                            0,
+                            symbi_algebra::Tensor::new([-G_OFFSET]),
+                            symbi_algebra::Tensor::zeros(),
+                            GM,
+                            1.0e-3,
+                            0.0,
+                        ),
+                    ));
+            for lvl in 1..hier.levels.len() {
+                hier.levels[lvl].state.seed_cells(hydrostatic);
+            }
+            hier.evolve(T_SAMPLE).unwrap();
+            let (floor, lvl) = worst_entropy_ratio(&hier);
+            println!(
+                "prolong {label}, n = {n:4}: deficit {:.4e} (level {lvl}) at t = {T_SAMPLE}",
+                1.0 - floor
+            );
+        }
+    }
+}
+
+/// the locality arm: the drain against the position of the patch's LOWER edge
+/// (the deep, steep side -- the balanced-arm deficit sits at the first uncovered
+/// coarse cell there). if the drain scales with the local dx/H of the edge, the
+/// mechanism is the seam transfer's one-signed limiter bias on the stratification,
+/// and moving the edge shallower must shrink it accordingly.
+///
+/// run: cargo test -p symbi --test refinement_entropy_floor -- --ignored locality --nocapture
+#[test]
+#[ignore = "diagnostic: cf-drain vs lower-edge depth"]
+fn diagnose_cf_dipole_locality_arm() {
+    const T_SAMPLE: f64 = 2.0;
+    for lo in [0.15, 0.3, 0.5] {
+        let region = RefinementRegion {
+            x_lo: [lo],
+            x_hi: [lo + 0.4],
+        };
+        let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([N])
+            .spacing([1.0 / N as f64])
+            .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+            .cfl(CFL)
+            .allocate()
+            .expect("sim construction failed")
+            .set_initial(hydrostatic)
+            .build();
+        let ck = kset_balanced(&coarse);
+        let mut hier =
+            Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, kset_balanced)
+                .unwrap()
+                .with_bodies(symbi_ib::BodyCollection::new().add(
+                    symbi_ib::Body::gravitational(
+                        0,
+                        symbi_algebra::Tensor::new([-G_OFFSET]),
+                        symbi_algebra::Tensor::zeros(),
+                        GM,
+                        1.0e-3,
+                        0.0,
+                    ),
+                ));
+        for lvl in 1..hier.levels.len() {
+            hier.levels[lvl].state.seed_cells(hydrostatic);
+        }
+        hier.evolve(T_SAMPLE).unwrap();
+        let (floor, lvl, x) = worst_entropy_at(&hier);
+        // the local scale height H = cs^2 / (gamma g) of the isentrope at the edge.
+        let r = lo + G_OFFSET;
+        let prim = hydrostatic([lo]);
+        let h = GAMMA * prim.pre / prim.rho / (GAMMA * GM / (r * r));
+        println!(
+            "edge at {lo:4.2} (dx/H = {:.3}): deficit {:.4e} at x = {x:.4} (level {lvl})",
+            (1.0 / N as f64) / h,
+            1.0 - floor
+        );
+    }
+}
+
+/// the semantics arm: the drain when the initial state carries CELL AVERAGES of
+/// the hydrostatic profile rather than point values. restriction is arithmetic
+/// averaging, so average-seeded data make it exactly consistent (the average of
+/// fine averages IS the coarse average), while point-seeded data hand the first
+/// uncovered coarse cell an average-valued neighbor offset by (dx^2/24) rho''
+/// from the pointwise isentrope its own reconstruction anchors on. if the drain
+/// dies here, restriction semantics is the mechanism.
+///
+/// run: cargo test -p symbi --test refinement_entropy_floor -- --ignored semantics --nocapture
+#[test]
+#[ignore = "diagnostic: cf-drain under average-consistent seeding"]
+fn diagnose_cf_dipole_semantics_arm() {
+    const T_SAMPLE: f64 = 2.0;
+    for (label, average_seeded) in [("point-seeded", false), ("average-seeded", true)] {
+        let region = RefinementRegion {
+            x_lo: [0.3],
+            x_hi: [0.7],
+        };
+        let mut hier = build_gravity_wb(&[region], N, true, average_seeded);
+        hier.evolve(T_SAMPLE).unwrap();
+        let (floor, lvl) = worst_entropy_ratio(&hier);
+        println!(
+            "{label:>15}: deficit {:.4e} (level {lvl}) at t = {T_SAMPLE}",
+            1.0 - floor
+        );
+    }
+}
+
+/// the timestep arm: the drain against CFL at fixed grid. the stage-work bias of
+/// the gravitational source (work a.v evaluated at the stage vs the trapezoidal
+/// kinetic-energy change) deposits ~ dt^2 per step, i.e. deficit ~ dt ~ cfl over a
+/// fixed physical time -- while a spatial seam truncation is cfl-independent.
+///
+/// run: cargo test -p symbi --test refinement_entropy_floor -- --ignored cfl_arm --nocapture
+#[test]
+#[ignore = "diagnostic: cf-drain scaling with cfl at fixed grid"]
+fn diagnose_cf_dipole_cfl_arm() {
+    const T_SAMPLE: f64 = 2.0;
+    for cfl in [0.4, 0.2, 0.1] {
+        let region = RefinementRegion {
+            x_lo: [0.3],
+            x_hi: [0.7],
+        };
+        let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([N])
+            .spacing([1.0 / N as f64])
+            .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+            .cfl(cfl)
+            .allocate()
+            .expect("sim construction failed")
+            .set_initial(hydrostatic)
+            .build();
+        let make = move |s: &Sim| {
+            Kset::new(GAMMA, cfl, &s.geom.allocated).well_balanced_reconstruction(true)
+        };
+        let ck = make(&coarse);
+        let mut hier = Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, make)
+            .unwrap()
+            .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new([-G_OFFSET]),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )));
+        for lvl in 1..hier.levels.len() {
+            hier.levels[lvl].state.seed_cells(hydrostatic);
+        }
+        hier.evolve(T_SAMPLE).unwrap();
+        let (floor, lvl) = worst_entropy_ratio(&hier);
+        println!(
+            "cfl {cfl:4.2}, n = {N}: deficit {:.4e} (level {lvl}) at t = {T_SAMPLE}",
+            1.0 - floor
+        );
+    }
+}
+
+/// the transfer-exactness probe: prolong the balanced hierarchy's coarse-fine
+/// ghosts once from the exact isentropic state and measure how far off the
+/// isentrope the fine ghosts land. the equilibrium decomposition's theorem says
+/// exactly on it (departures identically zero, prolongation of zero is zero),
+/// so anything above roundoff here is transfer bias; a clean pass relocates any
+/// remaining seam drain to the operators the transfer does not touch
+/// (restriction and the flux register).
+///
+/// run: cargo test -p symbi --test refinement_entropy_floor -- --ignored ghost_exactness --nocapture
+#[test]
+#[ignore = "diagnostic: fine cf-ghost isentrope error after one balanced prolong"]
+fn diagnose_cf_transfer_ghost_exactness() {
+    for (label, forced) in [("transfer on", None), ("transfer off", Some(false))] {
+        let region = RefinementRegion {
+            x_lo: [0.3],
+            x_hi: [0.7],
+        };
+        let mut hier = build_gravity_wb(&[region], N, true, false);
+        if let Some(on) = forced {
+            hier = hier.balance_aware_transfer(on);
+        }
+        // prime populates the primitive buffers (c2p) and performs the coarse-fine
+        // prolong once at alpha = 1; before it the prim fields are still zeroed
+        // scratch and a prolong would faithfully interpolate zeros.
+        hier.prime();
+        let st = &hier.levels[1].state;
+        let rho = st.fields.prim.rho.view();
+        let pre = st.fields.prim.pre.as_ref().expect("adiabatic").view();
+        let (ilo, ihi) = (
+            st.geom.interior.spaces[0].lo,
+            st.geom.interior.spaces[0].hi,
+        );
+        let (alo, ahi) = (
+            st.geom.allocated.spaces[0].lo,
+            st.geom.allocated.spaces[0].hi,
+        );
+        let mut worst = 0.0_f64;
+        let mut worst_rho = 0.0_f64;
+        for ii in (alo..ilo).chain(ihi..ahi) {
+            let (r, p) = (*rho.at([ii]), *pre.at([ii]));
+            assert!(
+                r > 0.0 && p > 0.0 && r.is_finite(),
+                "{label}: cf ghost {ii} holds (rho, pre) = ({r}, {p}); the prolong never \
+                 wrote it and the probe below would be measuring nothing"
+            );
+            let k = p / r.powf(GAMMA) / K0;
+            worst = worst.max((k - 1.0).abs());
+            // K alone cannot see a potential evaluated at the wrong position: any state
+            // on the anchor isentrope has K = K_anchor regardless of phi. the density
+            // against the analytic profile at the ghost's own centroid catches that.
+            let x = st.geom.centroid([ii]);
+            worst_rho = worst_rho.max((r / hydrostatic(x).rho - 1.0).abs());
+        }
+        println!(
+            "{label}: max |K/K0 - 1| = {worst:.4e}, max |rho/rho_exact - 1| = {worst_rho:.4e} \
+             over cf ghosts"
+        );
+    }
+    // no assertion: the numbers are the record; the permanent gate is the floor hold.
+}
+
+/// the coarse-fine entropy dipole, characterized in time under both reconstruction
+/// balances. the recorded pre-balance signature: the root-level K/K0 span at the
+/// patch's upper edge grows 1.8e-3 -> 9.3e-2 from t = 0.03 to t = 8 with no
+/// saturation, the minimum one cell outside the patch (x = 0.707 for the
+/// [0.3, 0.7] region at n = 128). the state is balanced to 8e-15 after one step,
+/// so the dipole DEVELOPS -- consistent with the coarse-fine ghost prolongation
+/// interpolating the conserved state (never a hydrostatic state) and being
+/// re-imposed every subcycle.
+///
+/// run: cargo test -p symbi --test refinement_entropy_floor -- --ignored dipole --nocapture
+#[test]
+#[ignore = "diagnostic: coarse-fine entropy dipole growth in time, plain vs balanced"]
+fn diagnose_cf_dipole_growth() {
+    // the single-grid balanced control: whatever floor drift survives WITHOUT any
+    // seam is the background (the stage-work bias of the source, the wall) and is
+    // the number the seam arms must be read against.
+    {
+        let mut hier = build_gravity_wb(&[], N, true, false);
+        for t in [0.5, 2.0, 8.0] {
+            hier.evolve(t).unwrap();
+            let (floor, _) = worst_entropy_ratio(&hier);
+            println!("single grid, balanced, t = {t:5.2}: global floor {floor:.9}");
+        }
+    }
+    // the third arm adds average-consistent seeding to the balanced pair: with
+    // restriction exactly consistent, whatever survives is the transfer's own bias.
+    for (balanced, average_seeded) in [(false, false), (true, false), (true, true)] {
+        let region = RefinementRegion {
+            x_lo: [0.3],
+            x_hi: [0.7],
+        };
+        println!("\nbalanced reconstruction = {balanced}, average seeded = {average_seeded}");
+        let mut hier = build_gravity_wb(&[region], N, balanced, average_seeded);
+        for t in [0.03125, 0.5, 1.0, 2.0, 4.0, 8.0] {
+            hier.evolve(t).unwrap();
+            let (span, kmin, xmin) = seam_span(&hier, (0.60, 0.85));
+            let (floor, lvl, xfloor) = worst_entropy_at(&hier);
+            println!(
+                "  t = {t:7.4}: seam span {span:.4e}, seam min K/K0 {kmin:.9} at x = {xmin:.4}, \
+                 global floor {floor:.9} (level {lvl}, x = {xfloor:.4})"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_balanced_seam_transfer_holds_the_entropy_floor() {
+    // the theorem under gate: encode the coarse slab as departures from one local
+    // equilibrium, prolong the departures, decode on the equilibrium at the fine
+    // ghost's own potential — then coarse stencil data on one isentrope land the
+    // fine ghosts exactly back on it, at any prolongation order and any limiter.
+    // measured: the fine coarse-fine ghosts sit on the coarse isentrope to 2e-16
+    // where raw prolongation leaves them 4.6e-5 off (a one-signed K EXCESS: the
+    // prolong kernels are cell-average operators, and averaging convex isentropic
+    // data overshoots K by jensen), and the balanced 2-level deficit at t = 2
+    // drops 1.7e-4 -> 1.8e-5.
+    //
+    // the residual 1.8e-5 is a SEPARATE, OPEN layer, suspected restriction:
+    // conservative averaging of on-isentrope fine data lands the covered coarse
+    // cells at K above K0 by the same one-signed jensen O(dx^2) excess, and the
+    // first uncovered neighbor vents against the junction. it survives with the
+    // transfer exact (ghosts at 2e-16), and it shrinks but persists under
+    // average-consistent seeding (3.6e-5 at t = 8 against 6.8e-5 point-seeded),
+    // so no ghost-transfer policy can close it. the bounds here therefore sit
+    // BETWEEN the transfer's contribution and that residual: 5e-5 is 2.7x above
+    // the measured post-transfer deficit and 3.4x below the deficit the transfer's
+    // absence restores, so the same constant separates both arms.
+    const T_GATE: f64 = 2.0;
+    let region = || RefinementRegion {
+        x_lo: [0.3],
+        x_hi: [0.7],
+    };
+
+    // positive control: the PLAIN 2-level seam vents visibly by this clock
+    // (measured 1.2e-2). if this stops tripping, the setup no longer stresses the
+    // seam and the quiet balanced arms below would be quiet about nothing.
+    let mut plain = build_gravity_wb(&[region()], N, false, false);
+    plain.evolve(T_GATE).unwrap();
+    let (floor_plain, _) = worst_entropy_ratio(&plain);
+    assert!(
+        1.0 - floor_plain > 1.0e-3,
+        "the plain seam stopped venting (deficit {:.2e}); the balanced-arm gate below \
+         is vacuous on this setup",
+        1.0 - floor_plain
+    );
+
+    // invariance: the transfer activates only on balanced gravitating hierarchies,
+    // so the plain arm must reproduce its recorded floor — the fix must never leak
+    // into an unbalanced hierarchy's arithmetic. the pin is schedule-specific:
+    // every evolve() call clamps its final dt to land on the target, so the floor's
+    // 8th decimal depends on the sequence of targets. under this test's
+    // (t = 2, t = 8) schedule the plain floor is 0.976185775495; under the dipole
+    // diagnostic's six-sample schedule the same scheme reads 0.976185833. both are
+    // pinned to 1e-9 in their own tests, so a leak into plain arithmetic trips
+    // whichever runs.
+    plain.evolve(8.0).unwrap();
+    let (floor_plain8, _) = worst_entropy_ratio(&plain);
+    println!("plain 2-level column at t = 8: floor {floor_plain8:.12}");
+    assert!(
+        (floor_plain8 - 0.976185775495).abs() < 1.0e-9,
+        "the plain 2-level floor at t = 8 moved to {floor_plain8:.12} from its recorded \
+         0.976185775495; the balance-aware transfer is leaking into plain hierarchies"
+    );
+
+    // the transfer is the load-bearing piece: the balanced RECONSTRUCTION alone,
+    // with the equilibrium transfer forced off, still vents well past the bound
+    // below (measured 1.7e-4) — raw-state prolongation keeps knocking the ghosts
+    // off the isentrope faster than the interior can hold the floor.
+    let mut off = build_gravity_wb(&[region()], N, true, false).balance_aware_transfer(false);
+    off.evolve(T_GATE).unwrap();
+    let (floor_off, _) = worst_entropy_ratio(&off);
+    assert!(
+        1.0 - floor_off > 5.0e-5,
+        "balanced reconstruction with the equilibrium transfer disabled no longer vents \
+         (deficit {:.2e}); the transfer is not the load-bearing piece on this setup and \
+         the gate below proves nothing about it",
+        1.0 - floor_off
+    );
+
+    // the gate: with the transfer active the same column holds its floor inside the
+    // bound the transfer-off arm must exceed (measured deficit 1.8e-5, the open
+    // restriction-side residual).
+    let mut on = build_gravity_wb(&[region()], N, true, false);
+    on.evolve(T_GATE).unwrap();
+    let (floor_on, lvl) = worst_entropy_ratio(&on);
+    println!(
+        "balanced 2-level column at t = {T_GATE}: deficit {:.2e} (plain {:.2e}, \
+         transfer-off {:.2e})",
+        1.0 - floor_on,
+        1.0 - floor_plain,
+        1.0 - floor_off
+    );
+    assert!(
+        floor_on > 1.0 - 5.0e-5,
+        "the balance-aware coarse-fine transfer left a deficit of {:.2e} on level {lvl}: \
+         beyond the restriction-side residual, so the transfer is venting again",
+        1.0 - floor_on
+    );
 }
 
 #[test]

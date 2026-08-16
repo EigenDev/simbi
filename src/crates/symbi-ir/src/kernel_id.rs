@@ -69,6 +69,15 @@ pub enum KernelId {
     /// MULTI-FIELD pointwise time interpolation `dst_k = (1-alpha)*old_k +
     /// alpha*new_k` — the coarse-side pass feeding `RefineProlongMulti1t`.
     FieldLerpMulti { ncomp: u8, ndim: u8 },
+    /// the balance-aware coarse-fine ENCODE: fused time lerp over the coarse
+    /// parent region with rho/pre written as departures from one hydrostatic
+    /// anchor equilibrium (the anchor re-lerped in-thread from the raw
+    /// inputs). cartesian gamma-law prim sets, ncomp = ndim + 2.
+    WbCfLerpEncode { ndim: u8 },
+    /// the balance-aware coarse-fine DECODE: the fine ghost rho/pre add back
+    /// the anchor equilibrium at the ghost's own potential, the anchor
+    /// re-lerped in-thread from the coarse rho/pre snapshots.
+    WbCfDecode { ndim: u8 },
     /// the immersed-boundary [Drain] penalization: the
     /// property-algebra kernel whose p = 1 stack reduces bit-exactly to the
     /// uniform-scaling drain. adiabatic, cartesian.
@@ -251,6 +260,16 @@ impl KernelId {
                      ncomp 4/5 are generated"
                 ),
             },
+            KernelId::WbCfLerpEncode { ndim } => [
+                "wb_cf_lerp_encode_1d",
+                "wb_cf_lerp_encode_2d",
+                "wb_cf_lerp_encode_3d",
+            ][dim_ix(ndim)],
+            KernelId::WbCfDecode { ndim } => [
+                "wb_cf_decode_1d",
+                "wb_cf_decode_2d",
+                "wb_cf_decode_3d",
+            ][dim_ix(ndim)],
             KernelId::PenalizeDrain { ndim } => [
                 "penalize_drain_1d",
                 "penalize_drain_2d",
@@ -387,6 +406,11 @@ mod tests {
             KernelId::RefineAccEdge { axis: 2, ndim: 3 }.name(),
             "refine_acc_edge_2_3d"
         );
+        assert_eq!(
+            KernelId::WbCfLerpEncode { ndim: 1 }.name(),
+            "wb_cf_lerp_encode_1d"
+        );
+        assert_eq!(KernelId::WbCfDecode { ndim: 3 }.name(), "wb_cf_decode_3d");
         assert_eq!(KernelId::FieldCopy { ndim: 1 }.name(), "field_copy_1d");
         assert_eq!(KernelId::FieldFill { ndim: 2 }.name(), "field_fill_2d");
         assert_eq!(

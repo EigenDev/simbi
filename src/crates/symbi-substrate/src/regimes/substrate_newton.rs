@@ -407,6 +407,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, self.flux_spec());
     }
 
+    fn hydrostatic_balance(&self) -> bool {
+        self.balance == symbi_discretize::coords::Balance::Hydrostatic
+    }
+
     fn reconstruction_reach(&self) -> u8 {
         match self.recon {
             symbi_discretize::Recon::Plm => 2,

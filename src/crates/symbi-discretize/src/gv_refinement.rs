@@ -734,6 +734,215 @@ pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
 }
 
 // =============================================================================
+// balance-aware coarse-fine transfer: the fused lerp+encode over the coarse
+// parent region and the decode over the fine ghost slab. between them the
+// UNCHANGED prolong kernels act on departures from one hydrostatic anchor, so
+// coarse stencil data on one isentrope land the fine ghosts exactly back on it
+// at any prolongation order and any limiter. cartesian, gamma-law only, like
+// every balance-carrying kernel.
+// =============================================================================
+
+/// the per-slot body scalars a balance-aware transfer kernel declares:
+/// `body_{b}_pos_{g}` per grid axis, then `body_{b}_mass` / `_soft` /
+/// `_softkind` — the same slot layout the wb ghost fill and body source bind
+/// (an inert slot carries mass = 0 and contributes exactly zero potential).
+/// declared eagerly so the scalar manifest order is the declaration order
+/// here, never the trace's evaluation order.
+fn declare_body_slots(ndim: usize, n_bodies: usize) -> Vec<([Gv; 3], Gv, Gv, Gv)> {
+    (0..n_bodies)
+        .map(|b| {
+            let mut pos = [Gv::from_f64(0.0), Gv::from_f64(0.0), Gv::from_f64(0.0)];
+            for (g, p) in pos.iter_mut().enumerate().take(ndim) {
+                *p = Gv::scalar(&format!("body_{b}_pos_{g}"));
+            }
+            (
+                pos,
+                Gv::scalar(&format!("body_{b}_mass")),
+                Gv::scalar(&format!("body_{b}_soft")),
+                Gv::scalar(&format!("body_{b}_softkind")),
+            )
+        })
+        .collect()
+}
+
+/// the total body potential at a cartesian position (grid axes ARE the
+/// coordinates; ungridded components zero), summed over every slot.
+fn body_slots_potential(pos: &[Gv; 3], slots: &[([Gv; 3], Gv, Gv, Gv)]) -> Gv {
+    slots
+        .iter()
+        .map(|(bpos, mass, soft, softkind)| {
+            let rvec: [Gv; 3] = std::array::from_fn(|i| pos[i] - bpos[i]);
+            crate::ibm::body_potential(rvec, *mass, *soft, *softkind)
+        })
+        .sum::<Gv>()
+}
+
+/// the cell centroid on a uniform cartesian lattice: `x_lo + (i + 1/2) dx` per
+/// grid axis — the same text the host `stagger_coord(Center)` computes, so the
+/// kernel potential agrees with a host evaluation bit for bit.
+fn centroid_position(ndim: usize, coords: &[NodeId], x_lo: &[Gv], dx: &[Gv]) -> [Gv; 3] {
+    let half = Gv::from_f64(0.5);
+    let mut pos = [Gv::from_f64(0.0), Gv::from_f64(0.0), Gv::from_f64(0.0)];
+    for g in 0..ndim {
+        pos[g] = x_lo[g] + (Gv::of(coords[g]) + half) * dx[g];
+    }
+    pos
+}
+
+/// trace the FUSED lerp + hydrostatic encode over the coarse parent region of a
+/// coarse-fine ghost slab: every component is time-interpolated
+/// `(1 - alpha)*src_old_k + alpha*src_new_k`, and rho (component 0) and pre
+/// (component ncomp-1) additionally subtract the anchor equilibrium evaluated
+/// at the cell's own potential. the ANCHOR (rho, pre) is re-lerped IN-THREAD
+/// from the raw inputs at the `anchor_{ax}` index scalars — never read from the
+/// output, so no thread ever races the anchor cell's encode. the prolong
+/// kernels then act on the resulting departures unchanged.
+///
+/// buffers: src_old_0, src_new_0, .., interleaved (inputs) then dst_0..
+/// (outputs). ints: anchor_{ax}. scalars: alpha, gamma, x_lo_{ax}, dx_{ax}
+/// (the COARSE lattice), then the body slots.
+pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKernel, Writes) {
+    use symbi_hydro::hydrostatic::LocalEquilibrium;
+    assert!(
+        (1..=3).contains(&ndim),
+        "wb_cf_lerp_encode_gv: ndim must be 1..=3"
+    );
+    assert!(
+        ncomp == ndim + 2,
+        "wb_cf_lerp_encode_gv: the balance-aware transfer carries rho + ndim velocities + pre"
+    );
+    begin_trace();
+    // scalar manifest in declaration order: alpha, gamma float; anchor int lane;
+    // grid origin/step; body slots.
+    let alpha = Gv::scalar("alpha");
+    let gamma = Gv::scalar("gamma");
+    let anchor: Vec<NodeId> = with_trace(|t| {
+        (0..ndim)
+            .map(|ax| t.scalar_int(&format!("anchor_{ax}")))
+            .collect()
+    });
+    let x_lo: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
+        .collect();
+    let dx: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("dx_{ax}"))).collect();
+    let slots = declare_body_slots(ndim, n_bodies);
+
+    let one = Gv::from_f64(1.0);
+    // cell loads in interleaved (old_k, new_k) registration order — the buffer
+    // order the dispatch binds.
+    let lerp_cell: Vec<Gv> = (0..ncomp)
+        .map(|k| {
+            let old_key = format!("src_old_{k}");
+            let new_key = format!("src_new_{k}");
+            let v_old = Gv::field(&old_key, old_key.as_str());
+            let v_new = Gv::field(&new_key, new_key.as_str());
+            (one - alpha) * v_old + alpha * v_new
+        })
+        .collect();
+
+    // the anchor state, re-lerped in-thread from the same inputs (keys already
+    // registered — no new buffers).
+    let lerp_anchor = |k: usize| -> Gv {
+        let old_key = format!("src_old_{k}");
+        let new_key = format!("src_new_{k}");
+        let v_old = gv_load_at(&old_key, old_key.as_str(), &anchor);
+        let v_new = gv_load_at(&new_key, new_key.as_str(), &anchor);
+        (one - alpha) * v_old + alpha * v_new
+    };
+    let rho_a = lerp_anchor(0);
+    let pre_a = lerp_anchor(ncomp - 1);
+
+    let cell_coords: Vec<NodeId> =
+        with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+    let phi_anchor = body_slots_potential(&centroid_position(ndim, &anchor, &x_lo, &dx), &slots);
+    let phi_cell = body_slots_potential(&centroid_position(ndim, &cell_coords, &x_lo, &dx), &slots);
+    let eq = LocalEquilibrium::through(rho_a, pre_a, phi_anchor, gamma);
+    let (r_eq, p_eq) = eq.state_at(phi_cell);
+
+    let mut writes = Vec::with_capacity(ncomp);
+    for k in 0..ncomp {
+        let val = if k == 0 {
+            lerp_cell[k] - r_eq
+        } else if k == ncomp - 1 {
+            lerp_cell[k] - p_eq
+        } else {
+            lerp_cell[k]
+        };
+        let dst_name = format!("dst_{k}");
+        writes.push((dst_name.clone(), dst_name.into(), val.node()));
+    }
+    (end_trace(), writes)
+}
+
+/// trace the hydrostatic DECODE over the fine coarse-fine ghost slab: the
+/// prolonged departures already sit in the fine (rho, pre), and each ghost adds
+/// back the anchor equilibrium evaluated at ITS OWN potential. the encoded
+/// scratch holds a zero departure at the anchor, so the anchor state cannot be
+/// read from it — the raw coarse (rho, pre) snapshots bind as inputs and the
+/// anchor is re-lerped in-thread with the same alpha the encode used.
+///
+/// buffers: src_old_rho, src_new_rho, src_old_pre, src_new_pre (the COARSE
+/// snapshots, inputs) then dst_rho, dst_pre (the fine ghosts, IN-PLACE
+/// outputs). ints: anchor_{ax}. scalars: alpha, gamma, x_lo_{ax}, dx_{ax} (the
+/// FINE lattice), src_x_lo_{ax}, src_dx_{ax} (the COARSE lattice), then the
+/// body slots.
+pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
+    use symbi_hydro::hydrostatic::LocalEquilibrium;
+    assert!((1..=3).contains(&ndim), "wb_cf_decode_gv: ndim must be 1..=3");
+    begin_trace();
+    let alpha = Gv::scalar("alpha");
+    let gamma = Gv::scalar("gamma");
+    let anchor: Vec<NodeId> = with_trace(|t| {
+        (0..ndim)
+            .map(|ax| t.scalar_int(&format!("anchor_{ax}")))
+            .collect()
+    });
+    let fine_x_lo: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
+        .collect();
+    let fine_dx: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("dx_{ax}"))).collect();
+    let src_x_lo: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("src_x_lo_{ax}")))
+        .collect();
+    let src_dx: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("src_dx_{ax}")))
+        .collect();
+    let slots = declare_body_slots(ndim, n_bodies);
+
+    let one = Gv::from_f64(1.0);
+    // the coarse snapshots register first, in the dispatch's input order.
+    let lerp_anchor = |name: &str| -> Gv {
+        let old_key = format!("src_old_{name}");
+        let new_key = format!("src_new_{name}");
+        let v_old = gv_load_at(&old_key, old_key.as_str(), &anchor);
+        let v_new = gv_load_at(&new_key, new_key.as_str(), &anchor);
+        (one - alpha) * v_old + alpha * v_new
+    };
+    let rho_a = lerp_anchor("rho");
+    let pre_a = lerp_anchor("pre");
+
+    let cell_coords: Vec<NodeId> =
+        with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+    let phi_anchor =
+        body_slots_potential(&centroid_position(ndim, &anchor, &src_x_lo, &src_dx), &slots);
+    let phi_fine = body_slots_potential(
+        &centroid_position(ndim, &cell_coords, &fine_x_lo, &fine_dx),
+        &slots,
+    );
+    let eq = LocalEquilibrium::through(rho_a, pre_a, phi_anchor, gamma);
+    let (r_eq, p_eq) = eq.state_at(phi_fine);
+
+    // in-place: the prolonged departures already sit in the ghosts.
+    let rho_g = Gv::field("dst_rho", "dst_rho") + r_eq;
+    let pre_g = Gv::field("dst_pre", "dst_pre") + p_eq;
+    let writes = vec![
+        ("dst_rho".to_string(), "dst_rho".into(), rho_g.node()),
+        ("dst_pre".to_string(), "dst_pre".into(), pre_g.node()),
+    ];
+    (end_trace(), writes)
+}
+
+// =============================================================================
 // face prolongation: thread over a fine FACE region (a bface transverse-halo
 // slab at a coarse-fine boundary), read the time-interpolated coarse face
 // field — the fine boundary-edge EMF at the coarse-fine interface

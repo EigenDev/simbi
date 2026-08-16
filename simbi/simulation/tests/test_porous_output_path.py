@@ -71,10 +71,18 @@ def test_segments_key_on_the_declared_defaults(porous_cls, tmp_path, monkeypatch
     # the comparison must read the model's own default, so passing the default
     # value EXPLICITLY still lands on the segment-free path -- the same run point
     # is the same directory however it was spelled on the command line.
-    for name in ("buffer_time_fraction", "buffer_index"):
+    for name in ("buffer_time_fraction", "buffer_index", "mach_limit"):
         default = porous_cls.model_fields[name].default
         got = _path(porous_cls, tmp_path, monkeypatch, **{name: default})
-        assert "sponge" not in got and "bufn" not in got, (name, got)
+        assert "sponge" not in got and "bufn" not in got and "/ml" not in got, (name, got)
+
+
+def test_a_swept_mach_limit_gets_its_own_directory(porous_cls, tmp_path, monkeypatch) -> None:
+    # the fleischmann saturation threshold is the instrument knob the machsweep arm
+    # varies; without its own segment the three sweep members would interleave one
+    # checkpoint series and the sweep would silently compare a run with itself.
+    got = _path(porous_cls, tmp_path, monkeypatch, mach_limit=0.05)
+    assert got.endswith("/ml0.05"), got
 
 
 def test_telescoping_ladder_carries_the_halving_cap(porous_cls, tmp_path, monkeypatch) -> None:

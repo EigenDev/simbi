@@ -406,6 +406,26 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
             );
         }
     }
+    // the balance-aware coarse-fine transfer pair: the fused lerp+encode over
+    // the coarse parent region and the fine-ghost decode, bracketing the
+    // unchanged prolong kernels so departures from one hydrostatic anchor are
+    // what gets interpolated. cartesian gamma-law, ncomp = ndim + 2.
+    let (k, writes) = symbi_discretize::wb_cf_lerp_encode_gv(nd, nd + 2, MAX_SOURCE_BODIES);
+    emit_gv(
+        out_dir,
+        KernelId::WbCfLerpEncode { ndim }.name(),
+        ndim,
+        &k,
+        &writes,
+    );
+    let (k, writes) = symbi_discretize::wb_cf_decode_gv(nd, MAX_SOURCE_BODIES);
+    emit_gv(
+        out_dir,
+        KernelId::WbCfDecode { ndim }.name(),
+        ndim,
+        &k,
+        &writes,
+    );
 }
 
 // passive-scalar (dye) transport: the donor-cell D_chi update from the

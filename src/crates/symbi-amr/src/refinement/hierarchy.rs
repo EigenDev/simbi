@@ -52,8 +52,8 @@ use super::tracer_interface::{
 };
 use super::transfer::{
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
-    cf_ghost_slabs, copy_field, prolong_face_field, prolong_field, prolong_prims_swept,
-    restrict_bface, restrict_cell_field, restrict_cons,
+    cf_ghost_slabs, copy_field, prolong_face_field, prolong_field, prolong_prims_balanced,
+    prolong_prims_swept, restrict_bface, restrict_cell_field, restrict_cons,
 };
 use std::ops::ControlFlow;
 use symbi_sim::decomp::{HaloTransport, drain_devices, exchange_grid, flatten, unflatten};
@@ -209,6 +209,13 @@ where
     /// rejection both shrink; comparing a fresh cfl estimate against it reports a "collapse" every
     /// time a rejected step is replayed at a smaller dt and then recovers. 0 before the first step.
     pub prev_dt_cfl: f64,
+
+    /// whether the coarse-fine ghost transfer prolongs DEPARTURES from the local hydrostatic
+    /// equilibrium instead of the raw primitive state. `None` follows the kernel set: active
+    /// exactly when the set reconstructs balanced (`KernelSet::hydrostatic_balance`) and a
+    /// gravitating body supplies the potential. `Some(x)` forces the choice — the instrument
+    /// knob that measures the transfer as the load-bearing piece. see `cf_transfer_balanced`.
+    pub balance_aware_transfer: Option<bool>,
 }
 
 impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
@@ -945,6 +952,7 @@ where
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
+            balance_aware_transfer: None,
         }
     }
 
@@ -1122,6 +1130,7 @@ where
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
+            balance_aware_transfer: None,
         })
     }
 
@@ -1153,6 +1162,15 @@ where
     /// pass `0.0` to consider every cell.
     pub fn with_equilibrium_mask(mut self, radius: f64) -> Self {
         self.equilibrium_mask_radius = Some(radius);
+        self
+    }
+
+    /// force the coarse-fine transfer's equilibrium decomposition on or off, overriding the
+    /// kernel-set default. `false` on a balanced gravitating hierarchy reproduces the seam
+    /// entropy drain the decomposition removes — the measurement that the transfer, not the
+    /// reconstruction, is the load-bearing piece.
+    pub fn balance_aware_transfer(mut self, on: bool) -> Self {
+        self.balance_aware_transfer = Some(on);
         self
     }
 
@@ -2582,6 +2600,28 @@ where
         }
     }
 
+    /// whether level `level`'s coarse-fine ghost transfer rides the hydrostatic
+    /// equilibrium decomposition: the explicit override when set, otherwise the level's
+    /// own kernel set. active only where the decomposition is defined —
+    /// a gravitating body supplies the potential and the prim set carries pressure
+    /// (gamma-law; asserted at the transfer). the encode/decode are baked kernels,
+    /// so host and device hierarchies take the same path.
+    fn cf_transfer_balanced(&self, level: usize) -> bool {
+        let want = self
+            .balance_aware_transfer
+            .unwrap_or_else(|| self.levels[level].kernels.hydrostatic_balance());
+        if !want {
+            return false;
+        }
+        let fine = &self.levels[level];
+        let has_gravity = fine
+            .state
+            .immersed
+            .as_ref()
+            .is_some_and(|im| (0..im.bodies.len()).any(|b| im.bodies.get(b).has_gravity()));
+        has_gravity && fine.state.fields.prim.pre_field().is_some()
+    }
+
     /// fill level `level`'s coarse-fine prim ghosts from its parent's
     /// time-interpolated prims: `(1 - alpha)*prim_old + alpha*prim_new`. pub so the DECOMPOSED
     /// driver can drive the fine subcycle (prolong -> fine ghost -> fine stages with exchange).
@@ -2608,17 +2648,42 @@ where
                 .map(|s| ProlongSweepScratch::for_slab(s, self.prolong_order, has_pre))
                 .collect()
         });
+        let balanced = self.cf_transfer_balanced(level);
         for (slab, scratch) in slabs.iter().zip(sweep_scratch) {
-            prolong_prims_swept(
-                scratch,
-                prim_lerp,
-                prim_old,
-                &parent.state.fields.prim,
-                &fine.state.fields.prim,
-                slab,
-                self.prolong_order,
-                alpha,
-            );
+            if balanced {
+                // the equilibrium decomposition: encode the lerped coarse slab as
+                // departures from one isentrope anchor, prolong the departures with
+                // the unchanged kernels, rebuild (rho, pre) on the isentrope at each
+                // fine ghost's own potential. baked kernel pair in the parent's lerp
+                // scratch (unused by the fallback prolong path this route replaces).
+                prolong_prims_balanced(
+                    prim_old,
+                    &parent.state.fields.prim,
+                    prim_lerp,
+                    &fine.state.fields.prim,
+                    slab,
+                    self.prolong_order,
+                    alpha,
+                    self.levels[0].state.physics.eos.gamma(),
+                    &parent.state.geom.x_lo,
+                    &parent.state.geom.dx,
+                    &fine.state.geom.x_lo,
+                    &fine.state.geom.dx,
+                    &parent.state.immersed.as_ref().unwrap().bodies,
+                    &fine.state.immersed.as_ref().unwrap().bodies,
+                );
+            } else {
+                prolong_prims_swept(
+                    scratch,
+                    prim_lerp,
+                    prim_old,
+                    &parent.state.fields.prim,
+                    &fine.state.fields.prim,
+                    slab,
+                    self.prolong_order,
+                    alpha,
+                );
+            }
             // the dye rides the same time-interpolated prolongation as the rest of the primitive
             // state. it sits outside the swept pass because that pass carries a positional
             // component count (rho, DOF velocities, optional pressure) sized by its scratch.
