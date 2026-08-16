@@ -163,8 +163,8 @@ fn a_draining_accretor_in_a_stratified_atmosphere_survives_under_ppm() {
     assert!(rho_min > 0.0 && pre_min > 0.0, "non-positive state survived c2p");
 }
 
-/// the plm control on the identical setup: a failure here too would indict the
-/// setup, not the reconstruction stack.
+/// the plm control on the identical setup: a failure here too would place the fault in the
+/// setup, leaving the reconstruction stack exonerated.
 #[test]
 fn the_plm_control_survives_the_same_drain() {
     let (rho_min, pre_min) = run_and_scan(Recon::Plm, 3, ProlongOrder::Ppm, false);

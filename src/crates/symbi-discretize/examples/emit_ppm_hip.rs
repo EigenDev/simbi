@@ -2,7 +2,7 @@
 // emit_ppm_hip.rs
 //
 // emit the ppm face-flux twins and the quartic coarse-fine prolong kernels as
-// HIP source — the SAME IR graphs the CPU AOT path compiles, rendered for the
+// HIP source — the same IR graphs the CPU AOT path compiles, rendered for the
 // device backend. these are the only kernel families whose first device
 // execution is a ppm+fmr run, so a standalone hipcc compile (and eyeball) of
 // the rendered source separates a render-level defect from a launch/runtime

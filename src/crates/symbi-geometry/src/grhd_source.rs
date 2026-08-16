@@ -1,10 +1,10 @@
 // =============================================================================
 // grhd_source.rs
 //
-// the GENERIC GRHD geodesic (gravity) source, carrier-generic over the scalar S (f64 host /
+// the generic GRHD geodesic (gravity) source, carrier-generic over the scalar S (f64 host /
 // f32 / Gv trace). computes the valencia momentum + energy sources by contracting the perfect-fluid
-// stress-energy T^{mu nu} with the metric geometry, INSTEAD of a hand-coded closed form per
-// spacetime:
+// stress-energy T^{mu nu} with the metric geometry, one contraction covering every
+// spacetime in place of a hand-coded closed form each:
 //   S_{S_r}^gravity = (1/2) [ T^{tt} d_r g_tt + 2 T^{tr} d_r g_tr + T^{rr} d_r g_rr ]   (the t-r block;
 //                     the angular 2p/r geometric term rides the flat curvilinear momentum source)
 //   S_tau          = alpha ( T^{mu 0} d_mu ln alpha - T^{mu nu} Gamma^0_{mu nu} )
@@ -125,16 +125,17 @@ pub fn grhd_radial_geodesic_source<S: Scalar>(
 ///   S_j   = (1/2) T^{mu nu} d_j g_{mu nu}                       (all blocks, per coordinate j)
 ///   S_tau = alpha ( T^{t j} d_j ln(alpha) - T^{mu nu} Gamma^t_{mu nu} )
 /// with T^{mu nu} = E uhat^mu uhat^nu + p g^{mu nu} (E = rho h W^2), uhat^t = 1/alpha,
-/// uhat^i = v^i - beta^i/alpha (v^i the CONTRAVARIANT valencia velocity).
+/// uhat^i = v^i - beta^i/alpha (v^i the contravariant valencia velocity).
 ///
 /// unlike [`grhd_radial_geodesic_source`] — the 1D (t, r)-block specialization whose angular
-/// pressure blocks ride the flat curvilinear source — this contraction carries EVERY metric
+/// pressure blocks ride the flat curvilinear source — this contraction carries every metric
 /// block: the angular/centrifugal/pressure terms included. it therefore serves any coordinate
 /// system (spherical, cartesian kerr-schild) and any momentum count: evaluate at the metric's
 /// full coordinate dimension `D` regardless of the grid dimension. a symmetry axis the metric
-/// never reads (axisymmetric phi) yields zero tangents, so the suppressed-axis momentum source
-/// vanishes by construction (angular-momentum conservation). the metric supplies only its ADM
-/// line element; autodiff differentiates it — no hand-derived christoffels.
+/// is independent of (axisymmetric phi) yields zero tangents, so the suppressed-axis momentum
+/// source vanishes by construction (angular-momentum conservation). the metric supplies its ADM
+/// line element and autodiff differentiates it, which is what retires the hand-derived
+/// christoffels.
 ///
 /// carrier-generic: `S = f64` evaluates on the host (the validation tests); `S = Gv` traces
 /// the kernel expression (the host loop over axes unrolls at trace time).
@@ -167,10 +168,10 @@ where
 /// the rest-mass-subtracted covariant (killing) energy from the valencia energy `tau`:
 ///   E_hat = sqrt(gamma) ( alpha tau + (alpha - 1) D - beta^i S_i )
 /// evolving `E_hat` in the energy slot conserves the relativistic bernoulli invariant `h u_t` to
-/// roundoff on ANY stationary background (the killing energy density minus the zero-source baryon
-/// density), where the eulerian `tau` carries a geodesic source that does not vanish. reduces to
-/// `tau` at alpha = 1, beta = 0, sqrt(gamma) = 1. `shift` is the CONTRAVARIANT beta^i and `mom` the
-/// COVARIANT valencia momentum S_i, so `shift.dot(mom) = beta^i S_i`. carrier-generic (S = f64 host
+/// roundoff on every stationary background (the killing energy density minus the zero-source baryon
+/// density), where the eulerian `tau` carries a geodesic source of finite size. reduces to
+/// `tau` at alpha = 1, beta = 0, sqrt(gamma) = 1. `shift` is the contravariant beta^i and `mom` the
+/// covariant valencia momentum S_i, so `shift.dot(mom) = beta^i S_i`. carrier-generic (S = f64 host
 /// / S = Gv traces the kernel expression at the godunov energy assembly).
 pub fn tau_to_ehat<S: Scalar, const D: usize>(
     tau: S,
@@ -263,10 +264,10 @@ mod ehat_tests {
 
     #[test]
     fn ehat_flux_is_conserved_on_the_michel_solution() {
-        // on the EXACT michel transonic solution (gamma = 4/3, M = 1) in the ingoing kerr-schild
+        // on the exact michel transonic solution (gamma = 4/3, M = 1) in the ingoing kerr-schild
         // chart, the re-split covariant-energy flux F_Ehat = alpha F_E - beta F_S - F_D is
-        // r-invariant to roundoff (= jm*(h_inf-1)), while the eulerian energy flux F_E is not. this
-        // is the numerical statement of "E_hat conserves the bernoulli invariant, tau needs a
+        // r-invariant to roundoff (= jm*(h_inf-1)), while the eulerian energy flux F_E varies O(1).
+        // this is the numerical statement of "E_hat conserves the bernoulli invariant, tau needs a
         // source". points (r, rho, u=|u^r|, p) generated from simbi_configs/.../gr_michel.py.
         const M: f64 = 1.0;
         const G: f64 = 4.0 / 3.0;
@@ -382,7 +383,7 @@ mod ehat_tests {
             (mean - analytic).abs() < 1e-6 * analytic.abs(),
             "F_Ehat {mean} vs {analytic}"
         );
-        // and the eulerian flux is NOT conserved (varies O(1)).
+        // and the eulerian flux varies O(1) across the same radii.
         let e_mean: f64 = f_e.iter().sum::<f64>() / f_e.len() as f64;
         let e_spread = (f_e.iter().cloned().fold(f64::MIN, f64::max)
             - f_e.iter().cloned().fold(f64::MAX, f64::min))
@@ -395,17 +396,17 @@ mod ehat_tests {
 }
 
 /// the full GRMHD covariant valencia source — [`grhd_covariant_source`] with the ideal-MHD
-/// stress `T^{mu nu} = (rho h + b^2) u^mu u^nu + (p + b^2/2) g^{mu nu} - b^mu b^nu` in the SAME
-/// per-axis contraction — the electromagnetic stress enters only through `T`. the caller
-/// supplies the METRIC-FREE rest enthalpy density `rho_h = rho + Gamma/(Gamma-1) p`, the
+/// stress `T^{mu nu} = (rho h + b^2) u^mu u^nu + (p + b^2/2) g^{mu nu} - b^mu b^nu` in the same
+/// per-axis contraction — the electromagnetic stress enters through `T` alone. the caller
+/// supplies the metric-free rest enthalpy density `rho_h = rho + Gamma/(Gamma-1) p`, the
 /// contravariant valencia `v^i`, the isotropic-block pressure `p`, and the contravariant
 /// eulerian field `B^i`; the lorentz factor and the magnetic four-vector assemble in here from
 /// the harvested metric:
 ///   alpha b^t = W (v.B),   b^i = B^i/W + alpha b^t uhat^i,   b^2 = B^2/W^2 + (v.B)^2,
 ///   (rho h + b^2) u^mu u^nu = (rho_h + b^2) W^2 uhat^mu uhat^nu.
 /// B = 0 reduces exactly to the hydro contraction at e = rho_h W^2. axisymmetry still zeroes
-/// the suppressed-slot momentum source (the metric never reads phi), B or not —
-/// angular-momentum conservation survives magnetization.
+/// the suppressed-slot momentum source (the metric is independent of phi) at every field
+/// strength — angular-momentum conservation survives magnetization.
 pub fn grmhd_covariant_source<S: Scalar, M, const D: usize>(
     g: &M,
     x: Tensor<S, D>,
@@ -790,13 +791,13 @@ mod tests {
         }
     }
 
-    // rotating (swirl) flow off the equator. the MOMENTUM closed forms follow from the diagonal
+    // rotating (swirl) flow off the equator. the momentum closed forms follow from the diagonal
     // spatial metric — S_theta = (E (v^phi)^2 + p g^{phi phi}) r^2 sin(theta) cos(theta), S_r gains
     // the azimuthal centrifugal block E (v^phi)^2 r sin^2(theta), and S_phi vanishes by axisymmetry.
     //
-    // the ENERGY source needs one term the (t, r)-block specialization cannot supply. that form
-    // carries the angular blocks at ISOTROPIC PRESSURE only, so the fluid's angular kinetic blocks
-    // are missing from `T^{mu nu} Gamma^t_{mu nu}`. on this chart
+    // the energy source needs one term beyond the (t, r)-block specialization. that form carries
+    // the angular blocks at isotropic pressure alone, so the fluid's angular kinetic blocks are
+    // absent from `T^{mu nu} Gamma^t_{mu nu}`. on this chart
     //
     //     Gamma^t_{kk} = -(1/2) g^{tr} d_r g_{kk},        g^{tr} = beta^r / alpha^2
     //
@@ -806,8 +807,8 @@ mod tests {
     //     dS_tau = (beta^r / alpha) E [ (v^theta)^2 r + (v^phi)^2 r sin^2(theta) ]
     //
     // which vanishes identically when beta^r does. that is why a static chart's energy source reads
-    // off the radial block alone, and why a horizon-penetrating one does not — the shift is exactly
-    // the coupling.
+    // off the radial block alone, while a horizon-penetrating one carries the angular blocks too —
+    // the shift is exactly the coupling.
     #[test]
     fn covariant_source_swirl_closed_form_including_the_shifted_energy_coupling() {
         use crate::metric::SchwarzschildKS;
@@ -858,9 +859,9 @@ mod tests {
         );
     }
 
-    // the same coupling with BOTH angular slots carrying fluid motion, so neither term of
-    // `dS_tau = (beta^r/alpha) E [ (v^theta)^2 r + (v^phi)^2 r sin^2(theta) ]` can hide the other.
-    // asserts the ENERGY source only: a nonzero v^theta also moves S_r and S_theta, whose closed
+    // the same coupling with both angular slots carrying fluid motion, so each term of
+    // `dS_tau = (beta^r/alpha) E [ (v^theta)^2 r + (v^phi)^2 r sin^2(theta) ]` stands exposed.
+    // asserts the energy source alone: a nonzero v^theta also moves S_r and S_theta, whose closed
     // forms the swirl test above already pins at v^theta = 0.
     #[test]
     fn shifted_chart_energy_source_carries_both_angular_kinetic_blocks() {
@@ -900,7 +901,7 @@ mod tests {
             approx(s_tau, want),
             "S_tau with both angular slots moving: {s_tau} != {want}"
         );
-        // the premise: the coupling must be RESOLVED here, not lost in the radial block's roundoff.
+        // the premise: the coupling stands well clear of the radial block's roundoff here.
         assert!(
             (want - tau_cf).abs() > 1e-6 * tau_cf.abs().max(1.0),
             "the angular kinetic coupling is negligible at these parameters ({}); the gate would \
@@ -909,8 +910,8 @@ mod tests {
         );
     }
 
-    // the M = 0 limit is flat spherical: the contraction must reproduce the covariant
-    // curvilinear inertial + pressure source with NO gravity and ZERO energy source.
+    // the M = 0 limit is flat spherical: the contraction reproduces the covariant curvilinear
+    // inertial + pressure source, with gravity and the energy source both identically zero.
     #[test]
     fn covariant_source_flat_limit_is_curvilinear_inertial() {
         use crate::metric::SchwarzschildKS;
@@ -940,7 +941,7 @@ mod tests {
         );
     }
 
-    // finite-difference mirror of the covariant contraction: the SAME T^{mu nu} algebra, but
+    // finite-difference mirror of the covariant contraction: the same T^{mu nu} algebra, with
     // every metric derivative taken numerically — validates the Dual (autodiff) plumbing through
     // an arbitrary theta-dependent, non-diagonal metric.
     fn covariant_source_fd<M: crate::metric::Metric<f64, 3>>(
@@ -1327,9 +1328,9 @@ mod tests {
     #[test]
     fn grmhd_source_on_kerr_matches_finite_differences() {
         use crate::metric::KerrKS;
-        // a rotating magnetized state with all velocity AND field components, off the
+        // a rotating magnetized state with all velocity and field components, off the
         // equator, inside and outside the horizon — the autodiff contraction with the
-        // b^mu assembly must agree with the finite-difference mirror.
+        // b^mu assembly agrees with the finite-difference mirror.
         let fd_close = |x: f64, y: f64, s: f64| (x - y).abs() < 1e-7 * (1.0 + s.abs());
         for &a in &[0.9_f64, -0.5] {
             let g = KerrKS {
@@ -1366,8 +1367,8 @@ mod tests {
     #[test]
     fn grmhd_axisymmetric_azimuthal_source_vanishes_with_field() {
         use crate::metric::KerrKS;
-        // the metric never reads phi, so the suppressed-slot momentum source is zero by
-        // construction — magnetization does not break angular-momentum conservation.
+        // the metric is independent of phi, so the suppressed-slot momentum source is zero by
+        // construction — angular-momentum conservation holds at every magnetization.
         let gd = KerrKS {
             mass: Dual::constant(1.0_f64),
             spin: Dual::constant(0.9_f64),

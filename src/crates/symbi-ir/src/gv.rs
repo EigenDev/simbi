@@ -2,11 +2,11 @@
 // gv.rs
 //
 // the `Gv` ("graph value") carrier + the thread-local trace it records into.
-// `Gv` is a `symbi_algebra::Scalar` whose operations RECORD into this crate's
-// tensor graph, evaluating nothing; instantiating carrier-generic physics
-// (written over `S: Scalar`) at `S = Gv` traces it into the stencil IR — the
-// foundational "code -> graph" boundary. graph and carrier live in the SAME
-// crate so the IR machine is one layer.
+// `Gv` is a `symbi_algebra::Scalar` whose operations record a node into this
+// crate's tensor graph and return a handle to it; instantiating carrier-generic
+// physics (written over `S: Scalar`) at `S = Gv` traces it into the stencil IR —
+// the foundational "code -> graph" boundary. graph and carrier live in one
+// crate so the IR machine is a single layer.
 //
 // arena pattern: a thread-local graph holds the active trace; `Gv` is a Copy
 // handle. `begin_trace()` opens it, ops push nodes, `end_trace()` takes the
@@ -14,7 +14,7 @@
 //
 // the trace (`GvTrace`/`with_trace`/`coord_node`) is `pub` so the discretization
 // builders in symbi-discretize can construct raw index/stencil IR (integer coord
-// arithmetic the f64 `Gv` carrier deliberately does not route through itself).
+// arithmetic, which lives in the graph's I32 domain alongside the f64 carrier).
 // =============================================================================
 
 use std::cell::RefCell;
@@ -35,15 +35,15 @@ pub struct GvKernel {
     /// field-buffer reads as `(ir_key, FieldBind)`: the IR-side load name paired with the
     /// born-typed runtime binding the producer minted. the binding is a
     /// `FieldBind` (typed `Ref` for the closed cell vocabulary, `Raw` for hand-built paths) —
-    /// no consumer re-parses a runtime string.
+    /// structured data every consumer reads directly.
     pub field_inputs: Vec<(String, FieldBind)>,
     pub scalar_params: Vec<String>,
     /// spatial axes whose `_coord_N` the trace referenced (for stencil `load_at`);
     /// empty for pointwise kernels. feeds `KernelEmitInputs::coord_components`.
     pub coord_components: Vec<u8>,
     /// the launch grade this kernel is to be issued over. fusion (`try_fuse`)
-    /// requires both sides to share a grade; untagged kernels never
-    /// fuse. see `LaunchGrade` and `try_fuse`.
+    /// requires both sides to share a grade, and a tagged grade is what admits a
+    /// kernel to fusion at all. see `LaunchGrade` and `try_fuse`.
     pub grade: LaunchGrade,
     /// optional shared-memory tile specification. when `Some`, the CUDA emit is
     /// expected to allocate a per-block `__shared__` buffer for each tiled
@@ -51,20 +51,19 @@ pub struct GvKernel {
     /// redirect that field's stencil `LoadAt` reads to smem. when `None`, the
     /// emit produces the prior gmem-per-thread pattern.
     ///
-    /// the type carries the spec; the CUDA emit and LoadAt rewriting paths are
-    /// **not implemented**. the field
-    /// exists so builders, fusion, and the runtime can be extended without
-    /// further enum-shape changes.
+    /// the type carries the spec; the CUDA emit and LoadAt rewriting paths
+    /// remain to be built. the field exists so builders, fusion, and the
+    /// runtime extend behind a stable enum shape.
     pub tile_spec: Option<TileSpec>,
-    /// the declared SUPPORT of this kernel's outputs:
+    /// the declared support of this kernel's outputs:
     /// a region outside which every output is exactly zero for any field input.
     /// declared by the builder (where the saturation constants live), carried
     /// into the serialized `Prepared` blob, consumed by dispatch (reduction /
     /// launch regions). `None` = Everywhere (always sound).
     pub output_support: Option<crate::support::Support>,
     /// builder-tagged support balls by node, carried from the trace for
-    /// `with_derived_support` propagation. build-time metadata only — never
-    /// serialized, dropped by fusion (fused kernels derive before fusing).
+    /// `with_derived_support` propagation. build-time metadata that stays in
+    /// memory; fusion drops it (fused kernels derive support before fusing).
     pub node_supports: std::collections::HashMap<NodeId, crate::support_infer::SupportBall>,
 }
 
@@ -74,28 +73,28 @@ pub struct GvKernel {
 ///
 /// invariants:
 ///   - `halo` has one entry per axis (`halo.len() == kernel ndim`) and at least
-///     one entry is `> 0` (an all-zero halo means no smem benefit — declare
-///     `tile_spec = None`). a PER-AXIS halo lets a direction-`dir` flux kernel,
-///     which reconstructs along ONE axis only, prefetch a thin SLAB (halo on
-///     `dir`, 0 transverse); a fat cube would load ~7.5x
-///     more cells than the physics reads and likely null the perf win.
-///   - every `tiled_field_keys[i]` MUST appear in `GvKernel::field_inputs` —
-///     fields not in the manifest can't be tiled because the dispatch has no
-///     way to bind a buffer to them
+///     one entry is `> 0` (smem reuse requires an extended axis; the untiled
+///     case is `tile_spec = None`). a per-axis halo lets a direction-`dir` flux
+///     kernel, which reconstructs along a single axis, prefetch a thin slab
+///     (halo on `dir`, 0 transverse); a fat cube loads ~7.5x
+///     more cells than the physics reads and spends the perf win.
+///   - every `tiled_field_keys[i]` appears in `GvKernel::field_inputs` — the
+///     dispatch binds a buffer through the manifest entry, so tiling is defined
+///     exactly for manifest fields
 ///   - the per-block thread layout (`block_dims`) plus halo determines the
 ///     smem footprint: `prod_d (block_dims[d] + 2*halo[d]) * sizeof(S) * n_fields`.
 ///     callers must ensure this fits in the device's smem-per-block budget
-///     (48 KB on Turing without opt-in, 64 KB with `cudaFuncSetAttribute`)
+///     (48 KB on Turing by default, 64 KB with `cudaFuncSetAttribute`)
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct TileSpec {
-    /// halo cells PER AXIS (length = kernel ndim). a reconstruction along axis
+    /// halo cells per axis (length = kernel ndim). a reconstruction along axis
     /// `dir` with PLM radius 2 sets `halo[dir] = 2`, the transverse axes `0`.
     /// the cooperative load extends the block by `halo[d]` on each side of axis
-    /// `d`; an axis with `halo[d] == 0` is not extended (yielding a slab).
+    /// `d`; an axis with `halo[d] == 0` keeps the block extent (yielding a slab).
     pub halo: Vec<u8>,
     /// fields to prefetch into smem, by IR key (matching `field_inputs[i].0`).
     /// stencil `LoadAt` reads for these keys are routed through smem; pointwise
-    /// reads of OTHER fields stay on gmem.
+    /// reads of the remaining fields stay on gmem.
     pub tiled_field_keys: Vec<String>,
 }
 
@@ -127,7 +126,8 @@ impl TileSpec {
 /// real `Domain<R>`; `LaunchGrade` is the type-erased view used by the IR.
 ///
 /// the empty grade (`LaunchGrade::untagged()`) is the sentinel for pre-algebra
-/// kernels. it never fuses with anything, including itself.
+/// kernels. fusion admits tagged grades only, so an untagged kernel stands
+/// alone — even against another untagged kernel.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct LaunchGrade {
     /// per-axis half-open intervals, in rank order. delegates to the algebra
@@ -176,9 +176,9 @@ pub enum FusionError {
     /// must serialize via two launches (or restructure to remove the dep).
     InterDep { written: String, read: String },
     /// the two kernels declare incompatible tile specs (different halo widths,
-    /// or one is tiled and the other isn't). a single fused launch can't
-    /// run two block layouts simultaneously. callers must either align the
-    /// specs or keep the kernels in separate launches.
+    /// or one tiled and the other untiled). a single fused launch runs one
+    /// block layout, so callers either align the specs or keep the kernels in
+    /// separate launches.
     TileSpecMismatch {
         a: Option<TileSpec>,
         b: Option<TileSpec>,
@@ -252,9 +252,9 @@ pub fn begin_trace() {
 
 /// take the finished trace (graph + manifest) out, closing it.
 ///
-/// the resulting kernel is **untagged** — it will not participate in
-/// `try_fuse`. callers that don't care about fusion use this; callers that
-/// want the fusion algebra should prefer `end_trace_for_domain(d)`.
+/// the resulting kernel is **untagged**, so it stands outside `try_fuse`.
+/// callers indifferent to fusion use this; callers that want the fusion algebra
+/// should prefer `end_trace_for_domain(d)`.
 pub fn end_trace() -> GvKernel {
     end_trace_with(LaunchGrade::untagged())
 }
@@ -284,7 +284,7 @@ pub fn end_trace_with(grade: LaunchGrade) -> GvKernel {
 }
 
 /// tag a traced value with a support ball: the builder asserts the value is
-/// exactly zero (f64) outside |x - center| > radius for EVERY field input —
+/// exactly zero (f64) outside |x - center| > radius for every field input —
 /// the saturation lemma, stated where the mask that makes it true is built.
 /// consumed by `GvKernel::with_derived_support`, which propagates tags to the
 /// write roots; validated downstream by the compiled-kernel support sampler.
@@ -305,11 +305,11 @@ pub fn tag_support_ball(
     });
 }
 
-/// run `f` in a FRESH, isolated trace and return the finished (untagged) kernel + `f`'s result.
-/// any trace already active on this thread is SAVED before and RESTORED after — so this is safe
-/// to call WHILE another trace is open (e.g., building a sub-source `BuiltSource` partway through
-/// a godunov trace). without this, the inner `begin_trace`/`end_trace` would clobber the outer
-/// trace and the next outer `Gv` op would panic "outside an active trace".
+/// run `f` in a fresh, isolated trace and return the finished (untagged) kernel + `f`'s result.
+/// any trace already active on this thread is saved before and restored after, so this is safe
+/// to call while another trace is open (e.g., building a sub-source `BuiltSource` partway through
+/// a godunov trace). the save/restore is what keeps the outer trace's nodes and manifest intact
+/// across the inner `begin_trace`/`end_trace` pair, which share the one thread-local slot.
 pub fn in_isolated_trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
     let saved = GV_TRACE.with(|t| t.borrow_mut().take());
     begin_trace();
@@ -321,32 +321,30 @@ pub fn in_isolated_trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
 
 impl GvKernel {
     /// infer this kernel's shared-memory tile intent. an explicit
-    /// `tile_spec` overrides; otherwise a STENCIL kernel (non-empty
+    /// `tile_spec` overrides; otherwise a stencil kernel (non-empty
     /// `coord_components` — it does shifted `load_at` reads, so it has a halo and
-    /// reusable neighbor data) gets a `TileSpec`, and a POINTWISE kernel (empty)
-    /// gets `None` (no stencil reuse => smem can't help). this is the
-    /// inferred-with-override policy (decision 1).
+    /// reusable neighbor data) gets a `TileSpec`, and a pointwise kernel (empty)
+    /// gets `None` (its reads are single-use, so gmem serves).
     ///
-    /// the CPU emit cache-tiles EVERY kernel regardless (a runtime knob); this
-    /// drives only the GPU smem path.
+    /// the CPU emit cache-tiles every kernel regardless (a runtime knob); this
+    /// drives the GPU smem path alone.
     ///
-    /// **policy:** OPT-IN. only kernels that explicitly declare
-    /// a `tile_spec` via `with_tile_spec` are tiled — the builder KNOWS the
-    /// stencil structure (which axis reconstructs, how wide) and declares the
-    /// correct per-axis SLAB. the previous auto-inference returned a fat halo-2
-    /// CUBE for every stencil kernel; that over-loads smem ~7.5x for a 1D-along-dir
-    /// reconstruction and reads transverse ghost cells the physics never touches,
-    /// so it is NOT a safe default. auto-inference of a correct per-axis slab from
-    /// the graph's `LoadAt` offsets is deferred to the promotion step.
+    /// **policy:** opt-in. tiling applies to kernels that declare a `tile_spec`
+    /// via `with_tile_spec` — the builder holds the stencil structure (which
+    /// axis reconstructs, how wide) and declares the matching per-axis slab. a
+    /// blanket halo-2 cube over-loads smem ~7.5x for a reconstruction along one
+    /// direction and reads transverse ghost cells outside the physics stencil,
+    /// which makes the explicit declaration the safe default. deriving the
+    /// per-axis slab from the graph's `LoadAt` offsets is future work.
     pub fn infer_tile_spec(&self) -> Option<TileSpec> {
         self.tile_spec.clone()
     }
 
-    /// the field-input keys this kernel reads at a SHIFTED coord — the
+    /// the field-input keys this kernel reads at a shifted coord — the
     /// `Op::LoadAt` field symbols, in first-seen order, restricted to keys that
     /// are actual `field_inputs` (a LoadAt always names a registered field, so
     /// the restriction is a safety net). this is the smem-tile
-    /// candidate set: only stencil-read fields have reusable neighbor data worth
+    /// candidate set: stencil-read fields carry reusable neighbor data worth
     /// prefetching; a field read pointwise stays on gmem.
     pub fn stencil_read_field_keys(&self) -> Vec<String> {
         let manifest: std::collections::HashSet<&str> =
@@ -365,7 +363,7 @@ impl GvKernel {
     }
 
     /// the identity element for the fusion monoid at the given grade. an
-    /// empty graph, no writes, no reads. `try_fuse(noop(g), k) == k` for any
+    /// empty graph with empty writes and reads. `try_fuse(noop(g), k) == k` for any
     /// tagged `k` with `k.grade == g` (identity law).
     pub fn noop(grade: LaunchGrade) -> (GvKernel, Writes) {
         (
@@ -384,10 +382,10 @@ impl GvKernel {
     }
 
     /// builder-style: attach a smem tile spec. validates that every tiled key
-    /// is present in this kernel's `field_inputs` manifest — fields not in the
-    /// manifest can't be tiled because the dispatch has no way to bind a
-    /// buffer to them. panics on mismatch (caller is the GvKernel builder,
-    /// which OWNS the manifest and a mismatch is a build-side bug).
+    /// is present in this kernel's `field_inputs` manifest — the dispatch binds
+    /// a buffer to a tiled slot through its manifest entry. panics on mismatch
+    /// (the caller is the GvKernel builder, which owns the manifest, so a
+    /// mismatch is a build-side bug).
     pub fn with_tile_spec(mut self, spec: TileSpec) -> Self {
         let manifest: std::collections::HashSet<&str> =
             self.field_inputs.iter().map(|(k, _)| k.as_str()).collect();
@@ -408,8 +406,8 @@ impl GvKernel {
     /// declare the support of this kernel's outputs: exactly zero outside the
     /// region, for every field input value (validated by sampling the compiled
     /// kernel — the support-validation gates). a ball's center/radius are
-    /// expressions over THIS kernel's scalar params; every referenced param
-    /// must be in the manifest, or dispatch could never evaluate the geometry.
+    /// expressions over this kernel's scalar params; every referenced param is
+    /// in the manifest, which is what lets dispatch evaluate the geometry.
     pub fn with_output_support(mut self, support: crate::support::Support) -> Self {
         if let crate::support::Support::Ball { center, radius } = &support {
             let manifest: std::collections::HashSet<&str> =
@@ -433,9 +431,9 @@ impl GvKernel {
 
     /// derive the output support from the trace's tagged mask nodes by
     /// propagation over the graph (`support_infer`), then declare it. a broken
-    /// mask chain or an untagged trace derives Everywhere — fail-safe wide,
-    /// never a stale narrow ball. ball params are manifest-validated exactly
-    /// as a hand declaration would be.
+    /// mask chain or an untagged trace derives Everywhere — fail-safe wide, so
+    /// the declared region always contains the true support. ball params are
+    /// manifest-validated exactly as a hand declaration would be.
     pub fn with_derived_support(self, writes: &Writes) -> Self {
         let support = crate::support_infer::derive_output_support(
             &self.graph,
@@ -468,20 +466,20 @@ fn collect_support_params(e: &crate::support::ParamExpr, f: &mut impl FnMut(&str
 /// over the same grade, returning the merged kernel + the concatenated writes
 /// manifest. fails if any of the three structural preconditions are violated:
 ///
-/// - grade equality: both `index_space` must match (and neither be
-///   `Untagged`). fusing different domains would launch at least one half
-///   over the wrong index set.
+/// - grade equality: both `index_space` match, and both are tagged. fusing
+///   different domains would launch at least one half over the wrong index
+///   set.
 ///
-/// - disjoint writes: no runtime_path appears in both writes lists. shared
-///   writes would race.
+/// - disjoint writes: each runtime_path appears in at most one writes list.
+///   shared writes would race.
 ///
-/// - no inter-dependency: for each runtime_path one kernel writes, the
-///   other must not read it. (in-place reads from one's own writes do not
-///   count — that's intra-kernel.) inter-dep violates the sequential
+/// - independence: each runtime_path one kernel writes is absent from the
+///   other's reads. (a kernel reading its own writes is intra-kernel and
+///   stays fine.) inter-dep violates the sequential
 ///    semantics: in the two-launch baseline the second launch sees the first
 ///    launch's updates globally; in a fused launch a stencil read in the
-///    second body would see the first body's writes only at the SAME thread
-///    index.
+///    second body would see the first body's writes at one thread index
+///    alone.
 ///
 /// returns `Ok((fused_kernel, fused_writes))` on success. the fused writes
 /// preserve the original ordering: all of a's writes (with NodeIds unchanged,
@@ -506,9 +504,10 @@ pub fn try_fuse(
         });
     }
 
-    // law: tile-spec equality. a fused launch can only run ONE block layout +
-    // smem prelude. tiled-and-untiled cannot share a launch, and two different
-    // halos / tiled-field sets can't either. callers must align before fusing.
+    // law: tile-spec equality. a fused launch carries one block layout + smem
+    // prelude, so both halves declare the same spec: identical halos and
+    // identical tiled-field sets, tiled or untiled together. callers align
+    // before fusing.
     if a.tile_spec != b.tile_spec {
         return Err(FusionError::TileSpecMismatch {
             a: a.tile_spec.clone(),
@@ -526,19 +525,18 @@ pub fn try_fuse(
         });
     }
 
-    // no inter-dependency: a field one kernel writes and the other reads is a TRUE pipeline hazard
-    // where the reader would need the writer's fresh OUTPUT. EXCEPTION: a field the writer holds
-    // IN-PLACE (it reads AND writes it) is a shared PRE-STATE — both kernels
-    // read the same old value as a leaf, and the fused dataflow writes the new value as a root
-    // (the field is read pointwise, so the in-place write is hazard-free). this is exactly the
-    // god+bcell co-stage composition: the curvilinear gas geo source reads cell-B (bc_k) for the
-    // magnetic pressure while the cell-B predictor flux-evolves that SAME bc_k in place — both on
-    // the timestep's pre-state. excluding the writer's in-place fields lets that fuse safely
-    // (symbi only ever fuses same-stage kernels, never a pipeline, so the reader always wants the
-    // pre-state). disjoint writes are still enforced above, so this never permits a double-write.
-    // compare by the CANONICAL path name on both sides (reads via FieldBind::name, writes via
-    // from_path().name() below) so the in-place/inter-dep detection is spelling-invariant —
-    // a field read as `prim.vel[k]` and written as `prim.vel_k` is the SAME buffer.
+    // independence: a field one kernel writes and the other reads is a pipeline hazard, where the
+    // reader wants the writer's fresh output. the exception is a field the writer holds in place
+    // (it both reads and writes it): that field is a shared pre-state — both kernels read the same
+    // old value as a leaf, and the fused dataflow writes the new value as a root (the read is
+    // pointwise, so the in-place write is hazard-free). the curvilinear gas geometric source reads
+    // cell-B (bc_k) for the magnetic pressure while the cell-B predictor flux-evolves that same
+    // bc_k in place, both off the timestep's pre-state; excluding the writer's in-place fields
+    // lets that pair fuse safely. fusion joins same-stage kernels, so the reader always wants the
+    // pre-state. the disjoint-writes law above still holds, keeping every fused output
+    // single-writer. compare by the canonical path name on both sides (reads via FieldBind::name,
+    // writes via from_path().name() below) so the in-place/inter-dep detection is
+    // spelling-invariant — a field read as `prim.vel[k]` and written as `prim.vel_k` is one buffer.
     let a_input_paths: HashSet<String> = a.field_inputs.iter().map(|(_, p)| p.name()).collect();
     let b_input_paths: HashSet<String> = b.field_inputs.iter().map(|(_, p)| p.name()).collect();
     let a_inplace: HashSet<&String> = a_write_paths.intersection(&a_input_paths).collect();
@@ -605,9 +603,9 @@ pub fn try_fuse(
         }
     }
 
-    // the fused outputs' support is the UNION of both sides'. representable
-    // only when both declare the same region; any mismatch (or an undeclared
-    // side) widens to Everywhere — always sound, never wrong.
+    // the fused outputs' support is the union of both sides'. representable
+    // when both declare the same region; any mismatch (or an undeclared side)
+    // widens to Everywhere, which is sound for any pair of declarations.
     let output_support = match (&a.output_support, &b.output_support) {
         (Some(sa), Some(sb)) if sa == sb => a.output_support.clone(),
         _ => None,
@@ -622,8 +620,8 @@ pub fn try_fuse(
         // a.tile_spec == b.tile_spec, so either side's value serves.
         tile_spec: a.tile_spec,
         output_support,
-        // node tags do not survive fusion: derivation happens at build time,
-        // before fusing, and the fused support is the declared-union above.
+        // node tags stay at build time: derivation runs before fusing, and the
+        // fused kernel carries the declared union above.
         node_supports: HashMap::new(),
     };
 
@@ -640,7 +638,7 @@ pub fn try_fuse(
 /// intern (or reuse) the synthetic `_coord_N` I32 param for spatial axis `ax`, recording
 /// the axis in the manifest. a cell coordinate
 /// is an i32, so stencil shifts (`_coord + off`) and buffer indices are pure integer
-/// arithmetic (no float routing through the f64 Gv carrier).
+/// arithmetic, computed in the graph's I32 domain beside the f64 Gv carrier.
 fn coord_node(t: &mut GvTrace, ax: u8) -> NodeId {
     if let Some(&id) = t.coord_nodes.get(&ax) {
         return id;
@@ -666,7 +664,8 @@ pub fn with_trace<R>(f: impl FnOnce(&mut GvTrace) -> R) -> R {
 // raw index/stencil IR through these, so the trace's fields and the graph stay private.
 impl GvTrace {
     /// raw graph access for builders constructing IR nodes directly (integer index
-    /// arithmetic, select, load_at) — the addressing the f64 `Gv` carrier doesn't route.
+    /// arithmetic, select, load_at): addressing lives in the graph's I32 domain,
+    /// value arithmetic in the f64 `Gv` carrier.
     pub fn graph(&mut self) -> &mut Graph {
         &mut self.graph
     }
@@ -697,7 +696,7 @@ impl GvTrace {
     }
 }
 
-/// a graph value: either a traced node, or a literal not yet materialized.
+/// a graph value: either a traced node, or a literal awaiting materialization.
 #[derive(Clone, Copy, Debug)]
 enum GvVal {
     Node(NodeId),
@@ -707,11 +706,11 @@ enum GvVal {
 /// the tracing scalar carrier. `Copy` (a NodeId or a literal); every operation
 /// records a node into the thread-local trace graph.
 ///
-/// a traced graph value has no physical order or equality — `Scalar` does not
-/// require `PartialOrd`/`PartialEq`, which are deliberately NOT implemented.
-/// physics decides with the traceable `cmp_lt` / `cmp_gt` / `select`, never with
-/// native `<` / `==` (which would silently compare node indices).
-/// the type system enforces this — native ordering does not compile:
+/// a traced graph value carries no physical order or equality: `Scalar` leaves
+/// `PartialOrd`/`PartialEq` out of its bounds, and `Gv` leaves them unimplemented.
+/// physics decides with the traceable `cmp_lt` / `cmp_gt` / `select`, which record a
+/// comparison node; native `<` / `==` would compare node indices, so the type system
+/// rejects them at compile time:
 ///
 /// ```compile_fail
 /// use symbi_ir::Gv;
@@ -723,7 +722,7 @@ enum GvVal {
 pub struct Gv(GvVal);
 
 impl Gv {
-    /// a fresh scalar param node named `name`, unrecorded in the ABI manifest
+    /// a fresh scalar param node named `name`, held out of the ABI manifest
     /// (a bare leaf for unit tests). production inputs use `field` / `scalar`.
     pub fn param(name: &str) -> Gv {
         Gv(GvVal::Node(with_trace(|t| {
@@ -746,13 +745,13 @@ impl Gv {
         })))
     }
 
-    /// a SHIFTED per-cell field read for stencils (PLM reconstruction): the field `key`
+    /// a shifted per-cell field read for stencils (PLM reconstruction): the field `key`
     /// loaded at `cell + offset` along `axis`, over an `ndim`-spatial grid. `offset == 0`
     /// is the direct cell read (`Gv::field`); nonzero builds the integer coord arithmetic
-    /// (`_coord_axis + offset`) + a `LoadAt`, registering the field AND the coord axes in
-    /// the manifest. codegen-only — a stencil is not a pointwise `Scalar` op, so this is a
-    /// Gv method (the host runtime reads neighbors from the
-    /// Field buffer; only the traced kernel needs the explicit `load_at`).
+    /// (`_coord_axis + offset`) + a `LoadAt`, registering the field and the coord axes in
+    /// the manifest. codegen-only: a stencil reaches past the pointwise `Scalar` surface,
+    /// so it lives as a Gv method (the host runtime reads neighbors straight from the
+    /// Field buffer; the traced kernel is what needs the explicit `load_at`).
     pub fn field_shifted(
         key: &str,
         runtime: impl Into<FieldBind>,
@@ -779,7 +778,7 @@ impl Gv {
         })))
     }
 
-    /// read a field at a MULTI-axis integer offset from the current cell — the
+    /// read a field at a multi-axis integer offset from the current cell — the
     /// halo-stencil primitive for operators that read diagonals (e.g. the
     /// viscous transverse gradient). `field_shifted` is the single-axis case.
     /// `offsets[ax]` is the per-axis shift; `offsets.len()` must be `ndim`.
@@ -822,7 +821,7 @@ impl Gv {
     }
 
     /// the cell coordinate along spatial `axis` as a Gv value — the index->physical bridge for
-    /// in-kernel GEOMETRY. it is the integer `_coord_N` (recorded in the coord manifest, like
+    /// in-kernel geometry. it is the integer `_coord_N` (recorded in the coord manifest, like
     /// `field_shifted`); arithmetic against the f64 grid scalars (`x_lo_d`, `dx_d`) auto-promotes
     /// at lowering (the IR's usual arithmetic conversions), so positions, scale factors, and cell
     /// widths trace as pure Gv expressions. this is what lets the substrate geometry (curvilinear
@@ -935,17 +934,17 @@ impl std::fmt::Display for Gv {
     }
 }
 
-// Gv is a Copy fixed-size handle, only ever live during a build-time trace — it is
-// never stored in a `Field<Gv>` buffer, so the layout contract is sound and unexercised.
+// Gv is a Copy fixed-size handle whose lifetime is the build-time trace; it lives in the
+// trace alone, so the `Field<Gv>` buffer-layout contract holds vacuously.
 unsafe impl FieldElement for Gv {
     type Scalar = Gv;
 }
 
 // structural numeric impl — satisfies the in-crate `Tensor` / `Matrix` / `Indexed`
 // method bounds (`Tensor::dot`, `Tensor::norm`, etc.). delegates to the trace-recording
-// ops the production `Scalar` impl below uses. `symbi_algebra::Numeric` is NOT the
-// production carrier-generic surface — it is the minimal subset that breaks the
-// `symbi-algebra` <-> `symbi-ir` dep cycle for `Tensor`'s scalar-bounded methods.
+// ops the production `Scalar` impl below uses. `symbi_algebra::Numeric` is the minimal
+// subset that breaks the `symbi-algebra` <-> `symbi-ir` dep cycle for `Tensor`'s
+// scalar-bounded methods; the production carrier-generic surface is `Scalar`.
 impl symbi_algebra::algebra::Numeric for Gv {
     const ZERO: Self = Gv(GvVal::Lit(0.0));
     const ONE: Self = Gv(GvVal::Lit(1.0));
@@ -974,17 +973,17 @@ impl symbi_algebra::algebra::Numeric for Gv {
 // =============================================================================
 // GvMask + impl `crate::algebra::Scalar for Gv` — the production carrier interface.
 //
-// Mask discipline: `GvMask` is a NEWTYPE around `Gv` that wraps a Bool-typed
-// graph node. construction is `pub(crate)` so ONLY `Scalar::cmp_*` produces
-// masks — the type system enforces "masks at the graph layer are always
-// Bool-typed." `BitAnd` / `BitOr` / `Not` emit the corresponding graph Bool
+// Mask discipline: `GvMask` is a newtype around `Gv` that wraps a Bool-typed
+// graph node. construction is `pub(crate)`, so `Scalar::cmp_*` is the sole
+// producer of masks — the type system enforces "masks at the graph layer are
+// always Bool-typed." `BitAnd` / `BitOr` / `Not` emit the corresponding graph Bool
 // ops (`ElementWiseOp::BitAnd` / `BitOr` / `BitNot`).
 //
 // this is the single carrier surface workspace-wide.
 // =============================================================================
 
 /// type-safe Mask wrapper for Gv. wraps a Gv carrying a Bool-typed graph
-/// node. `pub(crate)` constructor — only `Scalar::cmp_*` produces these.
+/// node. `pub(crate)` constructor — `Scalar::cmp_*` is the sole producer.
 #[derive(Copy, Clone, Debug)]
 pub struct GvMask(pub(crate) Gv);
 
@@ -1039,9 +1038,9 @@ impl crate::algebra::Scalar for Gv {
     fn to_f64(self) -> f64 {
         match self.0 {
             GvVal::Lit(v) => v,
-            // HOST-BOUNDARY ESCAPE — see `crate::algebra::Scalar::to_f64` doc.
+            // host-boundary escape — see `crate::algebra::Scalar::to_f64` doc.
             // a `Gv` on a traced node is a graph handle; extracting a concrete
-            // value inside carrier-generic physics is an A1 violation.
+            // value inside carrier-generic physics breaks the homomorphism.
             GvVal::Node(_) => panic!(
                 "Gv::to_f64 on a traced node — carrier-generic physics must decide with \
                  cmp_*/select, not extract a concrete value"
@@ -1075,21 +1074,21 @@ impl crate::algebra::Scalar for Gv {
 
     // scope frame at S = Gv.
     //
-    // semantics: snapshot the graph's node count BEFORE running `body`; all
+    // semantics: snapshot the graph's node count before running `body`; all
     // NodeIds pushed during the closure (the lexical region of this scope)
     // become the Op::Scope's body list — including any nested Op::Scope
-    // nodes the closure itself emits. the snapshot..end range captures only
-    // FRESH nodes; hash-consing that resolves an expression to a pre-
-    // existing NodeId contributes nothing (its NodeId is outside the
+    // nodes the closure itself emits. the snapshot..end range captures the
+    // fresh nodes; hash-consing that resolves an expression to a pre-
+    // existing NodeId contributes nothing (its NodeId lies outside the
     // range).
     //
     // the resulting Op::Scope bypasses hash-cons (see Graph::push) so two
     // structurally identical scopes from distinct call sites stay distinct.
     //
-    // empty body short-circuit: if the closure produces no new nodes (e.g.
-    // the result is a pre-existing constant or param), there is no scope
-    // to record — return the result directly. this preserves the identity
-    // law for trivial closures.
+    // empty body short-circuit: when the closure produces no new nodes (e.g.
+    // the result is a pre-existing constant or param), the body is empty and
+    // the result returns directly, preserving the identity law for trivial
+    // closures.
     fn scope<F>(body: F) -> Self
     where
         F: FnOnce() -> Self,
@@ -1109,17 +1108,17 @@ impl crate::algebra::Scalar for Gv {
         }))
     }
 
-    // the DUAL of `iterate` for BRANCHES: a lazy conditional at S = Gv.
+    // the dual of `iterate` for branches: a lazy conditional at S = Gv.
     //
-    // semantics: snapshot the graph BEFORE each arm's closure; the NodeIds
+    // semantics: snapshot the graph before each arm's closure; the NodeIds
     // pushed during the closure are that arm's body (the `mark..end` range —
     // same convention as `scope`). emit an Op::IfElse carrying the cond, both
     // arm bodies, and each arm's result. scalarize lowers the arm bodies
-    // INSIDE their respective `if`/`else` brace so only the taken arm executes
+    // inside their respective `if`/`else` brace so the taken arm alone executes
     // — the carrier-portable form of an early-out conditional.
     //
     // shared upstream values (the cond, any pre-branch subexpression) are
-    // created BEFORE the closures, so they fall OUTSIDE both ranges and stay in
+    // created before the closures, so they fall outside both ranges and stay in
     // the outer body (computed once). cross-arm / leaks-outside hash-cons
     // sharing is resolved by scalarize's eviction pass, exactly as for Scope.
     fn cond(m: GvMask, t: impl FnOnce() -> Gv, f: impl FnOnce() -> Gv) -> Gv {
@@ -1149,11 +1148,11 @@ impl crate::algebra::Scalar for Gv {
     }
 
     // the N-output lazy branch: one Op::IfElse, N results, N Op::Proj outputs.
-    // the SHARED arm computation is traced once (each closure runs once); each
+    // the shared arm computation is traced once (each closure runs once); each
     // returned Gv is a projection of the same branch. this is what lets a
     // multi-output fast-path (e.g., the (sl, sr) wave-speed Eq.57/58/quartic
     // selection) skip the whole quartic on the fast path. mirrors `cond` per
-    // arm; the only addition is the N-element result vectors + the projections.
+    // arm, adding the N-element result vectors + the projections.
     fn cond_vec<const N: usize>(
         m: GvMask,
         t: impl FnOnce() -> [Gv; N],
@@ -1194,7 +1193,7 @@ impl crate::algebra::Scalar for Gv {
         one / self
     }
 
-    // ── transcendentals (ONE graph tag: ElementWise) ───
+    // ── transcendentals (one graph tag: ElementWise) ───
     fn sin(self) -> Gv {
         self.unop(ElementWiseOp::Sin)
     }
@@ -1229,10 +1228,11 @@ impl crate::algebra::Scalar for Gv {
 
     fn powi(self, n: i32) -> Gv {
         // lower to repeated multiplication (exponentiation by squaring):
-        // `f64::powi` raises a NEGATIVE base exactly (e.g., (-2)^2 = 4), but CUDA
-        // `powf(neg, 2.0)` = NaN — a carrier-equivalence break (f64 host != Gv kernel).
-        // n is a small integer constant at trace time, so the multiply chain unrolls into
-        // the DAG; it also avoids the transcendental `powf` call entirely.
+        // `f64::powi` raises a negative base exactly (e.g., (-2)^2 = 4) while CUDA
+        // `powf(neg, 2.0)` is NaN, so a `powf` lowering would break carrier equivalence
+        // (the f64 host and the Gv kernel would disagree). n is a small integer constant
+        // at trace time, so the multiply chain unrolls into the DAG and the kernel keeps
+        // to plain multiplies.
         if n == 0 {
             return Gv(GvVal::Lit(1.0));
         }
@@ -1296,12 +1296,13 @@ impl crate::algebra::Scalar for Gv {
         body: impl Fn(Self) -> Self,
         converged: impl Fn(Self, Self) -> GvMask,
     ) -> Gv {
-        // carrier equivalence: traced kernel must return the SAME value the host
-        // loop returns for ANY input. freeze on convergence — see the FREEZE LAW
-        // in `crate::algebra::Scalar::iterate` doc. ALSO pass `conv` as the IR's
-        // `break_when` so the loop EXITS once convergence fires, skipping the
-        // remaining `max_steps` worth of dead body (the freeze nulled the writes
-        // but the cone's arithmetic ran every iter — see RMHD c2p perf).
+        // carrier equivalence: the traced kernel returns the value the host loop
+        // returns, for every input. freeze on convergence — see the freeze law
+        // in `crate::algebra::Scalar::iterate` doc. `conv` also rides as the IR's
+        // `break_when`, so the loop exits once convergence fires and skips the
+        // remaining `max_steps` worth of dead body (the freeze nulls the writes
+        // while the cone's arithmetic would otherwise run every iteration — the
+        // RMHD c2p cost).
         let acc = with_trace(|t| t.graph.iter_acc(0, None));
         let cur = Gv::of(acc);
         let next = body(cur);
@@ -1356,9 +1357,9 @@ impl crate::algebra::Scalar for Gv {
 //   - operation = try_fuse, partial (fails on mismatched grade, shared writes,
 //     or inter-dependency)
 //
-// the tests are SYNTHETIC (no physics): small traces with two independent
-// fields, writes declared manually, asserting the algebraic properties hold
-// structurally. these properties are what let consumer code (godunov +
+// the tests are synthetic (purely structural): small traces with two
+// independent fields, writes declared manually, asserting the algebraic
+// properties hold structurally. these properties are what let consumer code (godunov +
 // bcell_godunov, snapshot + bcell_snapshot, c2p + wave_speed_map) fuse via
 // `try_fuse` soundly.
 // =============================================================================
@@ -1478,7 +1479,7 @@ mod fusion_laws {
 
     // commutativity-mod-disjoint. when writes are disjoint and there is
     // no inter-dep, fuse(a,b) and fuse(b,a) have the same manifest sets.
-    // first-seen ordering of the input list differs, but the SET is invariant.
+    // first-seen ordering of the input list differs while the set is invariant.
     #[test]
     fn law_commutativity_mod_disjoint() {
         let g = interior_grade();
@@ -1529,7 +1530,7 @@ mod fusion_laws {
         }
     }
 
-    // grade rejection. two kernels of different grades cannot fuse.
+    // grade rejection. fusion admits equal grades; a mismatched pair is rejected.
     #[test]
     fn law_grade_rejection() {
         let (a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", interior_grade());
@@ -1541,8 +1542,8 @@ mod fusion_laws {
         }
     }
 
-    // untagged is not fusable, even with itself. tagging is opt-in
-    // — the algebra refuses to assume a default.
+    // an untagged kernel stands outside fusion, even against another untagged
+    // kernel. tagging is opt-in — the algebra requires an explicit grade.
     #[test]
     fn law_untagged_rejection() {
         let (a, aw) = doubler(
@@ -1582,7 +1583,7 @@ mod fusion_laws {
 
     // inter-dep rejection. a writes X, b reads X — fusing would let
     // b's stencil reads observe a's just-written values at non-local
-    // neighbor indices without a grid-wide barrier. reject.
+    // neighbor indices, which would demand a grid-wide barrier. reject.
     #[test]
     fn law_inter_dep_rejection_forward() {
         let g = interior_grade();
@@ -1619,8 +1620,9 @@ mod fusion_laws {
 
     // grade derives from Domain<R>. two grades built from the same
     // Domain (same R, same Space[s]) compare equal even when the Domain
-    // values were constructed by separate calls — the algebra is STRUCTURAL,
-    // not identity-based. (DomainId differs across constructions.)
+    // values were constructed by separate calls — the algebra compares by
+    // structure, while DomainId is identity-based and differs across
+    // constructions.
     #[test]
     fn law_grade_is_structural_over_domain() {
         let d1 = domain([Space {
@@ -1663,9 +1665,9 @@ mod fusion_laws {
         );
     }
 
-    // ----- tile-spec laws (new) -----
+    // ----- tile-spec laws -----
 
-    /// fusion preserves the tile_spec when BOTH sides match. directly sets
+    /// fusion preserves the tile_spec when both sides match. directly sets
     /// `tile_spec` on each kernel (bypassing the `with_tile_spec` builder's
     /// manifest check, which is tested separately) so a single shared spec sits
     /// on both halves regardless of their disjoint inputs.
@@ -1688,8 +1690,8 @@ mod fusion_laws {
         );
     }
 
-    /// fuse(tiled, untiled) must fail with TileSpecMismatch — one kernel
-    /// can't share a launch with another that needs a different smem layout.
+    /// fuse(tiled, untiled) fails with TileSpecMismatch — a launch carries one
+    /// smem layout, so both halves declare the same one.
     #[test]
     fn law_tile_spec_mismatch_rejected() {
         let g = interior_grade();
@@ -1710,8 +1712,8 @@ mod fusion_laws {
         }
     }
 
-    /// two tiled kernels with DIFFERENT halo widths also can't fuse — a single
-    /// smem prelude can only sit one halo at a time.
+    /// two tiled kernels with different halo widths also fail — a single smem
+    /// prelude carries one halo.
     #[test]
     fn law_tile_spec_different_halo_rejected() {
         let g = interior_grade();
@@ -1731,8 +1733,8 @@ mod fusion_laws {
         }
     }
 
-    /// `with_tile_spec` must reject keys absent from the kernel's manifest —
-    /// otherwise the dispatch has no buffer to bind to the tiled slot.
+    /// `with_tile_spec` rejects keys absent from the kernel's manifest — the
+    /// dispatch binds the tiled slot's buffer through its manifest entry.
     #[test]
     #[should_panic(expected = "not in this kernel's field_inputs manifest")]
     fn with_tile_spec_rejects_unknown_field() {
@@ -1744,7 +1746,8 @@ mod fusion_laws {
         });
     }
 
-    /// an all-zero halo is meaningless (no smem benefit). builder rejects it.
+    /// an all-zero halo leaves the block unextended, so smem would repeat gmem.
+    /// the builder rejects it.
     #[test]
     #[should_panic(expected = "at least one axis halo must be > 0")]
     fn with_tile_spec_rejects_zero_halo() {
@@ -1761,7 +1764,7 @@ mod fusion_laws {
     ///   - cube halo=[2,2,2], block (16, 8, 4), 1 field, f64 (8 bytes):
     ///       tile = (16+4) * (8+4) * (4+4) = 20*12*8 = 1920 cells
     ///       bytes = 1920 * 8 * 1 = 15,360
-    ///   - SLAB halo=[2,0,0] (reconstruct along axis 0 only), block (32, 8, 1),
+    ///   - slab halo=[2,0,0] (reconstruct along axis 0 alone), block (32, 8, 1),
     ///     8 fields, f64: tile = (32+4) * 8 * 1 = 288 cells
     ///       bytes = 288 * 8 * 8 = 18,432 — vs the 51,840 a fat cube would cost.
     #[test]
@@ -1780,9 +1783,9 @@ mod fusion_laws {
         assert_eq!(spec_slab.smem_bytes_per_block(&[32, 8, 1], 8), 288 * 8 * 8);
     }
 
-    /// existing fusion laws don't regress when both kernels declare `None`
-    /// for `tile_spec` (the untiled path). identity + grade-mismatch +
-    /// untagged still flow through `try_fuse` unchanged.
+    /// the fusion laws hold when both kernels declare `None` for `tile_spec`
+    /// (the untiled path): identity, grade-mismatch, and untagged all flow
+    /// through `try_fuse` unchanged.
     #[test]
     fn untiled_kernels_still_fuse_as_before() {
         let g = interior_grade();
@@ -1798,16 +1801,16 @@ mod fusion_laws {
 //
 // at f64 the default `Scalar::scope` impl is identity (the closure runs
 // inline). at Gv the override above snapshots the trace, runs the closure,
-// captures every NEW NodeId as the scope's body, and pushes an Op::Scope
+// captures every fresh NodeId as the scope's body, and pushes an Op::Scope
 // node carrying body + result. consequences:
 //
-//   - the scope-form graph contains ONE MORE node than the inline-form
+//   - the scope-form graph contains one more node than the inline-form
 //     graph (the Op::Scope itself);
-//   - all arithmetic nodes are identical in both forms (the scope is a
-//     PURE wrapper — it pushes nothing extra into the body region);
+//   - the arithmetic nodes are identical in both forms (the scope is a
+//     pure wrapper: the body region holds exactly the closure's arithmetic);
 //   - nested Gv::scope produces nested Op::Scope nodes; structural shape
 //     under graph.iter() is preserved (nested scopes appear as inner
-//     Op::Scope nodes pushed BEFORE the outer one).
+//     Op::Scope nodes pushed ahead of the outer one).
 //
 // these tests pin that contract.
 // =============================================================================
@@ -1818,8 +1821,8 @@ mod scope_op_contract {
     use crate::graph::Op;
     use symbi_algebra::Numeric;
 
-    /// at Gv, `scope(|| body)` produces inline-form + exactly ONE extra
-    /// Op::Scope node at the tail. body subgraph is otherwise identical.
+    /// at Gv, `scope(|| body)` produces inline-form plus exactly one extra
+    /// Op::Scope node at the tail; the body subgraph matches inline-form.
     #[test]
     fn gv_scope_emits_one_op_scope_node() {
         // scope-form: (x + y) * (x + y) wrapped in Gv::scope.
@@ -1872,7 +1875,7 @@ mod scope_op_contract {
             assert_eq!(&n_a.op, &n_b.op, "node {id:?} op mismatch in body region");
             assert_eq!(t_a, t_b, "node {id:?} ty mismatch in body region");
         }
-        // tail node MUST be Op::Scope whose result is the trailing Mul.
+        // tail node is Op::Scope whose result is the trailing Mul.
         match &scope_graph.node(scope_root_node).op {
             Op::Scope { body, result } => {
                 assert_eq!(
@@ -1894,8 +1897,8 @@ mod scope_op_contract {
         }
     }
 
-    /// nesting Gv::scope: inner Op::Scope appears BEFORE the outer one.
-    /// outer body must contain the inner Op::Scope NodeId.
+    /// nesting Gv::scope: the inner Op::Scope appears ahead of the outer one,
+    /// and the outer body contains the inner Op::Scope NodeId.
     #[test]
     fn gv_scope_nests_with_inner_op_scope() {
         begin_trace();
@@ -1911,9 +1914,9 @@ mod scope_op_contract {
         // outer Op::Scope is the tail.
         match &graph.node(outer_root_node).op {
             Op::Scope { body, result: _ } => {
-                // outer body contains TWO inner Op::Scope NodeIds (a, b)
-                // and one Add (a + b). assert at least one body entry IS
-                // an Op::Scope.
+                // outer body contains two inner Op::Scope NodeIds (a, b)
+                // and one Add (a + b). count the body entries that are
+                // Op::Scope.
                 let mut inner_scope_count = 0;
                 for &bid in body {
                     if matches!(graph.node(bid).op, Op::Scope { .. }) {
@@ -1930,13 +1933,14 @@ mod scope_op_contract {
     }
 
     /// empty-body short-circuit: a closure whose result is a pre-existing
-    /// NodeId (no new nodes pushed) must NOT emit an Op::Scope.
+    /// NodeId (pushing no fresh nodes) returns that NodeId directly, leaving
+    /// the graph free of an Op::Scope.
     #[test]
     fn gv_scope_empty_body_short_circuits() {
         begin_trace();
         let x = Gv::scalar("x");
         let before = with_trace(|t| t.graph.len());
-        // closure result is `x` itself — no new nodes.
+        // closure result is `x` itself, so the closure pushes nothing.
         let r = <Gv as crate::algebra::Scalar>::scope(|| x);
         let after = with_trace(|t| t.graph.len());
         let g = end_trace_with(LaunchGrade::untagged()).graph;
@@ -1946,7 +1950,7 @@ mod scope_op_contract {
             x.node(),
             "empty-body scope must return the input directly"
         );
-        // and the final graph has no Op::Scope.
+        // the final graph is free of Op::Scope.
         for (_, n, _) in g.iter() {
             assert!(
                 !matches!(n.op, Op::Scope { .. }),
@@ -1963,10 +1967,11 @@ mod powi_carrier_equiv {
     use crate::graph::{ElementWiseOp, Op};
     use crate::passes::scalarize::scalarize;
 
-    // `Gv::powi` must NOT lower to Pow/powf: `f64::powi` raises a NEGATIVE base exactly
-    // (e.g., (-2)^2 = 4), but `powf(neg, 2.0)` = NaN on CUDA — a carrier-equivalence break
-    // (the f64 host path != the traced kernel). this pins the structural fix (multiply
-    // chain, no Pow node) AND the numeric agreement with `f64::powi` on negative bases.
+    // `Gv::powi` lowers to a multiply chain: `f64::powi` raises a negative base exactly
+    // (e.g., (-2)^2 = 4) while `powf(neg, 2.0)` is NaN on CUDA, so a Pow/powf lowering
+    // would break carrier equivalence between the f64 host path and the traced kernel.
+    // this pins the structure (a multiply chain, free of Pow nodes) and the numeric
+    // agreement with `f64::powi` on negative bases.
     #[test]
     fn powi_lowers_to_multiplies_and_matches_f64_on_negative_base() {
         for n in [0_i32, 1, 2, 3, 4, 5, -2, -3] {
@@ -1976,7 +1981,7 @@ mod powi_carrier_equiv {
             let root = r.node();
             let graph = end_trace_with(LaunchGrade::untagged()).graph;
 
-            // structural: NO Pow op anywhere (the bug was lowering to powf).
+            // structural: the multiply-chain lowering leaves the graph free of Pow ops.
             let has_pow = (0..graph.len()).any(|i| {
                 matches!(
                     graph.node(NodeId(i as u32)).op,
@@ -1986,7 +1991,7 @@ mod powi_carrier_equiv {
             assert!(!has_pow, "powi({n}) must lower to multiplies, not Pow/powf");
 
             // numeric: evaluate the traced graph and require bit-agreement with f64::powi
-            // for NEGATIVE (and a few positive) bases — the exact case powf gets wrong.
+            // for negative (and a few positive) bases — the case where powf returns NaN.
             let f = scalarize(&graph, root, "out");
             for &base in &[-2.0_f64, -1.5, -0.5, 0.5, 3.0] {
                 let got = Cpu.eval_elemental(&f, &[base])[0];
@@ -1999,9 +2004,10 @@ mod powi_carrier_equiv {
         }
     }
 
-    // the defaulted carrier helpers `safe_sqrt` (= sqrt(max(.,0))) and `clamp` must trace at
-    // S=Gv AND match the f64 path bit-for-bit. safe_sqrt of a NEGATIVE radicand is 0 (the
-    // clamp-before-sqrt that keeps an unguarded sqrt(neg) from tracing a NaN into the kernel).
+    // the defaulted carrier helpers `safe_sqrt` (= sqrt(max(.,0))) and `clamp` trace at S=Gv
+    // and match the f64 path bit-for-bit. safe_sqrt of a negative radicand is 0: the clamp
+    // ahead of the sqrt holds the radicand at 0, so the trace carries a finite value where an
+    // unguarded sqrt(neg) would carry a NaN.
     #[test]
     fn safe_sqrt_and_clamp_trace_and_match_f64() {
         use crate::algebra::Scalar;

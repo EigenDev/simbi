@@ -1,25 +1,26 @@
 // =============================================================================
 // rmhd_ct_curl_2d_sph_gr_divb_symbolic.rs
 //
-// the SYMBOLIC proof that the 2D SPHERICAL GR constrained-transport curl
-// (rmhd_ct_curl_2d_sph_gr_gv) preserves the AREA-WEIGHTED div(B) = 0 EXACTLY — by
+// the symbolic proof that the 2D spherical GR constrained-transport curl
+// (rmhd_ct_curl_2d_sph_gr_gv) preserves the area-weighted div(B) = 0 exactly, by
 // rational-function cancellation on the traced IR DAG at graph-build time; the numeric 1e-12 evolve
-// gate lives in rmhd_ct_curl_2d_sph_gr_divb.rs. closes the M10 gap for the spherical GR charts: the curls had NO
-// symbolic proof because the extractor could not represent the lapse `sqrt(f)` / `sqrt(h)`.
+// gate lives in rmhd_ct_curl_2d_sph_gr_divb.rs. closes the M10 gap for the spherical GR charts: the
+// proof rests on the extractor's opaque representation of the lapse `sqrt(f)` / `sqrt(h)`.
 //
 // the GR densitized weight is the flat spherical area times the lapse factor:
-//   schwarzschild: sqrt(gamma) = r^2 sin(theta) / sqrt(f),   f = 1 - 2M/r   (lapse in the DENOMINATOR)
-//   kerr-schild:   sqrt(gamma) = r^2 sin(theta) * sqrt(h),   h = 1 + 2M/r   (lapse in the NUMERATOR)
-// the lapse is an OPAQUE, radially-keyed symbol `sqrt_f@<2m>` (proof/extract.rs): identical at a
+//   schwarzschild: sqrt(gamma) = r^2 sin(theta) / sqrt(f),   f = 1 - 2M/r   (lapse in the denominator)
+//   kerr-schild:   sqrt(gamma) = r^2 sin(theta) * sqrt(h),   h = 1 + 2M/r   (lapse in the numerator)
+// the lapse is an opaque, radially-keyed symbol `sqrt_f@<2m>` (proof/extract.rs): identical at a
 // shared radial face (so the div-weight's lapse cancels the curl's inverse lapse there — a rational
-// num/den cancellation), distinct across faces, and REMAPPED by the divergence's radial shift. once
-// it cancels, the residual is the SAME flat r^2 sin(theta) telescoping as the minkowski proof.
+// num/den cancellation), distinct across faces, and remapped by the divergence's radial shift. once
+// it cancels, the residual is the same flat r^2 sin(theta) telescoping as the minkowski proof.
 //
 // the 2D poloidal curl from the single densitized corner EMF Etilde (`ez`), flux form:
 //   dir=0 (B_r,   r-face):    dB_r/dt  = -(1/w_r)  d_th(Etilde),  w_r  = sqrt(gamma)(r_f, th_c) dth
 //   dir=1 (B_th, theta-face): dB_th/dt = +(1/w_th) d_r(Etilde),   w_th = sqrt(gamma)(r_c, th_f) dr
-// weighting each curl by its face area w (= the SAME expression) collapses the metric — the lapse
-// AND the r^2 sin — so the edge-EMF reads telescope to the ZERO rational function.
+// weighting each curl by its face area w (the same expression the kernel divides by) collapses the
+// metric — both the lapse and the r^2 sin — so the edge-EMF reads telescope to the zero rational
+// function.
 // =============================================================================
 
 use symbi_discretize::{Coords, Spacetime, Spacing, rmhd_ct_curl_2d_sph_gr_gv};
@@ -72,7 +73,7 @@ fn dx(ax: usize) -> Poly {
 }
 
 /// the radial lapse factor of `sqrt(gamma)` at the radial half-unit offset `two_m`. schwarzschild
-/// carries `1/sqrt(f)` (lapse in the DENOMINATOR); kerr-schild carries `sqrt(h)` (NUMERATOR). the
+/// carries `1/sqrt(f)` (lapse in the denominator); kerr-schild carries `sqrt(h)` (numerator). the
 /// same opaque `sqrt_f@<2m>` atom either way — it cancels the extracted curl's reciprocal factor at
 /// the same radial offset.
 fn lapse(two_m: i64, in_numerator: bool) -> RatFun {
@@ -106,9 +107,9 @@ fn curl(dir: usize, spacetime: Spacetime) -> LinFormR {
 }
 
 /// build the point-form area-weighted divergence of the 2D poloidal GR curl and return it. the flat
-/// r^2 sin area is multiplied by the chart's radial lapse factor at the SAME face the curl uses:
-///   r-face:     lapse at the r-FACE (offset 0 / +1 -> sqrt_f@0 / sqrt_f@2)
-///   theta-face: lapse at the r-CENTER (sqrt_f@1) for BOTH theta faces (same radius, theta-shift inert)
+/// r^2 sin area is multiplied by the chart's radial lapse factor at the same face the curl uses:
+///   r-face:     lapse at the r-face (offset 0 / +1 -> sqrt_f@0 / sqrt_f@2)
+///   theta-face: lapse at the r-center (sqrt_f@1) for both theta faces (same radius, theta-shift inert)
 fn div(spacetime: Spacetime, lapse_in_numerator: bool) -> LinFormR {
     let curl_r = curl(0, spacetime);
     let curl_th = curl(1, spacetime);
@@ -142,7 +143,7 @@ fn div(spacetime: Spacetime, lapse_in_numerator: bool) -> LinFormR {
 
 #[test]
 fn divb_2d_sph_kerr_schild_symbolic_telescoping() {
-    // the evolved chart: sqrt(gamma) = r^2 sin(theta) sqrt(1 + 2M/r) -> lapse in the NUMERATOR.
+    // the evolved chart: sqrt(gamma) = r^2 sin(theta) sqrt(1 + 2M/r) -> lapse in the numerator.
     let d = div(Spacetime::SchwarzschildKS, true);
     assert!(
         d.is_zero(),
@@ -151,8 +152,8 @@ fn divb_2d_sph_kerr_schild_symbolic_telescoping() {
     );
 }
 
-// bug-injection: a WRONG lapse radial offset on the low r-face weight must NOT cancel — the sqrt_f
-// atoms disagree at the shared face, so the residual survives. proves the proof is lapse-aware
+// bug-injection: pairing the low r-face weight with the lapse from the wrong radius leaves the
+// sqrt_f atoms disagreeing at the shared face, so a residual survives — the proof is lapse-aware
 // (schwarzschild chart; the kerr-schild control is identical up to the numerator/denominator side).
 #[test]
 fn divb_2d_sph_gr_symbolic_detects_wrong_lapse_offset() {
@@ -164,7 +165,7 @@ fn divb_2d_sph_gr_symbolic_detects_wrong_lapse_offset() {
         Poly::constant(1),
     )
     .mul(&lapse(2, false));
-    // INJECTED BUG: the low r-face weight uses the lapse at radial offset 2; the correct low r-face offset is 0.
+    // injected bug: the low r-face weight uses the lapse at radial offset 2; the correct low r-face offset is 0.
     let w_r_lo_bug = RatFun::new(
         r_at(0).times(&r_at(0)).times(&sin_center()).times(&dx(1)),
         Poly::constant(1),

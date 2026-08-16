@@ -2,10 +2,10 @@
 // decomp_refine_body_equivalence.rs
 //
 // IMMERSED BODIES x REFINEMENT x DECOMPOSITION: per-tile 2-level hierarchies, each carrying
-// the same bodies at their GLOBAL positions (finest-owns-bodies per tile: the fine level
+// the same bodies at their global positions (finest-owns-bodies per tile: the fine level
 // holds the full accreting body, the root a gravity-only proxy), driven through the
-// PRODUCTION `evolve_hierarchy_decomposed` loop, must reproduce the monolithic refined run
-// to round-off — fields AND the accreted-mass bookkeeping. the decomposed body phase sums
+// production `evolve_hierarchy_decomposed` loop, reproduce the monolithic refined run
+// to round-off — fields and the accreted-mass bookkeeping alike. the decomposed body phase sums
 // each tile's finest-level feedback partials (the tile fine interiors partition the sink
 // region) and applies the identical global delta everywhere, the same lockstep contract the
 // flat decomposed loop proves in decomp_body_equivalence.

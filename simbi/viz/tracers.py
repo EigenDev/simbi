@@ -326,8 +326,8 @@ def overlay_tracers(
         keep = np.abs(pos[:, ak] - at) <= slab
     x, y = pos[keep, ai], pos[keep, aj]
 
-    # a thin dark outline makes any fill legible on top of ANY field colormap, and a high
-    # zorder keeps the particles above the mesh; sized to read as points, not a haze.
+    # a thin dark outline keeps any fill legible on top of every field colormap, and a
+    # high zorder keeps the particles above the mesh; sized to read as discrete points.
     opts = {
         "s": 9,
         "alpha": 0.9,

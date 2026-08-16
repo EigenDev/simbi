@@ -4,12 +4,12 @@
 // the source-term carrier + user-expression gates. two layers:
 //   - built-in carrier-generic sources (`UniformAccel`, `PointMassGravity`) traced at S=Gv and
 //     rendered/evaluated, matching their analytical form (`S_mom_k = rho*g_ext_k`, etc.) — the
-//     f64 half lives in symbi-hydro (`source_term::tests`), so f64 == Gv == analytical from ONE
-//     definition, no separate eval path, no graph-divergence bug class.
-//   - USER expressions bridged from a DAG (`expr_bridge`) + rendered through the SAME splice path
-//     (`splice_user_source_gv`): a raw user field codegens correctly, and the AXIOMATIC wrappers
+//     f64 half lives in symbi-hydro (`source_term::tests`), so f64 == Gv == analytical from one
+//     definition, evaluated on a single path that closes the graph-divergence bug class.
+//   - user expressions bridged from a DAG (`expr_bridge`) + rendered through that same splice path
+//     (`splice_user_source_gv`): a raw user field codegens correctly, and the axiomatic wrappers
 //     (`user_force_*` / `user_cooling_source`) enforce the work-energy coupling `S_nrg = rho*(a.v)`
-//     BY CONSTRUCTION — energy cannot desync from the force.
+//     by construction — the energy source is derived from the force, so the two stay in step.
 // =============================================================================
 
 mod harness;
@@ -99,9 +99,9 @@ fn carrier_generic_point_mass_gravity_traces_to_analytical_source() {
 fn user_expression_codegens_through_the_source_path() {
     // a user "script": accel = p0 * sin(x_0) — a spatially varying source field, the kind a
     // config-driven user would pass. parse-shaped here as a symbi-expr Dag, bridged into the
-    // symbi-ir Graph, then spliced into a Gv kernel and RENDERED (the harness emits CUDA +
-    // evaluates on the CPU interp). proves a user expression compiles through the SAME path a
-    // built-in source uses, producing compiled kernel code; there is no per-cell interpreted VM.
+    // symbi-ir Graph, then spliced into a Gv kernel and rendered (the harness emits CUDA +
+    // evaluates on the CPU interp). proves a user expression compiles through the same path a
+    // built-in source uses, so the per-cell work is compiled kernel arithmetic.
     use symbi_expr::dag::Dag;
     use symbi_hydro::expr_bridge::lower_dag_to_builtsource;
 
@@ -127,9 +127,9 @@ fn user_force_source_cannot_desync_energy_from_work() {
     // a user "force script": acceleration a(x) = [p0 * x_0, 0.4] (D=2) — a spatially varying body
     // force. the framework wraps it in the conservation law via `user_force_*_source`:
     //   S_mom_k = rho * a_k        (momentum source, D outputs)
-    //   S_nrg   = rho * (a . v)     (energy source, DERIVED from the SAME a)
-    // the user never writes S_nrg, so it cannot desync from the force. proven two ways below:
-    // analytically, and structurally — S_nrg == S_mom . v using ONLY the rendered outputs.
+    //   S_nrg   = rho * (a . v)     (energy source, derived from that same a)
+    // the framework owns S_nrg and derives it from the force, so the two stay in step. proven two
+    // ways below: analytically, and structurally — S_nrg == S_mom . v from the rendered outputs.
     use symbi_expr::dag::Dag;
     use symbi_hydro::expr_bridge::lower_dag_to_builtsource;
     use symbi_hydro::source_spec::{user_force_energy_source, user_force_momentum_source};
@@ -140,7 +140,7 @@ fn user_force_source_cannot_desync_energy_from_work() {
     let a0 = dag.mul(p0, x0);
     let a1 = dag.constant(0.4);
     let nodes = dag.nodes().to_vec();
-    // ONE acceleration field, embedded into BOTH wrappers — the structural reason they can't desync.
+    // one acceleration field, embedded into both wrappers — the structural reason they stay in step.
     let accel = lower_dag_to_builtsource(&nodes, &[a0, a1]).expect("bridge lowers accel");
     let mom = user_force_momentum_source(&accel, 2);
     let nrg = user_force_energy_source(&accel, 2);
@@ -173,7 +173,7 @@ fn user_force_source_cannot_desync_energy_from_work() {
     );
 
     // structural: the energy source equals the momentum source dotted with velocity — the
-    // work-energy coupling, in the RENDERED outputs alone (no reference to `a`).
+    // work-energy coupling, in the rendered outputs alone (`a` stays out of the comparison).
     let s_mom = [out_mom.get([0usize], "s_0"), out_mom.get([0usize], "s_1")];
     let s_nrg = out_nrg.get([0usize], "s_0");
     let work = s_mom[0] * vel[0] + s_mom[1] * vel[1];
@@ -186,7 +186,7 @@ fn user_force_source_cannot_desync_energy_from_work() {
 #[test]
 fn user_cooling_source_is_energy_sink_only() {
     // a user cooling rate Lambda(x) = p0 * x_0^2. the framework wraps it as S_nrg = -Lambda,
-    // reaching ONLY the energy slot — a cooling kind cannot touch momentum or mass.
+    // reaching the energy slot alone — the write set of a cooling kind is exactly {energy}.
     use symbi_expr::dag::Dag;
     use symbi_hydro::expr_bridge::lower_dag_to_builtsource;
     use symbi_hydro::source_spec::user_cooling_source;
@@ -210,10 +210,10 @@ fn user_cooling_source_is_energy_sink_only() {
 
 #[test]
 fn front_door_json_force_config_renders_axiomatic_source() {
-    // THE FULL FRONT DOOR: a force SourceConfig — exactly what python `Dag.force_source` emits as
+    // the full front door: a force SourceConfig — exactly what python `Dag.force_source` emits as
     // json — parsed, then `build_user_source` lowers + wraps it in the conservation law, and the
     // mom + nrg BuiltSources render. accel = [p0*x_0, 0.4]; the coupling S_nrg == S_mom.v holds,
-    // driven entirely from the serialized config (python -> json -> rust -> kernel, no recompile).
+    // driven entirely from the serialized config (python -> json -> rust -> kernel, at runtime).
     use symbi_expr::SourceConfig;
     use symbi_hydro::NEWTONIAN_SPEC;
     use symbi_hydro::expr_bridge::build_user_source;

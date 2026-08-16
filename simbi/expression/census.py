@@ -9,12 +9,12 @@
 # - a list of bin axes, each an expression plus a set of explicit edges;
 # - a set of labelled accumulators, each an expression;
 # - a reduce op.
-# axes take an OUTER PRODUCT, so one radial axis gives shell profiles, a radial and
-# an angular-momentum axis give the histogram per shell, and NO axes give a global
-# reduction over the whole grid.
+# axes take an outer product, so one radial axis gives shell profiles, a radial and
+# an angular-momentum axis give the histogram per shell, and an empty axis list gives
+# a global reduction over the whole grid.
 #
-# gating needs no separate concept: "only inflowing cells" is an ordinary value
-# expression, `m * v_r * (v_r < 0)`, built from the comparison operators.
+# gating is an ordinary value expression: restricting to inflowing cells is
+# `m * v_r * (v_r < 0)`, built from the comparison operators.
 #
 # usage:
 #  g = ExprGraph()
@@ -41,20 +41,20 @@ from .dag_expression import Expr, ReductionOp
 class Cadence(str, Enum):
     """when a census samples on a refinement hierarchy.
 
-    levels are time-aligned ONLY at root-step boundaries: a level subcycles once per parent step,
-    so its clock runs ahead of its parent's within a step and only meets it at the end.
+    levels share a time at root-step boundaries: a level subcycles once per parent step, so its
+    clock runs ahead of its parent's within a step and meets it again at the end.
 
     `ROOT_STEP` reduces every level's leaf cells into one row at that meeting point, so a row is a
     consistent snapshot of the whole composite domain.
 
-    `PER_LEVEL_STEP` instead lets each level sample on its own subcycle, tagged with its own time
+    `PER_LEVEL_STEP` lets each level sample on its own subcycle, tagged with its own time
     and level. this is the better statistic wherever refinement tracks the flow: with cell width
     scaling as radius and a sound speed going as r^-1/2, a level's timestep scales as r^3/2 — the
     same scaling as the eddy turnover time — so samples per correlation time come out
     level-independent and every radius is sampled equally well in units of its own decorrelation.
     root-step sampling under-resolves exactly the innermost, fastest-decorrelating shells.
 
-    a single-level run is unaffected: the two cadences name the same instant.
+    on a single-level run the two cadences name the same instant.
     """
 
     ROOT_STEP = "root_step"
@@ -65,8 +65,8 @@ class Cadence(str, Enum):
 class BinAxis:
     """one bin axis: the coordinate to bin on, and the edges that cut it.
 
-    edges are given explicitly rather than as a spacing rule, so log spacing, linear
-    spacing and hand-chosen edges all work without a spacing enum. `n` edges give
+    edges are given explicitly, so log spacing, linear spacing and hand-chosen edges
+    are all expressible through this one field. `n` edges give
     `n - 1` bins; bin `k` covers `[edges[k], edges[k+1])`, and the last bin is closed
     at its upper edge so a value sitting exactly on the domain boundary is counted.
 
@@ -103,8 +103,8 @@ def log_edges(lo: float, hi: float, n_bins: int) -> list[float]:
     """`n_bins + 1` logarithmically spaced edges spanning [lo, hi].
 
     the natural cut for shells around an accretor, where the flow's correlation time
-    scales with radius, so equal ratios rather than equal widths sample each radius
-    equally well in units of its own decorrelation.
+    scales with radius: equal ratios sample each radius equally well in units of its
+    own decorrelation.
     """
     if not (lo > 0.0 and hi > lo):
         raise ValueError(f"log edges need 0 < lo < hi, got lo={lo}, hi={hi}")
@@ -129,18 +129,19 @@ class Census:
     """a registered binned reduction.
 
     `values` maps each accumulator's label to its expression; the labels travel with
-    the output so a reader can name a column without re-deriving the registration
-    order. `params` supplies the runtime values for any `parameter()` nodes.
+    the output, so a reader names each column straight from the file, leaving the
+    registration order implicit. `params` supplies the runtime values for any
+    `parameter()` nodes.
 
-    every expression — axes and values alike — must come from ONE `ExprGraph`. that
+    every expression — axes and values alike — comes from a single `ExprGraph`. that
     is what lets a shared subexpression be written once and evaluated once per cell,
-    and it is why the cost of a census scales with the size of its graph rather than
-    with the number of accumulators registered.
+    and it is why the cost of a census scales with the size of its graph, independent
+    of the number of accumulators registered.
 
     `sample_interval` is the shortest simulation time between samples; the default
     samples every step, which costs a sizeable fraction of the step it rides on.
 
-    `accumulate` folds every sample into ONE row with the census's own reduce op,
+    `accumulate` folds every sample into a single row with the census's own reduce op,
     trading the time series for a whole-segment reduction. a two-dimensional histogram
     runs to order a hundred kilobytes per sample, which a run that only ever wanted the
     time average would otherwise write to disk in order to average back down.
@@ -176,11 +177,11 @@ class Census:
             seen.add(axis.name)
 
     def _graph(self) -> object:
-        """the single graph every expression must belong to.
+        """the one graph shared by every expression.
 
         expressions from different graphs carry unrelated node numbering, so mixing
-        them would index into the wrong dag rather than fail — this is checked here
-        so the error names the census instead of surfacing as wrong physics.
+        them indexes into the wrong dag and comes back as plausible wrong physics.
+        checking here turns that into an error naming the census.
         """
         exprs = [axis.expr for axis in self.axes] + list(self.values.values())
         graph = exprs[0]._graph
@@ -216,14 +217,15 @@ class Census:
 def describe(payloads: Sequence[Mapping[str, object]]) -> str:
     """a one-line-per-census summary of what a run has registered, from the serialized wire form.
 
-    reported BEFORE the run because every number here is fixed at registration and every one of
+    reported ahead of the run because every number here is fixed at registration and every one of
     them decides a cost the user is about to pay for the whole job. the graph size is what a
     sample costs — the dag is evaluated once per cell regardless of how many accumulators it
-    feeds, so it, and not the accumulator count, is the per-cell work. the bin count times the
-    accumulator count times the sample count is what the output costs on disk.
+    feeds, so the graph size is the per-cell work. the bin count times the accumulator count
+    times the sample count is what the output costs on disk.
 
     a census that turns out to be a hundred-thousand-bin histogram sampled every step is a
-    legitimate thing to ask for; discovering it from a queue slot is not.
+    legitimate thing to ask for; this summary puts that discovery at registration time, where
+    it is cheap, ahead of the queue slot that would otherwise pay for it.
     """
     if not payloads:
         return "no censuses registered"

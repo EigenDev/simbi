@@ -33,8 +33,8 @@ pub fn rotate_3d<S: Scalar>(v: Tensor<S, 3>, theta: S) -> Tensor<S, 3> {
 /// compute advanced body positions for an inertial binary system.
 ///
 /// rotates all bodies by omega * dt where omega = sqrt(M / a^3).
-/// returns None if the system is not a binary, is 1D, or is in a
-/// corotating/stationary frame.
+/// returns Some only for a 2D or 3D binary in an inertial frame; a corotating or
+/// stationary frame, a 1D system, or any other body count yields None.
 pub fn advance_binary<S: Scalar, const D: usize>(
     coll: &BodyCollection<S, D>,
     dt: S,
@@ -64,13 +64,13 @@ pub fn advance_binary<S: Scalar, const D: usize>(
 
 /// apply per-body diagnostic deltas (force / torque / would-be accreted mass) to a body collection,
 /// then advance the prescribed binary orbit. shared by the single-grid `evolve_bodies` (which passes
-/// its own consolidated per-step deltas) and the DECOMPOSED body step (which passes the cross-tile
-/// SUM of every tile's partials). the gravitating mass is held FIXED (a fixed-potential sink):
+/// its own consolidated per-step deltas) and the decomposed body step (which passes the cross-tile
+/// sum of every tile's partials). the gravitating mass is held fixed (a fixed-potential sink):
 /// force/torque are recorded for output, total_accreted_mass accumulates the would-be accretion, and
-/// the binary motion is PRESCRIBED (Keplerian, independent of the feedback). applying the SAME deltas
+/// the binary motion is prescribed (Keplerian, independent of the feedback). applying identical deltas
 /// to two identical collections yields identical state -- the property the decomposed loop relies on
 /// to keep every tile's bodies in lockstep (same global delta + same prescribed advance on each tile).
-/// only the SOURCE prefix integrates here: fragments (bodies beyond
+/// the source prefix is what integrates here: fragments (bodies beyond
 /// `source_count()`) get their ledger fields booked but their motion belongs to
 /// the bonded-fragment subcycle, which consumes the same deltas as frozen
 /// external loads.
@@ -85,10 +85,10 @@ pub fn apply_body_deltas<const D: usize>(
             let body = bodies.get_mut(delta.idx);
             body.force = delta.force_delta;
             body.torque = delta.torque_delta;
-            // TRANSLATIONAL reaction: force_delta is the drag FORCE the gas exerts on the body
+            // translational reaction: force_delta is the drag force the gas exerts on the body
             // (momentum-transfer rate = absorbed_momentum * volume / dt). the body gains the impulse
             // over the step divided by its mass: dv = force_delta * dt / mass. gated on two_way +
-            // mass > 0. the ROTATIONAL reaction (torque_delta, likewise a torque = rate) is integrated
+            // mass > 0. the rotational reaction (torque_delta, likewise a torque = rate) is integrated
             // over dt in the orientation advance below via Euler's equations.
             if delta.idx < n_src && body.two_way_coupling && body.mass > 0.0 {
                 let m = body.mass;
@@ -105,7 +105,7 @@ pub fn apply_body_deltas<const D: usize>(
                 *total_accreted_mass += delta.mass_delta;
                 *accretion_rate = if dt > 0.0 { delta.mass_delta / dt } else { 0.0 };
             }
-            // the GR horizon books BOTH the accreted rest mass AND the covariant energy the shell-flux
+            // the GR horizon books the accreted rest mass together with the covariant energy the shell-flux
             // reduction measured this step (the energy is exactly conserved, so edot is well-defined).
             if let BodyKind::Horizon {
                 total_accreted_mass,
@@ -126,7 +126,7 @@ pub fn apply_body_deltas<const D: usize>(
             }
         }
     }
-    // a PRESCRIBED binary orbit (fixed-potential) governs position/velocity when present and takes
+    // a prescribed binary orbit (fixed-potential) governs position/velocity when present and takes
     // precedence over the force-driven update below.
     let binary = advance_binary(bodies, dt);
     if let Some(advanced) = &binary {
@@ -137,8 +137,8 @@ pub fn apply_body_deltas<const D: usize>(
     }
     for ii in 0..n_src {
         let body = bodies.get_mut(ii);
-        // force-driven TRANSLATION: a two-way body drifts under the velocity the gas reaction gave
-        // it (position += velocity * dt). skipped when a prescribed binary orbit governs motion.
+        // force-driven translation: a two-way body drifts under the velocity the gas reaction gave
+        // it (position += velocity * dt). a prescribed binary orbit takes precedence where present.
         if binary.is_none() && body.two_way_coupling {
             for a in 0..D {
                 body.position[a] = body.position[a] + body.velocity[a] * dt;
@@ -259,8 +259,8 @@ mod tests {
     #[test]
     fn two_way_off_axis_torque_tilts_omega_free_tumbling() {
         // a body spinning about z hit by a reaction torque about x: free 3D rotation integrates the
-        // FULL torque vector, so omega tilts off z (gains an x component). a fixed-axis rotor could
-        // not — this is what lets an asymmetric body tumble.
+        // full torque vector, so omega tilts off z (gains an x component). integrating all three
+        // components is what lets an asymmetric body tumble; a fixed-axis rotor holds omega on z.
         let mut coll = BodyCollection::new().add(
             crate::Body::<f64, 3>::rigid_sphere(
                 0,
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn two_way_force_accelerates_by_the_impulse_over_mass() {
-        // force_delta is the drag FORCE; the body gains the impulse over the step, dv = F dt / mass.
+        // force_delta is the drag force; the body gains the impulse over the step, dv = F dt / mass.
         // a large force over a tiny step is a small velocity kick.
         let mut coll = BodyCollection::new().add(
             crate::Body::<f64, 3>::rigid_sphere(
@@ -318,9 +318,10 @@ mod tests {
 
     #[test]
     fn anisotropic_torque_free_body_precesses() {
-        // torque-free motion of an ANISOTROPIC body spinning about a non-principal axis: Euler's
-        // gyroscopic term `omega x (I omega)` makes omega precess — it develops a z component it did
-        // not start with. an ISOTROPIC body (equal moments) has a zero gyroscopic term and does not.
+        // torque-free motion of an anisotropic body spinning about a non-principal axis: Euler's
+        // gyroscopic term `omega x (I omega)` makes omega precess — it develops a z component absent
+        // from the initial state. isotropic (equal) moments zero the gyroscopic term, holding omega
+        // fixed.
         let mut aniso = crate::Body::<f64, 3>::rigid_sphere(
             0,
             Tensor::zeros(),
@@ -452,6 +453,6 @@ mod tests {
         // positions should have rotated slightly
         let r0 = advanced[0].position.norm();
         assert!(approx(r0, 0.5)); // radius preserved
-        assert!(advanced[0].position[1] > 0.0); // rotated CCW
+        assert!(advanced[0].position[1] > 0.0); // rotated counterclockwise
     }
 }

@@ -20,12 +20,12 @@
 // runtime exposes a stable iteration order — geometric, gravity, IB, user —
 // so audit-mode source-map entries are deterministic.
 //
-// **what this layer is and isn't:**
-//   - IS: a structural validator + a runtime-ready additive iterator. proves
+// **the layer's scope:**
+//   - a structural validator + a runtime-ready additive iterator. proves
 //     that the spec-as-data tables compose correctly under the 5 clauses.
-//   - ISN'T: the substrate kernel emitter. that separate layer walks
-//     `sources_for(field)` to build the per-field flux + source kernel.
-//     this file ships the *contract* the emitter consumes.
+//   - the *contract* the substrate kernel emitter consumes; that separate
+//     layer walks `sources_for(field)` to build the per-field flux + source
+//     kernel.
 //
 // usage:
 //   use symbi_hydro::{NEWTONIAN_SPEC, spherical_geometric_sources,
@@ -48,7 +48,7 @@ use crate::regime_spec::RegimeSpec;
 use crate::source_spec::{BuiltSource, SourceKind, SourceSpec};
 
 /// **fused-source family**: a runtime declaration of a
-/// FAMILY of `SourceSpec` overlays that has a SINGLE corresponding AOT-baked
+/// family of `SourceSpec` overlays that has a single corresponding AOT-baked
 /// fused godunov kernel (see `symbi-aot/build.rs::gen_godunov_euler_fused`).
 /// the family knows three things: which AOT slug it maps to (`source_id`),
 /// the parameter values for the family's runtime scalars (`g_ext_k`, `gm`,
@@ -59,12 +59,12 @@ use crate::source_spec::{BuiltSource, SourceKind, SourceSpec};
 /// `(source_id, scalar_pairs)` tuple the substrate's `FusedSourceBinding`
 /// constructor accepts. when SimulationLaws holds zero fused families the
 /// derivation yields `None` and the substrate routes to the unfused kernel.
-/// a fused-source FAMILY captures the PHYSICS identity of an
-/// overlay (uniform external acceleration, point-mass gravity, ...) without
-/// regime-specific concerns. `has_energy` is determined by the regime the
-/// family composes with (`SimulationLaws::with_fused_family` reads it off
-/// `self.regime.has_energy`), so the same `UniformAcceleration` family
-/// composes correctly with iso (mom-only) AND with adiabatic / rhd / rmhd
+/// a fused-source family captures the physics identity of an
+/// overlay (uniform external acceleration, point-mass gravity, ...), leaving
+/// regime-specific concerns to the regime. `has_energy` is determined by the
+/// regime the family composes with (`SimulationLaws::with_fused_family` reads
+/// it off `self.regime.has_energy`), so the same `UniformAcceleration` family
+/// composes correctly with iso (mom-only) and with adiabatic / rhd / rmhd
 /// (mom + nrg) — one declaration, every regime.
 #[derive(Clone, Debug)]
 pub enum FusedSourceFamily {
@@ -80,7 +80,7 @@ pub enum FusedSourceFamily {
 }
 
 impl FusedSourceFamily {
-    /// the AOT-kernel slug this family corresponds to. MUST match the suffix
+    /// the AOT-kernel slug this family corresponds to. must match the suffix
     /// `symbi-aot/build.rs::gen_godunov_euler_fused` emits for the family.
     pub fn source_id(&self) -> &'static str {
         match self {
@@ -124,7 +124,7 @@ impl FusedSourceFamily {
     /// composition validator + the AOT build-time codegen. `d` = grid
     /// dimension (each `build_source` is dimension-generic). `has_energy`
     /// comes from the parent regime; the family declaration leaves it unset — the same
-    /// `UniformAcceleration` declaration composes with iso (mom-only) AND
+    /// `UniformAcceleration` declaration composes with iso (mom-only) and
     /// adiabatic / rhd / rmhd (mom + nrg) by varying just this flag.
     pub fn to_source_specs(&self, d: usize, has_energy: bool) -> Vec<SourceSpec> {
         match self {
@@ -153,10 +153,10 @@ impl FusedSourceFamily {
 ///     `source_apply` pass. (none ship as built-ins; the channel exists
 ///     for the general path + user-defined expression sources.)
 ///
-/// `a + b` concatenates both payloads — purely additive, so the source SET is
-/// order-independent. CAVEAT: the substrate consumes only the FIRST fused
-/// family (`derive_fused_binding`); composing two fused families needs either a
-/// composite AOT slug or the additive pass for the 2nd+ — without that, the order
+/// `a + b` concatenates both payloads — purely additive, so the source set is
+/// order-independent. caveat: the substrate consumes the first fused family
+/// (`derive_fused_binding`); composing two fused families needs either a
+/// composite AOT slug or the additive pass for the 2nd+ — until then, the order
 /// of two fused families is observable. one fused family + N additive specs is
 /// fully general.
 #[derive(Clone, Debug, Default)]
@@ -166,7 +166,7 @@ pub struct Overlay {
 }
 
 impl Overlay {
-    /// the monoid identity — no sources. `x + Overlay::none() == x`.
+    /// the monoid identity — an empty overlay. `x + Overlay::none() == x`.
     pub fn none() -> Self {
         Self::default()
     }
@@ -217,9 +217,9 @@ pub struct SimulationLaws<'a> {
     pub ib: Vec<SourceSpec>,
     pub user: Vec<SourceSpec>,
     /// the AOT-fused source families bound for this
-    /// simulation. typically ONE family (e.g., uniform_accel) — but the
+    /// simulation. typically one family (e.g., uniform_accel) — but the
     /// derivation accepts more for composite slugs (e.g.
-    /// `"uniform_accel_pointmass"`). the substrate consumes the FIRST
+    /// `"uniform_accel_pointmass"`). the substrate consumes the first
     /// family via `derive_fused_binding(d)`.
     pub fused_families: Vec<FusedSourceFamily>,
 }
@@ -308,11 +308,10 @@ impl<'a> SimulationLaws<'a> {
     /// consumes — or `None` when no family is configured (the substrate
     /// then routes through the unfused godunov, the prior default).
     ///
-    /// this picks the FIRST family in `fused_families`; multi-family
+    /// this picks the first family in `fused_families`; multi-family
     /// composite slugs (e.g., `"uniform_accel_pointmass"`) require a larger
-    /// AOT bake-matrix. a SimulationLaws with two
-    /// families logs a `debug_assert` so silent dropping never
-    /// goes unnoticed.
+    /// AOT bake-matrix. a SimulationLaws with two families trips a
+    /// `debug_assert`, so a dropped family is reported.
     pub fn derive_fused_binding(&self) -> Option<(&'static str, Vec<(String, f64)>)> {
         debug_assert!(
             self.fused_families.len() <= 1,
@@ -323,7 +322,7 @@ impl<'a> SimulationLaws<'a> {
         self.fused_families.first().map(|f| f.into_binding_pair())
     }
 
-    /// iterate ALL overlay sources in additive-composition order (geometric,
+    /// iterate all overlay sources in additive-composition order (geometric,
     /// gravity, IB, user). the substrate emitter walks this to build the
     /// per-field source accumulator.
     pub fn overlays(&self) -> impl Iterator<Item = &SourceSpec> {
@@ -348,7 +347,7 @@ impl<'a> SimulationLaws<'a> {
         self.overlays().map(|s| s.target_field).collect()
     }
 
-    /// build ONE combined source graph for `field` — the additive sum of
+    /// build one combined source graph for `field` — the additive sum of
     /// every overlay's contribution. returns `None` when no overlay targets
     /// the field (the substrate emitter skips source-term computation for
     /// that field's RHS).
@@ -364,14 +363,14 @@ impl<'a> SimulationLaws<'a> {
     ///   - corresponding-component outputs are summed via `Op::Add`
     ///     across sources;
     ///   - the result's `outputs.len()` equals the field-component count
-    ///     of the first overlay (every overlay targeting one field MUST
+    ///     of the first overlay (every overlay targeting one field must
     ///     emit the same component count — the validator enforces this).
     ///
     /// the splice supports the algebraic Op subset the source
     /// builders use (`Const`, `Param`, `ElementWise`, `Transcendental`,
     /// `Select`). it panics on tensor / higher-order Ops — by design: the
-    /// source layer doesn't lower through them; a source that
-    /// did would need the splice extended to match.
+    /// source layer lowers through the algebraic subset alone, and a source
+    /// reaching beyond it would need the splice extended to match.
     pub fn build_total_source(&self, field: &str, d: usize) -> Option<BuiltSource> {
         let sources: Vec<&SourceSpec> = self.sources_for(field).collect();
         if sources.is_empty() {
@@ -385,8 +384,8 @@ impl<'a> SimulationLaws<'a> {
         for source in sources {
             let built = (source.build_source)(d);
             // re-declare this source's params into dest (add_param dedups by symbol, so
-            // params shared across overlays map to ONE dest node), then splice via the ONE
-            // canonical homomorphism (symbi_ir::splice_graph) — no duplicated walker.
+            // params shared across overlays map to one dest node), then splice via the
+            // canonical homomorphism (symbi_ir::splice_graph) — the walker lives in one place.
             let subst = redeclare_params(&mut dest, &built.graph);
             let translated = splice_graph(&mut dest, &built.graph, &built.outputs, &subst)
                 .expect("additive source splice");
@@ -434,7 +433,7 @@ impl<'a> SimulationLaws<'a> {
     ///   - a source targets a field not in the regime's `fields` array
     ///     (clause 2 — typed `target_field`);
     ///   - a source targets `nrg` on an isothermal regime (clause 2's iso
-    ///     special case — `has_energy=false` MUST drop nrg overlays);
+    ///     special case — `has_energy=false` must drop nrg overlays);
     ///   - the regime's own laws table targets a field not in `fields`
     ///     (regime-internal consistency).
     pub fn validate(&self) -> Result<(), CompositionError> {
@@ -453,7 +452,7 @@ impl<'a> SimulationLaws<'a> {
 
         // every overlay source targets a known field — and isothermal
         // regimes reject nrg-targeted overlays specifically. the iso check
-        // fires FIRST so the diagnostic is the more specific
+        // fires first so the diagnostic is the more specific
         // `EnergyOverlayOnIsothermal`; the generic
         // `UnknownTargetField` is preempted (iso's `nrg` is "unknown" by structure but
         // the user-facing reason is "iso has no energy equation").
@@ -478,8 +477,8 @@ impl<'a> SimulationLaws<'a> {
 }
 
 /// re-declare every `Op::Param` leaf of `src` into `dest` (add_param dedups by symbol, so a
-/// param shared across overlays maps to ONE dest node) and return the Symbol -> dest-NodeId
-/// substitution map. this is the additive-composition "params are FRESH in dest" leaf policy;
+/// param shared across overlays maps to one dest node) and return the Symbol -> dest-NodeId
+/// substitution map. this is the additive-composition "params are fresh in dest" leaf policy;
 /// `splice_graph` then does the variant-complete graph copy with these substitutes.
 fn redeclare_params(dest: &mut Graph, src: &Graph) -> HashMap<Symbol, NodeId> {
     let mut subst: HashMap<Symbol, NodeId> = HashMap::new();
@@ -503,7 +502,7 @@ pub enum CompositionError {
         regime: &'static str,
         field: &'static str,
     },
-    /// an overlay source targets a field the regime does not declare.
+    /// an overlay source targets a field outside the regime's declaration.
     /// catches typos + cross-regime composition errors (e.g., attaching
     /// rmhd-targeted overlays to newtonian).
     UnknownTargetField {
@@ -511,10 +510,9 @@ pub enum CompositionError {
         target: &'static str,
         regime: &'static str,
     },
-    /// an overlay source targets `nrg` on an isothermal regime. iso has
-    /// no energy equation; the source can't contribute meaningfully. the
-    /// fix is to either drop the energy overlay or switch to an adiabatic
-    /// regime.
+    /// an overlay source targets `nrg` on an isothermal regime. iso evolves
+    /// mass and momentum alone, so the source has no slot to land in. the
+    /// fix is to drop the energy overlay or switch to an adiabatic regime.
     EnergyOverlayOnIsothermal {
         kind: SourceKind,
         regime: &'static str,
@@ -568,10 +566,10 @@ mod tests {
 
     #[test]
     fn sources_for_field_routes_correctly() {
-        // momentum gets BOTH the geometric source AND gravity's mom source
-        // AND IB's rigid penalty — three contributions all on "mom".
+        // momentum gets the geometric source, gravity's mom source, and
+        // IB's rigid penalty — three contributions all on "mom".
         // energy gets gravity's nrg source — one contribution on "nrg".
-        // mass gets nothing (this overlay stack has no accretion sink).
+        // mass gets zero contributions (this overlay stack omits an accretion sink).
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
             .with_geometric(spherical_geometric_sources(3))
             .with_gravity(point_mass_gravity_sources(3, true))
@@ -604,7 +602,7 @@ mod tests {
             .with_gravity(point_mass_gravity_sources(3, true)) // mom + nrg
             .with_ib(rigid_body_penalty_sources(3)); // mom
 
-        // mom is targeted by THREE overlays (geometric + gravity + rigid) and must dedupe to one.
+        // mom is targeted by three overlays (geometric + gravity + rigid) and must dedupe to one.
         let fields = sim.fields_with_overlays();
         assert_eq!(
             fields.len(),
@@ -630,7 +628,7 @@ mod tests {
     fn validate_rejects_nrg_overlay_on_isothermal_regime() {
         // **the load-bearing iso canary**: a gravity overlay with energy
         // attached to an isothermal regime is a composition error. the
-        // validator catches it BEFORE the kernel emitter ever runs.
+        // validator catches it before the kernel emitter ever runs.
         let sim = SimulationLaws::new(&ISO_NEWTONIAN_SPEC)
             .with_gravity(point_mass_gravity_sources(3, true)); // includes nrg
 
@@ -679,8 +677,8 @@ mod tests {
         }
     }
 
-    // a no-op builder just to satisfy the SourceSpec type for the negative
-    // test above; never invoked because validate() catches the error first.
+    // a no-op builder satisfying the SourceSpec type for the rejection tests;
+    // validate() catches the error ahead of any build_source call.
     fn bogus_builder(_d: usize) -> crate::source_spec::BuiltSource {
         let g = symbi_ir::graph::Graph::new();
         crate::source_spec::BuiltSource {
@@ -692,8 +690,8 @@ mod tests {
 
     #[test]
     fn validate_passes_through_each_kind_independently() {
-        // an unknown target_field on a Geometric source MUST also fail —
-        // the validator doesn't grant a free pass to any kind.
+        // an unknown target_field on a Geometric source must also fail —
+        // the validator applies clause 2 to every kind alike.
         let bogus_geom = vec![SourceSpec {
             kind: SourceKind::Geometric,
             target_field: "not_a_field",
@@ -765,7 +763,7 @@ mod tests {
     fn build_total_source_single_source_equals_that_source() {
         // when only one overlay targets the field, the combined graph
         // computes the same value as the source's own builder. proves
-        // the splice operation introduces no algebraic drift.
+        // the splice operation reproduces the source's algebra exactly.
         use crate::regime_spec::law_params;
         use crate::source_spec::source_params;
         let sim =
@@ -811,8 +809,8 @@ mod tests {
     #[test]
     fn build_total_source_two_sources_sums_componentwise() {
         // **the load-bearing test**: 2D spherical geometric + 2D point-mass
-        // gravity, both targeting `mom`. the combined total MUST equal the
-        // ELEMENTWISE SUM of the individual contributions. proves the
+        // gravity, both targeting `mom`. the combined total must equal the
+        // elementwise sum of the individual contributions. proves the
         // additive-composition contract end-to-end.
         use crate::regime_spec::law_params;
         use crate::source_spec::{gravity_params, source_params};
@@ -949,7 +947,7 @@ mod tests {
     #[test]
     fn build_total_source_param_dedup_keeps_manifest_minimal() {
         // **the param-dedup test**: when two sources share params (rho,
-        // vel_k, x_k), the combined manifest contains each name EXACTLY
+        // vel_k, x_k), the combined manifest contains each name exactly
         // once. the substrate emitter consumes this manifest to bind
         // kernel arguments — duplicates would cause double-binding and
         // run-time corruption.
@@ -983,8 +981,8 @@ mod tests {
     fn spec_data_drives_primary_cuda_emit_end_to_end() {
         // spec data -> SimulationLaws -> composition -> primary scalarize emit ->
         // concrete CUDA C. raw literals stay raw (precision-explicit via buffer
-        // ptr types); the math functions are libdevice names (`sqrt`, the bare
-        // C name; no `.sqrt()` method call), and there is no carrier-generic `S::from_f64` wrap.
+        // ptr types); the math functions are libdevice names (`sqrt`, the bare C name
+        // in function form), and the emitted literals are plain C constants.
         use crate::source_spec::point_mass_gravity_sources;
 
         let sim =
@@ -993,9 +991,9 @@ mod tests {
             .build_total_source("mom", 2)
             .expect("gravity mom source");
 
-        // the PRIMARY path (the production emitter via GpuSourceKernel) produces
+        // the primary path (the production emitter via GpuSourceKernel) produces
         // the source-ABI kernel from the graph: function-style sqrt, raw
-        // literals, no carrier wrap — via scalarize + emit_source_kernel.
+        // literals, plain C constants — via scalarize + emit_source_kernel.
         let prim = symbi_ir::backends::cuda::emit_source_kernel(
             &built.graph,
             &built.params,
@@ -1021,8 +1019,8 @@ mod tests {
     fn user_source_validates_and_composes_with_framework_sources() {
         // **the openness proof at the composition layer**: a user-defined
         // source slots into `SimulationLaws` and sums into the additive RHS
-        // with the same machinery as gravity / geometric / IB. proves there
-        // is no special path — user sources are first-class.
+        // with the same machinery as gravity / geometric / IB. proves user
+        // sources travel the one shared path — they are first-class.
         use crate::source_spec::uniform_acceleration_sources;
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
             .with_gravity(point_mass_gravity_sources(3, true))
@@ -1041,7 +1039,7 @@ mod tests {
         assert!(mom_kinds.contains(&SourceKind::Gravity));
         assert!(mom_kinds.contains(&SourceKind::UserDefined));
 
-        // and build_total_source DOES merge them into one graph — proves
+        // and build_total_source does merge them into one graph — proves
         // the user source flows through the same splice path as the rest.
         let combined = sim.build_total_source("mom", 3).expect("two sources");
         assert_eq!(combined.outputs.len(), 3);
@@ -1049,9 +1047,9 @@ mod tests {
 
     #[test]
     fn user_source_rejected_when_targeting_unknown_field() {
-        // user sources get NO free pass: a target_field outside the regime's
-        // fields array fails validation identically to a typo in any framework
-        // source. clause 2 holds uniformly across kinds.
+        // clause 2 binds user sources exactly as it binds framework ones: a
+        // target_field outside the regime's fields array fails validation
+        // identically to a typo in any framework source.
         use crate::source_spec::user_defined_source;
         let bogus = vec![user_defined_source("not_a_real_field", bogus_builder)];
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_user(bogus);
@@ -1067,11 +1065,9 @@ mod tests {
 
     #[test]
     fn newtonian_compose_full_stack_validates() {
-        // the canonical Kepler-disk setup: newtonian regime, cylindrical
-        // (no wait — cylindrical is also valid; this test uses spherical
-        // because Spherical is the most expression-dense geometric source).
-        // overlay: spherical geometry + central-mass gravity + an accreting
-        // body. EVERY clause must pass.
+        // the canonical Kepler-disk setup: newtonian regime with cylindrical
+        // geometry, central-mass gravity, and a rigid immersed body. every
+        // clause must pass.
         use crate::source_spec::cylindrical_geometric_sources;
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
             .with_geometric(cylindrical_geometric_sources(3))
@@ -1095,7 +1091,7 @@ mod tests {
     fn overlay_with_equals_with_fused_family() {
         // the surface is a pure rename: `.with(point_mass(..), d)` must produce
         // the identical laws as the underlying `.with_fused_family(..)` — same
-        // fused-family derivation AND same bucketed specs. kepler's path.
+        // fused-family derivation and same bucketed specs. kepler's path.
         let gm = 1.5;
         let xm = vec![0.0, 0.0];
         let via_surface =
@@ -1138,8 +1134,8 @@ mod tests {
 
     #[test]
     fn overlay_sum_threads_both_families() {
-        // `point_mass + uniform_accel` buckets gravity AND user, and declares
-        // two fused families. (derive_fused_binding picks the FIRST — the
+        // `point_mass + uniform_accel` buckets gravity and user, and declares
+        // two fused families. (derive_fused_binding picks the first — the
         // documented single-family substrate limit; the 2nd awaits the additive
         // pass or a composite slug.)
         let laws = SimulationLaws::new(&ISO_NEWTONIAN_SPEC).with(

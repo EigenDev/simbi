@@ -117,18 +117,18 @@ def plan_slice(
         index_tuple_list[axis_index] = slice_index
         sliced_axes_indices.add(axis_index)
 
-    # the surviving axes in DATA-AXIS order (ascending index). `sliced_values` keeps its
-    # axes in exactly this order, so the DOMAIN must stay in the same order for
-    # domain[k] to be the coordinate array of values axis k -- the plotter reads
-    # domain[0] as the outer/slower axis (vertical) and domain[1] as the inner/faster
-    # (horizontal), matching the unsliced/native path. reordering the domain into logical
-    # (x1,x2,x3) order WITHOUT a matching value transpose transposes a non-square slice:
-    # the domain claims (x1,x2) while the values stay (x2,x1), so the coordinate lengths
-    # disagree with the value grid.
+    # the surviving axes in data-axis order (ascending index). `sliced_values` keeps its
+    # axes in this order, and the domain holds the same order, which makes domain[k] the
+    # coordinate array of values axis k -- the plotter reads domain[0] as the
+    # outer/slower axis (vertical) and domain[1] as the inner/faster (horizontal),
+    # matching the unsliced/native path. reordering the domain into logical (x1,x2,x3)
+    # order travels with a matching value transpose; on its own it transposes a
+    # non-square slice, leaving the domain claiming (x1,x2) while the values stay
+    # (x2,x1), so the coordinate lengths disagree with the value grid.
     remaining_indices = sorted(set(range(ndim)) - sliced_axes_indices)
     final_domain_indices = remaining_indices
     transpose_order = tuple(range(len(remaining_indices)))
-    # AXIS LABELS, by contrast, are the logical names in forward (x1,x2,x3) order: the
+    # axis labels, by contrast, are the logical names in forward (x1,x2,x3) order: the
     # labeler pairs axis_names[0] with the horizontal axis, which is domain[1] = the
     # inner axis = the lowest-numbered surviving logical axis. this mirrors the native
     # convention (domain reversed, names forward), so a slice labels like an unsliced plot.
@@ -377,7 +377,8 @@ def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
         # of the coarse grid region it's covering
         fine_ny, fine_nx = fine_values.shape
         if fine_nx % coarse_nx != 0 or fine_ny % coarse_ny != 0:
-            # grid mismatch, cannot perform clean block averaging
+            # clean block averaging needs an integer refinement ratio, so a
+            # mismatched grid is skipped
             continue
 
         # downsample the fine data to the coarse grid's resolution
@@ -478,10 +479,10 @@ def _uncovered_cells(
     y_edges: Array,
     regions: Sequence[tuple[float, float, float, float]],
 ) -> Array:
-    """which cells of this level are not already drawn by a finer one.
+    """which cells of this level a finer one leaves for it to draw.
 
-    a cell belongs to whichever region holds its CENTRE: testing the corners
-    instead would drop a coarse cell that merely abuts a refined patch."""
+    a cell belongs to whichever region holds its center; a corner test would
+    drop a coarse cell that merely abuts a refined patch."""
     x_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
     y_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
 
@@ -505,7 +506,7 @@ def _compose_one_field(
     nlvls = 1 + sum("_L" in f.name for f in levels)
     is_refined = nlvls > 1
 
-    # refined data MUST use polygons (pcolormesh can't handle different grids)
+    # refined data renders as polygons; a pcolormesh quadmesh carries one grid
     if is_refined:
         use_polygons = True
     else:

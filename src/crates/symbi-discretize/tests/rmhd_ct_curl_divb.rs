@@ -2,10 +2,10 @@
 // rmhd_ct_curl_divb.rs
 //
 // proves the substrate constrained-transport curl update (rmhd_ct_curl_2d)
-// PRESERVES the divergence-free constraint div(B) = 0 to machine precision — the
+// preserves the divergence-free constraint div(B) = 0 to machine precision — the
 // defining property of CT. B is initialized divergence-free from a discrete vector
 // potential Az (Bx = dAz/dy, By = -dAz/dx, which makes the discrete div telescope
-// to exactly 0), then evolved one step by the curl of an ARBITRARY edge EMF Ez.
+// to exactly 0), then evolved one step by the curl of an arbitrary edge EMF Ez.
 // because the discrete curl + discrete divergence share the mixed Ez differences,
 // d(div B)/dt is identically 0, so div(B) stays at machine zero.
 //
@@ -68,7 +68,7 @@ fn ct_curl_preserves_div_b() {
 
     // build + run the gv CT curl update over [0, M-1)^2 so Ez[i+1,j]/Ez[i,j+1] stay in bounds.
     // the combined 2d curl was split per in-plane direction: dir=0 updates B_x from d_y(Ez),
-    // dir=1 updates B_y from d_x(Ez). run BOTH per-dir kernels (the generic `b` field bound to
+    // dir=1 updates B_y from d_x(Ez). run both per-dir kernels (the generic `b` field bound to
     // bx for dir=0, by for dir=1) to advance the full in-plane field one step. out-of-place
     // writes b_new so the before/after div comparison reads the originals.
     let bx_built = rmhd_ct_curl_2d_dir_gv(0);

@@ -4,12 +4,12 @@
 // byte-level pin of the plm evolution path: a short shocked 1d run and a smooth
 // 2d run, final conserved state serialized as little-endian f64 bytes and
 // compared against a recorded baseline file. any reconstruction variant added
-// beside plm must leave these bytes untouched — a mismatch means the plm
-// numerics moved, not that a tolerance drifted.
+// beside plm leaves these bytes untouched — a mismatch means the plm numerics
+// moved, which a bit comparison reports without any tolerance in the way.
 //
-// the baseline lives in the gitignored workspace tree (machine-local, not a
-// repo artifact). when the file is absent the run RECORDS the current bytes
-// and reports that no gate was exerted; deleting a baseline file is the
+// the baseline lives in the gitignored workspace tree, machine-local and outside
+// the repo. when the file is absent the run records the current bytes and
+// reports that no gate was exerted; deleting a baseline file is the
 // deliberate act that re-pins after an intentional change to plm numerics.
 //
 // run: cargo test -p symbi --test reconstruction_bit_identity

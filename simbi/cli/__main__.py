@@ -34,7 +34,8 @@ def main() -> None:
             args.func(args, remaining)
         except (ConfigError, FieldComputationError, FileNotFoundError, OSError) as exc:
             # a user-facing error: print the formatted message and exit
-            # non-zero WITHOUT the rich traceback (which buries the message).
+            # non-zero, keeping the message clear of the rich traceback that
+            # would bury it.
             print(f"\nerror: {exc}", file=sys.stderr)
             sys.exit(2)
     else:

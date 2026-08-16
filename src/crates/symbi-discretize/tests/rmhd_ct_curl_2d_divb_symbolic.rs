@@ -1,17 +1,18 @@
 // =============================================================================
 // rmhd_ct_curl_2d_divb_symbolic.rs
 //
-// the SYMBOLIC proof that the 2D CARTESIAN constrained-transport curl (rmhd_ct_curl_2d_dir_gv)
-// preserves div(B) = 0 — by polynomial-coefficient cancellation on the traced IR DAG at graph-build
-// time; no numeric evolve loop is run. closes the M10 gap "the 2D cartesian curl is numeric-only" (the 3D cartesian curl was
-// already proven by rmhd_ct_curl3d_divb_symbolic; the 2D builder is a distinct kernel and was not).
+// the symbolic proof that the 2D cartesian constrained-transport curl (rmhd_ct_curl_2d_dir_gv)
+// preserves div(B) = 0 — by polynomial-coefficient cancellation on the traced IR DAG; the check
+// completes at graph-build time, ahead of any evolve loop. closes the M10 gap "the 2D cartesian curl
+// is numeric-only" (rmhd_ct_curl3d_divb_symbolic proves the 3D cartesian curl; the 2D builder is a
+// distinct kernel and carries its own proof here).
 //
 // the 2D curl from the single out-of-plane corner EMF E_z (`ez`), inverse-width form:
 //   dir=0 (B_x, x-face): dB_x/dt = -idy (E_z[+y] - E_z)
 //   dir=1 (B_y, y-face): dB_y/dt = +idx (E_z[+x] - E_z)
 // the point-form divergence idx (B_x[+x] - B_x) + idy (B_y[+y] - B_y), applied symbolically by
-// shifting each curl's edge-emf reads, telescopes to the ZERO linear form (the mixed corner reads
-// E_z[1,1]/E_z[1,0]/E_z[0,1]/E_z[0,0] cancel) for ANY input field — that is the proof.
+// shifting each curl's edge-emf reads, telescopes to the zero linear form (the mixed corner reads
+// E_z[1,1]/E_z[1,0]/E_z[0,1]/E_z[0,0] cancel) for every input field — that is the proof.
 // =============================================================================
 
 use symbi_discretize::rmhd_ct_curl_2d_dir_gv;
@@ -20,8 +21,8 @@ use symbi_ir::proof::{LinForm, Poly};
 const FIELDS: &[&str] = &["ez", "b"];
 const SCALARS: &[&str] = &["dt", "idx", "idy"];
 
-// strip the old-field `b` leaf: it reproduces div(B_old), invariant under the update — not part of
-// the "the update preserves div" proof.
+// strip the old-field `b` leaf: it reproduces div(B_old), which the update leaves invariant; the
+// proof concerns the increment the update adds.
 fn curl_only(mut lf: LinForm) -> LinForm {
     lf.terms.retain(|(key, _), _| key != "b");
     lf
@@ -56,8 +57,8 @@ fn divb_2d_cartesian_symbolic_telescoping() {
     );
 }
 
-// a NEGATIVE control: mismatched coefficients do NOT cancel, so the checker is not vacuously green —
-// exactly the residual a sign/offset bug in the curl would leave.
+// a negative control: mismatched coefficients leave a residual, so the checker reports a broken
+// cancellation — exactly what a sign/offset bug in the curl would leave.
 #[test]
 fn divb_2d_cartesian_symbolic_detects_broken() {
     let mut lf = LinForm::default();

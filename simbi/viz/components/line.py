@@ -32,18 +32,19 @@ class LinePlotProps(ComponentProps):
     drawstyle: Literal["line", "steps"] = "line"
     """How the samples are joined.
 
-    `"line"` interpolates between cell CENTRES. `"steps"` draws the solution
+    `"line"` interpolates between cell centers. `"steps"` draws the solution
     piecewise-constant across each cell, at its true edges.
 
-    A finite-volume solution IS piecewise constant per cell, so `"steps"` is the
-    faithful mark, and on a GRADED mesh it is the one that stays honest: a line
-    through centres interpolates across a cell that may be twice its neighbour's
-    width, and the jump in spacing at a refinement boundary disappears entirely.
-    On a logarithmically spaced mesh it also removes the need to centre cells
-    geometrically, since the marks are drawn at the edges themselves.
+    A finite-volume solution is piecewise constant per cell, so `"steps"` is the
+    faithful mark. On a graded mesh it is also the honest one: a line through
+    centers interpolates across a cell that may be twice its neighbor's width,
+    and it erases the jump in spacing at a refinement boundary entirely. On a
+    logarithmically spaced mesh `"steps"` draws the marks at the edges
+    themselves, so the cell centering stays free of any geometric convention.
 
     `"line"` remains the default because at a few hundred cells per level the two
-    are visually identical and the line is one artist rather than a patch.
+    are visually identical and the line draws as a single artist where the step
+    draws as a patch.
     """
 
     @field_validator("linewidth", "marker_size", "alpha")
@@ -104,7 +105,7 @@ def _update_line_style(
     line.set_linewidth(style.get("linewidth", 2.0))
     line.set_alpha(style.get("alpha", 1.0))
     if isinstance(line, StepPatch):
-        # a step carries no markers; the remaining keys do not apply.
+        # a step is styled by linewidth and alpha alone; markers belong to lines.
         return
     line.set_marker(style.get("marker", ""))
     line.set_markersize(style.get("markersize", 6.0))
@@ -210,9 +211,11 @@ class LinePlotComponent(Component):
 
     def cleanup(self) -> None:
         """Clean up resources."""
-        # a step is a patch and never appears in `ax.lines`; testing membership
-        # there would silently leak it across renders.
+        # a step is a patch, so removal goes through the artist's own handle;
+        # `ax.lines` holds lines alone, and a membership test there would
+        # silently leak the step across renders.
         if self._line is not None and self._line.axes is not None:
             self._line.remove()
         self._line = None
-        # DO NOT call self.ax.cla() - it would wipe other components!
+        # cleanup is per-artist: self.ax.cla() would wipe every other component
+        # sharing this axes

@@ -4,8 +4,9 @@
 // the per-physics dispatch chokepoints every hydro regime shares: cfl wave-speed,
 // the metadata-driven `dispatch_named` (+ its cover-aware inner), the body source /
 // feedback, the face flux, and the godunov stage (plain + fused-source variants).
-// each binds buffers + scalars by the kernel's recorded manifest and routes ONE
-// invocation through the executor seam (exec.rs) — no regime re-derives buffer order.
+// each binds buffers + scalars by the kernel's recorded manifest and routes a single
+// invocation through the executor seam (exec.rs); the manifest is the sole source of
+// buffer order.
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
@@ -147,12 +148,12 @@ mod body_gravity_cfl_tests {
     }
 }
 
-/// the ONE CFL dispatch every hydro regime shares: run `{prefix}_wave_speed_map{sfx}` over
+/// the single CFL dispatch every hydro regime shares: run `{prefix}_wave_speed_map{sfx}` over
 /// the per-cell wave speeds (the regime's only contribution is which map — i.e., its wave
-/// speed), reduce by max, form `dt = cfl / lambda_max`. the scalar tail is the SHARED
+/// speed), reduce by max, form `dt = cfl / lambda_max`. the scalar tail is the shared
 /// `[gamma, <widths>]` (Cartesian inv_dx, else interleaved x_lo,dx — matching the kernel's
 /// cfl_inv_widths dispatch). the field buffers (rho, the per-axis velocities — for the
-/// axis-role grids the GRIDDED `vel[axes[d]]` — and pre) are bound by the
+/// axis-role grids the gridded `vel[axes[d]]` — and pre) are bound by the
 /// kernel's recorded manifest via `dispatch_named`; `pre` overrides "prim.pre" (iso's
 /// substrate-owned pressure). `prefix` is "iso" (iso + adiabatic share the map) or "rhd".
 pub fn cfl_wave_speed<const D: usize, const DOF: usize, Mem, Sc>(
@@ -171,7 +172,7 @@ pub fn cfl_wave_speed<const D: usize, const DOF: usize, Mem, Sc>(
     // rate already in the scratch and adds the source rate in place before the reduction.
     source_cfl: Option<&str>,
     // the horizon-excision radius (0 = unexcised): the source-cfl kernel zeroes its rate on the
-    // excised r_ks < r_exc level set (padding cells must not throttle dt), so the kernel binds
+    // excised r_ks < r_exc level set, so dt is set by the live cells alone, and the kernel binds
     // the radius as a spec scalar.
     excision_radius: f64,
 ) -> f64
@@ -181,12 +182,12 @@ where
 {
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
-    // the spacetime tag: Schwarzschild -> "_schw" (the GR coordinate-speed map). ORTHOGONAL to sfx.
+    // the spacetime tag: Schwarzschild -> "_schw" (the GR coordinate-speed map). orthogonal to sfx.
     let st_sfx = spacetime_slug(geom.spacetime);
     if eos == symbi_discretize::EosArm::TaubMathews {
-        // the tm wave-speed maps are baked for every FLAT DOF == D chart
-        // (cartesian + the curvilinear cells); curved spacetimes and the
-        // swirl momentum lift have no tm twin.
+        // the tm wave-speed maps are baked for every flat DOF == D chart
+        // (cartesian + the curvilinear cells); the tm twins span that family,
+        // leaving curved spacetimes and the swirl momentum lift to the ideal-gamma maps.
         assert!(
             prefix == "rhd" && DOF == D && geom.spacetime == symbi_geometry::Spacetime::Minkowski,
             "the taub-mathews wave-speed map is baked for the flat rhd family \
@@ -194,10 +195,10 @@ where
         );
     }
     let name = format!("{prefix}_wave_speed_map{}{sfx}{st_sfx}_{D}d", eos.suffix());
-    // scalars BY NAME: gamma + the per-axis CFL widths. the kernel's declared set drives it
-    // (cartesian declares `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`) — no geometry branch here.
-    // mesh motion: PHYSICAL geometry scalars (widths AND centroids — exact
-    // identities at a = 1; expanding axes only) pair with the per-axis
+    // scalars by name: gamma + the per-axis CFL widths. the kernel's declared set drives it
+    // (cartesian declares `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`), which keeps the geometry
+    // branch inside the manifest. mesh motion: physical geometry scalars (widths and centroids
+    // — exact identities at a = 1; expanding axes only) pair with the per-axis
     // hubble/translation rates for the in-kernel relative speed `|s - v_g|`.
     let (x_lo_phys, dx_phys) = kernel_geom(
         &geom.x_lo,
@@ -267,22 +268,22 @@ where
             );
         }
     }
-    // GHOST-BAND FAIL-LOUD: a poisoned boundary (a driven-inflow expression producing NaN, a broken
-    // BC) leaves a non-finite ghost that first-order flux correction never touches — so the interior
-    // finiteness guard (folded into the wave-speed map above) can miss it. probe the density over the
-    // ALLOCATED domain and force the rate to +inf (dt -> 0, the driver halts) if any zone is
-    // non-finite. legitimate boundaries fill finite ghosts, so there is no false halt.
+    // ghost-band fail-loud: a poisoned boundary (a driven-inflow expression producing NaN, a broken
+    // BC) leaves a non-finite ghost, and first-order flux correction acts on the interior, which is
+    // also the reach of the finiteness guard folded into the wave-speed map above. probe the density
+    // over the allocated domain and force the rate to +inf (dt -> 0, the driver halts) when any zone
+    // is non-finite. legitimate boundaries fill finite ghosts, so the halt fires on real poison.
     if !state_finite_over_allocated(sim, pre, scratch) {
         lambda_max = f64::INFINITY;
     }
     cfl_from_lambda(lambda_max, cfl_number)
 }
 
-/// the FOFC ADMISSIBLE-BOUNDARY PROJECTION dispatch (GR-hydro): blend the spliced first-order
+/// the FOFC admissible-boundary projection dispatch (GR-hydro): blend the spliced first-order
 /// conserved toward the admissible stage-input anchor exactly onto partial-G, so every cell it touches
 /// is admissible. field binds mirror `fofc_select` (x_* the live cons in place, us_* the stage input);
-/// the metric + grid scalars resolve exactly as for the source-CFL. runs BEFORE the freeze-count c2p,
-/// so the freeze tier afterwards fires only on a genuinely inadmissible ANCHOR — an SSP-admissibility
+/// the metric + grid scalars resolve exactly as for the source-CFL. runs ahead of the freeze-count
+/// c2p, so the freeze tier afterwards fires on a genuinely inadmissible anchor — an SSP-admissibility
 /// violation, the real poison. curved GR-hydro only.
 pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -298,16 +299,16 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
-    // the chart segment is DERIVED from the grid, not handed in: a caller that types it
-    // gets to type it wrong, and both of them did. the caller now states only WHICH grid
-    // property its family keys on, which is a two-valued choice the type system carries.
-    // the name itself is built by the same function the bake calls.
+    // the chart segment is derived from the grid: a caller that types it by hand gets to
+    // type it wrong, and both of them did. the caller states which grid property its family
+    // keys on, a two-valued choice the type system carries. the name itself is built by the
+    // same function the bake calls.
     let chart =
         symbi_discretize::kernel_slug::fofc_project_chart(keying, geom.coords, &geom.axes, DOF, D);
     let name = symbi_discretize::kernel_slug::fofc_project_name(prefix, chart, geom.spacetime, D);
     // x_* -> live cons (read + write in place), us_* -> stage input (read), bc_* -> cell-centered B
-    // (read ONLY: the magnetized residual needs the field, but constrained transport owns the
-    // staggered value shared with the neighbor, so the blend never moves it and div(B) survives).
+    // (read-only: the magnetized residual needs the field, and constrained transport owns the
+    // staggered value shared with the neighbor, so the blend leaves it fixed and div(B) survives).
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
         if let Some(c) = s.strip_prefix("us_") {
             crate::regimes::fofc::fofc_comp(u_stage, prim, c)
@@ -490,16 +491,16 @@ pub fn fofc_source_theta<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// the STATE-CONSTRAINT PROJECTION dispatch: enforce the whole declared family in one operation.
+/// the state-constraint projection dispatch: enforce the whole declared family in one operation.
 ///
-/// binds `a_*` to the admissible anchor (the stage input), `x_*` to the live candidate (projected IN
-/// PLACE), `bc_*` to the cell-centered B the magnetized residual reads but never blends, and writes
+/// binds `a_*` to the admissible anchor (the stage input), `x_*` to the live candidate (projected in
+/// place), `bc_*` to the cell-centered B the magnetized residual reads and leaves fixed, and writes
 /// the joint blend `theta` plus the `binding` member index for the per-constraint injection budget.
 ///
-/// each member's parameter arrives as a RUNTIME scalar, so one baked kernel serves every
-/// configuration. NEUTRAL values (`f_min = 0`, `sigma_max = +inf`, `den_min = 0`) leave a member
-/// declared, applicable and reporting a real residual, but never binding — deliberately NOT the same
-/// as a member that does not structurally apply to the regime.
+/// each member's parameter arrives as a runtime scalar, so one baked kernel serves every
+/// configuration. neutral values (`f_min = 0`, `sigma_max = +inf`, `den_min = 0`) leave a member
+/// declared, applicable and reporting a real residual while it stays slack — a state deliberately
+/// distinct from a member that structurally sits outside the regime.
 #[allow(clippy::too_many_arguments)]
 pub fn constraint_projection<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -590,15 +591,16 @@ pub fn constraint_projection<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// the run's declared constraint parameters. NEUTRAL by default: nothing is floored unless a caller
-/// asks for it, so there is no hidden default floor anywhere in the code.
+/// the run's declared constraint parameters. neutral by default: a floor applies once a caller asks
+/// for it, so every floor in force is one the run declared.
 #[derive(Clone, Copy, Debug)]
 pub struct ConstraintParams {
     /// minimum `p / rho`. numerical (stands in for truncation error); 0 disables.
     pub floor_temperature: f64,
     /// maximum `|B|^2 / rho`; +inf disables.
     pub ceiling_magnetization: f64,
-    /// minimum rest-mass density. a PHYSICAL model term (vacuum), not a numerical aid; 0 disables.
+    /// minimum rest-mass density. a physical model term (vacuum), distinct from the numerical
+    /// aids above; 0 disables.
     pub floor_density: f64,
 }
 
@@ -741,9 +743,9 @@ where
     (rates[0], rates[1])
 }
 
-/// probe the density finiteness over the ALLOCATED domain (interior + ghosts) via the
+/// probe the density finiteness over the allocated domain (interior + ghosts) via the
 /// `state_finite_{D}d` kernel; returns `false` if any zone is non-finite. the fail-loud backstop that
-/// survives FOFC recovery — FOFC keeps the interior finite but never touches the ghost band.
+/// survives FOFC recovery — FOFC keeps the interior finite, and this covers the ghost band.
 pub fn state_finite_over_allocated<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     pre: &Field<Sc, D, Mem>,
@@ -767,18 +769,18 @@ where
     field_max_reduce(scratch, &sim.geom.allocated) <= 0.5
 }
 
-/// every STAGE-LOCAL field a kernel reads must have been written by an earlier dispatch of the
+/// every stage-local field a kernel reads must have been written by an earlier dispatch of the
 /// same stage; every one it writes joins the ledger. see `FieldRef::is_stage_local` for which
 /// fields those are and why the persistent ones are exempt.
 ///
-/// this catches the case a name-level coverage gate cannot: the producer kernel EXISTS and the
-/// consumer kernel EXISTS, but the substrate decided not to run the producer for this
-/// configuration. the consumer then reads a zero-initialized buffer, which for a wave-speed pair
-/// means an HLL fan with no dissipation — no panic, no missing kernel, just a silently
-/// non-dissipative sweep that grows a grid-scale checkerboard many dynamical times later.
+/// this catches a case that survives a name-level coverage gate: both the producer kernel and the
+/// consumer kernel exist, and the substrate elected to skip the producer for this configuration.
+/// the consumer then reads a zero-initialized buffer, which for a wave-speed pair means an HLL fan
+/// with zero dissipation — the run continues, every kernel present, on a silently non-dissipative
+/// sweep that grows a grid-scale checkerboard many dynamical times later.
 ///
-/// debug builds only: it is a bug detector, not an invariant the physics depends on, and the
-/// per-dispatch set operations have no place in a production step.
+/// debug builds only: it is a bug detector, and the physics stands on its own invariants, so the
+/// per-dispatch set operations stay out of a production step.
 #[cfg(debug_assertions)]
 fn audit_stage_local_reads<'a, const D: usize, const DOF: usize, Mem, Sc>(
     sim: &'a FieldStore<D, DOF, Mem, Sc>,
@@ -789,12 +791,12 @@ fn audit_stage_local_reads<'a, const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
 {
-    // the buffer's own address is the identity: the several wire names that resolve to one field
-    // (`prim.mag[k]` / `bcell[k]` / `cons.mag_k`) all resolve to the SAME reference, so aliases
-    // need no canonical spelling.
+    // the buffer's own address is the identity: the several wire names for one field
+    // (`prim.mag[k]` / `bcell[k]` / `cons.mag_k`) all resolve to that one reference, so aliases
+    // compare equal without a canonical spelling.
     let id = |f: &Field<Sc, D, Mem>| f as *const _ as usize;
     let mut ledger = sim.workspace.stage_writes.lock().unwrap();
-    // outside a stage there is no "earlier in this stage" to check against.
+    // the ledger exists for the duration of a stage; outside one, the check has no window.
     let Some(written) = ledger.as_mut() else {
         return;
     };
@@ -854,12 +856,12 @@ pub fn dispatch_named<const D: usize, const DOF: usize, Mem, Sc>(
     audit_stage_local_reads(sim, name, &bindings, |fref| {
         resolve_path(sim, Some(pre), scratch, dir, fref)
     });
-    // PER-BUFFER LAYOUT: every buffer's (lo, extent, vol) comes from its OWN `Field::domain()`
+    // per-buffer layout: every buffer's (lo, extent, vol) comes from its own `Field::domain()`
     // inside `dispatch_fields_each` — bit-identical to a shared layout for cell-centered fields
-    // (where `f.domain() == sim.geom.allocated`), and the ONLY thing that lets a STAGGERED field
-    // (the CT `bface[dir]`, whose domain differs) bind by the same manifest path as every cell
-    // field. this is the structural cure: no kernel hand-orders a buffer list,
-    // no dispatch assumes a uniform layout. `dispatch_fields_each` carries the target-aware
+    // (where `f.domain() == sim.geom.allocated`), and what lets a staggered field (the CT
+    // `bface[dir]`, whose domain differs) bind by the same manifest path as every cell field.
+    // this is the structural cure: the manifest orders every buffer list and each dispatch reads
+    // its layout per buffer. `dispatch_fields_each` carries the target-aware
     // cover/whole policy internally (host block-split when a serial twin exists; one whole launch
     // on device), so the scheduling seam is unchanged.
     super::exec::dispatch_fields_each::<Sc, Mem, D>(name, exec, &inputs, &outputs, ints, scalars);
@@ -944,7 +946,7 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// dispatch the constant-nu VISCOUS operator (`viscous_iso_2d`):
+/// dispatch the constant-nu viscous operator (`viscous_iso_2d`):
 /// accumulate `dt div(tau)` into `cons.mom` over the interior. isothermal, 2D
 /// cartesian; the caller gates on `nu > 0`. reads `prim.rho` / `prim.vel` (current
 /// post-c2p) at the halo-1 3x3 stencil and writes `cons.mom` at the center cell —
@@ -954,7 +956,7 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
 /// rebuild the conserved state with the cell's own metric. runs as the store's fill
 /// pass count of the fill/writeback pair + one conserved rebuild, dispatched over
 /// the sphere's index bbox. inside the horizon every characteristic points inward,
-/// so the frozen cells are numerical padding the exterior never sees.
+/// so the frozen cells are numerical padding, causally sealed off from the exterior.
 pub fn dispatch_excise<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
@@ -987,7 +989,7 @@ pub fn dispatch_excise<const D: usize, const DOF: usize, Mem, Sc>(
     });
 }
 
-/// ONE fill pass (fill + writeback) — the decomposed loop drives the passes itself
+/// a single fill pass (fill + writeback) — the decomposed loop drives the passes itself
 /// and exchanges halos around them, so both drivers run the pass count the store
 /// reports and the tiled sequence stays bit-identical to the monolithic one.
 pub fn dispatch_excise_sweep<const D: usize, const DOF: usize, Mem, Sc>(
@@ -1049,9 +1051,9 @@ where
     if r_exc <= 0.0 {
         return 0;
     }
-    // ONE pass. the fill is POINTWISE: every excised cell is set to the vacuum floor from its own
-    // state, reading no neighbor, so the pass is idempotent and repeating it reproduces the same
-    // field exactly (gated by `excision_freezes_the_vacuum_floor_and_is_idempotent`). the count is
+    // one pass. the fill is pointwise: every excised cell is set to the vacuum floor from its own
+    // state, so the pass is idempotent and repeating it reproduces the same field exactly (gated
+    // by `excision_freezes_the_vacuum_floor_and_is_idempotent`). the count is
     // a function of the store because a fill that propagated values inward would need as many
     // passes as the region is cells deep, and a halo exchange between each of them on the
     // decomposed driver.
@@ -1108,14 +1110,14 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     // the region's index bbox, one cell of margin so every cell whose sampling point is inside is
     // covered, clamped to the interior.
     //
-    // a SPHERICAL chart's excised region is an exact slab of innermost radial cells — r is a
+    // a spherical chart's excised region is an exact slab of innermost radial cells — r is a
     // coordinate, so the region is axis-aligned and every transverse axis is covered in full. the
     // radial extent is found by scanning cell faces rather than inverting the index map, because
-    // the radial axis may be log-spaced and `x_lo + i dx` is then an index coordinate, not a
-    // radius. the spin does not widen it: the cartesian chart's oblate spheroid IS this chart's
-    // r = const surface.
+    // the radial axis may be log-spaced, which makes `x_lo + i dx` an index coordinate rather than
+    // a radius. the spin leaves the extent alone: the cartesian chart's oblate spheroid is this
+    // chart's r = const surface.
     //
-    // a CARTESIAN chart's region is a sphere (a = 0) or an oblate spheroid staircased across the
+    // a cartesian chart's region is a sphere (a = 0) or an oblate spheroid staircased across the
     // lattice: the polar (z) semi-axis is r_exc and the equatorial axes carry the spin widening
     // sqrt(r_exc^2 + a^2), a 2d grid being the equatorial slice.
     let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
@@ -1157,12 +1159,12 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     }
     let bbox = Domain::new(spaces);
 
-    // the KERNEL-space geometry pair. the kernel's face map is `x_lo + i dx` on a uniform axis and
-    // `x_lo * 10^(i dx)` on a log one, so `dx` must carry the axis map's own PARAMETER — the log
-    // slope, not a linear width. passing the raw `geom.dx` fed the log map a linear width, which
-    // put every cell center far outside the excision surface and silently masked nothing. every
-    // other dispatch converts through here; cartesian charts never saw it because the conversion
-    // is the identity on a uniform axis.
+    // the kernel-space geometry pair. the kernel's face map is `x_lo + i dx` on a uniform axis and
+    // `x_lo * 10^(i dx)` on a log one, so `dx` carries the axis map's own parameter — the log
+    // slope where the axis is logarithmic. passing the raw `geom.dx` fed the log map a linear
+    // width, which put every cell center far outside the excision surface and silently masked
+    // nothing. every other dispatch converts through here; on a uniform axis the conversion is the
+    // identity, which is why cartesian charts read the same either way.
     let (x_lo_k, dx_k) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
     let resolve = |bind: &ScalarBind| -> Sc {
         Sc::from_f64(match bind {
@@ -1184,8 +1186,8 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     };
     // the magnetized state rides the DOF-lifted momentum set (DOF = 3 on the 2d
     // equatorial slice); the gas fill carries rho + DOF velocities + pre either way.
-    // the field itself is NEVER filled: the staggered faces stay CT-owned, so the
-    // densitized div(B) invariant survives excision identically. the magnetized p2c
+    // the staggered faces stay CT-owned and keep their values through the fill, so
+    // the densitized div(B) invariant survives excision identically. the magnetized p2c
     // additionally reads the cell B (the face average) to fold the ideal-MHD stress
     // into (D, S_i, tau).
     let mhd = sim.fields.mhd.is_some();
@@ -1238,7 +1240,7 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
 
     match phase {
         // one sweep of fill (prim -> scratch) + writeback (scratch -> prim): the
-        // parallel stencil never reads a value written by the same sweep. the
+        // parallel stencil reads the sweep's input buffer throughout. the
         // caller drives the sweep count (excise_pass_count_for).
         ExcisePhase::Sweep => {
             dispatch_fields::<Sc, Mem, D>(
@@ -1300,10 +1302,10 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    // the viscous stencils are 3-point CENTERED differences carrying ONE width per axis. on a
-    // graded axis that form is not merely evaluated at the wrong spacing -- a centered difference
-    // over unequal intervals is first-order, and the second derivative it feeds is inconsistent --
-    // so no per-cell width substitution recovers it. an unequal-spacing stencil is required.
+    // the viscous stencils are 3-point centered differences carrying a single width per axis, so
+    // they require uniform spacing. on a graded axis a centered difference over unequal intervals
+    // drops to first order and the second derivative it feeds is inconsistent, which a per-cell
+    // width substitution leaves standing; an unequal-spacing stencil is what recovers it.
     assert!(
         sim.geom.maps.is_none(),
         "viscosity on a graded mesh: the shear stencil is a centered difference over a single \
@@ -1312,9 +1314,9 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     );
     let geom = &sim.geom;
     // cartesian uses the flat face-difference kernel (2D/3D); every curvilinear
-    // chart routes through the ONE general orthogonal kernel (scale-factor form),
+    // chart routes through the single general orthogonal kernel (scale-factor form),
     // which reads the cell geometry, so the geom scalars resolve as usual.
-    // the ADIABATIC regime (has_energy) books the viscous HEATING too (div(tau.v) onto nrg), so it
+    // the adiabatic regime (has_energy) books the viscous heating too (div(tau.v) onto nrg), so it
     // selects the energy-carrying kernel; the isothermal regime keeps the momentum-only iso kernel.
     let has_energy = sim.fields.cons.nrg_field().is_some();
     let name: String = match geom.coords {
@@ -1328,7 +1330,7 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
                     .to_string()
             };
             // 2.5D MHD (DOF=3 momentum on a 2-axis grid) selects the DOF-aware `_dof3` kernel, which
-            // diffuses ALL three momentum components (the toroidal velocity) + the energy heating;
+            // diffuses all three momentum components (the toroidal velocity) + the energy heating;
             // hydro / full 3D MHD (DOF==D) keep the base name.
             if DOF != D {
                 assert!(
@@ -1433,7 +1435,7 @@ where
         }
         ratio_max = ratio_max.max(p / r);
     }
-    // the farthest in-plane corner from the body (the vertical axis does not enter Omega_K).
+    // the farthest in-plane corner from the body (Omega_K is set by the in-plane radius alone).
     let plane = D.min(2);
     let mut r_max = 0.0_f64;
     for corner in 0..(1usize << D) {
@@ -1463,10 +1465,10 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    // the viscous stencils are 3-point CENTERED differences carrying ONE width per axis. on a
-    // graded axis that form is not merely evaluated at the wrong spacing -- a centered difference
-    // over unequal intervals is first-order, and the second derivative it feeds is inconsistent --
-    // so no per-cell width substitution recovers it. an unequal-spacing stencil is required.
+    // the viscous stencils are 3-point centered differences carrying a single width per axis, so
+    // they require uniform spacing. on a graded axis a centered difference over unequal intervals
+    // drops to first order and the second derivative it feeds is inconsistent, which a per-cell
+    // width substitution leaves standing; an unequal-spacing stencil is what recovers it.
     assert!(
         sim.geom.maps.is_none(),
         "viscosity on a graded mesh: the shear stencil is a centered difference over a single \
@@ -1484,9 +1486,9 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     let bodies = &im.bodies;
     let geom = &sim.geom;
     // cartesian forms nu from the body-position distance; cylindrical uses R itself
-    // (the central mass is on the axis), so the two kernels share every scalar but
-    // body_0_pos, which the cylindrical kernel simply never declares.
-    // the adiabatic (energy-carrying) gas reads the LOCAL cs^2 = gamma p / rho per
+    // (the central mass is on the axis), so the two kernels share every scalar apart
+    // from body_0_pos, which the cartesian kernel alone declares.
+    // the adiabatic (energy-carrying) gas reads the local cs^2 = gamma p / rho per
     // stencil cell; the isothermal kernels read the one global cs scalar. the 2.5D
     // magnetized gas (DOF = 3 on a 2-axis grid) selects the DOF-aware variant.
     let has_energy = sim.fields.cons.nrg_field().is_some();
@@ -1511,8 +1513,8 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
                 .name()
                 .to_string()
         }
-        // every curvilinear chart routes through the ONE general orthogonal alpha
-        // kernel; nu(R) uses the radial coordinate, so no body position is needed.
+        // every curvilinear chart routes through the single general orthogonal alpha
+        // kernel; nu(R) is formed from the radial coordinate the cell already carries.
         symbi_geometry::Geometry::Cylindrical | symbi_geometry::Geometry::Spherical => {
             let base = if has_energy { "adiabatic" } else { "iso" };
             match (D, DOF) {
@@ -1575,12 +1577,12 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     if D < 2 {
         return; // body feedback is emitted for ndim >= 2 (torque is degenerate in 1D)
     }
-    // cartesian grids take the SPLIT path: the gravity reaction reduces globally over
+    // cartesian grids take the split path: the gravity reaction reduces globally over
     // one streamed field, the drain-weighted quantities over the sink support box —
     // the combined kernel wrote MAX_SOURCE_BODIES*(D+5) full-domain scratch fields per step
     // (~800 MB of traffic at 128^3) to integrate quantities supported on the sink.
     // curvilinear grids keep the combined kernel: the support box is a coordinate
-    // ball spanning a non-rectangular index region, so the restriction does not apply directly.
+    // ball spanning a non-rectangular index region, which the box restriction requires.
     if sim.geom.coords == symbi_geometry::Geometry::Cartesian {
         dispatch_body_feedback_split(sim, dt, gamma);
         return;
@@ -1605,8 +1607,9 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     }
     inputs.push(nrg);
     // reduction scratch, cached on the workspace across calls (allocated on the
-    // first feedback dispatch — body-free sims never reach here). the kernel
-    // assign-writes every interior cell before the reduce, so no re-zeroing.
+    // first feedback dispatch, which a sim carrying bodies is what reaches). the
+    // kernel assign-writes every interior cell before the reduce, so the buffer
+    // arrives fully defined.
     let scratch = feedback_scratch(sim, n_out);
     let outputs: Vec<&Field<Sc, D, Mem>> = scratch.iter().collect();
     dispatch_fields::<Sc, Mem, D>(
@@ -1665,9 +1668,9 @@ where
 {
     // every body pass shares this OnceLock (feedback grav D, drain D+5,
     // penalize D+2, excise 4, the per-body feedback reduction MAX_SOURCE_BODIES x
-    // (D+5)): allocate the family maximum once so the first caller's size never
-    // starves a later pass — the feedback reduction is the largest member, so
-    // the max must include its MAX_SOURCE_BODIES factor.
+    // (D+5)): allocate the family maximum once, so the first caller's size covers
+    // every later pass — the feedback reduction is the largest member, which puts
+    // its MAX_SOURCE_BODIES factor inside the max.
     let n_alloc = n.max(symbi_ib::MAX_SOURCE_BODIES * (D + 5));
     let scratch = sim.workspace.body_scratch.get_or_init(|| {
         (0..n_alloc)
@@ -1684,15 +1687,15 @@ where
     &scratch[..n]
 }
 
-/// the SPLIT feedback path (cartesian): per ACTIVE body, a gravity-reaction pass
+/// the split feedback path (cartesian): per active body, a gravity-reaction pass
 /// reduced over the full interior (one field streamed, D outputs) and a drain pass
-/// dispatched AND reduced over the sink's support bounding box (D+5 outputs). the
-/// box derives from the drain kernel's DECLARED output support — the artifact
+/// both dispatched and reduced over the sink's support bounding box (D+5 outputs). the
+/// box derives from the drain kernel's declared output support — the artifact
 /// carries the ball inside which every integrand can be nonzero (tanh saturation
 /// makes it exactly zero beyond; the support-law sampler validates the claim on
-/// the compiled kernel). inert body slots cost nothing. sums differ from the
-/// combined kernel only by floating-point reassociation over the smaller region
-/// (omitted terms are exact zeros).
+/// the compiled kernel). inert body slots are free. sums match the combined kernel up
+/// to floating-point reassociation over the smaller region (the omitted terms are
+/// exact zeros).
 fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
@@ -1712,7 +1715,7 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
 
     // slot-0 scalar resolution rebound to body `b`: the single-body kernels declare
     // `body_0_*`; each active body's dispatch feeds its own parameters through them.
-    // `bind_value` is the ONE bind -> f64 map — the kernel's scalar arguments and
+    // `bind_value` is the single bind -> f64 map — the kernel's scalar arguments and
     // the support-ball evaluation below read the same values by construction.
     let bodies = &im.bodies;
     let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
@@ -1740,8 +1743,8 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
     };
 
     // reduction scratch, shared across bodies and both passes and cached on the
-    // workspace across calls (assign-write + reduce over the SAME region needs
-    // no zeroing).
+    // workspace across calls (assign-write + reduce cover one region, so the
+    // buffer arrives fully defined).
     let scratch = feedback_scratch(sim, per_drain);
 
     let nrg = sim
@@ -1787,14 +1790,14 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         }
 
         // drain-weighted quantities: support-box dispatch + reduce. the box derives
-        // from the drain kernel's DECLARED output support:
+        // from the drain kernel's declared output support:
         // evaluate the ball with this body's own scalar table (the same values the
         // kernel receives), convert to index space, clamp to the interior. a
-        // non-accreting body has no sink (every drain output is identically zero)
-        // and a body outside the domain intersects nothing — both skip the pass
-        // entirely, BEFORE Domain construction (an empty Space panics). a kernel
-        // with NO declared support integrates over the full interior — sound,
-        // never a silent physics loss.
+        // non-accreting body has a sink whose every drain output is identically zero,
+        // and a body outside the domain has an empty intersection — both skip the
+        // pass ahead of Domain construction (an empty Space panics). a kernel that
+        // declares its support open integrates over the full interior — sound, and
+        // conservative of the physics.
         let bbox = body.accretion_radius().and_then(|_| {
             let names = super::binding::kernel_scalar_names(&drain_name);
             let ball = super::binding::kernel_output_support(&drain_name).and_then(|support| {
@@ -1871,13 +1874,13 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// dispatch the [Drain]-stack immersed-boundary penalization: per accreting
 /// body, run `penalize_drain_{D}d` over the kernel's
-/// DECLARED support ball (evaluated with this body's scalar table, clamped to
+/// declared support ball (evaluated with this body's scalar table, clamped to
 /// the interior), in place on cons, with the per-cell exchange deltas reduced
 /// into the diagnostics accumulator — the same feedback stream the sink path
 /// feeds, so Mdot(t)/F_acc(t) land in the body history unchanged. cartesian +
 /// adiabatic only (the baked envelope); `c_drain` is the convergence dial
-/// (tau = c_drain dx / c_s), never tuned to a target rate. a parallel accretion
-/// mechanism to the drain sink.
+/// (tau = c_drain dx / c_s), set by the relaxation time rather than by a target
+/// accretion rate. a parallel accretion mechanism to the drain sink.
 pub fn dispatch_penalize<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
@@ -1943,8 +1946,8 @@ fn shaped_penalize_gv(
 /// build (or fetch from the process cache) the device IR for a shaped porous wall. mirrors
 /// `shaped_penalize_kernel` but emits the backend-neutral blob (`prepare` + `prepared_to_ir`, the
 /// same lowering the AOT registry bakes in build.rs) for a device backend. keyed by the
-/// shape's structural repr + dimension, so a moving body reuses the one blob. the kernel name
-/// embeds a per-shape id so the engine's render cache (keyed by name) never returns another shape's
+/// shape's structural repr + dimension, so a moving body reuses that one blob. the kernel name
+/// embeds a per-shape id so the engine's render cache (keyed by name) returns this shape's own
 /// descriptor; the module cache is content-addressed, so it is safe regardless.
 fn shaped_penalize_ir(
     coords: symbi_discretize::Coords,
@@ -1971,9 +1974,9 @@ fn shaped_penalize_ir(
     // a unique name per distinct shape: the render cache aliases on the name.
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let name = format!("penalize_shaped_{id}");
-    // the same lowering the AOT registry bakes (build.rs emit_gv): penalize buffers do not share
-    // one layout (coalesce_layout = false, matching the AOT penalize path); the smem tile path is
-    // gated off. the neutral blob renders to the launch precision at dispatch time.
+    // the same lowering the AOT registry bakes (build.rs emit_gv): penalize buffers each carry
+    // their own layout (coalesce_layout = false, matching the AOT penalize path); the smem tile
+    // path is gated off. the neutral blob renders to the launch precision at dispatch time.
     let inputs = symbi_ir::KernelEmitInputs {
         kernel_name: &name,
         ndim: ndim as u8,
@@ -2048,7 +2051,7 @@ fn shaped_penalize_kernel(
 }
 
 /// run the shaped porous wall for one body on either backend: on host, cranelift-JIT the shape
-/// kernel and run it over raw f64 bases; on a device-accessible Mem, render the SAME GvKernel to
+/// kernel and run it over raw f64 bases; on a device-accessible Mem, render that same GvKernel to
 /// CUDA + NVRTC-dispatch it in place (f64 only). either way, bind the cons fields (in-place) + the
 /// per-body delta scratch, resolve the kernel's scalar manifest through the shared per-body
 /// resolver over the body's bounding-ball bbox, then reduce the deltas into the feedback
@@ -2130,11 +2133,11 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         sim.geom.interior.clone()
     };
 
-    // iso has no energy channel: the kernel neither reads nor writes nrg, so it drops from the
+    // iso carries no energy channel: the kernel leaves nrg alone, so it drops from the
     // bound cons fields (and the writes order the kernel was compiled with).
     let nrg = sim.fields.cons.nrg_field();
     if Mem::IS_DEVICE_ACCESSIBLE {
-        // the device path renders the SAME shaped GvKernel to CUDA (the neutral IR the AOT
+        // the device path renders that same shaped GvKernel to CUDA (the neutral IR the AOT
         // registry bakes for the analytic sphere), NVRTC-compiles + caches it per shape, and
         // dispatches it in place.
         let sk = shaped_penalize_ir(coords, D, DOF, has_energy, spin, shape);
@@ -2174,9 +2177,9 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
                     "arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset"
                 )
             });
-        // in-place cons bases (read + write the SAME buffers) + the delta scratch as OUTPUT bases,
-        // in the kernel's declared write order: den, mom_0.., nrg, then the n_delta + n_torque
-        // scratch. the JIT buffer ABI is raw f64 on host.
+        // in-place cons bases (one buffer per field, read and written) + the delta scratch as
+        // output bases, in the kernel's declared write order: den, mom_0.., nrg, then the
+        // n_delta + n_torque scratch. the JIT buffer ABI is raw f64 on host.
         let cons_ptr = |f: &Field<Sc, D, Mem>| f.as_ptr() as *const f64;
         let cons_ptr_mut = |f: &Field<Sc, D, Mem>| f.as_ptr() as *mut f64;
         // the shaped kernel is JIT-built with dof = DOF, so it reads/writes all DOF momentum
@@ -2208,7 +2211,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
             .collect();
         let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
         let (grid, dlo) = exec_layout(&bbox);
-        // SAFETY: shared allocated layout; the cons.* fields are bound as the SAME base in
+        // SAFETY: shared allocated layout; each cons.* field is bound as one base in
         // `in_bases` and `out_bases` (in-place, read-before-write per cell); every scratch output
         // is a distinct allocation; distinct cells write distinct flat indices on distinct threads.
         unsafe {
@@ -2315,13 +2318,13 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     };
     let bodies = &im.bodies;
     // the max Alfven speed squared c_a^2 = |B|^2 / rho over the interior lifts the wall/drain
-    // relaxation from the sound speed to the FAST MAGNETOSONIC speed (bound to the kernel's `c_a2`
+    // relaxation from the sound speed to the fast magnetosonic speed (bound to the kernel's `c_a2`
     // scalar), so the wall stays a signal-crossing stiff in the low-beta regions a magnetized sink
     // accumulates. 0 off MHD, where the rate reduces to c_s exactly and a hydro run is unchanged.
-    // under domain decomposition the max is a GLOBAL property: the decomposed loop reduces the
+    // under domain decomposition the max is a global property: the decomposed loop reduces the
     // per-tile maxima and publishes the global value (a per-tile local max would relax the same
     // wall cell at a different rate than the monolithic run). unset (the monolithic / single-gpu
-    // path) => this grid's local max, which IS the global max on a single grid.
+    // path) => this grid's local max, which is the global max on a single grid.
     let c_a2_max: f64 = im
         .c_a2_override()
         .unwrap_or_else(|| symbi_sim::state::local_c_a2_max(sim));
@@ -2378,11 +2381,11 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         }
         // the body's surface stack picks the baked kernel. the regime picks
         // the eos flavor: adiabatic recovers c_s from cons; iso reads the
-        // constant `cs` param and has no energy channel. the porous stack is
-        // baked for the adiabatic regime only — fail loud, never fall back
-        // silently to a different surface physics.
+        // constant `cs` param and carries the pressure in `prim.pre`. the porous
+        // stack is baked for the adiabatic regime alone — an iso request fails
+        // loud, so a run gets the surface physics it asked for.
         // the kernel name carries the chart suffix ("" / "_sph" / "_cyl"); Cartesian
-        // reproduces the KernelId name exactly. only the drain is baked off-chart.
+        // reproduces the KernelId name exactly. the drain is the piece baked off-chart.
         let cart = symbi_geometry::Geometry::Cartesian;
         let coords_g = geom.coords;
         // a dyed run selects the twin that also drains `cons.chi`.
@@ -2541,13 +2544,13 @@ pub fn dispatch_body_source_iso<const D: usize, const DOF: usize, Mem, Sc>(
     let sfx = geom_suffix(sim.geom.coords, DOF, D);
     let name = format!("body_source_iso{sfx}_{D}d");
     // the iso kernel declares dt + grid + per-body scalars only (cs comes from the
-    // prim.pre FIELD, no gamma); `resolve_body_scalars` walks the manifest, so the
-    // unused gamma is never requested.
+    // prim.pre field, so gamma stays out of the manifest); `resolve_body_scalars`
+    // walks the manifest and resolves exactly what is declared.
     let scalars = resolve_body_scalars(sim, dt, 0.0, &name);
     dispatch_named(sim, pre, None, 0, &name, &sim.geom.interior, &[], &scalars);
 }
 
-/// ISOTHERMAL backward feedback: like `dispatch_body_feedback` but reads `prim.pre`
+/// isothermal backward feedback: like `dispatch_body_feedback` but reads `prim.pre`
 /// for the energy slot (manifest order: cons.den, mom_0.., prim.pre).
 pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -2616,11 +2619,11 @@ pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// dispatch the IMMERSED-BODY-fused godunov stage `{prefix}_godunov_stage_with_body_source...`:
-/// gravity + accretion are folded INTO the godunov update (additive convention, `ac*dt` weight) —
-/// one launch, no separate body_source pass. resolves the stage scalars (dt/a0/ac/motion/geom) +
-/// the EOS param (`gamma` adiabatic / `cs` iso) + the per-body params FROM THE LIVE SIDE-CAR (the
-/// bodies move, so this reads their current state each step — no static binding to refresh).
+/// dispatch the immersed-body-fused godunov stage `{prefix}_godunov_stage_with_body_source...`:
+/// gravity + accretion are folded into the godunov update (additive convention, `ac*dt` weight) —
+/// a single launch carrying the body source. resolves the stage scalars (dt/a0/ac/motion/geom) +
+/// the EOS param (`gamma` adiabatic / `cs` iso) + the per-body params from the live side-car (the
+/// bodies move, so this reads their current state each step, keeping the binding fresh).
 pub fn dispatch_godunov_with_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     pre: &Field<Sc, D, Mem>,
@@ -2779,34 +2782,34 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         );
     }
     // HLLD is MHD-only by physics — the magnetosonic + Alfven + contact wave structure needs the
-    // magnetic field. the (solver, regime) matrix is now enforced at BIND time in `with_solver`
+    // magnetic field. the (solver, regime) matrix is enforced at bind time in `with_solver`
     // (every non-MHD substrate set validates `Solver::valid_for` before storing `solver`, and the
-    // iso path here hardcodes HLLE), so a non-MHD `dispatch_flux` can never carry HLLD — no runtime
-    // assert needed.
+    // iso path here hardcodes HLLE), so a `dispatch_flux` reaching here off MHD already carries an
+    // MHD-free solver and the check is settled upstream.
     let face = sim.geom.interior.face_domain(dir);
-    // the flux is geometry-independent EXCEPT for the axis-role velocity layout (DOF>NDIM,
-    // spherical swirl / cyl-axisymmetric) AND the cartesian GR chart (`_cart`, a NON-diagonal metric
-    // with shift on every axis, distinct from the implicit spherical GR default). flat cartesian +
-    // spherical GR stay unsuffixed. `DOF != D` is the flux-path spelling of `dof > ndim` (the flux
-    // never lowers the momentum DOF below the grid dimension).
+    // the flux is geometry-independent apart from two things: the axis-role velocity layout
+    // (DOF>NDIM, spherical swirl / cyl-axisymmetric) and the cartesian GR chart (`_cart`, an
+    // off-diagonal metric with shift on every axis, distinct from the implicit spherical GR
+    // default). flat cartesian + spherical GR stay unsuffixed. `DOF != D` is the flux-path
+    // spelling of `dof > ndim` (the flux carries the momentum DOF at or above the grid dimension).
     let geom_sfx = gr_chart_dof_tag(sim.geom.coords, sim.geom.spacetime, DOF, D);
-    // the FOFC first-order redo on a CURVED background runs the light-cone Lax-Friedrichs (rusanov)
+    // the FOFC first-order redo on a curved background runs the light-cone Lax-Friedrichs (rusanov)
     // fan — a distinct baked kernel (`_rusanov`), the provably admissibility-preserving low-order
     // scheme. rusanov is GR-only (a curved-spacetime kernel); the flat first-order redo is HLLE at
     // theta = 0 through the normal solver suffix.
-    // a WELL-BALANCED reconstruction evaluates the body potential at cartesian positions, so it
-    // is the one flux baked per chart; the chart segment therefore rides WITH the balance axis
-    // and is empty whenever the reconstruction is plain. keying it on the BALANCE rather than on
-    // the solver is what lets the first-order redo be balanced: that redo runs HLLE.
+    // a well-balanced reconstruction evaluates the body potential at cartesian positions, so it
+    // is the one flux baked per chart; the chart segment therefore rides with the balance axis
+    // and is empty for a plain reconstruction. keying it on the balance rather than on the solver
+    // is what lets the first-order redo be balanced: that redo runs HLLE.
     let wb_chart = match balance {
         symbi_discretize::coords::Balance::Plain => "",
         symbi_discretize::coords::Balance::Hydrostatic => {
-            // the balanced reconstruction's local profile is the GAMMA-LAW isentrope
-            // (`LocalEquilibrium`: rho ~ [1 + (gamma-1) dphi/cs^2]^(1/(gamma-1))). on any
-            // other closure that curve is not the eos's isentrope, dp_eq/dphi != -rho_eq,
-            // and the transform REINTRODUCES the face jump it exists to remove -- silently,
-            // since the balance test only ever exercised gamma = 5/3. refused rather than
-            // approximated; a synge-gas balanced reconstruction needs its own profile.
+            // the balanced reconstruction's local profile is the gamma-law isentrope
+            // (`LocalEquilibrium`: rho ~ [1 + (gamma-1) dphi/cs^2]^(1/(gamma-1))). that curve
+            // is the eos's isentrope for a gamma law alone; under another closure
+            // dp_eq/dphi departs from -rho_eq and the transform reintroduces the face jump it
+            // exists to remove, silently, since the balance test exercises gamma = 5/3. refused
+            // rather than approximated; a synge-gas balanced reconstruction needs its own profile.
             assert!(
                 eos == symbi_discretize::EosArm::IdealGamma,
                 "the well-balanced reconstruction is gamma-law only: its local profile is \
@@ -2839,18 +2842,18 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         ..Default::default()
     }
     .build();
-    // scalars BY NAME: the regime's `primary` (bound to `gamma`; iso passes ISO_GAMMA) + the
+    // scalars by name: the regime's `primary` (bound to `gamma`; iso passes ISO_GAMMA) + the
     // regime-generic `theta` (the theta-MC limiter compression; theta == 1 -> plain minmod).
-    // declaring theta on the kernel can never silently shift a positional arg here.
-    // mesh motion: PHYSICAL face coordinates (expanding axes scaled by a)
+    // name binding keeps a kernel's theta declaration from shifting a positional arg here.
+    // mesh motion: physical face coordinates (expanding axes scaled by a)
     // pair with the hubble rate so `vface = H * r_phys`; the per-instance
-    // (per-dir) rates gate non-expanding curvilinear axes and route uniform
+    // (per-dir) rates gate the static curvilinear axes and route uniform
     // translation to axis 0. every binding is exactly identity/zero static.
     let a = sim.motion.a;
-    // the flat flux reads PHYSICAL face coordinates (mesh-motion vface); the GR flux reads the radial
-    // FACE POSITION through `gv_axis_face_at`, which — on a log-radial grid — needs the LOG-AWARE
-    // kernel scalars (dx is the log slope), exactly as the shift/godunov dispatches. GR is static
-    // mesh, so kernel_geom == physical_geom for the uniform case.
+    // the flat flux reads physical face coordinates (mesh-motion vface); the GR flux reads the
+    // radial face position through `gv_axis_face_at`, which — on a log-radial grid — needs the
+    // log-aware kernel scalars (dx is the log slope), exactly as the shift/godunov dispatches. GR
+    // runs a static mesh, so kernel_geom == physical_geom for the uniform case.
     let (x_lo_phys, dx_phys) = kernel_geom(
         &sim.geom.x_lo,
         &sim.geom.dx,
@@ -2859,15 +2862,15 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         a,
     );
     // the flux is a per-direction kernel; it declares the moving-mesh rate for
-    // its sweep axis as `mesh_adot_{dir}` (via MeshScalar) — the SAME per-axis
-    // convention + resolver the wave-speed and godunov dispatches use. no bespoke
-    // bare-name arm: `motion_scalar` owns every mesh rate, `geom_scalar` the
-    // physical spacing.
+    // its sweep axis as `mesh_adot_{dir}` (via MeshScalar) — the per-axis
+    // convention + resolver the wave-speed and godunov dispatches use. every mesh
+    // rate resolves through `motion_scalar` and every physical spacing through
+    // `geom_scalar`.
     let scalars = scalars_for(&name, |bind| {
         let sref = match bind {
             ScalarBind::Ref(sref) => sref,
-            // the ppm flatten dials ride the spec-scalar channel: only the ppm
-            // kernels declare them, so this arm is unreachable on any other
+            // the ppm flatten dials ride the spec-scalar channel: the ppm
+            // kernels alone declare them, so this arm is reached on the ppm
             // reconstruction.
             ScalarBind::Spec(spec) if &**spec == "flatten_onset" => {
                 return Sc::from_f64(flatten.0);
@@ -2875,8 +2878,8 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarBind::Spec(spec) if &**spec == "flatten_full" => {
                 return Sc::from_f64(flatten.1);
             }
-            // only the clamp-free HLLC-LM kernel declares this scalar, so the arm is
-            // unreachable on any other solver.
+            // the clamp-free HLLC-LM kernel declares this scalar, so the arm is
+            // reached on that solver.
             ScalarBind::Spec(spec) if &**spec == "mach_limit" => {
                 return Sc::from_f64(mach_limit);
             }
@@ -2885,11 +2888,11 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         match *sref {
             ScalarRef::Gamma => Sc::from_f64(primary),
             ScalarRef::Theta => Sc::from_f64(theta),
-            // the well-balanced reconstruction reads the SAME body params the forward source
-            // does, so what it balances against is the discrete force the scheme exerts rather
-            // than an analytic profile that agrees with it only to truncation order. a sim with
-            // no immersed side-car resolves every slot to zero, which zeroes the potential and
-            // returns the reconstruction to the plain one identically.
+            // the well-balanced reconstruction reads the body params the forward source reads,
+            // so what it balances against is the discrete force the scheme exerts rather than an
+            // analytic profile that agrees with it to truncation order. a sim without an immersed
+            // side-car resolves every slot to zero, which zeroes the potential and returns the
+            // reconstruction to the plain one identically.
             ScalarRef::Body { idx, field } => {
                 let bodies = sim.immersed.as_ref().map(|im| &im.bodies);
                 Sc::from_f64(body_scalar::<D>(bodies, idx, field))
@@ -2916,18 +2919,18 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     });
     // PoC: drive the flux dispatch over a `BlockGrid` cover of the face domain
     // (env `SYMBI_FLUX_BLOCK`), one launch per block. the blocks
-    // PARTITION `face` (the proven law), and the flux is a pure function of the
+    // partition `face` (the proven law), and the flux is a pure function of the
     // prim stencil per face cell, so every face flux is computed exactly once with
     // identical inputs -> bit-identical to the single dispatch. this validates the
-    // block primitive on the real hydro path, GENERICALLY: dispatch_flux is the one
-    // path every regime shares on BOTH a uni-grid SimState and each smr level.
+    // block primitive on the real hydro path, generically: dispatch_flux is the one
+    // path every regime shares on a uni-grid SimState and on each smr level alike.
     // the shared auto block policy is applied inside dispatch_named (universal).
     dispatch_named(sim, pre, None, dir, &name, &face, &[], &scalars);
 }
 
-/// the ONE godunov-update dispatch every hydro regime shares (the EOS-generic builder is
+/// the single godunov-update dispatch every hydro regime shares (the EOS-generic builder is
 /// already unified; this unifies the field-gathering + the curvilinear binding order + the
-/// scalar tail so no regime re-derives them). `rk2=false` is the forward-Euler step (inputs
+/// scalar tail, so each regime inherits them). `rk2=false` is the forward-Euler step (inputs
 /// = curvilinear-prefix ++ per-comp flux dirs); `rk2=true` interleaves the u_n snapshot per
 /// component. outputs are the in-place cons in writes order [den, mom.., nrg?]. curvilinear:
 /// the geometric source's reads (pre + prim.vel for the ndim>=2 inertial) lead the inputs
@@ -2942,7 +2945,7 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     ac: f64,
     // the EOS parameter (adiabatic gamma / iso cs). the GR-hydro covariant-energy godunov needs the
     // gamma to reconstruct the effective inertia rho h W^2 = h D^2/rho for the geodesic momentum
-    // source; flat / iso kernels never declare it, so this arm is unreachable there.
+    // source; the GR-hydro kernels are the ones declaring it, so this arm serves them.
     eos_param: f64,
 ) where
     Mem: MemorySpace + Sync,
@@ -2979,10 +2982,10 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarRef::Dt => Sc::from_f64(dt),
             ScalarRef::A0 => Sc::from_f64(a0),
             ScalarRef::Ac => Sc::from_f64(ac),
-            // the EOS param, bound only by the GR-hydro covariant-energy godunov (rho h W^2 = h D^2/rho).
+            // the EOS param, bound by the GR-hydro covariant-energy godunov (rho h W^2 = h D^2/rho).
             ScalarRef::Gamma | ScalarRef::Cs => Sc::from_f64(eos_param),
             // the GR lapse mass M (alpha = sqrt(1-2M/r)), carried on `geom.spacetime_scalars` from
-            // the metric. only a `_schw` kernel declares it; flat kernels never reach this arm.
+            // the metric. a `_schw` kernel declares it, and this arm serves that family.
             ScalarRef::SchwarzschildMass => Sc::from_f64(
                 geom.spacetime_scalars.iter()
                     .find(|(n, _)| n == "schwarzschild_mass")
@@ -3016,8 +3019,8 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 /// `plain-godunov + this pass` reproduces the fused run exactly, stage by stage and
 /// over a whole trajectory. the binding's
 /// scalars (`gm`, `xm_k`, `g_ext_k`, ...) + the lazily-declared centroid scalars
-/// (`x_lo_k`, `dx_k`) cover every spec param — anything missing panics, never
-/// silent zero-fill.
+/// (`x_lo_k`, `dx_k`) cover every spec param — a missing one panics, so the
+/// vocabulary mismatch surfaces in place of a zero-fill.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -3072,11 +3075,11 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
 /// `godunov_rk2` route through `dispatch_godunov_with_sources` (the AOT-baked fused
 /// kernel); when `None`, the unfused `dispatch_godunov` (backwards-compat default).
 ///
-/// the `source_id` slug MUST match an AOT-emitted variant from `symbi-aot/build.rs::
+/// the `source_id` slug must match an AOT-emitted variant from `symbi-aot/build.rs::
 /// gen_godunov_euler_fused` for this regime/ndim (e.g., `"uniform_accel"`). `scalars`
 /// covers every spec-declared scalar param the spec's `BuiltSource` declares
-/// (`g_ext_k`, `gm`, `xm_k`, `body_radius`, ...) — anything missing surfaces as a
-/// panic at `dispatch_godunov_with_sources`'s resolver (never a silent zero-fill).
+/// (`g_ext_k`, `gm`, `xm_k`, `body_radius`, ...) — a missing one surfaces as a panic at
+/// `dispatch_godunov_with_sources`'s resolver, in place of a silent zero-fill.
 #[derive(Clone, Debug)]
 pub struct FusedSourceBinding {
     pub source_id: String,
@@ -3107,8 +3110,8 @@ impl FusedSourceBinding {
 /// route the godunov dispatch through the fused-source kernel if the kernel-set
 /// has a binding configured, else through the unfused kernel. one chokepoint for
 /// every regime's `godunov_euler` / `godunov_rk2` so each set stays a thin
-/// declarative wrapper — `match &self.fused_source { ... }` does not have to
-/// repeat per regime.
+/// declarative wrapper — `match &self.fused_source { ... }` lives here once for
+/// every regime.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_godunov_maybe_fused<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -3132,23 +3135,23 @@ pub fn dispatch_godunov_maybe_fused<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// **fused-source godunov dispatch.** the same metadata-driven path as
-/// `dispatch_godunov`, but selects the AOT-baked FUSED kernel
+/// `dispatch_godunov`, but selects the AOT-baked fused kernel
 /// `{prefix}_godunov_{kind}_with_{source_id}{sfx}_{D}d` and feeds it the spec source's
 /// scalar parameters (e.g., `g_ext_0 = -9.81` for `uniform_acceleration_sources`)
 /// alongside the standard `dt` + geometry scalars.
 ///
-/// `source_id` MUST match the AOT-emitted name suffix from
+/// `source_id` must match the AOT-emitted name suffix from
 /// `symbi_aot::build.rs::gen_godunov_euler_fused` — e.g., `"uniform_accel"` for the
 /// uniform_acceleration overlay family. `source_scalars` maps the spec's declared
 /// scalar params (whatever names `build_source` declared — `g_ext_k`, `gm`, `xm_k`,
 /// `body_radius`, etc.) to their per-step values. unknown / missing names panic via
-/// `scalars_for`'s loud resolver — surface the vocabulary mismatch up at the call
-/// site, never silently fill with junk.
+/// `scalars_for`'s loud resolver, which surfaces the vocabulary mismatch at the call
+/// site in place of a junk fill.
 ///
-/// the BUFFER manifest still comes from the artifact (resolve_path on the FUSED
+/// the buffer manifest still comes from the artifact (resolve_path on the fused
 /// kernel's recorded bindings), so the same in-place cons.{den, mom_*, nrg} writes
-/// + per-axis flux reads bind automatically; the fused variant adds NO new buffers,
-/// only new SCALARS.
+/// + per-axis flux reads bind automatically; the fused variant extends the scalar
+/// list alone, over the identical buffer set.
 ///
 /// callers that want the unfused kernel keep using `dispatch_godunov`. one launch
 /// replaces two (godunov + body_source) on the AOT-baked fused configs.

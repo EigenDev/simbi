@@ -126,8 +126,8 @@ def test_a_sector_moves_angles_only() -> None:
 
 
 def test_fields_that_overrun_the_circle_are_refused() -> None:
-    """three half-planes do not fit in a circle; wrapping them would stack
-    fields on top of each other in the overlap."""
+    """three half-planes overrun the circle; wrapping them would stack fields
+    on top of each other in the overlap."""
     half_plane = wedge_field("D").model_copy(
         update={"domain": [np.linspace(0.0, np.pi, 9), RADIAL_EDGES]}
     )
@@ -140,8 +140,9 @@ def test_fields_that_overrun_the_circle_are_refused() -> None:
 
 
 def test_levels_of_one_quantity_stay_together() -> None:
-    """a refinement level is another view of the same quantity, not another
-    panel: split across sectors the levels of one field would be drawn apart."""
+    """a refinement level is another view of one quantity, so it shares that
+    quantity's panel: split across sectors the levels of one field would be
+    drawn apart."""
     fields = [
         wedge_field("rho"),
         wedge_field("rho_L1"),
@@ -286,7 +287,8 @@ def test_panels_do_not_share_a_colormap() -> None:
 
 def test_a_panel_takes_the_styling_asked_of_its_own_quantity() -> None:
     """two quantities on one chart rarely share a scaling: a four-velocity that
-    reaches zero cannot take the log scale its neighbouring density wants."""
+    reaches zero takes a linear scale where its neighboring density wants a
+    log one."""
     shared = QuadPlotProps(cmap="inferno", log_scale=True)
     only_u = QuadPlotProps(log_scale=False)
 
@@ -300,7 +302,7 @@ def test_a_panel_takes_the_styling_asked_of_its_own_quantity() -> None:
     )
 
     # the per-field override wins, the panel default colormap still applies,
-    # and props the override never mentioned are inherited
+    # and every prop the override leaves out is inherited
     assert props.log_scale is False
     assert props.cmap == _panel_cmap("inferno", 1)
     assert props.alpha == shared.alpha

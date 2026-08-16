@@ -6,7 +6,7 @@
 //                 — re-exported from the `symbi-sim` crate: the FieldStore hub +
 //                   the sim<->substrate seam, lifted below the substrate.
 //   evolve        — the evolve driver (drives the KernelSet trait); stays here, it depends
-//                   UP on the substrate (regimes) + the executor.
+//                   on the substrate (regimes) + the executor, which sit above it in the layering.
 //   refinement    — static mesh refinement (SMR) hierarchy; stays here for the same reason.
 // =============================================================================
 

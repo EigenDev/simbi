@@ -1,7 +1,7 @@
 // =============================================================================
 // gv/mod.rs
 //
-// the Gv KERNEL BUILDERS: each `*_gv` fn instantiates a carrier-generic
+// the Gv kernel builders: each `*_gv` fn instantiates a carrier-generic
 // symbi-hydro physics function (written over `S: Scalar`) at `S = Gv` and traces
 // it into a stencil DAG — the dispatchable kernel (graph + ABI manifest). the
 // `Gv` carrier + the trace itself live in `symbi-ir`; this module is the
@@ -11,8 +11,8 @@
 // gives the host body; `S = Gv` gives the kernel graph — one physics source.
 //
 // raw index/stencil IR (integer coord arithmetic, lattice-map boundary source,
-// multi-axis load_at) is built directly against `symbi_ir::with_trace` — the
-// f64 `Gv` carrier deliberately does not route integer addressing through itself.
+// multi-axis load_at) is built directly against `symbi_ir::with_trace`; the
+// f64 `Gv` carrier stays a floating-point carrier and leaves integer addressing there.
 // =============================================================================
 
 use symbi_algebra::Tensor;
@@ -144,9 +144,9 @@ pub(crate) fn plm_theta_from_stencil(qm2: Gv, qm1: Gv, q0: Gv, qp1: Gv, theta: G
 /// evolution face pair, so coarse-fine transfer and evolution monotonize identically.
 pub(crate) fn ppm_cell_interfaces<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S) -> (S, S) {
     let two = S::ONE + S::ONE;
-    // half is consumed by the prolongation's sub-cell average, not the interface pair;
-    // constructing it here keeps the traced node order of the prolongation kernel
-    // unchanged (hash-consed ids are assigned at first construction).
+    // half belongs to the prolongation's sub-cell average; constructing it here holds the
+    // traced node order of the prolongation kernel fixed (hash-consed ids are assigned at
+    // first construction).
     let _half = S::ONE / two;
     let three = S::from_f64(3.0);
     let six = S::from_f64(6.0);
@@ -183,14 +183,14 @@ pub(crate) fn ppm_cell_interfaces<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2:
 /// extremum-preserving ppm interface pair (colella & sekora 2008): identical to
 /// `ppm_cell_interfaces` away from extrema (4th-order interfaces, neighbor-range clamp,
 /// sequential overshoot correction), but the cell holding a smooth extremum keeps a
-/// LIMITED parabola instead of flattening to a constant. flattening every smooth
+/// limited parabola instead of flattening to a constant. flattening every smooth
 /// extremum caps the scheme's L1 convergence at second order — the crest cell injects
 /// an O(h^2) error stream each step — and in sustained turbulence, where velocity
 /// extrema fill the box, it is a first-order dissipation mechanism. the extremum
 /// parabola is rescaled by the limited second derivative: same-signed over the
 /// {left, centered, right, interface-implied} candidates -> scale by
 /// `min(|d2_faces|, 1.25 min(|d2_l|, |d2_c|, |d2_r|)) / |d2_faces|` (in [0, 1]);
-/// mixed signs (a genuine discontinuity or odd-even noise) -> zero, which IS the
+/// mixed signs (a genuine discontinuity or odd-even noise) -> zero, which reproduces the
 /// flatten, so shocked cells behave exactly as the cw84 form.
 fn ppm_cell_interfaces_ep<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S) -> (S, S) {
     let two = S::ONE + S::ONE;
@@ -360,7 +360,7 @@ pub(crate) fn recon_gv(
 fn gv_lattice_source(ndim: usize) -> Vec<NodeId> {
     use ElementWiseOp::*;
     with_trace(|t| {
-        // register coords, then ALL map_type, then ALL arg (grouped — matching the positional
+        // register coords, then every map_type, then every arg (grouped — matching the positional
         // rmhd ghost-fill dispatch ints [map_type_0..D, arg_0..D]).
         let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
         let map_type: Vec<NodeId> = (0..ndim)
@@ -401,22 +401,22 @@ pub(crate) fn gv_load_at(key: &str, runtime: impl Into<FieldBind>, src: &[NodeId
 }
 
 // =============================================================================
-// the RMHD CONSTRAINED-TRANSPORT stack in Gv — the staggered curl / edge-EMF / face->cell B /
-// cell-B flux-predictor / EMF save+average. all built on the gv multi-axis OFFSET stencil
+// the RMHD constrained-transport stack in Gv — the staggered curl / edge-EMF / face->cell B /
+// cell-B flux-predictor / EMF save+average. all built on the gv multi-axis offset stencil
 // `gv_field_at` (the staggered gather: read field at `coord + offsets`). div(B)=0 to machine
-// precision is preserved BY THE STENCIL (the discrete curl + divergence telescope the shared
+// precision is preserved by the stencil (the discrete curl + divergence telescope the shared
 // h-weighted edge EMFs to exactly 0); gated by the rmhd_ct_curl*_divb tests. the input/write
 // order matches the hand-built staggered runtime dispatch the RMHD regime binds.
 // =============================================================================
 
-/// register a field in the manifest WITHOUT emitting a node — to PIN the buffer order (the
-/// staggered runtime dispatch is positional) ahead of the stencil reads that follow.
+/// register a field in the manifest as a bare entry, emitting no node, to pin the buffer order
+/// (the staggered runtime dispatch is positional) ahead of the stencil reads that follow.
 fn gv_register_field(key: &str, runtime: &str) {
     with_trace(|t| t.register_field(key, runtime));
 }
 
 /// load field `key` at `coord + offsets` (per-axis integer offset; all-zero = the cell coord) —
-/// the gv multi-axis OFFSET stencil (the CT staggered gather). registers the field (deduped),
+/// the gv multi-axis offset stencil (the CT staggered gather). registers the field (deduped),
 /// builds the integer coord arithmetic + `load_at`. like `field_shifted` but a full offset vector.
 pub(crate) fn gv_field_at(key: &str, runtime: &str, ndim: usize, offsets: &[i32]) -> Gv {
     Gv::of(with_trace(|t| {
@@ -437,15 +437,16 @@ pub(crate) fn gv_field_at(key: &str, runtime: &str, ndim: usize, offsets: &[i32]
     }))
 }
 
-/// clamp a denominator's MAGNITUDE to at least `eps` while preserving its sign. the HLLC/HLLD
+/// clamp a denominator's magnitude to at least `eps` while preserving its sign. the HLLC/HLLD
 /// coefficients divide by wave-speed differences that approach zero in a degenerate riemann fan (the
 /// fast speed meeting the contact speed requires both the sound and alfven speeds to vanish), and by
 /// an HLL-averaged density that approaches zero in vacuum.
 ///
-/// this is NOT `x + eps * sgn(x)`, and deliberately so. signum is zero at zero, so that form adds
-/// nothing exactly where the guard is needed and still divides by zero; and for a well-resolved
-/// denominator it perturbs a value that needed no help. clamping the magnitude leaves every argument
-/// with `|x| >= eps` EXACTLY UNCHANGED and moves only the arguments that would otherwise be unsafe.
+/// clamping the magnitude is what makes the guard safe: every argument with `|x| >= eps` comes back
+/// bit-for-bit, and only the arguments that would otherwise be unsafe move. the tempting
+/// `x + eps * sgn(x)` fails on both counts — signum is zero at zero, so that form adds nothing
+/// exactly where the guard is needed and still divides by zero, and for a well-resolved denominator
+/// it perturbs a value that needed no help.
 /// an exact zero takes the positive branch — at zero either direction is equally valid, so the
 /// choice is arbitrary and only the magnitude matters.
 fn guard_denominator(x: Gv, eps: Gv) -> Gv {
@@ -464,9 +465,9 @@ mod tests {
 
     #[test]
     fn infer_tile_spec_stencil_vs_pointwise() {
-        // the rmhd flux builder DECLARES an explicit per-axis SLAB tile
-        // (halo on the reconstruction axis `dir`, 0 transverse). a POINTWISE
-        // kernel (same-cell reads only) declares no spec -> infers None.
+        // the rmhd flux builder declares an explicit per-axis slab tile
+        // (halo on the reconstruction axis `dir`, 0 transverse). a pointwise
+        // kernel (same-cell reads only) leaves the spec absent -> infers None.
         let (flux, _) = rmhd_flux_gv(1, 0, 0);
         assert!(
             !flux.coord_components.is_empty(),
@@ -494,7 +495,7 @@ mod tests {
     #[test]
     fn adiabatic_c2p_traces_the_real_physics_to_a_kernel() {
         // the payoff: symbi-hydro's adiabatic c2p, run at S=Gv, yields a dispatchable
-        // kernel — the right ABI manifest + the right writes — with NO hand-written builder.
+        // kernel — the right ABI manifest + the right writes — entirely from the traced physics.
         let (k, writes) = adiabatic_c2p_gv::<1>();
         assert_eq!(
             k.field_inputs
@@ -519,8 +520,8 @@ mod tests {
 
     #[test]
     fn boundary_fill_is_the_coord_assign_instance() {
-        // the SAME operator (apply_dag_core_gv) as the source pass, at the
-        // (Coord, Assign) coordinate. proves the abstraction is general — TWO instances, one builder.
+        // the same operator (apply_dag_core_gv) as the source pass, at the
+        // (Coord, Assign) coordinate. proves the abstraction is general — two instances, one builder.
         // a prim prescription: rho=2, vel=0.5, pre=1 (consts; a real boundary reads x/t, same path).
         use symbi_ir::graph::ConstValue;
         let mk = |v: f64| {
@@ -548,16 +549,16 @@ mod tests {
             "graph errors: {:?}",
             k.graph.errors()
         );
-        // Assign writes the PRIM state (not cons), one DAG per slot.
+        // Assign writes the prim state, one DAG per slot.
         let paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
         assert_eq!(paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
-        // Assign has NO `dt` weight (it is a prescription).
+        // Assign is a prescription, so it carries a bare value with no `dt` weight.
         assert!(
             !k.scalar_params.contains(&"dt".to_string()),
             "Assign carries no dt weight"
         );
-        // Coord binds NO state -> the kernel reads no `u_stage.*` / `cons.*` inputs (a pure
-        // coordinate prescription). the const prims read nothing at all here.
+        // Coord binds position alone, so the kernel's inputs are free of `u_stage.*` / `cons.*`
+        // (a pure coordinate prescription). the const prims read nothing at all here.
         assert!(
             !k.field_inputs
                 .iter()
@@ -694,10 +695,10 @@ mod tests {
 
     #[test]
     fn iso_c2p_traces_the_real_physics_to_a_kernel() {
-        // symbi-hydro's LOCALLY-isothermal recovery (`Cons::to_primitive` + Isothermal eos,
+        // symbi-hydro's locally-isothermal recovery (`Cons::to_primitive` + Isothermal eos,
         // reading cs^2 from the nrg slot) at S = Gv: rho = den, vel = mom/den, pre = cs2*rho.
-        // cs2 is a per-cell FIELD (the prescribed temperature) — NO scalar; this is what makes
-        // the run able to be locally isothermal (cs varies per cell). global = uniform cs2.
+        // cs2 is a per-cell field (the prescribed temperature), which is what makes the run
+        // locally isothermal (cs varies per cell). a global run supplies a uniform cs2.
         let (k, writes) = iso_c2p_gv::<1>();
         assert_eq!(
             k.field_inputs
@@ -743,8 +744,9 @@ mod tests {
     fn rhd_c2p_traces_the_real_iterative_physics_to_a_kernel() {
         // the iterative payoff: symbi-hydro's branch-free `rhd_recover` (a carrier-generic
         // newton on the pressure root) run at S=Gv yields a dispatchable kernel whose pressure
-        // is ONE Op::IterateInline (body traced once) — the deep newton does NOT unfold into an
-        // exponential tree. the manifest + writes match the retired `rhd_c2p` Expr builder.
+        // is a single Op::IterateInline (body traced once), so the deep newton stays folded
+        // instead of unfolding into an exponential tree. the manifest + writes match the retired
+        // `rhd_c2p` Expr builder.
         let (k, writes) = rhd_c2p_gv::<1>(20, EosArm::IdealGamma);
         assert_eq!(
             k.field_inputs
@@ -767,9 +769,9 @@ mod tests {
         );
 
         // the recovered pressure is the wu-2017 cone select over the fixed-count inline newton
-        // loop: `pre = select(q(U)/D > 0, newton_p, cone_fail_sentinel)`. the select's THEN branch
-        // is the ONE Op::IterateInline (the deep newton stays folded); the
-        // ELSE branch is the shared non-positive out-of-cone sentinel (see c2p_result).
+        // loop: `pre = select(q(U)/D > 0, newton_p, cone_fail_sentinel)`. the select's then-branch
+        // is the single Op::IterateInline (the deep newton stays folded); the else-branch is the
+        // shared out-of-cone sentinel, which is non-positive (see c2p_result).
         let pre_id = writes
             .iter()
             .find(|(_, rt, _)| rt.name() == "prim.pre")
@@ -1076,7 +1078,7 @@ mod tests {
 
     #[test]
     fn iterate_vec_traces_to_multi_acc_iterate_inline() {
-        // the bracketed-iterate cap: a 2-component coupled step traces to ONE
+        // the bracketed-iterate cap: a 2-component coupled step traces to a single
         // multi-accumulator IterateInline (body + per-component freeze recorded once).
         begin_trace();
         let a0 = Gv::param("a0");
@@ -1085,7 +1087,7 @@ mod tests {
             [a0, b0],
             7,
             |[a, b]| [b, a + b],              // fibonacci-style coupling
-            |_, _| Gv::ZERO.cmp_lt(Gv::ZERO), // never converge (false mask, fixed count)
+            |_, _| Gv::ZERO.cmp_lt(Gv::ZERO), // false mask: run the fixed count
             0,
         );
         let root = r.node();
@@ -1113,9 +1115,9 @@ mod tests {
     fn iterate_traces_to_iterate_inline() {
         begin_trace();
         let x0 = Gv::param("x0");
-        // x_{n+1} = x_n * 0.5, a fixed 3 steps. the convergence predicate IS traced on Gv:
+        // x_{n+1} = x_n * 0.5, a fixed 3 steps. the convergence predicate traces on Gv as well:
         // scalar iterate lowers to a single-accumulator IterateInline whose step is a
-        // Select(converged, OLD, NEW) — the keep-OLD freeze (carrier equivalence with the
+        // Select(converged, old, new) — the keep-old freeze (carrier equivalence with the
         // host early-break).
         let r = x0.iterate(
             3,
@@ -1147,11 +1149,11 @@ mod tests {
 
     #[test]
     fn iterate_freezes_on_convergence_carrier_equivalent() {
-        // the carrier-equivalence regression for Gv::iterate. a deliberately NON-idempotent
+        // the carrier-equivalence regression for Gv::iterate. a deliberately non-idempotent
         // body (each step +1, converge at the threshold): the host early-break returns the
-        // value AT convergence, while a no-freeze trace would run the full count and overshoot.
-        // they agree ONLY if the traced loop freezes; a trace that runs to count returns the
-        // overshot value, which is CPU-correct and GPU-wrong.
+        // value at convergence, and the traced loop matches it only when it freezes there.
+        // a trace that runs to the full count overshoots, giving a value that is CPU-correct
+        // and GPU-wrong.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
         use symbi_ir::{Cpu, CpuField, CpuFieldMut, KernelEmitInputs, emit_kernel_cpu};
 
@@ -1235,7 +1237,7 @@ mod tests {
             "no freeze: traced loop ran to count ({gv})"
         );
 
-        // never converges within the count: both carriers run the full bound and agree.
+        // convergence lies beyond the count: both carriers run the full bound and agree.
         let host_nc = ramp::<f64>(0.0, 3, 5.0);
         let gv_nc = run_gv(3, 5.0, 0.0);
         assert_eq!(host_nc, 3.0);
@@ -1247,9 +1249,9 @@ mod tests {
 
     #[test]
     fn cond_is_a_lazy_branch_carrier_equivalent_and_renders_if_else() {
-        // the DUAL of iterate: `S::cond` is a real data-dependent branch. the
+        // the dual of iterate: `S::cond` is a real data-dependent branch. the
         // untaken arm computes acosh(x) (NaN for x < 1); with `cond` it traces
-        // INTO the `if` block and runs ONLY when x > 1 — a carrier-portable
+        // into the `if` block and runs where x > 1 alone — a carrier-portable
         // early-`if`.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
         use symbi_ir::{Cpu, CpuField, CpuFieldMut, KernelEmitInputs, emit_kernel_from_lowering};
@@ -1258,7 +1260,7 @@ mod tests {
             S::cond(x.cmp_gt(S::ONE), || x.acosh(), || x * x)
         }
 
-        // TRACE STRUCTURE: the root is Op::IfElse, not Op::Select.
+        // trace structure: the root is Op::IfElse, the lazy branch form.
         begin_trace();
         let xp = Gv::param("x");
         let root = pick::<Gv>(xp).node();
@@ -1329,7 +1331,7 @@ mod tests {
             (out[0], src)
         }
 
-        // CARRIER EQUIVALENCE: f64 host == Gv interp, BIT-identical, on BOTH
+        // carrier equivalence: f64 host == Gv interp, bit-identical, on each of the two
         // arms (x<1 takes else=x*x; x>1 takes then=acosh; near the boundary).
         for &x in &[0.5_f64, 2.0, 1.5, 0.999, 1.0, 3.7] {
             let host = pick::<f64>(x);
@@ -1340,9 +1342,9 @@ mod tests {
             );
         }
 
-        // EMITTED SOURCE is a REAL `if (...) { ... } else { ... }`, with the
-        // expensive `acosh` INSIDE the branch (after `if (`), and NO
-        // higher-order placeholder: the branch is structurally lazy.
+        // the emitted source is a genuine `if (...) { ... } else { ... }`, with the
+        // expensive `acosh` inside the branch (after `if (`) and the higher-order
+        // placeholder resolved away: the branch is structurally lazy.
         let (_, src) = run_gv(2.0);
         assert!(
             src.contains("if ("),
@@ -1366,8 +1368,8 @@ mod tests {
 
     #[test]
     fn cond_vec_is_an_n_output_lazy_branch_carrier_equivalent() {
-        // the dual of iterate_vec: ONE branch, TWO outputs from the SAME taken
-        // arm. the else arm computes a SHARED expensive value (acosh) feeding
+        // the dual of iterate_vec: one branch, two outputs from the same taken
+        // arm. the else arm computes a shared expensive value (acosh) feeding
         // both outputs — proving the arm runs once and both outputs project
         // from it: the (sl, sr) wave-speed fast-path shape.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -1502,9 +1504,9 @@ mod tests {
     #[test]
     fn rhd_wave_speed_map_traces_the_real_physics() {
         // symbi-hydro's Rhd::wave_speeds_axis (mignone-bodo, normal velocity only) at S=Gv,
-        // folded with the in-kernel cartesian-uniform widths into ONE timestep kernel — the SAME
-        // physics the RHD flux's HLLE uses. cartesian 2D: reads rho + the GRIDDED normal
-        // velocities (v0, v1) + pre — the dead v2 is left ZERO and never enters the graph.
+        // folded with the in-kernel cartesian-uniform widths into one timestep kernel — the same
+        // physics the RHD flux's HLLE uses. cartesian 2D: reads rho + the gridded normal
+        // velocities (v0, v1) + pre; the dead v2 stays a zero constant outside the graph.
         let (k, writes) = rhd_wave_speed_map_gv(
             Coords::Cartesian,
             Spacetime::Minkowski,
@@ -1619,7 +1621,7 @@ mod tests {
     #[test]
     fn rmhd_wave_speed_map_traces_the_magnetosonic_bound() {
         // symbi-hydro's rmhd_magnetosonic_cfl_speeds (the cheap c_f^2 = c_s^2 + c_A^2 -
-        // c_s^2 c_A^2 UPPER BOUND) at S=Gv, folded into ONE timestep kernel. it reads the full
+        // c_s^2 c_A^2 upper bound) at S=Gv, folded into one timestep kernel. it reads the full
         // 3-vector prim + gamma (vsq/bsq), and is ~25x cheaper than the exact quartic. proves
         // the CFL pays no resolvent cubic (asinh/acosh/cos/cosh) — the mignone & del zanna
         // quartic's transcendentals stay on the riemann/flux path only.
@@ -1660,15 +1662,15 @@ mod tests {
             "graph errors: {:?}",
             k.graph.errors()
         );
-        // the magnetosonic bound has NO resolvent-cubic transcendentals.
+        // the magnetosonic bound is free of resolvent-cubic transcendentals.
         //
-        // the trigonometric and hyperbolic family alone is a COMPLETE signature of the resolvent,
-        // even though the resolvent's depressed-cubic branch reaches its root through a cube root
-        // rather than through them: tracing materializes BOTH arms of every conditional, so a
-        // resolvent in this graph would carry its `acos`/`cos` and `acosh`/`cosh` branches
-        // alongside that cube root. `Pow` is therefore redundant here, and it is separately
-        // emitted by the axis map -- a logarithmic axis places its faces at `start*10^(i*slope)`
-        // -- so forbidding it would flag the GEOMETRY rather than the wave-speed physics.
+        // the trigonometric and hyperbolic family alone is a complete signature of the resolvent,
+        // even though the resolvent's depressed-cubic branch reaches its root through a cube root:
+        // tracing materializes each arm of every conditional, so a resolvent in this graph would
+        // carry its `acos`/`cos` and `acosh`/`cosh` branches alongside that cube root. `Pow` is
+        // therefore redundant here, and it is separately emitted by the axis map -- a logarithmic
+        // axis places its faces at `start*10^(i*slope)` -- so forbidding it would flag the geometry
+        // rather than the wave-speed physics.
         use symbi_ir::graph::ElementWiseOp as E;
         let expensive = [
             E::Sin,
@@ -1687,7 +1689,7 @@ mod tests {
             !has_transcendental,
             "CFL bound must not emit the quartic's transcendentals"
         );
-        // it still computes ONE sqrt (the relativistic-addition discriminant).
+        // it still computes a single sqrt (the relativistic-addition discriminant).
         let n_sqrt = (0..k.graph.len())
             .filter(|&i| {
                 matches!(
@@ -1704,10 +1706,10 @@ mod tests {
 
     #[test]
     fn rmhd_wave_speeds_cell_traces_the_exact_quartic() {
-        // the per-cell wave-speed kernel: the EXACT mignone & del zanna quartic per cell, one
+        // the per-cell wave-speed kernel: the exact mignone & del zanna quartic per cell, one
         // (lambda_min, lambda_max) pair per direction -> wave_speed_l[d] / wave_speed_r[d].
-        // proves it reads the full prim + gamma, writes 6, and DOES carry the resolvent-cubic
-        // transcendentals (it IS the exact quartic — the cost lifted off the flux).
+        // proves it reads the full prim + gamma, writes 6, and carries the resolvent-cubic
+        // transcendentals, being the exact quartic — the cost lifted off the flux.
         let (k, writes) = rmhd_wave_speeds_cell_gv(3);
         assert_eq!(writes.len(), 6, "lambda_min/max per 3 directions");
         let out_paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
@@ -1736,8 +1738,8 @@ mod tests {
             "graph errors: {:?}",
             k.graph.errors()
         );
-        // it IS the exact quartic -> the resolvent cubic's transcendentals ARE present here
-        // (the whole point: this kernel pays them ONCE per cell, the flux pays none).
+        // being the exact quartic, this graph carries the resolvent cubic's transcendentals
+        // (the whole point: this kernel pays them once per cell, the flux pays none).
         use symbi_ir::graph::ElementWiseOp as E;
         let has_resolvent = (0..k.graph.len()).any(|i| {
             matches!(
@@ -1753,8 +1755,8 @@ mod tests {
 
     #[test]
     fn snapshot_gv_traces_a_pure_copy() {
-        // u_n = cons: each write root IS the read field param (a direct buffer copy), no scalars,
-        // geometry-free. ncomp=2 + energy -> cons den/mom_0/mom_1/nrg -> u_n.*.
+        // u_n = cons: each write root is the read field param (a direct buffer copy), scalar-free
+        // and geometry-free. ncomp=2 + energy -> cons den/mom_0/mom_1/nrg -> u_n.*.
         let (k, writes) = snapshot_gv(2, true);
         assert!(k.scalar_params.is_empty(), "snapshot takes no scalars");
         assert!(
@@ -1778,8 +1780,8 @@ mod tests {
     #[test]
     fn schwarzschild_wave_speed_map_wires_the_lapse_mass_scalar() {
         // the schwarzschild wave-speed map threads the banyuls-font coordinate correction
-        // (lapse + radial proper-width -> the `schwarzschild_mass` scalar) into the DAG; the flat
-        // spherical map does NOT, and stays bit-identical to the lapse-free form.
+        // (lapse + radial proper-width -> the `schwarzschild_mass` scalar) into the DAG. the flat
+        // spherical map omits that scalar and stays bit-identical to the lapse-free form.
         let (k_gr, _) = rhd_wave_speed_map_gv(
             Coords::Spherical,
             Spacetime::SchwarzschildKS,
@@ -1814,7 +1816,7 @@ mod tests {
     fn schwarzschild_stage_wires_the_lapse_mass_scalar() {
         // the GR lapse wiring: a schwarzschild-spacetime stage threads the lapse
         // alpha = sqrt(1 - 2M/r) into the DAG, so the host scalar `schwarzschild_mass` appears in
-        // the kernel manifest. the flat (minkowski) stage on the SAME spherical grid does NOT — it
+        // the kernel manifest. the flat (minkowski) stage on the same spherical grid omits it and
         // stays bit-identical to the lapse-free flat result. proves the (spherical, schwarzschild) -> metric.lapse path.
         let (k_gr, _) = godunov_stage_gv(
             Coords::Spherical,
@@ -1925,12 +1927,12 @@ mod tests {
 
     #[test]
     fn fused_built_core_matches_spec_adapter_trace() {
-        // step-2 split gate: the SourceSpec entry (`godunov_stage_gv_with_fused_sources`) and the
-        // BuiltSource core (`godunov_stage_gv_with_fused_built`) MUST emit the IDENTICAL
-        // godunov+source kernel — same ABI manifest, same writes, same lowered source. proves the
-        // refactor folded the AOT spec path and the runtime BuiltSource path onto ONE trace with
-        // no drift. a position- AND energy-dependent family (mom + nrg) exercises the centroid
-        // `x_k` binding and the energy overlay, the parts most likely to diverge under a bad split.
+        // the SourceSpec entry (`godunov_stage_gv_with_fused_sources`) and the BuiltSource core
+        // (`godunov_stage_gv_with_fused_built`) emit an identical godunov+source kernel — same
+        // ABI manifest, same writes, same lowered source. the AOT spec path and the runtime
+        // BuiltSource path share a single trace, so they stay in lockstep. a family depending on
+        // both position and energy (mom + nrg) exercises the centroid `x_k` binding and the energy
+        // overlay, the parts most likely to diverge under a bad split.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
         use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
 
@@ -1974,8 +1976,9 @@ mod tests {
             0,
         );
 
-        // the ABI manifest + writes are identical (NodeIds match because both trace the SAME op
-        // sequence — building the BuiltSource values outside the trace allocates no trace nodes).
+        // the ABI manifest + writes are identical (NodeIds match because both trace the same op
+        // sequence — building the BuiltSource values outside the trace leaves the node allocation
+        // untouched).
         assert_eq!(
             k_spec.field_inputs, k_built.field_inputs,
             "field_inputs drift"

@@ -10,10 +10,10 @@
 // still advects, still stays bounded, and still looks like a plausible tracer field — it is only
 // the total that goes wrong, quietly, in proportion to how much dye crossed the interface.
 //
-// so the gate is the composite total: dye summed over LEAF cells (coarse outside the refined
-// patch, fine inside it), which on a periodic domain with no sources is exactly conserved. and
-// because a bump that never reaches the patch would conserve that total trivially, the setup
-// asserts the dye actually crossed.
+// so the gate is the composite total: dye summed over leaf cells (coarse outside the refined
+// patch, fine inside it), which on a source-free periodic domain is exactly conserved. a bump
+// that stopped short of the patch would conserve that total trivially, so the setup also asserts
+// the dye crossed.
 //
 // run: cargo test -p symbi --test refinement_dye
 // =============================================================================
@@ -158,15 +158,15 @@ fn dye_is_conserved_across_a_refinement_interface() {
     );
 
     // long enough for the front to enter the patch (t = 0.25) and leave it again (t = 0.75), so
-    // the dye crosses BOTH interfaces rather than parking inside.
+    // the dye crosses both interfaces and clears the patch.
     let t_final = 0.9;
     hier.evolve(t_final).expect("refined dye advection");
 
     let after = composite_dye(&hier);
     let fine_after = fine_dye(&hier);
 
-    // the premise: the dye actually traversed the refined patch. a bump that never arrived would
-    // conserve the total trivially and test none of the transfer paths.
+    // the premise: the dye traversed the refined patch. a bump that stopped short would conserve
+    // the total trivially and leave every transfer path unexercised.
     assert!(
         fine_after > 1e-6 || fine_before > 1e-6,
         "no dye ever occupied the refined patch; the interface was never exercised"

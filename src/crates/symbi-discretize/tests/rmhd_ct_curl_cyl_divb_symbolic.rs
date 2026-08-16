@@ -1,25 +1,25 @@
 // =============================================================================
 // rmhd_ct_curl_cyl_divb_symbolic.rs
 //
-// the SYMBOLIC proof that the 3D CYLINDRICAL constrained-transport curl
-// (rmhd_ct_curl_3d_dir_gv under Coords::Cylindrical) preserves the AREA-WEIGHTED
-// div(B) = 0 EXACTLY — by rational-function coefficient cancellation on the traced
+// the symbolic proof that the 3D cylindrical constrained-transport curl
+// (rmhd_ct_curl_3d_dir_gv under Coords::Cylindrical) preserves the area-weighted
+// div(B) = 0 exactly, by rational-function coefficient cancellation on the traced
 // IR DAG. the cylindrical analog of rmhd_ct_curl_sph_divb_symbolic.rs.
 //
-// cylindrical (r, phi, z) scale factors are h_r=1, h_phi=r, h_z=1 — the ONLY
-// curvature is the radius r (axis 0). so unlike spherical there is NO sin: the
-// coefficients are rational functions of the AFFINE r alone (x_lo_0 + (c_0+off) dx_0),
-// the simplest curvilinear case the `RatFun` / `LinFormR` ring covers. the covariant
-// coord shift (c_0 -> c_0 + delta_0 under a +r step) is still essential — the curl
-// coefficients depend on the cell radius.
+// cylindrical (r, phi, z) scale factors are h_r=1, h_phi=r, h_z=1: the radius r
+// (axis 0) carries the whole curvature. the coefficients are therefore rational
+// functions of the affine r alone (x_lo_0 + (c_0+off) dx_0), where the spherical case
+// also needs the opaque sin(theta) — the simplest curvilinear case the `RatFun` /
+// `LinFormR` ring covers. the covariant coord shift (c_0 -> c_0 + delta_0 under a +r
+// step) stays essential, since the curl coefficients depend on the cell radius.
 //
-// the point-form area-weighted divergence over a cell (the SAME 1/inv_pref * widths
+// the point-form area-weighted divergence over a cell (the same 1/inv_pref * widths
 // rule as the spherical test):
 //   dir=0 (r-face):   A_r   = r(0) dphi dz     (h_phi h_z = r * 1, r at the r-face)
 //   dir=1 (phi-face): A_phi = dr dz            (h_z h_r = 1 — r-independent)
 //   dir=2 (z-face):   A_z   = r_c dr dphi      (h_r h_phi = 1 * r, r at the cell center)
 // weighting the curl by A_dir collapses the metric so the edge-EMF reads telescope
-// to the ZERO rational function — the proof, for ANY input field.
+// to the zero rational function — the proof, and it holds for every input field.
 // =============================================================================
 
 use std::collections::HashMap;
@@ -32,14 +32,14 @@ use symbi_ir::proof::{LinFormR, Poly, RatFun};
 const FIELDS: &[&str] = &["e_p1", "e_p2", "b"];
 const SCALARS: &[&str] = &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "x_lo_2", "dx_2"];
 
-// strip the old-field `b` leaf: it reproduces div(B_old), invariant under the
-// update — not part of the "the update preserves div" proof.
+// strip the old-field `b` leaf: it reproduces div(B_old), which the update leaves
+// invariant; the proof concerns the increment the update adds.
 fn curl_only(mut lf: LinFormR) -> LinFormR {
     lf.terms.retain(|(key, _), _| key != "b");
     lf
 }
 
-// the cylindrical geometry is built from the ABSOLUTE axis scalars x_lo_N/dx_N, so
+// the cylindrical geometry is built from the absolute axis scalars x_lo_N/dx_N, so
 // only the per-dir generic field keys e_p1/e_p2 need canonicalizing to physical axes.
 fn physical_rename(dir: usize) -> HashMap<String, String> {
     let p1 = (dir + 1) % 3;
@@ -76,7 +76,7 @@ fn dx(ax: usize) -> Poly {
     Poly::var(&format!("dx_{ax}"))
 }
 
-// the point-form face areas at the cell's LO dir-face (offset 0).
+// the point-form face areas at the cell's low dir-face (offset 0).
 fn area(dir: usize) -> RatFun {
     match dir {
         // r-face: r(0) dphi dz. h_phi (= r) at the r-face, h_z = 1.
@@ -117,8 +117,8 @@ fn divb_cyl_symbolic_telescoping() {
         div_contribution.add(&diff);
     }
 
-    // THE PROOF: the area-weighted edge-EMF contributions telescope to the zero
-    // rational function (every coefficient numerator cancels EXACTLY).
+    // the proof: the area-weighted edge-EMF contributions telescope to the zero
+    // rational function; every coefficient numerator cancels exactly.
     assert!(
         div_contribution.is_zero(),
         "cylindrical div(curl B) != 0 symbolically — residual edge-emf numerators:\n{:#?}",
@@ -126,8 +126,8 @@ fn divb_cyl_symbolic_telescoping() {
     );
 }
 
-// a NEGATIVE control: a single uncancelled area-weighted edge read does NOT vanish,
-// so the rational checker is not vacuously green.
+// a negative control: a single uncancelled area-weighted edge read survives as a
+// residual, so the rational checker reports a broken cancellation when one exists.
 #[test]
 fn divb_cyl_symbolic_detects_residual() {
     let mut lf = LinFormR::default();

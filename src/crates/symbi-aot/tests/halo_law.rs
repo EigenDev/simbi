@@ -7,8 +7,8 @@
 // without widening the halo fails here at test time, naming the kernel, the
 // field, and the axis at test time, before a widened stencil reads garbage at run time.
 //
-// three kernel families index in ways that are not fixed-offset stencils BY
-// DESIGN, and are exempted as families:
+// three kernel families are exempted by design because they index through
+// runtime-computed addressing, not fixed-offset stencils:
 //   - ghost fills: the source coord picks periodic/reflect/outflow through a
 //     runtime lattice-map select; the map keeps reads in range by construction
 //   - refinement transfers (refine_*): cross-grid addressing through scaled
@@ -87,9 +87,10 @@ fn every_registered_kernel_fits_the_ghost_halo() {
     );
 }
 
-// the positive control: the law is not passing vacuously. plm reconstruction's
-// -2..+1 fan on the flux axis is a pinned fact of the discretization — if the
-// analysis stops seeing it, the law above has gone blind while still reporting clean.
+// the positive control: confirms the law fires on a real stencil, not a
+// vacuous pass. plm reconstruction's -2..+1 fan on the flux axis is a pinned
+// fact of the discretization — if the analysis stops seeing it, the law
+// above has gone blind while still reporting clean.
 #[test]
 fn plm_face_flux_reach_is_two_on_the_flux_axis() {
     let report = stencil_reach(&prepared_from_ir(flux_blob()).scalarized);

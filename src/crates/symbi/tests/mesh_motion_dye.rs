@@ -73,8 +73,8 @@ fn a_uniform_dye_survives_homologous_expansion() {
     let a0 = sim.motion.a;
     evolve(&mut sim, &k, 0.4).expect("expanding dye evolution");
 
-    // the premise: the mesh actually expanded. a static mesh would hold a uniform dye uniform for
-    // free and the comoving-vs-physical width could not be distinguished.
+    // the premise: the mesh genuinely expanded. a static mesh holds a uniform dye uniform for
+    // free, collapsing the comoving and physical widths onto the same number.
     let growth = sim.motion.a / a0;
     assert!(
         growth > 1.1,

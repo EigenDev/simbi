@@ -7,12 +7,12 @@
 // time-interpolated coarse-fine ghost prolongation, conservative restriction,
 // and flux-register refluxing. the single-level engine is untouched —
 //
-// SINGLE-COVERAGE CAP (this is SMR): each level refines exactly
-// ONE box (`coverage: Option<Domain>`), with ONE FluxRegister per coarse-fine
-// level-pair. the refined region is fixed at setup and is not re-flagged from the
-// solution; there is no patch graph and no berger-rigoutsos clustering.
-// multi-patch adaptive refinement (a level as a disjoint cover of Domains) is
-// not implemented.
+// single-coverage cap (this is SMR): each level refines one box
+// (`coverage: Option<Domain>`), with one FluxRegister per coarse-fine
+// level-pair. the refined region is fixed at setup and stays where it was
+// placed; there is a single patch per level and no berger-rigoutsos
+// clustering. multi-patch adaptive refinement (a level as a disjoint cover of
+// Domains) lies outside this implementation.
 //
 // advance_level re-sequences the SSP stage loop (sim/evolve.rs::step) so the
 // register accumulation slots between flux() and the stage update.
@@ -108,8 +108,8 @@ where
     /// coarse scratch for the lerp-then-prolong split: `field_lerp` writes
     /// `(1-alpha)*prim_old + alpha*prim` here once per coarse cell, and the
     /// single-snapshot prolong reads it — half the time-pair kernel's gather
-    /// traffic. allocated with prim_old (None on the finest); reused every
-    /// call, never allocated in the step loop.
+    /// traffic. allocated alongside prim_old (None on the finest) and reused on
+    /// every call, so the step loop allocates nothing.
     pub prim_lerp: Option<PrimFieldsGeneric<NDIM, DOF, Mem>>,
     /// cell-centered B at this level's step start (mhd only) — the magnetic
     /// counterpart of prim_old for the finer level's ghost prolongation.
@@ -118,33 +118,33 @@ where
     /// finer level's bface transverse-halo prolongation (per-component
     /// staggered domains, cloned from this level's bface).
     pub bface_old: Option<[Field<f64, NDIM, Mem>; NDIM]>,
-    /// per-slab intermediates of the axis-split prolongation INTO this level,
+    /// per-slab intermediates of the axis-split prolongation into this level,
     /// in `cf_ghost_slabs` order. SMR slabs are static, so
     /// the shapes are too: lazily allocated on the first prolongation, reused
-    /// every call (the step loop allocates nothing). None-equivalent
-    /// (uninitialized) on the root.
+    /// on every call (the step loop allocates nothing). uninitialized on the
+    /// root.
     pub prolong_sweep: std::sync::OnceLock<Vec<ProlongSweepScratch<NDIM, DOF, Mem>>>,
-    /// the region of THIS level covered by the next finer level, in absolute
-    /// indices of this level. None on the finest. single-coverage cap: exactly
-    /// ONE refined box per level (this is static refinement / SMR — no disjoint-cover
-    /// `Vec<Domain>`, no clustering).
+    /// the region of this level covered by the next finer level, in absolute
+    /// indices of this level. None on the finest. single-coverage cap: one
+    /// refined box per level (static refinement / SMR — a single `Domain`,
+    /// placed at setup).
     pub coverage: Option<Domain<NDIM>>,
     /// this level's numerical flux of the run's stationary target state, `F(qt)`, when the run
     /// declares one. the flux registers subtract it from both sides of the coarse-fine
     /// difference, so what is refluxed is the deviation from the target and a state sitting
     /// exactly on the target accumulates nothing. per level, because the mismatch the register
-    /// would otherwise see IS the difference between the two grids' reconstructions of the same
-    /// exact solution.
+    /// would otherwise see is precisely the difference between the two grids' reconstructions of
+    /// the same exact solution.
     pub flux_eq: Option<EquilibriumFlux<NDIM, DOF, Mem>>,
     /// this level's discrete imbalance of that same target, `R = div_h F_h(qt) - s_h(qt)`, per
-    /// unit time and per cell. a steady state solves the CONTINUUM equations, so the scheme leaves
+    /// unit time and per cell. a steady state solves the continuum equations, so the scheme leaves
     /// this residual at truncation order and an atmosphere seeded on the exact hydrostatic profile
     /// starts moving. every stage adds it back, which makes the target an exact fixed point.
     pub residual_eq: Option<ConsFieldsGeneric<NDIM, DOF, Mem>>,
     /// the target's own conserved state on this level — the reference the deviation is measured
-    /// from. covered cells hold the volume-weighted restriction of the finer level's target, not
-    /// an independent evaluation of the profile: the restriction the run performs every parent
-    /// step must leave the target where it found it.
+    /// from. covered cells hold the volume-weighted restriction of the finer level's target, so
+    /// the restriction the run performs every parent step leaves the target where it found it.
+    /// defining it by an independent evaluation of the profile per level would move it.
     pub cons_eq: Option<ConsFieldsGeneric<NDIM, DOF, Mem>>,
 }
 
@@ -154,9 +154,9 @@ where
 
 /// static-refinement hierarchy: levels[0] = coarsest, levels[n-1] = finest.
 /// a fatal CFL crash: the wave speed went NaN or collapsed (an unphysical c2p — e.g. V -> 1 near a
-/// boundary), so the next dt is NaN / non-positive / blown up. the evolve loop stops at the LAST
-/// computed state (no further advance) and the driver snapshots a `.crashed` checkpoint + reports
-/// it, so the crash is never masked by clamping dt to t_final and "finishing" on garbage.
+/// boundary), so the next dt is NaN / non-positive / blown up. the evolve loop halts on the last
+/// computed state and the driver snapshots a `.crashed` checkpoint + reports it, so the crash
+/// reaches the user; clamping dt to t_final would instead let the run "finish" on garbage.
 #[derive(Clone, Copy, Debug)]
 pub struct CrashReport {
     pub iter: u64,
@@ -192,29 +192,30 @@ where
     /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
     pub crash: Option<CrashReport>,
 
-    /// cells within this radius of the origin are excluded from the STATIONARITY DIAGNOSTIC.
+    /// cells within this radius of the origin are excluded from the stationarity diagnostic.
     ///
     /// a declared target is a steady state of the equations the stage pipeline applies. inside a
-    /// sink it is not: the drain removes mass and energy there, so the target's imbalance carries
-    /// the drain rather than truncation error and reports non-convergence however exact the target
-    /// is elsewhere. the well-balancing itself is unaffected — the correction is applied on every
-    /// cell — this only decides which cells are allowed to testify about convergence.
+    /// sink the drain removes mass and energy, so the target's imbalance there measures the drain
+    /// rather than truncation error and reports non-convergence however exact the target is
+    /// elsewhere. the well-balancing correction still lands on every cell; this radius decides
+    /// which cells testify about convergence.
     ///
     /// `None` resolves to the largest accretion radius among the attached bodies, so a run with a
-    /// sink gets the exclusion without configuring anything, and a run without one excludes nothing.
+    /// sink gets the exclusion by default and a run with no bodies gets a zero radius that keeps
+    /// every cell.
     pub equilibrium_mask_radius: Option<f64>,
 
-    /// the previous step's RAW cfl-derived dt — the quantity the collapse guard compares against.
-    /// the level's `state.dt` is the ACCEPTED dt, which the `t_final` clamp and an explicit-step
+    /// the previous step's raw cfl-derived dt — the quantity the collapse guard compares against.
+    /// the level's `state.dt` is the accepted dt, which the `t_final` clamp and an explicit-step
     /// rejection both shrink; comparing a fresh cfl estimate against it reports a "collapse" every
     /// time a rejected step is replayed at a smaller dt and then recovers. 0 before the first step.
     pub prev_dt_cfl: f64,
 
-    /// whether the coarse-fine ghost transfer prolongs DEPARTURES from the local hydrostatic
-    /// equilibrium instead of the raw primitive state. `None` follows the kernel set: active
-    /// exactly when the set reconstructs balanced (`KernelSet::hydrostatic_balance`) and a
-    /// gravitating body supplies the potential. `Some(x)` forces the choice — the instrument
-    /// knob that measures the transfer as the load-bearing piece. see `cf_transfer_balanced`.
+    /// whether the coarse-fine ghost transfer prolongs departures from the local hydrostatic
+    /// equilibrium; when off it prolongs the raw primitive state. `None` follows the kernel set:
+    /// active precisely when the set reconstructs balanced (`KernelSet::hydrostatic_balance`) and
+    /// a gravitating body supplies the potential. `Some(x)` forces the choice — the knob that
+    /// measures the transfer as the load-bearing piece. see `cf_transfer_balanced`.
     pub balance_aware_transfer: Option<bool>,
 }
 
@@ -673,7 +674,7 @@ where
     }
 
     /// decimate the hierarchy to a screen-sized density heatmap, compositing the
-    /// nested refinement levels: each root cell descends to the FINEST level whose
+    /// nested refinement levels: each root cell descends to the finest level whose
     /// `coverage` box contains it (SMR = single nested box per level, ratio 2), so
     /// the refined region shows its fine detail and the rest shows the coarse grid.
     /// a single-level hierarchy is just the root decimation. cost is screen-bounded.
@@ -684,7 +685,7 @@ where
         orient: usize,
         zoom: usize,
     ) -> Option<FieldDecimation> {
-        // single grid: no coverage to descend, reuse the plain per-state decimation.
+        // single grid: the root is the only level, so reuse the plain per-state decimation.
         if self.levels.len() <= 1 {
             return self.levels[0]
                 .state
@@ -799,7 +800,7 @@ where
         self.levels[lvl].state.field_value(idx, kind)
     }
 
-    /// seed every fine level's interior from its parent by CONSERVATIVE
+    /// seed every fine level's interior from its parent by conservative
     /// prolongation at the hierarchy's `prolong_order` (= interior reconstruction
     /// order + 1, the same order the coarse-fine ghost prolongation uses). the IC
     /// fill for a hierarchy whose coarse level was seeded but whose fine levels are
@@ -807,9 +808,9 @@ where
     /// conserved component is prolonged coarse -> fine interior; the fine levels
     /// then refine the solution as they evolve.
     ///
-    /// the conserved components are prolonged INDEPENDENTLY, and nothing in a
-    /// component-wise high-order prolongation preserves the admissibility
-    /// inequality E >= |m|^2 / (2 rho): near an extremum of the momentum the
+    /// the conserved components are prolonged independently, and a component-wise
+    /// high-order prolongation is free to break the admissibility inequality
+    /// E >= |m|^2 / (2 rho): near an extremum of the momentum the
     /// non-monotone stencil overshoots `m` while `E` interpolates low, and the
     /// fine cell's internal energy E - |m|^2/(2 rho) goes negative wherever the
     /// kinetic energy density is comparable to the internal — e.g. a velocity
@@ -818,12 +819,12 @@ where
     /// re-seeded by piecewise-constant injection of its covering parent cell,
     /// which is unconditionally admissible (the children are copies of an
     /// admissible parent) and preserves the coarse-cell integral exactly. the
-    /// audit repairs hydro components only; returns the number of re-seeded
-    /// cells so callers can assert the fallback engaged (or did not).
+    /// audit repairs hydro components only; returns the count of re-seeded
+    /// cells so callers can assert how often the fallback engaged.
     ///
     /// the seeded state is hydro-complete plus the mhd cell-centered B. the staggered
-    /// fine `bface` is NOT seeded here: a face field needs face prolongation, which the
-    /// mhd refinement path supplies.
+    /// fine `bface` comes from the mhd refinement path, which supplies the face
+    /// prolongation a face field requires.
     pub fn seed_fine_from_coarse(&self) -> symbi_xpu::Result<usize> {
         let mut reseeded = 0usize;
         for ll in 1..self.levels.len() {
@@ -845,7 +846,7 @@ where
             if let (Some(cn), Some(fn_nrg)) = (cc.nrg_field(), fc.nrg_field()) {
                 prolong_field(cn, &zero, fn_nrg, &region, order, 0.0);
             }
-            // mhd: cell-centered B + the staggered FACES (divergence-free
+            // mhd: cell-centered B + the staggered faces (divergence-free
             // prolongation per normal axis — Balsara). seeding the faces div-free
             // is what lets the fine CT start at div(B)=0 and coarse-fine
             // consistent; the cell B is prolonged alongside for the flux.
@@ -870,8 +871,8 @@ where
             }
 
             // admissibility audit of the freshly filled level. the audit runs
-            // inside the level loop so a repaired cell is what the NEXT level
-            // prolongs from — the cascade never compounds an inadmissible state.
+            // inside the level loop so a repaired cell is what the next level
+            // prolongs from — every level prolongs from an admissible parent.
             let lvl = &self.levels[ll];
             lvl.kernels.c2p(&lvl.state);
             symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
@@ -922,7 +923,7 @@ where
         Ok(reseeded)
     }
 
-    /// a 1-level hierarchy: the degenerate case that must reproduce evolve()
+    /// a 1-level hierarchy: the degenerate case, which reproduces evolve()
     /// bit-for-bit.
     pub fn single(state: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>, kernels: K) -> Self {
         let tracer_root_global_cells =
@@ -958,7 +959,7 @@ where
 
     /// build a statically nested hierarchy: region k refines level k at ratio 2.
     /// fine levels live in absolute indices (interior at 2x the covered cells)
-    /// with the SAME global physical origin; coarse-fine faces get
+    /// sharing the global physical origin; coarse-fine faces get
     /// BoundaryType::CoarseFine, faces flush with the parent interior inherit
     /// the parent's boundary. `make_kernels` builds each fine level's kernel
     /// set from its constructed state.
@@ -1037,8 +1038,8 @@ where
                 "refinement: non-uniform axis maps need a per-level map split (not built)"
             );
             // the passive scalar is a run-level opt-in taken on the root, and a fine level is
-            // built fresh rather than cloned, so the dye slots have to be carried down explicitly.
-            // a fine level without them cannot hold the concentration its own cells advect.
+            // built fresh, so the dye slots have to be carried down explicitly. the slots are what
+            // hold the concentration a fine level's own cells advect.
             let fine = if parent.fields.cons.chi_field().is_some() {
                 fine.with_passive_scalar()?
             } else {
@@ -1134,14 +1135,14 @@ where
         })
     }
 
-    /// attach an immersed body collection to every level: the FINEST level
+    /// attach an immersed body collection to every level: the finest level
     /// carries the full collection (the sink and the accretion diagnostics
     /// have a single owner — the resolution truth), every coarser level a
     /// gravity-only proxy of each body (same mass / softening / motion, sink
-    /// disabled), so covered coarse cells are never sink-drained under the
-    /// restriction. body motion advances once per root step on the finest and
-    /// is synced outward. the sink region must lie inside the finest level —
-    /// asserted every step as the bodies move.
+    /// disabled), so the drain acts on the finest cells alone and the
+    /// restriction then sets the covered coarse cells. body motion advances
+    /// once per root step on the finest and is synced outward. the sink region
+    /// lies inside the finest level — asserted every step as the bodies move.
     pub fn with_bodies(mut self, bodies: symbi_ib::BodyCollection<f64, NDIM>) -> Self {
         let n = self.levels.len();
         for ll in 0..n {
@@ -1167,8 +1168,8 @@ where
 
     /// force the coarse-fine transfer's equilibrium decomposition on or off, overriding the
     /// kernel-set default. `false` on a balanced gravitating hierarchy reproduces the seam
-    /// entropy drain the decomposition removes — the measurement that the transfer, not the
-    /// reconstruction, is the load-bearing piece.
+    /// entropy drain the decomposition removes — the measurement that identifies the transfer,
+    /// over the reconstruction, as the load-bearing piece.
     pub fn balance_aware_transfer(mut self, on: bool) -> Self {
         self.balance_aware_transfer = Some(on);
         self
@@ -1219,13 +1220,13 @@ where
         self.assert_sinks_inside_finest_clipped();
     }
 
-    /// the sink containment invariant, clipped to this hierarchy's root: only the part of
-    /// the sink sphere that overlaps the root interior must lie inside the finest level —
-    /// on a decomposed tile the sphere may span cuts (each owning tile drains its own
-    /// cells), and a tile the sphere does not touch carries no constraint. a 1-level
-    /// hierarchy has no coarse-fine boundary to straddle; the decomposed driver separately
-    /// forbids sphere overlap on an UNREFINED tile of a refined run (a coarse drain the
-    /// refluxing does not protect).
+    /// the sink containment invariant, clipped to this hierarchy's root: the part of the
+    /// sink sphere overlapping the root interior lies inside the finest level — on a
+    /// decomposed tile the sphere may span cuts (each owning tile drains its own cells),
+    /// so the constraint binds exactly the tiles the sphere touches. a 1-level hierarchy
+    /// is a single grid with no coarse-fine boundary to straddle; the decomposed driver
+    /// separately forbids sphere overlap on an unrefined tile of a refined run (refluxing
+    /// protects drains inside refined regions).
     pub fn assert_sinks_inside_finest_clipped(&self) {
         if self.levels.len() < 2 {
             return;
@@ -1239,7 +1240,7 @@ where
         let fg = &finest.geom;
         im.bodies.visit_accretion(|body| {
             let racc: f64 = body.accretion_radius().unwrap_or(0.0);
-            // sphere-box overlap against the ROOT interior, per axis.
+            // sphere-box overlap against the root interior, per axis.
             let mut clip_lo = [0.0f64; NDIM];
             let mut clip_hi = [0.0f64; NDIM];
             let mut overlaps = true;
@@ -1269,8 +1270,8 @@ where
     }
 
     /// true when any accretion sphere overlaps this hierarchy's root interior — the
-    /// decomposed driver's guard input: on a refined run an UNREFINED tile must not
-    /// drain (its coarse cells are outside every reflux-protected fine region).
+    /// decomposed driver's guard input: on a refined run, draining is confined to tiles
+    /// carrying a fine patch, since reflux protection covers the fine regions alone.
     pub fn accretion_overlaps_root(&self) -> bool {
         let root = &self.levels[0].state;
         let Some(im) = root.immersed.as_ref() else {
@@ -1407,10 +1408,11 @@ where
         prepare_initial_state: bool,
         mut callback: impl FnMut(&Self) -> std::ops::ControlFlow<()>,
     ) -> symbi_xpu::Result<()> {
-        // homologous mesh motion is single-grid only: the hierarchy's flux
-        // registers and transfer operators have no a(t) bookkeeping yet. a
-        // 1-level hierarchy has no registers/transfer, so motion is safe there
-        // (it reproduces the single-grid evolve); only REFINED runs are forbidden.
+        // homologous mesh motion applies on a single grid: the hierarchy's flux
+        // registers and transfer operators are written for a fixed mesh. a
+        // 1-level hierarchy runs without registers or transfer, so motion is
+        // safe there (it reproduces the single-grid evolve); refined runs are
+        // refused.
         assert!(
             self.levels.len() == 1
                 || self
@@ -1425,9 +1427,9 @@ where
         let mut last_cb = self.levels[0].state.iteration;
         while self.levels[0].state.time < t_final {
             self.step_root(t_final);
-            // a crashed step recorded the crash WITHOUT advancing the clock: let the observer
-            // snapshot the `.crashed` checkpoint + report it, then stop the march (don't spin on the
-            // frozen time, and don't clamp dt to t_final on garbage).
+            // a crashed step records the crash and leaves the clock where it was: let the observer
+            // snapshot the `.crashed` checkpoint + report it, then stop the march. marching on
+            // would spin on the frozen time and clamp dt to t_final on garbage.
             if self.crash.is_some() {
                 symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
                 let _ = callback(self);
@@ -1453,12 +1455,13 @@ where
         Ok(())
     }
 
-    /// run the one-time IC preparation WITHOUT advancing time: bcell-from-bface,
+    /// run the one-time IC preparation at the current time: bcell-from-bface,
     /// c2p to populate the primitive buffer from the seeded conserved state, the
     /// coarse-fine prolong, and the ghost fill. the drivers call this internally
     /// at evolve start; a caller that snapshots state at t=0 (the binding's
-    /// initial-condition checkpoint) must call it first, else that snapshot
-    /// captures the ZEROED primitive + cell-centered-B scratch buffers. idempotent.
+    /// initial-condition checkpoint) must call it first, so that snapshot carries
+    /// recovered primitives and cell-centered B rather than zeroed scratch
+    /// buffers. idempotent.
     pub fn prime(&mut self) {
         self.init_levels();
     }
@@ -1517,16 +1520,16 @@ where
         }
     }
 
-    /// restore every level from a checkpoint, ADDING levels the file does not carry.
+    /// restore every level from a checkpoint, adding levels beyond the file's own depth.
     ///
     /// this is the bootstrap ladder: a rung converges at its own resolution and the next rung
     /// resumes it with one more level, so the expensive early transient is paid once at the
     /// coarsest depth instead of once per depth. the levels the file carries are loaded; the levels
     /// beyond it are injected from their parents.
     ///
-    /// the split between the two is taken from the FILE's own level count, never from the config —
+    /// the split between the two is taken from the file's own level count rather than the config:
     /// a run that guessed would either inject over converged data (replacing a level with a coarser
-    /// copy of itself) or try to load a level that was never written, and the first of those is
+    /// copy of itself) or try to load a level absent from the file, and the first of those is
     /// silent.
     ///
     /// each loaded level's grid is verified against the file before its data is read. a deeper
@@ -1556,9 +1559,9 @@ where
         }
         for level_index in stored..self.levels.len() {
             self.inject_level_from_parent(level_index)?;
-            // the injected level inherits its parent's clock: it did not exist for the elapsed run
-            // and has no history of its own, and a level whose time disagreed with its parent's
-            // would desynchronize the subcycle on the very first root step.
+            // the injected level inherits its parent's clock: it enters the run fresh and takes the
+            // parent's elapsed history as its own. matching level times keep the subcycle
+            // synchronized from the very first root step.
             let (time, dt, iteration, motion) = {
                 let parent = &self.levels[level_index - 1].state;
                 (parent.time, parent.dt, parent.iteration, parent.motion)
@@ -1575,19 +1578,20 @@ where
     /// initialize `level` from its parent by piecewise-constant injection: every fine cell takes
     /// the conserved state of the coarse cell containing it.
     ///
-    /// EXACTLY conservative on cell averages — a coarse average replicated to its `RATIO^D`
+    /// exactly conservative on cell averages — a coarse average replicated to its `RATIO^D`
     /// children preserves the integral over the coarse cell — so the new level enters the run
     /// carrying precisely the mass, momentum and energy its parent held over the same region.
     ///
-    /// that exactness is the justification for using injection rather than a higher-order
-    /// prolongation. adding a level to a converged solution adds RESOLUTION, not new physics: the
-    /// structure the finer cells can now represent is generated by the flow itself within a few
+    /// that exactness is the justification for injection over a higher-order
+    /// prolongation. adding a level to a converged solution adds resolution, and the
+    /// structure the finer cells can then represent is generated by the flow itself within a few
     /// crossing times of the new level's own (small) region, which is negligible against the time
     /// such a level is then run for. a smoother initial transient is all a higher-order operator
     /// would buy.
     ///
     /// refused for MHD: a face-centered field needs a divergence-preserving prolongation, and
-    /// injecting it cell-wise would seed a `div B` the constrained transport cannot remove.
+    /// injecting it cell-wise seeds a `div B` that constrained transport then preserves for the
+    /// rest of the run.
     pub fn inject_level_from_parent(&mut self, level: usize) -> Result<(), String> {
         if level == 0 || level >= self.levels.len() {
             return Err(format!(
@@ -1608,14 +1612,14 @@ where
         let parent = &coarser[level - 1].state;
         let fine = &mut finer[0].state;
 
-        // piecewise-constant prolongation IS parent injection: the stencil is the single covering
-        // coarse cell, so a coarse average lands unchanged on each of its children and the integral
-        // over the coarse cell is preserved exactly.
+        // piecewise-constant prolongation is precisely parent injection: the stencil is the single
+        // covering coarse cell, so a coarse average lands unchanged on each of its children and the
+        // integral over the coarse cell is preserved exactly.
         //
-        // routed through the same rendered kernel every other coarse-to-fine transfer uses rather
-        // than walked on the host, so a device-resident hierarchy injects on the device. the source
-        // and destination buffers are the same field, which collapses the time interpolation the
-        // coarse-fine ghost path needs — there is no old and new state here, only the parent's.
+        // routed through the same rendered kernel every other coarse-to-fine transfer uses, so a
+        // device-resident hierarchy injects on the device. the source and destination buffers are
+        // the same field, which collapses the time interpolation the coarse-fine ghost path needs:
+        // the parent's state serves as both the old and the new level.
         let region = fine.geom.interior.clone();
         let inject = |src: &Field<f64, NDIM, Mem>, dst: &Field<f64, NDIM, Mem>| {
             crate::refinement::transfer::prolong_field(
@@ -1642,19 +1646,19 @@ where
             inject(pc, fc);
         }
 
-        // the census, the diagnostics and the first flux evaluation all read PRIMITIVES; injection
+        // the census, the diagnostics and the first flux evaluation all read primitives; injection
         // writes the conserved state alone, so the recovery has to run before the level is stepped.
         finer[0].kernels.c2p(&fine.store);
         Ok(())
     }
 
-    /// the cfl-limited root dt this hierarchy would take (UNCLAMPED by t_final): the min over every
-    /// level of `cfl(level) * RATIO^level` (covered coarse cells are conservative averages, so a
-    /// fast fine-only feature is diluted out of the root cfl; level l subcycles RATIO^l times, so
-    /// its limit enters scaled by RATIO^l). exposed for the DECOMPOSED driver: it takes the global
-    /// min of this across tiles, then drives each tile with `evolve(t + global_dt)` -- since the
-    /// global dt is the min, each tile's internal `dt_cfl.min(global_dt)` collapses to global_dt,
-    /// giving a lockstep root step without a separate dt-injection path.
+    /// the cfl-limited root dt this hierarchy would take, ahead of the t_final clamp: the min over
+    /// every level of `cfl(level) * RATIO^level` (covered coarse cells are conservative averages,
+    /// so a fast fine-only feature is diluted out of the root cfl; level l subcycles RATIO^l times,
+    /// so its limit enters scaled by RATIO^l). exposed for the decomposed driver: it takes the
+    /// global min of this across tiles, then drives each tile with `evolve(t + global_dt)` -- since
+    /// the global dt is the min, each tile's internal `dt_cfl.min(global_dt)` collapses to
+    /// global_dt, so the existing clamp alone produces a lockstep root step.
     pub fn root_cfl_dt(&self) -> f64 {
         // same full-grid wave-speed pass as `step_root`; instrumented under the same phase name so a
         // decomposed run attributes it identically.
@@ -1671,7 +1675,7 @@ where
             dt
         });
         // the user clamp (max_dt > 0): pins the dt sequence across runs whose CFL
-        // estimators differ. applied AFTER the raw-cfl crash heuristics elsewhere.
+        // estimators differ. applied after the raw-cfl crash heuristics elsewhere.
         let clamp = self.levels[0].state.max_dt;
         if clamp > 0.0 {
             dt_cfl.min(clamp)
@@ -1681,7 +1685,7 @@ where
     }
 
     /// one root step: cfl-limited dt (clamped to t_final), the recursive level
-    /// advance, then the root clock + body state. EVERY level limits the root
+    /// advance, then the root clock + body state. every level limits the root
     /// step — covered coarse cells are conservative averages of fine data, so
     /// a fast feature resolved only on the fine level is diluted out of the
     /// root's own cfl; level l subcycles RATIO^l times, so its limit enters
@@ -1691,10 +1695,11 @@ where
         // must be at least the evolution reconstruction's stencil reach (= its degree
         // plus one: pcm evolution -> plm prolong, plm -> ppm, ppm -> quartic). the
         // prolonged ghost averages then carry error one order above the interior
-        // truncation, and the interface layer's flux-divergence order loss cannot
-        // degrade the interior order. a shallower prolongation would degrade it
-        // SILENTLY at every refinement boundary — refuse loudly instead. a
-        // single-level hierarchy has no coarse-fine boundary and carries any pairing.
+        // truncation, so the interface layer's flux-divergence order loss leaves
+        // the interior order intact. a shallower prolongation would degrade it
+        // silently at every refinement boundary, so the pairing is asserted here.
+        // a single-level hierarchy is one grid with no coarse-fine boundary, and
+        // carries any pairing.
         if self.levels.len() > 1 {
             for lvl in &self.levels {
                 assert!(
@@ -1711,9 +1716,9 @@ where
             }
         }
         // the per-root-step wave-speed pass + global min reduction. instrumented because it is a
-        // FULL-GRID read of prim on every level, once per step, and sits OUTSIDE the substage loop:
-        // at a small domain / high step count it is a large fraction of the step that no per-phase
-        // timing would otherwise attribute.
+        // full-grid read of prim on every level, once per step, and sits outside the substage loop:
+        // at a small domain / high step count it is a large fraction of the step that per-phase
+        // timing inside the substage loop would leave unattributed.
         let dt_cfl = prof("cfl", || {
             let mut dt = f64::INFINITY;
             for (ll, lvl) in self.levels.iter().enumerate() {
@@ -1726,28 +1731,29 @@ where
             }
             dt
         });
-        // a crashed state must HALT the run and must not be masked by the `t_final` clamp below. the clamp
-        // `dt_cfl.min(t_final - time)` silently replaces a NaN dt with the remaining time (f64::min
-        // returns the non-NaN operand) AND clamps a collapsed-wave-speed BLOWUP (an unphysical c2p
-        // cell — e.g. V->1 at the inner boundary — drives the cfl speed -> 0, so dt -> huge) down to
-        // the remaining time; either way the run would "finish" at t_final on garbage. a physical
-        // flow grows dt SMOOTHLY (cfl-limited), so detect a crash as: NaN / non-positive, or a sudden
-        // >1000x one-step jump in the RAW cfl dt. a genuinely static state (dt_cfl = +inf) only
-        // arises from the rest state at step 0 (dt_prev = 0, skipped) -> the clamp takes the run end.
+        // a crashed state halts the run, and this detection runs ahead of the `t_final` clamp below.
+        // the clamp `dt_cfl.min(t_final - time)` silently replaces a NaN dt with the remaining time
+        // (f64::min returns the non-NaN operand) and pulls a collapsed-wave-speed blowup (an
+        // unphysical c2p cell — e.g. V->1 at the inner boundary — drives the cfl speed -> 0, so
+        // dt -> huge) down to the remaining time; either way the run would "finish" at t_final on
+        // garbage. a physical flow grows dt smoothly (cfl-limited), so a crash shows as: NaN /
+        // non-positive, or a sudden >1000x one-step jump in the raw cfl dt. a genuinely static state
+        // (dt_cfl = +inf) arises from the rest state at step 0 alone (dt_prev = 0, skipped) -> the
+        // clamp takes the run end.
         let (iter, time) = {
             let r = &self.levels[0].state;
             (r.iteration, r.time)
         };
-        // compare cfl estimate against cfl estimate. `state.dt` is the ACCEPTED dt, which both the
+        // compare cfl estimate against cfl estimate. `state.dt` is the accepted dt, which both the
         // `t_final` clamp and a rejected-step replay shrink below the rate the wave speeds imply —
         // measuring a fresh estimate against it reports a collapse whenever a reduced step recovers.
         let dt_prev = self.prev_dt_cfl; // 0.0 before the first step
         let crashed =
             dt_cfl.is_nan() || dt_cfl <= 0.0 || (dt_prev > 0.0 && dt_cfl > 1.0e3 * dt_prev);
         if crashed {
-            // record the crash + STOP without advancing: the evolve loop reports it and the driver
-            // snapshots `.crashed.h5` from this (last computed) state and stops, without panicking or
-            // marching past t_final on garbage.
+            // record the crash and halt on this state: the evolve loop reports it and the driver
+            // snapshots `.crashed.h5` from the last computed state and stops. the run therefore
+            // terminates by report, in place of a panic or a march past t_final on garbage.
             self.crash = Some(CrashReport {
                 iter,
                 time,
@@ -1756,7 +1762,7 @@ where
             });
             return;
         }
-        // the guard's reference for the NEXT step: the rate the wave speeds imply, before the
+        // the guard's reference for the next step: the rate the wave speeds imply, before the
         // user clamp, the `t_final` clamp, or any rejection reduces it.
         self.prev_dt_cfl = dt_cfl;
         let root = &mut self.levels[0];
@@ -1805,11 +1811,11 @@ where
                 .unwrap_or_else(|detail| panic!("continuous tracer refinement transfer: {detail}"));
         }
 
-        // horizon excision, ONCE per step after the full RK combination (the same
-        // point the single-grid loop applies it): overwrite the causally
-        // disconnected cells inside the excision sphere with a zero-gradient
-        // viscous / excise / horizon-ledger / penalize now run in the finest
-        // level's tail (level_step_tail), in the uni-grid driver's exact order.
+        // horizon excision runs once per step after the full RK combination, the same
+        // point the single-grid loop applies it: the causally disconnected cells inside
+        // the excision sphere take a zero-gradient fill. viscous / excise /
+        // horizon-ledger / penalize run in the finest level's tail (level_step_tail),
+        // in the uni-grid driver's exact order.
 
         // the registered binned reductions, at the tail of the accepted step — the same point
         // the uni-grid driver samples them, and for the same reason: the stage sequence has
@@ -1817,7 +1823,7 @@ where
         // primitives every census reads belong to the state at this time. sampling mid-stage
         // would bin a partially advanced state.
         //
-        // EVERY level contributes its LEAF cells: a cell a finer level resolves is excluded
+        // every level contributes its leaf cells: a cell a finer level resolves is excluded
         // here and counted there, so the refined volume enters the reduction exactly once at
         // the finest resolution that covers it. counting a covered coarse cell as well would
         // inflate every extensive total by the refined volume — a wrong number that looks
@@ -1829,7 +1835,7 @@ where
                 .iter()
                 .map(|r| r.evaluator.spec().op())
                 .collect();
-            // the registrations live on the ROOT, which owns the history; every level is reduced
+            // the registrations live on the root, which owns the history; every level is reduced
             // against that one list. a level carrying its own (empty) list would contribute
             // nothing while its volume stayed excluded from the parent.
             let registrations = &self.levels[0].state.store.censuses;
@@ -1856,10 +1862,10 @@ where
         }
 
         let root = &mut self.levels[0];
-        // homologous linear advance ONLY when there is no traced motion law.
+        // homologous linear advance, taken when the run leaves the motion law untraced.
         advance_state_clock(&mut root.state, dt);
 
-        // body feedback + motion: the FINEST level owns the sink and the
+        // body feedback + motion: the finest level owns the sink and the
         // diagnostics; advance the (prescribed) motion there once per root
         // step at the root dt, then sync positions/velocities outward so
         // every level's gravity sees the same bodies.
@@ -1876,8 +1882,8 @@ where
                 .is_some_and(|im| im.bodies.needs_feedback());
             if needs_fb {
                 // the backward reduction sweeps the full domain (~11 outputs per
-                // body: force/torque/mass/energy) — a real per-step cost that must
-                // appear in the profile, so it does not hide in the wall-vs-instrumented gap.
+                // body: force/torque/mass/energy) — a real per-step cost, instrumented
+                // so the profile accounts for it explicitly.
                 prof("body_feedback", || {
                     finest.kernels.body_feedback(&finest.state, dt)
                 });
@@ -1907,18 +1913,18 @@ where
     /// advance one level by dt, then subcycle the finer level, restrict, and
     /// reflux. `alpha0` is this level's substep start as a fraction of the
     /// PARENT's step; 0.0 on the root. the coarse-fine ghosts are
-    /// STAGE-CORRECT in time: the prolong feeding stage k reconstructs at the
+    /// stage-correct in time: the prolong feeding stage k reconstructs at the
     /// shu-osher stage time `alpha0 + c_k / RATIO` (see
     /// stage_time_fractions), which restores second-order temporal coupling
     /// at the interface — substep-start-frozen ghosts measurably collapse the
     /// boundary to first order. the stage loop mirrors sim/evolve.rs::step, and a
     /// 1-level hierarchy reproduces it bit-for-bit.
     /// a rejected step rolls back the conserved gas state, the magnetic field, the primitives,
-    /// the mesh motion, the level clocks, and discrete-tracer ancestry. on a REFINED hierarchy a
+    /// the mesh motion, the level clocks, and discrete-tracer ancestry. on a refined hierarchy a
     /// level's step epilogue — tracer spawning, immersed-body accretion, the horizon receipt —
-    /// commits BEFORE the finer level subcycles, and those ledgers have no inverse: a rejection
+    /// commits ahead of the finer level's subcycle, and those ledgers are append-only: a rejection
     /// raised from inside the subcycle replays them and double-books. a single-level hierarchy
-    /// runs its epilogue only after every stage is accepted, so it is reversible unconditionally.
+    /// runs its epilogue once every stage is accepted, so it is reversible unconditionally.
     fn assert_step_is_reversible(&self) {
         if self.levels.len() == 1 {
             return;
@@ -1985,13 +1991,13 @@ where
     /// one SSP stage `ii` of level `level` -- the body of `advance_level`'s stage loop. `alpha0` is
     /// this level's substep start as a fraction of the parent step (0 on the root). pure extraction.
     pub fn level_stage(&mut self, level: usize, ii: usize, dt: f64, alpha0: f64) -> bool {
-        // the phase sequence is THE shared table (symbi-sim::stage); this
-        // driver contributes only its two structural interleaves through the
-        // hook points — flux-register sampling (on the high-order fluxes,
-        // before a fofc splice) and the coarse-fine ghost re-prolongation.
-        // everything the hooks touch is reached by shared reference (the
-        // registers and field writes go through interior mutability), so the
-        // fold's borrow of the level state never conflicts.
+        // the phase sequence comes from the shared table (symbi-sim::stage); this
+        // driver contributes two structural interleaves through the hook points —
+        // flux-register sampling (on the high-order fluxes, before a fofc splice)
+        // and the coarse-fine ghost re-prolongation. everything the hooks touch is
+        // reached by shared reference (the registers and field writes go through
+        // interior mutability), so the fold's borrow of the level state stays
+        // compatible.
         let has_finer = level + 1 < self.levels.len();
         let has_coarser = level > 0;
         let stages = self.levels[level].state.timestepping.stages();
@@ -2008,7 +2014,7 @@ where
         let mut hook = |hp: HookPoint| match hp {
             HookPoint::AfterFlux => {
                 prof("refine_flux_reg", || {
-                    // when the run declares a stationary target, the SAME accumulation runs a
+                    // when the run declares a stationary target, that same accumulation runs a
                     // second time on that target's flux with the weight negated, so the register
                     // holds the coarse-fine mismatch of `F(Q) - F(qt)` rather than of `F(Q)`. a
                     // state sitting on the target then accumulates zero, while the two grids'
@@ -2211,8 +2217,8 @@ where
     }
 
     /// step epilogue: emf bookkeeping (mhd) + the finer-level subcycle + restrict + reflux + the
-    /// level clock. pure extraction from `advance_level`. for the DECOMPOSED root the driver calls
-    /// this AFTER the (exchanged) root stages; the fine subcycle here is tile-local (the patch lives
+    /// level clock. pure extraction from `advance_level`. for the decomposed root the driver calls
+    /// this after the (exchanged) root stages; the fine subcycle here is tile-local (the patch lives
     /// inside one tile), so it reuses the recursive `advance_level` on the finer level unchanged.
     pub fn level_step_tail(&mut self, level: usize, dt: f64, alpha0: f64) -> bool {
         let has_finer = level + 1 < self.levels.len();
@@ -2233,8 +2239,8 @@ where
             self.sync_tracer_spawn_state(level);
         }
         self.level_tail_emf(level, dt);
-        // the IBM surface physics on the FINEST level, once per its substep,
-        // AFTER the full RK combination (receipt == removal) and BEFORE the
+        // the IBM surface physics on the finest level, once per its substep,
+        // after the full RK combination (receipt == removal) and ahead of the
         // parent's restriction (so the coarse covered cells sync to the
         // drained state — restriction consistency).
         // per-step operator order matches the uni-grid driver exactly:
@@ -2245,14 +2251,15 @@ where
             let l = &self.levels[level];
             prof("viscous", || l.kernels.viscous(&l.state, dt));
         }
-        // EXCISE runs on EVERY level, not only the finest: the excised (causally-disconnected) region
-        // is owned by whichever level contains it, and the refinement request gate forbids a finer
-        // patch overlapping it, so a REFINED ROOT still owns — and must excise — its singular core.
-        // gating this on `!has_finer` silently skipped excision wherever the excised region sat under
-        // a refined level (the root of an off-core refined run), leaving the core evolving. ordered
-        // after viscous (bit-identical on the finest, where both run); a no-op at excision_radius = 0,
-        // so unexcised and uni-grid runs are unchanged. the excised fill survives the finer subcycle +
-        // restriction below because the excised region is never a covered (finer-patch) region.
+        // excise runs on every level: the excised (causally-disconnected) region is owned by
+        // whichever level contains it, and the refinement request gate keeps every finer patch clear
+        // of it, so a refined root still owns — and still excises — its singular core. gating this
+        // on `!has_finer` silently skipped excision wherever the excised region sat under a refined
+        // level (the root of an off-core refined run), leaving the core evolving. ordered after
+        // viscous (bit-identical on the finest, where both run); a no-op at excision_radius = 0, so
+        // unexcised and uni-grid runs are unchanged. the excised fill survives the finer subcycle +
+        // restriction below because the excised region stays outside every covered (finer-patch)
+        // region.
         self.level_tail_excise(level);
         if !has_finer {
             if let Some((index, diagnostic_radius)) = horizon_request(&self.levels[level].state) {
@@ -2324,14 +2331,14 @@ where
         false
     }
 
-    /// record a PER-LEVEL census sample from this level's own accepted subcycle step.
+    /// record a per-level census sample from this level's own accepted subcycle step.
     ///
     /// levels are time-aligned only at root-step boundaries, so this row is this level's alone: it
     /// covers this level's leaf cells at this level's clock, and carries the level index so a
     /// consumer can tell it from a root row or from another level's. summing rows across levels is
-    /// therefore the consumer's decision, not one baked into the file.
+    /// therefore left to the consumer.
     ///
-    /// the registrations live on the ROOT, which owns the history; a finer level carries none.
+    /// the registrations live on the root, which owns the history; a finer level defers to it.
     fn sample_per_level_censuses(&mut self, level: usize) {
         if self.levels[0].state.store.censuses.is_empty() {
             return;
@@ -2472,26 +2479,26 @@ where
         self.levels[level].state.continuous_tracers = Some(tracers);
     }
 
-    /// emf register bookkeeping (mhd) after the stage loop: the efield buffers hold the EFFECTIVE
+    /// emf register bookkeeping (mhd) after the stage loop: the efield buffers hold the effective
     /// per-step EMF (post_godunov wrote the rk2 time-average in place before the single curl; euler
     /// keeps the raw stage EMF) -- sample it into the coarse-side register (a finer level exists)
-    /// and the fine-side register (a coarser level exists). no-op for hydro. PURE EXTRACTION from
-    /// level_step_tail so the DECOMPOSED driver can interpose a fine-level halo exchange between the
-    /// root stages and the (driver-controlled) fine subcycle.
-    /// the excise pass for ONE level, as a PURE EXTRACTION from `level_step_tail` — the same reason
-    /// `level_tail_emf` is extracted: the DECOMPOSED driver builds the step itself and must be able to
-    /// run this piece of the tail without the finest-level pieces (viscous, horizon ledger, penalize)
-    /// that legitimately belong to the finest level alone.
+    /// and the fine-side register (a coarser level exists). a no-op for hydro. a pure extraction
+    /// from level_step_tail so the decomposed driver can interpose a fine-level halo exchange
+    /// between the root stages and the (driver-controlled) fine subcycle.
+    /// the excise pass for one level, as a pure extraction from `level_step_tail` — the same reason
+    /// `level_tail_emf` is extracted: the decomposed driver builds the step itself and runs this
+    /// piece of the tail on its own, apart from the finest-level pieces (viscous, horizon ledger,
+    /// penalize) that belong to the finest level alone.
     ///
-    /// it runs on EVERY level, not only the finest: the excised region is owned by whichever level
-    /// contains it, and the refinement request gate forbids a finer patch overlapping it, so a refined
-    /// ROOT still owns and must excise its singular core. a decomposed driver that omitted this would
-    /// evolve un-excised gas inside the horizon forever — silent, since the interior is causally
-    /// disconnected and never protests.
+    /// it runs on every level: the excised region is owned by whichever level contains it, and the
+    /// refinement request gate keeps every finer patch clear of it, so a refined root still owns
+    /// and still excises its singular core. a decomposed driver that omitted this would evolve
+    /// un-excised gas inside the horizon forever — silent, since the interior is causally
+    /// disconnected and reports nothing.
     ///
-    /// no halo re-exchange is needed after it: the fill writes only cells inside the excised surface,
-    /// and the refinement gate keeps every fine patch off that surface, so the prolongation that
-    /// follows never reads an excised cell.
+    /// the halo survives it: the fill writes cells inside the excised surface, and the refinement
+    /// gate keeps every fine patch off that surface, so the prolongation that follows reads
+    /// live cells only.
     pub fn level_tail_excise(&self, level: usize) {
         let l = &self.levels[level];
         l.kernels.excise(&l.state);
@@ -2541,10 +2548,10 @@ where
     }
 
     /// restrict the finer level into this level's coverage + apply the flux/emf reflux + re-derive
-    /// prim (and, if this level has a coarser parent, re-prolong its coarse-fine ghosts). runs AFTER
-    /// the finer-level subcycle. the flux/emf registers are TILE-LOCAL (a coarse cell + the fine
+    /// prim (and, if this level has a coarser parent, re-prolong its coarse-fine ghosts). runs after
+    /// the finer-level subcycle. the flux/emf registers are tile-local (a coarse cell + the fine
     /// cells at its face are co-located), so the decomposed driver calls this per tile unchanged.
-    /// PURE EXTRACTION.
+    /// a pure extraction.
     pub fn level_restrict_reflux(&mut self, level: usize, alpha0: f64) {
         let has_coarser = level > 0;
         let is_mhd = self.levels[level].state.fields.mhd.is_some();
@@ -2695,9 +2702,9 @@ where
                 prolong_field(chi_old, pchi, fchi, slab, self.prolong_order, alpha);
             }
             // mhd: the cell-centered B ghosts feed the fine reconstruction +
-            // the boundary-edge UCT emf. the fine OWNED bface needs no
-            // prolongation (the fine CT evolves its own boundary faces, and
-            // CT preserves divB for ANY emf values).
+            // the boundary-edge UCT emf. the fine CT evolves its own owned
+            // bface, and CT preserves divB for whatever emf values it is
+            // handed, so those faces stand on their own.
             if let (Some(fmhd), Some(bcell_old)) =
                 (fine.state.fields.mhd.as_ref(), parent.bcell_old.as_ref())
             {
@@ -2763,20 +2770,20 @@ where
     /// declare the run's stationary target state `qt`, making it an exact fixed point of the
     /// refined scheme.
     ///
-    /// a steady state solves the CONTINUUM equations, so on any grid the scheme leaves a residual
+    /// a steady state solves the continuum equations, so on any grid the scheme leaves a residual
     /// `R = div_h F_h(qt) - s_h(qt)` at truncation order, and an atmosphere seeded on the exact
     /// hydrostatic profile starts moving. worse, `R` is grid-dependent, so the coarse-fine flux
-    /// register differences two unequal reconstructions of the SAME exact solution and applies the
+    /// register differences two unequal reconstructions of one exact solution and applies the
     /// difference to the coarse cells at the interface as a force. this captures both halves of
     /// the cure: `F(qt)` per level, which the registers subtract from both sides of their
     /// difference, and `R` per level, which every stage adds back.
     ///
-    /// the target reaches the flux phase through the SAME preparation an evolving state does —
+    /// the target reaches the flux phase through the preparation an evolving state gets —
     /// conserved-to-primitive recovery, coarse-fine prolongation, physical ghost fill — and `R` is
     /// read off one explicit stage of the shared pipeline, so both quantities are what the scheme
     /// genuinely produces when handed the target, ghost band and every source included.
     ///
-    /// the target must be TIME-INDEPENDENT: both quantities are evaluated once here and reused
+    /// the target must be time-independent: both quantities are evaluated once here and reused
     /// every stage of every step. each level's conserved and primitive state is left exactly as it
     /// was found, so this may be called at any point after the initial condition is seeded.
     pub fn with_equilibrium(
@@ -2804,19 +2811,19 @@ where
 
         // the copy above runs on the device queue while the seeding below writes the same fields
         // from the host. field storage is unified memory, so both reach the same bytes, but a host
-        // write is not ordered against an in-flight kernel: without this barrier the copy could
-        // read cells the target had already overwritten and "restore" the run to the target it was
-        // asked to measure.
+        // write is unordered against an in-flight kernel, so this barrier is what keeps the copy
+        // from reading cells the target had already overwritten and "restoring" the run to the
+        // target it was asked to measure.
         symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
         for level in &self.levels {
             level.state.seed_cells(&target);
         }
-        // the target has to be HIERARCHY-CONSISTENT: a coarse target cell must equal the
+        // the target has to be hierarchy-consistent: a coarse target cell equals the
         // volume-weighted average of the fine target cells covering it, or the run's own
         // restriction moves a level that was sitting on its target off it, twice per parent step.
-        // evaluating the analytic profile independently per level does not give that — the two
-        // differ at the profile's curvature — so the coarse target is DEFINED as the restriction
-        // of the fine one wherever a finer level exists.
+        // an analytic profile evaluated independently per level breaks that — the two differ at
+        // the profile's curvature — so the coarse target is defined as the restriction of the fine
+        // one wherever a finer level exists.
         for ll in (0..self.levels.len().saturating_sub(1)).rev() {
             let (lo, hi) = self.levels.split_at(ll + 1);
             let coarse = &lo[ll];
@@ -2877,8 +2884,8 @@ where
                  state the scheme can carry"
             );
             // an inadmissible probe state means the update was clipped somewhere, and a clipped
-            // update is not `qt - dt R`: what would be read off is a limiter's response, not the
-            // scheme's imbalance.
+            // update departs from `qt - dt R`: what would be read off is a limiter's response in
+            // place of the scheme's imbalance.
             symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
             let err = scan_c2p_errors(&level.state);
             assert!(
@@ -2912,39 +2919,37 @@ where
         Ok(self)
     }
 
-    /// the declared target must actually BE a steady state of the equations being solved.
+    /// the declared target must actually be a steady state of the equations being solved.
     ///
-    /// nothing in the method checks this on its own: the imbalance is measured and subtracted
-    /// whatever it is, so a state that is merely asserted to be stationary gets held motionless and
-    /// the run reports no error while solving the wrong problem. that is this feature's sharpest
-    /// edge and it is silent.
+    /// the method takes the declaration as given: the imbalance is measured and subtracted whatever
+    /// it is, so a state merely asserted to be stationary gets held motionless and the run proceeds
+    /// silently on the wrong problem. that silence is this feature's sharpest edge.
     ///
     /// the discriminator is how the imbalance behaves under refinement. for a genuine steady state
     /// `R` is pure truncation error, `C(x) dx^p`, so halving the cell width cuts its norm over a
-    /// fixed region by `2^p`. for a state that does not solve the equations, `R` converges to the
-    /// continuum residual, which knows nothing about the grid and does not fall at all. every level
-    /// pair measures this for free, over the region they both cover.
+    /// fixed region by `2^p`. for a state that departs from the equations, `R` converges to the
+    /// continuum residual, a property of the state alone that holds flat under refinement. every
+    /// level pair measures this for free, over the region they both cover.
     ///
     /// the test is source-agnostic — gravity, rotation, the curvilinear geometric terms and any
     /// user source all enter `R` through the stage that produced it.
     /// report how the declared target's discrete imbalance behaves under refinement.
     ///
-    /// this is ADVISORY and never blocks. the deviation method itself carries no such check; it is
-    /// a diagnostic added here because declaring a state that is not stationary is a silent error
-    /// — the scheme holds whatever it is given, so the run reports nothing while solving the wrong
-    /// problem.
+    /// this is advisory: it reports and lets the run continue. the deviation method carries it as a
+    /// diagnostic, because declaring a non-stationary state is a silent error — the scheme holds
+    /// whatever it is given, so the run proceeds quietly on the wrong problem.
     ///
-    /// it is advisory because it cannot be made both sound and complete. a genuine steady state's
-    /// imbalance is truncation error, which converges only where the grid RESOLVES the target; a
-    /// non-stationary state leaves the continuum residual, which converges nowhere. for a strongly
-    /// stratified target those two populations do not separate — the imbalance is large only where
-    /// the profile is steep, and steep is exactly where convergence cannot be demonstrated either
-    /// way. a check that refused on that basis would reject correct equilibria for being sharp,
-    /// which is the more damaging error: it blocks valid science, where a missed warning only
-    /// fails to catch a mistake the user can still find by other means.
+    /// it is advisory because soundness and completeness pull apart here. a genuine steady state's
+    /// imbalance is truncation error, which converges where the grid resolves the target; a
+    /// non-stationary state leaves the continuum residual, which holds flat everywhere. for a
+    /// strongly stratified target those two populations overlap — the imbalance is large where the
+    /// profile is steep, and steep is where convergence stays undemonstrable either way. a check
+    /// that refused on that basis would reject correct equilibria for being sharp, which is the
+    /// more damaging error: it blocks valid science, where a missed warning leaves a mistake the
+    /// user can still find by other means.
     ///
-    /// what it reports is therefore evidence, not a verdict. a median near 1 on cells that ARE
-    /// resolved is strong evidence the target does not solve these equations; anything else is
+    /// what it reports is therefore evidence for the reader to weigh. a median near 1 on resolved
+    /// cells is strong evidence the target departs from these equations; anything else is
     /// inconclusive.
     fn report_target_stationarity(&self) {
         for ll in 0..self.levels.len().saturating_sub(1) {
@@ -2997,25 +3002,25 @@ where
         }
     }
 
-    /// how the target's discrete imbalance behaves under refinement, measured PER CELL and reduced
-    /// with a median — the raw evidence behind the steady-state check, with no threshold applied.
+    /// how the target's discrete imbalance behaves under refinement, measured per cell and reduced
+    /// with a median — the raw evidence behind the steady-state check, threshold-free.
     ///
     /// each coarse cell in the overlap is compared against the mean of its own children, so the
     /// statistic is local. that is what makes it usable: a ratio of summed norms is dominated by
     /// wherever the imbalance happens to be largest, and for a target with an unresolved feature —
-    /// the `1/r` cusp of a point-mass atmosphere at the centre of a refinement box, say — that is a
-    /// handful of cells whose error does not converge because neither grid resolves them. those
-    /// cells are real, and they say nothing about whether the declared state solves the equations.
-    /// a median over cells cannot be moved by them.
+    /// the `1/r` cusp of a point-mass atmosphere at the center of a refinement box, say — that is a
+    /// handful of cells whose error stays flat because both grids under-resolve them. those cells
+    /// are real, and they are silent on whether the declared state solves the equations. a median
+    /// over cells is robust to them.
     ///
     /// `None` when the two levels share too little interior to compare. the region is the coverage
     /// trimmed by two coarse cells on every side: the fine level's outermost cells reconstruct
     /// through prolonged coarse-fine ghosts, whose error converges at the prolongation's order
-    /// rather than the scheme's, and mixing the two would measure neither.
+    /// rather than the scheme's, and a mixture of the two measures neither.
     pub fn target_imbalance_convergence(&self, pair: usize) -> Option<ImbalanceConvergence> {
         const TRIM: isize = 2;
         // the imbalance is written by device kernels and read here on the host; the read goes
-        // through unified memory and is not ordered against the queue on its own.
+        // through unified memory, which leaves the barrier below to order it against the queue.
         symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
         let coarse = self.levels.get(pair)?;
         let fine = self.levels.get(pair + 1)?;
@@ -3036,17 +3041,17 @@ where
         // the cells the question can be ASKED of. truncation error is a statement about a
         // solution the grid resolves; where the target changes by a large factor across one cell
         // the reconstruction is clipping rather than approximating, and its error carries no
-        // order. such cells are real and are corrected like any other — they are simply not
-        // evidence about whether the declared state solves the equations, so they are excluded
-        // from the statistic rather than allowed to set it.
+        // order. such cells are real and are corrected like any other — they are silent on whether
+        // the declared state solves the equations, so they stay out of the statistic instead of
+        // setting it.
         let target = coarse.cons_eq.as_ref()?;
         let den = target.den.view();
-        // a cell can only testify about convergence if the grid RESOLVES the target there: where
-        // the density turns over inside one width the reconstruction is clipping rather than
+        // a cell testifies about convergence when the grid resolves the target there: where the
+        // density turns over inside one width the reconstruction is clipping rather than
         // approximating, and its error carries no order either way.
-        // inside a sink the target is not a steady state of the applied equations -- the drain
-        // removes mass and energy there -- so those cells report the drain rather than truncation
-        // and would set the statistic from a region the declaration never claimed.
+        // inside a sink the drain removes mass and energy, so the target departs from a steady
+        // state of the applied equations there and those cells report the drain rather than
+        // truncation, setting the statistic from a region the declaration left out.
         let mask = self.resolved_equilibrium_mask();
         let geom = &coarse.state.geom;
         let offered: Vec<[isize; NDIM]> = inner
@@ -3078,7 +3083,7 @@ where
         let coarse_comps = residual_components(coarse.residual_eq.as_ref()?);
         let fine_comps = residual_components(fine.residual_eq.as_ref()?);
 
-        // the scale is the component's peak over the WHOLE overlap, not over the resolved subset.
+        // the scale is the component's peak over the whole overlap, the resolved subset included.
         // it sets what counts as real signal, and a floor derived from the quiet cells alone would
         // admit their own roundoff as evidence.
         let scale: Vec<f64> = coarse_comps
@@ -3096,11 +3101,11 @@ where
             let mut ratios = Vec::new();
             for c in &resolved {
                 let numerator = cv.at(*c).abs();
-                // a cell whose own imbalance is at roundoff has no convergence to report; its
-                // ratio would be noise over noise.
-                // resolved AND carrying signal. a cell whose residual is a millionth of this
-                // component's peak is reporting roundoff, and a median of such cells reads 1
-                // whatever the target is — indistinguishable from a genuine non-convergence.
+                // a cell whose own imbalance sits at roundoff reports noise over noise, so the
+                // sample is restricted to cells that are resolved and carrying signal. a cell
+                // whose residual is a millionth of this component's peak is reporting roundoff,
+                // and a median of such cells reads 1 whatever the target is — the same reading a
+                // genuine non-convergence gives.
                 if numerator < SIGNAL_FLOOR * scale[cc].max(f64::MIN_POSITIVE) {
                     continue;
                 }
@@ -3127,16 +3132,16 @@ where
         })
     }
 
-    /// declare the stationary target as an EXPRESSION of position rather than as a closure.
+    /// declare the stationary target as an expression of position rather than as a closure.
     ///
     /// this is the form a configured run supplies, and the form that survives a restart: the
     /// target is re-derived from the expression at whatever resolution the restarted hierarchy
-    /// has, so a restart that adds a refinement level gets a target on cells that did not exist
-    /// when the run began. sampled field data cannot supply those.
+    /// has, so a restart that adds a refinement level gets a target on the newly created cells.
+    /// sampled field data covers the cells it was written from alone.
     ///
     /// the expression's outputs are the primitive components in order — density, one velocity
     /// component per momentum degree of freedom, then pressure when the regime carries energy —
-    /// and are evaluated at each cell centre at time zero, because the target is stationary.
+    /// and are evaluated at each cell center at time zero, because the target is stationary.
     pub fn with_equilibrium_expression(
         self,
         config: &symbi_hydro::EquilibriumConfig,
@@ -3179,12 +3184,12 @@ where
 
     /// seed every level's conserved state from the declared target.
     ///
-    /// the target a refined hierarchy can hold exactly is not the pointwise profile: covered cells
-    /// carry the restriction of the finer level's target, because that is what the run's own
-    /// restriction produces and re-produces every parent step. a run seeded from the pointwise
-    /// profile therefore starts a truncation-order distance off the state the well-balancing
-    /// preserves, and that distance evolves like any other perturbation. build a perturbed initial
-    /// condition on top of this rather than beside it.
+    /// the target a refined hierarchy holds exactly has covered cells carrying the restriction of
+    /// the finer level's target, because that is what the run's own restriction produces and
+    /// re-produces every parent step. a run seeded from the pointwise profile instead starts a
+    /// truncation-order distance off the state the well-balancing preserves, and that distance
+    /// evolves like any other perturbation. build a perturbed initial condition on top of this
+    /// seeding pass.
     pub fn seed_equilibrium(&mut self) {
         for (ll, level) in self.levels.iter().enumerate() {
             let target = level.cons_eq.as_ref().unwrap_or_else(|| {
@@ -3197,9 +3202,9 @@ where
 
     /// rewrite every level's interior in primitive space: `f` receives each cell's physical
     /// center and its recovered primitive and returns the primitive to store. every level
-    /// evaluates the SAME closure at its own cell centers, so a perturbation carries each
-    /// level's full resolvable content instead of the coarse grid's prolongation — the seam
-    /// for laying a multi-scale velocity field over a prolonged smooth base state.
+    /// evaluates that one closure at its own cell centers, so a perturbation carries each
+    /// level's full resolvable content in place of the coarse grid's prolongation — the entry
+    /// point for laying a multi-scale velocity field over a prolonged smooth base state.
     ///
     /// may be called repeatedly (a measured correction pass after a seeding pass, say);
     /// call `sync_perturbed` once after the last pass.
@@ -3216,8 +3221,8 @@ where
                  face field, so a magnetized state's div(B) = 0 would not survive it"
             );
         }
-        // field storage is unified memory; a host write is not ordered against an in-flight
-        // kernel without this barrier.
+        // field storage is unified memory; this barrier is what orders a host write against an
+        // in-flight kernel.
         symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
         for level in &self.levels {
             level.state.perturb_cells(&f);
@@ -3267,10 +3272,10 @@ pub struct ImbalanceConvergence {
 const MIN_CONVERGENCE_SAMPLE: usize = 8;
 
 /// the largest fractional change in the target's density across one cell for that cell to count as
-/// RESOLVED. beyond it a limited reconstruction is clipping rather than approximating and its
-/// error carries no order, so the cell cannot testify about convergence either way. a stratified
+/// resolved. beyond it a limited reconstruction is clipping rather than approximating and its
+/// error carries no order, leaving the cell silent about convergence either way. a stratified
 /// atmosphere spread over its grid sits far below this; the cells it excludes are the ones where
-/// the profile turns over inside a single width — a `1/r` cusp at a box centre, typically.
+/// the profile turns over inside a single width — a `1/r` cusp at a box center, typically.
 const RESOLVED_VARIATION: f64 = 0.25;
 
 /// the smallest share of a component's peak imbalance a cell must carry to vote on convergence.
@@ -3494,19 +3499,19 @@ pub struct FineSubgrid<const NDIM: usize> {
 
 /// derive the first-fine-level sub-grid from which tiles carry a fine level. None if no tile is
 /// refined. asserts the refined tiles fill a rectangle (the SMR single-box invariant). pub so the
-/// seed every tile's fine levels from its coarse level, DECOMPOSITION-AWARE: the root
-/// CONSERVED cut halos are exchanged first, then each tile prolongs.
+/// seed every tile's fine levels from its coarse level, decomposition-aware: the root
+/// conserved cut halos are exchanged first, then each tile prolongs.
 ///
-/// the per-tile [`Hierarchy::seed_fine_from_coarse`] is not enough when a refined patch SPANS a
-/// cut: the seed prolongs conserved components, its stencil at the coverage edge reads the
-/// root's cut ghosts, and nothing else ever fills conserved ghosts -- the evolve loop's
-/// exchange moves primitives, on the (correct there) invariant that no flux stage reads
-/// conserved ghosts. seeded per tile, the cut-side fine interior is therefore prolonged from
-/// each tile's standalone boundary fill instead of its neighbor's data, and the decomposed
-/// hierarchy differs from the monolithic one BEFORE A SINGLE STEP IS TAKEN -- measured 7.2e-3
-/// on a smooth bump centered on the cut, decaying as the flow smooths it, and growing with the
-/// prolongation order (a higher-degree interpolant weights the ghost cells more heavily).
-/// tile-local patches never reach a cut and are unaffected.
+/// a refined patch spanning a cut needs this exchange on top of the per-tile
+/// [`Hierarchy::seed_fine_from_coarse`]: the seed prolongs conserved components, its stencil at
+/// the coverage edge reads the root's cut ghosts, and this exchange is the sole filler of
+/// conserved ghosts -- the evolve loop's exchange moves primitives, on the (correct there)
+/// invariant that the flux stages read primitive ghosts alone. seeded per tile, the cut-side fine
+/// interior would be prolonged from each tile's standalone boundary fill in place of its
+/// neighbor's data, and the decomposed hierarchy would differ from the monolithic one at step
+/// zero -- measured 7.2e-3 on a smooth bump centered on the cut, decaying as the flow smooths it,
+/// and growing with the prolongation order (a higher-degree interpolant weights the ghost cells
+/// more heavily). tile-local patches stay clear of every cut and behave identically either way.
 pub fn seed_decomposed_fine_from_coarse<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     counts: [usize; NDIM],
@@ -3862,20 +3867,20 @@ fn spawn_decomposed_injections<R, const NDIM: usize, const DOF: usize, M, E, S, 
     }
 }
 
-/// the DECOMPOSED hierarchy driver (refinement x decomposition): lockstep-advance N
-/// per-tile hierarchies, decomposing the ROOT and the FIRST FINE level. the root stages run with a
-/// root halo exchange BETWEEN them (rk2 corrector reads each neighbor's stage-1 update); the fine
-/// subcycle is driven here so its stages can exchange the FINE halos between fine tiles when a patch
-/// SPANS a tile cut. for a TILE-LOCAL patch the fine sub-grid is 1x1, so the fine exchange
-/// is a no-op and this reduces to the tile-local case exactly. the flux/emf reflux registers stay TILE-LOCAL
-/// (a coarse cell + the fine cells at its face are co-located; any register write to a cut-adjacent
-/// GHOST is overwritten by the next root exchange). global dt = min over tiles of `root_cfl_dt()`.
-/// `decomposed == monolithic` holds for both tile-local and cut-spanning patches.
+/// the decomposed hierarchy driver (refinement x decomposition): lockstep-advance N
+/// per-tile hierarchies, decomposing the root and the first fine level. the root stages run with a
+/// root halo exchange between them (rk2 corrector reads each neighbor's stage-1 update); the fine
+/// subcycle is driven here so its stages can exchange the fine halos between fine tiles when a
+/// patch spans a tile cut. for a tile-local patch the fine sub-grid is 1x1, so the fine exchange
+/// is a no-op and this reduces to the tile-local case exactly. the flux/emf reflux registers stay
+/// tile-local (a coarse cell + the fine cells at its face are co-located; any register write to a
+/// cut-adjacent ghost is overwritten by the next root exchange). global dt = min over tiles of
+/// `root_cfl_dt()`. `decomposed == monolithic` holds for both tile-local and cut-spanning patches.
 ///
-/// LEVELS 2+ are advanced TILE-LOCALLY (inside the level-1 fine tile, via the recursive
-/// `level_step_tail(1)`); decomposing a patch that spans a cut on a level >= 2 is not supported.
-/// hydro only in the root post-step (mesh motion and immersed bodies are not carried there;
-/// the root clock is advanced directly). `on_checkpoint(iteration, time, &tiles)` fires every
+/// levels 2+ are advanced tile-locally (inside the level-1 fine tile, via the recursive
+/// `level_step_tail(1)`); a patch spanning a cut on a level >= 2 lies outside this driver's scope.
+/// hydro only in the root post-step (the root clock is advanced directly; mesh motion and immersed
+/// bodies belong to the single-grid path). `on_checkpoint(iteration, time, &tiles)` fires every
 /// `interval` root steps and once at the end (devices drained first).
 #[allow(clippy::too_many_arguments)]
 pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, F>(
@@ -3899,10 +3904,10 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
     F: FnMut(u64, f64, &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>]) -> ControlFlow<()>,
 {
     let n = tiles.len();
-    // the finest-level tail owns the IBM surface physics; the refined-
-    // decomposed step never runs the root tail, so a refined run whose tiles
-    // ALL failed to build a fine patch would penalize its bodies NOWHERE —
-    // silent physics loss, refused here.
+    // the finest-level tail owns the IBM surface physics, and the refined-
+    // decomposed step drives the fine tail alone, so a refined run needs at
+    // least one tile carrying a fine patch for its bodies to be penalized at
+    // all — a silent physics loss otherwise, refused here.
     assert!(
         tiles.iter().any(|h| h.levels.len() > 1)
             || tiles.iter().all(|h| !h.levels[0].state.has_bodies()),
@@ -3947,10 +3952,11 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || tiles[i].level_tail_emf(0, gdt));
         }
-        // the ROOT excise, in the same position the uni-grid tail puts it (after the emf
+        // the root excise, in the same position the uni-grid tail puts it (after the emf
         // bookkeeping). the rest of the tail — viscous, horizon ledger, penalize — belongs to the
-        // finest level and is driven with the fine subcycle; the excise does not, because the excised
-        // region is owned by whichever level contains it and a refined root still owns its core.
+        // finest level and is driven with the fine subcycle; the excise runs per level, because
+        // the excised region is owned by whichever level contains it and a refined root still
+        // owns its core.
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || tiles[i].level_tail_excise(0));
         }
@@ -4026,12 +4032,12 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
             });
         }
         // per-step immersed-body bookkeeping, the hierarchy form of the flat decomposed
-        // body step: each tile's FINEST level reduces its LOCAL feedback partials (the
+        // body step: each tile's finest level reduces its local feedback partials (the
         // tile finest interiors partition the sink region — coarser levels carry a
-        // gravity-only proxy and never drain), the deltas are summed across tiles into
-        // the true global reaction, and the identical global delta + prescribed advance
-        // is applied to every tile's bodies. identical input -> identical body state,
-        // so all tiles stay in lockstep.
+        // gravity-only proxy, so the drain stays on the finest), the deltas are summed
+        // across tiles into the true global reaction, and the identical global delta +
+        // prescribed advance is applied to every tile's bodies. identical input ->
+        // identical body state, so all tiles stay in lockstep.
         if tiles.iter().any(|h| h.levels[0].state.has_bodies()) {
             for i in 0..n {
                 symbi_xpu::with_device(devices[i], || tiles[i].finest_body_feedback(gdt));

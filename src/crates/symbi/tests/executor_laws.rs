@@ -9,7 +9,7 @@
 // per call — a fresh scratch field, a cloned buffer — multiplies the count and
 // fails the law with the measured number attached.
 //
-// the counting allocator is process-global, so this binary holds ONLY this law.
+// the counting allocator is process-global, so this binary is reserved for this one law.
 // =============================================================================
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -65,7 +65,7 @@ fn e2_steady_state_step_loop_allocation_is_bounded() {
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
     // a central gravitating + accreting body drives the full dispatch surface:
-    // godunov, cfl, ghost fill, body source, AND both body-feedback passes
+    // godunov, cfl, ghost fill, body source, and both body-feedback passes
     // (gravity reaction + drain) with their workspace-cached scratch.
     let bodies = BodyCollection::new().add(Body::black_hole(
         0,

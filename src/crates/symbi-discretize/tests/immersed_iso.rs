@@ -1,16 +1,16 @@
 // =============================================================================
 // immersed_iso.rs
 //
-// validates the ISOTHERMAL immersed-body source/feedback builders against the
-// same spec as the adiabatic kernels (immersed_source.rs). the body PHYSICS is
+// validates the isothermal immersed-body source/feedback builders against the
+// same spec as the adiabatic kernels (immersed_source.rs). the body physics is
 // EOS-independent — gravity + bondi-hoyle accretion are functions of (den, mom,
 // cs) only — so the iso kernels must:
-//   - produce den/mom updates BITWISE-IDENTICAL to the adiabatic kernels when
+//   - produce den/mom updates bitwise-identical to the adiabatic kernels when
 //     the sound speed matches (the shared `body_contribution` is the single
 //     source of truth);
 //   - match the analytic accretion spec with cs from prim.pre (= cs^2*rho),
 //     the isothermal closure for the sound speed;
-//   - emit NO energy write.
+//   - write den and mom alone, the isothermal conserved set.
 // =============================================================================
 
 mod harness;
@@ -35,8 +35,8 @@ const RACC0: f64 = 0.6;
 const SINK0: f64 = 5.0;
 const DELTA0: f64 = 0.3;
 
-// iso scalar binding: dt + grid + per-body params. NO gamma (the iso kernel reads
-// cs from the prim.pre field).
+// iso scalar binding: dt + grid + per-body params. gamma is absent because the iso
+// kernel reads cs from the prim.pre field.
 fn iso_scalars(sink0: f64) -> Vec<(&'static str, f64)> {
     vec![
         ("dt", DT),
@@ -101,8 +101,8 @@ fn rel(a: f64, b: f64) -> f64 {
 
 #[test]
 fn iso_gravity_matches_adiabatic_exactly() {
-    // gravity-only (sink=0): den_dot = 0, so the den/mom updates depend ONLY on the
-    // softened gravity, which is EOS-independent. choose an adiabatic energy whose
+    // gravity-only (sink=0): den_dot = 0, so the softened gravity alone drives the den/mom
+    // updates, and it is EOS-independent. choose an adiabatic energy whose
     // recovered cs equals the iso CS so the two kernels are on equal footing — then
     // their den/mom writes must be bitwise-identical.
     let (den, m0, m1) = (2.0, 0.6, -0.4);
@@ -167,8 +167,8 @@ fn iso_source_gravity_only_matches_analytic() {
 #[test]
 fn iso_source_accretion_matches_spec() {
     // gravity + the well-posed uniform-scaling DRAIN (docs/ideas/accretor.md), cs = CS from
-    // prim.pre, no energy. per cell: gravity is an additive momentum source, then EVERY conserved
-    // component is scaled by f = exp(-drain_rate*dt) -- so den and mom shrink by the SAME factor
+    // prim.pre, no energy. per cell: gravity is an additive momentum source, then each conserved
+    // component is scaled by f = exp(-drain_rate*dt) -- so den and mom shrink by the same factor
     // (the velocity is invariant, the design invariant).
     let (den, m0, m1) = (1.5, 0.4, -0.3);
     let out = run_iso(SINK0, den, m0, m1);

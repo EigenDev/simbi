@@ -23,10 +23,10 @@ pub struct BodyDelta<S: Scalar, const D: usize> {
 
     // instantaneous quantities (last timestep value)
     pub force_delta: Tensor<S, D>,
-    /// the NORMAL (form-drag / pressure) component of the surface force, projected onto the SDF
+    /// the normal (form-drag / pressure) component of the surface force, projected onto the SDF
     /// outward normal: `force_normal = (F.n_hat) n_hat` summed over the body's cells. the tangential
-    /// (skin-friction) part is `force_delta - force_normal_delta`. zero for a bare drain (no wall
-    /// normal). instantaneous, like force.
+    /// (skin-friction) part is `force_delta - force_normal_delta`. zero for a bare drain, which
+    /// carries no wall normal. instantaneous, like force.
     pub force_normal_delta: Tensor<S, D>,
     pub torque_delta: Tensor<S, 3>,
 
@@ -34,8 +34,8 @@ pub struct BodyDelta<S: Scalar, const D: usize> {
     pub mass_delta: S,
     pub prev_mass_delta: S,
     /// total (internal + kinetic) energy absorbed from the fluid -- the accretion-power
-    /// budget `Edot = energy_delta / dt`. closes the gas+body ENERGY ledger: the fluid
-    /// loses exactly this (uniform-scaling drain), so it must be booked on the body side.
+    /// budget `Edot = energy_delta / dt`. closes the gas+body energy ledger: the fluid
+    /// loses exactly this (uniform-scaling drain), and the body books the matching gain.
     pub energy_delta: S,
 }
 

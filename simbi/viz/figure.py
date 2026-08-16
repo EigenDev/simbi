@@ -11,9 +11,9 @@
 # contract with components:
 #   a component implements the Component protocol (see components/interface.py)
 #   and returns a `RenderResult`: the artists it drew, plus the facts the
-#   FigureFormatter cannot work out for itself -- which artist a colorbar
-#   describes, what to call it, the extent it drew, whether it is a vector
-#   overlay riding on another artist.
+#   component alone holds -- which artist a colorbar describes, what to call
+#   it, the extent it drew, whether it is a vector overlay riding on another
+#   artist.
 #
 #   the figure composes the view from those extents and delegates every
 #   formatting decision (title, axis labels, colorbar, legend, spines) to
@@ -303,9 +303,9 @@ class Figure:
         # frame's fields are new objects, so they are matched back by name
         self._signatures = [payload for _, payload in self._components]
 
-        # the immersed-body silhouette artists from the PREVIOUS frame, removed
-        # before the next frame's overlay so a tumbling body does not smear
-        # across the movie
+        # the immersed-body silhouette artists from the preceding frame, removed
+        # before the next frame's overlay so a tumbling body shows one
+        # silhouette per frame of the movie
         self._body_artists = []
         self._horizon_artists = []
 
@@ -541,7 +541,7 @@ class Figure:
     ) -> None:
         """the parts of the formatting that change from frame to frame.
 
-        the rest is left alone so the layout does not shift under the movie."""
+        the rest is left alone, which holds the layout fixed under the movie."""
         assert self.fig is not None
         from simbi.viz.formatting import set_title
 

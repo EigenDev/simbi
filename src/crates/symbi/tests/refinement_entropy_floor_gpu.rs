@@ -2,7 +2,7 @@
 // refinement_entropy_floor_gpu.rs
 //
 // the device twin of the balanced-seam entropy-floor gate: the same 2-level
-// hydrostatic column on CudaSpace/UnifiedMemory, exercising the SAME baked
+// hydrostatic column on CudaSpace/UnifiedMemory, exercising the same baked
 // wb_cf_lerp_encode / wb_cf_decode kernel pair the cpu gate runs. the transfer
 // activates on device because the balance gate is memory-space-blind; this
 // asserts the device hierarchy holds the same floor bound the cpu gate pins.
@@ -114,9 +114,9 @@ fn worst_entropy_ratio(hier: &Hier) -> (f64, usize) {
 
 #[test]
 fn the_balanced_seam_transfer_holds_the_entropy_floor_on_device() {
-    // positive control: the PLAIN 2-level seam must vent visibly by this clock
-    // (the cpu gate measures 1.2e-2), or the balanced arm below is quiet about a
-    // setup that never stressed the seam.
+    // positive control: the plain 2-level seam vents visibly by this clock
+    // (the cpu gate measures 1.2e-2), which is what puts the balanced arm's
+    // quiet under a seam that is genuinely stressed.
     let mut plain = build(false);
     plain.evolve(T_GATE).unwrap();
     let (floor_plain, _) = worst_entropy_ratio(&plain);

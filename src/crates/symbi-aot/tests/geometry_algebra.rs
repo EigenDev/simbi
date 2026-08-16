@@ -1,11 +1,11 @@
 // =============================================================================
 // geometry_algebra.rs
 //
-// validates the substrate GEOMETRY ALGEBRA: the build-time-generated
+// validates the substrate geometry algebra: the build-time-generated
 // `geom_*` probe kernels compute per-cell finite-volume geometric factors
-// (inverse volume, dir-0 face areas, dir-0 volume-weighted centroid) FROM THE
-// CELL INDEX, and must match the ANALYTIC formulas — for Cartesian + Spherical,
-// uniform + LOG radial spacing. proves the in-kernel factor-from-index path:
+// (inverse volume, dir-0 face areas, dir-0 volume-weighted centroid) from the
+// cell index, and must match the analytic formulas — for Cartesian + Spherical,
+// uniform + log radial spacing. proves the in-kernel factor-from-index path:
 // analytic exact-integral factors + volume-weighted centroids (not the
 // coordinate center), with log zones via the axis map.
 // =============================================================================
@@ -178,7 +178,7 @@ fn spherical_weighted_divergence_matches_analytic() {
 // exact discrete HYDROSTATIC BALANCE. the spherical adiabatic godunov_euler with
 // the well-balanced geometric momentum source. set a v=0 uniform-pressure state — the
 // momentum face flux is then p, the mass/energy fluxes are 0 — and assert the momentum
-// stays EXACTLY 0: the source `(p*A_hi - p*A_lo)/V` bit-cancels the pressure flux
+// stays exactly 0: the source `(p*A_hi - p*A_lo)/V` bit-cancels the pressure flux
 // divergence `(p*A_hi - p*A_lo)/V`. (without the source, momentum would spuriously
 // gain -dt*(p*A_hi - p*A_lo)/V each step — a curvilinear code's classic failure mode.)
 #[test]
@@ -198,7 +198,7 @@ fn spherical_hydrostatic_balance_exact() {
 
     // the godunov-stage kernel reads the u_n snapshot per law + the SSP (a0, ac) coefficients.
     // HSE is a forward-Euler step (a0=0, ac=1): u_n is the initial state (multiplied by 0, so it
-    // does not affect the result). buffer order (per the stage ABI): prim.pre, then per law the
+    // drops out of the result). buffer order (per the stage ABI): prim.pre, then per law the
     // (u_n, flux) pair, then the in-place cons outputs. scalar order [dt, a0, ac, x_lo, dx].
     let (u_n_den, u_n_mom, u_n_nrg) = (den.clone(), mom.clone(), nrg.clone());
     NamedKernel::new("adiabatic_godunov_stage_sph_1d")
@@ -288,7 +288,7 @@ fn log_spherical_cfl_uses_per_cell_widths() {
 // cell is s_0 = mom_theta*v_theta/r_c (centrifugal, outward) and s_1 = -mom_r*v_theta/r_c
 // (coriolis), r_c the volume-weighted radial centroid. the density factor is rho
 // (Newtonian) or rho*h*W^2 (RHD/relativistic) — both exercised: RHD just feeds the
-// relativistic momentum density as cons.mom, ONE source path serves both.
+// relativistic momentum density as cons.mom, one source path serves both.
 #[test]
 fn spherical_inertial_source_matches_analytic() {
     let nr = 8usize;
@@ -356,7 +356,7 @@ fn spherical_inertial_source_matches_analytic() {
 }
 
 // the FULL relativistic-MHD geometric source via the RMHD adapter onto the
-// SAME regime-generic builder — TOTAL-pressure source + gas inertial (wgam2 v^2) +
+// same regime-generic builder — TOTAL-pressure source + gas inertial (wgam2 v^2) +
 // magnetic tension (-bmu^2). validates the RADIAL source s_0 (no cot term; the angular
 // extent cancels in (A_hi-A_lo)*inv_V): exercises all three RMHD-specific quantities
 // (ptot, the gas momentum density wgam2 = rho h W^2, and the magnetic four-vector bmu).
@@ -428,10 +428,11 @@ fn rmhd_spherical_source_radial_matches_analytic() {
 }
 
 // the FULL relativistic-MHD geometric source (cylindrical) on a (r, phi, z) grid via
-// the SAME coord-generic builder as spherical — only the Christoffel changes (cylindrical has the
+// the same coord-generic builder as spherical — only the Christoffel changes (cylindrical has the
 // r-phi pair; z carries no inertial/tension and, with uniform ptot, no pressure source). validates
 // all three components against the analytic centrifugal + magnetic-tension forms. proves the
-// metric-generic source machinery covers cylindrical RMHD with NO new physics — only a bake entry.
+// metric-generic source machinery reuses existing physics for cylindrical RMHD — only a bake
+// entry is new.
 #[test]
 fn rmhd_cylindrical_source_matches_analytic() {
     let nr = 6usize;

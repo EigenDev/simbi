@@ -335,8 +335,9 @@ def load_component_props(
     for key, config in merged.items():
         component = component_of(key)
         if component not in PROPS_REGISTRY:
-            # accepting an unknown component name would silently drop EVERY override
-            # under it (qaud.cmap=inferno), so it raises with a close-match suggestion.
+            # an unknown component name would silently drop the whole block of
+            # overrides under it (qaud.cmap=inferno), so it raises with a
+            # close-match suggestion.
             import difflib
 
             close = difflib.get_close_matches(component, PROPS_REGISTRY, n=1)

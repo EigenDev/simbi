@@ -2,12 +2,12 @@
 // algebra.rs
 //
 // minimal structural numeric primitives needed by `Tensor` / `Matrix` /
-// `Indexed` impls inside this crate. NOT a re-implementation of `Scalar` —
-// the production `Scalar` (and `Selectable`) live in `symbi_ir::algebra`.
-// this trait is `pub(crate)`-equivalent: nothing outside `symbi-algebra` should
-// reference it. its role is to provide arithmetic / sqrt / min / max / abs /
-// ZERO / ONE / from_f64 so dot / norm / det / inv etc. compile without
-// depending on `symbi-ir` (that would be a circular dep — `symbi-ir` already
+// `Indexed` impls inside this crate. the production `Scalar` (and
+// `Selectable`) live in `symbi_ir::algebra`; this is the structural subset.
+// this trait is `pub(crate)`-equivalent: its audience is `symbi-algebra`
+// itself. its role is to provide arithmetic / sqrt / min / max / abs /
+// ZERO / ONE / from_f64 so dot / norm / det / inv etc. compile within this
+// crate alone (a `symbi-ir` dependency would close a cycle — `symbi-ir` already
 // depends on `symbi-algebra` for `Tensor`, `FieldElement`, `Domain`).
 //
 // the production `Scalar` in `symbi_ir::algebra` carries this structural surface
@@ -19,18 +19,18 @@
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 /// structural numeric bag: what the in-crate `Tensor` / `Matrix` / `Indexed`
-/// methods need from a scalar. NOT a production trait — `symbi_ir::algebra::Scalar`
-/// is the production carrier-generic surface; this is the minimal subset that
-/// breaks the `symbi-algebra` <-> `symbi-ir` dep cycle.
+/// methods need from a scalar. `symbi_ir::algebra::Scalar` is the production
+/// carrier-generic surface; this is the minimal subset that keeps the
+/// `symbi-algebra` <-> `symbi-ir` dep graph acyclic.
 ///
-/// **deliberately NO `PartialOrd`** (Tier 1.7, 2026-05-30). the new `Scalar`
-/// has `Numeric` as a super-trait, so `S: Scalar` does NOT have `PartialOrd`
-/// — native `<` / `>` / `<=` / `>=` on a generic `S` does NOT compile, and
-/// the A1 discipline (use `cmp_*` returning `Self::Mask`, then `select` or
-/// `branch`) is compile-enforced. methods that genuinely need host-side
-/// ordering bound on `OrderedNumeric` (below) instead, which is impl'd only
-/// by host numeric types (f64/f32). tracing carriers (Gv) cannot be smuggled
-/// into those methods — preserving "no silent A1 violation on Gv."
+/// **deliberately omits `PartialOrd`** (Tier 1.7, 2026-05-30). the new `Scalar`
+/// has `Numeric` as a super-trait, so `S: Scalar` reaches ordering through
+/// `cmp_*` alone — native `<` / `>` / `<=` / `>=` on a generic `S` is a compile
+/// error, and the A1 discipline (use `cmp_*` returning `Self::Mask`, then
+/// `select` or `branch`) is compile-enforced. methods that genuinely need
+/// host-side ordering bound on `OrderedNumeric` (below), which is impl'd by the
+/// host numeric types (f64/f32). that bound admits host carriers alone,
+/// preserving "no silent A1 violation on Gv."
 pub trait Numeric:
     Copy
     + 'static
@@ -56,13 +56,13 @@ pub trait Numeric:
     fn max(self, other: Self) -> Self;
 }
 
-/// `Numeric` + host-side ordering. impl'd only by concrete host numeric types
+/// `Numeric` + host-side ordering. impl'd by the concrete host numeric types
 /// (`f64`, `f32`) — tracing carriers (`Gv`, future `Sym` / `Dual`) impl
-/// `Numeric` but NOT `OrderedNumeric`, so they cannot be smuggled into methods
-/// that branch on a host bool (`Tensor::normalize`, `Matrix::is_symmetric`,
+/// `Numeric` alone, so the bound admits host carriers into methods that branch
+/// on a host bool (`Tensor::normalize`, `Matrix::is_symmetric`,
 /// and the host-only Riemann solvers `riemann/hlld.rs` / `riemann/hllc.rs`).
-/// these methods are host computations on concrete tensors / matrices, not
-/// part of carrier-generic physics.
+/// these methods are host computations on concrete tensors / matrices, distinct
+/// from the carrier-generic physics.
 pub trait OrderedNumeric: Numeric + PartialOrd {}
 
 impl Numeric for f64 {
@@ -76,11 +76,11 @@ impl Numeric for f64 {
     fn sqrt(self) -> Self {
         f64::sqrt(self)
     }
-    // ternary form `x < 0 ? -x : x` / `a < b ? a : b` / `a > b ? a : b` — NOT
-    // f64::abs/min/max. the std methods are NaN-symmetric and normalize signed
+    // ternary form `x < 0 ? -x : x` / `a < b ? a : b` / `a > b ? a : b`, in place
+    // of f64::abs/min/max. the std methods are NaN-symmetric and normalize signed
     // zero; the ternary is order-asymmetric. the traced IR lowers Min/Max/Abs to
-    // exactly this select (scalarize), so the host carrier MUST match it bit-for-
-    // bit or carrier equivalence breaks at NaN / signed-zero cells (tier-1 #2b).
+    // exactly this select (scalarize), so the host carrier matches it bit-for-bit
+    // and carrier equivalence holds at NaN / signed-zero cells (tier-1 #2b).
     #[inline(always)]
     fn abs(self) -> Self {
         if self < 0.0 { -self } else { self }

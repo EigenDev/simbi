@@ -114,7 +114,7 @@ mod tests {
         };
         assert_eq!(m.source(&[-1]), vec![0]); // ghost -1 mirrors to interior 0
         assert_eq!(m.source(&[-2]), vec![1]); // ghost -2 mirrors to interior 1
-        // the wall-normal component flips; tangential does not.
+        // the wall-normal component flips sign; the tangential component copies through.
         assert_eq!(m.jacobian_sign(0), -1);
         assert_eq!(m.jacobian_sign(1), 1);
     }

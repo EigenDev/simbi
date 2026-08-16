@@ -45,8 +45,8 @@ pub struct KernelEmitInputs<'a> {
     pub kernel_name: &'a str,
     pub ndim: u8,
     pub target: TargetConfig,
-    /// whether all of this kernel's buffers share ONE allocated layout, so the
-    /// cell index can be computed once and shared across reads. the PRODUCER sets
+    /// whether all of this kernel's buffers share one allocated layout, so the
+    /// cell index can be computed once and shared across reads. the producer sets
     /// this (it knows the kernel's buffer topology); the IR stays domain-agnostic.
     /// true for single-layout
     /// cell-centered kernels (c2p, wave-speed maps, pure-hydro face flux); false
@@ -54,7 +54,7 @@ pub struct KernelEmitInputs<'a> {
     pub coalesce_layout: bool,
     /// (IR-side synthesized key, born-typed runtime binding). the IR key
     /// matches a Param node in the graph; the FieldBind is what ends up in
-    /// `FieldBinding::field` for the dispatch side (no re-parse).
+    /// `FieldBinding::field`, which the dispatch side consumes verbatim.
     pub field_inputs: &'a [(String, FieldBind)],
     /// IR-side param names that stay as scalar __global__ args (user
     /// scalars: dt, gamma, etc.), passed by value.
@@ -74,8 +74,8 @@ pub struct KernelEmitInputs<'a> {
     /// (callees before callers) and de-duplication. each entry is a
     /// complete `__device__ inline RET name(...) { ... }` string.
     pub device_preamble: &'a [String],
-    /// the kernel's shared-memory tile intent for STENCIL
-    /// kernels (halo + stencil-read field keys). `None` = no smem tiling.
+    /// the kernel's shared-memory tile intent for stencil
+    /// kernels (halo + stencil-read field keys). `None` = gmem loads only.
     /// the CUDA emitter cooperatively prefetches the (block + halo)
     /// region for these fields into `__shared__`; the CPU emitter ignores it
     /// (it cache-tiles every kernel unconditionally). inferred for stencil
@@ -83,12 +83,12 @@ pub struct KernelEmitInputs<'a> {
     pub tile_spec: Option<&'a crate::gv::TileSpec>,
 }
 
-/// the C-FAMILY backend spelling for the shared kernel driver (`emit_render`):
-/// CUDA AND HIP. produces an `extern "C" __global__` kernel over raw
+/// the C-family backend spelling for the shared kernel driver (`emit_render`):
+/// CUDA and HIP. produces an `extern "C" __global__` kernel over raw
 /// `<precision>*` buffers (the per-cell view ABI shape); the header + global qualifier
 /// vary by `target.target` (`emit::header` / `global_qualifier`), so HIP is a
-/// pure token-map with zero physics edits. Metal (MSL: buffer-index ABI, no
-/// `double`) needs its OWN renderer.
+/// pure token-map with zero physics edits. Metal (MSL: buffer-index ABI, f32-only)
+/// takes its own renderer.
 pub struct CRenderer {
     pub target: TargetConfig,
 }
@@ -103,7 +103,7 @@ impl KernelRenderer for CRenderer {
     fn preamble(&self, device_preamble: &[String]) -> String {
         // every CUDA kernel takes its buffers as `__symbi_View<T>`
         // structs — one struct per buffer carrying
-        // ptr + lo + pre-multiplied strides. emit the struct typedef ONCE in the
+        // ptr + lo + pre-multiplied strides. emit the struct typedef once in the
         // preamble so the kernel signature can spell `__symbi_View field0`.
         // the host side packs a matching POD into the kernel arg buffer (see
         // `substrate_gpu::DeviceView`).
@@ -121,9 +121,9 @@ impl KernelRenderer for CRenderer {
         s
     }
     fn buffer_param(&self, idx: u32, _is_output: bool) -> String {
-        // every buffer is a View struct (data + lo + strides). drops
-        // the matching `buf_lo_*` / `buf_extent_*` scalar args (see
-        // `skip_scattered_buffer_layout_args`).
+        // every buffer is a View struct (data + lo + strides); the layout rides
+        // inside it, in place of scattered `buf_lo_*` / `buf_extent_*` scalar args
+        // (see `skip_scattered_buffer_layout_args`).
         format!("    __symbi_View field{idx}")
     }
     fn grid_size_param(&self, axis: usize) -> String {
@@ -153,9 +153,9 @@ impl KernelRenderer for CRenderer {
         "\n) {\n" // C forbids a trailing comma in the parameter list
     }
     fn cell_prelude(&self, ndim: usize, _n_buffers: u32) -> Vec<String> {
-        // CUDA order: thread index, bounds check, absolute coord. strides used
-        // to require `_ny_<N>` / `_nz_<N>` lets — under the View ABI they're
-        // read directly off `field<N>.strides[..]`, so no per-buffer prelude.
+        // CUDA order: thread index, bounds check, absolute coord. under the View
+        // ABI strides are read straight off `field<N>.strides[..]`, so the prelude
+        // is per-cell only.
         let dims = ["x", "y", "z"];
         let mut v = Vec::new();
         for aa in 0..ndim {
@@ -271,7 +271,8 @@ impl KernelRenderer for CRenderer {
         format!("    field{buf}.data[{flat}] = {expr};")
     }
     fn close(&self, _ndim: usize) -> String {
-        // a GPU kernel is one thread per cell — no loop to close, just the fn.
+        // a GPU kernel is one thread per cell, so closing the fn body is the
+        // whole of it.
         "}\n".to_string()
     }
 }
@@ -310,10 +311,11 @@ fn smem_flat_index(locals: &[String]) -> String {
 
 /// the block-level smem prelude: one `__shared__` slab per tiled field + a
 /// cooperative (block + per-axis halo) prefetch from gmem, ending in
-/// `__syncthreads()`. each gmem read is CLAMPED to the field's allocated bounds
-/// `[lo, lo+extent-1]` (a thin ternary, NVRTC-safe — no `min`/`max`/<math.h>), so
-/// a boundary/padding tile cell re-reads a ghost edge, staying in bounds. the
-/// tiled fields are assumed CELL-CENTERED with shared `lo`/`extent` (true for the
+/// `__syncthreads()`. each gmem read is clamped to the field's allocated bounds
+/// `[lo, lo+extent-1]` (a thin ternary; `min`/`max` live in <math.h>, which NVRTC
+/// leaves out), so a boundary/padding tile cell re-reads a ghost
+/// edge, staying in bounds. the tiled fields are cell-centered with shared
+/// `lo`/`extent` (true for the
 /// rmhd flux prim + wave-speed inputs); the clamp uses the first field's geometry.
 fn smem_prelude_cuda(ty: &str, ndim: usize, halo: &[u8], tiled: &[(String, u32)]) -> Vec<String> {
     assert_eq!(
@@ -405,24 +407,24 @@ fn smem_prelude_cuda(ty: &str, ndim: usize, halo: &[u8], tiled: &[(String, u32)]
 }
 
 /// serialize a `Prepared` to the IR blob `build.rs` embeds per kernel (the inverse
-/// of `prepared_from_ir`). keeps serde_json contained to symbi-ir — build.rs and
-/// the runtime call these helpers, never the wire format directly.
+/// of `prepared_from_ir`). keeps serde_json contained to symbi-ir: build.rs and
+/// the runtime go through these helpers, so the wire format stays internal.
 pub fn prepared_to_ir(prepared: &Prepared) -> String {
     serde_json::to_string(prepared).expect("prepared_to_ir: Prepared is not serializable")
 }
 
-/// deserialize a `Prepared` IR blob — the backend-NEUTRAL artifact `build.rs`
-/// embeds per kernel. hides serde_json from consumers so they
-/// don't take the dep; pair with `render(_, &SomeRenderer)` (the choice of backend
-/// is the renderer, never this function).
+/// deserialize a `Prepared` IR blob — the backend-neutral artifact `build.rs`
+/// embeds per kernel. hides serde_json from consumers so the dep stays here;
+/// pair with `render(_, &SomeRenderer)`, where the renderer alone picks the
+/// backend.
 pub fn prepared_from_ir(ir: &str) -> Prepared {
     serde_json::from_str(ir).expect("prepared_from_ir: malformed Prepared IR blob")
 }
 
-/// the RUNTIME render path: deserialize a `Prepared` IR blob and
-/// render it to `target` source at `precision`. `target` is a PARAMETER threaded
-/// through the render call — adding HIP/Metal is a new match arm here, never a new `*_cuda`
-/// function. one blob renders every backend AND both
+/// the runtime render path: deserialize a `Prepared` IR blob and
+/// render it to `target` source at `precision`. `target` is a parameter threaded
+/// through the render call, so adding HIP/Metal is a new match arm here. one blob
+/// renders every backend and both
 /// precisions (precision is a render-algebra parameter); the source then
 /// feeds the backend's runtime compiler (NVRTC/hiprtc/Metal). the
 /// accelerator renders source at runtime.
@@ -430,12 +432,12 @@ pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelD
     let prepared = prepared_from_ir(ir);
     let tcfg = TargetConfig { target, precision };
     match target {
-        // CUDA and HIP share the C-family renderer: it already varies header +
+        // CUDA and HIP share the C-family renderer: it varies header +
         // global-qualifier by `Target` (emit::header / global_qualifier), so HIP
         // drops in as a token-map with zero physics edits.
         Target::Cuda | Target::Hip => render(prepared, &CRenderer { target: tcfg }),
-        // Metal (MSL) is f32-only and needs its own renderer (the binding-index ABI
-        // + no-`double` capability gate); it lands with that backend.
+        // Metal (MSL) is f32-only and takes its own renderer (the binding-index ABI
+        // + the f32 capability gate); it lands with that backend.
         Target::Metal => unimplemented!(
             "Metal renderer not implemented; render from IR once \
              MetalRenderer exists"
@@ -444,10 +446,10 @@ pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelD
 }
 
 // the NVRTC-safe identity + combine for a grid reduction at `precision`. min/max
-// use the INLINE TERNARY — fmin/fmax come from <math.h> which
-// NVRTC does not include (same class of bug the flux INFINITY fix caught), and the
-// ternary matches the CPU carrier's min/max semantics. the identities are plain
-// finite literals (no INFINITY macro).
+// use the inline ternary: fmin/fmax live in <math.h>, which NVRTC leaves out (the
+// same gap an INFINITY literal in a flux kernel falls into), and the ternary matches
+// the CPU carrier's min/max semantics. the identities are plain finite literals,
+// keeping the INFINITY macro out of the emitted source.
 fn reduction_identity_combine(
     op: ReductionOp,
     precision: Precision,
@@ -460,12 +462,12 @@ fn reduction_identity_combine(
         ReductionOp::Mul => (if f32 { "1.0f" } else { "1.0" }, |a, b| {
             format!("({a} * {b})")
         }),
-        // sentinels safely beyond any physical value; finite (NVRTC has no INFINITY).
-        // min/max MUST propagate NaN so a poisoned cell surfaces at the host dt
-        // guard ([[feedback_no_silent_floors]]); the bare ternary `a < b ? a : b`
-        // silently drops a NaN operand (NaN compares false). `x != x` is the
-        // NVRTC-safe NaN test (no isnan/<math.h>), matching the host fold in
-        // `substrate_gpu::host_identity_combine`.
+        // sentinels safely beyond any physical value, and finite, since NVRTC leaves
+        // the INFINITY macro out. min/max propagate NaN so a poisoned cell surfaces at
+        // the host dt guard ([[feedback_no_silent_floors]]); the bare ternary
+        // `a < b ? a : b` silently drops a NaN operand (NaN compares false). `x != x`
+        // is the NVRTC-safe NaN test (isnan lives in <math.h>), matching the host fold
+        // in `substrate_gpu::host_identity_combine`.
         ReductionOp::Min => (if f32 { "1.0e38f" } else { "1.0e308" }, |a, b| {
             format!("(({a} != {a}) ? {a} : (({b} != {b}) ? {b} : ({a} < {b} ? {a} : {b})))")
         }),
@@ -489,20 +491,20 @@ pub const SEGMENTED_LDS_BUDGET_BYTES: usize = 32 * 1024;
 /// launch shape independent of the resolution.
 pub const SEGMENTED_MAX_BLOCKS: u32 = 1024;
 
-/// the segment index marking a cell that is NOT PART OF THE REDUCTION AT ALL — a cell
-/// covered by finer data, inside an immersed body's mask, or otherwise not physical gas.
-/// distinct from an index past the last segment, which means the cell WAS to be reduced but
-/// fell outside the declared bin edges. only the latter is a shortfall of the binning and
-/// only the latter is counted; conflating the two would report a body's footprint as
-/// under-coverage.
-/// the marker for a cell EXCLUDED from a reduction, as an offset past the last bucket. a census
+/// the segment index marking a cell held out of the reduction entirely — a cell
+/// covered by finer data, inside an immersed body's mask, or otherwise outside the physical
+/// gas. an index past the last segment carries the other meaning: the cell was to be reduced
+/// and fell outside the declared bin edges. that second case alone is a shortfall of the
+/// binning and that second case alone is counted; conflating the two would report a body's
+/// footprint as under-coverage.
+/// the marker for a cell excluded from a reduction, as an offset past the last bucket. a census
 /// writes `n_segments + EXCLUDED_OFFSET`; the reduction treats anything strictly above
 /// `n_segments` as excluded and `n_segments` itself as a cell that fell outside the bin edges.
 ///
-/// an offset rather than a fixed sentinel because every marker must stay a SMALL integer: the
+/// an offset keeps every marker a small integer, which the carrier requires: the
 /// segment travels on the scalar carrier (a generated kernel has one scalar type for all of its
-/// buffers), and a `u32::MAX` marker is not representable in f32 — it rounds to 2^32 and stops
-/// comparing equal, which would silently reclassify every excluded cell.
+/// buffers), and a `u32::MAX` marker rounds to 2^32 in f32 and stops comparing equal, which
+/// would silently reclassify every excluded cell.
 pub const SEGMENT_EXCLUDED_OFFSET: u32 = 1;
 
 /// does a segmented reduction of this shape privatize its accumulators into shared memory,
@@ -517,11 +519,11 @@ pub fn segmented_privatizes(n_segments: usize, n_values: usize, precision: Preci
 }
 
 /// the NVRTC-safe read-modify-write of one accumulator slot. `Add` has a native
-/// `atomicAdd`; `Min`/`Max` have none for floating point, so they compare-and-swap on the
-/// bit pattern until the slot holds the combined value. every form is a device-wide atomic,
-/// so the COMBINE ORDER IS UNSPECIFIED: `Min`/`Max` are order-agnostic and land on the same
-/// answer regardless, but `Add` reassociates, which is why a summing segmented reduction
-/// cannot claim bit-reproducibility on device.
+/// `atomicAdd`; floating-point `Min`/`Max` compare-and-swap on the bit pattern until the
+/// slot holds the combined value. every form is a device-wide atomic, so the combine order
+/// is unspecified: `Min`/`Max` are order-agnostic and land on the same answer regardless,
+/// while `Add` reassociates, so a summing segmented reduction is reproducible only up to
+/// that reassociation.
 fn segmented_atomic_helpers(op: ReductionOp, precision: Precision) -> String {
     let f32 = matches!(precision, Precision::F32);
     let ty = precision.c_type();
@@ -542,7 +544,7 @@ fn segmented_atomic_helpers(op: ReductionOp, precision: Precision) -> String {
     let (_, combine) = reduction_identity_combine(op, precision);
     let combined = combine("cur", "v");
     // the cas retries until the slot's bits are the ones this thread computed from the value
-    // it read, so a racing update is never lost. the combine is the SAME NaN-propagating
+    // it read, so every racing update is folded in. the combine is the same NaN-propagating
     // ternary the block reduction and the host fold use.
     format!(
         "__device__ inline void __symbi_seg_accum({ty}* addr, {ty} v) {{\n\
@@ -558,19 +560,19 @@ fn segmented_atomic_helpers(op: ReductionOp, precision: Precision) -> String {
     )
 }
 
-/// render a SEGMENTED reduction: the scatter-add half of a binned reduction (a census).
+/// render a segmented reduction: the scatter-add half of a binned reduction (a census).
 /// each cell carries a destination bucket in `segment`, and every one of the `n_values`
 /// value fields is combined by `op` into that bucket's accumulator, giving
-/// `n_segments * n_values` outputs from ONE pass over the domain. this is not expressible
-/// by tracing pointwise code — the destination is data-dependent — so it sits beside the
+/// `n_segments * n_values` outputs from one pass over the domain. the data-dependent
+/// destination puts this outside traced pointwise code, so it sits beside the
 /// generated kernels as its own morphism, exactly as the whole-field reduction does.
 ///
 /// two accumulation strategies, chosen by `segmented_privatizes`:
-///   - PRIVATIZED: a block-local shared accumulator absorbs the block's cells, then each
+///   - privatized: a block-local shared accumulator absorbs the block's cells, then each
 ///     slot is folded into the global output once per block. contention scales with the
-///     block count rather than the cell count.
-///   - DIRECT: the accumulator does not fit shared memory, so cells combine straight into
-///     the global output.
+///     block count, which is far below the cell count.
+///   - direct: an accumulator larger than the shared budget keeps cells combining straight
+///     into the global output.
 /// both are device-wide atomic at the final combine, so `Add` reassociates run to run.
 ///
 /// a cell whose segment index is at or beyond `n_segments` lies outside the binning. it is
@@ -600,8 +602,7 @@ pub fn render_field_segmented_reduction(
         "render_field_segmented_reduction: needs at least one segment"
     );
     // a product over bins overflows to zero or infinity on any realistic cell count and
-    // carries no meaning as a census statistic, so it is refused rather than allowed to
-    // silently produce garbage.
+    // carries no meaning as a census statistic, so the emitter refuses it loudly.
     assert!(
         !matches!(op, ReductionOp::Mul),
         "render_field_segmented_reduction: Mul is not a meaningful segmented reduction"
@@ -618,8 +619,8 @@ pub fn render_field_segmented_reduction(
     out.push_str(&format!(
         "struct __symbi_View {{ {ty}* __restrict__ data; int lo[4]; int strides[4]; int extent[4]; }};\n",
     ));
-    // the segment view carries the same host-packed layout as a value view; only the
-    // element type differs, and the index formulas read lo/strides alone.
+    // the segment view carries the same host-packed layout as a value view; the element
+    // type is the one difference, and the index formulas read lo/strides alone.
     out.push_str("");
     out.push_str(&segmented_atomic_helpers(op, precision));
 
@@ -656,7 +657,7 @@ pub fn render_field_segmented_reduction(
 
     // ---- grid-stride walk ----
     // the block count is fixed by the launcher, so a thread visits a strided run of cells
-    // and the launch shape does not grow with the resolution.
+    // and the launch shape stays independent of the resolution.
     out.push_str(
         "    for (unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x; gid < total_cells; gid += blockDim.x * gridDim.x) {\n",
     );
@@ -685,16 +686,16 @@ pub fn render_field_segmented_reduction(
         out.push('\n');
     }
     let seg_flat = emit::emit_flat_index(emit::IndexLang::Cuda, ndim as u8, seg_buf as u32, comps);
-    // the segment rides the SCALAR carrier, like every other kernel buffer: a generated kernel is
-    // `fn k<S: Scalar>`, one type for all of its buffers, so a bucket index cannot arrive as its
-    // own integer field. every marker is therefore a SMALL non-negative integer, exact in f32 and
+    // the segment rides the scalar carrier, like every other kernel buffer: a generated kernel is
+    // `fn k<S: Scalar>`, one type for all of its buffers, so a bucket index arrives on that same
+    // carrier. every marker is therefore a small non-negative integer, exact in f32 and
     // f64 alike — bucket in `[0, n)`, `n` for a cell that fell outside the bin edges, and anything
-    // above `n` for a cell excluded from the reduction entirely. no sentinel depends on the
-    // carrier's width, which a `u32::MAX` marker silently would once the carrier is f32.
+    // above `n` for a cell excluded from the reduction entirely. every sentinel is carrier-width
+    // independent; a `u32::MAX` marker would silently break once the carrier is f32.
     out.push_str(&format!(
         "        unsigned int seg = (unsigned int) field{seg_buf}.data[{seg_flat}];\n"
     ));
-    // a cell EXCLUDED (covered by finer data, inside a body mask, a ghost) is skipped silently; a
+    // a cell excluded (covered by finer data, inside a body mask, a ghost) is skipped silently; a
     // cell that was to be reduced and fell outside the declared edges is a shortfall and counted.
     out.push_str(&format!("        if (seg > {n_segments}u) continue;\n"));
     out.push_str(&format!(
@@ -743,9 +744,9 @@ pub fn render_field_segmented_reduction(
     }
 }
 
-/// render a GRID reduction (the Reduce morphism): reduce ONE input
+/// render a grid reduction (the Reduce morphism): reduce one input
 /// field by `op` over the dispatch window, emitting one partial per block (the host
-/// folds the partials — only the partials cross, never per-cell). C-family
+/// folds the partials; the partials alone cross the bus). C-family
 /// (CUDA/HIP) + precision-generic + NVRTC-renderable; the per-thread value is the
 /// field load at the cell (the trivial morphism — a fused per-cell value expression
 /// is a later extension). the CPU algebra of the same reduce is the host fold in
@@ -816,11 +817,11 @@ pub fn render_field_reduction(
             out.push_str("        int kk = (int)(gid % grid_size_2) + dom_lo_2;\n");
         }
     }
-    // single source of truth: the per-cell base AND the flat-index expression
+    // single source of truth: the per-cell base and the flat-index expression
     // come from `emit::emit_cell_index_base` / `emit::emit_flat_index`. for a
-    // reduction every access is at the cell coord so the delta folds to zero —
-    // but it still goes through the SAME formula every other emitter uses.
-    // both formulas now reference `field0.lo[..]` and `field0.strides[..]` —
+    // reduction every access is at the cell coord so the delta folds to zero,
+    // and it still goes through the same formula every other emitter uses.
+    // both formulas reference `field0.lo[..]` and `field0.strides[..]` —
     // the View struct passed in by the host.
     out.push_str("    ");
     out.push_str(&emit::emit_cell_index_base(
@@ -945,8 +946,8 @@ mod tests {
         );
         assert!(desc.source.contains("__symbi_View field0"));
         assert!(desc.source.contains("__symbi_View field1"));
-        // strides come from `field{N}.strides[..]` — no per-buffer
-        // `_ny_<N>` lets needed; the View struct carries pre-multiplied strides.
+        // the View struct carries pre-multiplied strides, so the body reads
+        // `field{N}.strides[..]` directly.
         assert!(desc.source.contains("field0.strides[0]"));
         assert!(desc.source.contains("int jj = (int)_i1 + dom_lo_1;"));
     }
@@ -1103,8 +1104,8 @@ mod tests {
         assert!(s.contains("double* partials"));
         assert!(s.contains("__shared__ double sdata[256];"));
         assert!(s.contains("partials[blockIdx.x] = sdata[0];"));
-        // max via INLINE TERNARY (NVRTC has no <math.h> for fmax); finite identity,
-        // no INFINITY macro.
+        // max via the inline ternary (fmax lives in <math.h>, which NVRTC leaves
+        // out); the identity is a finite literal.
         assert!(
             s.contains("sdata[tid] > sdata[tid + s] ? sdata[tid] : sdata[tid + s]"),
             "src:\n{s}"
@@ -1115,8 +1116,8 @@ mod tests {
             !s.contains("INFINITY"),
             "must not use INFINITY (NVRTC-unsafe): {s}"
         );
-        // NaN-propagation guard: a poisoned cell must survive the block reduce so it
-        // reaches the host dt guard ([[feedback_no_silent_floors]]); the bare ternary
+        // NaN-propagation guard: a poisoned cell survives the block reduce and reaches
+        // the host dt guard ([[feedback_no_silent_floors]]); the bare ternary
         // drops NaN. `x != x` is the NVRTC-safe NaN test.
         assert!(
             s.contains("(sdata[tid] != sdata[tid])"),
@@ -1146,9 +1147,9 @@ mod tests {
         // three value views, then the segment view; one binding each.
         assert!(s.contains("__symbi_View field0"));
         assert!(s.contains("__symbi_View field2"));
-        // the segment rides the SCALAR view like every other buffer: a generated kernel has one
-        // scalar type for all of them, so the bucket index arrives as a small exact integer in
-        // that carrier rather than as an integer field of its own.
+        // the segment rides the scalar view like every other buffer: a generated kernel has one
+        // scalar type for all of them, so the bucket index arrives as a small exact integer on
+        // that same carrier.
         assert!(s.contains("__symbi_View field3"));
         assert_eq!(desc.field_bindings.len(), 4);
         assert!(desc.field_bindings.iter().all(|b| !b.is_output));
@@ -1166,15 +1167,16 @@ mod tests {
         );
         // a fixed block count walking the domain with a grid stride.
         assert!(s.contains("gid += blockDim.x * gridDim.x"), "src:\n{s}");
-        // add accumulates with the native atomic, not a compare-and-swap.
+        // add accumulates with the native `atomicAdd`; the compare-and-swap loop
+        // belongs to min/max.
         assert!(s.contains("atomicAdd(addr, v)"), "src:\n{s}");
         assert!(!s.contains("atomicCAS"), "src:\n{s}");
     }
 
     #[test]
     fn segmented_reduction_falls_back_to_direct_global_accumulation() {
-        // an accumulator past the shared budget cannot be privatized, so cells combine
-        // straight into the global output. the choice must follow `segmented_privatizes`.
+        // an accumulator past the shared budget stays in global memory, so cells combine
+        // straight into the global output. the choice follows `segmented_privatizes`.
         let n_segments = SEGMENTED_LDS_BUDGET_BYTES / 8 + 1;
         assert!(!segmented_privatizes(n_segments, 1, Precision::F64));
         let desc = render_field_segmented_reduction(
@@ -1195,9 +1197,10 @@ mod tests {
 
     #[test]
     fn segmented_reduction_min_uses_a_nan_propagating_cas() {
-        // there is no floating-point atomic min, so the slot is compare-and-swapped until
-        // it holds the combined value. the combine is the same `x != x` NaN-propagating
-        // ternary the block reduction uses, so a poisoned cell cannot be silently dropped.
+        // a floating-point min lands through compare-and-swap on the bit pattern, retried
+        // until the slot holds the combined value. the combine is the same `x != x`
+        // NaN-propagating ternary the block reduction uses, so a poisoned cell survives
+        // to the host.
         let desc = render_field_segmented_reduction(
             "census_min_1d",
             1,
@@ -1216,8 +1219,8 @@ mod tests {
 
     #[test]
     fn segmented_reduction_counts_cells_outside_the_binning() {
-        // a cell whose bin index lies past the last segment is outside the binning. it must
-        // be dropped and counted — an under-covering binning that reported nothing would be
+        // a cell whose bin index lies past the last segment is outside the binning. it is
+        // dropped and counted — an under-covering binning that reported nothing would be
         // indistinguishable from a physics result.
         let desc = render_field_segmented_reduction(
             "census_drop_1d",
@@ -1240,7 +1243,7 @@ mod tests {
     #[should_panic(expected = "Mul is not a meaningful segmented reduction")]
     fn segmented_reduction_refuses_a_product() {
         // a product over a bin's cells overflows to zero or infinity at any realistic cell
-        // count and is not a census statistic.
+        // count, leaving no meaningful census statistic.
         render_field_segmented_reduction(
             "census_mul_1d",
             1,
@@ -1278,7 +1281,7 @@ mod tests {
         assert!(
             maxf.source.contains("__symbi_View field0") && maxf.source.contains("float* partials")
         );
-        // 1D: no buf_extent params, single buf_lo.
+        // 1D: the View struct carries extent and lo, so the signature is one view arg.
         assert!(!maxf.source.contains("buf_extent"));
         assert!(maxf.source.contains("__symbi_View field0"));
     }

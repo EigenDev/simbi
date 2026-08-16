@@ -93,18 +93,18 @@ def test_slice_position_outside_domain_is_loud():
     from simbi.viz.pipeline.transforms import find_slice_index
 
     verts = np.linspace(0.0, 1.0, 11)  # 10 cells, 11 vertices
-    # at the upper edge: clamps to the last CELL index, never index 10.
+    # at the upper edge: clamps to the last cell index, 9, since 11 vertices bound 10 cells.
     assert find_slice_index(verts, 1.0) == 9
     with pytest.raises(ValueError, match="outside the domain"):
         find_slice_index(verts, 1.5)
 
 
 def test_nonsquare_slice_keeps_domain_aligned_with_values():
-    # a NON-SQUARE 3D field sliced on x3 must leave the vertex coordinate arrays
-    # aligned with the value grid: pcolormesh(flat) needs len(domain[0]) == rows+1 and
-    # len(domain[1]) == cols+1. reordering the domain into logical order without a
-    # matching value transpose silently swapped these on a non-square grid (a square
-    # grid hid it because the two lengths were equal).
+    # a non-square 3D field sliced on x3 leaves the vertex coordinate arrays aligned
+    # with the value grid: pcolormesh(flat) needs len(domain[0]) == rows+1 and
+    # len(domain[1]) == cols+1. reordering the domain into logical order carries a
+    # matching value transpose; reordering alone silently swapped these on a non-square
+    # grid (a square grid hid it because the two lengths were equal).
     from simbi.viz.pipeline.transforms import execute_slice, plan_slice
 
     # vertex arrays, in data-axis order [x3, x2, x1]; distinct lengths + ranges.
@@ -122,7 +122,7 @@ def test_nonsquare_slice_keeps_domain_aligned_with_values():
     assert len(new_domain[0]) == sliced_values.shape[0] + 1  # 97 == 96 + 1
     assert len(new_domain[1]) == sliced_values.shape[1] + 1  # 161 == 160 + 1
     assert new_domain[0].max() == 2.0 and new_domain[1].max() == 6.0
-    # the value grid is not transposed: it is exactly the x3 plane.
+    # the value grid is exactly the x3 plane, in its stored orientation.
     s = int(np.abs(x3 - 0.0).argmin())
     assert np.array_equal(sliced_values, values[s, :, :])
     # labels stay in forward logical order so the labeler names the horizontal axis x1.
@@ -161,7 +161,7 @@ def test_steady_state_time_tolerates_nan_samples():
 
     t = np.linspace(0.0, 30.0, 300)
     series = np.ones_like(t)
-    series[50] = np.nan  # one bad sample must not misdiagnose NOT SETTLED
+    series[50] = np.nan  # one non-finite sample leaves the settled diagnosis intact
     with pytest.warns(UserWarning, match="non-finite"):
         t0 = steady_state_time(t, series, window=5.0)
     assert t0 is not None

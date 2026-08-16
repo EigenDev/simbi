@@ -7,7 +7,7 @@
 // KernelDispatcher<R> wraps a runtime with a thread-safe kernel cache.
 // adding a new backend (HIP, Metal, SYCL) = implement GpuRuntime.
 //
-// usage (internal — users never see this):
+// usage (internal — hidden from users):
 //   let kernel = DISPATCHER.jit_kernel_keyed(source, cache_key, entry_name);
 //   DISPATCHER.runtime().launch(&kernel, config, args);
 // =============================================================================
@@ -28,9 +28,9 @@ pub trait GpuRuntime: 'static + Send + Sync {
     type Kernel: Send + Sync + Copy;
 
     /// compile kernel source to a loadable binary (PTX, HSACO) with the backend's
-    /// OWN in-process runtime compiler — NVRTC for CUDA, hiprtc for HIP — shelling
-    /// out to no external toolchain binary. default: the backend has no in-process
-    /// compiler, so source dispatch is unsupported (override to enable JIT).
+    /// own in-process runtime compiler — NVRTC for CUDA, hiprtc for HIP — compiling
+    /// entirely in-process. default: the backend has no in-process compiler, so
+    /// source dispatch is unsupported (override to enable JIT).
     fn compile(&self, source: &str, name: &str) -> crate::Result<Vec<u8>> {
         let _ = (source, name);
         Err(crate::XpuError {
@@ -75,7 +75,7 @@ impl<R: GpuRuntime> KernelDispatcher<R> {
         }
     }
 
-    /// get the kernel handle for `source`, compiling via the runtime's OWN JIT
+    /// get the kernel handle for `source`, compiling via the runtime's own JIT
     /// (NVRTC) and caching the module per kernel_name — for callers that build a
     /// non-standard arg array (e.g., interleaved int/float scalar params) and launch
     /// via `runtime()` themselves. no caller-supplied compile closure.
@@ -85,15 +85,16 @@ impl<R: GpuRuntime> KernelDispatcher<R> {
 
     /// like `jit_kernel`, but the module cache is keyed by `cache_key` (which may
     /// encode e.g., the precision) while the entry point is resolved by `entry_name`
-    /// (the real symbol in the PTX). lets the SAME kernel name compile at two
-    /// precisions in one process without the f32 module shadowing the f64 one.
+    /// (the real symbol in the PTX). lets the same kernel name compile at two
+    /// precisions in one process, each precision keeping its own cache slot so the
+    /// f32 and f64 modules coexist.
     ///
-    /// **content-addressed dedup.** the cache is INTERNALLY keyed by
+    /// **content-addressed dedup.** the cache is internally keyed by
     /// `(cache_key, hash(source))` — so two distinct sources with the same
-    /// `cache_key` get DISTINCT cache slots. user-supplied `cache_key`s are
-    /// diagnostic NAMES; correctness is enforced by hashing the source.
-    /// without this discipline, two callers passing the same `cache_key` with
-    /// different source strings would silently launch the FIRST caller's
+    /// `cache_key` get distinct cache slots. user-supplied `cache_key`s are
+    /// diagnostic labels; correctness is enforced by hashing the source. this
+    /// discipline is what stops two callers passing the same `cache_key` with
+    /// different source strings from silently launching the first caller's
     /// cached PTX — a content-vs-name footgun. the source hash closes it.
     pub fn jit_kernel_keyed(&self, source: &str, cache_key: &str, entry_name: &str) -> R::Kernel {
         let internal_key = compute_internal_cache_key(cache_key, source.as_bytes());
@@ -124,19 +125,19 @@ impl<R: GpuRuntime> KernelDispatcher<R> {
     }
 }
 
-/// the content-addressed cache key the dispatcher uses INTERNALLY for
+/// the content-addressed cache key the dispatcher uses internally for
 /// every JIT/binary cache lookup. callers pass a `name` (the entry symbol,
 /// or a precision-augmented variant); this fn appends a content hash so
-/// two distinct sources / binaries with the same `name` get DISTINCT cache
+/// two distinct sources / binaries with the same `name` get distinct cache
 /// slots.
 ///
 /// **the discipline**: `name` is a diagnostic label; the content hash
-/// enforces correctness. callers can pass any `name` they like — they
-/// cannot cause a silent kernel mismatch through name reuse, because the
-/// dispatcher's actual cache index includes the source's hash.
+/// enforces correctness. callers can pass any `name` they like — the
+/// dispatcher's actual cache index includes the source's hash, so name
+/// reuse resolves safely to the correct kernel.
 ///
 /// public for testability — `tests/dispatcher_cache.rs` asserts the
-/// content-hashing discipline without requiring GPU hardware.
+/// content-hashing discipline entirely on the host, no GPU needed.
 #[doc(hidden)]
 pub fn compute_internal_cache_key(name: &str, content: &[u8]) -> String {
     use std::collections::hash_map::DefaultHasher;
@@ -268,7 +269,7 @@ pub mod hip_runtime {
 // =============================================================================
 // neutral backend selection: downstream names `runtime::DeviceRuntime` and
 // `runtime::current_dispatcher()`; the active backend feature binds them. cuda wins if both
-// are somehow set (the hip arms are `not(cuda)`), so the tree never double-binds.
+// are somehow set (the hip arms are `not(cuda)`), so the tree binds exactly once.
 // =============================================================================
 
 #[cfg(feature = "cuda")]

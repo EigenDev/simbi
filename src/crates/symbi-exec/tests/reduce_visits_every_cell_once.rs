@@ -1,20 +1,20 @@
 // =============================================================================
 // reduce_visits_every_cell_once.rs
 //
-// the host fold (`field_reduce`) takes a PARALLEL path above `PAR_THRESHOLD` cells and a serial one
-// below. the parallel path slabs the outermost axis across rayon and walks each slab in STORAGE order
+// the host fold (`field_reduce`) takes a parallel path above `PAR_THRESHOLD` cells and a serial one
+// below. the parallel path slabs the outermost axis across rayon and walks each slab in storage order
 // (CONTIGUOUS_AXIS innermost) so the fold streams memory contiguously; walking in index order would stride by `extent[0]` per cell.
 //
 // that hand-rolled slab walk is exactly the kind of index arithmetic that is correct-looking and
 // wrong: skip a cell or double-count one, and a Max reduce still returns a plausible number. so the
-// gate is an ADD over values chosen to be exactly representable — the sum pins the MULTISET of
+// gate is an add over values chosen to be exactly representable — the sum pins the multiset of
 // visited cells; dropping or double-counting a cell shifts the sum even where a max would still look plausible.
 //
-// what this CANNOT catch, by construction: a transposed or otherwise reordered walk. a reorder is a
-// permutation of the same multiset, and every reduce here is order-independent (min/max exactly;
-// add/mul over exact integers). so a walk that strides memory the wrong way is invisible to any
-// reduce test — which is precisely why the visit ORDER is derived from `symbi_algebra::nest_order`
-// and pinned by the layout laws.
+// this reduce-based gate certifies the multiset of visited cells, not their traversal order: a
+// transposed or otherwise reordered walk permutes the same multiset, which leaves an
+// order-independent reduce (min/max exactly; add/mul over exact integers) identical, so a walk
+// that strides memory the wrong way passes silently here. the visit order is instead pinned
+// separately, derived from `symbi_algebra::nest_order` and the layout laws.
 //
 // run: cargo test -p symbi-exec --test reduce_visits_every_cell_once
 // =============================================================================
@@ -37,7 +37,7 @@ fn big_box() -> Domain<3> {
 }
 
 /// fill each cell with its own storage offset, as an f64. every value is an exact integer well under
-/// 2^53, so the ADD fold is associative to the bit and the expected sum is closed-form.
+/// 2^53, so the add fold is associative to the bit and the expected sum is closed-form.
 fn seeded_field(d: &Domain<3>) -> Field<f64, 3, HostMemory> {
     let f = Field::<f64, 3, HostMemory>::zeros(d).expect("alloc");
     for c in d.iter() {
@@ -56,7 +56,7 @@ fn parallel_reduce_visits_every_cell_exactly_once() {
     let f = seeded_field(&d);
     let n = d.volume() as u64;
 
-    // ADD pins the multiset of visited cells: sum of 0..n-1. a skipped or repeated cell shifts it.
+    // add pins the multiset of visited cells: sum of 0..n-1. a skipped or repeated cell shifts it.
     let want_sum = (n * (n - 1) / 2) as f64;
     let got_sum = field_reduce(&f, &d, ReductionOp::Add);
     assert_eq!(
@@ -77,9 +77,9 @@ fn parallel_reduce_visits_every_cell_exactly_once() {
 
 #[test]
 fn parallel_and_serial_folds_agree() {
-    // the same field reduced over a SUB-domain small enough to take the serial path, and over the
-    // full domain (parallel). both must agree with an independent fold, so the two paths cannot
-    // drift apart the way the traversal helpers did.
+    // the same field reduced over a sub-domain small enough to take the serial path, and over the
+    // full domain (parallel). both must agree with an independent fold, keeping the two paths
+    // locked together against the kind of drift the traversal helpers once had.
     let d = big_box();
     let f = seeded_field(&d);
 

@@ -3,9 +3,9 @@
 //
 // driven (dirichlet) boundaries on a refined hierarchy. the mechanics under test:
 // - a fine level flush against a driven physical face INHERITS `Driven(id)` there and
-//   evaluates the SAME coordinate DAG at its own finer ghost coordinates (the dags must be
+//   evaluates the same coordinate graph at its own finer ghost coordinates (the graphs are
 //   registered on every level's kernel set);
-// - an interior fine level has only CoarseFine faces and never consults the dags;
+// - an interior fine level carries CoarseFine faces throughout and leaves the graphs untouched;
 // - the fill ordering (prolong_cf, then ghost_fill whose tail is the driven pass) gives the
 //   driven prescription deterministic ownership of the driven/coarse-fine corner overlap.
 // three oracles: exact uniform preservation with all faces driven at the uniform state, the
@@ -35,7 +35,7 @@ const STEPS: u64 = 6;
 type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kset = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
-// a constant prescription [rho, v1, v2, p]; registered on EVERY level so a fine level flush
+// a constant prescription [rho, v1, v2, p]; registered on every level so a fine level flush
 // against a driven face resolves its inherited Driven(0).
 fn const_dag(rho: f64, vx: f64, pre: f64) -> String {
     format!(
@@ -81,7 +81,7 @@ fn build_hier(
 }
 
 // seed the fine level's conserved state directly (harness convention:
-// with_refinement's IC prolongation is not relied on here).
+// the fine state comes from this seeding, leaving with_refinement's IC prolongation out of it).
 fn seed_fine(
     hier: &Hierarchy<Newtonian, 2, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset>,
     rho: f64,
@@ -100,7 +100,7 @@ fn seed_fine(
 
 #[test]
 fn uniform_gas_stays_uniform_with_all_faces_driven() {
-    // every face driven at EXACTLY the uniform interior state: any seam/corner/ordering
+    // every face driven at exactly the uniform interior state: any seam/corner/ordering
     // corruption between the driven fill and the coarse-fine prolongation breaks uniformity.
     let (rho0, pre0) = (2.0, 1.0);
     let boundaries = Boundaries::<2>::per_axis([

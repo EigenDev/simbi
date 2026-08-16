@@ -92,10 +92,11 @@ fn the_closed_form_measure_equals_the_matrix_determinant() {
     }
 }
 
-/// the inverse must invert the MATRIX, not the unit-l idealisation of it. sherman-morrison on
-/// delta + 2H l l^T needs the actual |l|^2 in its coefficient; using 1 leaves a residual wherever
-/// the radius clamp has driven |l| below 1, and the recovered contravariant velocity
-/// v^i = gamma^{ij} S_j is then not the inverse of the lowering the conserved momentum used.
+/// the inverse inverts the matrix as stored, |l| included.
+/// sherman-morrison on delta + 2H l l^T takes the measured |l|^2 in its coefficient; substituting 1
+/// leaves a residual wherever the radius clamp has driven |l| below 1, and the recovered
+/// contravariant velocity v^i = gamma^{ij} S_j then departs from the inverse of the lowering the
+/// conserved momentum used.
 #[test]
 fn the_spatial_metric_inverse_inverts_the_spatial_metric() {
     let bh = SchwarzschildKSCartesian { mass: M };

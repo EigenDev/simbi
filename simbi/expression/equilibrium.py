@@ -3,17 +3,17 @@
 #
 # stationary target states built from a declared gravitational potential.
 #
-# a well-balanced run needs two things that must agree exactly: the equilibrium state it
+# a well-balanced run rests on two things that agree exactly: the equilibrium state it
 # holds, and the source term that state is in balance against. writing them separately is
 # how they drift apart — the profile balances one gravity and the run applies another, and
-# the result is a smooth, plausible, wrong atmosphere. declaring the POTENTIAL once and
+# the result is a smooth, plausible, wrong atmosphere. declaring the potential once and
 # deriving both from it makes disagreement unrepresentable.
 #
 # for a barotropic equation of state the balance integrates in closed form. with
 # `p = K rho^gamma` the specific enthalpy is `h = gamma K/(gamma-1) rho^(gamma-1)`, and
 # hydrostatic balance `grad p = -rho grad phi` reduces to the bernoulli invariant
 #   h + phi = const,
-# so no integration is needed at all:
+# so the profile follows algebraically:
 #   rho = [(gamma-1)/(gamma K) (C - phi)]^(1/(gamma-1)),  p = K rho^gamma.
 # the constant is fixed by a reference density at a reference point.
 #
@@ -67,9 +67,9 @@ def gradient(scalar: Expr, dim: int) -> list[Expr]:
     """the spatial gradient of a scalar expression, one component per grid dimension.
 
     differentiation is symbolic on the same graph, so a subexpression the potential and its
-    gradient share is written once. the position variables are matched by name, which is why
-    the potential must be written in terms of `variable("x1")` and friends rather than a
-    numeric coordinate array.
+    gradient share is written once. the position variables are matched by name, so the
+    potential is written in terms of `variable("x1")` and friends; a numeric coordinate array
+    carries no name for the match.
     """
     if not 1 <= dim <= 3:
         raise ValueError(f"gradient needs a grid dimension in 1..3, got {dim}")
@@ -93,11 +93,12 @@ def isentropic_atmosphere(
 
     the gas is isentropic by construction: `p = k_entropy rho^gamma` everywhere, one
     entropy for the whole atmosphere. a stratified-entropy atmosphere is a different
-    problem — it does not reduce to a bernoulli invariant and needs the balance integrated
-    along a path, which has no closed form in more than one dimension.
+    problem — the bernoulli invariant belongs to the single-entropy case, so there the
+    balance is integrated along a path, which has a closed form in one dimension alone.
 
-    `gamma` must exceed 1: at `gamma = 1` the enthalpy is logarithmic and the inversion
-    below is not the right one (that is the isothermal atmosphere, an exponential).
+    `gamma` exceeds 1: the inversion below assumes a power-law enthalpy, while at
+    `gamma = 1` the enthalpy is logarithmic and the profile is exponential in the
+    potential — that case is `isothermal_atmosphere`.
     """
     if gamma <= 1.0:
         raise ValueError(
@@ -147,17 +148,18 @@ def isothermal_atmosphere(
     """the isothermal atmosphere in hydrostatic balance against `potential`, at rest.
 
     with `p = cs^2 rho` the balance `grad p = -rho grad phi` becomes
-    `grad(ln rho) = -grad phi / cs^2`, which integrates to an EXPONENTIAL rather than a
-    power:
+    `grad(ln rho) = -grad phi / cs^2`, which integrates to an exponential in the potential,
+    where the isentropic case gives a power:
         rho = rho_ref exp(-(phi - phi_ref)/cs^2).
-    that is why the isentropic construction refuses `gamma = 1` instead of taking a limit.
+    that is why the isentropic construction refuses `gamma = 1` and sends the case here.
 
-    the equilibrium carries no pressure component: an isothermal regime stores none, and its
-    equation of state supplies `p = cs^2 rho` from the density. `sound_speed` must therefore
-    be the SAME cs the run is configured with — an atmosphere built for a different one is
-    not a steady state of the run, and the backend's refinement check will say so.
+    the equilibrium carries density and velocity: an isothermal regime holds its pressure
+    implicitly, its equation of state supplying `p = cs^2 rho` from the density.
+    `sound_speed` therefore matches the cs the run is configured with — an atmosphere built
+    for a different cs is the steady state of a different run, and the backend's refinement
+    check reports it.
 
-    a LOCALLY isothermal run, whose cs varies with position, is a different problem: the
+    a locally isothermal run, whose cs varies with position, is a different problem: the
     balance is then a linear ODE with non-constant coefficients and has no closed form.
     """
     if sound_speed <= 0.0:
@@ -181,7 +183,8 @@ def isothermal_atmosphere(
     at_rest = [constant(0.0, graph) for _ in range(dim)]
 
     return Equilibrium(
-        # no pressure slot: the isothermal regime does not store one.
+        # density and velocity fill the primitive slots: the isothermal regime recovers
+        # its pressure from p = cs^2 rho.
         primitives=[rho, *at_rest],
         acceleration=[-component for component in gradient(potential, dim)],
         potential=potential,

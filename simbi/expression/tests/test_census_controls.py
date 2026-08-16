@@ -1,13 +1,14 @@
 # =============================================================================
 # test_census_controls.py
 #
-# the two registration controls that decide what a census COSTS rather than what it measures: the
-# sample interval, which sets how often the grid is swept, and the accumulate flag, which sets
-# whether the samples are stored apiece or folded into one row.
+# the two registration controls that set what a census costs, leaving what it measures to the
+# expressions: the sample interval, which sets how often the grid is swept, and the accumulate
+# flag, which sets whether the samples are stored apiece or folded into one row.
 #
-# both are inert defaults, which is exactly why they need gating: a control that silently failed
-# to reach the wire would leave a run sampling every step and writing every sample, producing
-# entirely correct output at many times the intended cost, and nothing in the numbers would say so.
+# both default to inert values, which is what makes the gate necessary: a control that silently
+# failed to reach the wire would leave a run sampling every step and writing every sample,
+# producing entirely correct output at many times the intended cost, with the numbers themselves
+# silent about it.
 # =============================================================================
 
 import pytest
@@ -34,9 +35,9 @@ def test_the_controls_reach_the_wire() -> None:
 
 
 def test_the_defaults_are_every_step_and_a_row_per_sample() -> None:
-    # the keys must be PRESENT and explicitly inert rather than absent: the rust side defaults a
-    # missing key the same way, so an omission and a deliberate default would be indistinguishable
-    # on the wire and a serializer that dropped the fields would go unnoticed.
+    # the keys are present and explicitly inert: the rust side defaults a missing key the same
+    # way, so an omission and a deliberate default would read alike on the wire, and a serializer
+    # that dropped the fields would go unnoticed.
     payload = _census().serialize()
     assert payload["sample_interval"] is None
     assert payload["accumulate"] is False
@@ -44,9 +45,9 @@ def test_the_defaults_are_every_step_and_a_row_per_sample() -> None:
 
 @pytest.mark.parametrize("bad", [0.0, -1.0, -0.25])
 def test_a_non_positive_interval_is_refused(bad: float) -> None:
-    # zero means "every step", which is what omitting it already means, and a negative interval is
-    # a sign the caller computed it rather than chose it. clamping either would hide the mistake
-    # behind a run that costs what the user was trying to avoid.
+    # zero means "every step", which is what omitting it already means, and a negative interval
+    # marks a value the caller computed and left unchecked. clamping either would hide the
+    # mistake behind a run that costs what the user was trying to avoid.
     with pytest.raises(ValueError, match="not positive"):
         _census(sample_interval=bad)
 
@@ -54,8 +55,8 @@ def test_a_non_positive_interval_is_refused(bad: float) -> None:
 def test_the_report_names_every_cost_fixed_at_registration() -> None:
     # what a user needs before submitting: the bin count and the accumulator count set the output
     # size, the graph size sets the per-cell work, and the cadence multiplies both by the number of
-    # samples. a hundred-thousand-bin histogram sampled every step is a legitimate ask; finding out
-    # from a queue slot is not.
+    # samples. a hundred-thousand-bin histogram sampled every step is a legitimate ask, and this
+    # report puts the discovery at registration time, where it is cheap.
     line = describe([_census(sample_interval=0.25, accumulate=True).serialize()])
     assert "shells" in line
     assert "r:8" in line and "8 bin(s)" in line

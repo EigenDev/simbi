@@ -2,14 +2,14 @@
 // nvrtc.rs
 //
 // NVRTC: NVIDIA's runtime CUDA compiler (libnvrtc.so). compiles a CUDA C++
-// source string straight to PTX IN-PROCESS — no `nvcc` binary, no host C++
+// source string straight to PTX in-process — no `nvcc` binary, no host C++
 // compiler, no temp files (every accelerator compiles at
 // runtime via its own runtime compiler). this is what lets `Sim<UnifiedMemory>`
-// JIT + run a substrate kernel on the GPU without the nvcc toolchain (the host
-// gcc-16 breaks nvcc; NVRTC ships its own front-end, so it does not care).
+// JIT + run a substrate kernel on the GPU independent of the nvcc toolchain (the
+// host gcc-16 breaks nvcc; NVRTC ships its own front-end and stays unaffected).
 //
 // the driver still JITs the PTX to SASS at module load, so compilation targets the device's
-// VIRTUAL arch (`compute_<major><minor>`, queried from the driver) and let the
+// virtual arch (`compute_<major><minor>`, queried from the driver) and let the
 // driver finish the lowering for whatever GPU is present.
 //
 // link: -lnvrtc (set in build.rs under the cuda feature).
@@ -54,13 +54,14 @@ pub fn compile_ptx(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
     let (major, minor) = crate::cuda::device_compute_capability()?;
     let arch = CString::new(format!("--gpu-architecture=compute_{major}{minor}"))
         .expect("arch option has no interior NUL");
-    // FMA fusion: nvcc's default `a*b + c -> fma(a,b,c)` stays ON
-    // ([[project_fma_discipline]]): trust the compiler, accept ULP-bounded drift
-    // vs the CPU (which doesn't auto-fuse). do NOT re-introduce `--fmad=false`.
-    // -O3 is NOT a recognized NVRTC option on the current driver; the PTX -> SASS
-    // JIT done at module load by the CUDA driver already optimizes at -O3, so
-    // there is no perf left on the table here. do NOT add it back without
-    // confirming the NVRTC version actually accepts it.
+    // FMA fusion: nvcc's default `a*b + c -> fma(a,b,c)` stays enabled
+    // ([[project_fma_discipline]]): trust the compiler and accept ULP-bounded drift
+    // against the CPU, which evaluates the multiply and add as separate rounded
+    // steps. leave `--fmad=false` out.
+    // -O3 falls outside NVRTC's recognized options on the current driver; the PTX ->
+    // SASS JIT done at module load by the CUDA driver already optimizes at -O3, so
+    // performance here is already captured. confirm the NVRTC version actually
+    // accepts `-O3` before adding it back.
 
     let src = CString::new(source).map_err(|_| XpuError {
         operation: "nvrtc source",

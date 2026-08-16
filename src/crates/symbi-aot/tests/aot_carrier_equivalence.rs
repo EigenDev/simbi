@@ -2,15 +2,15 @@
 // aot_carrier_equivalence.rs
 //
 // the carrier-equivalence regression. a carrier-generic physics fn `f<S: Scalar>`
-// must compute the SAME thing at `S = f64` (the host, run here) and at `S = Gv`
-// (traced -> compiled into the build-time kernel) — for ANY input, at the SAME
+// must compute the same thing at `S = f64` (the host, run here) and at `S = Gv`
+// (traced -> compiled into the build-time kernel) — for any input, at the same
 // baked iteration count. a compiled iterate that stops at a different count than the
 // host is invisible to the round-trip suites: they only sample states that converge
 // well within the baked count, and the divergence appears only on slow /
 // non-convergent inputs.
 //
-// so these tests deliberately include HARD inputs (ultra-relativistic, strong
-// contrast, near-vacuum) and compare the compiled kernel against the REAL host
+// so these tests deliberately include hard inputs (ultra-relativistic, strong
+// contrast, near-vacuum) and compare the compiled kernel against the real host
 // source (`rhd_recover` / `rmhd_recover` at `S = f64`) — not a re-implemented
 // reference Newton — at the kernel's baked count: same source, two carriers,
 // identical result.
@@ -262,7 +262,7 @@ use symbi_hydro::state::{Cons, Prim};
 
 const GAMMA: f64 = 5.0 / 3.0;
 // the iteration counts build.rs bakes into each compiled c2p kernel — the host
-// must run the SAME count for the carriers to be comparable (the production host
+// must run the same count for the carriers to be comparable (the production host
 // MAX_ITER differs; that is a separate count-adequacy question, while this test checks carrier equivalence).
 const RHD_ITERS: usize = 20;
 const RMHD_ITERS: usize = 100;
@@ -311,7 +311,7 @@ fn rhd_c2p_kernel_equals_host_at_baked_count() {
     for &(rho, v, p) in cases {
         let (d, s, tau) = rhd_prim_to_cons(rho, v, p);
 
-        // host: the SAME rhd_recover source at S = f64, at the kernel's baked count.
+        // host: the same rhd_recover source at S = f64, at the kernel's baked count.
         let host = rhd_recover::<f64, 1>(
             &eos,
             &Cons {

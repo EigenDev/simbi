@@ -4,7 +4,7 @@
 // the RMHD characteristic wave speeds: the full Mignone & Del Zanna magnetosonic
 // quartic (Eq. 56) with fast paths for vsq~0 (Eq. 57) and bn~0 (Eq. 58), plus the
 // polynomial solvers it needs (resolvent cubic + quartic min/max root). this is
-// the SINGLE source both the RMHD flux's HLLE and the CFL map consume.
+// the single source both the RMHD flux's HLLE and the CFL map consume.
 // GPU-traceable: all paths computed unconditionally, selected via S::select.
 // =============================================================================
 
@@ -41,13 +41,13 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
     let eps = S::from_f64(1e-14);
 
     // the (sl, sr) path selection as a nested `cond_vec<2>` (the lazy-branch
-    // dual of iterate, vector form): exactly ONE path's intermediates are
-    // computed at render time. CRUCIALLY the full quartic (Eq. 56 — the
-    // resolvent cubic + ~10 transcendentals via `solve_quartic_minmax`) lives
-    // in the innermost else arm, so it is SKIPPED entirely when `vsq ~ 0`
-    // (Eq. 57) or `bn ~ 0` (Eq. 58) — the `wave_speeds` early-`return` chain
-    // skips compute-all-paths via `S::select`. the
-    // cheap shared prefix above (rho, hh, w2, cssq, bmu*) stays unconditional.
+    // dual of iterate, vector form): exactly one path's intermediates are
+    // computed at render time. the full quartic (Eq. 56 — the resolvent cubic
+    // + ~10 transcendentals via `solve_quartic_minmax`) lives in the innermost
+    // else arm, which is what keeps it out of the render when `vsq ~ 0`
+    // (Eq. 57) or `bn ~ 0` (Eq. 58); the lazy chain is the carrier-portable
+    // form of an early-`return`, where `S::select` would compute every path.
+    // the cheap shared prefix (rho, hh, w2, cssq, bmu*) stays unconditional.
     let cond_vsq = vsq.cmp_lt(eps);
     let magnetic_scale = bsq + rho * hh;
     let cond_bn = (bn * bn).cmp_lt(eps * magnetic_scale);
@@ -78,8 +78,8 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
                     let sl_2 = S::from_f64(0.5) * (S::ZERO - a1_p2 - disq_2.sqrt()) / a2_p2;
                     [sl_2, sr_2]
                 },
-                // path 3: the FULL quartic (Eq. 56) — computed ONLY when both fast
-                // paths fail. this is the ~750-op + ~10-transcendental body.
+                // path 3: the full quartic (Eq. 56) — reached where both fast
+                // paths decline. this is the ~750-op + ~10-transcendental body.
                 || {
                     let vn2 = vn * vn;
                     let a4 = S::ZERO - bmu0 * bmu0 * cssq + bmu_sq * w2 - cssq * w2 * w2 * hh * rho
@@ -126,19 +126,19 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
     (sl, sr)
 }
 
-/// the magnetosonic UPPER BOUND on the RMHD fast wave speed — for the CFL TIMESTEP ONLY.
+/// the magnetosonic upper bound on the RMHD fast wave speed — for the CFL timestep alone.
 ///
-/// `c_f^2 = c_s^2 + c_A^2 - c_s^2 c_A^2` (textbook no-rotation magnetosonic bound), a STRICT
-/// upper bound on the Mignone & Del Zanna quartic fast speed (`rmhd_wave_speeds`). the CFL
-/// needs only a stable UPPER bound — this is ~25x cheaper
+/// `c_f^2 = c_s^2 + c_A^2 - c_s^2 c_A^2` (textbook no-rotation magnetosonic bound), a strict
+/// upper bound on the Mignone & Del Zanna quartic fast speed (`rmhd_wave_speeds`). the CFL is
+/// satisfied by a stable upper bound, and this one is ~25x cheaper
 /// (~30 ops + 1 sqrt vs ~750 ops + ~10 transcendentals, all of which trace into the kernel
-/// because `S::select` evaluates every arm). it stays CFL-safe because it never UNDER-
-/// estimates the true signal speed. do NOT route the Riemann/flux path (`extremal_speeds`)
-/// here — HLLE diffusion needs the tight quartic.
+/// because `S::select` evaluates every arm). it stays CFL-safe because it bounds the true
+/// signal speed from above everywhere. the Riemann/flux path (`extremal_speeds`) keeps to the
+/// tight quartic, which is what HLLE diffusion needs.
 ///
-/// returns `(sl, sr)` along `nhat` via the SR relativistic velocity-addition. NaN-PRESERVING:
+/// returns `(sl, sr)` along `nhat` via the SR relativistic velocity-addition. NaN-preserving:
 /// `cf_sq` uses the product form `1 - (1-cs^2)(1-cA^2)` (manifestly < 1 for physical inputs,
-/// so `denom = 1 - vsq*cf_sq > 0` with NO clamp) and the outputs are UNCLAMPED — a NaN prim
+/// so `denom = 1 - vsq*cf_sq > 0` stands unclamped) and the outputs stay unclamped — a NaN prim
 /// from an unphysical c2p propagates straight to the CFL max-reduction + dt guard, where it
 /// halts the run; a light-cone `.min`/`.max` would mask it by dropping the NaN.
 /// over-estimating a speed only shrinks dt, which is safe.
@@ -162,36 +162,37 @@ pub fn rmhd_magnetosonic_cfl_speeds<S: Scalar, const D: usize>(
     let rho_h = rho * hh;
     let va_sq = b_mu_sq / (rho_h + b_mu_sq); // alfven speed squared, in [0, 1)
 
-    // magnetosonic c_f^2 via the PRODUCT form: 1 - (1-cs^2)(1-cA^2). strictly < 1 for
-    // physical cs^2, cA^2 in [0,1) (so denom below stays positive without a clamp), and it
-    // preserves NaN (1 - (1-NaN)(.) = NaN) so an unphysical prim surfaces unmasked.
+    // magnetosonic c_f^2 via the product form: 1 - (1-cs^2)(1-cA^2). strictly < 1 for
+    // physical cs^2, cA^2 in [0,1), which keeps the denominator positive on its own, and it
+    // preserves NaN (1 - (1-NaN)(.) = NaN) so an unphysical prim surfaces plainly.
     let cf_sq = S::ONE - (S::ONE - cssq) * (S::ONE - va_sq);
 
     // SR relativistic addition of the normal flow velocity and the magnetosonic speed.
     let one_m_vsq = S::ONE - vsq;
     let denom = S::ONE / (S::ONE - vsq * cf_sq);
-    // clamp the discriminant before the sqrt (Gv traces both arms); cf_sq's NaN still
-    // reaches the outputs via the (1 - cf_sq) and denom terms, so this does not mask it.
+    // clamp the discriminant ahead of the sqrt (Gv traces both arms); cf_sq's NaN still
+    // reaches the outputs through the (1 - cf_sq) and denom terms, so the clamp leaves it visible.
     let disc = (one_m_vsq * cf_sq).safe_sqrt();
     let sl = (vn * (S::ONE - cf_sq) - disc) * denom;
     let sr = (vn * (S::ONE - cf_sq) + disc) * denom;
     (sl, sr)
 }
 
-/// the curved-background magnetosonic UPPER BOUND — for the CFL TIMESTEP ONLY.
+/// the curved-background magnetosonic upper bound — for the CFL timestep alone.
 ///
-/// the SAME product-form bound as `rmhd_magnetosonic_cfl_speeds`, with the euclidean
+/// the same product-form bound as `rmhd_magnetosonic_cfl_speeds`, with the euclidean
 /// contractions replaced by the spatial metric and the coordinate-frame factors of the
 /// Banyuls-Font transform applied: `gamma^{nn}` scales the discriminant and `alpha` the
 /// whole fan (the shift is the caller's coordinate correction). the discriminant
 /// `gamma^{nn} (1 - v^2) c_f^2` bounds the exact Banyuls-Font radical
 /// `(1 - v^2)(gamma^{nn}(1 - v^2 c_f^2) - vn^2(1 - c_f^2))` because
 /// `gamma^{nn} >= gamma^{nn}(1 - v^2 c_f^2) - vn^2(1 - c_f^2)` for physical inputs, so the
-/// fan never under-estimates a signal speed and stays CFL-safe. at `alpha = 1`,
+/// fan bounds every signal speed from above and stays CFL-safe. at `alpha = 1`,
 /// `gamma = delta` every extra factor is an exact 1.0 multiply, so the bound equals the
 /// flat `rmhd_magnetosonic_cfl_speeds` — minkowski-limit runs take the flat timestep.
-/// do NOT route the Riemann/flux path here — HLLE diffusion needs the tight quartic.
-/// nan-preserving for the same reasons as the flat form: no clamp, no light-cone cap.
+/// the Riemann/flux path keeps to the tight quartic, which is what HLLE diffusion needs.
+/// nan-preserving for the same reasons as the flat form: the expression stands unclamped
+/// and uncapped by the light cone.
 pub fn rmhd_magnetosonic_cfl_speeds_gr<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim: &MhdPrim<S, D>,
@@ -228,7 +229,7 @@ pub fn rmhd_magnetosonic_cfl_speeds_gr<S: Scalar, const D: usize>(
 /// solve quartic x^4 + bx^3 + cx^2 + dx + e = 0 and return (min_root, max_root).
 /// uses resolvent cubic method. for RMHD wave speed computation.
 /// GPU-traceable: all root pairs computed unconditionally, invalid roots
-/// masked via sentinel values so they don't affect min/max.
+/// masked to sentinel values that leave min/max on the valid ones.
 fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
     let p = c - S::from_f64(0.375) * b * b;
     let q = S::from_f64(0.125) * b * b * b - S::from_f64(0.5) * b * c + d;
@@ -281,7 +282,7 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
     let r2_nz = half * (sqrt_2m + delta2) + qb4;
     let r3_nz = half * (sqrt_2m - delta2) + qb4;
 
-    // mask invalid roots with sentinels so they don't affect min/max
+    // mask invalid roots with sentinels so min/max land on the valid ones
     let r0_lo = S::select(d1_valid, r0_nz, sent_hi);
     let r1_lo = S::select(d1_valid, r1_nz, sent_hi);
     let r2_lo = S::select(d2_valid, r2_nz, sent_hi);
@@ -312,12 +313,12 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
 }
 
 /// solve resolvent cubic x^3 + bx^2 + cx + d = 0 for one real root.
-/// GPU-traceable via `S::cond` (the DUAL of iterate): ONLY the taken case's
-/// transcendental pair is evaluated — the carrier-portable form of the
+/// GPU-traceable via `S::cond` (the dual of iterate): the taken case's
+/// transcendental pair alone is evaluated — the carrier-portable form of the
 /// `solve_cubic` early-`return`. cheap, symmetric
-/// sub-choices (the cube-root sign) stay branch-free `S::select`. clamps are
-/// kept for bit-equivalence with the host f64 path (they are identity when the
-/// owning arm is taken).
+/// sub-choices (the cube-root sign) stay branch-free `S::select`. the clamps
+/// hold bit-equivalence with the host f64 path, acting as the identity whenever
+/// the owning arm is taken.
 fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
     let p = c - b * b / S::from_f64(3.0);
     let q = S::from_f64(2.0) * b * b * b / S::from_f64(27.0) - b * c / S::from_f64(3.0) + d;
@@ -329,7 +330,7 @@ fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
     // is inside its `cond` closure, so only the chosen tier computes it).
     S::cond(
         p.abs().cmp_lt(eps),
-        // case 1: p ~ 0 -> cube-root formula (the `powf` lives ONLY here).
+        // case 1: p ~ 0 -> cube-root formula (this arm alone carries the `powf`).
         || {
             let aq = q.abs();
             let cq = aq.powf(third);
@@ -436,17 +437,17 @@ mod tests {
     /// rmhd_wave_speeds kernel.
     ///
     /// the estimate counts every ancestor-scope `Let` as live and ignores true liveness, so it is a
-    /// conservative UPPER bound and NOT the SASS register count a device compiler picks. the full
-    /// Mignone & Del Zanna quartic (~200 ops) sits inside the lazily-selected branch taken only when
-    /// the flow is neither near-static (`vsq ~ 0`) nor field-aligned-degenerate (`bn ~ 0`); the
-    /// estimate sums that whole branch body as simultaneously live at the deepest scope, with no
-    /// cross-path CSE to compact it, which is why it reads ~239 while a liveness-aware count reads
-    /// near ~90. branch-local temps have short live ranges and cost the same whether they sit at
-    /// function scope or inside an arm, and the lazy branch only DELETES work on the degenerate
-    /// paths, so a value in that range carries no register regression.
+    /// conservative upper bound, well above the SASS register count a device compiler picks. the
+    /// full Mignone & Del Zanna quartic (~200 ops) sits inside the lazily-selected branch reached
+    /// where the flow is away from near-static (`vsq ~ 0`) and away from field-aligned degeneracy
+    /// (`bn ~ 0`); the estimate sums that whole branch body as simultaneously live at the deepest
+    /// scope, with no cross-path CSE to compact it, which is why it reads ~239 while a
+    /// liveness-aware count reads near ~90. branch-local temps have short live ranges and cost the
+    /// same whether they sit at function scope or inside an arm, and the lazy branch subtracts work
+    /// on the degenerate paths, so a value in that range carries no register regression.
     ///
-    /// the guard therefore catches a gross (>2x) structural blow-up only. the load-bearing evidence
-    /// for the branch structure is the emitted kernel shape and wallclock, not this number.
+    /// the guard therefore catches gross (>2x) structural blow-up. the load-bearing evidence
+    /// for the branch structure is the emitted kernel shape and wallclock.
     #[test]
     fn rmhd_wave_speeds_under_pressure_bound() {
         let report = trace_and_measure_pressure();
@@ -460,8 +461,8 @@ mod tests {
         );
     }
 
-    // CFL safety: the magnetosonic upper bound must NEVER under-estimate the exact
-    // Mignone & Del Zanna quartic signal speed — otherwise the CFL dt would be unsafe. sweep a
+    // CFL safety: the magnetosonic upper bound stays at or above the exact Mignone & Del Zanna
+    // quartic signal speed everywhere, which is what makes the CFL dt safe. sweep a
     // battery of physical RMHD states (varying density, velocity direction/magnitude, pressure,
     // field strength/orientation) and assert max|s_ub| >= max|s_quartic| per axis.
     #[test]
@@ -555,9 +556,9 @@ mod tests {
         }
     }
 
-    // the CFL upper bound must PRESERVE NaN — an unphysical prim (NaN from a failed c2p) must
-    // yield NaN speeds so it reaches the NaN-propagating CFL reduction + dt guard, which halts
-    // the run; a clamped finite speed would silently mask it.
+    // the CFL upper bound preserves NaN — an unphysical prim (NaN from a failed c2p) yields
+    // NaN speeds, which reach the NaN-propagating CFL reduction + dt guard and halt the run;
+    // a clamped finite speed would silently mask it.
     #[test]
     fn magnetosonic_bound_propagates_nan() {
         let eos = IdealGas { gamma: 4.0 / 3.0 };
@@ -620,8 +621,8 @@ mod tests {
 
     #[test]
     fn solve_quartic_minmax_recovers_known_real_roots() {
-        // build a quartic from KNOWN real roots and require the solver to return their
-        // (min, max). semantics-independent of the cubic resolvent's branch choice.
+        // build a quartic from known real roots and require the solver to return their
+        // (min, max). semantics hold for every branch choice the cubic resolvent makes.
         let root_sets = [
             [-2.0, -1.0, 1.0, 2.0],
             [0.1, 0.2, 0.3, 0.5],
@@ -647,7 +648,7 @@ mod tests {
 
     #[test]
     fn solve_cubic_resolvent_is_a_root() {
-        // the resolvent returns ONE real root of x^3 + b x^2 + c x + d; verify it nulls
+        // the resolvent returns one real root of x^3 + b x^2 + c x + d; verify it nulls
         // the polynomial across the trig / hyperbolic branches.
         let cases = [
             (0.0, -1.0, 0.0),
@@ -835,7 +836,7 @@ mod tests {
     fn rmhd_wave_speeds_match_cpp_reference() {
         // Rmhd::wave_speeds vs the analytic ground truth across all three dispersion regimes
         // (Eq.57 vsq~0, Eq.58 bn~0, Eq.56 full quartic). this is the function the flux HLLE
-        // AND the spliced CFL map both call — one validated source.
+        // and the spliced CFL map both call — one validated source.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let states = [
             ([0.0, 0.0, 0.0], [0.5, 0.3, 0.2], 0usize), // Eq.57: vsq ~ 0
@@ -874,13 +875,12 @@ mod tests {
         }
     }
 
-    // wall-clock A/B: the production carrier cubic resolvent at S=f64 vs the
-    // native single-branch reference. `solve_cubic_resolvent` now uses nested
-    // `S::cond` (the lazy-branch dual of iterate), so at f64 it takes ONE arm —
-    // matching the native branch. BEFORE the cond rewrite this was nested
-    // `S::select` (computes ALL 4 transcendental cases, then blends) and ran
-    // 2.16x slower; AFTER it is ~0.95x (parity). isolates that the
-    // compute-all-paths tax is gone. run: cargo test -p symbi-hydro --release
+    // wall-clock A/B: the production carrier cubic resolvent at S=f64 against the
+    // native single-branch reference. `solve_cubic_resolvent` uses nested
+    // `S::cond` (the lazy-branch dual of iterate), so at f64 it takes one arm,
+    // matching the native branch, and runs at ~0.95x (parity). a nested-`S::select`
+    // spelling computes all 4 transcendental cases and blends, which costs 2.16x.
+    // isolates the compute-all-paths tax. run: cargo test -p symbi-hydro --release
     //   cubic_resolvent_select_tax_wallclock -- --ignored --nocapture
     #[test]
     #[ignore = "wall-clock A/B; timing is not a deterministic assertion. run with --release \
@@ -890,7 +890,7 @@ mod tests {
         use std::time::Instant;
 
         // deterministic LCG giving representative (b,c,d) coefficient triples spanning
-        // all four resolvent cases (p>0, three-real, q-sign). no rand dep.
+        // all four resolvent cases (p>0, three-real, q-sign), free of an rng dependency.
         let n = 5_000_000usize;
         let mut inputs = Vec::with_capacity(n);
         let mut s: u64 = 0x9E3779B97F4A7C15;

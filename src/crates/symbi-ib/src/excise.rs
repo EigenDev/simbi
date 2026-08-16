@@ -5,14 +5,14 @@
 // r_ks(x; a) < r_exc — the sphere |x| < r_exc at a = 0, and the oblate spheroid
 // (x^2 + y^2)/(r_exc^2 + a^2) + z^2/r_exc^2 < 1 at spin a about z (the r = const
 // surfaces of the cartesian kerr-schild chart). the mask is a carrier-generic
-// select, compared in the SQUARE so no sqrt of the radius itself enters.
+// select, compared in the square so the radius enters only through r_ks^2.
 //
 // the state an excised cell carries is chosen by the fill that consumes this
-// mask: a cold vacuum floor, so the exterior gas rarefies INTO the excised
-// region and nothing returns — the absorbing boundary a horizon is. a
-// zero-gradient outward copy would instead impose a TRANSMISSIVE outflow, and
-// on the staircased cartesian surface the per-axis sweep speeds need not be
-// one-signed, so a transmissive interior leaks back into the exterior flux.
+// mask: a cold vacuum floor, so the exterior gas rarefies into the excised
+// region and stays there — the absorbing boundary a horizon is. a zero-gradient
+// outward copy would instead impose a transmissive outflow, and on the
+// staircased cartesian surface the per-axis sweep speeds carry mixed signs, so
+// a transmissive interior leaks back into the exterior flux.
 //
 // usage:
 //   let excised = ks_excised(&x_c, spin, r_exc);
@@ -25,8 +25,8 @@ use symbi_ir::algebra::Scalar;
 ///   r_ks^2 = (R^2 - a^2)/2 + sqrt(((R^2 - a^2)/2)^2 + a^2 z^2),  R^2 = |x|^2,
 /// with the missing axes of a D < 3 position reading z = 0 (the equatorial
 /// slice, where the excised disc has coordinate radius sqrt(r_exc^2 + a^2)).
-/// compared in the SQUARE (both sides non-negative), so no sqrt of the radius
-/// itself enters the mask. a = 0 reduces to |x|^2 < r_exc^2 exactly.
+/// compared in the square (both sides non-negative), so the radius enters the
+/// mask only through r_ks^2. a = 0 reduces to |x|^2 < r_exc^2 exactly.
 pub fn ks_excised<S: Scalar, const D: usize>(x_c: &[S; D], spin: S, r_exc: S) -> S::Mask {
     let z = if D > 2 { x_c[2] } else { S::ZERO };
     let mut rr2 = S::ZERO;
@@ -96,7 +96,7 @@ mod predicate_tests {
     fn outward_diagonal_step_leaves_the_region_monotonically() {
         // the excised region is star-shaped under axis-outward steps: moving by
         // (sign x, sign y, sign z) * dx strictly increases r_ks, so a walk that has left the
-        // spheroid never re-enters it.
+        // spheroid stays outside it.
         let (a, r, dx) = (0.9, 1.2, 0.05);
         let mut x = [0.02_f64, -0.03, 0.01];
         let mut inside = true;

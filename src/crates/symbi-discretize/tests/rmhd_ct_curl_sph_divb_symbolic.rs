@@ -1,29 +1,29 @@
 // =============================================================================
 // rmhd_ct_curl_sph_divb_symbolic.rs
 //
-// the SYMBOLIC keystone proof that the 3D SPHERICAL constrained-transport curl
-// (rmhd_ct_curl_3d_dir_gv under Coords::Spherical) preserves the AREA-WEIGHTED
-// div(B) = 0 EXACTLY — by RATIONAL-FUNCTION coefficient cancellation on the traced
+// the symbolic keystone proof that the 3D spherical constrained-transport curl
+// (rmhd_ct_curl_3d_dir_gv under Coords::Spherical) preserves the area-weighted
+// div(B) = 0 exactly, by rational-function coefficient cancellation on the traced
 // IR DAG at graph-build time; the numerical 1e-10 evolve test lives in rmhd_ct_curl_sph_divb.rs.
 //
 // the curvilinear curl multiplies edge EMFs by scale-factor weights h_p (= r,
 // r sin(theta)) and divides by the face-center prefactor 1/(h_p1c h_p2c) and the
-// transverse widths, so its coefficients are RATIONAL FUNCTIONS carrying the metric
-// denominators. `symbi_ir::proof::LinFormR` carries those: r-values are AFFINE in
+// transverse widths, so its coefficients are rational functions carrying the metric
+// denominators. `symbi_ir::proof::LinFormR` carries those: r-values are affine in
 // {x_lo_0, dx_0, c_0} (a true polynomial — r^2 in an area must algebraically equal
-// r*r in an h-product); sin(theta at offset m) is an OPAQUE symbol keyed by the
-// resolved offset (sin at distinct offsets have NO polynomial relation). the cell
+// r*r in an h-product); sin(theta at offset m) is an opaque symbol keyed by the
+// resolved offset (sin at distinct offsets are algebraically independent). the cell
 // coord c_N is a polynomial variable, and the divergence's coord shift is
-// COVARIANT — shifting the cell by e_dir shifts the field reads AND the c_N / sin
-// the coefficients depend on (the geometry at c+e_dir differs from c), mirroring
-// the numerical test's absolute-index area weights.
+// covariant: shifting the cell by e_dir shifts the field reads together with the
+// c_N / sin the coefficients depend on (the geometry at c+e_dir differs from c),
+// mirroring the numerical test's absolute-index area weights.
 //
-// the point-form area-weighted divergence over a cell (the SAME stencil as
+// the point-form area-weighted divergence over a cell (the same stencil as
 // rmhd_ct_curl_sph_divb.rs):
 //   div(B) = sum_dir [ A_dir(+e_dir) curl_dir(+e_dir) - A_dir(+0) curl_dir(+0) ]
 // each A_dir is exactly 1/inv_pref(dir) * the transverse widths; weighting the
-// curl by it collapses the metric so the edge-EMF reads telescope to the ZERO
-// rational function — that is the proof, for ANY input field.
+// curl by it collapses the metric so the edge-EMF reads telescope to the zero
+// rational function — the proof, and it holds for every input field.
 // =============================================================================
 
 use std::collections::HashMap;
@@ -36,8 +36,8 @@ use symbi_ir::proof::{LinFormR, Poly, RatFun};
 const FIELDS: &[&str] = &["e_p1", "e_p2", "b"];
 const SCALARS: &[&str] = &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "x_lo_2", "dx_2"];
 
-// strip the old-field `b` leaf: it reproduces div(B_old), invariant under the
-// update — not part of the "the update preserves div" proof.
+// strip the old-field `b` leaf: it reproduces div(B_old), which the update leaves
+// invariant; the proof concerns the increment the update adds.
 fn curl_only(mut lf: LinFormR) -> LinFormR {
     lf.terms.retain(|(key, _), _| key != "b");
     lf
@@ -45,8 +45,8 @@ fn curl_only(mut lf: LinFormR) -> LinFormR {
 
 // map the per-dir generic emf keys to physical-axis identities. for face axis dir,
 // p1=(dir+1)%3 and p2=(dir+2)%3. (the geometry coefficients are built from the
-// ABSOLUTE axis scalars x_lo_N/dx_N (no per-dir id_pN) — so ONLY the field keys
-// need canonicalizing, unlike the cartesian proof.)
+// absolute axis scalars x_lo_N/dx_N in place of per-dir id_pN handles, so the field
+// keys are the only ones needing canonicalization; the cartesian proof renames both.)
 fn physical_rename(dir: usize) -> HashMap<String, String> {
     let p1 = (dir + 1) % 3;
     let p2 = (dir + 2) % 3;
@@ -95,7 +95,7 @@ fn dx(ax: usize) -> Poly {
     Poly::var(&format!("dx_{ax}"))
 }
 
-// the point-form face areas at the cell's LO dir-face (offset 0). these are exactly
+// the point-form face areas at the cell's low dir-face (offset 0). these are exactly
 // 1/inv_pref(dir) * the transverse widths — see rmhd_ct_curl_sph_divb.rs.
 //   dir=0 (r-face):   A_r  = r(0)^2 sin(th_c) dth dph
 //   dir=1 (theta-face): A_th = r_c sin(th(0)) dr dph
@@ -155,8 +155,8 @@ fn divb_sph_symbolic_telescoping() {
         div_contribution.add(&diff);
     }
 
-    // THE PROOF: the area-weighted edge-EMF contributions telescope to the zero
-    // rational function (every coefficient numerator cancels EXACTLY).
+    // the proof: the area-weighted edge-EMF contributions telescope to the zero
+    // rational function; every coefficient numerator cancels exactly.
     assert!(
         div_contribution.is_zero(),
         "spherical div(curl B) != 0 symbolically — residual edge-emf numerators:\n{:#?}",
@@ -164,8 +164,8 @@ fn divb_sph_symbolic_telescoping() {
     );
 }
 
-// a NEGATIVE control: a single uncancelled area-weighted edge read does NOT vanish,
-// so the rational checker is not vacuously green.
+// a negative control: a single uncancelled area-weighted edge read survives as a
+// residual, so the rational checker reports a broken cancellation when one exists.
 #[test]
 fn divb_sph_symbolic_detects_residual() {
     let mut lf = LinFormR::default();

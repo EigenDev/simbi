@@ -4,9 +4,9 @@
 // the per-step body diagnostic time series: what
 // each body exchanged with the gas on every step — the record the steady-state
 // detector and the emergent-rate validation consume. Mdot(t) is
-// mass_delta/dt, the accretion drag F_acc(t) is force; both are FUNCTIONALS of
-// the solved flow (the drain's conserved-variable deltas reduced over the
-// mask), never a prescribed rate.
+// mass_delta/dt, the accretion drag F_acc(t) is force; both are functionals of
+// the solved flow, read out of the drain's conserved-variable deltas reduced
+// over the mask.
 //
 // columnar storage so the checkpoint writer borrows each series as one flat
 // dataset. the series restarts empty on checkpoint load — earlier segments
@@ -33,12 +33,13 @@ pub struct BodyHistory<const D: usize> {
     energy_delta: Vec<f64>,
     /// force on the body (gravity reaction + accretion drag): [len, nb, D].
     force: Vec<f64>,
-    /// the NORMAL (form-drag / pressure) component of the wall force: [len, nb, D]. skin friction is
+    /// the normal (form-drag / pressure) component of the wall force: [len, nb, D]. skin friction is
     /// `force - force_normal` (derived). zero for a bare drain/gravitational body.
     force_normal: Vec<f64>,
     /// torque on the body (the r x F moment that drives the Euler rotation / precession): the
-    /// evolution consumes `torque_delta` but net force cannot reconstruct it, so record it. always
-    /// 3-component (rotation is a 3-space rank-2 object even for a 2D flow): [len, nb, 3].
+    /// evolution consumes `torque_delta`, which is independent of the net force, so it is recorded
+    /// in its own series. always 3-component (rotation is a 3-space rank-2 object even for a 2D
+    /// flow): [len, nb, 3].
     torque: Vec<f64>,
 }
 

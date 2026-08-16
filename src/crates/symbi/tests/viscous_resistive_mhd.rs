@@ -7,7 +7,7 @@
 // sheared v_x = V sin(k y) + a sheared B_x = B0 sin(k y) must, with both on:
 //   - lose more KINETIC energy than the ideal run (viscosity is acting),
 //   - lose more MAGNETIC energy than the ideal run (resistivity is acting),
-//   - GAIN gas internal energy (BOTH viscous heating AND Ohmic heating warm the gas -- each dissipation
+//   - gain gas internal energy (viscous heating and Ohmic heating both warm the gas -- each dissipation
 //     is conservatively booked into the internal energy),
 //   - evolve stably.
 // =============================================================================

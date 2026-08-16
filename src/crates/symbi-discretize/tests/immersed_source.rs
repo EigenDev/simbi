@@ -163,9 +163,9 @@ fn body_source_accretion_matches_spec() {
             let r_mag = r_dist2.sqrt();
 
             // gravity is an additive momentum + energy source, contributing the work rate
-            // `m.g` at the state the force was evaluated at; the DRAIN then scales EVERY
-            // conserved component by f = exp(-drain_rate*dt). the second-order work term that
-            // closes a standalone kick is the stage weights' job, not this pass's.
+            // `m.g` at the state the force was evaluated at; the drain then scales each
+            // conserved component by f = exp(-drain_rate*dt). the stage weights supply the
+            // second-order work term that closes a standalone kick.
             let g = [-M0 * rvec[0] / r_eff3, -M0 * rvec[1] / r_eff3];
             let mom_grav = [m0_in + DT * den_in * g[0], m1_in + DT * den_in * g[1]];
             let nrg_grav = nrg_in + DT * (m0_in * g[0] + m1_in * g[1]);
@@ -298,7 +298,7 @@ fn a_standalone_body_kick_leaves_internal_energy_exactly_fixed() {
     // `m.g dt + 0.5 rho |g|^2 dt^2`, and the energy must be credited exactly that or the internal
     // energy `e = E - |m|^2/2rho` moves. it is one-signed when it moves, so it accumulates.
     //
-    // this is NOT the contract of the additive `body_source_gv` pass above, which contributes the
+    // the additive `body_source_gv` pass above carries a different contract: it contributes the
     // work rate alone and lets the stage weights supply the rest. both forms exist on purpose.
     let (den_in, m0_in, m1_in, nrg_in) = (2.0_f64, 0.6_f64, -0.4_f64, 5.0_f64);
     let out = KernelRun::new(body_evolved_probe_gv(2, Coords::Cartesian, 2, 2, &[0, 1]))

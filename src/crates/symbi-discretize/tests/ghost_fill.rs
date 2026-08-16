@@ -1,16 +1,16 @@
 // =============================================================================
 // ghost_fill.rs
 //
-// the lattice-map PULLBACK scheme emits correct integer code.
+// the lattice-map pullback scheme emits correct integer code.
 // `iso_ghost_fill` reads the primitives at a per-axis lattice-map source coord
 // (periodic / reflect / outflow, branched on a runtime integer `map_type`) and
 // writes them at the cell, with the per-component `vel_sign` (the map's jacobian).
 //
-// these are SOURCE-shape checks: the source coord is pure-integer (the select
-// branches render as `ii + arg_0`, `arg_0 - ii`, no float, no cast); the params
-// are typed integer; no dead base cell read is emitted (the field is read only at
-// the source). the bit-identical run vs production lives in the AOT crate (the
-// path production actually compiles).
+// these are source-shape checks: the source coord stays in integer arithmetic (the
+// select branches render as `ii + arg_0`, `arg_0 - ii`, free of floats and casts);
+// the params are typed integer; the field is read at the source coord alone, so the
+// emitted body carries that one read. the bit-identical run vs production lives in
+// the AOT crate (the path production actually compiles).
 // =============================================================================
 
 mod harness;
@@ -33,7 +33,7 @@ fn ghost_fill_1d_emits_integer_source_coord_and_vel_sign() {
 
     // params, in first-use order: the lattice-map encoding then the grade sign.
     assert_eq!(scalar_params, vec!["map_type_0", "arg_0", "vel_sign_0"]);
-    // the lattice-map source-coord args are INTEGER; vel_sign is a float, typed `S`
+    // the lattice-map source-coord args are integer; vel_sign is a float, typed `S`
     // (the kernels are precision-generic `fn k<S: Scalar>(..)`).
     assert!(
         src.contains("map_type_0: i32"),
@@ -45,7 +45,7 @@ fn ghost_fill_1d_emits_integer_source_coord_and_vel_sign() {
         "vel_sign must be the scalar S:\n{src}"
     );
 
-    // the source coord branches on map_type in PURE INTEGER space: periodic
+    // the source coord branches on map_type in pure integer space: periodic
     // `_coord_0 + arg_0`, reflect `arg_0 - _coord_0`, identity `_coord_0`,
     // outflow `arg_0`. shared across rho + every vel read, it is CSE'd — and the
     // CSE'd local stays `i32`, so the buffer index built from it is integer.
@@ -77,8 +77,8 @@ fn ghost_fill_1d_emits_integer_source_coord_and_vel_sign() {
         "velocity must pick up vel_sign_0:\n{src}"
     );
 
-    // NO dead base cell read: prim is read only at the source coord, so the
-    // emitter must NOT emit `let prim_rho: f64 = buf0[(ii - buf_lo_0_0) ...]`.
+    // the single read: prim is read at the source coord alone, so the emitted body
+    // stays free of a base-cell read `let prim_rho: f64 = buf0[(ii - buf_lo_0_0) ...]`.
     assert!(
         !src.contains("let prim_rho: f64 = buf0[(ii - buf_lo_0_0) as usize];"),
         "a dead base cell read leaked in:\n{src}"
@@ -87,8 +87,9 @@ fn ghost_fill_1d_emits_integer_source_coord_and_vel_sign() {
 
 #[test]
 fn ghost_fill_scheme_is_dimension_generic() {
-    // the SAME builder produces a 2D fill: per-axis map params (map_type_0/1,
-    // arg_0/1) and one vel_sign per momentum component. no per-dimension variant.
+    // the same builder produces a 2D fill: per-axis map params (map_type_0/1,
+    // arg_0/1) and one vel_sign per momentum component — one builder covers every
+    // dimension.
     let (src, scalar_params) = emit(2);
     assert_eq!(
         scalar_params,

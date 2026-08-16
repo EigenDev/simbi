@@ -2,12 +2,12 @@
 // ibm.rs
 //
 // the carrier-generic core of the immersed-boundary source, split from the
-// Gv-traced kernel builders so the SAME expressions serve two roles:
+// Gv-traced kernel builders so the same expressions serve two roles:
 //   - traced at S = Gv (the `body_source` / fused-godunov kernels), and
 //   - evaluated at S = f64 or S = Dual<f64> (the well-posedness suite: the conservative-gravity
 //     proof differentiates the potential by forward-mode autodiff; the drain-contraction and
 //     softened-gravity bounds sample the f64 forms).
-// every function is a PURE map over one Scalar carrier — no field reads, no trace state — so the
+// every function is a pure map over one Scalar carrier, free of field reads and trace state, so the
 // property a proof establishes on the f64/Dual carrier is a property of the traced kernel too.
 //
 // the physics:
@@ -53,7 +53,7 @@ pub fn softened_potential<S: Scalar>(rvec: [S; 3], mass: S, soft: S) -> S {
     -mass / r_eff
 }
 
-/// COMPACT newtonian gravity: the field of the density profile `rho ~ 1 - (r/h)^2` truncated at
+/// compact newtonian gravity: the field of the density profile `rho ~ 1 - (r/h)^2` truncated at
 /// `h`, which is **exactly** `-mass * rvec / |rvec|^3` for `|rvec| >= h` and regular within.
 ///
 /// ```text
@@ -61,20 +61,21 @@ pub fn softened_potential<S: Scalar>(rvec: [S; 3], mass: S, soft: S) -> S {
 ///     = -mass rvec / r^3                            r >= h
 /// ```
 ///
-/// the distinction from [`softened_gravity`] is not smoothness but SUPPORT. a Plummer sphere has
-/// none: `g_plummer / g_newton = [1 + (h/r)^2]^{-3/2}` is below unity at EVERY radius, so a
+/// what separates this from [`softened_gravity`] is compact support: this field is the bare point
+/// mass beyond `h`, where a Plummer sphere's reach is infinite. `g_plummer / g_newton =
+/// [1 + (h/r)^2]^{-3/2}` stays below unity at every radius, so a Plummer
 /// softening length chosen for regularity near the body silently weakens gravity through the whole
 /// domain — at `r = h` it is already down to 0.354, and it needs `r > 5h` to reach 0.99. when the
 /// quantity being measured is a power law in radius, that is a systematic bias across the entire
 /// fitting range, growing toward small `r` where the range is most valuable.
 ///
 /// here the truncation is exact: outside `h` the field is the bare point mass to the last bit,
-/// because the enclosed mass is complete. so `h` may be set to whatever radius the flow is not
-/// being asked to resolve — an accretion radius, say — and the measurement outside it is
+/// because the enclosed mass is complete. so `h` may be set to the largest radius the flow is
+/// asked to leave unresolved — an accretion radius, say — and the measurement outside it is
 /// untouched by the choice.
 ///
-/// `rho(h) = 0` makes `dg/dr` continuous at the match (`phi` is `C^2`), unlike the uniform sphere
-/// whose density jumps there. the peak field is `1.242 mass / h^2` at `r = sqrt(5/9) h`, bounded
+/// `rho(h) = 0` makes `dg/dr` continuous at the match (`phi` is `C^2`), where the uniform sphere's
+/// density jumps there. the peak field is `1.242 mass / h^2` at `r = sqrt(5/9) h`, bounded
 /// and independent of resolution — where a Plummer accurate enough at `h` peaks at `~ mass / eps^2`
 /// with `eps << h`, which is what makes the timestep collapse.
 #[inline]
@@ -106,7 +107,7 @@ pub fn compact_potential<S: Scalar>(rvec: [S; 3], mass: S, h: S) -> S {
     S::cond(r.cmp_lt(h), || inner, || outer)
 }
 
-/// the accretion DRAIN RATE for one body: `chi * min(sink, cs/dx)`, with the mollified mask
+/// the accretion drain rate for one body: `chi * min(sink, cs/dx)`, with the mollified mask
 /// `chi = (1 - tanh((r - r_mask)/w))/2 in (0, 1)` and the sound-crossing cap `cs/dx`. nonnegative
 /// whenever `sink >= 0`, `cs >= 0`, `w > 0` (the sign lemma the contraction proof rests on). the ops
 /// match the traced body kernel bit-for-bit.
@@ -118,17 +119,17 @@ pub fn drain_rate<S: Scalar>(r_mag: S, r_mask: S, min_w: S, sink: S, cs: S) -> S
     chi * sink.min(sound_rate)
 }
 
-/// the EXACT support of the drain mask, in mask widths: `tanh(z)` returns exactly 1.0 in
+/// the exact support of the drain mask, in mask widths: `tanh(z)` returns exactly 1.0 in
 /// f64 for `z >= 19.1` (the taylor tail `2 exp(-2z)` falls below half an ulp of 1), so
 /// `chi = (1 - tanh(z))/2` — and with it the drain rate — is exactly zero for
 /// `r >= r_mask + DRAIN_SUPPORT_WIDTHS * w`. a spatial gate at this radius skips the
-/// tanh/exp evaluation on the far field WITHOUT changing any bit of any field: outside
+/// tanh/exp evaluation on the far field while every field keeps its exact bits: outside
 /// the support the ungated kernel computes rate = 0 and factor = exp(0) = 1 exactly.
 pub const DRAIN_SUPPORT_WIDTHS: f64 = 20.0;
 
 /// the exact-exponential drain factor `f = exp(-total_rate * dt)`. for `total_rate >= 0`, `dt >= 0`
 /// this lies in `(0, 1]`: `f > 0` (positivity-preserving) and `f <= 1` (non-expansive on the
-/// intensive state), for ANY dt — no CFL condition on the sink.
+/// intensive state) at every dt, so the sink imposes no CFL condition.
 #[inline]
 pub fn drain_factor<S: Scalar>(total_rate: S, dt: S) -> S {
     (S::ZERO - total_rate * dt).exp()
@@ -139,8 +140,8 @@ mod tests {
     use super::*;
 
     // the spatial gate's bit-exactness rests on tanh saturation: at and beyond
-    // the support radius the UNGATED rate is exactly zero and the ungated
-    // factor exactly one, so a branch that skips them changes nothing.
+    // the support radius the ungated rate is exactly zero and the ungated
+    // factor exactly one, so a branch that skips them reproduces those values.
     #[test]
     fn drain_is_exactly_zero_beyond_the_support_radius() {
         let (r_mask, w, sink, cs) = (2.0_f64, 0.1, 1e6, 0.7);
@@ -150,7 +151,7 @@ mod tests {
             assert_eq!(rate, 0.0, "rate must saturate to exact zero at r = {r}");
             assert_eq!(drain_factor(rate, 1e3), 1.0, "factor must be exact one");
         }
-        // just INSIDE the support the mask is alive — the gate is not oversized.
+        // just inside the support the mask is alive, so the gate sits at the true edge.
         let r_in = r_mask + (DRAIN_SUPPORT_WIDTHS - 2.0) * w;
         assert!(drain_rate(r_in, r_mask, w, sink, cs) > 0.0);
     }
@@ -159,8 +160,8 @@ mod tests {
 /// the body's gravitational field, selecting the family by the wire scalar `kind`
 /// (`0` = Plummer, `1` = compact; see `symbi_ib::SofteningKind`).
 ///
-/// branch-free at the trace: `cond` lowers to a select, so ONE baked kernel serves both families
-/// and the choice is a runtime scalar rather than a kernel variant. an inactive or non-gravitating
+/// branch-free at the trace: `cond` lowers to a select, so a single baked kernel serves both
+/// families with the choice carried as a runtime scalar. an inactive or non-gravitating
 /// body slot carries `mass = 0`, which zeroes both arms identically, so the family it nominally
 /// names is immaterial there.
 #[inline]

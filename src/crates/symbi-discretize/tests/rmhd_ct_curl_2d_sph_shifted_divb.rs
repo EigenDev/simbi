@@ -1,12 +1,12 @@
 // =============================================================================
 // rmhd_ct_curl_2d_sph_shifted_divb.rs
 //
-// div(B)=0 preservation for the 2D poloidal CT curl on the SHIFTED charts
+// div(B)=0 preservation for the 2D poloidal CT curl on the shifted charts
 // (kerr-schild + spinning kerr) — the phase-C diagnostic. same construction as
-// rmhd_ct_curl_2d_sph_gr_divb.rs (schwarzschild) but with the shifted metrics'
+// rmhd_ct_curl_2d_sph_gr_divb.rs (schwarzschild), carrying the shifted metrics'
 // sqrt(gamma). if the curl preserves the w-weighted div(B) here, the kerr div
-// drift observed in the full sim is NOT in the curl (consistent with the
-// weight-independent symbolic telescoping proof) and lives in the integration.
+// drift observed in the full sim originates in the integration (consistent with
+// the weight-independent symbolic telescoping proof), leaving the curl clear.
 //   kerr-schild: sqrt(gamma) = r^2 sin(theta) sqrt(1 + 2M/r)
 //   kerr:        sqrt(gamma) = Sigma sin(theta) sqrt(1 + 2Mr/Sigma),
 //                Sigma = r^2 + a^2 cos^2(theta)
@@ -163,11 +163,12 @@ fn kerr_ct_curl_preserves_div_b() {
     preserves_div(Spacetime::KerrKS);
 }
 
-// ---- the ACTUAL contact EMF kernel + curl, in isolation ----
-// drives rmhd_edge_emf_gr_gv (the real corner EMF, with the shift's beta_r) then the curl on a
-// div-free B, and checks div preservation. if this holds, the EMF+curl kernels are consistent and
-// the sim div drift is in the buffer/field management (swirl layout); if it breaks, the EMF kernel
-// itself feeds the curl an inconsistent (multi-valued) corner EMF on the shifted chart.
+// ---- the production contact EMF kernel + curl, in isolation ----
+// drives rmhd_edge_emf_gr_gv (the production corner EMF, carrying the shift's beta_r) then the
+// curl on a div-free B, and checks div preservation. if this holds, the EMF+curl kernels are
+// consistent and the sim div drift is in the buffer/field management (swirl layout); if it breaks,
+// the EMF kernel itself feeds the curl an inconsistent (multi-valued) corner EMF on the shifted
+// chart.
 use symbi_discretize::gv::rmhd_edge_emf_gr_gv;
 
 fn run_emf(st: Spacetime) -> Vec<f64> {

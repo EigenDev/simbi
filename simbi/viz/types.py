@@ -10,16 +10,16 @@
 #   - Bounds/ColorRange: simple numeric range helpers used by style/config
 #
 # render contract (RenderResult):
-#   a component returns the artists it drew, plus the facts the figure and the
-#   formatter cannot work out for themselves: which artist a colorbar
-#   describes and what to call it, the extent it drew (a mesh collection
-#   carries no data limit of its own), the names of its series, and whether it
-#   is a vector overlay riding on another artist.
+#   a component returns the artists it drew, plus the facts the component alone
+#   holds: which artist a colorbar describes and what to call it, the extent it
+#   drew (a mesh collection leaves the axes data limits to its component), the
+#   names of its series, and whether it is a vector overlay riding on another
+#   artist.
 #
-#   each of those is a named field rather than a free-form dictionary entry.
-#   an unrecognised key silently disables a feature, and a key that means
-#   something else silently enables one: `label` on a field render once
-#   switched on the legend handling meant for lines.
+#   each of those is a named field, so the contract is checked at the type
+#   level. in a free-form dictionary an unrecognized key silently disables a
+#   feature, and a key that means something else silently enables one: `label`
+#   on a field render once switched on the legend handling meant for lines.
 #
 #   example:
 #     RenderResult(

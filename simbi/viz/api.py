@@ -39,8 +39,8 @@ from .utility import get_tracer_field_str
 
 # colormaps handed to successive panels of a shared chart. two quantities that
 # share a chart and a colormap read as one field, so each panel takes a
-# different one; they are perceptually uniform so no panel implies a structure
-# its data does not have.
+# different one; they are perceptually uniform, so the structure a panel shows
+# is the structure its data holds.
 PANEL_CMAPS = ("viridis", "magma", "cividis", "plasma")
 
 
@@ -322,7 +322,7 @@ def plot(
     is_refined = nlvls > 1
 
     # determine rendering mode
-    # refined data MUST use polygons (pcolormesh can't handle different grids)
+    # refined data renders as polygons; a pcolormesh quadmesh carries one grid
     if is_refined:
         use_polygons = True
     else:
@@ -544,7 +544,7 @@ def animate(
     is_refined = nlvls > 1
 
     # determine rendering mode
-    # refined data MUST use polygons (pcolormesh can't handle different grids)
+    # refined data renders as polygons; a pcolormesh quadmesh carries one grid
     if is_refined:
         use_polygons = True
     else:

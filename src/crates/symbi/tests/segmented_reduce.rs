@@ -6,12 +6,12 @@
 // accumulators from one pass.
 //
 // the properties that make it usable as the scatter half of a binned reduction:
-//   - PARTITION: summing an extensive value over every bucket equals the whole-field
+//   - partition: summing an extensive value over every bucket equals the whole-field
 //     reduction of the same value. a bucket assignment that double-counted or lost
 //     cells would break here and nowhere else.
-//   - the zero-axis case (one bucket) IS the whole-field reduction.
-//   - cells outside the binning are dropped and COUNTED, so an under-covering
-//     binning is distinguishable from a physics result.
+//   - the zero-axis case (one bucket) reproduces the whole-field reduction exactly.
+//   - cells outside the binning are dropped and counted, so an under-covering
+//     binning reads distinctly from a physics result.
 //   - the host combine is bit-reproducible across thread counts, per the fixed
 //     slab-order contract the whole-field reduce already holds.
 // =============================================================================
@@ -109,8 +109,8 @@ fn summing_every_bucket_equals_the_whole_field_reduction() {
 
 #[test]
 fn one_bucket_reproduces_the_whole_field_reduction() {
-    // the zero-axis census: no bin axes at all is a global reduction. if the mechanism
-    // cannot express that, it is not a generalization of the reduction it sits beside.
+    // the zero-axis census: with the bin axes empty the census is a global reduction. expressing
+    // that is what makes the mechanism a generalization of the reduction it sits beside.
     let dom = domain();
     let field = Field::<f64, 2, HostMemory>::zeros(&dom).expect("value field");
     for c in dom.iter() {
@@ -136,8 +136,8 @@ fn one_bucket_reproduces_the_whole_field_reduction() {
 #[test]
 fn cells_outside_the_binning_are_dropped_and_counted() {
     // a bin index past the last bucket means the cell fell outside the declared edges.
-    // it must not land in a neighboring bucket, and the shortfall must be reported:
-    // a silently under-covering binning reads exactly like a physics result.
+    // it is dropped clear of every bucket and the shortfall is reported, because a silently
+    // under-covering binning reads exactly like a physics result.
     let dom = domain();
     let field = Field::<f64, 2, HostMemory>::zeros(&dom).expect("value field");
     let segment = Field::<f64, 2, HostMemory>::zeros(&dom).expect("segment field");
@@ -170,9 +170,9 @@ fn cells_outside_the_binning_are_dropped_and_counted() {
 #[test]
 fn host_buckets_are_bit_reproducible_across_thread_counts() {
     // the fixed slab-order contract, per bucket. the partition is one slab per outer
-    // index — a function of the domain shape alone — so the grouping of addends cannot
-    // move when the machine's thread count does. a thread-count-dependent partition
-    // would regroup the 1e16-against-1 mix and shift the low bits visibly.
+    // index — a function of the domain shape alone — so the grouping of addends is fixed
+    // whatever the machine's thread count. a thread-count-dependent partition would regroup
+    // the 1e16-against-1 mix and shift the low bits visibly.
     let (values, segment) = build(2);
     let dom = domain();
     let refs: Vec<&Field<f64, 2, HostMemory>> = values.iter().collect();
@@ -200,8 +200,8 @@ fn host_buckets_are_bit_reproducible_across_thread_counts() {
 #[test]
 fn min_and_max_land_on_the_per_bucket_extrema() {
     // the extrema ops, checked against a direct scan. min/max are order-agnostic, so
-    // they are exact under any partition — that is why they stay bit-reproducible even
-    // where a sum cannot.
+    // they are exact under any partition — which is why they stay bit-reproducible in
+    // regimes where a sum drifts with the grouping.
     let (values, segment) = build(1);
     let dom = domain();
 
@@ -263,7 +263,8 @@ fn a_product_over_a_bucket_is_refused() {
 
 #[test]
 fn the_host_accumulator_is_double_precision_whatever_the_field_carrier_is() {
-    // the accumulator width is a property of the REDUCTION, not of the fields it reads. that
+    // the accumulator width is a property of the reduction, held independent of the fields it
+    // reads. that
     // separation is what lets a single-precision run — which is what a device without double
     // support forces — still produce a total that means something: a bin over three million cells
     // summed in f32 loses the low bits of every term once the running sum outgrows them, and the

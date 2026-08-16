@@ -348,7 +348,7 @@ fn compiled_viscous_iso_3d_matches_the_f64_chain_bitwise() {
 }
 
 // the 3D alpha gate: nu(x,y) = alpha cs^2 / Omega_k(R) with R the CYLINDRICAL
-// radius (z does not enter), so every k-slice of the nu stencil is equal.
+// radius, a function of x,y alone, so every k-slice of the nu stencil is equal.
 #[test]
 fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
     let (kernel, ir) =
@@ -428,11 +428,11 @@ fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
         kernel(&inputs, &mut outs, &disp_ext, &disp_lo, &ints, &scalars);
     }
 
-    // cylindrical R: z does not enter Omega_k. the stencil position must match the
-    // kernel arithmetic bit-for-bit: the cell centroid is `(lo_face + hi_face)/2`
-    // with the uniform face `x_lo + i*dx`, and the offset cell sits at `centroid +
-    // (off)*dx` — NOT `x_lo + (i+off+0.5)*dx`, which rounds differently and the
-    // sqrt/division in nu(x) amplifies.
+    // cylindrical R depends on x,y alone; Omega_k excludes z. the stencil position
+    // must match the kernel arithmetic bit-for-bit: the cell centroid is
+    // `(lo_face + hi_face)/2` with the uniform face `x_lo + i*dx`, and the offset
+    // cell sits at `centroid + (off)*dx` — not `x_lo + (i+off+0.5)*dx`, which
+    // rounds differently and the sqrt/division in nu(x) amplifies.
     let face = |i_f: f64| X_LO + i_f * DX;
     let centroid = |c: usize| (face(c as f64) + face(c as f64 + 1.0)) * 0.5;
     // nu(x) = alpha cs^2 / Omega_k(r) in the kernel's spelling, `alpha cs^2 sqrt(r^3/GM)`.
@@ -497,7 +497,7 @@ fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
 // the GENERAL ORTHOGONAL kernel on the cylindrical chart: bit-identical to the f64
 // `viscous_mom_update_orthogonal_2d` fed the scale factors h = (1, R) that the
 // kernel reads from CylindricalRPhi::scale_factors (R = the cell centroid + offset).
-// this is the ONE kernel every curvilinear chart routes through.
+// every curvilinear chart routes through this single kernel.
 #[test]
 fn compiled_viscous_iso_ortho_cyl_matches_the_f64_chain_bitwise() {
     use symbi_hydro::viscous::viscous_mom_update_orthogonal_2d;

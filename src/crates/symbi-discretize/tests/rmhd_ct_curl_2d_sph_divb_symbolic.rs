@@ -1,11 +1,11 @@
 // =============================================================================
 // rmhd_ct_curl_2d_sph_divb_symbolic.rs
 //
-// the SYMBOLIC proof that the 2D SPHERICAL POLOIDAL (r, theta) constrained-transport
-// curl (rmhd_ct_curl_2d_sph_gv) preserves the AREA-WEIGHTED div(B) = 0 EXACTLY — by
+// the symbolic proof that the 2D spherical poloidal (r, theta) constrained-transport
+// curl (rmhd_ct_curl_2d_sph_gv) preserves the area-weighted div(B) = 0 exactly, by
 // rational-function cancellation on the traced IR DAG. the structural counterpart to
 // the numerical rmhd_ct_curl_2d_sph_poloidal_divb gate. the heaviest 2D case: the coeff
-// ring needs BOTH the affine r AND the opaque sin(theta) symbols.
+// ring needs the affine r together with the opaque sin(theta) symbols.
 //
 // the 2D curl from the single out-of-plane corner EMF E (`ez` = E_phi):
 //   dir=0 (B_r,   r-face):    dB_r/dt  = -(1/(r_f sin th_c)) d_th(sin th E)
@@ -14,8 +14,8 @@
 // (1/(r sin th))d_th(sin th B_th)), the rmhd_ct_curl_2d_sph_poloidal_divb form:
 //   div(B) = (r_hi^2 sin_c B_r[+r] - r_lo^2 sin_c B_r) dth          [/(r^2) folded into area]
 //          + (r_c sin_hi B_th[+th] - r_c sin_lo B_th) dr
-// with B = dt*curl(E), every E read cancels to the ZERO rational function. r AFFINE,
-// sin(theta@offset) OPAQUE (half-unit keys: sin_c = sin@1, sin-faces = sin@0/sin@2).
+// with B = dt*curl(E), every E read cancels to the zero rational function. r is affine,
+// sin(theta@offset) opaque (half-unit keys: sin_c = sin@1, sin-faces = sin@0/sin@2).
 // =============================================================================
 
 use symbi_discretize::{Spacing, rmhd_ct_curl_2d_sph_gv};

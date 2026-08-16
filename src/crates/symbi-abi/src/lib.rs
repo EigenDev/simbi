@@ -5,12 +5,12 @@
 // field buffers (`FieldRef`/`FieldBind`), scalar params (`ScalarRef`/`ScalarBind`/
 // `BodyScalar`), and mesh scalars (`MeshScalar`). each name is minted in exactly
 // one place (`name()`) and recovered by `parse()`, so a producer (the trace) and a
-// consumer (the dispatch) cannot drift on a spelling — the failure mode the typed
-// ABI was built to kill.
+// consumer (the dispatch) agree on a spelling — drift is the failure mode the
+// typed ABI was built to kill.
 //
-// this crate is a LEAF (serde only). it holds the closed DOMAIN vocabulary so the
+// this crate is a leaf (serde only). it holds the closed domain vocabulary so the
 // graph-theoretic IR (symbi-ir) can carry the typed containers (`FieldBind` lives
-// in `Prepared`/`GvKernel`) without its own source spelling any hydro field name.
+// in `Prepared`/`GvKernel`) while every hydro field name is spelled here, once.
 //
 // usage:
 //  let den = symbi_abi::FieldRef::cons_den();

@@ -2,7 +2,7 @@
 # adapter.py
 #
 # adapter to make io.Checkpoint compatible with visualization pipeline.
-# provides the interface viz expects without the old lazy evaluation system.
+# provides the interface viz expects, with every field evaluated eagerly.
 # =============================================================================
 
 import numpy as np
@@ -68,16 +68,16 @@ class MeshAdapter:
             # default to linear
             coords_comoving = np.linspace(xmin, xmax, ncells + 1)
 
-        # apply the moving-mesh scale factor. homologous expansion scales LENGTH axes only, never
-        # angles (theta/phi). this MUST match the writer (symbi-sim checkpoint.rs) and the volume
-        # jacobian (symbi-geometry block.rs). x1 (radial) is the last storage axis; in the reader's
-        # storage order z is axis 0 for cylindrical (r, phi, z).
+        # apply the moving-mesh scale factor. homologous expansion scales the length axes; angles
+        # (theta/phi) stay fixed. the same rule holds in the writer (symbi-sim checkpoint.rs) and
+        # in the volume jacobian (symbi-geometry block.rs). x1 (radial) is the last storage axis;
+        # in the reader's storage order z is axis 0 for cylindrical (r, phi, z).
         metric = getattr(self._mesh, "metric", "cartesian").lower()
         radial_axis = self._mesh.ndim - 1
         if "cartesian" in metric:
             scales_this_axis = True  # isotropic: every axis is a length
         elif "cylindrical" in metric:
-            # (r, phi, z): r and z scale; phi (the middle axis) does not. 2D assumes (r, z).
+            # (r, phi, z): r and z scale, phi (the middle axis) stays fixed. 2D assumes (r, z).
             scales_this_axis = axis == radial_axis or axis == 0
         else:  # spherical / default curvilinear: only the radial axis scales
             scales_this_axis = axis == radial_axis
@@ -179,8 +179,8 @@ class SimData:
 
     def hierarchy(self):
         """access AMR hierarchy info."""
-        # the checkpoint reader exposes level count and per-level partitions, not the
-        # box tree, so there is no hierarchy object to hand back
+        # the checkpoint reader exposes level count and per-level partitions; the box
+        # tree lives outside the file, so the hierarchy object is absent
         return None
 
     def list_derived_fields(self) -> list[str]:
@@ -279,7 +279,7 @@ class SimData:
         halo = level_data.mesh.halo_radius
         global_shape = level_data.mesh.global_cells
 
-        # allocate output array for FULL mesh domain
+        # allocate output array for the full mesh domain
         result = np.zeros(global_shape, dtype=np.float64)
 
         # check if field exists in any partition
@@ -298,7 +298,7 @@ class SimData:
         if not found_field:
             # try derived fields
             if field_name in self._derived_names:
-                # derived fields not yet supported for multi-partition
+                # derived fields resolve on single-partition levels
                 raise NotImplementedError(
                     f"derived field '{field_name}' not supported "
                     f"for multi-partition levels"
@@ -307,7 +307,7 @@ class SimData:
 
         # stitch each partition into global array
         for partition in level_data.partitions:
-            # get owned domain (without ghost zones)
+            # get owned domain (the interior cells)
             owned = partition.owned_domain
 
             # create slice for global array

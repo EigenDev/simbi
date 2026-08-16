@@ -12,12 +12,12 @@ use symbi_geometry::{
 };
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 
-/// trace the REAL adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
-/// `S = Gv` — into a dispatchable kernel. the carrier-generic physics IS the kernel
+/// trace the real adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
+/// `S = Gv` — into a dispatchable kernel. the carrier-generic physics is the kernel
 /// builder; this is what replaces the hand-written `adiabatic_c2p` Expr builder. returns
 /// the `GvKernel` (graph + ABI manifest) and the `(write_key, runtime_path, root)` writes.
-/// note: the `Regime::to_primitive` WRAPPER's native error-code branches are host-only
-/// diagnostics — the kernel traces only the branch-free math `Cons::to_primitive`.
+/// note: the `Regime::to_primitive` wrapper's native error-code branches are host-only
+/// diagnostics — the kernel traces the branch-free math `Cons::to_primitive`.
 pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // input binding: the conserved fields + the eos scalar, as Gv leaves.
@@ -28,7 +28,7 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, 
     let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
     let gamma = Gv::scalar("gamma");
 
-    // the SINGLE-SOURCE physics, instantiated at the tracing carrier.
+    // the single-source physics, instantiated at the tracing carrier.
     let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
     let cons = Cons::<Gv, D> {
         chi: Default::default(),
@@ -60,29 +60,30 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, 
     (end_trace(), writes)
 }
 
-/// trace the REAL isothermal c2p — symbi-hydro's `IsoNewtonian::to_primitive` (the pure
+/// trace the real isothermal c2p — symbi-hydro's `IsoNewtonian::to_primitive` (the pure
 /// `rho = den`, `vel = mom / rho` kinematics) plus the `Isothermal::pressure` closure
 /// `p = cs^2 * rho` — at `S = Gv`. replaces the hand-written `iso_c2p` Expr builder.
 ///
-/// `IsoModel`'s `prim.pre` is a ZST: the HOST runtime elides pressure storage and
-/// recomputes `cs^2 * rho` in the flux. the SUBSTRATE stores a real `prim.pre` field
+/// `IsoModel`'s `prim.pre` is a ZST: the host runtime elides pressure storage and
+/// recomputes `cs^2 * rho` in the flux. the substrate stores a real `prim.pre` field
 /// (the iso face flux PLM-reconstructs it), so the materialized closure is traced
 /// explicitly here — the value (`cs^2 * rho`) is the single source either way.
 ///
-/// iso c2p is geometry-independent and ncomp == ndim (the cyl r-z swirl has no iso c2p),
-/// so the `<D>` instance is a complete drop-in: no geom branch, no retained builder.
+/// iso c2p is geometry-independent and ncomp == ndim (the cyl r-z swirl, with DOF > ndim,
+/// falls outside its coverage), so the `<D>` instance is a complete drop-in: one
+/// geometry-free builder serves every iso grid.
 pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // input binding: the conserved fields + the prescribed per-cell sound-speed-squared
-    // field `cs2` (the local temperature; global isothermal is a uniform cs2). NO scalar —
-    // cs2 is a FIELD so the run can be LOCALLY isothermal (cs varies per cell).
+    // field `cs2` (the local temperature; global isothermal is a uniform cs2). cs2 is bound
+    // as a field so the run can be locally isothermal (cs varies per cell).
     let den = Gv::field("cons_den", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..D)
         .map(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
         .collect();
     let cs2 = Gv::field("cs2", "cs2");
 
-    // the SINGLE-SOURCE physics: symbi-hydro's LOCALLY-isothermal recovery (state.rs
+    // the single-source physics: symbi-hydro's locally-isothermal recovery (state.rs
     // `locally_isothermal_recover`) — `Cons::to_primitive` with the Isothermal eos reads
     // cs^2 from the nrg slot: rho = den, vel = mom/rho, p = recover_pressure = cs2 * rho.
     // the cs2 is the separate prescribed field, fed through the compute struct's nrg slot.
@@ -117,10 +118,10 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId
 }
 
 /// the isothermal eos law `p = cs^2(x) * rho` as a standalone pointwise kernel, from the
-/// PRIMITIVE density. c2p derives the substrate pressure from the conserved state over
-/// the interior only, but coarse-fine ghost cells receive prim rho by prolongation and
-/// carry NO conserved state — the pressure there must be re-derived from the prolonged
-/// rho or the face reconstruction sees a spurious vacuum at every level seam. pointwise
+/// primitive density. c2p derives the substrate pressure from the conserved state over
+/// the interior; coarse-fine ghost cells receive prim rho by prolongation and carry the
+/// primitives alone, so the pressure there is re-derived from the prolonged rho — otherwise
+/// the face reconstruction sees a spurious vacuum at every level seam. pointwise
 /// and dimension-independent (emitted per ndim like the snapshot family).
 pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
@@ -134,11 +135,11 @@ pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     )
 }
 
-/// trace the REAL RHD c2p — symbi-hydro's branch-free `rhd_recover` (the iterative
+/// trace the real RHD c2p — symbi-hydro's branch-free `rhd_recover` (the iterative
 /// relativistic cons->prim: a carrier-generic newton on the pressure root, then the
 /// algebraic velocity/lorentz/density recovery) at `S = Gv`. the newton lowers to one
 /// `Op::IterateInline` (body traced once); `max_iters` bakes the fixed loop count. this
-/// is the FIRST iterative gv kernel — replaces the hand-written `rhd_c2p` Expr builder.
+/// is the first iterative gv kernel — replaces the hand-written `rhd_c2p` Expr builder.
 ///
 /// numerically equivalent within ULP; the values differ in the last bits because the builder
 /// hand-cancels rho in `c2`/`h` while the EOS-generic form keeps
@@ -158,7 +159,7 @@ pub fn rhd_c2p_gv<const D: usize>(
     let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
     let gamma = Gv::scalar("gamma");
 
-    // the SINGLE-SOURCE physics, instantiated at the tracing carrier.
+    // the single-source physics, instantiated at the tracing carrier.
     let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
     let cons = Cons::<Gv, D> {
         chi: Default::default(),
@@ -169,7 +170,7 @@ pub fn rhd_c2p_gv<const D: usize>(
     // flat-frame spatial metric = identity (constant-folds to the euclidean norm, so the
     // traced/compiled kernel is bit-identical). the GR metric threads in here. the newton
     // is eos-generic — the closure arm selects gamma-law or taub-mathews at trace time
-    // (gamma stays bound on both arms; the synge closure never reads it).
+    // (gamma stays bound on both arms; under the synge closure it is bound-but-inert).
     let prim = rhd_recover(
         &super::gv_eos(eos_arm, gamma),
         &cons,
@@ -200,11 +201,11 @@ pub fn rhd_c2p_gv<const D: usize>(
 
 /// the RHD cons->prim on a curved spacetime — the `_schw`/`_ks` GR path. it undensitizes the
 /// evolved state by the known measure `sqrt(-g)(x)` and then runs the recovery contracted with the
-/// REAL spatial metric gamma(r) at the cell (not identity): `|S|^2 = gamma^{ij} S_i S_j` and the
-/// recovered `v^i = gamma^{ij} S_j / (tau+D+p)` is the CONTRAVARIANT velocity (valencia). the metric
-/// is evaluated at the volume-weighted centroid — the SAME point the seeding densitizes at — so the
+/// spatial metric gamma(r) carried at the cell: `|S|^2 = gamma^{ij} S_i S_j` and the
+/// recovered `v^i = gamma^{ij} S_j / (tau+D+p)` is the contravariant velocity (valencia). the metric
+/// is evaluated at the volume-weighted centroid — the point the seeding densitizes at — so the
 /// state round-trips per cell. reduces to `rhd_c2p_gv` at identity gamma. `D` is the momentum
-/// DOF (all D components contracted), the GRID dimension is `axes.len()` — they differ for the
+/// DOF (all D components contracted), the grid dimension is `axes.len()` — they differ for the
 /// spherical swirl (DOF = 3 azimuthal momentum on a 2D (r, theta) grid). reads
 /// `schwarzschild_mass` + the grid scalars for the cell centroid.
 pub fn rhd_c2p_gr_gv<const D: usize>(
@@ -229,14 +230,14 @@ where
     let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
     let gamma = Gv::scalar("gamma");
 
-    // the in-kernel spatial metric at the cell's ARITHMETIC MIDPOINT — the SAME point the seeding
+    // the in-kernel spatial metric at the cell's arithmetic midpoint — the point the seeding
     // densitizes at and the godunov evaluates the connection source at, so the stored state
     // inverts exactly. the densitized law's cell average is over the plain coordinate volume, so
-    // the midpoint (not the chart's volume-weighted centroid) is its second-order sampling point.
-    // gridded coordinate slots take that midpoint; an ungridded symmetry slot (the axisymmetric
-    // phi of the spherical swirl) takes zero — the spherical metrics never read phi, and
-    // gamma_{phi phi} = r^2 sin^2(theta) needs only the GRIDDED (r, theta). a suppressed POLAR
-    // slot would zero sin(theta) (singular gamma) — rejected.
+    // the midpoint is its second-order sampling point, where the area-weighted law would read the
+    // chart's volume-weighted centroid. gridded coordinate slots take that midpoint; an ungridded
+    // symmetry slot (the axisymmetric phi of the spherical swirl) takes zero — the spherical
+    // metrics read the gridded (r, theta) alone, gamma_{phi phi} = r^2 sin^2(theta). a suppressed
+    // polar slot would zero sin(theta) (singular gamma) — rejected.
     let ndim = axes.len();
     let mid = gv_cell_midpoints(spacing, ndim);
     let x = Tensor::<Gv, D>::new(std::array::from_fn(|c| {
@@ -249,10 +250,10 @@ where
     // recovery harvests the cell lapse, shift and full-chart measure `volume_factor`: undensitize
     // by the known sqrt(det gamma)(x), then invert the killing energy back to the valencia tau the
     // newton consumes, tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
-    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
-    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. on the SPHERICAL
-    // chart the non-diagonal gamma_{r phi} means only the azimuthal-momentum (swirl, D = 3)
-    // instantiation carries the metric; the D = 1/2 arms are unreachable at bake.
+    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
+    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. on the spherical
+    // chart the non-diagonal gamma_{r phi} means the azimuthal-momentum (swirl, D = 3)
+    // instantiation is the one carrying the metric; the D = 1/2 arms are unreachable at bake.
     let (gm, gm_inv, alpha, beta, sqrt_gamma) = {
         fn adm<const N: usize, M: Metric<Gv, N>>(
             m: &M,
@@ -303,16 +304,16 @@ where
     (end_trace(), writes)
 }
 
-/// trace the REAL RMHD c2p — symbi-hydro's branch-free `rmhd_recover` (the KKC
+/// trace the real RMHD c2p — symbi-hydro's branch-free `rmhd_recover` (the KKC
 /// false-position: a 6-state bracketed iterate over `kkc_fmu44` + `find_mu_plus`,
-/// illinois half-damp, sticky `done`) at `S = Gv`. the LAST + hardest c2p: the
+/// illinois half-damp, sticky `done`) at `S = Gv`. the last and hardest c2p: the
 /// bracketed solve lowers to a multi-accumulator `Op::IterateInline` via the new
 /// `Scalar::iterate_vec`. replaces the hand-written `rmhd_c2p` Expr builder.
 ///
-/// RMHD vectors are ALWAYS 3-component (the physics is 3D; grid symmetry handles the
-/// 1D/2D cases), so this always traces `rmhd_recover::<Gv, 3>` — `ndim` only selects
-/// the emit grid loop. reads the 8-field conserved (den, mom_{0,1,2}, nrg, mag_{0,1,2})
-/// + gamma; writes (rho, vel_{0,1,2}, pre). B passes through (CT-evolved, so c2p does not recover it).
+/// RMHD vectors are 3-component on every grid (the physics is 3D; grid symmetry handles the
+/// 1D/2D cases), so this always traces `rmhd_recover::<Gv, 3>` — `ndim` selects the emit grid
+/// loop. reads the 8-field conserved (den, mom_{0,1,2}, nrg, mag_{0,1,2})
+/// + gamma; writes (rho, vel_{0,1,2}, pre). B passes through, recovered by the CT evolution.
 pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // input binding, in the substrate's field-read order: den, mom, nrg (tau), mag, gamma.
@@ -324,7 +325,7 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeI
         std::array::from_fn(|k| Gv::field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
     let gamma = Gv::scalar("gamma");
 
-    // the SINGLE-SOURCE physics at the tracing carrier (3-component RMHD state).
+    // the single-source physics at the tracing carrier (3-component RMHD state).
     let cons = MhdCons::<Gv, 3> {
         hydro: Cons {
             chi: Default::default(),
@@ -362,10 +363,10 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeI
     (end_trace(), writes)
 }
 
-/// the RMHD cons->prim on a curved SPATIAL metric — the metric-aware KKC recovery
+/// the RMHD cons->prim on a curved spatial metric — the metric-aware KKC recovery
 /// (`|r|^2 = gamma^{ij} r_i r_j`, `B^2 = gamma_ij h^i h^j`, contravariant `v^i` raised) with
-/// gamma at the cell's VOLUME-WEIGHTED centroid — the same point the covariant `to_conserved`
-/// stored at, so the round-trip is exact (well-balanced). the metric evaluates at its FULL
+/// gamma at the cell's volume-weighted centroid — the same point the covariant `to_conserved`
+/// stored at, so the round-trip is exact (well-balanced). the metric evaluates at its full
 /// three coordinates regardless of the grid dimension (RMHD vectors are always 3-component):
 /// gridded slots take the centroid, the ungridded polar slot the exact equatorial pi/2, the
 /// azimuthal slot zero. spinning kerr requires the gridded polar axis.
@@ -396,10 +397,10 @@ pub fn rmhd_c2p_gr_gv(
     // the covariant energy ehat = alpha tau + (alpha-1) D - beta^i S_i is what the godunov evolves,
     // so the recovery harvests the cell lapse + shift to invert it back to the valencia tau the KKC
     // c2p consumes: tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
-    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
     // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. every spinning
     // kerr chart has a theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta),
-    // so the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
+    // so the polar axis must be gridded — the swirl 2D (r, theta) bake grids it (the
     // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
     let (gm, gm_inv, alpha, beta) = {
         fn adm<M: Metric<Gv, 3>>(
@@ -452,18 +453,18 @@ pub fn rmhd_c2p_gr_gv(
 }
 
 // =============================================================================
-// newtonian MHD — the non-relativistic ideal-MHD regime. ALGEBRAIC c2p (no
-// iteration -> no current-sheet failure mode), closed-form fast-magnetosonic
-// wave speeds (cheap enough to compute inline in the flux from the reconstructed
-// face states; NO per-cell materialization needed, unlike the RMHD quartic). all
-// three builders trace the SAME `NewtonianMhd` carrier-generic physics validated
-// at f64 in symbi-hydro. B passes through c2p unchanged (CT-evolved, so c2p does not recover it).
+// newtonian MHD — the non-relativistic ideal-MHD regime. algebraic c2p (closed-form,
+// so it holds through the current sheets where an iterate fails), closed-form
+// fast-magnetosonic wave speeds (cheap enough to compute inline in the flux from the
+// reconstructed face states, where the RMHD quartic needs a per-cell materialization). all
+// three builders trace the one `NewtonianMhd` carrier-generic physics validated
+// at f64 in symbi-hydro. B passes through c2p unchanged; the CT evolution advances it.
 // =============================================================================
 
 /// trace the newtonian-MHD c2p — the carrier-safe algebraic `nmhd_recover` at
 /// `S = Gv`. binds cons (den, mom, nrg, mag) + gamma; writes the recovered hydro
-/// (rho, vel, pre). the host-side `to_primitive` error codes are NOT traced (the
-/// math is branch-free; comparisons stay on the host). reads `cons_mag_k` because
+/// (rho, vel, pre). the host-side `to_primitive` error codes stay on the host (the
+/// traced math is branch-free, comparisons living with the caller). reads `cons_mag_k` because
 /// recovering the gas pressure requires stripping 1/2|B|^2 from the total energy.
 pub fn nmhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
@@ -508,15 +509,15 @@ pub fn nmhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 }
 
 // =============================================================================
-// ISOTHERMAL MHD gv builders — the same shapes as the NMHD ones, but over the
+// isothermal MHD gv builders — the same shapes as the NMHD ones, over the
 // energy-model-generic state at E = IsoModel: the conserved vector is {den, mom,
-// mag} (NO nrg), c2p is trivial (rho = den, v = mom/den, no pressure), and the
-// closure is p = cs^2 rho (Isothermal EOS, scalar `cs` replaces `gamma`). the
+// mag}, c2p is trivial (rho = den, v = mom/den), and the
+// closure supplies p = cs^2 rho (Isothermal EOS, scalar `cs` replaces `gamma`). the
 // flux is `IsothermalMhd::to_flux` -> HLLE / the 3-state `hlld_isothermal`.
 // =============================================================================
 
-/// trace the isothermal-MHD c2p — trivial inversion (rho = den, v = mom/den); no
-/// energy/pressure output. the single source the substrate c2p kernel renders.
+/// trace the isothermal-MHD c2p — trivial inversion (rho = den, v = mom/den), writing rho
+/// and vel. the single source the substrate c2p kernel renders.
 pub fn imhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let den = Gv::field("cons_den", FieldRef::cons_den());
@@ -534,7 +535,8 @@ pub fn imhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
         },
         mag: Tensor::new(mag),
     };
-    // imhd_recover ignores the EOS (pure kinematics); Gv::ZERO -> no `cs` param.
+    // imhd_recover is pure kinematics, so the EOS argument is inert; Gv::ZERO keeps `cs`
+    // out of the manifest.
     let prim = imhd_recover(&Isothermal { cs: Gv::ZERO }, &cons);
 
     let mut writes = vec![(
@@ -549,6 +551,6 @@ pub fn imhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
             prim.vel[k].node(),
         ));
     }
-    // no prim.pre — the isothermal closure has no independent pressure.
+    // the writes stop at vel — the isothermal closure sets the pressure from rho.
     (end_trace(), writes)
 }

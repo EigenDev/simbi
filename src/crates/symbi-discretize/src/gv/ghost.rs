@@ -7,10 +7,11 @@
 use super::*;
 
 /// the isothermal lattice-map ghost fill — pull back rho/vel/pre at the per-axis source coord,
-/// write IN PLACE; the velocity component whose coordinate is a GRID axis picks up that axis's
-/// wall-normal `vel_sign` (an ungridded swirl coordinate has no wall map -> unflipped). rho/pre
-/// are grade-0 copies. `ncomp` velocity components, `ndim` gridded axes; `axes[d]` = the coord
-/// of grid axis d. the EOS-generic 3-field pullback the iso/newton/rhd ghost fill share.
+/// write in place; the velocity component whose coordinate is a grid axis picks up that axis's
+/// wall-normal `vel_sign` (an ungridded swirl coordinate keeps its sign, having no wall
+/// map). rho/pre are grade-0 copies. `ncomp` velocity components, `ndim` gridded axes;
+/// `axes[d]` = the coord of grid axis d. the EOS-generic 3-field pullback the
+/// iso/newton/rhd ghost fill share.
 pub fn iso_ghost_fill_gv(
     ndim: usize,
     ncomp: usize,
@@ -25,7 +26,7 @@ pub fn iso_ghost_fill_gv(
     let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), rho.node())];
     for k in 0..ncomp {
         let v = gv_load_at(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src);
-        // grade-1 wall flip on the grid axis whose coordinate IS k; ungridded -> unflipped.
+        // grade-1 wall flip on the grid axis whose coordinate is k; ungridded keeps its sign.
         let v = match axes.iter().position(|&c| c == k) {
             Some(ax) => v * vel_sign[ax],
             None => v,
@@ -41,9 +42,9 @@ pub fn iso_ghost_fill_gv(
     (end_trace(), writes)
 }
 
-/// the OUTWARD edge->ghost separation used by the prescribed-gradient fills: `sum_ax |centroid(ghost
-/// index) - centroid(source index)|`. the source index is the outflow EDGE (map_type >= 3), so a
-/// PASSTHROUGH axis (source == cell coord) contributes 0 and a single-axis face pass yields exactly
+/// the outward edge->ghost separation used by the prescribed-gradient fills: `sum_ax |centroid(ghost
+/// index) - centroid(source index)|`. the source index is the outflow edge (map_type >= 3), so a
+/// passthrough axis (source == cell coord) contributes 0 and a single-axis face pass yields exactly
 /// that face's outward distance — a corner (multi-axis) composes the per-axis distances. the
 /// centroid is the midpoint of the cell's two faces (uniform or log, via `gv_axis_face_at_index`).
 fn gv_outward_dist(ndim: usize, spacing: &[Spacing], src: &[NodeId]) -> Gv {
@@ -61,8 +62,8 @@ fn gv_outward_dist(ndim: usize, spacing: &[Spacing], src: &[NodeId]) -> Gv {
     dist
 }
 
-/// the NEUMANN lattice-map ghost fill: prescribe the OUTWARD normal derivative `dU/dn = q` per
-/// primitive variable. reuses the outflow EDGE source coord (map_type >= 3 -> arg), reads the
+/// the neumann lattice-map ghost fill: prescribe the outward normal derivative `dU/dn = q` per
+/// primitive variable. reuses the outflow edge source coord (map_type >= 3 -> arg), reads the
 /// boundary-adjacent interior value, and extrapolates `U_ghost = u_edge + q * dist` (per-variable
 /// coefficient `neu_q_*`, outward separation `dist`). `q = 0` recovers the plain outflow copy, so
 /// outflow is the homogeneous member of this family. `ncomp` velocity components, `ndim` gridded
@@ -98,9 +99,9 @@ pub fn neumann_ghost_fill_gv(
     (end_trace(), writes)
 }
 
-/// the ROBIN lattice-map ghost fill: prescribe `a*U_face + b*(dU/dn) = c` per primitive variable at
-/// the boundary FACE, with the face midway between the edge cell and the ghost (separation `dist`).
-/// reuses the outflow EDGE source; the per-variable coefficients are `rob_{a,b,c}_*`. degenerates to
+/// the robin lattice-map ghost fill: prescribe `a*U_face + b*(dU/dn) = c` per primitive variable at
+/// the boundary face, with the face midway between the edge cell and the ghost (separation `dist`).
+/// reuses the outflow edge source; the per-variable coefficients are `rob_{a,b,c}_*`. degenerates to
 /// dirichlet (`b = 0`) and neumann (`a = 0`) per `symbi_hydro::boundary_term::robin_ghost`.
 pub fn robin_ghost_fill_gv(
     ndim: usize,
@@ -146,11 +147,11 @@ pub fn robin_ghost_fill_gv(
     (end_trace(), writes)
 }
 
-/// the SINGLE-SCALAR lattice-map ghost fill: pull back one field "f" at the per-axis
+/// the single-scalar lattice-map ghost fill: pull back one field "f" at the per-axis
 /// integer source coord, times the runtime grade `sign` (+1 for a scalar copy or a
 /// tangential staggered component; -1 for a wall-normal component under a reflect
 /// map). the staggered `bface` transverse-halo fill dispatches this per component —
-/// the field resolves the region's absolute coords against its OWN staggered lo, so
+/// the field resolves the region's absolute coords against its own staggered lo, so
 /// the same kernel serves any cell- or face-anchored scalar.
 pub fn scalar_ghost_fill_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
@@ -164,14 +165,14 @@ pub fn scalar_ghost_fill_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, N
 // the per-vector-component wall-map sign: the in-plane components (k < ndim) pick up the
 // boundary axis's reflect sign (B/vel are grade-1 vectors under the wall map); the out-of-
 // plane components (k >= ndim, e.g., Bz/vz in 1.5D/2.5D) are tangential to every grid-axis
-// wall, so they copy unchanged (sign = +1). this is why ghost fill loops 0..ncomp (DOF),
-// NOT 0..ndim — else the out-of-plane ghosts stay zero and drain the boundary.
+// wall, so they copy unchanged (sign = +1). this is why ghost fill loops 0..ncomp (DOF):
+// a 0..ndim loop leaves the out-of-plane ghosts at zero, which drains the boundary.
 fn gv_ghost_sign(k: usize, ndim: usize, vel_sign: &[Gv]) -> Gv {
     if k < ndim { vel_sign[k] } else { Gv::ONE }
 }
 
 /// the RMHD lattice-map ghost fill — `iso_ghost_fill_gv` plus the cell-centered B: pull back
-/// rho/vel/pre + `mhd.bcell[k]`, the velocity AND B (DOF-vectors) picking up the per-axis
+/// rho/vel/pre + `mhd.bcell[k]`, the velocity and B (DOF-vectors) picking up the per-axis
 /// `vel_sign` for in-plane components and copying the out-of-plane ones. `ndim` = grid axes
 /// (the lattice source + reflect signs), `ncomp` = vector components (DOF).
 pub fn rmhd_ghost_fill_gv(
@@ -208,8 +209,8 @@ pub fn rmhd_ghost_fill_gv(
     (end_trace(), writes)
 }
 
-/// the ISOTHERMAL lattice-map ghost fill — `rmhd_ghost_fill_gv` minus the `pre` field
-/// (isothermal MHD has no pressure to fill). rho + vel + bcell only.
+/// the isothermal lattice-map ghost fill — the `rmhd_ghost_fill_gv` field set at the
+/// isothermal state: rho + vel + bcell, the pressure coming from the closure.
 pub fn imhd_ghost_fill_gv(
     ndim: usize,
     ncomp: usize,
@@ -242,15 +243,15 @@ pub fn imhd_ghost_fill_gv(
     (end_trace(), writes)
 }
 
-/// the SPINNING-KERR lattice-map ghost fill — `iso_ghost_fill_gv` (2D grid, swirl DOF = 3)
-/// with the azimuthal ghost copied through the ANGULAR-MOMENTUM variable
+/// the spinning-kerr lattice-map ghost fill — `iso_ghost_fill_gv` (2D grid, swirl DOF = 3)
+/// with the azimuthal ghost copied through the angular-momentum variable
 /// w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r. a frame-dragging
 /// state (S_phi = 0) satisfies w = 0 at every radius; a raw v^phi copy plants the source
-/// cell's dragging velocity at the ghost's DIFFERENT (r, theta), violating the dragging
+/// cell's dragging velocity at the ghost's own (r, theta), violating the dragging
 /// relation there and generating boundary S_phi at truncation scale. the w copy keeps the
 /// pulled-back state on the dragging manifold exactly:
 ///   v^phi(ghost) = [v^phi(src) + q(src) v^r(src)] - q(ghost) v^r(ghost),
-/// with q = gamma_{r phi}/gamma_{phi phi} evaluated at each cell's VOLUME-WEIGHTED centroid
+/// with q = gamma_{r phi}/gamma_{phi phi} evaluated at each cell's volume-weighted centroid
 /// (the c2p metric point, so the cellwise cancellation transfers at roundoff) and
 /// v^r(ghost) carrying the wall map's vel_sign. q(src) needs the source cell's position, an
 /// integer map expression — `gv_axis_face_at_index` evaluates the coordinate map there.
@@ -285,10 +286,10 @@ pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(String, Fi
     let q_at = |i: Gv, j: Gv| -> Gv {
         let rl = gv_axis_face_at_index(0, spacing[0], i);
         let rh = gv_axis_face_at_index(0, spacing[0], i + Gv::ONE);
-        // the volume-weighted centroid, the SAME text `cell_geometry_gv` evaluates:
+        // the volume-weighted centroid, the same text `cell_geometry_gv` evaluates:
         // the c2p inverted the metric at that centroid, and the zero-angular-momentum
-        // cancellation transfers to the stencil only when the coefficient is evaluated
-        // at the bit-identical position.
+        // cancellation transfers to the stencil when the coefficient is evaluated at
+        // that bit-identical position.
         let r_c = symbi_geometry::volume_weighted_centroid(
             symbi_geometry::Geometry::Spherical,
             0,
@@ -323,12 +324,12 @@ pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(String, Fi
     (end_trace(), writes)
 }
 
-/// the SPINNING-KERR MHD lattice-map ghost fill — `rhd_kerr_ghost_fill_gv` (the velocity
-/// w = v^phi + q v^r copy) PLUS the cell-centered B, whose out-of-plane component gets the SAME
+/// the spinning-kerr MHD lattice-map ghost fill — `rhd_kerr_ghost_fill_gv` (the velocity
+/// w = v^phi + q v^r copy) plus the cell-centered B, whose out-of-plane component gets the same
 /// frame-dragging treatment: the covariant B_phi = gamma_{phi phi} B^phi + gamma_{phi r} B^r is the
 /// magnetic angular-momentum density, so a B_phi = 0 state satisfies w_B = B^phi + q B^r = 0 at every
 /// radius (q = gamma_{r phi}/gamma_{phi phi}). copying B^phi raw plants the source cell's dragging
-/// profile at the ghost's DIFFERENT (r, theta) and generates a boundary B_phi (a spurious toroidal-
+/// profile at the ghost's own (r, theta) and generates a boundary B_phi (a spurious toroidal-
 /// field / azimuthal-tension source) at truncation; the w_B copy keeps the pulled-back B on the
 /// dragging manifold exactly:
 ///   B^phi(ghost) = [B^phi(src) + q(src) B^r(src)] - q(ghost) B^r(ghost).
@@ -350,10 +351,10 @@ pub fn rmhd_kerr_ghost_fill_gv(
     let q_at = |i: Gv, j: Gv| -> Gv {
         let rl = gv_axis_face_at_index(0, spacing[0], i);
         let rh = gv_axis_face_at_index(0, spacing[0], i + Gv::ONE);
-        // the volume-weighted centroid, the SAME text `cell_geometry_gv` evaluates:
+        // the volume-weighted centroid, the same text `cell_geometry_gv` evaluates:
         // the c2p inverted the metric at that centroid, and the zero-angular-momentum
-        // cancellation transfers to the stencil only when the coefficient is evaluated
-        // at the bit-identical position.
+        // cancellation transfers to the stencil when the coefficient is evaluated at
+        // that bit-identical position.
         let r_c = symbi_geometry::volume_weighted_centroid(
             symbi_geometry::Geometry::Spherical,
             0,
@@ -414,17 +415,17 @@ pub fn rmhd_kerr_ghost_fill_gv(
     (end_trace(), writes)
 }
 
-/// the WELL-BALANCED lattice-map ghost fill, per chart: the velocity pulls back with the
-/// wall-normal `vel_sign` flip exactly as the plain fill, but density and pressure are
-/// EXTENDED ALONG THE LOCAL ISENTROPE from the source cell to the ghost position,
+/// the well-balanced lattice-map ghost fill, per chart: the velocity pulls back with the
+/// wall-normal `vel_sign` flip exactly as the plain fill, and density and pressure are
+/// extended along the local isentrope from the source cell to the ghost position,
 ///
 ///   (rho, p)_ghost = LocalEquilibrium::through((rho, p)_src, phi_src).state_at(phi_ghost),
 ///
 /// with `phi` the total body potential at each cell's position — the runtime spacing map's
 /// own cell centers (geometric mean of the faces on a log axis, arithmetic midpoint
 /// otherwise), the same anchor ladder the balanced reconstruction evaluates, mapped to
-/// cartesian through the chart embedding on a curvilinear grid. a mirrored copy of a
-/// stratified column is not the column's continuation, so a plain reflect ghost presents
+/// cartesian through the chart embedding on a curvilinear grid. the continuation of a
+/// stratified column is its hydrostatic extension, so a plain reflect ghost presents
 /// the balanced reconstruction with departures that are pure boundary artifact -- measured
 /// as a 1.5e-2 entropy-floor loss on a sealed column that the interior scheme holds to
 /// 2.2e-8. the extension makes the wall face balanced by construction, the same statement
@@ -433,9 +434,9 @@ pub fn rmhd_kerr_ghost_fill_gv(
 /// the extension is exact wherever the source and ghost potentials coincide: a skip axis
 /// (source == cell) gives `phi_src == phi_ghost` as identical traced nodes, the enthalpy
 /// ratio is exactly one, and the fill reduces to the plain pullback bit-for-bit. on an
-/// outflow edge it extends the column hydrostatically instead of flat-copying it, which is
-/// the well-balanced outflow fill. a periodic cut across an asymmetric potential would be
-/// mis-extended -- refused at dispatch rather than approximated.
+/// outflow edge it extends the column hydrostatically, which is the well-balanced outflow
+/// fill (the plain fill flat-copies). a periodic cut across an asymmetric potential would be
+/// mis-extended, and dispatch refuses it.
 pub fn wb_ghost_fill_gv(
     ndim: usize,
     ncomp: usize,
@@ -450,7 +451,7 @@ pub fn wb_ghost_fill_gv(
         .map(|ax| Gv::scalar(&format!("vel_sign_{ax}")))
         .collect();
     // the bake-time spacing enum is vestigial: face positions and the cell center both come
-    // from the RUNTIME per-axis map (`map_kind_{ax}`), so this one kernel serves every
+    // from the runtime per-axis map (`map_kind_{ax}`), so this one kernel serves every
     // grading. the center is the map's own (geometric mean on a log axis, arithmetic midpoint
     // otherwise) — the same position `set_initial` seeds at and the balanced reconstruction's
     // potential ladder anchors on, which is what makes the wall-face extension exact on the
@@ -463,7 +464,7 @@ pub fn wb_ghost_fill_gv(
     };
     let (phi_src, phi_ghost) = match coords {
         Coords::Cartesian => {
-            // cartesian: grid axis positions ARE the cartesian coordinates; ungridded components 0.
+            // cartesian: grid axis positions are the cartesian coordinates; ungridded components 0.
             let mut ghost_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
             let mut src_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
             for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
@@ -495,7 +496,7 @@ pub fn wb_ghost_fill_gv(
             let phi_ghost = phi_at(&ghost_pos);
             (phi_src, phi_ghost)
         }
-        // curvilinear: the per-axis midpoints are CHART coordinates (r, theta, ...); the
+        // curvilinear: the per-axis midpoints are chart coordinates (r, theta, ...); the
         // potential is evaluated at their cartesian embedding, against body positions on
         // the chart's grid-plane cartesian axes — the same convention the balanced
         // reconstruction's potential ladder and the wb body source use, so the wall face

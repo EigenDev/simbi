@@ -2,21 +2,22 @@
 // support_inference.rs
 //
 // the derived-support parity law: every body kernel's output support is
-// DERIVED — the mask
+// derived — the mask
 // seam tags chi's saturation ball and propagation carries it through the
 // property algebra to the write roots — and must reproduce the geometry the
 // hand declarations stated: ball(body_0_pos, racc + DRAIN_SUPPORT_WIDTHS *
 // min(dx)) for sphere masks, the shape's bounding ball for CSG masks. gates:
 // - every cartesian penalize / feedback / resistive-EMF builder derives that
 //   exact ball (numerically, under a fixed scalar table);
-// - a SPINNING shape derives the position-centered swept ball |lc| + lr + pad
-//   — strictly wider than the static shape ball (the static-center ball does
-//   not contain a mask rotated half a turn);
-// - a curvilinear chart derives NO ball (the cartesian mask region is not a
-//   coordinate ball off the identity chart) — fail-safe Everywhere, matching
+// - a spinning shape derives the position-centered swept ball |lc| + lr + pad
+//   — strictly wider than the static shape ball, since it contains the mask at
+//   every rotation angle, a half turn included;
+// - a curvilinear chart derives Everywhere (a cartesian mask region is a
+//   coordinate ball on the identity chart alone) — the fail-safe, matching
 //   the whole-interior dispatch fallback;
-// - a kernel whose write chain breaks the mask algebra derives Everywhere,
-//   never a stale narrow ball (gated in symbi-ir's support_infer unit tests).
+// - a kernel whose write chain breaks the mask algebra derives Everywhere, so
+//   a broken chain widens the support (gated in symbi-ir's support_infer unit
+//   tests).
 // =============================================================================
 
 use symbi_discretize::coords::Coords;
@@ -81,7 +82,7 @@ fn sphere_kernels_derive_the_declared_ball() {
     // 3d.
     let (k, _) = penalize_drain_gv(Coords::Cartesian, 3, 3, &[0, 1, 2], false);
     expect_ball(&k.output_support, "drain 3d", &POS, RACC + PAD);
-    // the (r, z) axisymmetric section: the on-axis mask region IS a coordinate
+    // the (r, z) axisymmetric section: the on-axis mask region is a coordinate
     // ball (identity embedding), so the sphere mask carries its ball there too.
     let (k, _) = penalize_drain_gv(Coords::Cylindrical, 2, 3, &[0, 2], false);
     expect_ball(&k.output_support, "drain rz", &POS[..2], RACC + PAD);
@@ -120,9 +121,9 @@ fn shaped_kernel_derives_the_shape_bounding_ball() {
 
 #[test]
 fn spinning_kernel_derives_the_position_centered_swept_ball() {
-    // an OFFSET shape: rotation sweeps its bounding ball around the body
+    // an offset shape: rotation sweeps its bounding ball around the body
     // position, so the support is position-centered with |lc| + lr radius —
-    // the static-center ball misses the mask at half a turn.
+    // the radius that still covers the mask at half a turn.
     let shape = SdfExpr::<f64, 3>::cuboid([0.3, 0.1, 0.0], [0.5, 0.3, 0.2]);
     let (lc, lr) = shape.bounding_ball().expect("bounded shape");
     let lc_norm = (lc[0] * lc[0] + lc[1] * lc[1] + lc[2] * lc[2]).sqrt();
@@ -141,9 +142,9 @@ fn spinning_kernel_derives_the_position_centered_swept_ball() {
 
 #[test]
 fn curvilinear_kernels_derive_no_ball() {
-    // the mask ball is a cartesian region; on a curvilinear chart it is not a
-    // coordinate ball, so the derivation must refuse — dispatch already runs
-    // the whole interior off-cartesian.
+    // the mask ball is a cartesian region, a coordinate ball on the identity
+    // chart alone, so a curvilinear chart derives Everywhere — dispatch already
+    // runs the whole interior off-cartesian.
     for coords in [Coords::Cylindrical, Coords::Spherical] {
         let (k, _) = penalize_drain_gv(coords, 2, 2, &[0, 1], false);
         assert!(

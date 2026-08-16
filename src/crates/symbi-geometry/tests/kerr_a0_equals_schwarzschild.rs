@@ -1,17 +1,17 @@
 // =============================================================================
 // kerr_a0_equals_schwarzschild.rs
 //
-// at zero spin the kerr-schild kerr chart IS the schwarzschild kerr-schild
+// at zero spin the kerr-schild kerr chart is the schwarzschild kerr-schild
 // chart: the oblate-spheroidal radius solve
 //   r^2 = (R^2 - a^2)/2 + sqrt(((R^2 - a^2)/2)^2 + a^2 z^2)
 // collapses to r = R, the null covector l^i = (r x + a y, r y - a x, z r)/(r^2 + a^2)
 // collapses to x^i / r, and 2H = 2 M r^3 / (r^4 + a^2 z^2) collapses to 2M/r.
-// so every metric quantity from the two implementations must agree to roundoff.
+// so every metric quantity from the two implementations agrees to roundoff.
 //
-// this is a LAW, not a sampled comparison: the two are separate code paths that
-// carry separate baked kernels (Spacetime::KerrKS vs Spacetime::SchwarzschildKS), so a
-// divergence here is silent — both paths keep running and merely disagree about
-// the same spacetime.
+// this is a law that holds pointwise, across the whole sampled set: the two are
+// separate code paths carrying separate baked kernels (Spacetime::KerrKS vs
+// Spacetime::SchwarzschildKS), so a divergence here is silent — both paths keep
+// running and merely disagree about the same spacetime.
 //
 // run: cargo test -p symbi-geometry --test kerr_a0_equals_schwarzschild
 // =============================================================================
@@ -32,9 +32,9 @@ fn points() -> Vec<[f64; 3]> {
             }
         }
     }
-    // INSIDE the r < M/2 radius floor as well: both charts contract the rank-1 forms with the
-    // ACTUAL |l|^2, which the floor drives below 1, so the two continue the clamped core
-    // identically rather than diverging. sampling the floor is the point — the a = 0 chart once
+    // inside the r < M/2 radius floor as well: both charts contract the rank-1 forms with the
+    // measured |l|^2, which the floor drives below 1, so the two continue the clamped core
+    // identically. sampling the floor is the point — the a = 0 chart once
     // assumed the unit-l forms there and disagreed with the spinning chart by ~19% in the lapse,
     // decaying outward about two decades per shell into the region the accretion gates read.
     for &s in &[0.45_f64, 0.3, 0.12, 0.02] {

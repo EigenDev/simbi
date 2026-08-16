@@ -59,7 +59,7 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
     (sim, k)
 }
 
-// the tile grid over the origin-centered box: the 2x2 cut point is EXACTLY the
+// the tile grid over the origin-centered box: the 2x2 cut point lands exactly on the
 // chart origin, so every tile owns one quadrant of the excised sphere and the
 // excised rim straddles all four cuts.
 fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
@@ -110,8 +110,8 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2]) {
         &LocalCopy,
         |_, _, stores| {
             // dt-collapse tripwire: the vacuum-sink rim can drive dt into the
-            // floor on cold configurations; a run that can never finish must
-            // fail loud rather than spin.
+            // floor on cold configurations; a run whose dt has collapsed fails
+            // loud here instead of spinning to the time limit.
             assert!(
                 stores[0].dt > 1.0e-9,
                 "dt collapsed to {:.3e} at t = {:.6e}",
@@ -156,7 +156,7 @@ fn assert_matches(counts: [usize; 2]) {
         mden.iter().all(|v| v.is_finite()) && dden.iter().all(|v| v.is_finite()),
         "some global cells were never written (gather bug)"
     );
-    // non-vacuous: the infall genuinely developed AND the excision genuinely acted
+    // non-vacuous: the infall genuinely developed and the excision genuinely acted
     // (the deep excised cells hold rebuilt, non-initial values).
     let den_max = mden.iter().cloned().fold(0.0_f64, f64::max);
     assert!(

@@ -1,26 +1,26 @@
 // =============================================================================
 // rmhd_ct_curl3d_divb_symbolic.rs
 //
-// the SYMBOLIC keystone proof that the cartesian 3D constrained-transport curl
+// the symbolic keystone proof that the cartesian 3D constrained-transport curl
 // preserves div(B) = 0 — by polynomial-coefficient cancellation on the traced IR
 // DAG at graph-build time; the numerical 1e-12 evolve test lives in rmhd_ct_curl3d_divb.rs.
 //
 // for each face axis `dir`, `rmhd_ct_curl_3d_dir_gv` traces `b_new = b + dt*curl`
-// whose leaves are edge-emf field reads at KNOWN integer stencil offsets.
+// whose leaves are edge-emf field reads at known integer stencil offsets.
 // `symbi_ir::proof::LinForm` extracts the exact symbolic linear combination of
 // those reads. the divergence stencil over a cell is
 //   d(div B)/dt = sum_dir id_dir * (curl[dir][+e_dir] - curl[dir][+0]),
-// applied symbolically by SHIFTING each curl LinForm's offsets. the edge-emf
-// contributions must cancel to the ZERO linear form for div(B) to vanish by
-// construction, for ANY input field — that is the proof.
+// applied symbolically by shifting each curl LinForm's offsets. div(B) vanishes by
+// construction exactly when the edge-emf contributions cancel to the zero linear
+// form, for every input field — that is the proof.
 //
-// canonicalization: the per-dir builder reuses the GENERIC keys e_p1/e_p2 and
-// scalars id_p1/id_p2 for all three dirs, but they denote different PHYSICAL emf
-// components / inverse widths (p1=(dir+1)%3, p2=(dir+2)%3). the runtime dispatch
-// binds the real buffers positionally; the symbolic proof must rename them to
-// their physical-axis identity (e_<axis>, id_<axis>) before the three dirs can
-// telescope. the b (old-field) leaf is stripped — it reproduces div(B_old), not
-// part of the UPDATE's preservation property.
+// canonicalization: the per-dir builder reuses the generic keys e_p1/e_p2 and
+// scalars id_p1/id_p2 for all three dirs, and they denote a different physical emf
+// component / inverse width per dir (p1=(dir+1)%3, p2=(dir+2)%3). the runtime
+// dispatch binds the real buffers positionally; the symbolic proof renames them to
+// their physical-axis identity (e_<axis>, id_<axis>) so the three dirs telescope.
+// the b (old-field) leaf is stripped — it reproduces div(B_old), which the update
+// leaves invariant.
 // =============================================================================
 
 use std::collections::HashMap;
@@ -33,15 +33,15 @@ use symbi_ir::proof::{LinForm, Poly};
 const FIELDS: &[&str] = &["e_p1", "e_p2", "b"];
 const SCALARS: &[&str] = &["dt", "id_p1", "id_p2"];
 
-// strip the old-field `b` leaf: it contributes div(B_old), invariant under the
-// update, so it is not part of the "the update preserves div" proof.
+// strip the old-field `b` leaf: it contributes div(B_old), which the update leaves
+// invariant; the proof concerns the increment the update adds.
 fn curl_only(mut lf: LinForm) -> LinForm {
     lf.terms.retain(|(key, _), _| key != "b");
     lf
 }
 
 // map the per-dir generic names to physical-axis identities. for face axis dir,
-// p1=(dir+1)%3 and p2=(dir+2)%3, so the generic e_p1/id_p1 ARE the physical
+// p1=(dir+1)%3 and p2=(dir+2)%3, so the generic e_p1/id_p1 denote the physical
 // component p1, e_p2/id_p2 the component p2.
 fn physical_rename(dir: usize) -> HashMap<String, String> {
     let p1 = (dir + 1) % 3;
@@ -84,7 +84,7 @@ fn divb_symbolic_telescoping() {
         div_contribution.add(&diff.scale_var(&id_div));
     }
 
-    // THE PROOF: the edge-emf contributions telescope to the zero polynomial.
+    // the proof: the edge-emf contributions telescope to the zero polynomial.
     assert!(
         div_contribution.is_zero(),
         "div(curl B) != 0 symbolically — residual edge-emf coefficients:\n{:#?}",
@@ -92,8 +92,8 @@ fn divb_symbolic_telescoping() {
     );
 }
 
-// a NEGATIVE control: mismatched coefficients do NOT cancel, so the checker is
-// not vacuously green — exactly the residual a sign bug in the curl would leave.
+// a negative control: mismatched coefficients leave a residual, so the checker
+// reports a broken cancellation — exactly what a sign bug in the curl would leave.
 #[test]
 fn divb_symbolic_detects_broken_telescoping() {
     let mut lf = LinForm::default();

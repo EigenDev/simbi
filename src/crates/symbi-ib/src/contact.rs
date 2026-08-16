@@ -2,7 +2,7 @@
 // contact.rs
 //
 // soft-sphere contact between rigid fragments (cundall & strack 1979): pairs
-// whose bounding spheres overlap and are NOT joined by an intact bond repel
+// whose bounding spheres overlap while free of an intact bond repel
 // through a linear spring-dashpot on the overlap, with coulomb-capped
 // tangential friction from a slip accumulator at the contact point. an intact
 // bond owns its pair's interaction entirely; contact takes over the moment the
@@ -10,10 +10,10 @@
 //
 // the normal force is non-attractive by construction: the dashpot may reduce
 // the repulsion of a separating pair but the total normal force clamps at
-// zero, so a contact can never bind. the tangential spring force saturates at
+// zero, so a contact stays purely repulsive. the tangential spring force saturates at
 // the coulomb cone `|F_t| <= mu F_n` (the accumulator is clipped to the cap,
 // the standard cundall-strack sliding rule). the total force is applied as
-// +F on body i and -F on body j at the COMMON contact point, the same
+// +F on body i and -F on body j at the common contact point, the same
 // conservation spelling as the bond module: pair linear momentum and pair
 // total angular momentum are conserved identically.
 //
@@ -107,7 +107,7 @@ fn material_velocity<const D: usize>(body: &Body<f64, D>, p: [f64; 3]) -> [f64; 
 }
 
 // non-attractive normal force magnitude: spring on the overlap, dashpot on the
-// separation rate, clamped at zero so a departing contact never pulls.
+// separation rate, clamped at zero so a departing contact pushes or releases.
 fn normal_magnitude(mat: &ContactMaterial, delta: f64, v_n: f64) -> f64 {
     (mat.k_n * delta - mat.gamma_n * v_n).max(0.0)
 }
@@ -136,7 +136,7 @@ impl Contacts {
 
     // the contact force on body i of the pair, at the contact point. reads the
     // stored slip; saturation against the coulomb cone happens here on the
-    // FORCE (the accumulator itself is clipped in `update_slip`).
+    // force (the accumulator itself is clipped in `update_slip`).
     pub(crate) fn kick<const D: usize>(
         &self,
         key: (usize, usize),
@@ -204,7 +204,7 @@ impl Contacts {
                     slip[a] = (slip[a] - sn * ov.n[a]) + (ov.v_rel[a] - vn * ov.n[a]) * h;
                 }
                 // sliding: clip the accumulator to the coulomb cone so the
-                // stored spring force never exceeds `mu F_n`.
+                // stored spring force stays within `mu F_n`.
                 if m.k_t > 0.0 && m.mu.is_finite() {
                     let f_n = normal_magnitude(&m, ov.delta, vn);
                     let cap = m.mu * f_n / m.k_t;
@@ -447,8 +447,8 @@ mod tests {
 
     #[test]
     fn intact_bond_owns_the_pair_until_breakage() {
-        // a bond holds the pair OVERLAPPED at rest length 0.8 < r_i + r_j:
-        // contact must stay silent while the bond is intact, then push the
+        // a bond holds the pair overlapped at rest length 0.8 < r_i + r_j:
+        // contact stays silent while the bond is intact, then pushes the
         // fragments apart to touching distance once it breaks.
         let mut coll = BodyCollection::<f64, 2>::new()
             .add_fragment(ball(0.0, 0.0, 0.0, 0.0))

@@ -4,8 +4,9 @@
 # `simbi attach <data_dir>` — read-only live monitor for a headless run.
 # a run started with `--live` writes a snapshot to <data_dir>/.simbi-live/ each
 # diagnostic cadence; this polls that file and renders the same tabbed dashboard
-# the interactive run shows. one-way: the client never writes back, so pausing /
-# stepping / checkpointing are absent (they do not apply to a remote run).
+# the interactive run shows. the traffic is one-way -- the client reads the
+# snapshot and renders it -- so control actions (pausing, stepping,
+# checkpointing) stay with the process that owns the run.
 # =============================================================================
 import sys
 from argparse import Namespace, _SubParsersAction

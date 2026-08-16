@@ -2,13 +2,13 @@
 # test_polygon_compose.py
 #
 # a level hierarchy is drawn one quadrilateral per cell, because a quadmesh is
-# a single logically-rectangular lattice and cannot hold cells of two sizes.
-# composing it has to get two things right, and neither shows up in a picture:
+# a single logically-rectangular lattice holding cells of one size. composing
+# it has to get two things right, and a finished picture hides both:
 #
 #   - every leaf cell appears exactly once, carrying its own value. a cell
 #     drawn twice is a coarse value painted over a fine one, and the plot looks
 #     finished either way.
-#   - a cell belongs to the finest level that covers its CENTRE. testing the
+#   - a cell belongs to the finest level that covers its center. testing the
 #     corners instead drops the coarse cells that merely abut a refined patch,
 #     leaving a hairline gap around every refinement boundary.
 #

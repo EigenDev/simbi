@@ -31,7 +31,7 @@ pub enum FaceSide {
     Minus,
     /// ghost is above the interior in this axis.
     Plus,
-    /// ghost doesn't contact the interior boundary in this axis.
+    /// ghost sits interior to this axis, clear of the boundary.
     None,
 }
 
@@ -215,7 +215,7 @@ pub fn build_bc_map<const D: usize>(
 // the ghost fill: domain algebra + coordinate maps + field remap
 // =============================================================================
 
-/// true if ALL contacting faces of a ghost region are BcType::Skip.
+/// true when every contacting face of a ghost region is BcType::Skip.
 /// face ghosts touching a Skip face are filled externally (AMR prolongation).
 /// edge/corner ghosts with mixed Skip + physical BCs are processed normally:
 /// build_bc_map applies identity for Skip dims and physical BCs for the rest,
@@ -235,7 +235,7 @@ fn region_touches_skip<const D: usize>(
                 any_contact = true;
                 boundaries[ax][1] == BcType::Skip
             }
-            FaceSide::None => true, // no contact — doesn't count
+            FaceSide::None => true, // no contact in this axis; vacuously satisfies the all-skip check
         };
         if !is_skip {
             return false;
@@ -273,7 +273,7 @@ pub fn ghost_fill_field<const D: usize, S: ExecutionSpace, M: MemorySpace>(
     Ok(())
 }
 
-/// fill ghost cells of ALL fields at each point, in a single pass.
+/// fill ghost cells of every field at each point, in a single pass.
 /// iterates ghost coordinates once, applies the coordinate map once per
 /// point, and copies all field values at that point.
 ///

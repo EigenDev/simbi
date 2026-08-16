@@ -6,8 +6,8 @@
 #   `body_diagnostics` group: Mdot(t) = mass_delta/dt, drag F_acc(t)
 # - steady-state detection: consecutive dt-weighted window means of Mdot
 #   agreeing to a relative tolerance
-# - windowed averaging with a fluctuation amplitude (reported together;
-#   an unsteady flow gets a mean AND an amplitude, never a bare value)
+# - windowed averaging with a fluctuation amplitude (reported together, so an
+#   unsteady flow is quoted as a mean with the amplitude that goes with it)
 # - sonic-surface radius vs angle and the on-axis stagnation distance,
 #   as pure array functions (the caller extracts cell arrays via the reader)
 # usage:
@@ -56,7 +56,7 @@ def load_body_diagnostics(path: str) -> BodyDiagnostics:
 @dataclass(frozen=True)
 class DatDiagnostics:
     """the cadence-sampled body-state log (`diagnostics.dat`): one row per body
-    per diagnostic interval, appended across the whole run INCLUDING restarts.
+    per diagnostic interval, appended across the whole run, restarts included.
     complements the per-step checkpoint series — the cumulative accreted_mass
     column yields exact interval-averaged rates at any cadence, while per-step
     fluctuation amplitudes live only in the checkpoint series."""
@@ -71,8 +71,8 @@ class DatDiagnostics:
 def load_diagnostics_dat(path: str) -> DatDiagnostics:
     """parse `diagnostics.dat`. the header line names the columns, so both the
     current 3-component schema (x y z .. fx fy fz torque_x..) and the legacy
-    2d-shaped one (x y .. fx fy torque_z) load; components a file does not
-    record come back nan."""
+    2d-shaped one (x y .. fx fy torque_z) load; components absent from a file
+    come back nan."""
     with open(path) as f:
         first = f.readline()
     if not first.startswith("#"):
@@ -148,16 +148,16 @@ def steady_state_time(
 ) -> float | None:
     """the earliest time at which the series is steady: the dt-weighted mean
     over the trailing `window` agrees with the mean over the window before it
-    to relative tolerance `tol`. returns None if the series never settles
-    (or is shorter than two windows). `window` is in code time units
-    (t_B = 1 for the accretor problem)."""
+    to relative tolerance `tol`. returns None for a series that stays unsettled
+    through its whole span, or that is shorter than two windows. `window` is in
+    code time units (t_B = 1 for the accretor problem)."""
     time = np.asarray(time, dtype=np.float64)
     series = np.asarray(series, dtype=np.float64)
     if len(time) < 2:
-        # np.gradient needs two samples; a shorter series cannot settle.
+        # np.gradient needs two samples; a series shorter than that reports None.
         return None
-    # a NaN sample poisons every window mean it touches, misdiagnosing a settled
-    # run as NOT SETTLED — filter with a data-quality warning instead.
+    # a NaN sample poisons every window mean it touches, which would report a
+    # settled run as unsettled; the samples are filtered with a data-quality warning.
     finite = np.isfinite(series) & np.isfinite(time)
     if not finite.all():
         import warnings
@@ -252,7 +252,7 @@ def stagnation_distance(
 ) -> float | None:
     """the on-axis stagnation distance: the zero crossing of the axial
     velocity along the (sorted) upstream axis samples, linearly interpolated.
-    None if the velocity never changes sign on the sampled axis."""
+    returns None for an axis on which the velocity keeps one sign throughout."""
     x = np.asarray(x, dtype=np.float64)
     u = np.asarray(u_axial, dtype=np.float64)
     order = np.argsort(x)

@@ -218,7 +218,7 @@ fn keplerian_disk_holds_around_central_mass() {
 #[test]
 fn orbiting_overdensity_advects_in_phi() {
     // azimuthal transport: a density blob at (r~1, phi~pi) with keplerian v_phi orbits at the
-    // local Omega(r) = v_phi/r WITHOUT radial drift (p uniform -> centrifugal-gravity balance is
+    // local Omega(r) = v_phi/r on a fixed radius (p uniform -> centrifugal-gravity balance is
     // rho-independent). after t the blob's phi-centroid shifts by ~Omega*t; r-centroid stays put.
     // this exercises the phi-flux + area-weighted phi-divergence — real disk dynamics.
     let (nr, nphi) = (24usize, 64usize);

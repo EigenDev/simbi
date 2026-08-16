@@ -285,8 +285,8 @@ impl<S: crate::algebra::Numeric, const N: usize> Tensor<S, N> {
 
 // cross product: only defined for 3-vectors
 /// `normalize` requires host-side ordering (`if norm > 0`) — bound on
-/// `OrderedNumeric`, which only host numeric types (f64, f32) impl. tracing
-/// carriers (Gv) cannot be smuggled into `normalize`, preserving the A1
+/// `OrderedNumeric`, which the host numeric types (f64, f32) impl. that bound
+/// admits host carriers into `normalize` alone, preserving the A1
 /// discipline ("no native `<` / `>` on a generic `S: Scalar`").
 impl<S: crate::algebra::OrderedNumeric, const N: usize> Tensor<S, N> {
     pub fn normalize(&self) -> Self {

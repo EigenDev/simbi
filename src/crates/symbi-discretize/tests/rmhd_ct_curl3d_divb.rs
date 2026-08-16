@@ -2,14 +2,14 @@
 // rmhd_ct_curl3d_divb.rs
 //
 // proves the 3D constrained-transport curl update (rmhd_ct_curl_3d_dir, run once
-// per face axis) PRESERVES div(B) = 0 to machine precision — the defining CT
+// per face axis) preserves div(B) = 0 to machine precision — the defining CT
 // property, in three dimensions (the 2D result generalized). B is
 // initialized divergence-free from a 3D discrete vector potential A (B = curl A,
 // so the discrete div telescopes to 0), then evolved one step by the curl of an
-// ARBITRARY edge EMF E = (Ex, Ey, Ez). the discrete curl + discrete divergence
+// arbitrary edge EMF E = (Ex, Ey, Ez). the discrete curl + discrete divergence
 // share the mixed E differences, so d(div B)/dt is identically 0.
 //
-// each per-dir kernel updates ONE bface component from its two transverse edge
+// each per-dir kernel updates one bface component from its two transverse edge
 // fields E_p1 / E_p2 (p1=(dir+1)%3, p2=(dir+2)%3); the interpreter run uses
 // out-of-place writes so the before/after div comparison can read the originals.
 //

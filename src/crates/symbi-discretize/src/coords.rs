@@ -70,12 +70,12 @@ pub enum Recon {
     Ppm,
 }
 
-/// whether a reconstruction limits the STATE or its DEPARTURE from local hydrostatic
+/// whether a reconstruction limits the state or its departure from local hydrostatic
 /// equilibrium.
 ///
-/// an axis of its own, not a flavour of `Recon` and not a property of the riemann solver. the
-/// transform is independent of which limiter consumes it -- plm, ppm and pcm all inherit it --
-/// and independent of which solver consumes the face states. tying it to a solver, as an earlier
+/// an axis of its own, orthogonal to `Recon` and to the riemann solver. the transform is
+/// independent of which limiter consumes it -- plm, ppm and pcm all inherit it -- and
+/// independent of which solver consumes the face states. tying it to a solver, as an earlier
 /// arrangement did, denies it to the first-order FOFC redo (which runs HLLE) precisely in the
 /// stagnant stratified cells most likely to trip that redo.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -137,8 +137,8 @@ impl EosArm {
 }
 
 impl Coords {
-    /// project the codegen-time mirror onto the runtime `symbi_geometry::Geometry` — so the ONE
-    /// shared kernel-name suffix protocol (`kernel_slug`) takes a single enum family for both the
+    /// project the codegen-time mirror onto the runtime `symbi_geometry::Geometry` — so the single
+    /// shared kernel-name suffix protocol (`kernel_slug`) takes one enum family for both the
     /// AOT bake (which speaks this mirror) and the runtime dispatch (which speaks `Geometry`).
     pub fn to_geometry(self) -> symbi_geometry::Geometry {
         match self {

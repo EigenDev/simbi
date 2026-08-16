@@ -3,11 +3,11 @@
 //
 // mutual gravity between immersed bodies: a softened direct sum over every
 // pair, `F = G m_i m_j r_vec / (|r|^2 + eps^2)^{3/2}`, applied at the body
-// CENTERS. the force is central and equal-and-opposite, so pair momentum and
-// pair angular momentum are conserved identically and no torque arises. a
-// kinematic body (two_way_coupling = false) sources gravity but ignores the
-// reaction — the fixed-potential convention the prescribed binary already
-// uses. O(N^2) host-side; at fragment counts of order 10^3 this is noise next
+// centers. the force is central and equal-and-opposite, so pair momentum and
+// pair angular momentum are conserved identically at zero net torque. a
+// kinematic body (two_way_coupling = false) sources gravity while holding its
+// own motion prescribed — the fixed-potential convention the prescribed binary
+// already uses. O(N^2) host-side; at fragment counts of order 10^3 this is noise next
 // to the grid work, so there is no tree and no cutoff.
 //
 // usage:

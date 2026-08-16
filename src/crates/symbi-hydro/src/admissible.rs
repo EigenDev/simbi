@@ -6,35 +6,35 @@
 // G = { U : D > 0,  f(U) = E^2 - D^2 - gamma^{ij} S_i S_j > 0 },  E = tau + D
 //
 // is the set of conserved states admitting a physical primitive (rho > 0, p > 0, |v| < c)
-// (Wu & Tang 2015). G is CONVEX in the conserved variables, so the segment from a KNOWN-admissible
+// (Wu & Tang 2015). G is convex in the conserved variables, so the segment from a known-admissible
 // anchor to any candidate crosses the boundary partial-G at most once. `admissible_theta` returns
 // the largest blend `theta` in [0, 1] for which `anchor + theta (cand - anchor)` lies in G:
 // `theta = 1` (the candidate unchanged) when the candidate is already admissible, else the exact
-// crossing. because the anchor is admissible the projection ALWAYS yields an admissible state, so it
-// is the provable replacement for a freeze/floor fallback — no cell is ever unrecoverable.
+// crossing. because the anchor is admissible the projection always yields an admissible state, so it
+// is the provable replacement for a freeze/floor fallback — every cell recovers.
 //
-// the crossing is a CLOSED-FORM quadratic root: D, S_i and E are all linear along the segment, so
+// the crossing is a closed-form quadratic root: D, S_i and E are all linear along the segment, so
 // `f(theta) = a theta^2 + b theta + c` with `c = f(anchor) > 0`. densitization scales D, S and E by
-// the common positive factor sqrt(-g), which cancels in the sign of f, so this operates directly on
-// the stored densitized conserveds with no undensitization.
+// the common positive factor sqrt(-g), which cancels in the sign of f, so this operates on the
+// stored densitized conserveds as they stand.
 //
-// carrier-generic (S = f64 host / Gv trace); branch-free (select only, no control flow).
+// carrier-generic (S = f64 host / Gv trace); branch-free (select carries every conditional).
 // =============================================================================
 
 use symbi_algebra::{Matrix, Tensor};
 
-/// the RELATIVE margin below which an admissibility residual is treated as indistinguishable from
+/// the relative margin below which an admissibility residual is treated as indistinguishable from
 /// zero, measured against the cell's own energy density.
 ///
 /// the residuals guarded by it — `q = E - sqrt(D^2 + |S|^2)` and the norm `sqrt(D^2 + |S|^2)` — both
 /// carry one power of energy, so a bare absolute floor would encode an assumption about the problem's
 /// energy scaling that nothing enforces: the same constant is far too loose for a near-vacuum
 /// atmosphere and far too tight for a dense core. scaling by the local energy makes the criterion
-/// DIMENSIONLESS, so it means the same thing at every density.
+/// dimensionless, so it means the same thing at every density.
 ///
 /// the value sits about six orders above the accumulated roundoff of a multi-operation flux
-/// computation (roughly 1e-16 relative per operation), which is enough margin that a residual falling
-/// under it is genuinely numerical noise rather than a resolved small number.
+/// computation (roughly 1e-16 relative per operation), which is enough margin that a residual
+/// falling under it counts as numerical noise, with genuinely resolved small numbers sitting above.
 pub const ADMISSIBLE_REL_FLOOR: f64 = 1e-10;
 use symbi_ir::algebra::Scalar;
 
@@ -52,7 +52,7 @@ pub fn rhd_state_scale<S: Scalar>(d: S, s: &Tensor<S, 3>, e: S, gm_inv: &Matrix<
 
 /// one-power-of-energy scale for relativistic magnetohydrodynamic conserved
 /// states. `D`, `|S|`, `E`, and `|B|^2` have the same dimensions, so their
-/// maximum defines a local scale without privileging a density normalization.
+/// maximum defines a local scale that weighs every conserved component alike.
 pub fn rmhd_state_scale<S: Scalar>(
     d: S,
     s: &Tensor<S, 3>,
@@ -92,7 +92,7 @@ pub fn stationary_killing_source_ray<S: Scalar>(
 /// the largest `theta` in [0, 1] with `anchor + theta (cand - anchor)` in the admissible set G,
 /// given the anchor is admissible (`f(anchor) > 0`, `D_anchor > 0`).
 ///
-/// `d`, `s`, `e`: the conserved rest-mass density D, the COVARIANT momentum S_i, and the eulerian
+/// `d`, `s`, `e`: the conserved rest-mass density D, the covariant momentum S_i, and the eulerian
 /// energy E = tau + D (the caller reconstructs E from the stored energy slot via the 3+1 block).
 /// `gm_inv`: the inverse spatial metric gamma^{ij} for `|S|^2 = gamma^{ij} S_i S_j` (identity for
 /// flat SR). `eps_d` / `eps_f`: strict-interior floors on D and on f, keeping the projected state
@@ -134,9 +134,9 @@ pub fn admissible_theta<S: Scalar>(
     // g(theta) = f(theta) - eps_f; g(0) = c - eps_f >= 0. the crossing to g < 0 — present iff the
     // candidate is inadmissible — is the citardauq root theta_f = 2 g0 / (-b + sqrt(b^2 - 4 a g0)):
     // branch-free, and division-safe because -b + sqrt(.) >= -b > 0 whenever a crossing exists (b < 0
-    // there). convexity of G guarantees the two regimes cleanly: an admissible candidate has NO
-    // crossing in (0, 1], so the raw root is >= 1 and the clamp returns exactly 1 (the candidate
-    // passes through bit-for-bit); an inadmissible candidate has EXACTLY one crossing, and this is it.
+    // there). convexity of G separates the two regimes cleanly: an admissible candidate's crossing
+    // lies beyond theta = 1, so the raw root is >= 1 and the clamp returns exactly 1 (the candidate
+    // passes through bit-for-bit); an inadmissible candidate has exactly one crossing, and this is it.
     let g0 = (c - eps_f).max(S::ZERO);
     let disc = (b * b - S::from_f64(4.0) * a * g0).max(S::ZERO);
     let denom_raw = (S::ZERO - b) + disc.sqrt();
@@ -159,24 +159,24 @@ pub fn admissible_theta<S: Scalar>(
         S::ONE,
     );
 
-    // a non-finite candidate (NaN / inf momentum or energy) has no admissible point along its
-    // segment; fall fully back to the anchor (theta = 0), the degenerate case the freeze once held.
+    // for a non-finite candidate (NaN / inf momentum or energy) the whole segment is unusable, so
+    // fall fully back to the anchor (theta = 0), the degenerate case the freeze once held.
     let finite = |v: S| (v - v).cmp_eq(S::ZERO);
     let mut ok = finite(d_c) & finite(e_c);
     for k in 0..3 {
         ok = ok & finite(s_c[k]);
     }
     let project = S::select(ok, theta_f.min(theta_d), S::ZERO);
-    // EXACT passthrough: a candidate already in G (f > 0, D > 0, finite) is returned bit-for-bit
-    // (theta = 1), so the projection is a no-op on every physical cell and only genuinely
-    // inadmissible cells move. `f(1) = a + b + c` is the candidate's own f.
+    // exact passthrough: a candidate already in G (f > 0, D > 0, finite) is returned bit-for-bit
+    // (theta = 1), so the projection is a no-op on every physical cell and the genuinely
+    // inadmissible cells are the ones that move. `f(1) = a + b + c` is the candidate's own f.
     let f_cand = a + b + c;
     let cand_ok = f_cand.cmp_gt(S::ZERO) & d_c.cmp_gt(S::ZERO) & ok;
     S::select(cand_ok, S::ONE, project)
 }
 
 /// the two RMHD admissibility residuals `(q, psi)` (Wu & Tang, arXiv:1709.05838, theorem 2.1). a
-/// magnetized state is admissible iff `D > 0`, `q(U) > 0` AND `psi(U) > 0`:
+/// magnetized state is admissible iff `D > 0`, `q(U) > 0` and `psi(U) > 0`:
 ///
 /// ```text
 /// q   = E - sqrt(D^2 + |S|^2)
@@ -184,13 +184,13 @@ pub fn admissible_theta<S: Scalar>(
 /// psi = (Phi - 2(|B|^2 - E)) sqrt(Phi + |B|^2 - E) - sqrt( (27/2)(D^2 |B|^2 + (S.B)^2) )
 /// ```
 ///
-/// `q > 0` alone is only NECESSARY (their lemma 2.1) — it is the B-free cone, blind to the magnetic
-/// decomposition — whereas the pair is SUFFICIENT, and both are evaluable directly in the conserved
-/// variables with no primitive recovery.
+/// `q > 0` alone is necessary (their lemma 2.1) — it is the B-free cone, blind to the magnetic
+/// decomposition — while the pair is sufficient, and both evaluate directly in the conserved
+/// variables, ahead of any primitive recovery.
 ///
 /// the three contractions carry the spatial metric exactly as their valence demands: `|S|^2 =
 /// gamma^{ij} S_i S_j` on the inverse metric, `|B|^2 = gamma_{ij} B^i B^j` on the covariant metric,
-/// and `S.B = S_i B^i` is a covector-vector pairing and hence METRIC-FREE. one triad orthonormalizes
+/// and `S.B = S_i B^i` is a covector-vector pairing and hence metric-free. one triad orthonormalizes
 /// all three at once, which is why the special-relativistic condition holds verbatim in a curved
 /// chart. every square root is floored at zero: the radicands are non-negative on `q > 0` (which
 /// forces `Phi > | |B|^2 - E |`), and the floor keeps the branch-free evaluation finite off it.
@@ -268,7 +268,7 @@ pub fn rmhd_anchor_energy_with_margin<S: Scalar>(
 }
 
 /// the largest `theta` in [0, 1] with `anchor + theta (cand - anchor)` in the RMHD admissible set,
-/// with the magnetic field held FIXED at `b` throughout.
+/// with the magnetic field held fixed at `b` throughout.
 ///
 /// holding `B` fixed is what keeps constrained transport intact: `B` is staggered and shared between
 /// neighboring cells, so blending it per-cell would desynchronize the shared face value and break
@@ -276,21 +276,21 @@ pub fn rmhd_anchor_energy_with_margin<S: Scalar>(
 /// intersection of a convex set with the affine slice `B = const` is convex, so the segment still
 /// crosses the boundary at most once and the largest admissible `theta` is well defined.
 ///
-/// unlike the hydro cone there is NO closed form. the hydro admissible set is a second-order
-/// (Lorentz) cone whose defining function is concave — linear minus a norm — which is what makes its
-/// crossing a quadratic root. `psi` is not concave (it carries products of square roots), so the
-/// crossing is found by bisection: a FIXED iteration count, branch-free, so the trace carrier emits
-/// straight-line code. convexity guarantees the admissible `theta` form the interval `[0, theta*]`,
-/// which is exactly what makes bisection on the predicate correct rather than merely plausible.
+/// the crossing here is found by bisection. the hydro admissible set is a second-order (Lorentz)
+/// cone whose defining function is concave — linear minus a norm — which is what makes its crossing
+/// a quadratic root; `psi` carries products of square roots and so loses that concavity, leaving
+/// bisection as the closed form's replacement: a fixed iteration count, branch-free, so the trace
+/// carrier emits straight-line code. convexity guarantees the admissible `theta` form the interval
+/// `[0, theta*]`, which is exactly what makes bisection on the predicate provably correct.
 ///
 /// an admissible candidate returns exactly `1` bit-for-bit, so the projection is a no-op on every
 /// physical cell.
 ///
-/// RETURNS 0 WHEN THE ANCHOR ITSELF IS INADMISSIBLE IN THE CANDIDATE'S MAGNETIC SLICE. this is the
-/// one structural difference from the hydro projection, and it is not removable: the anchor is
-/// admissible with its OWN `B`, but the projection must land in the slice of the CANDIDATE's `B`,
-/// where the anchor's hydro state need not be admissible. the caller must therefore keep a fallback
-/// for `theta = 0`; magnetized admissibility is not unconditionally recoverable by blending alone.
+/// returns 0 when the anchor itself is inadmissible in the candidate's magnetic slice. this is the
+/// one structural difference from the hydro projection, and it is intrinsic: the anchor is
+/// admissible with its own `B`, while the projection must land in the slice of the candidate's `B`,
+/// where the anchor's hydro state may fail. the caller therefore keeps a fallback for `theta = 0`;
+/// blending alone recovers magnetized admissibility exactly when that slice holds the anchor.
 #[allow(clippy::too_many_arguments)]
 pub fn rmhd_admissible_theta<S: Scalar>(
     d_c: S,
@@ -323,11 +323,11 @@ pub fn rmhd_admissible_theta<S: Scalar>(
     };
 
     // bisection for theta*, the boundary of the admissible interval [0, theta*]; `iters` halvings
-    // resolve theta to 2^-iters. `lo` always holds a KNOWN-ADMISSIBLE theta, so the result is
-    // admissible by construction rather than by convergence — truncating the bisection is SAFE, it
-    // only returns a smaller (more diffusive) blend. that is what lets a traced carrier, which
-    // unrolls every iteration into the expression graph, choose a low count without risking
-    // correctness.
+    // resolve theta to 2^-iters. `lo` always holds a known-admissible theta, so admissibility
+    // follows from the loop invariant at every iteration count — truncating the bisection is safe
+    // and returns a smaller (more diffusive) blend. that is what lets a traced carrier, which
+    // unrolls every iteration into the expression graph, choose a low count with correctness
+    // intact.
     let mut lo = S::ZERO;
     let mut hi = S::ONE;
     for _ in 0..iters {
@@ -342,10 +342,10 @@ pub fn rmhd_admissible_theta<S: Scalar>(
     S::select(cand_ok, S::ONE, S::select(cand_finite, lo, S::ZERO))
 }
 
-/// how many trial times out the "the ray never leaves G" probe is evaluated. the magnetized
-/// residual `psi` carries the FIXED `|B|`, which becomes negligible against `t |Sdot|` as `t`
-/// grows; by this multiple the set along the ray is the B-free cone to well past f64 precision,
-/// so an admissible endpoint here is the cone membership the certificate below needs.
+/// how many trial times out the "the ray stays in G" probe is evaluated. the magnetized residual
+/// `psi` carries a fixed `|B|`, which becomes negligible against `t |Sdot|` as `t` grows; by this
+/// multiple the set along the ray is the B-free cone to well past f64 precision, so an admissible
+/// endpoint here supplies the cone membership the ray certificate needs.
 const SOURCE_RAY_FAR: f64 = 1.0e6;
 
 /// a source-ray timestep that remains inside the RMHD admissible set.
@@ -356,18 +356,19 @@ const SOURCE_RAY_FAR: f64 = 1.0e6;
 /// earlier point admissible. otherwise fixed-count bisection returns the largest known-admissible
 /// fraction of the trial time. a zero source returns an infinite timestep.
 ///
-/// AN INWARD SOURCE IMPOSES NO TIMESTEP AT ALL (Wu, arXiv:1610.06274, theorem 1: `lambda_S = 0`
-/// whenever `q(S) >= 0`). the unmagnetized set is a convex cone, so `U + t Sdot` provably never
-/// leaves it and the bound does not exist to be computed. the MAGNETIZED set is not a cone —
-/// `psi` carries `|B|`, which does not scale with `(D, S, E)` — so cone membership of the source
-/// alone does not certify the ray. two facts do: the set at fixed `B` is convex (Wu & Tang,
-/// arXiv:1709.05838, theorem 2.2), which covers `[0, T]` once the endpoint at `T` is admissible;
-/// and the ray's own magnetic terms vanish relative to `t |Sdot|`, so beyond `T` the set is the
-/// B-free cone and `q(Sdot) > 0` covers `[T, inf)`. together they certify the whole ray.
+/// an inward source leaves the step unbounded (Wu, arXiv:1610.06274, theorem 1: `lambda_S = 0`
+/// whenever `q(S) >= 0`). the unmagnetized set is a convex cone, so `U + t Sdot` provably stays
+/// inside it for every `t` and the bound is infinite. the magnetized set departs from a cone —
+/// `psi` carries `|B|`, which holds fixed while `(D, S, E)` scale — so cone membership of the
+/// source certifies the ray in the company of a second fact. the pair: the set at fixed `B` is
+/// convex (Wu & Tang, arXiv:1709.05838, theorem 2.2), which covers `[0, T]` once the endpoint at
+/// `T` is admissible; and the ray's own magnetic terms vanish relative to `t |Sdot|`, so beyond
+/// `T` the set is the B-free cone and `q(Sdot) > 0` covers `[T, inf)`. together they certify the
+/// whole ray.
 ///
 /// this clause is what keeps a near-vacuum cell from throttling the global step: an evacuated
 /// atmosphere cell has `state_scale -> 0`, so its trial time collapses and the bisection returns
-/// an arbitrarily small "safe" time — for a source that was never driving it out of G.
+/// an arbitrarily small "safe" time — for a source that leaves the cell inside G.
 #[allow(clippy::too_many_arguments)]
 pub fn rmhd_source_admissible_time<S: Scalar>(
     d: S,
@@ -396,8 +397,9 @@ pub fn rmhd_source_admissible_time<S: Scalar>(
         d.cmp_gt(eps_d) & q.cmp_gt(eps_q) & psi.cmp_gt(eps_psi)
     };
 
-    // the inward-source certificate: `q` of the SOURCE VECTOR (no baryon component, no magnetic
-    // component — the geometric source touches neither) together with an admissible far endpoint.
+    // the inward-source certificate: `q` of the source vector (zero baryon and magnetic
+    // components — the geometric source acts on momentum and energy alone) together with an
+    // admissible far endpoint.
     let (q_source, _) =
         rmhd_admissible_residuals(S::ZERO, &s_dot, e_dot, &Tensor::zeros(), gm_inv, gm);
     let unbounded = q_source.cmp_gt(S::ZERO) & ok_at(S::from_f64(SOURCE_RAY_FAR));
@@ -426,8 +428,8 @@ pub fn rmhd_source_admissible_time<S: Scalar>(
 ///
 /// the caller must provide an admissible flux anchor. this is the low-order physical-constraint-
 /// preserving invariant: a first-order flux + constrained-transport update under the CFL bound
-/// lands in the admissible set. an anchor that does not is a statement about the TIMESTEP, not
-/// about the source — no source fraction can repair the flux operator, so the caller's only
+/// lands in the admissible set. an anchor that falls outside indicts the timestep: a smaller dt is
+/// what repairs the flux operator, and every source fraction leaves it as it is, so the caller's
 /// recourse is to reject the step and replay it at a smaller dt.
 #[allow(clippy::too_many_arguments)]
 pub fn rmhd_limit_source_increment<S: Scalar>(
@@ -516,9 +518,9 @@ mod tests {
         let eps_psi = ADMISSIBLE_REL_FLOOR * scale.powf(1.5);
 
         // q(source) = e_dot - |s_dot| = 1.0 - 0.2 > 0: the source vector lies in the cone, so the
-        // ray U + t Sdot never leaves G and NO timestep bound exists (Wu, arXiv:1610.06274,
+        // ray U + t Sdot stays in G for every t and the bound is infinite (Wu, arXiv:1610.06274,
         // theorem 1: lambda_S = 0). returning the finite trial timescale here would throttle the
-        // global step for a cell the source is not endangering.
+        // global step for a cell the source leaves safely inside G.
         let inward = rmhd_source_admissible_time(
             d, s, e, s_dot, 1.0, &b, &gm, &gm, scale, 1.0, eps_d, eps_q, eps_psi, 24,
         );
@@ -543,7 +545,8 @@ mod tests {
         // the funnel pathology: an atmosphere cell evacuated by ten orders in pressure has
         // state_scale -> 0, so the dimensional trial time state_scale/source_scale collapses and a
         // bisection over it returns an arbitrarily small "safe" time. one such cell then sets dt
-        // for the whole grid. it must not, when the source is not driving the cell out of G.
+        // for the whole grid. the global step must stay free of it while the source keeps the
+        // cell inside G.
         let gm = Matrix::identity();
         let d = 6.3e-6;
         let s = Tensor::zeros();
@@ -581,7 +584,7 @@ mod tests {
              is the near-vacuum dt collapse"
         );
 
-        // PREMISE: the same cell with an OUTWARD source must still be bounded, else this gate
+        // premise: the same cell with an outward source must still be bounded, else this gate
         // would pass on a function that returns infinity unconditionally.
         let outward = rmhd_source_admissible_time(
             d,
@@ -878,7 +881,7 @@ mod tests {
     }
 
     // a deterministic admissible conserved state from a physical primitive on the given metric.
-    // `v_phys` is the PHYSICAL radial velocity (|v| = sqrt(gamma_ij v^i v^j), subluminal on ANY
+    // `v_phys` is the physical radial velocity (|v| = sqrt(gamma_ij v^i v^j), subluminal on any
     // metric); the contravariant v^r = v_phys / sqrt(gamma_rr) then has gamma_rr (v^r)^2 = v_phys^2.
     fn admissible(rho: f64, v_phys: f64, p: f64, grr: f64) -> (f64, Tensor<f64, 3>, f64) {
         let gamma = 5.0 / 3.0;
@@ -895,9 +898,9 @@ mod tests {
 
     #[test]
     fn projection_always_lands_in_the_admissible_set() {
-        // over a grid of admissible anchors and WILD candidates (negative density, superluminal
-        // momentum, negative energy, and finite admissible ones), the projected state is ALWAYS in
-        // G, and an already-admissible candidate passes through unchanged (theta = 1).
+        // over a grid of admissible anchors and wild candidates (negative density, superluminal
+        // momentum, negative energy, and finite admissible ones), the projected state always lands
+        // in G, and an already-admissible candidate passes through unchanged (theta = 1).
         let (eps_d, eps_f) = (1e-12, 1e-14);
         for &grr in &[1.0_f64, 1.25, 2.0] {
             let gi = metric(1.0 / grr); // gamma^{rr} = 1/gamma_rr
@@ -918,7 +921,7 @@ mod tests {
                     "grr={grr} cand=({rho},{vr},{p}) f_cand={fc:.3e}: not passed through, theta={th}"
                 );
             }
-            // WILD inadmissible candidates: the projection must still yield a state in G.
+            // wild inadmissible candidates: the projection must still yield a state in G.
             let wild: [(f64, Tensor<f64, 3>, f64); 5] = [
                 (-2.0, Tensor::new([5.0, 0.0, 0.0]), 1.0), // negative density
                 (0.5, Tensor::new([100.0, 0.0, 0.0]), 1.0), // |S| >> E (superluminal)
@@ -999,7 +1002,7 @@ mod tests {
 
     #[test]
     fn psi_is_strictly_stronger_than_the_b_free_cone() {
-        // THE JUSTIFICATION FOR THE WHOLE CONSTRUCTION: a strongly magnetized state can satisfy the
+        // the justification for the whole construction: a strongly magnetized state can satisfy the
         // necessary cone q > 0 and still be inadmissible, because the magnetic energy exceeds what
         // the total energy can carry and the recovered gas pressure is non-positive. such a state is
         // exactly what the B-free projection waves through and the freeze tier then has to catch.
@@ -1058,8 +1061,8 @@ mod tests {
                      D={dp:.3e} q={q:.3e} psi={psi:.3e} theta={th}"
                 );
             }
-            // if every candidate passed through untouched the projection was never exercised and the
-            // landing assertion above proved nothing.
+            // the landing assertion carries weight only when candidates actually move; a full set
+            // of passthroughs would leave it vacuous.
             assert_eq!(
                 n_moved,
                 wild.len(),
@@ -1088,9 +1091,9 @@ mod tests {
 
     #[test]
     fn the_magnetized_projection_reports_an_unrecoverable_anchor() {
-        // the structural gap versus hydro, asserted rather than left implicit: when the anchor's
-        // hydro state is NOT admissible inside the candidate's magnetic slice, no blend along the
-        // segment can succeed and theta = 0 is returned, which is the caller's signal to fall back.
+        // the structural gap versus hydro, asserted explicitly: when the anchor's hydro state
+        // falls outside the candidate's magnetic slice, every blend along the segment fails and
+        // theta = 0 is returned, which is the caller's signal to fall back.
         // a field this strong swamps the anchor's energy, so every point of the segment fails psi.
         let (gi, gc) = (metric(1.0), metric(1.0));
         let (d_a, s_a, e_a) = admissible(1.0, 0.1, 0.5, 1.0);
@@ -1125,19 +1128,19 @@ mod tests {
     fn a_wrong_psi_is_caught_by_the_b_zero_limit() {
         // bug injection: the 27/2 coefficient is the most error-prone constant in theorem 2.1.
         // perturbing it must break the B = 0 equivalence that `psi_reduces_to_the_hydro_cone`
-        // asserts, proving that test constrains the coefficient rather than passing vacuously.
+        // asserts, proving that test has teeth on the coefficient.
         let injected = |d: f64, s: Tensor<f64, 3>, e: f64, b: Tensor<f64, 3>| -> f64 {
             let s2 = s[0] * s[0] + s[1] * s[1] + s[2] * s[2];
             let b2 = b[0] * b[0] + b[1] * b[1] + b[2] * b[2];
             let sb = s[0] * b[0] + s[1] * b[1] + s[2] * b[2];
             let w = b2 - e;
             let phi = (w * w + 3.0 * (e * e - d * d - s2)).max(0.0).sqrt();
-            // WRONG: 27/2 -> 27
+            // injected error: 27/2 -> 27
             (phi - 2.0 * w) * (phi + w).max(0.0).sqrt()
                 - (27.0 * (d * d * b2 + sb * sb)).max(0.0).sqrt()
         };
-        // with B = 0 the injected term vanishes too, so the equivalence survives -> the B=0 test
-        // alone does NOT pin the coefficient. it is pinned by a magnetized state instead.
+        // with B = 0 the injected term vanishes too, so the equivalence survives: a magnetized
+        // state is what pins the coefficient.
         let (gi, gc) = (metric(1.0), metric(1.0));
         let (d, s, e) = (1.0_f64, Tensor::new([0.3, 0.0, 0.0]), 1.6);
         let b = Tensor::new([1.0, 0.0, 0.0]);
@@ -1151,8 +1154,8 @@ mod tests {
 
     #[test]
     fn a_wrong_theta_is_caught_by_the_property() {
-        // bug injection: theta = 1 (keep the candidate unconditionally) must FAIL to land a wildly
-        // inadmissible candidate in G — proving the property test has teeth.
+        // bug injection: theta = 1 (keep the candidate unconditionally) leaves a wildly
+        // inadmissible candidate outside G — proving the property test has teeth.
         let gi = metric(1.0);
         let anchor = admissible(1.0, 0.1, 0.5, 1.0);
         let (dc, sc, ec) = (0.5_f64, Tensor::new([100.0, 0.0, 0.0]), 1.0);

@@ -6,7 +6,7 @@
 // 2009). carrier-generic: every comparison goes through `S::cmp_*` / `S::select` /
 // `S::branch`, the secant loop runs through `Scalar::iterate_vec` (fixed-step body,
 // freeze-on-converged), and the HLLE fallback is computed eagerly with the final
-// flux choice selected by a success mask. ONE Riemann source, two backends
+// flux choice selected by a success mask. one Riemann source, two backends
 // (host f64 + traced Gv).
 // =============================================================================
 
@@ -32,7 +32,7 @@ const CONVERGENCE_TOL: f64 = 1e-12;
 const DIVERGENCE_GUARD: f64 = 1e30;
 /// initial secant perturbation off the pressure guess.
 const SECANT_PERTURBATION: f64 = 1e-6;
-/// low-B regime threshold: below `bn^2/p < this`, use the low-B quadratic
+/// low-B regime threshold: below `bn^2/p < this`, the low-B quadratic
 /// pressure estimate replaces the HLL recovered pressure.
 const LOW_B_PRESSURE_RATIO: f64 = 0.01;
 /// secant iteration count (`max_iter = 15`).
@@ -45,26 +45,24 @@ const SECANT_STEPS: usize = 15;
 /// cancelling constituents.
 const ALFVEN_DEGENERACY_TOL: f64 = 1e-3;
 
-/// relative tolerance on the ALFVEN-WAVE SEPARATION `|sa_r - sa_l|` against the full fan
+/// relative tolerance on the alfven-wave separation `|sa_r - sa_l|` against the full fan
 /// width, below which the anti-diffusive EMF coefficient `nustar` is zeroed: coincident
-/// alfven waves carry no rotational discontinuity for the coefficient to steepen. a
-/// DIFFERENT question from `ALFVEN_DEGENERACY_TOL` above, at a different scale -- that one
-/// guards a catastrophic cancellation between near-equal star-state constituents (per-mille,
-/// where the cancellation loses meaningful digits), while this one detects wave COINCIDENCE
-/// (parts-per-billion, where the physical discontinuity itself vanishes). shared by the
-/// newtonian and isothermal coefficient siblings, which each carried a private copy that
-/// could drift from the other.
+/// alfven waves leave the rotational discontinuity at zero amplitude, so the coefficient
+/// has nothing to steepen. this measures wave coincidence, at parts-per-billion, where the
+/// physical discontinuity itself vanishes; `ALFVEN_DEGENERACY_TOL` answers a separate
+/// question at per-mille, guarding a catastrophic cancellation between near-equal
+/// star-state constituents that costs meaningful digits. one constant serves both the
+/// newtonian and isothermal coefficient siblings, so they measure coincidence at one scale.
 const ALFVEN_SEPARATION_TOL: f64 = 1e-9;
 
 /// the relative roundoff scale every guard in this file measures small denominators
-/// against: a few ulps of headroom over machine epsilon. previously written inline
-/// fourteen times.
+/// against: a few ulps of headroom over machine epsilon.
 const REL_EPS: f64 = 32.0 * f64::EPSILON;
 
 /// the vdiff helper result: intermediate states + the f-function value at
 /// the trial pressure. unphysical inputs leave `f` saturated at
-/// `DIVERGENCE_GUARD * 10` (so the secant + final-select treat them as
-/// divergent without needing a host bool sentinel).
+/// `DIVERGENCE_GUARD * 10`; the secant and the final select read that saturation as
+/// divergence, which keeps the verdict inside the scalar carrier.
 struct VdiffOut<S: Scalar, const D: usize> {
     f: S,
     vv: [Tensor<S, D>; 2],
@@ -74,8 +72,8 @@ struct VdiffOut<S: Scalar, const D: usize> {
     bc: Tensor<S, D>,
 }
 
-/// branchless HLLD intermediate-state + f-function. carrier-generic: no
-/// native `<`/`>`/`if`. unphysical states (x ~= 0 or any of the 8-way
+/// branchless HLLD intermediate-state + f-function. carrier-generic: every comparison
+/// runs through the scalar mask API. unphysical states (x ~= 0 or any of the 8-way
 /// consistency checks failing) saturate the returned `f` to a value the
 /// outer divergence-guard catches.
 fn hlld_vdiff<S: Scalar, const D: usize>(
@@ -104,10 +102,10 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     for ii in 0..2 {
         let a_s = lam[ii];
         let rs = r[ii];
-        // the SR MUB09 star-state reconstruction (Mignone, Ugliano & Bodo 2009). the GR path does
-        // NOT drive this in the coordinate frame: it maps to the local ORTHONORMAL frame where the
-        // metric is identity, runs THIS flat reconstruction, and maps the flux back (the metric
-        // contractions below are euclidean at the flat metric the GR wrapper passes).
+        // the SR MUB09 star-state reconstruction (Mignone, Ugliano & Bodo 2009). the GR path maps
+        // into the local orthonormal frame where the spatial metric is the identity, runs this
+        // flat reconstruction there, and maps the flux back, so the metric contractions here are
+        // euclidean at the flat metric the GR wrapper passes.
         let rmn = rs.mom.dot(nhat);
         let rmtrans = rs.mom - nhat.scale(rmn);
         let rbtrans = metric.project_transverse(&rs.mag, nhat); // transverse magnetic part
@@ -171,13 +169,13 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     let vn_l = vv[0].dot(nhat);
     let vn_r = vv[1].dot(nhat);
 
-    // bn -> 0 degeneracy flag: the alfven waves collapse onto the contact, so the K-speed
-    // spread `dkn = alf_r - alf_l` is DRIVEN to zero by the pressure iteration itself (f =
-    // dkn is the residual on this path). a vanishing dkn is then the converged degenerate
-    // geometry, not an unphysical state, so the dkn-proportional guards below act as pure
-    // DIVISION guards here and must not fold into `physical`: folding them made the
-    // success verdict the roundoff bit of whether the residual cleared the epsilon, and
-    // that bit selects between the fan and the O(1)-different HLLE fallback.
+    // bn -> 0 degeneracy flag: the alfven waves collapse onto the contact, so the pressure
+    // iteration itself drives the K-speed spread `dkn = alf_r - alf_l` to zero (f = dkn is
+    // the residual on this path). a vanishing dkn is then the converged degenerate geometry,
+    // a physical state, so the dkn-proportional guards serve purely as division guards here
+    // and stay out of `physical`: folding them in would make the success verdict the roundoff
+    // bit of whether the residual cleared the epsilon, and that bit selects between the fan
+    // and the O(1)-different HLLE fallback.
     let b_scale = metric
         .norm_sq_contra(&bv[0])
         .max(metric.norm_sq_contra(&bv[1]))
@@ -217,7 +215,7 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     let denom_l_ok = denom_l.abs().cmp_gt(rel * denom_l_scale);
     let denom_r_ok = denom_r.abs().cmp_gt(rel * denom_r_scale);
     // dkn-proportional: division guards only when bn -> 0 (y_l/y_r feed f_default, which
-    // the bn-small residual path never consumes).
+    // the bn-small residual path leaves unread).
     physical = physical & ((denom_l_ok & denom_r_ok) | bn_small);
     let y_l = (one - ksq_l) / S::select(denom_l_ok, denom_l, one);
     let y_r = (one - ksq_r) / S::select(denom_r_ok, denom_r, one);
@@ -256,10 +254,10 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     }
 }
 
-/// the converged five-wave fan: the secant-final intermediate state + the success mask. SHARED by
+/// the converged five-wave fan: the secant-final intermediate state + the success mask. shared by
 /// the flux path (`hlld_rmhd`) and the UCT-HLLD edge-EMF star-state extraction (`hlld_rmhd_states`).
-/// `success` is FALSE iff the secant diverged or the state is unphysical (the flux then falls back
-/// to HLLE) — in that case every field below is GARBAGE and the consumer MUST NOT trust it.
+/// `success` is true exactly when the secant converged on a physical state; when it is false the
+/// flux falls back to HLLE and the remaining fields hold garbage the consumer discards.
 struct HlldConverged<S: Scalar, const D: usize> {
     p_final: S,
     v: VdiffOut<S, D>,
@@ -326,16 +324,16 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
 /// and Gv-traced kernel. on unphysical state or secant divergence, falls back
 /// to HLLE via a final mask-driven `select` over the flux. matches mignone,
 /// ugliano & bodo (2009).
-/// GR HLLD via the local ORTHONORMAL frame (TETRAD form). the tetrad E = `metric.orthonormal_basis(dir)`
+/// GR HLLD via the local orthonormal frame (tetrad form). the tetrad E = `metric.orthonormal_basis(dir)`
 /// maps the physical contravariant velocity/field into the frame where the spatial metric is the
 /// identity: V_hat = E^{-1} v, B_hat = E^{-1} B (whence W_hat = W, |B_hat|^2 = |B|^2, V_hat.B_hat = v.B
-/// — every Lorentz scalar preserved). the VALIDATED flat MUB09 solver runs there and the intercell
-/// flux maps back EXACTLY, with the single normal factor E_dd = E[dir][dir]:
+/// — every Lorentz scalar preserved). the flat MUB09 solver runs there and the intercell
+/// flux maps back exactly, with the single normal factor E_dd = E[dir][dir]:
 ///   F_D   = E_dd F_hat_D,             F_tau = E_dd F_hat_tau,
 ///   F_B^i = E_dd (E F_hat_B)^i        (contravariant induction flux),
-///   F_S_j = E_dd (E^{-T} F_hat_S)_j   (covariant momentum; the Valencia pressure term is the MIXED
-///           p_tot delta^n_j, so it cancels exactly under the transform — no residual).
-/// the ALE face speed rides along as vface_hat = vface / E_dd. exact for ANY symmetric-positive
+///   F_S_j = E_dd (E^{-T} F_hat_S)_j   (covariant momentum; the Valencia pressure term is the mixed
+///           p_tot delta^n_j, so it cancels exactly under the transform).
+/// the ALE face speed rides along as vface_hat = vface / E_dd. exact for any symmetric-positive
 /// spatial metric: diagonal Schwarzschild/KS (E diagonal, reduces to the sqrt(g_i) scaling) and the
 /// non-diagonal spinning-Kerr gamma alike.
 pub fn hlld_rmhd_gr_ortho<S: Scalar, const D: usize>(
@@ -350,7 +348,7 @@ pub fn hlld_rmhd_gr_ortho<S: Scalar, const D: usize>(
     let e = metric.orthonormal_basis(dir);
     let e_t = e.transpose();
     let e_dd = e[(dir, dir)];
-    // the tetrad is orthonormal w.r.t. gamma, so the FORWARD map needs no matrix inverse:
+    // the tetrad is orthonormal w.r.t. gamma, so the forward map is a plain transpose contraction:
     // V_hat^a = gamma(v, e_hat_a) = (E^T gamma v)_a. the covariant momentum flux maps back with
     // T^{-T} = gamma E (F_S = E_dd gamma (E F_hat_S)); the contravariant field maps with E.
     let to_hat = |p: &MhdPrim<S, D>| MhdPrim {
@@ -383,14 +381,14 @@ pub fn hlld_rmhd_gr_ortho<S: Scalar, const D: usize>(
     }
 }
 
-/// the converged HLLD fan for the GR UCT-HLLD edge EMF, via the ORTHONORMAL frame (the states-only
+/// the converged HLLD fan for the GR UCT-HLLD edge EMF, via the orthonormal frame (the states-only
 /// analogue of `hlld_rmhd_gr_ortho`). the flat MUB09 star states are extracted in the tetrad frame
-/// and mapped back to the coordinate frame with the SAME tetrad rules that make the wave-sum EMF
-/// telescope to the coordinate B_t flux: a CONTRAVARIANT field/velocity maps as X = E X_hat; a wave
-/// SPEED (dx^n/dt) maps as lambda = E_dd lambda_hat; the normal field maps as B^n = E_dd B_hat^n. in
-/// the wave-sum Phi = sum |lambda_k| (B_t^{star} - B_t) these combine exactly to the contravariant
-/// B_t flux, so Phi IS the coordinate EMF. exact for any symmetric-positive spatial metric (diagonal
-/// Schwarzschild/KS and non-diagonal Kerr alike).
+/// and mapped back to the coordinate frame with the one set of tetrad rules that makes the wave-sum
+/// EMF telescope to the coordinate B_t flux: a contravariant field/velocity maps as X = E X_hat; a
+/// wave speed (dx^n/dt) maps as lambda = E_dd lambda_hat; the normal field maps as B^n = E_dd
+/// B_hat^n. in the wave-sum Phi = sum |lambda_k| (B_t^{star} - B_t) these combine exactly to the
+/// contravariant B_t flux, so Phi is the coordinate EMF. exact for any symmetric-positive spatial
+/// metric (diagonal Schwarzschild/KS and non-diagonal Kerr alike).
 pub fn hlld_rmhd_states_gr_ortho<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
@@ -402,7 +400,7 @@ pub fn hlld_rmhd_states_gr_ortho<S: Scalar, const D: usize>(
     let e = metric.orthonormal_basis(dir);
     let e_t = e.transpose();
     let e_dd = e[(dir, dir)];
-    // forward map (no inverse): V_hat^a = gamma(v, e_hat_a) = (E^T gamma v)_a.
+    // forward map is a plain transpose contraction: V_hat^a = gamma(v, e_hat_a) = (E^T gamma v)_a.
     let to_hat = |p: &MhdPrim<S, D>| MhdPrim {
         hydro: Prim {
             rho: p.hydro.rho,
@@ -480,12 +478,12 @@ where
     let r_pair = [&r_l, &r_r];
     let lam = [a_l, a_r];
 
-    // initial pressure guess: L+R average of TOTAL pressure (gas + magnetic).
+    // initial pressure guess: L+R average of total pressure (gas + magnetic).
     // recovering the HLL state's primitive pressure via `regime.to_primitive`
-    // would require `OrderedNumeric` and isn't
-    // Gv-traceable (the c2p error code is host-only). the L+R average is
-    // strictly positive, monotonic in inputs, and the secant converges fine
-    // from it — the only cost is a few more iterations on extreme shocks.
+    // would demand `OrderedNumeric` plus a host-only c2p error code, which keeps
+    // it off the Gv trace. the L+R average is strictly positive, monotonic in
+    // inputs, and the secant converges from it at a cost of a few extra
+    // iterations on extreme shocks.
     let p_total = |prim: &MhdPrim<S, D>| -> S {
         prim.hydro.pre + half * metric.norm_sq_contra(&prim.mag) // |B|^2 (contravariant)
     };
@@ -578,10 +576,10 @@ where
     // ---- contact-wave state (Section 3.3) ----
     let vdbc = metric.contract_contra(&vc, &bc); // v_c.B_c (contravariant)
     let vna_used = S::select(on_left, vv_iso[0].dot(nhat), vv_iso[1].dot(nhat));
-    // `la - vnc` is analytically ZERO when bn -> 0 (the alfven waves collapse onto the
-    // contact), so this comparison decides on pure roundoff there; it must therefore gate
-    // only the EMPTY contact wedge (see the flux_hlld select below), never an HLLE
-    // fallback — either arm of a roundoff-decided select has to produce the same flux.
+    // `la - vnc` is analytically zero when bn -> 0 (the alfven waves collapse onto the
+    // contact), so this comparison decides on pure roundoff there; it therefore gates
+    // exactly one thing, the closed contact wedge, where both arms of the select carry the
+    // same flux. the HLLE fallback stays with the `success` physicality verdict.
     let contact_denominator = la - vnc;
     let contact_ok = contact_denominator
         .abs()
@@ -605,11 +603,10 @@ where
     let flux_fast = fa - ua * vface;
     let flux_contact = fa + (ut - ua) * la - ut * vface;
     // degenerate contact (la -> vnc, i.e. bn -> 0): the alfven waves coincide with the
-    // contact, the wedge between them is EMPTY, and the fan reduces to the per-side
-    // single-star (fast) state — the HLLC-like limit, not a failure. routing this case
-    // to flux_fast (instead of an HLLE fallback) keeps the flux continuous across the
-    // roundoff-decided contact_ok boundary: with an empty wedge, flux_contact is never
-    // the selected arm, so both sides of the select agree.
+    // contact, the wedge between them closes, and the fan reduces to the per-side
+    // single-star (fast) state — a valid HLLC-like limit. routing this case to flux_fast
+    // keeps the flux continuous across the roundoff-decided contact_ok boundary: a closed
+    // wedge puts flux_contact out of reach, so both sides of the select agree.
     let flux_hlld = MhdCons::select(at_contact & contact_ok, flux_contact, flux_fast);
 
     // wave-bracket select chain.
@@ -631,22 +628,22 @@ where
 }
 
 /// the converged HLLD five-wave fan for the UCT-HLLD edge EMF (Mignone & Del Zanna 2020, sec. 5.2). all
-/// speeds + the per-side SINGLE-STAR (post-fast, Section 3.1) lab-frame B field, plus `success`.
-/// CONSUMER CONTRACT: when `success == 0` the gas flux fell back to HLLE and EVERY field here is
-/// garbage — the EMF must use the HLL coefficients there. ordering (when success): `lam[0] <= alf[0]
-/// <= lstar <= alf[1] <= lam[1]`. `bstar[s]` is lab-frame B; transverse part = `bstar[s] - n*bn`.
+/// speeds + the per-side single-star (post-fast, Section 3.1) lab-frame B field, plus `success`.
+/// consumer contract: when `success == 0` the gas flux fell back to HLLE and every field here holds
+/// garbage, so the EMF switches to the HLL coefficients there. ordering (when success): `lam[0] <=
+/// alf[0] <= lstar <= alf[1] <= lam[1]`. `bstar[s]` is lab-frame B; transverse part = `bstar[s] - n*bn`.
 pub struct HlldStates<S: Scalar, const D: usize> {
-    pub lam: [S; 2],              // outermost FAST speeds [lambda^L, lambda^R]
+    pub lam: [S; 2],              // outermost fast speeds [lambda^L, lambda^R]
     pub alf: [S; 2],              // rotational/Alfven speeds [lambda*^L, lambda*^R] (MUB09)
     pub lstar: S,                 // contact speed lambda* = vc . n
     pub bstar: [Tensor<S, D>; 2], // per-side single-star B (lab-frame): B*^{L}, B*^{R}
-    pub bc: Tensor<S, D>, // CONTACT transverse field B_c (MUB09 Eq. 45) — B_t^{ss}, the EMF chi-jump target
-    pub vc: Tensor<S, D>, // CONTACT velocity v_c (MUB09 Eq. 47); v_c.n == lstar
-    pub bn: S,            // the (single, div-free) normal field
+    pub bc: Tensor<S, D>, // contact transverse field B_c (MUB09 Eq. 45) — B_t^{ss}, the EMF chi-jump target
+    pub vc: Tensor<S, D>, // contact velocity v_c (MUB09 Eq. 47); v_c.n == lstar
+    pub bn: S,            // the single normal field, div-free across the fan
     pub success: S,       // 1.0 = HLLD converged + physical; 0.0 = HLLE fallback (garbage)
 }
 
-/// extract the converged HLLD fan for the edge-EMF coefficients WITHOUT building the flux. shares
+/// extract the converged HLLD fan for the edge-EMF coefficients, stopping short of flux assembly. shares
 /// `hlld_rmhd_converge` with `hlld_rmhd` (identical secant), so the states are bit-consistent with
 /// the flux solve. carrier-generic.
 pub fn hlld_rmhd_states<S: Scalar, const D: usize, R>(
@@ -720,10 +717,9 @@ where
     }
 }
 
-// helper: mask-on-mask select. `Mask: BitAnd + BitOr + Not` from `algebra.rs`,
-// but the carrier doesn't ship a `select_mask` on Mask itself — it is synthesized
-// as `(on_left & a) | (!on_left & b)` so the `at_contact` per-side flag
-// stays branchless.
+// helper: mask-on-mask select. the carrier supplies `Mask: BitAnd + BitOr + Not` from
+// `algebra.rs`, and `select_mask` is synthesized from those three as
+// `(c & a) | (!c & b)`, which keeps the `at_contact` per-side flag branchless.
 trait MaskSelect: Sized + Copy {
     fn select_mask(c: Self, a: Self, b: Self) -> Self;
 }
@@ -740,12 +736,12 @@ where
 }
 
 /// the Newtonian (non-relativistic) ideal-MHD HLLD five-wave solver
-/// (Miyoshi & Kusano 2005). closed-form intermediate states — NO pressure
-/// iteration, unlike the relativistic `hlld_rmhd`. carrier-generic: native
-/// comparisons are `cmp_*`/`select`, every denominator is clamped before the
+/// (Miyoshi & Kusano 2005). the intermediate states are closed-form here, where the
+/// relativistic `hlld_rmhd` needs a pressure iteration. carrier-generic: comparisons go
+/// through `cmp_*`/`select`, every denominator is clamped before the
 /// divide (the Alfven-resonant / vanishing-Bn degeneracies select to the
 /// single-state limit), and a physicality-gated HLLE fallback guarantees a
-/// valid flux. ONE source, host f64 + traced Gv. wave structure (left->right):
+/// valid flux. one source, host f64 + traced Gv. wave structure (left->right):
 /// S_L < S*_L (alfven) < S_M (contact) < S*_R (alfven) < S_R.
 pub fn hlld_newtonian<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
@@ -760,12 +756,12 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     let neg = S::from_f64(-1.0);
     let regime = NewtonianMhd;
 
-    // the normal field is CONTINUOUS across the Riemann fan (div B = 0): Miyoshi-Kusano
-    // assume a single constant B_x. PLM reconstruction of the CELL-centered field gives
+    // the normal field is continuous across the Riemann fan (div B = 0): Miyoshi-Kusano
+    // assume a single constant B_x. PLM reconstruction of the cell-centered field gives
     // bn_l != bn_r in 2D, and feeding those raw leaves a spurious normal remnant in the
-    // transverse decomposition `B - n(B.n)` (-> corrupt star B -> negative pressure; the
-    // Orszag-Tang bug, ABSENT in constant-Bx Brio-Wu). enforce a single normal field on
-    // both states (the L/R average) — this also makes the normal-B flux F(Bn) = 0 exactly.
+    // transverse decomposition `B - n(B.n)` (-> corrupt star B -> negative pressure, a
+    // failure Orszag-Tang exposes and constant-Bx Brio-Wu hides). enforcing a single normal
+    // field on both states (the L/R average) also drives the normal-B flux F(Bn) to zero.
     let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
     let bn_sq = bn * bn;
     let with_bn = |p: &MhdPrim<S, D>| -> MhdPrim<S, D> {
@@ -831,8 +827,8 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
         // the transverse star fields divide by den = rho_k(s_k-u_k)(s_k-s_m) - bn^2, which
         // vanishes at the alfven resonance (the rotational wave coincides with the
         // entropy wave — frequent in 2D when the field is nearly face-normal). there the
-        // factors below diverge -> singular star state -> negative pressure. switch to the
-        // no-rotation limit (transverse fields unchanged) on a relative threshold.
+        // factors diverge -> singular star state -> negative pressure. a relative threshold
+        // switches to the no-rotation limit, which carries the transverse fields through intact.
         let term = rho_k * (s_k - un_k) * smk;
         let den = term - bn_sq;
         let small = den
@@ -849,7 +845,7 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
         );
         let v_star = nhat.scale(s_m) + (v_tang - b_tang.scale(fac_v));
         let b_star = nhat.scale(bn) + b_tang.scale(fac_b);
-        let e_k = u_k.nrg; // newtonian total energy (no D split)
+        let e_k = u_k.nrg; // newtonian total energy: kinetic + internal + magnetic in one scalar
         let vdb_k = prim_k.vel.dot(&prim_k.mag);
         let vdb_s = v_star.dot(&b_star);
         let e_star =
@@ -939,7 +935,8 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
         ),
     );
 
-    // physicality: any non-positive star density / pressure routes to HLLE.
+    // physicality: the HLLD arm is taken only where the star densities and star total
+    // pressure are strictly positive; everything else routes to HLLE.
     let smk_l_ok = (s_l - s_m)
         .abs()
         .cmp_gt(S::from_f64(REL_EPS) * s_l.abs().max(s_m.abs()));
@@ -959,11 +956,11 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
 }
 
 /// the UCT-HLLD edge-EMF coefficients `(a^L, d^L, d^R)` from L/R primitives (M&DZ 2020 Eq. 44-46).
-/// it runs the SAME classical Miyoshi-Kusano fan as `hlld_newtonian` — single normal field, Davis
+/// it runs the classical Miyoshi-Kusano fan of `hlld_newtonian` — single normal field, Davis
 /// `wave_speeds`, contact `lambda*`, star densities `rho^{*s}`, rotational `lambda^{*s}` — and
-/// extracts the master-form coefficients from that fan. so when the EMF feeds it the SAME
-/// reconstructed face states the gas flux uses, the EMF's fan is identical to the flux's (the
-/// CT-consistency M&DZ require). carrier-generic; NO clamp (verbatim Eq. 44).
+/// extracts the master-form coefficients from that fan. feeding it the same reconstructed face
+/// states the gas flux uses therefore makes the EMF's fan identical to the flux's, the
+/// CT-consistency M&DZ require. carrier-generic; the coefficients stand as Eq. 44 gives them.
 pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
@@ -1001,7 +998,7 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     let pt_l = prim_l.pre + half * prim_l.mag.dot(&prim_l.mag);
     let pt_r = prim_r.pre + half * prim_r.mag.dot(&prim_r.mag);
 
-    // contact lambda* (Miyoshi-Kusano eq 38) — same as the flux.
+    // contact lambda* (Miyoshi-Kusano eq 38), identical to the flux path.
     let cl = (s_l - un_l) * prim_l.rho;
     let cr = (s_r - un_r) * prim_r.rho;
     let dm = cr - cl;
@@ -1081,13 +1078,14 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     )
 }
 
-/// the UCT-HLLD edge-EMF coefficients `(a^L, d^L, d^R)` for ISOTHERMAL MHD (M&DZ 2020 Appendix A).
-/// the isothermal fan has NO contact/entropy mode, so the appendix states the a/d/nu formulas (Eq.
-/// 44-46) are UNCHANGED but chi~^s is built from the HLL central state:
+/// the UCT-HLLD edge-EMF coefficients `(a^L, d^L, d^R)` for isothermal MHD (M&DZ 2020 Appendix A).
+/// the isothermal fan carries fast and alfven modes alone, so the appendix keeps the a/d/nu
+/// formulas (Eq. 44-46) as they stand and builds chi~^s from the HLL central state:
 ///   rho* = rho^hll,  u* = F_rho^hll/rho^hll,  lambda^{*s} = u* -/+ |Bx|/sqrt(rho*),
 ///   chi~^s = (v_x^s - u*)(lambda^s - u*)/(lambda^{*s} + lambda^s - 2u*).
 /// mirrors the `hlld_isothermal` flux's fan exactly (single rho*, u* = mass-flux/rho — the advective mass flux, where m_x/rho would give the wrong star velocity),
-/// so the EMF fan == the flux fan at the same reconstructed face state. carrier-generic; NO clamp.
+/// so the EMF fan == the flux fan at the same reconstructed face state. carrier-generic; the
+/// coefficients stand as the appendix gives them.
 pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &IsoMhdPrim<S, D>,
@@ -1188,11 +1186,12 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
 }
 
 // =============================================================================
-// isothermal MHD HLLD — Mignone (2007). the THREE-state / four-wave solver: the
-// isothermal closure (p = a^2 rho) removes the entropy/contact mode, so the fan
-// is U_L* | U_c* | U_R* enclosed by two fast waves S_L/S_R and two Alfven waves
-// S_L*/S_R* (NO middle contact wave, unlike adiabatic HLLD). closed form; the
-// density is the HLL average so positivity is trivial (no energy to go negative).
+// isothermal MHD HLLD — Mignone (2007). the three-state / four-wave solver: the
+// isothermal closure (p = a^2 rho) leaves a spectrum of fast and alfven modes, so
+// the fan is U_L* | U_c* | U_R* enclosed by two fast waves S_L/S_R and two Alfven
+// waves S_L*/S_R*, where adiabatic HLLD threads a fifth contact wave through the
+// middle. closed form; the density is the HLL average, so positivity reduces to
+// rho > 0 over a system whose conserved variables are mass and momentum alone.
 // =============================================================================
 
 /// isothermal MHD HLLD face flux (Mignone 2007, eqs 20-39). carrier-generic; the
@@ -1275,9 +1274,9 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     // per-side star tangential state (eqs 30-33), vectorized over the transverse plane.
     // den = (s_k - s_l*)(s_k - s_r*) = (s_k - u*)^2 - cax^2, which vanishes at the alfven
     // resonance (the fast wave coincides with an alfven wave — a purely-normal field, where
-    // c_fast -> cax). there fac_v / fac_b diverge -> singular star state. switch to the
-    // no-rotation limit (transverse fields unchanged) on a relative threshold measured
-    // against the magnitude of the two cancelling terms `(s_k-u*)^2` and `cax^2`.
+    // c_fast -> cax). there fac_v / fac_b diverge -> singular star state. a relative threshold,
+    // measured against the magnitude of the two cancelling terms `(s_k-u*)^2` and `cax^2`,
+    // switches to the no-rotation limit, which carries the transverse fields through intact.
     let star = |rho_k: S,
                 un_k: S,
                 s_k: S,
@@ -1462,10 +1461,11 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_states_ordering_and_coplanarity() {
-        // THE GATE for UCT-HLLD: the star-state extractor must give (1) a physically ORDERED fan
-        // lam_L <= alf_L <= lstar <= alf_R <= lam_R, and (2) a SCALAR chi^s (B*^s_t parallel to
-        // B^s_t — fast-wave coplanarity), tested with a genuine 3D transverse field (By AND Bz).
-        // reduction state: asymmetric L/R (different fast speeds) + transverse-B jump + Bx != 0.
+        // the gate for UCT-HLLD: the star-state extractor gives a physically ordered fan
+        // lam_L <= alf_L <= lstar <= alf_R <= lam_R together with a scalar chi^s (B*^s_t parallel
+        // to B^s_t — fast-wave coplanarity), tested on a genuine 3D transverse field carrying By
+        // and Bz. reduction state: asymmetric L/R (different fast speeds) + transverse-B jump +
+        // Bx != 0.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rmhd;
         let prim_l = MhdPrim {
@@ -1527,9 +1527,10 @@ mod tests {
             s.alf[1],
             s.lam[1]
         );
-        // coplanarity: B*^s_t parallel to B^s_t. chi^s is extracted by PROJECTION (robust to the
-        // tiny non-parallel residual the HLLD star state carries — a componentwise ratio amplifies
-        // it because chi itself is small). the GATE is that the NON-PARALLEL residual is negligible.
+        // coplanarity: B*^s_t parallel to B^s_t. chi^s is extracted by projection, which stays
+        // robust against the tiny off-parallel residual the HLLD star state carries; a
+        // componentwise ratio amplifies that residual, since chi itself is small. the gate holds
+        // the off-parallel residual to a negligible fraction of |B*_t|.
         for (side, prim) in [(0usize, &prim_l), (1usize, &prim_r)] {
             let bt = [prim.mag[1], prim.mag[2]]; // transverse (y,z) upstream
             let bst = [s.bstar[side][1], s.bstar[side][2]]; // transverse star
@@ -1540,10 +1541,11 @@ mod tests {
             let res_rel = (res[0] * res[0] + res[1] * res[1]).sqrt()
                 / (bst[0] * bst[0] + bst[1] * bst[1]).sqrt().max(1e-30);
             println!("GATE: side {side} chi_proj={chi} non-parallel residual={res_rel:.2e}");
-            // the MUB09 single-star B is APPROXIMATELY coplanar: the non-parallel residual scales
+            // the MUB09 single-star B is approximately coplanar: the off-parallel residual scales
             // with the amplification |chi| (0.09% at chi=-0.05, 0.74% at chi=0.48 here). projection
             // is the principled scalar extraction; the residual is the HLLD approximation error and
-            // is negligible vs the HLL/HLLD diffusion gap. MONITOR it for the high-sigma wind.
+            // stays negligible against the HLL/HLLD diffusion gap. the high-sigma wind is the
+            // regime where it warrants monitoring.
             assert!(
                 res_rel < 2e-2,
                 "B*^{side}_t coplanarity residual too large: {res_rel:.2e}"
@@ -1555,11 +1557,11 @@ mod tests {
     fn hlld_rmhd_emf_reduces_to_by_flux() {
         // the grid-aligned reduction: in the double-star
         // region (lambda*^L < 0 < lambda*^R, the interface sits between the Alfven waves) the HLLD
-        // induction flux is CONSTANT and equals the contact-state value:
+        // induction flux is constant and equals the contact-state value:
         //   F_x[B_y] = v_x B_y - v_y B_x  ->  lambda* B_c^y - v_c^y B^x
         // (v_x = lambda*, B_y = B_c, v_y = v_c, B_x = B^x are all constant there). this validates the
-        // EXACT contact quantities (B_c, v_c, lstar, bn) the D-formula is built from against the
-        // proven `hlld_rmhd` flux. asymmetric L/R + B_y^L != B_y^R + B^x != 0 (the nontrivial case).
+        // exact contact quantities (B_c, v_c, lstar, bn) the D-formula is built from against the
+        // `hlld_rmhd` flux. asymmetric L/R + B_y^L != B_y^R + B^x != 0 (the nontrivial case).
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rmhd;
         let prim_l = MhdPrim {
@@ -1620,11 +1622,11 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_uct_telescopes_to_flux() {
-        // the Mignone & Del Zanna (2020) master form Eq. (30) must
-        // reconstruct the hlld_rmhd B_y flux EXACTLY from the per-side coefficients:
+        // the Mignone & Del Zanna (2020) master form Eq. (30)
+        // reconstructs the hlld_rmhd B_y flux exactly from the per-side coefficients:
         //   F^[By] = a^L F^L + a^R F^R - (d^R B_y^R - d^L B_y^L),   F^s = v_x^s B_y^s - v_y^s B^x
-        // with the BOUNDED chi-term substitution  d^s_chi . B_y^s = 1/2 (v^s-v*)(lambda*^s-lambda^s)(B_c^y - B_y^s).
-        // if this == flux.mag[1], the relativistic coefficients are PROVEN consistent (no rebuild).
+        // with the bounded chi-term substitution  d^s_chi . B_y^s = 1/2 (v^s-v*)(lambda*^s-lambda^s)(B_c^y - B_y^s).
+        // matching flux.mag[1] proves the relativistic coefficients consistent as they stand.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rmhd;
         let prim_l = MhdPrim {
@@ -1663,8 +1665,8 @@ mod tests {
         // single-star (between fast & Alfven) and double-star (== contact B_c) transverse fields.
         let by_ss_l = s.bstar[0][1]; // B_y^{sL}
         let by_ss_r = s.bstar[1][1]; // B_y^{sR}
-        // the EXACT HLLD induction flux (M&DZ Eq. 39): central minus the per-wave |lambda| dissipation
-        // over the ACTUAL star-field jumps. BOUNDED (all field differences); relativistically correct.
+        // the exact HLLD induction flux (M&DZ Eq. 39): central minus the per-wave |lambda| dissipation
+        // over the star-field jumps themselves. bounded (all field differences); relativistically correct.
         let f_hat = 0.5
             * (f(0) + f(1)
                 - lam[0].abs() * (by_ss_l - by[0])
@@ -1692,10 +1694,10 @@ mod tests {
         );
     }
 
-    // a MILD diagonal SPD spatial metric (a physical Schwarzschild-scale perturbation of
+    // a mild diagonal SPD spatial metric (a physical Schwarzschild-scale perturbation of
     // identity: gamma_rr = 1.3, gamma_tt = gamma_pp = 1.15) that exercises every metric
-    // contraction in the HLLD fan WITHOUT the r^2 blow-up that would map coordinate B to an
-    // unphysical ultra-low-beta physical field.
+    // contraction in the HLLD fan while staying clear of the r^2 blow-up that maps coordinate
+    // B to an unphysical ultra-low-beta physical field.
     fn mild_curved_metric() -> SpatialMetric<f64, 3> {
         SpatialMetric::new(
             Gamma::new(symbi_algebra::Matrix::diag(Tensor::new([1.3, 1.15, 1.15]))),
@@ -1707,9 +1709,9 @@ mod tests {
         )
     }
 
-    // a MILD NON-DIAGONAL SPD spatial metric (the kerr-class case: off-diagonal gamma_r_phi-type
-    // couplings), exercising the FULL tetrad path in the orthonormal-frame HLLD (including the
-    // off-diagonal couplings beyond the diagonal sqrt(g) scaling). the inverse is computed exactly from the closed-form 3x3 inv.
+    // a mild non-diagonal SPD spatial metric (the kerr-class case: off-diagonal gamma_r_phi-type
+    // couplings), exercising the full tetrad path in the orthonormal-frame HLLD, including the
+    // off-diagonal couplings beyond the diagonal sqrt(g) scaling. the inverse is computed exactly from the closed-form 3x3 inv.
     fn mild_nondiag_metric() -> SpatialMetric<f64, 3> {
         let gamma =
             symbi_algebra::Matrix::new([[1.3, 0.2, 0.05], [0.2, 1.15, 0.1], [0.05, 0.1, 1.15]]);
@@ -1718,12 +1720,12 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_gr_telescopes_to_flux_on_a_curved_metric() {
-        // the DECISIVE proof for the metric-generalized MUB09 solver: the M&DZ wave-sum
-        // (Eq. 39) built from the metric-aware star states must telescope EXACTLY to the
+        // the decisive proof for the metric-generalized MUB09 solver: the M&DZ wave-sum
+        // (Eq. 39) built from the metric-aware star states telescopes exactly to the
         // metric-aware HLLD B_t flux — the star states and the flux are self-consistent on a
         // curved background (the CT-flux consistency the GR-UCT-HLLD EMF relies on). the
         // induction flux F(B^i) = B^i v^n - v^i B^n is metric-free in contravariant
-        // components, so the telescoping FORMULA is unchanged; only the star fields carry gamma.
+        // components, so the telescoping formula stands as written; the star fields carry gamma.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_curved_metric();
         let gr = RmhdGr {
@@ -1780,8 +1782,8 @@ mod tests {
     fn hlld_rmhd_gr_telescopes_on_the_theta_direction() {
         // the theta-direction Riemann (nhat = unit(1)) — where the michel-monopole theta-momentum
         // instability lives. the wave-sum for the dissipated transverse component (here B_r,
-        // component 0) must telescope to the metric HLLD flux for THAT component, or the
-        // theta-face flux has a directional metric bug.
+        // component 0) telescopes to the metric HLLD flux for that same component; a mismatch
+        // means the theta-face flux carries a directional metric bug.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_curved_metric();
         let gr = RmhdGr {
@@ -1835,9 +1837,9 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_gr_ortho_reduces_to_flat_at_identity() {
-        // the GR orthonormal wrapper at the identity metric (sqrt(g_i) = 1) must be BIT-IDENTICAL
-        // to the flat MUB09 solver on a genuine L != R shock: no metric factor may perturb the SR
-        // path. this is the guard that the SR-MHD path is untouched by the GR generalization.
+        // the GR orthonormal wrapper at the identity metric (sqrt(g_i) = 1) is bit-identical
+        // to the flat MUB09 solver on a genuine L != R shock: every metric factor reduces to
+        // unity there. this guard holds the SR-MHD path fixed under the GR generalization.
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let flat = SpatialMetric::<f64, 3>::flat();
         let prim_l = MhdPrim {
@@ -1883,12 +1885,12 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_gr_uniform_state_equals_flux() {
-        // the SMOOTH-LIMIT gate: for identical L=R states on a CURVED metric, the HLLD intercell
-        // flux MUST equal the metric-aware physical flux F(U) exactly (no wave dissipation for a
-        // trivial Riemann). the orthonormal-frame wrapper reduces the GR solve to the validated
-        // flat MUB09 solver and maps the flux back, so this holds to roundoff in every component
-        // and every direction (the coordinate-frame reconstruction did not — it carried residual
-        // covariant-variance sqrt(gamma) factors in the transverse star fields).
+        // the smooth-limit gate: for identical L=R states on a curved metric the HLLD intercell
+        // flux equals the metric-aware physical flux F(U) exactly, a trivial Riemann carrying
+        // zero wave dissipation. the orthonormal-frame wrapper reduces the GR solve to the flat
+        // MUB09 solver and maps the flux back, so this holds to roundoff in every component and
+        // every direction; a coordinate-frame reconstruction instead leaves residual
+        // covariant-variance sqrt(gamma) factors in the transverse star fields.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_curved_metric();
         let gr = RmhdGr {
@@ -1938,8 +1940,8 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_gr_ortho_nondiagonal_smooth_equals_flux() {
-        // the TETRAD smooth-limit gate: on a NON-DIAGONAL (kerr-class) metric the orthonormal-frame
-        // HLLD must STILL equal F(U) exactly for L = R. this exercises the full Gram-Schmidt tetrad
+        // the tetrad smooth-limit gate: on a non-diagonal (kerr-class) metric the orthonormal-frame
+        // HLLD still equals F(U) exactly for L = R. this exercises the full Gram-Schmidt tetrad
         // (off-diagonal gamma), beyond the diagonal sqrt(g) scaling. all three coordinate normals.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_nondiag_metric();
@@ -1990,9 +1992,9 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_gr_ortho_shift_smooth_equals_moving_flux() {
-        // the SHIFTED smooth-limit gate: a moving interface vface (the kerr-schild/kerr shift
-        // beta^n/alpha rides the fan this way) must give, for L = R, the intercell flux F(U) -
-        // vface U EXACTLY — the kernel flux of the shifted valencia system (the godunov re-applies
+        // the shifted smooth-limit gate: a moving interface vface (the kerr-schild/kerr shift
+        // beta^n/alpha rides the fan this way) gives, for L = R, the intercell flux F(U) -
+        // vface U exactly — the kernel flux of the shifted valencia system (the godunov re-applies
         // alpha). validates the shifted HLLD; tested on the non-diagonal metric, all three normals.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_nondiag_metric();
@@ -2037,12 +2039,12 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_gr_ortho_nondiagonal_telescopes() {
-        // the TETRAD wave-sum gate: on a NON-DIAGONAL metric the M&DZ wave-sum built from the tetrad
-        // star states must telescope EXACTLY to the tetrad HLLD B_t flux (the CT-flux consistency the
-        // GR-UCT-HLLD EMF relies on, now with the full frame-dragging-class metric). r-direction,
+        // the tetrad wave-sum gate: on a non-diagonal metric the M&DZ wave-sum built from the tetrad
+        // star states telescopes exactly to the tetrad HLLD B_t flux (the CT-flux consistency the
+        // GR-UCT-HLLD EMF relies on, with the full frame-dragging-class metric). r-direction,
         // dissipated component B_y. the induction flux F(B^i) = B^i v^n - v^i B^n is metric-free in
-        // contravariant components, so the telescoping FORMULA is unchanged; the tetrad enters only
-        // through the star fields + speeds.
+        // contravariant components, so the telescoping formula stands as written; the tetrad enters
+        // through the star fields and speeds.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_nondiag_metric();
         let dir = 0usize;
@@ -2090,8 +2092,8 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_gr_fan_is_ordered_on_a_curved_metric() {
-        // the five-wave fan on the curved metric must stay ordered
-        // lam^L <= alf^L <= lstar <= alf^R <= lam^R (MUB09), and the normal field single-valued.
+        // the five-wave fan on the curved metric stays ordered
+        // lam^L <= alf^L <= lstar <= alf^R <= lam^R (MUB09), with a single-valued normal field.
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let m = mild_curved_metric();
         let gr = RmhdGr {
@@ -2128,7 +2130,7 @@ mod tests {
     #[test]
     fn hlld_rmhd_states_bx_zero_is_finite() {
         // degenerate Bx=0 (the toroidal-wind regime at the equator): the rotational waves collapse
-        // onto the contact; the extractor must stay finite (success may be 0 -> EMF uses HLL there).
+        // onto the contact; the extractor stays finite (success may be 0, and the EMF then uses HLL).
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rmhd;
         let prim_l = MhdPrim {
@@ -2278,8 +2280,8 @@ mod tests {
 
     #[test]
     fn hlld_newtonian_supersonic_right_upwinds_left() {
-        // vn >> fast speed on BOTH sides -> S_L > 0 -> the whole fan is right-going,
-        // so the interface flux at vface=0 is the LEFT physical flux F(U_L).
+        // vn >> fast speed on each side -> S_L > 0 -> the whole fan is right-going,
+        // so the interface flux at vface=0 is the left physical flux F(U_L).
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let nhat = Tensor::<f64, 3>::unit(0);
         let prim_l = nm_prim(1.0, [5.0, 0.2, 0.0], 1.0, [0.3, 0.5, 0.0]);
@@ -2291,7 +2293,7 @@ mod tests {
 
     #[test]
     fn hlld_newtonian_supersonic_left_upwinds_right() {
-        // vn << -fast speed -> S_R < 0 -> the interface flux is the RIGHT flux F(U_R).
+        // vn << -fast speed -> S_R < 0 -> the interface flux is the right flux F(U_R).
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let nhat = Tensor::<f64, 3>::unit(0);
         let prim_l = nm_prim(1.0, [-5.0, 0.2, 0.0], 1.0, [0.3, 0.5, 0.0]);
@@ -2303,8 +2305,8 @@ mod tests {
 
     #[test]
     fn hlld_newtonian_brio_wu_is_finite_and_physical() {
-        // a Brio-Wu-like subsonic discontinuity: the HLLD flux must be finite and
-        // its mass flux must lie within the L/R physical-flux bracket (consistency).
+        // a Brio-Wu-like subsonic discontinuity: the HLLD flux stays finite and its
+        // mass flux lies within the L/R physical-flux bracket (consistency).
         let eos = IdealGas { gamma: 2.0 };
         let nhat = Tensor::<f64, 3>::unit(0);
         let prim_l = nm_prim(1.0, [0.0, 0.0, 0.0], 1.0, [0.75, 1.0, 0.0]);
@@ -2371,7 +2373,7 @@ mod tests {
         let eos = Isothermal { cs: 0.7 };
         let nhat = Tensor::<f64, 3>::unit(0);
         let cases = [
-            im_prim(1.0, [0.0, 0.0, 0.0], [0.3, 1.0, 0.0]), // static, weak normal B (no resonance)
+            im_prim(1.0, [0.0, 0.0, 0.0], [0.3, 1.0, 0.0]), // static, weak normal B (off resonance)
             im_prim(0.8, [0.2, -0.1, 0.15], [0.2, 0.4, -0.5]), // moving, full 3D B
             im_prim(1.2, [-0.3, 0.0, 0.2], [0.0, 0.8, -0.3]), // Bn = 0 (perpendicular)
         ];
@@ -2424,18 +2426,17 @@ mod tests {
 
     #[test]
     fn hlld_isothermal_alfven_resonance_stays_bounded() {
-        // tier-1 #3b. a STRONG normal field (cax^2 = Bn^2/rho = 1.0 > cs^2 = 0.25) makes the
-        // fast speed approach the Alfven speed near a vanishing tangential field, where the
-        // transverse-star denominator den = (S_k - u*)^2 - cax^2 is smallest and the relative
-        // guard engages. sweep By across that band on an asymmetric shock (u* != u_n) and
-        // require the flux to stay finite and O(1). NOTE: unlike the newtonian solver (whose
-        // energy-bearing star state goes singular -> negative pressure at the Orszag-Tang
-        // resonance), the isothermal degeneracy is empirically BENIGN — the fast speed brackets
-        // the Alfven speed so den >= 0 with the zero removable (0/0), and the HLL-average density
-        // is always positive. so this is a robustness/regression pin reproducing no
-        // catastrophic blow-up; the relative guard's value is regularizing den near-zero to the
-        // physically-correct no-rotation limit (and matching the newtonian guard for the
-        // identical den structure); no Inf is being rescued.
+        // a strong normal field (cax^2 = Bn^2/rho = 1.0 > cs^2 = 0.25) drives the fast speed
+        // toward the Alfven speed near a vanishing tangential field, where the transverse-star
+        // denominator den = (S_k - u*)^2 - cax^2 is smallest and the relative guard engages.
+        // sweep By across that band on an asymmetric shock (u* != u_n) and require the flux to
+        // stay finite and O(1). the isothermal degeneracy is empirically benign: the fast speed
+        // brackets the Alfven speed so den >= 0 with the zero removable (0/0), and the
+        // HLL-average density stays positive; the newtonian solver by contrast carries an
+        // energy-bearing star state that goes singular -> negative pressure at the Orszag-Tang
+        // resonance. the guard here regularizes that removable 0/0 to the physically-correct
+        // no-rotation limit and matches the newtonian guard over the identical den structure,
+        // and these assertions pin the resulting finite, O(1) behavior.
         let eos = Isothermal { cs: 0.5 };
         let nhat = Tensor::<f64, 3>::unit(0);
         for k in 0..12 {

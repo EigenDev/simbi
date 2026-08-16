@@ -59,7 +59,7 @@ struct Config {
     name: String,
     regime: String,
     coord_system: String,
-    // the spacetime background ("minkowski" default, "schwarzschild" for GR). ORTHOGONAL to
+    // the spacetime background ("minkowski" default, "schwarzschild" for GR), orthogonal to
     // coord_system; selects the Schwarzschild metric (lapse/densitization/GR-wavespeed kernels).
     spacetime: String,
     // the Schwarzschild geometric mass M (G = c = 1); only meaningful when spacetime = schwarzschild.
@@ -83,8 +83,8 @@ struct Config {
     refinement_enabled: bool,
     // each region is a flat [lo_0, hi_0, lo_1, hi_1, ..] bound list (2 per axis).
     refinement_regions: Vec<Vec<f64>>,
-    // an initial-condition PERTURBATION as `SourceConfig` json: a position expression
-    // supplying a delta on each primitive component, evaluated at EVERY level's own cell
+    // an initial-condition perturbation as `SourceConfig` json: a position expression
+    // supplying a delta on each primitive component, evaluated at each level's own cell
     // centers. the cell generator fills the root grid alone and fine levels inherit it by
     // prolongation, which carries nothing below the root's nyquist; a declared expression
     // is the seam for initial data whose content is finer than the root can represent.
@@ -108,13 +108,13 @@ struct Config {
     wb_reconstruction: bool,
     dlogt: f64,
     viscosity: f64,
-    /// the shakura-sunyaev alpha-disk coefficient, read from the `viscosity_alpha` key.
-    /// deliberately NOT `alpha`: that is a generic name a problem may use for its own quantity
-    /// (a wave amplitude, a slope), and reading it here would switch on a viscosity nobody asked
-    /// for. see `bare_alpha_key`.
+    /// the shakura-sunyaev alpha-disk coefficient, read from the `viscosity_alpha` key,
+    /// not the bare `alpha` key: `alpha` is a generic name a problem may use for its own
+    /// quantity (a wave amplitude, a slope), and reading it here would switch on a viscosity
+    /// nobody asked for. see `bare_alpha_key`.
     alpha: f64,
     /// whether the config carried a bare `alpha` key. only used to refuse the ambiguous case
-    /// loudly: a viscous regime with `alpha` but no `viscosity_alpha` cannot be interpreted.
+    /// loudly: a viscous regime with `alpha` but no `viscosity_alpha` is inherently ambiguous.
     bare_alpha_key: bool,
     resistivity: f64,
     // horizon-excision sphere radius about the chart origin (cartesian kerr-schild,
@@ -129,7 +129,7 @@ struct Config {
     x3_spacing: String,
     x3_spacing_ratio: f64,
     start_time: f64,
-    // the LOG-checkpoint anchor (positive reference for log-spaced cadence). distinct from
+    // the log-checkpoint anchor (positive reference for log-spaced cadence). distinct from
     // start_time, which is the physical/resume clock (= checkpoint time on restart). 0 = unset ->
     // fall back to start_time (the common case where they coincide).
     checkpoint_log_anchor: f64,
@@ -157,8 +157,8 @@ struct Config {
     tracer_scheme: String,
     // the passive-scalar (dye) initial condition: one value per interior cell,
     // axis-0-fastest, drained from the python `passive_scalar` generator.
-    // empty = the run carries no dye. set AFTER parse (run_simulation drains
-    // the generator), never read from the sim_info dict.
+    // empty = the run carries no dye; populated after parse when run_simulation drains
+    // the generator, independent of the sim_info dict.
     chi_ic: Vec<f64>,
     // immutable initial-material cohort per interior cell.
     cohort_ic: Vec<u16>,
@@ -176,15 +176,15 @@ struct Config {
     motion_json: Option<String>,
     // the run's stationary target state in the rust `EquilibriumConfig` wire format, or None.
     // when present the scheme measures the target's discrete imbalance once per level and
-    // subtracts it back every stage, which makes the target an exact fixed point instead of a
-    // state that drifts at truncation order — most visibly across a coarse-fine interface, where
-    // the two grids reduce the same exact solution to different face values.
+    // subtracts it back every stage, keeping the target an exact fixed point, immune to the
+    // truncation-order drift a plain state would show — most visibly across a coarse-fine
+    // interface, where the two grids reduce the same exact solution to different face values.
     equilibrium_json: Option<String>,
     // whether to seed every level from that target before evolving. the state a refined hierarchy
-    // holds exactly has covered cells carrying the RESTRICTION of the finer target, which an
-    // independently sampled profile does not reproduce.
+    // holds exactly has covered cells carrying the restriction of the finer target, a value an
+    // independently sampled profile only reproduces by coincidence.
     seed_from_equilibrium: bool,
-    // driven (DYNAMIC) boundary prescriptions as `SourceConfig` json, in Driven-id order
+    // driven (dynamic) boundary prescriptions as `SourceConfig` json, in Driven-id order
     // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). lowered against each
     // regime's spec at sim build: every regime prescribes the full ghost primitive state; the
     // MHD build additionally prescribes the ghost cell B. rejected with mesh refinement.
@@ -192,7 +192,7 @@ struct Config {
     // gradient (Neumann / Robin) boundary coefficients, in registry order (gradient_bcs[id] <-> the
     // face marked BoundaryType::Neumann(id) / Robin(id)). the convenience prescribed-gradient wall.
     gradient_bcs: Vec<GradientBcSpec>,
-    // the config author's OWN params (subclass fields), grouped, for the live dashboard's
+    // the config author's own params (subclass fields), grouped, for the live dashboard's
     // problem-setup panel: each is [group, label, value].
     custom_params: Vec<[String; 3]>,
     // body-diagnostic output cadence in natural units (x time_unit -> code);
@@ -236,7 +236,7 @@ struct BodyParams {
     /// rigid-wall no-slip flag: true relaxes the tangential velocity to the body
     /// (no slip), false is a free-slip wall (the tangential channel is off).
     no_slip: bool,
-    /// the rigid-wall SHAPE as a `SdfExpr` json wire (`body["rigid"]["shape"]["wire"]`),
+    /// the rigid-wall shape as a `SdfExpr` json wire (`body["rigid"]["shape"]["wire"]`),
     /// or None for the analytic sphere. a `Some` routes the body to the runtime-JIT'd
     /// arbitrary-shape penalization kernel.
     shape_json: Option<String>,
@@ -248,7 +248,7 @@ struct BodyParams {
     inertia_principal: [f64; 3],
     /// whether the gas reaction force acts back on the body. black-hole sinks
     /// always feel feedback; this dial adds it to non-accreting gravitating
-    /// masses (BodyCollection gates feedback on this flag OR the sink kind).
+    /// masses (BodyCollection gates feedback on this flag or the sink kind).
     two_way_coupling: bool,
     /// the body's Ohmic resistivity `eta` (`MagneticSpec::Resistive`): a magnetized immersed sink that
     /// dissipates the field threading it. None = magnetically transparent (`MagneticSpec::None`).
@@ -297,7 +297,8 @@ fn validate_porous_body_overlaps(bodies: &[BodyParams]) -> Result<(), String> {
 /// a bonded-fragment assembly from the `bonded_assembly` config key: a cluster
 /// of wall-only rigid spherical fragments (sealed porous surfaces) joined by
 /// breakable elastic bonds, with optional soft-sphere contact and mutual
-/// gravity. fragments never enter the baked gravity/accretion source fan.
+/// gravity. fragments interact through this mutual-gravity/contact/bond path exclusively,
+/// separate from the baked gravity/accretion source fan.
 struct BondedAssemblyParams {
     positions: Vec<Vec<f64>>,
     masses: Vec<f64>,
@@ -369,8 +370,8 @@ fn enum_str_or(dict: &Bound<'_, PyDict>, key: &str, default: &str) -> String {
 /// format, emitted by python's `CompiledExpr.serialize_source`) and return it as a
 /// json string ready for `SourceConfig::from_json`. an empty dict (the default for
 /// configs with no source) -> None. the conversion goes through python's
-/// `json.dumps`, so the node DAG crosses the boundary without a hand-written
-/// PyDict -> serde walk.
+/// `json.dumps`, so the node DAG crosses the boundary as a single serialized
+/// string, in place of a hand-written PyDict -> serde walk.
 fn get_source_json(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
     let Some(obj) = dict.get_item(key)? else {
         return Ok(None);
@@ -388,8 +389,8 @@ fn get_source_json(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Strin
 
 /// read the registered censuses (already in the rust `CensusConfig` wire format,
 /// emitted by python's `Census.serialize`) as json strings. same shape as the source
-/// intake: the payload crosses through `json.dumps` so the node dag does not need a
-/// hand-written PyDict walk.
+/// intake: the payload crosses through `json.dumps` as a single serialized string, in
+/// place of a hand-written PyDict walk.
 fn get_census_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
     let mut censuses = Vec::new();
     if let Some(obj) = dict.get_item("census_expressions")? {
@@ -408,7 +409,7 @@ fn get_census_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
 }
 
 /// parse and lower every registered census, so a malformed binning or an
-/// unlowerable expression fails at SETUP rather than at the first sample. duplicate
+/// unlowerable expression fails at setup, not at the first sample. duplicate
 /// names are refused here because the name is the checkpoint group: two censuses
 /// sharing one would have the second silently overwrite the first.
 fn lower_configured_censuses(
@@ -450,10 +451,10 @@ fn get_source_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
 }
 
 /// uniform runtime-source attach across the substrate kernel sets the hydro
-/// dispatch macro instantiates. the macro body monomorphizes for EVERY regime it
-/// covers (newtonian/adiabatic AND rhd), but `with_runtime_source` is inherent
+/// dispatch macro instantiates. the macro body monomorphizes for every regime it
+/// covers (newtonian/adiabatic and rhd), but `with_runtime_source` is inherent
 /// only on the substrates that carry a source slot — so the call must go through
-/// a trait that ALL of them implement. the relativistic set has no slot yet and
+/// a trait every one of them implements. the relativistic set has no slot yet and
 /// reports a clear runtime error.
 trait AttachRuntimeSource: Sized {
     fn attach_runtime_source(
@@ -523,8 +524,8 @@ where
     }
 }
 
-/// enable pointwise-source fusion on a source-FREE substrate — a run with immersed bodies but no user
-/// source, so `attach_runtime_source` (which sets the fusion flag) is never called. real only for the
+/// enable pointwise-source fusion on a source-free substrate — a run with immersed bodies but no user
+/// source, where `attach_runtime_source` (which sets the fusion flag) goes uncalled. real only for the
 /// adiabatic set (its energy-regime body folds into godunov); a no-op elsewhere (iso folds its body via
 /// its own baked kernel; rhd/mhd have no host fused source path). the fused path self-gates on host+f64.
 trait EnableSourceFusion: Sized {
@@ -584,8 +585,8 @@ where
 
 /// the static regime spec a config's `regime` string names. the spec drives every
 /// source-term validation (which conservation laws are well posed, whether an energy
-/// equation exists), so resolving it here is what lets a source be lowered at preflight
-/// rather than only at dispatch, where the regime is a type parameter.
+/// equation exists), so resolving it here is what lets a source be lowered at preflight,
+/// not only at dispatch, where the regime is a type parameter.
 fn regime_spec_for(regime: &str) -> Result<&'static symbi_hydro::RegimeSpec, String> {
     match regime {
         "newtonian" => Ok(&symbi_hydro::NEWTONIAN_SPEC),
@@ -723,7 +724,7 @@ mod source_collection_tests {
     #[test]
     fn a_census_binning_is_validated_at_setup() {
         // non-increasing edges make a bin no cell can land in. the registration must
-        // fail here rather than produce a census that quietly bins nothing.
+        // fail here, not produce a census that quietly bins nothing.
         let censuses = [SourcePayload {
             origin: "census_expressions[0]".to_string(),
             json: r#"{ "name":"shells",
@@ -863,7 +864,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         .get_item("boundary_conditions")?
         .ok_or_else(|| PyValueError::new_err("sim_info missing 'boundary_conditions'"))?;
     // per-face boundary-expression field names, in face order (2*axis + side): a `dynamic`
-    // (DRIVEN) face reads its prescribed ghost state from the matching field.
+    // (`Driven`) face reads its prescribed ghost state from the matching field.
     const BX_FIELDS: [&str; 6] = [
         "bx1_inner_expressions",
         "bx1_outer_expressions",
@@ -873,7 +874,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         "bx3_outer_expressions",
     ];
     let mut boundaries = Vec::new();
-    // driven (DYNAMIC) boundary expressions in Driven-id order; id == registration order ==
+    // driven (`dynamic`) boundary expressions in Driven-id order; id == registration order ==
     // the order faces are visited here, so `Driven(id)` on a face matches `driven_exprs[id]`.
     let mut driven_exprs: Vec<String> = Vec::new();
     // gradient (Neumann / Robin) boundary coefficients in registry order; id == registration order,
@@ -919,7 +920,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         .get_item("adiabatic_index")?
         .and_then(|v| v.extract::<f64>().ok())
         .unwrap_or(5.0 / 3.0);
-    // gamma = 1 on an ENERGY regime is a degenerate EOS: the adiabatic sound
+    // gamma = 1 on an energy regime is a degenerate EOS: the adiabatic sound
     // speed gamma(gamma-1)e is identically zero, the CFL wave speed vanishes
     // on quiescent gas, and the first dt spans the whole run — one giant step
     // to NaN, reported as success. reject at parse with the actionable fix.
@@ -970,7 +971,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
     };
 
     Ok(Config {
-        // the problem class name (preserve case); blank when not supplied.
+        // the problem class name (preserve case); blank if omitted.
         name: dict
             .get_item("name")
             .ok()
@@ -1278,8 +1279,8 @@ fn parse_bonded_assembly(dict: &Bound<'_, PyDict>) -> PyResult<Option<BondedAsse
 
 fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
     let mut out: Vec<BodyParams> = Vec::new();
-    // the GRAVITATIONAL BODY-SYSTEM branch (`body_system.binary_config`): the binary components are
-    // GRAVITATING ACCRETORS whose initial positions/velocities come from the Keplerian orbit (the
+    // the gravitational body-system branch (`body_system.binary_config`): the binary components are
+    // gravitating accretors whose initial positions/velocities come from the Keplerian orbit (the
     // config leaves the component positions at the origin, delegating the ICs to the backend). the
     // orbit itself is attached separately via `parse_binary` -> `with_binary_params`.
     parse_binary_components(dict, &mut out);
@@ -1416,7 +1417,7 @@ fn parse_binary(dict: &Bound<'_, PyDict>) -> Option<BinaryCfg> {
     })
 }
 
-/// append the binary components as GRAVITATING (and, if `is_an_accretor`, ACCRETING) bodies, with
+/// append the binary components as gravitating (and, if `is_an_accretor`, accreting) bodies, with
 /// their initial positions/velocities from the circular Keplerian orbit about the COM (the config
 /// leaves the component positions at the origin and delegates the ICs to `keplerian_binary`).
 fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) {
@@ -1487,7 +1488,7 @@ fn sub_f64(body: &Bound<'_, PyDict>, group: &str, key: &str, default: f64) -> f6
 }
 
 /// the string twin of `sub_f64`: a nested `body[group][key]` string, or `default` when the
-/// group or key is absent. used by selectors that name a physical model rather than set a number.
+/// group or key is absent. used by selectors that name a physical model, not set a number.
 fn sub_str(body: &Bound<'_, PyDict>, group: &str, key: &str, default: &str) -> String {
     body.get_item(group)
         .ok()
@@ -1673,11 +1674,11 @@ fn configured_ito_order(
     }
 }
 
-/// install the configured censuses onto a store. lowering ALREADY happened at preflight, where
+/// install the configured censuses onto a store. lowering already happened at preflight, where
 /// a malformed registration is rejected before any grid is allocated; this is the step that makes
-/// the run actually carry them. without it a census validates, reports no error, and records
-/// nothing — a checkpoint with no census group is indistinguishable from a run that never
-/// registered one.
+/// the run actually carry them. omitting it leaves a census that validates, reports no error, and
+/// records nothing — a checkpoint with no census group reads identically to a run that skipped
+/// registration entirely.
 fn attach_configured_censuses<
     const D: usize,
     const DOF: usize,
@@ -1752,14 +1753,14 @@ fn partition_configured_tracers<
 }
 
 /// the number of scheduled checkpoint boundaries already at or before `resume_time`, i.e. the
-/// count a restart must SKIP so the next write lands on the first boundary strictly in the future.
+/// count a restart must skip so the next write lands on the first boundary strictly in the future.
 /// `boundary(fired)` is the (fired+1)-th scheduled checkpoint time and is monotonic increasing
-/// (log: anchor*10^((fired+1)*dlogt); linear: (fired+1)*interval). without this skip a restart
-/// re-dumps the checkpoint it resumed from — duplicating a file and shifting every later index by
-/// one — whenever the schedule is anchored at a fixed reference below the resume clock. a fresh run
-/// (`is_restart` false) skips nothing. the loop terminates: a finite monotonic cadence exceeds any
-/// finite `resume_time`, and a disabled cadence (`boundary` returns a non-finite sentinel) stops at
-/// once.
+/// (log: anchor*10^((fired+1)*dlogt); linear: (fired+1)*interval). this skip keeps a restart from
+/// re-dumping the checkpoint it resumed from, which would duplicate a file and shift every later
+/// index by one, whenever the schedule is anchored at a fixed reference below the resume clock.
+/// a fresh run (`is_restart` false) skips nothing. the loop terminates: a finite monotonic
+/// cadence exceeds any finite `resume_time`, and a disabled cadence (`boundary` returns a
+/// non-finite sentinel) stops at once.
 fn checkpoints_at_or_before(
     is_restart: bool,
     resume_time: f64,
@@ -1789,11 +1790,11 @@ mod checkpoint_schedule_tests {
         }
     }
 
-    // log cadence anchored at a FIXED reference: the k-th checkpoint lands at anchor*10^(k*dlogt).
+    // log cadence anchored at a fixed reference: the k-th checkpoint lands at anchor*10^(k*dlogt).
     // cp_at(fired) is the (fired+1)-th boundary. a restart at index k resumes with the clock at the
     // k-th boundary, so the skip must consume exactly k boundaries and leave the next write on the
-    // (k+1)-th — same index it would carry in an uninterrupted run, and NO duplicate at the resume
-    // time. this is the "restart from the correct index" invariant.
+    // (k+1)-th — same index it would carry in an uninterrupted run, writing exactly once at the
+    // resume time. this is the "restart from the correct index" invariant.
     #[test]
     fn log_restart_skips_to_the_next_future_boundary() {
         let anchor = 1.0_f64;
@@ -1835,7 +1836,7 @@ mod checkpoint_schedule_tests {
         assert!((cp_at(5) - 6.0 * interval).abs() < 1e-12);
     }
 
-    // a fresh run never skips, regardless of the schedule, so the first checkpoint keeps index 0->1.
+    // a fresh run skips zero boundaries, regardless of the schedule, so the first checkpoint keeps index 0->1.
     #[test]
     fn fresh_run_skips_nothing() {
         let cp_at = |fired: u64| (fired + 1) as f64 * 0.2;
@@ -1869,10 +1870,10 @@ where
 {
     let data_dir = &cfg.data_dir;
     if let Some(path) = cfg.restart_path.as_deref() {
-        // a restart may run DEEPER than the file it resumes from — the bootstrap ladder, where a
+        // a restart may run deeper than the file it resumes from — the bootstrap ladder, where a
         // rung converges at its own resolution and the next resumes it with one more level. the
         // sequence (count the file's levels, verify their grids, load them, inject the rest) lives
-        // on the hierarchy so it is reachable from a test rather than only from here.
+        // on the hierarchy so it is reachable from a test, not only from here.
         for level in hier.levels.iter_mut() {
             level.state.tracers = None;
             level.state.continuous_tracers = None;
@@ -1890,7 +1891,7 @@ where
             .into());
         }
     }
-    // the checkpoint cadence is in NATURAL units: `checkpoint_interval * time_unit`
+    // the checkpoint cadence is in natural units: `checkpoint_interval * time_unit`
     // is the code-unit spacing, so `checkpoint_interval = 0.1` with a binary's
     // orbital `time_unit` means "every 0.1 orbits". default time_unit = 1.0 keeps
     // the cadence in code units, unchanged for ordinary runs.
@@ -1899,11 +1900,11 @@ where
     } else {
         f64::INFINITY
     };
-    // LOGARITHMIC checkpoint spacing: when dlogt > 0 (the python config enabled
+    // logarithmic checkpoint spacing: when dlogt > 0 (the python config enabled
     // log_checkpoints over a positive start_time), the k-th checkpoint lands at
     // start_time*10^(k*dlogt) in code units — dense early, sparse late, the right
     // cadence for a run spanning many decades in time (a relativistic wind from a
-    // tiny inner radius out to a huge one). otherwise the cadence is LINEAR at
+    // tiny inner radius out to a huge one). otherwise the cadence is linear at
     // cp_interval. `cp_at(fired)` returns the (fired+1)-th scheduled checkpoint time.
     // the log cadence is anchored at checkpoint_log_anchor (a fixed reference, e.g., the inner
     // light-crossing) so the schedule is identical across a fresh run and a restart whose clock
@@ -1926,7 +1927,7 @@ where
         }
     };
     // on a restart the clock resumes mid-schedule at start_time; skip every boundary already at or
-    // before it so the first write lands on the next FUTURE boundary and reuses no index. seeding
+    // before it so the first write lands on the next future boundary and reuses no index. seeding
     // cp_fired at 0 would re-dump the resumed checkpoint (a duplicate file, every later index shifted
     // by one) whenever cp_at is anchored at a fixed checkpoint_log_anchor below the resume clock. a
     // restart is signalled by a nonzero loaded checkpoint_index; a fresh run skips nothing.
@@ -1934,17 +1935,17 @@ where
         checkpoints_at_or_before(cfg.checkpoint_index > 0, cfg.start_time, &cp_at);
     let mut next_cp = cp_at(cp_fired);
     let mut cp_index: u64 = cfg.checkpoint_index + 1;
-    // LOG-spaced runs are named by the monotonic INDEX: the fixed-3-decimal
+    // log-spaced runs are named by the monotonic index: the fixed-3-decimal
     // time name (`000_790`) collides at small times (0.0001 and 0.0002 both round to
     // `000_000`, silently overwriting the dense early dumps a log run produces). the physical
     // time lives in metadata/time, which every reader uses. size the zero-pad width to the
     // projected checkpoint count (+ any restart offset) so names always sort lexicographically.
     let cp_idx_width: usize = if cp_log {
-        // size the zero-pad TIGHTLY to the projected highest index (count + any restart offset).
+        // size the zero-pad tightly to the projected highest index (count + any restart offset).
         // `ceil(log10(max_index + 1))` is the digit count and is robust at the power-of-10 boundary
-        // (a projection of 99.99 still yields 2, and exactly 1000 yields 4) so the digit-count boundary never lands
-        // on the run's own last checkpoint. an overshoot extends the width gracefully (format! never
-        // truncates: width is a MINIMUM, so 99 -> 100); only a raw `ls` sees a cosmetic width jump there,
+        // (a projection of 99.99 still yields 2, and exactly 1000 yields 4) so the digit-count boundary stays
+        // clear of the run's own last checkpoint. an overshoot extends the width gracefully (format! only
+        // pads or grows: width is a floor, so 99 -> 100); only a raw `ls` sees a cosmetic width jump there,
         // since every reader sorts numerically (metadata/time, viz extract_timestep).
         let projected = (cfg.t_final / cp_tstart).log10() / cp_dlogt + cfg.checkpoint_index as f64;
         ((projected.max(1.0) + 1.0).log10().ceil() as usize).max(1)
@@ -1981,12 +1982,12 @@ where
         let _ = table.set_log_file(std::path::Path::new(&p));
     }
 
-    // zone-cycle throughput: the ACTUAL interior cell-updates per ROOT step. for a refined run this
-    // is NOT just the base grid -- each level ll subcycles RATIO^ll times per root step over its own
-    // (finer, larger) interior, so the honest count is sum_ll (interior_cells_ll * RATIO^ll). a
-    // single-level run reduces to the base interior, unchanged. without this, AMR reports only the
-    // coarse zones while the wall-clock includes all the hidden fine work, so the rate reads ~RATIO^d
-    // too low. (RATIO = 2, the baked transfer ratio.)
+    // zone-cycle throughput: the actual interior cell-updates per root step. for a refined run this
+    // counts every level's own work -- each level ll subcycles RATIO^ll times per root step over its
+    // own (finer, larger) interior, so the honest count is sum_ll (interior_cells_ll * RATIO^ll). a
+    // single-level run reduces to the base interior, unchanged. this accounting is what keeps AMR
+    // from reporting only the coarse zones while the wall-clock includes all the hidden fine work,
+    // which would read the rate ~RATIO^d too low. (RATIO = 2, the baked transfer ratio.)
     let n_zones: u64 = {
         let mut eff = 0u64;
         let mut subcycle = 1u64; // RATIO^ll for level ll
@@ -2011,23 +2012,23 @@ where
     let diag_interval = (cfg.diagnostic_interval * cfg.time_unit).max(f64::MIN_POSITIVE);
     let mut next_diag = diag_interval;
     let start = std::time::Instant::now();
-    // checkpoint-write seconds, accumulated ALWAYS (not just under SYMBI_PROFILE): the
+    // checkpoint-write seconds, accumulated on every run regardless of SYMBI_PROFILE: the
     // exit summary reports the sustained integration rate with i/o excluded — on a
     // short run the h5 writes are a large slice of wall and dilute the displayed rate.
     let io_secs = std::cell::Cell::new(0.0f64);
     let mut last_inst = start;
     let mut last_iter = hier.levels[0].state.iteration;
     // FOFC observability: zero the deliberate-fallback counters at run start, track the last-seen
-    // totals so the benchmark cadence can post the per-window delta (a limiter that fired is shown,
-    // never silent). cumulative totals also close out the run summary.
+    // totals so the benchmark cadence can post the per-window delta (a limiter that fired always
+    // shows). cumulative totals also close out the run summary.
     symbi::regimes::fofc::fofc_reset_stats();
-    // on a cartesian black-hole run, split the FOFC counters at the OUTER HORIZON
+    // on a cartesian black-hole run, split the FOFC counters at the outer horizon
     // r_+ = M + sqrt(M^2 - a^2): everything inside is causally disconnected (and the
     // near-horizon infall band fires steadily by design), so the exterior signal is the
     // acceptance criterion for a production run (exterior events == 0). the split is
-    // load-bearing — the freeze-streak HALT gates on the exterior count — so it uses the
-    // TRUE spin-dependent r_+, not the Schwarzschild 2M: cells in (r_+, 2M) at nonzero spin
-    // are OUTSIDE the horizon and a poison there must still halt the run.
+    // load-bearing — the freeze-streak halt gates on the exterior count — so it uses the
+    // true spin-dependent r_+, not the Schwarzschild 2M: cells in (r_+, 2M) at nonzero spin
+    // sit outside the horizon, where a poison must still halt the run.
     symbi::regimes::fofc::fofc_set_horizon_radius(
         if cfg.spacetime != "minkowski"
             && cfg.coord_system == "cartesian"
@@ -2055,11 +2056,11 @@ where
     // a render thread owns the terminal + input and draws at ~30 fps, so
     // tab / pause respond instantly regardless of step rate. `None` off a tty (the
     // static string path renders headless). the solver publishes snapshots + reads
-    // its control flags without polling keys inline.
+    // its control flags, leaving key polling entirely to the render thread.
     let mut dash = LiveDashboard::spawn();
 
     // prime the IC: derive primitives (c2p) + cell-centered B (bcell-from-bface)
-    // from the seeded conserved/face state BEFORE snapshotting, so the t=0
+    // from the seeded conserved/face state before snapshotting, so the t=0
     // checkpoint carries real primitives (the reader reads primitives — an
     // unprimed IC's zeroed scratch buffers plot as all zeros). idempotent
     // with the prime the evolve driver runs at its own start.

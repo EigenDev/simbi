@@ -3,15 +3,15 @@
 //
 // the D-generic hydro analog of substrate_rmhd_gpu.rs: every iso / Newton / RHD
 // SubstrateKernelSet method runs on the GPU through the production dispatch path, at
-// 1D, 2D AND 3D. build TWO identical sims — host (CpuSpace/HostMemory) and unified
-// (CudaSpace/UnifiedMemory) — and drive the SAME `<Mem,f64,const D>` kernelset on
+// 1D, 2D and 3D. build two identical sims — host (CpuSpace/HostMemory) and unified
+// (CudaSpace/UnifiedMemory) — and drive one `<Mem,f64,const D>` kernelset on
 // each. unified `Mem` routes every kernel to run_gpu (render neutral IR -> NVRTC ->
 // launch); host routes to the AOT CPU fn. the cfl exercises the device block-reduce
 // (field_reduce_device) — the only device->host crossing.
 //
-// a deterministic SINGLE-PASS pipeline (snapshot, c2p, ghost_fill, cfl, flux per dir,
-// godunov_euler, godunov_rk2) — every kernel run + diffed on the SAME input state, so
-// there is no cfl-clamped step-count sensitivity. GPU vs CPU agree modulo nvcc FMA
+// a deterministic single-pass pipeline (snapshot, c2p, ghost_fill, cfl, flux per dir,
+// godunov_euler, godunov_rk2) — every kernel run + diffed on one shared input state, which
+// keeps the comparison free of cfl-clamped step-count sensitivity. GPU vs CPU agree modulo nvcc FMA
 // fusion: ULP-bounded, rel < 1e-9.
 //
 // runs on a CUDA GPU (NVRTC needs no nvcc). in the symbi-cuda distrobox:

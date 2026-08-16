@@ -9,15 +9,15 @@
 // and this module turns per-cell axis coordinates into the destination bucket the
 // segmented reduction scatters into.
 //
-// axes take an OUTER PRODUCT, so one radial axis gives shell profiles, a radial and
-// an angular-momentum axis give the histogram per shell, and NO axes give a global
-// reduction over the whole grid.
+// axes take an outer product, so one radial axis gives shell profiles, a radial and
+// an angular-momentum axis give the histogram per shell, and an empty axis list gives
+// a global reduction over the whole grid.
 //
 // the accumulated object must be a commutative monoid — associative and
-// order-agnostic — or it cannot be reduced in parallel, blocked, or combined across
-// restart segments. sums and extrema are; means, variances and percentiles are not,
-// being functions of sums. so a census registers `m*v` and `m` and the reader
-// divides.
+// order-agnostic — for the reduction to run in parallel, blocked, and combined across
+// restart segments. sums and extrema qualify; means, variances and percentiles are
+// functions of sums and stand outside it. so a census registers `m*v` and `m` and the
+// reader divides.
 //
 // usage:
 //  let axis = BinAxis::new("log_r", log_spaced_edges)?;
@@ -28,10 +28,10 @@
 use symbi_ir::algebra::Scalar;
 use symbi_ir::emit::ReductionOp;
 
-/// how far past the last bucket the EXCLUDED marker sits — a cell that is not part of the
-/// reduction at all: covered by finer data, inside an immersed body's mask, a ghost, or otherwise
-/// not physical gas. distinct from a cell that falls outside the declared bin edges, which was to
-/// be reduced and is a genuine shortfall of the binning, counted as such.
+/// how far past the last bucket the excluded marker sits — a cell outside the reduction's scope
+/// entirely: covered by finer data, inside an immersed body's mask, a ghost, or otherwise
+/// something other than physical gas. distinct from a cell that falls outside the declared bin
+/// edges, which was in scope and is a genuine shortfall of the binning, counted as such.
 ///
 /// an OFFSET rather than a fixed sentinel because the segment travels on the scalar carrier, so
 /// every marker must stay a small integer to be exact in f32 as well as f64.
@@ -40,10 +40,10 @@ pub use symbi_ir::SEGMENT_EXCLUDED_OFFSET;
 /// one bin axis: a coordinate to bin on, plus the edges that cut it.
 ///
 /// edges are supplied explicitly rather than as a spacing rule, so linear spacing, log
-/// spacing and hand-chosen edges all work without a spacing enum. `n` edges give
+/// spacing and hand-chosen edges all work through one representation. `n` edges give
 /// `n - 1` bins, and bin `k` covers `[edges[k], edges[k+1])`; the last bin is closed at
-/// its upper edge so a value sitting exactly on the domain's outer boundary is not
-/// silently dropped.
+/// its upper edge, so a value sitting exactly on the domain's outer boundary lands in
+/// that bin.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BinAxis {
     name: String,
@@ -110,8 +110,8 @@ impl BinAxis {
 
 /// when a census samples on a refinement hierarchy.
 ///
-/// levels are time-aligned ONLY at root-step boundaries: level `l` subcycles once per parent step,
-/// so its clock runs ahead of its parent's within a step and only meets it at the end.
+/// levels are time-aligned at root-step boundaries: level `l` subcycles once per parent step,
+/// so its clock runs ahead of its parent's within a step and meets it again at the end.
 ///
 /// `RootStep` reduces every level's leaf cells into one sample at that meeting point, so a row is
 /// a consistent snapshot of the whole composite domain. `PerLevelStep` instead lets each level
@@ -158,7 +158,7 @@ pub struct CensusSpec {
     name: String,
     /// shortest simulation-time interval between samples; `None` samples every step.
     sample_interval: Option<f64>,
-    /// fold every sample into ONE running row rather than emitting a row apiece.
+    /// fold every sample into a single running row rather than emitting a row apiece.
     accumulate: bool,
     /// whether a hierarchy samples at root-step boundaries or on each level's own subcycle.
     cadence: Cadence,
@@ -184,7 +184,7 @@ impl CensusSpec {
             return Err(format!("census '{name}': registers no values"));
         }
         // a product over a bin's cells overflows to zero or infinity at any realistic cell
-        // count and is not a census statistic.
+        // count, which puts it outside the set of usable census statistics.
         if matches!(op, ReductionOp::Mul) {
             return Err(format!(
                 "census '{name}': a product over a bin is not a meaningful reduction; use \
@@ -247,13 +247,13 @@ impl CensusSpec {
         self.sample_interval
     }
 
-    /// fold every sample into ONE running row instead of storing a row apiece.
+    /// fold every sample into a single running row in place of a row apiece.
     ///
-    /// the fold is the census's OWN reduce op, extended over time: an additive census carries the
+    /// the fold is the census's own reduce op, extended over time: an additive census carries the
     /// running total, from which the reader forms a time average by dividing by the sample count,
-    /// and an extremal one carries the extremum over space AND time. that consistency is what
-    /// makes the mode safe — the same commutative monoid that merges two cells and two refinement
-    /// levels merges two samples, so no third combining rule exists to disagree.
+    /// and an extremal one carries the extremum over space and time together. that consistency is
+    /// what makes the mode safe — one commutative monoid merges two cells, two refinement levels
+    /// and two samples alike, so a single combining rule governs all three.
     ///
     /// the motivation is storage: a two-dimensional histogram runs to order a hundred kilobytes
     /// per sample, and a run that only ever wanted the segment's time average would otherwise
@@ -285,9 +285,9 @@ impl CensusSpec {
             "add" => ReductionOp::Add,
             "min" => ReductionOp::Min,
             "max" => ReductionOp::Max,
-            // a product is not a census statistic, and mean/variance/percentile are not
-            // order-agnostic, so they cannot be reduced in parallel or combined across restart
-            // segments. those are functions of sums the reader forms offline.
+            // add, min and max are the commutative monoids that reduce in parallel and combine
+            // across restart segments. a product overflows, and mean/variance/percentile depend
+            // on order; those are functions of sums the reader forms offline.
             other => {
                 return Err(format!(
                     "census '{}': unknown reduce op '{other}' (expected add, min or max)",
@@ -339,8 +339,8 @@ impl CensusSpec {
     }
 
     /// the bucket a cell lands in, given its coordinate on each axis in registration
-    /// order. `None` when any axis places the cell outside its edges — a cell must fall
-    /// inside EVERY axis to be counted, since the bucket is a point in their outer product.
+    /// order. `None` when any axis places the cell outside its edges — a counted cell falls
+    /// inside every axis, since the bucket is a point in their outer product.
     ///
     /// the last axis varies fastest, so a reader reshaping the flat output to
     /// `[n_0, .., n_{K-1}]` in row-major order recovers the axes in registration order.
@@ -358,11 +358,11 @@ impl CensusSpec {
         Some(flat)
     }
 
-    /// the marker for a cell that is not part of the reduction at all — a ghost, a cell a finer
-    /// level resolves, anything that is not physical gas. it sits STRICTLY ABOVE the
-    /// outside-the-edges marker so the reduction can tell the two apart: a cell that fell outside
-    /// the declared edges was meant to be reduced and is a shortfall worth reporting, while an
-    /// excluded one was never in scope.
+    /// the marker for a cell outside the reduction's scope — a ghost, a cell a finer level
+    /// resolves, anything other than physical gas. it sits strictly above the outside-the-edges
+    /// marker so the reduction can tell the two apart: a cell that fell outside the declared edges
+    /// was in scope and is a shortfall worth reporting, while an excluded one sits outside scope
+    /// by construction.
     pub fn excluded_marker(&self) -> f64 {
         (self.n_segments() + SEGMENT_EXCLUDED_OFFSET as usize) as f64
     }
@@ -377,19 +377,19 @@ impl CensusSpec {
     }
 }
 
-/// the bucket a cell's axis coordinates fall in, as a CARRIER-GENERIC branch-free expression:
+/// the bucket a cell's axis coordinates fall in, as a carrier-generic branch-free expression:
 /// the flat segment index, or `n_segments` (one past the last bucket) when any axis coordinate
 /// lies outside its declared edges, which is what the reduction counts as dropped.
 ///
-/// ONE definition for every carrier. `S = f64` evaluates it on the host; `S = Gv` traces it into a
+/// one definition for every carrier. `S = f64` evaluates it on the host; `S = Gv` traces it into a
 /// kernel. the binning is the part of a census a device path would otherwise have to reimplement,
-/// and a host/device split there is invisible: both produce a smooth, plausible profile, and only
-/// their disagreement — which nothing would be comparing — reveals it.
+/// and a host/device split there hides itself: both produce a smooth, plausible profile, and their
+/// disagreement — which nothing would be comparing — is the sole tell.
 ///
-/// the search is a COUNT rather than a branchy partition point: `bin = #{edges at or below x} - 1`,
+/// the search is a count rather than a branchy partition point: `bin = #{edges at or below x} - 1`,
 /// saturated at the last bin so a value sitting exactly on the outer edge lands in it rather than
 /// one past. edges are known at registration, so the loop unrolls at trace time. a NaN coordinate
-/// compares false against both bounds and is therefore dropped, never binned.
+/// compares false against both bounds and is therefore dropped.
 pub fn segment_marker_generic<S: Scalar>(axes: &[BinAxis], coords: &[S], n_segments: usize) -> S {
     debug_assert_eq!(axes.len(), coords.len(), "one coordinate per bin axis");
     let mut flat = S::ZERO;
@@ -417,17 +417,17 @@ pub fn segment_marker_generic<S: Scalar>(axes: &[BinAxis], coords: &[S], n_segme
 
 /// a registered census with its expressions lowered and compiled — the runtime artifact.
 ///
-/// the bin-axis coordinates and the accumulator values share ONE compiled graph, so a
+/// the bin-axis coordinates and the accumulator values share one compiled graph, so a
 /// subexpression both use (a radius, its logarithm) is evaluated once per cell. cost scales
-/// with the size of that graph, not with the number of registered accumulators.
+/// with the size of that graph, independent of how many accumulators are registered.
 pub struct CensusEvaluator {
     spec: CensusSpec,
     eval: symbi_hydro::SourceEvaluator,
-    /// the REGISTRATION, retained so a compiled path can lower the same expressions the
-    /// interpreter walks. the lowered `BuiltSource` itself is deliberately not held: it carries a
-    /// `proc_macro2::Span`, so it is not `Sync`, and a store holding one could not be shared with
+    /// the registration, retained so a compiled path can lower the same expressions the
+    /// interpreter walks. the config is held in place of the lowered `BuiltSource`, which carries
+    /// a `proc_macro2::Span` and so lacks `Sync`; a store holding one would be unshareable with
     /// the rayon closures every parallel pass takes over it. lowering from the config on demand
-    /// keeps both paths sourced from one registration without that constraint.
+    /// keeps both paths sourced from one registration and the store `Sync`.
     cfg: symbi_hydro::CensusConfig,
     /// the config's tunable parameter values, indexed by `PARAMETER` node index.
     params: Vec<f64>,
@@ -437,9 +437,9 @@ pub struct CensusEvaluator {
 /// the compiled-expression kernel key. a census lowers to a single graph, so one entry.
 const CENSUS_FIELD: &str = "census";
 
-// the compiled kernels are not printable, so the report is the registration's shape:
-// what it bins on, how many buckets that makes, what it accumulates, and how big the
-// per-cell graph is — the numbers worth seeing before a job is submitted.
+// the report is the registration's shape, the compiled kernels being opaque: what it
+// bins on, how many buckets that makes, what it accumulates, and how big the per-cell
+// graph is — the numbers worth seeing before a job is submitted.
 impl std::fmt::Debug for CensusEvaluator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CensusEvaluator")

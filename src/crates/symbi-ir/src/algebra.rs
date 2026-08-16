@@ -1,24 +1,24 @@
 // =============================================================================
 // algebra.rs
 //
-// THE SYMBI CODEGEN SUBSTRATE — mathematical contract.
+// the symbi codegen substrate — mathematical contract.
 //
 // the trait surface is feature-complete against the known kernel set:
 // iterate/iterate_vec with freeze law, hyperbolics for the RMHD quartic,
 // infinity/nan/is_nan, branch default for state-typed conditionals, and the
 // FieldLoad/IterateInline payload.
 //
-// the IR is a FREE ALGEBRA over the operation signature defined in section 1.
-// every Carrier (each `Scalar` impl) is a TOTAL HOMOMORPHISM from this free
+// the IR is a free algebra over the operation signature defined in section 1.
+// every Carrier (each `Scalar` impl) is a total homomorphism from this free
 // algebra into a concrete algebra: `f64` evaluates, `Gv` traces into IR,
 // `Dual<C>` carries derivatives. lowering (CPU emit, CUDA emit) is also a
 // homomorphism — into a source-code algebra. rewrites are equational laws
 // preserved by every homomorphism.
 //
-// invariant: this module contains ZERO `panic!`/`unwrap`/`expect`. category
+// invariant: this module is free of `panic!`/`unwrap`/`expect`. category
 // errors (carrier dialect, variance, scope, algebra, theory composition,
-// naming) MUST be compile errors. admitted panics live only at I/O / driver
-// boundaries (config parse, NVRTC compile, HDF5 write) — outside this file.
+// naming) surface as compile errors. admitted panics live at I/O / driver
+// boundaries (config parse, NVRTC compile, HDF5 write), outside this file.
 // =============================================================================
 
 #![deny(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
@@ -33,12 +33,12 @@ use symbi_algebra::FieldElement;
 // section 1 — the Op signature.
 //
 // the IR is `Free<Op>` — terms built by composition of the symbols below.
-// adding to this set is a ONE-WAY DOOR: every existing Carrier impl must be
+// adding to this set is a one-way door: every existing Carrier impl must be
 // extended in lockstep. defer additions until a real consumer forces them.
 // =============================================================================
 
-/// the algebraic laws every `Scalar` carrier satisfies. these are not prose: each is an
-/// EXECUTABLE PROPERTY swept over a deterministic sample grid on both concrete carriers
+/// the algebraic laws every `Scalar` carrier satisfies. each is an executable property
+/// swept over a deterministic sample grid on both concrete carriers
 /// (f64 + f32) in `tests/carrier_laws.rs`, classified exact-vs-floating; the homomorphism
 /// law (f64 == traced-Gv) is in `tests/carrier_oracle_new.rs`.
 pub mod laws {
@@ -73,8 +73,8 @@ pub mod laws {
     //! - `Acosh(Cosh(x))  == Abs(x)`       (asymmetric, like `Sqrt(x*x)`)
     //! - `Atanh(x)` total on `(-1, 1)`; `Acosh(x)` total on `[1, +inf)`.
     //!
-    //! ## iteration — the FREEZE LAW (load-bearing)
-    //! `IterateInline` is fixed-count, but every Carrier MUST return the OLD
+    //! ## iteration — the freeze law (load-bearing)
+    //! `IterateInline` is fixed-count, and every Carrier returns the old
     //! accumulator from the step where `converged` first fires:
     //!
     //! ```text
@@ -86,12 +86,12 @@ pub mod laws {
     //! traced carriers (Gv): `acc' = select(converged, acc, body(acc))` per
     //!   component; the body runs once, the count bakes in, the freeze
     //!   preserves the converged value through the remaining baked steps.
-    //! VIOLATING THIS makes the traced kernel disagree with the host loop on
-    //! non-convergent inputs (the c2p / kepler regression class).
+    //! the law is what keeps the traced kernel agreeing with the host loop on
+    //! inputs that fail to converge (the c2p / kepler regression class).
     //!
     //! ## NaN
-    //! NaN is the only value where `x.cmp_eq(x) == false`. callers MUST use
-    //! `is_nan(x)`, NEVER `x.cmp_eq(S::nan())` — the latter is always false.
+    //! NaN is the only value where `x.cmp_eq(x) == false`. callers detect it
+    //! with `is_nan(x)`; `x.cmp_eq(S::nan())` is always false.
     //!
     //! ## the homomorphism law
     //! for every Carrier `S`, every Op `f` of arity N, and every term `a_i`:
@@ -108,8 +108,8 @@ pub mod laws {
 // section 2 — Mask: the carrier-polymorphic boolean.
 //
 // on `f64`, Mask = `bool`. on `Gv`, Mask = a graph-node handle. `Into<bool>`
-// is intentionally absent: `Gv -> bool` has no total definition, so admitting
-// it would open a runtime-panic hole.
+// is absent by design: `Gv -> bool` is partial, so admitting it would open a
+// runtime-panic hole.
 // =============================================================================
 
 pub trait Mask:
@@ -120,14 +120,14 @@ pub trait Mask:
 impl Mask for bool {}
 
 // =============================================================================
-// section 3 — Scalar: a TOTAL homomorphism from Free<Op> into a concrete algebra.
+// section 3 — Scalar: a total homomorphism from Free<Op> into a concrete algebra.
 //
 // invariants:
-//   - every Op has a corresponding method on this trait; the impl is TOTAL.
+//   - every Op has a corresponding method on this trait; the impl is total.
 //   - comparisons return `S::Mask`. `PartialOrd` is absent so native `<`, `>`,
 //     `<=`, `>=` on `S: Scalar` fail to compile in generic code.
-//   - the trait has no `to_f64`. extracting a concrete value from a Carrier
-//     is a debug-only side channel that lives outside the algebraic core.
+//   - `to_f64` sits outside the algebraic core: extracting a concrete value
+//     from a Carrier is a debug-only side channel at the host boundary.
 // =============================================================================
 
 pub trait Scalar:
@@ -154,21 +154,21 @@ pub trait Scalar:
     /// the carrier-polymorphic boolean. `bool` for `f64`; a node handle for `Gv`.
     type Mask: Mask;
 
-    // NOTE: `ZERO`, `ONE`, `from_f64`, `sqrt`, `abs`, `min`, `max` are inherited
-    // from the `symbi_algebra::algebra::Numeric` super-trait — DO NOT redeclare
-    // them here (name-resolution ambiguity if both traits have them). Numeric is
-    // a structural sub-bag needed by `Tensor` / `Matrix` / `Indexed` methods that
-    // live in `symbi-algebra` (downstream of `symbi-ir`); Scalar requiring it
-    // lets carrier-generic code uniformly call `S::ZERO` / `S::sqrt()` etc.
-    // while keeping the dep graph `symbi-algebra <- symbi-ir`.
+    // `ZERO`, `ONE`, `from_f64`, `sqrt`, `abs`, `min`, `max` are inherited from
+    // the `symbi_algebra::algebra::Numeric` super-trait and stay declared there
+    // alone; a second declaration here would make name resolution ambiguous.
+    // Numeric is a structural sub-bag needed by `Tensor` / `Matrix` / `Indexed`
+    // methods that live in `symbi-algebra` (downstream of `symbi-ir`); Scalar
+    // requiring it lets carrier-generic code uniformly call `S::ZERO` /
+    // `S::sqrt()` etc. while keeping the dep graph `symbi-algebra <- symbi-ir`.
 
-    // ── IEEE sentinels exclusive to Scalar (not in Numeric) ───────────────
+    // ── IEEE sentinels declared by Scalar (beyond the Numeric set) ────────
     /// the positive IEEE infinity. wave-speed init / fold sentinel.
     const INFINITY: Self;
     /// the negative IEEE infinity.
     const NEG_INFINITY: Self;
-    /// IEEE NaN. WARNING: `x.cmp_eq(Self::NAN)` is ALWAYS false (NaN is the
-    /// only value where `x == x` fails). use `is_nan(x)` instead.
+    /// IEEE NaN. `x.cmp_eq(Self::NAN)` is always false (NaN is the only value
+    /// where `x == x` fails), so `is_nan(x)` is the test that detects it.
     const NAN: Self;
 
     // ── method-form alias of `Numeric::ZERO` / `Numeric::ONE` (ergonomics) ─
@@ -181,19 +181,19 @@ pub trait Scalar:
         <Self as symbi_algebra::algebra::Numeric>::ONE
     }
 
-    /// HOST-BOUNDARY ESCAPE — for the host/emitter boundary only.
+    /// host-boundary escape — reserved for the host/emitter boundary.
     ///
     /// on `f64`/`f32` this is the identity. on tracing Carriers (Gv) this
-    /// PANICS for a non-literal node — extracting a concrete value from a
+    /// panics for a traced node — extracting a concrete value from a
     /// trace breaks the homomorphism by construction.
     ///
-    /// callers using this MUST be at the host/emitter boundary (eos parameter
-    /// read-back, host-side reduction reading device buffers, test diffs
-    /// against analytic). new code in carrier-generic physics MUST NOT use
-    /// this — decide with `cmp_*` / `select` / `branch` instead.
+    /// callers sit at the host/emitter boundary (eos parameter read-back,
+    /// host-side reduction reading device buffers, test diffs against
+    /// analytic). carrier-generic physics decides with `cmp_*` / `select` /
+    /// `branch`.
     fn to_f64(self) -> f64;
 
-    // ── comparisons — return Mask, NEVER bool ─────────────────────────────
+    // ── comparisons — the return type is Mask ─────────────────────────────
     fn cmp_lt(self, other: Self) -> Self::Mask;
     fn cmp_le(self, other: Self) -> Self::Mask;
     fn cmp_gt(self, other: Self) -> Self::Mask;
@@ -201,10 +201,10 @@ pub trait Scalar:
     fn cmp_eq(self, other: Self) -> Self::Mask;
 
     // ── branch-free conditional ───────────────────────────────────────────
-    /// invariant: on tracing Carriers, BOTH `t` and `f` are evaluated when
-    /// the graph is built. callers MUST clamp NaN/Inf-producing ops (sqrt of
-    /// maybe-negative, `1/x` near 0) BEFORE handing them to `select`. use
-    /// `safe_sqrt` / `safe_p` / `g_clamp` idioms when unsure.
+    /// invariant: on tracing Carriers, both `t` and `f` are evaluated when
+    /// the graph is built. callers clamp NaN/Inf-producing ops (sqrt of a
+    /// maybe-negative radicand, `1/x` near 0) ahead of `select`; the
+    /// `safe_sqrt` / `safe_p` / `g_clamp` idioms do exactly that.
     fn select(m: Self::Mask, t: Self, f: Self) -> Self;
 
     // ── ordered-field operations ──────────────────────────────────────────
@@ -212,23 +212,23 @@ pub trait Scalar:
     fn recip(self) -> Self;
 
     // ── carrier-safe clamp idioms ────────────────────────
-    // these make the prescribed `safe_sqrt` / `g_clamp` idioms CALLABLE as shared
-    // helpers reused at every site. the Gv carrier evaluates BOTH arms of a `select`, so a
-    // maybe-NaN op (sqrt of a negative, an out-of-domain transcendental) must be clamped
-    // BEFORE the select or it traces a NaN into the kernel. these guard the
-    // UNSELECTED arm / roundoff on a provably-physical quantity; a genuinely
-    // unphysical state must still surface NaN ([[feedback_no_silent_floors]]).
+    // these make the prescribed `safe_sqrt` / `g_clamp` idioms callable as shared
+    // helpers reused at every site. the Gv carrier evaluates both arms of a `select`, so a
+    // maybe-NaN op (sqrt of a negative, an out-of-domain transcendental) is clamped
+    // ahead of the select, which keeps the traced kernel finite. they guard the
+    // unselected arm and roundoff on a provably-physical quantity; a genuinely
+    // unphysical state still surfaces NaN.
 
     /// `sqrt(max(self, 0))` — the canonical clamp-before-sqrt. use when the radicand is
-    /// non-negative for physical inputs and the clamp only guards the unselected arm /
-    /// roundoff; never to hide a negative radicand that signals an unphysical state.
+    /// non-negative for physical inputs, so the clamp guards the unselected arm and
+    /// roundoff alone; a negative radicand signaling an unphysical state stays visible.
     #[inline]
     fn safe_sqrt(self) -> Self {
         self.max(Self::ZERO).sqrt()
     }
 
     /// clamp into `[lo, hi]` = `max(lo).min(hi)`. keeps a transcendental argument in-domain
-    /// on BOTH carrier arms before a `select` (e.g., `acos` to `[-1, 1]`, `acosh` to
+    /// on both carrier arms before a `select` (e.g., `acos` to `[-1, 1]`, `acosh` to
     /// `[1, +inf)`). callers pass `lo <= hi`.
     #[inline]
     fn clamp(self, lo: Self, hi: Self) -> Self {
@@ -287,11 +287,11 @@ pub trait Scalar:
         !self.cmp_eq(self)
     }
 
-    // ── HIGHER-ORDER: trace-safe conditional for state-typed results ──────
-    /// **NEVER use native `if cond { ... } else { ... }`** on a value
-    /// derived from `S: Scalar`. that BREAKS THE HOMOMORPHISM on Gv: only the
-    /// branch evaluated by the host is traced, and the traced kernel
-    /// silently disagrees with the host's f64 eval. use `branch` instead.
+    // ── higher-order: trace-safe conditional for state-typed results ──────
+    /// **decide with `branch`, not a native `if cond { ... } else { ... }`**, on
+    /// any value derived from `S: Scalar`. a native `if` breaks the homomorphism
+    /// on Gv: the host evaluates one arm, so the trace carries that arm alone and
+    /// the traced kernel silently disagrees with the host's f64 eval.
     ///
     /// both `t` and `f` are evaluated; `Selectable::select` picks. on
     /// traced Carriers, both branches are built into the graph (IR
@@ -305,29 +305,29 @@ pub trait Scalar:
         R::select(m, t(), f())
     }
 
-    // ── HIGHER-ORDER: trace-safe LAZY branch — the DUAL of `iterate` ───────
-    /// a data-dependent conditional that evaluates ONLY the taken arm at
-    /// runtime — unlike `select` / `branch`, which evaluate BOTH. this is the
+    // ── higher-order: trace-safe lazy branch — the dual of `iterate` ───────
+    /// a data-dependent conditional that evaluates the taken arm alone at
+    /// runtime, where `select` / `branch` evaluate both. this is the
     /// carrier-portable form of an early-out `if`: it lets carrier-generic
     /// physics skip a whole expensive arm (e.g., the RMHD quartic on a
-    /// fast-path cell), avoiding the compute-all-paths cost.
+    /// fast-path cell), sparing the compute-all-paths cost.
     ///
-    /// use `cond` where the arms have a LARGE cost asymmetry. for cheap,
+    /// use `cond` where the arms have a large cost asymmetry. for cheap,
     /// symmetric arms prefer `select` — a real branch adds CPU branch cost and
-    /// (on GPU) warp-divergence risk that a `select` blend does not.
+    /// (on GPU) warp-divergence risk, while a `select` blend stays branch-free.
     ///
     /// semantics:
     /// - `S = f64`/`f32`: a real `if m { t() } else { f() }` — one arm runs.
     /// - `S = Gv`: traces each arm into its own subgraph and emits an
-    ///   `Op::IfElse`, rendered as a real `if/else` on CPU AND CUDA. one arm
-    ///   executes at runtime (a warp whose lanes disagree runs both — never
-    ///   worse than `select`'s unconditional both-arms).
-    /// - carrier-equivalence holds: f64 and the traced kernel take the SAME
+    ///   `Op::IfElse`, rendered as a real `if/else` on CPU and CUDA. one arm
+    ///   executes at runtime (a warp whose lanes disagree runs both, matching
+    ///   `select`'s unconditional both-arms as the worst case).
+    /// - carrier-equivalence holds: f64 and the traced kernel take the same
     ///   arm for the same input, bit-identical.
     ///
-    /// DEFAULT is the eager fallback (`select` of both arms) so any carrier is
-    /// correct without an override; `f64`/`f32` override with a real branch and
-    /// `Gv` overrides to trace `Op::IfElse`. scalar-result only (mirrors
+    /// the default is the eager fallback (`select` of both arms), which leaves
+    /// every carrier correct as it stands; `f64`/`f32` override with a real branch
+    /// and `Gv` overrides to trace `Op::IfElse`. scalar-result only (mirrors
     /// `scope`); the vector form `cond_vec` (dual of `iterate_vec`, for tuple
     /// returns) lands on `Op::IfElse`'s result vectors.
     #[inline]
@@ -335,15 +335,15 @@ pub trait Scalar:
         Self::select(m, t(), f())
     }
 
-    /// the N-OUTPUT lazy branch — the dual of `iterate_vec`. one branch, N
-    /// results: the SHARED arm computation runs once and both outputs come from
-    /// the SAME taken arm. this is what lets a `(sl, sr)` wave-speed fast-path
-    /// skip the WHOLE quartic when `vsq ~ 0` / `bn ~ 0` (computing the quartic
-    /// once in the else arm — two scalar `cond`s would compute it twice — and
-    /// skipped entirely on the fast path). DEFAULT is eager componentwise `select`;
-    /// `f64`/`f32` take a real branch; `Gv` traces ONE `Op::IfElse` with N
-    /// results and returns N `Op::Proj` outputs. carrier-equivalent: every
-    /// carrier takes the SAME arm for the same input.
+    /// the N-output lazy branch — the dual of `iterate_vec`. one branch, N
+    /// results: the shared arm computation runs once and both outputs come from
+    /// the same taken arm. this is what lets a `(sl, sr)` wave-speed fast-path
+    /// skip the whole quartic when `vsq ~ 0` / `bn ~ 0` (the quartic is computed
+    /// once in the else arm, where two scalar `cond`s would compute it twice, and
+    /// skipped entirely on the fast path). the default is eager componentwise
+    /// `select`; `f64`/`f32` take a real branch; `Gv` traces one `Op::IfElse` with
+    /// N results and returns N `Op::Proj` outputs. carrier-equivalent: every
+    /// carrier takes the same arm for the same input.
     #[inline]
     fn cond_vec<const N: usize>(
         m: Self::Mask,
@@ -355,7 +355,7 @@ pub trait Scalar:
         std::array::from_fn(|j| Self::select(m, tv[j], fv[j]))
     }
 
-    // ── HIGHER-ORDER: bounded-pressure scope ─────────────
+    // ── higher-order: bounded-pressure scope ─────────────
     /// declare a **bounded-pressure phase**: run `body`, return its result;
     /// on tracing Carriers, intermediates that were created inside the
     /// closure die at the closure's closing brace. lets nvcc / rustc see
@@ -368,11 +368,11 @@ pub trait Scalar:
     ///
     /// **semantics:**
     /// - at `S = f64`: identity. the closure executes immediately; locals
-    ///   die at the brace per normal Rust rules. zero overhead, no IR.
+    ///   die at the brace per normal Rust rules. zero overhead, zero IR.
     /// - at `S = Gv`: the Gv override snapshots the trace, runs the closure,
     ///   and emits an `Op::Scope` (body + result) that scalarize lowers into a
     ///   `ScalarStmt::Scope`. consumers that use this method get the perf win
-    ///   automatically — no call-site changes.
+    ///   automatically, with call sites left as written.
     /// - any future carrier (smid/avx) can override per its own discipline.
     ///
     /// the formal framing is interval-graph coloring and Sethi-Ullman pathwidth.
@@ -392,17 +392,18 @@ pub trait Scalar:
         body()
     }
 
-    // ── HIGHER-ORDER: bounded iteration, FREEZE LAW ───────────────────────
-    /// fixed-count iteration with the FREEZE LAW (see `mod laws` and
-    /// `Op::IterateInline`). `converged` returns `Self::Mask`, never `bool`.
-    /// the body MUST be pure: a `Fn` closure that captures no mutable state.
+    // ── higher-order: bounded iteration, freeze law ───────────────────────
+    /// fixed-count iteration with the freeze law (see `mod laws` and
+    /// `Op::IterateInline`). `converged` returns `Self::Mask`. the body is
+    /// pure: a `Fn` closure over immutable captures.
     ///
     /// **freeze law** — after the first step where `converged(acc, body(acc))`
-    /// holds, the accumulator stays at the OLD acc for all remaining steps.
+    /// holds, the accumulator stays at the old acc for all remaining steps.
     /// host: early-return. traced: `acc' = select(converged, acc, body(acc))`
     /// — both branches built, the frozen arm preserves acc through the
-    /// remaining baked steps. VIOLATING THIS reopens the kepler c2p
-    /// regression class (host loop early-breaks, traced kernel runs past).
+    /// remaining baked steps. upholding it is what keeps the host loop (which
+    /// early-breaks) and the traced kernel (which runs the baked count)
+    /// agreeing — the kepler c2p regression class.
     fn iterate(
         self,
         max_steps: usize,
@@ -411,7 +412,7 @@ pub trait Scalar:
     ) -> Self;
 
     /// `N`-accumulator iteration. `result` selects which accumulator
-    /// becomes the scalar return. the FREEZE LAW applies componentwise.
+    /// becomes the scalar return. the freeze law applies componentwise.
     fn iterate_vec<const N: usize>(
         init: [Self; N],
         max_steps: usize,
@@ -531,21 +532,21 @@ macro_rules! source_loc {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RenderPolicy {
-    /// production — minified. no comments, anonymous temporaries. fastest
+    /// production — minified: anonymous temporaries, comment-free output. fastest
     /// downstream compile, smallest binary. the default for `cargo build --release`.
     Minified,
     /// debug / audit — preserves names, source-loc comments, section headers.
     /// for inspection only.
     Audit,
-    /// RESERVED — not implemented. graph -> LaTeX is a non-trivial pretty-
-    /// printer with no documentation-pipeline consumer. emit returns
+    /// reserved. graph -> LaTeX is a non-trivial pretty-printer awaiting a
+    /// documentation-pipeline consumer. emit returns
     /// `Err(RenderPolicyNotImplemented)` for this variant until a consumer
-    /// earns it (rent test). do NOT thread this in production paths.
+    /// earns it (rent test). production paths select an implemented variant.
     Latex,
 }
 
-/// returned by an emitter when the caller selects a `RenderPolicy` whose
-/// implementation does not exist (`RenderPolicy::Latex`).
+/// returned by an emitter when the caller selects a `RenderPolicy` that is
+/// still reserved (`RenderPolicy::Latex`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct RenderPolicyNotImplemented {
     pub policy: RenderPolicy,
@@ -603,7 +604,7 @@ impl Scalar for f64 {
         if m { t } else { f }
     }
 
-    // the lazy branch: a REAL `if` on the host — only the taken arm runs. this
+    // the lazy branch: a real `if` on the host — the taken arm alone runs. this
     // is the f64 reference for the early-out branch cost (and the reference
     // the traced `Op::IfElse` kernel is checked against).
     #[inline(always)]
@@ -707,9 +708,9 @@ impl Scalar for f64 {
         f64::atanh(self)
     }
 
-    // iterate: early-return on convergence. preserves the FREEZE LAW — the
-    // returned `acc` is the value BEFORE the converging step, matching how
-    // the traced kernel freezes via `select(converged, acc, body(acc))`.
+    // iterate: early-return on convergence. preserves the freeze law — the
+    // returned `acc` is the value from ahead of the converging step, matching
+    // how the traced kernel freezes via `select(converged, acc, body(acc))`.
     #[inline]
     fn iterate(
         self,
@@ -728,7 +729,7 @@ impl Scalar for f64 {
         acc
     }
 
-    // iterate_vec: same FREEZE LAW, N-accumulator. `result` selects the
+    // iterate_vec: same freeze law, N-accumulator. `result` selects the
     // returned component (often the c2p root, e.g., recovered pressure).
     #[inline]
     fn iterate_vec<const N: usize>(
@@ -750,7 +751,7 @@ impl Scalar for f64 {
     }
 }
 
-// f32 mirrors f64 with the same impl pattern. needed because the workspace's
+// f32 mirrors f64 with the same impl pattern. the workspace's
 // `ConsG<f32, ...>` / `PrimG<f32, ...>` types in symbi-hydro state.rs require
 // `f32: Scalar` to satisfy the struct's `S: Scalar` bound. ZERO / ONE / from_f64
 // / sqrt / abs / min / max inherited from `Numeric for f32`.
@@ -941,7 +942,7 @@ impl Scalar for f32 {
 //   `Scalar for Dual<C>`     — crates/symbi-ir/src/dual.rs. forward-mode
 //                              derivative carrier.
 //
-// each MUST be a total homomorphism.
+// each is a total homomorphism.
 // =============================================================================
 
 // =============================================================================
@@ -1060,7 +1061,7 @@ mod tests {
     }
     #[test]
     fn f64_nan_is_not_self_equal() {
-        // the LAW that defines is_nan: NaN is the only value with x != x.
+        // the law that defines is_nan: NaN is the only value with x != x.
         let n = <f64 as Scalar>::nan();
         assert!(!n.cmp_eq(n));
     }
@@ -1074,7 +1075,7 @@ mod tests {
     }
     #[test]
     fn f64_cmp_eq_with_nan_is_always_false() {
-        // documents the trap: x.cmp_eq(S::nan()) is ALWAYS false.
+        // documents the trap: x.cmp_eq(S::nan()) is always false.
         let n = <f64 as Scalar>::nan();
         assert!(!(1.0_f64).cmp_eq(n));
         assert!(!n.cmp_eq(1.0));
@@ -1094,7 +1095,7 @@ mod tests {
     #[test]
     fn f64_branch_evaluates_both_closures() {
         // documents the trap: native `if cond { yes() } else { no() }`
-        // would only evaluate the chosen arm. `branch` evaluates BOTH (for
+        // evaluates the chosen arm alone. `branch` evaluates both (for
         // the f64 carrier this is wasted work; for Gv it is the trace).
         let counter = std::cell::Cell::new(0);
         let bump = |_| counter.set(counter.get() + 1);
@@ -1112,27 +1113,28 @@ mod tests {
         assert_eq!(counter.get(), 2);
     }
 
-    // ── iterate: the FREEZE LAW on f64 ────────────────────────────────────
+    // ── iterate: the freeze law on f64 ────────────────────────────────────
     #[test]
     fn f64_iterate_returns_pre_convergence_acc() {
         // body: acc -> 2*acc. converged: |next - acc| < 0.5.
         // start at 0.0: 0 -> 0 (converged immediately since |0-0|<0.5 -> returns 0).
         let r0 = (0.0_f64).iterate(10, |a| 2.0 * a, |a, n| ((n - a) as f64).abs() < 0.5);
         assert_eq!(r0, 0.0);
-        // start at 1.0: 1 -> 2 (|2-1|=1 not converged), 2 -> 4 (|4-2|=2 not), ...
-        // converges when consecutive close, which never happens in this chain.
-        // result should be after max_steps = 10: 1 -> 2 -> 4 -> ... -> 1024.
+        // start at 1.0: 1 -> 2 (|2-1|=1, short of the criterion), 2 -> 4 (|4-2|=2,
+        // likewise), ... convergence needs consecutive iterates within 0.5, and the
+        // doubling chain separates them further each step, so the loop runs the full
+        // max_steps = 10: 1 -> 2 -> 4 -> ... -> 1024.
         let r1 = (1.0_f64).iterate(10, |a| 2.0 * a, |a, n| ((n - a) as f64).abs() < 0.5);
         assert_eq!(r1, 1024.0);
     }
     #[test]
     fn f64_iterate_freeze_holds_pre_convergence_value() {
         // a fixed-point body (acc -> sqrt(acc)) converges towards 1.0 from 4.0.
-        // returns acc BEFORE the converging step — that's the freeze: the
-        // returned value is from BEFORE the convergence criterion fired.
+        // returns the acc that stood one step ahead of the converging step —
+        // that is the freeze: the value predates the convergence criterion firing.
         let r = (4.0_f64).iterate(50, |a| a.sqrt(), |a, n| (n - a).abs() < 1e-10);
-        // converged: the result is ~1.0 (the fixed point), but the returned
-        // value is acc from the PRE-converging step, so it's epsilon-close.
+        // converged: the result is ~1.0 (the fixed point), and the returned
+        // value is the pre-converging acc, so it lands epsilon-close.
         assert!((r - 1.0).abs() < 1e-9);
     }
 
@@ -1140,7 +1142,7 @@ mod tests {
     #[test]
     fn f64_iterate_vec_fibonacci() {
         // (a, b) -> (b, a + b). 5 steps from (1, 1) -> (1, 1) (1,2) (2,3) (3,5) (5,8) (8,13).
-        // never-converged predicate; result index = 1 (the "b" component).
+        // predicate that stays false; result index = 1 (the "b" component).
         let r = <f64 as Scalar>::iterate_vec::<2>(
             [1.0, 1.0],
             5,
@@ -1152,8 +1154,8 @@ mod tests {
     }
     #[test]
     fn f64_iterate_vec_freeze() {
-        // same fibonacci body, but converge-immediately predicate; returns acc[1]
-        // BEFORE the first body step — the seed value.
+        // same fibonacci body with a converge-immediately predicate; returns acc[1]
+        // as it stood ahead of the first body step — the seed value.
         let r = <f64 as Scalar>::iterate_vec::<2>(
             [3.0, 7.0],
             5,
@@ -1167,16 +1169,16 @@ mod tests {
     // ----- Scalar::scope at S = f64 -----
 
     /// at `S = f64`, `scope` is identity — the closure runs immediately and
-    /// returns its value. this is the FOUNDATION for the Gv override: physics
-    /// authors use `S::scope(|| ...)` blocks even before the Gv override emits
-    /// real `ScalarStmt::Scope`s.
+    /// returns its value. this is the foundation for the Gv override: physics
+    /// authors write `S::scope(|| ...)` blocks that stay correct at f64 while
+    /// the Gv override turns them into real `ScalarStmt::Scope`s.
     #[test]
     fn f64_scope_runs_closure_identity() {
         let r: f64 = <f64 as Scalar>::scope(|| 3.14_f64 * 2.0);
         assert_eq!(r, 6.28);
 
-        // the closure can return any Scalar — it's not tied to f64 specifically.
-        // here R is inferred as f64; a tensor return type works the same.
+        // the closure can return any Scalar; here R is inferred as f64, and a
+        // tensor return type works the same.
         let inputs = (2.0_f64, 5.0_f64);
         let r: f64 = <f64 as Scalar>::scope(|| {
             // simulate a small phase: locals die at brace.
@@ -1187,7 +1189,7 @@ mod tests {
         assert_eq!(r, 9.0);
     }
 
-    /// scope CAN be nested arbitrarily. each nested call to `scope` produces
+    /// scope nests arbitrarily. each nested call to `scope` produces
     /// an independent identity transform at f64. this proves the trait
     /// shape works for nested-phase patterns
     /// (load -> reconstruct -> compute -> store).

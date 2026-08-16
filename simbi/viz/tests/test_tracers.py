@@ -2,8 +2,8 @@
 # test_tracers.py
 #
 # ownership-native tracer loading and tracer-only rendering. exact uint64
-# identities and owners never pass through floating point, deterministic spawn
-# state remains available, and standalone plots use checkpoint geometry.
+# identities and owners stay integral end to end, deterministic spawn state
+# remains available, and standalone plots use checkpoint geometry.
 # =============================================================================
 
 import argparse

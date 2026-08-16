@@ -2,12 +2,12 @@
 // aot_godunov_fused_source.rs
 //
 // the FUSED-source godunov AOT-compiles to a single
-// Rust kernel that applies `div(F) + \sum spec_source + integrator` in ONE call.
+// Rust kernel that applies `div(F) + \sum spec_source + integrator` in one call.
 //
 //   - `iso_godunov_stage_with_uniform_accel_1d` — iso (mass + mom) + uniform
 //     external acceleration overlay (mom only; iso has no energy law).
 //   - `adiabatic_godunov_stage_with_uniform_accel_1d` — adiabatic + uniform
-//     accel overlays for BOTH momentum (S_mom = rho*g_ext) AND energy
+//     accel overlays for both momentum (S_mom = rho*g_ext) and energy
 //     (S_nrg = rho*v*g_ext). proves the multi-source fusion is baked into
 //     the compiled kernel at build time.
 //
@@ -16,10 +16,10 @@
 //     and the generated `pub fn ..__raw<S>(..)` signature — present means the
 //     build emitted, compiled, and registered.
 //   - invoked on a uniform state with zero-flux inputs, the kernels produce
-//     EXACTLY the analytical source update (`mom_new = mom + dt*rho*g_ext`
+//     exactly the analytical source update (`mom_new = mom + dt*rho*g_ext`
 //     and, for adiabatic, `nrg_new = nrg + dt*rho*v*g_ext`). bit-exact at f64.
 //   - the kernels also work at f32 (Scalar genericity through to the AOT
-//     artifact) — the SAME generated fn body, inferred for f32 from input
+//     artifact) — the same generated fn body, inferred for f32 from input
 //     buffers, produces the analytical update within f32 tol.
 //
 // run: cargo test -p symbi-aot --test aot_godunov_fused_source
@@ -151,7 +151,7 @@ fn adiabatic_fused_kernel_registered_by_name() {
 fn iso_aot_fused_step_matches_analytical_source_update() {
     // **load-bearing semantic check**: the AOT-baked iso kernel, called on a
     // uniform state with zero flux differences (mass_flux constant => div=0),
-    // produces EXACTLY the analytical source update for every cell:
+    // produces exactly the analytical source update for every cell:
     //
     //     rho_new[i] = rho[i]                         (mass unaffected)
     //     mom_new[i] = mom[i] + dt * rho[i] * g_ext_0 (uniform_accel mom overlay)
@@ -210,7 +210,7 @@ fn iso_aot_fused_step_matches_analytical_source_update() {
 fn adiabatic_aot_fused_step_applies_both_mom_and_nrg_overlays() {
     // **the Phase-2b-via-AOT claim**: `uniform_acceleration_sources(D, true)`
     // returns TWO specs (mom + nrg). the AOT-baked adiabatic kernel applies
-    // BOTH in ONE call:
+    // both in one call:
     //
     //     rho_new[i] = rho[i]
     //     mom_new[i] = mom[i] + dt * rho[i] * g_ext_0
@@ -333,7 +333,7 @@ fn bake_matrix_emits_every_regime_family_ndim_cell() {
     // **structural fingerprint**: the data-driven bake
     // matrix in build.rs (REGIMES x FUSED_FAMILIES x ndim) must emit a
     // kernel at every cell of the cube. asserts the loop walked the table
-    // — adding a row to REGIMES or FUSED_FAMILIES MUST surface here as a
+    // — adding a row to REGIMES or FUSED_FAMILIES must surface here as a
     // new kernel without any other change in the codebase.
     let regimes = ["iso", "adiabatic"];
     let families = ["uniform_accel", "point_mass_grav"];

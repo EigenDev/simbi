@@ -1,12 +1,12 @@
 // =============================================================================
 // rmhd_ct_curl_cyl_rz_divb_symbolic.rs
 //
-// the SYMBOLIC proof that the 2D CYLINDRICAL (r, z) constrained-transport curl
-// (rmhd_ct_curl_cyl_rz_gv) preserves the AREA-WEIGHTED div(B) = 0 EXACTLY — by
+// the symbolic proof that the 2D cylindrical (r, z) constrained-transport curl
+// (rmhd_ct_curl_cyl_rz_gv) preserves the area-weighted div(B) = 0 exactly, by
 // rational-function coefficient cancellation on the traced IR DAG. the structural
 // counterpart to the numerical nmhd_rotor_cyl_rz gate.
 //
-// this is the curl that carried a SIGN BUG: dir=1 / B_z used +d_r(r E) where the correct
+// this is the curl that carried a sign bug: dir=1 / B_z used +d_r(r E) where the correct
 // term is -d_r(r E); div(B) blew to O(1) in one step. this proof would have caught it: the
 // telescoping leaves the E reads at 2x where they should cancel to zero. it is the instant,
 // always-true guard the numerical rotor test only approximates.
@@ -16,8 +16,9 @@
 //   dir=1 (B_z, z-face):  dB_z/dt = -(1/r_c) d_r(r E)   (cylindrical radial metric)
 // the point-form area-weighted divergence over a cell (the nmhd_rotor_cyl_rz form):
 //   div(B) = (1/(r_c dr)) (r_hi B_r[+r] - r_lo B_r) + (1/dz) (B_z[+z] - B_z)
-// with B = dt*curl(E). substituting curl, every E read cancels to the ZERO rational
-// function — for ANY input field. r is AFFINE (x_lo_0 + (c_0+off) dx_0); no sin.
+// with B = dt*curl(E). substituting curl, every E read cancels to the zero rational
+// function — for every input field. r is affine (x_lo_0 + (c_0+off) dx_0), so r symbols
+// alone span the coefficient ring.
 // =============================================================================
 
 use symbi_discretize::{Spacing, rmhd_ct_curl_cyl_rz_gv};
@@ -95,7 +96,7 @@ fn divb_cyl_rz_symbolic_telescoping() {
     div.add(&curl_z.shifted(&[0, 1]).scale_rat(&w_z));
     div.add(&curl_z.scale_rat(&w_z).neg_form());
 
-    // THE PROOF: the area-weighted edge-EMF contributions telescope to zero.
+    // the proof: the area-weighted edge-EMF contributions telescope to zero.
     assert!(
         div.is_zero(),
         "cyl r-z div(curl B) != 0 symbolically — residual edge-emf numerators:\n{:#?}",
@@ -103,7 +104,8 @@ fn divb_cyl_rz_symbolic_telescoping() {
     );
 }
 
-// negative control: a mismatched pair does NOT cancel — the checker is not vacuously green.
+// negative control: a mismatched pair leaves a residual, so the checker reports a broken
+// cancellation.
 #[test]
 fn divb_cyl_rz_symbolic_detects_residual() {
     let mut lf = LinFormR::default();

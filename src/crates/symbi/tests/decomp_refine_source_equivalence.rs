@@ -1,12 +1,12 @@
 // =============================================================================
 // decomp_refine_source_equivalence.rs
 //
-// USER SOURCES x REFINEMENT x DECOMPOSITION: per-tile 2-level hierarchies, each level of
-// each tile carrying the SAME runtime source, must reproduce the monolithic refined run to
-// round-off through the PRODUCTION `evolve_hierarchy_decomposed` loop. the source is the
-// POSITION-DEPENDENT force a = [x, 0] (VARIABLE_X1 -> the cell's global x): a tile or fine
-// level evaluating it at a local coordinate diverges at every cut and level seam; a constant
-// force could not catch either bug. the canonical per-level stage drives the additive
+// user sources x refinement x decomposition: per-tile 2-level hierarchies, each level of
+// each tile carrying one shared runtime source, reproduce the monolithic refined run to
+// round-off through the production `evolve_hierarchy_decomposed` loop. the source is the
+// position-dependent force a = [x, 0] (VARIABLE_X1 -> the cell's global x): a tile or fine
+// level evaluating it at a local coordinate diverges at every cut and level seam, and only a
+// position-dependent force exposes either bug. the canonical per-level stage drives the additive
 // source_apply on every level of every tile.
 // =============================================================================
 

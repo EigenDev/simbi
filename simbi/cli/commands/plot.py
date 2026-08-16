@@ -54,8 +54,9 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
         sys.exit(2)
 
     # apply --tmin/--tmax/--stride to the checkpoint series before dispatch.
-    # without this the flags are parsed but never consumed: they leak into the
-    # plotter **kwargs and are ignored, so the series spans every input file.
+    # this filter is what consumes those flags; left to travel onward they land
+    # in the plotter **kwargs and are ignored, so the series spans every input
+    # file.
     args.files = filter_files(
         args.files,
         tmin=getattr(args, "tmin", None),

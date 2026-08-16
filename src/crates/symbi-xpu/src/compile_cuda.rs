@@ -5,13 +5,13 @@
 // --ptx, return the PTX bytes. lives in symbi-xpu because this is execution-side
 // orchestration (a sibling of nvrtc.rs's runtime JIT).
 //
-// AOT-compiles a kernel when a caller prefers nvcc PTX over NVRTC. if nvcc is
-// unavailable or can't compile here, returns None and the caller falls back to
+// AOT-compiles a kernel when a caller prefers nvcc PTX over NVRTC, returning None
+// when nvcc is unavailable or unable to compile here so the caller falls back to
 // NVRTC.
 //
 // the host-compiler probe (`which_first` / `ccbin_retry_candidate`) is shared
 // with symbi/build.rs's stub-PTX compile so the `-ccbin` fallback policy lives
-// in ONE place.
+// in a single place.
 //
 // usage:
 //   let ptx = try_compile_cuda("__global__ void k(...) { ... }", "k");
@@ -36,12 +36,13 @@ pub fn try_compile_cuda_with_includes(
     // detect nvcc
     let nvcc = find_nvcc()?;
 
-    // nvcc may be PRESENT but its default host compiler unusable (host gcc too
+    // nvcc may be present but its default host compiler unusable (host gcc too
     // new for the toolkit, or nvcc hard-wired to a g++ version absent in a
-    // distrobox). probe ONCE: determine the working host-compiler args (possibly
-    // `-ccbin <PATH g++>`), or None if nvcc can't compile here at all — then warn
-    // once and fall back to NVRTC quietly, so a single environment failure is not
-    // re-reported per kernel. real per-kernel codegen errors still surface below.
+    // distrobox). probe once to determine the working host-compiler args (possibly
+    // `-ccbin <PATH g++>`), or None if nvcc is unable to compile here at all — then
+    // warn once and fall back to NVRTC quietly, so a single environment failure
+    // produces one warning for the whole crate. real per-kernel codegen errors
+    // still surface below.
     let host_args = nvcc_host_ccbin(&nvcc)?;
 
     // write source to temp file
@@ -55,9 +56,9 @@ pub fn try_compile_cuda_with_includes(
     f.write_all(cuda_source.as_bytes()).ok()?;
     drop(f);
 
-    // FMA fusion: nvcc's default `a*b + c -> fma(a,b,c)` stays ON: trust the
-    // compiler, accept ULP-bounded drift vs the CPU (which doesn't auto-fuse).
-    // do NOT re-introduce `--fmad=false`.
+    // FMA fusion: nvcc's default `a*b + c -> fma(a,b,c)` stays enabled: trust the
+    // compiler and accept ULP-bounded drift against the CPU, which evaluates the
+    // multiply and add as separate rounded steps. leave `--fmad=false` out.
     let mut args = vec![
         "-ptx".to_string(),
         "-O3".to_string(),
@@ -88,8 +89,8 @@ pub fn try_compile_cuda_with_includes(
     // read PTX bytes
     let ptx_bytes = std::fs::read(&ptx_path).ok()?;
 
-    // per-kernel success chatter is gated behind SYMBI_VERBOSE — most builds
-    // don't need to see one line per kernel.
+    // per-kernel success chatter is gated behind SYMBI_VERBOSE, giving a quiet
+    // default build; setting it opts into a line per kernel.
     if std::env::var("SYMBI_VERBOSE").is_ok() {
         eprintln!(
             "symbi: compiled {} -> {} ({} bytes PTX)",
@@ -98,7 +99,7 @@ pub fn try_compile_cuda_with_includes(
             ptx_bytes.len()
         );
     }
-    // don't clean up — keep for inspection.
+    // left in place for inspection.
 
     Some(ptx_bytes)
 }
@@ -107,15 +108,15 @@ pub fn try_compile_cuda_with_includes(
 /// process (one rustc per crate, so at most one probe/warning per crate).
 /// returns Some(extra args) — empty if the default host compiler
 /// works, or `-ccbin <PATH g++>` if the default failed but a PATH g++ works
-/// (the common distrobox case) — or None if nvcc can't compile at all (warns
-/// once; caller falls back to NVRTC).
+/// (the common distrobox case) — or None if nvcc is unable to compile at all
+/// (warns once; caller falls back to NVRTC).
 fn nvcc_host_ccbin(nvcc: &str) -> Option<Vec<String>> {
     static ARGS: std::sync::OnceLock<Option<Vec<String>>> = std::sync::OnceLock::new();
     ARGS.get_or_init(|| {
         if probe_nvcc(nvcc, &[]) {
             return Some(vec![]);
         }
-        // the default host compiler failed; retry with a PATH g++ IF the configured
+        // the default host compiler failed; retry with a PATH g++ if the configured
         // NVCC_CCBIN is untrustworthy (shared policy with symbi/build.rs).
         if let Some(retry) = ccbin_retry_candidate() {
             let args = vec!["-ccbin".to_string(), retry.gxx.clone()];
@@ -145,14 +146,15 @@ pub struct CcbinRetry {
 }
 
 /// the candidate host compiler to retry nvcc with via `-ccbin` when its default
-/// host compiler is unusable. returns Some ONLY when the configured NVCC_CCBIN is
-/// untrustworthy — UNSET (nvcc fell back to an absent hard-wired g++), or SET to a
-/// path that DOESN'T EXIST (a stale value leaked from another machine via a shared
-/// env; env vars carry no provenance, so a missing target is the signal it's
-/// stale) — AND a `g++`/`c++` is resolvable on PATH. a real-but-failing NVCC_CCBIN
-/// is the user's deliberate choice and is left alone (None). the CALLER verifies
-/// the candidate actually works in its own context (a trivial probe at runtime, the
-/// real stub compile at build time). shared by both so the policy lives in ONE place.
+/// host compiler is unusable. returns `Some` precisely when two conditions hold:
+/// the configured NVCC_CCBIN is untrustworthy — unset (nvcc fell back to an absent
+/// hard-wired g++), or set to a path missing from disk (a stale value leaked from
+/// another machine via a shared env; env vars carry no provenance, so a missing
+/// target is the signal it's stale) — and a `g++`/`c++` is resolvable on PATH. a
+/// real-but-failing NVCC_CCBIN is the user's deliberate choice, left alone
+/// (`None`). the caller verifies the candidate actually works in its own context
+/// (a trivial probe at runtime, the real stub compile at build time). the shared
+/// function keeps the policy in a single place for both.
 pub fn ccbin_retry_candidate() -> Option<CcbinRetry> {
     let nvcc_ccbin = std::env::var("NVCC_CCBIN").ok();
     let ccbin_stale = nvcc_ccbin

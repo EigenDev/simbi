@@ -6,17 +6,17 @@ from typing import Any, Callable, Optional, Sequence, Set, TypeVar, Union
 
 
 class SourceKind(str, enum.Enum):
-    """the conservation LAW the rust framework wraps a user source field in.
+    """the conservation law the rust framework wraps a user source field in.
     typo-proof front for the `kind` string crossing into rust's `SourceConfig`
     (str subclass -> serializes to its `.value`). FORCE/COOLING/RELAX are the
     safe primitive-lifted constructors; RAW writes conserved components directly
-    to ONE slot (the regime-agnostic escape hatch). INJECT writes the FULL
+    to a single slot (the regime-agnostic escape hatch). INJECT writes the whole
     conserved vector [den, mom_0..mom_{D-1}, nrg] additively from one config — a
-    mass+momentum+energy deposition (jet/wind) a single-slot RAW cannot express;
-    like RAW it supplies conserved components, so it is valid on relativistic/MHD.
-    SPONGE is the full conserved-state relaxation (buffer zone): it relaxes den,
-    mom, AND nrg toward a reference conserved state, where RELAX relaxes only the
-    velocity (density-preserving drag). ROTATING_FRAME takes
+    mass+momentum+energy deposition (jet/wind), which reaches past the one slot
+    RAW targets; like RAW it supplies conserved components, so it is valid on
+    relativistic/MHD. SPONGE is the full conserved-state relaxation (buffer
+    zone): it relaxes den, mom and nrg toward a reference conserved state, where
+    RELAX relaxes the velocity alone (density-preserving drag). ROTATING_FRAME takes
     [omega, origin_x, origin_y] and applies the Newtonian Coriolis and centrifugal
     force for constant rotation about the positive z axis."""
 
@@ -32,14 +32,15 @@ class SourceKind(str, enum.Enum):
 class ReductionOp(str, enum.Enum):
     """how a census combines the cells that land in one bin.
 
-    the accumulated object must be a commutative monoid — associative and
-    order-agnostic — or it cannot be reduced in parallel, blocked, or combined across
-    restart segments. ADD gives moments, histograms, mass budgets and fluxes; MIN and
-    MAX give per-bin extrema.
+    the accumulated object is a commutative monoid — associative and order-agnostic —
+    which is what lets the reduction run in parallel, over blocks, and across restart
+    segments. ADD gives moments, histograms, mass budgets and fluxes; MIN and MAX give
+    per-bin extrema.
 
-    mean, variance, dispersion and percentile are deliberately absent. they are not
-    monoids, they are FUNCTIONS OF SUMS: register `m*v` and `m` and divide in the
-    reader. an api offering variance directly would compute `<v^2> - <v>^2`, which
+    mean, variance, dispersion and percentile are deliberately absent: each is a
+    function of sums, which places it outside the monoid requirement above. register
+    `m*v` and `m` and divide in the reader. an api offering variance directly would
+    compute `<v^2> - <v>^2`, which
     loses most of its significant digits whenever the mean dominates the dispersion —
     register `m*(v - v_ref)^2` against a known reference instead. a product is absent
     because it overflows to zero or infinity at any realistic cell count.
@@ -117,18 +118,19 @@ __all__ = [
     "sgn",
 ]
 
-# "phi" is the azimuth (x3) only: in 3d spherical (r, theta, phi) it must not
-# alias x2 (theta). a 2d-polar azimuthal coordinate is written "x2" or "theta".
+# "phi" is the azimuth (x3): in 3d spherical (r, theta, phi) it names the third
+# axis, leaving x2 (theta) to its own aliases. a 2d-polar azimuthal coordinate is
+# written "x2" or "theta".
 X1_ALIASES = ["x", "r", "x1"]
 X2_ALIASES = ["y", "theta", "x2"]
 X3_ALIASES = ["z", "phi", "x3"]
 
-# per-cell FLUID-STATE leaves — let a source read the local state, so the physics
-# (not just the position/time) is in the user's hands: e.g., cooling ~ rho^2,
+# per-cell fluid-state leaves — let a source read the local state, so the physics
+# itself, beyond position and time, is in the user's hands: e.g., cooling ~ rho^2,
 # velocity drag ~ -k*vel. these map to the rust `VARIABLE_RHO/VEL{1,2,3}/PRESSURE`
 # ops (symbi-hydro::expr_bridge lowers them to the per-cell rho / vel_k / pre reads).
-# NOTE regime validity is the user's responsibility: `pressure` on an isothermal
-# regime (no energy) has no `pre` field and is rejected at lower time.
+# regime validity rests with the user: an isothermal regime carries no energy, so
+# `pressure` there has no `pre` field to read and is rejected at lower time.
 RHO_ALIASES = ["rho", "density"]
 PRE_ALIASES = ["pre", "pressure", "p"]
 VEL1_ALIASES = ["vel1", "vx", "v1"]
@@ -138,8 +140,8 @@ VEL3_ALIASES = ["vel3", "vz", "v3"]
 # the cell's lab-frame volume measure, the natural weight for an extensive quantity in a
 # binned reduction. it is the measure the finite-volume update itself uses, so a mass sum
 # `rho*dV` stays correct on a curvilinear grid, where the measure is
-# r^2 sin(theta) dr dtheta dphi rather than dx^3. reduction weight only: a source term is a
-# per-unit-volume density and is rejected if it references this leaf.
+# r^2 sin(theta) dr dtheta dphi in place of dx^3. this leaf serves as a reduction weight: a
+# source term is a per-unit-volume density, so a source referencing this leaf is rejected.
 DV_ALIASES = ["dv", "cell_volume", "volume"]
 
 
@@ -342,13 +344,13 @@ class Expr:
 
     def diff(self, var: "Expr") -> "Expr":
         """symbolic derivative d(self)/d(var), built into the same graph (forward chain rule with
-        memoization on shared subexpressions). `var` must be a variable() leaf (e.g., variable('t'));
-        matching is by NAME, so every leaf of that name differentiates to 1.
+        memoization on shared subexpressions). `var` is a variable() leaf (e.g., variable('t'));
+        matching is by name, so every leaf of that name differentiates to 1.
 
-        comparisons / mod raise (non-differentiable — they can only legitimately appear in a branch
-        CONDITION, never in a smooth a(t)). abs and select differentiate per-branch, which is correct
-        away from the kink / branch boundary; the backend's finite-difference cross-check is what
-        guards those cases, so a wrong derivative there fails loudly at setup rather than silently."""
+        comparisons / mod raise: they are non-differentiable, and their legitimate home is a branch
+        condition, distinct from a smooth a(t). abs and select differentiate per-branch, which is
+        correct away from the kink / branch boundary; the backend's finite-difference cross-check
+        guards those cases, so a wrong derivative there fails loudly at setup."""
         g = self._graph
         vdef = g.get_node(var._node_id)
         if vdef is None or vdef[0] != "variable":
@@ -364,9 +366,10 @@ class Expr:
                 return Expr(g, cache[nid])
             op, ins, attrs = g.get_node(nid)  # type: ignore[misc]
             c = [kid(i) for i in ins]
-            # the conditional differentiates PER BRANCH: the condition passes
-            # through untouched (comparisons are not differentiable and must not
-            # be recursed into), so it is handled before the eager child pass.
+            # the conditional differentiates per branch: the condition passes
+            # through untouched — comparisons are non-differentiable, so the
+            # recursion stops at one — and it is handled before the eager child
+            # pass.
             if op == "if_then_else":
                 res = Expr(g, g.add_node(op, ins[0], d(ins[1])._node_id, d(ins[2])._node_id))
                 cache[nid] = res._node_id
@@ -1499,8 +1502,9 @@ class CompiledExpr:
 
         # unary ops emit a `right: -1` "no operand" sentinel; the rust NodeDesc index
         # fields are Option<usize> and reject -1. drop any -1 index key so the absent
-        # field deserializes to None (the correct "no operand"). value (a float) is
-        # never an index, so a legitimate -1.0 constant is untouched.
+        # field deserializes to None (the correct "no operand"). the `value` key holds
+        # a float, outside this set of index keys, so a legitimate -1.0 constant
+        # passes through untouched.
         for node in expressions:
             for key in ("left", "right", "condition", "true_case", "false_case"):
                 if node.get(key) == -1:
@@ -1571,20 +1575,20 @@ class CompiledExpr:
         (`load.rs::EquilibriumConfig::from_json`) and handed to
         `Hierarchy::with_equilibrium_expression`.
 
-        this is a STATE, not a source: it carries no conservation law to be wrapped in and
-        no conserved slot to target. the compiled outputs are the primitive components
+        this is a state declaration: the compiled outputs are the primitive components
         themselves, in the order `[rho, v1, ..., vN, p]` — one velocity component per
-        momentum degree of freedom, and the pressure omitted on an isothermal regime.
+        momentum degree of freedom, and the pressure omitted on an isothermal regime. the
+        conservation-law wrap and conserved slot a source carries stay out of this wire
+        form.
 
-        the state declared here is the one a well-balanced scheme holds EXACTLY: its
+        the state declared here is the one a well-balanced scheme holds exactly: its
         discrete imbalance is measured once per level and subtracted back at every stage.
-        it must therefore be a genuine steady state of the equations being solved — the
-        backend checks that its imbalance converges under refinement and refuses a state
-        whose does not, because well-balancing a non-equilibrium would freeze the run in
-        place with no error.
+        it is therefore a genuine steady state of the equations being solved — the backend
+        requires its imbalance to converge under refinement, since well-balancing a
+        non-equilibrium would freeze the run in place while reporting success.
 
           dim    -- spatial dimensionality of the grid
-          params -- runtime scalar VALUES for the parameter() nodes (p0, p1, ...)
+          params -- runtime scalar values for the parameter() nodes (p0, p1, ...)
         """
         base = self._serialize_nodes()
         return {
@@ -1660,11 +1664,12 @@ class CompiledExpr:
         }
 
     def serialize_motion(self) -> dict[str, object]:
-        """serialize a scale-factor MOTION law to the rust mesh-motion wire. the compiled outputs
-        MUST be exactly `[a(t), a_dot(t)]` in that order (a_dot is typically `a.diff(variable('t'))`).
-        NO conservation-law wrap (unlike `serialize_source`) — the two scalar-in-`t` expressions are
-        lowered to a `BuiltSource` and evaluated every step; the backend finite-difference-checks
-        `a_dot` against `a` at setup before running, so an inconsistent derivative fails loudly."""
+        """serialize a scale-factor motion law to the rust mesh-motion wire. the compiled outputs
+        are exactly `[a(t), a_dot(t)]` in that order (a_dot is typically `a.diff(variable('t'))`).
+        the two scalar-in-`t` expressions are lowered to a `BuiltSource` and evaluated every step,
+        free of the conservation-law wrap `serialize_source` applies; the backend
+        finite-difference-checks `a_dot` against `a` at setup before running, so an inconsistent
+        derivative fails loudly."""
         base = self._serialize_nodes()
         out = base["output_indices"]
         if len(out) != 2:

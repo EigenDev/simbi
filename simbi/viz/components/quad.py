@@ -253,8 +253,8 @@ class QuadPlotComponent(Component):
     def _coordinates_moved(self, x: Array, y: Array) -> bool:
         """whether the vertex arrays differ from the ones the mesh was built on.
 
-        a change of length is a change of mesh, and comparing values across
-        two different lengths is not defined, so shape is tested first."""
+        a change of length is a change of mesh, and a value comparison is
+        defined only for matching lengths, so shape is tested first."""
         for new, old in ((x, self.last_x), (y, self.last_y)):
             if np.shape(new) != np.shape(old):
                 return True

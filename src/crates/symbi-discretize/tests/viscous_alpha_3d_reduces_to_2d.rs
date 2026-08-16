@@ -3,11 +3,11 @@
 //
 // the 3D cartesian adiabatic alpha-disk viscous operator against its 2D twin.
 //
-// the alpha law sets nu from the LOCAL sound speed and the keplerian frequency at the CYLINDRICAL
-// radius about the rotation axis, so nothing in nu depends on height. give the operator a state
-// that is uniform in z with no vertical velocity, and the vertical derivatives of the stress
-// tensor vanish identically: the in-plane momentum and the viscous heating must then reproduce the
-// 2D kernel exactly, and the vertical momentum must not move at all.
+// the alpha law sets nu from the local sound speed and the keplerian frequency at the cylindrical
+// radius about the rotation axis, so nu is a function of the in-plane radius alone. give the
+// operator a state that is uniform in z with zero vertical velocity, and the vertical derivatives
+// of the stress tensor vanish identically: the in-plane momentum and the viscous heating then
+// reproduce the 2D kernel exactly, and the vertical momentum holds fixed.
 //
 // that is the sharpest available check on a new 3D kernel, because it pins the whole in-plane
 // stress — shear, divergence, and heating — against an operator that already has gates, rather
@@ -128,9 +128,10 @@ fn a_z_invariant_state_reproduces_the_two_dimensional_operator() {
     );
 }
 
-// the z-invariant reduction above cannot see the VERTICAL structure of nu: with no vertical
-// gradients the z stress terms are zero, so the nu values at the k±1 stencil cells never reach the
-// result. that is precisely where the adiabatic operator differs from its isothermal twin — the
+// the z-invariant reduction above is blind to the vertical structure of nu: with the vertical
+// gradients zero the z stress terms vanish, so the result depends on the home cell's nu alone and
+// the k±1 stencil values stay out of it. that is precisely where the adiabatic operator differs
+// from its isothermal twin — the
 // isothermal cs is one global constant, so its nu really is z-invariant, while the adiabatic cs^2
 // = gamma p / rho is read per stencil cell and varies with height through the stratification.
 //

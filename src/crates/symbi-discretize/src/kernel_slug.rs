@@ -1,18 +1,18 @@
 // =============================================================================
 // kernel_slug.rs
 //
-// the ONE kernel-name SUFFIX protocol, shared by the AOT bake (mints the kernel
-// names, `symbi-aot/build.rs`) and the runtime dispatch (re-derives them,
+// the kernel-name suffix protocol, defined once and shared by the AOT bake (mints
+// the kernel names, `symbi-aot/build.rs`) and the runtime dispatch (re-derives them,
 // `symbi-substrate/regimes/substrate_kernels`). a kernel name is
 // `{prefix}{...suffix...}_{ndim}d[...]`; every suffix segment below is a
-// SEMANTIC AXIS of the discretization (spatial chart, momentum DOF lift,
-// spacetime background) that must select the SAME baked kernel from both sides.
+// semantic axis of the discretization (spatial chart, momentum DOF lift,
+// spacetime background), and both sides land on one and the same baked kernel.
 //
 // the two sides speak different enum families (`coords::Coords` at bake time vs
 // `symbi_geometry::Geometry` at runtime). a slug derived independently on each
 // side can only be held in lockstep by convention, and the failure is silent:
 // either a name that resolves to the wrong discretization, or a name no bake
-// ever emitted. ONE definition, called from both sides, removes the channel.
+// ever emitted. a single definition, called from both sides, removes the channel.
 //
 // every fn takes the runtime `symbi_geometry` enums; the bake projects its
 // codegen mirror via `Coords::to_geometry` / `Spacetime::to_spacetime`.
@@ -63,11 +63,12 @@ pub fn geom_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
     }
 }
 
-/// the suffix ONLY when the momentum DOF exceeds the axis count (the out-of-plane
-/// swirl lift): `_sph_swirl` / `_cyl_rz`, and EMPTY otherwise -- including on a
-/// curvilinear grid with `dof == ndim`, where `geom_suffix` would still say
-/// `_sph`/`_cyl`. the two are NOT interchangeable; families whose cartesian and
-/// curvilinear no-lift instances share one kernel name key on this one.
+/// the suffix for a momentum DOF exceeding the axis count (the out-of-plane
+/// swirl lift): `_sph_swirl` / `_cyl_rz`. every other grid gets the empty string,
+/// including a curvilinear grid with `dof == ndim`, where `geom_suffix` would still
+/// say `_sph`/`_cyl`. `geom_suffix` names the chart, this one names the lift;
+/// families whose cartesian and curvilinear lift-free instances share one kernel
+/// name key on this one.
 pub fn dof_lift_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
     if dof > ndim {
         geom_suffix(coords, dof, ndim)
@@ -101,10 +102,10 @@ pub fn viscous_ortho_name(base: &str, coords: Geometry, ndim: usize) -> String {
 
 /// which grid property a family keys its chart segment on.
 ///
-/// the two are NOT interchangeable on a curvilinear grid. hydro keys on the momentum-DOF
+/// the two keyings diverge on a curvilinear grid. hydro keys on the momentum-DOF
 /// lift, so a 2-axis spherical grid carrying azimuthal momentum is `_sph_swirl`. MHD B is
-/// always a 3-vector, so the lift cannot separate the two cylindrical planes and the chart
-/// keys on the grid-axis set instead.
+/// always a 3-vector, so both cylindrical planes carry DOF = 3 and the chart keys on the
+/// grid-axis set, which separates them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChartKeying {
     /// hydro: `geom_suffix(coords, dof, ndim)`.
@@ -114,12 +115,13 @@ pub enum ChartKeying {
 }
 
 /// the chart segment of an admissible-boundary projection kernel name, derived from the
-/// GRID rather than typed at the call site.
+/// grid itself.
 ///
-/// "the regime carries no DOF lift" does NOT imply an empty chart segment: an empty segment
-/// is correct only on cartesian, and a curvilinear chart that short-circuits to it asks for a
-/// name no bake emits — a dispatch panic on the first cell that needs the projection.
-/// deriving the segment from the grid leaves no call site the opportunity to short-circuit.
+/// the empty chart segment belongs to cartesian alone. a regime carrying no DOF lift on a
+/// curvilinear chart still takes its `_sph`/`_cyl` segment; short-circuiting to the empty
+/// one asks for a name outside the baked set — a dispatch panic on the first cell that
+/// needs the projection. deriving the segment from the grid keeps that choice away from
+/// the call site.
 pub fn fofc_project_chart(
     keying: ChartKeying,
     coords: Geometry,
@@ -135,13 +137,13 @@ pub fn fofc_project_chart(
 
 /// the admissible-boundary projection kernel name: `{prefix}_fofc_project{chart}{st}_{ndim}d`.
 ///
-/// the family is CURVED-SPACETIME ONLY, and the two regimes key their chart segment on
-/// different axes — hydro on the DOF lift (`geom_suffix`), MHD on the grid-axis set
-/// (`mhd_geom_suffix`, since B is always a 3-vector and the DOF lift cannot separate the
-/// two cylindrical planes). the caller supplies the chart segment its regime uses; the
-/// ORDER and the surrounding literals live here, once, so the bake and the dispatch cannot
-/// spell the same kernel two ways. an empty chart segment resolves only on cartesian, whose
-/// segment is empty anyway; on every curvilinear chart it names a kernel no bake emits.
+/// the family is baked for curved spacetimes, and the two regimes key their chart segment
+/// on different axes — hydro on the DOF lift (`geom_suffix`), MHD on the grid-axis set
+/// (`mhd_geom_suffix`, since B is always a 3-vector and both cylindrical planes carry
+/// DOF = 3). the caller supplies the chart segment its regime uses; the segment order and
+/// the surrounding literals live here, once, so the bake and the dispatch spell the kernel
+/// one way. an empty chart segment resolves on cartesian, whose segment is empty anyway;
+/// on every curvilinear chart it names a kernel outside the baked set.
 pub fn fofc_project_name(
     prefix: &str,
     chart_suffix: &str,
@@ -154,38 +156,38 @@ pub fn fofc_project_name(
     )
 }
 
-/// the FACE-FLUX kernel name, as NAMED FIELDS.
+/// the face-flux kernel name, built from named fields.
 ///
 /// `{prefix}_face_flux{solver}{recon}{balance}{chart}{eos}{geom}{spacetime}_{ndim}d_{dir}`.
 ///
-/// eight suffix axes, and the ORDER is the whole point. spelled at the call site it has been
+/// eight suffix axes, whose order is the whole point. spelled at the call site it has been
 /// spelled three mutually incompatible ways -- the bake putting the reconstruction before the
 /// chart, one runtime folding the chart into the solver segment, and another emitting the chart
-/// FIRST in one branch and second in the branch below it. those agree only while the segments
+/// first in one branch and second in the branch below it. those agree only while the segments
 /// they disagree about are empty, so the break arrives with the first non-default reconstruction
-/// on a curvilinear grid: a name no bake emitted, and a dispatch panic on the first cell.
+/// on a curvilinear grid: a name outside the baked set, and a dispatch panic on the first cell.
 ///
-/// the fields are NAMED rather than positional because seven adjacent `&str` parameters are a
-/// transposition waiting to happen, and a transposed pair here fails the same way -- silently,
-/// on one configuration. `..Default::default()` lets a call site mention only the axes it uses.
+/// the fields are named because seven adjacent `&str` parameters are a transposition waiting
+/// to happen, and a transposed pair here fails the same way -- silently, on one
+/// configuration. `..Default::default()` lets a call site mention only the axes it uses.
 ///
 /// the axes, in order:
 ///   - `solver`     the riemann solver arm (`Solver::kernel_suffix`), `""` for HLLE.
 ///   - `recon`      the face reconstruction limiter (`Recon::suffix`), `""` for PLM.
-///   - `balance`    whether the reconstruction limits the STATE or its departure from
+///   - `balance`    whether the reconstruction limits the state or its departure from
 ///                  hydrostatic equilibrium (`Balance::suffix`). a property of the
-///                  reconstruction, so it sits beside `recon` -- NOT of the solver, which is why
-///                  it is an axis at all: any solver may be well-balanced, and the first-order
-///                  FOFC redo runs HLLE, so tying it to a solver denies the redo a property that
-///                  is free (a piecewise-constant reconstruction of departures is exactly
-///                  balanced).
-///   - `chart`      the coordinate chart, present ONLY for a reconstruction that reads
+///                  reconstruction, so it sits beside `recon`, and an axis of its own because
+///                  any solver may be well-balanced: the first-order FOFC redo runs HLLE, and
+///                  a piecewise-constant reconstruction of departures is exactly balanced, so
+///                  the redo carries that property for free.
+///   - `chart`      the coordinate chart, present for a reconstruction that reads
 ///                  positions -- a well-balanced reconstruction evaluates the body potential at
-///                  cartesian coordinates, so it is baked per chart while every chart-agnostic
+///                  cartesian coordinates, so it is baked per chart, while a chart-agnostic
 ///                  flux passes `""`.
 ///   - `eos`        the equation-of-state arm (`EosArm::suffix`), `""` for gamma-law.
 ///   - `geom`       the DOF-lift / GR chart tag, a different axis from `chart`: it keys on
-///                  momentum DOF exceeding the grid dimension, not on where a position is read.
+///                  momentum DOF exceeding the grid dimension, while `chart` keys on where a
+///                  position is read.
 ///   - `spacetime`  the curved-background slug, empty on minkowski.
 #[derive(Clone, Copy)]
 pub struct FaceFluxName<'a> {
@@ -237,11 +239,11 @@ impl FaceFluxName<'_> {
 }
 
 
-/// the MHD curvilinear suffix, keyed on the GRID-AXIS SET (not DOF-vs-ndim). MHD
-/// B is ALWAYS a 3-vector, so both cylindrical 2D planes carry DOF = 3 and the
-/// DOF lift cannot tell them apart: r-z axisymmetric = axes `[0, 2]` (out-of-plane
+/// the MHD curvilinear suffix, keyed on the grid-axis set. MHD B is always a
+/// 3-vector, so both cylindrical 2D planes carry DOF = 3 and the axis set is what
+/// tells them apart: r-z axisymmetric = axes `[0, 2]` (out-of-plane
 /// phi) -> `_cyl_rz`; r-phi disk = axes `[0, 1]` (out-of-plane z) -> `_cyl_rphi`.
-/// a 2D spherical MHD grid is the normal `_sph` (NOT the hydro swirl lift).
+/// a 2D spherical MHD grid takes the plain `_sph`, leaving the swirl lift to hydro.
 /// cartesian / 1D-radial / 3D collapse to the chart suffix. drives the gas
 /// godunov / wave-speed / CT curl / bcell MHD families.
 pub fn mhd_geom_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
@@ -256,11 +258,11 @@ pub fn mhd_geom_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
     }
 }
 
-/// the MHD normal-direction riemann FLUX suffix: geometry-INDEPENDENT wherever the
-/// normal component `coord_n == dir` (every IDENTITY-axis grid — cart / sph / 3D-cyl
-/// AND the r-phi disk `[0, 1]`, which is identity), so those share the suffix-free
-/// flux family. ONLY r-z (`[0, 2]`) lifts grid axis 1 onto the z component
-/// (`coord_n = 2 != 1`), so its normal flux differs and needs `_cyl_rz`.
+/// the MHD normal-direction riemann flux suffix: one geometry-independent flux serves
+/// every chart whose normal component satisfies `coord_n == dir` (the identity-axis
+/// grids — cart / sph / 3D-cyl, plus the r-phi disk `[0, 1]`, which is identity), so those
+/// share the suffix-free flux family. r-z (`[0, 2]`) lifts grid axis 1 onto the z component
+/// (`coord_n = 2 != 1`), giving it a normal flux of its own under `_cyl_rz`.
 pub fn mhd_flux_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
     if matches!(coords, Geometry::Cylindrical) && axes == [0, 2] {
         "_cyl_rz"
@@ -271,7 +273,7 @@ pub fn mhd_flux_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
 
 /// the spacetime background tag: flat `Minkowski` is unsuffixed (the
 /// densitization is a no-op -> bit-identical to the SR kernel); each curved
-/// chart carries its slug. ORTHOGONAL to the spatial suffix and the physics
+/// chart carries its slug. orthogonal to the spatial suffix and the physics
 /// regime (GR is a spacetime).
 pub fn spacetime_slug(spacetime: Spacetime) -> &'static str {
     match spacetime {

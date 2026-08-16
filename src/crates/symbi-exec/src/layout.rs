@@ -37,11 +37,11 @@ pub fn exec_layout<const D: usize>(dom: &Domain<D>) -> ([u32; D], [i32; D]) {
     (grid, dlo)
 }
 
-/// resolve an AOT kernel by name, or panic with an ACTIONABLE message. a missing kernel almost
-/// always means it was not EMITTED in `symbi-aot/build.rs` for the requested combination — an
+/// resolve an AOT kernel by name, or panic with an actionable message. a missing kernel almost
+/// always means the requested combination fell outside what `symbi-aot/build.rs` emits — an
 /// unsupported (regime, dimension D, geometry / cyl-plane, Riemann solver) tuple, or a dispatch-
-/// name typo — NOT a runtime bug. the bare `kernel_by_name(..).unwrap()` would just say "missing
-/// <name>"; this points a new user at WHERE to look. use it for every substrate kernel lookup.
+/// name typo, not a runtime bug. the bare `kernel_by_name(..).unwrap()` would just say "missing
+/// <name>"; this points a new user at where to look. use it for every substrate kernel lookup.
 pub fn expect_kernel<S: Scalar + OrderedNumeric>(
     name: &str,
 ) -> (symbi_aot::KernelFn<S>, &'static str) {

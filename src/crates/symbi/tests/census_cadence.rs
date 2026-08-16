@@ -1,9 +1,9 @@
 // =============================================================================
 // census_cadence.rs
 //
-// a census samples on a declared simulation-time interval, not on every step.
+// a census samples on a declared simulation-time interval, at a cadence coarser than the step.
 //
-// this is a COST control, and a cost control that silently does nothing looks exactly like one
+// this is a cost control, and a cost control that silently does nothing looks exactly like one
 // that works: the numbers are identical, only the row count and the wall clock differ. a sample is
 // a full extra sweep of the grid plus its reduction — measured at roughly a third of a hydro step
 // on a small 1d problem — so a cadence that quietly degraded to every-step would be paying that
@@ -111,7 +111,8 @@ fn a_declared_interval_samples_far_less_often_than_every_step() {
          control that samples every step is indistinguishable from none at all"
     );
 
-    // and the samples are actually spaced by the interval, not merely fewer.
+    // and the surviving samples sit at least the declared interval apart, which is a stronger
+    // statement than merely being fewer.
     for w in times.windows(2) {
         assert!(
             w[1] - w[0] >= interval,

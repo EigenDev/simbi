@@ -2,15 +2,15 @@
 // named_call.rs
 //
 // the name-keyed CPU-kernel invocation for host + test code. resolves an emitted
-// kernel AND its buffer/scalar manifest by name, binds every buffer + scalar BY
+// kernel and its buffer/scalar manifest by name, binds every buffer + scalar BY
 // FIELD NAME (order-independent), then runs the structured slice ABI.
 //
-// this is the ONLY sanctioned way for host code to call an emitted kernel. the
+// this is the only sanctioned way for host code to call an emitted kernel. the
 // positional `__raw(field0, field1, .., gamma)` form is codegen-internal: its
 // arity changes whenever a builder adds/removes an input, silently breaking
-// hand-written positional callers. binding by name turns that into a LOUD, NAMED
+// hand-written positional callers. binding by name turns that into a loud, named
 // failure — a missing/extra field panics with the manifest's expected names — so
-// adding a kernel input can never again drift past a stale caller unnoticed.
+// adding a kernel input surfaces immediately at every stale caller.
 //
 // usage:
 //  NamedKernel::new("rmhd_c2p_1d")
@@ -36,7 +36,7 @@ struct Binding<'a, S> {
 }
 
 /// name-keyed kernel-invocation builder. accumulate inputs/outputs/scalars/ints by
-/// name in ANY order, then `run` reorders them against the kernel's manifest.
+/// name in any order, then `run` reorders them against the kernel's manifest.
 pub struct NamedKernel<'a, S> {
     name: &'a str,
     bufs: Vec<Binding<'a, S>>,
@@ -138,7 +138,7 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
             .collect();
 
         // reorder the provided buffers to match the manifest, by name. a manifest field
-        // with no provided buffer (or vice versa) is a NAMED panic — never silent drift.
+        // with no provided buffer (or vice versa) raises a named panic, not silent drift.
         // default layout is 1D contiguous (lo = [0], extent = [len]); the run-local layout
         // vectors live for the whole call, so the field views may borrow them.
         let mut provided = self.bufs;
@@ -220,8 +220,8 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
                     .iter()
                     .find(|(n, _)| *n == name.as_str())
                     .map(|(_, v)| *v)
-                    // static-mesh default: a test that does not exercise a moving mesh has ZERO
-                    // mesh rates — exactly what production `motion_scalar` returns for a static
+                    // static-mesh default: a test confined to a static mesh has zero mesh rates —
+                    // exactly what production `motion_scalar` returns for a static
                     // mesh. so the harness supplies 0 for any unsupplied `mesh_*` scalar rather
                     // than forcing every static test to enumerate mesh_adot/mesh_vtrans/mesh_hdil.
                     // this closes the footgun where a kernel growing a moving-mesh scalar silently
@@ -233,8 +233,8 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
                     // = 1 explicitly (its analytic expectations fail loudly if it forgets).
                     //
                     // `x_lo_{ax}` joins them because a kernel that only DIFFERENCES widths reads
-                    // the axis origin solely through the mapped arm of that selector, which the
-                    // uniform map does not take — so the origin is unread and any value serves. a
+                    // the axis origin solely through the mapped arm of that selector; the uniform
+                    // map bypasses that arm — so the origin is unread and any value serves. a
                     // kernel that positions a cell absolutely (a moving mesh, a curvilinear
                     // metric) reads it on every arm, and those tests bind it.
                     .or_else(|| {
@@ -302,7 +302,7 @@ mod tests {
         }
     }
 
-    // the whole point: an unbound manifest field is a LOUD, NAMED panic — never the
+    // the whole point: an unbound manifest field raises a loud, named panic, not the
     // silent positional drift that `__raw` allowed (omit cons.nrg here).
     #[test]
     #[should_panic(expected = "no buffer bound for manifest field 'cons.nrg'")]

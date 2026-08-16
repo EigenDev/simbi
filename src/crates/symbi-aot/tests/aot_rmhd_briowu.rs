@@ -133,7 +133,7 @@ fn rmhd_face_flux_1d(
         .input("prim.mag[1]", by)
         .input("prim.mag[2]", bz)
         // the flux now reads the NORMAL field from the staggered FACE field (Gardiner-Stone CT
-        // coupling); in 1D Brio-Wu Bx is constant, so the cell bx array IS the face field.
+        // coupling); in 1D Brio-Wu Bx is constant, so the cell bx array equals the face field.
         .input("bface_n", bx)
         .input("wave_speed_l[0]", &wsl)
         .input("wave_speed_r[0]", &wsr)
@@ -350,7 +350,7 @@ fn rmhd_briowu_1d_evolves_physically() {
     }
 
     // the shock develops: x-velocity becomes nonzero (it started at 0), and the
-    // interface density is no longer a pure step (intermediate states formed).
+    // interface density forms intermediate states, departing from the initial step.
     let max_vx = (NG..NG + N).map(|i| vx[i].abs()).fold(0.0_f64, f64::max);
     assert!(
         max_vx > 1e-3,

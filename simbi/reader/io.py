@@ -256,9 +256,10 @@ def read_primitives(
 
     # C++ names -> Python names. the cell-centered magnetic components (b1, b2, b3)
     # are written into the primitives group by the rust backend; read them here so
-    # they are plottable. for 2.5D MHD the out-of-plane B_phi (b3) is ONLY cell-
-    # centered (no face counterpart in the staggered CT set), so without this it is
-    # unreachable -> `simbi plot --field b3` yields zero fields (dimensions=0).
+    # they are plottable. for 2.5D MHD the out-of-plane B_phi (b3) lives at cell
+    # centers alone — the staggered CT set holds faces for the in-plane components —
+    # so this mapping is the path by which `simbi plot --field b3` resolves a field
+    # (its absence yields zero fields, dimensions=0).
     field_map = {
         "rho": "rho",
         "pre": "p",
@@ -440,7 +441,7 @@ def read_level(
         if part_result.is_ok():
             partitions.append(part_result.value)
         else:
-            # a corrupt partition is dropped but never silently: the stitched
+            # a corrupt partition is dropped and the drop is logged: the stitched
             # field would otherwise show unexplained zero holes.
             logger.warning(
                 "dropping corrupt partition_%d: %s", partition_id, part_result.error
@@ -588,7 +589,7 @@ def read_checkpoint(filename: str) -> Result[Checkpoint, str]:
                 if level_result.is_ok():
                     levels.append(level_result.value)
                 else:
-                    # a corrupt level is dropped but never silently: an AMR
+                    # a corrupt level is dropped and the drop is logged: an AMR
                     # plot missing its fine level looks like missing physics.
                     logger.warning(
                         "dropping corrupt level_%d: %s", level_id, level_result.error
@@ -622,7 +623,7 @@ def get_base_fields(
     """
     extract base-level primitive fields as simple dict[str, array].
 
-    useful for visualization and analysis that doesn't need partition info.
+    useful for visualization and analysis that works from whole fields.
     assumes single partition at level 0.
     """
     base = checkpoint.base_level()

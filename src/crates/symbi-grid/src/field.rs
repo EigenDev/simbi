@@ -99,8 +99,8 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
 
     /// mutable view over the entire domain.
     pub fn view_mut(&self) -> ViewMut<T, D> {
-        // safety: shared handle + unified memory. the caller is responsible
-        // for not aliasing mutable views; writers run sequentially between
+        // safety: shared handle + unified memory. the caller must keep
+        // mutable views disjoint; writers run sequentially between
         // sync points.
         let ptr = self.storage.get().as_ptr::<T>() as *mut T;
         ViewMut::from_domain(ptr, &self.domain)
@@ -112,12 +112,12 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
     // uses interior mutability: &Field can both read and write.
 
     /// flat index from coordinate. delegates to `Domain::flat_index` so
-    /// `Field` and `View` agree on the storage convention (axis 0 fastest).
-    /// this must not hand-roll an independent formula: the kernel dispatch
-    /// writes via `View` using `Domain`'s strides, while host
-    /// `Field::at`/`Field::set` read via this method. any divergence would
-    /// land writes and reads at different addresses and silently corrupt
-    /// code that mixes kernel writes with `Field::at` reads.
+    /// `Field` and `View` agree on the storage convention (axis 0 fastest)
+    /// through one shared formula: the kernel dispatch writes via `View`
+    /// using `Domain`'s strides, while host `Field::at`/`Field::set` read
+    /// via this method. any divergence would land writes and reads at
+    /// different addresses and silently corrupt code that mixes kernel
+    /// writes with `Field::at` reads.
     #[inline]
     fn flat_index(&self, coord: [isize; D]) -> usize {
         self.domain.flat_index(coord)
@@ -139,13 +139,13 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
         }
     }
 
-    /// accumulate `delta` into the value at `coord`, with a RELEASE-ACTIVE bounds check.
+    /// accumulate `delta` into the value at `coord`, with a release-active bounds check.
     /// the single audited write path for pointwise per-cell ops (`op` computes `delta` purely,
     /// this performs the only field mutation). unlike `set`/`ViewMut::set` (which guard with
-    /// `debug_assert!`, compiled out in release) the assert here is ALWAYS on, so a bad index is a
-    /// LOUD PANIC; a bad index would otherwise silently corrupt the heap. sound to call concurrently from many threads
-    /// PROVIDED each `coord` is written by exactly one thread (disjoint cells) — `T` is a Copy
-    /// scalar so the read-modify-write touches only this cell.
+    /// `debug_assert!`, compiled out in release) the assert here stays compiled in for every
+    /// build, so a bad index panics loudly; leaving it unchecked would corrupt the heap silently.
+    /// sound to call concurrently from many threads provided each `coord` is written by one thread
+    /// (disjoint cells) — `T` is a Copy scalar so the read-modify-write touches only this cell.
     #[inline]
     pub fn add_assign_checked(&self, coord: [isize; D], delta: T)
     where

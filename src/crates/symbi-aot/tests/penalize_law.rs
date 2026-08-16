@@ -43,8 +43,8 @@ fn cell_center(i: usize) -> f64 {
 /// run a penalize kernel: `inputs` are the in-place cons reads (3 for iso: den,
 /// mom0, mom1; 4 for adiabatic: + nrg). the output count (cons clones first,
 /// then the delta scratch) comes off the artifact's buffer manifest, so a
-/// receipt added to the kernels (torque, normal-force split) can never stale
-/// this harness. returns every output buffer.
+/// receipt added to the kernels (torque, normal-force split) stays automatically
+/// in sync with this harness. returns every output buffer.
 fn run_pen(
     kern: symbi_aot::KernelFn<f64>,
     ir: &str,
@@ -196,7 +196,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
         nrg = nrg_o;
     }
 
-    // the f64 host chain: the SAME carrier-generic functions per cell.
+    // the f64 host chain: the same carrier-generic functions per cell.
     let sphere = SdfExpr::<f64, 2>::sphere(POS, RACC);
     // the kernel's volume comes from the geometry scaffold: per-axis widths
     // as FACE differences (x_lo + (i+1)dx) - (x_lo + i dx), the product
@@ -255,7 +255,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
             let tq = symbi_ib::moment(&x_rel, &delta.force_delta);
             assert_eq!(pt[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
-            // per cell: the delta IS the gas's loss.
+            // per cell: the delta equals the gas's loss.
             assert_eq!(
                 pm[c].to_bits(),
                 ((host_in.0[c] - den[c]) * dv).to_bits(),
@@ -415,9 +415,9 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
     use symbi_geometry::{CylindricalRPhi, Metric};
     use symbi_hydro::energy::IsoModel;
     let (kernel, ir) = kernel_by_name::<f64>("penalize_drain_iso_cyl_2d").expect("cyl kernel");
-    // a cylindrical kernel carries NO support ball: the cartesian mask region
-    // is not a coordinate ball off the identity chart, so the derivation
-    // refuses and dispatch runs the whole interior.
+    // a cylindrical kernel dispatches over the whole interior: the cartesian mask
+    // region forms a coordinate ball only on the identity chart, so the support
+    // derivation declines off it.
     assert!(kernel_output_support_from_ir(ir).is_none());
 
     const CS: f64 = 0.8;
@@ -586,9 +586,9 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
     use symbi_hydro::energy::IsoModel;
     let (tf, ir) =
         kernel_by_name::<f64>("penalize_torque_free_iso_cyl_2d").expect("cyl torque-free kernel");
-    // a cylindrical kernel carries NO support ball: the cartesian mask region
-    // is not a coordinate ball off the identity chart, so the derivation
-    // refuses and dispatch runs the whole interior.
+    // a cylindrical kernel dispatches over the whole interior: the cartesian mask
+    // region forms a coordinate ball only on the identity chart, so the support
+    // derivation declines off it.
     assert!(kernel_output_support_from_ir(ir).is_none());
     let (drain, drain_ir) =
         kernel_by_name::<f64>("penalize_drain_iso_cyl_2d").expect("cyl drain kernel");
@@ -768,8 +768,8 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
                 "mass at ({ii},{jj})"
             );
             // the force receipt is booked in the CARTESIAN world frame: local
-            // physical components rotate cell to cell and their raw sum is not
-            // a net force on the body.
+            // physical components rotate cell to cell, so only the cartesian-frame
+            // sum represents the net force on the body.
             let e = metric.vector_to_cartesian(
                 Tensor::new([cr(ii), cphi(jj)]),
                 symbi_algebra::Physical::new(delta.force_delta),
@@ -785,7 +785,7 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
     }
     assert!(fired > 20, "the cylindrical torque-free drain never fired");
 
-    // (2) xi = 0: the torque-free kernel IS the cylindrical iso drain, bit for bit.
+    // (2) xi = 0: the torque-free kernel equals the cylindrical iso drain, bit for bit.
     let tf0 = run(tf, ir, 0.0);
     let dr = run(drain, drain_ir, 0.0);
     for c in 0..n2 {
@@ -975,7 +975,7 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
     }
     assert!(fired > 20, "the torque-free drain never fired");
 
-    // (2) xi = 0: the torque-free kernel IS the iso drain kernel, bit for bit.
+    // (2) xi = 0: the torque-free kernel equals the iso drain kernel, bit for bit.
     let tf0 = run(tf, ir, 0.0);
     let dr = run(drain, drain_ir, 0.0);
     for c in 0..n2 {
@@ -1217,7 +1217,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
     assert!(fired > 20, "the porous drain never fired");
     assert!(tangential_checked > 5, "the free-slip check never ran");
 
-    // porosity = 1: the porous kernel IS the drain kernel, bit for bit.
+    // porosity = 1: the porous kernel equals the drain kernel, bit for bit.
     let porous_p1 = run(porous, ir, 1.0);
     let drain_out = run(drain, drain_ir, 1.0);
     for c in 0..n2 {
@@ -1254,7 +1254,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
     }
 }
 
-// the ISOTHERMAL porous twin: porosity = 1 IS the isothermal drain, bit for bit
+// the ISOTHERMAL porous twin: porosity = 1 equals the isothermal drain, bit for bit
 // (the wall channels carry an exact (1 - p) = 0). proves the regime twin is wired.
 #[test]
 fn iso_porous_reduces_to_iso_drain_at_p1() {
@@ -1307,7 +1307,7 @@ fn iso_porous_reduces_to_iso_drain_at_p1() {
     assert!(fired > 20, "the iso porous drain never fired");
 }
 
-// the ADIABATIC torque-free twin: xi = 0 IS the adiabatic drain, bit for bit.
+// the ADIABATIC torque-free twin: xi = 0 equals the adiabatic drain, bit for bit.
 #[test]
 fn adiabatic_torque_free_reduces_to_drain_at_xi0() {
     let (tf, tir) = kernel_by_name::<f64>("penalize_torque_free_2d").expect("adiabatic tf");

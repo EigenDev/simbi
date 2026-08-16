@@ -2,20 +2,20 @@
 // godunov_with_fused_source.rs
 //
 // proves `godunov_euler_gv_with_fused_source` produces a
-// SINGLE kernel that combines the flux-divergence integrator + a spec-driven
+// single kernel that combines the flux-divergence integrator + a spec-driven
 // user momentum source (e.g., `uniform_acceleration_sources`). validates:
 //
 //   - structural — with `user_source = None` the fused builder reproduces
 //     `godunov_euler_gv` exactly; same Writes shape;
-//   - semantic — for a UNIFORM state (zero flux divergence), running the
+//   - semantic — for a uniform state (zero flux divergence), running the
 //     fused kernel with `uniform_acceleration` as the user source produces
-//     `mom_k_new = mom_k + dt * rho * g_ext_k`, EXACTLY the analytical
+//     `mom_k_new = mom_k + dt * rho * g_ext_k`, exactly the analytical
 //     newtonian response to a uniform external force, so the spliced spec
 //     contribution reads the register-resident state at the right point.
 //
-// PERF motivation: a newtonian + external-acceleration
-// problem runs TWO kernels per RK stage (godunov + body_source). the spec
-// source can instead ride INSIDE godunov — one launch, one set of
+// performance motivation: a newtonian + external-acceleration
+// problem runs two kernels per RK stage (godunov + body_source). the spec
+// source rides inside godunov instead — one launch, one set of
 // register-resident `cons` reads, one fused CSE pass over the divergence +
 // source expressions. zero added kernel dispatch overhead.
 //
@@ -51,10 +51,10 @@ use symbi_hydro::source_spec::uniform_acceleration_sources;
 #[test]
 fn user_source_none_matches_writes_of_plain_godunov() {
     // structural equivalence: passing `None` for `user_source` produces a kernel with
-    // the SAME Writes shape as the plain godunov builder, so a caller with no spec
-    // source binds exactly the same ABI. (NodeId identity is NOT checked — the trace
-    // IDs differ between two `begin_trace` sessions — but Writes-shape equivalence is
-    // the contract the runtime binds against.)
+    // the same Writes shape as the plain godunov builder, so a caller passing `None`
+    // binds exactly the same ABI. (the check is Writes-shape equivalence, the contract
+    // the runtime binds against; NodeId identity differs between two `begin_trace`
+    // sessions.)
     let coords = Coords::Cartesian;
     let spacing = vec![Spacing::Uniform; 3];
     let axes = vec![0, 1, 2];
@@ -98,16 +98,16 @@ fn user_source_none_matches_writes_of_plain_godunov() {
 fn uniform_state_picks_up_only_the_user_source_contribution() {
     // **load-bearing semantic check**: build the fused-source godunov for
     // newtonian 3D cartesian + uniform-acceleration user source. configure
-    // a UNIFORM state — zero flux divergence — and verify the momentum
-    // update IS the analytical user-source contribution:
+    // a uniform state — zero flux divergence — and verify the momentum
+    // update equals the analytical user-source contribution:
     //
     //     mom_k_new = mom_k + dt * rho * g_ext_k       (for each k)
     //     rho_new   = rho                              (mass invariant under user mom source)
     //     nrg_new   = nrg                              (uniform_acceleration's energy spec is
-    //                                                   a separate SourceSpec; not wired here)
+    //                                                   a separate SourceSpec, omitted here)
     //
     // this proves the spliced graph is fused at the right state — `rho`
-    // and `g_ext_k` resolve to the SAME Gv values the godunov is already
+    // and `g_ext_k` resolve to the same Gv values the godunov is already
     // using, so the source contribution rides for free on the existing
     // register-resident reads.
     const D: usize = 3;
@@ -115,7 +115,7 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
     let spacing = vec![Spacing::Uniform; D];
     let axes = vec![0, 1, 2];
 
-    // the user source: external acceleration on momentum only (no energy).
+    // the user source: external acceleration on the momentum slot alone.
     // `uniform_acceleration_sources(D, false)[0]` is the momentum SourceSpec.
     let specs = uniform_acceleration_sources(D, false);
     let user_source = &specs[0];
@@ -138,7 +138,7 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
         false,
     );
 
-    // a UNIFORM 3x3x3 state: rho/mom/nrg all constant, all flux fields too.
+    // a uniform 3x3x3 state: rho/mom/nrg all constant, all flux fields too.
     // with constant fluxes, divergence is identically zero on the interior.
     let rho_v = 1.5_f64;
     let mom_v = [0.3_f64, -0.2, 0.4];
@@ -219,9 +219,9 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
 #[test]
 fn fused_source_kernel_includes_spec_param_in_signature() {
     // **structural fingerprint** that the spec source actually fused into
-    // the godunov kernel. the kernel's IR must declare a Param named
-    // `g_ext_0` (the uniform_acceleration scalar) — without the splice,
-    // godunov by itself never references that name.
+    // the godunov kernel. the kernel's IR declares a Param named `g_ext_0`
+    // (the uniform_acceleration scalar), a name that enters the graph
+    // through the splice alone — which is what makes it a fingerprint.
     const D: usize = 3;
     let coords = Coords::Cartesian;
     let spacing = vec![Spacing::Uniform; D];
@@ -244,7 +244,7 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
     );
 
     // sanity: the kernel's underlying graph contains a Param leaf named
-    // `g_ext_0` — proves uniform_acceleration's `g_ext_k` made it INTO
+    // `g_ext_0` — proves uniform_acceleration's `g_ext_k` reached
     // the godunov trace, fused with the divergence + integrator.
     let g = &kernel.graph;
     let mut found_g_ext_0 = false;
@@ -261,7 +261,8 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
         "fused godunov kernel must declare `g_ext_0` Param (from spliced uniform_acceleration source)",
     );
 
-    // and the plain godunov, for comparison, does NOT declare g_ext_0:
+    // control: `g_ext_0` is absent from the plain godunov graph, so the param above is
+    // attributable to the splice:
     let (k_plain, _) = godunov_stage_gv(
         coords,
         Spacetime::Minkowski,
@@ -288,23 +289,23 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
 }
 
 // =============================================================================
-// MULTI-source overlay (mom + nrg simultaneously fused)
+// multi-source overlay (mom + nrg simultaneously fused)
 // =============================================================================
 
 #[test]
 fn multi_source_fuses_mom_and_nrg_overlays_in_one_kernel() {
     // the load-bearing claim: `uniform_acceleration_sources(D, true)`
-    // returns TWO SourceSpecs — `[0]` targeting "mom" (S_mom_k = rho*g_ext_k) and
+    // returns two SourceSpecs — `[0]` targeting "mom" (S_mom_k = rho*g_ext_k) and
     // `[1]` targeting "nrg" (S_nrg = rho*(v dot g_ext)). passing both to
-    // `godunov_stage_gv_with_fused_sources` produces a SINGLE kernel that
-    // applies BOTH contributions at the right per-field update sites.
+    // `godunov_stage_gv_with_fused_sources` produces a single kernel that
+    // applies both contributions at the right per-field update sites.
     //
-    // for a UNIFORM state (zero flux divergence), the analytical update is:
+    // for a uniform state (zero flux divergence), the analytical update is:
     //     rho_new   = rho
     //     mom_k_new = mom_k + dt * rho * g_ext_k
     //     nrg_new   = nrg   + dt * rho * (v dot g_ext)
     //
-    // proving this in ONE kernel proves the per-spec target_field dispatch
+    // proving this in one kernel proves the per-spec target_field dispatch
     // wires each spliced output to the right conservation-law update site.
     const D: usize = 3;
     let coords = Coords::Cartesian;
@@ -408,10 +409,10 @@ fn multi_source_fuses_mom_and_nrg_overlays_in_one_kernel() {
 #[test]
 fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
     // **CSE / vocabulary-sharing contract**: both specs declare `g_ext_k` as
-    // a scalar param. when fused into the same kernel, they MUST bind to
-    // the SAME `Param("g_ext_0")` leaf — not two distinct leaves with the
-    // same name. proves the scalar-leaf cache in the multi-source builder
-    // actually dedups across specs.
+    // a scalar param. fused into the same kernel, they bind to one shared
+    // `Param("g_ext_0")` leaf, so each name maps to a single NodeId. proves
+    // the scalar-leaf cache in the multi-source builder actually dedups
+    // across specs.
     use std::collections::HashSet;
     const D: usize = 3;
     let coords = Coords::Cartesian;
@@ -433,9 +434,9 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
         false,
     );
 
-    // every Param("g_ext_k") in the graph must occur EXACTLY ONCE — one
-    // distinct NodeId per name. otherwise the runtime would have to fill
-    // two different leaves with the same value.
+    // every Param("g_ext_k") in the graph occurs exactly once — one
+    // distinct NodeId per name, so the runtime fills a single leaf per
+    // name.
     let mut seen: HashSet<String> = HashSet::new();
     for (_id, node, _ty) in kernel.graph.iter() {
         if let symbi_ir::graph::Op::Param(sym) = &node.op {
@@ -459,12 +460,12 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
 #[test]
 fn ssp_combine_applies_runtime_coefficients() {
     // **carrier-oracle for the runtime (a0, ac) combine** — the load-bearing claim of the
-    // integrator collapse. a UNIFORM state (constant fluxes => zero divergence, no source)
-    // isolates the SSP shu-osher convex combine `cons = a0*u_n + ac*cons` from the stencil. with
-    // u_n != cons and the SSP-RK2 corrector coefficients (1/2, 1/2), the kernel evaluated on the
-    // CPU interpreter MUST produce the analytical convex combination — proving a SINGLE compiled
-    // kernel realizes any explicit SSP stage from its runtime scalars. 1D cartesian, ncomp=1, no
-    // energy (mass + one momentum law).
+    // integrator collapse. a uniform state (constant fluxes, so the divergence vanishes and the
+    // build carries the combine alone) isolates the SSP shu-osher convex combine
+    // `cons = a0*u_n + ac*cons` from the stencil. with u_n != cons and the SSP-RK2 corrector
+    // coefficients (1/2, 1/2), the kernel evaluated on the CPU interpreter produces the analytical
+    // convex combination — proving a single compiled kernel realizes any explicit SSP stage from
+    // its runtime scalars. 1D cartesian, ncomp=1, mass + one momentum law (energy omitted).
     let coords = Coords::Cartesian;
     let kernel = godunov_stage_gv(
         coords,
@@ -517,20 +518,21 @@ fn ssp_combine_applies_runtime_coefficients() {
 
 #[test]
 fn unsupported_target_field_panics_loudly() {
-    // **discipline**: target_field that godunov doesn't know how to route
-    // (a typo, or a field name the substrate doesn't wire) is a programmer
-    // bug — surface a panic with the offending value so it is never silently dropped.
-    // (the godunov vocabulary is den/mom/nrg/bcell; use a bogus name here.)
+    // **discipline**: a target_field outside godunov's routing vocabulary
+    // (a typo, or a name outside the substrate's wiring) is a programmer
+    // bug — the dispatch panics with the offending value, making the bad
+    // spec loud at build time.
+    // (the godunov vocabulary is den/mom/nrg/bcell; this uses a bogus name.)
     const D: usize = 1;
     let coords = Coords::Cartesian;
     let spacing = vec![Spacing::Uniform; D];
     let axes = vec![0];
 
-    // hand-built spec with an unknown target_field; build_source is never
-    // called (the panic fires on the dispatch match before splicing).
+    // hand-built spec with an unknown target_field; the panic fires on the
+    // dispatch match, ahead of both splicing and any call to build_source.
     fn empty_builder(_d: usize) -> symbi_hydro::source_spec::BuiltSource {
-        // 1 output, just bind to rho — never actually evaluated since the
-        // dispatch panic fires first.
+        // 1 output, bound to rho; the dispatch panic fires first, so this
+        // graph stands unevaluated.
         use symbi_ir::graph::Graph;
         let mut g = Graph::new();
         let rho = g.add_scalar_param("rho", symbi_ir::ElementTy::F64);
@@ -542,7 +544,7 @@ fn unsupported_target_field_panics_loudly() {
     }
     let bad_spec = symbi_hydro::source_spec::SourceSpec {
         kind: symbi_hydro::source_spec::SourceKind::UserDefined,
-        target_field: "bogus_target", // not in the godunov vocabulary (den/mom/nrg/bcell)
+        target_field: "bogus_target", // outside the godunov vocabulary (den/mom/nrg/bcell)
         build_source: empty_builder,
     };
     let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = vec![&bad_spec];
@@ -566,9 +568,9 @@ fn unsupported_target_field_panics_loudly() {
 
 #[test]
 fn source_apply_pass_adds_dt_times_source() {
-    // the standalone ADDITIVE source pass `cons += dt * \sum S` — the general source executor.
-    // uniform state (no divergence here, it's source-only), uniform_accel (mom + nrg). assert the
-    // in-place conserved update is EXACTLY the analytical source contribution times dt:
+    // the standalone additive source pass `cons += dt * \sum S` — the general source executor.
+    // uniform state (this pass carries the source alone), uniform_accel (mom + nrg). assert the
+    // in-place conserved update is exactly the analytical source contribution times dt:
     //   mom_k += dt * rho * g_ext_k ;  nrg += dt * rho * (v dot g_ext) ;  rho unchanged.
     // the driver passes dt = ac*dt, so this is the additive half of the fused stage.
     const D: usize = 3;
@@ -601,7 +603,7 @@ fn source_apply_pass_adds_dt_times_source() {
             ("mom_0", mom[0]),
             ("mom_1", mom[1]),
             ("mom_2", mom[2]),
-            // add-base (cons), equal to the state since no godunov ran before this pass.
+            // add-base (cons), equal to the state: this pass runs standalone.
             ("cons_den", rho),
             ("cons_mom_0", mom[0]),
             ("cons_mom_1", mom[1]),
@@ -631,10 +633,10 @@ fn source_apply_pass_adds_dt_times_source() {
 
 #[test]
 fn fused_stage_equals_plain_plus_additive_pass() {
-    // the fused godunov stage computes BIT-FOR-BIT the
+    // the fused godunov stage computes bit-for-bit the
     // same conserved update as (plain godunov stage) followed by (the standalone additive source
-    // pass) — because the fused builder adds the user source as the SAME post-combine term
-    // `+ \sum ac*dt*contrib` the pass adds, evaluated at the SAME stage-input state. tested at the
+    // pass) — the fused builder adds the user source as the same post-combine term
+    // `+ \sum ac*dt*contrib` the pass adds, evaluated at the same stage-input state. tested at the
     // SSP-RK2 corrector (a0=ac=0.5 — the FP-distribution-sensitive case) with u_n != u.
     // uniform state + uniform fluxes => div == 0 (the flux is identical in both paths anyway).
     const D: usize = 3;

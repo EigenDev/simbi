@@ -4,7 +4,7 @@
 // kernel argument builder. type-safe construction of the void** arg array
 // that cuLaunchKernel / hipModuleLaunchKernel expect.
 //
-// implementation: ONE flat byte arena (`storage: Vec<u8>`) holding every pushed
+// implementation: a single flat byte arena (`storage: Vec<u8>`) holding every pushed
 // arg. push appends the value's bytes (properly aligned for `T`) and
 // records the byte offset; `as_mut_slice` rebuilds the void* pointer table by
 // offsetting the arena's base pointer. on reuse (`clear`) the arena retains
@@ -12,10 +12,10 @@
 // pay zero allocations.
 //
 // safety: cuLaunchKernel reads the pointed-to bytes synchronously (the driver
-// copies them out before returning), so the arena's contents only need to be
-// stable through the launch call. callers must NOT push after `as_mut_slice`
-// without re-calling it (a push could realloc the arena and invalidate the
-// pointers handed out previously).
+// copies them out before returning), so the arena's contents only need to stay
+// stable through the launch call. a push after `as_mut_slice` invalidates the
+// pointers already handed out (it could realloc the arena), so any push
+// following `as_mut_slice` requires a fresh call to it before the next launch.
 //
 // usage:
 //   let mut args = KernelArgs::new();
@@ -45,7 +45,7 @@ impl KernelArgs {
         }
     }
 
-    /// reserve byte capacity for the arena AND slot capacity for the offset /
+    /// reserve byte capacity for the arena and slot capacity for the offset /
     /// pointer tables. pre-sizing to the largest plausible arg footprint makes
     /// the entire `push` sequence allocation-free.
     pub fn with_capacity_bytes(bytes: usize, n_args: usize) -> Self {
@@ -85,9 +85,9 @@ impl KernelArgs {
     }
 
     /// build the void** array for cuLaunchKernel. valid until the next `push`
-    /// or `clear` — i.e., valid through the launch call. callers MUST NOT push
-    /// after this without re-calling `as_mut_slice`: a subsequent push could
-    /// realloc the arena and invalidate the previously handed-out pointers.
+    /// or `clear` — i.e., valid through the launch call. a push after this call
+    /// invalidates the previously handed-out pointers (it could realloc the
+    /// arena); re-call `as_mut_slice` before the next launch if more args follow.
     pub fn as_mut_slice(&mut self) -> &mut [*mut std::ffi::c_void] {
         self.ptrs.clear();
         let base = self.storage.as_mut_ptr();
@@ -117,7 +117,7 @@ impl Default for KernelArgs {
 
 // ---- thread-local pool ------------------------------------------------------
 //
-// every kernel launch on the same thread reuses the SAME KernelArgs instance —
+// every kernel launch on the same thread reuses the same KernelArgs instance —
 // the arena retains its grown capacity across launches, so after warmup pushes
 // hit existing arena bytes and allocate nothing. CPU sims are usually
 // single-threaded; multi-threaded callers (e.g., rayon-parallel CPU kernels)
@@ -125,7 +125,7 @@ impl Default for KernelArgs {
 //
 // initial sizing covers the widest substrate kernel comfortably: rmhd face_flux
 // is ~30 buffers \times 40-byte DeviceView + ~15 i32/f64 scalars \approx 1.3 KB, rounded
-// up to 4 KB so the first launch doesn't grow.
+// up to 4 KB so the first launch already sits at steady-state capacity.
 
 thread_local! {
     static POOL: std::cell::RefCell<KernelArgs> =
@@ -138,10 +138,10 @@ thread_local! {
 /// arena has hit steady-state capacity and the closure's `push` calls
 /// allocate nothing.
 ///
-/// the closure MUST drive a single kernel launch and MUST NOT itself trigger
-/// another dispatch via the pool on the same thread — that would panic on the
-/// re-entrant `borrow_mut`. CUDA kernel launches don't call back into Rust, so
-/// the substrate dispatch path is safe.
+/// the closure drives a single kernel launch only; triggering another dispatch
+/// via the pool on the same thread panics on the re-entrant `borrow_mut`. CUDA
+/// kernel launches return control to the host directly, so the substrate
+/// dispatch path is safe.
 pub fn with_pooled_args<R>(f: impl FnOnce(&mut KernelArgs) -> R) -> R {
     POOL.with_borrow_mut(|a| {
         a.clear();
@@ -189,7 +189,7 @@ mod tests {
         a.clear();
         assert_eq!(a.len(), 0);
         assert_eq!(a.storage.capacity(), cap_before);
-        // a second cycle should not regrow
+        // a second cycle stays within retained capacity
         for _ in 0..16 {
             a.push(&0u64);
         }

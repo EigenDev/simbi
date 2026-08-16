@@ -18,7 +18,8 @@
 //   - rank-N: a struct with named fields _0, _1, ..., _{N-1}
 //
 // the macro layer consumes these device functions; CUDA syntax here is
-// pure device-function code, no kernel-launch (__global__) shape.
+// pure device-function code, with the kernel-launch (__global__) shape
+// living in the kernel emitters.
 // =============================================================================
 
 use crate::graph::{ConstValue, Graph, NodeId};
@@ -44,9 +45,9 @@ use crate::{BinaryKind, ElementTy, LoweredFn, ScalarExpr, ScalarStmt, UnaryKind}
 //   }
 //
 // the per-component body comes from `scalarize` + the existing `emit_stmt` /
-// `emit_expr` — the SAME machinery the stencil path uses. each component is its
-// own brace scope so the `__cse_*` / `__t_*` temps don't collide across
-// components. the param NAMES (`rho`, `vel_0`, ...) match `Op::Param` leaves in
+// `emit_expr` — the same machinery the stencil path uses. each component is its
+// own brace scope, so the `__cse_*` / `__t_*` temps stay component-local. the
+// param names (`rho`, `vel_0`, ...) match `Op::Param` leaves in
 // the graph, so the scalarized body references them transparently.
 // =============================================================================
 
@@ -76,7 +77,7 @@ pub fn emit_source_kernel(
     s.push_str("    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;\n");
     s.push_str("    if (i >= n_cells) return;\n\n");
 
-    // per-cell input reads. the param NAMES match the graph's `Op::Param`
+    // per-cell input reads. the param names match the graph's `Op::Param`
     // leaves, so the scalarized body references them transparently. NVRTC
     // reads them as `auto` (CUDA C++14) — precision propagates from the
     // buffer type.
@@ -87,8 +88,7 @@ pub fn emit_source_kernel(
 
     // per-component scoped body. each output is scalarized independently into
     // a LoweredFn; its body statements + result expression land inside the
-    // component's brace block, so `__cse_*` / `__t_*` temps stay component-
-    // local (no cross-component collision).
+    // component's brace block, so `__cse_*` / `__t_*` temps stay component-local.
     for (k, &out_node) in outputs.iter().enumerate() {
         s.push_str(&format!("    {{ /* component {k} */\n"));
         let f = scalarize(graph, out_node, "source_term");
@@ -205,7 +205,7 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
             element,
             init,
         } => {
-            // CUDA doesn't distinguish mut/non-mut; emit a plain decl.
+            // a CUDA declaration carries no mut/non-mut distinction; emit a plain decl.
             out.push_str(cuda_type_name(*element));
             out.push(' ');
             out.push_str(name);
@@ -268,9 +268,9 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
             body,
             result,
         } => {
-            // CUDA has no block-expression form, so declare `name` in the
-            // outer scope, write inside the inner `{ }`, and rely on the
-            // brace to kill all inner locals. nvcc gets clean lifetime
+            // a CUDA block is a statement, so declare `name` in the
+            // outer scope, write inside the inner `{ }`, and let the closing
+            // brace end every inner local's lifetime. nvcc gets clean lifetime
             // information for the body's temps.
             out.push_str(cuda_type_name(*element));
             out.push(' ');
@@ -293,8 +293,9 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
         } => {
             // declare the N result slots in the outer scope; each arm body ends
             // with `outs[j] = <arm result j>`. a real C `if (cond) { } else { }`
-            // — ONE arm runs (a divergent warp runs both, never worse than a
-            // blend). the carrier-portable early-out `if`, DUAL of iterate's `for`.
+            // — one arm runs per thread (a divergent warp runs both, matching a
+            // blend's cost at worst). the carrier-portable early-out `if`, dual of
+            // iterate's `for`.
             for (name, element) in outs {
                 out.push_str(cuda_type_name(*element));
                 out.push(' ');
@@ -372,17 +373,17 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
             method,
             args,
         } => {
-            // emit `min`/`max`/`abs` as INLINE TERNARIES (`a<b?a:b`). the
+            // emit `min`/`max`/`abs` as inline ternaries (`a<b?a:b`). the
             // libdevice functions follow IEEE 754-2008 NaN / signed-zero semantics
             // that differ from the plain `a<b?a:b` ternary; at shock cells the
             // divergent semantics produced different fluxes CPU vs GPU -> macroscopic
             // Bx drift in MUB09. the f64/f32 `Numeric` carrier, the
-            // interpreter, and the cranelift jit all use this SAME ternary, so the
+            // interpreter, and the cranelift jit all use this same ternary, so the
             // CPU and GPU paths stay bit-identical at min/max.
             //   min(a, b) = a < b ? a : b
             //   max(a, b) = a > b ? a : b
             //   abs(x)    = x < 0 ? -x : x
-            // no headers needed; works in both CUDA C and CUDA C++.
+            // header-free; valid in both CUDA C and CUDA C++.
             match method.as_str() {
                 "min" => {
                     out.push('(');
@@ -416,11 +417,11 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
                     out.push(')');
                 }
                 "powi" => {
-                    // integer power. f64::powi raises a NEGATIVE base exactly
-                    // (e.g., (-2)^2 = 4) whereas libdevice pow(neg, 2.0) = NaN,
-                    // and the fallthrough arm would emit a bare `powi(...)` that
-                    // does not exist in NVRTC. emit the unrolled multiply chain
-                    // (exponentiation by squaring) so the grouping is BIT-IDENTICAL
+                    // integer power. f64::powi raises a negative base exactly
+                    // ((-2)^2 = 4) where libdevice pow(neg, 2.0) returns NaN, and the
+                    // fallthrough arm would emit a bare `powi(...)`, a name NVRTC
+                    // leaves undefined. emit the unrolled multiply chain
+                    // (exponentiation by squaring) so the grouping is bit-identical
                     // to f64::powi and the Gv carrier lowering (gv.rs::powi).
                     let n = const_i32(&args[0]).unwrap_or_else(|| {
                         panic!(
@@ -452,7 +453,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
                     out.push_str(") < 0) ? 1 : 0))");
                 }
                 _ => {
-                    // every other method: emit as function call as before.
+                    // every other method emits as a function call.
                     // sqrt, sin, cos, exp, log, etc. — these go through
                     // libdevice and match standard math semantics.
                     let fn_name = cuda_method_to_fn(method);
@@ -484,10 +485,10 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
             out.push(']');
         }
         ScalarExpr::FieldLoadAt { .. } => {
-            // emit_kernel.rs MUST rewrite every FieldLoadAt to a Var
-            // form before invoking the cuda emitter. seeing one here is
-            // a bug in the rewrite pass — fail loudly; a silent path would emit
-            // an undefined identifier.
+            // emit_kernel.rs rewrites every FieldLoadAt into a Var form ahead of
+            // the cuda emitter. one arriving here marks a gap in that rewrite
+            // pass, so the emitter fails loudly; the quiet alternative is an
+            // undefined identifier in the emitted source.
             panic!(
                 "emit_cuda::emit_expr: encountered un-rewritten FieldLoadAt — \
                  emit_kernel::rewrite_field_load_at must run first"
@@ -514,12 +515,12 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
 
 fn emit_const(out: &mut String, v: &ConstValue) {
     match v {
-        // non-finite consts spell the IEEE bit pattern via device intrinsics; the
-        // <math.h> macros (INFINITY) / functions (nan) are unavailable, since nvcc includes
-        // math.h implicitly but NVRTC does NOT, so `INFINITY` is undefined under runtime
-        // compilation. __longlong_as_double / __int_as_float are
-        // CUDA+HIP device builtins needing no header, and reinterpret the exact bits
-        // — bit-identical to the macros, no numerical change.
+        // non-finite consts spell the IEEE bit pattern via device intrinsics. the
+        // <math.h> macros (INFINITY) and functions (nan) reach nvcc through its implicit
+        // math.h include; NVRTC leaves that include out, so `INFINITY` is undefined under
+        // runtime compilation. __longlong_as_double / __int_as_float are header-free
+        // CUDA+HIP device builtins that reinterpret the exact bits, so the emitted value
+        // is bit-identical to the macro form.
         ConstValue::F64(x) => {
             if x.is_nan() {
                 out.push_str("__longlong_as_double(0x7ff8000000000000LL)");
@@ -578,8 +579,8 @@ fn cuda_binop(kind: BinaryKind) -> &'static str {
 /// equivalent function name.
 // extract a compile-time integer exponent from a powi argument. accepts the
 // integer const forms and an exactly-integral f64 (the carrier lowers small
-// int exponents through f64 in places). returns None for any non-constant or
-// non-integral value so the caller can fail loudly.
+// int exponents through f64 in places). returns Some only for a constant,
+// exactly-integral value; everything else yields None so the caller fails loudly.
 fn const_i32(e: &ScalarExpr) -> Option<i32> {
     match e {
         ScalarExpr::Const(ConstValue::I32(n)) => Some(*n),
@@ -591,7 +592,7 @@ fn const_i32(e: &ScalarExpr) -> Option<i32> {
 }
 
 // build the cuda source for `receiver^n` as an unrolled multiply chain using
-// exponentiation by squaring. mirrors gv.rs::powi EXACTLY so the float grouping
+// exponentiation by squaring. mirrors gv.rs::powi exactly so the float grouping
 // (and therefore the rounding) is bit-identical to f64::powi on host and Gv.
 fn powi_product(receiver: &ScalarExpr, n: i32) -> String {
     if n == 0 {
@@ -619,16 +620,13 @@ fn powi_product(receiver: &ScalarExpr, n: i32) -> String {
 
 fn cuda_method_to_fn(method: &str) -> &str {
     match method {
-        // float-only math functions take the `f` suffix? precision is not
-        // tracked here per-call; emit the double-prec name. nvcc selects
-        // overloads based on argument type at compile time, so this works
-        // for both double and float inputs.
-        // NOTE: `abs`, `min`, `max` are handled inline (ternary form) in
-        // emit_expr's MethodCall arm — they intentionally do NOT use the libdevice
-        // `fabs`/`fmin`/`fmax`, whose IEEE NaN / signed-zero semantics diverge
-        // from the plain ternary. these fallthrough entries are kept
-        // only for a hypothetical caller that bypasses the special-case path; they
-        // are not reached during normal emission.
+        // per-call precision is untracked here; emit the double-prec name. nvcc
+        // selects overloads by argument type at compile time, so both double and
+        // float inputs work.
+        // `abs`, `min`, `max` render inline as ternaries in emit_expr's MethodCall
+        // arm, whose semantics the libdevice `fabs`/`fmin`/`fmax` diverge from at
+        // NaN and signed zero. these fallthrough entries cover a caller that bypasses
+        // the special-case path; normal emission takes the ternary.
         "abs" => "fabs",
         "sqrt" => "sqrt",
         "floor" => "floor",
@@ -677,7 +675,7 @@ mod tests {
         let src = emit_cuda(&f);
         assert!(src.contains("__device__ inline double ident(double x)"));
         assert!(src.contains("return x;"));
-        // no struct decl for rank-0
+        // rank-0 returns the scalar type directly
         assert!(!src.contains("_out"), "{}", src);
     }
 
@@ -744,7 +742,7 @@ mod tests {
 
     #[test]
     fn floor_div_emits_floor_division_correction() {
-        // FloorDiv must render rust div_euclid semantics in C: truncating `/`
+        // FloorDiv renders rust div_euclid semantics in C: truncating `/`
         // corrected by one when the remainder is nonzero and signs differ.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::I32);
@@ -846,10 +844,10 @@ mod tests {
 
     #[test]
     fn powi_emits_unrolled_product_not_libdevice() {
-        // a `powi` MethodCall must NOT hit the `other => other`
-        // fallthrough (which emits a bare `powi(...)` that NVRTC cannot compile).
-        // it lowers to the exponentiation-by-squaring multiply chain, grouped
-        // bit-identically to f64::powi / gv.rs::powi.
+        // a `powi` MethodCall lowers to the exponentiation-by-squaring multiply
+        // chain, grouped bit-identically to f64::powi / gv.rs::powi. the
+        // `other => other` fallthrough would emit a bare `powi(...)`, a name NVRTC
+        // leaves undefined.
         let x = ScalarExpr::Var("x".to_string());
         let pow3 = ScalarExpr::MethodCall {
             receiver: Box::new(x.clone()),
@@ -991,7 +989,7 @@ mod tests {
     #[test]
     fn source_kernel_multi_component_isolates_temp_scopes() {
         // two outputs -> two `out_<k>` ptrs + two brace scopes. each scope is
-        // independent so per-component temps cannot collide.
+        // independent, so per-component temps stay local to their component.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);
         let two = g.add_const(ConstValue::F64(2.0), None);
@@ -1013,9 +1011,9 @@ mod tests {
 
     // ----- ScalarStmt::Scope CUDA tests -----
 
-    /// CUDA has no block-expression syntax, so a `Scope` lowers to:
+    /// a CUDA block is a statement, so a `Scope` lowers to:
     ///   `<ty> <name>; { <body>; <name> = <result>; }`
-    /// the inner braces kill body-local lets; nvcc gets explicit liveness.
+    /// the inner braces end each body-local let's lifetime; nvcc gets explicit liveness.
     #[test]
     fn scope_emits_cuda_decl_then_braced_assign() {
         use crate::passes::scalarize::{

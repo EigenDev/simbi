@@ -11,15 +11,15 @@
 // selected at RUNTIME by `map_kind_0` (0 = uniform, 1 = log). a kernel that instead read the
 // affine `x_lo + i dx` would be reading an INDEX coordinate on a log grid: at the parameters
 // below that expression reaches 0.5 only at i = 10 while the true radius reaches it at i = 4, so a
-// wrong reading excises six extra shells of live gas. the uniform case cannot see that error at
-// all — the two formulas agree there — which is why both are run against the same kernel.
+// wrong reading excises six extra shells of live gas. the uniform case leaves that error
+// undetected — the two formulas agree there — which is why both are run against the same kernel.
 //
-// the second law is the SAMPLING POINT. the excised state is stored densitized, so its cell
+// the second law is the sampling point. the excised state is stored densitized, so its cell
 // average is over the plain coordinate volume and its second-order sampling point is the per-axis
-// MIDPOINT, not the chart's volume-weighted centroid (they differ by dr^2/(6r) on a radial axis).
+// midpoint, not the chart's volume-weighted centroid (they differ by dr^2/(6r) on a radial axis).
 // the recovery inverts at the midpoint, so the reference below rebuilds there too: a rebuild
-// sampled anywhere else leaves an excised cell whose recovered primitives are not the floor it was
-// frozen at, and the bitwise comparison catches it.
+// sampled anywhere else leaves an excised cell whose recovered primitives diverge from the floor
+// it was frozen at, and the bitwise comparison catches it.
 // =============================================================================
 
 use symbi_algebra::Tensor;
@@ -40,7 +40,7 @@ const R_EXC: f64 = 1.4;
 
 // the cold c2p-safe vacuum an excised cell is frozen at. handed to the kernel as scalars so the
 // substrate can scale the floor to the problem's units; the law under test is that the compiled
-// and f64 paths agree bitwise on a GIVEN floor, not what the floor's value is.
+// and f64 paths agree bitwise on a given floor, not what the floor's value is.
 const RHO_VAC: f64 = 1e-10;
 const PRE_VAC: f64 = 1e-12;
 
@@ -301,10 +301,10 @@ fn spherical_excise_chain_matches_the_f64_chain_bitwise_on_a_log_axis() {
 #[test]
 fn the_log_axis_would_expose_an_index_coordinate_read_as_a_radius() {
     // the log gate above is only meaningful if the two readings of "r" actually disagree on this
-    // grid. pin that: the affine expression x_lo + i dx is not a radius on a log axis, and at
-    // these parameters the two cross the excision surface many shells apart. without this the log
-    // test could pass while the kernel read the wrong quantity, simply because the parameters
-    // happened to make them agree.
+    // grid. pin that: the affine expression x_lo + i dx tracks an index coordinate, not a radius,
+    // on a log axis, and at these parameters the two cross the excision surface many shells
+    // apart. without this the log test could pass while the kernel read the wrong quantity,
+    // simply because the parameters happened to make them agree.
     let axis = Axis::Log;
     let (x_lo, dx) = axis.params();
     let affine_cut = (0..N)

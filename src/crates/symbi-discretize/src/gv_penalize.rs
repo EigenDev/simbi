@@ -3,17 +3,17 @@
 //
 // the traced immersed-boundary penalization kernel:
 // per cell, the sphere SDF's signed distance -> the mollified chi -> the
-// property stack's Relax accumulation -> the SAME carrier-generic
+// property stack's Relax accumulation -> the same carrier-generic
 // `penalize_cell` that runs at f64, evaluated at Gv. the [Drain] stack is
 // the p = 1 anchor: chi/tau on the rho channel only, every other channel's
 // correction an exact arithmetic zero, so the kernel reduces bit-for-bit to
 // `drain_cell`'s uniform scaling.
 //
-// buffers: cons (den, mom_0.., nrg) IN PLACE, plus per-body delta scratch
+// buffers: cons (den, mom_0.., nrg) in place, plus per-body delta scratch
 // (pen_0_mass, pen_0_force_{ax}, pen_0_energy) for the feedback reduction.
 // scalars: dt, gamma, the grid (x_lo/dx/map_kind per axis), body_0_pos_*,
 // body_0_racc (the mask radius), and the open spec knob `c_drain`
-// (tau = c_drain dx / c_s, the convergence dial — never tuned to a rate).
+// (tau = c_drain dx / c_s, the convergence dial — pushed until the answer stops moving).
 // the mask width is one minimum cell. outputs declare the support ball
 // body_0_pos +- (body_0_racc + DRAIN_SUPPORT_WIDTHS min dx): beyond it tanh
 // saturation makes chi exactly zero and the update an exact no-op.
@@ -34,7 +34,7 @@ use symbi_ir::algebra::Scalar;
 use symbi_ir::gv::Writes;
 use symbi_ir::{Gv, GvKernel, ParamExpr};
 
-/// the wall/drain relaxation signal speed: the FAST MAGNETOSONIC speed `sqrt(c_s^2 + c_a^2)`,
+/// the wall/drain relaxation signal speed: the fast magnetosonic speed `sqrt(c_s^2 + c_a^2)`,
 /// with `c_a^2 = |B|^2 / rho` bound as the runtime `c_a2` scalar (the max over the interior, so the
 /// wall stays a signal-crossing stiff in the low-beta regions a magnetized sink accumulates).
 /// `c_a2 = 0` off MHD reduces it to the sound speed exactly, so a hydro run is unchanged.
@@ -48,7 +48,7 @@ use crate::gv::{cell_geometry_gv, gv_axis_width};
 use symbi_ir::{begin_trace, end_trace};
 
 /// the 3-space axes whose torque component can be nonzero at dimension
-/// `ndim`: rotation needs a plane, so 1d has none, 2d only the z moment,
+/// `ndim`: rotation needs a plane, so 1d carries zero, 2d the z moment alone,
 /// 3d all three.
 pub fn torque_axes(ndim: usize) -> std::ops::Range<usize> {
     match ndim {
@@ -59,13 +59,13 @@ pub fn torque_axes(ndim: usize) -> std::ops::Range<usize> {
 }
 
 /// map the coordinate cell centroid `(r, theta, phi)` / `(R, phi, z)` to cartesian
-/// so the sphere SDF measures the PHYSICAL distance to the body. a coordinate-space
-/// subtraction is meaningless on a curved grid (`sqrt((r - r_b)^2 + (theta -
-/// theta_b)^2)` is not a distance); on a Cartesian grid this is the identity. the
+/// so the sphere SDF measures the physical distance to the body. on a curved grid the
+/// cartesian difference is the one that carries a length — `sqrt((r - r_b)^2 + (theta -
+/// theta_b)^2)` mixes a radius with an angle; on a cartesian grid the map is the identity. the
 /// 2D cylindrical chart is the `(R, phi)` disk plane (`CylindricalRPhi`), matching
 /// the geometric-source dispatch — one metric for the whole codebase.
 /// the 2d cylindrical (r, z) axisymmetric section: the phi = 0 half-plane is
-/// isometric to a 2d cartesian half-plane (h_r = h_z = 1), so an ON-AXIS body's
+/// isometric to a 2d cartesian half-plane (h_r = h_z = 1), so an on-axis body's
 /// mask distance is the plain euclidean |(r, z - z0)|, the section frame
 /// rotations are identities, and the mask region is a genuine coordinate-space
 /// ball. the (r, phi) disk (axes [0, 1]) keeps the curved-chart machinery.
@@ -96,10 +96,10 @@ fn centroid_to_cartesian(coords: Coords, ndim: usize, axes: &[usize], centroid: 
     }
 }
 
-/// rotate a CARTESIAN vector into the cell's PHYSICAL (orthonormal) frame — the
+/// rotate a cartesian vector into the cell's physical (orthonormal) frame — the
 /// frame the substrate stores momentum in. the surface normal is a geometric
 /// cartesian direction; the wall / torque-free split projects the physical
-/// momentum onto it, so it must be rotated here. `x` is the COORDINATE centroid
+/// momentum onto it, so it must be rotated here. `x` is the coordinate centroid
 /// (the rotation depends on the local basis). identity on a cartesian grid.
 fn vector_from_cartesian(
     coords: Coords,
@@ -133,7 +133,7 @@ fn vector_from_cartesian(
     }
 }
 
-/// rotate a PHYSICAL-frame vector into the global cartesian frame — used to book
+/// rotate a physical-frame vector into the global cartesian frame — used to book
 /// the lab-frame torque `r_cart x F_cart` (the accreted force receipt is in the
 /// physical frame; the cross product needs both vectors in one frame). identity
 /// on a cartesian grid, so the cartesian torque is bit-unchanged.
@@ -169,11 +169,12 @@ fn vector_to_cartesian(
     }
 }
 
-/// append the FORM-DRAG receipt: the surface force projected onto the outward SDF normal,
+/// append the form-drag receipt: the surface force projected onto the outward SDF normal,
 /// `force_normal = (F.n_hat) n_hat`, in the cartesian frame the reduction sums (both `f_cart` and
 /// `n_cart` are already cartesian). the tangential (skin-friction) part is recovered downstream as
 /// `force - force_normal`. a bare drain passes `n_cart = 0`, so its form drag is exactly zero. this
-/// is the LAST receipt block, appended after mass/force/energy/torque so no existing slot shifts.
+/// is the last receipt block, appended after mass/force/energy/torque so every existing slot
+/// keeps its index.
 fn push_force_normal(writes: &mut Writes, ndim: usize, f_cart: &Tensor<Gv, 3>, n_cart: &[Gv]) {
     let mut f_dot_n = Gv::ZERO;
     for a in 0..ndim {
@@ -188,7 +189,7 @@ fn push_force_normal(writes: &mut Writes, ndim: usize, f_cart: &Tensor<Gv, 3>, n
     }
 }
 
-/// the cell's force receipt in the CARTESIAN world frame plus its lab-frame
+/// the cell's force receipt in the cartesian world frame plus its lab-frame
 /// moment `r_cart x F_cart` about the body center. penalization acts in the
 /// cell's physical orthonormal basis, which rotates from cell to cell on a
 /// curvilinear chart — only cartesian components sum across cells to a
@@ -253,43 +254,42 @@ fn solid_velocity_phys(
 
 /// the immersed body's mask geometry as a traced SDF, centered at `center` (the body
 /// position `body_0_pos_*` in cartesian): a sphere of radius `body_0_racc`. this is the
-/// ONE seam every penalization kernel (drain / porous-wall / torque-free, adiabatic and
-/// iso) shares — the mask cannot drift between kernels.
+/// single seam every penalization kernel (drain / porous-wall / torque-free, adiabatic and
+/// iso) shares, so one mask definition serves them all.
 fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
     body_mask_sdf_shaped(center, None)
 }
 
 /// the mask geometry with an optional config CSG. `None`: a sphere of runtime radius
-/// `body_0_racc` (the AOT kernel). `Some(shape)`: the shape — authored in the body-LOCAL
-/// frame as f64 constants — lifted to Gv constants and TRANSLATED to the runtime center. so a
-/// MOVING body rides the same kernel: only `body_0_pos_*` changes per step; the shape geometry
-/// is baked, never a runtime knob. (rotation would compose a runtime orientation transform on
+/// `body_0_racc` (the AOT kernel). `Some(shape)`: the shape — authored in the body-local
+/// frame as f64 constants — lifted to Gv constants and translated to the runtime center. so a
+/// moving body rides the same kernel: only `body_0_pos_*` changes per step; the shape geometry
+/// is baked in as constants. (rotation would compose a runtime orientation transform on
 /// `x` before the shape; translation alone is the moving-body core.)
 ///
-/// `center` is the body's CENTER OF MASS AND its mask/geometric center at once — they coincide for
+/// `center` is the body's center of mass and its mask/geometric center at once — they coincide for
 /// a symmetric body (sphere, symmetric CSG). everything dynamical (translation, gravity, the
 /// omega x r wall velocity, the torque moment arm `x - center`) is referenced to the COM, so an
-/// asymmetric mass distribution would offset the MASK PLACEMENT alone.
-/// the drain rate for a SPHERICAL accretor: the faster of the sound-crossing timescale and the
-/// FREE-FALL rate at the mask radius, `sqrt(GM / r_acc^3)`.
+/// asymmetric mass distribution would offset the mask placement alone.
+/// the drain rate for a spherical accretor: the faster of the sound-crossing timescale and the
+/// free-fall rate at the mask radius, `sqrt(GM / r_acc^3)`.
 ///
 /// the sound-crossing form `c_s / (c_drain dx)` is a convergence dial on the premise that the
-/// SONIC SURFACE sets the emergent rate, so any sufficiently fast drain gives the same answer.
+/// sonic surface sets the emergent rate, so any sufficiently fast drain gives the same answer.
 /// that premise has a precondition — the mask must sit inside the sonic surface — and the Bondi
-/// sonic radius is `(5 - 3 gamma)/4 R_B`, which is IDENTICALLY ZERO at `gamma = 5/3`. there is no
-/// sonic surface to set the rate, so the dial stops being a dial and starts being the boundary
-/// condition.
+/// sonic radius is `(5 - 3 gamma)/4 R_B`, which is identically zero at `gamma = 5/3`. with the
+/// sonic surface collapsed to a point, the dial becomes the boundary condition itself.
 ///
-/// the free-fall floor restores the intent. gas cannot cross the mask faster than free fall, so a
-/// rate at or above `sqrt(GM/r_acc^3)` removes it within one crossing at ANY refinement depth,
+/// the free-fall floor restores the intent. free fall bounds how fast gas crosses the mask, so a
+/// rate at or above `sqrt(GM/r_acc^3)` removes it within one crossing at any refinement depth,
 /// where the sound-crossing form drifts: `(c_s/dx) / Omega_ff ~ sqrt(r_acc)`, falling from 1.56 at
 /// six levels to 0.75 at fourteen — the accretor becomes measurably less absorbing the more it is
 /// resolved.
 ///
-/// taking the MAXIMUM is safe by the original premise: where the sonic surface does set the rate,
-/// draining faster is a no-op, and where it does not, this is the rate that means "perfect
-/// absorber". the drain is an exact exponential, non-expansive with no CFL condition, so there is
-/// no stability ceiling to respect.
+/// taking the maximum is safe by the original premise: where the sonic surface does set the rate,
+/// draining faster is a no-op, and where it has collapsed, this is the rate that means "perfect
+/// absorber". the drain is an exact exponential, non-expansive and free of any CFL condition, so
+/// it stays stable at every rate.
 fn spherical_drain_rate(sound_rate: Gv) -> Gv {
     let mass = Gv::scalar("body_0_mass");
     let racc = Gv::scalar("body_0_racc");
@@ -307,10 +307,10 @@ fn body_mask_sdf_shaped(center: [Gv; 3], shape: Option<&SdfExpr<f64, 3>>) -> Sdf
     }
 }
 
-/// the SPINNING body's mask: the shape lifted to Gv constants, rotated by the RUNTIME orientation
+/// the spinning body's mask: the shape lifted to Gv constants, rotated by the runtime orientation
 /// matrix `R` (the body's full 3D orientation, integrated on the CPU from its angular velocity and
 /// read here as the 9 row-major scalars `body_0_rot_0..8`), then translated to the runtime body
-/// position. one kernel handles ANY orientation, so a freely-tumbling body reuses it; the mask + its
+/// position. one kernel handles any orientation, so a freely-tumbling body reuses it; the mask + its
 /// Dual-autodiff normal track `R` as it evolves.
 fn body_mask_sdf_spinning(center: [Gv; 3], shape: &SdfExpr<f64, 3>) -> SdfExpr<Gv, 3> {
     let rot: [[Gv; 3]; 3] = std::array::from_fn(|i| {
@@ -325,12 +325,12 @@ fn body_mask_sdf_spinning(center: [Gv; 3], shape: &SdfExpr<f64, 3>) -> SdfExpr<G
 /// the saturation lemma at the mask seam: `chi = 0.5(1 - tanh(phi/w))` is
 /// exactly zero in f64 once `phi > DRAIN_SUPPORT_WIDTHS * w`, so the mask is
 /// supported by its geometry's bounding ball padded by that many cell widths.
-/// tagging chi HERE (where the mask is built) lets `with_derived_support`
-/// propagate the ball to every write — support and mask cannot drift apart.
-/// the ball is a COORDINATE-space region: only the identity chart can spell
+/// tagging chi where the mask is built lets `with_derived_support`
+/// propagate the ball to every write, keeping support and mask in step.
+/// the ball is a coordinate-space region: the identity chart alone can spell
 /// the cartesian mask ball in grid coordinates, so curvilinear kernels stay
 /// untagged and derive Everywhere (dispatch already falls back to the whole
-/// interior off-cartesian). a SPINNING shape sweeps every orientation about
+/// interior off-cartesian). a spinning shape sweeps every orientation about
 /// the body position, so its ball is position-centered with the body-local
 /// offset folded into the radius.
 fn tag_body_mask(
@@ -383,15 +383,15 @@ fn tag_body_mask(
     symbi_ir::tag_support_ball(chi, center, radius);
 }
 
-/// the 2.5D immersed-body OHMIC RESISTIVE edge EMF: adds a body-LOCALIZED resistive current
-/// `eta * chi(x) * J_z` to the out-of-plane edge EMF `ez` (efield[0]) IN PLACE, where `J_z =
-/// dB_y/dx - dB_x/dy` is the SAME adjoint current as the generic resistive kernel and `chi` is the
+/// the 2.5D immersed-body ohmic resistive edge EMF: adds a body-localized resistive current
+/// `eta * chi(x) * J_z` to the out-of-plane edge EMF `ez` (efield[0]) in place, where `J_z =
+/// dB_y/dx - dB_x/dy` is the same adjoint current as the generic resistive kernel and `chi` is the
 /// body mask (`0.5(1 - tanh(phi/w))`, 1 inside the body, 0 outside, mollified over one cell). the
-/// localized resistivity dissipates the magnetic field THREADING the body while leaving the exterior
-/// flux untouched. div-B-clean: the same curl consumes the augmented EMF (`div(curl) = 0`). STABILITY:
-/// the composed operator `-curl(eta chi J)` is `-C diag(eta chi) C^T`, negative-definite for ANY
-/// `eta chi >= 0` — the mask only reweights the edges of the already-adjoint current, so the body can
-/// only DISSIPATE, never amplify. `chi` is sampled at the E_z CORNER (the edge location), half a cell
+/// localized resistivity dissipates the magnetic field threading the body while leaving the exterior
+/// flux untouched. div-B-clean: the same curl consumes the augmented EMF (`div(curl) = 0`). stability:
+/// the composed operator `-curl(eta chi J)` is `-C diag(eta chi) C^T`, negative-definite for any
+/// `eta chi >= 0` — the mask reweights the edges of the already-adjoint current, so the body's
+/// action is purely dissipative. `chi` is sampled at the E_z corner (the edge location), half a cell
 /// below the traced cell centroid on each in-plane axis.
 pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, Writes) {
     let ndim = 2usize;
@@ -459,7 +459,7 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Wr
     let dxp2 = Gv::scalar(&format!("dx_{p2}"));
     let j = (Gv::ONE / dxp1) * (b_p2 - b_p2_m) - (Gv::ONE / dxp2) * (b_p1 - b_p1_m);
 
-    // the dir-edge sits at the cell centroid shifted half a cell back on the two TRANSVERSE axes
+    // the dir-edge sits at the cell centroid shifted half a cell back on the two transverse axes
     // (p1, p2) and centered along dir. sample the body mask at that edge so the dissipation registers
     // with the edge EMF.
     let dx: Vec<Gv> = (0..ndim).map(|a| Gv::scalar(&format!("dx_{a}"))).collect();
@@ -494,8 +494,8 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Wr
     (kernel, writes)
 }
 
-/// trace the [Drain]-stack penalization for the adiabatic regime, cartesian. `ndim` is the SPATIAL
-/// grid dimension (geometry, mask, force receipt); `dof` is the MOMENTUM count (the conserved
+/// trace the [Drain]-stack penalization for the adiabatic regime, cartesian. `ndim` is the spatial
+/// grid dimension (geometry, mask, force receipt); `dof` is the momentum count (the conserved
 /// 3-vector's active components). `dof == ndim` for hydro and full 3D MHD; `dof = 3, ndim = 2` for
 /// 2.5D MHD, where the out-of-plane momentum must be drained too (else its velocity blows up as the
 /// density is evacuated). dimension-generic over 1..=3.
@@ -509,10 +509,10 @@ pub fn penalize_drain_gv(
     penalize_drain_impl::<Adiabatic>(coords, ndim, dof, axes, has_dye)
 }
 
-/// the ISOTHERMAL twin: no energy channel (the drain scales den + mom; the
-/// sound speed is the constant `cs` param), delta
-/// outputs mass + force only. same [Drain] stack, same integrator — the iso
-/// energy slot discards the e-channel by construction.
+/// the isothermal twin: the drain scales den + mom and the sound speed is the
+/// constant `cs` param, so the delta outputs are mass + force. same [Drain]
+/// stack, same integrator — the iso energy slot is zero-sized, so the e-channel
+/// drops out by construction.
 pub fn penalize_drain_iso_gv(
     coords: Coords,
     ndim: usize,
@@ -524,10 +524,10 @@ pub fn penalize_drain_iso_gv(
 }
 
 /// the [Drain] stack traced once, generic over the energy model: the adiabatic and
-/// isothermal kernels are the SAME graph up to the energy channel, so one builder
+/// isothermal kernels are the same graph up to the energy channel, so one builder
 /// carries both. `E::HAS_ENERGY` gates the `nrg` field read/write, the sound-speed
 /// recovery, and the `pen_0_energy` receipt; the iso energy slot is zero-sized, so
-/// nothing energy-shaped enters the iso trace.
+/// the iso trace carries den + mom alone.
 fn penalize_drain_impl<E: EnergyModel>(
     coords: Coords,
     ndim: usize,
@@ -572,7 +572,7 @@ fn penalize_drain_impl<E: EnergyModel>(
     }
 
     // the mask geometry as a traced SDF: phi = |x - body_pos| - r_mask, and
-    // chi = 0.5 (1 - tanh(phi / w)). the distance is PHYSICAL, so the coordinate
+    // chi = 0.5 (1 - tanh(phi / w)). the distance is physical, so the coordinate
     // centroid is mapped to cartesian first (identity on a cartesian grid).
     let center: [Gv; 3] = std::array::from_fn(|a| {
         if a < ndim {
@@ -601,14 +601,14 @@ fn penalize_drain_impl<E: EnergyModel>(
         eos
     };
     let sound_rate = signal_speed(cs) / (c_drain * min_w);
-    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
-    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
-    // this kernel is the sphere path by construction (no shape parameter), so the floor
-    // always applies.
+    // the free-fall floor belongs to the sphere path, whose `r_acc` scalar supplies the radius
+    // in `sqrt(GM/r_acc^3)`; a shaped wall spans a range of radii, so it keeps the sound-crossing
+    // rate. this kernel is the sphere path by construction (it takes no shape parameter), so the
+    // floor always applies.
     let inv_tau = spherical_drain_rate(sound_rate);
 
     // the property stack: [Drain]. contribute at Gv, then
-    // the SAME integrator that runs at f64.
+    // the same integrator that runs at f64.
     let kin = BodyKin::<Gv, 3> {
         u_solid: Tensor::zeros(),
         omega: Tensor::zeros(),
@@ -735,7 +735,7 @@ fn penalize_writes<E: EnergyModel>(
 /// trace the [PorousAccretor]-stack penalization for the adiabatic regime,
 /// cartesian, DOF = ndim. the porosity dial `p` scales the drain channel and
 /// `(1 - p)` the wall channels; the wall rates are `k_eta_n/t * c_s / dx`
-/// (sound-crossings per cell width — MULTIPLICATIVE dials so zero is an EXACT
+/// (sound-crossings per cell width — multiplicative dials so zero is an exact
 /// off switch: `k_eta_t = 0` is free-slip with the tangential velocity
 /// bit-untouched). the velocity target is the body's translational velocity
 /// (`body_0_vel_*`); the surface normal is the sphere's, `x_rel / |x_rel|`,
@@ -754,9 +754,9 @@ pub fn penalize_porous_gv(
 }
 
 /// the arbitrary-shape porous wall: the same relaxation stack as `penalize_porous_gv`, but the
-/// mask AND the surface normal come from the config CSG `shape` (body-local, translated to the
-/// runtime body position). built at sim SETUP, once the body's shape is
-/// known — the AOT bake cannot know a per-body CSG.
+/// mask and the surface normal come from the config CSG `shape` (body-local, translated to the
+/// runtime body position). built at sim setup, once the body's shape is
+/// known — a per-body CSG is a runtime fact, so it reaches the kernel after the AOT bake.
 pub fn penalize_porous_gv_shaped(
     coords: Coords,
     ndim: usize,
@@ -775,7 +775,7 @@ pub fn penalize_porous_gv_shaped(
     )
 }
 
-/// the SPINNING arbitrary-shape porous wall: like `penalize_porous_gv_shaped`, but the mask is
+/// the spinning arbitrary-shape porous wall: like `penalize_porous_gv_shaped`, but the mask is
 /// rotated by the runtime orientation matrix (the 9 scalars `body_0_rot_0..8`) and the surface
 /// velocity carries the spin `omega x r` (the vector `body_0_omega_0..2`), so the wall drags the
 /// gas around as it turns — an arbitrary spin axis.
@@ -797,9 +797,9 @@ pub fn penalize_porous_gv_spinning(
     )
 }
 
-/// the ISOTHERMAL [PorousAccretor] twin: the same porous surface as
-/// `penalize_porous_gv` but for the isothermal regime — the sound speed is the
-/// constant `cs` param (no energy channel), delta outputs mass + force only.
+/// the isothermal [PorousAccretor] twin: the same porous surface as
+/// `penalize_porous_gv` for the isothermal regime — the sound speed is the
+/// constant `cs` param and the delta outputs are mass + force.
 /// `p = 1` reduces bit-for-bit to `penalize_drain_iso`.
 pub fn penalize_porous_iso_gv(
     coords: Coords,
@@ -811,8 +811,8 @@ pub fn penalize_porous_iso_gv(
     penalize_porous_impl::<IsoModel>(coords, ndim, dof, None, false, axes, has_dye)
 }
 
-/// the arbitrary-shape ISO porous wall: the energy-free counterpart of
-/// `penalize_porous_gv_shaped` — mask + normal from the config CSG, no energy channel.
+/// the arbitrary-shape iso porous wall: the energy-free counterpart of
+/// `penalize_porous_gv_shaped` — mask + normal from the config CSG, den + mom channels.
 pub fn penalize_porous_iso_gv_shaped(
     coords: Coords,
     ndim: usize,
@@ -831,7 +831,7 @@ pub fn penalize_porous_iso_gv_shaped(
     )
 }
 
-/// the SPINNING ISO porous wall: the energy-free counterpart of `penalize_porous_gv_spinning`.
+/// the spinning iso porous wall: the energy-free counterpart of `penalize_porous_gv_spinning`.
 pub fn penalize_porous_iso_gv_spinning(
     coords: Coords,
     ndim: usize,
@@ -876,8 +876,9 @@ fn penalize_porous_impl<E: EnergyModel>(
     let k_eta_t = Gv::scalar("k_eta_t");
 
     // the wall normal + velocity target are ndim (in-plane); the momentum runs over dof so the
-    // out-of-plane component is carried as a purely TANGENTIAL velocity (relaxed by k_eta_t) and its
-    // kinetic energy enters c_s. drained/walled in 2.5D MHD, absent for hydro (dof == ndim).
+    // out-of-plane component is carried as a purely tangential velocity (relaxed by k_eta_t) and its
+    // kinetic energy enters c_s. it exists in 2.5D MHD, where the drain and the wall both act on
+    // it; hydro runs at dof == ndim.
     let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
     let mom: Vec<Gv> = (0..dof)
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
@@ -905,7 +906,7 @@ fn penalize_porous_impl<E: EnergyModel>(
             Gv::ZERO
         }
     });
-    // the mask distance is PHYSICAL: map the coordinate centroid to cartesian.
+    // the mask distance is physical: map the coordinate centroid to cartesian.
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
     let sdf = if spin {
@@ -929,8 +930,9 @@ fn penalize_porous_impl<E: EnergyModel>(
         eos
     };
     let sound_rate = signal_speed(cs) / (c_drain * min_w);
-    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
-    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
+    // the free-fall floor belongs to the sphere path, whose `r_acc` scalar supplies the radius
+    // in `sqrt(GM/r_acc^3)`; a shaped wall spans a range of radii, so it keeps the sound-crossing
+    // rate.
     let inv_tau = if shape.is_none() {
         spherical_drain_rate(sound_rate)
     } else {
@@ -938,7 +940,7 @@ fn penalize_porous_impl<E: EnergyModel>(
     };
     let rate_scale = signal_speed(cs) / min_w;
 
-    // the outward surface normal in the cell's PHYSICAL frame (the cartesian normal rotated into
+    // the outward surface normal in the cell's physical frame (the cartesian normal rotated into
     // the orthonormal basis; identity on a cartesian grid). the sphere path is r_hat =
     // x_rel/|x_rel|, with |x_rel| = 0 guarded to a zero normal (its whole du is tangential,
     // finite). the shaped path is the exact CSG gradient — the SDF outward unit normal via Dual
@@ -969,7 +971,7 @@ fn penalize_porous_impl<E: EnergyModel>(
             Gv::ZERO
         }
     }));
-    // a spinning wall's surface moves at u_solid + omega x r with the FULL world-frame
+    // a spinning wall's surface moves at u_solid + omega x r with the full world-frame
     // angular-velocity vector (an arbitrary rotation axis; z-spin is the [0, 0, w] case).
     let omega = if spin {
         // the full angular-velocity vector (world frame): the surface drags the gas at omega x r
@@ -987,7 +989,7 @@ fn penalize_porous_impl<E: EnergyModel>(
         omega,
         e_wall: Gv::ZERO,
     };
-    // a spinning wall's velocity target is the LOCAL rigid-motion velocity u_solid + omega x r_cell;
+    // a spinning wall's velocity target is the local rigid-motion velocity u_solid + omega x r_cell;
     // `at` bakes omega x r into u_solid per cell (the contribute path reads u_solid directly). the
     // static path keeps the bare translational u_solid, bit-identical to before.
     let kin_cart = if spin {
@@ -1042,9 +1044,9 @@ fn penalize_porous_impl<E: EnergyModel>(
     (kernel, writes)
 }
 
-/// the ADIABATIC torque-free accretor: the drain plus a tangential
-/// ANTI-relaxation `lambda_t = -xi lambda_rho` about the sphere normal, so the
-/// accreted mass carries no net angular momentum to the body (the dittmann &
+/// the adiabatic torque-free accretor: the drain plus a tangential
+/// anti-relaxation `lambda_t = -xi lambda_rho` about the sphere normal, so the
+/// accreted mass delivers zero net angular momentum to the body (the dittmann &
 /// ryan 2021 torque-free sink, coordinate-free via the SDF normal). the
 /// retention floor (`Relax.ut_growth_cap`, set by the property) bounds the
 /// growing tangential factor at the evacuation limit. the sound speed is
@@ -1052,7 +1054,7 @@ fn penalize_porous_impl<E: EnergyModel>(
 /// outputs mass + force + energy + torque). `xi = 0` reduces to
 /// `penalize_drain`; `xi = 1` is torque-free. the velocity target is the
 /// body's translational velocity `body_0_vel_*` (the accretion is torque-free
-/// RELATIVE to the moving sink).
+/// relative to the moving sink).
 pub fn penalize_torque_free_gv(
     coords: Coords,
     ndim: usize,
@@ -1063,8 +1065,8 @@ pub fn penalize_torque_free_gv(
     penalize_torque_free_impl::<Adiabatic>(coords, ndim, dof, axes, has_dye)
 }
 
-/// the ISOTHERMAL torque-free twin: the same torque-free surface as
-/// `penalize_torque_free_gv` but with no energy channel (iso, the thin-disk
+/// the isothermal torque-free twin: the same torque-free surface as
+/// `penalize_torque_free_gv` on the den + mom channels (iso, the thin-disk
 /// regime) — the sound speed is the constant `cs` param, delta outputs
 /// mass + force + torque. `xi = 0` reduces bit-for-bit to `penalize_drain_iso`.
 pub fn penalize_torque_free_iso_gv(
@@ -1125,7 +1127,7 @@ fn penalize_torque_free_impl<E: EnergyModel>(
             Gv::ZERO
         }
     });
-    // the mask distance is PHYSICAL: map the coordinate centroid to cartesian.
+    // the mask distance is physical: map the coordinate centroid to cartesian.
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
     let sphere = body_mask_sdf(center);
@@ -1144,13 +1146,13 @@ fn penalize_torque_free_impl<E: EnergyModel>(
         eos
     };
     let sound_rate = signal_speed(cs) / (c_drain * min_w);
-    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
-    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
-    // this kernel is the sphere path by construction (no shape parameter), so the floor
-    // always applies.
+    // the free-fall floor belongs to the sphere path, whose `r_acc` scalar supplies the radius
+    // in `sqrt(GM/r_acc^3)`; a shaped wall spans a range of radii, so it keeps the sound-crossing
+    // rate. this kernel is the sphere path by construction (it takes no shape parameter), so the
+    // floor always applies.
     let inv_tau = spherical_drain_rate(sound_rate);
 
-    // the outward surface normal in the cell's PHYSICAL frame: the cartesian
+    // the outward surface normal in the cell's physical frame: the cartesian
     // r_hat from the body center rotated into the orthonormal basis (identity on
     // a cartesian grid; e_r for a centered accretor). the torque-free channel's
     // radial/tangential split is about this normal, so it must match the frame
@@ -1218,8 +1220,8 @@ mod shaped_tests {
     use super::*;
     use symbi_ib::sdf::SdfExpr;
 
-    // a shaped porous kernel bakes the CSG geometry as CONSTANTS and keeps only the body
-    // POSITION as a runtime scalar — so a moving body rides the same kernel, updating just
+    // a shaped porous kernel bakes the CSG geometry as constants and keeps only the body
+    // position as a runtime scalar — so a moving body rides the same kernel, updating just
     // `body_0_pos_*` per step. the sphere kernel instead reads a runtime `body_0_racc`.
     #[test]
     fn shaped_porous_kernel_bakes_geometry_and_keeps_position_runtime() {
@@ -1248,7 +1250,7 @@ mod shaped_tests {
         assert!(!writes.is_empty(), "the shaped kernel emitted no writes");
     }
 
-    // the unshaped path is the sphere: `body_0_racc` IS a runtime scalar (the AOT kernel).
+    // the unshaped path is the sphere: `body_0_racc` is a runtime scalar (the AOT kernel).
     #[test]
     fn unshaped_porous_kernel_reads_the_runtime_radius() {
         let (kernel, _) = penalize_porous_gv(Coords::Cartesian, 3, 3, &[0, 1, 2], false);
@@ -1272,7 +1274,7 @@ mod twin_tests {
         ),
     ];
 
-    // each iso surface differs from its adiabatic twin ONLY by the energy channel:
+    // each iso surface differs from its adiabatic twin only by the energy channel:
     // the same write list minus `nrg_out` and `pen_energy`, and the `gamma` scalar
     // swapped for the constant sound speed `cs`.
     #[test]
@@ -1322,7 +1324,7 @@ mod twin_tests {
         }
     }
 
-    // the momentum count can never sit below the grid dimension: the cons momentum
+    // the momentum count sits at or above the grid dimension: the cons momentum
     // fill and the write loop both index 0..dof, so dof < ndim would silently zero
     // in-plane momentum.
     #[test]

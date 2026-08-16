@@ -2,7 +2,7 @@
 // cpu_kernel_bench.rs
 //
 // real wall-clock timing of the AOT-compiled rmhd cpu kernels (c2p + face flux)
-// over a grid. the ONLY valid perf metric available on this host (no cuda/ptxas)
+// over a grid. the only valid perf metric available on this host (no cuda/ptxas)
 // — actual compiled native code exercised end to end.
 //
 // usage: cargo run -p symbi-aot --release --example cpu_kernel_bench
@@ -17,7 +17,7 @@ use std::time::Instant;
 // the bench resolves the kernels at COMPILE time (the slice-form `pub fn k<S>`),
 // not the per-call name-keyed NamedKernel — its IR parse would dominate the hot
 // loop and poison the timing. the slice ABI is still drift-stable (the signature
-// never changes when a builder adds a field; the buffer slice just grows).
+// stays fixed as a builder adds a field; the buffer slice just grows).
 use symbi_aot::{
     CpuField, CpuFieldMut, rhd_c2p_1d, rhd_face_flux_1d_0, rmhd_c2p_1d, rmhd_face_flux_1d,
 };
@@ -215,7 +215,8 @@ fn main() {
         black_box(&fden);
     });
 
-    // ---- RHD comparison: same relativistic physics, NO magnetic field / quartic ----
+    // ---- RHD comparison: same relativistic physics, hydrodynamic sector only
+    // (magnetic field and quartic solve drop out) ----
     // rhd p2c (1-velocity): D = rho*W, S = rho*h*W^2*v, tau = rho*h*W^2 - p - D.
     let (mut sden, mut smom, mut snrg) = (vec![0.0; N], vec![0.0; N], vec![0.0; N]);
     for ii in 0..N {

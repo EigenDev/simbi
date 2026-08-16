@@ -5,7 +5,7 @@
 // curvilinear FUSED god+bcell kernel on device. 3D + curvilinear +
 // energy => fusable, so on GPU this sim runs the fused gas+bcell launch whose geo source
 // reads cell-B via the predictor's `bc_k` key (the codegen dedup that makes the fuse
-// alias-free). builds the SAME div-free B_r = B0/r^2 + pressure-bump shell on host and
+// alias-free). builds one div-free B_r = B0/r^2 + pressure-bump shell on host and
 // device, evolves a handful of RK2 steps, and asserts conserved state + cell B + the
 // staggered radial face B agree. (cartesian fused GPU parity lives in substrate_rmhd_gpu.)
 // =============================================================================

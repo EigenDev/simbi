@@ -183,8 +183,8 @@ def theme_config_from_args(args: Namespace) -> ThemeConfig:
         return theme_candidate
 
     # from_mapping already takes a dict, a pydantic model, or anything else
-    # mapping-like, and keeps only the fields a theme has; it raises for a type
-    # that is none of those, which is a themeless plot rather than no plot
+    # mapping-like, and keeps only the fields a theme has; any other type
+    # raises, and the recovery is the default theme, so the plot still draws
     try:
         return ThemeConfig.from_mapping(theme_candidate)
     except (TypeError, ValueError) as exc:

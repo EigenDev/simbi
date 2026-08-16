@@ -2,7 +2,7 @@
 // harness/mod.rs
 //
 // the kernel-test harness: run a gv-built kernel on the CPU interpreter from
-// NAMED field + scalar values, then read NAMED outputs back. collapses the
+// named field + scalar values, then read named outputs back. collapses the
 // KernelEmitInputs / CpuField / run_kernel / row-major-index ceremony every
 // kernel test otherwise hand-rolls — the physics intent stays, the IR plumbing
 // leaves. the CPU interpreter is f64, so this is also the carrier oracle.
@@ -82,7 +82,7 @@ impl KernelRun {
         self
     }
 
-    /// anchor all buffers at `lo`, overriding the default origin anchor — fields then resolve ABSOLUTE
+    /// anchor all buffers at `lo`, overriding the default origin anchor — fields then resolve absolute
     /// coordinates against it (negative ghost indices included). `field_with` closures
     /// and `Out::get` keep buffer-local coords (subtract `lo` at the call site). the
     /// amr transfer kernels need this: a fine ghost slab lives at negative absolute
@@ -92,7 +92,7 @@ impl KernelRun {
         self
     }
 
-    /// bind named input fields, each to a UNIFORM value over the grid.
+    /// bind named input fields, each to a uniform value over the grid.
     pub fn fields(mut self, vals: &[(&str, f64)]) -> Self {
         self.uniform
             .extend(vals.iter().map(|&(k, v)| (k.to_string(), v)));
@@ -159,18 +159,18 @@ impl KernelRun {
                     || name.starts_with("map_param_")
                     || name.starts_with("x_lo_")
                 {
-                    // spacing is a per-axis RUNTIME scalar: `map_kind_{ax}` selects the face map
-                    // (0 = uniform, 1 = log, 2 = geometric cell widths) and `map_param_{ax}` carries
-                    // that map's parameter (the grading ratio). every kernel that positions a face
-                    // carries both even on a uniform grid, so default the unbound ones to 0 —
-                    // map_kind 0 IS uniform, and the ratio is then unread. a graded- or log-axis
-                    // test binds them explicitly.
+                    // spacing enters as a per-axis scalar at runtime: `map_kind_{ax}` selects
+                    // the face map (0 = uniform, 1 = log, 2 = geometric cell widths) and
+                    // `map_param_{ax}` carries that map's parameter (the grading ratio). every
+                    // kernel that positions a face carries both even on a uniform grid, so
+                    // default the unbound ones to 0 — map_kind 0 selects uniform, and the ratio
+                    // is then unread. a graded- or log-axis test binds them explicitly.
                     //
-                    // `x_lo_{ax}` reaches a width-differencing kernel only through the MAPPED arm
-                    // of that selector, which map_kind 0 does not take, so the axis origin is
-                    // unread on a uniform grid. a kernel that positions a cell absolutely (a
-                    // moving mesh, a curvilinear metric) reads it on every arm and its tests bind
-                    // it explicitly.
+                    // `x_lo_{ax}` reaches a width-differencing kernel through the mapped arm
+                    // of that selector alone, and map_kind 0 takes the uniform arm, so the axis
+                    // origin is unread on a uniform grid. a kernel that positions a cell
+                    // absolutely (a moving mesh, a curvilinear metric) reads it on every arm
+                    // and its tests bind it explicitly.
                     0.0
                 } else {
                     panic!("KernelRun: no value bound for scalar '{name}'")
@@ -227,9 +227,10 @@ impl KernelRun {
         }
     }
 
-    /// emit the kernel as CPU (rust) source without running it — for the BUILD+EMIT tests
-    /// that inspect the generated text (the masked-newton unroll is too costly to interpret).
-    /// no field/scalar bindings are needed; `.grid(...)` (or its len via the writes) fixes ndim.
+    /// emit the kernel as CPU (rust) source, stopping short of a run — for the build-and-emit
+    /// tests that inspect the generated text (the masked-newton unroll is too costly to
+    /// interpret). `.grid(...)` (or its len via the writes) fixes ndim, and that is the whole
+    /// binding requirement.
     pub fn emit_cpu(self) -> Emit {
         let ndim = self.grid.len() as u8;
         assert!(ndim > 0, "KernelRun::emit_cpu: call .grid(...) to fix ndim");
@@ -264,10 +265,11 @@ impl KernelRun {
         }
     }
 
-    /// the LOWERABILITY contract: the traced graph renders to clean CPU (rust) AND GPU (CUDA)
+    /// the lowerability contract: the traced graph renders to clean CPU (rust) and GPU (CUDA)
     /// source — write-once-run-everywhere at the source level. an unlowerable op (a renderer with
-    /// no branch for it) PANICS here, on the CPU test path, before the nvcc / on-device gate.
-    /// only `.grid(...)` (to fix ndim) is needed — no field/scalar bindings, no run.
+    /// no branch for it) panics here, on the CPU test path, ahead of the nvcc / on-device gate.
+    /// `.grid(...)` (to fix ndim) is the whole requirement: the check is static, satisfied by
+    /// the graph and its renderers alone.
     pub fn assert_lowers(self) {
         let ndim = self.grid.len() as u8;
         assert!(ndim > 0, "assert_lowers: call .grid(...) to fix ndim");
@@ -337,8 +339,8 @@ impl Out {
     }
 
     /// the carrier-oracle assert: each named output at `cell` matches `want` within relative
-    /// `rel`. the expected values come from the SAME physics run natively at S = f64 (a
-    /// round-trip, or a direct f64 eval) — never hand-derived algebra.
+    /// `rel`. the expected values come from that same physics run natively at S = f64 (a
+    /// round-trip, or a direct f64 eval), so the reference is the physics itself.
     pub fn expect(&self, cell: impl AsRef<[usize]>, want: &[(&str, f64)], rel: f64) {
         let cell = cell.as_ref();
         for &(name, w) in want {
@@ -366,7 +368,7 @@ impl Out {
     }
 }
 
-// axis-0-fastest flat index (buffer lo = 0), matching the interpreter's CpuField layout AND the
+// axis-0-fastest flat index (buffer lo = 0), matching the interpreter's CpuField layout and the
 // canonical symbi `Field`/`View` storage (`symbi_algebra::strides_from_extent`): axis 0 fastest.
 fn flatten(cell: &[usize], extent: &[u32]) -> usize {
     let mut idx = 0usize;

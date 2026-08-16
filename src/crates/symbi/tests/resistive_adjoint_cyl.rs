@@ -9,8 +9,8 @@
 //     <B, curl(J B)>_F = <J B, J B>_E >= 0
 //
 // (eta = 1), which holds to machine precision iff J = C^T with the cyl weights w_r = w_E = r_face,
-// w_z = r_cell. it needs NO analytic solution and is geometry-agnostic: any wrong r-weight or a
-// flipped sign (which would make the resistive term GROW energy) breaks it. random compact-support
+// w_z = r_cell. it stands on the adjoint identity alone, so it is geometry-agnostic: any wrong
+// r-weight or a flipped sign (which would make the resistive term grow energy) breaks it. random compact-support
 // fields keep every stencil evaluation in the full-stencil interior, so the identity is exact.
 // =============================================================================
 
@@ -117,7 +117,7 @@ fn cyl_rz_resistive_current_is_the_curl_adjoint() {
         }
     }
 
-    // J: efield[0] <- eta * J_phi(B), eta = 1. after this efield[0] IS J.B on the corners.
+    // J: efield[0] <- eta * J_phi(B), eta = 1. after this efield[0] holds J.B on the corners.
     apply_resistive_emf::<2, 3, HostMemory, f64>(&sim, 1.0);
 
     // the edge-norm <J B, J B>_E = sum_corner (J B)^2 * r_face.
@@ -240,9 +240,10 @@ fn cyl_rz_resistivity_dominates_the_ideal_numerical_diffusion() {
     let ideal = evolve_decay(0.0);
     let resistive = evolve_decay(0.05);
     // "dominates" = the resistive term erases far more field than the scheme's own numerical
-    // diffusion floor. compare the FRACTIONAL losses (the cyl sinusoid is not a pure eigenmode of the
-    // (1/r) d_r(r d_r) operator, so the absolute decay rate is not the clean cartesian exp(-eta k^2 t);
-    // the loss RATIO is the geometry-robust statement). the resistive loss must dwarf the ideal one.
+    // diffusion floor. compare the fractional losses (the cyl sinusoid mixes eigenmodes of the
+    // (1/r) d_r(r d_r) operator, so its absolute decay rate departs from the clean cartesian
+    // exp(-eta k^2 t); the loss ratio is the geometry-robust statement). the resistive loss
+    // dwarfs the ideal one.
     let ideal_loss = 1.0 - ideal;
     let resistive_loss = 1.0 - resistive;
     assert!(

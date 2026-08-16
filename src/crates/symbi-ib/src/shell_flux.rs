@@ -2,10 +2,10 @@
 // shell_flux.rs
 //
 // the accretion diagnostic for a first-class immersed boundary: the net flux of
-// (rest mass, momentum, covariant energy, angular momentum) INTO the region
-// Omega = { phi(x) < 0 } through its boundary, summed from the code's OWN
+// (rest mass, momentum, covariant energy, angular momentum) into the region
+// Omega = { phi(x) < 0 } through its boundary, summed from the code's own
 // densitized numerical face fluxes. divergence-theorem consistent with the
-// finite-volume update -- the diagnostic flux IS the flux the scheme applies
+// finite-volume update -- the diagnostic flux is the flux the scheme applies
 // across those faces, so a discretely divergence-free flow gives a phi-invariant
 // (surface-independent) rate to roundoff. phi is a level set: r_ks - r_d for a
 // horizon shell, the surface sdf for a material body later -- one reduction.
@@ -27,7 +27,7 @@ use crate::body_delta::BodyDelta;
 /// the densitized numerical flux through one coordinate face (in the `+axis`
 /// direction): `numerical_flux * sqrt(gamma) * dA_coordinate` -- the same quantity
 /// the godunov divergence consumes, so the diagnostic is bit-consistent with the
-/// evolution. `nrg` is the COVARIANT energy flux on a GR path.
+/// evolution. `nrg` is the covariant energy flux on a GR path.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FaceFlux<const D: usize> {
     pub den: f64,
@@ -62,7 +62,7 @@ fn cross3(a: Tensor<f64, 3>, b: Tensor<f64, 3>) -> Tensor<f64, 3> {
 
 /// accumulate the accretion ledger of the region `Omega = { phi < 0 }` from the
 /// densitized face fluxes. a face between an inside cell and an outside cell is a
-/// boundary face; the body accretes the INWARD flux (`-` the outward normal flux),
+/// boundary face; the body accretes the inward flux (`-` the outward normal flux),
 /// integrated over `dt`. interior faces (both sides inside, or both outside) cancel
 /// by construction, so the result is the exact discrete boundary integral.
 ///
@@ -90,7 +90,7 @@ pub fn shell_accretion<const D: usize>(
             cn[a] += 1;
             let inside_cn = phi(cn) < 0.0;
             if inside_c == inside_cn {
-                continue; // not a boundary face of Omega
+                continue; // an interior face of Omega
             }
             // outward normal out of Omega points along +a when the inside cell is on the
             // -a side (c inside), along -a when the inside cell is on the +a side (cn inside).
@@ -112,13 +112,13 @@ pub fn shell_accretion<const D: usize>(
 mod tests {
     use super::*;
 
-    /// the discrete divergence theorem: the boundary integral the reduction computes MUST
-    /// equal the volume sum of the per-cell net outward flux over Omega, to roundoff, for an
-    /// ARBITRARY flux field. this is the exactness that makes a steady flow phi-invariant.
+    /// the discrete divergence theorem: the boundary integral the reduction computes equals
+    /// the volume sum of the per-cell net outward flux over Omega, to roundoff, for an
+    /// arbitrary flux field. this is the exactness that makes a steady flow phi-invariant.
     #[test]
     fn boundary_integral_equals_the_volume_divergence() {
         let shape = [12usize, 12];
-        // an arbitrary (not divergence-free) densitized flux field on the +a faces.
+        // an arbitrary densitized flux field on the +a faces, carrying a finite divergence.
         let flux = |c: [usize; 2], a: usize| -> FaceFlux<2> {
             let (i, j) = (c[0] as f64, c[1] as f64);
             let s = 0.37 * i - 0.21 * j + 1.7 * (a as f64) + 0.9;
@@ -167,8 +167,8 @@ mod tests {
     }
 
     /// phi-invariance for a discretely divergence-free field: two nested shells enclosing the
-    /// same (zero) net source give the SAME accretion rate to roundoff -- the certificate a
-    /// steady accretion flow must satisfy.
+    /// same (zero) net source agree on the accretion rate to roundoff -- the certificate a
+    /// steady accretion flow satisfies.
     #[test]
     fn nested_shells_agree_for_a_divergence_free_field() {
         let shape = [16usize, 16];

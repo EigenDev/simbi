@@ -1,17 +1,17 @@
 // =============================================================================
 // lowering.rs
 //
-// the LOWERABILITY contract (the third leg of the kernel trio, alongside the
+// the lowerability contract (the third leg of the kernel trio, alongside the
 // carrier-equivalence oracle + its numeric tolerance): every production kernel's
-// traced graph must render to clean CPU (rust) AND GPU (CUDA) source. an op the
-// renderer can't lower PANICS in `assert_lowers`, on the CPU test path, catching a
+// traced graph renders to clean CPU (rust) and GPU (CUDA) source. an unlowerable
+// op panics in `assert_lowers`, on the CPU test path, catching a
 // GPU-codegen regression long before the nvcc / on-device gate. this is the fast,
 // device-free "runs everywhere" check.
 //
 // the canonical kernel list is symbi-aot/build.rs: every `gen_*` there constructs
-// a builder and emits it. each builder call below MIRRORS a build.rs call EXACTLY
-// (same args), so this suite covers every distinct (regime, geometry, ndim, dir)
-// kernel shape build.rs generates. the grid ndim MUST equal the builder's
+// a builder and emits it. each builder call below mirrors a build.rs call argument
+// for argument, so this suite covers every distinct (regime, geometry, ndim, dir)
+// kernel shape build.rs generates. the grid ndim equals the builder's
 // construction ndim — stencil/curvilinear kernels reference coord axes 0..ndim, so
 // a mismatch panics or mis-emits.
 // =============================================================================
@@ -34,8 +34,8 @@ use symbi_discretize::{
 };
 
 // MAX_SOURCE_BODIES is owned by the runtime (symbi_ib::collection::MAX_SOURCE_BODIES = 2); mirrored
-// here as a literal since symbi-discretize does not depend on symbi-ib. the lowering
-// only cares that the per-body-unrolled graph builds + renders, regardless of the exact count.
+// here as a literal, keeping symbi-discretize independent of symbi-ib. the lowering
+// cares that the per-body-unrolled graph builds + renders, at any count.
 const MAX_SOURCE_BODIES: usize = 2;
 
 // the curvilinear momentum source the godunov binds, by regime prefix — mirrors
@@ -214,9 +214,10 @@ fn godunov_kernels_lower() {
     .grid([8])
     .assert_lowers();
 
-    // cartesian godunov-stage/snapshot for each EOS regime, 1D (iso no-energy, adiabatic/rhd
-    // energy). the one `godunov_stage_gv` kernel serves every SSP scheme (euler/rk2/rk3) via the
-    // runtime (a0, ac) coefficients, so one lowering check per geometry replaces the euler+rk2 pair.
+    // cartesian godunov-stage/snapshot for each EOS regime, 1D (iso carries mass+momentum,
+    // adiabatic/rhd carry energy too). the one `godunov_stage_gv` kernel serves every SSP
+    // scheme (euler/rk2/rk3) via the runtime (a0, ac) coefficients, so one lowering check per
+    // geometry replaces the euler+rk2 pair.
     for (prefix, has_energy) in [("iso", false), ("adiabatic", true), ("rhd", true)] {
         KernelRun::new(godunov_stage_gv(
             Coords::Cartesian,
@@ -476,7 +477,7 @@ fn geometry_probe_kernels_lower() {
     .grid([8, 8])
     .assert_lowers();
     // full rmhd geometric momentum source (total pressure + gas inertial + magnetic tension), 3D
-    // spherical AND cylindrical — the coord-generic christoffel covers both (cyl: r-phi pair).
+    // spherical and cylindrical — the coord-generic christoffel covers both (cyl: r-phi pair).
     for coords in [Coords::Spherical, Coords::Cylindrical] {
         KernelRun::new(geometric_momentum_source_probe_gv(
             coords,

@@ -2,10 +2,11 @@
 # simbi/cli/base_parser.py
 #
 # base argument parser with subcommand tracking and clinical error handling:
-# every parse error prints the REAL message (with a did-you-mean for a mistyped
-# command), then the relevant help, then exits 2. error handling never re-enters
-# parsing: an error() -> parse_args() -> error() cycle recurses forever on any
-# unregistered single-argument invocation.
+# every parse error prints the underlying message (with a did-you-mean for a
+# mistyped command), then the relevant help, then exits 2. error handling
+# terminates in place: re-entering parsing sets up an error() -> parse_args() ->
+# error() cycle that recurses forever on any unregistered single-argument
+# invocation.
 # =============================================================================
 import difflib
 import re

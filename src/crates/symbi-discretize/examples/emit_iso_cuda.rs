@@ -1,12 +1,12 @@
 // =============================================================================
 // emit_iso_cuda.rs
 //
-// emit the substrate iso/adiabatic kernels as CUDA source (the SAME IR graphs the
+// emit the substrate iso/adiabatic kernels as CUDA source (the same IR graphs the
 // CPU AOT path compiles, run through emit_kernel_from_lowering instead of
 // emit_kernel_cpu) and write them as .cu files. proves the backend axis: one
 // physics graph -> two backends. nvcc-compile the output to PTX (the GPU
 // portability gate); the kernels chosen exercise the GPU-risky features —
-// integer source-coord SELECT (ghost_fill), sqrt + HLLE branches + integer
+// integer source-coord select (ghost_fill), sqrt + HLLE branches + integer
 // stencil shifts (flux), reciprocal (c2p).
 //
 // usage: cargo run -p symbi-discretize --example emit_iso_cuda -- <out_dir>
@@ -86,21 +86,21 @@ fn main() {
     let (iso_ws, iso_wsw) = iso_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform], &[0], 1);
     emit_gv(&out, "iso_wave_speed_map_1d", 1, iso_ws, iso_wsw);
 
-    // rhd c2p: the FIRST ITERATIVE kernel — a 20-step newton (Op::IterateInline, body
+    // rhd c2p: the first iterative kernel — a 20-step newton (Op::IterateInline, body
     // once) + sqrt (lorentz factor). the GPU-risky construct is the deep iterate; this is
     // the on-device proof it emits compilable CUDA. the gv single-source physics
     // (symbi-hydro's `rhd_recover` at S=Gv), like iso.
     let (rhd_k, rhd_writes) = rhd_c2p_gv::<1>(20, EosArm::IdealGamma);
     emit_gv(&out, "rhd_c2p_1d", 1, rhd_k, rhd_writes);
 
-    // rhd flux: reconstruction + the canonical HLLE with RELATIVISTIC physics (lorentz
+    // rhd flux: reconstruction + the canonical HLLE with relativistic physics (lorentz
     // factor + relativistic enthalpy/sound speed + the mignone-bodo wave speeds). gv single
     // source (riemann::hlle at the Rhd regime).
     let (rhd_f, rhd_fw) = rhd_flux_gv::<1>(0, EosArm::IdealGamma);
     emit_gv(&out, "rhd_face_flux_1d", 1, rhd_f, rhd_fw);
 
     // the conserved-update family — godunov step, RK2, snapshot — EOS-generic gv kernels
-    // (has_energy=false is iso; true is adiabatic AND rhd, whose godunov is the identical
+    // (has_energy=false is iso; true covers adiabatic and rhd alike, whose godunov is the identical
     // regime-agnostic kernel). cartesian-1D here: the stencil divergence + in-place update.
     let cart = (Coords::Cartesian, [Spacing::Uniform; 1], [0usize; 1]);
     let src = GeoSource::Hydro { inertial: true };

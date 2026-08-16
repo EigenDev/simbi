@@ -3,13 +3,13 @@
 //
 // the traced isothermal viscous operators: per interior cell,
 // read the primitive velocity + density on the halo-1 3x3 stencil (via
-// `field_offset`), evaluate the SAME carrier-generic `viscous_mom_update_2d` the
+// `field_offset`), evaluate the same carrier-generic `viscous_mom_update_2d` the
 // f64 oracle runs, and accumulate `dt div(tau)` into `cons.mom`. 2D cartesian.
 //
 //   viscous_iso_gv        constant nu (a uniform viscosity stencil).
 //   viscous_iso_alpha_gv  shakura-sunyaev alpha: nu(x) = alpha c_s^2 / Omega_k(r),
 //                         Omega_k = sqrt(GM/r^3) about the central body — a
-//                         SPATIALLY VARYING viscosity, face-averaged so the flux
+//                         spatially varying viscosity, face-averaged so the flux
 //                         divergence stays conservative.
 //
 // hazard-free in place: the stencil reads are on PRIMITIVE fields (read-only in
@@ -98,8 +98,8 @@ pub fn viscous_iso_gv() -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
-/// trace the constant-nu ADIABATIC viscous operator, 2D cartesian: the SAME `dt div(tau)` momentum
-/// update as `viscous_iso_gv` PLUS the total-energy increment `dt div(tau . v)` — the viscous energy
+/// trace the constant-nu adiabatic viscous operator, 2D cartesian: the same `dt div(tau)` momentum
+/// update as `viscous_iso_gv` plus the total-energy increment `dt div(tau . v)` — the viscous energy
 /// flux divergence — accumulated onto `cons.nrg`. total energy is conserved (flux form) and the
 /// irreversible heating warms the gas. runs post-c2p (prim current).
 pub fn viscous_adiabatic_gv() -> (GvKernel, Writes) {
@@ -135,10 +135,10 @@ pub fn viscous_adiabatic_gv() -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
-/// the shakura-sunyaev alpha viscosity with the LOCAL adiabatic sound speed:
+/// the shakura-sunyaev alpha viscosity with the local adiabatic sound speed:
 /// nu(x) = alpha cs^2(x) / Omega_K(r), cs^2 = gamma p / rho read per stencil cell
-/// (the isothermal alpha kernel uses the one global cs instead; on a varying-cs
-/// gas the local read IS the shakura-sunyaev prescription). Omega_K from body 0's
+/// (the isothermal alpha kernel uses the one global cs; on a varying-cs
+/// gas the local read is the shakura-sunyaev prescription). Omega_K from body 0's
 /// mass at the in-plane distance. cartesian 2D; carries the viscous heating.
 pub fn viscous_adiabatic_alpha_gv() -> (GvKernel, Writes) {
     viscous_adiabatic_alpha_impl(false)
@@ -247,14 +247,14 @@ pub(crate) fn scale_factors_at(coords: Coords, ndim: usize, x: &[Gv]) -> Vec<Gv>
     }
 }
 
-/// trace the constant-nu isothermal viscous operator on a GENERAL 2D ORTHOGONAL
+/// trace the constant-nu isothermal viscous operator on a general 2D orthogonal
 /// chart: read the scale factors `(h1, h2)` at each stencil cell from the chart's
 /// `Metric::scale_factors` (evaluated at `centroid + coordinate offset`), then run
 /// the one carrier-generic orthogonal operator. `coords` is the bake-time chart —
 /// cylindrical and spherical both route here (spherical `h = (1, r)` falls out for
-/// free), so this ONE kernel subsumes the chart-specific curvilinear operators.
-/// the ADIABATIC orthogonal viscous operator: the same scale-factor stencil as
-/// the iso one, through the (momentum + HEATING) carrier pair — div(tau) on the
+/// free), so this single kernel subsumes the chart-specific curvilinear operators.
+/// the adiabatic orthogonal viscous operator: the same scale-factor stencil as
+/// the iso one, through the (momentum + heating) carrier pair — div(tau) on the
 /// momenta and div(tau . u) onto the total energy. one kernel per chart; the
 /// heating and the momentum share their face stresses, so the discrete work
 /// telescopes and the pair conserves total energy up to the boundary flux.
@@ -470,9 +470,9 @@ pub fn viscous_iso_gv_3d() -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
-/// trace the constant-nu ADIABATIC viscous operator, 3D cartesian: the SAME `dt div(tau)` momentum as
-/// `viscous_iso_gv_3d` PLUS the total-energy increment `dt div(tau . v)` onto `cons.nrg`. serves both
-/// adiabatic hydro AND full-3D MHD (viscosity leaves B untouched, so the flux heats the gas with the
+/// trace the constant-nu adiabatic viscous operator, 3D cartesian: the same `dt div(tau)` momentum as
+/// `viscous_iso_gv_3d` plus the total-energy increment `dt div(tau . v)` onto `cons.nrg`. serves
+/// adiabatic hydro and full-3D MHD alike (viscosity leaves B untouched, so the flux heats the gas with the
 /// 1/2 B^2 preserved). runs post-c2p.
 pub fn viscous_adiabatic_gv_3d() -> (GvKernel, Writes) {
     begin_trace();
@@ -575,18 +575,18 @@ fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, Writes) {
 
 /// trace the alpha-viscosity isothermal operator, 3D cartesian. the disk lies in
 /// the x-y plane with rotation axis z, so the keplerian frequency is set by the
-/// CYLINDRICAL radius `R = sqrt((x-x_body)^2 + (y-y_body)^2)` — the vertical
-/// z-offset from the body does NOT enter `Omega_k = sqrt(GM/R^3)`. hence `nu(x,y)
+/// cylindrical radius `R = sqrt((x-x_body)^2 + (y-y_body)^2)`, so `Omega_k =
+/// sqrt(GM/R^3)` is a function of R alone and the vertical z-offset drops out. hence `nu(x,y)
 /// = alpha c_s^2 / Omega_k(R)` is z-invariant (a cylinder of constant nu about the
 /// rotation axis), face-averaged so the flux divergence stays conservative.
 /// the alpha-viscosity ADIABATIC operator, 3D cartesian: `nu(x) = alpha cs^2(x) / Omega_k(R)`
-/// with the LOCAL sound speed `cs^2 = gamma p / rho` read per stencil cell, and the keplerian
-/// frequency set by the CYLINDRICAL radius `R = sqrt((x-x_body)^2 + (y-y_body)^2)` about the
-/// rotation axis — the vertical offset does not enter `Omega_k`.
+/// with the local sound speed `cs^2 = gamma p / rho` read per stencil cell, and the keplerian
+/// frequency set by the cylindrical radius `R = sqrt((x-x_body)^2 + (y-y_body)^2)` about the
+/// rotation axis, so `Omega_k` depends on R alone.
 ///
-/// unlike the isothermal 3D twin, nu here is NOT z-invariant: `Omega_k` is, but the local `cs^2`
-/// varies with height through the stratified pressure and density, so every stencil cell carries
-/// its own nu. carries the viscous heating onto the total energy, like the other adiabatic forms.
+/// nu here varies with height, where the isothermal 3D twin's is z-invariant: `Omega_k` is
+/// z-invariant in both, while the local `cs^2` varies with height through the stratified pressure
+/// and density, so each stencil cell carries its own nu. carries the viscous heating onto the total energy, like the other adiabatic forms.
 pub fn viscous_adiabatic_alpha_gv_3d() -> (GvKernel, Writes) {
     const NDIM: u8 = 3;
     begin_trace();

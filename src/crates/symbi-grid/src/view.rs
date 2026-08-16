@@ -5,8 +5,8 @@
 // the functor interface: view.at(coord) -> &T.
 //
 // a view is Copy — a borrowed pointer + strides. the field owns the
-// storage and guarantees the pointer is valid for the view's lifetime. a view IS a
-// function from coordinates to values: view.at(coord) -> &T.
+// storage and guarantees the pointer is valid for the view's lifetime. a view acts
+// as a function from coordinates to values: view.at(coord) -> &T.
 //
 // usage:
 //   let view = field.view();
@@ -90,7 +90,7 @@ impl<T, const D: usize> View<T, D> {
     /// `Domain::compute_strides` — see the comment there for why this
     /// convention (vs the prior axis-`D-1`-fastest) matters for GPU coalescing.
     fn row_major_strides(shape: &[usize; D]) -> [usize; D] {
-        // THE formula lives once in `symbi_algebra::strides_from_extent`.
+        // the formula lives in one place: `symbi_algebra::strides_from_extent`.
         let mut strides = [0usize; D];
         symbi_algebra::strides_from_extent(shape, &mut strides);
         strides

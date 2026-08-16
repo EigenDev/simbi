@@ -2,7 +2,7 @@
 # test_props_validation.py
 #
 # component props reject unknown keys by name. absent that check a mistyped prop
-# (cma for cmap) validates cleanly and the style silently never applies.
+# (cma for cmap) validates cleanly and the style silently sits idle.
 # =============================================================================
 
 import pytest
@@ -50,8 +50,8 @@ def test_a_field_qualified_key_keeps_the_data_name_verbatim() -> None:
 
 
 def test_a_field_qualified_key_records_only_what_was_asked() -> None:
-    """the override is layered over the shared props, so a value nobody set
-    must not travel with it and overwrite the shared one."""
+    """the override is layered over the shared props, so it carries the values
+    it was given and leaves the shared ones standing."""
     props = load_component_props(overrides=["quad:u.log_scale=false"])
 
     assert props["quad:u"].model_fields_set == {"log_scale"}

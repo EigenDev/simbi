@@ -10,12 +10,12 @@
 //
 // gates:
 // - a full accepted step followed by `restore_step` reproduces the step-entry
-//   conserved gas state, cell-centered B, staggered face B, AND the primitives
-//   BIT-FOR-BIT (the retried step re-enters at wave_speeds/flux, which
+//   conserved gas state, cell-centered B, staggered face B, and the primitives
+//   bit-for-bit (the retried step re-enters at wave_speeds/flux, which
 //   reconstruct from prim, so a conserved-only rollback would replay from the
 //   rejected attempt's primitives);
 // - the rollback storage exists exactly where a step can be rejected: a curved
-//   magnetized background allocates it, flat MHD does not.
+//   magnetized background allocates it, and flat MHD leaves it unallocated.
 // =============================================================================
 
 use std::f64::consts::PI;
@@ -136,9 +136,9 @@ fn rejecting_a_step_restores_the_full_magnetized_entry_state() {
     let kern = kernels(&sim);
 
     // a rejection is raised mid-step, so the entry state must be a genuine step
-    // boundary: seeded initial data has never been through the ghost fill that
-    // closes every stage, and comparing against it would measure the fill
-    // rather than the rollback.
+    // boundary. seeded initial data still awaits the ghost fill that closes every
+    // stage, so comparing against it would measure the fill in place of the
+    // rollback; stepping once first puts the entry state at a real boundary.
     step_once(&mut sim, &kern, DT);
 
     kern.snapshot_retry(&sim);
@@ -146,8 +146,8 @@ fn rejecting_a_step_restores_the_full_magnetized_entry_state() {
 
     step_once(&mut sim, &kern, DT);
 
-    // WITHOUT this the rollback comparison is vacuous: a step that moved
-    // nothing would "restore" trivially.
+    // the step has to move the state, which is what gives the rollback comparison
+    // something to restore; a frozen step would "restore" trivially.
     let moved = dump_state(&sim);
     assert!(
         entry

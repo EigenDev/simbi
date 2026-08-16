@@ -182,8 +182,8 @@ class PolygonPlotComponent(Component):
     ) -> None:
         """Outline each refined level's bounding box.
 
-        the box follows the chart: its constant-radius sides are arcs on a
-        polar axes, not chords across the wedge."""
+        the box follows the chart: on a polar axes its constant-radius sides
+        are drawn as arcs, so they hug the wedge along its true boundary."""
         polar = self.ax.name == "polar"
 
         segments: list[Array] = []

@@ -20,10 +20,10 @@
 
 use crate::domain::Domain;
 
-/// THE physical-x-fastest stride prefix product — written ONCE. `strides[0] = 1`,
+/// the physical-x-fastest stride prefix product, written once. `strides[0] = 1`,
 /// `strides[d] = prod(extent[0..d])`. axis 0 is the fastest-varying in memory, so
 /// adjacent x-coords (and CUDA `threadIdx.x` lanes) hit adjacent bytes. every view
-/// in the codebase derives its strides from THIS; they cannot drift apart.
+/// in the codebase derives its strides from this one function, so they move together.
 ///
 /// generic over the integer type so the geometric layer (`usize`) and the kernel
 /// ABI (`i32`) share the formula. `extent` and `out` must be the same length.
@@ -45,11 +45,11 @@ where
     }
 }
 
-/// THE contiguous axis: the one `strides_from_extent` gives a stride of 1. every consumer that needs
+/// the contiguous axis: the one `strides_from_extent` gives a stride of 1. every consumer that needs
 /// to know "which axis is adjacent in memory" — the CPU loop nest, the unit-stride index term, the
-/// vectorized inner loop, the GPU warp axis — must read it from HERE and not assume a fixed rank.
-/// assuming the wrong axis is silent: the code stays correct (the offset formula is still affine) and
-/// only the memory-access pattern degrades, which no correctness test can see.
+/// vectorized inner loop, the GPU warp axis — reads it from this constant, at whatever rank.
+/// assuming the wrong axis is silent: the code stays correct (the offset formula is still affine)
+/// while the memory-access pattern degrades, which correctness tests are blind to.
 pub const CONTIGUOUS_AXIS: usize = 0;
 
 /// the INVERSE of the flat index: recover a coordinate from a canonical iteration index, with
@@ -79,7 +79,7 @@ pub fn nest_order(ndim: usize) -> impl DoubleEndedIterator<Item = usize> + Clone
 }
 
 /// the affine flat offset under physical-x-fastest strides: `sum_a (coord[a] - lo[a]) * strides[a]`.
-/// THE single value-path index formula — `Layout::at`, `Domain::flat_index`,
+/// the single value-path index formula — `Layout::at`, `Domain::flat_index`,
 /// and the grid `View`/`ViewMut` accessors all route here, so the storage convention lives in
 /// exactly one place. a coordinate left of its origin (`coord < lo`) is a caller bug (out of the
 /// buffer); the subtraction wraps in release like any index past the end.
@@ -242,8 +242,8 @@ mod laws {
     }
 
     // ---- the traversal laws ---------------------------------------------------------------
-    // the layout owns WHERE a cell lives (`strides_from_extent`, `flat_offset`) AND, from here
-    // down, the ORDER a sweep visits cells (`unflatten`, `nest_order`). every driver and every
+    // the layout owns where a cell lives (`strides_from_extent`, `flat_offset`) and, from here
+    // down, the order a sweep visits cells (`unflatten`, `nest_order`). every driver and every
     // code emitter derives from these; the tests below are what makes "derives" enforceable.
 
     /// the definition: `strides_from_extent` gives the contiguous axis a stride of exactly 1.
@@ -327,7 +327,7 @@ mod laws {
     }
 
     /// walking `nest_order` as a real nest visits cells in exactly `unflatten` order — so the two
-    /// halves of the traversal contract (a nested emitter, a flat driver) cannot disagree.
+    /// halves of the traversal contract (a nested emitter, a flat driver) stay in agreement.
     #[test]
     fn nest_order_walk_agrees_with_unflatten() {
         let extent = [4usize, 3, 2];

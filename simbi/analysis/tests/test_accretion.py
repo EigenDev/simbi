@@ -2,8 +2,8 @@
 # test_accretion.py
 #
 # the accretor analysis laws (docs/ideas/accretor.md §5):
-# - the steady detector fires after an exponential transient and never on a
-#   secular drift
+# - the steady detector fires after an exponential transient and returns None on
+#   a secular drift
 # - windowed averaging reproduces known dt-weighted means/amplitudes
 # - the sonic extractor recovers an exact mach = r_s/r surface, isotropic and
 #   shaped, and reports nan where no crossing exists
@@ -25,7 +25,7 @@ from simbi.analysis import (
 
 def test_steady_detector_fires_after_the_transient() -> None:
     # an exponential relaxation to 2.0 with time constant 1: settled well
-    # before t = 20, and the detector must not fire inside the transient.
+    # before t = 20, and the detector reports a time past the transient.
     t = np.linspace(0.0, 40.0, 4000)
     series = 2.0 + 3.0 * np.exp(-t)
     t0 = steady_state_time(t, series, window=5.0, tol=0.01)
@@ -116,7 +116,8 @@ def test_dat_loader_reads_the_legacy_2d_schema(tmp_path) -> None:
     assert d.time.shape == (3,)
     assert d.accreted_mass.shape == (3, 2)
     assert d.force[1, 0, 0] == pytest.approx(0.2)
-    # the legacy row never recorded fz: the field is absent here; a stored 0.0 would read as a real measurement.
+    # the legacy schema stops at fy, so fz is absent here and comes back nan; a stored 0.0
+    # would read as a real measurement.
     assert np.isnan(d.force[1, 0, 2])
     # the cumulative diff gives the exact mean rate regardless of cadence.
     assert mdot_from_cumulative(d.time, d.accreted_mass[:, 0], t_start=1.0) == pytest.approx(0.5)

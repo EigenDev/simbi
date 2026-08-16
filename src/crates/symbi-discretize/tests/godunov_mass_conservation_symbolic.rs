@@ -1,19 +1,19 @@
 // =============================================================================
 // godunov_mass_conservation_symbolic.rs
 //
-// the SYMBOLIC proof that the CARTESIAN godunov mass update conserves mass EXACTLY
-// — by showing the traced flux-divergence is a sum of per-direction DISCRETE
-// DIVERGENCES `G_d[+e_d] - G_d`, which telescope globally. the structural
+// the symbolic proof that the cartesian godunov mass update conserves mass exactly,
+// by showing the traced flux-divergence is a sum of per-direction discrete
+// divergences `G_d[+e_d] - G_d`, which telescope globally. the structural
 // counterpart to the numerical sod-conservation integral (1e-9).
 //
-// finite-volume conservation: a shared face flux enters cell i (as its HIGH face)
-// and cell i+1 (as its LOW face) with equal-and-opposite signed coefficient, so
+// finite-volume conservation: a shared face flux enters cell i (as its high face)
+// and cell i+1 (as its low face) with equal-and-opposite signed coefficient, so
 // summing over cells the interior faces cancel and only the domain boundary remains.
 // the godunov mass update is `rho_new = rho - dt*div(mass_flux)`, and for cartesian
 //   div = sum_d (F_d[+e_d] - F_d[0]) / dx_d.
 // so the flux part is exactly `sum_d (G_d[+e_d] - G_d)` with `G_d = (-dt/dx_d) F_d[0]`
-// — a discrete divergence per direction. asserting the extracted flux form EQUALS
-// that telescoping form proves conservation by construction, for ANY flux field.
+// — a discrete divergence per direction. asserting the extracted flux form equals
+// that telescoping form proves conservation by construction, for an arbitrary flux field.
 //
 // (curvilinear conservation reduces to the shared-face area consistency
 // `area_hi(c) == area_lo(c+e)`; proving it symbolically needs the coeff ring extended
@@ -76,7 +76,7 @@ fn godunov_mass_conservation_symbolic() {
         telescoping.add(&g.neg_form());
     }
 
-    // THE PROOF: the traced flux update IS that sum of discrete divergences -> conserves.
+    // the proof: the traced flux update equals that sum of discrete divergences -> conserves.
     let mut residual = flux;
     residual.add(&telescoping.neg_form());
     assert!(
@@ -87,7 +87,7 @@ fn godunov_mass_conservation_symbolic() {
 }
 
 // negative control: a non-telescoping pair (a flux that enters two cells with the
-// SAME sign) does not vanish — the checker is not vacuous.
+// same sign) leaves a residual, so the checker has real content.
 #[test]
 fn conservation_symbolic_detects_nonconservative() {
     let mut lf = LinFormR::default();

@@ -6,7 +6,7 @@
 // map definition: read prim at the integer source coord (periodic / reflect /
 // outflow), write at the cell, velocity picks up the per-axis Jacobian sign.
 //
-// proves the generated Rust COMPILES, RUNS, and IS the pullback — in particular
+// proves the generated Rust compiles, runs, and is the pullback — in particular
 // that the source coord is integer (a periodic ghost reads exactly one period
 // over, a reflecting ghost reads the mirror cell and flips the normal velocity).
 //
@@ -120,7 +120,7 @@ fn aot_reflect_mirrors_and_flips_the_normal_velocity() {
     let mut pre = alloc(pre_profile);
     // reflect about the low wall (face = interior lo = 0): pivot2 = 2*0 - 1 = -1.
     // ghost c reads pivot2 - c; the wall-normal velocity flips (vel_sign -1),
-    // pressure does NOT (grade 0).
+    // pressure keeps its sign (grade 0).
     fill_low(&mut rho, &mut vel, &mut pre, 2, -1, -1.0);
     for c in -NG..0 {
         let src = -1 - c;
@@ -171,8 +171,8 @@ fn aot_outflow_clamps_to_the_edge() {
 
 #[test]
 fn aot_in_place_leaves_the_interior_untouched() {
-    // the fill writes only the ghost region; interior cells are the source, never
-    // a destination, so they must be byte-unchanged after an in-place fill.
+    // the fill writes only the ghost region; interior cells serve strictly as
+    // the source, so they must be byte-unchanged after an in-place fill.
     let mut rho = alloc(rho_profile);
     let mut vel = alloc(vel_profile);
     let mut pre = alloc(pre_profile);

@@ -1,14 +1,15 @@
 # =============================================================================
 # test_loud_failures.py
 #
-# formatting is cosmetic enough that a failure should not throw away a finished
-# render, and that is exactly what makes silence dangerous here: a plot with no
-# colorbar, no labels or no legend still looks like a plot, and the process
-# exits 0. a whole spherical rendering mode shipped without a colorbar because
-# one `except: pass` sat over the placement call.
+# formatting is cosmetic enough that a failure should leave a finished render
+# standing, and that is exactly what makes silence dangerous here: a plot
+# missing its colorbar, its labels or its legend still looks like a plot, and
+# the process exits 0. a whole spherical rendering mode shipped with its
+# colorbar silently dropped because one `except: pass` sat over the placement
+# call.
 #
-# so the rule is: a formatting step may fail without halting the render, but it
-# may not fail quietly. these gates hold each step to that.
+# so the rule is: a formatting step may fail, the render still finishes, and
+# the failure is announced. these gates hold each step to that.
 # =============================================================================
 import matplotlib
 
@@ -116,7 +117,7 @@ def test_a_failed_colorbar_is_reported(monkeypatch) -> None:
 
 
 def test_the_render_still_completes(monkeypatch) -> None:
-    """loud, but not fatal: the field is drawn even when its labels are not."""
+    """loud and survivable: the field is drawn even when its labels fail."""
     monkeypatch.setattr(formatting, "apply_axis_labels", breaks)
     figure = rendered_figure()
 

@@ -1,23 +1,23 @@
 // =============================================================================
 // rmhd/gr.rs
 //
-// `RmhdGr` — the relativistic-MHD regime on a curved SPATIAL metric: the VALENCIA form
-// (COVARIANT conserved momentum `S_i = (rho h W^2 + B^2) v_i - (v.B) B_i`) with the
-// fast-magnetosonic BOUND through the Banyuls-Font coordinate wave-speed transform. it
+// `RmhdGr` — the relativistic-MHD regime on a curved spatial metric: the Valencia form
+// (covariant conserved momentum `S_i = (rho h W^2 + B^2) v_i - (v.B) B_i`) with the
+// fast-magnetosonic bound through the Banyuls-Font coordinate wave-speed transform. it
 // is the flat `Rmhd` regime with the metric threaded through every contraction, and
-// REDUCES to `Rmhd` at identity gamma + lapse 1 -> flat SRMHD is untouched. carries
+// reduces to `Rmhd` at identity gamma + lapse 1, which leaves flat SRMHD intact. carries
 // gamma/gamma^{-1} (via `SpatialMetric`) + the lapse `alpha`, exactly like `RhdGr`.
 //
 // the GR flux kernel uses this via `riemann::hlle_with_speeds` + the shift-in-the-fan,
-// so GRMHD is a DIVERGENT KERNEL that leaves the shared flat `Rmhd` untouched. `prim.vel` is
-// the CONTRAVARIANT valencia velocity `v^i`; `prim.mag`/`cons.mag` the CONTRAVARIANT
+// so GRMHD is a divergent kernel and the shared flat `Rmhd` stays as it is. `prim.vel` is
+// the contravariant valencia velocity `v^i`; `prim.mag`/`cons.mag` the contravariant
 // eulerian field `B^i`.
 //
 // wave speeds: the flat Mignone & Del Zanna magnetosonic quartic is a flat-frame
-// construct; the GR fan uses the fast-speed BOUND c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2
+// construct; the GR fan uses the fast-speed bound c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2
 // (v_A^2 = b^2/(rho h + b^2)) in the same two-velocity Banyuls-Font form the RHD fan
-// uses — unconditionally OUTSIDE the true fan, so HLL stays consistent (at worst mildly
-// more diffusive than the exact quartic).
+// uses — enclosing the true fan everywhere, so HLL stays consistent, at worst mildly
+// more diffusive than the exact quartic.
 // =============================================================================
 
 use symbi_algebra::{OrderedNumeric, Tensor};
@@ -48,8 +48,8 @@ pub struct RmhdGr<S: Scalar, const D: usize> {
     pub alpha: S,
 }
 
-/// the EXACT GR RMHD characteristic speeds along coordinate axis `dir`, through the local
-/// ORTHONORMAL frame.
+/// the exact GR RMHD characteristic speeds along coordinate axis `dir`, through the local
+/// orthonormal frame.
 ///
 /// the tetrad `E = metric.orthonormal_basis(dir)` maps the state into the frame where the spatial
 /// metric is the identity, so the flat Mignone & Del Zanna quartic applies there verbatim -- the
@@ -57,15 +57,15 @@ pub struct RmhdGr<S: Scalar, const D: usize> {
 /// the single normal factor `E_dd = E[dir][dir]`, exactly as the tetrad HLLD flux does, and `alpha`
 /// converts the normal observer's time to coordinate time. the shift is the caller's to subtract.
 ///
-/// WHY THIS RATHER THAN THE FAST-MAGNETOSONIC BOUND. `c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2` is a
-/// valid HLL estimate and is what the cheap CFL rate uses, but it is a BOUND, not the characteristic
-/// speed. the per-cell speed buffers exist so the flux fan and the UCT edge EMF can read the exact
-/// quartic roots without re-solving per face; a bound in those buffers makes every curved-spacetime
-/// UCT EMF more diffusive than its flat counterpart on identical physics. on an EXACTLY minkowski
-/// metric the bound and the exact left-going root differ by 55%.
+/// the quartic here, in place of the fast-magnetosonic bound. `c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2`
+/// is a valid HLL estimate and is what the cheap CFL rate uses, though it remains a bound on the
+/// characteristic speed. the per-cell speed buffers exist so the flux fan and the UCT edge EMF read
+/// the exact quartic roots from one solve per cell; a bound in those buffers makes every
+/// curved-spacetime UCT EMF more diffusive than its flat counterpart on identical physics. on an
+/// exactly minkowski metric the bound and the exact left-going root differ by 55%.
 ///
 /// on a flat metric the tetrad is the identity and `alpha` is one, so this reduces to the flat
-/// quartic BIT-FOR-BIT: at zero mass the curved and flat speeds are identical to the last bit, an
+/// quartic bit-for-bit: at zero mass the curved and flat speeds are identical to the last bit, an
 /// exact equality rather than a tolerance.
 pub fn rmhd_gr_wave_speeds_axis<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
@@ -77,9 +77,9 @@ pub fn rmhd_gr_wave_speeds_axis<S: Scalar, const D: usize>(
     let e = metric.orthonormal_basis(dir);
     let e_t = e.transpose();
     let e_dd = e[(dir, dir)];
-    // the tetrad is orthonormal w.r.t. gamma, so the forward map needs no matrix inverse:
+    // the tetrad is orthonormal w.r.t. gamma, so the forward map is a plain transpose contraction:
     // V_hat^a = gamma(v, e_hat_a) = (E^T gamma v)_a. every lorentz scalar is preserved, so W,
-    // |B|^2 and v.B are unchanged and the flat solver sees a physically identical state.
+    // |B|^2 and v.B carry through and the flat solver sees a physically identical state.
     let hat = MhdPrim {
         hydro: Prim {
             rho: prim.hydro.rho,
@@ -109,7 +109,7 @@ impl<S: Scalar, const D: usize> RmhdGr<S, D> {
     ///
     /// `stage_gas` comes from an accepted stage state, while `candidate_mag` comes from the
     /// current constrained-transport update. rebuilding through the canonical primitive-to-conserved
-    /// map makes the anchor admissible with that exact field without modifying the shared CT state.
+    /// map makes the anchor admissible with that exact field while the shared CT state stands.
     #[inline]
     pub fn admissible_anchor(
         &self,
@@ -137,7 +137,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
 
     #[inline]
     fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
-        // Valencia: S_i = (rho h W^2 + B^2) v_i - (v.B) B_i with v_i/B_i LOWERED;
+        // Valencia: S_i = (rho h W^2 + B^2) v_i - (v.B) B_i with v_i/B_i lowered;
         // tau = rho h W^2 + B^2 - (p + b^2/2) - D. identity gamma -> lower = id, every
         // contraction euclidean: the flat `Rmhd::to_conserved` term-for-term.
         let vsq = self.metric.norm_sq_contra(&prim.vel);
@@ -184,7 +184,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
             return C2pResult::err(floored, code);
         }
         // the metric-aware KKC recovery: the invariants r^2/B^2/r.B form with gamma, the
-        // recovered v^i is contravariant. the SR->GR difference is the metric VALUE.
+        // recovered v^i is contravariant. the SR->GR difference is the metric value.
         let prim = rmhd_recover(eos, cons, &self.metric, MAX_ITER);
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
@@ -197,12 +197,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
 
     #[inline]
     fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
-        // the Valencia SPATIAL flux (no shift; the shift rides the GR flux kernel's fan):
+        // the Valencia spatial flux, shift-free here (the shift rides the GR flux kernel's fan):
         //   F_D     = D v^n
-        //   F_{S_j} = S_j v^n + p_tot n_j - b_j B^n / W      (b_j LOWERED four-vector)
+        //   F_{S_j} = S_j v^n + p_tot n_j - b_j B^n / W      (b_j lowered four-vector)
         //   F_tau   = (tau + p_tot) v^n - (v.B) B^n          ((v.B) B^n = alpha b^0 B^n / W)
         //   F_{B^i} = B^i v^n - v^i B^n                      (contravariant, metric-free)
-        // v^n = v.nhat / B^n = B.nhat are coordinate COMPONENTS (coordinate-unit nhat).
+        // v^n = v.nhat / B^n = B.nhat are coordinate components (coordinate-unit nhat).
         // identity gamma -> the flat `Rmhd::to_flux` (its tau flux `S.n - D v^n` equals
         // this form by the flat momentum identity).
         let cons = self.to_conserved(eos, prim);
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn rmhd_gr_reduces_to_flat_at_identity() {
-        // RmhdGr on the flat metric (gamma = identity, alpha = 1) MUST equal the flat Rmhd
+        // RmhdGr on the flat metric (gamma = identity, alpha = 1) equals the flat Rmhd
         // regime component-for-component: conserved, flux, wave speeds, and the recovery.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let flat = Rmhd;
@@ -438,8 +438,8 @@ mod tests {
 
     #[test]
     fn rmhd_gr_wave_speed_bound_contains_flat_fan_at_identity() {
-        // at identity/1 the BF-transformed bound must CONTAIN the exact flat MDZ fan
-        // (the bound is c_ms >= every magnetosonic speed) and stay inside the light cone.
+        // at identity/1 the BF-transformed bound contains the exact flat MDZ fan
+        // (the bound is c_ms >= every magnetosonic speed) and stays inside the light cone.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let flat = Rmhd;
         let gr = RmhdGr::<f64, 3> {
@@ -473,8 +473,8 @@ mod tests {
     #[test]
     fn rmhd_gr_round_trips_on_a_non_diagonal_metric() {
         // prim -> conserved (hand-checkable valencia forms) -> KKC recovery on a
-        // kerr-like gamma with gamma_{r phi} != 0: the recovered state must match the
-        // input, exercising the metric contractions in BOTH directions (lower on p2c,
+        // kerr-like gamma with gamma_{r phi} != 0: the recovered state matches the
+        // input, exercising the metric contractions in both directions (lower on p2c,
         // the invariants + raise on c2p).
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let m = curved_metric();

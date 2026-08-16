@@ -4,8 +4,9 @@
 // heterogeneous body container with subcycle interpolation. the body list is
 // partitioned [source bodies | fragments]: source bodies occupy the baked
 // gravity/accretion kernel slots (at most MAX_SOURCE_BODIES), fragments are
-// wall-only rigid bodies in unbounded number that never enter the baked
-// source fan. provides capability-filtered iteration and supports
+// wall-only rigid bodies in unbounded number, reached through per-instance
+// dispatch outside the baked source fan. provides capability-filtered
+// iteration and supports
 // snapshot/interpolate/finalize for AMR subcycling.
 //
 // usage:
@@ -21,9 +22,9 @@ use symbi_algebra::{OrderedNumeric, Tensor};
 use symbi_ir::algebra::Scalar;
 
 /// number of body slots statically unrolled into the baked gravity/accretion
-/// source kernels. 2 covers binary systems. only SOURCE bodies (gravity-on-gas
-/// or sinks) occupy slots; wall-only fragments live beyond the slot prefix and
-/// are reached exclusively through the per-instance penalization dispatch.
+/// source kernels. 2 covers binary systems. source bodies (gravity-on-gas or
+/// sinks) are what occupy slots; wall-only fragments live beyond the slot prefix
+/// and are reached through the per-instance penalization dispatch.
 pub const MAX_SOURCE_BODIES: usize = 2;
 
 /// orbital parameters for a binary system.
@@ -106,7 +107,7 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
 
     // -- builder pattern --
 
-    /// add a SOURCE body: it occupies the next baked source-kernel slot
+    /// add a source body: it occupies the next baked source-kernel slot
     /// (gravity-on-gas, sink accretion). every source must be added before
     /// any fragment so the slot prefix stays contiguous.
     pub fn add(mut self, body: Body<S, D>) -> Self {
@@ -123,8 +124,8 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
         self
     }
 
-    /// add a wall-only FRAGMENT: a rigid body that never gravitates on the gas
-    /// and never accretes, so it needs no baked source-kernel slot and the
+    /// add a wall-only fragment: a rigid body that acts on the gas through its
+    /// wall alone, so it lives outside the baked source-kernel slots and the
     /// fragment count is unbounded. the body's index is overwritten with its
     /// list position so per-body dispatch and delta ledgers stay aligned.
     pub fn add_fragment(mut self, mut body: Body<S, D>) -> Self {
@@ -168,11 +169,11 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
         self.bodies.is_empty()
     }
 
-    /// whether ANY body needs the backward feedback reduction: a two-way-coupled
+    /// whether some body needs the backward feedback reduction: a two-way-coupled
     /// body (it moves in response to the gas) or a black-hole sink (its accreted
-    /// mass + rate come from the reduction). a one-way fixed gravitational mass
-    /// does NOT — feedback would only feed force/torque DIAGNOSTICS, so the whole
-    /// reduction pass can be skipped for it (a large saving: kepler-like setups).
+    /// mass + rate come from the reduction). for a one-way fixed gravitational mass
+    /// the feedback would land in force/torque diagnostics alone, so the whole
+    /// reduction pass is skipped for it (a large saving: kepler-like setups).
     pub fn needs_feedback(&self) -> bool {
         self.bodies
             .iter()
@@ -514,7 +515,7 @@ mod tests {
             0.1,
             0.04,
             10.0,
-            0.0, // body 0 accretes, body 1 doesn't
+            0.0, // body 0 accretes; body 1 is inert
             0.2,
             0.0,
             0.0,

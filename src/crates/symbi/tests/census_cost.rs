@@ -3,17 +3,17 @@
 //
 // what a census actually costs, as a fraction of the step it rides on.
 //
-// the cost is REPORTED, not bounded: a wall-clock threshold would either be so loose it never
-// fires or so tight it fails on another machine, and neither figure is something a run can be
-// planned around.
+// the cost is reported as a number, and the assertion is placed elsewhere: a wall-clock
+// threshold is either so loose it stays silent or so tight it fails on another machine, and
+// neither figure is something a run can be planned around.
 //
-// what IS asserted is where the cost lives — it scales with the size of the per-cell graph, not
-// with the number of registered accumulators. that is the property needed to reason about a
-// registration before submitting a job, and it is checkable without pinning a wall-clock number.
+// the asserted property is where the cost lives — it scales with the size of the per-cell graph
+// and stays flat in the number of registered accumulators. that is what lets a registration be
+// reasoned about before a job is submitted, and it holds independently of any wall-clock number.
 //
-// two failure modes this measurement discriminates: a compiled map that re-runs the jit on EVERY
-// sample (4.3 ms per sample over 4096 cells, more than the step it observes), and a kernel cache
-// keyed on the census NAME — unique within a run, but naturally reused across a parameter sweep in
+// two failure modes this measurement discriminates: a compiled map that re-runs the jit on every
+// sample (4.3 ms per sample over 4096 cells, exceeding the step it observes), and a kernel cache
+// keyed on the census name — unique within a run, and naturally reused across a parameter sweep in
 // one process, so the second run is handed the first one's kernel.
 // =============================================================================
 
@@ -34,9 +34,9 @@ use symbi_geometry::Spherical;
 const N: usize = 4096;
 const GAMMA: f64 = 5.0 / 3.0;
 
-/// `n_values` accumulators over ONE shared graph: each is the same `rho * dv` product re-emitted,
-/// so the dag is a constant size and only the output count grows. that is the discrimination the
-/// cost claim rests on.
+/// `n_values` accumulators over a single shared graph: each is the same `rho * dv` product
+/// re-emitted, so the graph holds a constant size while the output count grows. that separation
+/// is what the cost claim rests on.
 fn census_with(n_values: usize) -> CensusConfig {
     let names: Vec<String> = (0..n_values).map(|k| format!("\"m{k}\"")).collect();
     let outs: Vec<String> = (0..n_values).map(|_| "2".to_string()).collect();
@@ -141,9 +141,9 @@ fn the_census_cost_tracks_the_graph_not_the_accumulator_count() {
     let one = sample_ms(1, reps);
     let eight = sample_ms(8, reps);
 
-    // reported, not asserted, and reported WITH its build profile: these are debug-profile
-    // numbers, and the optimized sweep is a different measurement entirely. a "few percent of a
-    // hydro step" claim has to be made against a release build or it means nothing.
+    // printed for the record, carrying its build profile: these are debug-profile numbers, and
+    // the optimized sweep is a different measurement entirely. a "few percent of a hydro step"
+    // claim holds only when it is made against a release build.
     println!(
         "census over {N} cells [{} profile]: 1 accumulator {one:.4} ms, 8 accumulators {eight:.4} ms",
         if cfg!(debug_assertions) {
@@ -243,7 +243,7 @@ fn a_reused_scratch_carries_nothing_from_the_previous_sample() {
     let before = sim.store.censuses[0].history.values()[0];
 
     // triple the density everywhere, so a sample that reflects the new state is exactly 3x and one
-    // that reflects the stale scratch is unchanged. the two outcomes cannot be confused.
+    // that reflects the stale scratch is unchanged. the two outcomes are 3x apart.
     for c in sim.geom.allocated.iter() {
         let rho = *sim.fields.prim.rho.view().at(c);
         sim.fields.prim.rho.view_mut().set(c, 3.0 * rho);

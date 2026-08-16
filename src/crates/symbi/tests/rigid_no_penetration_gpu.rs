@@ -3,11 +3,11 @@
 //
 // the cartesian device twin of the rigid-wall gate: a runtime-JIT shaped rigid
 // sphere (a CSG shape, routing the shaped kernel) on the cartesian chart, run on
-// device memory and asserted BIT-CLOSE to
-// the CPU run. this exercises the CARTESIAN bounding-ball bbox branch of the
-// shaped-wall dispatch on device — the index-aligned support box the cylindrical
-// twin (whole-interior dispatch) never takes. the per-body force receipt (a
-// deterministic slab-order fold) must land the same value on both backends.
+// device memory and asserted bit-close to
+// the CPU run. this exercises the cartesian bounding-ball bbox branch of the
+// shaped-wall dispatch on device — the index-aligned support box, where the
+// cylindrical twin routes to whole-interior dispatch. the per-body force receipt
+// (a deterministic slab-order fold) lands the same value on both backends.
 //
 // runs on the host GPU (NVRTC needs no nvcc). run:
 //   cargo test -p symbi --features cuda --test rigid_no_penetration_gpu

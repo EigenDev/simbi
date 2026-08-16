@@ -4,8 +4,8 @@
 # the accretor validation report (docs/ideas/accretor.md §5-6): steady-state
 # detection, dt-weighted mean accretion rate + fluctuation amplitude, and the
 # ratio to the analytic bondi rate f = Mdot / (4 pi lambda_c(gamma)) — rungs
-# 1-2 of the ladder in one command. exits nonzero when the run is not
-# quotable (never settled, or the averaging span is under 10 t_B).
+# 1-2 of the ladder in one command. exits nonzero when the run falls short of
+# quotable: the series stays unsettled, or the averaging span is under 10 t_B.
 # =============================================================================
 
 import argparse
@@ -56,7 +56,7 @@ def main() -> int:
 
             with h5py.File(a.checkpoint, "r") as f:
                 # the eos parameter travels in the checkpoint metadata; the flag
-                # exists only to override a file written before it did.
+                # overrides it for a file written before the attribute existed.
                 a.gamma = float(_find_attr(f, "gamma"))
         d = load_body_diagnostics(a.checkpoint)
     except (FileNotFoundError, OSError) as exc:

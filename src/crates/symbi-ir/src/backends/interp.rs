@@ -4,14 +4,14 @@
 // the CPU backend: an in-process interpreter for the scalarized IR
 // (the device-agnostic execution boundary).
 //
-// emit_cpu / emit_cuda / emit_kernel render a `LoweredFn` to SOURCE that is
-// compiled later; this RUNS it directly on the host. `Cpu` is the first
+// emit_cpu / emit_cuda / emit_kernel render a `LoweredFn` to source that is
+// compiled later; this runs it directly on the host. `Cpu` is the first
 // `Backend` instance; the source-emitting GPU path (emit_cuda / emit_kernel +
 // the `symbi` runtime's JIT + dispatch) is the other. the cross-device
 // kernel-over-field-buffers method extends this boundary — it needs the buffer
 // / domain model that lives in `symbi-grid` / `symbi`.
 //
-// scope: elemental `LoweredFn` over SCALAR params — the `scalarize`
+// scope: elemental `LoweredFn` over scalar params — the `scalarize`
 // output for pointwise / elemental graphs (arithmetic, transcendentals,
 // select). kernel-stencil evaluation (`FieldLoadAt` over field buffers + a
 // coordinate loop), rank-1 array params, and generic-dim `for` loops
@@ -58,8 +58,8 @@ impl Value {
 type Env = HashMap<String, Value>;
 
 /// resolves a stencil field read `field_key[coord]` to its value, for the
-/// kernel interpreter. `None` in the elemental path (where `FieldLoadAt` cannot
-/// appear). the coord is one integer index per spatial axis.
+/// kernel interpreter. `None` in the elemental path, whose graphs are
+/// FieldLoadAt-free. the coord is one integer index per spatial axis.
 type FieldRead<'a> = Option<&'a dyn Fn(&str, &[i64]) -> f64>;
 
 /// a compute backend for the scalarized IR. `Cpu` interprets in-process; the
@@ -93,7 +93,7 @@ impl Backend for Cpu {
             env.insert(p.name.clone(), Value::F(v));
         }
         for stmt in &f.body {
-            // top-level break would escape the kernel — disallowed by lowering.
+            // lowering confines `break` to a loop body, so the top level flows through.
             let _ = exec_stmt(stmt, &mut env, None);
         }
         f.results
@@ -163,12 +163,12 @@ fn exec_stmt(stmt: &ScalarStmt, env: &mut Env, fr: FieldRead) -> Flow {
         } => {
             // Scope semantics for the interpreter: execute body (its lets
             // mutate env), evaluate `result`, then bind `name` to it in env.
-            // **scoping is a CODEGEN concern** (lifetime hints to nvcc /
-            // rustc); the interpreter doesn't restore env afterward because
-            // doing so would diverge from the codegen path's semantics under
-            // SSA-fresh names — the body's bindings are all fresh `__cse_N`
-            // names that downstream stmts don't reference anyway. break does
-            // not propagate out of a Scope (it's not a loop).
+            // scoping is a codegen concern (lifetime hints to nvcc / rustc);
+            // the interpreter leaves env intact afterward, which is what keeps
+            // it aligned with the codegen path under SSA-fresh names — the
+            // body's bindings are all fresh `__cse_N` names that downstream
+            // stmts leave alone. a Scope is a block, so `break` belongs to the
+            // enclosing loop.
             for s in body {
                 if exec_stmt(s, env, fr) == Flow::Break {
                     return Flow::Break;
@@ -184,12 +184,12 @@ fn exec_stmt(stmt: &ScalarStmt, env: &mut Env, fr: FieldRead) -> Flow {
             else_body,
             ..
         } => {
-            // a REAL branch: execute ONLY the taken arm (each arm ends with a
+            // a real branch: execute the taken arm alone (each arm ends with a
             // `name = <arm result>` Assign that binds `name` in env). this
-            // matches BOTH the f64 host oracle and the rendered `if/else` — the
-            // untaken arm's ops never run, so an out-of-domain transcendental in
-            // the dead arm cannot poison the result. break does not propagate
-            // out (not a loop).
+            // matches both the f64 host oracle and the rendered `if/else`: the
+            // untaken arm's ops stay unevaluated, so an out-of-domain
+            // transcendental there leaves the result clean. an if/else is a
+            // branch, so `break` belongs to the enclosing loop.
             let arm = if eval_expr(cond, env, fr).as_b() {
                 then_body
             } else {
@@ -290,7 +290,7 @@ fn eval_binop(op: BinaryKind, a: Value, b: Value) -> Value {
 fn eval_method(recv: f64, method: &str, args: &[f64]) -> Value {
     match method {
         "sqrt" => Value::F(recv.sqrt()),
-        // abs/min/max use the plain `a<b?a:b` TERNARY (the NaN-symmetric
+        // abs/min/max use the plain `a<b?a:b` ternary (the NaN-symmetric
         // f64::abs/min/max would diverge) — so the interpreter
         // matches the cuda emit, the cranelift jit, and the f64/f32 `Numeric`
         // carrier bit-for-bit at NaN / signed-zero.
@@ -333,9 +333,9 @@ fn eval_method(recv: f64, method: &str, args: &[f64]) -> Value {
 
 // ---- kernel interpreter (the stencil case, over host buffers) -----------
 //
-// runs a scalarized KERNEL over a domain on host f64 buffers: iterates the
+// runs a scalarized kernel over a domain on host f64 buffers: iterates the
 // cells, resolves field reads (cell loads + stencil-shifted `FieldLoadAt`),
-// evaluates the shared body, and writes the per-cell outputs. the SAME
+// evaluates the shared body, and writes the per-cell outputs. the same
 // `KernelEmitInputs` spec either emits CUDA (`emit_kernel_from_lowering`) or
 // runs here on CPU. buffers are separate in/out (a stencil sweep that wrote
 // in-place would corrupt neighbor reads; in-place godunov is the caller's
@@ -359,11 +359,11 @@ pub struct CpuFieldMut<'a> {
 }
 
 /// affine view offset `sum_a (coord[a] - lo[a]) * strides[a]`. the stride prefix
-/// product is NOT re-spelled here — it is derived from the ONE canonical
-/// definition `symbi_algebra::strides_from_extent` (the same formula `Layout` /
+/// product comes from the one canonical definition
+/// `symbi_algebra::strides_from_extent` (the same formula `Layout` /
 /// `Domain` / the runtime `View` and the AOT kernels all use). routing through it
-/// means the interpreter is a faithful oracle for stencil (neighbor) reads and
-/// cannot drift from the real `Field` layout (axis-0-fastest / physical-x-fastest).
+/// makes the interpreter a faithful oracle for stencil (neighbor) reads, locked to
+/// the real `Field` layout (axis-0-fastest / physical-x-fastest).
 fn flat_index(coord: &[i64], lo: &[i32], extent: &[u32], ndim: usize) -> usize {
     let ext_i64: [i64; 4] = std::array::from_fn(|a| if a < ndim { extent[a] as i64 } else { 1 });
     let mut strides = [0i64; 4];
@@ -426,7 +426,7 @@ impl Cpu {
         for flat in 0..total {
             // the canonical flat -> coord map, owned by the layout (`CONTIGUOUS_AXIS` fastest), so
             // this reference sweep visits cells in the same order the emitted kernels and the JIT
-            // drivers do. the inverse map comes from the layout, never hand-rolled here.
+            // drivers do. the inverse map comes from the layout, defined in one place.
             symbi_algebra::unflatten(flat, &ext, &mut idx);
             let coord: Vec<i64> = (0..ndim)
                 .map(|ax| dom_los[ax] as i64 + idx[ax] as i64)
@@ -467,14 +467,14 @@ mod tests {
     // non-square / >=2D extents and asymmetric coords. if the
     // stride formula in `flat_index` is re-spelled and drifts from the canonical definition
     // (the latent axis-order class of bug — last-axis-fastest vs axis-0-fastest),
-    // this fails. `Layout` itself is already pinned == `Domain::flat_index` in
+    // this fails. `Layout` itself is pinned == `Domain::flat_index` in
     // symbi-algebra, so transitively interp == Domain == kernels.
     #[test]
     fn flat_index_equals_canonical_layout() {
         use symbi_algebra::Layout;
 
-        // deterministic splitmix prng — no external dep (workspace forbids rand
-        // in build-affecting code), mirrors the symbi-algebra law-test rng.
+        // deterministic splitmix prng, dependency-free (the workspace forbids rand
+        // in build-affecting code); mirrors the symbi-algebra law-test rng.
         struct Rng(u64);
         impl Rng {
             fn bits(&mut self) -> u64 {
@@ -603,21 +603,21 @@ mod tests {
 
     // ----- Scope interpreter semantics test -----
 
-    /// the interpreter must execute a `ScalarStmt::Scope` correctly: run the
-    /// inner body, evaluate `result`, bind `result`'s value to the outer name.
-    /// since scoping is a CODEGEN concern (it tells nvcc/rustc about lifetimes),
-    /// the interpreter's numerical answer must be IDENTICAL whether the body
+    /// the interpreter executes a `ScalarStmt::Scope` by running the
+    /// inner body, evaluating `result`, and binding `result`'s value to the outer
+    /// name. since scoping is a codegen concern (it tells nvcc/rustc about
+    /// lifetimes), the interpreter's numerical answer is identical whether the body
     /// uses Scope or flat lets. that property is what makes scope-aware lowering
-    /// safe: it doesn't change semantics, only codegen.
+    /// safe: it moves codegen alone and holds semantics fixed.
     #[test]
     fn scope_is_semantically_transparent_in_interpreter() {
         use crate::passes::scalarize::{
             BinaryKind, LoweredFn, LoweredParam, ScalarExpr, ScalarStmt,
         };
 
-        // build a tiny LoweredFn BY HAND using a Scope for a controlled
-        // test of the Scope arm in exec_stmt — independent of whatever the
-        // scalarize pass might or might not produce.
+        // build a tiny LoweredFn by hand using a Scope for a controlled
+        // test of the Scope arm in exec_stmt, independent of what the
+        // scalarize pass emits.
         //
         // semantics: out = (a + b) * a  computed via a Scope binding `__t1 = a + b`
         // then returning `__t1 * a`.
@@ -650,7 +650,7 @@ mod tests {
             result_shape: vec![],
         };
 
-        // equivalent FLAT form: same math, no scope.
+        // equivalent flat form: the same math spelled with plain lets.
         let flat_form = LoweredFn {
             name: "flat_form".to_string(),
             params: vec![

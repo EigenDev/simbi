@@ -2,20 +2,20 @@
 // gv_immersed.rs
 //
 // the immersed-boundary body source terms traced at S = Gv:
-//   - body_source_gv  (FORWARD, bodies -> fluid): softened gravity + bondi-hoyle accretion,
+//   - body_source_gv  (forward, bodies -> fluid): softened gravity + bondi-hoyle accretion,
 //     cons -> cons in-place (`cons += dt * S`).
-//   - body_feedback_gv (BACKWARD, fluid -> bodies): per-cell per-body force / torque / accreted
+//   - body_feedback_gv (backward, fluid -> bodies): per-cell per-body force / torque / accreted
 //     mass -> scratch fields a device reduction sums into each body's BodyDelta.
 //
-// GENERIC over coordinate system: the physics is done in CARTESIAN
+// generic over coordinate system: the physics is done in cartesian
 // (coord-free) — `cell_scaffold` supplies the cell's cartesian position + gas velocity via the
-// gv to_cartesian / vector_to_cartesian transforms; the forward source PROJECTS gravity + sink
+// gv to_cartesian / vector_to_cartesian transforms; the forward source projects gravity + sink
 // velocity onto the physical momentum frame (vector_from_cartesian), the feedback keeps the
 // cartesian force/torque (matching symbi_ib's BodyDelta). the physics is a function of `cons`
-// ALONE (no c2p); the 0..n_bodies loop is BRANCH-FREE (inactive body: mass=0 / sink_rate=0).
+// alone (c2p-free); the 0..n_bodies loop is branch-free (inactive body: mass=0 / sink_rate=0).
 //
-// kept OUT of the (already large) gv module: this rides the PUBLIC gv API only — Gv arithmetic +
-// the transcendentals (exp) + `cell_geometry_gv` + begin/end_trace.
+// this module sits outside the (already large) gv module and rides the public gv API alone —
+// Gv arithmetic + the transcendentals (exp) + `cell_geometry_gv` + begin/end_trace.
 // =============================================================================
 
 use symbi_ir::graph::NodeId;
@@ -35,19 +35,19 @@ fn sq(a: Gv) -> Gv {
     a * a
 }
 
-/// per-cell, per-body physics in CARTESIAN (coord-free): softened gravity `g`, the well-posed
-/// DRAIN RATE `drain_rate` (1/time; the fluid in the mask relaxes by `exp(-drain_rate*dt)`), and
+/// per-cell, per-body physics in cartesian (coord-free): softened gravity `g`, the well-posed
+/// drain rate `drain_rate` (1/time; the fluid in the mask relaxes by `exp(-drain_rate*dt)`), and
 /// `rvec = cell - body`. the drain replaces the KMK04 mass-only sink: a
-/// UNIFORM exponential scaling of every conserved component leaves the intensive primitive state
-/// invariant (no acoustic injection, positivity-preserving for any dt) and the accretion rate is
-/// EMERGENT (the reduced `U(1 - exp(-rate*dt))`).
+/// uniform exponential scaling of every conserved component leaves the intensive primitive state
+/// invariant (acoustically silent, positivity-preserving for any dt) and the accretion rate is
+/// emergent (the reduced `U(1 - exp(-rate*dt))`).
 struct BodyContributionGv {
     g: [Gv; 3],
     drain_rate: Gv,
     rvec: [Gv; 3],
 }
 
-/// the CARTESIAN axes (0=x,1=y,2=z) a body's ndim-D position/velocity components map to — the
+/// the cartesian axes (0=x,1=y,2=z) a body's ndim-D position/velocity components map to — the
 /// grid-plane convention. identical to `immersed::body_cart_axes`.
 pub(crate) fn body_cart_axes(coords: Coords, ndim: usize, axes: &[usize]) -> Vec<usize> {
     match coords {
@@ -162,7 +162,7 @@ fn gas_state(ncomp: usize, gamma: Gv, den: Gv, mom: &[Gv], nrg: Gv) -> (Vec<Gv>,
 
 /// the per-cell scaffolding both kernels open with: the cell's coordinate position `coord3` (3D,
 /// gridded coords from the centroid via the axis-role map, ungridded at symmetry 0), the cell
-/// CARTESIAN position, the gas velocity in CARTESIAN, min width, cs, e_int.
+/// cartesian position, the gas velocity in cartesian, min width, cs, e_int.
 #[allow(clippy::too_many_arguments)]
 fn cell_scaffold(
     coords: Coords,
@@ -175,7 +175,7 @@ fn cell_scaffold(
     nrg: Gv,
 ) -> ([Gv; 3], [Gv; 3], [Gv; 3], Gv, Gv, Gv) {
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
-    // coord3 in NATURAL coordinate order: gridded coords from the centroid, ungridded = 0.
+    // coord3 in natural coordinate order: gridded coords from the centroid, ungridded = 0.
     let mut coord3 = [Gv::ZERO; 3];
     for (g, &coord_idx) in axes.iter().enumerate() {
         if coord_idx < 3 {
@@ -218,16 +218,16 @@ fn body_contribution(
     // proven conservative (g = -grad phi) + bounded in the well-posedness suite (`ibm.rs`).
     let g = crate::ibm::body_gravity(rvec, mass, soft, soft_kind);
 
-    // the well-posed DRAIN rate: chi * min(sink, cs/dx), the mollified mask chi =
+    // the well-posed drain rate: chi * min(sink, cs/dx), the mollified mask chi =
     // 0.5(1 - tanh((r - r_mask)/w)) (w = one cell) times the sound-crossing-capped sink. `sink_rate`
     // (per body) is the user dial: 0 for a non-accreting body (drain_rate = 0, exact no-op), large ->
     // the full sound-crossing drain. carrier-generic form proven nonnegative -> f in (0,1] (`ibm.rs`).
     let r_mask = Gv::scalar(&format!("body_{b}_racc"));
     let sink_rate = Gv::scalar(&format!("body_{b}_sink"));
-    // spatial gate at the mask's EXACT support (ibm::DRAIN_SUPPORT_WIDTHS): beyond it the
+    // spatial gate at the mask's exact support (ibm::DRAIN_SUPPORT_WIDTHS): beyond it the
     // ungated rate is exactly zero (tanh saturation), so the lazy branch skips the
-    // tanh + divisions on the far field — ~all cells for a sink of a few cell widths —
-    // without changing any bit. the branch is spatially coherent, hence well predicted.
+    // tanh + divisions on the far field — ~all cells for a sink of a few cell widths — for a
+    // bit-identical result. the branch is spatially coherent, hence well predicted.
     let r_cut = r_mask + Gv::from_f64(crate::ibm::DRAIN_SUPPORT_WIDTHS) * min_w;
     let drain_rate = Gv::cond(
         r_mag.cmp_lt(r_cut),
@@ -242,23 +242,23 @@ fn body_contribution(
     }
 }
 
-/// per-cell body-evolved ADIABATIC conserved state as a STANDALONE forward kick: `(den, mom, nrg)`
+/// per-cell body-evolved adiabatic conserved state as a standalone forward kick: `(den, mom, nrg)`
 /// -> the state after `dt *` the immersed-body source (gravity + accretion sink) over all
 /// `n_bodies` slots, with the gravity half exact to second order in `dt` by construction.
 ///
-/// the energy carries `0.5 rho |g|^2 dt^2` explicitly, which is what makes the ISOLATED kick
+/// the energy carries `0.5 rho |g|^2 dt^2` explicitly, which is what makes the isolated kick
 /// preserve internal energy exactly: momentum gains `rho g dt`, so the kinetic energy it implies
 /// gains `m.g dt + 0.5 rho |g|^2 dt^2`, and the energy is credited exactly that. this is the right
 /// operator for a consumer that applies the whole kick to one state and takes the result as the
 /// answer — the FOFC freeze parachute, which evolves the stage input and uses it as that cell's
 /// entire update.
 ///
-/// it is the WRONG operator to apply on top of a state some other operator has already advanced.
-/// composing an exact flux update with an exact source update sequentially is first order in `dt`
+/// applied on top of a state some other operator has already advanced, this becomes sequential
+/// composition: an exact flux update composed with an exact source update is first order in `dt`
 /// however accurately either half is integrated, and the residue is one-signed in the internal
 /// energy. a consumer that runs after the flux divergence wants [`body_applied_gv`].
 ///
-/// a PURE function of the cell state in registers (NO field reads / writes), so it composes into
+/// a pure function of the cell state in registers, touching registers alone, so it composes into
 /// any kernel that already holds the conserved state with no materialized buffer. declares
 /// `dt` / `gamma` + the per-body scalars via `body_contribution`; unused body slots contribute zero.
 pub(crate) fn body_evolved_gv(
@@ -278,8 +278,8 @@ pub(crate) fn body_evolved_gv(
     let (coord3, cell_cart, vel_cart, min_w, cs, _e_int) =
         cell_scaffold(coords, ndim, ncomp, axes, gamma, den, mom, nrg);
 
-    // gravity is an ADDITIVE momentum + energy source; the drain is the TOTAL rate over all bodies,
-    // applied as ONE uniform multiplicative factor (the exact-exponential
+    // gravity is an additive momentum + energy source; the drain is the total rate over all bodies,
+    // applied as one uniform multiplicative factor (the exact-exponential
     // relaxation). the two operators split cleanly: gravity accelerates, then the mask drains.
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
     let mut total_rate = Gv::ZERO;
@@ -316,33 +316,33 @@ pub(crate) fn body_evolved_gv(
         .map(|comp| (mom[comp] + dt * d_mom[comp]) * f)
         .collect();
     let nrg_new = (nrg + dt * gravity_work + Gv::from_f64(0.5) * dt * dt * force_sq / den) * f;
-    // `f` is returned so a dyed run can drain the conserved dye by the SAME factor. a sink removes
+    // `f` is returned so a dyed run can drain the conserved dye by the same factor. a sink removes
     // gas together with the dye dissolved in it, leaving the concentration of what remains
     // untouched: `D_chi = rho chi` scales exactly as `rho` does. recomputing the factor at the
     // call site would duplicate the per-cell mask and rate, so it is handed out instead.
     (den_new, mom_new, nrg_new, f)
 }
 
-/// the immersed-body operator for a consumer that runs AFTER the flux divergence: the body
+/// the immersed-body operator for a consumer that runs after the flux divergence: the body
 /// contribution is evaluated at `src` (the stage input) and applied to `dst` (the flux-advanced
 /// conserved state).
 ///
 /// splitting the evaluation point from the application point is what makes this composable. an
 /// explicit scheme advances `cons = a0 u_n + ac (cons - dt div F + dt S)`, in which the flux and
-/// the source are BOTH evaluated at the stage input and summed into one convex update. applying a
+/// the source are both evaluated at the stage input and summed into one convex update. applying a
 /// complete source operator on top of an already-flux-advanced state is a different scheme —
 /// sequential composition — and it is first order in `dt` no matter how accurately either half is
 /// integrated. the residue lands in the internal energy `e = E - |m|^2/2rho` with a fixed sign,
-/// so it accumulates rather than averaging out, and no increase in Runge-Kutta order removes it
-/// because every stage repeats the same composition.
+/// so it accumulates, and it survives every Runge-Kutta order because each stage repeats the
+/// same composition.
 ///
 /// two consequences for the form below, both differences from [`body_evolved_gv`]:
 ///
 /// - the gravity force, the gravity work and the drain rate all read `src`, so the source is the
 ///   one the stage's flux was evaluated against.
-/// - the energy carries `m.g dt` and NOT the `0.5 rho |g|^2 dt^2` second-order term. that term
-///   belongs to a standalone kick; here the stage weights reconstruct it, and adding it explicitly
-///   would double-count it.
+/// - the energy carries `m.g dt` alone. the `0.5 rho |g|^2 dt^2` second-order term belongs to a
+///   standalone kick; here the stage weights reconstruct it, so adding it explicitly would
+///   double-count it.
 ///
 /// the accretion drain is unchanged: `f = exp(-rate dt)` still multiplies the whole conserved
 /// vector, which is exact for the relaxation it solves and positivity-preserving for any `dt`
@@ -419,7 +419,7 @@ pub fn body_source_gv(
         .collect();
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
     // this pass runs after the godunov stage has advanced `cons`, so the body contribution is
-    // evaluated at the STAGE INPUT — the state the stage's flux divergence was also evaluated at —
+    // evaluated at the stage input — the state the stage's flux divergence was also evaluated at —
     // and applied to the advanced `cons`.
     let us_den = Gv::field("us_den", FieldRef::ustage_den());
     let us_mom: Vec<Gv> = (0..ncomp)
@@ -448,7 +448,7 @@ pub fn body_source_gv(
         nrg_new.node(),
     ));
     // the dye drains with the mass it is dissolved in, so the concentration the surviving gas
-    // carries is unchanged. gravity never enters: it accelerates, it does not remove dye.
+    // carries is unchanged. the drain alone touches the dye; gravity only accelerates the gas.
     if has_dye {
         let chi = Gv::field("chi", FieldRef::cons_chi());
         writes.push((
@@ -460,12 +460,11 @@ pub fn body_source_gv(
     (end_trace(), writes)
 }
 
-/// BACKWARD feedback, GRAVITY-REACTION half (single body slot): per cell, the reaction
+/// backward feedback, gravity-reaction half (single body slot): per cell, the reaction
 /// force the gas exerts on the body, `f_grav[ax] = -(den * g_cart[ax]) * dv`. genuinely
-/// GLOBAL support — every gas cell pulls on the body — so the runtime reduces it over
-/// the full interior. reads only `cons.den` (no velocity / energy / sound speed), so
-/// the pass streams a single field. slot-0 scalar names (`body_0_*`); the
-/// dispatch rebinds them per ACTIVE body.
+/// global support — every gas cell pulls on the body — so the runtime reduces it over
+/// the full interior. reads `cons.den` alone, so the pass streams a single field.
+/// slot-0 scalar names (`body_0_*`); the dispatch rebinds them per active body.
 pub fn body_feedback_grav_gv(coords: Coords, ndim: usize, axes: &[usize]) -> (GvKernel, Writes) {
     begin_trace();
     let cart_axes = body_cart_axes(coords, ndim, axes);
@@ -497,11 +496,11 @@ pub fn body_feedback_grav_gv(coords: Coords, ndim: usize, axes: &[usize]) -> (Gv
     (end_trace(), writes)
 }
 
-/// BACKWARD feedback, DRAIN half (single body slot): the sink-weighted quantities —
+/// backward feedback, drain half (single body slot): the sink-weighted quantities —
 /// drag force (absorbed momentum / dt), torque, absorbed mass and energy. every output
-/// is proportional to `frac = 1 - exp(-rate*dt)`, which is EXACTLY zero outside the
+/// is proportional to `frac = 1 - exp(-rate*dt)`, which is exactly zero outside the
 /// mask support (tanh saturation, `ibm::DRAIN_SUPPORT_WIDTHS`), so the runtime
-/// dispatches AND reduces this kernel over the body's support bounding box only: an
+/// dispatches and reduces this kernel over the body's support bounding box only: an
 /// omitted cell contributes an exact zero to every sum. slot-0 scalar names; the
 /// dispatch rebinds them per active body.
 pub fn body_feedback_drain_gv(
@@ -531,7 +530,7 @@ pub fn body_feedback_drain_gv(
     );
     // the saturation lemma at the drain seam: the cond-gated rate is exactly
     // zero outside |x - body_pos| > racc + DRAIN_SUPPORT_WIDTHS*min(dx) (the
-    // gate radius IS the tanh saturation radius), so every feedback write —
+    // gate radius is the tanh saturation radius), so every feedback write —
     // all multiples of the rate — derives this ball. cartesian only: the ball
     // lives in cartesian space, the one chart whose index box contains it.
     if matches!(coords, Coords::Cartesian) {
@@ -592,7 +591,7 @@ pub fn body_feedback_drain_gv(
     (kernel, writes)
 }
 
-/// BACKWARD feedback: per cell, per body, the CARTESIAN force / 3D torque / absorbed mass / absorbed
+/// backward feedback: per cell, per body, the cartesian force / 3D torque / absorbed mass / absorbed
 /// energy each body receives -> the MAX_SOURCE_BODIES*(ndim+5) reduction-scratch writes (`fb_{b}_force_{ax}`
 /// / `fb_{b}_torque_{t}` / `fb_{b}_mass` / `fb_{b}_energy`, the order the runtime sums). generic over
 /// coord system.
@@ -622,7 +621,7 @@ pub fn body_feedback_gv(
     let dv_dt = dv * dt;
 
     let _ = dv_dt;
-    // the gas momentum in CARTESIAN (den * v_cart): what the uniform drain removes proportionally.
+    // the gas momentum in cartesian (den * v_cart): what the uniform drain removes proportionally.
     let mom_cart: [Gv; 3] = std::array::from_fn(|i| den * vel_cart[i]);
 
     let mut writes: Writes = Vec::new();
@@ -631,8 +630,8 @@ pub fn body_feedback_gv(
             b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
         );
         // the fraction of this cell drained by body b this step: frac = 1 - exp(-rate*dt). exact for
-        // NON-overlapping masks (each cell in at most one mask -> matches the forward's total-rate
-        // factor); overlapping masks slightly over-attribute in this DIAGNOSTIC reduction.
+        // non-overlapping masks (each cell in at most one mask -> matches the forward's total-rate
+        // factor); overlapping masks slightly over-attribute in this diagnostic reduction.
         let frac = Gv::cond(
             bc.drain_rate.cmp_gt(Gv::ZERO),
             || Gv::ONE - (Gv::ZERO - bc.drain_rate * dt).exp(),
@@ -674,7 +673,7 @@ pub fn body_feedback_gv(
             (den * frac * dv).node(),
         ));
         // absorbed total (internal + kinetic) energy = nrg * frac * dv -- the accretion power,
-        // closing the gas+body ENERGY ledger. adiabatic only (the iso kernel has no energy slot).
+        // closing the gas+body energy ledger. adiabatic only (the iso state carries den + mom).
         writes.push((
             format!("b{b}_e"),
             format!("fb_{b}_energy").into(),
@@ -687,21 +686,21 @@ pub fn body_feedback_gv(
 // =============================================================================
 // isothermal variants (no energy equation)
 //
-// the immersed-body PHYSICS is EOS-independent — softened gravity + bondi-hoyle
-// accretion are functions of (den, mom, cs) only via the SHARED `body_contribution`.
+// the immersed-body physics is EOS-independent — softened gravity + bondi-hoyle
+// accretion are functions of (den, mom, cs) only, through the shared `body_contribution`.
 // the single difference from the adiabatic kernels is the closure for `cs` and
-// the absence of an energy update:
+// the reach of the update:
 //   - adiabatic: cs / e_int are recovered from `cons.nrg` (`gas_state`), and the
 //     source updates `cons.nrg` (gravity work + accreted internal+kinetic energy).
-//   - isothermal: there is no `cons.nrg`. cs comes from `prim.pre` (= cs^2(x)*rho,
-//     the substrate's iso pressure encoding — EXACTLY what the iso FLUX reads), so
-//     a locally-isothermal cs^2(x) flows through identically; no energy is updated.
-// future media (porous / deformable) extend `body_contribution`, so BOTH the
+//   - isothermal: the state carries den + mom, and cs comes from `prim.pre` (= cs^2(x)*rho,
+//     the substrate's iso pressure encoding, exactly what the iso flux reads), so
+//     a locally-isothermal cs^2(x) flows through identically and the update stays in den + mom.
+// future media (porous / deformable) extend `body_contribution`, so both the
 // adiabatic and isothermal kernels inherit them with no further duplication.
 // =============================================================================
 
 // iso gas state from cons + the substrate pressure: (vel_physical[ncomp], cs).
-// `pre = cs^2(x)*rho` so `cs = sqrt(pre/rho)`. no internal energy (isothermal).
+// `pre = cs^2(x)*rho` so `cs = sqrt(pre/rho)`. the isothermal closure returns velocity and cs.
 fn gas_state_iso(ncomp: usize, den: Gv, mom: &[Gv], pre: Gv) -> (Vec<Gv>, Gv) {
     let inv_den = Gv::ONE / den;
     let vel: Vec<Gv> = (0..ncomp).map(|comp| mom[comp] * inv_den).collect();
@@ -738,9 +737,9 @@ fn cell_scaffold_iso(
     (coord3, cell_cart, vel_cart, min_w, cs)
 }
 
-/// FORWARD iso source: `cons += dt * (S_grav + S_accretion)` with NO energy update.
-/// reads cons (den/mom) + prim.pre; writes den/mom (no nrg). gravity + accretion via
-/// the SHARED `body_contribution`.
+/// forward iso source: `cons += dt * (S_grav + S_accretion)` over den and mom.
+/// reads cons (den/mom) + prim.pre; writes den/mom. gravity + accretion via
+/// the shared `body_contribution`.
 pub fn body_source_iso_gv(
     n_bodies: usize,
     coords: Coords,
@@ -779,7 +778,7 @@ pub fn body_source_iso_gv(
     (end_trace(), writes)
 }
 
-/// the isothermal immersed-body evolution as a PURE per-cell function (no field reads): the
+/// the isothermal immersed-body evolution as a pure per-cell function of its arguments alone: the
 /// energy-free twin of `body_evolved_gv`. given the cell's conserved (den, mom) and its isothermal
 /// pressure `pre` (which sets the sound speed), returns the state advanced by `dt` of softened
 /// newtonian gravity + bondi-hoyle accretion from `n_bodies` point masses. shared by the standalone
@@ -827,8 +826,8 @@ pub(crate) fn body_evolved_iso_gv(
     (den_new, mom_new)
 }
 
-/// host-testable trace of the STANDALONE body kick [`body_evolved_gv`], which reaches production
-/// only inlined into the FOFC freeze parachute where no kernel boundary exposes it. reads and
+/// host-testable trace of the standalone body kick [`body_evolved_gv`], which reaches production
+/// inlined into the FOFC freeze parachute, wholly inside that kernel's boundary. reads and
 /// writes cons; the law it carries is that the kick leaves internal energy exactly fixed, because
 /// the energy it credits is exactly the kinetic energy its own momentum update implies.
 pub fn body_evolved_probe_gv(
@@ -920,7 +919,7 @@ pub(crate) fn body_applied_iso_gv(
     (den_new, mom_new)
 }
 
-/// BACKWARD iso feedback: identical force/torque/mass writes as the adiabatic
+/// backward iso feedback: identical force/torque/mass writes as the adiabatic
 /// kernel; cs comes from prim.pre. 2D+ only.
 pub fn body_feedback_iso_gv(
     n_bodies: usize,
@@ -989,14 +988,14 @@ pub fn body_feedback_iso_gv(
     (end_trace(), writes)
 }
 
-/// the total gravitational potential at a point displaced `half_cells` HALF-CELL widths from the
+/// the total gravitational potential at a point displaced `half_cells` half-cell widths from the
 /// current cell's lower face along the sweep axis: `half_cells = 2k` lands on the lower face of
 /// cell `i+k`, `2k+1` on that cell's centre.
 ///
-/// built from the SAME `body_{b}_*` scalars and the SAME `body_potential` the immersed-body source
-/// applies, which is the whole point of sourcing it here rather than from an analytic column. a
+/// built from the same `body_{b}_*` scalars and the same `body_potential` the immersed-body source
+/// applies, which is the whole point of sourcing it from the source itself. a
 /// well-balanced reconstruction is exact only when the face states it produces cancel the
-/// DISCRETE force the scheme exerts; a potential taken from an idealized profile agrees with that
+/// discrete force the scheme exerts; a potential taken from an idealized profile agrees with that
 /// force only to truncation order, and the leftover is precisely the residual the balancing exists
 /// to remove. `body_potential` is the antiderivative of `body_gravity` under the same softening
 /// selector, proven by autodiff (`ibm_wellposedness.rs`, theorem 1), so the pairing is exact for
@@ -1018,7 +1017,7 @@ pub fn stencil_potential_gv(
 
     // natural-order coordinates: every axis at its own centroid, then the sweep axis replaced by
     // the displaced position. an even half-cell offset lands on a face of the runtime spacing
-    // map; an odd one lands on the CELL CENTER between the two bracketing faces, through the
+    // map; an odd one lands on the cell center between the two bracketing faces, through the
     // same map-aware center the host `stagger_coord(Center)` uses (geometric mean on a log
     // axis, arithmetic midpoint otherwise) — the position the initial condition seeds the
     // hydrostatic column at, which is what makes the anchor departures exactly zero.
@@ -1054,20 +1053,20 @@ pub fn stencil_potential_gv(
         .sum::<Gv>()
 }
 
-/// the WELL-BALANCED forward body source, gravity only, per chart. the momentum-d source is the
-/// area-weighted difference of EQUILIBRIUM pressures at the cell's own faces,
+/// the well-balanced forward body source, gravity only, per chart. the momentum-d source is the
+/// area-weighted difference of equilibrium pressures at the cell's own faces,
 ///
 ///   S_m[d] = [ A_hi,d (p_eq(phi_hi) - p_eq(phi_c)) - A_lo,d (p_eq(phi_lo) - p_eq(phi_c)) ] / V,
 ///   S_E    = sum_d v[d] S_m[d],
 ///
 /// with `p_eq` the isentrope through the cell's own stage-input state, `phi` the total body
 /// potential at the face and centroid positions (Kaeppeli & Mishra, J. Comput. Phys. 259:199,
-/// 2014), and A/V the SAME `cell_geometry_gv` factors the godunov divergence and the geometric
+/// 2014), and A/V the same `cell_geometry_gv` factors the godunov divergence and the geometric
 /// pressure source use. on a discretely balanced column the three cancel by telescoping: the
 /// balanced reconstruction's face states make the pressure flux divergence
 /// `(A_hi p_eq(phi_hi) - A_lo p_eq(phi_lo))/V`, the geometric source contributes
 /// `p_eq(phi_c)(A_hi - A_lo)/V`, and this source is exactly their difference. `p_eq(phi_c)`
-/// is the cell's own stage-input pressure BIT-exactly (the isentrope is anchored there), so
+/// is the cell's own stage-input pressure bit-exactly (the isentrope is anchored there), so
 /// the reference term costs no transcendental. on a transverse axis the two face potentials
 /// coincide and the source vanishes in the same float arithmetic. cartesian keeps its landed
 /// `(p_eq(phi_hi) - p_eq(phi_lo))/dx` spelling — value-equal (A_hi = A_lo, V = A dx) but a
@@ -1075,10 +1074,10 @@ pub fn stencil_potential_gv(
 /// byte. off equilibrium the source differs from `rho g` at second order, so smooth dynamics
 /// are unchanged at the scheme's order.
 ///
-/// GRAVITY ONLY, on purpose: every accreting surface in this codebase drains through the
+/// gravity alone, on purpose: every accreting surface in this codebase drains through the
 /// penalization stack (`penalize_owns_accretion` = true), so the legacy in-source sink is
-/// already inert on production configs; a balanced source with an active sink has no
-/// equilibrium to preserve. the dispatch refuses the pairing rather than approximating it.
+/// already inert on production configs; a balanced source preserves an equilibrium, and an
+/// active sink is precisely what removes one. the dispatch refuses that pairing outright.
 pub fn body_source_wb_gv(
     n_bodies: usize,
     coords: Coords,
@@ -1094,7 +1093,7 @@ pub fn body_source_wb_gv(
         .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-    // evaluated at the STAGE INPUT, exactly like the analytic body source: the stage's flux
+    // evaluated at the stage input, exactly like the analytic body source: the stage's flux
     // divergence was reconstructed from this state, and the cancellation is a statement about
     // the pair.
     let us_den = Gv::field("us_den", FieldRef::ustage_den());
@@ -1106,7 +1105,7 @@ pub fn body_source_wb_gv(
     let p_us = (gamma - Gv::ONE) * us_den * e_int;
 
     // the bake-time spacing enum is vestigial in the traced face map: `gv_axis_face_at_index`
-    // selects uniform/log/geometric at RUNTIME through the per-axis `map_kind_{ax}` scalar,
+    // selects uniform/log/geometric at runtime through the per-axis `map_kind_{ax}` scalar,
     // so this one kernel serves every grading.
     let spacing = vec![Spacing::Uniform; ndim];
     // the curvilinear form needs the per-axis face areas and inverse volume; traced only on
@@ -1126,15 +1125,15 @@ pub fn body_source_wb_gv(
         let (_, p_lo) = eq.state_at(phi_lo);
         let (_, p_hi) = eq.state_at(phi_hi);
         let s_m = match &geo {
-            // at equilibrium `rho g = dp_eq/dx`, so the source IS the discrete equilibrium
+            // at equilibrium `rho g = dp_eq/dx`, so the source is the discrete equilibrium
             // pressure gradient -- upper face minus lower. the flipped difference doubles the
-            // force the flux divergence carries instead of cancelling it, and a 400-step
+            // force the flux divergence carries where the correct sign cancels it, and a 400-step
             // stagnant column measured |v| = 8.1 under it against 2.9e-2 with the analytic
-            // source: sign errors here announce themselves as detonations, not drifts.
-            // the width is the CELL's own, through the runtime spacing map (`gv_axis_width`
-            // reduces to the `dx_{ax}` scalar on an unmapped axis) -- a graded axis has no
-            // single `dx`, and the flux divergence this source telescopes against differences
-            // its faces over the same per-cell width.
+            // source: sign errors here announce themselves as detonations.
+            // the width is the cell's own, through the runtime spacing map (`gv_axis_width`
+            // reduces to the `dx_{ax}` scalar on an unmapped axis) -- a graded axis carries a
+            // distinct width per cell, and the flux divergence this source telescopes against
+            // differences its faces over that same per-cell width.
             None => (p_hi - p_lo) / crate::gv::gv_axis_width(ax, spacing[ax]),
             // the area-weighted form: `p_eq(phi_c)` is `p_us` bit-exactly (the isentrope's
             // anchor point), so the reference term is the raw stage-input pressure. on a

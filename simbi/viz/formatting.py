@@ -250,9 +250,9 @@ class FigureFormatter:
                 fig, main_ax, find_mappables(results), first_data
             )
         except Exception as exc:
-            # a plot missing its colorbar is still a plot, so this does not halt
-            # the render -- but it is a defect, and swallowing it silently is how
-            # a chart ships with no scale at all
+            # a plot missing its colorbar is still a plot, so the render
+            # continues -- but it is a defect: a chart needs its scale to be
+            # readable, so the failure is announced once
             warn_once(
                 f"colorbar:{type(exc).__name__}", f"colorbar failed: {exc}"
             )
@@ -381,9 +381,9 @@ BAR_WIDTH_IN_CELL = 0.8
 def is_hemispherical(ax: Axes) -> bool:
     """whether the chart draws a half-plane.
 
-    a polar axes centres its sector in the axes box, so a wedge that spans pi
-    fills the box edge to edge and only half its height, leaving a strip below
-    the flat edge that a narrower wedge or a full circle does not."""
+    a polar axes centers its sector in the axes box, so a wedge that spans pi
+    fills the box edge to edge and half its height, leaving a blank strip below
+    the flat edge; a narrower wedge or a full circle fills the box evenly."""
     if "polar" not in getattr(ax, "name", ""):
         return False
     lo, hi = ax.get_xlim()

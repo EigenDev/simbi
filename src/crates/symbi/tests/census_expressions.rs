@@ -40,7 +40,7 @@ const DR: f64 = (R_HI - R_LO) / N as f64;
 
 /// a steeply falling atmosphere: the density spans orders of magnitude across the shell
 /// while the cell volume grows as r^2, so the two weightings pull in opposite directions
-/// and a census using the wrong measure cannot land on the right total by coincidence.
+/// so only the correct measure lands on the right total; a wrong one misses by orders.
 fn density_at(r: f64) -> f64 {
     r.powi(-3)
 }
@@ -95,7 +95,7 @@ fn mass_census() -> CensusConfig {
 #[test]
 fn a_mass_expression_census_reproduces_the_conservation_diagnostic() {
     // the dV leaf's binding, end to end: `density * cell_volume` accumulated over a
-    // spherical grid IS the conservation diagnostic's total mass.
+    // spherical grid reproduces the conservation diagnostic's total mass exactly.
     let sim = build_sim();
     let diag = sim.conservation_diag().expect("conservation diagnostic");
 
@@ -262,9 +262,9 @@ fn a_binned_expression_census_partitions_the_total() {
 
 #[test]
 fn ghost_cells_are_excluded_rather_than_binned() {
-    // a ghost cell is not physical gas. it must carry the excluded marker, distinct from
-    // the marker for a cell that was to be reduced and fell outside the edges — otherwise
-    // the halo would be reported as a shortfall of the binning.
+    // a ghost cell holds halo state rather than physical gas, so it carries the excluded
+    // marker, which is distinct from the marker for a cell that was to be reduced and fell
+    // outside the edges — otherwise the halo would be reported as a shortfall of the binning.
     let sim = build_sim();
     let ev = CensusEvaluator::new(&mass_census()).expect("census compiles");
     let fields = sim.census_fields(&ev, None).expect("host-resident sim");
@@ -280,8 +280,9 @@ fn ghost_cells_are_excluded_rather_than_binned() {
             );
         } else {
             n_ghost += 1;
-            // EXCLUDED sits past the last bucket, and past the outside-the-edges marker: a
-            // ghost is not gas that failed to bin, it is not part of the reduction at all.
+            // the excluded marker sits past the last bucket and past the outside-the-edges
+            // marker: a ghost sits outside the reduction entirely, which is a stronger
+            // statement than gas that failed to bin.
             let excluded = (ev.spec().n_segments() + SEGMENT_EXCLUDED_OFFSET as usize) as f64;
             assert_eq!(seg, excluded, "ghost cell {c:?} must be excluded");
             assert!(
@@ -355,7 +356,7 @@ fn a_forward_referencing_dag_is_refused_with_a_readable_error() {
         }"#,
     )
     .expect("census config parses as json");
-    // CensusEvaluator holds compiled kernels and is not Debug, so unwrap_err won't compile.
+    // CensusEvaluator holds compiled kernels and omits Debug, so the error is matched out by hand.
     let err = match CensusEvaluator::new(&cfg) {
         Err(e) => e,
         Ok(_) => panic!("a forward reference must be refused"),
@@ -422,7 +423,7 @@ fn a_covered_region_is_excluded_so_a_refined_grid_counts_it_once() {
     // its own resolution. counting both inflates every extensive total by exactly the refined
     // volume — smooth, positive, of the right order, and wrong.
     //
-    // exercised here on ONE store by handing the same census a covered region directly, which
+    // exercised here on a single store by handing the same census a covered region directly, which
     // isolates the predicate from the hierarchy's level bookkeeping.
     let sim = build_sim();
     let ev = CensusEvaluator::new(&mass_census()).expect("census compiles");

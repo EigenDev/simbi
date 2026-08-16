@@ -4,15 +4,16 @@
 // the constant-nu Navier-Stokes shear operator, carrier-generic
 // (f64 oracle / Gv trace / Dual). the shear stress
 //   tau_ij = rho nu ( d_i v_j + d_j v_i - (2/3) delta_ij d_k v_k )
-// is evaluated at the FOUR cell faces from a halo-1 velocity stencil and
-// DIFFERENCED into the momentum, so the update is a conservative flux divergence:
-// momentum is conserved to roundoff and angular momentum is TRANSPORTED (the
-// r-phi shear), never created. bulk viscosity zeta = 0 (the disk convention).
+// is evaluated at the four cell faces from a halo-1 velocity stencil and
+// differenced into the momentum, so the update is a conservative flux divergence:
+// momentum is conserved to roundoff, and the r-phi shear transports angular
+// momentum, whose budget therefore moves only through the boundary flux. bulk
+// viscosity zeta = 0 (the disk convention).
 //
-// isothermal only here: no energy channel (the viscous heating is not booked; a
-// locally-isothermal disk radiates it instantly by assumption). the r-phi shear
-// is what drives disk accretion, so the momentum operator is the load-bearing
-// piece; the energy twin (the v_i tau_ij flux + viscous heating) is not built here.
+// the isothermal path books momentum alone: a locally-isothermal disk radiates the
+// viscous heating instantly by assumption. the r-phi shear is what drives disk
+// accretion, so the momentum operator is the load-bearing piece; the adiabatic twin
+// adds the v_i tau_ij flux and the heating it carries.
 //
 // stencil convention: v[jj][ii] and rho[jj][ii] with jj, ii in {0, 1, 2} for the
 // grid offsets {-1, 0, +1} along (y, x); the center cell is [1][1]. the face
@@ -36,8 +37,9 @@ fn harmonic_mean<S: Scalar>(a: S, b: S) -> S {
 }
 
 /// the diagonal deviatoric viscous stress under the stokes hypothesis:
-/// tau_ii = mu (2 e_ii - (2/3) div v). zero bulk viscosity -- the stress tensor
-/// is traceless, so uniform compression alone dissipates nothing. every stress
+/// tau_ii = mu (2 e_ii - (2/3) div v). zero bulk viscosity leaves the stress tensor
+/// traceless, so the dissipation responds to shear alone and a uniform compression
+/// passes through free. every stress
 /// assembly in this file states the constitutive law through this one function;
 /// off-diagonal components are the plain symmetric part mu (d_j v_i + d_i v_j).
 #[inline]
@@ -51,7 +53,7 @@ fn stokes_diag<S: Scalar>(mu: S, e_ii: S, div: S) -> S {
 /// velocity + density + viscosity stencil (2D, cartesian). additive onto
 /// `cons.mom`. `nu` is per-cell: constant-nu passes a uniform stencil (the face
 /// average `0.5(nu + nu) = nu` is bit-identical to a scalar); alpha passes
-/// `nu(x) = alpha c_s^2 / Omega_k(r)`. the FACE viscosity is the average of the
+/// `nu(x) = alpha c_s^2 / Omega_k(r)`. the face viscosity is the average of the
 /// two straddling cells' `nu` — single-valued at the face, so the update stays
 /// conservative under a spatially varying viscosity.
 pub fn viscous_mom_update_2d<S: Scalar>(
@@ -65,9 +67,9 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     viscous_update_2d(v, rho, nu, dx, dy, dt).0
 }
 
-/// the viscous increment for the ADIABATIC regime: the momentum `dt * div(tau)` (bit-identical to
-/// `viscous_mom_update_2d`) PLUS the total-energy increment `dt * div(tau . v)` — the divergence of
-/// the viscous energy flux `F_a = tau_ab v_b`, evaluated on the SAME four faces with the
+/// the viscous increment for the adiabatic regime: the momentum `dt * div(tau)` (bit-identical to
+/// `viscous_mom_update_2d`) plus the total-energy increment `dt * div(tau . v)` — the divergence of
+/// the viscous energy flux `F_a = tau_ab v_b`, evaluated on those same four faces with the
 /// face-interpolated velocity. the conservative flux form conserves total energy exactly, and the
 /// irreversible heating `Phi = tau : grad(v) >= 0` emerges in the internal energy `e = E - rho v^2/2`.
 pub fn viscous_update_2d<S: Scalar>(
@@ -81,9 +83,9 @@ pub fn viscous_update_2d<S: Scalar>(
     let four = S::from_f64(4.0);
     let half = S::from_f64(0.5);
 
-    // the face DYNAMIC viscosity is mu = rho_face * nu_face. the density uses the
-    // HARMONIC (series) mean of the two straddling cells — the physically correct
-    // average of a diffusion coefficient across a face, and the one that VANISHES
+    // the face dynamic viscosity is mu = rho_face * nu_face. the density uses the
+    // harmonic (series) mean of the two straddling cells — the physically correct
+    // average of a diffusion coefficient across a face, and the one that vanishes
     // as either cell empties (rho -> 0). a mass sink that retains momentum (the
     // torque-free surface) leaves a mask cell with tiny rho and O(1) momentum, so
     // v = mom/rho is enormous; the arithmetic mean would keep mu ~ rho_healthy and
@@ -142,7 +144,7 @@ pub fn viscous_update_2d<S: Scalar>(
     let dmom_x = dt * ((txx_xp - txx_xm) / dx + (tyx_yp - tyx_ym) / dy);
     let dmom_y = dt * ((txy_xp - txy_xm) / dx + (tyy_yp - tyy_ym) / dy);
 
-    // the viscous ENERGY flux F_a = tau_ab v_b at each face, with v face-interpolated (arithmetic
+    // the viscous energy flux F_a = tau_ab v_b at each face, with v face-interpolated (arithmetic
     // mean of the straddling cells — the velocity is primitive). div F onto the total energy.
     let fx_xp = txx_xp * (half * (vx(1, 1) + vx(1, 2))) + txy_xp * (half * (vy(1, 1) + vy(1, 2)));
     let fx_xm = txx_xm * (half * (vx(1, 0) + vx(1, 1))) + txy_xm * (half * (vy(1, 0) + vy(1, 1)));
@@ -153,7 +155,7 @@ pub fn viscous_update_2d<S: Scalar>(
     (Tensor::new([dmom_x, dmom_y]), dnrg)
 }
 
-/// the cylindrical `(R, phi)` PHYSICAL-frame deviatoric stress `(tau_RR, tau_pp,
+/// the cylindrical `(R, phi)` physical-frame deviatoric stress `(tau_RR, tau_pp,
 /// tau_Rphi)` from the physical velocity gradients at a point of radius `r`.
 /// `u = v_R`, `w = v_phi`. the metric enters as the `u/R` (azimuthal stretch) and
 /// `-w/R` (rigid-rotation cancellation) terms — a rigid rotation `w = Omega R`
@@ -183,11 +185,12 @@ fn cyl_stress<S: Scalar>(
 }
 
 /// the viscous momentum increment `dt * div(tau)` for the center cell of a 3x3
-/// stencil on a cylindrical `(R, phi)` grid, PHYSICAL orthonormal frame,
+/// stencil on a cylindrical `(R, phi)` grid, physical orthonormal frame,
 /// conservative. `v[j][i] = (v_R, v_phi)`. the radial force uses the area-weighted
 /// `(1/R) d_R(R tau_RR)` divergence plus the `-tau_pp/R` hoop stress; the azimuthal
-/// force uses the ANGULAR-MOMENTUM-conserving `(1/R^2) d_R(R^2 tau_Rphi)` flux, so
-/// `R * mom_phi` (the angular momentum) is transported, never created — the r-phi
+/// force uses the angular-momentum-conserving `(1/R^2) d_R(R^2 tau_Rphi)` flux, so
+/// `R * mom_phi` (the angular momentum) is transported, entering a cell through its
+/// faces alone — the r-phi
 /// shear of a differentially rotating disk drives `v_R = -3 nu / (2 R)`. `r_c` is
 /// the cell R centroid; neighbors sit at `r_c +- dr`, faces at `r_c +- dr/2`.
 pub fn viscous_mom_update_cyl_2d<S: Scalar>(
@@ -270,7 +273,7 @@ pub fn viscous_mom_update_cyl_2d<S: Scalar>(
     Tensor::new([dt * f_r, dt * f_phi])
 }
 
-/// the general ORTHOGONAL-coordinate physical deviatoric stress `(tau_11, tau_22,
+/// the general orthogonal-coordinate physical deviatoric stress `(tau_11, tau_22,
 /// tau_12)` from the physical velocity gradients + the scale factors `h1, h2` and
 /// their gradients at a point. reduces to Cartesian at `h = 1` and to the
 /// cylindrical `cyl_stress` at `h = (1, R)` (`d1h2 = 1`). `u1 = v along axis 1`,
@@ -305,13 +308,13 @@ fn ortho_stress<S: Scalar>(
 }
 
 /// the viscous momentum increment `dt * div(tau)` for the center cell of a 3x3
-/// stencil on a GENERAL 2D ORTHOGONAL grid, physical frame, given the scale-factor
-/// stencils `h1, h2` (their gradients are differenced from the stencil). ONE
+/// stencil on a general 2D orthogonal grid, physical frame, given the scale-factor
+/// stencils `h1, h2` (their gradients are differenced from the stencil). one
 /// operator for every diagonal chart: `h = (1, 1)` is Cartesian, `(1, R)` is
-/// cylindrical, `(1, r)` is the spherical meridian. axis 2 is the ANGULAR / Killing
+/// cylindrical, `(1, r)` is the spherical meridian. axis 2 is the angular / Killing
 /// axis (`h` independent of `x2`): its momentum uses the conservative
 /// `(1/(h1 h2^2)) d1(h2^2 tau_12)` flux, so the generalized angular momentum
-/// `h2 * mom_2` is transported, never created. axis 1 carries the geometric hoop
+/// `h2 * mom_2` is transported, entering a cell through its faces alone. axis 1 carries the geometric hoop
 /// source `-tau_22 d1(h2)/(h1 h2)`.
 #[allow(clippy::too_many_arguments)]
 pub fn viscous_mom_update_orthogonal_2d<S: Scalar>(
@@ -327,11 +330,11 @@ pub fn viscous_mom_update_orthogonal_2d<S: Scalar>(
     viscous_update_orthogonal_2d(v, rho, nu, h1, h2, dx1, dx2, dt).0
 }
 
-/// the FULL orthogonal viscous increment: `dt div(tau)` on the momenta (exactly
-/// [`viscous_mom_update_orthogonal_2d`]) PLUS the viscous HEATING `dt div(tau . u)`
+/// the full orthogonal viscous increment: `dt div(tau)` on the momenta (exactly
+/// [`viscous_mom_update_orthogonal_2d`]) plus the viscous heating `dt div(tau . u)`
 /// onto the total energy. the energy flux is the plain vector divergence in the
 /// scale-factor form, `(1/(h1 h2)) [d1(h2 F1) + d2(h1 F2)]` with
-/// `F_a = tau_a1 u1 + tau_a2 u2` at the SAME faces (same stresses, same face-mean
+/// `F_a = tau_a1 u1 + tau_a2 u2` at those same faces (same stresses, same face-mean
 /// velocities) the momentum uses — so the discrete work telescopes in the
 /// h-weighted measure and the pair conserves total energy up to the boundary
 /// flux. `h = (1, 1)` reduces to the cartesian [`viscous_update_2d`] expressions.
@@ -427,7 +430,7 @@ pub fn viscous_update_orthogonal_2d<S: Scalar>(
     let f2 = (h2_1p * h2_1p * t12_1p - h2_1m * h2_1m * t12_1m) * (inv_h1h2sq / dx1)
         + (t22_2p - t22_2m) * (S::from_f64(1.0) / h2_c / dx2);
 
-    // the viscous energy flux at the SAME faces: F1 = tau_11 u1 + tau_12 u2 on
+    // the viscous energy flux at those same faces: F1 = tau_11 u1 + tau_12 u2 on
     // x1-faces, F2 = tau_12 u1 + tau_22 u2 on x2-faces; its scale-factor
     // divergence (1/(h1 h2)) [d1(h2 F1) + d2(h1 F2)] heats the total energy.
     let f1_1p = t11_1p * u1_1p + t12_1p * u2_1p;
@@ -441,11 +444,11 @@ pub fn viscous_update_orthogonal_2d<S: Scalar>(
     (Tensor::new([dt * f1, dt * f2]), dnrg)
 }
 
-/// the (tau_0a, tau_1a, tau_2a) stress column at the face normal to IN-PLANE axis `a` (0 or 1) for a
-/// 2.5D flow: a 3x3 in-plane stencil carrying the FULL 3-vector velocity, with the OUT-OF-PLANE axis
+/// the (tau_0a, tau_1a, tau_2a) stress column at the face normal to in-plane axis `a` (0 or 1) for a
+/// 2.5D flow: a 3x3 in-plane stencil carrying the full 3-vector velocity, with the out-of-plane axis
 /// frozen (`d_2 = 0`, the 2.5D symmetry). the out-of-plane velocity `v_2` shears in-plane
-/// (`tau_2a = mu d_a v_2`), so a rotating disk's toroidal velocity diffuses -- the DOF > ndim case a
-/// 2D grid cannot express by dimension alone.
+/// (`tau_2a = mu d_a v_2`), so a rotating disk's toroidal velocity diffuses -- the DOF > ndim case,
+/// which a 2D grid carries in its momentum components rather than in its dimension count.
 fn face_stress_2p5d<S: Scalar>(
     v: &[[Tensor<S, 3>; 3]; 3],
     rho: &[[S; 3]; 3],
@@ -497,10 +500,11 @@ fn face_stress_2p5d<S: Scalar>(
     tau
 }
 
-/// the ADIABATIC viscous increment for a 2.5D flow (D=2 grid, DOF=3 momentum): `dt div(tau)` over the
-/// two in-plane axes onto ALL THREE momentum components (including the out-of-plane one) PLUS
+/// the adiabatic viscous increment for a 2.5D flow (D=2 grid, DOF=3 momentum): `dt div(tau)` over the
+/// two in-plane axes onto all three momentum components (including the out-of-plane one) plus
 /// `dt div(tau . v)` onto the total energy. the out-of-plane momentum diffuses by the in-plane
-/// Laplacian; the energy flux carries its work. for MHD, B is untouched, so the heat warms the gas.
+/// Laplacian; the energy flux carries its work. for MHD the operator leaves B intact, so the heat
+/// warms the gas.
 pub fn viscous_update_2p5d<S: Scalar>(
     v: &[[Tensor<S, 3>; 3]; 3],
     rho: &[[S; 3]; 3],
@@ -560,9 +564,9 @@ fn face_stress_3d<S: Scalar>(
     let rr = |o: [usize; 3]| rho[o[2]][o[1]][o[0]];
     let nn = |o: [usize; 3]| nu[o[2]][o[1]][o[0]];
     // harmonic (series) density mean: vanishes as either cell empties so the
-    // stress stays bounded next to a momentum-retaining mass sink (see the 2D
-    // core). arithmetic nu mean (nu never blows up). an empty-empty face has
-    // exactly zero dynamic viscosity.
+    // stress stays bounded next to a momentum-retaining mass sink, matching the
+    // 2D core. nu stays bounded on its own, so it takes the arithmetic mean. an
+    // empty-empty face has exactly zero dynamic viscosity.
     let (rl, rh_) = (rr(lo), rr(ro));
     let mu = harmonic_mean(rl, rh_) * (half * (nn(lo) + nn(ro)));
 
@@ -611,11 +615,11 @@ pub fn viscous_mom_update_3d<S: Scalar>(
     viscous_update_3d(v, rho, nu, dx, dt).0
 }
 
-/// the ADIABATIC viscous increment (3D): `dt div(tau)` momentum (bit-identical to
-/// `viscous_mom_update_3d`) PLUS `dt div(tau . v)` onto the total energy — the viscous energy flux
+/// the adiabatic viscous increment (3D): `dt div(tau)` momentum (bit-identical to
+/// `viscous_mom_update_3d`) plus `dt div(tau . v)` onto the total energy — the viscous energy flux
 /// `F_a = tau_ia v_i` on each of the six faces, with v face-interpolated. conserves total energy;
-/// the heating `Phi = tau : grad(v) >= 0` warms the gas. shared by adiabatic hydro AND MHD (viscosity
-/// never touches B, so adding dnrg to the MHD total energy heats the gas with 1/2 B^2 untouched).
+/// the heating `Phi = tau : grad(v) >= 0` warms the gas. shared by adiabatic hydro and MHD: the
+/// operator leaves B intact, so adding dnrg to the MHD total energy heats the gas at fixed 1/2 B^2.
 pub fn viscous_update_3d<S: Scalar>(
     v: &[[[Tensor<S, 3>; 3]; 3]; 3],
     rho: &[[[S; 3]; 3]; 3],
@@ -694,7 +698,7 @@ mod tests {
     }
 
     // null 2: rigid rotation v = (-omega y, omega x) is strain-free (the
-    // symmetric velocity gradient vanishes) -> zero viscous force. THE null that
+    // symmetric velocity gradient vanishes) -> zero viscous force. the null that
     // catches a sign error or a missing trace subtraction.
     #[test]
     fn rigid_rotation_books_zero_force() {
@@ -711,11 +715,11 @@ mod tests {
         assert!(d[0].abs() < 1e-14 && d[1].abs() < 1e-14, "{d:?}");
     }
 
-    // the CURVED-shear probe the linear tests miss: an axisymmetric keplerian field
-    // v_phi = sqrt(GM/r) (constant rho, div v = 0) has a PURELY AZIMUTHAL analytic
+    // the curved-shear probe the linear tests miss: an axisymmetric keplerian field
+    // v_phi = sqrt(GM/r) (constant rho, div v = 0) has a purely azimuthal analytic
     // viscous force F = rho nu laplacian(v), F_phi = -3/4 rho nu sqrt(GM) r^{-5/2},
-    // F_r = 0. a consistent operator reproduces it with O(dx^2) error and NO angular
-    // (grid-aligned m=4) variation.
+    // F_r = 0. a consistent operator reproduces it with O(dx^2) error and holds the
+    // azimuthal force flat against the grid-aligned m=4 angle.
     #[test]
     fn keplerian_disk_viscous_force_probe() {
         let (gm, nu) = (1.0_f64, 1.0_f64);
@@ -754,10 +758,10 @@ mod tests {
             let spread = (pmax - pmin) / fref.abs();
             let radial = frmax / fref.abs();
             let err = ((0.5 * (pmin + pmax) - fref) / fref).abs();
-            // the operator is axisymmetric: NO grid-aligned (m=4) angular variation in the
-            // azimuthal force, NO spurious radial force, and the error converges at SECOND
-            // order — halving dx must cut the error by ~4x (central differences on the
-            // face stresses); a ratio bound of 3 allows the subleading terms.
+            // the operator is axisymmetric: the azimuthal force stays flat in angle against
+            // the grid-aligned m=4 mode, the radial force stays at zero, and the error
+            // converges at second order — halving dx cuts the error by ~4x (central
+            // differences on the face stresses); a ratio bound of 3 allows the subleading terms.
             assert!(
                 spread < 0.01,
                 "azimuthal force varies with angle (grid m=4): spread={spread} at dx={dx}"
@@ -775,11 +779,11 @@ mod tests {
         }
     }
 
-    // the SAME keplerian field but with the disk's RADIAL density profile (cavity
+    // the same keplerian field carrying the disk's radial density profile (cavity
     // carve-out at r_cav). the analytic viscous force stays axisymmetric (F depends
-    // on r only) for ANY rho(r), so any angular (m=4) variation in the discrete force
-    // is a grid-anisotropy BUG in the density coupling. probes the cavity edge where
-    // rho jumps ~5 decades — exactly where the sim's X originates.
+    // on r only) for any rho(r), so angular (m=4) variation in the discrete force
+    // marks a grid anisotropy in the density coupling. probes the cavity edge where
+    // rho jumps ~5 decades, the region that sets the discrete force's error budget.
     #[test]
     fn keplerian_disk_with_cavity_density_probe() {
         let (gm, nu, r_cav) = (1.0_f64, 1.0_f64, 2.5_f64);
@@ -811,9 +815,9 @@ mod tests {
             }
             (frmax, pmin, pmax)
         };
-        // from the cavity edge outward the force is O(1)-scaled and must be axisymmetric:
-        // any angular (grid m=4) variation or spurious radial force is a density-coupling
-        // anisotropy bug. measured at dx=0.02: spread <= 0.13%, |F_r| <= 0.06% of |F_phi|.
+        // from the cavity edge outward the force is O(1)-scaled and axisymmetric: angular
+        // (grid m=4) variation or a radial component marks a density-coupling anisotropy.
+        // measured at dx=0.02: spread <= 0.13%, |F_r| <= 0.06% of |F_phi|.
         for &r in &[2.5, 3.0, 4.0] {
             let (frmax, pmin, pmax) = probe(r, 0.02);
             let scale = pmax.abs().max(pmin.abs()).max(1e-30);
@@ -829,8 +833,8 @@ mod tests {
             );
         }
         // deep in the cavity (r below the carve-out radius) the density sits on the 1e-5
-        // floor and the residual force is dynamically negligible in ABSOLUTE terms — the
-        // relative spread there is meaningless (noise over noise).
+        // floor and the residual force is dynamically negligible in absolute terms, which
+        // is the bound this checks; the relative spread there is noise over noise.
         let (frmax, pmin, pmax) = probe(2.0, 0.02);
         assert!(
             pmin.abs().max(pmax.abs()) < 1e-4,
@@ -842,8 +846,8 @@ mod tests {
         );
     }
 
-    // null 3: a linear shear vx = S y has a CONSTANT stress -> zero divergence ->
-    // zero force (constant rho). the force appears only when the stress varies.
+    // null 3: a linear shear vx = S y has a constant stress -> zero divergence ->
+    // zero force (constant rho). the force tracks the variation of the stress.
     #[test]
     fn linear_shear_books_zero_force() {
         let s = 0.9;
@@ -852,8 +856,8 @@ mod tests {
         assert!(d[0].abs() < 1e-14 && d[1].abs() < 1e-14, "{d:?}");
     }
 
-    // the ADIABATIC energy twin: a linear shear vx = S y has a CONSTANT stress (zero force) but a
-    // nonzero viscous HEATING Phi = tau : grad(v) = mu S^2 = rho nu S^2 (>= 0), booked into the total
+    // the adiabatic energy twin: a linear shear vx = S y has a constant stress (zero force) with a
+    // nonzero viscous heating Phi = tau : grad(v) = mu S^2 = rho nu S^2 (>= 0), booked into the total
     // energy via div(tau . v). the momentum stays zero; the energy increment is the exact dissipation.
     #[test]
     fn linear_shear_heats_at_the_dissipation_rate() {
@@ -878,9 +882,10 @@ mod tests {
         );
     }
 
-    // the 2.5D DOF-aware energy: a PURELY out-of-plane shear v_z = S y (v_x = v_y = 0) has a constant
-    // stress tau_2y = mu S -> zero force on all 3 momentum components, but heating Phi = mu S^2 booked
-    // into the energy. verifies the toroidal-velocity path the plain 2D kernel cannot express.
+    // the 2.5D DOF-aware energy: a purely out-of-plane shear v_z = S y (v_x = v_y = 0) has a constant
+    // stress tau_2y = mu S -> zero force on all 3 momentum components, with heating Phi = mu S^2 booked
+    // into the energy. verifies the toroidal-velocity path, which lives in the third momentum
+    // component that the plain 2D kernel lacks.
     #[test]
     fn out_of_plane_shear_heats_2p5d() {
         let (s, nu, rho, dt) = (0.9, 0.02, 1.3, 0.01);
@@ -960,7 +965,7 @@ mod tests {
     }
 
     // a Keplerian profile v_phi = sqrt(GM/R) shears (Omega ~ R^-3/2), so the
-    // r-phi stress is active and the azimuthal force is NEGATIVE — viscosity
+    // r-phi stress is active and the azimuthal force is negative — viscosity
     // removes angular momentum from the inner gas, driving inflow. the analytic
     // axisymmetric value is F_phi = -(3/4) mu sqrt(GM) R^-5/2.
     #[test]
@@ -1050,12 +1055,12 @@ mod tests {
         );
     }
 
-    // THE conservation gate: a smooth, doubly-periodic fake orthogonal metric
-    // h1 = 1, h2 = 1 + 0.3 sin(2pi i/n), INDEPENDENT of x2 (the angular axis is
+    // the conservation gate: a smooth, doubly-periodic fake orthogonal metric
+    // h1 = 1, h2 = 1 + 0.3 sin(2pi i/n), independent of x2 (the angular axis is
     // Killing), so h2 * mom_2 is the conserved generalized angular momentum. every
     // face flux (the single-valued h2^2 tau_12 and h1 h2 tau_22) telescopes on a
-    // periodic grid, so the total change is EXACTLY zero — the property a naive
-    // non-conservative discretization would violate.
+    // periodic grid, so the total change is exactly zero — the property that
+    // separates this conservative discretization from a naive one.
     #[test]
     fn orthogonal_conserves_generalized_angular_momentum() {
         use std::f64::consts::PI;
@@ -1105,11 +1110,11 @@ mod tests {
 
     // a mass sink that retains momentum (the torque-free surface) leaves a mask
     // cell with tiny rho and O(1) momentum, so v = mom/rho is enormous. an
-    // ARITHMETIC-mean face viscosity keeps mu ~ rho_healthy and the stress
-    // mu*grad(v) explodes (a >1e4x kick that FOFC cannot recover -> the freeze).
-    // the HARMONIC mean gives mu ~ rho_vacuum, so the stress ~ nu*(momentum): the
-    // momentum kick stays BOUNDED BY THE CELL'S OWN MOMENTUM at the viscous-CFL
-    // step -- no overshoot, no sign flip, the pathology diffuses away instead.
+    // arithmetic-mean face viscosity keeps mu ~ rho_healthy and the stress
+    // mu*grad(v) explodes (a >1e4x kick past the range FOFC recovers -> the freeze).
+    // the harmonic mean gives mu ~ rho_vacuum, so the stress ~ nu*(momentum): at the
+    // viscous-CFL step the momentum kick stays bounded by the cell's own momentum,
+    // which keeps the sign fixed and lets the pathology diffuse away.
     #[test]
     fn vacuum_adjacent_stress_stays_bounded_by_momentum() {
         let (nu, dt): (f64, f64) = (0.1, 1e-4);
@@ -1129,7 +1134,7 @@ mod tests {
         v[1][0] = Tensor::new([mom_mask[0] / r[1][0], mom_mask[1] / r[1][0]]);
         let f = viscous_mom_update_2d(&v, &r, &uni(nu), dx, dy, dt);
 
-        // the kick on the mask cell's momentum must not exceed the momentum itself
+        // the kick on the mask cell's momentum stays within the momentum itself
         // (arithmetic-mean would give ~5x this bound -> overshoot -> breakdown).
         let bound = mom_mask[0].abs().max(mom_mask[1].abs());
         assert!(
@@ -1141,13 +1146,14 @@ mod tests {
     }
 
     // -- stability + conservation battle tests --------------------------------
-    // integrate the operator on a periodic grid so EVERY Fourier mode is present;
-    // a diffusion that is stable and dissipative must decay every mode. a mode
-    // that grows (the checkerboard from a wide cross-stencil, or a CFL over the
-    // stability limit) shows up as a rising total kinetic energy.
+    // integrate the operator on a periodic grid so every Fourier mode is present;
+    // a stable, dissipative diffusion decays every mode. a mode that grows (the
+    // checkerboard from a wide cross-stencil, or a CFL over the stability limit)
+    // shows up as a rising total kinetic energy.
 
     // one explicit viscous step on an N x N periodic grid, constant density.
-    // v_new = v + dt div(tau) / rho, all reads from the old field (no hazard).
+    // v_new = v + dt div(tau) / rho, every read taken from the old field so the
+    // update is hazard-free.
     fn viscous_step_periodic(
         v: &[Vec<[f64; 2]>],
         rho: f64,
@@ -1204,8 +1210,8 @@ mod tests {
             for i in 0..n {
                 let (fi, fj) = (i as f64 / n as f64, j as f64 / n as f64);
                 let cb = if (i + j) % 2 == 0 { 1.0 } else { -1.0 };
-                // a low mode, a mid mode, and the checkerboard (nyquist) in BOTH
-                // components — the cross-stencil terms are exercised by having
+                // a low mode, a mid mode, and the checkerboard (nyquist) in each
+                // component — the cross-stencil terms are exercised by having
                 // vy vary in x and vx vary in y.
                 v[j][i] = [
                     (2.0 * PI * fi).sin() + 0.5 * (6.0 * PI * fj).cos() + 0.4 * cb,
@@ -1246,9 +1252,9 @@ mod tests {
         );
     }
 
-    // stability: at the C_VISC = 0.1 cap the fluctuation energy decays MONOTONE
-    // over many steps (no mode grows — including the checkerboard). this is the
-    // guard the CFL constant fix is anchored on.
+    // stability: at the C_VISC = 0.1 cap the fluctuation energy decays monotonically
+    // over many steps, every mode decaying, the checkerboard included. this is the
+    // guard the CFL constant is anchored on.
     #[test]
     fn viscous_diffusion_is_monotone_stable_at_the_cfl_cap() {
         let (n, dx, nu, rho) = (16, 0.1, 0.1, 1.0);
@@ -1269,8 +1275,8 @@ mod tests {
     }
 
     // the limit is real: above ~0.21 dx^2/nu the highest mode amplifies. at
-    // 0.3 the fluctuation energy BLOWS UP — confirming C_VISC = 0.1 is the safe
-    // side and 0.25 (the plain-Laplacian value) was not.
+    // 0.3 the fluctuation energy blows up, which places C_VISC = 0.1 on the safe
+    // side of a threshold that sits below 0.25, the plain-Laplacian value.
     #[test]
     fn viscous_diffusion_blows_up_above_the_stability_limit() {
         let (n, dx, nu, rho) = (16, 0.1, 0.1, 1.0);
@@ -1288,9 +1294,9 @@ mod tests {
     }
 
     // -- spatially varying nu (the alpha case) --------------------------------
-    // a smooth nu(x) field and a smooth rho(x) field, periodic. the FACE nu is
+    // a smooth nu(x) field and a smooth rho(x) field, periodic. the face nu is
     // the average of the two straddling cells (single-valued), so conservation
-    // and stability must hold exactly as for constant nu.
+    // and stability hold exactly as they do for constant nu.
 
     fn seed_nu_field(n: usize, nu_min: f64, nu_max: f64) -> Vec<Vec<f64>> {
         use std::f64::consts::PI;
@@ -1373,7 +1379,7 @@ mod tests {
     fn varying_nu_diffusion_is_monotone_stable() {
         let (n, dx, rho) = (16, 0.1, 1.0);
         let (nu_min, nu_max) = (0.01, 0.2);
-        let dt = 0.1 * dx * dx / nu_max; // cap on the MAX nu
+        let dt = 0.1 * dx * dx / nu_max; // cap set by the largest nu on the grid
         let nu_field = seed_nu_field(n, nu_min, nu_max);
         let rho_field = vec![vec![rho; n]; n];
         let mut v = seed_all_modes(n);
@@ -1453,9 +1459,9 @@ mod tests {
         );
     }
 
-    // the load-bearing cross-check: a z-invariant flow with v_z = 0 must give
-    // exactly the (already battle-tested) 2D force in x, y and zero in z. ties
-    // the 3D operator to the validated 2D one bit-for-bit.
+    // the load-bearing cross-check: a z-invariant flow with v_z = 0 gives
+    // exactly the 2D force in x, y and zero in z. ties the 3D operator to the
+    // validated 2D one bit-for-bit.
     #[test]
     fn reduces_to_the_2d_operator_for_planar_flow() {
         let (a, b, c, nu, rho, dt) = (1.5, 0.8, -1.1, 0.02, 1.3, 0.01);
@@ -1570,7 +1576,7 @@ mod tests {
         assert!(s.iter().all(|x| x.abs() < 1e-12), "momentum leak: {s:?}");
     }
 
-    // 3D stability: fluctuation energy decays monotone at the C_VISC = 0.1 cap,
+    // 3D stability: fluctuation energy decays monotonically at the C_VISC = 0.1 cap,
     // the checkerboard mode included.
     #[test]
     fn viscous_3d_is_monotone_stable_at_the_cfl_cap() {
@@ -1634,8 +1640,8 @@ mod ortho_heating_tests {
     #[test]
     fn rigid_rotation_is_a_stress_free_null_for_momentum_and_heating() {
         // cylindrical (R, phi): h = (1, R). the rigid rotation u_phi = Omega R has
-        // ZERO deviatoric stress, so div(tau) AND div(tau . u) must both vanish
-        // identically — any geometry error in the heating operator (a missing
+        // zero deviatoric stress, so div(tau) and div(tau . u) both vanish
+        // identically — a geometry error in the heating operator (a missing
         // scale factor, a wrong face weight) breaks this exactly.
         let omega = 0.7;
         let (dx1, dx2) = (0.02, 0.01);
@@ -1669,8 +1675,8 @@ mod ortho_heating_tests {
     }
 }
 
-/// the general 2.5D ORTHOGONAL stress `(t11, t22, t33, t12, t13, t23)` at a
-/// point with the THIRD axis frozen (`d_3 = 0`, the 2.5D symmetry) and the
+/// the general 2.5D orthogonal stress `(t11, t22, t33, t12, t13, t23)` at a
+/// point with the third axis frozen (`d_3 = 0`, the 2.5D symmetry) and the
 /// scale factors independent of x_3 (every axisymmetric chart: cylindrical
 /// r-phi with out-of-plane z, spherical r-theta with out-of-plane phi). the
 /// out-of-plane shear is `e_3j = (h3 / 2 h_j) d_j(u3 / h3)` — zero identically
@@ -1721,7 +1727,7 @@ fn ortho_stress_2p5d<S: Scalar>(
     )
 }
 
-/// the FULL 2.5D orthogonal viscous increment: `dt div(tau)` on all THREE
+/// the full 2.5D orthogonal viscous increment: `dt div(tau)` on all three
 /// physical momentum components plus the heating `dt div(tau . u)` onto the
 /// total energy, on a general 2D orthogonal chart carrying a frozen third
 /// axis with its own scale factor `h3(x1, x2)`. divergences ride the
@@ -1729,7 +1735,8 @@ fn ortho_stress_2p5d<S: Scalar>(
 /// the center; the out-of-plane force gains `+ t_3j d_j h3 / (h_j h3)` — the
 /// flux+source split of the angular-momentum-conserving `(1/(J h3)) d_j(J h3
 /// t_3j / h_j)` form, so `h3 u_3` (the axial angular momentum on a spherical
-/// meridian) is transported, never created. `h = (1, 1, 1)` reduces to the
+/// meridian) is transported, entering a cell through its faces alone.
+/// `h = (1, 1, 1)` reduces to the
 /// cartesian expressions; `h3 = 1` decouples the out-of-plane channel into
 /// the plain metric Laplacian.
 #[allow(clippy::too_many_arguments)]
@@ -1885,7 +1892,7 @@ pub fn viscous_update_orthogonal_2p5d<S: Scalar>(
     (Tensor::new([dt * f1, dt * f2, dt * f3]), dnrg)
 }
 
-/// the FULL 3D orthogonal viscous increment: `dt div(tau)` on the three
+/// the full 3D orthogonal viscous increment: `dt div(tau)` on the three
 /// physical momenta plus the heating `dt div(tau . u)`, on a general 3D
 /// orthogonal chart with scale-factor stencils `h1, h2, h3` (cartesian
 /// (1,1,1), cylindrical (1, r, 1), spherical (1, r, r sin(theta))). the
@@ -2081,8 +2088,8 @@ mod ortho_general_tests {
 
     #[test]
     fn ortho_2p5d_reduces_to_cartesian_at_unit_h() {
-        // a generic smooth 3-velocity field: the general operator at h = 1 must
-        // match the dedicated cartesian 2.5D operator to roundoff (the two
+        // a generic smooth 3-velocity field: the general operator at h = 1
+        // matches the dedicated cartesian 2.5D operator to roundoff (the two
         // assemble algebraically identical fluxes in different groupings).
         let vf = |x: f64, y: f64| -> [f64; 3] {
             [
@@ -2138,7 +2145,7 @@ mod ortho_general_tests {
 
     #[test]
     fn ortho_2p5d_out_of_plane_shear_heats_at_the_dissipation_rate() {
-        // h = 1, u3 = S * x2: pure out-of-plane shear — zero force on u1/u2,
+        // h = 1, u3 = S * x2: purely out-of-plane shear — zero force on u1/u2,
         // heating exactly rho nu S^2 (the flux divergence of t23 u3).
         let s_rate = 1.3;
         let one = h_const_2d(1.0);

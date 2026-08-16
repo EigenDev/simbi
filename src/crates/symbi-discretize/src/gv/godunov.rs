@@ -14,7 +14,7 @@ use symbi_geometry::{
 use symbi_ir::dual::Dual;
 use symbi_ir::gv::GvMask;
 
-/// snapshot `u_n = cons` — a pure pointwise copy (the RK2 stage-0 hold), geometry-INDEPENDENT
+/// snapshot `u_n = cons` — a pure pointwise copy (the RK2 stage-0 hold), geometry-independent
 /// (works for every coord system). copies the energy too when `has_energy`. write root == the
 /// read field node (a direct buffer copy).
 pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -63,17 +63,17 @@ pub fn fofc_copy_gv(
     (end_trace(), writes)
 }
 
-/// the FIRST-ORDER FLUX-CORRECTION select: `out = physical(ho_prim) ? ho : fo`, componentwise over
+/// the first-order flux-correction select: `out = physical(ho_prim) ? ho : fo`, componentwise over
 /// the gas conserved (den, mom[k], nrg?) and primitive (rho, vel[k], pre?). the high-order state
 /// `ho_*` is the snapshot taken before the substage was redone at first order; `fo_*` is the redone
 /// (PCM + HLLE) result, aliased to the live cons/prim `out_*` (in-place read+write). the failure
 /// test is metric-free and needs only rho/pre: both relativistic recoveries drive an out-of-cone
-/// state to a FINITE flagged result — density from the ceiling-clamped lorentz factor, pressure to
+/// state to a finite flagged result — density from the ceiling-clamped lorentz factor, pressure to
 /// the density-scaled non-positive cone-failure sentinel (see c2p_result) — so an unphysical recovery
-/// always shows up as rho <= 0 or pre <= 0 (both fail `> 0`), never needing a velocity test. so a
-/// cell whose HIGH-ORDER c2p is physical keeps its sharp state; only the failed cells take the
+/// always shows up as rho <= 0 or pre <= 0 (both fail `> 0`), which the rho/pre tests alone catch.
+/// so a cell whose high-order c2p is physical keeps its sharp state; only the failed cells take the
 /// diffusive first-order result. carrier-generic, regime-generic (has_energy toggles the pressure law).
-/// the FOFC HOST GATE probe: write 1 to the scratch where the high-order c2p is unphysical (density
+/// the FOFC host-gate probe: write 1 to the scratch where the high-order c2p is unphysical (density
 /// or, for an energy regime, pressure non-finite or non-positive), else 0. a max-reduce over the
 /// interior is > 0 exactly when some zone needs correcting; a clean substage reduces to 0 and skips
 /// the whole FOFC pass (which would keep the high-order everywhere anyway — bit-identical to skip).
@@ -87,8 +87,8 @@ fn primitive_physical_gv(ncomp: usize, has_energy: bool) -> GvMask {
     } else {
         finite_pos(rho)
     };
-    // the full state vector: each velocity component must be FINITE (its SIGN is physical, so no
-    // positivity test). catches a non-finite momentum the density/pressure test misses — notably for
+    // the full state vector: each velocity component is tested for finiteness alone, since its sign
+    // is physical. catches a non-finite momentum the density/pressure test misses — notably for
     // iso, whose only other guard is the density, so a NaN momentum would otherwise ride through the
     // FOFC gate until the next flux divergence poisons the density one step later.
     for k in 0..ncomp {
@@ -114,13 +114,14 @@ pub fn fofc_probe_gv(
     )
 }
 
-/// keep only the flagged cells whose admissibility carries information about the TIMESTEP: drop
+/// keep only the flagged cells whose admissibility carries information about the timestep: drop
 /// everything on the causally disconnected side of the mask surface. the outer horizon
-/// `r_+ = M + sqrt(M^2 - a^2)` is one-way on a horizon-penetrating chart, so no interior cell can
-/// destabilize the exterior; and an excised cell is frozen at the vacuum floor, numerical padding
-/// that can sit arbitrarily close to the admissible boundary forever. the threshold is therefore the
-/// LARGER of `r_+` and the excision surface, tested on the kerr-schild radius level set — the same
-/// surface and the same test the source-admissibility CFL masks on, so the two agree cell for cell.
+/// `r_+ = M + sqrt(M^2 - a^2)` is one-way on a horizon-penetrating chart, so the exterior's
+/// stability is set by exterior cells alone; and an excised cell is frozen at the vacuum floor,
+/// numerical padding that can sit arbitrarily close to the admissible boundary forever. the
+/// threshold is therefore the larger of `r_+` and the excision surface, tested on the kerr-schild
+/// radius level set — the same surface and the same test the source-admissibility CFL masks on, so
+/// the two agree cell for cell.
 /// cartesian kerr-schild charts only; every other chart passes each flag through unchanged.
 pub fn fofc_exterior_flag_gv(
     coords: Coords,
@@ -160,9 +161,9 @@ pub fn fofc_exterior_flag_gv(
 
 /// write the authoritative primitive-validity status after c2p. zero means the
 /// recovered primitive lies in the same strict interior accepted by fofc;
-/// `INVALID_PRIMITIVE` means it does not. c2p and fofc share
+/// `INVALID_PRIMITIVE` means it lies outside. c2p and fofc share
 /// `primitive_physical_gv`, so their
-/// pressure-zero and finiteness semantics cannot diverge.
+/// pressure-zero and finiteness semantics agree by construction.
 pub fn c2p_status_gv(
     ncomp: usize,
     has_energy: bool,
@@ -183,11 +184,11 @@ pub fn c2p_status_gv(
     )
 }
 
-/// GHOST-BAND FAIL-LOUD probe: write 1 where the density is non-finite (NaN or +-inf via
-/// `(rho - rho) != 0`), else 0. run over the ALLOCATED domain (interior + ghosts): first-order flux
-/// correction keeps the INTERIOR finite, but it never touches the ghost band, so a poisoned boundary
-/// (a driven-inflow expression producing NaN, a broken BC) leaves a non-finite ghost that FOFC cannot
-/// mask. a max-reduce > 0 forces the CFL rate to +inf (dt -> 0, the driver halts) — the fail-loud that
+/// ghost-band fail-loud probe: write 1 where the density is non-finite (NaN or +-inf via
+/// `(rho - rho) != 0`), else 0. run over the allocated domain (interior + ghosts): first-order flux
+/// correction keeps the interior finite and acts on the interior alone, so a poisoned boundary
+/// (a driven-inflow expression producing NaN, a broken BC) leaves a non-finite ghost beyond FOFC's
+/// reach. a max-reduce > 0 forces the CFL rate to +inf (dt -> 0, the driver halts) — the fail-loud that
 /// survives FOFC recovery. density-only, so regime- and energy-independent (one kernel per dimension);
 /// a poison in any primitive reaches the density within one c2p / flux divergence.
 pub fn state_finite_probe_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -200,7 +201,7 @@ pub fn state_finite_probe_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     )
 }
 
-/// FOFC FREEZE diagnostic: write 1 to `freeze` where the SPLICED first-order result (`x_*`, the live
+/// FOFC freeze diagnostic: write 1 to `freeze` where the spliced first-order result (`x_*`, the live
 /// cons after the face-based redo) is still unphysical — the zones the freeze tier holds at the
 /// stage input. reduced over the interior to count freezes per substage; a fully
 /// physical-constraint-preserving low-order scheme recovers every flagged cell (full first-order
@@ -232,20 +233,20 @@ pub fn fofc_freeze_probe_gv(
     )
 }
 
-/// the FOFC FREEZE tier select (the face-based redo's only per-cell state replacement): keep the
-/// live spliced first-order conserved (`x_*`) where it is physical, else FREEZE to the stage-input
+/// the FOFC freeze tier select (the face-based redo's only per-cell state replacement): keep the
+/// live spliced first-order conserved (`x_*`) where it is physical, else freeze to the stage-input
 /// state `u_stage` (`us_*`) — the pre-godunov conserved, admissible from stage entry, so the final
 /// c2p converges on it. the face-based splice already made every kept cell conservative (one flux per
-/// face); this handles only the rare cell that no flux can update admissibly, holding its stage input
-/// so no NaN propagates. that single-cell hold is the documented conservation waiver — it
-/// discards the cell's flux exchange, bounded by the persistent-freeze fail-loud. only the conserved
-/// is chosen; the primitive is re-derived by the c2p that follows.
+/// face); this handles only the rare cell whose every flux update lands outside the admissible set,
+/// holding its stage input so the state stays finite. that single-cell hold is the documented
+/// conservation waiver — it discards the cell's flux exchange, bounded by the persistent-freeze
+/// fail-loud. only the conserved is chosen; the primitive is re-derived by the c2p that follows.
 pub fn fofc_select_gv(
     ncomp: usize,
     has_energy: bool,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    // finite AND positive: (v - v) is 0 for a finite value and NaN for NaN OR +-inf (inf - inf =
+    // finite and positive: (v - v) is 0 for a finite value and NaN for NaN or +-inf (inf - inf =
     // NaN), so cmp_eq(0) rejects every non-finite value; the > 0 rejects a vacuum/negative one. a
     // "physical" cell is one whose density (and pressure, when modeled) passes both.
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
@@ -257,17 +258,18 @@ pub fn fofc_select_gv(
     } else {
         finite_pos(x_rho)
     };
-    // the full state vector: each spliced velocity must be FINITE (its sign is physical) — else a
-    // non-finite momentum with a finite density/pressure would be kept and propagated instead of
-    // frozen to the admissible stage input.
+    // the full state vector: each spliced velocity is tested for finiteness (its sign is physical),
+    // so a non-finite momentum riding an otherwise finite density/pressure freezes to the
+    // admissible stage input.
     for k in 0..ncomp {
         let p = format!("x_vel_{k}");
         physical = physical & finite(Gv::field(&p, &p));
     }
     let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
-    // the live cons (`x_*`) is read+write IN PLACE: it holds the spliced first-order result and is
+    // the live cons (`x_*`) is read+write in place: it holds the spliced first-order result and is
     // overwritten with the chosen tier. one slot per component (read path == write path) so the IR
-    // dedups it to a single in-place binding (the CT-`b` pattern) — no input/output aliasing.
+    // dedups it to a single in-place binding (the CT-`b` pattern), keeping input and output on a
+    // single binding.
     let mut sel_inplace = |comp: &str, us: Gv| {
         let path = format!("x_{comp}");
         let x = Gv::field(&path, &path);
@@ -287,15 +289,16 @@ pub fn fofc_select_gv(
     (end_trace(), writes)
 }
 
-/// the FREEZE-tier select WITH the immersed-body source composed INLINE — the LAZY, buffer-free
-/// answer to "a frozen cell must not lose its body gravity/accretion". identical to `fofc_select_gv`
-/// except the freeze parachute is the stage input EVOLVED by the body source in registers,
-/// `u_stage + dt*body(u_stage)` (via `body_evolved_gv` / `body_evolved_iso_gv`). no buffer is materialized: the body delta AND the c2p pressure used to GUARD it are
-/// closed forms of `us_*`. the guard preserves the freeze tier's physical-parachute invariant — a body
+/// the freeze-tier select with the immersed-body source composed inline — the lazy, buffer-free
+/// form that carries a frozen cell's body gravity/accretion with it. identical to `fofc_select_gv`
+/// except the freeze parachute is the stage input evolved by the body source in registers,
+/// `u_stage + dt*body(u_stage)` (via `body_evolved_gv` / `body_evolved_iso_gv`). the body delta and
+/// the c2p pressure that guards it are closed forms of `us_*`, so both stay in registers.
+/// the guard preserves the freeze tier's physical-parachute invariant — a body
 /// kick that would drive the parachute unphysical (a strong pull on a low-internal-energy cell) falls
 /// back to the bare stage input. `has_energy` selects the adiabatic (evolves nrg, eos param = gamma,
-/// pressure guard) vs the isothermal (no nrg, eos param = cs, `p = cs^2 * rho > 0` so only the density
-/// guard) form. body-free regimes keep `fofc_select_gv`.
+/// pressure guard) vs the isothermal (density + momentum, eos param = cs, `p = cs^2 * rho > 0` so the
+/// density guard alone) form. body-free regimes keep `fofc_select_gv`.
 pub fn fofc_select_with_body_gv(
     ncomp: usize,
     n_bodies: usize,
@@ -307,7 +310,7 @@ pub fn fofc_select_with_body_gv(
     begin_trace();
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
     let finite = |v: Gv| (v - v).cmp_eq(Gv::ZERO);
-    // the spliced first-order result's physicality, IDENTICAL to `fofc_select_gv`: density always,
+    // the spliced first-order result's physicality, identical to `fofc_select_gv`: density always,
     // pressure only when the energy is modeled (iso keeps p in a separate cs^2 buffer, so its
     // select gates on the density alone), plus finiteness of every velocity component.
     let x_rho = Gv::field("x_rho", "x_rho");
@@ -320,21 +323,21 @@ pub fn fofc_select_with_body_gv(
         let p = format!("x_vel_{k}");
         physical_fo = physical_fo & finite(Gv::field(&p, &p));
     }
-    // the stage input evolved by the body source, INLINE (no buffer, no separate pass).
+    // the stage input evolved by the body source, inline in registers within this kernel.
     let dt = Gv::scalar("dt");
     let us_den = Gv::field("us_den", "us_den");
     let us_mom: Vec<Gv> = (0..ncomp)
         .map(|k| Gv::field(&format!("us_mom_{k}"), &format!("us_mom_{k}")))
         .collect();
     // the body-evolved conserved parachute + its physicality, energy-aware. `us_nrg` is bound only in
-    // the adiabatic form so the isothermal kernel manifest carries no energy field.
+    // the adiabatic form so the isothermal kernel manifest carries the density and momentum alone.
     let (b_den, b_mom, b_nrg, usb_ok) = if has_energy {
         let gamma = Gv::scalar("gamma");
         let us_nrg = Gv::field("us_nrg", "us_nrg");
         let (b_den, b_mom, b_nrg, _drain) = crate::gv_immersed::body_evolved_gv(
             us_den, &us_mom, us_nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
         );
-        // GUARD: the parachute must itself be physical. rho = den (newtonian, W = 1); the adiabatic
+        // guard: the parachute must itself be physical. rho = den (newtonian, W = 1); the adiabatic
         // pressure p = (gamma-1)(nrg - 0.5|mom|^2/den) is a closed form of the evolved cons.
         let mut ke = Gv::ZERO;
         for m in &b_mom {
@@ -355,7 +358,7 @@ pub fn fofc_select_with_body_gv(
         (b_den, b_mom, None, usb_ok)
     };
     let parachute = |ub: Gv, us: Gv| Gv::select(usb_ok, ub, us);
-    // main select IN PLACE: `x_*` (the spliced first-order cons) is kept where physical, else FROZEN
+    // main select in place: `x_*` (the spliced first-order cons) is kept where physical, else frozen
     // to the guarded body-evolved stage input.
     let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
     let mut sel = |comp: &str, par: Gv| {
@@ -374,13 +377,13 @@ pub fn fofc_select_with_body_gv(
     (end_trace(), writes)
 }
 
-/// the FOFC FACE-BASED FLUX SPLICE for axis `dir`: choose, per interior face, the FIRST-ORDER flux
+/// the FOFC face-based flux splice for axis `dir`: choose, per interior face, the first-order flux
 /// (`fo_*`, the redone HLLE/rusanov flux held in the live `fields.flux[dir]`) where either adjacent
-/// cell is flagged for fallback, else the HIGH-ORDER flux (`ho_*`, saved in `flux_ho[dir]` before the
+/// cell is flagged for fallback, else the high-order flux (`ho_*`, saved in `flux_ho[dir]` before the
 /// redo overwrote the live buffer). the finite-volume convention stores the axis-`dir` flux at cell
-/// `c` on the LOW face of `c` (between `c - e_dir` and `c`), so the face is first-order iff
-/// `flag[c] > 0 OR flag[c - e_dir] > 0`. the `fo_*` slot is read+write IN PLACE (the live flux
-/// buffer), so after the splice every face carries ONE flux value and the following godunov
+/// `c` on the low face of `c` (between `c - e_dir` and `c`), so the face is first-order iff
+/// `flag[c] > 0 OR flag[c - e_dir] > 0`. the `fo_*` slot is read+write in place (the live flux
+/// buffer), so after the splice every face carries a single flux value and the following godunov
 /// telescopes conservatively across every fallback boundary. componentwise over the conserved flux
 /// (den, mom[k], nrg?); the flag is a plain 0/1 cell field with boundary-consistent ghosts.
 pub fn fofc_splice_gv(
@@ -413,13 +416,13 @@ pub fn fofc_splice_gv(
     (end_trace(), writes)
 }
 
-/// the FOFC FACE-BASED INDUCTION-FLUX SPLICE for axis `dir`: the magnetic mirror of
-/// `fofc_splice_gv`. per B-component `c` in `0..ncomp`, choose the FIRST-ORDER induction flux
+/// the FOFC face-based induction-flux splice for axis `dir`: the magnetic mirror of
+/// `fofc_splice_gv`. per B-component `c` in `0..ncomp`, choose the first-order induction flux
 /// (`fo_bflux_{c}`, the redone flux in the live `bflux[dir][c]`) on faces adjacent to a flagged cell,
-/// else the HIGH-ORDER flux (`ho_bflux_{c}`, saved in `bflux_ho[dir][c]`). the axis-`dir` induction
+/// else the high-order flux (`ho_bflux_{c}`, saved in `bflux_ho[dir][c]`). the axis-`dir` induction
 /// flux shares the gas flux's face indexing (stored at cell `c` on the low face of `c`), so the face
 /// is first-order iff `flag[c] > 0 OR flag[c - e_dir] > 0` — the identical mask to the gas splice.
-/// `fo_bflux_{c}` is read+write IN PLACE; the spliced induction flux feeds the cell-B predictor (HO
+/// `fo_bflux_{c}` is read+write in place; the spliced induction flux feeds the cell-B predictor (HO
 /// off the fallback region, FO on it) and the Contact FO edge EMF.
 pub fn fofc_bflux_splice_gv(
     ndim: usize,
@@ -443,8 +446,8 @@ pub fn fofc_bflux_splice_gv(
     (end_trace(), writes)
 }
 
-/// the single mass-law godunov step to a SEPARATE output buffer:
-/// `rho_new = rho - dt*div(mass_flux)`. cartesian-uniform OR curvilinear (area-weighted).
+/// the single mass-law godunov step to a separate output buffer:
+/// `rho_new = rho - dt*div(mass_flux)`. cartesian-uniform or curvilinear (area-weighted).
 /// write -> `cons.den_new`.
 pub fn godunov_mass_gv(
     coords: Coords,
@@ -463,22 +466,22 @@ pub fn godunov_mass_gv(
 }
 
 /// the in-place SSP shu-osher stage update `cons = a0*u_n + ac*fe(cons)`, where the
-/// forward-euler operator is `fe(u) = u - dt*div(F) (+ dt*S_geom)`. ONE builder for every
-/// explicit SSP scheme: the per-stage convex coefficients `(a0, ac)` arrive as RUNTIME
-/// scalars, so a SINGLE compiled kernel serves forward-euler `[(0,1)]`, SSP-RK2
-/// `[(0,1),(1/2,1/2)]`, and SSP-RK3 `[(0,1),(3/4,1/4),(1/3,2/3)]` — the integrator is data,
-/// not codegen. forward-euler is the `(a0,ac)=(0,1)` instantiation (the `a0*u_n` term reads
+/// forward-euler operator is `fe(u) = u - dt*div(F) (+ dt*S_geom)`. one builder for every
+/// explicit SSP scheme: the per-stage convex coefficients `(a0, ac)` arrive as runtime
+/// scalars, so a single compiled kernel serves forward-euler `[(0,1)]`, SSP-RK2
+/// `[(0,1),(1/2,1/2)]`, and SSP-RK3 `[(0,1),(3/4,1/4),(1/3,2/3)]` — the integrator arrives as
+/// data at runtime. forward-euler is the `(a0,ac)=(0,1)` instantiation (the `a0*u_n` term reads
 /// the snapshot held by `snapshot_gv` and multiplies it by 0).
 ///
 /// mass + one scalar law per momentum component (+ energy when `has_energy`). cartesian =
-/// unweighted divergence, no source; curvilinear = area-weighted divergence + the geometric
+/// unweighted divergence alone; curvilinear = area-weighted divergence + the geometric
 /// momentum `source` carried inside the forward-euler stage. write path == input path (in
-/// place). EOS- AND geom-generic.
+/// place). EOS- and geom-generic.
 ///
 /// this is the no-overlay case of [`godunov_stage_gv_with_fused_sources`] — the full stage
 /// body lives there, and the empty source slice traces exactly the plain SSP stage (the splice
-/// helper short-circuits on no overlays, so there are no dead vocabulary nodes). kept as a named
-/// entry point for the common no-source case.
+/// helper short-circuits on an empty overlay list, so the trace keeps only live vocabulary
+/// nodes). kept as a named entry point for the common no-source case.
 pub fn godunov_stage_gv(
     coords: Coords,
     spacetime: Spacetime,
@@ -508,8 +511,8 @@ pub fn godunov_stage_gv(
 /// vocabulary is spliced once, then each conserved law adds its bucket inside the
 /// forward-euler stage.
 ///
-/// **structural shape contract**: spliced outputs MUST have the expected per-target
-/// arity (1 for den/nrg, D for mom); spec authors that violate this get a panic that prevents
+/// **structural shape contract**: spliced outputs carry the expected per-target
+/// arity (1 for den/nrg, D for mom); a violating spec panics, which prevents
 /// a silent wrong-component write.
 struct FusedContribs {
     /// each entry is a `S_den` NodeId to add to `rho_new`.
@@ -518,22 +521,22 @@ struct FusedContribs {
     mom: Vec<Vec<NodeId>>,
     /// each entry is a `S_nrg` NodeId to add to `nrg_new`.
     nrg: Vec<NodeId>,
-    /// `mag[k]` is the per-component cell-B prescription, ONLY for a driven-boundary
-    /// (`WriteMode::Assign`) MHD `bcell` slot. unused (empty) for hydro and for the
-    /// accumulate (godunov source) path — the conservation-law lifts never target B.
+    /// `mag[k]` is the per-component cell-B prescription, only for a driven-boundary
+    /// (`WriteMode::Assign`) MHD `bcell` slot. empty for hydro and for the
+    /// accumulate (godunov source) path — the conservation-law lifts target den/mom/nrg alone.
     mag: Vec<Vec<NodeId>>,
-    /// the dye concentration prescription, ONLY for a driven-boundary (`WriteMode::Assign`)
-    /// `chi` slot: injected fluid carries a concentration the interior cannot supply. empty for
-    /// the accumulate path, where the dye moves by the mass flux alone and takes no source.
+    /// the dye concentration prescription, only for a driven-boundary (`WriteMode::Assign`)
+    /// `chi` slot: injected fluid carries a concentration supplied by the boundary itself. empty
+    /// for the accumulate path, where the dye moves by the mass flux alone.
     chi: Vec<NodeId>,
 }
 
-/// fused-source splice helper. requires an ACTIVE Gv trace
+/// fused-source splice helper. requires an active Gv trace
 /// (the caller holds `begin_trace` / `end_trace`). builds the shared primitive
 /// vocabulary (`rho`, `vel_k`, lazy `x_k` <-> centroid), then splices every
-/// spec into the trace and buckets the outputs by `target_field`. with no overlays it
-/// returns empty buckets WITHOUT touching the trace — so the no-source `godunov_stage_gv`
-/// wrapper traces exactly the plain SSP stage, no dead `mom/rho` vocabulary nodes.
+/// spec into the trace and buckets the outputs by `target_field`. on an empty overlay list it
+/// returns empty buckets and leaves the trace untouched — so the no-source `godunov_stage_gv`
+/// wrapper traces exactly the plain SSP stage, keeping only live `mom/rho` vocabulary nodes.
 fn splice_fused_sources_to_contribs(
     coords: Coords,
     spacing: &[Spacing],
@@ -542,13 +545,13 @@ fn splice_fused_sources_to_contribs(
     ncomp: usize,
     has_energy: bool,
     geo: &Option<CellGeometryGv>,
-    // the STATE vocabulary the DAG reads `rho`/`vel_k` from (`StateEnv`). `Some((rho,
-    // mom))` binds them (sources read the stage/conserved state); `None` binds NOTHING from state — a
-    // pure coordinate prescription (a driven boundary, whose DAG outputs the state it does not read).
+    // the state vocabulary the DAG reads `rho`/`vel_k` from (`StateEnv`). `Some((rho,
+    // mom))` binds them (sources read the stage/conserved state); `None` is a pure coordinate
+    // prescription — a driven boundary, whose DAG outputs the state and reads coordinates alone.
     // `x_k` (centroid) + scalar params are bound regardless.
     state: Option<(Gv, &[Gv])>,
-    // (target_field, built) pairs — the BuiltSource VALUES, so this serves both the AOT path
-    // (SourceSpec.build_source(ndim)) and the RUNTIME path (build_user_source's loaded values).
+    // (target_field, built) pairs — the BuiltSource values, so this serves both the AOT path
+    // (SourceSpec.build_source(ndim)) and the runtime path (build_user_source's loaded values).
     sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
 ) -> FusedContribs {
     use std::collections::HashMap;
@@ -563,7 +566,7 @@ fn splice_fused_sources_to_contribs(
         };
     }
 
-    // ----- shared primitive vocabulary, declared ONCE; CSE collapses the
+    // ----- shared primitive vocabulary, declared once; CSE collapses the
     // `mom_k / rho` divisions across every overlay that uses them. bound only when the DAG reads
     // state (`StateEnv::Stage`); a coordinate prescription (`StateEnv::Coord`) skips it.
     let mut shared_params: HashMap<String, NodeId> = HashMap::new();
@@ -574,11 +577,11 @@ fn splice_fused_sources_to_contribs(
             shared_params.insert(format!("vel_{k}"), v_k.node());
         }
         // pressure-reading sources (e.g., radiative cooling Lambda(rho, T), T = pre/rho): bind `pre`
-        // to the c2p-computed `prim.pre` field. at source-apply / fused-godunov time prim is the SSP
-        // stage input (not yet recomputed), so this is consistent with rho/vel above. energy-bearing
-        // regimes only — iso has no pressure field. bound ONLY when a source actually references
+        // to the c2p-computed `prim.pre` field. at source-apply / fused-godunov time prim still holds
+        // the SSP stage input, so this is consistent with rho/vel above. energy-bearing
+        // regimes only — the `prim.pre` field exists there. bound when a source actually references
         // `pre` (mirrors `needs_position`): an unconditional bind adds a manifest `prim.pre` read that
-        // DUPLICATES the adiabatic godunov's own flux-reconstruction read -> input/output aliasing.
+        // duplicates the adiabatic godunov's own flux-reconstruction read -> input/output aliasing.
         let needs_pre = sources
             .iter()
             .any(|(_, b)| b.params.iter().any(|p| p == "pre"));
@@ -589,12 +592,12 @@ fn splice_fused_sources_to_contribs(
             );
         }
     }
-    // LAZY centroid binding. `x_k` <-> cell centroid for specs
+    // lazy centroid binding. `x_k` <-> cell centroid for specs
     // that declare position params (gravity, immersed bodies). walk the
-    // spec params FIRST to detect which axes are needed, then call
+    // spec params first to detect which axes are needed, then call
     // `cell_geometry_gv` (which declares `x_lo_k` / `dx_k` scalars in the
-    // trace) ONLY if at least one axis is referenced. specs without
-    // position dependence keep the prior scalar manifest unchanged.
+    // trace) only if at least one axis is referenced. position-free specs
+    // keep the prior scalar manifest unchanged.
     let needs_position = sources.iter().any(|(_, built)| {
         built
             .params
@@ -610,9 +613,9 @@ fn splice_fused_sources_to_contribs(
         }
     }
 
-    // scalar-leaf cache so the SAME spec param across multiple overlays
+    // scalar-leaf cache so the same spec param across multiple overlays
     // (e.g., `g_ext_0` in the mom + nrg specs of uniform_acceleration)
-    // resolves to ONE Gv leaf — runtime fills one scalar, CSE collapses.
+    // resolves to a single Gv leaf — runtime fills one scalar, CSE collapses.
     let mut scalar_leaves: HashMap<String, NodeId> = HashMap::new();
     let mut out = FusedContribs {
         den: Vec::new(),
@@ -671,7 +674,7 @@ fn splice_fused_sources_to_contribs(
             }
             // cell-B prescription (MHD driven boundary): the ncomp-component bcell vector.
             // only valid in the Assign (prescription) mode — the conservation-law source lifts
-            // never target B, so the accumulate path asserts mag stays empty.
+            // target den/mom/nrg alone, so the accumulate path asserts mag stays empty.
             "bcell" => {
                 assert_eq!(
                     spliced.len(),
@@ -684,7 +687,7 @@ fn splice_fused_sources_to_contribs(
                 }
             }
             // dye prescription (driven boundary): one scalar concentration for the injected fluid.
-            // Assign mode only — the dye has no source term, it rides the mass flux.
+            // Assign mode only — the dye rides the mass flux, which is its whole transport.
             "chi" => {
                 assert_eq!(
                     spliced.len(),
@@ -700,7 +703,7 @@ fn splice_fused_sources_to_contribs(
     out
 }
 
-/// the SSP shu-osher stage update WITH a fused list of spec sources — the
+/// the SSP shu-osher stage update with a fused list of spec sources — the
 /// `godunov_stage_gv` body (runtime `(a0, ac)` convex coefficients, `cons = a0*u_n + ac*fe`)
 /// with the spec contributions spliced into the forward-euler operator:
 /// `fe(u, div, src) = u - dt*div + dt*(geo_src + \sum spec_src)`. one launch folds flux
@@ -711,10 +714,10 @@ fn splice_fused_sources_to_contribs(
 /// same convex coefficient that weights the flux divergence — which is exactly the SSP
 /// source treatment (`ac*dt*S` per stage). pass an empty slice for the no-overlay variant.
 ///
-/// this is the COMPILE-TIME entry: it materializes each `SourceSpec`'s `BuiltSource`
+/// this is the compile-time entry: it materializes each `SourceSpec`'s `BuiltSource`
 /// (`build_source(ndim)`) then delegates to [`godunov_stage_gv_with_fused_built`], the core
-/// over `BuiltSource` VALUES that the AOT bake and the RUNTIME user-source path share. the
-/// godunov+source trace lives ONCE, in the core.
+/// over `BuiltSource` values that the AOT bake and the runtime user-source path share. the
+/// godunov+source trace lives once, in the core.
 pub fn godunov_stage_gv_with_fused_sources(
     coords: Coords,
     spacetime: Spacetime,
@@ -725,8 +728,8 @@ pub fn godunov_stage_gv_with_fused_sources(
     has_energy: bool,
     source: GeoSource,
     user_sources: &[&symbi_hydro::source_spec::SourceSpec],
-    // when this stage is FUSED with the cell-B predictor, the magnetic geo source reads cell-B
-    // via the predictor's `bc_k` key so try_fuse merges the two reads (no input/output alias).
+    // when this stage is fused with the cell-B predictor, the magnetic geo source reads cell-B
+    // via the predictor's `bc_k` key so try_fuse merges the two reads onto one binding.
     // the plain (unfused) stage passes false -> reads `prim.mag[k]`.
     mag_from_bcell: bool,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -736,8 +739,8 @@ pub fn godunov_stage_gv_with_fused_sources(
         .collect();
     let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
         builts.iter().map(|(t, b)| (*t, b)).collect();
-    // spec-overlay fusion (AOT `_with_{slug}` bakes) never carries an immersed body; that is the
-    // runtime-source path's job (build_fused_cpu_kernel threads the real count).
+    // spec-overlay fusion (AOT `_with_{slug}` bakes) runs body-free; the immersed body belongs to
+    // the runtime-source path (build_fused_cpu_kernel threads the real count).
     godunov_stage_gv_with_fused_built(
         coords,
         spacetime,
@@ -753,11 +756,12 @@ pub fn godunov_stage_gv_with_fused_sources(
     )
 }
 
-/// the SSP stage core over PRE-BUILT sources — `BuiltSource` VALUES paired with their target
+/// the SSP stage core over pre-built sources — `BuiltSource` values paired with their target
 /// field, the shape `splice_fused_sources_to_contribs` consumes. the SourceSpec entry
 /// [`godunov_stage_gv_with_fused_sources`] feeds AOT specs (`build_source(ndim)`); the runtime
-/// user-source CPU fusion feeds `RuntimeSource`'s loaded `BuiltSource`s directly. ONE trace, both
-/// paths — no duplicated godunov+source lowering. `sources` is `(target_field, built)` pairs.
+/// user-source CPU fusion feeds `RuntimeSource`'s loaded `BuiltSource`s directly. one trace, both
+/// paths — the godunov+source lowering lives in one place. `sources` is `(target_field, built)`
+/// pairs.
 #[allow(clippy::too_many_arguments)]
 pub fn godunov_stage_gv_with_fused_built(
     coords: Coords,
@@ -771,8 +775,8 @@ pub fn godunov_stage_gv_with_fused_built(
     sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
     mag_from_bcell: bool,
     // immersed-body count. > 0 wraps the post-combine cons with `body_evolved_gv` (gravity +
-    // accretion drain) at weight `ac*dt`, so the single fused sweep IS `plain godunov + source_apply
-    // + body_source`, in that order, bit-for-bit. 0 leaves the update body-free.
+    // accretion drain) at weight `ac*dt`, so the single fused sweep equals `plain godunov +
+    // source_apply + body_source`, in that order, bit-for-bit. 0 leaves the update body-free.
     n_bodies: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     godunov_stage_gv_with_fused_built_and_geo_weight(
@@ -816,18 +820,18 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     let dt = Gv::scalar("dt");
     let a0 = Gv::scalar("a0");
     let ac = Gv::scalar("ac");
-    // the SSP source weight. computed as `ac*dt` so it is BIT-IDENTICAL to the standalone
+    // the SSP source weight. computed as `ac*dt` so it is bit-identical to the standalone
     // `source_apply_gv` pass's `dt` scalar (the driver fills that with `ac*sim.dt` — the same IEEE
     // f64 product). this is what makes `fused == plain godunov + source_apply` bit-exact: the
-    // user source is added as a SEPARATE post-combine term with this weight, never
-    // folded into the `ac*fe` multiply (which would distribute the rounding differently).
+    // user source rides as a separate post-combine term at this weight; folding it into the
+    // `ac*fe` multiply would distribute the rounding differently.
     let ac_dt = ac * dt;
     // flat spacetime: the physical (orthonormal) finite-volume geometry. curved (GR): the
-    // COVARIANT geometry — coordinate-form angular face weights (the alpha sqrt(gamma) measure),
+    // covariant geometry — coordinate-form angular face weights (the alpha sqrt(gamma) measure),
     // matching the covariant momentum S_i and the contravariant fluxes v^i; the orthonormal
     // angular weights would leave every theta-direction force on S_theta short by a factor r.
     // radial faces and the volume coincide, so 1D radial GR is bit-identical.
-    // a curved spacetime ALWAYS needs the geometry (the metric position + the alpha sqrt(gamma)
+    // a curved spacetime always needs the geometry (the metric position + the alpha sqrt(gamma)
     // densitization measure), even on a cartesian-uniform grid where flat hydro skips it.
     let geo =
         (!is_cartesian_uniform(coords, spacing) || spacetime != Spacetime::Minkowski).then(|| {
@@ -845,12 +849,13 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
                 _ => cell_geometry_covariant_gv(coords, spacing, axes, ndim as usize, None),
             }
         });
-    // GR HYDRO evolves the fully densitized state (gammie et al. 2003; stone et al. 2024 eq. 20):
-    // U = sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] with the flux carrying the SAME measure, so
-    // the divergence is plain coordinate differencing, there is no lapse to place, the geometry
-    // arrives through the pointwise connection source (1/2) sqrt(-g) (d_i g_ab) T^ab, and the
-    // energy source is identically zero because the metric is stationary. GR MHD keeps the
-    // area-weighted valencia path (its induction and CT seam are not densitized).
+    // GR hydro evolves the fully densitized state (gammie et al. 2003; stone et al. 2024 eq. 20):
+    // U = sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] with the flux carrying the same measure, so
+    // the divergence is plain coordinate differencing with the lapse absorbed into the measure on
+    // both sides, the geometry arrives through the pointwise connection source
+    // (1/2) sqrt(-g) (d_i g_ab) T^ab, and the energy source is identically zero because the metric
+    // is stationary. GR MHD keeps the area-weighted valencia path (its induction and CT seam carry
+    // the area-weighted form).
     let densitized = spacetime != Spacetime::Minkowski && matches!(source, GeoSource::Hydro { .. });
     assert!(
         !densitized || (sources.is_empty() && n_bodies == 0),
@@ -860,15 +865,15 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     let mom: Vec<Gv> = (0..ncomp)
         .map(|k| Gv::field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8)))
         .collect();
-    // on a curved background the flat velocity-quadratic inertial is the WRONG contraction for the
-    // covariant momentum S_i (it treats the components as flat); the covariant stress-energy
-    // contraction below carries those blocks instead, so the hydro geometric source keeps ONLY its
+    // on a curved background the covariant momentum S_i takes its inertial blocks from the
+    // covariant stress-energy contraction below (the flat velocity-quadratic inertial treats the
+    // components as flat), so the hydro geometric source keeps only its
     // discrete well-balanced pressure form `p (A_hi - A_lo) / V` — which cancels the pressure flux
-    // divergence bit-exactly at a uniform-p hydrostatic state, unlike the analytic pressure block
-    // `p d_j ln(alpha sqrt(gamma))` of the contraction.
+    // divergence bit-exactly at a uniform-p hydrostatic state, while the analytic pressure block
+    // `p d_j ln(alpha sqrt(gamma))` of the contraction cancels only to truncation order.
     // the ideal-MHD stress moves to the covariant contraction on the GR path too — the flat
-    // Rmhd curvilinear source would double-count the inertia/tension with the WRONG (flat)
-    // contraction for covariant S_i; only the GAS-pressure discrete block stays.
+    // Rmhd curvilinear source would double-count the inertia/tension with the flat contraction
+    // for covariant S_i; only the gas-pressure discrete block stays.
     let source_discrete = match (spacetime, source) {
         (Spacetime::Minkowski, s) => s,
         (_, GeoSource::Hydro { .. }) | (_, GeoSource::Rmhd) => GeoSource::Hydro { inertial: false },
@@ -901,16 +906,17 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
         sources,
     );
 
-    // the plain forward-euler stage carries ONLY the flux divergence + the (well-balanced)
-    // geometric source — NOT the user sources. `cons_new = a0*u_n + ac*fe`, identical to
-    // `godunov_stage_gv`. the homologous-mesh dilution `-mesh_hdil * u` (with
-    // `mesh_hdil = ndim * a_dot / a`, the comoving volume-growth rate) rides every
-    // conserved law; the static binding mesh_hdil = 0 subtracts an exact zero.
+    // the plain forward-euler stage carries the flux divergence + the (well-balanced)
+    // geometric source; the user sources ride outside it, added after the combine.
+    // `cons_new = a0*u_n + ac*fe`, identical to `godunov_stage_gv`. the homologous-mesh
+    // dilution `-mesh_hdil * u` (with `mesh_hdil = ndim * a_dot / a`, the comoving
+    // volume-growth rate) rides every conserved law; the static binding mesh_hdil = 0
+    // subtracts an exact zero.
     let h_dil = Gv::scalar("mesh_hdil");
     // GR densitization (valencia 3+1, static diagonal background): the spatial RHS — the flux
-    // divergence + the geometric momentum source — is weighted by the lapse `alpha(x)`. NOT the
-    // `u` snapshot or the mesh-dilution term (those are the time / comoving parts). flat
-    // spacetime -> `None` -> untouched, bit-identical (see `gv_lapse_weight`).
+    // divergence + the geometric momentum source — is weighted by the lapse `alpha(x)`. the `u`
+    // snapshot and the mesh-dilution term stay unweighted: they are the time / comoving parts.
+    // flat spacetime -> `None` -> untouched, bit-identical (see `gv_lapse_weight`).
     // the coordinate-indexed cell centroid (r at slot 0) for the lapse alpha(x); only the
     // curvilinear path carries one (cartesian-uniform geo = None is always minkowski -> unused).
     let coord_centroid: Vec<Gv> = match &geo {
@@ -937,12 +943,13 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     );
     // the cell lapse. on the valencia path it weights the spatial RHS; under densitization it is
     // one factor of the measure sqrt(-g) = alpha sqrt(det gamma), and the RHS weight is identically
-    // 1 (sqrt(-g) sits on both the state and the flux) so there is no lapse left to place.
+    // 1 (sqrt(-g) sits on both the state and the flux, so the whole lapse is already placed).
     let cell_lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
     let lapse = if densitized { None } else { cell_lapse };
     // coordinate-indexed metric position: each gridded coordinate at its centroid, each ungridded
     // coordinate at its chart symmetry default (spherical polar -> pi/2, else 0). a flat spacetime
-    // has no metric to sample and (on a cartesian-uniform grid) no centroid nodes at all.
+    // leaves this `None`: its metric is constant, and a cartesian-uniform grid's centroid nodes are
+    // absent from the trace.
     let x_cell: Option<Tensor<Gv, 3>> = (spacetime != Spacetime::Minkowski).then(|| {
         Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
             if axes.contains(&c) {
@@ -952,7 +959,7 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
             }
         }))
     });
-    // the cell measure, evaluated at the metric's FULL spatial dimension so a reduced grid keeps
+    // the cell measure, evaluated at the metric's full spatial dimension so a reduced grid keeps
     // the suppressed directions' volume element. the state carries sqrt(det gamma), the flux and
     // the connection source carry sqrt(-g) = alpha sqrt(det gamma).
     let sqrt_gamma_cell = densitized.then(|| {
@@ -964,15 +971,15 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     });
     let sqrt_neg_g =
         sqrt_gamma_cell.map(|g| cell_lapse.expect("a curved spacetime has a lapse") * g);
-    // the GR geodesic sources from the FULL covariant contraction `grhd_covariant_source`: the
+    // the GR geodesic sources from the full covariant contraction `grhd_covariant_source`: the
     // per-coordinate momentum source S_j = (1/2) T^{mu nu} d_j g_{mu nu} and the energy source
     // S_tau, one forward-autodiff pass per axis at the metric's full spherical D = 3 (the metric
-    // supplies only its ADM line element — no hand-derived christoffels).
+    // supplies its ADM line element and autodiff supplies every derivative).
     //
-    // on the valencia path the MOMENTUM call takes p = 0 (the E-part only: gravity + covariant
-    // centrifugal), because the pressure block `p d_j ln(alpha sqrt(gamma))` rides the DISCRETE
-    // well-balanced form in gv_geometric_source above, and the ENERGY call takes the full p.
-    // under densitization the connection source IS the whole geometric contribution, so ONE pass
+    // on the valencia path the momentum call takes p = 0 (the E-part only: gravity + covariant
+    // centrifugal), because the pressure block `p d_j ln(alpha sqrt(gamma))` rides the discrete
+    // well-balanced form in gv_geometric_source above, and the energy call takes the full p.
+    // under densitization the connection source is the whole geometric contribution, so one pass
     // at the full pressure serves the momentum and the energy source is structurally zero.
     // GRMHD-ready: the EM stress just changes T^{mu nu}.
     let geodesic: Option<(Tensor<Gv, 3>, Gv)> = match spacetime {
@@ -982,8 +989,8 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
             let x = x_cell.expect("a curved spacetime has a metric position");
             // the effective inertia e = rho h W^2 for the covariant stress. reconstructed metric-free
             // as h D^2 / rho_prim (W = D/rho_prim) — independent of the energy variable, so it holds
-            // whether the nrg slot stores the valencia tau (RMHD) or the killing energy (RHD, where
-            // D + tau + p does not equal the nrg field). the mass slot is densitized on the GR
+            // whether the nrg slot stores the valencia tau (RMHD) or the killing energy (RHD, whose
+            // stored value differs from D + tau + p). the mass slot is densitized on the GR
             // hydro path, so the baryon density D is recovered as cons_den / sqrt(det gamma).
             let p = Gv::field("pre", FieldRef::PrimPre);
             let e = {
@@ -996,9 +1003,9 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
                 };
                 h_enth * d_baryon * d_baryon / prim_rho
             };
-            // the CONTRAVARIANT velocity in coordinate slots (the metric-aware c2p output);
+            // the contravariant velocity in coordinate slots (the metric-aware c2p output);
             // spherical GR momentum slots are coordinate-ordered, so slot k == coordinate k.
-            // coordinates without a momentum slot carry zero.
+            // a coordinate beyond the momentum slots carries zero.
             let v = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
                 if c < ncomp {
                     Gv::field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8))
@@ -1008,13 +1015,13 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
             }));
             if matches!(source, GeoSource::Rmhd) {
                 // GRMHD: the ideal-MHD stress in the same contraction. the source takes the
-                // METRIC-FREE rest enthalpy density rho_h = rho + Gamma/(Gamma-1) p (it builds
+                // metric-free rest enthalpy density rho_h = rho + Gamma/(Gamma-1) p (it builds
                 // W and b^mu from the harvested gamma internally); B reads the cell field under
                 // the same key convention as the discrete magnetic geo source. the momentum call
                 // takes p = 0 (the gas-pressure block rides the discrete well-balanced form) but
-                // keeps the FULL magnetic stress — the b^2/2 isotropic block is analytic; the
-                // one-step-residual instrument adjudicates its balance. spinning kerr is not
-                // covered here: the dragging-consistent reconstruction does not extend to B.
+                // keeps the full magnetic stress — the b^2/2 isotropic block is analytic; the
+                // one-step-residual instrument adjudicates its balance. this path applies on a
+                // static background: the dragging-consistent reconstruction extends to the gas alone.
                 let gamma_eos = Gv::scalar("gamma");
                 let prim_rho = Gv::field("prim_rho", FieldRef::PrimRho);
                 let rho_h = prim_rho + gamma_eos / (gamma_eos - Gv::ONE) * p;
@@ -1050,14 +1057,14 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
                         grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pp, b)
                     }
                     Spacetime::KerrKS if coords == Coords::Cartesian => {
-                        // cartesian spinning kerr: the rank-1 kerr-schild metric at the FULL
+                        // cartesian spinning kerr: the rank-1 kerr-schild metric at the full
                         // cartesian position; derivatives ride the same autodiff Dual pass.
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
                         grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pp, b)
                     }
                     Spacetime::KerrKS if coords == Coords::Cylindrical => {
                         // cylindrical spinning kerr: the rank-1 update on the diag(1, R^2, 1)
-                        // base at the FULL (R, phi, z) position; same autodiff Dual pass.
+                        // base at the full (R, phi, z) position; same autodiff Dual pass.
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
                         grmhd_covariant_source(
                             &KerrKSCylindrical { mass, spin },
@@ -1070,8 +1077,8 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
                     }
                     Spacetime::KerrKS => {
                         // the generic covariant stress contraction S_j = (1/2) T^{mu nu} d_j g_{mu nu}
-                        // with the EM stress; the non-diagonal kerr metric enters only through the
-                        // autodiff Dual pass, no per-block closed form.
+                        // with the EM stress; the non-diagonal kerr metric enters through the
+                        // autodiff Dual pass alone, which keeps the contraction generic.
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
                         grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, pp, b)
                     }
@@ -1106,7 +1113,7 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
                     Spacetime::Minkowski => unreachable!("flat handled above"),
                 };
                 if densitized {
-                    // the momentum call takes p = 0: the pressure block rides the DISCRETE
+                    // the momentum call takes p = 0: the pressure block rides the discrete
                     // well-balanced form below, exactly as it does on the flat curvilinear path.
                     // the free-index-down energy source vanishes on a stationary metric.
                     let (s_mom, _) = src_at(Gv::ZERO);
@@ -1120,27 +1127,28 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
         }
     };
     // the connection source is the right side of d_t U + d_j F^j = sqrt(-g)(1/2)(d_i g_ab) T^ab, so
-    // it takes the SAME measure the state and the flux carry.
+    // it takes the same measure the state and the flux carry.
     let geodesic = match (geodesic, sqrt_neg_g) {
         (Some((s_mom, s_tau)), Some(m)) => Some((s_mom.scale(m), s_tau)),
         (g, _) => g,
     };
-    // the WELL-BALANCED pressure block of the densitized momentum source.
+    // the well-balanced pressure block of the densitized momentum source.
     //
     // the momentum flux carries sqrt(-g) p delta^j_i, so its divergence contributes
     // p d_i sqrt(-g) + sqrt(-g) d_i p, while the connection source's pressure part is
     // (1/2) sqrt(-g) p g^{ab} d_i g_ab = p d_i sqrt(-g). the two p d_i sqrt(-g) terms cancel
-    // ANALYTICALLY, leaving sqrt(-g) d_i p — identically zero at uniform pressure. they do NOT
-    // cancel discretely if the flux side differences sqrt(-g) p across the faces while the source
-    // side takes a pointwise derivative at the center: that mismatch is O(dx^2), the same order as
-    // the truncation error, and it lands on exactly the momentum components.
+    // analytically, leaving sqrt(-g) d_i p — identically zero at uniform pressure. discrete
+    // cancellation requires both sides to use one operator: differencing sqrt(-g) p across the
+    // faces on the flux side while taking a pointwise derivative at the center on the source side
+    // leaves an O(dx^2) mismatch, the same order as the truncation error, landing on exactly the
+    // momentum components.
     //
-    // so the pressure block is discretized with the SAME operator the divergence uses — a face
+    // so the pressure block is discretized with the same operator the divergence uses — a face
     // difference of the measure over the coordinate width — and a uniform-p state then cancels the
-    // pressure flux divergence bit-exactly. only a GRIDDED coordinate has a pressure gradient.
+    // pressure flux divergence bit-exactly. only a gridded coordinate has a pressure gradient.
     let mom_pressure: Option<Vec<Gv>> = densitized.then(|| {
         let p = Gv::field("pre", FieldRef::PrimPre);
-        // the measure at a face of THIS cell: the swept coordinate at the face, every other slot
+        // the measure at a face of this cell: the swept coordinate at the face, every other slot
         // where the flux kernel puts it — gridded slots at the cell midpoint, ungridded slots at
         // the chart's symmetry default. taking the raw centroid vector instead would leave an
         // ungridded spherical polar slot at theta = 0, where sin(theta) zeroes the measure and the
@@ -1172,7 +1180,7 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
             .collect()
     });
     let mom_gravity: Option<Tensor<Gv, 3>> = geodesic.map(|(s_mom, _)| s_mom);
-    // the GR geodesic ENERGY source S_tau — the second output of the contraction (gravity's rate
+    // the GR geodesic energy source S_tau — the second output of the contraction (gravity's rate
     // of work on the infalling gas). zero on a flat background.
     let nrg_gravity: Option<Gv> = geodesic.map(|(_, s_tau)| s_tau);
     let geo_weight = weighted_geo_source.then(|| Gv::field("geo_source_weight", FieldRef::Scratch));
@@ -1192,8 +1200,8 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
         }
         r
     };
-    // the densitized law differences the face fluxes in PLAIN coordinates — sqrt(-g) already
-    // carries the geometry, so there is no area or volume weighting on any chart.
+    // the densitized law differences the face fluxes in plain coordinates — sqrt(-g) already
+    // carries the geometry, so every chart differences with unit weights.
     let divergence = |base: &str| {
         if densitized {
             gv_divergence_coord(base, ndim, spacing)
@@ -1202,9 +1210,9 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
         }
     };
     let combine = |un: Gv, fe: Gv| a0 * un + ac * fe;
-    // the USER sources ride as a SEPARATE additive term after the combine: `+ \sum ac*dt*contrib`,
+    // the user sources ride as a separate additive term after the combine: `+ \sum ac*dt*contrib`,
     // accumulated exactly as `source_apply_gv` accumulates it (start from the combine result,
-    // `+= ac_dt*contrib` per spec). so the fused kernel IS `plain godunov + the additive pass`,
+    // `+= ac_dt*contrib` per spec). so the fused kernel equals `plain godunov + the additive pass`,
     // bit-for-bit, fused into one launch (proven by the fused-equivalence test).
     let with_sources = |base: Gv, srcs: &[NodeId]| {
         let mut r = base;
@@ -1226,8 +1234,8 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
         let geo_src = src.as_ref().map(|s| s[k]);
         // every momentum slot carries its covariant geodesic block (gravity + covariant
         // centrifugal, coordinate k of the contraction) on top of the discrete pressure form in
-        // geo_src; a suppressed axisymmetric slot's block is identically zero (the metric never
-        // reads phi, so its autodiff tangent vanishes — angular-momentum conservation).
+        // geo_src; a suppressed axisymmetric slot's block is identically zero (the metric is
+        // independent of phi, so its autodiff tangent vanishes — angular-momentum conservation).
         let mom_src = match mom_gravity {
             Some(g) => Some(geo_src.map_or(g[k], |s| s + g[k])),
             None => geo_src,
@@ -1237,18 +1245,18 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
             Some(pb) => Some(mom_src.map_or(pb[k], |s| s + pb[k])),
             None => mom_src,
         };
-        // valencia covariant storage: the conserved momentum is the COVARIANT S_i = rho h W^2
+        // valencia covariant storage: the conserved momentum is the covariant S_i = rho h W^2
         // gamma_ij v^j (the metric-aware c2p + flux), and the geodesic source is written for that
-        // covariant S_i, so d_t S_i = -alpha div(F) + alpha S — a SINGLE, uniform lapse on every
-        // conserved law, supplied by the `fe` weight. no orthonormal alpha^2 asymmetry: the flux
-        // kernel already carries the contravariant v^n (no V_rhat), and the metric coefficient
-        // gamma_ij rides inside S_i, above the densitization.
+        // covariant S_i, so d_t S_i = -alpha div(F) + alpha S — a single, uniform lapse on every
+        // conserved law, supplied by the `fe` weight. the lapse enters at one power, matching the
+        // contravariant v^n the flux kernel carries (the orthonormal V_rhat would bring an alpha^2
+        // asymmetry), and the metric coefficient gamma_ij rides inside S_i, above the densitization.
         mom_g.push(with_sources(
             combine(u_n_mom, fe(mom[k], div, mom_src)),
             &contribs.mom[k],
         ));
     }
-    // relativistic hydro AND MHD on a curved background evolve the COVARIANT (killing) energy ehat,
+    // relativistic hydro and MHD on a curved background evolve the covariant (killing) energy ehat,
     // whose flux is the free-index-down `-sqrt(-g)(T^t_t + rho u^t)` current and whose source vanishes
     // on a stationary metric (HARM/AthenaK; docs/covariant_energy.md). RHD builds f_ehat in the regime;
     // RMHD builds it as a linear re-split of the valencia numerical fluxes in the flux kernel (keeping
@@ -1261,11 +1269,12 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
         let div = divergence("nrg_flux");
         let stage = if is_covariant_energy {
             // conservation of the killing energy, d_t(sqrt(gm) ehat) + d_n(sqrt(gm) f_ehat) = 0,
-            // reduced to the code's FLAT coordinate measure (sqrt(gm) = sqrt(gm_flat)/alpha, static):
+            // reduced to the code's flat coordinate measure (sqrt(gm) = sqrt(gm_flat)/alpha, static):
             // d_t ehat + alpha_cell * div_flat(f_ehat/alpha_face) = 0. the flux kernel stores
-            // f_ehat/alpha at the face; the cell lapse rides here through `fe` — the SAME uniform
-            // lapse every other conserved law takes. NO geodesic energy source (it is identically
-            // zero for the killing energy on a stationary metric, unlike the normal-observer tau).
+            // f_ehat/alpha at the face; the cell lapse rides here through `fe` — the same uniform
+            // lapse every other conserved law takes. the geodesic energy source is identically zero
+            // for the killing energy on a stationary metric (the normal-observer tau carries one),
+            // so this law is pure conservation.
             fe(nrg, div, None)
         } else {
             fe(nrg, div, nrg_gravity)
@@ -1274,7 +1283,7 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     });
 
     // immersed-body wrap: `(cons_g + ac_dt*S_grav(cons))*f` with `f = exp(-drain*ac_dt)`. the body
-    // contribution is evaluated at the STAGE INPUT — `rho`/`mom`/`nrg`, which is what this kernel
+    // contribution is evaluated at the stage input — `rho`/`mom`/`nrg`, which is what this kernel
     // reads `cons` as — and applied to the flux-combined `cons_g`. an explicit scheme evaluates
     // the flux divergence and every source at one state and sums them into one convex update;
     // evaluating the body at the combined state instead would compose two operators sequentially,
@@ -1285,8 +1294,8 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     // stage at weight ac*dt), so the fused sweep stays bit-identical to plain godunov followed by
     // the standalone `body_source` pass: storing cons_g to an f64 buffer and reading it back is
     // exact, so the register-resident cons_g the body reads here equals the memory value the
-    // two-pass body reads. gravity is additive but the accretion drain is multiplicative, so
-    // neither rides the additive `contribs` accumulation — the body wraps the final nodes.
+    // two-pass body reads. gravity is additive and the accretion drain multiplicative, so the body
+    // wraps the final nodes, outside the additive `contribs` accumulation.
     // adiabatic (energy) only; the iso body (`body_source_iso_gv`, cs from prim.pre) is a follow-on.
     let (rho_final, mom_final, nrg_final) = if n_bodies > 0 {
         if let Some(nrg_in) = nrg_g {
@@ -1352,23 +1361,23 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     (end_trace(), writes)
 }
 
-/// the standalone ADDITIVE source pass: `cons += dt * \sum S(prim, x; params)`, in place, per
-/// conserved slot, for a list of spec sources. the GENERAL source executor — it runs ANY composed
-/// source as a SEPARATE per-stage kernel (the `body_source_gv` mechanism, generalized to
-/// `SourceSpec`s), as opposed to FUSING the source into the godunov stage.
+/// the standalone additive source pass: `cons += dt * \sum S(prim, x; params)`, in place, per
+/// conserved slot, for a list of spec sources. the general source executor — it runs any composed
+/// source as a separate per-stage kernel (the `body_source_gv` mechanism, generalized to
+/// `SourceSpec`s); the fused path folds the same source into the godunov stage.
 ///
-/// it splices the SAME `splice_fused_sources_to_contribs` the fused godunov uses, so a plain
+/// it splices the same `splice_fused_sources_to_contribs` the fused godunov uses, so a plain
 /// `godunov_stage_gv` (flux + geometric source, no user sources) followed by this pass is the
-/// proven-equivalent DECOMPOSITION of `godunov_stage_gv_with_fused_sources`. the driver passes
+/// proven-equivalent decomposition of `godunov_stage_gv_with_fused_sources`. the driver passes
 /// `dt = ac*dt` (the SSP shu-osher stage weight — identical to how `body_source` is invoked), so
 /// `S` lands with the same `ac*dt` weight the fused stage applies inside its `ac*fe` combine.
 ///
 // =============================================================================
-// THE UNIFIED DAG-APPLICATION OPERATOR.
+// the unified DAG-application operator.
 //
-// `apply_dag_core_gv` is the ONE kernel builder behind BOTH the interior source pass and
+// `apply_dag_core_gv` is the single kernel builder behind both the interior source pass and
 // the driven-boundary pass. it factors out the decisions a source/boundary
-// makes: WHERE the DAG reads state (`StateEnv`), and HOW its result lands in
+// makes: where the DAG reads state (`StateEnv`), and how its result lands in
 // the target field (`WriteMode`). the iteration domain + target-field binding are the dispatch's job
 // (the same `dispatch_runtime_ir` + `resolve_path` serve cons.* and prim.*), so this builder is the
 // whole difference between a source and a boundary prescription. doc 32's user `combine` projects
@@ -1378,8 +1387,8 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
 
 /// the state vocabulary the DAG reads `rho`/`vel_k` from. `Stage` binds them from the SSP stage
 /// snapshot `u_stage` (an interior source evaluates at its stage input — the stage-input invariant); `Coord`
-/// binds NOTHING from state (a pure coordinate prescription — a driven boundary, whose DAG OUTPUTS
-/// the state). `x_k` (centroid) + scalar params bind regardless of this.
+/// is a pure coordinate prescription — a driven boundary, whose DAG outputs the state and reads
+/// coordinates alone. `x_k` (centroid) + scalar params bind regardless of this.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StateEnv {
     Stage,
@@ -1388,8 +1397,8 @@ pub enum StateEnv {
 
 /// how the DAG result lands in the target field. `Accumulate` is the RHS form `target = read(target)
 /// + dt * \sum contrib` (in place; the `dt` scalar is the SSP stage weight) — sources. `Assign` is the
-/// prescription `target = expr` (write-only, no base, no weight) — driven boundaries. doc 32's
-/// `combine`: add + relax both map to `Accumulate`, overwrite to `Assign`.
+/// prescription `target = expr` (write-only; the expression is the whole value) — driven
+/// boundaries. doc 32's `combine`: add + relax both map to `Accumulate`, overwrite to `Assign`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WriteMode {
     Accumulate,
@@ -1397,7 +1406,7 @@ pub enum WriteMode {
 }
 
 /// the unified core: trace a kernel that evaluates each `(slot, BuiltSource)` DAG per cell and writes
-/// it to the slot's field under `mode`. `slot` names the STRUCTURAL conserved slot (`"den"` mass /
+/// it to the slot's field under `mode`. `slot` names the structural conserved slot (`"den"` mass /
 /// `"mom"` momentum-vector / `"nrg"` energy); `mode` + the slot pick the runtime path (Accumulate ->
 /// `cons.{den,mom_k,nrg}`; Assign -> `prim.{rho,vel_k,pre}`). shared: trace, geometry, the
 /// `splice_fused_sources_to_contribs` primitive (leaf binding + per-DAG lowering).
@@ -1417,8 +1426,9 @@ fn apply_dag_core_gv(
         .then(|| cell_geometry_gv(coords, spacing, axes, ndim as usize));
 
     // bind the state vocabulary the DAG reads from. `Stage` reads the stage-input snapshot `u_stage`
-    // (NOT post-godunov `cons`): the fused stage evaluates at its stage input, so this standalone
-    // pass must too, for `plain + this == fused` bit-for-bit. `Coord` reads no state.
+    // in place of the post-godunov `cons`: the fused stage evaluates at its stage input, so this
+    // standalone pass matches it, giving `plain + this == fused` bit-for-bit. `Coord` reads
+    // coordinates alone.
     let state_vocab: Option<(Gv, Vec<Gv>)> = match state {
         StateEnv::Stage => {
             let rho = Gv::field("rho", FieldRef::ustage_den());
@@ -1474,15 +1484,15 @@ fn apply_dag_core_gv(
                     nrg_new.node(),
                 ));
             }
-            // the godunov-source (accumulate) path never targets B — the safe conservation-law
-            // lifts touch only den/mom/nrg, and `raw` is gated to those slots. a bcell contrib
-            // here means a mis-routed source; fail loud so it is never silently dropped.
+            // the godunov-source (accumulate) path targets den/mom/nrg alone — the safe
+            // conservation-law lifts touch those slots, and `raw` is gated to them. a bcell contrib
+            // here means a mis-routed source; fail loud so it surfaces at once.
             debug_assert!(
                 contribs.mag.iter().all(|m| m.is_empty()),
                 "accumulate (godunov source) path does not support a `bcell` target",
             );
-            // the dye is advected by the mass flux and carries no source term, so a chi contrib
-            // here is a mis-routed prescription. fail loud rather than drop it silently.
+            // the dye is advected by the mass flux alone, so a chi contrib here is a mis-routed
+            // prescription. fail loud so it surfaces at once.
             debug_assert!(
                 contribs.chi.is_empty(),
                 "accumulate (godunov source) path does not support a `chi` target",
@@ -1490,8 +1500,8 @@ fn apply_dag_core_gv(
             writes
         }
         WriteMode::Assign => {
-            // prescription: `prim_slot = expr` (write-only, no base, no weight). a prescription is a
-            // COMPLETE state — exactly ONE DAG per slot (not summed overlays).
+            // prescription: `prim_slot = expr` (write-only; the expression is the whole value). a
+            // prescription is a complete state — a single DAG per slot, taken whole.
             assert_eq!(
                 contribs.den.len(),
                 1,
@@ -1519,7 +1529,7 @@ fn apply_dag_core_gv(
                 writes.push(("pre".to_string(), FieldRef::PrimPre.into(), contribs.nrg[0]));
             }
             // MHD driven boundary: prescribe the cell-B vector (prim.mag). out-of-plane B_phi
-            // (cell-centered, flux-evolved) is the SAFE toroidal case; in-plane components are
+            // (cell-centered, flux-evolved) is the safe toroidal case; in-plane components are
             // the user's responsibility to keep div-compatible (=0 for a purely toroidal field).
             // absent for a hydro prescription (no bcell slot -> empty mag buckets).
             if contribs.mag.iter().any(|m| !m.is_empty()) {
@@ -1583,7 +1593,7 @@ pub fn source_apply_gv(
     )
 }
 
-/// RUNTIME entry (Path B): the SAME in-place source-apply kernel, but from already-lowered
+/// runtime entry (Path B): the same in-place source-apply kernel, but from already-lowered
 /// `(target_field, BuiltSource)` values — e.g., `expr_bridge::build_user_source`'s output from a
 /// SourceConfig loaded at sim startup. the `(Stage, Accumulate)` instance of [`apply_dag_core_gv`].
 pub fn source_apply_from_built_gv(
@@ -1608,10 +1618,10 @@ pub fn source_apply_from_built_gv(
     )
 }
 
-/// DRIVEN-BOUNDARY entry: prescribe the primitive state from coordinate DAGs — the
+/// driven-boundary entry: prescribe the primitive state from coordinate DAGs — the
 /// `(Coord, Assign)` instance of [`apply_dag_core_gv`]. `sources` are `(slot, BuiltSource)` with slot
 /// `"den"`/`"mom"`/`"nrg"` mapping to `prim.rho`/`prim.vel_k`/`prim.pre`; each DAG reads only
-/// `x_k`/`t`/`p_i` and OUTPUTS the prescribed value. dispatched over a face's ghost band.
+/// `x_k`/`t`/`p_i` and outputs the prescribed value. dispatched over a face's ghost band.
 pub fn boundary_fill_from_built_gv(
     coords: Coords,
     spacing: &[Spacing],
@@ -1636,7 +1646,7 @@ pub fn boundary_fill_from_built_gv(
 
 /// the cell-B induction-flux divergence for component `c` (mirror of `rmhd::bcell_flux_div`):
 /// cartesian `sum_d (bf_d_c[+e_d] - bf_d_c)/dx_d`; curvilinear the area-weighted `inv_V sum_d
-/// (A_hi_d bf_d_c[+e_d] - A_lo_d bf_d_c)` from `geo` — the SAME divergence the gas godunov uses.
+/// (A_hi_d bf_d_c[+e_d] - A_lo_d bf_d_c)` from `geo` — the same divergence the gas godunov uses.
 fn bcell_flux_div_gv(c: usize, ndim: usize, geo: &Option<CellGeometryGv>, dx: &[Gv]) -> Gv {
     let off = |d: usize| -> Vec<i32> {
         let mut o = vec![0i32; ndim];
@@ -1665,9 +1675,9 @@ fn bcell_flux_div_gv(c: usize, ndim: usize, geo: &Option<CellGeometryGv>, dx: &[
     }
 }
 
-/// the PLAIN (metric-free) cell-B induction-flux divergence `sum_d (bf_d_c[+e_d] - bf_d_c)/width_d`
-/// with the per-axis COORDINATE width read in-kernel (gv_axis_face_at). used for the OUT-OF-PLANE
-/// B component whose curl carries no lame factor — see `metric_free_oop_component`.
+/// the plain (metric-free) cell-B induction-flux divergence `sum_d (bf_d_c[+e_d] - bf_d_c)/width_d`
+/// with the per-axis coordinate width read in-kernel (gv_axis_face_at). used for the out-of-plane
+/// B component whose curl carries unit lame factors — see `metric_free_oop_component`.
 fn bcell_flux_div_plain_gv(c: usize, ndim: usize, spacing: &[Spacing]) -> Gv {
     let off = |d: usize| -> Vec<i32> {
         let mut o = vec![0i32; ndim];
@@ -1690,10 +1700,10 @@ fn bcell_flux_div_plain_gv(c: usize, ndim: usize, spacing: &[Spacing]) -> Gv {
     div.unwrap()
 }
 
-/// the divergence operator for the OUT-OF-PLANE B component (the one not in `axes`) on a FLAT
-/// background, where the stored component is PHYSICAL (orthonormal) and its induction curl is
-/// `d_t B_c = -(1/(h1 h2))[d_1(h2 F^1) + d_2(h1 F^2)]` over the in-plane lame factors — which
-/// only sometimes coincides with the gas area-weighted divergence.
+/// the divergence operator for the out-of-plane B component (the one whose coordinate lies outside
+/// `axes`) on a flat background, where the stored component is physical (orthonormal) and its
+/// induction curl is `d_t B_c = -(1/(h1 h2))[d_1(h2 F^1) + d_2(h1 F^2)]` over the in-plane lame
+/// factors — which only sometimes coincides with the gas area-weighted divergence.
 enum OopDiv {
     /// in-plane lame factors are both 1 (cyl r-z: (curl E)_phi = d_z E_r - d_r E_z), so the
     /// operator is the plain unweighted divergence; the gas h_phi = r cell volume would inject
@@ -1705,15 +1715,15 @@ enum OopDiv {
     Curl(CellGeometryGv),
 }
 
-/// the out-of-plane B component and its curl divergence for a FLAT (physical-component) plane:
+/// the out-of-plane B component and its curl divergence for a flat (physical-component) plane:
 /// - cyl r-z (axes [0,2]) -> B_phi (comp 1), metric-free (Plain).
 /// - sph r-theta (axes [0,1]) -> B_phi (comp 2), the (r, 1)-weighted curl on the r dr dtheta
 ///   measure (Curl).
-/// - cyl r-phi (axes [0,1]) -> B_z: the z-curl `(1/R)[d_R(R F^R) + d_phi F^phi]` IS the gas
+/// - cyl r-phi (axes [0,1]) -> B_z: the z-curl `(1/R)[d_R(R F^R) + d_phi F^phi]` is the gas
 ///   R-measure divergence -> None (the gas path is already the curl).
-/// - cartesian / fully-gridded (3D): None (plain == gas, or no out-of-plane component).
-/// a CURVED spacetime never takes these shortcuts: B is stored CONTRAVARIANT and every
-/// component obeys the densitized conservation law `d_t(sqrt(gamma) B^i) + d_j(alpha
+/// - cartesian / fully-gridded (3D): None (plain == gas, or the out-of-plane set is empty).
+/// on a curved spacetime every component takes the covariant law: B is stored
+/// contravariant and obeys the densitized conservation `d_t(sqrt(gamma) B^i) + d_j(alpha
 /// sqrt(gamma) G^j) = 0` — the covariant area-weighted divergence with the lapse weight.
 fn flat_oop_divergence(
     coords: Coords,
@@ -1732,7 +1742,7 @@ fn flat_oop_divergence(
 
 /// the per-component induction-flux divergences for the cell-B predictor, GR-lapse-weighted.
 /// flat: the gas area-weighted divergence, except the out-of-plane component's curl operator
-/// (`flat_oop_divergence`). curved: the covariant `alpha sqrt(gamma)` measure for EVERY
+/// (`flat_oop_divergence`). curved: the covariant `alpha sqrt(gamma)` measure for every
 /// component, times the lapse `alpha(centroid)` — the same densitization contract as the gas
 /// godunov (the face kernel writes `G = F - (beta^n/alpha) U`, deferring one alpha to the
 /// divergence; see `gv_lapse_weight`). flat spacetime elides the weight (bit-identical).
@@ -1765,7 +1775,7 @@ fn bcell_flux_divs_gv(
         None => Vec::new(),
     };
     let lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
-    // one divergence per REQUESTED component (the predictor evaluates only the out-of-plane set),
+    // one divergence per requested component (the predictor evaluates only the out-of-plane set),
     // returned in `comps` order.
     comps
         .iter()
@@ -1785,23 +1795,24 @@ fn bcell_flux_divs_gv(
         .collect()
 }
 
-/// the OUT-OF-PLANE (non-CT) magnetic components for a chart: the B-vector slots whose coordinate
-/// is NOT one of the grid axes. those live on staggered faces and are re-derived cell-centered by
-/// `bcell_from_bface = interp(bface)`, so the predictor must leave them alone; the complement — the
-/// out-of-plane components — have no face to curl and ARE evolved here as cell-centered conserved
-/// variables. cartesian `[0..ndim)` grid -> `[ndim..ncomp)`; cyl r-z (axes [0,2])
+/// the out-of-plane (non-CT) magnetic components for a chart: the B-vector slots whose coordinate
+/// lies outside the grid axes. the in-plane slots live on staggered faces and are re-derived
+/// cell-centered by `bcell_from_bface = interp(bface)`, so the predictor leaves them alone; the
+/// complement — the out-of-plane components — live purely at cell centers and are evolved here as
+/// conserved variables. cartesian `[0..ndim)` grid -> `[ndim..ncomp)`; cyl r-z (axes [0,2])
 /// -> {phi=1}; sph r-theta (axes [0,1]) -> {phi=2}; a fully-gridded 3D chart -> empty.
 fn oop_components(ncomp: usize, axes: &[usize]) -> Vec<usize> {
     (0..ncomp).filter(|c| !axes.contains(c)).collect()
 }
 
-/// the RMHD cell-B FLUX PREDICTOR (euler): `bcell[c] -= dt*div(bflux_c)`, in-place, for the
-/// OUT-OF-PLANE components ONLY (`oop_components`). those are the genuinely cell-centered magnetic
-/// slots — no staggered face, so not CT-evolved (reduced-dimension MHD). the
-/// in-plane components are re-derived by `bcell_from_bface = interp(bface)` and must NOT be
-/// flux-evolved here: their transient predictor value poisons the FOFC/c2p recoverability probe once
-/// the magnetic-energy patch is gone. a fully-gridded chart (3D)
-/// has no out-of-plane component and yields an EMPTY kernel — its dispatch is elided at `ndim==ncomp`.
+/// the RMHD cell-B flux predictor (euler): `bcell[c] -= dt*div(bflux_c)`, in-place, for the
+/// out-of-plane components (`oop_components`). those are the genuinely cell-centered magnetic
+/// slots — stored at cell centers, hence flux-evolved (reduced-dimension MHD) while CT governs the
+/// staggered faces. the in-plane components are re-derived by `bcell_from_bface = interp(bface)`
+/// and keep that value through this pass: a transient predictor value on them poisons the FOFC/c2p
+/// recoverability probe once the magnetic-energy patch is gone. on a fully-gridded chart (3D) the
+/// out-of-plane set is empty and the kernel comes out empty — its dispatch is elided at
+/// `ndim==ncomp`.
 pub fn rmhd_bcell_godunov_euler_gv(
     coords: Coords,
     spacetime: Spacetime,
@@ -1835,9 +1846,9 @@ pub fn rmhd_bcell_godunov_euler_gv(
     (end_trace(), writes)
 }
 
-/// the RMHD cell-B FLUX PREDICTOR (RK2 stage 2): `bcell[c] = 0.5*(bcell_n[c] + (bcell[c] -
-/// dt*div(bflux_c)))`, in-place, for the OUT-OF-PLANE components ONLY (`oop_components`; see the
-/// euler predictor). a fully-gridded chart (3D) yields an EMPTY kernel (dispatch elided).
+/// the RMHD cell-B flux predictor (RK2 stage 2): `bcell[c] = 0.5*(bcell_n[c] + (bcell[c] -
+/// dt*div(bflux_c)))`, in-place, for the out-of-plane components (`oop_components`; see the
+/// euler predictor). a fully-gridded chart (3D) yields an empty kernel (dispatch elided).
 pub fn rmhd_bcell_godunov_rk2_gv(
     coords: Coords,
     spacetime: Spacetime,
@@ -1876,7 +1887,7 @@ pub fn rmhd_bcell_godunov_rk2_gv(
 }
 
 /// the cell-B godunov geometry: curvilinear or curved -> the gv cell geometry (area-weighted
-/// div); flat cartesian -> the uniform `dx_d` scalars. a curved CARTESIAN chart (kerr-schild)
+/// div); flat cartesian -> the uniform `dx_d` scalars. a curved cartesian chart (kerr-schild)
 /// still carries the (flat-equal) cartesian geometry so the lapse weight has a centroid to
 /// evaluate at — its covariant measure `alpha sqrt(gamma) = 1` equals the coordinate volume.
 fn bcell_godunov_geom(
@@ -1889,14 +1900,14 @@ fn bcell_godunov_geom(
     if coords == Coords::Cartesian && spacetime == Spacetime::Minkowski {
         (
             None,
-            // per-CELL widths: an unmapped axis reduces to its `dx_d` scalar, a graded one
+            // per-cell widths: an unmapped axis reduces to its `dx_d` scalar, a graded one
             // differences its own faces.
             (0..ndim).map(|d| gv_axis_width(d, spacing[d])).collect(),
         )
     } else {
         // axes maps grid axis -> coordinate (identity for sph/3d-cyl; [0,2] for cyl r-z) so the
         // area-weighted divergence uses the right radial axis for the cylindrical metric. a
-        // curved spacetime takes the COVARIANT (alpha sqrt(gamma)) measure — the mag rows are
+        // curved spacetime takes the covariant (alpha sqrt(gamma)) measure — the mag rows are
         // densitized conserved laws of the same form as the gas (d_t(sqrt(g) B) + coordinate
         // divergence), exactly like the gas godunov's geometry selection.
         let g = match spacetime {
@@ -1915,21 +1926,21 @@ fn bcell_godunov_geom(
 }
 
 // =============================================================================
-// passive-scalar (dye) transport: D_chi = rho*chi rides the ALREADY-materialized
+// passive-scalar (dye) transport: D_chi = rho*chi rides the already-materialized
 // mass flux, donor-cell upwinded on its sign per face:
 //   F_chi(face) = mass_flux(face) * (chi_donor)
 // so the dye moves exactly with the mass it is painted on: a uniform chi = c
 // gives F_chi = c * F_rho at every face and the update telescopes to c times the
 // mass update (uniform-preservation is bit-exact). the upwind chi comes from the
-// PRIMITIVE chi (the stage-input concentration, consistent with the primitives
+// primitive chi (the stage-input concentration, consistent with the primitives
 // the flux pass reconstructed from); the kernels read prim.chi at neighbor
 // offsets and write cons.chi at offset 0 only, so the in-place update is
 // race-free under tiled execution. cartesian flat charts only (dx_d scalars).
 // =============================================================================
 
-// the donor-cell chi flux divergence: sum_d (F_hi - F_lo)/dx_d, reading the STORED interface dye
+// the donor-cell chi flux divergence: sum_d (F_hi - F_lo)/dx_d, reading the stored interface dye
 // flux `flux[d].chi` written by `chi_flux_gv`. same convention as the gas: the flux field at a cell
-// index holds the flux through that cell's LO face on axis d.
+// index holds the flux through that cell's low face on axis d.
 fn chi_flux_div_gv(ndim: usize, spacing: &[Spacing]) -> Gv {
     let zero_off = vec![0i32; ndim];
     let mut div: Option<Gv> = None;
@@ -1949,15 +1960,15 @@ fn chi_flux_div_gv(ndim: usize, spacing: &[Spacing]) -> Gv {
     div.unwrap()
 }
 
-/// the interface dye flux on ONE axis: `flux[d].chi = mass_flux_d * upwind(prim.chi)`, the
+/// the interface dye flux on one axis: `flux[d].chi = mass_flux_d * upwind(prim.chi)`, the
 /// concentration taken from whichever side the mass is flowing out of. donor-cell upwinding on the
 /// sign of the mass flux at that same face, so the dye flux telescopes with the mass flux and a
 /// uniform concentration is carried exactly.
 ///
-/// written as a stored field rather than folded into the dye update: a coarse-fine reflux corrects
-/// the conserved dye from the difference between the fine-time-summed and coarse fluxes at the
-/// interface, and `F_chi` is nonlinear in the state, so the correction cannot be reconstructed from
-/// the mass-flux correction after the fact.
+/// materialized as a stored field so a coarse-fine reflux can correct the conserved dye from the
+/// difference between the fine-time-summed and coarse fluxes at the interface. `F_chi` is nonlinear
+/// in the state, so that correction has to read the stored dye flux itself; the mass-flux
+/// correction alone underdetermines it.
 pub fn chi_flux_gv(ndim: usize, dir: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let zero_off = vec![0i32; ndim];
@@ -1994,8 +2005,8 @@ pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)
     // one: expansion dilutes `D_chi = rho chi` exactly as it dilutes `rho`, leaving the
     // concentration invariant. the static binding `mesh_hdil = 0` subtracts an exact zero.
     let h_dil = Gv::scalar("mesh_hdil");
-    // face positions are selected at runtime by `map_kind_d`, so the bake-time spacing tag
-    // carries no information here and the widths come out per-cell on any mesh.
+    // face positions are selected at runtime by `map_kind_d`, so the widths come out per-cell on
+    // any mesh, whatever the bake-time spacing tag says.
     let spacing = vec![Spacing::Uniform; ndim];
     let new =
         a0 * chin + ac * (dchi - dt * chi_flux_div_gv(ndim, &spacing) - dt * (h_dil * dchi));

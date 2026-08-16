@@ -11,8 +11,8 @@
 # bondi radius r_bondi ~ M / c_inf^2, where gravity overtakes pressure and the flow
 # goes transonic; the domain spans from inside the horizon to beyond r_bondi.
 #
-# the chart is horizon-penetrating, so r = 2M is an ordinary surface rather than a
-# coordinate singularity and the domain reaches through it. the region inside the
+# the chart is horizon-penetrating, so r = 2M is an ordinary surface and the domain
+# reaches through it. the region inside the
 # excision radius is frozen at a cold vacuum floor: every characteristic there points
 # inward, so the exterior rarefies into it and nothing returns — a one-way absorbing
 # boundary, which is what a horizon is. the alternative, an inner wall held outside
@@ -72,9 +72,9 @@ class GrBondi(SimbiProblem):
     bounds: Annotated[
         list[tuple[float, float]],
         ProblemParam(
-            # the domain reaches THROUGH the horizon at r = 2M: the chart is regular there,
-            # so the accreting gas crosses it rather than piling up against an artificial
-            # inner wall, and the excision surface below carries the causal boundary.
+            # the domain reaches through the horizon at r = 2M: the chart is regular there,
+            # so the accreting gas crosses it freely, and the excision surface below carries
+            # the causal boundary.
             [(1.0, 100.0)], description="radial domain bounds, spanning r_+ = 2M"
         ),
     ]

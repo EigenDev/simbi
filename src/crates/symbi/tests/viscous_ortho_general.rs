@@ -142,9 +142,9 @@ fn spherical_meridian_rigid_rotation_nulls() {
         })
         .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(NU);
-    // no c2p / ghost_fill: the adiabatic spherical-swirl gas pipeline is not
-    // baked (this gate exercises the VISCOUS kernel only); set_initial seeds
-    // the prims, and the zeroed ghost bands are excluded by the 2-cell trim.
+    // the pipeline here runs the viscous kernel alone, since the adiabatic
+    // spherical-swirl gas path is unbaked; set_initial seeds the prims, and the
+    // 2-cell trim excludes the zeroed ghost bands.
     let grab = |c: usize| -> Vec<f64> {
         sim.geom
             .interior

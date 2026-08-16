@@ -1,19 +1,19 @@
 // =============================================================================
 // godunov_mass_conservation_sph_symbolic.rs
 //
-// the SYMBOLIC proof that the SPHERICAL godunov mass update CONSERVES mass EXACTLY
-// — by the shared-face AREA-CONSISTENCY condition
+// the symbolic proof that the spherical godunov mass update conserves mass exactly,
+// by the shared-face area-consistency condition
 //   area_hi_0(c) == area_lo_0(c + e_r)
 // the high r-face area of cell c equals the low r-face area of its outward neighbor
 // c+e_r, so the shared face is single-valued, the volume-weighted flux divergence
 // telescopes, and mass conserves globally. the spherical counterpart of the
-// cylindrical proof — it EXERCISES the opaque cos-symbol extraction (the solid-angle
-// measure), which the cylindrical case does not need.
+// cylindrical proof — it exercises the opaque cos-symbol extraction (the solid-angle
+// measure), an ingredient the spherical chart adds on top of the cylindrical one.
 //
 // spherical (r, theta, phi), h=(1, r, r sin theta): the r-face area is
 //   area_lo_0 = r_lo^2 * Omega,   area_hi_0 = r_hi^2 * Omega
 // with Omega = (cos(theta_lo) - cos(theta_hi)) * dphi the solid-angle measure and
-// r_lo = x_lo_0 + c_0 dx_0, r_hi = x_lo_0 + (c_0+1) dx_0. Omega is c_0-INDEPENDENT
+// r_lo = x_lo_0 + c_0 dx_0, r_hi = x_lo_0 + (c_0+1) dx_0. Omega is c_0-independent
 // (it lives entirely on axes 1 and 2) and is a COMMON factor of both faces, so under
 // the r-shift e_r = [1,0,0] it is UNTOUCHED (the shift remaps trig symbols only along
 // axis 1) and cancels identically in the equality — no pi, no Omega survives. the
@@ -47,8 +47,8 @@ fn sph_areas() -> (RatFun, RatFun) {
 fn godunov_mass_conservation_sph_symbolic() {
     let (area_lo, area_hi) = sph_areas();
 
-    // THE PROOF: the cell's HIGH r-face area equals its outward neighbor's LOW r-face
-    // area. EXACT symbolic equality — r_hi(c)^2 Omega == r_lo(c+1)^2 Omega, with Omega
+    // the proof: the cell's high r-face area equals its outward neighbor's low r-face
+    // area. exact symbolic equality — r_hi(c)^2 Omega == r_lo(c+1)^2 Omega, with Omega
     // (the cos solid angle) cancelling structurally. => the r-flux divergence
     // telescopes => mass conserves.
     assert!(
@@ -57,8 +57,8 @@ fn godunov_mass_conservation_sph_symbolic() {
     );
 }
 
-// negative control: the UNSHIFTED low face area is NOT the high face area (r_lo^2 vs
-// r_hi^2 differ for a positive-width cell). the cos-symbol checker is not vacuous.
+// negative control: the unshifted low face area differs from the high face area (r_lo^2
+// vs r_hi^2 differ for a positive-width cell), so the cos-symbol checker has real content.
 #[test]
 fn conservation_sph_symbolic_detects_inconsistency() {
     let (area_lo, area_hi) = sph_areas();

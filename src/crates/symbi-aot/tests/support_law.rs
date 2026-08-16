@@ -39,7 +39,7 @@ fn scalar_value(name: &str) -> f64 {
         "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" => 0.0,
         "body_0_mass" => 1.0,
         "body_0_soft" => 0.05,
-        // 0 = plummer, the default family; this law is about mask SUPPORT, not the field.
+        // 0 = plummer, the default family; this law is about the mask's support, not the field.
         "body_0_softkind" => 0.0,
         "body_0_pos_0" => BODY_POS[0],
         "body_0_pos_1" => BODY_POS[1],
@@ -55,8 +55,8 @@ fn cell_center(i: usize) -> f64 {
     X_LO + (i as f64 + 0.5) * DX
 }
 
-// nontrivial, smooth, positive-pressure conserved fields — the support must
-// hold for ANY field values, so nothing here is tuned to the body.
+// nontrivial, smooth, positive-pressure conserved fields — the support holds
+// for arbitrary field values, so nothing here is tuned to the body.
 fn cons_fields() -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
     let mut den = Vec::with_capacity(N * N);
     let mut mx = Vec::with_capacity(N * N);

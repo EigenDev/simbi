@@ -42,9 +42,10 @@ impl Geometry {
     }
 }
 
-/// spacetime identifier — the background a regime evolves on. ORTHOGONAL to BOTH the spatial
+/// spacetime identifier — the background a regime evolves on. orthogonal to both the spatial
 /// [`Geometry`] and the physics regime: GR is a curved spacetime, so a single
-/// SR regime (Rhd / Rmhd) composes with any spacetime here without duplication. flat `Minkowski`
+/// SR regime (Rhd / Rmhd) composes with every spacetime here, one implementation serving all of
+/// them. flat `Minkowski`
 /// (lapse = 1, shift = 0, gamma = identity in physical components) is the default — every realized
 /// run. drives the lapse / sqrt(gamma) densitization selector in the kernel. integer
 /// repr matches the GPU kernel convention (mirrors `Geometry`).
@@ -54,14 +55,14 @@ pub enum Spacetime {
     #[default]
     Minkowski = 0,
     /// the static spherically-symmetric vacuum in ingoing kerr-schild (eddington-finkelstein)
-    /// coords — HORIZON-PENETRATING: regular across r = 2M, nonzero
-    /// radial shift beta^r, DIAGONAL spatial metric gamma_{rr} = 1 + 2M/r. reuses the
+    /// coords — horizon-penetrating: regular across r = 2M, nonzero
+    /// radial shift beta^r, diagonal spatial metric gamma_{rr} = 1 + 2M/r. reuses the
     /// `schwarzschild_mass` scalar. selects the shift-advection flux + KS densitization kernel path.
     SchwarzschildKS = 2,
-    /// spinning Kerr in ingoing kerr-schild coordinates — horizon-penetrating, NON-DIAGONAL
+    /// spinning Kerr in ingoing kerr-schild coordinates — horizon-penetrating, non-diagonal
     /// spatial metric (gamma_{r phi} carries the frame dragging into the spatial slice), radial
-    /// shift beta^r = 2Mr/(Sigma + 2Mr). the covariant valencia storage is REQUIRED here (no
-    /// componentwise orthonormal frame exists for a non-diagonal gamma). the mass M and spin a
+    /// shift beta^r = 2Mr/(Sigma + 2Mr). the covariant valencia storage is required here, since a
+    /// componentwise orthonormal frame exists for a diagonal gamma alone. the mass M and spin a
     /// ride as kernel scalars (`schwarzschild_mass`, `kerr_spin`). reduces to `SchwarzschildKS`
     /// physics at a = 0 (different kernel expressions, same values).
     KerrKS = 3,
@@ -80,19 +81,19 @@ impl Spacetime {
 
 /// metric on a D-dimensional spatial manifold.
 ///
-/// provides the GENERAL 3+1 ADM surface — valid for ANY metric, diagonal or not:
+/// provides the general 3+1 ADM surface — valid for every metric, diagonal or otherwise:
 /// - lapse \alpha (1 for flat spacetimes)
 /// - shift \beta^i (0 for static spacetimes)
 /// - spatial metric \gamma_{ij} and its inverse \gamma^{ij}
 /// - the volume element \sqrt{\gamma} (= `sqrt_det_gamma` / `volume_factor`)
 /// - `lower`/`raise` (variance-typed: `Contravariant` <-> `Covariant`, general tensor contraction)
 ///
-/// the ORTHOGONAL-FRAME surface — scale factors `h_i` and the orthonormal-frame
-/// `vector_to_cartesian` — is NOT here: it only exists for a DIAGONAL metric, so it lives on the
-/// [`DiagonalMetric`] subtrait. a non-diagonal (Kerr-class) metric impls `Metric` but NOT
-/// `DiagonalMetric`, so the compiler forbids orthogonal quadrature on it until the non-diagonal
-/// forms are written — the "GRMHD-forward" claim is type-enforced. (the realized
-/// physics is all diagonal: flat + orthogonal-curvilinear.)
+/// the orthogonal-frame surface — scale factors `h_i` and the orthonormal-frame
+/// `vector_to_cartesian` — exists for a diagonal metric, so it lives on the [`DiagonalMetric`]
+/// subtrait. a non-diagonal (Kerr-class) metric impls `Metric` alone, so the compiler withholds
+/// orthogonal quadrature on it until the non-diagonal forms are written — the "GRMHD-forward"
+/// claim is type-enforced. (the realized
+/// physics is entirely diagonal: flat + orthogonal-curvilinear.)
 ///
 /// implementations: Cartesian, Spherical, Cylindrical (all `DiagonalMetric`),
 /// and (future) Schwarzschild, Kerr, etc. (`Metric` only, until their quadrature lands).
@@ -102,14 +103,14 @@ pub trait Metric<S: Scalar, const D: usize> {
         Geometry::Cartesian
     }
 
-    /// the spacetime background (flat vs curved). ORTHOGONAL to `geometry()`: `Minkowski` for every
+    /// the spacetime background (flat vs curved). orthogonal to `geometry()`: `Minkowski` for every
     /// flat metric, a curved variant (Schwarzschild, ...) for GR. selects the lapse / sqrt(gamma)
     /// densitization path in the kernel; flat -> the densitization is a no-op.
     fn spacetime(&self) -> Spacetime {
         Spacetime::Minkowski
     }
 
-    /// the spacetime's runtime scalar PARAMETERS as `(wire-name, value)` pairs — the kernel-dispatch
+    /// the spacetime's runtime scalar parameters as `(wire-name, value)` pairs — the kernel-dispatch
     /// scalars a curved metric needs filled (e.g. `("schwarzschild_mass", M)`). flat -> empty. the
     /// substrate resolves these by name at the godunov dispatch, exactly like the EOS feeds `gamma`.
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
@@ -123,10 +124,10 @@ pub trait Metric<S: Scalar, const D: usize> {
         S::ONE
     }
 
-    /// the lapse SQUARED, \alpha^2 = -1/g^{tt}. default \alpha*\alpha; OVERRIDE where a closed form
-    /// avoids a sqrt round-trip (Schwarzschild \alpha^2 = f = 1 - 2M/r; Kerr-Schild \alpha^2 =
+    /// the lapse squared, \alpha^2 = -1/g^{tt}. default \alpha*\alpha; override where a closed form
+    /// replaces the sqrt round-trip (Schwarzschild \alpha^2 = f = 1 - 2M/r; Kerr-Schild \alpha^2 =
     /// 1/(1 + 2M/r)). the GR CFL radial coordinate-speed factor \alpha sqrt(\gamma^{rr}) equals
-    /// \alpha^2 for the det-g-flat family (Schwarzschild, Kerr-Schild), and needs the EXACT closed
+    /// \alpha^2 for the det-g-flat family (Schwarzschild, Kerr-Schild), and takes the exact closed
     /// form — sqrt(\alpha^2)^2 != \alpha^2 in floating point, which would break the CFL bit-diff.
     fn lapse_sq(&self, x: Tensor<S, D>) -> S {
         let a = self.lapse(x);
@@ -152,10 +153,10 @@ pub trait Metric<S: Scalar, const D: usize> {
     /// this is the volume element: dV = \sqrt{\gamma} dx^1 dx^2 ... dx^D.
     fn sqrt_det_gamma(&self, x: Tensor<S, D>) -> S;
 
-    /// scale factors h_i where \gamma_{ii} = h_i^2. ONLY well-defined for a diagonal metric — the
-    /// `where Self: DiagonalMetric` bound makes this a COMPILE ERROR on a non-diagonal metric;
-    /// without it the off-diagonal terms would be silently dropped (a bare sqrt-of-diagonal).
-    /// the default reads the diagonal directly.
+    /// scale factors h_i where \gamma_{ii} = h_i^2, well-defined for a diagonal metric — the
+    /// `where Self: DiagonalMetric` bound turns a non-diagonal call into a compile error, which is
+    /// what forces the off-diagonal terms to be handled explicitly where a bare sqrt-of-diagonal
+    /// would silently drop them. the default reads the diagonal directly.
     fn scale_factors(&self, x: Tensor<S, D>) -> Tensor<S, D>
     where
         Self: DiagonalMetric<S, D>,
@@ -177,12 +178,12 @@ pub trait Metric<S: Scalar, const D: usize> {
     ///   cylindrical 1D: r  (naive gives 1)
     ///   cylindrical 2D: r  (naive gives 1)
     ///
-    /// REQUIRED, no default: the natural default `= sqrt_det_gamma` is WRONG for every
-    /// REDUCED-dimension metric — it drops the jacobian of the suppressed angular directions (a
+    /// required, with no default: the natural default `= sqrt_det_gamma` is wrong for every
+    /// reduced-dimension metric — it drops the jacobian of the suppressed angular directions (a
     /// spherical-1D cell volume is r^2 dr, while the 1x1 `sqrt_det_gamma` is 1). a silent default there
-    /// bakes the wrong face area / cell volume with no error. forcing it means a full-rank metric
-    /// spells the (trivial) `self.sqrt_det_gamma(x)` delegation and a reduced-D metric CANNOT forget
-    /// the proper measure: it fails to COMPILE instead.
+    /// bakes the wrong face area / cell volume and reports success. making it explicit costs a
+    /// full-rank metric the trivial `self.sqrt_det_gamma(x)` delegation, and it puts a reduced-D
+    /// metric that omits the proper measure in front of the compiler.
     fn volume_factor(&self, x: Tensor<S, D>) -> S;
 
     /// transform from this coordinate system to cartesian.
@@ -259,7 +260,7 @@ pub trait Metric<S: Scalar, const D: usize> {
     /// cartesian: S = 0.
     /// non-cartesian: derived from Christoffel symbols of the diagonal metric.
     ///
-    /// NOTE: this is the CONTINUOUS analytical formula. for discrete schemes,
+    /// this is the continuous analytical formula. for discrete schemes,
     /// use `momentum_source_inertial` + discrete pressure source from face
     /// area differences to achieve exact discrete equilibrium.
     fn momentum_source(&self, x: Tensor<S, D>, rho: S, vel: Tensor<S, D>, p: S) -> Tensor<S, D> {
@@ -268,8 +269,8 @@ pub trait Metric<S: Scalar, const D: usize> {
     }
 
     /// inertial (velocity-dependent) part of the geometric momentum source.
-    /// excludes ALL pressure terms — those must be computed from discrete
-    /// face area differences for exact discrete equilibrium:
+    /// carries the velocity terms alone; the pressure terms come from discrete
+    /// face area differences, which is what delivers exact discrete equilibrium:
     ///
     ///   S_pressure[i] = p * (A^i_R - A^i_L) / V
     ///
@@ -278,9 +279,9 @@ pub trait Metric<S: Scalar, const D: usize> {
     ///
     /// cartesian: S_inertial = 0.
     ///
-    /// `mom` is the REGIME-AGNOSTIC conserved momentum density (Newtonian `rho v`,
+    /// `mom` is the regime-agnostic conserved momentum density (Newtonian `rho v`,
     /// relativistic `rho h W^2 v`): the source is the bilinear `S^i = -Gamma^i_jk mom^j v^k`,
-    /// so the same code serves every regime AND the magnetic tension (call with `mom = b`,
+    /// so the same code serves every regime and the magnetic tension (call with `mom = b`,
     /// `vel = b` for `-Gamma(b, b)`).
     fn momentum_source_inertial(
         &self,
@@ -293,15 +294,15 @@ pub trait Metric<S: Scalar, const D: usize> {
     }
 }
 
-/// a metric whose spatial tensor \gamma_{ij} is DIAGONAL — flat-space + orthogonal-curvilinear
-/// (Cartesian, Spherical, Cylindrical). only on such a metric do scale factors `h_i` and the
-/// orthonormal-frame `vector_to_cartesian` make sense, so [`Metric::scale_factors`] /
+/// a metric whose spatial tensor \gamma_{ij} is diagonal — flat-space + orthogonal-curvilinear
+/// (Cartesian, Spherical, Cylindrical). scale factors `h_i` and the orthonormal-frame
+/// `vector_to_cartesian` are meaningful exactly on such a metric, so [`Metric::scale_factors`] /
 /// [`Metric::vector_to_cartesian`] are gated `where Self: DiagonalMetric`. a non-diagonal
-/// (Kerr-class) metric impls `Metric` but NOT this — so the compiler rejects orthogonal-frame
+/// (Kerr-class) metric impls `Metric` alone — so the compiler rejects orthogonal-frame
 /// quadrature on it until the non-diagonal forms are written. a pure marker: the gated methods
-/// already live on `Metric`; this trait only carries the diagonality proof obligation.
+/// already live on `Metric`; this trait carries the diagonality proof obligation.
 ///
-/// the diagonality bound is compile-enforced. a `DiagonalMetric`-bounded generic MAY take scale factors:
+/// the diagonality bound is compile-enforced. a `DiagonalMetric`-bounded generic takes scale factors:
 /// ```
 /// use symbi_geometry::{DiagonalMetric, Spherical};
 /// use symbi_algebra::Tensor;
@@ -310,7 +311,7 @@ pub trait Metric<S: Scalar, const D: usize> {
 /// }
 /// let _ = h(&Spherical, Tensor::new([1.0, 0.5]));
 /// ```
-/// a `Metric`-only generic MAY NOT — it is a compile-time type error at the call site:
+/// a `Metric`-only generic meets a compile-time type error at the call site:
 /// ```compile_fail
 /// use symbi_geometry::Metric;
 /// use symbi_algebra::Tensor;
@@ -695,31 +696,32 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
 //   reduced dims mirror Spherical: 1D (r) radial, 2D (r, theta). valid OUTSIDE the horizon r > 2M
 //   (f > 0); r <= 2M makes sqrt(f) imaginary — the coordinate singularity, physical.
 //
-//   the momentum source (geodesic gravity) is the connection of the FULL 4-metric; left at
-//   the trait default (zero) here — only the metric geometry + lapse are provided.
+//   the momentum source (geodesic gravity) is the connection of the full 4-metric; left at
+//   the trait default (zero) here, so this impl supplies the metric geometry + lapse.
 // ============================================================
 
 // ============================================================
 // schwarzschild in ingoing kerr-schild (eddington-finkelstein) coords: x = (r, theta, phi)
-//   the SAME physical vacuum as `Schwarzschild`, in a HORIZON-PENETRATING chart. ingoing EF line
+//   the same physical vacuum as `Schwarzschild`, in a horizon-penetrating chart. ingoing EF line
 //   element (h(r) = 1 + 2M/r):
 //     ds^2 = -(1 - 2M/r) dt^2 + (4M/r) dt dr + h dr^2 + r^2 dOmega^2
 //   3+1 decomposition:
-//     lapse  alpha  = 1/sqrt(h)                       (1/sqrt(2) at the horizon; NEVER zero)
+//     lapse  alpha  = 1/sqrt(h)                       (1/sqrt(2) at the horizon; strictly positive)
 //     shift  beta^r = (2M/r)/h = 2M/(r + 2M)          (radial, ingoing; 1/2 at the horizon)
-//     gamma_{ij}    = diag(h, r^2, r^2 sin^2 theta)   (DIAGONAL -> DiagonalMetric)
+//     gamma_{ij}    = diag(h, r^2, r^2 sin^2 theta)   (diagonal -> DiagonalMetric)
 //     sqrt(gamma)   = r^2 sin(theta) sqrt(h)
 //     sqrt(-g)      = alpha sqrt(gamma) = r^2 sin(theta)   (flat spherical volume)
 //   every factor is finite and smooth at and inside r = 2M — the whole point: the inner boundary can
 //   sit below the horizon where the transport velocity tilde v^r = v^r - beta^r/alpha is negative for
-//   every subluminal fluid, so the excised interior is causal. the SPATIAL geometry is spherical
+//   every subluminal fluid, so the excised interior is causal. the spatial geometry is spherical
 //   (geometry() = Spherical); the curvature lives in gamma_rr = h and the lapse/shift.
 // ============================================================
 
 /// schwarzschild in ingoing kerr-schild coordinates — horizon-penetrating (regular across r = 2M).
 /// same geometric `mass` M and `schwarzschild_mass` kernel scalar as [`Schwarzschild`], differing
-/// only in the coordinate chart: nonzero radial shift beta^r and gamma_{rr} = 1 + 2M/r. a DIAGONAL
-/// spatial metric, so the orthonormal frame + flat-SR c2p survive (unlike spinning Kerr).
+/// only in the coordinate chart: nonzero radial shift beta^r and gamma_{rr} = 1 + 2M/r. a diagonal
+/// spatial metric, so the orthonormal frame + flat-SR c2p survive here, where spinning Kerr calls
+/// for the covariant storage.
 #[derive(Debug, Clone, Copy)]
 pub struct SchwarzschildKS<S> {
     /// the geometric mass M (units G = c = 1); the horizon is at r = 2M. CARRIER-GENERIC over `S`
@@ -728,8 +730,8 @@ pub struct SchwarzschildKS<S> {
 }
 
 impl<S: Scalar> SchwarzschildKS<S> {
-    /// h(r) = 1 + 2M/r — the radial metric coefficient gamma_{rr} AND the inverse lapse-square
-    /// (alpha^2 = 1/h). strictly positive for every r > 0: no coordinate singularity at the horizon.
+    /// h(r) = 1 + 2M/r — the radial metric coefficient gamma_{rr} and the inverse lapse-square
+    /// (alpha^2 = 1/h). strictly positive for every r > 0, so the chart stays regular at the horizon.
     #[inline]
     fn h(&self, r: S) -> S {
         S::ONE + S::from_f64(2.0) * self.mass / r
@@ -941,25 +943,26 @@ impl<S: Scalar> DiagonalMetric<S, 2> for SchwarzschildKS<S> {}
 impl<S: Scalar> DiagonalMetric<S, 3> for SchwarzschildKS<S> {}
 
 // ============================================================
-// schwarzschild in CARTESIAN kerr-schild coordinates: x = (x, y, z)
-//   the SAME physical vacuum as `Schwarzschild` / `SchwarzschildKS`, in the cartesian kerr-schild
-//   chart — horizon-penetrating and with NO polar axis (the natural chart for binary black holes and
+// schwarzschild in cartesian kerr-schild coordinates: x = (x, y, z)
+//   the same physical vacuum as `Schwarzschild` / `SchwarzschildKS`, in the cartesian kerr-schild
+//   chart — horizon-penetrating and pole-free (the natural chart for binary black holes and
 //   octree AMR). H = M / r, r = sqrt(x^2 + y^2 + z^2), l_i = x_i / r (the unit kerr-schild covector):
-//     gamma_ij   = delta_ij + 2H l_i l_j = delta_ij + 2M x_i x_j / r^3   (NON-diagonal: the KS null structure)
-//     alpha      = 1 / sqrt(1 + 2H)                                     (1/sqrt(2) at r = 2M; never zero)
+//     gamma_ij   = delta_ij + 2H l_i l_j = delta_ij + 2M x_i x_j / r^3   (non-diagonal: the KS null structure)
+//     alpha      = 1 / sqrt(1 + 2H)                                     (1/sqrt(2) at r = 2M; strictly positive)
 //     beta^i     = (2H / (1 + 2H)) l^i = 2M x_i / (r^2 (r + 2M))        (ingoing, along the radial direction)
 //     gamma^{ij} = delta_ij - (2H / (1 + 2H)) l_i l_j                   (sherman-morrison; l a unit vector)
 //     sqrt(gamma) = sqrt(1 + 2H);  alpha sqrt(gamma) = 1   (the det-g-flat identity, cartesian instance)
-//   NON-diagonal even at zero spin, so NOT a `DiagonalMetric` (the covariant/tetrad storage is required).
-//   r = |x| is rotation-generic — there are NO coordinate-role assumptions (no radial/angular axis), so
+//   non-diagonal even at zero spin, so it impls `Metric` alone and the covariant/tetrad storage applies.
+//   r = |x| is rotation-generic — the formulas treat the cartesian axes symmetrically, radial and
+//   angular roles alike, so
 //   the D = 2 impl is the z = 0 equatorial slice (exact for equatorially-symmetric flows) and D = 3 the
 //   full chart. reduces to flat cartesian at M = 0.
 // ============================================================
 
-/// schwarzschild in cartesian kerr-schild coordinates — horizon-penetrating, no polar axis. same
+/// schwarzschild in cartesian kerr-schild coordinates — horizon-penetrating and pole-free. same
 /// geometric `mass` M and `schwarzschild_mass` kernel scalar as [`Schwarzschild`] / [`SchwarzschildKS`],
-/// differing only in the coordinate chart: a NON-diagonal `gamma_ij = delta_ij + 2M x_i x_j / r^3` and a
-/// shift `beta^i` spread along all cartesian axes. NOT a `DiagonalMetric`.
+/// differing only in the coordinate chart: a non-diagonal `gamma_ij = delta_ij + 2M x_i x_j / r^3` and a
+/// shift `beta^i` spread along all cartesian axes. impls `Metric` alone.
 #[derive(Debug, Clone, Copy)]
 pub struct SchwarzschildKSCartesian<S> {
     /// the geometric mass M (units G = c = 1); the horizon is at r = 2M. CARRIER-GENERIC over `S`
@@ -969,21 +972,21 @@ pub struct SchwarzschildKSCartesian<S> {
 
 impl<S: Scalar> SchwarzschildKSCartesian<S> {
     /// (r, 2H, |l|^2) at a cartesian position: r = sqrt(sum x_i^2) the euclidean/kerr-schild
-    /// radius, 2H = 2M/r, and the SQUARED NORM of the null covector l^i = x^i / r. the number of
+    /// radius, 2H = 2M/r, and the squared norm of the null covector l^i = x^i / r. the number of
     /// gridded axes D is the slice (D = 2 -> the z = 0 equatorial plane).
     ///
-    /// the radius is clamped to r >= M/2: the chart's coordinate singularity at r = 0 sits ON
+    /// the radius is clamped to r >= M/2: the chart's coordinate singularity at r = 0 sits on
     /// the grid when the domain contains the origin, and the metric (h = 1 + 2M/r) and its
     /// derivatives (christoffels ~ M/r^2) diverge there. the clamp bounds every metric quantity
-    /// while `max(r, M/2)` is the BIT-EXACT identity for r > M/2 — deep inside the horizon
+    /// while `max(r, M/2)` is the bit-exact identity for r > M/2 — deep inside the horizon
     /// r_+ = 2M and below any excision surface.
     ///
-    /// the clamp leaves l^i = x^i / r_clamped, so |l| = |x| / r_clamped drops BELOW 1 inside it
-    /// and the kerr-schild null condition no longer holds there. every closed form below
-    /// therefore contracts with the ACTUAL |l|^2 rather than assuming 1 — the rank-1 determinant
+    /// the clamp leaves l^i = x^i / r_clamped, so |l| = |x| / r_clamped falls below 1 inside it
+    /// and the kerr-schild null condition relaxes to |l| < 1 there. every closed form below
+    /// therefore contracts with the measured |l|^2 — the rank-1 determinant
     /// det(delta + 2H l l^T) = 1 + 2H |l|^2 and its sherman-morrison inverse — so the clamped
-    /// region stays a CONSISTENT positive-definite metric whose determinant agrees with the
-    /// matrix it came from. assuming |l| = 1 there instead makes sqrt(det gamma) disagree with
+    /// region stays a consistent positive-definite metric whose determinant agrees with the
+    /// matrix it came from. assuming |l| = 1 there makes sqrt(det gamma) disagree with
     /// the metric by ~18% at r = 0.45 M, breaks the four-volume identity
     /// alpha sqrt(det gamma) = 1, and turns the pressure block of the connection source,
     /// (1/2) p g^{ab} d_i g_ab = p d_i ln sqrt(-g), from identically zero into a spurious force.
@@ -998,9 +1001,9 @@ impl<S: Scalar> SchwarzschildKSCartesian<S> {
         let r_g = S::from_f64(0.5) * self.mass;
         let r_true = r2.sqrt();
         let r = r_true.max(r_g);
-        // |l|^2 = |x|^2 / r_clamped^2, formed from the UNROOTED r2 so it stays differentiable at
+        // |l|^2 = |x|^2 / r_clamped^2, formed from the unrooted r2 so it stays differentiable at
         // the origin: d(sqrt(r2))/dx is infinite there, and squaring that back gives a NaN tangent
-        // rather than the true zero. outside the clamp |l|^2 is exactly 1 by construction, which
+        // where the true value is zero. outside the clamp |l|^2 is exactly 1 by construction, which
         // keeps every form below bit-identical to the unit-l one wherever the null condition holds.
         let ll2 = S::select(r_true.cmp_ge(r_g), S::ONE, r2 / (r * r));
         (r, S::from_f64(2.0) * self.mass / r, ll2)
@@ -1080,17 +1083,17 @@ macro_rules! impl_schwarzschild_ks_cartesian {
 impl_schwarzschild_ks_cartesian!(2);
 impl_schwarzschild_ks_cartesian!(3);
 
-/// kerr in cartesian (ingoing) kerr-schild coordinates, spin about z — horizon-penetrating,
-/// no polar axis, no coordinate ring except the physical one. the metric is the rank-1
+/// kerr in cartesian (ingoing) kerr-schild coordinates, spin about z — horizon-penetrating and
+/// pole-free, its one ring being the physical kerr ring singularity. the metric is the rank-1
 /// kerr-schild update `gamma_ij = delta_ij + 2H l_i l_j` with
 ///   r^2 = (R^2 - a^2)/2 + sqrt(((R^2 - a^2)/2)^2 + a^2 z^2),   R^2 = x^2 + y^2 + z^2,
 ///   2H  = 2 M r^3 / (r^4 + a^2 z^2),
 ///   l   = ((r x + a y)/(r^2 + a^2), (r y - a x)/(r^2 + a^2), z/r),
 /// where the kerr-schild radius r solves the oblate-spheroidal quartic and |l| = 1 wherever
-/// it does. every closed form below uses the ACTUAL |l|^2 (exact rank-1 determinant and
+/// it does. every closed form below uses the measured |l|^2 (exact rank-1 determinant and
 /// sherman-morrison inverse), so the clamped region stays a consistent positive-definite
 /// metric and the forms are bit-identical to the unit-l ones where the quartic holds.
-/// a = 0 reduces exactly to [`SchwarzschildKSCartesian`]. NOT a `DiagonalMetric`.
+/// a = 0 reduces exactly to [`SchwarzschildKSCartesian`]. impls `Metric` alone.
 #[derive(Debug, Clone, Copy)]
 pub struct KerrKSCartesian<S> {
     /// the geometric mass M (G = c = 1); the outer horizon is at r_+ = M + sqrt(M^2 - a^2).
@@ -1194,8 +1197,8 @@ macro_rules! impl_kerr_ks_cartesian {
 impl_kerr_ks_cartesian!(2);
 impl_kerr_ks_cartesian!(3);
 
-// D = 1 is degenerate (cartesian GR has no radial structure on a line); fail-loud so
-// generic kernel bounds `Metric<S, 1>` resolve, never reached at bake time.
+// D = 1 is degenerate (a line carries no radial structure in cartesian GR); fail-loud so
+// generic kernel bounds `Metric<S, 1>` resolve, while every bake stays at D = 2, 3.
 impl<S: Scalar> Metric<S, 1> for KerrKSCartesian<S> {
     fn geometry(&self) -> Geometry {
         Geometry::Cartesian
@@ -1226,9 +1229,9 @@ impl<S: Scalar> Metric<S, 1> for KerrKSCartesian<S> {
     }
 }
 
-// D = 1 is degenerate (cartesian GR has no radial structure on a line); provided fail-loud so
-// generic kernel bounds `Metric<S, 1>` resolve, never reached at bake time (the cartesian GR bakes
-// are D = 2, 3). mirrors the KerrKS D = 1 stub.
+// D = 1 is degenerate (a line carries no radial structure in cartesian GR); provided fail-loud so
+// generic kernel bounds `Metric<S, 1>` resolve, while the cartesian GR bakes stay at D = 2, 3.
+// mirrors the KerrKS D = 1 stub.
 impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCartesian<S> {
     fn geometry(&self) -> Geometry {
         Geometry::Cartesian
@@ -1268,20 +1271,20 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCartesian<S> {
 }
 
 // ============================================================
-// schwarzschild in CYLINDRICAL kerr-schild coordinates: x = (R, phi, z)
-//   the SAME physical vacuum as `Schwarzschild` / `SchwarzschildKS`, in the cylindrical kerr-schild
-//   chart — horizon-penetrating, the natural chart for AXISYMMETRIC relativistic jets and disks
-//   around a hole. r = sqrt(R^2 + z^2) is the SPHERICAL (BH) radius; the KS null covector is radial,
-//   l_i = (R/r, 0, z/r) (no azimuthal component for a = 0). the kerr-schild structure lives entirely
-//   in the POLOIDAL (R, z) block; the azimuth phi DECOUPLES:
+// schwarzschild in cylindrical kerr-schild coordinates: x = (R, phi, z)
+//   the same physical vacuum as `Schwarzschild` / `SchwarzschildKS`, in the cylindrical kerr-schild
+//   chart — horizon-penetrating, the natural chart for axisymmetric relativistic jets and disks
+//   around a hole. r = sqrt(R^2 + z^2) is the spherical (BH) radius; the KS null covector is radial,
+//   l_i = (R/r, 0, z/r) (purely poloidal for a = 0). the kerr-schild structure lives entirely
+//   in the poloidal (R, z) block; the azimuth phi decouples:
 //     gamma_RR   = 1 + 2H R^2/r^2,  gamma_zz = 1 + 2H z^2/r^2,  gamma_Rz = 2H R z/r^2   (2H = 2M/r)
 //     gamma_phi-phi = R^2,  gamma_R-phi = gamma_z-phi = 0        (flat azimuth; the a = 0 hole)
 //     alpha      = 1 / sqrt(1 + 2H),  beta^i = (2H/(1+2H)) (R/r, 0, z/r)   (beta^phi = 0)
 //     sqrt(gamma) = R sqrt(1 + 2H);  alpha sqrt(gamma) = R   (the flat cylindrical volume measure)
-//   NON-diagonal (gamma_Rz), so NOT a `DiagonalMetric`. the TWO radii are the wrinkle: the spherical
+//   non-diagonal (gamma_Rz), so it impls `Metric` alone. the two radii are the wrinkle: the spherical
 //   r = sqrt(R^2 + z^2) drives H / alpha / the KS block, while the cylindrical R drives the measure.
 //   the D = 3 metric serves the 2.5D axisymmetric-swirl grid (R, z gridded, phi carried but ungridded
-//   -> the metric never reads phi, so its autodiff phi-tangent vanishes and S_phi is conserved) and
+//   -> the metric is independent of phi, so its autodiff phi-tangent vanishes and S_phi is conserved) and
 //   the full 3D (R, phi, z). reduces to flat cylindrical at M = 0.
 // ============================================================
 
@@ -1290,10 +1293,10 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCartesian<S> {
 /// g0 = diag(1, R^2, 1), with the oblate-spheroidal radius r(R, z) solving
 /// r^2 = (R^2 + z^2 - a^2)/2 + sqrt(((R^2 + z^2 - a^2)/2)^2 + a^2 z^2) and
 ///   2H  = 2 M r^3 / (r^4 + a^2 z^2),
-///   l   = (r R/(r^2 + a^2), -a R^2/(r^2 + a^2), z/r)   (COVARIANT coordinate basis;
+///   l   = (r R/(r^2 + a^2), -a R^2/(r^2 + a^2), z/r)   (covariant coordinate basis;
 /// the azimuthal slot carries the frame dragging). a = 0 reduces exactly to
-/// [`SchwarzschildKSCylindrical`]. NOT diagonal: gamma_{R phi} and gamma_{phi z}
-/// are nonzero at spin.
+/// [`SchwarzschildKSCylindrical`]. off-diagonal at spin: gamma_{R phi} and gamma_{phi z}
+/// are nonzero.
 #[derive(Debug, Clone, Copy)]
 pub struct KerrKSCylindrical<S> {
     /// the geometric mass M (G = c = 1); the outer horizon is at r_+ = M + sqrt(M^2 - a^2).
@@ -1436,14 +1439,14 @@ impl<S: Scalar> Metric<S, 3> for KerrKSCylindrical<S> {
     }
 }
 
-/// schwarzschild in cylindrical kerr-schild coordinates (R, phi, z) — horizon-penetrating, no polar
-/// singularity off the axis. same geometric `mass` M and `schwarzschild_mass` kernel scalar as
-/// [`Schwarzschild`]; the kerr-schild structure is in the poloidal (R, z) block (NON-diagonal), phi
-/// decoupled (gamma_phi-phi = R^2). NOT a `DiagonalMetric`. the physics needs the azimuthal DOF, so
-/// only D = 3 carries the metric; D = 1 / D = 2 are fail-loud stubs for the generic kernel bounds.
+/// schwarzschild in cylindrical kerr-schild coordinates (R, phi, z) — horizon-penetrating and
+/// regular off the axis. same geometric `mass` M and `schwarzschild_mass` kernel scalar as
+/// [`Schwarzschild`]; the kerr-schild structure is in the poloidal (R, z) block (non-diagonal), phi
+/// decoupled (gamma_phi-phi = R^2). impls `Metric` alone. the physics needs the azimuthal DOF, so
+/// D = 3 carries the metric; D = 1 / D = 2 are fail-loud stubs for the generic kernel bounds.
 #[derive(Debug, Clone, Copy)]
 pub struct SchwarzschildKSCylindrical<S> {
-    /// the geometric mass M (units G = c = 1); the horizon is at the SPHERICAL radius r = 2M.
+    /// the geometric mass M (units G = c = 1); the horizon is at the spherical radius r = 2M.
     pub mass: S,
 }
 
@@ -1543,7 +1546,8 @@ impl<S: Scalar> Metric<S, 3> for SchwarzschildKSCylindrical<S> {
 }
 
 // D = 1 / D = 2 are degenerate (the azimuthal DOF + the poloidal (R, z) block need the full D = 3);
-// provided fail-loud so generic kernel bounds resolve, never reached at bake time. mirrors KerrKS.
+// provided fail-loud so generic kernel bounds resolve, while every bake stays at D = 3. mirrors
+// KerrKS.
 impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCylindrical<S> {
     fn geometry(&self) -> Geometry {
         Geometry::Cylindrical
@@ -1582,11 +1586,11 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCylindrical<S> {
     }
 }
 
-// the D = 2 view is the (R, phi) EQUATORIAL DISK (z = 0): the razor-thin accretion-disk chart. on
+// the D = 2 view is the (R, phi) equatorial disk (z = 0): the razor-thin accretion-disk chart. on
 // the equator the spherical and cylindrical radii coincide (r = R), so the kerr-schild off-diagonal
-// vanishes and the metric is DIAGONAL — gamma = diag(1 + 2M/R, R^2), alpha = 1/sqrt(1 + 2M/R), shift
+// vanishes and the metric is diagonal — gamma = diag(1 + 2M/R, R^2), alpha = 1/sqrt(1 + 2M/R), shift
 // beta^R = 2M/(R + 2M) (beta^phi = 0), sqrt(gamma) = R sqrt(1 + 2M/R) so alpha sqrt(gamma) = R (the
-// cylindrical measure). the SAME physical vacuum as the (R, z) D = 3 view, restricted to z = 0.
+// cylindrical measure). the same physical vacuum as the (R, z) D = 3 view, restricted to z = 0.
 impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
     fn geometry(&self) -> Geometry {
         Geometry::Cylindrical
@@ -1656,8 +1660,8 @@ impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
 /// form): gamma^rr = (Sigma + a^2 sin^2 (1+b)) / ((1+b) Sigma), gamma^{r phi} = a / Sigma,
 /// gamma^{phi phi} = 1 / (Sigma sin^2). every ADM identity is pinned by tests: g_tt = b - 1,
 /// g_{t phi} = -a b sin^2, det, inverse, and the a = 0 reduction to `SchwarzschildKS`.
-/// NOT a `DiagonalMetric` — the compile-time bound keeps scale-factor consumers off it.
-/// the physics needs the azimuthal momentum DOF, so only the D = 3 impl carries the metric;
+/// impls `Metric` alone — the compile-time bound keeps scale-factor consumers off it.
+/// the physics needs the azimuthal momentum DOF, so the D = 3 impl carries the metric;
 /// the D = 1 / D = 2 impls exist to satisfy generic kernel bounds and fail loud if reached.
 #[derive(Clone, Copy, Debug)]
 pub struct KerrKS<S> {
@@ -2921,7 +2925,7 @@ mod tests {
 
     #[test]
     fn test_kerr_schild_is_regular_across_the_horizon() {
-        // the defining property: lapse, shift, gamma_rr are all FINITE and smooth at AND inside the
+        // the defining property: lapse, shift, gamma_rr are all finite and smooth at and inside the
         // horizon r = 2M (where the schwarzschild-coordinate lapse sqrt(1 - 2M/r) hits 0 / goes
         // imaginary). h(2M) = 2, so alpha = 1/sqrt(2), beta^r = 1/2, gamma_rr = 2.
         let bh = SchwarzschildKS { mass: 1.0_f64 };
@@ -3051,7 +3055,7 @@ mod tests {
 
     #[test]
     fn test_kerr_schild_sqrt_minus_g_is_flat_spherical_area() {
-        // sqrt(-g) = alpha sqrt(gamma) = r^2 sin(theta), the SAME flat spherical volume element as
+        // sqrt(-g) = alpha sqrt(gamma) = r^2 sin(theta), the same flat spherical volume element as
         // schwarzschild coords — det(g) is chart-independent for this vacuum.
         let bh = SchwarzschildKS { mass: 0.7_f64 };
         let (r, theta) = (6.0, FRAC_PI_4);
@@ -3086,12 +3090,12 @@ mod tests {
 
     #[test]
     fn test_metric_autodiff_radial_derivs_match_finite_difference() {
-        // the geodesic source gets its metric radial derivatives from FORWARD-MODE AUTODIFF:
-        // evaluate lapse/shift/gamma_rr at `Dual` with the radial coordinate SEEDED (d/dr = 1); the
-        // tangent IS d/dr. this is the SINGLE source of metric derivatives (the hand-written analytic
-        // forms are retired) — so it must equal a central finite difference of the metric's OWN
-        // lapse/shift/spatial_metric. checked for schwarzschild + KS, INCLUDING inside the KS horizon
-        // (r < 2M). the mass is a CONSTANT dual (differentiation is w.r.t. r; M is held constant).
+        // the geodesic source gets its metric radial derivatives from forward-mode autodiff:
+        // evaluate lapse/shift/gamma_rr at `Dual` with the radial coordinate seeded (d/dr = 1); the
+        // tangent is d/dr. this is the single source of metric derivatives (the hand-written analytic
+        // forms are retired), so it matches a central finite difference of the metric's own
+        // lapse/shift/spatial_metric. checked for schwarzschild + KS, including inside the KS horizon
+        // (r < 2M). the mass is a constant dual (differentiation is w.r.t. r; M is held fixed).
         use symbi_ir::dual::Dual;
         // dr balances central-diff truncation (O(dr^2)) against subtractive roundoff (O(eps/dr)):
         // 1e-4 keeps both ~1e-8, so an FD-appropriate relative tolerance of 1e-5 is safe.
@@ -3137,7 +3141,8 @@ mod tests {
         for &r in &[2.3_f64, 5.0, 11.7] {
             let x = Tensor::new([r]);
             assert_eq!(ks.lapse_sq(x), 1.0 / (1.0 + 2.0 / r));
-            // and it genuinely differs from the sqrt round-trip at some radius (the trap this avoids).
+            // and it genuinely differs from the sqrt round-trip at some radius (the trap the closed
+            // form sidesteps).
             let _ = ks.lapse(x) * ks.lapse(x);
         }
     }
@@ -3145,8 +3150,8 @@ mod tests {
     #[test]
     fn test_kerr_schild_transport_velocity_is_ingoing_inside_horizon() {
         // the horizon-penetrating guarantee: tilde v^r = v^r - beta^r/alpha = (V - 2M/r)/sqrt(h) is
-        // negative for EVERY subluminal physical velocity V < 1 at r <= 2M, so nothing escapes the
-        // excised interior and the inner outflow boundary is causal.
+        // negative for every subluminal physical velocity V < 1 at r <= 2M, so every characteristic
+        // stays inside the excised interior and the inner outflow boundary is causal.
         let bh = SchwarzschildKS { mass: 1.0_f64 };
         for &r in &[2.0, 1.5, 1.0] {
             let x = Tensor::new([r]);
@@ -3248,11 +3253,12 @@ mod tests {
     fn cartesian_ks_is_bounded_and_consistent_inside_the_clamp() {
         // the radius clamp exists to bound the chart's coordinate singularity at r = 0, which the
         // grid straddles whenever the domain contains the origin. inside r = M/2 the clamp freezes
-        // r and hence 2H, but NOT the metric: l^i = x^i / r_clamped still varies with position and
-        // its norm |l| = |x| / r_clamped falls below 1, so the rank-1 forms must contract with the
-        // ACTUAL |l|^2. with M = 1 that gives 1 + 2H |l|^2 = 1 + 16 |x|^2 on the clamp, running
+        // r and hence 2H, while the metric keeps varying: l^i = x^i / r_clamped tracks position and
+        // its norm |l| = |x| / r_clamped falls below 1, so the rank-1 forms contract with the
+        // measured |l|^2. with M = 1 that gives 1 + 2H |l|^2 = 1 + 16 |x|^2 on the clamp, running
         // continuously from the flat value 1 at the origin to the exterior value 5 at r = M/2.
-        // the requirement is boundedness and consistency, not constancy: alpha in [1/sqrt(5), 1],
+        // the requirement is boundedness and consistency, with variation allowed: alpha in
+        // [1/sqrt(5), 1],
         // every component finite through the origin, and sqrt(det gamma) equal to the determinant
         // of the matrix it describes.
         let bh = SchwarzschildKSCartesian { mass: 1.0_f64 };
@@ -3277,8 +3283,8 @@ mod tests {
                 alpha >= 1.0 / 5.0_f64.sqrt() - 1e-15 && alpha <= 1.0 + 1e-15,
                 "lapse out of the clamp bounds at ({px},{py}): {alpha}"
             );
-            // the 2x2 determinant must equal the closed form: the guard region is a CONSISTENT
-            // metric, not one whose measure disagrees with its components.
+            // the 2x2 determinant equals the closed form: the guard region is a consistent metric,
+            // its measure agreeing with its components.
             let det = gm[(0, 0)] * gm[(1, 1)] - gm[(0, 1)] * gm[(1, 0)];
             assert!(
                 (det - sq * sq).abs() < 1e-14 * det.max(1.0),
@@ -3297,12 +3303,12 @@ mod tests {
     #[test]
     fn cartesian_ks_clamp_bounds_the_metric_gradient() {
         // the geodesic source is built from Dual derivatives of the metric. what the clamp has to
-        // deliver is a BOUNDED derivative — the unclamped chart's d(alpha)/dx grows like M/r^2 and
-        // diverges at the origin — not a vanishing one. on the clamp the lapse derivative is
+        // deliver is a bounded derivative — the unclamped chart's d(alpha)/dx grows like M/r^2 and
+        // diverges at the origin. on the clamp the lapse derivative is
         // -16 x / (1 + 16 |x|^2)^{3/2} (M = 1), which is bounded by ~2.5 and vanishes at the
-        // origin by symmetry. the metric is NOT constant there: freezing r leaves l^i = x^i/r_g
-        // varying with position, so a claim of zero gravity inside the clamp holds for no
-        // component of the source.
+        // origin by symmetry. the metric keeps varying there: freezing r leaves l^i = x^i/r_g
+        // tracking position, so gravity inside the clamp stays live in every component of the
+        // source.
         use symbi_ir::dual::Dual;
         let bh = SchwarzschildKSCartesian {
             mass: Dual {
@@ -3388,10 +3394,10 @@ mod tests {
 
     #[test]
     fn cartesian_ks_matches_spherical_ks_physics_via_rotation_invariants() {
-        // the SAME physical vacuum as the spherical KS chart: the rotation-invariant scalars must
-        // agree at the same physical radius. the lapse alpha(r) is a scalar (chart-independent), and
-        // the PHYSICAL radial stretch l^i l^j gamma_ij (cartesian) equals the spherical KS gamma_rr
-        // (whose radial scale factor is 1, so gamma_rr IS the physical radial metric) = 1 + 2M/r.
+        // the same physical vacuum as the spherical KS chart: the rotation-invariant scalars agree
+        // at the same physical radius. the lapse alpha(r) is a scalar (chart-independent), and
+        // the physical radial stretch l^i l^j gamma_ij (cartesian) equals the spherical KS gamma_rr
+        // (whose radial scale factor is 1, so gamma_rr is the physical radial metric) = 1 + 2M/r.
         let close = |x: f64, y: f64| (x - y).abs() < 1e-13 * (1.0 + x.abs().max(y.abs()));
         let cart = SchwarzschildKSCartesian { mass: 1.3_f64 };
         let sph = SchwarzschildKS { mass: 1.3_f64 };
@@ -3586,9 +3592,9 @@ mod tests {
 
     #[test]
     fn cylindrical_ks_matches_cartesian_ks_physics_via_invariants() {
-        // the SAME physical vacuum as the cartesian KS chart: the lapse is a scalar (chart-free) and
+        // the same physical vacuum as the cartesian KS chart: the lapse is a scalar (chart-free) and
         // the poloidal physical radial stretch l^i l^j gamma_ij (the KS null covector contracted) is
-        // 1 + 2M/r in BOTH charts, at the same spherical radius r.
+        // 1 + 2M/r in both charts, at the same spherical radius r.
         let close = |x: f64, y: f64| (x - y).abs() < 1e-13 * (1.0 + x.abs().max(y.abs()));
         let cyl = SchwarzschildKSCylindrical { mass: 1.3_f64 };
         let cart = SchwarzschildKSCartesian { mass: 1.3_f64 };
@@ -3619,8 +3625,8 @@ mod tests {
     #[test]
     fn cylindrical_ks_autodiff_derivs_match_finite_difference() {
         // the geodesic source's metric derivatives via forward-mode autodiff w.r.t. the cylindrical
-        // coordinates (R, phi, z). d_R and d_z are nontrivial; d_phi MUST vanish (axisymmetry — the
-        // metric never reads phi, so S_phi is conserved). off-axis + inside the horizon.
+        // coordinates (R, phi, z). d_R and d_z are nontrivial; d_phi vanishes (axisymmetry — the
+        // metric is independent of phi, so S_phi is conserved). off-axis + inside the horizon.
         use symbi_ir::dual::Dual;
         let dd = 1e-4;
         let close = |a: f64, b: f64| (a - b).abs() < 1e-5 * (1.0 + a.abs().max(b.abs()));
@@ -3797,7 +3803,7 @@ mod tests {
     fn kerr_ks_cylindrical_matches_the_cartesian_chart_through_the_jacobian() {
         // the cross-chart reference: gamma_cyl = J^T gamma_cart J with the coordinate
         // jacobian of (x, y, z) = (R cos phi, R sin phi, z) — the two charts describe
-        // the SAME spacetime, so any formula drift between them breaks this exactly.
+        // the same spacetime, so any formula drift between them breaks this exactly.
         let (mm, aa) = (1.0_f64, 0.8_f64);
         let cyl = KerrKSCylindrical { mass: mm, spin: aa };
         let cart = KerrKSCartesian { mass: mm, spin: aa };

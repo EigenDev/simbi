@@ -62,8 +62,8 @@ def prepare_fields(
             all_fields.append(field_data)
         else:
             # prepare one field for each active level. a field genuinely
-            # absent from one level is skipped, but a field that produces
-            # nothing on ANY level must fail here by name: dropping it
+            # absent from one level is skipped; a field that comes up empty
+            # across every level raises here by name, since dropping it
             # silently yields an empty PlotData whose validation error
             # ("dimensions = 0") points nowhere near the cause.
             produced = 0

@@ -2,14 +2,14 @@
 // symbi-aot
 //
 // build-time AOT kernel library. build.rs
-// runs the substrate to lower every kernel to IR and emit it as BOTH compilable
+// runs the substrate to lower every kernel to IR and emit it as both compilable
 // Rust source (via emit_kernel_cpu) and a serialized backend-NEUTRAL lowered IR
-// blob (the Prepared artifact, via prepare + prepared_to_ir), then writes ONE
+// blob (the Prepared artifact, via prepare + prepared_to_ir), then writes one
 // registry module that `include!`s every CPU kernel and exposes every kernel's IR
-// blob as a `<KERNEL>_IR` const. the blob renders to ANY backend at runtime via
+// blob as a `<KERNEL>_IR` const. the blob renders to any backend at runtime via
 // `symbi_ir::render_from_ir`. this crate `include!`s that single registry —
-// so adding a kernel touches only build.rs's kernel list, never this file
-// (no hand-maintained registration).
+// so adding a kernel touches only build.rs's kernel list; this file carries
+// no hand-maintained registration to update.
 //
 // each generated `pub fn` is a normal compiled function exported from this crate;
 // downstream consumers (the tests here, `symbi`'s SubstrateKernelSet) call them
@@ -26,7 +26,7 @@
 //
 // `lo` and `strides` are fixed `[i32; 4]` (no slice indirection, no bounds
 // checks) — supports rank <= 4 (more than the project's 3D ceiling). the unused
-// tail is `0` and never read.
+// tail holds `0` and stays unread.
 //
 // `extent` is intentionally absent: no emitted kernel reads it (the strides
 // already encode the only layout fact the index math needs). carrying it
@@ -61,9 +61,9 @@ pub struct CpuFieldMut<'a, T = f64> {
 /// fastest-varying in memory — under the CFD-standard mapping (axis 0 = x),
 /// adjacent CUDA `threadIdx.x` lanes hit adjacent bytes (coalesced reads).
 ///
-/// delegates to `symbi_algebra::strides_from_extent` — THE single definition of
+/// delegates to `symbi_algebra::strides_from_extent` — the single definition of
 /// the stride formula, shared with `Domain`, `Layout`, and symbi-grid's `View`.
-/// `pub` so the GPU view-construction path reuses the SAME helper.
+/// `pub` so the GPU view-construction path reuses the same helper.
 #[inline]
 pub fn compute_strides(extent: &[u32]) -> [i32; 4] {
     let n = extent.len().min(4);
@@ -129,16 +129,16 @@ impl<'a, T> CpuFieldMut<'a, T> {
 
 // ---- the structured binding ABI ----
 //
-// the backend-NEUTRAL kernel invocation. the call site builds ONE
+// the backend-NEUTRAL kernel invocation. the call site builds one
 // `KernelInvocation`: an ordered buffer list (each a data HANDLE + its layout) +
 // the packed params, keeping the CPU-specific `&[CpuField]` / `&mut [CpuFieldMut]`
 // host slices (a host-memory-ism) out of the call site. the same invocation maps to a CPU
 // call (`run_cpu`, below) or a GPU launch, by interpreting the handle. the
-// device-pointer handle variant for the runtime GPU render is not yet present.
+// device-pointer handle variant for the runtime GPU render is future work.
 
 /// where a buffer's data lives. the variant encodes the kernel role: `Host` is a
 /// read-only input, `HostMut` an output (incl. in-place — the kernel reads + writes
-/// it). a `Device` variant for GPU launches is not yet present.
+/// it). a `Device` variant for GPU launches is future work.
 pub enum BufHandle<'a, T> {
     Host(&'a [T]),
     HostMut(&'a mut [T]),

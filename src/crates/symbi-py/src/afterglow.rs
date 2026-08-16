@@ -10,9 +10,9 @@
 //   - write_photon_events: serialize the handle to HDF5, byte-compatible with the
 //     python `postprocess.read_photon_events` schema (root datasets + root attrs).
 //
-// the handle wraps a `Vec<PhotonEvent>` so it round-trips between the three calls
-// without ever materializing per-event python objects (cheapest boundary). the
-// HDF5 write reuses the symbi-io `Hdf5Backend` Tree writer — no bespoke hdf5 code.
+// the handle wraps a `Vec<PhotonEvent>` so it round-trips between the three calls,
+// keeping per-event python objects unmaterialized the whole way (cheapest boundary).
+// the HDF5 write reuses the symbi-io `Hdf5Backend` Tree writer, so hdf5 code lives in one place.
 //
 // usage (from python):
 //  from simbi.libs import cpu_ext
@@ -74,7 +74,7 @@ impl PhotonEvents {
     }
 
     /// merge another catalog into this one (consuming the other's packets), so a
-    /// multi-checkpoint run concatenates per-file catalogs without a python list.
+    /// multi-checkpoint run concatenates per-file catalogs directly on the rust side.
     fn extend(&mut self, other: &mut PhotonEvents) {
         self.events.append(&mut other.events);
     }
@@ -218,7 +218,7 @@ fn generate_photon_events_py(
 
     let events = if md.data_dim <= 1 {
         // the spherical BMK path: synthesize a full sphere from the 1d radial profile, with
-        // the angular tessellation SIZED FROM THE BUDGET so every radial cell emits (see
+        // the angular tessellation sized from the budget so every radial cell emits (see
         // `spherical_tessellation_for_budget`); full sphere (theta_max = pi).
         let ppd = if photons_per_cell > 0 {
             photons_per_cell
@@ -266,7 +266,7 @@ fn generate_photon_events_py(
 /// propagate the catalog through the medium in place (synchrotron self-absorption +
 /// thomson scattering, optional pair production), filling optical_depth and flipping
 /// absorbed / n_scatter. operates on the data_dim==1 spherical catalog by indexing the
-/// radial profile (cell_id is the radial index), so x2/x3 are not needed here.
+/// radial profile, so cell_id (the radial index) alone is sufficient here.
 #[pyfunction]
 #[pyo3(name = "monte_carlo_radiative_transfer")]
 #[pyo3(signature = (events, sim_cond, qscales, fields, mesh, seed=0, include_scattering=true, include_pair_production=false))]
@@ -312,8 +312,8 @@ fn monte_carlo_radiative_transfer_py(
 }
 
 /// reduce the catalog into a resolved sky-plane image at a given line of sight. the
-/// observer direction is an arbitrary unit vector, so one catalog serves EVERY viewing
-/// angle without regeneration: per call the EATS surface t_obs = (1+z)(t_em - r.n/c) is
+/// observer direction is an arbitrary unit vector, so one catalog serves any viewing
+/// angle from a single generation pass: per call the EATS surface t_obs = (1+z)(t_em - r.n/c) is
 /// selected, the observer-direction doppler boost delta^doppler_power is recomputed toward
 /// n (the limb-brightening), and the in-window packets are projected onto the plane
 /// perpendicular to n and binned into n_pix*n_pix equal-area pixels.
@@ -400,8 +400,9 @@ fn write_photon_events_py(
     let stokes_v: Vec<f64> = ev.iter().map(|e| e.stokes_v).collect();
     let doppler: Vec<f64> = ev.iter().map(|e| e.doppler_factor).collect();
     let lorentz: Vec<f64> = ev.iter().map(|e| e.lorentz_factor()).collect();
-    // the lab-frame fluid velocity vector — REQUIRED to round-trip the observer-direction
-    // doppler (delta = 1/(gamma(1 - beta.n))) when a saved catalog is reduced; not assumed radial.
+    // the lab-frame fluid velocity vector, needed to round-trip the observer-direction
+    // doppler (delta = 1/(gamma(1 - beta.n))) when a saved catalog is reduced; stored as
+    // the full 3-vector to cover general, non-radial flow.
     let beta_x: Vec<f64> = ev.iter().map(|e| e.beta_vec[0]).collect();
     let beta_y: Vec<f64> = ev.iter().map(|e| e.beta_vec[1]).collect();
     let beta_z: Vec<f64> = ev.iter().map(|e| e.beta_vec[2]).collect();
@@ -514,9 +515,9 @@ fn write_photon_events_py(
 }
 
 /// read a catalog written by `write_photon_events` back into a handle, so a saved catalog can be
-/// reduced (skymap_from_events / monte_carlo_radiative_transfer) WITHOUT regenerating — the
+/// reduced (skymap_from_events / monte_carlo_radiative_transfer) directly from disk — the
 /// generate-once, reduce-many path. beta_vec is read from beta_x/y/z; a catalog written before
-/// those existed falls back to a RADIAL reconstruction from position + the stored lorentz_factor.
+/// those existed falls back to a radial reconstruction from position + the stored lorentz_factor.
 #[pyfunction]
 #[pyo3(name = "read_photon_events")]
 fn read_photon_events_py(path: &str) -> PyResult<PhotonEvents> {
@@ -526,8 +527,8 @@ fn read_photon_events_py(path: &str) -> PyResult<PhotonEvents> {
     events_from_tree(&tree)
 }
 
-/// total packet count in a saved catalog, read from the `t_emission` column's length WITHOUT
-/// loading any column — the row count that bounds a `read_photon_events_chunk` loop.
+/// total packet count in a saved catalog, read from the `t_emission` column's length via a
+/// metadata-only lookup — the row count that bounds a `read_photon_events_chunk` loop.
 #[pyfunction]
 #[pyo3(name = "photon_event_count")]
 fn photon_event_count_py(path: &str) -> PyResult<usize> {
@@ -549,9 +550,9 @@ fn read_photon_events_chunk_py(path: &str, start: usize, count: usize) -> PyResu
     events_from_tree(&tree)
 }
 
-/// build the packet vector from a catalog TreeBuf (whole-file `read` OR a hyperslab chunk —
+/// build the packet vector from a catalog TreeBuf (whole-file `read` or a hyperslab chunk —
 /// both produce the same SoA columns, just different lengths). shared by the full and chunked
-/// readers so the column->struct mapping (incl. the radial beta_vec fallback) lives in ONE place.
+/// readers so the column->struct mapping (incl. the radial beta_vec fallback) lives in one place.
 fn events_from_tree(tree: &TreeBuf) -> PyResult<PhotonEvents> {
     let f64col = |name: &str| -> PyResult<Vec<f64>> {
         tree.find_dataset(name)
@@ -643,9 +644,9 @@ fn events_from_tree(tree: &TreeBuf) -> PyResult<PhotonEvents> {
 
 /// reduce a catalog into an observer light curve F_nu(t): per-frequency flux density [mJy]
 /// over the observer-time bins, via the EATS. additive across catalogs, so a multi-checkpoint
-/// light curve STREAMS — reduce each checkpoint's events into the bins and discard them, never
-/// holding the full event set. returns (bin-center times [day], fluxes flat [n_time*n_freq],
-/// frequencies [Hz]).
+/// light curve streams: reduce each checkpoint's events into the bins and discard them, holding
+/// only the current checkpoint's events at a time. returns (bin-center times [day], fluxes flat
+/// [n_time*n_freq], frequencies [Hz]).
 #[pyfunction]
 #[pyo3(name = "lightcurve_from_events")]
 #[pyo3(signature = (events, observer_direction, frequencies, redshift, luminosity_distance, time_bins, doppler_power=3.0, frac_bandwidth=0.1))]
@@ -682,14 +683,14 @@ fn lightcurve_from_events_py(
     Ok((lc.times, lc.fluxes, lc.frequencies))
 }
 
-/// DETERMINISTIC (noise-free) sky-map deposition for a spherical-mesh blast in 1/2/3D —
+/// deterministic (noise-free) sky-map deposition for a spherical-mesh blast in 1/2/3D —
 /// Zrake+2018 eq. 1-2. deposits each cell's lab-frame monochromatic emissivity onto the sky
 /// plane (no photon sampling), gated by the EATS window: a 1d radial profile uses the exact
 /// analytic-azimuth path; 2d (r, theta) and 3d (r, theta, phi) meshes sweep each cell's
 /// azimuth arcs at pixel resolution. optional `fields["v1"/"v2"/"v3"]` three-velocity
 /// components (units of c) capture lateral spreading; absent, the flow is radial from
 /// `gamma_beta`. `sim_cond["dt"]` carries the snapshot's lab-time interval (the same
-/// trapezoidal weight the photon generator uses), `obs_time`/`time_window` are in DAYS, and
+/// trapezoidal weight the photon generator uses), `obs_time`/`time_window` are in days, and
 /// `half_width` [cm] is the caller-fixed image extent (so frames over many snapshots share a
 /// grid). returns the raw deposit image (row-major `[iy*n_pix+ix]`); the caller calibrates to
 /// mJy/mas^2 via F_nu = image.sum() / (4 pi d_L^2 dt_obs).

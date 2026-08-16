@@ -1,7 +1,7 @@
 // =============================================================================
 // rmhd_ct_curl_2d_sph_gr_divb.rs
 //
-// div(B)=0 preservation for the CURVED-SPACETIME 2D poloidal CT curl
+// div(B)=0 preservation for the curved-spacetime 2D poloidal CT curl
 // (rmhd_ct_curl_2d_sph_gr_gv, schwarzschild): the update evolves the densitized
 // Btilde^i = sqrt(gamma) B^i with the coordinate curl of the densitized corner
 // EMF Etilde_phi, dividing back by the face's own constant weight
@@ -12,8 +12,8 @@
 //               + w_th(j+1,i) B_th(i,j+1) - w_th(j,i) B_th(i,j)
 // (the corner-EMF telescoping is weight-independent, so this holds to roundoff
 // for any smooth Etilde). B initializes div-free as the curl of an arbitrary
-// A_phi through the SAME kernel (b=0, dt=1), then evolves one step by
-// curl(Etilde_phi). div(B) must stay machine zero AND unchanged.
+// A_phi through the same kernel (b=0, dt=1), then evolves one step by
+// curl(Etilde_phi). div(B) must stay machine zero and unchanged.
 // =============================================================================
 
 mod harness;
@@ -46,8 +46,8 @@ fn mid(ax: usize, idx: usize) -> f64 {
 }
 
 // the ingoing kerr-schild spatial measure sqrt(gamma) = r^2 sin(theta) sqrt(1 + 2M/r), from
-// gamma = diag(1 + 2M/r, r^2, r^2 sin^2 theta). the curl telescopes for ANY face weight, so what
-// this pins is that the SAME measure the kernel uses is the one the divergence is read with.
+// gamma = diag(1 + 2M/r, r^2, r^2 sin^2 theta). the curl telescopes for any face weight, so what
+// this pins is that the divergence is read with the same measure the kernel uses.
 fn sqrtg(r: f64, th: f64) -> f64 {
     r * r * th.sin() * (1.0 + 2.0 * MASS / r).sqrt()
 }

@@ -37,7 +37,7 @@ const GAMMA: f64 = 4.0 / 3.0;
 // the cold c2p-safe vacuum the excised cells are frozen at. the kernel takes these as the
 // `excision_rho` / `excision_pre` scalars rather than baking literals, so the substrate can
 // scale the floor to the problem's density and pressure units. the compiled kernel and the
-// f64 chain below are handed the SAME pair — the law under test is that the two paths agree
+// f64 chain below are handed the same pair — the law under test is that the two paths agree
 // bitwise on a given floor, not what the floor's value happens to be.
 const RHO_VAC: f64 = 1e-10;
 const PRE_VAC: f64 = 1e-12;

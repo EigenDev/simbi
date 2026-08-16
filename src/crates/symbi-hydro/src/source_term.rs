@@ -1,23 +1,23 @@
 // =============================================================================
 // source_term.rs
 //
-// the carrier-generic CONSERVATION LIFT + its built-in acceleration fields. the
-// `+ sum S(U)` half of the conservation form, written ONCE over `S: Scalar` —
-// COMPUTED at S=f64 (the analytical reference) and TRACED at S=Gv (the rendered
-// kernel) from the SAME definition. this is the carrier discipline the physics
+// the carrier-generic conservation lift + its built-in acceleration fields. the
+// `+ sum S(U)` half of the conservation form, written once over `S: Scalar` —
+// computed at S=f64 (the analytical reference) and traced at S=Gv (the rendered
+// kernel) from the same definition. this is the carrier discipline the physics
 // (flux, c2p) already follows, applied to the source half.
 //
-// the lift is the load-bearing idea: a source is a FREE FIELD (an acceleration
+// the lift is the load-bearing idea: a source is a free field (an acceleration
 // `a`, a cooling rate `Lambda`, a relaxation `(kappa, v_ref)`) wrapped in the
 // conservation law. the lift functions (`force_momentum` / `force_energy` /
-// `cooling` / `relax_*`) ARE that wrapping. because the wrapping is one carrier-
+// `cooling` / `relax_*`) are that wrapping. because the wrapping is one carrier-
 // generic definition:
-//   - f64 == Gv by construction across the whole LAW computation, field values included — the
-//     graph-divergence bug class (a hand-built `Op` graph that traces a different
-//     computation than the f64 reference) cannot occur.
-//   - the energy source is DERIVED from the same field the momentum source uses
-//     (`S_nrg = rho*(a.v)`), so a user cannot desync energy from the force.
-//   - built-in sources and USER sources share ONE lift: a built-in supplies its
+//   - f64 == Gv by construction across the whole law computation, field values included —
+//     one definition authors both, closing the graph-divergence bug class where a
+//     hand-built `Op` graph traces a different computation than the f64 reference.
+//   - the energy source is derived from the same field the momentum source uses
+//     (`S_nrg = rho*(a.v)`), so energy and force stay in step for every user.
+//   - built-in sources and user sources share one lift: a built-in supplies its
 //     field in Rust here (`UniformAccel`, `PointMassGravity`), a user supplies it
 //     as a runtime DAG lowered via `expr_bridge`; both ride the identical lift
 //     (`source_spec::user_force_*` / `user_relax_*` / `user_cooling_source` trace
@@ -25,29 +25,29 @@
 //
 // params are carrier-typed: at S=f64 they are numbers (the analytical reference);
 // at S=Gv they are `Gv::scalar(name)` / spliced-DAG leaves the runtime fills per
-// step. the caller owns the names (the lift never invents them).
+// step. the caller owns the names; the lift takes them as given.
 // =============================================================================
 
 use crate::Scalar;
 
 // =============================================================================
-// the conservation lift — the source-half analogue of the flux. ONE definition,
-// instantiated at S=f64 (reference) and S=Gv (kernel). runs at BUILD/TRACE time
-// (building IR or evaluating the analytical reference), never per-cell in the hot
-// path — the rendered kernel / scalarized graph carries the per-cell work — so the
-// `Vec` returns are free (they allocate once per kernel build).
+// the conservation lift — the source-half analogue of the flux. one definition,
+// instantiated at S=f64 (reference) and S=Gv (kernel). runs at build/trace time
+// (building IR or evaluating the analytical reference), while the rendered kernel /
+// scalarized graph carries the per-cell work — so the `Vec` returns are free (they
+// allocate once per kernel build).
 // =============================================================================
 
-/// force-MOMENTUM lift: `S_mom_k = rho * a_k`, for an acceleration field `a` (D
-/// components). the field's origin — constant gravity, a point mass, a user DAG —
-/// is irrelevant to the lift; only `a` differs.
+/// force-momentum lift: `S_mom_k = rho * a_k`, for an acceleration field `a` (D
+/// components). the lift depends on `a` alone, so constant gravity, a point mass,
+/// and a user DAG all reach it through the same signature.
 pub fn force_momentum<S: Scalar>(rho: S, accel: &[S]) -> Vec<S> {
     accel.iter().map(|&a| rho * a).collect()
 }
 
-/// force-ENERGY lift: `S_nrg = rho * (a . v)` — the work the force does, DERIVED
-/// from the SAME acceleration field `a` the momentum lift uses. pairing the two
-/// over one `a` is the structural reason the energy source cannot desync from the
+/// force-energy lift: `S_nrg = rho * (a . v)` — the work the force does, derived
+/// from the same acceleration field `a` the momentum lift uses. pairing the two
+/// over one `a` is the structural reason the energy source stays in step with the
 /// momentum source.
 pub fn force_energy<S: Scalar>(rho: S, vel: &[S], accel: &[S]) -> S {
     rho * dot(accel, vel)
@@ -76,15 +76,16 @@ pub fn rotating_frame_acceleration<S: Scalar>(
 }
 
 /// cooling lift: `S_nrg = -Lambda`, for a cooling-rate field `Lambda`. an energy
-/// sink; mass + momentum are untouched (a cooling kind reaches only the nrg slot).
+/// sink; mass and momentum pass through unchanged (a cooling kind reaches the nrg
+/// slot alone).
 pub fn cooling<S: Scalar>(rate: S) -> S {
     S::ZERO - rate
 }
 
-/// velocity-relaxation MOMENTUM lift (a sponge / buffer zone): `S_mom_k =
+/// velocity-relaxation momentum lift (a sponge / buffer zone): `S_mom_k =
 /// max(kappa, 0) * rho * (v_ref_k - vel_k)`, the linear drag toward a reference
-/// velocity. `kappa` is clamped non-negative ([`clamp_rate`]) so the relaxation can
-/// only DAMP — the unstable (anti-damping) form is unexpressible.
+/// velocity. `kappa` is clamped non-negative ([`clamp_rate`]) so the relaxation
+/// damps — damping is the one behavior the form can express.
 pub fn relax_momentum<S: Scalar>(rho: S, vel: &[S], kappa: S, v_ref: &[S]) -> Vec<S> {
     let k = clamp_rate(kappa);
     vel.iter()
@@ -93,33 +94,34 @@ pub fn relax_momentum<S: Scalar>(rho: S, vel: &[S], kappa: S, v_ref: &[S]) -> Ve
         .collect()
 }
 
-/// velocity-relaxation ENERGY lift: `S_nrg = sum_k vel_k * S_mom_k` — the work the
-/// drag does, DERIVED from the SAME `(kappa, v_ref)` the momentum lift uses. with
-/// `kappa >= 0` it removes kinetic energy when `vel` overshoots `v_ref`, never adds it.
+/// velocity-relaxation energy lift: `S_nrg = sum_k vel_k * S_mom_k` — the work the
+/// drag does, derived from the same `(kappa, v_ref)` the momentum lift uses. with
+/// `kappa >= 0` the work term is sign-definite: kinetic energy leaves the flow
+/// whenever `vel` departs from `v_ref`.
 pub fn relax_energy<S: Scalar>(rho: S, vel: &[S], kappa: S, v_ref: &[S]) -> S {
     dot(vel, &relax_momentum(rho, vel, kappa, v_ref))
 }
 
 // ----- full conserved-state relaxation (the buffer zone) ---------------------
 //
-// where `relax_*` relaxes the intensive VELOCITY toward `v_ref` at fixed density,
-// the `sponge_*` family relaxes EVERY conserved component toward a reference state
+// where `relax_*` relaxes the intensive velocity toward `v_ref` at fixed density,
+// the `sponge_*` family relaxes every conserved component toward a reference state
 // `U_ref = (den_ref, mom_ref, nrg_ref)`: `S_U = max(kappa,0) * (U_ref - U)`. this is
 // the well-posed sink of a buffer/damping zone that holds the flow at a known (e.g.
-// analytic ambient) solution — density included, so the zone cannot let the boundary
-// density drift. the three channels share the ONE `kappa`, so masking the rate masks
+// analytic ambient) solution — density included, so the zone pins the boundary
+// density as well. the three channels share one `kappa`, so masking the rate masks
 // the whole relaxation, and `clamp_rate` keeps it a damping-only sink.
 
-/// full-state relaxation MASS lift: `S_den = max(kappa,0) * (den_ref - rho)`, the
+/// full-state relaxation mass lift: `S_den = max(kappa,0) * (den_ref - rho)`, the
 /// linear drag of density toward the reference `den_ref`.
 pub fn sponge_density<S: Scalar>(rho: S, kappa: S, den_ref: S) -> S {
     clamp_rate(kappa) * (den_ref - rho)
 }
 
-/// full-state relaxation MOMENTUM lift: `S_mom_k = max(kappa,0) * (mom_ref_k - rho*vel_k)`,
-/// relaxing the CONSERVED momentum `rho*vel_k` toward a reference momentum `mom_ref_k`.
-/// distinct from `relax_momentum` (intensive velocity at fixed rho) — this composes with
-/// a simultaneous density relaxation without the two channels fighting.
+/// full-state relaxation momentum lift: `S_mom_k = max(kappa,0) * (mom_ref_k - rho*vel_k)`,
+/// relaxing the conserved momentum `rho*vel_k` toward a reference momentum `mom_ref_k`.
+/// distinct from `relax_momentum` (intensive velocity at fixed rho) — working on the
+/// conserved variable is what lets it compose with a simultaneous density relaxation.
 pub fn sponge_momentum<S: Scalar>(rho: S, vel: &[S], kappa: S, mom_ref: &[S]) -> Vec<S> {
     let k = clamp_rate(kappa);
     vel.iter()
@@ -128,10 +130,10 @@ pub fn sponge_momentum<S: Scalar>(rho: S, vel: &[S], kappa: S, mom_ref: &[S]) ->
         .collect()
 }
 
-/// full-state relaxation ENERGY lift: `S_nrg = max(kappa,0) * (nrg_ref - E)`, relaxing the
-/// CONSERVED total energy `E = pre*inv_gm1 + (1/2)*rho*|v|^2` toward `nrg_ref`. `inv_gm1 =
+/// full-state relaxation energy lift: `S_nrg = max(kappa,0) * (nrg_ref - E)`, relaxing the
+/// conserved total energy `E = pre*inv_gm1 + (1/2)*rho*|v|^2` toward `nrg_ref`. `inv_gm1 =
 /// 1/(gamma-1)` is the ideal-gas internal-energy coefficient — a build-time constant since
-/// gamma is known when the source is lowered, so the lift needs no runtime gamma binding.
+/// gamma is known when the source is lowered, so the lift carries it as a literal.
 pub fn sponge_energy<S: Scalar>(rho: S, vel: &[S], pre: S, kappa: S, nrg_ref: S, inv_gm1: S) -> S {
     let e = pre * inv_gm1 + S::from_f64(0.5) * rho * dot(vel, vel);
     clamp_rate(kappa) * (nrg_ref - e)
@@ -139,8 +141,8 @@ pub fn sponge_energy<S: Scalar>(rho: S, vel: &[S], pre: S, kappa: S, nrg_ref: S,
 
 /// the `kappa >= 0` stability clamp. a relaxation adds `kappa*(U_ref - U)`; a
 /// negative rate would anti-damp (inject energy / destabilize). clamping in the
-/// lift makes the unstable form UNEXPRESSIBLE — the stability invariant enforced
-/// by construction. carrier-safe (`max`, no branch).
+/// lift leaves damping as the only expressible behavior — the stability invariant
+/// enforced by construction. carrier-safe (a branch-free `max`).
 fn clamp_rate<S: Scalar>(kappa: S) -> S {
     kappa.max(S::ZERO)
 }
@@ -157,7 +159,7 @@ fn dot<S: Scalar>(a: &[S], b: &[S]) -> S {
 // =============================================================================
 // built-in acceleration fields — the Rust-authored half of "the field". each
 // produces an `a` the lift wraps; momentum/energy delegate to the shared lift so a
-// built-in source and a user source are, past `accel()`, the SAME computation.
+// built-in source and a user source are, past `accel()`, the same computation.
 // =============================================================================
 
 /// uniform external acceleration `g_ext` (the constant-gravity user source).
@@ -188,7 +190,7 @@ impl<S: Scalar, const D: usize> UniformAccel<S, D> {
 ///
 ///   a_k = -GM (x-xm)_k / (|x-xm|^2 + eps^2)^{3/2}.
 ///
-/// softening (`eps > 0`) keeps the field finite AT the mass position — without it
+/// softening (`eps > 0`) keeps the field finite at the mass position; the bare
 /// `1/|x-xm|^3` produces Inf in the cell containing the mass and traces straight
 /// into the kernel. the shared `1/(...)^{3/2}` scaffolding hash-conses across the
 /// momentum + energy lifts (one `sqrt`/division per kernel). a moving mass updates
@@ -204,8 +206,9 @@ pub struct PointMassGravity<S, const D: usize> {
 
 impl<S: Scalar, const D: usize> PointMassGravity<S, D> {
     /// the softened acceleration field `a_k = -GM (x-xm)_k / (|x-xm|^2 + eps^2)^{3/2}`.
-    /// `rho` is applied by the caller's lift, so this acceleration field excludes it. the radicand `|x-xm|^2 + eps^2`
-    /// is strictly positive for `eps > 0`, so the `sqrt` + division never hit zero.
+    /// `rho` is applied by the caller's lift, so this is the bare acceleration. the radicand
+    /// `|x-xm|^2 + eps^2` is strictly positive for `eps > 0`, so the `sqrt` + division stay
+    /// well defined everywhere.
     pub fn accel(&self, x: &[S; D]) -> [S; D] {
         let dx: [S; D] = std::array::from_fn(|k| x[k] - self.xm[k]);
         let r_sq = dot(&dx, &dx) + self.eps * self.eps;
@@ -225,22 +228,22 @@ impl<S: Scalar, const D: usize> PointMassGravity<S, D> {
     }
 }
 
-/// ONE immersed body's source contribution in **3D Cartesian** (coord-free),
-/// carrier-generic: softened gravity + Bondi-Hoyle accretion. this is the SINGLE
+/// one immersed body's source contribution in **3D Cartesian** (coord-free),
+/// carrier-generic: softened gravity + Bondi-Hoyle accretion. this is the single
 /// source of truth for the body forcing — instantiated at `S = Gv` to build the
 /// fused kernel, at `S = f64` for the analytic reference test, and shared by the
-/// backward feedback. the physics is done in CARTESIAN (frame-independent); the
+/// backward feedback. the physics is done in cartesian (frame-independent); the
 /// composing layer supplies the cell's Cartesian position + gas velocity (via the
 /// metric's to_cartesian) and projects the Cartesian momentum source back onto the
 /// physical coordinate basis (vector_from_cartesian) — so it is correct in
-/// Cartesian, cylindrical, AND spherical. the per-body MAX_SOURCE_BODIES sum lives one
-/// layer up. future media (porous drag, deformable stress) extend THIS struct's
+/// Cartesian, cylindrical, and spherical. the per-body MAX_SOURCE_BODIES sum lives one
+/// layer up. future media (porous drag, deformable stress) extend this struct's
 /// methods, inheriting the frame handling + fused machinery for free.
-/// the EXACT support of the gaussian sink kernel, in accretion radii: the weight
+/// the exact support of the gaussian sink kernel, in accretion radii: the weight
 /// `exp(-(r/(racc/2))^2)` underflows to exactly +0 in f64 once the exponent argument
 /// passes ~-745, i.e. `r/(racc/2) >= 27.3`. gating at `r >= SINK_SUPPORT_RADII * racc`
 /// (= 28 half-radii, with margin) therefore skips the exp / roots / divisions on the
-/// far field WITHOUT changing any bit of any field: outside the support the ungated
+/// far field while every field keeps its bits: outside the support the ungated
 /// kernel computes den_dot = 0 exactly.
 pub const SINK_SUPPORT_RADII: f64 = 14.0;
 
@@ -273,12 +276,12 @@ impl<S: Scalar> BodySource<S> {
 
     /// Bondi-Hoyle accretion rate `den_dot = rho * min(sink, 1/t_nat, 1/dt) * w(r)`,
     /// `w = exp(-(r/(racc/2))^2)`, `t_nat = min(min_w/cs, sqrt(r^3/(2 mass)))`. reads
-    /// the LOCAL `rho` + `cs` — the state dependence the fused source must carry.
+    /// the local `rho` + `cs` — the state dependence the fused source must carry.
     ///
-    /// spatially gated at the kernel's EXACT support ([`SINK_SUPPORT_RADII`]): beyond it
+    /// spatially gated at the kernel's exact support ([`SINK_SUPPORT_RADII`]): beyond it
     /// the gaussian weight underflows to exactly +0 in f64, so the ungated rate is
     /// exactly zero and the lazy branch skips the exp + roots on the far field —
-    /// ~all cells for a sink of a few cell widths — without changing any bit.
+    /// ~all cells for a sink of a few cell widths — with every bit preserved.
     pub fn accretion_rate(&self, rho: S, cs: S, x: &[S; 3], min_w: S, inv_dt: S) -> S {
         let dx: [S; 3] = std::array::from_fn(|k| x[k] - self.xm[k]);
         let r_mag = dot(&dx, &dx).sqrt();
@@ -319,7 +322,7 @@ impl<S: Scalar> BodySource<S> {
     /// the Cartesian momentum source `S = rho*a - v_star*den_dot` (gravity + sink).
     /// the composer projects this onto the physical coordinate basis.
     ///
-    /// gravity acts everywhere; the SINK term carries the same exact-support gate as
+    /// gravity acts everywhere; the sink term carries the same exact-support gate as
     /// [`Self::accretion_rate`] so the far field skips `sink_velocity`'s root and
     /// divisions too (they would be multiplied by an exact zero).
     pub fn momentum_cartesian(
@@ -358,8 +361,9 @@ mod tests {
     use super::*;
 
     // the sink gate's bit-exactness rests on gaussian underflow: at and beyond
-    // the support radius the UNGATED weight is exactly +0 in f64, so the lazy
-    // branch that skips the exp / roots changes nothing. gravity is unaffected.
+    // the support radius the ungated weight is exactly +0 in f64, so the lazy
+    // branch that skips the exp / roots reproduces it bit for bit. gravity keeps
+    // acting throughout.
     #[test]
     fn sink_is_exactly_zero_beyond_the_support_radius() {
         let body = BodySource::<f64> {
@@ -391,7 +395,7 @@ mod tests {
 
     #[test]
     fn uniform_accel_f64_matches_analytical() {
-        // at S=f64 the source IS the analytical reference — no graph, no eval_source.
+        // at S=f64 the source is the analytical reference itself, evaluated directly.
         let src = UniformAccel::<f64, 3> {
             g_ext: [-0.1, -0.2, -9.81],
         };
@@ -410,7 +414,7 @@ mod tests {
 
     #[test]
     fn point_mass_gravity_f64_matches_analytical() {
-        // at S=f64 the source IS the softened analytical reference:
+        // at S=f64 the source is the softened analytical reference:
         // S = -rho*GM (x-xm) / (|x-xm|^2 + eps^2)^{3/2}.
         let src = PointMassGravity::<f64, 3> {
             gm: 2.0,
@@ -438,7 +442,7 @@ mod tests {
 
     #[test]
     fn softening_keeps_acceleration_finite_at_the_mass() {
-        // the bug softening fixes: WITHOUT eps, x == xm gives 1/0 = Inf. WITH eps > 0
+        // the bug softening fixes: at eps = 0, x == xm gives 1/0 = Inf. with eps > 0
         // the field is finite everywhere (= 0 exactly at the mass, where dx = 0).
         let src = PointMassGravity::<f64, 2> {
             gm: 1.0,
@@ -457,7 +461,7 @@ mod tests {
 
     #[test]
     fn body_source_f64_matches_immersed_spec() {
-        // at S=f64 BodySource IS the analytic reference (the same spec the
+        // at S=f64 BodySource is the analytic reference (the same spec the
         // gv_immersed kernel + immersed_iso test validate): softened gravity +
         // Bondi accretion + sink-velocity momentum loss. Cartesian 3D (z=0 plane).
         let b = BodySource::<f64> {
@@ -508,7 +512,7 @@ mod tests {
             (b.density(rho, cs, &x, min_w, inv_dt) - (-den_dot)).abs() < 1e-12,
             "S_den"
         );
-        // an inactive body (mass=0, sink=0) contributes exactly nothing.
+        // an inactive body (mass=0, sink=0) contributes exactly zero on every channel.
         let off = BodySource::<f64> {
             mass: 0.0,
             sink: 0.0,
@@ -520,7 +524,8 @@ mod tests {
 
     #[test]
     fn relax_clamps_negative_rate_and_only_damps() {
-        // kappa < 0 (anti-damping) clamps to a no-op; kappa > 0 removes kinetic energy.
+        // kappa < 0 (anti-damping) clamps to a no-op; kappa > 0 removes kinetic
+        // energy.
         let rho = 1.0_f64;
         let vel = [3.0_f64, 0.0];
         let v_ref = [0.0_f64, 0.0];

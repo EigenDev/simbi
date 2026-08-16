@@ -3,7 +3,7 @@
 //
 // run the BUILD-TIME-GENERATED godunov kernel (compiled into this crate from a
 // substrate RegimeSpec via emit_kernel_cpu) and diff against the hand-written
-// reference. since the SAME kernel matches hand-written via the #4
+// reference. since this kernel matches the hand-written reference via the #4
 // interpreter, this transitively proves the AOT-compiled Rust \equiv the interpreter
 // — and, more importantly, that the generated Rust COMPILES and RUNS.
 //
@@ -79,10 +79,10 @@ fn aot_mass_godunov_step_matches_hand_written() {
 
 #[test]
 fn aot_mass_godunov_runs_at_f32() {
-    // the SAME generic kernel `godunov_mass_1d<S: Scalar>` instantiated at f32 — S
+    // this generic kernel `godunov_mass_1d<S: Scalar>` instantiated at f32 — S
     // inferred from the &[f32] buffers + f32 scalars. proves the precision-generic
     // codegen: one kernel, run at f32, Scalar-for-f32 forwarding
-    // to f32::* correctly. no separate f32 kernel, no dispatch — just inference.
+    // to f32::* correctly, with type inference alone selecting the instantiation.
     let n = 8usize;
     let (dt, dx) = (0.01_f32, 0.5_f32);
     let rho: Vec<f32> = (0..n)

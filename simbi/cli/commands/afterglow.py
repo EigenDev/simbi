@@ -159,10 +159,11 @@ def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, d
 
 
 def _combine_catalogs(paths, args, rad_hydro, observer, manifest):
-    """load each input (checkpoint or catalog) and merge into ONE handle, so a movie can
-    span the epochs the user provides. each checkpoint carries its own scale_factor_a, so
-    the lab-frame radii are epoch-consistent; each emits over its trapezoidal share of the
-    snapshot-time axis (not the CFL dt)."""
+    """load each input (checkpoint or catalog) and merge into a single handle, so a movie
+    can span the epochs the user provides. each checkpoint carries its own scale_factor_a,
+    so the lab-frame radii are epoch-consistent; each emits over its trapezoidal share of
+    the snapshot-time axis, whose intervals are the checkpoint spacings (a distinct
+    quantity from the CFL dt)."""
     from ...afterglow.generate import _read_snapshot_time, _snapshot_emission_durations
 
     hydro = sorted((p for p in paths if not _is_event_catalog(p)), key=_read_snapshot_time)
@@ -236,8 +237,9 @@ def _calibrate_deposit(image, half_width_cm, observer, time_window_day):
 
 
 def _progress(iterable, total, label):
-    """lightweight carriage-return progress for long multi-snapshot loops (no extra deps).
-    writes count / % / rate / ETA to stderr so it overwrites in place and never pollutes stdout."""
+    """lightweight carriage-return progress for long multi-snapshot loops, built on the
+    standard library alone. writes count / % / rate / ETA to stderr so it overwrites in
+    place and leaves stdout clean for the run's own output."""
     import sys
     import time
 
@@ -271,7 +273,7 @@ def _deposit_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, 
     n_pix = args.n_pix
     qscales = manifest.to_qscales()
 
-    # shared field of view [cm]: --fov, else auto-size with ONE cheap MC pass on the mid checkpoint.
+    # shared field of view [cm]: --fov, else auto-size with a single cheap MC pass on the mid checkpoint.
     if args.fov is not None:
         half_width_cm = observer.mas_to_length(args.fov)
     else:
@@ -320,11 +322,12 @@ def _deposit_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, 
 
 
 def _draw_skymap_on_ax(ax, image, half_mas, log_decades=None, contours=False, diagnostics=False, vmax=None):
-    """draw ONE skymap onto a given axes in the paper style: jet axis HORIZONTAL (x), thin
-    grey axis lines through the origin, and (optionally) the yellow flux-centroid marker +
-    FWHM error bars. returns the imshow handle. the image is transposed so the projected
-    symmetry axis (sky-plane e2) runs horizontally, then flipped left<->right so the
-    APPROACHING (doppler-beamed, +z) hemisphere sits on the LEFT, matching nedora+2023."""
+    """draw a single skymap onto a given axes in the paper style: jet axis horizontal (x),
+    thin gray axis lines through the origin, and (optionally) the yellow flux-centroid
+    marker + FWHM error bars. returns the imshow handle. the image is transposed so the
+    projected symmetry axis (sky-plane e2) runs horizontally, then flipped left<->right so
+    the approaching (doppler-beamed, +z) hemisphere sits on the left, matching
+    nedora+2023."""
     img = np.asarray(image).T[:, ::-1]  # jet -> horizontal, approaching side on the left
     extent = [-half_mas, half_mas, -half_mas, half_mas]
 
@@ -367,7 +370,7 @@ def _plot_skymap(
     log_decades=None, contours=False, diagnostics=False, colorbar=True,
 ):
     """single skymap with mas axes (x = jet axis). morphology mode (log_decades) drops the
-    colorbar by default — for morphology the shape is what matters, not the scale."""
+    colorbar by default: morphology is read off the image shape alone."""
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots()

@@ -5,23 +5,23 @@
 // (which emits a CUDA `__global__`). this is the build-time AOT path for the CPU
 // backend: a scalarized stencil kernel -> a compilable Rust
 // `pub fn` that iterates the dispatch window over `&[f64]` / `&mut [f64]`
-// buffers, with the SAME flat-index ABI as the CUDA emitter (coord is absolute;
+// buffers, with the same flat-index ABI as the CUDA emitter (coord is absolute;
 // access is `buf[(coord - buf_lo) . strides]`).
 //
 // it reuses the proven `emit_cpu` ScalarExpr/ScalarStmt renderer for the f64
 // body and writes, and the same buffer-binding + FieldLoadAt-resolution
-// structure as the CUDA emitter — only the syntax (Rust slices, a cell loop)
-// differs. precision is f64: the substrate is double-precision.
+// structure as the CUDA emitter; the syntax (Rust slices, a cell loop) is the
+// whole of the difference. precision is f64: the substrate is double-precision.
 //
-// INDICES ARE INTEGERS. coord index params are `I32` in the IR, so coord and
+// indices are integers. coord index params are `I32` in the IR, so coord and
 // index arithmetic is pure `i32` — coord vars, strides, and buffer-lo offsets are
 // all `i32`; integer stencil shifts render as integer literals (`+ 1`); a
 // CSE'd shared shift is an `i32` body let, so a multi-law kernel's
-// indices stay integer. the ONLY conversion is the `as usize` at the slice-index
+// indices stay integer. the sole conversion is the `as usize` at the slice-index
 // site, which Rust's `Index<usize>` requires. (32-bit indices match the existing
 // CUDA `(int)` flat-index ABI.) data-dependent gather indexing (a float field
-// value used as an index) is NOT supported here and panics loudly; a silent
-// path would route integers through float.
+// value used as an index) panics loudly here, so integer arithmetic stays in
+// integer space.
 //
 // signature shape (1D; 2D/3D add stride extents and nested loops):
 //   pub fn <name>(
@@ -37,21 +37,21 @@
 //       }
 //   }
 //
-// aliasing: a buffer read AND written (in-place conserved update) is one
-// `&mut [f64]` param; reads go through it into f64 locals BEFORE the store, so
-// there is no held borrow.
+// aliasing: a buffer both read and written (in-place conserved update) is one
+// `&mut [f64]` param; reads go through it into f64 locals ahead of the store, so
+// every borrow is released by the time the write happens.
 // =============================================================================
 
 /// the default CPU cache-tile edge. the emitter parallelizes over `N^ndim` cache
 /// blocks with serial nested loops inside each block, keeping a block's stencil
 /// neighborhood + multi-field working set resident. measured ~1.4-2.1x full-step
-/// over the flat emit, GROWING with grid size, and grid-size-independent
+/// over the flat emit, growing with grid size, and grid-size-independent
 /// throughput. 8 and 16 both measured ~optimal; 8 is the
 /// conservative default (fits closer to L1/L2).
 const CPU_TILE: usize = 8;
 
-/// cache-tile edge length for the CPU emit. DEFAULT = `CPU_TILE` (tiled).
-/// `SYMBI_TILE_CPU=0` forces the FLAT parallel-over-all-cells emit (debug / A/B);
+/// cache-tile edge length for the CPU emit. default = `CPU_TILE` (tiled).
+/// `SYMBI_TILE_CPU=0` forces the flat parallel-over-all-cells emit (debug / A/B);
 /// `SYMBI_TILE_CPU=N` overrides the tile edge. read at emit time and tracked by
 /// `symbi-aot/build.rs` (`rerun-if-env-changed`), so toggling regenerates kernels.
 fn cpu_tile_size() -> usize {
@@ -73,14 +73,14 @@ fn cpu_tile_size() -> usize {
     }
 }
 
-/// SYMBI_UNCHECKED_LOADS=1: emit field loads/stores through `get_unchecked` instead
-/// of bounds-checked `data[idx]`. the per-cell index is computed from the cell coord
-/// + strides + stencil offset, always within the buffer's allocated domain (the
-/// kernel's correctness contract, validated by the carrier oracle), so the bounds
-/// check is dead weight — and an opaque-index check defeats vectorization. read at
-/// emit time (build.rs tracks the env); default OFF (safe checked indexing).
-/// dropping the checks is worth ~8x on the scalar loop. UNSAFE if an index is
-/// ever wrong.
+/// SYMBI_UNCHECKED_LOADS=1: emit field loads/stores through `get_unchecked`; the
+/// default spelling is the bounds-checked `data[idx]`. the per-cell index is computed
+/// from the cell coord + strides + stencil offset, always within the buffer's allocated
+/// domain (the kernel's correctness contract, validated by the carrier oracle), so the
+/// bounds check is dead weight — and an opaque-index check defeats vectorization. read at
+/// emit time (build.rs tracks the env); default off (safe checked indexing).
+/// dropping the checks is worth ~8x on the scalar loop, and puts the whole memory-safety
+/// burden on the index contract.
 fn unchecked_loads() -> bool {
     // vec mode needs the bounds-check branches gone to vectorize, so it implies unchecked.
     std::env::var("SYMBI_UNCHECKED_LOADS")
@@ -89,8 +89,8 @@ fn unchecked_loads() -> bool {
         || vec_loop()
 }
 
-/// SYMBI_VEC_LOOP=1 (ndim>=2): emit the ROW-PARALLEL loop — parallelize over the
-/// outer (non-contiguous) axes, with a COUNTABLE inner loop walking the contiguous
+/// SYMBI_VEC_LOOP=1 (ndim>=2): emit the row-parallel loop — parallelize over the
+/// outer (non-contiguous) axes, with a countable inner loop walking the contiguous
 /// last axis. combined with the unit-stride index (emit::emit_*_index) this is the
 /// shape LLVM loop-vectorizes (the simd-spike form). 1D / coalesce-incompatible
 /// kernels fall back to flat/tiled. read at emit time; build.rs tracks the env.
@@ -121,11 +121,11 @@ use crate::{ElementTy, Graph};
 /// slices with pure-integer indices (one `as usize` at the slice boundary). the
 /// float scalar is the type parameter `S` (`Sim<f64>`/`Sim<f32>`
 /// pick it by the buffer type they pass); constants render `S::lit(..)`, math
-/// resolves to the `Scalar` trait. one kernel, every precision — no monomorphized
-/// duplication, no dispatch.
+/// resolves to the `Scalar` trait. one kernel serves every precision, with the
+/// scalar type resolved statically at the call site.
 ///
 /// rayon-parallel outer cell loop. the renderer tracks which buffer
-/// indices are MUTABLE (outputs / in-place fields) as they're emitted via
+/// indices are mutable (outputs / in-place fields) as they're emitted via
 /// `buffer_param`. `cell_prelude` then emits a `rayon::IntoParallelIterator`
 /// fan-out over the outermost grid axis, with each mutable buffer's pointer
 /// wrapped in an unsafe-Send newtype so workers can re-borrow disjoint cell
@@ -138,15 +138,14 @@ pub struct RustRenderer {
     /// during `buffer_param` calls; consumed by `cell_prelude` to emit the
     /// raw-ptr Send wrappers + closure-internal re-borrows.
     mut_buf_indices: std::cell::RefCell<Vec<u32>>,
-    /// SERIAL variant: emit a plain nested `for` loop over the exec window with
-    /// NO `into_par_iter` / closure / mut-ptr rebind — the kernel runs entirely
-    /// on the caller's thread. the EXECUTOR owns the parallelism: it fans a
-    /// disjoint cover (a BlockGrid / guillotine cover) out over rayon and calls
-    /// this serial kernel per block, so the cover dispatches in ONE fork-join
-    /// across all blocks. soundness rests on the cover being a PARTITION
-    /// (disjoint output writes) — the proven law.
+    /// serial variant: emit a plain nested `for` loop over the exec window; the
+    /// kernel runs entirely on the caller's thread. the executor owns the
+    /// parallelism: it fans a disjoint cover (a BlockGrid / guillotine cover) out
+    /// over rayon and calls this serial kernel per block, so the cover dispatches
+    /// in one fork-join across all blocks. soundness rests on the cover being a
+    /// partition (disjoint output writes) — the proven law.
     serial: bool,
-    /// whether the mask-form rewrite was applied to THIS kernel (set via
+    /// whether the mask-form rewrite was applied to this kernel (set via
     /// `note_mask_form`). in a mask-formed body every bool local holds a
     /// `cmp_*` result, so its type is `<S as Scalar>::Mask`;
     /// fallback (control-flow) kernels keep native bools.
@@ -179,13 +178,13 @@ impl KernelRenderer for RustRenderer {
     fn preamble(&self, _device_preamble: &[String]) -> String {
         // the ScalarExpr renderer parenthesizes every BinOp; allow the redundant
         // outer pair; minimal-paren code would be precedence-fragile.
-        // (device_preamble is a GPU device-function concept — unused on CPU.)
+        // (device_preamble is a GPU device-function concept; the CPU path ignores it.)
         "#[allow(unused_parens)]\n".to_string()
     }
     fn buffer_param(&self, idx: u32, is_output: bool) -> String {
-        // per-buffer arg is ONE view-struct reference. all of `lo`,
-        // `extent`, and pre-multiplied `strides` ride along inside the struct;
-        // there are no scattered `buf_lo_X_a` / `buf_extent_X_a` scalar args
+        // per-buffer arg is one view-struct reference. `lo`, `extent`, and the
+        // pre-multiplied `strides` all ride inside the struct, so a buffer's whole
+        // layout travels as a single argument
         // (see `skip_scattered_buffer_layout_args` below).
         if is_output {
             self.mut_buf_indices.borrow_mut().push(idx);
@@ -204,19 +203,18 @@ impl KernelRenderer for RustRenderer {
         format!("    {name}: {}", rust_type_name(element, true))
     }
     fn open_signature(&self, name: &str) -> String {
-        // (no ledger reset here — `buffer_param` is called by the driver
-        // BEFORE this point, so a clear here would wipe the already-collected ledger.
-        // each emission constructs a fresh `RustRenderer::new()` so the state
-        // is naturally per-emission.)
+        // the mut-buffer ledger carries through untouched: the driver calls
+        // `buffer_param` ahead of this point, and each emission constructs a fresh
+        // `RustRenderer::new()`, so the state is per-emission by construction.
         // `+ Send + Sync` so rayon par_iter can capture &[S] inputs +
         // S scalar params, and so the unsafe raw-ptr Send wrapper for mut
         // buffers compiles (the bound on T inside `unsafe impl Send`).
         // `__raw` is the positional ABI core — codegen-internal. its arity changes
-        // whenever a builder adds/removes an input, so HAND-WRITTEN positional callers
-        // drift silently. host + test code must call the name-keyed `NamedKernel`
-        // (symbi-aot) instead, which binds by manifest field name. `#[doc(hidden)]`
-        // keeps the slice-form wrapper + the registry working while removing `__raw`
-        // as a discoverable/recommended API.
+        // whenever a builder adds or removes an input, so hand-written positional
+        // callers drift silently. host + test code calls the name-keyed `NamedKernel`
+        // (symbi-aot), which binds by manifest field name. `#[doc(hidden)]`
+        // keeps the slice-form wrapper + the registry working while holding `__raw`
+        // out of the discoverable API surface.
         // `unused_unsafe`: with SYMBI_UNCHECKED_LOADS the per-access `unsafe`
         // blocks nest (a stencil load inlined into a store's unsafe rhs) — the
         // inner ones are redundant but correct; this is machine-generated code.
@@ -228,25 +226,25 @@ impl KernelRenderer for RustRenderer {
         ",\n) {\n" // Rust allows the trailing comma
     }
     fn cell_prelude(&self, ndim: usize, _n_buffers: u32) -> Vec<String> {
-        // the kernel signature takes the view structs DIRECTLY:
-        // `field0: &CpuField<S>, ..., field_n: &mut CpuFieldMut<S>`. no per-cell
-        // reconstruction needed — input fields capture by ref into the closure,
+        // the kernel signature takes the view structs directly:
+        // `field0: &CpuField<S>, ..., field_n: &mut CpuFieldMut<S>`. the structs
+        // arrive whole, so input fields capture by ref into the closure and
         // outputs use the standard mut-ptr-rebind dance.
         //
         // body emission (cell-base, flat index, base reads, stores) all spell
-        // `field{N}.lo[..]`/`.strides[..]`/`.data` directly — SINGLE source of
+        // `field{N}.lo[..]`/`.strides[..]`/`.data` directly — a single source of
         // truth (`CpuField` / `CpuFieldMut` in `symbi-aot`).
         let mut v = Vec::new();
 
-        // SERIAL variant: plain nested `for` over the exec window, on the caller's
-        // thread. no `into_par_iter`, no closure, no mut-ptr rebind — `field{N}`
-        // (incl. the `&mut CpuFieldMut` outputs) is used directly. the cover
-        // executor parallelizes over many such blocks, paying ONE fork-join total.
+        // serial variant: plain nested `for` over the exec window, on the caller's
+        // thread. `field{N}` (incl. the `&mut CpuFieldMut` outputs) is used directly.
+        // the cover executor parallelizes over many such blocks, paying one
+        // fork-join total.
         if self.serial {
-            // the nest order is DERIVED from the layout, never assumed: `nest_order` puts
+            // the nest order is derived from the layout: `nest_order` puts
             // `CONTIGUOUS_AXIS` innermost, so the cell index advances by one element per iteration of
-            // the hot loop. nesting the contiguous axis outermost still produces a correct kernel —
-            // it just strides the hot loop by `extent[0]*extent[1]`, which no correctness test sees.
+            // the hot loop. nesting the contiguous axis outermost is equally correct and strides the
+            // hot loop by `extent[0]*extent[1]`, a difference correctness tests are blind to.
             for aa in symbi_algebra::nest_order(ndim) {
                 v.push(format!("    for _i{aa} in 0..(grid_size_{aa} as i32) {{"));
                 v.push(format!(
@@ -260,7 +258,7 @@ impl KernelRenderer for RustRenderer {
         let mut_buf = self.mut_buf_indices.borrow();
 
         // for mut buffers: hoist `lo` + `strides` arrays (Copy `[i32; 4]`) so
-        // the par_iter closure captures them BY VALUE; capture data ptr in
+        // the par_iter closure captures them by value; capture data ptr in
         // `__MutBufPtr`. inside the closure the CpuFieldMut is rebuilt.
         for &bi in mut_buf.iter() {
             v.push(format!("    let __field{bi}_lo: [i32; 4] = field{bi}.lo;"));
@@ -287,9 +285,8 @@ impl KernelRenderer for RustRenderer {
         // the tiled loop emits a non-indexed `into_par_iter().for_each()` over the
         // tile count — IntoParallelIterator + ParallelIterator suffice, and pulling
         // in IndexedParallelIterator there would be a dead import (208 warnings
-        // across the registry). the FLAT loop, however, calls `.with_min_len(16)`,
-        // which lives on IndexedParallelIterator — so that trait MUST be in scope
-        // there or the kernel fails to compile.
+        // across the registry). the flat loop calls `.with_min_len(16)`, which lives
+        // on IndexedParallelIterator, so that branch imports the trait as well.
         if cpu_tile_size() == 0 {
             v.push("    use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};".to_string());
         } else {
@@ -297,7 +294,8 @@ impl KernelRenderer for RustRenderer {
         }
 
         // helper: rebind each mut buffer's raw ptr to a fresh CpuFieldMut inside
-        // the closure (shadows the borrowed param; never held across threads).
+        // the closure (shadows the borrowed param; the reborrow lives entirely
+        // inside one worker's closure body).
         let push_rebind = |v: &mut Vec<String>| {
             for &bi in mut_buf.iter() {
                 v.push(format!(
@@ -310,15 +308,15 @@ impl KernelRenderer for RustRenderer {
         };
 
         if vec_loop() && ndim >= 2 {
-            // VECTORIZABLE ROW MODE (SYMBI_VEC_LOOP): parallelize over the NON-contiguous axes; a
-            // single COUNTABLE inner loop walks `CONTIGUOUS_AXIS`. paired with the unit-stride index
+            // vectorizable row mode (SYMBI_VEC_LOOP): parallelize over the transverse axes; a
+            // single countable inner loop walks `CONTIGUOUS_AXIS`. paired with the unit-stride index
             // (`emit::emit_cell_index_base`) the inner trip advances the cell offset by exactly one
             // element, which is the shape LLVM's loop-vectorizer turns into whole-vector loads.
             //
-            // the inner axis is DERIVED from the layout. it is axis 0 under `strides_from_extent`,
+            // the inner axis is derived from the layout. it is axis 0 under `strides_from_extent`,
             // the contiguous axis under this column-major layout (C row-major would put it last):
             // pointing this loop at the last axis leaves the kernel correct and
-            // strided, so the debug_assert below is the only thing that would ever say so.
+            // strided, and the debug_assert below is what reports it.
             let inner = symbi_algebra::CONTIGUOUS_AXIS;
             // outer axes, ascending, so the one adjacent to `inner` in memory varies fastest —
             // the same nesting `nest_order` gives, minus the innermost.
@@ -363,7 +361,7 @@ impl KernelRenderer for RustRenderer {
                 COORD_VARS[inner]
             ));
         } else if cpu_tile_size() == 0 {
-            // FLAT (default): parallelize over the flattened interior (every
+            // flat (default): parallelize over the flattened interior (every
             // cell) — exposes all cells so the grid
             // scales like the 1D path (mirrors the GPU global thread index).
             let total_expr = (0..ndim)
@@ -376,7 +374,7 @@ impl KernelRenderer for RustRenderer {
             );
             push_rebind(&mut v);
             // the emitted flat -> coord map mirrors `symbi_algebra::unflatten`: CONTIGUOUS_AXIS peels
-            // FIRST because it varies fastest, and the outermost axis takes the remainder. peeling
+            // first because it varies fastest, and the outermost axis takes the remainder. peeling
             // the outermost axis first walks the flat index along the slowest memory axis — correct,
             // cell-disjoint, and strided by extent[0]*extent[1] on every cell.
             let peel: Vec<usize> = symbi_algebra::nest_order(ndim).rev().collect();
@@ -402,17 +400,17 @@ impl KernelRenderer for RustRenderer {
                 ));
             }
         } else {
-            // TILED (SYMBI_TILE_CPU=N): parallelize over cache blocks; serial
+            // tiled (SYMBI_TILE_CPU=N): parallelize over cache blocks; serial
             // nested loops over each block's cells keep its stencil
             // neighborhood in cache. recovers the per-cell cache-miss penalty
             // once the grid working set exceeds cache. per-tile
             // rebind (amortized over the block's cells).
             //
-            // the CONTIGUOUS axis is NOT tiled (ndim >= 2): the vectorized
+            // the contiguous axis runs its full extent (ndim >= 2): the vectorized
             // (mask-form/SLP) bodies need long unit-stride inner trips —
             // edge-length trips invert their win (the
             // same law as the cover executor's row-elongated blocks). 1d tiles
-            // its only axis: an untiled 1d loop would serialize the kernel.
+            // its only axis, which is what exposes the parallelism there.
             let tile = cpu_tile_size();
             let contig = symbi_algebra::CONTIGUOUS_AXIS;
             let tiled_axes: Vec<usize> =
@@ -454,8 +452,8 @@ impl KernelRenderer for RustRenderer {
             // nested cell loops within the tile; declare each axis's coord right
             // after its index. `break` on the boundary handles partial tiles
             // (`_c{aa}` is monotonic in `_d{aa}`). close() emits ndim matching `}`.
-            // the nest order is DERIVED from the layout (see the serial branch); each `break` still
-            // exits its own axis's loop, so partial tiles are unaffected by the nesting order.
+            // the nest order is derived from the layout, as in the serial branch; each `break`
+            // exits its own axis's loop, so partial tiles stay correct under any nesting order.
             // the untiled contiguous axis is a plain full-extent loop.
             for aa in symbi_algebra::nest_order(ndim) {
                 if !tiled_axes.contains(&aa) {
@@ -495,8 +493,8 @@ impl KernelRenderer for RustRenderer {
     fn index_lang(&self) -> crate::emit::IndexLang {
         crate::emit::IndexLang::Rust
     }
-    // branch-free cmp/select spelling (passes::mask_form). DEFAULT ON, made
-    // safe by the pass's arm-cost gate: `select` computes BOTH arms of every
+    // branch-free cmp/select spelling (passes::mask_form). default on, made
+    // safe by the pass's arm-cost gate: `select` computes both arms of every
     // conditional, so a kernel whose select arms divide or call out (the hllc
     // star-state fan: measured 31 -> 79 ns/zone mask-formed) keeps the bool/if
     // spelling, while cheap-arm bodies (the clamped-hlle flux: 18.5 -> 13.3
@@ -587,8 +585,8 @@ impl KernelRenderer for RustRenderer {
             // for_each closure and the fn body.
             "    }\n    });\n}\n".to_string()
         } else if cpu_tile_size() == 0 {
-            // flat: the loop has NO inner serial fors — just close the for_each
-            // closure and the fn body.
+            // flat: the parallel for_each is the whole nest, so closing it and
+            // the fn body suffices.
             "    });\n}\n".to_string()
         } else {
             // tiled: close the `ndim` nested cell-fors, then the for_each closure
@@ -604,19 +602,20 @@ impl KernelRenderer for RustRenderer {
 }
 
 /// emit a scalarized stencil kernel as a compilable Rust `pub fn` — the shared
-/// driver with the `RustRenderer` spelling, plus a DESCRIPTOR-ABI wrapper. the
+/// driver with the `RustRenderer` spelling, plus a descriptor-ABI wrapper. the
 /// driver emits the flat `{name}__raw(buf0.., grid.., dom.., buf_extent.., buf_lo..,
 /// scalars..)` body; `descriptor_wrapper` then emits the public
 /// `{name}(inputs: &[CpuField], outputs: &mut [CpuFieldMut], grid, dom_lo, scalars)`
-/// that expands the per-buffer/per-axis args from the shared-domain descriptors —
-/// so callers never hand-marshal the ~3*nbuf*ndim integer args (which is unusable
-/// at 3D). the `CpuField`/`CpuFieldMut` carry each buffer's `{data, lo, extent}`.
+/// that expands the per-buffer/per-axis args from the shared-domain descriptors,
+/// so a caller passes descriptors and the wrapper marshals the ~3*nbuf*ndim integer
+/// args (a fanout that is unusable by hand at 3D). the `CpuField`/`CpuFieldMut`
+/// carry each buffer's `{data, lo, extent}`.
 pub fn emit_kernel_cpu(graph: &Graph, inputs: &KernelEmitInputs) -> KernelDescriptor {
     emit_kernel_cpu_with(graph, inputs, &RustRenderer::new())
 }
 
-/// SERIAL variant of `emit_kernel_cpu`: the `__raw` body is a plain nested loop on
-/// the caller's thread (no `into_par_iter`). build.rs generates a `{name}_serial`
+/// serial variant of `emit_kernel_cpu`: the `__raw` body is a plain nested loop on
+/// the caller's thread. build.rs generates a `{name}_serial`
 /// alongside the parallel kernel (gated by `SYMBI_GEN_SERIAL`); the cover executor
 /// fans a disjoint block cover out over rayon and calls this once per block — one
 /// fork-join total. soundness = the cover is a partition (disjoint writes).
@@ -633,7 +632,7 @@ fn emit_kernel_cpu_with(
 
     // loop unswitching (passes::unswitch): a select gated on a param-only
     // condition (the limiter pick `theta < 0`) takes the same arm in every
-    // cell. render TWO specialized loop nests plus a dispatcher that branches
+    // cell. render two specialized loop nests plus a dispatcher that branches
     // once per kernel call — each specialization is rendered independently, so
     // mask_form's arm-cost gate applies per branch (the division-heavy
     // van-Leer body keeps bool/if; the cheap-arm minmod body vectorizes).
@@ -691,12 +690,12 @@ fn emit_kernel_cpu_with(
     desc
 }
 
-/// generate the unswitch dispatcher `pub fn {name}__raw(...)`: the SAME positional
+/// generate the unswitch dispatcher `pub fn {name}__raw(...)`: the same positional
 /// signature as a rendered `__raw` kernel (buffers in binding order, grid, dom_lo,
 /// scalars in declared order — mirroring `render_source`), forwarding every arg to
 /// the `__uswt`/`__uswf` specialization picked by the param-only condition. one
-/// branch per kernel call; the loop nests inside the specializations carry no
-/// trace of the invariant select.
+/// branch per kernel call; the loop nests inside the specializations hold the
+/// resolved arm inline.
 fn unswitch_dispatcher(
     prepared: &crate::backends::render::Prepared,
     cand: &crate::passes::unswitch::Candidate,
@@ -753,7 +752,7 @@ fn unswitch_dispatcher(
 /// buf_lo[bb][aa] / scalars. buffers split into inputs (is_output=false -> &[f64])
 /// and outputs (is_output=true -> &mut [f64], incl. in-place fields). outputs are
 /// `split_first_mut`'d into disjoint &mut, with extent/lo hoisted to locals before
-/// the call so the &mut data reborrow doesn't alias the field reads.
+/// the call so the &mut data reborrow stays disjoint from the field reads.
 fn descriptor_wrapper(
     name: &str,
     bindings: &[crate::emit::FieldBinding],
@@ -761,9 +760,9 @@ fn descriptor_wrapper(
     scalars: &[String],
     scalar_is_int: &[bool],
 ) -> String {
-    // `__raw` takes the view-struct refs DIRECTLY. the wrapper just
-    // splits outputs into disjoint `&mut` and passes refs through — no more
-    // per-axis `lo` / `extent` unpacking, no more 7-args-per-buffer fanout.
+    // `__raw` takes the view-struct refs directly, so the wrapper's whole job is
+    // splitting outputs into disjoint `&mut` and passing the refs through; each
+    // buffer's per-axis `lo` / `extent` travels inside its struct.
     let mut binds: Vec<&crate::emit::FieldBinding> = bindings.iter().collect();
     binds.sort_by_key(|b| b.buffer_index);
     let mut buf_kind: Vec<(bool, usize)> = Vec::with_capacity(binds.len());
@@ -783,8 +782,8 @@ fn descriptor_wrapper(
          pub fn {name}<S: Scalar + OrderedNumeric + Send + Sync>(inputs: &[CpuField<S>], outputs: &mut [CpuFieldMut<S>], \
          grid: &[u32], dom_lo: &[i32], ints: &[i32], scalars: &[S]) {{\n"
     ));
-    // split outputs into disjoint `&mut CpuFieldMut<S>` refs. `__o{k}` is the
-    // SAME shape `__raw` wants — no unpacking.
+    // split outputs into disjoint `&mut CpuFieldMut<S>` refs. `__o{k}` is already
+    // the shape `__raw` takes.
     if n_out > 0 {
         s.push_str("    let mut __rest = &mut *outputs;\n");
         for k in 0..n_out {
@@ -838,7 +837,7 @@ fn rust_flat_index(ndim: u8, buf: u32, comps: &[String]) -> String {
 // render a coord index expression in INTEGER space: coord vars (`_coord_N` ->
 // `ii`/`jj`/`kk`), integer-valued constants as integer literals, and `+`/`-`/`*`.
 // anything else (a float field value used as a gather index, division, a method
-// call) panics — the CPU emitter does not silently route integers through float.
+// call) panics loudly, keeping index arithmetic in integer space.
 fn render_index_expr(e: &ScalarExpr, coord_vars: &[&str]) -> String {
     use ScalarExpr::*;
     match e {
@@ -871,8 +870,8 @@ fn render_index_expr(e: &ScalarExpr, coord_vars: &[&str]) -> String {
         Const(ConstValue::I32(v)) => format!("{}", *v as i64),
         Const(ConstValue::U32(v)) => format!("{}", *v as i64),
         // integer arithmetic, and integer comparisons (the condition of a
-        // data-INDEPENDENT index branch — e.g., a lattice-map `map_type == 1`).
-        // Div is excluded: division in an index is float.
+        // data-independent index branch — e.g., a lattice-map `map_type == 1`).
+        // division in an index is float, so `Div` falls through to the panic arm.
         BinOp(kind, a, b) if !matches!(kind, BinaryKind::Div) => {
             format!(
                 "({} {} {})",
@@ -901,7 +900,7 @@ fn render_index_expr(e: &ScalarExpr, coord_vars: &[&str]) -> String {
 }
 
 // does the scalarized kernel (body + outputs) reference a local named `name`?
-// used to skip a dead base cell read (see the base-load loop). runs AFTER the
+// used to skip a dead base cell read (see the base-load loop). runs after the
 // FieldLoadAt rewrite, so a field's computed-coord reads are `buf<N>[..]` Vars;
 // the base read is kept only when the key is genuinely used.
 #[cfg(test)]
@@ -967,7 +966,7 @@ mod tests {
         // integer params, integer coord, integer index with one slice-boundary as usize.
         assert!(desc.source.contains("grid_size_0: i32"));
         assert!(desc.source.contains("dom_lo_0: i32"));
-        // the DEFAULT CPU emit is cache-TILED: parallelize over N^ndim tile
+        // the default CPU emit is cache-tiled: parallelize over N^ndim tile
         // blocks, serial nested loops over each block's cells. 1D: one block
         // dimension, `_i0` from the tile coord + intra-tile offset.
         assert!(desc.source.contains("(0.._ntiles).into_par_iter()"));
@@ -983,7 +982,7 @@ mod tests {
             desc.source
                 .contains("field1.data[(__idx_cell_buf1 + ((ii) - ii)) as usize] = cons_den;")
         );
-        // no float-routed indices.
+        // indices stay in integer space.
         assert!(
             !desc.source.contains("as f64 + dom_lo"),
             "index must not route through f64"
@@ -1038,11 +1037,12 @@ mod tests {
 
     #[test]
     fn cpu_kernels_are_generic_over_the_scalar() {
-        // the CPU kernel is ONE generic `fn k<S: Scalar>` compiled once over the
+        // the CPU kernel is one generic `fn k<S: Scalar>` compiled once over the
         // scalar type. Sim<f64>/Sim<f32> pick the precision by the
-        // buffer type they pass (S inferred); no dispatch. every float spelling is S:
-        // buffers &[S], reads `let x: S`, the f64-built ConstValue(2.0) -> S::lit(2.0),
-        // the descriptor CpuField<S> + scalars: &[S]. zero f64 leaks; indices stay i32.
+        // buffer type they pass (S inferred), resolved statically. every float
+        // spelling is S: buffers &[S], reads `let x: S`, the f64-built
+        // ConstValue(2.0) -> S::lit(2.0), the descriptor CpuField<S> + scalars: &[S].
+        // every float type in the emitted source is S; indices stay i32.
         let mut g = Graph::new();
         let cons_den = scalar_param(&mut g, "cons_den");
         let cons_nrg = scalar_param(&mut g, "cons_nrg");
@@ -1091,9 +1091,9 @@ mod tests {
         );
         assert!(desc.source.contains("pub fn compute_pre_1d<S: Scalar + OrderedNumeric + Send + Sync>(inputs: &[CpuField<S>]"), "src:\n{}", desc.source);
         assert!(desc.source.contains("outputs: &mut [CpuFieldMut<S>]"));
-        // float spelling is fully S; integer index arithmetic stays i32 (never S). no
-        // concrete float TYPE leaks — `: f64` annotations / `[f64]` slices. (the bare
-        // `f64` inside `Scalar::from_f64` is the constructor name.)
+        // float spelling is fully S; integer index arithmetic stays i32. every float
+        // type in the source is S — `: f64` annotations and `[f64]` slices are absent.
+        // (the bare `f64` inside `Scalar::from_f64` is the constructor name.)
         assert!(
             !desc.source.contains(": f64"),
             "no f64 type annotation:\n{}",
@@ -1187,7 +1187,7 @@ mod tests {
     fn render_index_handles_select_and_comparison() {
         // the lattice-map pullback source coord:
         //   if (map_type == 1) { ii + shift } else { pivot2 - ii }
-        // must render as a pure-integer if/else index — no float, no cast.
+        // renders as a pure-integer if/else index, free of floats and casts.
         use ScalarExpr::*;
         let e = Select {
             cond: Box::new(BinOp(
@@ -1216,9 +1216,9 @@ mod tests {
     #[test]
     fn param_invariant_select_unswitches_into_two_specializations() {
         // four float selects gated on `theta < 0` (a param-only condition):
-        // the emitter must render a true and a false specialization plus a
-        // dispatcher branching once per call. the specialized bodies carry no
-        // select on the invariant condition.
+        // the emitter renders a true and a false specialization plus a
+        // dispatcher branching once per call. each specialized body holds the
+        // resolved arm inline.
         let mut g = Graph::new();
         let x = scalar_param(&mut g, "x");
         let theta = scalar_param(&mut g, "theta");
@@ -1280,7 +1280,8 @@ mod tests {
 
     #[test]
     fn cell_varying_select_does_not_unswitch() {
-        // the condition reads the field: it varies per cell, no specialization.
+        // the condition reads the field: it varies per cell, so the single loop
+        // nest keeps the select.
         let mut g = Graph::new();
         let x = scalar_param(&mut g, "x");
         let zero = g.add_const(ConstValue::F64(0.0), None);
@@ -1335,7 +1336,7 @@ mod tests {
         // axis 0 is CONTIGUOUS_AXIS: its stride is 1 by construction, so the emitter drops the
         // multiply. axis 1 keeps its stride factor.
         assert!(desc.source.contains("field0.strides[1]"));
-        // 2D default emit is cache-TILED on the TRANSVERSE axis only: axis 1
+        // 2D default emit is cache-tiled on the transverse axis only: axis 1
         // gets a `for _d1` tile loop; the contiguous axis 0 runs the full
         // extent (vectorized bodies need long unit-stride inner trips).
         assert!(desc.source.contains("(0.._ntiles).into_par_iter()"));

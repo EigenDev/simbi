@@ -77,7 +77,7 @@ def _max_adjacent_jump(cmap, n: int = 256) -> float:
 
 def test_join_cmaps_blends_without_a_discontinuity() -> None:
     # a raw concatenation of grayscale (ends white) and inferno (starts black) has a cliff;
-    # join_cmaps crossfades the seam so neighboring entries never jump.
+    # join_cmaps crossfades the seam so neighboring entries step smoothly across it.
     hard = stack_cmaps([("Greys_r", 0.0, 0.5), ("inferno", 0.5, 1.0)], "test_hard", blend=0.0)
     soft = join_cmaps("Greys_r", "inferno", "test_join", at=0.5, blend=0.2)
     assert _max_adjacent_jump(hard) > 1.0  # the white->black cliff

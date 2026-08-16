@@ -2,8 +2,8 @@
 // mhd_2p5d_sink_dof.rs
 //
 // the DOF-aware immersed-body drain under 2.5D MHD (D=2 grid, DOF=3 momentum). the penalize kernel
-// drains ALL momentum components -- including the OUT-OF-PLANE one (mom[2], the v_z the 2.5D plane
-// carries). without this the out-of-plane momentum survives
+// drains every momentum component, the out-of-plane one included (mom[2], the v_z the 2.5D plane
+// carries). draining the in-plane pair alone would leave the out-of-plane momentum standing
 // while the density is evacuated, so its velocity v_z = mom[2]/den runs away at the sink. the sink is
 // selected via the `_dof3` kernel (the dispatch appends `_dof{DOF}` when DOF != D).
 // =============================================================================
@@ -75,7 +75,7 @@ fn make() -> Sim {
 }
 
 // (inside-mask, far-field) sums of the out-of-plane momentum |mom[2]| over the interior. "far" is
-// several cells beyond the mask so the mollified tanh tail (width ~one cell) does not bleed into it.
+// several cells beyond the mask, clear of the mollified tanh tail (width ~one cell).
 fn out_of_plane_momentum(s: &Sim) -> (f64, f64) {
     let dx = s.geom.dx[0];
     let momz = &s.fields.cons.mom[2];

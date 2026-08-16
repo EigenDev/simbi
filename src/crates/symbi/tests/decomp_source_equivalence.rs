@@ -10,10 +10,10 @@
 // targets. the position leaf uses the cell's global x. this is the decisive cross-tile test: a tile
 // that evaluated the source at its tile-local
 // coordinate would diverge from the monolithic run at every cut. a
-// constant force could not catch that bug. the source also exercises the energy work overlay
+// only a position-dependent force exposes that bug. the source also exercises the energy work overlay
 // (S_nrg = mom . a) since Newtonian carries energy, so both overlays go through `source_apply`.
 //
-// the additive (NOT fused) path is what the decomposed loop drives: `evolve_decomposed` calls a
+// the additive path is what the decomposed loop drives, with fusion left off: `evolve_decomposed` calls a
 // plain `godunov_stage` and then `source_apply(ac*dt)` after `snapshot_stage` captured the stage
 // input -- the same two-pass protocol the single-grid `step()` runs (evolve.rs STAGE_PIPELINE),
 // proven equal to the fused stage by `jit_fused_equals_two_pass`. cpu-only + 2d: same exchange
@@ -43,7 +43,7 @@ type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
 // a position-dependent force `a_x = x_0` (VARIABLE_X1, the cell's GLOBAL x), `a_y = 0`. the energy
-// regime lowers this into BOTH a momentum overlay (S_mom = rho*a) and an nrg work overlay; both
+// regime lowers this into a momentum overlay (S_mom = rho*a) together with an nrg work overlay; both
 // flow through the additive `source_apply` pass in `evolve_decomposed`.
 const SOURCE_JSON_1: &str = r#"{
     "kind": "force", "dim": 2, "outputs": [2, 3], "params": [0.25],
@@ -142,7 +142,7 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
         .map(|json| SourceConfig::from_json(json).expect("parse source config"));
     let (built, params) =
         build_user_sources(&configs, &NEWTONIAN_SPEC).expect("lower source collection");
-    // two-pass (NOT fused): the decomposed loop drives plain godunov + the additive source_apply.
+    // two-pass, with fusion off: the decomposed loop drives plain godunov + the additive source_apply.
     // `with_runtime_source` sets has_additive_source -> evolve_decomposed runs snapshot_stage +
     // source_apply; the non-vacuous momentum check in `assert_source_matches` confirms it fires.
     let k = sim.substrate().with_runtime_source(built, params);
@@ -286,9 +286,9 @@ fn source_euler_two_tile_y_cut() {
     assert_source_matches([1, 2], Timestepping::Euler);
 }
 
-// rk2 is the real test of the additive pass: snapshot_stage must capture the stage input for BOTH
-// stages, and source_apply uses the per-stage weight ac*dt -- a wrong weight or a stale snapshot
-// diverges here even when euler passes.
+// rk2 is the real test of the additive pass: snapshot_stage captures the stage input for each of
+// the two stages, and source_apply uses the per-stage weight ac*dt -- a wrong weight or a stale
+// snapshot diverges here even when euler passes.
 #[test]
 fn source_rk2_two_tile_x_cut() {
     assert_source_matches([2, 1], Timestepping::Rk2);
@@ -299,7 +299,7 @@ fn source_rk2_two_tile_y_cut() {
     assert_source_matches([1, 2], Timestepping::Rk2);
 }
 
-// the 2x2 corner under rk2 -- both cuts AND the corrector source pass.
+// the 2x2 corner under rk2 -- both cuts together with the corrector source pass.
 #[test]
 fn source_rk2_quad_tile_2d_grid() {
     assert_source_matches([2, 2], Timestepping::Rk2);

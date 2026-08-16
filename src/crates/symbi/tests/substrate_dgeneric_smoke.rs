@@ -5,11 +5,10 @@
 // executes at D > 1 through the real `evolve()` loop — the multi-dimensional
 // case. one struct, instantiated at D=2 and D=3.
 //
-// the 2D test is also a CORRECTNESS proof: a centered, x<->y-symmetric pressure pulse
-// evolved by an isotropic scheme (the SAME per-dir face-flux kernel for dir 0 and 1)
-// must stay symmetric to ~machine precision. if the dir-1 flux / godunov divergence
-// were miswired, the symmetry breaks immediately. so symmetry == both sweep axes are
-// wired correctly.
+// the 2D test is also a correctness proof: a centered, x<->y-symmetric pressure pulse
+// evolved by an isotropic scheme (one per-dir face-flux kernel serving dir 0 and 1)
+// stays symmetric to ~machine precision. a miswired dir-1 flux / godunov divergence
+// breaks the symmetry immediately, so symmetry certifies both sweep axes.
 // =============================================================================
 
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
@@ -29,8 +28,8 @@ use symbi_xpu::{CpuSpace, HostMemory};
 const GAMMA: f64 = 1.4;
 
 // the max asymmetry of the 3D primitive state under the x<->y and x<->z axis swaps.
-// an isotropic scheme (the SAME per-dir flux/godunov for dir 0, 1, 2) on a swap-
-// symmetric IC must hold both symmetries to ~machine precision: x<->y proves dir-0 ==
+// an isotropic scheme (one per-dir flux/godunov serving dir 0, 1, 2) on a swap-
+// symmetric IC holds both symmetries to ~machine precision: x<->y proves dir-0 ==
 // dir-1, x<->z proves dir-0 == dir-2, so all three sweep axes are wired identically.
 // scalars (rho, pre) are invariant; velocity components permute with the axes.
 fn max_3d_asymmetry(

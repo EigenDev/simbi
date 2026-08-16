@@ -3,28 +3,28 @@
 //
 // the trace-carrier oracle for the state-constraint projection.
 //
-// WHAT THIS DOES NOT TEST, and why that matters for reading it: the projection is NOT reimplemented
-// in the kernel. `constraint_projection_gv` calls the same `symbi_hydro::constraints` functions the
+// the shape of the gate, and why that matters for reading it: the kernel reuses the projection
+// itself. `constraint_projection_gv` calls the same `symbi_hydro::constraints` functions the
 // host unit gates exercise, instantiated at `S = Gv` — one implementation, two carriers, exactly as
-// `admissible_theta` is already shared. so "does the traced algebra agree with the host algebra" is
-// true by construction and is not a claim worth a test.
+// `admissible_theta` is already shared. agreement between the traced algebra and the host algebra
+// therefore holds by construction, which puts it outside what a test can add.
 //
-// WHAT THIS TESTS is the WIRING around the algebra, which is genuinely a second implementation and
+// what this tests is the wiring around the algebra, which is genuinely a second implementation and
 // is reachable only through a trace-and-execute round trip:
-//   - the anchor and the candidate are not swapped (an inverted segment still produces a plausible
-//     theta in [0, 1], so a magnitude-only check on a symmetric case would pass);
+//   - the anchor and the candidate enter in the declared order (an inverted segment still produces
+//     a plausible theta in [0, 1], so a magnitude-only check on a symmetric case would pass);
 //   - each field reaches the slot its residual expects;
 //   - the stored covariant energy is mapped to the eulerian energy the admissible set is defined on
-//     (`E = (ehat + D + beta^i S_i) / alpha`), not passed through raw;
-//   - the ATTRIBUTION survives: `binding` names the member that actually bound. two different
+//     (`E = (ehat + D + beta^i S_i) / alpha`) before it is used;
+//   - the attribution survives: `binding` names the member that actually bound. two different
 //     members can produce the same joint theta, so a scalar comparison alone can pass while the
 //     ledger silently charges the wrong constraint.
 //
-// SCOPE: the members are exercised on a flat background, which is where the wiring is isolated from
+// scope: the members are exercised on a flat background, which is where the wiring is isolated from
 // metric evaluation (itself covered by the carrier oracles for the metric kernels). every member of
 // the family applies on a magnetized energy regime, so the structurally-inapplicable `None` path is
-// not reachable through THIS kernel and is gated host-side instead; an isothermal or unmagnetized
-// projection kernel would need its own case here.
+// gated host-side, beyond the reach of this kernel; an isothermal or unmagnetized projection kernel
+// would need its own case here.
 //
 // usage:
 //   cargo test -p symbi-discretize --test constraint_projection_oracle
@@ -79,9 +79,9 @@ fn cases() -> Vec<Case> {
             x_nrg: 2.0,
             b: [0.1, 0.0, 0.0],
         },
-        // the TEMPERATURE floor binds, and on a flat background with zero momentum the crossing is
-        // analytic, so this case checks the traced kernel against the closed form rather than
-        // merely against the host — a bug shared by both would survive a host-vs-trace comparison.
+        // the temperature floor binds, and on a flat background with zero momentum the crossing is
+        // analytic, so this case checks the traced kernel against that closed form — an oracle
+        // independent of the host, where a shared bug would survive a host-vs-trace comparison.
         Case {
             what: "temperature floor binds",
             a_den: 1.0,
@@ -92,7 +92,7 @@ fn cases() -> Vec<Case> {
             x_nrg: -0.5,
             b: [0.0; 3],
         },
-        // the DENSITY floor binds: a different member, so the attribution must move with it.
+        // the density floor binds: a different member, so the attribution must move with it.
         Case {
             what: "density floor binds",
             a_den: 1.0,
@@ -103,7 +103,7 @@ fn cases() -> Vec<Case> {
             x_nrg: 3.0,
             b: [0.0; 3],
         },
-        // the MAGNETIZATION ceiling binds: density falls at fixed field, so sigma rises.
+        // the magnetization ceiling binds: density falls at fixed field, so sigma rises.
         Case {
             what: "magnetization ceiling binds",
             a_den: 1.0,
@@ -114,9 +114,9 @@ fn cases() -> Vec<Case> {
             x_nrg: 4.0,
             b: [1.0, 0.0, 0.0],
         },
-        // ADMISSIBILITY binds — the one member whose crossing is BISECTED rather than closed-form,
-        // so it is the path with the most room for the trace to diverge. the candidate drives the
-        // momentum past what the energy can carry, which no affine member notices.
+        // admissibility binds — the one member whose crossing is found by bisection, which gives
+        // the trace the most room to diverge. the candidate drives the momentum past what the
+        // energy can carry, a violation visible to this member alone.
         Case {
             what: "admissibility binds",
             a_den: 1.0,
@@ -130,7 +130,7 @@ fn cases() -> Vec<Case> {
     ]
 }
 
-/// the HOST evaluation of the same family, on the same flat background the kernel traces.
+/// the host evaluation of the same family, on the same flat background the kernel traces.
 fn host(case: &Case) -> (f64, f64) {
     let (gm, gi) = (Matrix::<f64, 3>::identity(), Matrix::<f64, 3>::identity());
     let a_mom = Tensor::new(case.a_mom);
@@ -234,7 +234,7 @@ fn the_traced_projection_matches_the_host_family_in_magnitude_and_attribution() 
     let cases = cases();
     let (theta, binding, _, _) = run_kernel(&cases);
 
-    // TOLERANCE, calibrated rather than guessed: the affine members cross in closed form (exact),
+    // tolerance, calibrated from the numerics: the affine members cross in closed form (exact),
     // and the bisected member converges to 2^-20 of the trial interval. anything tighter than that
     // would false-positive on the bisection's own stopping point; anything looser would admit a
     // genuinely wrong crossing.
@@ -248,7 +248,7 @@ fn the_traced_projection_matches_the_host_family_in_magnitude_and_attribution() 
             case.what,
             theta[ii]
         );
-        // ATTRIBUTION: two members can bind at the same theta, so the ledger's key is a separate
+        // attribution: two members can bind at the same theta, so the ledger's key is a separate
         // claim from the magnitude and is checked separately.
         assert_eq!(
             binding[ii], want_binding,
@@ -260,9 +260,10 @@ fn the_traced_projection_matches_the_host_family_in_magnitude_and_attribution() 
 
 #[test]
 fn each_case_binds_the_member_it_was_built_to_bind() {
-    // PREMISE: without this, the traced-vs-host comparison could pass with every case slack — two
-    // implementations that both correctly do nothing. it also pins the family's DECLARATION ORDER,
-    // so a reordering in the kernel that silently remapped the ledger's keys fails here.
+    // premise: each case actually binds the member it was built for, so the traced-vs-host
+    // comparison rests on projections that fire. a sweep left entirely slack would let two
+    // implementations agree by doing nothing. it also pins the family's declaration order, so a
+    // reordering in the kernel that silently remapped the ledger's keys fails here.
     let cases = cases();
     let (theta, binding, _, _) = run_kernel(&cases);
     let expect = [
@@ -292,8 +293,8 @@ fn each_case_binds_the_member_it_was_built_to_bind() {
 
 #[test]
 fn the_temperature_crossing_matches_the_analytic_value() {
-    // checking the trace against the HOST would pass on a bug the two share. this case has a
-    // closed-form answer independent of both: with zero momentum and no field on a flat
+    // this case has a closed-form answer independent of both carriers, so it catches a bug the
+    // trace and the host would share: with zero momentum and no field on a flat
     // background, the residual is (ehat + D) - D - f_min D = ehat - f_min D, so with D fixed at 1
     // the crossing sits where ehat = f_min.
     let cases = cases();
@@ -306,7 +307,7 @@ fn the_temperature_crossing_matches_the_analytic_value() {
         "traced theta {} vs analytic {want}",
         theta[1]
     );
-    // and the PROJECTED state sits on the boundary: ehat = f_min * D exactly.
+    // and the projected state sits on the boundary: ehat = f_min * D exactly.
     assert!(
         (x_nrg[1] - F_MIN * c.a_den).abs() < 1e-12,
         "projected ehat {} is not on the floor {}",
@@ -318,8 +319,8 @@ fn the_temperature_crossing_matches_the_analytic_value() {
 #[test]
 fn swapping_the_anchor_and_candidate_is_detectable() {
     // the orientation bug this design is most exposed to: an inverted segment still yields a theta
-    // in [0, 1], so nothing about the magnitude alone reveals it. running the family with the roles
-    // reversed must NOT reproduce the forward answer.
+    // in [0, 1], so the magnitude alone leaves it hidden. running the family with the roles
+    // reversed yields a different answer, which is what makes the orientation observable.
     let forward = cases()[1];
     let reversed = Case {
         what: "reversed",

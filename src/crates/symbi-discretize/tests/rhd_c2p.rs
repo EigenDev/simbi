@@ -1,10 +1,10 @@
 // =============================================================================
 // rhd_c2p.rs
 //
-// the RHD iterative cons->prim scheme LOWERS + EMITS valid CPU code. this is a
-// BUILD + EMIT test only — it does NOT run the kernel, because the masked newton
+// the RHD iterative cons->prim scheme lowers + emits valid CPU code. this is a
+// build + emit test: it stops short of running the kernel, because the masked newton
 // unroll is exponential in the #4 interpreter (see feedback). the numerical
-// validation (vs rhd_to_primitive) runs through the COMPILED path in the AOT
+// validation (vs rhd_to_primitive) runs through the compiled path in the AOT
 // crate, where the unroll CSE-collapses to linear.
 //
 // what this checks: the scheme builds without graph errors; the emitted Rust has
@@ -60,10 +60,10 @@ fn rhd_c2p_1d_lowers_and_emits() {
         "gamma must be a scalar param (precision-generic S):\n{src}"
     );
 
-    // the newton emits as ONE loop (body emitted once, no 8x unroll) —
-    // identified by its literal `0..8` bound. the cache-tiled default CPU
-    // emit ALSO emits per-axis cell loops (`for _d in 0.._ts`) for the outer
-    // iteration, so count the newton specifically by its `0..8` bound.
+    // the newton emits as a single loop with the body emitted once, identified by its
+    // literal `0..8` bound. the cache-tiled default CPU emit also emits per-axis cell
+    // loops (`for _d in 0.._ts`) for the outer iteration, so count the newton
+    // specifically by its `0..8` bound.
     let n_newton = src.matches(" in 0..8").count();
     assert_eq!(
         n_newton, 1,
@@ -83,7 +83,7 @@ fn rhd_c2p_1d_lowers_and_emits() {
 
 #[test]
 fn rhd_c2p_is_dimension_generic() {
-    // the SAME gv builder yields D velocity components — 1D: 1, 2D: 2, 3D: 3.
+    // the same gv builder yields D velocity components — 1D: 1, 2D: 2, 3D: 3.
     let n_vel = |writes: &[(String, symbi_ir::FieldBind, NodeId)]| {
         writes
             .iter()
@@ -149,10 +149,10 @@ fn rhd_face_flux_1d_lowers_and_emits() {
         src.contains("] = ") && src.contains("buf"),
         "missing reads/writes:\n{src}"
     );
-    // no float-routed BUFFER index. the only sanctioned `as f64` is the index-to-physical
+    // buffer indices stay integer. the one sanctioned `as f64` is the index-to-physical
     // coordinate bridge `S::from_f64((_coord_n) as f64)` (the moving-mesh geometry term reads the
-    // cell's physical position x = x_lo + coord*dx). EVERY `as f64` in the emitted source must be
-    // exactly that bridge cast — i.e., immediately preceded by a `(_coord_n)` token.
+    // cell's physical position x = x_lo + coord*dx), so each `as f64` in the emitted source is
+    // exactly that bridge cast — immediately preceded by a `(_coord_n)` token.
     for (off, _) in src.match_indices("as f64") {
         // the token immediately before the cast must be a `(_coord_<n>)` group.
         let before = src[..off].trim_end();

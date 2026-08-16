@@ -73,8 +73,8 @@ def sector_transform(index: int, wedge: float) -> tuple[float, float]:
 def place_in_sector(field: FieldData, index: int, count: int) -> FieldData:
     """the field with its angular vertices carried into sector `index` of `count`.
 
-    the radial vertices and the values are untouched: this moves where the
-    wedge is drawn, not what it holds."""
+    the radial vertices and the values pass through untouched: this moves where
+    the wedge is drawn, and its contents ride along as they are."""
     wedge = wedge_angle(field)
 
     if count * wedge > 2.0 * np.pi + 1.0e-9:

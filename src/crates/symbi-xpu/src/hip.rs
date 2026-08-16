@@ -6,9 +6,10 @@
 //
 // the sibling of cuda.rs. the key difference: HIP has no context
 // api -- a device is bound per-thread with `hipSetDevice(ord)` and the primary
-// context is implicit. so there is NO context registry here; `with_device` is just
-// save / set / restore, and the per-device dispatcher registry keys on the ordinal
-// exactly as the cuda path does. peer copy takes device ORDINALS.
+// context is implicit, so a per-thread device slot stands in for cuda's context
+// registry; `with_device` here is just save / set / restore, and the per-device
+// dispatcher registry keys on the ordinal exactly as the cuda path does. peer copy
+// takes device ordinals.
 //
 // link: -lamdhip64 (set in build.rs under the hip feature).
 // =============================================================================
@@ -39,7 +40,8 @@ const HIP_SUCCESS: hipError_t = 0;
 const HIP_ERROR_NOT_READY: hipError_t = 600;
 // re-enabling already-enabled peer access counts as success. value mirrors
 // the cuda numbering; verify against hip_runtime_api.h on the cluster if peer-enable misreports
-// (it is best-effort -- hipMemcpyPeer works without it, so a wrong code never breaks correctness).
+// (it is best-effort -- hipMemcpyPeer works regardless, so a wrong code here still leaves
+// correctness intact).
 const HIP_ERROR_PEER_ACCESS_ALREADY_ENABLED: hipError_t = 704;
 const HIP_MEM_ATTACH_GLOBAL: c_uint = 1;
 const HIP_EVENT_DISABLE_TIMING: c_uint = 2;
@@ -89,7 +91,7 @@ unsafe extern "C" {
     fn hipDeviceGetName(name: *mut c_char, len: c_int, dev: hipDevice_t) -> hipError_t;
     fn hipDeviceTotalMem(bytes: *mut usize, dev: hipDevice_t) -> hipError_t;
     // peer access + cross-device copy. hipMemcpyPeer takes device
-    // ORDINALS, simpler than the cuda context-based form.
+    // ordinals, simpler than the cuda context-based form.
     fn hipMemcpyPeer(
         dst: *mut c_void,
         dst_device: c_int,
@@ -120,7 +122,7 @@ static HIP_INIT: OnceLock<()> = OnceLock::new();
 static DEVICE_COUNT: OnceLock<i32> = OnceLock::new();
 
 thread_local! {
-    // the device bound on THIS thread. hip's current device is per-thread, so this is too.
+    // the device bound on the current thread. hip's current device is per-thread, so this is too.
     static CURRENT_DEVICE: Cell<i32> = const { Cell::new(0) };
 }
 
@@ -149,8 +151,8 @@ fn cached_device_count() -> i32 {
 /// logical ordinals round-robin onto the physical devices: identity when there are at least as
 /// many gpus as logical ids (the production case), wrapping otherwise. unlike cuda, folding two
 /// logical ids onto one card shares the primary context (no per-context module table), so the
-/// local "n logical devices on one card" trick does not exercise context binding on hip -- but
-/// hip is cluster-validated anyway, where the mapping is identity.
+/// local "n logical devices on one card" trick leaves hip's context binding untested locally --
+/// but hip is cluster-validated anyway, where the mapping is identity.
 fn physical(ord: i32) -> i32 {
     let count = cached_device_count();
     if count > 0 { ord % count } else { 0 }
@@ -176,7 +178,7 @@ fn ensure_init_device(ord: i32) -> error::Result<()> {
     unsafe { check(hipSetDevice(physical(ord)), "hipSetDevice") }
 }
 
-/// ensure hip is initialized and THIS thread's current device is bound.
+/// ensure hip is initialized and the current thread's device is bound.
 fn ensure_init() -> error::Result<()> {
     ensure_init_device(current_device())
 }
@@ -194,8 +196,8 @@ pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
     r
 }
 
-/// block until all outstanding work on the current device finishes. panics on driver error --
-/// the caller is in dispatch code that cannot recover.
+/// block until all outstanding work on the current device finishes. panics on driver error,
+/// the only recovery available to dispatch code at this point.
 pub fn ctx_sync() {
     let res = unsafe { hipDeviceSynchronize() };
     if res != HIP_SUCCESS {
@@ -222,7 +224,7 @@ pub fn can_access_peer(ord: i32, peer: i32) -> error::Result<bool> {
 }
 
 /// enable direct peer access from device `ord` to memory on device `peer`. directional;
-/// idempotent ("already enabled" is success). hip enables from the CURRENT device, so bind
+/// idempotent ("already enabled" is success). hip enables from the current device, so bind
 /// `ord` first.
 pub fn enable_peer_access(ord: i32, peer: i32) -> error::Result<()> {
     with_device(ord, || {
@@ -303,7 +305,8 @@ pub fn device_info() -> error::Result<DeviceInfo> {
     Ok(DeviceInfo {
         name,
         total_memory_bytes: total_bytes as u64,
-        // amd arch is not a (major, minor) pair; report (0, 0) and rely on SYMBI_HIP_ARCH.
+        // amd arch is `gcnArchName`, a string, so the numeric field reports (0, 0); rely on
+        // SYMBI_HIP_ARCH.
         compute_capability: (0, 0),
         device_count: count,
     })
@@ -441,7 +444,8 @@ impl ExecutionSpace for HipSpace {
     fn load_module(bytes: &[u8]) -> error::Result<HipModule> {
         ensure_init()?;
         let mut handle: hipModule_t = std::ptr::null_mut();
-        // the hiprtc output is a raw binary code object; load the bytes as-is, without nul-termination.
+        // the hiprtc output is a raw binary code object; load the bytes as-is -- no nul
+        // terminator required.
         unsafe {
             check(
                 hipModuleLoadData(&mut handle, bytes.as_ptr() as *const c_void),
@@ -497,8 +501,8 @@ impl ExecutionSpace for HipSpace {
 // =============================================================================
 
 /// HIP managed (unified) memory. accessible from both host and device. the amd analog of
-/// `UnifiedMemory`; the same managed-thrash caveat applies -- a device-local
-/// space is not yet implemented.
+/// `UnifiedMemory`; the same managed-thrash caveat applies -- a device-local space is
+/// future work.
 pub struct HipManaged;
 
 impl MemorySpace for HipManaged {

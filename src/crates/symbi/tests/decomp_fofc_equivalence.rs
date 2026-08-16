@@ -137,8 +137,8 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2]) -> u64 {
         1,
         &LocalCopy,
         |_, _, stores| {
-            // dt-collapse guard: below the floor this run can never finish —
-            // fail fast and name it instead of spinning forever.
+            // dt-collapse guard: below the floor the run would spin to the time
+            // limit, so it fails fast here with the collapsed dt named.
             let dt = stores[0].dt;
             assert!(
                 dt > DT_FLOOR,

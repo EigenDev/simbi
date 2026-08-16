@@ -3,12 +3,12 @@
 //
 // signed-distance geometry as carrier-generic CSG:
 // negative inside the body, positive outside. every operation is min/max/
-// affine arithmetic plus one sqrt, so the SAME expression evaluates at f64
+// affine arithmetic plus one sqrt, so one expression evaluates at f64
 // (host reference + tests), at Gv (the traced penalization kernel), and at
 // Dual<S> — which is how normals are computed: the exact gradient of the
 // exact expression, one seeded evaluation per axis, no finite-difference
 // step size. after CSG the gradient magnitude drifts from 1 (min/max kinks,
-// nested offsets), so `normal` renormalizes; the DIRECTION survives.
+// nested offsets), so `normal` renormalizes; the direction survives intact.
 //
 // the f64 bounding ball encloses every point with dist <= 0 — the geometric
 // input to a kernel's declared support (the consumer pads it by the chi
@@ -122,7 +122,7 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
 
     /// the signed distance at `x`: negative inside, positive outside, zero on
     /// the surface. exact for the primitives; a CSG min/max is exact outside
-    /// the blend locus and conservative (never overstates the distance) at it.
+    /// the blend locus and conservative (bounded above by the true distance) at it.
     pub fn dist(&self, x: [S; D]) -> S {
         match self {
             SdfExpr::Sphere { center, radius } => {
@@ -273,7 +273,7 @@ impl SdfExpr<f64, 3> {
     ///   {"kind":"union"|"intersect","a":<shape>,"b":<shape>}
     ///   {"kind":"complement","inner":<shape>}
     ///   {"kind":"translated","inner":<shape>,"offset":[x,y,z]}
-    /// coordinates are the body-LOCAL frame; the penalization kernel translates the whole
+    /// coordinates are the body-local frame; the penalization kernel translates the whole
     /// tree to the runtime body position. an unknown kind or a malformed field fails loud.
     pub fn from_json(s: &str) -> Result<Self, String> {
         let v: serde_json::Value =
@@ -426,7 +426,7 @@ impl SdfExpr<f64, 3> {
 impl<const D: usize> SdfExpr<f64, D> {
     /// the enclosing ball of the body: every point with `dist(x) <= 0` lies
     /// within `radius` of `center`. `None` when the body is unbounded (any
-    /// complement). the ball is the GEOMETRIC bound — a kernel's declared
+    /// complement). the ball is the geometric bound — a kernel's declared
     /// support pads it by the chi saturation width.
     pub fn bounding_ball(&self) -> Option<([f64; D], f64)> {
         match self {
@@ -450,7 +450,7 @@ impl<const D: usize> SdfExpr<f64, D> {
                 (Some(ba), Some(bb)) => Some(enclosing_ball(ba, bb)),
                 _ => None,
             },
-            // the intersection lies inside EITHER operand, so either ball is
+            // the intersection lies inside each operand, so either ball is
             // sound; take the smaller, and tolerate one unbounded side (an
             // annulus: sphere minus its core).
             SdfExpr::Intersect(a, b) => match (a.bounding_ball(), b.bounding_ball()) {
@@ -568,7 +568,7 @@ mod tests {
         assert!(approx(n[0], 1.0, 1e-12));
         assert!(approx(n[1], 0.0, 1e-12));
         assert!(approx(n[2], 0.0, 1e-12));
-        // an INSIDE point near the +x face still points outward along +x.
+        // an interior point near the +x face still points outward along +x.
         let n = c.normal([0.9, 0.1, 0.0]);
         assert!(approx(n[0], 1.0, 1e-12));
     }
@@ -683,8 +683,8 @@ mod tests {
 
     #[test]
     fn the_sdf_traces_at_gv() {
-        // the trace-native claim: the SAME expression that
-        // ran at f64 above evaluates at the Gv carrier inside a trace — shape
+        // the trace-native claim: one expression evaluates both at f64 and at
+        // the Gv carrier inside a trace — shape
         // parameters as scalar params, the distance as a graph node. the
         // penalization kernel builder consumes exactly this path.
         use symbi_algebra::algebra::Numeric as _;
@@ -730,7 +730,7 @@ mod tests {
 
     #[test]
     fn from_json_parses_csg_and_equals_native() {
-        // the EXACT wire python's Shape.sphere(...).union(Shape.box(...)) emits.
+        // the exact wire python's Shape.sphere(...).union(Shape.box(...)) emits.
         let wire = r#"{"kind":"union",
             "a":{"kind":"sphere","center":[0.0,0.0,0.0],"radius":1.0},
             "b":{"kind":"box","center":[2.0,0.0,0.0],"half_extents":[0.5,0.5,0.5]}}"#;

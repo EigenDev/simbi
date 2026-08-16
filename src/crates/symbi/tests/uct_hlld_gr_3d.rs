@@ -11,7 +11,7 @@
 //   (r > 2M everywhere) evolves under UCT-HLLD with div(B) preserved;
 // - spinning kerr: the same contract on the a != 0 chart (nonzero shift
 //   enters the transport velocity and the moving-interface fan speeds);
-// - the M -> 0 oracle: the kerr-schild metric at zero mass IS minkowski
+// - the M -> 0 oracle: the kerr-schild metric at zero mass reduces to minkowski
 //   (alpha = 1, beta = 0, gamma = delta, tetrad = identity), so the GR
 //   UCT-HLLD run must match the FLAT UCT-HLLD run (gated in uct_hlld_3d.rs)
 //   on identical initial data to roundoff.
@@ -46,7 +46,7 @@ const DIVB_TOL: f64 = 1e-12;
 // sqrt(gamma)|face * B: the GR curl updates bface by curl(Etilde)/sqrt(gamma),
 // so the raw-B divergence drifts with the metric gradient while the densitized
 // one telescopes exactly. sqrt(gamma) is evaluated at each face's own center
-// (face on its axis, cell-centered transversely) via the SAME carrier-generic
+// (face on its axis, cell-centered transversely) via the same carrier-generic
 // `Metric::sqrt_det_gamma` the kernel traces. flat: sqrt(gamma) = 1, the
 // ordinary staggered divergence.
 fn max_divb<M>(
@@ -216,8 +216,8 @@ fn spinning_kerr_3d_uct_hlld_preserves_divb() {
 // (zero on both sides at M = 0) while the other keeps the real magnetosonic bounds, and the two
 // disagree at O(1) rather than at roundoff.
 //
-// ONE step: t_final sits below both charts' CFL estimates, so the loop's dt = min(cfl, t_final - t)
-// clamp pins the SAME dt on both chains (the GR and flat wave-speed maps are different, both valid,
+// a single step: t_final sits below both charts' CFL estimates, so the loop's dt = min(cfl, t_final - t)
+// clamp pins one shared dt on both chains (the GR and flat wave-speed maps differ, both valid,
 // bounds — free stepping would diverge in step count while agreeing on physics).
 const T_ONE: f64 = 0.005;
 

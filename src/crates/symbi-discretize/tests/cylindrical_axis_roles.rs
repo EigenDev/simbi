@@ -1,14 +1,14 @@
 // =============================================================================
 // cylindrical_axis_roles.rs
 //
-// validates the AXIS-ROLE physics for the cylindrical (r, z)
+// validates the axis-role physics for the cylindrical (r, z)
 // axisymmetric swirl plane: grid axes [r, z] = coordinate map [0, 2], with phi
-// (coord 1) a SYMMETRY axis but a CARRIED swirl component (ncomp=3 > ndim=2). two
-// gv probes pin the (r, z) case the fixed-order convention could not express:
-//   - the geometric momentum SOURCE: pressure-curvature + centrifugal/coriolis,
+// (coord 1) a symmetry axis carrying a swirl component (ncomp=3 > ndim=2). two
+// gv probes pin the (r, z) case that lies outside the fixed-order convention:
+//   - the geometric momentum source: pressure-curvature + centrifugal/coriolis,
 //     with the angular-momentum swirl law S_phi = -mom_r*v_phi/r.
-//   - the cyl r-z FLUX: HLLE along the r-sweep — F_mom_phi is advective (no
-//     pressure, since phi is not the sweep coordinate).
+//   - the cyl r-z flux: HLLE along the r-sweep — F_mom_phi is purely advective,
+//     since the sweep coordinate is r and the pressure rides the sweep axis.
 // the underlying cell_geometry_gv r-weighting (sqrt(g)=r, phi's 2*pi folded into
 // volume + face areas) is exercised through both. interpreter run via KernelRun.
 // =============================================================================
@@ -92,10 +92,10 @@ fn cylindrical_rz_swirl_source_matches_analytic() {
 fn cylindrical_rz_swirl_flux_is_advective() {
     // ncomp>ndim hydro flux: cylindrical (r,z) [0,2], ncomp=3.
     // the gv cyl r-z flux (riemann::hlle at the newtonian regime, coord_n = axes[0] = r)
-    // builds a momentum flux for ALL THREE coordinates; for a uniform state HLLE returns the
+    // builds a momentum flux for all three coordinates; for a uniform state HLLE returns the
     // physical flux, so along the r-sweep (coord_n=r):
-    //   F_den = rho*v_r;  F_mom_r = rho*v_r^2 + p;  F_mom_phi = rho*v_phi*v_r (advection, NO
-    //   pressure — phi != sweep coord);  F_mom_z = rho*v_z*v_r.
+    //   F_den = rho*v_r;  F_mom_r = rho*v_r^2 + p;  F_mom_phi = rho*v_phi*v_r (pure advection,
+    //   since the sweep coord is r);  F_mom_z = rho*v_z*v_r.
     let (rho, vr, vphi, vz, p, gamma) = (1.3_f64, 0.2_f64, 0.4_f64, 0.1_f64, 0.7_f64, 1.4_f64);
     let (nr, nz) = (6usize, 3usize);
 

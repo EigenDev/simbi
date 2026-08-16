@@ -1,27 +1,27 @@
 // =============================================================================
 // scalar_ref.rs
 //
-// typed names for the kernel SCALAR parameters that cross the trace -> dispatch
+// typed names for the kernel scalar parameters that cross the trace -> dispatch
 // ABI — the scalar analog of `FieldRef`, mirroring `MeshScalar`'s minted-once
-// discipline over the WHOLE closed scalar vocabulary.
+// discipline across the closed scalar vocabulary.
 //
-// a kernel scalar is the link between the traced graph (which DECLARES it via
-// `Gv::scalar(name)`) and the host dispatch (which SUPPLIES its value by name).
+// a kernel scalar is the link between the traced graph (which declares it via
+// `Gv::scalar(name)`) and the host dispatch (which supplies its value by name).
 // that link is a bare string, minted independently on each side, so it drifts:
 // the same per-axis convention is spelled `inv_dx_0` / `x_lo_0` / `body_2_pos_0`
 // across the trace builders and the dispatch resolvers with nothing forcing the
 // two sides to agree.
 //
-// `ScalarRef` mints each CLOSED-vocabulary wire name in EXACTLY one place
+// `ScalarRef` mints each closed-vocabulary wire name in exactly one place
 // (`name()`), and `parse()` recovers the typed ref. a dispatch resolver parses
 // once at manifest load (off the per-dispatch hot path) and then matches
-// EXHAUSTIVELY — adding a scalar is a compile error until every match covers it.
+// exhaustively — adding a scalar is a compile error until every match covers it.
 //
-// the vocabulary is NOT total over every kernel scalar: spec-source kernels
-// declare arbitrary user-named knobs (`gm`, `g_ext_0`, `xm_1`, ...) that are not
-// a fixed vocabulary. `parse()` returns `None` for those — the caller then looks
-// them up in the spec's string-keyed scalar map. this is the SAME split FieldRef
-// leaves: a closed typed core + an open spec tail.
+// the vocabulary covers a fixed set of kernel scalars; spec-source kernels
+// declare arbitrary user-named knobs (`gm`, `g_ext_0`, `xm_1`, ...) outside that
+// set. `parse()` returns `None` for those — the caller then looks them up in the
+// spec's string-keyed scalar map. this is the same split FieldRef leaves: a
+// closed typed core + an open spec tail.
 //
 // usage:
 //  // producer (trace): Gv::scalar(&ScalarRef::XLo(d).name())
@@ -41,8 +41,9 @@ pub enum BodyScalar {
     Mass,
     Soft,
     /// which softened-gravity family `soft` parameterizes: `0` = Plummer (a real extended
-    /// profile, never exactly Newtonian at any radius), `1` = COMPACT (exactly Newtonian
-    /// outside `soft`, regular within). carried as a scalar so one baked kernel serves both.
+    /// profile that approaches the Newtonian potential only asymptotically), `1` = compact
+    /// (exactly Newtonian outside `soft`, regular within). carried as a scalar so one baked
+    /// kernel serves both.
     SoftKind,
     Racc,
     Sink,
@@ -97,13 +98,13 @@ impl BodyScalar {
     }
 }
 
-/// a typed kernel scalar-parameter name over the CLOSED dispatch vocabulary.
+/// a typed kernel scalar-parameter name over the closed dispatch vocabulary.
 /// every variant round-trips through `name()`/`parse()`; `parse()` returns `None`
-/// for an OPEN spec/user-source knob (the caller resolves those by string).
+/// for an open spec/user-source knob (the caller resolves those by string).
 ///
-/// `is_int` is NOT carried here — the int/float sort lives in the kernel manifest
-/// alongside the ref; the ghost-fill `MapType`/`Arg` variants are the int-lane
-/// members and the manifest tags them.
+/// the kernel manifest carries the int/float sort (`is_int`) alongside the ref;
+/// the ghost-fill `MapType`/`Arg` variants are the int-lane members and the
+/// manifest tags them.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ScalarRef {
     /// ideal-gas adiabatic index `gamma` (the energy-regime EOS param).
@@ -113,10 +114,10 @@ pub enum ScalarRef {
     /// theta-MC limiter free parameter `theta`.
     Theta,
     /// the Schwarzschild geometric mass `M` (the lapse `alpha = sqrt(1 - 2M/r)` parameter). a
-    /// SPACETIME dispatch scalar, resolved from the metric at the call site (like `gamma`).
+    /// spacetime dispatch scalar, resolved from the metric at the call site (like `gamma`).
     SchwarzschildMass,
     /// the Kerr specific angular momentum `a = J/M` (the spinning kerr-schild metric parameter,
-    /// Sigma = r^2 + a^2 cos^2(theta)). a SPACETIME dispatch scalar, resolved from the metric.
+    /// Sigma = r^2 + a^2 cos^2(theta)). a spacetime dispatch scalar, resolved from the metric.
     KerrSpin,
     /// the time step `dt` (the godunov/source stage weight feeds through this name).
     Dt,
@@ -132,7 +133,7 @@ pub enum ScalarRef {
     XLo(u8),
     /// the axis step / log-slope `dx_{ax}`.
     Dx(u8),
-    /// the per-axis SPACING KIND `map_kind_{ax}` — the runtime selector the in-kernel face-position
+    /// the per-axis spacing kind `map_kind_{ax}` — the runtime selector the in-kernel face-position
     /// map branches on: 0 = uniform (`face = x_lo + i*dx`), 1 = log (`face = x_lo * 10^(i*dx)`).
     /// makes spacing a per-axis runtime value (log-r, log-theta, ...),
     /// so one kernel per (regime, geometry) serves every spacing; a moving mesh updates the
@@ -147,16 +148,16 @@ pub enum ScalarRef {
     UserParam(u32),
     /// an immersed-body scalar `body_{idx}_{field}`.
     Body { idx: u8, field: BodyScalar },
-    /// the ghost-fill per-axis lattice-map kind `map_type_{ax}` (INT lane).
+    /// the ghost-fill per-axis lattice-map kind `map_type_{ax}` (int lane).
     MapType(u8),
-    /// the ghost-fill per-axis lattice-map argument `arg_{ax}` (INT lane).
+    /// the ghost-fill per-axis lattice-map argument `arg_{ax}` (int lane).
     Arg(u8),
     /// the ghost-fill per-axis velocity-flip sign `vel_sign_{ax}`.
     VelSign(u8),
 }
 
 impl ScalarRef {
-    /// the ONE place a closed-vocabulary scalar wire name is minted. holds
+    /// the sole place a closed-vocabulary scalar wire name is minted. holds
     /// `parse(x.name()) == Some(x)` for every variant.
     pub fn name(self) -> String {
         match self {
@@ -184,7 +185,7 @@ impl ScalarRef {
     }
 
     /// the inverse of `name`: recover the typed scalar from a wire name, or `None`
-    /// when the name is an OPEN spec/user-source knob (resolved by string at the
+    /// when the name is an open spec/user-source knob (resolved by string at the
     /// call site). holds `parse(x.name()) == Some(x)` for every variant.
     pub fn parse(name: &str) -> Option<Self> {
         // bare-name singletons.
@@ -243,8 +244,8 @@ impl ScalarRef {
             return BodyScalar::parse(field).map(|field| ScalarRef::Body { idx, field });
         }
 
-        // user-source knob `p{i}` (tried last — a bare `p` followed by digits, NOT
-        // a prefix, so it does not shadow `pre`/`pos` which never reach here).
+        // user-source knob `p{i}`, tried last: only an all-digit suffix after `p`
+        // binds here, so `pre`/`pos` (non-digit suffixes) parse to `None`.
         if let Some(i) = name.strip_prefix('p')
             && !i.is_empty()
             && i.bytes().all(|b| b.is_ascii_digit())
@@ -256,9 +257,9 @@ impl ScalarRef {
     }
 }
 
-/// a SERIALIZED kernel scalar binding: the typed core (`Ref`) over the closed
+/// a serialized kernel scalar binding: the typed core (`Ref`) over the closed
 /// dispatch vocabulary, plus an open tail (`Spec`) for the spec/user-source knobs
-/// (`gm`, `g_ext_0`, `xm_1`, ...) that are NOT a fixed vocabulary and resolve
+/// (`gm`, `g_ext_0`, `xm_1`, ...) that fall outside the fixed vocabulary and resolve
 /// against the spec's string-keyed scalar map at the call site. this is the scalar
 /// analog of `FieldBind` (typed core + open tail): the manifest is born typed for
 /// the closed dispatch scalars, and the spec knobs round-trip losslessly as the
@@ -344,7 +345,7 @@ mod tests {
 
     // the invariant the whole module exists for: name() and parse() are exact
     // inverses over every representable variant, so a producer and a consumer that
-    // both route through ScalarRef can never diverge on a name.
+    // both route through ScalarRef agree on a name.
     #[test]
     fn name_parse_round_trips() {
         for r in all_variants() {
@@ -373,8 +374,8 @@ mod tests {
         );
     }
 
-    // OPEN spec/user-source knobs are NOT in the closed vocabulary: parse must
-    // return None so the caller falls through to the spec string map. this is the
+    // spec/user-source knobs live outside the closed vocabulary: parse returns
+    // None so the caller falls through to the spec string map. this is the
     // documented boundary.
     #[test]
     fn rejects_open_spec_scalars() {
@@ -396,9 +397,9 @@ mod tests {
         }
     }
 
-    // per-cell interpreter vars (resolve_runtime_param) are a SEPARATE path; they
-    // must not be mistaken for closed kernel scalars (except `t` / `p{i}`, which
-    // ARE shared names — the call site decides which path).
+    // per-cell interpreter vars (resolve_runtime_param) resolve through a
+    // separate path from closed kernel scalars, except `t` / `p{i}`, which are
+    // shared names — the call site decides which path.
     #[test]
     fn rejects_per_cell_vars() {
         for n in ["rho", "pre", "vel_0", "x_2", "pos", "p"] {
@@ -424,7 +425,7 @@ mod tests {
             );
             assert_eq!(bind.name(), r.name(), "Ref round-trip failed for {r:?}");
         }
-        // open spec/user-source knobs are not in the closed vocabulary — they round-trip as Spec.
+        // spec/user-source knobs live outside the closed vocabulary — they round-trip as Spec.
         for spec in ["gm", "g_ext_0", "xm_1", "value", "scale", "alpha", "cs2"] {
             let bind = ScalarBind::from_name(spec);
             assert_eq!(

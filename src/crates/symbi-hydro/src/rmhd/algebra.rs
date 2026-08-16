@@ -37,8 +37,8 @@ pub fn total_pressure<S: Scalar, const D: usize>(
     prim.pre + magnetic_pressure(prim, metric)
 }
 
-/// the SPATIAL magnetic four-vector b^i = B^i / W + v^i W (v.B) — the spatial part of the
-/// covariant four-vector b^mu. the SINGLE source for both the RMHD flux's magnetic tension
+/// the spatial magnetic four-vector b^i = B^i / W + v^i W (v.B) — the spatial part of the
+/// covariant four-vector b^mu. the single source for both the RMHD flux's magnetic tension
 /// and the curvilinear geometric source's stress tension (T^{jk} = ... - b^j b^k).
 #[inline]
 pub fn magnetic_four_vector_spatial<S: Scalar, const D: usize>(
@@ -50,12 +50,12 @@ pub fn magnetic_four_vector_spatial<S: Scalar, const D: usize>(
     prim.mag.scale(S::ONE / ww) + prim.vel.scale(ww * vdb)
 }
 
-/// the RMHD curvilinear geometric-source quantities: the GAS momentum density `rho h W^2`,
+/// the RMHD curvilinear geometric-source quantities: the gas momentum density `rho h W^2`,
 /// the spatial magnetic four-vector `b^i`, and the total pressure `p_tot`. these are the
 /// regime-specific pieces of the relativistic-MHD stress `T^{jk} = (rho h W^2) v^j v^k +
 /// p_tot gamma^{jk} - b^j b^k` that the substrate contracts with the Christoffels
-/// (`S^i = -Gamma^i_{jk} T^{jk}`). RMHD needs its own quantities (unlike hydro/RHD, whose
-/// `cons.mom` IS rho h W^2 v) because the RMHD `cons.mom` also carries B-momentum. the
+/// (`S^i = -Gamma^i_{jk} T^{jk}`). RMHD carries its own quantities because the RMHD
+/// `cons.mom` also holds B-momentum, where the hydro/RHD `cons.mom` is rho h W^2 v. the
 /// carrier-generic single source for the substrate `rmhd_geometric_momentum_sources`.
 #[inline]
 pub fn rmhd_source_quantities<S: Scalar, const D: usize>(

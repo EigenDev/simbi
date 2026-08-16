@@ -10,7 +10,7 @@
 //   mass flux:  r^2 rho u = lambda_c(gamma)          (Mdot_B / 4 pi)
 //   eos:        c^2 = rho^(gamma-1)
 // eliminating rho = lambda/(r^2 u) leaves g(u; r) with
-// dg/du = (u^2 - c^2)/u — the stationary point IS the local sonic condition,
+// dg/du = (u^2 - c^2)/u — the stationary point is exactly the local sonic condition,
 // at u_min = (lambda/r^2)^((gamma-1)/(gamma+1)). the subsonic root lies below
 // u_min, the supersonic root above; bisection on each side is unconditionally
 // bracketed. the transonic solution takes the subsonic branch for r > r_s and
@@ -61,7 +61,7 @@ pub fn accretion_coefficient<S: Scalar + OrderedNumeric>(gamma: S) -> S {
 }
 
 /// the local transonic bondi state at radius `r` (bondi radii): density,
-/// INFLOW speed magnitude (the radial velocity is `-u * rhat`), and pressure.
+/// inflow speed magnitude (the radial velocity is `-u * rhat`), and pressure.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BondiState {
     pub rho: f64,
@@ -133,7 +133,7 @@ pub fn bondi_profile(r: f64, gamma: f64) -> BondiState {
     for _ in 0..200 {
         let mid = 0.5 * (lo + hi);
         let (gm, want_neg_side_low) = (g(mid), supersonic);
-        // on the supersonic branch g goes negative BELOW the root (toward
+        // on the supersonic branch g goes negative below the root (toward
         // u_min) and positive above; subsonic is the mirror image.
         if (gm < 0.0) == want_neg_side_low {
             lo = mid;

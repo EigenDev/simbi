@@ -510,7 +510,7 @@ fn run_prolong<const D: usize>(order: reference::ProlongOrder, alpha: f64) {
         .run();
 
     // the reference sweep: prolong_nd over the coarse active window, reading the
-    // SAME time-interpolated coarse state.
+    // same time-interpolated coarse state.
     let coarse_active =
         symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space {
             name: ["i", "j", "k"][ax],

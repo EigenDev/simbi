@@ -16,7 +16,7 @@
 //   let v = Contravariant::new(vec3(1.0, 0.0, 0.0));
 //   let w = Covariant::new(vec3(1.0, 2.0, 3.0));
 //   let s = v.contract(&w);  // v^i w_i = 1.0
-//   // v + w;  // compile error: can't add Con + Cov
+//   // v + w;  // compile error: Con + Cov is rejected by the type system
 // =============================================================================
 
 use std::fmt;
@@ -230,8 +230,8 @@ impl<S: Scalar, const D: usize> Covariant<S, D> {
 }
 
 impl<S: Scalar, const D: usize> Physical<S, D> {
-    /// Euclidean squared norm |V|^2 = sum_a V_a^2 — METRIC-FREE, because the orthonormal frame has
-    /// gamma = delta. (the coordinate-frame norm is NOT this: it needs the metric, g_ij v^i v^j =
+    /// Euclidean squared norm |V|^2 = sum_a V_a^2 — metric-free, because the orthonormal frame has
+    /// gamma = delta. (the coordinate-frame norm carries the metric instead: g_ij v^i v^j =
     /// v^i (lower v)_i = `Contravariant::contract(&metric.lower(v))`.)
     pub fn norm_sq(&self) -> S {
         self.data.dot(&self.data)
@@ -493,8 +493,8 @@ mod tests {
         assert!((s - 11.0f32).abs() < 1e-5);
     }
 
-    // ---- compile-time safety (these should NOT compile) ----
-    // uncomment any of these to verify they produce a type error:
+    // ---- compile-time safety (each of these is a type error) ----
+    // uncomment any of these to verify it produces a type error:
     //
     // fn test_con_add_cov_fails() {
     //     let v = Con3::new(vec3(1.0, 0.0, 0.0));

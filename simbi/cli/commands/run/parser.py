@@ -56,15 +56,16 @@ def _validate_config_script(param: str) -> str:
     base = path.stem
     ext = path.suffix
 
-    # an explicit .py path bypasses discovery, but a typo'd path must fail HERE
-    # with a clear message at parse time.
+    # an explicit .py path bypasses discovery; a typo'd path fails at parse time
+    # with a clear message.
     if ext.lower() == ".py":
         if not path.is_file():
             raise ArgumentTypeError(f"config script '{param}' does not exist")
         return param
 
-    # otherwise, search available configs. collect EVERY match — the same stem
-    # can exist in several config dirs (bundled examples vs a cwd-local tree).
+    # otherwise, search available configs. collect the full set of matches -- the
+    # same stem can exist in several config dirs (bundled examples vs a cwd-local
+    # tree).
     available_configs = get_available_configs()
     matches = [
         Path(file)

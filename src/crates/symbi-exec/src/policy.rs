@@ -1,7 +1,7 @@
 // =============================================================================
 // policy.rs
 //
-// the CPU/GPU EXECUTOR entry point for cell-centered structured invocations: `dispatch_fields`
+// the CPU/GPU executor entry point for cell-centered structured invocations: `dispatch_fields`
 // (shared-layout), `dispatch_fields_cover` (disjoint-cover fork-join), `dispatch_fields_each`
 // (per-buffer layouts), the `ExecPolicy` strategy + its `policy_for` / `run_policy` /
 // `auto_block_size` selection, and the env-gated dispatch micro-profiler. all parallelism
@@ -26,10 +26,10 @@ use crate::layout::{alloc_layout, exec_layout, expect_kernel};
 /// its structured CPU fn + neutral IR blob via the generated registry; the CPU path
 /// runs the AOT fn, a device-accessible `Mem` renders + JITs the IR (the GPU path).
 ///
-/// `inputs` MUST be in the generated kernel's input-binding order and `outputs` in
+/// `inputs` must be in the generated kernel's input-binding order and `outputs` in
 /// its output-binding order (`run_cpu` re-splits by handle, preserving order within
-/// each group, so the call site need not interleave them the way the binding list
-/// happens to).
+/// each group, so the call site is free to order the two groups independently of
+/// how the binding list happens to interleave them).
 ///
 /// SAFETY: the caller guarantees every `outputs` field is a distinct allocation from
 /// the others and from `inputs` — the multiple `&mut` slices then alias nothing.
@@ -44,7 +44,7 @@ pub fn dispatch_fields<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: u
     scalars: &[Sc],
 ) {
     let (grid, dlo) = exec_layout(exec);
-    // cell-centered: one SHARED allocated layout, replicated per field for the disjoint constructor.
+    // cell-centered: one shared allocated layout, replicated per field for the disjoint constructor.
     let shared = alloc_layout(allocated);
     let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> = std::iter::repeat(shared)
         .take(inputs.len() + outputs.len())
@@ -61,10 +61,11 @@ pub fn dispatch_fields<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: u
     dispatch::<Sc, Mem, _>(inv, ir, name, cpu);
 }
 
-/// the host CPU fallback for a RUNTIME-BUILT kernel: unreachable. a runtime kernel
+/// the host CPU fallback for a runtime-built kernel: unreachable. a runtime kernel
 /// (e.g. the shaped immersed-body wall, whose CSG geometry is known only at setup)
-/// has no AOT-generated CPU fn — the host path runs its own JIT (cranelift), so this
-/// twin is only ever taken on a device-accessible `Mem`, where the CPU arg is dead.
+/// runs its own JIT (cranelift) on the host path rather than an AOT-generated CPU
+/// fn, so this twin is only ever taken on a device-accessible `Mem`, where the CPU
+/// arg is dead.
 fn no_host_fallback<Sc: Scalar + OrderedNumeric>(
     _: &[symbi_aot::CpuField<'_, Sc>],
     _: &mut [symbi_aot::CpuFieldMut<'_, Sc>],
@@ -77,7 +78,7 @@ fn no_host_fallback<Sc: Scalar + OrderedNumeric>(
 }
 
 /// the runtime-IR twin of `dispatch_fields`: identical buffer binding + launch, but the
-/// neutral IR blob + kernel name are supplied by the CALLER (a runtime-built kernel)
+/// neutral IR blob + kernel name are supplied by the caller (a runtime-built kernel)
 /// bypassing the generated registry that `dispatch_fields` resolves against. device-only — the host path of a
 /// runtime kernel has its own JIT, so the CPU fallback is unreachable.
 ///
@@ -114,11 +115,11 @@ pub fn dispatch_fields_runtime_ir<Sc: Scalar + OrderedNumeric, Mem: MemorySpace,
     dispatch::<Sc, Mem, _>(inv, ir, name, no_host_fallback::<Sc>);
 }
 
-/// build a kernel's WHOLE-buffer host binding set from its input + output fields over a shared
-/// `(lo, extent)` layout — the ONE place the `from_raw_parts` whole-buffer construction lives,
-/// with the disjoint-write contract checked ONCE, RELEASE-ACTIVE. inputs bind `&[T]`, outputs
+/// build a kernel's whole-buffer host binding set from its input + output fields over a shared
+/// `(lo, extent)` layout — the one place the `from_raw_parts` whole-buffer construction lives,
+/// with the disjoint-write contract checked once, release-active. inputs bind `&[T]`, outputs
 /// `&mut [T]`; if two bindings shared a backing allocation the resulting `&` + `&mut` (or two
-/// `&mut`s) would alias — UB under Stacked/Tree Borrows, and a SILENT garbled-physics bug on
+/// `&mut`s) would alias — UB under Stacked/Tree Borrows, and a silent garbled-physics bug on
 /// release (the class a debug-only guard misses). a manifest with a duplicate path or a caller
 /// binding the same field twice fails loudly here. the per-block (`dispatch_fields_cover`) and
 /// per-face (`dispatch_fields_each`) executors slice per-region and keep their own builds; this
@@ -137,17 +138,17 @@ where
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
 {
-    // `layouts` carries one `(lo, extent, vol)` per field, in `inputs ++ outputs` order — a SHARED
+    // `layouts` carries one `(lo, extent, vol)` per field, in `inputs ++ outputs` order — a shared
     // cell layout (replicated) for `dispatch_fields`, or each field's own `Field::domain()` layout
-    // for `dispatch_fields_each` (staggered / mixed-domain binds). ONE constructor, ONE distinctness
+    // for `dispatch_fields_each` (staggered / mixed-domain binds). one constructor, one distinctness
     // check (release-active) — the "DisjointBufferSet" SSOT.
     debug_assert_eq!(
         layouts.len(),
         inputs.len() + outputs.len(),
         "disjoint_host_buffers('{name}'): one layout per field required",
     );
-    // the hazard is a WRITE that aliases another binding: `&` + `&mut`, or two `&mut`. every output
-    // must therefore be distinct from every other binding. two INPUTS sharing an allocation are two
+    // the hazard is a write that aliases another binding: `&` + `&mut`, or two `&mut`. every output
+    // must therefore be distinct from every other binding. two inputs sharing an allocation are two
     // `&[T]` to the same memory, which is sound, and is a real calling pattern — a prolongation
     // whose old and new coarse states are the same buffer is the no-time-interpolation case, and a
     // kernel reading one field through two manifest paths reads it twice to no ill effect.
@@ -187,20 +188,22 @@ where
     buffers
 }
 
-/// THE EXECUTOR INVERSION (cpu). dispatch `name` over a DISJOINT COVER of the exec
-/// window in ONE rayon fork-join: the parallelism moves OUT of the kernel (which
-/// runs serially per block) and INTO the executor, which fans the cover out. this
+/// the executor inversion (cpu). dispatch `name` over a disjoint cover of the exec
+/// window in a single rayon fork-join: the parallelism moves from inside the kernel
+/// (which runs serially per block) into the executor, which fans the cover out. this
 /// is what makes a block decomposition pay off — N blocks share a single launch.
 ///
-/// SOUNDNESS rests entirely on `cover` being a PARTITION of the exec window (the
-/// proven `BlockGrid` / `guillotine_difference` law): the blocks write DISJOINT
+/// soundness rests entirely on `cover` being a partition of the exec window (the
+/// proven `BlockGrid` / `guillotine_difference` law): the blocks write disjoint
 /// output cells, so the per-task raw-`&mut` reconstruction (the same pattern the
-/// parallel kernel uses internally, lifted to block granularity) never aliases a
-/// live write. inputs are read-only and shared. the axiom is load-bearing here.
+/// parallel kernel uses internally, lifted to block granularity) touches only its
+/// own cells on every live write. inputs are read-only and shared. the axiom is
+/// load-bearing here.
 ///
-/// returns `false` (caller falls back) when the `{name}_serial` twin was not
-/// generated (`SYMBI_GEN_SERIAL` off) or the memory space is device-resident —
-/// the executor is a host scheduler; the gpu owns its own parallelism.
+/// returns `true` only when the `{name}_serial` twin exists (`SYMBI_GEN_SERIAL` on)
+/// and the memory space is host-resident — the executor is a host scheduler; the gpu
+/// owns its own parallelism. otherwise the caller falls back to its own whole-window
+/// dispatch.
 #[must_use]
 pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
     name: &str,
@@ -223,15 +226,15 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
     let serial_name = format!("{name}_serial");
     let serial = match symbi_aot::kernel_by_name::<Sc>(&serial_name) {
         Some((cpu, _ir)) => cpu, // KernelFn is a Copy fn-pointer (Send + Sync).
-        None => return false,    // twin not generated -> caller falls back.
+        None => return false,    // missing twin -> caller falls back.
     };
-    // SAFETY KEYSTONE (hard, release-active). this executor slices each whole buffer
-    // into per-block `&mut` via `from_raw_parts_mut`, trusting that every OUTPUT is a
-    // DISTINCT allocation from every other binding: inter-BLOCK disjointness is the
-    // proven partition law, but inter-FIELD disjointness is the caller's contract. a
+    // safety keystone (hard, release-active). this executor slices each whole buffer
+    // into per-block `&mut` via `from_raw_parts_mut`, trusting that every output is a
+    // distinct allocation from every other binding: inter-block disjointness is the
+    // proven partition law, but inter-field disjointness is the caller's contract. a
     // duplicate output (or an output bound as an input) would alias live `&mut`s
-    // across every block -> UB that silently garbles physics on release. DUPLICATE
-    // INPUTS are sound (shared `&[T]` reads alias nothing) and intentional — the
+    // across every block -> UB that silently garbles physics on release. duplicate
+    // inputs are sound (shared `&[T]` reads alias nothing) and intentional — the
     // prolong binds the same coarse buffer as src_old/src_new. the whole-window paths
     // assert this in debug; the cover path is the production CPU parallelism, so it
     // asserts in every build.
@@ -249,9 +252,9 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
          — the per-block &mut reconstruction would alias and be UB. either the kernel's \
          IR manifest has a duplicate output path, or the caller bound an output twice."
     );
-    // per-field allocation layouts — coarse INPUTS and fine OUTPUTS may live in
-    // DIFFERENT allocated domains (the prolong case), so each buffer carries its
-    // own (lo, extent, vol). the block restricts only the exec WINDOW. computed
+    // per-field allocation layouts — coarse inputs and fine outputs may live in
+    // different allocated domains (the prolong case), so each buffer carries its
+    // own (lo, extent, vol). the block restricts only the exec window. computed
     // once; stack-resident up to 16 buffers.
     let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> = inputs
         .iter()
@@ -261,7 +264,7 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
     let n_in = inputs.len();
 
     // raw buffer pointers, shared across the rayon tasks. inputs are read-only;
-    // outputs are written to DISJOINT cells per block (the partition law), so the
+    // outputs are written to disjoint cells per block (the partition law), so the
     // newtype's Send/Sync is sound for this access pattern.
     struct CoverPtrs<T>(Vec<*const T>, Vec<*mut T>);
     unsafe impl<T> Send for CoverPtrs<T> {}
@@ -269,7 +272,8 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
     impl<T> CoverPtrs<T> {
         // accessed through methods so the closure captures the whole (Send+Sync)
         // wrapper; Rust 2021 disjoint capture would otherwise grab the inner
-        // `*const T`/`*mut T` Vecs, which are not Sync.
+        // `*const T`/`*mut T` Vecs directly, bypassing the wrapper's manual Send/Sync
+        // impls that raw-pointer collections need.
         fn ins(&self) -> &[*const T] {
             &self.0
         }
@@ -282,10 +286,10 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
         outputs.iter().map(|f| f.as_mut_ptr()).collect::<Vec<_>>(),
     );
 
-    // LAZY cover: iterate block INDICES and derive each window by arithmetic
-    // (`BlockGrid::window`) — no `Vec<Domain>`, no per-block `DomainId` atomic.
-    // an 8-edge tile makes 32k blocks of a 256^3 grid; materializing them per
-    // dispatch was the large-grid crumble. one fork-join over all blocks.
+    // lazy cover: iterate block indices and derive each window by arithmetic
+    // (`BlockGrid::window`), so the cover exists purely as index math. an 8-edge
+    // tile makes 32k blocks of a 256^3 grid; materializing them per dispatch was
+    // the large-grid crumble. one fork-join over all blocks.
     let bg = BlockGrid::new(exec.clone(), block);
     (0..bg.len()).into_par_iter().for_each(|bi| {
         let (lo, size) = bg.window(bi);
@@ -295,7 +299,7 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
         for (i, &p) in ptrs.ins().iter().enumerate() {
             let (l, ext, vol) = &layouts[i];
             // SAFETY: `p` spans the whole allocated field (`vol`); the block only
-            // restricts the OUTPUT window — stencil reads stay in-bounds.
+            // restricts the output window — stencil reads stay in-bounds.
             buffers.push(Buf {
                 handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(p, *vol) }),
                 lo: l,
@@ -329,7 +333,7 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
 // different dispatch, so this is purely the AMR bookkeeping). splits the registry
 // name lookup from the kernel execution and counts calls, to attribute the
 // prolong cost to (1) rayon launch + work, (2) the 285-arm name match, (3) the
-// per-field dispatch count. main-thread only (the rayon fan-out lives INSIDE the
+// per-field dispatch count. main-thread only (the rayon fan-out lives inside the
 // kernel), so the counters are uncontended.
 static DISP_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 static DISP_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -350,11 +354,11 @@ pub fn report_dispatch_profile() -> (u64, u64, u64) {
     )
 }
 
-/// `dispatch_fields` for buffers that do NOT share one allocated layout: each
-/// field's lo/extent come from ITS OWN domain. the amr transfer kernels need
+/// the `dispatch_fields` twin for buffers whose lo/extent come from each field's own
+/// domain, rather than one shared allocated layout. the amr transfer kernels need
 /// this — the restrict/prolong source lives on one refinement level and the
 /// destination on another, and the absolute-index load resolves against each
-/// buffer's own lo. duplicate INPUT fields are allowed (the prolong binds the
+/// buffer's own lo. duplicate input fields are allowed (the prolong binds the
 /// same coarse buffer as src_old and src_new when no time interpolation is
 /// wanted — shared `&[T]` reads alias soundly); outputs must stay distinct
 /// from everything.
@@ -368,13 +372,13 @@ pub fn dispatch_fields_each<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const
 ) {
     let (grid, dlo) = exec_layout(exec);
 
-    // UNIVERSAL EXECUTOR (the prolong / amr-transfer path too). cache-tile big
-    // windows into a disjoint cover dispatched in ONE fork-join — at large grids
+    // universal executor (the prolong / amr-transfer path too). cache-tile big
+    // windows into a disjoint cover dispatched in a single fork-join — at large grids
     // the prolong slabs are big, and the scattered coarse-stencil reads benefit
     // from staying L1-resident exactly like the interior kernels. host only (the
     // target-aware policy keeps one launch on device); falls through to the single
-    // dispatch when small / when the serial twin isn't built. bit-identical: each
-    // output cell is computed once over a partition of the window.
+    // dispatch below the tiling threshold, or when the serial twin is missing.
+    // bit-identical: each output cell is computed once over a partition of the window.
     let policy = policy_for(exec, Mem::IS_DEVICE_ACCESSIBLE);
     if run_policy(policy, |block| {
         dispatch_fields_cover::<Sc, Mem, D>(name, exec, block, inputs, outputs, ints, scalars)
@@ -382,10 +386,10 @@ pub fn dispatch_fields_each<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const
         return;
     }
 
-    // PER-BUFFER layouts: each field's own `Field::domain()` (staggered/mixed-domain binds), then
-    // the ONE disjoint constructor (release-active distinctness). materialized first so the Buf refs
-    // stay valid; stack-resident (bounded by buffer count) so the hot AMR transfer / register
-    // dispatches don't heap-allocate per call.
+    // per-buffer layouts: each field's own `Field::domain()` (staggered/mixed-domain binds), then
+    // the single disjoint constructor (release-active distinctness). materialized first so the Buf
+    // refs stay valid; stack-resident (bounded by buffer count) so the hot AMR transfer / register
+    // dispatches stay allocation-free per call.
     let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> = inputs
         .iter()
         .chain(outputs.iter())
@@ -415,28 +419,28 @@ pub fn dispatch_fields_each<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const
     }
 }
 
-/// the ONE CPU-parallelism strategy for an interior dispatch, decided at the ONE
-/// scheduling point (`policy_for`) and consumed at the ONE site (`run_policy`).
+/// the single CPU-parallelism strategy for an interior dispatch, decided at one
+/// scheduling point (`policy_for`) and consumed at one site (`run_policy`).
 /// `Whole` runs the kernel's own internal rayon over the whole exec window (the
-/// small-domain / device / no-serial-twin fallback); `Cover` fans a SERIAL kernel
-/// out over a disjoint `BlockGrid` cover in ONE fork-join (the big-domain win — the
-/// parallelism moves OUT of the kernel and INTO the executor). bit-identical either
-/// way: each output cell is computed once over a partition of the same window.
+/// small-domain / device / no-serial-twin fallback); `Cover` fans a serial kernel
+/// out over a disjoint `BlockGrid` cover in a single fork-join (the big-domain win —
+/// the parallelism moves from inside the kernel into the executor). bit-identical
+/// either way: each output cell is computed once over a partition of the same window.
 pub enum ExecPolicy<const D: usize> {
     Whole,
     Cover([usize; D]),
 }
 
-/// SELECT the CPU-parallelism strategy for `exec`. PRODUCTION behavior depends ONLY
-/// on (domain size, target) — never on a build-time flag. DEVICE targets always run
+/// select the CPU-parallelism strategy for `exec`: production behavior is a pure
+/// function of (domain size, target). device targets always run
 /// `Whole`: a single domain is already one GPU launch over all cells (optimal); a
-/// cover would be N launches (~10us each — a regression). HOST targets auto-tile:
+/// cover would be N launches (~10us each — a regression). host targets auto-tile:
 /// small domains stay `Whole` (sit in cache; the kernel's own rayon suffices), big
 /// domains take a cache-sized `Cover` (the 3D throughput lever).
 ///
-/// `SYMBI_BLOCK` is a DEBUG-ONLY A/B override of the host heuristic (`"b"` /
-/// `"bx,by,bz"` fixes the cover edge; `"off"` / `"0"` forces `Whole`); it does not
-/// gate the production path. the `_serial` twins the `Cover` path needs are always
+/// `SYMBI_BLOCK` is a debug-only A/B override of the host heuristic (`"b"` /
+/// `"bx,by,bz"` fixes the cover edge; `"off"` / `"0"` forces `Whole`), scoped to
+/// non-production runs. the `_serial` twins the `Cover` path needs are always
 /// generated; `run_policy` falls back to `Whole` if a twin is missing.
 pub fn policy_for<const D: usize>(exec: &Domain<D>, is_device: bool) -> ExecPolicy<D> {
     if is_device {
@@ -480,10 +484,10 @@ pub fn policy_for<const D: usize>(exec: &Domain<D>, is_device: bool) -> ExecPoli
     }
 }
 
-/// CONSUME an `ExecPolicy` — the ONE site that turns a chosen strategy into work.
-/// `Cover(block)` runs `cover(block)`, which fans the SERIAL kernel over the disjoint
+/// consume an `ExecPolicy` — the single site that turns a chosen strategy into work.
+/// `Cover(block)` runs `cover(block)`, which fans the serial kernel over the disjoint
 /// cover and returns whether it actually executed (it returns `false` when the
-/// `_serial` twin isn't compiled in). returns `true` iff the cover handled the
+/// `_serial` twin was left out of the build). returns `true` iff the cover handled the
 /// dispatch; on `false` (or `Whole`) the caller runs its own whole-window fallback.
 /// keeping the policy->cover decision here means neither call site re-derives the
 /// "device? small? twin-missing?" logic — they only supply how to run the cover.
@@ -497,10 +501,10 @@ pub fn run_policy<const D: usize>(
     }
 }
 
-/// AUTO block policy — ROW-ELONGATED CACHE TILING. keep the WHOLE domain (`None`)
+/// auto block policy — row-elongated cache tiling. keep the whole domain (`None`)
 /// only when it is small enough to already sit in cache; otherwise tile the
-/// TRANSVERSE axes at a small fixed edge (stencil reuse stays in cache) while the
-/// CONTIGUOUS axis runs the full row — the vectorized (mask-form/SLP) kernel
+/// transverse axes at a small fixed edge (stencil reuse stays in cache) while the
+/// contiguous axis runs the full row — the vectorized (mask-form/SLP) kernel
 /// bodies need long unit-stride inner trips to amortize; 8-cell trips invert
 /// their win into a loss.
 ///
@@ -509,16 +513,16 @@ pub fn run_policy<const D: usize>(
 ///   16x8x8   = 33.3        (flux 13)
 ///   32x8x8   = 34.8        (flux 12)
 ///   64x8x8   = 35.6        (flux 11)
-///   256x8x8  = 38.5        (flux 10) — monotonic to the FULL row
+///   256x8x8  = 38.5        (flux 10) — monotonic to the full row
 /// the transverse 8x8 cross-section keeps the stencil working set bounded; the
 /// hardware prefetchers cover the streaming row. `SYMBI_BLOCK=<x,y,z>` overrides
 /// per run.
 ///
-/// the full-row block trades tile COUNT for row length, so when the transverse
-/// axes alone cannot feed the thread pool (small or low-D grids) the row is
+/// the full-row block trades tile count for row length, so when the transverse
+/// axes alone leave the thread pool under-fed (small or low-D grids) the row is
 /// halved until the cover has ~4 tiles per thread — load balance beats row
 /// length only when tiles are scarce. 1D keeps the fixed edge: axis 0 is the
-/// ONLY source of parallel tiles there.
+/// only source of parallel tiles there.
 fn auto_block_size<const D: usize>(shape: [usize; D], threads: usize) -> Option<[usize; D]> {
     // the transverse cache-tile edge (cells per axis); clamps for thin domains.
     const CACHE_EDGE: usize = 8;
@@ -620,7 +624,7 @@ mod alias_tests {
         vec![([0i32; 1], [8u32; 1], 8usize); n]
     }
 
-    /// the WRITE hazard: two `&mut` to one buffer. must stay refused, and on RELEASE too — a
+    /// the write hazard: two `&mut` to one buffer. must stay refused, and on release too — a
     /// debug-only guard would let a garbled-physics bug through in exactly the builds that run
     /// production.
     #[test]
@@ -640,7 +644,7 @@ mod alias_tests {
         let _ = disjoint_host_buffers::<f64, 1, HostMemory>("probe", &[&f], &[&f], &l);
     }
 
-    /// two INPUTS on one buffer are two `&[T]` — sound, and a real calling pattern: a prolongation
+    /// two inputs on one buffer are two `&[T]` — sound, and a real calling pattern: a prolongation
     /// whose old and new coarse states are the same field is the no-time-interpolation case, which
     /// is how a level is initialized from its parent. refusing it would force a caller to duplicate
     /// a full-grid buffer to satisfy a check stricter than the hazard it guards.

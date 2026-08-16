@@ -3,7 +3,7 @@
 //
 // machine-checked well-posedness proofs for the immersed-boundary source (`ibm.rs`), the same
 // operators the traced body kernels run (softened gravity + the exact-exponential accretion drain).
-// each theorem is stated + proved analytically here, then GATED against the real carrier-generic
+// each theorem is stated + proved analytically here, then gated against the real carrier-generic
 // code — conservativeness by forward-mode autodiff (the `Dual` carrier differentiates the actual
 // potential), the sign / contraction / boundedness lemmas by dense sampling of the actual f64 forms.
 //
@@ -13,27 +13,29 @@
 //   PROOF.  d/dx_j (1/r_eff) = -(1/2)(|r|^2+eps^2)^{-3/2} d/dx_j |r|^2, and d/dx_j |r|^2 = 2 r_j,
 //   so d/dx_j (1/r_eff) = -r_j / r_eff^3.  hence
 //     -d phi/dx_j = M d/dx_j (1/r_eff) = -M r_j / r_eff^3 = g_j.   QED.
-//   COROLLARY.  curl g = -curl(grad phi) = 0: the force does no work around any closed loop, so the
-//   immersed body cannot pump spurious energy into the gas.  (mixed partials of the smooth phi
-//   commute — softening makes phi C^infinity everywhere, INCLUDING r = 0.)
+//   COROLLARY.  curl g = -curl(grad phi) = 0: the work integral around any closed loop vanishes, so
+//   the energy the immersed body exchanges with the gas is bookkept by phi alone.  (mixed partials
+//   of the smooth phi commute — softening makes phi C^infinity everywhere, r = 0 included.)
 //
 // THEOREM 2 (drain is a contraction on the intensive state).  For rate >= 0, dt >= 0,
 //     f = exp(-rate dt)  in  (0, 1]   (mathematically),
-//   so U -> U f is positivity-preserving and non-expansive for ANY dt — no CFL condition on the sink.
+//   so U -> U f is positivity-preserving and non-expansive at every dt — the sink is
+//   unconditionally stable, free of any CFL restriction.
 //   the drain rate is nonnegative for physical inputs:
 //     rate = chi min(sink, cs/w),   chi = (1 - tanh(z))/2 in (0,1),   z = (r - r_mask)/w,
 //   with sink >= 0, cs >= 0, w > 0  =>  min(sink, cs/w) >= 0  =>  rate >= 0.
-//   In IEEE f64 the REALIZED operator maps  f in [0, 1]:  exp underflows to +0.0 only when rate dt
+//   In IEEE f64 the realized operator maps  f in [0, 1]:  exp underflows to +0.0 only when rate dt
 //   exceeds ~745 — deep inside a fully-evacuated mask, where den -> 0 is exactly the accretion limit.
-//   so den -> den f lands in [0, den]: NONNEGATIVE (never a floor, never a negative) and non-expansive
-//   for every dt.  that is the well-posedness guarantee, and it is why the exact-exponential drain
+//   so den -> den f lands in [0, den]: nonnegative straight from the arithmetic — the operator
+//   itself supplies the bound a floor would otherwise impose — and non-expansive for every dt.
+//   that is the well-posedness guarantee, and it is why the exact-exponential drain
 //   retired the KMK04 min-gate: an operator that is a contraction by construction.
 //
 // THEOREM 3 (softening regularizes the singularity — bounded, lipschitz force).
 //     |g| = M |r| / (|r|^2 + eps^2)^{3/2}  <=  C M / eps^2,     C = 2 / (3 sqrt 3) ~ 0.3849,
-//   attained at |r| = eps / sqrt 2.  the bare 1/r^2 force is unbounded as r -> 0; the softened
-//   force has a finite maximum set by eps, so g is globally bounded and lipschitz — the source is
-//   well-posed where the newtonian point-mass force is not.
+//   attained at |r| = eps / sqrt 2.  the bare 1/r^2 force diverges as r -> 0; the softened
+//   force has a finite maximum set by eps, so g is globally bounded and lipschitz — the softening
+//   is what makes the source well-posed at the body.
 //   PROOF.  maximize h(s) = s/(s^2+eps^2)^{3/2}.  h'(s) = (eps^2 - 2 s^2)/(s^2+eps^2)^{5/2} = 0 at
 //   s = eps/sqrt 2, where h = (eps/sqrt2)/((3 eps^2/2)^{3/2}) = 2/(3 sqrt 3 eps^2).   QED.
 // -----------------------------------------------------------------------------
@@ -52,7 +54,8 @@ fn bound_const() -> f64 {
     2.0 / (3.0 * 3.0_f64.sqrt())
 }
 
-// a deterministic parameter sweep — no rng (reproducible), dense enough to exercise the near-body
+// a deterministic parameter sweep — fixed sample points, reproducible run to run, dense enough
+// to exercise the near-body
 // core, the mask edge, and the far field.
 fn sweep<F: FnMut(f64, f64, f64, f64)>(mut f: F) {
     for &mass in &[0.3_f64, 1.0, 7.5] {
@@ -67,14 +70,14 @@ fn sweep<F: FnMut(f64, f64, f64, f64)>(mut f: F) {
     }
 }
 
-// THEOREM 1 — conservative gravity: g = -grad phi, checked by autodiff on the REAL potential.
+// THEOREM 1 — conservative gravity: g = -grad phi, checked by autodiff on the real potential.
 #[test]
 fn gravity_is_conservative_grad_of_potential() {
-    // put the body off-origin so no coordinate is accidentally zero, and spread r over the 3 axes.
+    // put the body off-origin so every coordinate stays nonzero, and spread r over the 3 axes.
     let bpos = [0.13_f64, -0.27, 0.41];
     sweep(|mass, soft, r, frac| {
         // a position at displacement r along a fixed direction (varied a little by frac so the
-        // sampled points are not collinear).
+        // sampled points spread over distinct directions).
         let dir = {
             let d = [0.6, -0.5 + 0.3 * frac, 0.62];
             let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
@@ -157,7 +160,7 @@ fn drain_factor_is_a_contraction() {
                 for &cs in &[0.0_f64, 0.4, 3.0] {
                     for ri in 0..60 {
                         let r_mag = ri as f64 * 0.02;
-                        // the SIGN lemma: physical inputs (sink>=0, cs>=0, w>0) give rate >= 0.
+                        // the sign lemma: physical inputs (sink>=0, cs>=0, w>0) give rate >= 0.
                         let rate = drain_rate(r_mag, r_mask, min_w, sink, cs);
                         assert!(rate >= 0.0, "drain rate negative: {rate}");
                         // the mollified mask is bounded: rate <= min(sink, cs/w) since chi in (0,1).
@@ -165,15 +168,15 @@ fn drain_factor_is_a_contraction() {
                             rate <= sink.min(cs / min_w) + 1e-12,
                             "rate exceeds the mask cap"
                         );
-                        // THEOREM 2: den -> den f lands in [0, den] for ANY dt (no CFL on the sink) —
-                        // nonnegative (positivity-preserving) and non-expansive.
+                        // THEOREM 2: den -> den f lands in [0, den] at every dt (the sink is
+                        // CFL-free) — nonnegative (positivity-preserving) and non-expansive.
                         for &dt in &[0.0_f64, 1e-6, 0.03, 5.0, 1e6] {
                             let f = drain_factor(rate, dt);
                             assert!(f >= 0.0, "drain factor negative: f={f}");
                             assert!(f <= 1.0, "drain factor expands the state: f={f}");
                         }
                         // strict positivity holds below the f64 exp-underflow threshold (rate dt < 745):
-                        // a physical step never zeroes a cell the mask has not fully evacuated.
+                        // a physical step zeroes a cell only once the mask has fully evacuated it.
                         if rate * 0.03 < 700.0 {
                             assert!(drain_factor(rate, 0.03) > 0.0, "physical step underflowed");
                         }
@@ -184,7 +187,7 @@ fn drain_factor_is_a_contraction() {
     }
 }
 
-// THEOREM 3 — softening bounds the force: |g| <= C M / eps^2, and the bound is TIGHT (attained at
+// THEOREM 3 — softening bounds the force: |g| <= C M / eps^2, and the bound is tight (attained at
 // |r| = eps/sqrt2), so it is the exact supremum.
 #[test]
 fn softened_gravity_is_bounded_by_softening() {
@@ -214,7 +217,7 @@ fn softened_gravity_is_bounded_by_softening() {
 }
 
 // THEOREM 5 — the compact field is conservative: g = -grad phi, by autodiff on the real potential,
-// across the match radius rather than only away from it.
+// sampled across the match radius, the transition itself included.
 #[test]
 fn compact_gravity_is_conservative_grad_of_potential() {
     let bpos = [0.13_f64, -0.27, 0.41];
@@ -252,10 +255,10 @@ fn compact_gravity_is_conservative_grad_of_potential() {
     });
 }
 
-// THEOREM 6 — COMPACT SUPPORT. outside the match radius the field is the BARE point mass, to the
-// last bit. this is the property a Plummer sphere cannot have at any softening length, and it is
-// what lets `h` be chosen for regularity near the body without biasing a power law measured
-// outside it.
+// THEOREM 6 — compact support. outside the match radius the field is the bare point mass, to the
+// last bit. a Plummer sphere departs from the point mass at every radius and every softening
+// length, so this property is what lets `h` be chosen for regularity near the body while a power
+// law measured outside it stays unbiased.
 #[test]
 fn the_compact_field_is_exactly_newtonian_outside_the_match_radius() {
     let mut checked = 0usize;
@@ -265,10 +268,10 @@ fn the_compact_field_is_exactly_newtonian_outside_the_match_radius() {
                 let r = h * (1.0 + 0.05 * k as f64); // strictly outside
                 let rvec = [r * 0.6, r * -0.8, 0.0]; // |rvec| = r exactly
                 let g = compact_gravity(rvec, mass, h);
-                // the oracle is the BARE point mass evaluated through the same arithmetic:
+                // the oracle is the bare point mass evaluated through the same arithmetic:
                 // `softened_gravity` at zero softening recovers |rvec| by the identical
-                // `sqrt(dot)` and cubes it identically. comparing against a separately-formed
-                // `-mass/r^3` would only measure how the norm round-trips, not the model.
+                // `sqrt(dot)` and cubes it identically, which keeps the comparison on the model;
+                // a separately-formed `-mass/r^3` would measure how the norm round-trips.
                 let want = softened_gravity(rvec, mass, 0.0);
                 for i in 0..3 {
                     assert_eq!(
@@ -292,8 +295,9 @@ fn the_compact_field_is_exactly_newtonian_outside_the_match_radius() {
     }
     assert!(checked > 400, "the sweep covered only {checked} points");
 
-    // NON-VACUITY: a Plummer sphere at the same length is NOT the point mass anywhere -- this is
-    // the bias the compact form removes, and it must be large enough here to be worth removing.
+    // non-vacuity: a Plummer sphere at the same length departs from the point mass at every radius
+    // -- that departure is the bias the compact form removes, and it is large enough here to be
+    // worth removing.
     let (mass, h) = (1.0_f64, 0.1_f64);
     for &mult in &[1.0_f64, 2.0, 5.0] {
         let r = h * mult;
@@ -310,7 +314,7 @@ fn the_compact_field_is_exactly_newtonian_outside_the_match_radius() {
 }
 
 // THEOREM 7 — the peak field is bounded by the match radius alone, at 1.242 mass/h^2 (attained at
-// r = sqrt(5/9) h). resolution-independent, unlike a Plummer accurate at `h`, whose peak grows as
+// r = sqrt(5/9) h). resolution-independent, where a Plummer sphere accurate at `h` peaks as
 // 1/eps^2 and takes the timestep with it.
 #[test]
 fn the_compact_field_peaks_at_a_bounded_resolution_independent_value() {

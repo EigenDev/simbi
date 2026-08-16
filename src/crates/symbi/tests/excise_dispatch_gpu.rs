@@ -150,9 +150,9 @@ fn excise_dispatch_matches_cpu_on_device() {
 #[test]
 fn excise_source_cfl_dt_matches_cpu_on_device() {
     // the GR source-admissibility CFL kernel (rhd_source_cfl) zeroes its rate on the excised
-    // sphere so the horizon cells do not collapse the timestep — a past device failure mode.
-    // a device mask that failed to zero the excised rate would collapse dt on device and diverge
-    // from the host dt. this is the only gate that exercises the source-cfl kernel on device.
+    // sphere, keeping the horizon cells clear of the timestep bound — a past device failure mode.
+    // a device mask that left the excised rate live would collapse dt on device and diverge from
+    // the host dt. this is the one gate that exercises the source-cfl kernel on device.
     let init = |[x, y]: [f64; 2]| Prim {
         rho: 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos(),
         vel: Tensor::new([0.08 * (x + y).cos(), -0.06 * (x - y).sin()]),

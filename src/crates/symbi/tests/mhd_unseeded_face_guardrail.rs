@@ -1,7 +1,7 @@
 // =============================================================================
 // mhd_unseeded_face_guardrail.rs
 //
-// an MHD sim whose staggered face B was never seeded must fail at evolve ENTRY with an
+// an MHD sim carrying unseeded staggered face B fails at evolve entry with an
 // actionable message, ahead of any deep c2p/dt panic. seeding cell-centered B
 // (seed_cell/seed_cells) leaves the faces uninitialized; the constrained transport needs the
 // staggered `bface` as its divergence-free ground truth.

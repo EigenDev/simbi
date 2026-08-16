@@ -2,12 +2,12 @@
 # test_line_drawstyle.py
 #
 # a finite-volume solution is piecewise constant across each cell, and `drawstyle="steps"`
-# is the mark that says so. what it must get right is the GEOMETRY: the marks belong at the
-# cell edges, not at centres, because on a graded mesh those are different places.
+# is the mark that says so. the geometry is what it has to get right: the marks belong at
+# the cell edges, which on a graded mesh sit apart from the cell centers.
 #
-# a line through centres is not wrong so much as silently smooth — it interpolates across a
-# cell that may be twice its neighbour's width, and the change in spacing at a refinement
-# boundary vanishes. that is invisible in the output, which is what makes it worth a gate.
+# a line through centers is silently smooth -- it interpolates across a cell that may be
+# twice its neighbor's width, and the change in spacing at a refinement boundary vanishes.
+# that is invisible in the output, which is what makes it worth a gate.
 # =============================================================================
 import matplotlib
 
@@ -43,7 +43,7 @@ def render(drawstyle: str, data: FieldData):
 
 
 def test_the_mesh_is_genuinely_graded() -> None:
-    # NON-VACUITY: on a uniform mesh edges and centres differ by half a cell and every
+    # non-vacuity: on a uniform mesh edges and centers differ by half a cell and every
     # claim below would hold trivially. the point is a mesh whose widths vary.
     edges = graded_field().domain[0]
     widths = np.diff(edges)
@@ -82,8 +82,9 @@ def test_a_line_is_drawn_at_the_cell_centres() -> None:
 
 
 def test_the_two_styles_disagree_on_a_graded_mesh() -> None:
-    # the substantive claim: these are different places. on a graded mesh a centre is not
-    # the midpoint of its edges, so this cannot be recovered by shifting half a cell.
+    # the substantive claim: these are different places. on a graded mesh a cell center
+    # sits off the midpoint of its edges, so recovering one mark from the other takes
+    # more than a uniform half-cell shift.
     data = graded_field()
     _, _, _, step_result = render("steps", data)
     _, _, _, line_result = render("line", data)
@@ -122,8 +123,8 @@ def test_animation_updates_in_place(drawstyle: str) -> None:
 
 @pytest.mark.parametrize("drawstyle", ["line", "steps"])
 def test_cleanup_removes_the_artist(drawstyle: str) -> None:
-    # a StepPatch never appears in `ax.lines`, so a membership test there would leak it
-    # across renders while reporting success.
+    # `ax.lines` holds lines alone and a StepPatch lives elsewhere, so a membership test
+    # there would leak the step across renders while reporting success.
     data = graded_field()
     fig, ax, component, _ = render(drawstyle, data)
     component.cleanup()

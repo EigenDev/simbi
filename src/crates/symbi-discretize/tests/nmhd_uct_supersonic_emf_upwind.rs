@@ -1,29 +1,29 @@
 // =============================================================================
 // nmhd_uct_supersonic_emf_upwind.rs
 //
-// the DETERMINISTIC rust regression gate for the supersonic-EMF upwind-pairing
+// the deterministic rust regression gate for the supersonic-EMF upwind-pairing
 // invariant of the UCT master edge-EMF (`uct_master_emf`, ct_emf.rs). a prior bug
-// paired the advective weight a^L with the DOWNWIND face (anti-upwind):
-//   adv_x = -vbar_x (a^L by_E + a^R by_W)   [WRONG: a^L -> East/downwind]
+// paired the advective weight a^L with the downwind face (anti-upwind):
+//   adv_x = -vbar_x (a^L by_E + a^R by_W)   [the bug: a^L -> East/downwind]
 // the correct upwind pairing is:
 //   adv_x = -vbar_x (a^L by_W + a^R by_E)   [a^L -> West/upwind]
-// for SYMMETRIC edge speeds (a^L == a^R, e.g. subsonic orszag-tang) the two are
-// identical -> the bug is INVISIBLE. supersonically (a^L >> a^R), the wrong form
-// ADVECTS THE DOWNWIND state -> a growing odd-even instability (the field-loop
-// blow-up: gas pressure 1 -> 29, dt collapse). div(B) tests do NOT catch it (the
-// CT curl preserves div(B) for ANY edge EMF, advective coefficients included).
+// for symmetric edge speeds (a^L == a^R, e.g. subsonic orszag-tang) the two forms
+// agree, so only asymmetry exposes the bug. supersonically (a^L >> a^R), the wrong
+// form advects the downwind state -> a growing odd-even instability (the field-loop
+// blow-up: gas pressure 1 -> 29, dt collapse). div(B) tests stay green through it
+// (the CT curl preserves div(B) for any edge EMF, advective coefficients included).
 //
 // the gate stands up the minimal physics that exposes it: a weak magnetic loop
 // (gardiner & stone 2005 / simbi_configs/examples/field_loop.py) advected
-// SUPERSONICALLY (|v| = sqrt(5), cs ~ 1.29 => mach ~ 1.7) on a small periodic
+// supersonically (|v| = sqrt(5), cs ~ 1.29 => mach ~ 1.7) on a small periodic
 // grid, evolved purely by the CT induction loop (uniform rho/p/v -> the gas is
 // frozen, only B advects). it chains the production kernels through the CPU
 // interpreter harness:
 //   nmhd_edge_emf_uct_hllc_gv (the master EMF) -> rmhd_ct_curl_2d_dir_gv (induction)
-// over N steps, asserting B / magnetic energy stays BOUNDED and finite. with the
+// over N steps, asserting B / magnetic energy stays bounded and finite. with the
 // correct upwind pairing the loop translates and stays bounded; with the
 // downwind-paired bug the magnetic energy diverges. flipping by_w<->by_e at
-// ct_emf.rs:577 MUST make this test FAIL.
+// ct_emf.rs:577 must make this test fail.
 // =============================================================================
 
 mod harness;
@@ -56,20 +56,20 @@ const RHO0: f64 = 1.0;
 const PRE0: f64 = 1.0;
 const A0: f64 = 1.0e-3; // vector-potential amplitude (weak / passive)
 const RAD: f64 = 0.3; // loop radius
-const SPEED: f64 = 2.2360679774997896; // sqrt(5): the paper's SUPERSONIC v=(2,1), cs ~ 1.29
+const SPEED: f64 = 2.2360679774997896; // sqrt(5): the paper's supersonic v=(2,1), cs ~ 1.29
 // domain: a square box centered on the origin so the diagonal loop is well inside.
 const L: f64 = 1.0; // half-width in x and y
 const THETA: f64 = 1.5; // plm-theta (the kernel's reconstruction slope limiter)
-// a small DIV-FREE grid-scale (odd-even) seed superposed on the loop: a checkerboard in
+// a small div-free grid-scale (odd-even) seed superposed on the loop: a checkerboard in
 // the corner vector potential A_z. its discrete curl is exactly div-free (CT preserves
-// it), so it injects a pure grid-scale magnetic mode WITHOUT a div(B) error. supersonic
-// UPWIND advection (the correct pairing) DAMPS this mode; the DOWNWIND-paired bug is the
-// anti-upwind scheme, which AMPLIFIES it -> the discriminating instability. the smooth
-// loop alone has no grid-scale content, so the bug is invisible on it (by_w ~ by_e); the
-// seed is the minimal feature that makes the upwind/downwind choice MATTER.
+// it), so it injects a pure grid-scale magnetic mode at machine-zero div(B). supersonic
+// upwind advection (the correct pairing) damps this mode; the downwind-paired bug is the
+// anti-upwind scheme, which amplifies it -> the discriminating instability. the smooth
+// loop carries resolved scales alone, where the two pairings agree (by_w ~ by_e); the
+// seed is the minimal feature that makes the upwind/downwind choice bite.
 const SEED: f64 = 5.0e-5; // << A0*RAD (the loop A_z); the field stays weak/passive
 
-// axis-0-fastest flat index over the FULL (ghosted) buffer, matching the harness /
+// axis-0-fastest flat index over the full (ghosted) buffer, matching the harness /
 // interpreter / canonical Field convention. (i, j) are buffer-local (ghosts included).
 fn idx(i: usize, j: usize) -> usize {
     i + j * BX
@@ -99,7 +99,7 @@ fn az_loop(x: f64, y: f64) -> f64 {
 
 // the corner vector potential at corner (i, j) = loop + the div-free odd-even seed.
 // the seed is a checkerboard (-1)^(i+j) on the corner lattice -> its discrete curl is a
-// pure grid-scale div-free B mode. defined on the GRID-INDEX corner so the periodicity
+// pure grid-scale div-free B mode. defined on the grid-index corner so the periodicity
 // and the checkerboard phase are exact (period NX/NY must be even for the wrap to align;
 // NX=NY=24 is even).
 fn az_corner(i: usize, j: usize) -> f64 {
@@ -135,8 +135,8 @@ impl Sim {
         let mut by = vec![0.0_f64; N];
         for i in 0..BX {
             for j in 0..BY {
-                // staggered B = discrete curl of the CORNER A_z (loop + div-free seed).
-                // any corner-defined A_z gives an EXACTLY div-free staggered B.
+                // staggered B = discrete curl of the corner A_z (loop + div-free seed).
+                // any corner-defined A_z gives an exactly div-free staggered B.
                 // B_x on the x-face (spans the two y-corners): B_x = dA_z/dy.
                 if j + 1 < BY {
                     bx[idx(i, j)] = (az_corner(i, j + 1) - az_corner(i, j)) / dy;
@@ -210,10 +210,10 @@ impl Sim {
         s
     }
 
-    // total STAGGERED magnetic energy 0.5 sum(B_x^2 + B_y^2) over the interior faces — the
-    // boundedness diagnostic. it must read the STAGGERED faces (NOT the cell-average
-    // `bcell`): the anti-upwind instability is a grid-scale ODD-EVEN mode on the staggered
-    // field, which the face-average smooths away (the cell-centered energy is blind to it).
+    // total staggered magnetic energy 0.5 sum(B_x^2 + B_y^2) over the interior faces — the
+    // boundedness diagnostic. it reads the staggered faces directly: the anti-upwind
+    // instability is a grid-scale odd-even mode on the staggered field, which the
+    // cell-average `bcell` smooths away, leaving the cell-centered energy blind to it.
     fn mag_energy(&self) -> f64 {
         let mut e = 0.0_f64;
         for i in NG..NG + NX {
@@ -263,7 +263,7 @@ fn build_emf_inputs(sim: &Sim) -> EmfInputs {
     };
     // fill over the whole buffer (the EMF stencil reaches into the ghosts). the wrapped
     // faces already populate the ghost cell-B; the outermost ring (where bcell reads
-    // face[i+1]) is never an edge target, so leaving it at 0 is harmless.
+    // face[i+1]) sits outside every edge target, so leaving it at 0 is harmless.
     for i in 0..BX {
         for j in 0..BY {
             let in_bounds = i + 1 < BX && j + 1 < BY;
@@ -305,11 +305,11 @@ fn run_edge_emf(sim: &Sim) -> Vec<f64> {
     let (bp1, bp2, bout) = (inp.bp1, inp.bp2, inp.bout);
     let (wsr1, wsl1, wsr2, wsl2) = (inp.wsr1, inp.wsl1, inp.wsr2, inp.wsl2);
     let pull = |buf: Vec<f64>| move |c: &[usize]| buf[idx(c[0], c[1])];
-    // g1 = x (axis 0), g2 = y (axis 1): the out-of-plane z-edge EMF. the HLLD edge EMF is
-    // REQUIRED here (not HLLC): HLLC's three-wave fan fixes the advective weights a^L=a^R=1/2,
-    // so the by_w<->by_e swap is a no-op for HLLC and the bug is invisible. HLLD's five-wave
-    // fan gives ASYMMETRIC a^L != a^R supersonically -> the upwind/downwind pairing MATTERS.
-    // (this is field_loop.py's actual default solver, Solver.HLLD.)
+    // g1 = x (axis 0), g2 = y (axis 1): the out-of-plane z-edge EMF. the gate needs the HLLD
+    // edge EMF: HLLC's three-wave fan fixes the advective weights a^L=a^R=1/2, so the
+    // by_w<->by_e swap leaves the HLLC EMF identical and hides the bug. HLLD's five-wave fan
+    // gives asymmetric a^L != a^R supersonically, where the upwind/downwind pairing decides
+    // which state is advected. (this is field_loop.py's default solver, Solver.HLLD.)
     let out = KernelRun::new(nmhd_edge_emf_uct_hlld_gv(2, 0, 1))
         .grid([BX, BY])
         // the EMF reads -2..+1 in the transverse directions; compute strictly inside.
@@ -334,7 +334,7 @@ fn run_edge_emf(sim: &Sim) -> Vec<f64> {
 
 // advance the staggered faces one step by the CT curl of the edge EMF (induction).
 // dir=0 updates B_x from d_y(Ez); dir=1 updates B_y from d_x(Ez). out-of-place.
-// NOTE the EMF kernel writes the corner field as `emf`; the curl kernel reads it as `ez`.
+// note: the EMF kernel writes the corner field as `emf`; the curl kernel reads it as `ez`.
 fn ct_induction(sim: &Sim, ez: &[f64], dt: f64) -> (Vec<f64>, Vec<f64>) {
     let (idx_inv, idy_inv) = (1.0 / dx(), 1.0 / dy());
     let ez_a = ez.to_vec();
@@ -370,7 +370,8 @@ fn nmhd_uct_supersonic_emf_stays_bounded() {
     let mut sim = Sim::new();
     sim.wrap_all();
 
-    // sanity: the supersonic regime is real (mach > 1) — the bug is invisible otherwise.
+    // sanity: the supersonic regime is real (mach > 1); subsonically a^L == a^R and the
+    // two pairings agree.
     let cs = (GAMMA * PRE0 / RHO0).sqrt();
     let speed = (sim.vx * sim.vx + sim.vy * sim.vy).sqrt();
     assert!(
@@ -385,10 +386,10 @@ fn nmhd_uct_supersonic_emf_stays_bounded() {
     );
 
     // a CFL dt from the (constant) max signal speed. CFL=0.1 sits comfortably inside the
-    // forward-euler CT stability limit, so the UCT diffusion makes the CORRECT scheme
-    // monotonically DECAY the (slightly over-resolved) loop energy. the downwind-paired
+    // forward-euler CT stability limit, so the UCT diffusion makes the correct scheme
+    // monotonically decay the (slightly over-resolved) loop energy. the downwind-paired
     // pairing breaks this: it anti-diffuses the supersonically-advected transverse field,
-    // so the energy GROWS instead -> the discriminating signal.
+    // so the energy grows -> the discriminating signal.
     let cfl = 0.1;
     let dt = cfl * dx().min(dy()) / sim.smax();
     // the downwind pairing blows past 5x E0 by roughly the 13th update, so 20 updates keeps
@@ -412,8 +413,8 @@ fn nmhd_uct_supersonic_emf_stays_bounded() {
         let e = sim.mag_energy();
         e_max = e_max.max(e);
         // the correct upwind pairing keeps the loop coherent: magnetic energy stays
-        // within a small band of its initial value (numerical diffusion can only LOWER
-        // it; the bound is a generous ceiling). the downwind-paired bug ANTI-diffuses
+        // within a small band of its initial value (numerical diffusion lowers it; the
+        // bound is a generous ceiling). the downwind-paired bug anti-diffuses
         // the supersonically-advected transverse field -> a runaway odd-even mode that
         // pushes the energy far past this band before NaN.
         assert!(
@@ -432,8 +433,9 @@ fn nmhd_uct_supersonic_emf_stays_bounded() {
         speed / cs,
         e_max / e0,
     );
-    // tighter post-hoc bound: a stable advection diffuses the loop slightly; energy must
-    // not have GROWN appreciably (the bug GROWS it). this is the discriminating assert.
+    // tighter post-hoc bound: a stable advection diffuses the loop slightly, so the energy
+    // stays near or below its initial value (the bug grows it past this bound). this is the
+    // discriminating assert.
     assert!(
         e_max < 1.5 * e0,
         "magnetic energy GREW (E_max/E0 = {:.3}) — a stable advection only diffuses; \

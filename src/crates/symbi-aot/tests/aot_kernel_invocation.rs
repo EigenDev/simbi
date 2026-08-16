@@ -6,7 +6,8 @@
 // output to calling the descriptor wrapper directly with `&[CpuField]` /
 // `&mut [CpuFieldMut]`. the invocation is the backend-NEUTRAL boundary (handle +
 // layout + params); the CPU mapping just splits the buffers back into the
-// generated fn's args. (the device-pointer handle + GPU launch are not covered here.)
+// generated fn's args. (the CPU path is the scope here; the device-pointer handle
+// and GPU launch route through a separate kernel invocation test.)
 // =============================================================================
 
 use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation, godunov_mass_1d};

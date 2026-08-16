@@ -2,19 +2,19 @@
 // metric_conformance.rs
 //
 // a trait-wide self-consistency gate on the ADM surface of every Metric impl. the trait
-// carries flat DEFAULTS for the spacetime-background methods (spacetime = Minkowski, lapse = 1,
+// carries flat defaults for the spacetime-background methods (spacetime = Minkowski, lapse = 1,
 // shift = 0, spacetime_scalars = empty) so a genuinely flat metric stays ergonomic. that default is
-// a FOOTGUN for a curved metric: an unoverridden `lapse` silently bakes flat, gravity-free
-// physics with no error. rust cannot force a subtrait to override a supertrait's
-// DEFAULTED method, so this test is the guardrail: it asserts, for the whole realized metric set,
-// that the background methods are MUTUALLY CONSISTENT —
+// a footgun for a curved metric: an unoverridden `lapse` silently bakes flat, gravity-free
+// physics and reports success. rust leaves a supertrait's defaulted method inheritable by any
+// subtrait, so this test is the guardrail: it asserts, for the whole realized metric set,
+// that the background methods are mutually consistent —
 //   - flat metrics: spacetime == Minkowski, lapse == 1, shift == 0, no spacetime scalars;
 //   - curved metrics: spacetime != Minkowski, lapse != 1 (gravity wired), lapse_sq == lapse^2,
 //     spacetime scalars present, and the radial shift matches the chart (0 for a static chart,
 //     nonzero for a horizon-penetrating one).
 // a curved metric that inherits any flat default trips the matching assertion here.
 //
-// (`volume_factor` is enforced at COMPILE time — it is a required trait method with no default, so a
+// (`volume_factor` is enforced at compile time — a required trait method carrying no default, so a
 // metric that omits the proper reduced-dimension measure fails to build; the reduced-D semantic
 // itself is spot-checked here.)
 // =============================================================================

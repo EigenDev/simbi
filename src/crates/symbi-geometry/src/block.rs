@@ -4,7 +4,7 @@
 // block geometry: the solver-facing interface to curvilinear coordinates.
 // wraps a metric + coordinate maps into functions that operate on grid indices.
 //
-// the solver never touches the metric directly. it calls:
+// the solver reaches the metric through this interface alone. it calls:
 //   geo.volume(coord)        — cell volume
 //   geo.face_area(coord, d)  — face area in direction d
 //   geo.centroid(coord)      — cell center in physical coordinates
@@ -203,9 +203,9 @@ pub struct BlockGeometry<M, S: Scalar, const D: usize> {
     pub x_lo: [S; D],
     /// per-axis coordinate maps. when Some, overrides dx/x_lo.
     pub maps: Option<[AxisMap; D]>,
-    /// which COORDINATE slot each grid axis resolves — `[0, 2]` for a cylindrical (R, z) plane,
-    /// identity otherwise. carried because the cell volume needs to know which coordinates the
-    /// grid does NOT resolve, and a chart alone does not say: cylindrical (R, phi) and (R, z) are
+    /// which coordinate slot each grid axis resolves — `[0, 2]` for a cylindrical (R, z) plane,
+    /// identity otherwise. carried because the cell volume depends on which coordinates the grid
+    /// leaves unresolved, and the chart alone leaves that open: cylindrical (R, phi) and (R, z) are
     /// both 2d cylindrical and leave different coordinates ungridded.
     pub axes: [usize; D],
 }
@@ -239,12 +239,12 @@ where
         }
     }
 
-    /// the measure of the coordinates the grid does NOT resolve.
+    /// the measure of the coordinates the grid leaves unresolved.
     ///
     /// an ungridded axis contributes its full physical extent exactly when that extent is fixed by
-    /// the symmetry the reduction assumes — which is true iff the coordinate is an ANGLE, and false
-    /// iff it is a LENGTH. an angle has a compact range the symmetry pins down; a length does not,
-    /// since there is no such thing as "the" transverse extent of a slab.
+    /// the symmetry the reduction assumes — which holds iff the coordinate is an angle, and fails
+    /// iff it is a length. an angle has a compact range the symmetry pins down; a length is open,
+    /// since "the" transverse extent of a slab is undefined.
     ///
     ///   spherical theta   int sin(theta) dtheta over [0, pi] = 2
     ///   spherical phi     2 pi
@@ -252,10 +252,10 @@ where
     ///   cartesian x/y/z   1     (the result is per unit length / area)
     ///   cylindrical z     1     (per unit length)
     ///
-    /// so a 1d radial spherical cell is the whole SHELL (2 * 2 pi = 4 pi), a 2d (r, theta) cell is
+    /// so a 1d radial spherical cell is the whole shell (2 * 2 pi = 4 pi), a 2d (r, theta) cell is
     /// the revolved annulus (2 pi), a 2d cylindrical (R, z) cell is the revolved ring (2 pi) — all
     /// exact physical volumes — while cylindrical (R, phi) and every reduced cartesian grid stay
-    /// per-unit-length, because nothing in the problem says how thick they are.
+    /// per-unit-length, their thickness left open by the problem.
     pub fn ungridded_measure(&self) -> S {
         use crate::metric::Geometry;
         let two_pi = S::from_f64(std::f64::consts::TAU);
@@ -300,10 +300,10 @@ where
     }
 
     /// physical coordinate of the CT face center in direction `dir`: the `dir` axis on the face,
-    /// each TRANSVERSE axis at the ARITHMETIC midpoint of its cell. this is the point the CT curl
+    /// each transverse axis at the arithmetic midpoint of its cell. this is the point the CT curl
     /// evaluates the metric at (`a_c = (a_lo + a_hi)/2` in the ct_emf curl) and the point `volume`'s
     /// quadrature centers on, so `face_area` telescopes the area-weighted div(B) to machine zero.
-    /// NOTE: a transverse axis's arithmetic midpoint is NOT the cell `centroid` on a LOG axis
+    /// on a log axis the arithmetic midpoint departs from the cell `centroid`
     /// (whose centroid is the geometric mean sqrt(r_lo r_hi)); using the geometric mean here would
     /// evaluate the metric a distance O((dr/r)^2) off the curl's point, injecting a spurious ~1e-6
     /// divergence into the diagnostic for a field that is exactly div-free in the scheme.
@@ -339,7 +339,7 @@ where
     /// for Kerr-Schild (volume_factor includes sqrt(1+2M/r)):
     ///   - O(dx^4) accurate, consistent with the second-order PDE solver
     ///
-    /// a single general path that works for ANY metric, with no hardcoded
+    /// a single general path that works for every metric, the quadrature standing in for
     /// per-geometry formulas.
     #[inline]
     pub fn volume(&self, idx: [isize; D]) -> S {
@@ -364,8 +364,8 @@ where
         }
         // average over 2^D points, multiply by cell coordinate volume
         vol = vol / S::from_f64(n_quad as f64);
-        // the coordinates the grid does not resolve: an angular one contributes its full range, so
-        // a reduced-dimension curvilinear cell carries its true physical volume rather than a
+        // the coordinates the grid leaves unresolved: an angular one contributes its full range, so
+        // a reduced-dimension curvilinear cell carries its true physical volume in place of a
         // per-steradian one.
         vol = vol * self.ungridded_measure();
         for ax in 0..D {
@@ -416,7 +416,7 @@ where
 
     /// lab-frame (physical) face area for ALE moving meshes.
     /// spherical: all faces scale as a^2 (face area ~ r^2).
-    /// cylindrical (r, phi, z): r-face and z-face scale as a, phi-face doesn't.
+    /// cylindrical (r, phi, z): r-face and z-face scale as a, phi-face stays fixed.
     /// cartesian: a^(D-1).
     #[inline]
     pub fn labframe_face_area(&self, idx: [isize; D], dir: usize, a: S) -> S {
@@ -566,8 +566,8 @@ mod tests {
 
     #[test]
     fn spherical_volume_1d_is_the_whole_shell() {
-        // a 1d radial grid resolves neither angle, and BOTH are angles whose full range the
-        // spherical symmetry fixes — so the cell is the whole SHELL, 4 pi (r_R^3 - r_L^3)/3, not a
+        // a 1d radial grid leaves both angles unresolved, and the spherical symmetry fixes the full
+        // range of each — so the cell is the whole shell, 4 pi (r_R^3 - r_L^3)/3, in place of a
         // per-steradian slice of one. this number is the physical volume of the region the run
         // represents, which is what makes an extensive total over it the actual mass.
         let geo = BlockGeometry::uniform(Spherical, [1.0], [0.1], std::array::from_fn(|d| d));
@@ -588,18 +588,18 @@ mod tests {
 
     #[test]
     fn cylindrical_volume_1d_revolves_but_stays_per_unit_height() {
-        // a 1d radial cylindrical grid leaves phi AND z unresolved, and they are not alike: phi is
-        // an angle whose full 2 pi the axisymmetry fixes, z is a length nothing bounds. so the cell
-        // revolves (x 2 pi) but stays PER UNIT HEIGHT — the honest answer, since the problem does
-        // not say how tall the column is.
+        // a 1d radial cylindrical grid leaves phi and z unresolved, and the two differ in kind: phi
+        // is an angle whose full 2 pi the axisymmetry fixes, z is an unbounded length. so the cell
+        // revolves (x 2 pi) and stays per unit height — the honest answer while the column's height
+        // is left open by the problem.
         let geo = BlockGeometry::uniform(Cylindrical, [1.0], [0.1], std::array::from_fn(|d| d));
         let vol = geo.volume([0]); // r in [1.0, 1.1]
         let expected = std::f64::consts::TAU * (1.1_f64.powi(2) - 1.0_f64.powi(2)) / 2.0;
         assert!(approx(vol, expected), "got {vol}, want {expected}");
     }
 
-    /// the RULE, per chart and dimension, so the convention cannot drift back one call site at a
-    /// time. an ungridded coordinate contributes its full extent iff it is an ANGLE.
+    /// the rule, per chart and dimension, so the convention holds at every call site at once.
+    /// an ungridded coordinate contributes its full extent iff it is an angle.
     #[test]
     fn the_ungridded_measure_follows_the_angle_length_rule() {
         let tau = std::f64::consts::TAU;
@@ -607,7 +607,7 @@ mod tests {
         let id2: [usize; 2] = [0, 1];
         let id3: [usize; 3] = [0, 1, 2];
 
-        // 3d resolves everything: nothing is missing, so nothing is assumed.
+        // 3d resolves every coordinate, so the measure is a bare 1.
         assert_eq!(
             BlockGeometry::<_, f64, 3>::uniform(Spherical, [1.0; 3], [0.1; 3], id3)
                 .ungridded_measure(),
@@ -630,9 +630,9 @@ mod tests {
             2.0 * tau
         );
 
-        // cylindrical: the (R, z) plane leaves the ANGLE unresolved and revolves; the (R, phi)
-        // disk leaves a LENGTH unresolved and does not. same chart, same dimension, different
-        // answer — which is why the axis roles have to be carried rather than inferred.
+        // cylindrical: the (R, z) plane leaves the angle unresolved and revolves; the (R, phi)
+        // disk leaves a length unresolved and stays per unit thickness. same chart, same dimension,
+        // different answer — which is why the axis roles are carried explicitly.
         assert_eq!(
             BlockGeometry::<_, f64, 2>::uniform(Cylindrical, [1.0; 2], [0.1; 2], [0, 2])
                 .ungridded_measure(),
@@ -644,7 +644,7 @@ mod tests {
             1.0
         );
 
-        // cartesian never assumes an extent: every missing coordinate is a length.
+        // cartesian leaves every extent open: each unresolved coordinate is a length.
         for m in [
             BlockGeometry::<_, f64, 1>::uniform(Cartesian, [0.0], [0.1], id1).ungridded_measure(),
             BlockGeometry::<_, f64, 2>::uniform(Cartesian, [0.0; 2], [0.1; 2], id2)
@@ -703,7 +703,7 @@ mod tests {
         };
 
         // on a log-spaced radial grid the arithmetic and geometric cell centers differ at O(1e-3), so a
-        // center-choice error in the curl is observable rather than degenerate.
+        // center-choice error in the curl shows up at a measurable size.
         let r_arith = rc(3);
         let r_geom = (rmap.face(3) * rmap.face(4)).sqrt();
         assert!(

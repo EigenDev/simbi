@@ -3,15 +3,15 @@
 #
 # reading binned reductions back out of a checkpoint. a census stores, per sample, one
 # accumulated value per (bucket, accumulator); this turns that flat table into named,
-# bin-shaped arrays and forms the derived quantities the accumulators cannot store.
+# bin-shaped arrays and forms the derived quantities from the accumulated totals.
 #
-# WHY THE READER FORMS THE MEANS. an accumulator has to be a commutative monoid — the
-# reduction runs in parallel, over blocks, across restart segments, so the combine must be
-# associative and order-agnostic. sums and extrema are; means, variances and percentiles are
-# not, being functions of sums. a census therefore registers `m*v` and `m` and the division
-# happens HERE, once, on the reduced totals. a mean accumulated per-block and averaged again
-# is weighted by block occupancy rather than by mass, which is a different number that looks
-# entirely reasonable.
+# why the reader forms the means. an accumulator has to be a commutative monoid — the
+# reduction runs in parallel, over blocks, across restart segments, so the combine has to be
+# associative and order-agnostic. sums and extrema satisfy that; means, variances and
+# percentiles are functions of sums, so they are formed downstream. a census therefore
+# registers `m*v` and `m`, and the division happens in the reader, once, on the reduced
+# totals. a mean accumulated per-block and averaged again carries block-occupancy weights
+# where mass weights belong, and that number looks entirely reasonable.
 #
 # the same argument gives the Favre (density-weighted) moments for free: the mass-weighted
 # mean of q is `sum(m q) / sum(m)`, and its variance `sum(m q^2)/sum(m) - favre(q)^2`, both
@@ -24,13 +24,13 @@
 #   vr = c.favre("mass_vr", "mass")[-1]        # sum(m v) / sum(m), per bin
 #   c = read_census_series(sorted(glob("run/*.chkpt.*.h5")), "shells")   # across restarts
 #
-# WHY A SERIES READER EXISTS. a history covers ONE run segment: it lives in process memory and
-# starts empty when a run resumes from a checkpoint, so a campaign that requeues writes its
-# record in pieces. the pieces are NOT simply appended. within a single process the history is
-# never cleared, so a later checkpoint contains every row an earlier one does -- concatenating
-# two checkpoints from the same job would count their shared rows twice, and the duplicates are
-# invisible afterwards because a repeated sample looks exactly like a real one. the join is a
-# UNION keyed on (level, time), which is idempotent and therefore safe to run over whatever
+# why a series reader exists. a history covers a single run segment: it lives in process memory
+# and starts empty when a run resumes from a checkpoint, so a campaign that requeues writes its
+# record in pieces. the pieces join as a union. within a single process the history persists for
+# the life of the job, so a later checkpoint contains every row an earlier one does --
+# concatenating two checkpoints from the same job would count their shared rows twice, and the
+# duplicates stay invisible afterwards because a repeated sample looks exactly like a fresh one.
+# keying the union on (level, time) makes it idempotent and therefore safe to run over whatever
 # subset of a run's checkpoints happens to be on disk.
 # =============================================================================
 
@@ -47,8 +47,8 @@ __all__ = ["Census", "CensusError", "read_census", "read_census_series", "census
 
 
 class CensusError(Exception):
-    """a census could not be read or a derived quantity was asked for that its accumulators
-    cannot support. raised rather than returning a sentinel: a silently empty profile is
+    """a census could not be read, or a derived quantity was asked for beyond what its
+    accumulators support. raising keeps the failure loud: a silently empty profile is
     indistinguishable from a physical one."""
 
 
@@ -63,14 +63,13 @@ class Census:
     every row is self-describing. `level` says which refinement level produced it, `n_samples` how
     many samples were folded into it, and `t_start` / `time` the span it covers.
 
-    an ACCUMULATING census stores one row per level folded from many samples with its own reduce
-    op, rather than a row apiece: the time series is traded for a whole-segment reduction, so
-    `n_samples` is what makes a running sum divisible back into a time average.
+    an accumulating census stores one row per level, folded from many samples under its own
+    reduce op: the time series is traded for a whole-segment reduction, so `n_samples` is what
+    makes a running sum divisible back into a time average.
 
-    a PER-LEVEL census records each level's own subcycle rather than one composite row per root
-    step, so rows from different levels carry different times and cover different volumes. summing
-    across levels is therefore the reader's decision, not one baked into the file — use
-    `for_level`.
+    a per-level census records each level's own subcycle, so rows from different levels carry
+    different times and cover different volumes. the file keeps the levels separate, which
+    leaves summing across them to the reader — use `for_level`.
     """
 
     name: str
@@ -106,10 +105,10 @@ class Census:
     def for_level(self, level: int) -> "Census":
         """the rows produced by one refinement level.
 
-        rows from different levels are NOT interchangeable: they carry different times, cover
-        different volumes, and on a per-level cadence arrive at different rates. selecting before
-        any time-series analysis is what keeps a level-2 row taken four times per root step from
-        being averaged against a level-0 row taken once.
+        each level's rows describe that level alone: they carry their own times, cover their own
+        volumes, and on a per-level cadence arrive at their own rate. selecting a level before
+        any time-series analysis is what keeps a level-2 row taken four times per root step
+        apart from a level-0 row taken once.
         """
         if self.level is None:
             raise CensusError(
@@ -135,11 +134,11 @@ class Census:
 
         this is what an accumulating census exists to produce: the stored row is the running
         sum over samples, so the mean is that row divided by the count — and the count is what
-        makes it recoverable without the samples themselves. a per-sample census averages its
-        rows directly, so the same call means the same thing either way.
+        makes the mean recoverable from the sum alone. a per-sample census averages its rows
+        directly, so the same call means the same thing either way.
 
-        only meaningful for an additive census: a running max over time is already the answer
-        for the whole segment and dividing it by a sample count is not an average of anything.
+        defined for an additive census: a running max over time is already the answer for the
+        whole segment, so a sample count has nothing left to divide.
         """
         self._require_additive("a time average")
         if len(self.levels) > 1:
@@ -161,10 +160,11 @@ class Census:
         return self.value(name).sum(axis=0) / float(counts.sum())
 
     def bin_centers(self, axis: int = 0) -> Array:
-        """midpoints of one axis's bins. these are plotting coordinates, NOT the radii the
-        accumulators were evaluated at — each bucket holds a sum over a finite-width bin, so
-        the representative coordinate of the contents is whatever the census was asked to
-        accumulate (register `mass_r` alongside `mass` if the mass-weighted radius matters)."""
+        """midpoints of one axis's bins. these are plotting coordinates: a midpoint labels a
+        bin, while the accumulators were evaluated at the cell coordinates inside it. each
+        bucket holds a sum over a finite-width bin, so the representative coordinate of the
+        contents is whatever the census was asked to accumulate (register `mass_r` alongside
+        `mass` if the mass-weighted radius matters)."""
         e = self.axis_edges[self._axis(axis)]
         return 0.5 * (e[:-1] + e[1:])
 
@@ -180,8 +180,8 @@ class Census:
         average a finite-volume scheme actually evolves — a volume-weighted mean of the same
         field is a different quantity and diverges from it wherever the density is structured.
 
-        empty bins return NaN rather than zero: no matter landed there, so the mean is not
-        defined, and zero would read as a physical measurement of zero.
+        empty bins return NaN: no matter landed there, so the mean is undefined, and a zero
+        there would read as a physical measurement of zero.
         """
         self._require_additive("a weighted mean")
         num = self.value(moment)
@@ -193,10 +193,10 @@ class Census:
         """the weight-averaged variance `sum(w q^2)/sum(w) - favre(q)^2` per bin, per sample.
 
         `second` holds `sum(w q^2)`. this is the reason a census stores raw powers: the
-        variance is a function of two sums, so it cannot be accumulated directly, but it
-        falls out of them exactly. the subtraction is cancellation-prone where the spread is
-        far below the mean, so a negative result (pure roundoff) is clamped to zero rather
-        than returned as a nonsensical negative variance.
+        variance is a function of two sums, and it falls out of them exactly, which is why
+        the sums are what the run accumulates. the subtraction is cancellation-prone where
+        the spread is far below the mean, so a negative result is pure roundoff and is
+        clamped to zero, keeping the returned variance nonnegative.
         """
         self._require_additive("a weighted variance")
         mean = self.favre(moment, weight)
@@ -207,8 +207,8 @@ class Census:
 
     def total(self, name: str) -> Array:
         """one accumulator summed over every bin, per sample — the global reduction the
-        binning refines. only meaningful for an additive census: combining extrema across
-        bins is a max, not a sum, and is not what this returns."""
+        binning refines. defined for an additive census: combining extrema across bins is a
+        max over bins, a different reduction from the sum returned here."""
         self._require_additive("a total over bins")
         axes = tuple(range(1, 1 + len(self.bin_shape)))
         return self.values[..., self._value(name)].sum(axis=axes) if axes else self.value(name)
@@ -216,10 +216,10 @@ class Census:
     def assert_fully_binned(self, sample: int | None = None) -> None:
         """every cell landed in a bin.
 
-        a cell whose coordinate falls outside the declared edges is DROPPED, and a census
+        a cell whose coordinate falls outside the declared edges is dropped, and a census
         that under-covers its domain produces a profile that looks entirely physical while
-        omitting an arbitrary part of the grid. the shortfall travels with the numbers so
-        this can be checked rather than assumed.
+        omitting an arbitrary part of the grid. the shortfall travels with the numbers, so
+        coverage is a checkable fact.
         """
         d = self.dropped if sample is None else self.dropped[sample : sample + 1]
         worst = int(d.max()) if d.size else 0
@@ -289,8 +289,8 @@ def read_census(path: str, name: str) -> Census:
         op = _attr_str(attrs, "op")
         n_segments = int(attrs["n_segments"])
         n_values = int(attrs["n_values"])
-        # a file written before accumulation existed is, by definition, not accumulated, and its
-        # sample count is its row count — so these default rather than fail.
+        # a file written before accumulation existed holds one sample per row, so these
+        # attributes fall back to the per-sample reading.
         accumulated = bool(int(attrs.get("accumulated", 0)))
         cadence = _attr_str(attrs, "cadence") if "cadence" in attrs else "root_step"
         level = np.asarray(g["level"][...], dtype=np.int64) if "level" in g else None
@@ -337,20 +337,20 @@ def read_census(path: str, name: str) -> Census:
 
 
 def read_census_series(paths, name: str) -> Census:
-    """one census joined across a chain of checkpoints, as a UNION over rows.
+    """one census joined across a chain of checkpoints, as a union over rows.
 
     a history covers one run segment and restarts empty when a run resumes, so a requeued
     campaign records its series in pieces. this joins them.
 
-    the join is a union keyed on (level, time), NOT a concatenation. within a single process the
-    history is never cleared, so a later checkpoint holds every row an earlier one holds; appending
-    would double-count the shared rows, and a duplicated sample is indistinguishable from a real
-    one once it is in the array. keying on (level, time) makes the join idempotent, so it may be
-    given every checkpoint of a run, any subset of them, or the same file twice.
+    the join is a union keyed on (level, time). within a single process the history persists to
+    the end of the job, so a later checkpoint holds every row an earlier one holds; appending
+    would double-count the shared rows, and a duplicated sample is indistinguishable from a
+    genuine one once it is in the array. keying on (level, time) makes the join idempotent, so it
+    may be given every checkpoint of a run, any subset of them, or the same file twice.
 
-    every file must carry the SAME registration. a census whose bins or accumulators changed
-    describes different quantities under the same name, and joining those silently would produce a
-    profile assembled from two different measurements.
+    the join requires one registration shared by every file. a census whose bins or accumulators
+    changed describes different quantities under the same name, and joining those silently would
+    produce a profile assembled from two different measurements.
     """
     paths = list(paths)
     if not paths:
@@ -360,9 +360,9 @@ def read_census_series(paths, name: str) -> Census:
 
     if head.accumulated:
         # an accumulating history folds its samples into one row per level, so a row records a
-        # reduction over a span rather than an instant. two such rows may be disjoint segments
-        # (combine them, count-weighted) or one may be a superset of the other (keep the larger) --
-        # and (level, time) does not separate those cases. refused rather than guessed.
+        # reduction over a span of time. two such rows may be disjoint segments (combine them,
+        # count-weighted) or one may be a superset of the other (keep the larger); the
+        # (level, time) key reads the same in both cases, so the merge is left to the caller.
         raise CensusError(
             f"census '{name}' is accumulating; a series join would have to combine whole-segment "
             "reductions, which is a count-weighted merge rather than a union over rows. read the "
@@ -399,9 +399,9 @@ def read_census_series(paths, name: str) -> Census:
     has_ts = all(p.t_start is not None for p in parts)
     t_start = np.concatenate([p.t_start for p in parts]) if has_ts else None
 
-    # unique on (level, time). the times compare EXACTLY because a duplicated row is the same
-    # bytes written twice, not the same instant recomputed -- so no tolerance is needed, and
-    # introducing one would risk merging two genuinely distinct samples of a fine level.
+    # unique on (level, time). the times compare exactly: a duplicated row is the same bytes
+    # written twice, so bitwise equality identifies it, and a tolerance would risk merging two
+    # genuinely distinct samples of a fine level.
     keys = np.stack([level.astype(np.float64), time], axis=1)
     _, keep = np.unique(keys, axis=0, return_index=True)
     # chronological, level as the tiebreak, so the result reads as a time series

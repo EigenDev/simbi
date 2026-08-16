@@ -13,9 +13,9 @@
 // first-class property here and is monotonically decreasing in block size (the
 // measured "larger patches are cheaper" result, now a law).
 //
-// NOTE: this is the DOMAIN-decomposition primitive (how the index space is cut
+// this is the domain-decomposition primitive (how the index space is cut
 // into work units). it is orthogonal to a memory-layout `View` (strides /
-// contiguous axis), which concerns how ONE block is laid out in memory.
+// contiguous axis), which concerns how a single block is laid out in memory.
 //
 // usage:
 //  let grid = BlockGrid::new(interior, [32, 32, 32]);
@@ -65,7 +65,7 @@ impl<const R: usize> BlockGrid<R> {
     }
 
     /// the block at multi-index `idx` (axis-wise). the last block on an axis is
-    /// CLIPPED to the domain when the size is not a multiple of the block size.
+    /// clipped to the domain when the size is a partial multiple of the block size.
     pub fn block(&self, idx: [usize; R]) -> Domain<R> {
         Domain::new(std::array::from_fn(|aa| {
             let lo = self.domain.spaces[aa].lo + (idx[aa] * self.block[aa]) as isize;
@@ -78,12 +78,12 @@ impl<const R: usize> BlockGrid<R> {
         }))
     }
 
-    /// the `(lo, size)` of the block at LINEAR index `bi` (row-major, axis 0
-    /// fastest) WITHOUT minting a `Domain`. for hot parallel dispatch over many
-    /// blocks: `blocks()` allocates a `Vec<Domain>` and a `DomainId` atomic PER
-    /// block — fine for a few, ruinous for the 32k blocks an 8-edge tile makes of
-    /// a 256^3 grid. iterate `0..len()` and call this instead; it is pure index
-    /// arithmetic (no alloc, no atomic). the last block per axis is clipped.
+    /// the `(lo, size)` of the block at linear index `bi` (row-major, axis 0
+    /// fastest), computed in place of minting a `Domain`. for hot parallel dispatch
+    /// over many blocks: `blocks()` allocates a `Vec<Domain>` and a `DomainId` atomic
+    /// per block — fine for a few, ruinous for the 32k blocks an 8-edge tile makes of
+    /// a 256^3 grid. iterate `0..len()` and call this; it is pure index
+    /// arithmetic, free of allocation and atomics. the last block per axis is clipped.
     pub fn window(&self, bi: usize) -> ([isize; R], [usize; R]) {
         let counts = self.counts();
         // block-space index -> block coordinate through the layout's canonical inverse, so a block
@@ -182,8 +182,8 @@ mod laws {
     const N3: [&str; 3] = ["i", "j", "k"];
     const ITERS: usize = 3000;
 
-    // AXIOM: blocks() is a PARTITION of the domain — disjoint and covering, for
-    // ANY block size (including non-divisible sizes -> partial last blocks, and
+    // axiom: blocks() is a partition of the domain — disjoint and covering, for
+    // every block size (including partial-multiple sizes -> partial last blocks, and
     // blocks larger than the domain -> a single block == domain).
     #[test]
     fn blocks_partition_the_domain() {

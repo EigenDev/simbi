@@ -19,8 +19,9 @@ ComputeFunc = Callable[[dict[str, Any]], Any]
 class FieldComputationError(ValueError):
     """a derived field could not be computed from the checkpoint's stored
     datasets (e.g. a pressure-dependent field on a file with no pressure).
-    deliberately not a KeyError: callers that skip fields absent from a
-    level must still surface this as a hard failure."""
+    it derives from ValueError, which keeps it clear of the KeyError that
+    callers swallow when skipping fields absent from a level, so this
+    surfaces as a hard failure."""
 
 
 # =============================================================================
@@ -126,10 +127,10 @@ closure_t = gamma_law_t | taub_mathews_t
 
 
 def closure_of(metadata: Any) -> closure_t:
-    """the equation of state a checkpoint was integrated with. the `gamma` attribute of a
-    synge run is an INERT PLACEHOLDER — the closure carries no adiabatic index — so reading
-    it as one computes a different gas than the one that was evolved. an empty slug means
-    the file predates the attribute, which only gamma-law runs can be."""
+    """the equation of state a checkpoint was integrated with. the synge closure is
+    parameter-free, so the `gamma` attribute of a synge run carries a reporting value alone;
+    reading it as an adiabatic index computes a different gas than the one that was evolved.
+    an empty slug marks a file predating the attribute, and such a file is gamma-law."""
     if getattr(metadata, "eos", "") == "synge":
         return taub_mathews_t()
     return gamma_law_t(metadata.gamma)
@@ -137,8 +138,8 @@ def closure_of(metadata: Any) -> closure_t:
 
 def _newtonian_gamma(eos: closure_t) -> float:
     """the adiabatic index of a newtonian checkpoint. the parameter-free relativistic
-    closure has none and cannot appear on one — it is refused at configuration time — so
-    reaching here with it means the file's regime and eos attributes disagree."""
+    closure is refused on a newtonian regime at configuration time, so meeting one here
+    means the file's regime and eos attributes disagree."""
     if not isinstance(eos, gamma_law_t):
         raise FieldComputationError(
             f"the checkpoint declares a newtonian regime under the "
@@ -354,9 +355,9 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             return self._fields.get(key, default)
 
         def __contains__(self, key: str) -> bool:
-            # without this, `key in ctx` falls back to integer __getitem__
-            # iteration and raises KeyError: 0 — which broke every b*_mean
-            # derived field on MHD checkpoints.
+            # `key in ctx` answers from the field mapping. the fallback path,
+            # integer __getitem__ iteration, raises KeyError: 0 and takes out
+            # every b*_mean derived field on MHD checkpoints.
             return key in self._fields
 
         def __iter__(self):
@@ -548,7 +549,9 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
                 if tuple(cell.shape) == rho_shape:
                     out.append(cell)
                 else:
-                    # cannot reconcile shapes: return zeros to avoid silent mis-shapes
+                    # the face average landed on a shape other than the density
+                    # grid: return zeros at the density shape so the result stays
+                    # conformable
                     out.append(np.zeros(rho_shape, dtype=float))
             except Exception:
                 out.append(np.zeros(rho_shape, dtype=float))

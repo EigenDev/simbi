@@ -18,7 +18,7 @@ use super::linform::{LinForm, LinFormR};
 use super::poly::{FieldTerm, Poly, RatFun};
 
 impl LinFormR {
-    /// extract the symbolic rational-function linear form of the CURVILINEAR curl
+    /// extract the symbolic rational-function linear form of the curvilinear curl
     /// DAG rooted at `root`. `field_keys` are the edge-emf reads; `scalar_keys` are
     /// the geometry/time scalars (dt, x_lo_N, dx_N). the `_coord_N` params become
     /// the polynomial vars `c_N`; `Div` -> RatFun divide; `Sin` -> an opaque

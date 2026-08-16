@@ -91,7 +91,7 @@ unsafe extern "C" {
     fn cuDeviceTotalMem_v2(bytes: *mut usize, dev: CUdevice) -> CUresult;
     fn cuDeviceGetCount(count: *mut c_int) -> CUresult;
     // peer access + cross-device copy. cuMemcpyPeer takes the source and
-    // destination CONTEXTS, so the logical->physical context mapping composes automatically.
+    // destination contexts, so the logical->physical context mapping composes automatically.
     fn cuMemcpyPeer(
         dst: CUdeviceptr,
         dst_ctx: CUcontext,
@@ -109,8 +109,8 @@ const CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR: c_int = 76;
 
 /// the (major, minor) compute capability of device 0, e.g., (7, 5) for an RTX 2070.
 /// NVRTC needs it to pick `--gpu-architecture=compute_<major><minor>` so the PTX it
-/// emits matches the GPU the driver will JIT it onto. queried from the driver, not
-/// hardcoded — device-agnostic by design.
+/// emits matches the GPU the driver will JIT it onto, queried live from the driver
+/// for device-agnostic behavior.
 pub fn device_compute_capability() -> error::Result<(i32, i32)> {
     ensure_init()?;
     let mut dev: CUdevice = 0;
@@ -191,7 +191,7 @@ pub fn device_info() -> error::Result<DeviceInfo> {
 }
 
 /// block until all outstanding work on the current CUDA context finishes.
-/// panics on driver error — the caller is in dispatch code that cannot recover.
+/// panics on driver error, the only recovery available to dispatch code at this point.
 pub fn ctx_sync() {
     let res = unsafe { cuCtxSynchronize() };
     if res != CUDA_SUCCESS {
@@ -230,7 +230,7 @@ pub const MAX_GPUS: usize = 16;
 static CUDA_CTX: [OnceLock<SyncCtx>; MAX_GPUS] = [const { OnceLock::new() }; MAX_GPUS];
 
 thread_local! {
-    // the device whose context is current on THIS thread. cuda's current-context is
+    // the device whose context is current on the running thread. cuda's current-context is
     // per-thread, so the "current device" is too. defaults to 0 (the single-device path).
     static CURRENT_DEVICE: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
 }
@@ -250,9 +250,10 @@ pub fn device_count() -> error::Result<i32> {
     Ok(count)
 }
 
-/// get-or-create device `ord`'s context WITHOUT changing this thread's current device. peer
-/// ops need a handle to ANOTHER device's context (for cuMemcpyPeer / cuCtxEnablePeerAccess)
-/// while the current device stays put, so the context creation is split from the rebind.
+/// get-or-create device `ord`'s context, leaving this thread's current device unchanged.
+/// peer ops need a handle to another device's context (for cuMemcpyPeer /
+/// cuCtxEnablePeerAccess) while the current device stays put, so the context creation is
+/// split from the rebind.
 fn device_ctx(ord: i32) -> CUcontext {
     assert!(
         (ord as usize) < MAX_GPUS,
@@ -272,8 +273,7 @@ fn device_ctx(ord: i32) -> CUcontext {
                     // logical ordinals round-robin onto the physical devices: identity when
                     // there are at least as many gpus as logical ids (the production case),
                     // and wrapping otherwise -- so N logical devices run as N distinct contexts
-                    // on a single card, which is how the multi-device path is validated without
-                    // a second gpu.
+                    // on a single card, validating the multi-device path on one gpu alone.
                     let mut count: c_int = 0;
                     check(cuDeviceGetCount(&mut count), "cuDeviceGetCount")
                         .expect("cuDeviceGetCount failed");
@@ -297,7 +297,7 @@ fn ensure_init_device(ord: i32) -> error::Result<CUcontext> {
     Ok(ctx)
 }
 
-/// ensure CUDA is initialized and the CURRENT device's context is current on this thread.
+/// ensure CUDA is initialized and the current device's context is current on this thread.
 /// the single-device path (current device defaults to 0) is behaviorally unchanged.
 fn ensure_init() -> error::Result<()> {
     ensure_init_device(current_device()).map(|_| ())
@@ -320,8 +320,8 @@ pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
 // =============================================================================
 // peer access: direct device-to-device halo copy. the peer
 // `HaloTransport` gathers a strip on the source device, moves the contiguous buffer to the
-// destination device with `memcpy_peer`, then scatters there. on a single gpu these are not
-// exercised (one device cannot peer with itself); they run on a real multi-gpu node.
+// destination device with `memcpy_peer`, then scatters there. these paths exercise only on a
+// real multi-gpu node, where a device has another device to peer with; a single gpu has none.
 // =============================================================================
 
 /// can device `ord` directly read memory resident on device `peer`? false when the link is

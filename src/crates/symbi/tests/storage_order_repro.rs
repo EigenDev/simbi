@@ -151,7 +151,7 @@ fn part4_what_numpy_imshow_sees() {
     // axis 1 as COLUMNS (horizontal). with reshape (Ny, Nx):
     //   - numpy axis 0 = Ny -> vertical screen axis = physical y
     //   - numpy axis 1 = Nx -> horizontal screen axis = physical x
-    // standard physics orientation. NO rotation.
+    // standard physics orientation, screen axes aligned with the physical ones.
 
     let nx = NX;
     let ny = NY;

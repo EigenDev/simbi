@@ -29,8 +29,8 @@ from simbi.reader.gr_accretion import (
 
 
 def _conserved_ks_inflow(r, mass, mdot, v_r):
-    """a Schwarzschild-KS radial inflow with EXACTLY constant rest-mass rate `mdot`.
-    `v_r` is the (subluminal, negative) CONTRAVARIANT valencia radial velocity; returns
+    """a Schwarzschild-KS radial inflow with exactly constant rest-mass rate `mdot`.
+    `v_r` is the (subluminal, negative) contravariant valencia radial velocity; returns
     (rho, v_r) with rho chosen so -4 pi r^2 rho u^r = mdot at every radius."""
     h = 1.0 + 2.0 * mass / r
     beta_over_alpha = (2.0 * mass / (r + 2.0 * mass)) * np.sqrt(h)
@@ -90,9 +90,9 @@ def test_reducer_reproduces_analytic_michel_mdot():
     rho = np.empty_like(r)
     v_r = np.empty_like(r)
     for ii, rr in enumerate(r):
-        # the SCHWARZSCHILD split, explicitly: this builds a synthetic state in that
-        # chart and checks the reducer against it, so the split must match what the
-        # reducer assumes rather than any evolution chart.
+        # the schwarzschild split, explicitly: this builds a synthetic state in that
+        # chart and checks the reducer against it, so the split follows the reducer's
+        # own assumption, independent of any evolution chart.
         rho_i, v1_i, _ = sol.primitive(rr, "schwarzschild")
         rho[ii] = rho_i
         v_r[ii] = v1_i  # valencia contravariant radial velocity, negative (inflow)
@@ -116,7 +116,7 @@ def _radial_centroids(x1v):
 
 
 def test_shell_accretion_recovers_conserved_flow_on_a_log_grid_1d():
-    # a real log-spaced radial vertex grid; the flow is conserved at the SAME
+    # a real log-spaced radial vertex grid; the flow is conserved at the very
     # volume-weighted centroids the reducer samples, so recovery is exact.
     mass = 1.0
     x1v = _log_vertices(2.5, 50.0, 96)
@@ -212,7 +212,7 @@ def test_accretion_from_checkpoint_rejects_flat_and_massless():
 
 def _cartesian_ks_grid(n, half_width):
     """cell-center axes of an even-resolution origin-containing square (centers
-    straddle the origin, never on an axis)."""
+    straddle the origin, each sitting half a cell off both axes)."""
     dx = 2.0 * half_width / n
     c = (np.arange(n) + 0.5) * dx - half_width
     return c, c
@@ -220,10 +220,11 @@ def _cartesian_ks_grid(n, half_width):
 
 def _conserved_cartesian_ks_inflow(xc, yc, mass, mdot2d, v_r):
     """a radial contravariant inflow v^i = v_r l^i on the cartesian KS slice with
-    EXACTLY constant 2D ring flux `mdot2d`: rho = -mdot2d / (2 pi r u^r), with u^r
-    from the (michel-validated) spherical-KS formula — the reducer must reproduce
-    it through the cartesian non-diagonal metric. cells too deep for the chosen
-    v_r to be subluminal are masked to an arbitrary value (never ring-sampled)."""
+    exactly constant 2D ring flux `mdot2d`: rho = -mdot2d / (2 pi r u^r), with u^r
+    from the (michel-validated) spherical-KS formula — the reducer reproduces it
+    through the cartesian non-diagonal metric. cells too deep for the chosen v_r to
+    be subluminal are masked to an arbitrary value, and every sampled ring lies
+    outside them."""
     x = xc[None, :]
     y = yc[:, None]
     r = np.sqrt(x * x + y * y)

@@ -2,35 +2,35 @@
 // gv_excise.rs
 //
 // the traced horizon-excision fill for the cartesian kerr-schild charts: three
-// kernels that together freeze every excised cell at a cold VACUUM FLOOR
+// kernels that together freeze every excised cell at a cold vacuum floor
 // (rho_floor, v = 0, p_floor), then rebuild the conserved state with the cell's
 // own metric. the excised region is the sublevel set of the kerr-schild radius
 // r_ks(x; a) < r_exc — the sphere about the chart origin at a = 0, the oblate
 // spheroid (x^2 + y^2)/(r_exc^2 + a^2) + z^2/r_exc^2 < 1 at spin a about z (the
 // r = const surfaces of the chart).
 //
-// the vacuum is a one-way ABSORBING accretion boundary: the exterior gas rarefies
-// INTO the vacuum at the excision faces (material is consumed, nothing returns),
-// the physical horizon. a zero-gradient / outward-copy fill would instead be a
-// TRANSMISSIVE outflow BC — on the staircased cartesian surface the per-axis sweep
-// speeds need not be one-signed, so a transmissive interior leaks back into the
-// exterior flux; accretion and outflow are different boundary conditions and only
-// the absorber is correct for a black hole.
+// the vacuum is a one-way absorbing accretion boundary: the exterior gas rarefies
+// into the vacuum at the excision faces (material crosses in and stays), the
+// physical horizon. a zero-gradient / outward-copy fill would instead be a
+// transmissive outflow BC — on the staircased cartesian surface the per-axis sweep
+// speeds carry both signs, so a transmissive interior leaks back into the
+// exterior flux; accretion and outflow are different boundary conditions, and the
+// absorber is the one a black hole obeys.
 //
 //   excise_fill      prim -> scratch = the vacuum-floor fill
 //   excise_writeback scratch -> prim                    (the fill commit)
 //   excise_p2c       prim -> cons, valencia to_conserved at the cell centroid,
 //                    excised cells only (live cells pass their cons through)
 //
-// the fill carries the GAS primitives only (rho, v, p). the magnetized p2c
-// reads the cell's OWN B (the face average the constrained transport owns) and
-// rebuilds (D, S_i, tau) with it — the staggered faces are never written, so
-// the densitized div(B) invariant survives excision by construction.
+// the fill carries the gas primitives alone (rho, v, p). the magnetized p2c
+// reads the cell's own B (the face average the constrained transport owns) and
+// rebuilds (D, S_i, tau) with it — the staggered faces keep the values transport
+// gave them, so the densitized div(B) invariant survives excision by construction.
 //
 // the fill is pointwise and idempotent, so a single pass fills the region; the
 // pair runs under a store-driven pass count and p2c runs once after it. the
-// dispatch box is the excision region's index bbox — computed host-side, so
-// no output-support declaration rides the artifacts.
+// dispatch box is the excision region's index bbox — computed host-side, so the
+// support lives in the runtime dispatch and the baked artifacts carry the arithmetic alone.
 //
 // usage (build.rs):
 //   let (k, writes) = excise_fill_gv();
@@ -95,7 +95,7 @@ fn centroid(ndim: usize) -> Vec<Gv> {
 
 /// the excision mask at the traced centroid: r_ks(x; a) < r_exc with the
 /// host-filled `kerr_spin` / `excision_radius` scalars (spin = 0 for the
-/// schwarzschild chart). ONE definition shared by the fill and the rebuild.
+/// schwarzschild chart). one definition shared by the fill and the rebuild.
 fn excised_mask_2d(x: &[Gv; 2]) -> <Gv as Scalar>::Mask {
     ks_excised(x, Gv::scalar("kerr_spin"), Gv::scalar("excision_radius"))
 }
@@ -107,7 +107,7 @@ fn excised_mask_3d(x: &[Gv; 3]) -> <Gv as Scalar>::Mask {
 /// one 2d fill pass over `1 + dof + 1` gas primitives: every excised cell is
 /// frozen at the cold vacuum floor; live cells copy their own state. writes the
 /// filled state to the exc_0.. scratch (the commit is `excise_writeback`, so the
-/// fill never reads a value written by the same pass). `dof = 2` is the in-plane GR-hydro state; `dof = 3`
+/// fill sees the pre-pass state at every read). `dof = 2` is the in-plane GR-hydro state; `dof = 3`
 /// carries the out-of-plane momentum of the 2.5d MHD state.
 fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, Writes) {
     begin_trace();
@@ -121,8 +121,8 @@ fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, Writes) {
     let x = [c[0], c[1]];
     let excised = excised_mask_2d(&x);
     // the vacuum-floor sink: an excised (inside-horizon) cell is frozen at a cold c2p-safe vacuum;
-    // live cells keep their own state. the boundary riemann then rarefies the exterior gas INTO the
-    // vacuum -- a one-way absorbing accretion BC (nothing returns), the physical horizon.
+    // live cells keep their own state. the boundary riemann then rarefies the exterior gas into the
+    // vacuum -- a one-way absorbing accretion BC (material crosses in and stays), the physical horizon.
     let filled: Vec<Gv> = (0..nf)
         .map(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]))
         .collect();
@@ -251,17 +251,17 @@ pub fn excise_p2c_gv() -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
-/// the traced metric-sampling position of a spherical cell: the per-axis MIDPOINT on every
+/// the traced metric-sampling position of a spherical cell: the per-axis midpoint on every
 /// gridded axis, the symmetry value on every ungridded one (the polar slot of a 1d radial row is
 /// pi/2 — suppressing it to zero would zero sin(theta) and make gamma_{phi phi} singular).
 ///
-/// the midpoint, not the chart's volume-weighted centroid: the excised state is stored
-/// DENSITIZED, and a densitized cell average is taken over the plain coordinate volume, whose
-/// second-order sampling point is the midpoint. the two differ by dr^2/(6r) on a radial axis, and
-/// the recovery inverts at the midpoint — sampling the rebuild anywhere else leaves an excised
-/// cell whose recovered primitives are not the floor it was frozen at.
+/// the midpoint is the sampling point, ahead of the chart's volume-weighted centroid: the excised
+/// state is stored densitized, and a densitized cell average is taken over the plain coordinate
+/// volume, whose second-order sampling point is the midpoint. the two differ by dr^2/(6r) on a
+/// radial axis, and the recovery inverts at the midpoint — sampling the rebuild there is what
+/// returns an excised cell's primitives as the floor it was frozen at.
 ///
-/// the face positions this is built from are selected at RUNTIME by `map_kind_{ax}`, so one
+/// the face positions this is built from are selected at runtime by `map_kind_{ax}`, so one
 /// traced kernel serves a uniform and a log-radial grid alike.
 fn sample_position_sph<const D: usize>(ndim: usize) -> Tensor<Gv, D> {
     let spacing = vec![Spacing::Uniform; ndim];
@@ -275,21 +275,21 @@ fn sample_position_sph<const D: usize>(ndim: usize) -> Tensor<Gv, D> {
     }))
 }
 
-/// the excision mask on a spherical chart: `r < r_exc` on the grid's OWN radial coordinate.
+/// the excision mask on a spherical chart: `r < r_exc` on the grid's own radial coordinate.
 ///
-/// no quartic and no staircase. the cartesian mask solves `r_ks(x; a)` because a sphere cut out of
-/// a cartesian lattice is not aligned with any axis; here `r` IS a coordinate, so the excised
-/// region is an exact slab of the innermost radial cells and its surface is a coordinate surface.
-/// the spin does not widen it: the oblate spheroid of the cartesian chart is the `r = const`
-/// surface of this one.
+/// a plain radial comparison replaces the cartesian mask's quartic and its staircased surface. the
+/// cartesian mask solves `r_ks(x; a)` because a sphere cut out of a cartesian lattice crosses every
+/// axis obliquely; here `r` is a coordinate, so the excised region is an exact slab of the
+/// innermost radial cells and its surface is a coordinate surface. the spin leaves that slab as it
+/// stands: the oblate spheroid of the cartesian chart is the `r = const` surface of this one.
 fn excised_mask_sph(x_r: Gv) -> <Gv as Scalar>::Mask {
     x_r.cmp_lt(Gv::scalar("excision_radius"))
 }
 
 /// the spherical-chart gas fill: every cell inside the horizon is frozen at the cold vacuum floor,
 /// live cells keep their own state. the same absorbing boundary the cartesian charts use — the
-/// exterior rarefies INTO the vacuum at the excision faces and nothing returns, which is the
-/// physical content of a horizon: no characteristic leaves it.
+/// exterior rarefies into the vacuum at the excision faces and stays there, which is the
+/// physical content of a horizon: every characteristic points inward.
 fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> (GvKernel, Writes) {
     begin_trace();
     let names = prim_names(dof);
@@ -397,10 +397,10 @@ pub fn excise_p2c_sph_ks_2d_gv() -> (GvKernel, Writes) {
 }
 
 /// the 3d gas fill: every excised cell takes the primitive state of its outward
-/// CORNER-diagonal neighbor (sign-selected on all three axes); live cells copy
-/// their own state. the rho/vel_0..2/pre set serves BOTH the 3d GR-hydro state
-/// and the 3d magnetized gas state (the field rides the staggered faces, never
-/// the fill).
+/// corner-diagonal neighbor (sign-selected on all three axes); live cells copy
+/// their own state. the rho/vel_0..2/pre set serves both the 3d GR-hydro state
+/// and the 3d magnetized gas state (the field lives on the staggered faces,
+/// outside this fill).
 pub fn excise_fill_3d_gv() -> (GvKernel, Writes) {
     begin_trace();
     let names = prim_names(3);
@@ -413,8 +413,8 @@ pub fn excise_fill_3d_gv() -> (GvKernel, Writes) {
     let x = [c[0], c[1], c[2]];
     let excised = excised_mask_3d(&x);
     // the vacuum-floor sink: an excised (inside-horizon) cell is frozen at a cold c2p-safe vacuum;
-    // live cells keep their own state. the boundary riemann rarefies the exterior gas INTO the
-    // vacuum -- a one-way absorbing accretion BC (nothing returns), the physical horizon.
+    // live cells keep their own state. the boundary riemann rarefies the exterior gas into the
+    // vacuum -- a one-way absorbing accretion BC (material crosses in and stays), the physical horizon.
     let filled: [Gv; 5] =
         std::array::from_fn(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]));
 
@@ -499,12 +499,12 @@ pub fn excise_p2c_3d_gv() -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
-/// the MAGNETIZED conserved rebuild of every excised cell: the ideal-GRMHD
+/// the magnetized conserved rebuild of every excised cell: the ideal-GRMHD
 /// valencia `to_conserved` — S_i = (rho h W^2 + B^2) v_i - (v.B) B_i and
 /// tau = rho h W^2 + B^2 - (p + b^2/2) - D, all contractions through the
-/// cell-centroid spatial metric — from the just-filled GAS primitives and the
-/// cell's OWN B (the face average the constrained transport owns). the
-/// staggered faces are never written, so d_i(sqrt(gamma) B^i) = 0 survives
+/// cell-centroid spatial metric — from the just-filled gas primitives and the
+/// cell's own B (the face average the constrained transport owns). the
+/// staggered faces keep the values transport gave them, so d_i(sqrt(gamma) B^i) = 0 survives
 /// excision identically; the conserved B slots alias the cell B and pass
 /// through untouched. MHD momentum/velocity vectors are always 3-component
 /// (the 2d grid instance is the equatorial slice with z = 0 in the metric
@@ -588,15 +588,15 @@ pub fn excise_p2c_mhd_3d_gv() -> (GvKernel, Writes) {
     excise_p2c_mhd_dim_gv(3)
 }
 
-/// the per-cell OUTWARD boundary-flux contribution of the diagnostic region
+/// the per-cell outward boundary-flux contribution of the diagnostic region
 /// `Omega = { r_ks(x) < diagnostic_radius }`, for the densitized numerical flux field
-/// `flux_base` (`"mass_flux"` | `"nrg_flux"` | `"mom_flux_k"`). each cell OWNS its lo
+/// `flux_base` (`"mass_flux"` | `"nrg_flux"` | `"mom_flux_k"`). each cell owns its lo
 /// faces: for gridded axis `d`, the lo face (between `c - e_d` and `c`) is a boundary
 /// face of `Omega` iff the two cells straddle the shell, and its outward-normal
 /// densitized flux `+/- F_lo * A_lo` is emitted (`+` when the interior cell is on the
-/// `-d` side). `field_reduce(Add)` over the domain then telescopes to the NET OUTWARD
-/// flux through `d(Omega)`; the accretion rate is its NEGATION. the `F_lo * A_lo` face
-/// flux is the SAME quantity `gv_divergence` consumes, so the diagnostic is bit-consistent
+/// `-d` side). `field_reduce(Add)` over the domain then telescopes to the net outward
+/// flux through `d(Omega)`; the accretion rate is its negation. the `F_lo * A_lo` face
+/// flux is the same quantity `gv_divergence` consumes, so the diagnostic is bit-consistent
 /// with the finite-volume update and a steady flow is `diagnostic_radius`-invariant to
 /// roundoff. cartesian kerr-schild only (the charts that excise).
 pub fn shell_flux_map_gv(
@@ -696,7 +696,7 @@ mod shell_flux_tests {
             "schwarzschild ks carries no spin"
         );
         // the flux field is read at offset 0 (the cell's own lo face) — a direct read, bound at
-        // dispatch, so it is not a stencil (shifted) read. one scratch output per quantity pass.
+        // dispatch, so the kernel's stencil reach stays zero. one scratch output per quantity pass.
         assert_eq!(writes.len(), 1, "one scratch output per quantity pass");
 
         // the spinning-kerr chart adds the spin scalar.

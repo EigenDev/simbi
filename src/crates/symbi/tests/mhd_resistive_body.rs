@@ -5,12 +5,13 @@
 // magnetic field THREADING it (`eta*chi*J` added to the edge EMF, masked by the body indicator chi)
 // while the exterior flux is left to ideal constrained transport. the kernel is exercised DIRECTLY
 // (one masked-resistive EMF + one induction curl), pinning the two defining properties:
-//   - LOCALIZATION: the added EMF is nonzero only near the body (chi > 0) and exactly zero far away,
-//     even though the field itself is nonzero everywhere. a `MagneticSpec::None` body adds NOTHING.
-//   - DISSIPATION: the magnetic-energy change `<B, curl(eta chi J B)>_F <= 0` — the body can only
-//     shed field, never amplify it (`-C diag(eta chi) C^T` is negative-definite for eta,chi >= 0).
+//   - localization: the added EMF is nonzero near the body (chi > 0) and exactly zero far away,
+//     even though the field itself is nonzero everywhere. a `MagneticSpec::None` body leaves the
+//     EMF untouched.
+//   - dissipation: the magnetic-energy change `<B, curl(eta chi J B)>_F <= 0` — the body sheds
+//     field monotonically (`-C diag(eta chi) C^T` is negative-definite for eta,chi >= 0).
 // stability of the composed operator is proven to machine precision by the cyl/cartesian adjoint
-// oracle; this test pins the MASK (localization) and the production dispatch wiring.
+// oracle; this test pins the mask (localization) and the production dispatch wiring.
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
@@ -143,7 +144,7 @@ fn resistive_body_localizes_and_dissipates() {
     seed_field(&sim);
     body_resistive_emf::<2, 3, HostMemory, f64>(&sim);
 
-    // LOCALIZATION: the added EMF is nonzero near the body and EXACTLY zero beyond the masked region,
+    // localization: the added EMF is nonzero near the body and exactly zero beyond the masked region,
     // even though B is nonzero throughout the window.
     let mut near_max = 0.0_f64;
     let mut far_max = 0.0_f64;
@@ -485,8 +486,8 @@ fn resistive_body_3d_localizes_and_dissipates() {
 fn drain_sink_in_2p5d_mhd_is_local_and_stable() {
     // the immersed-body penalize under 2.5D MHD (D=2, DOF=3). the kernel writes only the D=2
     // in-plane momentum components, so a dispatch that binds the full DOF=3 momentum shifts the nrg
-    // write onto mom[2] and wipes the gas energy on EVERY cell -> whole-domain NaN in a few steps.
-    // a Drain sink must evolve stably and remove gas only INSIDE its mask, leaving the far gas
+    // write onto mom[2] and wipes the gas energy on every cell -> whole-domain NaN in a few steps.
+    // a Drain sink evolves stably and removes gas inside its mask alone, leaving the far gas
     // exactly at the ambient state.
     let dx = 1.0 / N as f64;
     let k = 2.0 * std::f64::consts::PI;

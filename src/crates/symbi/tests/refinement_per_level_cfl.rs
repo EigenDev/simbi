@@ -1,9 +1,9 @@
 // =============================================================================
 // refine_per_level_cfl.rs
 //
-// per-level cfl gate: the root step must be limited by EVERY level's cfl
+// per-level cfl gate: the root step is limited by every level's cfl
 // (dt = min over levels of 2^l * dt_l). covered coarse
-// cells are conservative AVERAGES of fine data, so a fast feature resolved
+// cells are conservative averages of fine data, so a fast feature resolved
 // only on the fine level — the very thing refinement exists for — is diluted
 // on the coarse grid and invisible to a root-only cfl. here a hot blob
 // (sound speed ~14x ambient) spans 2^3 fine cells inside the nested box: the

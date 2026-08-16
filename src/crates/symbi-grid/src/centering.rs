@@ -19,8 +19,8 @@
 //
 // rationale for axis-erased markers over a per-axis `Face<const AX: usize>`:
 // chalkboard kernels need `for cc in 0..D { bface[cc][coord] }` patterns.
-// arrays require uniform element types — `[Field<.., Face<0>>, Field<..,
-// Face<1>>, ...]` won't typecheck. the resolution is one array indexed by
+// arrays require uniform element types, so `[Field<.., Face<0>>, Field<..,
+// Face<1>>, ...]` fails to typecheck. the resolution is one array indexed by
 // axis, with no per-axis type tag.
 // =============================================================================
 

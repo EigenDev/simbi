@@ -9,12 +9,12 @@
 //   at the bond midpoint (the cundall-strack incremental shear accumulator,
 //   re-projected perpendicular to the current normal every substep)
 // - linear damper on the relative material velocity at the midpoint
-// the total force is applied as +F on body i and -F on body j AT THE COMMON
+// the total force is applied as +F on body i and -F on body j at the common
 // center-line midpoint, so pair linear momentum and pair total angular
-// momentum (orbital + spin) are conserved identically for ANY force direction:
+// momentum (orbital + spin) are conserved identically for every force direction:
 //   d(momentum) = F - F = 0
 //   d(L)        = (x_i - x_j) x F + (x_j - x_i) x F = 0
-// the bond breaks (tombstones, never removed) when the tensile stress
+// the bond breaks (tombstoned in place, keeping the list order) when the tensile stress
 // `k_n max(e, 0) / area` exceeds `sigma_t` or the shear stress `|F_t| / area`
 // exceeds `tau_s`. breakage is a pure function of body state, so identical
 // states produce identical break sets on every rank.
@@ -68,7 +68,7 @@ impl BondMaterial {
 /// tangential displacement of the material points at the bond midpoint
 /// (world frame, kept perpendicular to the current normal). broken bonds
 /// tombstone in place (`intact = false`) so the bond list order — and with it
-/// every accumulation order — never changes over a run.
+/// every accumulation order — is fixed for the whole run.
 #[derive(Clone, Copy, Debug)]
 pub struct Bond {
     pub i: usize,
@@ -80,7 +80,7 @@ pub struct Bond {
 }
 
 impl Bond {
-    /// form a bond between two bodies at their CURRENT separation: the center
+    /// form a bond between two bodies at their present separation: the center
     /// distance becomes the rest length (a pre-strained assembly is made by
     /// moving a body after formation).
     pub fn form<const D: usize>(
@@ -107,7 +107,7 @@ impl Bond {
     }
 }
 
-/// per-body load held FROZEN across the subcycle (the gas force/torque of the
+/// per-body load held constant across the subcycle (the gas force/torque of the
 /// enclosing fluid step, or a test's applied load). the force acts at the body
 /// center, the torque is world-frame.
 #[derive(Clone, Copy, Debug)]
@@ -127,7 +127,7 @@ impl<const D: usize> ExternalLoad<D> {
 
 /// the elastic energy stored in the intact bonds:
 /// `sum 0.5 k_n e^2 + 0.5 k_t |slip|^2`. with the kinetic energy of the
-/// bodies this is the mechanical energy a damped network must not gain.
+/// bodies this is the mechanical energy a damped network holds flat or sheds.
 pub fn bond_potential_energy<const D: usize>(
     bonds: &[Bond],
     bodies: &BodyCollection<f64, D>,
@@ -232,7 +232,7 @@ fn eval_bond<const D: usize>(
     let e = dist - bond.rest_length;
 
     // tangential spring force from the slip accumulator, projected
-    // perpendicular to the CURRENT normal (the accumulator itself is
+    // perpendicular to the instantaneous normal (the accumulator itself is
     // re-projected during the drift phase; the projection here keeps the
     // force exactly tangential between re-projections).
     let sn = bond.slip[0] * n[0] + bond.slip[1] * n[1] + bond.slip[2] * n[2];
@@ -307,12 +307,13 @@ fn accumulate_slip<const D: usize>(bond: &mut Bond, bi: &Body<f64, D>, bj: &Body
 }
 
 /// the stable substep for the current bond network. every channel a body
-/// feels is bounded, with the stiffness/damping of ALL its intact bonds
-/// summed (a body inside a lattice sees the row sum, not one bond):
+/// feels is bounded, with the stiffness/damping of its intact bonds summed —
+/// a body inside a lattice sees the row sum, so the bound tightens with its
+/// coordination number:
 /// - pair spring period `2 pi sqrt(m_eff / (k_n + k_t))` with >= 10 substeps
 /// - per-body spring period `2 pi sqrt(m / sum k)` with >= 10 substeps
 /// - per-body translational damping time `m / sum gamma` with >= 5 substeps
-/// - per-body ROTATIONAL spring/damping through the midpoint lever arm
+/// - per-body rotational spring/damping through the midpoint lever arm
 ///   `lc = rest_length / 2`: period `2 pi sqrt(I_min / sum k_t lc^2)` and
 ///   relaxation `I_min / sum gamma lc^2`, same safety factors (the damper
 ///   acts on the material velocity at the midpoint, so it torques spin even
@@ -329,8 +330,8 @@ fn stable_substep<const D: usize>(
     let two_pi = 2.0 * std::f64::consts::PI;
     let nb = bodies.len();
     let n_src = bodies.source_count();
-    // a body integrates in the subcycle only when it is a two-way FRAGMENT;
-    // the source prefix and kinematic fragments impose no dynamics of their own.
+    // the two-way fragments are the bodies that integrate in the subcycle; the
+    // source prefix and kinematic fragments carry prescribed motion instead.
     let dynamic = |idx: usize| idx >= n_src && bodies.get(idx).two_way_coupling;
     let mut k_trans = vec![0.0f64; nb];
     let mut k_rot = vec![0.0f64; nb];
@@ -401,7 +402,7 @@ fn stable_substep<const D: usize>(
 /// velocity-verlet translation + per-substep euler rotation, with `external`
 /// per-body loads (the enclosing step's gas force/torque) held frozen.
 /// mobility tiers:
-/// - the SOURCE prefix (`idx < bodies.source_count()`) is fully frozen here —
+/// - the source prefix (`idx < bodies.source_count()`) is fully frozen here —
 ///   the legacy body integrator (prescribed binary / fixed-potential sink)
 ///   owns its motion; sources still exert bond/contact/gravity forces on
 ///   fragments and absorb none of the reaction (the fixed-potential
@@ -456,7 +457,7 @@ pub fn advance_bonded<const D: usize>(
                 apply_kick(force, torque, bond.i, bond.j, bi, bj, &kick);
             }
         }
-        // contact acts on every touching pair an intact bond does not own.
+        // contact acts on every touching pair left unowned by an intact bond.
         if let Some(cts) = contacts {
             let bonded = crate::contact::bonded_pairs(bonds);
             for i in 0..nb {
@@ -487,7 +488,7 @@ pub fn advance_bonded<const D: usize>(
     };
 
     // one half kick: velocity gains h/2 F/m and the rotation advances by the
-    // SAME half-impulse of torque. pairing every spin half-impulse with the
+    // matching half-impulse of torque. pairing every spin half-impulse with the
     // velocity half-impulse from the same force evaluation is what conserves
     // the pair total angular momentum: per evaluation the orbital change
     // `x x (h/2 F)` and the spin change `(mid - x) x (h/2 F)` sum to
@@ -522,7 +523,7 @@ pub fn advance_bonded<const D: usize>(
         accumulate(&mut force, &mut torque, bodies, bonds, contacts.as_deref());
         half_kick(bodies, &force, &torque, h, n_src);
         // drift every fragment at its (half-kicked or prescribed) velocity;
-        // the source prefix does not move here.
+        // the source prefix holds its position.
         for b in n_src..nb {
             let body = bodies.get_mut(b);
             for a in 0..D {
@@ -679,7 +680,7 @@ mod tests {
             "momentum drift {p:?}"
         );
         // velocity-verlet energy oscillates within an O((h omega)^2) band and
-        // does not drift secularly; h omega ~ 0.11 puts the band at ~0.3%.
+        // stays inside it over the run; h omega ~ 0.11 puts the band at ~0.3%.
         let e1 = total_ke(&coll) + bond_potential_energy(&bonds, &coll);
         assert!(
             (e1 - e0).abs() < 1e-2 * e0,
@@ -756,7 +757,7 @@ mod tests {
             advance_bonded(&mut coll, &mut bonds, None, None, 0.005, &[]);
             let e = total_ke(&coll) + bond_potential_energy(&bonds, &coll);
             // the damper dissipates; the integrator adds a bounded
-            // O((h omega)^2) oscillation on top, never sustained growth.
+            // O((h omega)^2) oscillation on top, which stays bounded.
             assert!(
                 e <= e0 * (1.0 + 5e-3),
                 "damped energy exceeded start: {e0} -> {e}"

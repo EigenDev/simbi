@@ -71,11 +71,12 @@ pub enum BodyKind<S: Scalar> {
         accretion_rate: S,
         sink_delta: S, // 0 = torque-free, 1 = standard
     },
-    /// the GR EXCISION HORIZON as a first-class immersed boundary: NOT a Newtonian point mass
-    /// (gravity is the fixed metric, the sink is the vacuum excision), but a diagnostic-carrying
-    /// absorbing surface. its accretion ledger — `total_accreted_{mass,energy}` + the instantaneous
+    /// the GR excision horizon as a first-class immersed boundary: a diagnostic-carrying
+    /// absorbing surface whose gravity is the fixed metric and whose sink is the vacuum
+    /// excision. its accretion ledger — `total_accreted_{mass,energy}` + the instantaneous
     /// `mdot`/`edot` — is fed by the shell-flux reduction through a coordinate sphere at
-    /// `diagnostic_radius` (OUTSIDE the horizon, where the flux is well-posed). the covariant energy
+    /// `diagnostic_radius`, placed outside the horizon where the flux is well-posed. the
+    /// covariant energy
     /// makes `edot` a conserved, `diagnostic_radius`-invariant rate at steady state.
     Horizon {
         excision_radius: S,
@@ -97,7 +98,7 @@ pub enum BodyKind<S: Scalar> {
 }
 
 /// the hydrodynamic penalization stack a body's surface runs (the property
-/// algebra). config-static — parameters, never state, never checkpointed.
+/// algebra). config-static — a parameter set, restored from the config on restart.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum SurfaceSpec {
     /// the uniform-scaling drain: the validated accretor (p = 1).
@@ -120,21 +121,21 @@ pub enum SurfaceSpec {
 }
 
 /// the magnetic coupling a body's surface runs — the MHD analog of `SurfaceSpec`.
-/// config-static, never state, never checkpointed. `None` is transparent to the
-/// magnetic field: a hydro run and an MHD run with a non-magnetic body evolve
-/// identically, and a subgrid sink drains only the plasma while the flux is left to
+/// config-static — a parameter set, restored from the config on restart. `None` is
+/// transparent to the magnetic field: a hydro run and an MHD run with a non-magnetic body
+/// evolve identically, and a subgrid sink drains the plasma alone, leaving the flux to
 /// constrained transport. the flux-anchor / resistive / beta-floor couplings land in
 /// later work.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum MagneticSpec {
-    /// no magnetic coupling: the body does not act on the magnetic field.
+    /// the field passes through the body untouched.
     #[default]
     None,
     /// localized Ohmic resistivity: a diffusivity `eta` masked by the body indicator `chi` adds the
     /// resistive edge EMF `eta*chi*J` before constrained transport, dissipating the magnetic field
-    /// THREADING the body while leaving the exterior flux untouched. div-B-clean (the shared curl
+    /// threading the body while leaving the exterior flux untouched. div-B-clean (the shared curl
     /// consumes it) and unconditionally dissipative (`-C diag(eta*chi) C^T` is negative-definite for
-    /// `eta >= 0`), so the body can only shed field, never amplify it.
+    /// `eta >= 0`), so the body sheds field monotonically.
     Resistive { eta: f64 },
 }
 
@@ -151,12 +152,12 @@ pub struct BodySpec {
 
 /// which softened-gravity family a body's `softening` length parameterizes.
 ///
-/// the distinction is SUPPORT, not smoothness. `Plummer` is a real extended profile whose field
-/// `[1 + (h/r)^2]^{-3/2}` is below Newtonian at EVERY radius — 0.354 at `r = h`, and it needs
-/// `r > 5h` to reach 0.99 — so a length chosen for regularity near the body biases the field
-/// through the whole domain. `Compact` truncates the source at `h` instead: outside it the field
-/// is the bare point mass to the last bit, so `h` may be set to whatever radius the flow is not
-/// asked to resolve without touching the measurement outside it.
+/// the two families differ in the support of the softening, and both are smooth. `Plummer` is a
+/// real extended profile whose field `[1 + (h/r)^2]^{-3/2}` sits below Newtonian at every radius
+/// — 0.354 at `r = h`, reaching 0.99 only past `r > 5h` — so a length chosen for regularity near
+/// the body biases the field through the whole domain. `Compact` truncates the source at `h`:
+/// outside it the field is the bare point mass to the last bit, so `h` may be set to the radius
+/// below which the flow is left unresolved while the measurement outside it stays exact.
 ///
 /// use `Plummer` for a genuinely extended mass. use `Compact` for a point accretor, where the
 /// softening exists only to keep the field finite where the sink has thinned the gas.
@@ -196,15 +197,15 @@ pub struct Body<S: Scalar, const D: usize> {
     /// and the magnetic coupling (`spec.magnetic`). kinematics stay on `kind`; this
     /// picks the baked kernel.
     pub spec: BodySpec,
-    /// the body's ORIENTATION as a row-major rotation matrix `R` (init identity), advanced each step
+    /// the body's orientation as a row-major rotation matrix `R` (init identity), advanced each step
     /// by the angular velocity. a shaped rigid wall's mask is `shape.rotated(R)` and its Dual-normal
-    /// tracks it. every non-rotating body keeps the identity.
+    /// tracks it. a body at rest in rotation keeps the identity.
     pub orientation: [[S; 3]; 3],
-    /// the ANGULAR VELOCITY vector `omega` (world frame, radians/time). a shaped wall's surface drags
+    /// the angular velocity vector `omega` (world frame, radians/time). a shaped wall's surface drags
     /// the gas at `omega x r`; a two-way body's omega evolves from the reaction torque via Euler's
-    /// equations, so an asymmetric body tumbles. zero for every non-spinning body.
+    /// equations, so an asymmetric body tumbles. a body at rest in rotation holds it at zero.
     pub omega: Tensor<S, 3>,
-    /// the PRINCIPAL MOMENTS of inertia `(I1, I2, I3)` in the body frame (along the shape's local
+    /// the principal moments of inertia `(I1, I2, I3)` in the body frame (along the shape's local
     /// axes). anisotropic (unequal) moments make Euler's gyroscopic term nonzero -> torque-free
     /// precession/nutation (an asymmetric body wobbles). default isotropic (1, 1, 1).
     pub inertia_body: [S; 3],
@@ -244,9 +245,10 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     }
 
     /// declare the hydrodynamic surface stack (fluent; the default is the drain).
-    /// the penalize step keys on `mask_radius`, so a surface declared on a body
-    /// kind that carries no mask (passive / purely gravitational) would never
-    /// run — refuse it here rather than silently evolve without the wall.
+    /// the penalize step keys on `mask_radius`, so a surface runs on a body kind
+    /// that carries a mask. a passive / purely gravitational kind is rejected at
+    /// declaration time, the last point where the missing wall is still visible;
+    /// past it the run would evolve silently wall-free.
     pub fn with_surface(mut self, surface: SurfaceSpec) -> Self {
         assert!(
             self.mask_radius().is_some(),
@@ -270,7 +272,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         self
     }
 
-    /// convenience: a spin RATE about `axis` (any nonzero vector, normalized here). fluent.
+    /// convenience: a spin rate about `axis` (any nonzero vector, normalized here). fluent.
     pub fn with_spin_about(mut self, rate: S, axis: Tensor<S, 3>) -> Self {
         let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
         let s = rate / n;
@@ -278,7 +280,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         self
     }
 
-    /// convenience: a spin RATE about z. fluent.
+    /// convenience: a spin rate about z. fluent.
     pub fn with_spin(mut self, rate: S) -> Self {
         self.omega = Tensor::new([S::ZERO, S::ZERO, rate]);
         self
@@ -291,11 +293,11 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         self
     }
 
-    /// advance the FULL rigid-body rotation over `dt` under the external torque `torque_world` (world
-    /// frame): integrate Euler's equations with the DIAGONAL body-frame inertia —
+    /// advance the full rigid-body rotation over `dt` under the external torque `torque_world` (world
+    /// frame): integrate Euler's equations with the diagonal body-frame inertia —
     /// `dL_body = (tau_body - omega_body x L_body) dt` — then roll the orientation by the updated
     /// angular velocity `R <- Rodrigues(omega_hat, |omega|*dt) R`. the gyroscopic term `omega x L`
-    /// drives torque-free precession of an ANISOTROPIC body; ISOTROPIC inertia zeros it and this
+    /// drives torque-free precession of an anisotropic body; isotropic inertia zeros it and this
     /// reduces to `omega += torque * dt / I`. `omega = 0`, `torque = 0` is a no-op.
     pub fn advance_rotation(&mut self, torque_world: Tensor<S, 3>, dt: S) {
         let r = self.orientation;
@@ -350,7 +352,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     }
 
     /// the world-frame angular momentum `L = I omega = R (inertia_body .* (R^T omega))` — the rigid-
-    /// body spin state a viz glyph draws, and the conserved quantity a torque-free sink must not gain.
+    /// body spin state a viz glyph draws, and the quantity a torque-free sink leaves invariant.
     pub fn angular_momentum(&self) -> Tensor<S, 3> {
         let wb = matvec3(
             transpose3(self.orientation),

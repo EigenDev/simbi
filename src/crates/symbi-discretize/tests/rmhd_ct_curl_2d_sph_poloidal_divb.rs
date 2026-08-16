@@ -1,10 +1,10 @@
 // =============================================================================
 // rmhd_ct_curl_2d_sph_poloidal_divb.rs
 //
-// the dedicated div(B)=0 preservation test for the 2D AXISYMMETRIC spherical
+// the dedicated div(B)=0 preservation test for the 2D axisymmetric spherical
 // poloidal constrained-transport curl (rmhd_ct_curl_2d_sph_gv) — the test its own
 // doc comment (ct_emf.rs) flagged as still missing: the toroidal-injection case is
-// trivially div-free (zero in-plane field), so a genuine POLOIDAL (B_r, B_theta)
+// trivially div-free (zero in-plane field), so a genuine poloidal (B_r, B_theta)
 // field is needed to actually exercise the staggered cancellation.
 //
 // the 2D builder evolves a poloidal field by the single out-of-plane corner EMF
@@ -16,12 +16,13 @@
 //   div(B)[i,j] = A_r(i+1) B_r(i+1,j) - A_r(i) B_r(i,j)
 //               + A_th(j+1) B_th(i,j+1) - A_th(j) B_th(i,j)
 // with the point-form face areas A_r = r_f^2 sin(th_c) dth, A_th = r_c sin(th_f) dr
-// (the 3D spherical areas without dphi). these are exactly the weights for which
-// div(curl)=0 telescopes against the kernel's 1/(r sin th) and 1/r prefactors.
+// (the 3D spherical areas, with the common dphi divided out). these are exactly the
+// weights for which div(curl)=0 telescopes against the kernel's 1/(r sin th) and 1/r
+// prefactors.
 //
 // B is initialized div-free as B = curl(A_phi) (a single out-of-plane vector
-// potential through the SAME kernel: b=0, dt=1), then evolved one step by
-// curl(E_phi). div(B) must stay machine zero AND unchanged.
+// potential through the same kernel: b=0, dt=1), then evolved one step by
+// curl(E_phi). div(B) must stay machine zero and unchanged.
 // =============================================================================
 
 mod harness;
@@ -102,7 +103,7 @@ fn run_curl(b_in: &[Vec<f64>; 2], ez: &[f64], dt: f64) -> [Vec<f64>; 2] {
 fn ct_curl_2d_sph_poloidal_preserves_div_b() {
     let f = M * M;
     // an arbitrary smooth out-of-plane vector potential A_phi and a separate EMF E_phi,
-    // both nontrivial in (r, theta) so the poloidal B = curl(A) has BOTH components.
+    // both nontrivial in (r, theta) so the poloidal B = curl(A) has both components.
     let avec = |i: usize, j: usize| -> f64 {
         let (x, y) = (i as f64, j as f64);
         (0.3 * x).sin() * (0.2 * y).cos() + 0.15 * (0.1 * x + 0.25 * y).sin()
@@ -125,7 +126,7 @@ fn ct_curl_2d_sph_poloidal_preserves_div_b() {
     let zero = [vec![0.0; f], vec![0.0; f]];
     let b = run_curl(&zero, &a, 1.0);
 
-    // the init must already have a NONTRIVIAL poloidal field (else the test is vacuous,
+    // the init must already have a nontrivial poloidal field (else the test is vacuous,
     // exactly the trivial toroidal-injection case the doc comment warns about).
     let mut max_b = 0.0_f64;
     for i in 0..M - 1 {
@@ -153,7 +154,7 @@ fn ct_curl_2d_sph_poloidal_preserves_div_b() {
     // evolve one CT step by curl(E_phi).
     let b2 = run_curl(&b, &e, DT);
 
-    // div(B) after the update must still be machine zero AND unchanged.
+    // div(B) after the update must stay machine zero and unchanged.
     let mut max_after = 0.0_f64;
     let mut max_change = 0.0_f64;
     for i in 0..M - 2 {

@@ -1,23 +1,23 @@
 // =============================================================================
 // codegen_diff.rs
 //
-// apples-to-apples timing of two compilation paths for the SAME algorithm:
+// apples-to-apples timing of two compilation paths for the same algorithm:
 //
-//   path A (native): `rmhd_magnetosonic_cfl_speeds(eos, prim, nhat)` — the SAME
+//   path A (native): `rmhd_magnetosonic_cfl_speeds(eos, prim, nhat)` — the same
 //     function `rmhd_wave_speed_map_gv` traces — called directly in a tight
-//     per-cell loop, compiled by rustc with full LLVM optimisation over the
-//     source as written. (NOT the exact quartic `rmhd_wave_speeds`: the CFL map
-//     uses the cheap magnetosonic UPPER BOUND, so path A must too — else the two
-//     sides compute different physics and the comparison is meaningless.)
+//     per-cell loop, compiled by rustc with full LLVM optimization over the
+//     source as written. (the CFL map uses the cheap magnetosonic upper bound,
+//     not the exact quartic `rmhd_wave_speeds`, so path A must too — else the
+//     two sides compute different physics and the comparison is meaningless.)
 //
 //   path B (IR-emitted): the same physics traced through `Gv`, scalarized,
 //     CSE'd, emitted as Rust source via `emit_kernel_cpu`, then compiled by
 //     rustc into the symbi-aot crate. invoked via the public
 //     `rmhd_wave_speed_map_3d` registry entry.
 //
-// both paths run the SAME algorithm, so they must agree to ULP; the only
+// both paths run the same algorithm, so they must agree to ULP; the only
 // difference is the codegen path. wall-time ratio = pure codegen
-// overhead. if A ~= B, the IR pipeline preserves rustc's optimisation
+// overhead. if A ~= B, the IR pipeline preserves rustc's optimization
 // opportunities and any speed-up has to come from the algorithm. if B >> A,
 // the IR is leaking ops (e.g., unfolded `x * 0.0`, dropped strength
 // reductions) and the codegen pipeline is the lever.
@@ -45,7 +45,7 @@ fn parse_arg<T: std::str::FromStr>(flag: &str, default: T) -> T {
 }
 
 // generate a million-cell field of physically-realistic RMHD prims. uses a
-// deterministic LCG so both paths see EXACTLY the same input — any disagreement
+// deterministic LCG so both paths see exactly the same input — any disagreement
 // is then pure floating-point pattern from the shared input.
 fn make_fields(
     n: usize,
@@ -111,7 +111,7 @@ fn main() {
     //
     // PARALLELISM: path B uses `into_par_iter` (emitted by the renderer); to
     // compare codegen and not threading models, path A must use rayon over the
-    // SAME outer iteration. with_min_len(16) matches the emitted kernel.
+    // same outer iteration. with_min_len(16) matches the emitted kernel.
     use rayon::prelude::*;
     let mut best_a = f64::INFINITY;
     for _ in 0..repeats {

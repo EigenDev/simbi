@@ -14,15 +14,15 @@
 //     weights (r, 1) on the r dr dtheta measure; the gas r^2 sin(theta) measure would inject
 //     spurious -F^r/r - cot(theta) F^theta/r sources.
 //
-// curved (CONTRAVARIANT components), the out-of-plane component obeys the densitized conservation
+// curved (contravariant components), the out-of-plane component obeys the densitized conservation
 // law d_t(sqrt(gamma) B^i) + d_j(alpha sqrt(gamma) G^j) = 0: the covariant area-weighted divergence
 // times the cell lapse alpha (the face kernel writes G = F - (beta^n/alpha) U, deferring one alpha
-// to the divergence — the same contract the gas godunov honors), with NO flat out-of-plane shortcut
-// (B is contravariant). the lapse witness is measure-free: the det-g-flat covariant measure is
+// to the divergence — the same contract the gas godunov honors). the covariant form applies on
+// every curved chart, B being contravariant. the lapse witness is measure-free: the det-g-flat covariant measure is
 // M-independent, so update(M)/update(0) must equal alpha(centroid) exactly.
 //
-// the IN-PLANE components (CT-evolved; the predictor does not write them) and the r-phi disk (out-of-plane
-// z, where the area-weighting IS the correct z-curl) are exercised by the rotor + GPU gates in the
+// the in-plane components (CT-evolved, so CT owns their writes) and the r-phi disk (out-of-plane
+// z, where the area-weighting is the correct z-curl) are exercised by the rotor + GPU gates in the
 // symbi crate.
 // =============================================================================
 
@@ -130,8 +130,9 @@ fn cyl_rz_out_of_plane_bphi_uses_metric_free_divergence() {
     );
 }
 
-/// the out-of-plane component set for a chart: the B-vector slots whose coordinate is NOT a grid
-/// axis. the predictor writes ONLY these (the in-plane components are CT / interp(bface)).
+/// the out-of-plane component set for a chart: the B-vector slots whose coordinate lies off the
+/// grid axes. these are exactly the slots the predictor writes (the in-plane components are
+/// CT / interp(bface)).
 fn oop_comps(axes: &[usize]) -> Vec<usize> {
     (0..3usize).filter(|c| !axes.contains(c)).collect()
 }
@@ -236,9 +237,9 @@ fn sph_rtheta_out_of_plane_bphi_uses_curl_weighted_divergence() {
 }
 
 /// per-cell covariant radial divergence + centroid lapse checks shared by the GR charts, applied to
-/// the OUT-OF-PLANE component the predictor writes (the in-plane slots are `None`). with a uniform
-/// radial flux C, that component's update must be the covariant divergence (NO flat out-of-plane
-/// shortcut on curved charts — B is contravariant), matching `div_formula(i)` at M = 0 and scaling
+/// the out-of-plane component the predictor writes (the in-plane slots are `None`). with a uniform
+/// radial flux C, that component's update is the covariant divergence (the form that holds on every
+/// curved chart, B being contravariant), matching `div_formula(i)` at M = 0 and scaling
 /// by `alpha(i, j)` at M > 0.
 fn assert_gr_bcell_updates(
     upd0: &[Option<Vec<f64>>],
@@ -316,10 +317,10 @@ fn schwarzschild_ks_sph_bcell_predictor_applies_lapse_weight() {
         3.0 * (rh * rh - rl * rl) / (rh * rh * rh - rl * rl * rl)
     };
     // the ingoing kerr-schild lapse alpha = 1/sqrt(1 + 2M/r) at the volume-weighted radial centroid
-    // r_cen = (3/4)(rh^4 - rl^4)/(rh^3 - rl^3). the LAW under test is chart-generic — the densitized
-    // divergence carries the lapse weight — but the lapse itself is not: the static chart's
-    // sqrt(1 - 2M/r) vanishes at the horizon where this one stays finite, which is the whole reason
-    // the flow can be evolved through r = 2M here.
+    // r_cen = (3/4)(rh^4 - rl^4)/(rh^3 - rl^3). the law under test is chart-generic — the densitized
+    // divergence carries the lapse weight — while the lapse itself is chart-specific: the static
+    // chart's sqrt(1 - 2M/r) vanishes at the horizon where this one stays finite, which is the whole
+    // reason the flow can be evolved through r = 2M here.
     let alpha = |i: usize, _j: usize| {
         let (rl, rh) = (R0 + i as f64 * DR, R0 + (i + 1) as f64 * DR);
         let r_cen = 0.75 * (rh.powi(4) - rl.powi(4)) / (rh.powi(3) - rl.powi(3));
@@ -330,9 +331,9 @@ fn schwarzschild_ks_sph_bcell_predictor_applies_lapse_weight() {
 
 #[test]
 fn schwarzschild_ks_cyl_rz_bcell_oop_uses_covariant_divergence_and_lapse() {
-    // kerr-schild cylindrical (R,z), contravariant B: the out-of-plane B^phi must take the
-    // SAME covariant R-measure divergence as the in-plane components (the flat metric-free
-    // shortcut would give a ZERO update for a uniform radial flux — dropping the G^R/R
+    // kerr-schild cylindrical (R,z), contravariant B: the out-of-plane B^phi takes the
+    // same covariant R-measure divergence as the in-plane components (a flat metric-free
+    // shortcut would give a zero update for a uniform radial flux, dropping the G^R/R
     // geometric term of d_t B^phi = -(1/sqrt(gamma))[d_R(R G^R) + d_z(R G^z)] entirely),
     // lapse-weighted by alpha = 1/sqrt(1 + 2M/r), r = sqrt(R_cen^2 + z_cen^2).
     let mass = 0.2;

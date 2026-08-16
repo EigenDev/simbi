@@ -2,11 +2,10 @@
 # test_census_reader.py
 #
 # the census reader against a synthetic checkpoint written in the layout the rust writer
-# produces. what is worth gating here is not the plumbing but the two places a reader can be
-# quietly wrong: the segment-to-bin reshape (a transposed profile is smooth and plausible)
-# and the weighted means (a volume-weighted mean of the same field is a DIFFERENT number
-# that also looks reasonable), plus the dropped-cell shortfall, which is invisible in the
-# values themselves.
+# produces. the gate covers the two places a reader can be quietly wrong: the segment-to-bin
+# reshape (a transposed profile is smooth and plausible) and the weighted means (a
+# volume-weighted mean of the same field is a different number that also looks reasonable),
+# plus the dropped-cell shortfall, which is invisible in the values themselves.
 # =============================================================================
 
 import h5py
@@ -91,9 +90,9 @@ def test_reads_names_shape_and_edges(tmp_path):
 
 
 def test_two_axes_reshape_is_last_axis_fastest(tmp_path):
-    # the segment axis is stored FLAT. a reader that reshaped it the other way round would
-    # produce a transposed profile — perfectly smooth, entirely wrong — so pin the order
-    # against a segment table whose value IS its own flat index.
+    # the segment axis is stored flat. a reader that reshaped it the other way round would
+    # produce a transposed profile — perfectly smooth, entirely wrong — so the order is
+    # pinned against a segment table whose every value equals its own flat index.
     edges = (np.array([0.0, 1.0, 2.0]), np.array([0.0, 1.0, 2.0, 3.0]))  # 2 x 3 bins
     flat = np.arange(6, dtype=float).reshape(1, 6, 1)
     p = _write(
@@ -114,10 +113,10 @@ def test_two_axes_reshape_is_last_axis_fastest(tmp_path):
 
 
 def test_favre_mean_differs_from_the_volume_weighted_mean(tmp_path):
-    # the reason a census stores sums instead of means. one bin holds two parcels of equal
-    # volume but very different mass; the mass-weighted mean is dominated by the heavy one,
-    # while the plain average of the two parcel velocities is not. a reader that accumulated
-    # or averaged means would report the latter.
+    # the reason a census stores sums and forms the means on read. one bin holds two parcels
+    # of equal volume and very different mass; the mass-weighted mean sits near the heavy
+    # parcel's velocity, while the plain average of the two parcel velocities sits halfway
+    # between them. a reader that accumulated or averaged means would report the latter.
     m1, v1 = 9.0, 1.0   # heavy, slow
     m2, v2 = 1.0, 11.0  # light, fast
     mass = m1 + m2
@@ -169,8 +168,9 @@ def test_dropped_cells_are_reported_not_hidden(tmp_path):
 
 
 def test_segment_count_disagreeing_with_the_edges_is_refused(tmp_path):
-    # the file's own two descriptions of the bin layout must agree; if they do not, no
-    # reshape of the segment axis is trustworthy and guessing one would fabricate a profile.
+    # the file's own two descriptions of the bin layout agree, or the read fails: a
+    # trustworthy reshape of the segment axis needs both, and guessing one would fabricate
+    # a profile.
     p = _write(tmp_path / "c.h5")
     with h5py.File(p, "r+") as h:
         del h["census/shells/axis0_edges"]
@@ -180,8 +180,8 @@ def test_segment_count_disagreeing_with_the_edges_is_refused(tmp_path):
 
 
 def test_derived_means_are_refused_on_a_non_additive_census(tmp_path):
-    # an extremum census carries no sums, so a weighted mean of its accumulators is not a
-    # weighted mean of anything.
+    # an extremum census carries extrema in place of sums, so a weighted mean of its
+    # accumulators would be a ratio of two extrema, with no interpretation as a mean.
     p = _write(tmp_path / "c.h5", op="max")
     c = read_census(p, "shells")
     with pytest.raises(CensusError, match="reduces with 'max'"):
@@ -207,9 +207,9 @@ def test_total_sums_over_bins_only(tmp_path):
 
 def test_a_file_predating_accumulation_reads_as_a_per_sample_history(tmp_path):
     # the compatibility case: a checkpoint written before the mode existed carries none of its
-    # metadata, and by definition it is not accumulated. defaulting is right here — the sample
-    # count of a per-sample history IS its row count — but it must not be defaulted the other way,
-    # which would make every old file claim to be one folded row.
+    # metadata, so by definition it is a per-sample history. defaulting is right here — the
+    # sample count of a per-sample history is its row count — and the default runs in this
+    # direction alone; the reverse would make every old file claim to be one folded row.
     c = read_census(_write(tmp_path / "c.h5", times=(0.0, 1.0, 2.0), dropped=(0, 0, 0)), "shells")
     assert c.accumulated is False
     assert c.n_rows == 3
@@ -250,9 +250,9 @@ def test_an_accumulated_row_averages_back_by_its_sample_count(tmp_path):
 
 
 def test_a_file_claiming_accumulation_with_many_rows_is_refused(tmp_path):
-    # the metadata and the data must agree. an accumulating history folds every sample into one
-    # row, so a file marked accumulated that stores several is describing something the writer
-    # cannot produce — and `time_average` would silently read row zero as though it were the whole
+    # the metadata and the data have to agree. an accumulating history folds every sample into one
+    # row, so a file marked accumulated that stores several describes something outside what the
+    # writer emits — and `time_average` would silently read row zero as though it were the whole
     # segment.
     p = _write(tmp_path / "bad.h5", accumulated=True, n_samples=9, times=(0.0, 1.0))
     with pytest.raises(CensusError, match="accumulating"):
@@ -261,7 +261,7 @@ def test_a_file_claiming_accumulation_with_many_rows_is_refused(tmp_path):
 
 def test_a_time_average_of_an_extremal_census_is_refused(tmp_path):
     # a running max over a segment is already the answer for that segment; dividing it by a sample
-    # count is not an average of anything, and the result would look like a perfectly ordinary
+    # count yields a quantity with no interpretation, and it would look like a perfectly ordinary
     # profile.
     p = _write(tmp_path / "mx.h5", op="max", accumulated=True, n_samples=4,
                value_names=("peak",),
@@ -272,10 +272,10 @@ def test_a_time_average_of_an_extremal_census_is_refused(tmp_path):
 
 
 def test_per_level_rows_are_selected_before_any_time_series_analysis(tmp_path):
-    # rows from different levels are not interchangeable: a level subcycles, so it contributes
-    # several rows per root step, each covering only the volume that level resolves. averaging them
-    # together weights the answer by the subcycle ratio — a number that is smooth and plausible and
-    # is a property of the timestepper rather than the flow.
+    # each level's rows describe that level alone: a level subcycles, so it contributes several
+    # rows per root step, each covering the volume that level resolves. averaging them together
+    # weights the answer by the subcycle ratio — a number that is smooth and plausible and is a
+    # property of the timestepper rather than the flow.
     p = _write(
         tmp_path / "lv.h5",
         value_names=("mass",),
@@ -299,15 +299,15 @@ def test_per_level_rows_are_selected_before_any_time_series_analysis(tmp_path):
 
 
 # =============================================================================
-# joining a restart chain. the hazard is not the concatenation but the OVERLAP: a history is
-# never cleared within a process, so a later checkpoint of the same job repeats every row an
-# earlier one holds. an append would count those twice and the duplicates are undetectable
-# afterwards, because a repeated sample is numerically indistinguishable from a real one.
+# joining a restart chain. the hazard is the overlap: a history persists for the life of a
+# process, so a later checkpoint of the same job repeats every row an earlier one holds. an
+# append would count those twice, and the duplicates stay undetectable afterwards, because a
+# repeated sample is numerically indistinguishable from a genuine one.
 # =============================================================================
 
 
 def test_series_join_does_not_double_count_a_superset(tmp_path):
-    # two checkpoints of ONE process: the second holds every row of the first plus more.
+    # two checkpoints of a single process: the second holds every row of the first plus more.
     vals = np.arange(4 * 3 * 3, dtype=float).reshape(4, 3, 3)
     early = _write(
         tmp_path / "e.h5", times=(0.0, 1.0), dropped=(0, 0), values=vals[:2]
@@ -339,8 +339,8 @@ def test_series_join_is_idempotent_and_order_free(tmp_path):
 
 
 def test_series_join_keys_on_level_not_time_alone(tmp_path):
-    # a per-level census samples several levels at the SAME time; keying on time alone would
-    # collapse them into one row and silently discard every level but one.
+    # a per-level census samples several levels at one shared time; keying on time alone would
+    # collapse them into a single row and silently discard every level but one.
     a = _write(
         tmp_path / "a.h5", times=(0.0, 0.0, 1.0, 1.0), dropped=(0,) * 4, level=(0, 1, 0, 1)
     )
@@ -372,7 +372,7 @@ def test_series_join_refuses_a_changed_registration(tmp_path):
 
 def test_series_join_refuses_an_accumulating_history(tmp_path):
     # an accumulating row is a reduction over a span, so two rows may be disjoint segments to
-    # merge or one may contain the other -- (level, time) cannot tell those apart.
+    # merge or one may contain the other; (level, time) reads the same either way.
     a = _write(
         tmp_path / "a.h5", times=(1.0,), dropped=(0,), accumulated=True, n_samples=7
     )

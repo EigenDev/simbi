@@ -2,9 +2,9 @@
 // census_conservation.rs
 //
 // the unification gate for binned reductions: total mass and total energy — the live
-// conservation diagnostic — expressed as a census with NO bin axes. a census is a
-// pointwise map followed by a segmented reduce, and a global reduction is the case
-// with a single bucket. if the mechanism cannot express it, the mechanism is wrong.
+// conservation diagnostic — expressed as a census whose bin-axis list is empty. a census
+// is a pointwise map followed by a segmented reduce, and a global reduction is the case
+// with a single bucket. expressing it is what makes the mechanism general.
 //
 // and the partition gate: the same extensive quantity binned into radial shells must
 // sum back to the global total. that is the leaf-tiling check — it catches a bucket
@@ -39,8 +39,8 @@ const DR: f64 = (R_HI - R_LO) / N as f64;
 
 /// a steeply falling atmosphere. the density spans four orders of magnitude across the
 /// shell while the cell volume grows as r^2, so the two weightings pull in opposite
-/// directions — a census that used the wrong measure could not land on the same total
-/// by coincidence.
+/// directions — so only the correct measure lands on the same total, a wrong one missing
+/// by orders.
 fn density_at(r: f64) -> f64 {
     r.powi(-3)
 }
@@ -100,7 +100,7 @@ fn one_bucket(sim: &SimSph) -> Field<f64, 1, HostMemory> {
 
 #[test]
 fn total_mass_and_energy_are_a_census_with_no_bins() {
-    // the conservation diagnostic IS a census with no bin axes, agreeing to
+    // the conservation diagnostic is exactly a census with an empty bin-axis list, agreeing to
     // round-off. the two paths differ only in how they group the addends.
     let sim = build_sim();
     let diag = sim
@@ -145,8 +145,8 @@ fn total_mass_and_energy_are_a_census_with_no_bins() {
         diag_energy
     );
 
-    // the measure is load-bearing: on this r^2 grid an unweighted sum is a different
-    // number entirely, so the agreement above is not an accident of a flat geometry.
+    // the measure is load-bearing: on this r^2 grid an unweighted sum lands on a different
+    // number entirely, so the agreement above turns on the volume weighting itself.
     let unweighted: f64 = sim
         .geom
         .interior
@@ -225,9 +225,9 @@ fn shell_bins_sum_back_to_the_global_total() {
 
 #[test]
 fn cells_outside_the_shell_edges_are_reported_not_absorbed() {
-    // a binning that does not span the domain must say so. if the shortfall were folded
-    // into the outermost shell, an under-covering census would be indistinguishable
-    // from a physics result — the failure this counter exists to prevent.
+    // a binning that leaves part of the domain uncovered reports the shortfall. folded into
+    // the outermost shell instead, an under-covering census would read exactly like a physics
+    // result — the failure this counter exists to prevent.
     let sim = build_sim();
 
     // edges covering only the inner half of the shell.

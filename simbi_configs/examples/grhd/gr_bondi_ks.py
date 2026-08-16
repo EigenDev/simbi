@@ -2,14 +2,15 @@
 # gr_bondi_ks.py
 #
 # spherical (bondi) accretion onto a schwarzschild black hole in INGOING KERR-SCHILD
-# (eddington-finkelstein) coordinates — the SAME physical spacetime as gr_bondi.py,
-# but in a HORIZON-PENETRATING chart that is regular across r = 2M. started from a
+# (eddington-finkelstein) coordinates — the same physical spacetime as gr_bondi.py,
+# in a horizon-penetrating chart that is regular across r = 2M. started from a
 # uniform gas at rest.
 #
 # the payoff of the KS chart: the inner boundary sits BELOW the horizon (r < 2M),
-# where the transport velocity tilde v^r = v^r - beta^r/alpha is negative for EVERY
-# subluminal fluid — nothing can escape, so zero-gradient outflow is unconditionally
-# causal and the gas simply crosses r = 2M and leaves through the excised interior.
+# where the transport velocity tilde v^r = v^r - beta^r/alpha is negative for every
+# subluminal fluid — every characteristic points inward, so zero-gradient outflow is
+# unconditionally causal and the gas simply crosses r = 2M and leaves through the
+# excised interior.
 # no coordinate singularity, no subsonic-inner-boundary fragility (contrast the
 # schwarzschild-coordinate gr_bondi.py, whose boundary must be held OUTSIDE 2M).
 #

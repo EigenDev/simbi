@@ -14,9 +14,9 @@ use symbi_geometry::{
 use symbi_ir::dual::Dual;
 
 /// trace the newtonian-MHD CFL wave-speed map — `NewtonianMhd::wave_speeds` (the
-/// EXACT closed-form fast magnetosonic; it is already cheap) folded
+/// exact closed-form fast magnetosonic; it is already cheap) folded
 /// with the geometry inverse-width into `lambda = max_d (max(|sl|,|sr|) inv_w_d)`.
-/// the SAME speed the flux's HLLE consumes (one physics, two consumers).
+/// the same speed the flux's HLLE consumes (one physics, two consumers).
 pub fn nmhd_wave_speed_map_gv(
     coords: Coords,
     spacing: &[Spacing],
@@ -87,32 +87,32 @@ pub fn imhd_wave_speed_map_gv(
 }
 
 // =============================================================================
-// CFL wave-speed MAP — symbi-hydro's `Regime::wave_speeds_axis` traced at S=Gv into the
-// COMPLETE timestep kernel: per gridded axis the characteristic speed `s_d = max(|sl|,|sr|)`,
-// folded against the per-cell inverse PHYSICAL width into `lambda = max_d (s_d * inv_w_d)`.
-// ONE gv trace owns physics + geometry + reduction — the regime supplies only
-// `wave_speeds_axis` (the SAME function the flux's HLLE uses), the geometry is the in-kernel
-// Gv metric (`cfl_inv_widths_gv`). NO Expr quartic, NO splice, NO hand-written iso speed.
+// CFL wave-speed map — symbi-hydro's `Regime::wave_speeds_axis` traced at S=Gv into the
+// complete timestep kernel: per gridded axis the characteristic speed `s_d = max(|sl|,|sr|)`,
+// folded against the per-cell inverse physical width into `lambda = max_d (s_d * inv_w_d)`.
+// one gv trace owns physics + geometry + reduction — the regime supplies
+// `wave_speeds_axis` (the same function the flux's HLLE uses), the geometry is the in-kernel
+// Gv metric (`cfl_inv_widths_gv`). the Expr quartic, the splice, and the hand-written iso
+// speed are all subsumed by that single graph.
 //
-// `axes[d]` is the COORDINATE gridded axis `d` maps to: identity for cartesian/spherical,
+// `axes[d]` is the coordinate gridded axis `d` maps to: identity for cartesian/spherical,
 // `[0, 2]` for the cyl r-z swirl. the euler map reads the normal velocity `vel[axes[d]]`
-// directly (`wave_speeds_axis` reads only the normal) and leaves the non-gridded velocity
-// slots ZERO — so the swirl CFL reads v_r/v_z but never the folded v_phi, and those zeroed
-// slots never enter the graph (dead). the host reduces `lambda` by max -> dt = cfl/lambda_max.
+// directly (`wave_speeds_axis` reads the normal alone) and leaves the non-gridded velocity
+// slots at zero — the swirl CFL prices v_r and v_z, the folded v_phi stays outside it, and the
+// zeroed slots are dead in the graph. the host reduces `lambda` by max -> dt = cfl/lambda_max.
 // =============================================================================
 
-/// the per-gridded-axis inverse PHYSICAL width `1/(h_d*width_d)` for the CFL — the length a
-/// wave must cross in one step. curvilinear: the per-cell width from the index
-/// (`cell_inv_phys_widths_gv`, so log zones + angular `h_d=r` are tracked). the regime never
-/// writes the width — it only supplies wave speeds — so it can never desync it.
+/// the per-gridded-axis inverse physical width `1/(h_d*width_d)` for the CFL — the length a
+/// wave crosses in one step. curvilinear: the per-cell width from the index
+/// (`cell_inv_phys_widths_gv`, so log zones + angular `h_d=r` are tracked). this is the sole
+/// writer of the width — the regime supplies wave speeds alone — so the two stay in sync.
 ///
-/// on cartesian every lame factor is 1, so the physical width IS the coordinate width, and
-/// WHICH width a cell has is a runtime property of the axis (`map_kind_d`) rather than a
-/// bake-time one. branching on the bake-time spacing instead would price `dt` off a single
-/// uniform width on a graded axis: too long a step where cells are narrow, which is a
-/// stability violation and not merely an inaccuracy. the uniform arm reads the host's
-/// precomputed reciprocal, so an unmapped run evaluates the identical expression it did
-/// before, and `map_kind` is per-launch-uniform so the branch never diverges across lanes.
+/// on cartesian every lame factor is 1, so the physical width equals the coordinate width, and
+/// which width a cell has is a runtime property of the axis (`map_kind_d`). branching on the
+/// bake-time spacing instead would price `dt` off a single uniform width on a graded axis: too
+/// long a step where cells are narrow, a stability violation well past a loss of accuracy. the
+/// uniform arm reads the host's precomputed reciprocal, so an unmapped run evaluates exactly
+/// the plain `inv_dx_d`, and `map_kind` is per-launch-uniform so every lane takes one branch.
 fn cfl_inv_widths_gv(coords: Coords, spacing: &[Spacing], axes: &[usize], ndim: usize) -> Vec<Gv> {
     if coords != Coords::Cartesian {
         return cell_inv_phys_widths_gv(coords, spacing, axes, ndim);
@@ -138,18 +138,18 @@ fn wave_speed_map_writes(root: NodeId) -> Vec<(String, FieldBind, NodeId)> {
     vec![("lambda".to_string(), FieldRef::Scratch.into(), root)]
 }
 
-/// the gridded cell-CENTER coordinate on axis `d`, SPACING-AWARE: the geometric mean of the bounding
-/// faces on a `Log` axis, the arithmetic midpoint on a `Uniform` one. every GR wave-speed map MUST
-/// evaluate the metric (lapse alpha, shift beta^r, the h_c = sqrt(gamma_cc) scale factors) at this
-/// radius — the uniform `x_lo + (i + 1/2) dx` formula evaluates the metric at ~r_min for EVERY cell
-/// on a log grid (alpha^2/beta^r/scale factors suppressed by f(r_min)/f(r)), overestimating dt into a
+/// the gridded cell-center coordinate on axis `d`, spacing-aware: the geometric mean of the bounding
+/// faces on a `Log` axis, the arithmetic midpoint on a `Uniform` one. every GR wave-speed map
+/// evaluates the metric (lapse alpha, shift beta^r, the h_c = sqrt(gamma_cc) scale factors) at this
+/// radius. the uniform `x_lo + (i + 1/2) dx` formula places every cell of a log grid at ~r_min
+/// (alpha^2/beta^r/scale factors suppressed by f(r_min)/f(r)), overestimating dt into a
 /// silent CFL violation. bit-identical to the plain uniform formula on a `Uniform` axis
 /// (`face_at(0) + 1/2 dx = x_lo + (i + 1/2) dx`). single source shared by every wave-speed map.
 fn gv_cell_center(d: usize, spacing: &[Spacing]) -> Gv {
     let half = Gv::from_f64(0.5);
     let lo = gv_axis_face_at(d, spacing[d], 0);
     let hi = gv_axis_face_at(d, spacing[d], 1);
-    // each map's own center convention, selected at RUNTIME by `map_kind_d` so one kernel serves
+    // each map's own center convention, selected at runtime by `map_kind_d` so one kernel serves
     // every spacing: the geometric mean on a logarithmic axis (the point that sits midway in
     // log-space, where the arithmetic mean sits far outward and overestimates dt), the arithmetic
     // mean of the bounding faces on a geometrically graded one, and the plain `face + dx/2` on an
@@ -168,11 +168,11 @@ fn gv_cell_center(d: usize, spacing: &[Spacing]) -> Gv {
     )
 }
 
-/// trace the COMPLETE ideal-gas euler CFL wave-speed map at `S = Gv` — the newtonian regime
+/// trace the complete ideal-gas euler CFL wave-speed map at `S = Gv` — the newtonian regime
 /// (which also drives the isothermal CFL at gamma->1) or `Rhd`. reads rho/pre + the gridded
-/// normal velocities `vel[axes[d]]` (non-gridded slots left ZERO; `wave_speeds_axis` reads
-/// only the normal, so they stay dead) + gamma, then folds `lambda = max_d (max(|sl|,|sr|) *
-/// inv_w_d)` over the gridded axes with the in-kernel geometry widths. ONE trace: physics +
+/// normal velocities `vel[axes[d]]` (non-gridded slots left at zero; `wave_speeds_axis` reads
+/// the normal alone, so they stay dead) + gamma, then folds `lambda = max_d (max(|sl|,|sr|) *
+/// inv_w_d)` over the gridded axes with the in-kernel geometry widths. one trace: physics +
 /// metric + reduction, replacing the splice-into-`flux::wave_speed_map` composition. always
 /// 3-component (the swirl shares the form); `coords`/`spacing`/`axes` select plane + metric.
 pub fn euler_wave_speed_map_gv<R>(
@@ -189,11 +189,12 @@ where
 {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
-    // the gridded normal velocities only; the non-gridded slots (cyl r-z's v_phi) stay ZERO and
-    // never enter the graph — `wave_speeds_axis` reads only the normal velocity `vel[axes[d]]`.
-    // the cell-CENTER coordinate on the grid axis carrying COORDINATE `target` (radial = 0, polar =
+    // the gridded normal velocities only; the non-gridded slots (cyl r-z's v_phi) stay at zero and
+    // dead in the graph — `wave_speeds_axis` reads the normal velocity `vel[axes[d]]` alone.
+    // the cell-center coordinate on the grid axis carrying coordinate `target` (radial = 0, polar =
     // 1), for the physical-velocity scale factors below. spacing-aware (log grids evaluate the metric
-    // scale factors at the geometric-mean radius). `None` if `target` is not a grid axis.
+    // scale factors at the geometric-mean radius). `Some(center)` for a gridded `target`, `None`
+    // otherwise.
     let coord_at = |target: usize| -> Option<Gv> {
         axes.iter()
             .position(|&c| c == target)
@@ -203,8 +204,8 @@ where
     for d in 0..ndim {
         let c = axes[d];
         let raw = Gv::field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8));
-        // valencia storage: `prim.vel` is the CONTRAVARIANT v^i; the SR characteristic speed is a
-        // function of the PHYSICAL velocity V^c = h_c v^c, with the metric scale factor h_c =
+        // valencia storage: `prim.vel` is the contravariant v^i; the SR characteristic speed is a
+        // function of the physical velocity V^c = h_c v^c, with the metric scale factor h_c =
         // sqrt(gamma_cc). spherical GR: h_r = sqrt(gamma_rr) = 1/alpha (det-g-flat), h_theta = r,
         // h_phi = r sin(theta). the per-axis coordinate factor (alpha^2 radial / alpha angular) applied
         // below completes the banyuls-font coordinate speed. flat -> h = 1 (untouched, bit-identical).
@@ -234,7 +235,7 @@ where
         pre,
     };
     let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
-    // mesh motion: the cfl signal speed is RELATIVE to the grid, `|s -+ v_g|`
+    // mesh motion: the cfl signal speed is relative to the grid, `|s -+ v_g|`
     // with per-axis `v_g = mesh_adot_d * x_centroid + mesh_vtrans_d`, the centroid taken from
     // the axis map so a graded axis is evaluated at its own cell centers (the dispatch binds the
     // homologous hubble rate on expanding axes, the translation rate on axis 0, zero
@@ -242,11 +243,11 @@ where
     // `|s|` are bit-identical).
     // GR coordinate CFL: the banyuls-font coordinate signal speed
     //   lambda_coord^c = alpha sqrt(gamma^{cc}) lambda^{SR} - beta^c.
-    // for the det-g-flat family (schwarzschild, kerr-schild) the RADIAL factor alpha sqrt(gamma^{rr})
-    // = alpha^2 (schwarzschild f = 1-2M/r; kerr-schild 1/(1+2M/r)), the ANGULAR factor = alpha. a
-    // ZERO-shift background keeps the multiplicative form `base * factor` (bit-identical to the
-    // pre-genericization kernel); a SHIFTED background (kerr-schild beta^r != 0) subtracts beta^r per
-    // characteristic root BEFORE the max|.|, which the multiplicative form cannot express. the lapse /
+    // for the det-g-flat family (schwarzschild, kerr-schild) the radial factor alpha sqrt(gamma^{rr})
+    // = alpha^2 (schwarzschild f = 1-2M/r; kerr-schild 1/(1+2M/r)), the angular factor = alpha. a
+    // zero-shift background keeps the multiplicative form `base * factor` (bit-identical to the
+    // pre-genericization kernel); a shifted background (kerr-schild beta^r != 0) subtracts beta^r per
+    // characteristic root before the max|.|, an ordering the per-root form carries. the lapse /
     // shift are radial-only, evaluated at the uniform-centroid cell radius (coord slot 0); flat ->
     // None -> the SR CFL untouched (bit-identical). the factors come from the `Metric` trait (the
     // single ADM seam).
@@ -266,10 +267,9 @@ where
     for d in 0..ndim {
         let (sl, sr) = regime.wave_speeds_axis(&eos, &prim, axes[d]);
         // the moving grid's local velocity `a_dot x_c + v_trans` has to be evaluated at the cell's
-        // OWN center. a graded axis places that center where its map does, not at
-        // `x_lo + (i + 1/2) dx` — reading the linear form there assigns each cell the velocity of
-        // a cell somewhere else, which grows outward with the grading and is a CFL violation
-        // rather than an inaccuracy.
+        // own center. a graded axis places that center where its map does, so the linear form
+        // `x_lo + (i + 1/2) dx` assigns each cell the velocity of a cell somewhere else, an error
+        // that grows outward with the grading and is a CFL violation well past an inaccuracy.
         let xc = gv_cell_center(d, spacing);
         let vg = Gv::scalar(&MeshScalar::Adot(d as u8).name()) * xc
             + Gv::scalar(&MeshScalar::Vtrans(d as u8).name());
@@ -310,13 +310,13 @@ where
     (end_trace(), writes)
 }
 
-/// the GENERIC curved-background CFL wave-speed map — the coordinate LIGHT-CONE bound per
-/// gridded axis, for ANY spacetime the codegen enum carries:
+/// the generic curved-background CFL wave-speed map — the coordinate light-cone bound per
+/// gridded axis, for any spacetime the codegen enum carries:
 /// `lambda_d = (alpha sqrt(gamma^{dd}) + |beta^d|) h_d / (h_d dx_d)` (the flat scale factor
 /// `h_d` cancels against the physical inverse width, leaving the coordinate speed over the
-/// coordinate width). every characteristic of ANY matter — magnetosonic waves included — lies
+/// coordinate width). every characteristic of any matter — magnetosonic waves included — lies
 /// inside the coordinate light cone, so the bound is unconditionally CFL-safe and
-/// state-INDEPENDENT (a pure-geometry kernel). tighter state-dependent maps (the factored
+/// state-independent (a pure-geometry kernel). tighter state-dependent maps (the factored
 /// banyuls-font forms) stay per-regime specializations; this is the safe generic fallback the
 /// GRMHD path uses. the metric evaluates at its full three coordinates: gridded slots at the
 /// cell center, the ungridded polar slot at the exact equatorial pi/2, the azimuthal at zero.
@@ -337,12 +337,12 @@ pub fn gr_light_cone_wave_speed_map_gv(
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    // the light-cone speed alpha sqrt(gamma^{dd}) + |beta^d| at the FULL position, dispatched by
-    // (spacetime, chart): the kerr-schild spacetime is expressed in spherical, CARTESIAN, or
-    // CYLINDRICAL coordinates — the metric computes r = |x| (cartesian) / sqrt(R^2 + z^2)
-    // (cylindrical) internally, so the wrong-chart spherical metric (which would read x[0] as the
-    // radius) is never used.
-    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // the light-cone speed alpha sqrt(gamma^{dd}) + |beta^d| at the full position, dispatched by
+    // (spacetime, chart): the kerr-schild spacetime is expressed in spherical, cartesian, or
+    // cylindrical coordinates — the metric computes r = |x| (cartesian) / sqrt(R^2 + z^2)
+    // (cylindrical) internally, so each chart gets the metric that reads its own coordinates. the
+    // spherical form reads x[0] as the radius and serves the spherical chart alone.
+    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
     // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
     let (alpha, gi, beta) = {
         fn adm<M: Metric<Gv, 3>>(m: &M, x: Tensor<Gv, 3>) -> (Gv, Matrix<Gv, 3>, Tensor<Gv, 3>) {
@@ -365,12 +365,12 @@ pub fn gr_light_cone_wave_speed_map_gv(
     (end_trace(), writes)
 }
 
-/// the fail-loud guard for a STATE-INDEPENDENT wave-speed map: a pure-geometry lambda breaks
+/// the fail-loud guard for a state-independent wave-speed map: a pure-geometry lambda breaks
 /// the "NaN state -> NaN wave speed -> NaN dt -> halt" backstop (a blown-up run marches to
 /// t_final and writes garbage checkpoints). probe the conserved state at this cell and force
-/// lambda -> +inf when it is non-finite: dt collapses to ZERO and the driver's crash guard
-/// halts. the inf is built at RUNTIME as lambda/0 (an inf literal does not survive the json
-/// ir); `probe - probe` is NaN for BOTH NaN and +-inf inputs; the good path divides by one,
+/// lambda -> +inf when it is non-finite: dt collapses to zero and the driver's crash guard
+/// halts. the json ir carries finite literals only, so the inf is built at runtime as
+/// lambda/0; `probe - probe` is NaN for both NaN and +-inf inputs; the good path divides by one,
 /// bit-transparent. den + tau suffice: any physics NaN reaches them within one step's fluxes.
 fn gv_state_finite_guard(lambda: Gv) -> Gv {
     let probe =
@@ -382,14 +382,15 @@ fn gv_state_finite_guard(lambda: Gv) -> Gv {
 /// the 3+1 metric fields (gamma_ij, gamma^ij, alpha, beta^i) traced at position `x`,
 /// dispatched by (spacetime, chart). the kerr-schild spacetime is expressed in spherical,
 /// cartesian, or cylindrical coordinates — the metric computes r = |x| (cartesian) /
-/// sqrt(R^2 + z^2) (cylindrical) internally, so the wrong-chart spherical metric (which
-/// would read x[0] as the radius) is never used. mass and spin bind as runtime scalars.
+/// sqrt(R^2 + z^2) (cylindrical) internally, so each chart gets the metric that reads its own
+/// coordinates; the spherical form reads x[0] as the radius and serves the spherical chart
+/// alone. mass and spin bind as runtime scalars.
 fn gr_metric_fields_gv(
     spacetime: Spacetime,
     coords: Coords,
     x: Tensor<Gv, 3>,
 ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
-    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
     // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
     fn adm<M: Metric<Gv, 3>>(
         m: &M,
@@ -405,17 +406,17 @@ fn gr_metric_fields_gv(
     with_ks_metric!(spacetime, coords, "the GR metric-fields trace", |m| adm(&m, x))
 }
 
-/// the STATE-DEPENDENT curved-background RMHD CFL wave-speed map — the coordinate-frame
+/// the state-dependent curved-background RMHD CFL wave-speed map — the coordinate-frame
 /// magnetosonic bound (`rmhd_magnetosonic_cfl_speeds_gr`: the flat product-form bound
 /// with metric contractions, `gamma^{nn}` in the discriminant, and the `alpha` prefactor),
-/// shifted to COORDINATE speeds `lambda_pm - beta^d` and folded per gridded axis with the
+/// shifted to coordinate speeds `lambda_pm - beta^d` and folded per gridded axis with the
 /// physical inverse width (the flat scale factor h_d restores the coordinate width, as in
-/// the light-cone map). the bound never under-estimates a signal speed, so it is
-/// CFL-safe, and it is TIGHT where the light cone is not: dt scales with the gas, not
-/// with c. at alpha = 1, gamma = delta, beta = 0 every curved factor is an exact 1.0
-/// multiply, so the map equals the flat magnetosonic map to roundoff. nan-preserving
-/// like the flat map: no light-cone clamp, no finite guard — an unphysical prim
-/// propagates to the dt guard unmasked. metric at the spacing-aware cell center,
+/// the light-cone map). the bound sits at or above every signal speed, so it is
+/// CFL-safe, and it is tight where the light cone is loose: dt tracks the gas speeds
+/// themselves, well below c. at alpha = 1, gamma = delta, beta = 0 every curved factor is
+/// an exact 1.0 multiply, so the map equals the flat magnetosonic map to roundoff. nan-preserving
+/// like the flat map: the bound is written raw, clamp-free and guard-free, so an unphysical
+/// prim reaches the dt guard intact. metric at the spacing-aware cell center,
 /// ungridded polar slot at pi/2.
 pub fn rmhd_magnetosonic_cfl_map_gr_gv(
     spacetime: Spacetime,
@@ -465,14 +466,14 @@ pub fn rmhd_magnetosonic_cfl_map_gr_gv(
     (end_trace(), writes)
 }
 
-/// the SPINNING-KERR CFL wave-speed map — the coordinate LIGHT-CONE bound per gridded axis:
+/// the spinning-kerr CFL wave-speed map — the coordinate light-cone bound per gridded axis:
 /// `lambda_d = alpha sqrt(gamma^{dd}) + |beta^d|`, folded over axes with the in-kernel physical
 /// inverse widths. every fluid characteristic lies inside the coordinate light cone, so the bound
-/// is unconditionally CFL-safe; it is state-INDEPENDENT (a pure-geometry kernel — dt is set by the
-/// metric alone). the exact banyuls-font per-axis speeds of the radial-only backgrounds do not
-/// factor for kerr (the theta-dependent lapse and the non-diagonal gamma^{rr} break the
+/// is unconditionally CFL-safe; it is state-independent (a pure-geometry kernel — dt is set by the
+/// metric alone). the exact banyuls-font per-axis speeds factor on the radial-only backgrounds
+/// alone (for kerr the theta-dependent lapse and the non-diagonal gamma^{rr} break the
 /// alpha^2-times-SR-speed identity), and the light cone gives up at most the O(1 - |v| - cs)
-/// interior margin. static metric: no mesh-motion terms.
+/// interior margin. static metric: the mesh is stationary, so the speeds carry the whole rate.
 pub fn kerr_wave_speed_map_gv(
     coords: Coords,
     spacing: &[Spacing],
@@ -485,7 +486,7 @@ pub fn kerr_wave_speed_map_gv(
     );
     begin_trace();
     let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
-    // spacing-aware cell centers: the radial axis may be LOG (kerr log-radial is baked), so the
+    // spacing-aware cell centers: the radial axis may be log (kerr log-radial is baked), so the
     // metric (lapse, shift, gamma^{cc}) must evaluate at the geometric-mean radius. theta is
     // uniform -> its center is the plain arithmetic midpoint.
     let r = gv_cell_center(0, spacing);
@@ -498,7 +499,7 @@ pub fn kerr_wave_speed_map_gv(
     let gi = g.spatial_metric_inv(x);
     let beta_r = g.shift(x)[0];
     // radial: (alpha sqrt(gamma^rr) + beta^r) / dr; the physical inv width for the flat radial
-    // scale factor h_r = 1 IS the coordinate 1/dr.
+    // scale factor h_r = 1 equals the coordinate 1/dr.
     let lam_r = (alpha * gi[(0, 0)].sqrt() + beta_r) * inv_w[0];
     // polar: alpha sqrt(gamma^{theta theta}) = alpha/sqrt(Sigma) over the coordinate dtheta; the
     // physical inv width carries the flat h_theta = r, so multiply the ratio r/sqrt(Sigma) back.
@@ -529,7 +530,7 @@ pub fn iso_wave_speed_map_gv(
 }
 
 /// the RHD CFL wave-speed map — the relativistic mignone-bodo per-axis speed (`Rhd::
-/// wave_speeds_axis`, the SAME core the RHD flux's HLLE consumes) traced to the timestep kernel.
+/// wave_speeds_axis`, the same core the RHD flux's HLLE consumes) traced to the timestep kernel.
 pub fn rhd_wave_speed_map_gv(
     coords: Coords,
     spacetime: Spacetime,
@@ -541,10 +542,10 @@ pub fn rhd_wave_speed_map_gv(
     euler_wave_speed_map_gv(&Rhd, coords, spacetime, spacing, axes, ndim, eos_arm)
 }
 
-/// trace the RMHD CFL wave-speed map at `S = Gv` — the MAGNETOSONIC UPPER BOUND
+/// trace the RMHD CFL wave-speed map at `S = Gv` — the magnetosonic upper bound
 /// (`rmhd_magnetosonic_cfl_speeds`). the CFL needs
 /// only a stable upper bound on the signal speed, and the bound is ~25x cheaper than the
-/// quartic (~30 ops + 1 sqrt vs ~750 ops + ~10 transcendentals, ALL of which trace into the
+/// quartic (~30 ops + 1 sqrt vs ~750 ops + ~10 transcendentals, all of which trace into the
 /// kernel because `S::select` evaluates every arm). the quartic stays on the riemann/flux
 /// path (`rmhd_flux_gv` -> extremal_speeds), where HLLE diffusion needs the tight estimate.
 /// see docs/c9fbdcb_perf_study/02. reads the full 3-velocity + 3-magnetic-field (vsq/bsq).
@@ -584,26 +585,26 @@ pub fn rmhd_wave_speed_map_gv(
     (end_trace(), writes)
 }
 
-/// trace the PER-CELL RMHD wave speeds — the EXACT mignone & del zanna quartic
-/// (`Rmhd::wave_speeds`, raw min/max, NO zero-clamp) evaluated once per cell for each of the
+/// trace the per-cell RMHD wave speeds — the exact mignone & del zanna quartic
+/// (`Rmhd::wave_speeds`, the raw min/max roots) evaluated once per cell for each of the
 /// 3 directions, writing `wave_speed_l[d] = lambda_min^d` and `wave_speed_r[d] = lambda_max^d`.
 ///
-/// this lifts the wave speed OFF the per-face flux (where it was recomputed for L and R at
+/// this lifts the wave speed off the per-face flux (where it was recomputed for L and R at
 /// every face — the dominant 166-register, 12-transcendental cost) onto the cell index space:
-/// the quartic's direction-INDEPENDENT guts (rho/h/c_s^2/b_mu^2/...) are CSE-shared across the
+/// the quartic's direction-independent guts (rho/h/c_s^2/b_mu^2/...) are CSE-shared across the
 /// 3 directions; only vn/bn and the resolvent differ. the flux then reads the two adjacent
 /// cells' stored speeds for the davis fan (`hlle_with_speeds`), and CFL folds the same fields
 /// — one computation, three consumers (flux, CFL, UCT-HLL). the zero-clamp for the HLL fan is
-/// applied at the FLUX (min/max of the two cells, clamped), so the stored values are raw.
-/// the CURVED-SPACETIME per-cell RMHD wave speeds — the SHIFTED coordinate characteristic
+/// applied at the flux (min/max of the two cells, clamped), so the stored values are raw.
+/// the curved-spacetime per-cell RMHD wave speeds — the shifted coordinate characteristic
 /// speeds `lambda_pm = (RmhdGr fast-magnetosonic BF speed) - beta^d` per grid direction,
-/// materialized into wave_speed_l/r for the GR-UCT edge coefficients. UNLIKE the flat kernel
-/// (the exact magnetosonic quartic) these are the algebraic fast bound `c_ms^2 = c_s^2 + v_A^2
-/// - c_s^2 v_A^2` through the two-velocity BF transform — cheaper, and the ONLY consumer is the
-/// UCT edge EMF (the GR flux computes its own inline). the shift makes them the induction
-/// system's coordinate speeds, consistent with the transport velocity vtilde = alpha v - beta
-/// the edge advection uses. metric at the cell centroid (the c2p point), ungridded polar slot
-/// at pi/2. baked per (spacetime, spacing).
+/// materialized into wave_speed_l/r for the GR-UCT edge coefficients. where the flat kernel
+/// solves the exact magnetosonic quartic, these carry the algebraic fast bound `c_ms^2 = c_s^2
+/// + v_A^2 - c_s^2 v_A^2` through the two-velocity BF transform — cheaper, and the sole
+/// consumer is the UCT edge EMF (the GR flux computes its own inline). the shift makes them the
+/// induction system's coordinate speeds, consistent with the transport velocity
+/// vtilde = alpha v - beta the edge advection uses. metric at the cell centroid (the c2p point),
+/// ungridded polar slot at pi/2. baked per (spacetime, spacing).
 pub fn rmhd_wave_speeds_cell_gr_gv(
     spacetime: Spacetime,
     coords: Coords,
@@ -642,9 +643,9 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     };
     let mut writes = Vec::with_capacity(2 * ndim);
     for d in 0..ndim {
-        // the EXACT quartic roots through the local orthonormal frame -- the same solve the flat
+        // the exact quartic roots through the local orthonormal frame -- the same solve the flat
         // chain performs, so these buffers hold the same quantity on every chart. the fast
-        // magnetosonic bound the cheap CFL rate uses is a valid HLL estimate but a DIFFERENT
+        // magnetosonic bound the cheap CFL rate uses is a valid HLL estimate but a different
         // number, and the UCT edge EMF reads these directly: filling them with a bound made every
         // curved-spacetime EMF more diffusive than its flat counterpart on identical physics.
         // the shift is subtracted here; alpha is already folded in by the tetrad map.
@@ -670,15 +671,16 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     (end_trace(), writes)
 }
 
-/// the SOURCE-admissibility CFL for GR-RMHD — the wu 2017 `lambda_S` mechanism. the covariant
+/// the source-admissibility CFL for GR-RMHD — the wu 2017 `lambda_S` mechanism. the covariant
 /// geodesic + EM-stress source advances `U -> U + dt S`, and the step must leave the result inside
-/// the admissible set: `D > 0`, `q(U) = E - sqrt(D^2 + |S|^2) > 0` AND `psi(U) > 0` (wu & tang,
+/// the admissible set: `D > 0`, `q(U) = E - sqrt(D^2 + |S|^2) > 0` and `psi(U) > 0` (wu & tang,
 /// theorem 2.1).
 ///
-/// the rate is the RECIPROCAL of the largest time the source ray may be followed before it leaves
-/// that set, located by bisection along the ray. no closed-form rate reproduces it: `psi` carries
-/// the magnetic field at FIXED `|B|`, which does not scale with `(D, S, E)`, so membership along
-/// the ray is not a function of the state's magnitude alone the way the hydrodynamic cone's is.
+/// the rate is the reciprocal of the largest time the source ray may be followed before it leaves
+/// that set, located by bisection along the ray. bisection is what it takes: `psi` carries
+/// the magnetic field at fixed `|B|`, which holds still while `(D, S, E)` scale, so membership
+/// along the ray turns on the state's direction as well as its magnitude — the hydrodynamic cone
+/// is homogeneous and admits a closed form.
 ///
 /// the momentum source takes `p = 0` and the energy source the full pressure, matching the fused
 /// godunov update. metric at the cell centroid, ungridded polar slot at pi/2.
@@ -786,7 +788,7 @@ pub fn rmhd_source_cfl_gr_gv(
                 st,
             )
         }
-        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
         (Spacetime::KerrKS, Coords::Cartesian) => {
             let spin_gv = Gv::scalar("kerr_spin");
@@ -878,24 +880,24 @@ pub fn rmhd_source_cfl_gr_gv(
         &gm_inv,
         &gm,
     );
-    // follow the ACTUAL geometric-source ray through the full RMHD admissible set. the evolved
-    // killing-energy slot has no geometric source on a stationary metric, while the momentum update
+    // follow the actual geometric-source ray through the full RMHD admissible set. the evolved
+    // killing-energy slot is source-free on a stationary metric, while the momentum update
     // is dS/dt = alpha Smom. therefore dE/dt = beta.Smom after differentiating
     // E = (ehat + D + beta.S)/alpha. the local state/source ratio supplies a dimensionally natural
     // trial time. if its endpoint is admissible, convexity proves the whole segment safe; otherwise
-    // fixed-count bisection returns the largest known-safe fraction. unlike the lipschitz |source|/q
-    // bound, an inward or tangent source does not collapse dt merely because a previous projection
-    // left q near its strict floor.
+    // fixed-count bisection returns the largest known-safe fraction. the lipschitz |source|/q bound
+    // collapses dt whenever a previous projection leaves q near its strict floor; following the ray
+    // keeps the full step for an inward or tangent source.
     let (source_mom, e_dot) =
         symbi_hydro::admissible::stationary_killing_source_ray(alpha, &beta, Tensor::new(sm_arr));
     let source_scale = e_dot.abs().max(alpha * sm_norm);
-    // the rate MUST be the reciprocal of an admissible-ray TIME, not a fractional-change ratio.
-    // `source_scale / state_scale` measures how fast the source moves the state; it says nothing
-    // about where the admissible boundary lies, so it permits a step that carries a cell straight
-    // out of G. the explicit update has no other guard on the geometric source: the first-order
-    // flux correction rebuilds a cell from its neighbors' fluxes, and the source limiter can only
-    // scale a source that is already being integrated over an admissible-length step. bisecting the
-    // actual ray is what makes `U + dt S` provably admissible for every cell.
+    // the rate is the reciprocal of an admissible-ray time. the fractional-change ratio
+    // `source_scale / state_scale` measures how fast the source moves the state and leaves the
+    // admissible boundary unlocated, so it permits a step that carries a cell straight
+    // out of G. this is the one guard the explicit update places on the geometric source: the
+    // first-order flux correction rebuilds a cell from its neighbors' fluxes, and the source
+    // limiter scales a source already being integrated over an admissible-length step. bisecting
+    // the actual ray is what makes `U + dt S` provably admissible for every cell.
     let eps_d = Gv::from_f64(1e-12) * state_scale;
     let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
     let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
@@ -918,20 +920,21 @@ pub fn rmhd_source_cfl_gr_gv(
         16,
     );
     let lam_s = Gv::ONE / safe_time;
-    // no cell inside the event horizon may throttle the global timestep. the outer horizon
-    // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
-    // interior reaches the exterior, so an interior cell's admissibility rate carries no information
-    // about exterior stability. infalling gas drives the interior pressure toward zero, which sends
-    // the cone margin q = E - sqrt(D^2 + |S|^2) to zero and the source rate lambda_S to infinity
-    // with it, so without this mask a handful of sub-horizon cells set dt for the whole grid — measured on the
+    // the global timestep belongs to the cells outside the event horizon. the outer horizon
+    // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: the
+    // interior stays causally sealed from the exterior, so an interior cell's admissibility rate is
+    // irrelevant to exterior stability. infalling gas drives the interior pressure toward zero,
+    // which sends the cone margin q = E - sqrt(D^2 + |S|^2) to zero and the source rate lambda_S to
+    // infinity with it, so this mask is what hands dt back to the exterior — measured on the
     // spinning magnetized torus, 24 cells lying between the excision surface and r_+ held lambda_S at
     // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
     //
-    // the threshold is the LARGER of r_+ and the excision surface, so a run that excises further out
+    // the threshold is the larger of r_+ and the excision surface, so a run that excises further out
     // keeps masking everything it excises. an excised cell is additionally numerical padding: its
     // state is frozen at the vacuum floor and can sit near the cone boundary indefinitely, the
-    // clamped-core metric driving enormous geodesic sources over it. gating cell CENTERS matches how
-    // interior guard activations are counted. cartesian charts only (spherical charts never excise).
+    // clamped-core metric driving enormous geodesic sources over it. gating cell centers matches how
+    // interior guard activations are counted. excision is a cartesian-chart facility, so the mask
+    // applies there.
     let lam_s = if coords == Coords::Cartesian
         && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
     {
@@ -956,11 +959,11 @@ pub fn rmhd_source_cfl_gr_gv(
     )
 }
 
-/// the SOURCE-admissibility CFL for GR-HYDRO — the wu 2017 lambda_S mechanism, the perfect-fluid
+/// the source-admissibility CFL for GR-hydro — the wu 2017 lambda_S mechanism, the perfect-fluid
 /// analogue of [`rmhd_source_cfl_gr_gv`] (no magnetic field). the covariant geodesic source
 /// S = (S_mom, S_tau) advances U -> U + dt S; the timestep must keep U + dt S inside the admissible
-/// cone q(U) = E - sqrt(D^2 + gamma^{ij} S_i S_j) >= 0 (E = tau + D). without `psi` the cone is
-/// homogeneous in the state, so the rate is available in CLOSED FORM as the sum of the two orders
+/// cone q(U) = E - sqrt(D^2 + gamma^{ij} S_i S_j) >= 0 (E = tau + D). with `psi` absent the cone is
+/// homogeneous in the state, so the rate is available in closed form as the sum of the two orders
 /// at which the margin is consumed: the first-order `(|beta.Smom|/alpha + |S.Smom|/root)/q` and the
 /// second-order `|Smom| / sqrt(2 root q)` derived below, `root = sqrt(D^2 + |S|^2)`. the second term
 /// is what survives where cold gas at rest kills the first. added into the CFL scratch alongside
@@ -987,7 +990,7 @@ pub fn rhd_source_cfl_gr_gv(
     });
     let pre = Gv::field("prim_pre", FieldRef::PrimPre);
     let v = Tensor::<Gv, 3>::new(vel);
-    // the densitized law samples its metric coefficients at the cell's ARITHMETIC MIDPOINT, the
+    // the densitized law samples its metric coefficients at the cell's arithmetic midpoint, the
     // same point the c2p undensitizes at, so the cone reads the state the recovery produced.
     let mid = gv_cell_midpoints(spacing, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
@@ -996,7 +999,7 @@ pub fn rhd_source_cfl_gr_gv(
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    // the admissible cone is a statement about the PHYSICAL state, so the densitized conserveds
+    // the admissible cone is a statement about the physical state, so the densitized conserveds
     // are divided by the full-chart measure sqrt(det gamma) before entering it. the densitized
     // update adds `dt sqrt(-g) S` to `sqrt(det gamma) U`, so the undensitized source rate the cone
     // sees is `alpha S` — the lapse is applied to the connection source below.
@@ -1004,7 +1007,7 @@ pub fn rhd_source_cfl_gr_gv(
     let d_cons = Gv::field("cons_den", FieldRef::cons_den()) * inv_dens;
     // the effective inertia e = rho h W^2 = h D^2 / rho_prim (W = D/rho_prim), reconstructed
     // metric-free and independent of the energy variable: the RHD nrg slot stores the killing
-    // energy, not the valencia tau, so `rho + tau + pre` does not name rho h W^2. the eulerian
+    // energy, and only the valencia tau would make `rho + tau + pre` name rho h W^2. the eulerian
     // energy for the admissibility cone follows as E = e - p = rho h W^2 - p = tau + D (below).
     let gamma_eos = Gv::scalar("gamma");
     let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * pre / rho;
@@ -1044,7 +1047,7 @@ pub fn rhd_source_cfl_gr_gv(
             let (_, st) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pre);
             (gi, sm, st, al, bt)
         }
-        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
         (Spacetime::KerrKS, Coords::Cartesian) => {
             let spin_gv = Gv::scalar("kerr_spin");
@@ -1126,10 +1129,9 @@ pub fn rhd_source_cfl_gr_gv(
     });
     // the connection source is densitized by sqrt(-g) while the state carries only
     // sqrt(det gamma), so the undensitized state actually moves at rate alpha S — a lapse the rate
-    // below deliberately does NOT apply. alpha <= 1, so charging the full |S| bounds the true
-    // margin consumption from above and the admissible step from below; relaxing it by the lapse
-    // is a sharpening that has to be justified against the cone it protects, not a free
-    // simplification.
+    // below deliberately omits. alpha <= 1, so charging the full |S| bounds the true
+    // margin consumption from above and the admissible step from below; folding the lapse in
+    // sharpens the bound, and a sharpening has to be justified against the cone it protects.
     // the eulerian total energy E = tau + D = rho h W^2 - p = e - p (metric-free; no killing-energy
     // inversion needed for the admissibility cone).
     let e_cons = e - pre;
@@ -1148,20 +1150,20 @@ pub fn rhd_source_cfl_gr_gv(
         symbi_hydro::admissible::rhd_state_scale(d_cons, &Tensor::new(mom), e_cons, &gm_inv);
     let q_safe = q0.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale);
     // the rate at which the geometric source consumes the admissibility margin
-    // q0 = E - sqrt(D^2 + |S|^2), evaluated for the COVARIANT (killing) energy variable.
-    // over a source step the mass has no source and the killing energy has none either
-    // (its source is identically zero on a stationary metric), so ONLY the momentum
-    // source moves the state. writing the eulerian energy in the stored variables,
+    // q0 = E - sqrt(D^2 + |S|^2), evaluated for the covariant (killing) energy variable.
+    // over a source step the mass and the killing energy are both source-free
+    // (the killing energy's source is identically zero on a stationary metric), so the momentum
+    // source alone moves the state. writing the eulerian energy in the stored variables,
     //   E = (ehat + D + beta^i S_i) / alpha,
     // and differentiating along S -> S + dt Smom,
     //   dq0/dt = (beta^i Smom_i)/alpha - (gamma^{ij} S_i Smom_j)/sqrt(D^2 + |S|^2).
     // the second term carries the factor |S|/sqrt(D^2 + |S|^2) and vanishes at rest, so
-    // cold gas at rest on a SHIFT-FREE chart consumes no margin at first order: the
-    // gravitational work rides inside the conserved killing energy rather than being
-    // charged against the vanishing internal energy. charging the valencia form
+    // cold gas at rest on a shift-free chart consumes zero margin at first order: the
+    // gravitational work rides inside the conserved killing energy, which absorbs it in
+    // place of the vanishing internal energy. charging the valencia form
     // (|S_tau| + |Smom|)/q0 instead makes the admissible dt scale like the pressure and
-    // drives dt to zero on cold atmospheres, a limit this variable does not actually
-    // impose. the energy source is absent from the update and so absent here too.
+    // drives dt to zero on cold atmospheres; the killing-energy variable admits the full
+    // step there. the update carries the momentum source alone, and so does this rate.
     let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
     let beta_dot_sm = {
         let mut acc = Gv::ZERO;
@@ -1179,35 +1181,36 @@ pub fn rhd_source_cfl_gr_gv(
         }
         acc
     };
-    // the FIRST-ORDER rate above degenerates exactly where cold gas sits: at rest S -> 0
-    // kills the second term, and a shift-free chart kills the first, leaving no constraint
-    // at all. the margin is still consumed at SECOND order, because |S| grows like
+    // the first-order rate above degenerates exactly where cold gas sits: at rest S -> 0
+    // kills the second term, and a shift-free chart kills the first, leaving that rate at
+    // zero. the margin is still consumed at second order, because |S| grows like
     // dt |Smom| and
     //   sqrt(D^2 + |S|^2) ~ root + (dt |Smom|)^2 / (2 root),
     // so admissibility needs dt < sqrt(2 root q0) / |Smom|. carried as the rate
-    // |Smom| / sqrt(2 root q0), it makes the cold-gas limit scale like sqrt(p) instead of
-    // the valencia form's p — far weaker, but NOT absent. omitting it lets a stationary
-    // rotating equilibrium on a zero-shift chart run past its admissible step.
+    // |Smom| / sqrt(2 root q0), it makes the cold-gas limit scale like sqrt(p) where the
+    // valencia form scales like p — far weaker, and still binding. it is what holds a
+    // stationary rotating equilibrium on a zero-shift chart to its admissible step.
     let root_safe =
         root.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale);
     let sm_norm = gamma_norm(&sm_arr).sqrt();
     let lam_first = ((beta_dot_sm / alpha).abs() + (s_dot_sm / root_safe).abs()) / q_safe;
     let lam_second = sm_norm / (Gv::from_f64(2.0) * root_safe * q_safe).sqrt();
     let lam_s = lam_first + lam_second;
-    // no cell inside the event horizon may throttle the global timestep. the outer horizon
-    // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
-    // interior reaches the exterior, so an interior cell's admissibility rate carries no information
-    // about exterior stability. infalling gas drives the interior pressure toward zero, which sends
-    // the cone margin q = E - sqrt(D^2 + |S|^2) to zero and the source rate lambda_S to infinity
-    // with it, so without this mask a handful of sub-horizon cells set dt for the whole grid — measured on the
+    // the global timestep belongs to the cells outside the event horizon. the outer horizon
+    // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: the
+    // interior stays causally sealed from the exterior, so an interior cell's admissibility rate is
+    // irrelevant to exterior stability. infalling gas drives the interior pressure toward zero,
+    // which sends the cone margin q = E - sqrt(D^2 + |S|^2) to zero and the source rate lambda_S to
+    // infinity with it, so this mask is what hands dt back to the exterior — measured on the
     // spinning magnetized torus, 24 cells lying between the excision surface and r_+ held lambda_S at
     // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
     //
-    // the threshold is the LARGER of r_+ and the excision surface, so a run that excises further out
+    // the threshold is the larger of r_+ and the excision surface, so a run that excises further out
     // keeps masking everything it excises. an excised cell is additionally numerical padding: its
     // state is frozen at the vacuum floor and can sit near the cone boundary indefinitely, the
-    // clamped-core metric driving enormous geodesic sources over it. gating cell CENTERS matches how
-    // interior guard activations are counted. cartesian charts only (spherical charts never excise).
+    // clamped-core metric driving enormous geodesic sources over it. gating cell centers matches how
+    // interior guard activations are counted. excision is a cartesian-chart facility, so the mask
+    // applies there.
     let lam_s = if coords == Coords::Cartesian
         && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
     {
@@ -1256,7 +1259,8 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
     let mut writes = Vec::with_capacity(2 * ndim);
     for d in 0..ndim {
         let nhat = Tensor::<Gv, 3>::unit(d);
-        // raw quartic min/max — NOT extremal_speeds (no zero-clamp); the flux clamps the fan.
+        // raw quartic min/max as the solver returns them; the flux clamps the fan, and the
+        // zero-clamped form lives there as `extremal_speeds`.
         let (lmin, lmax) = Rmhd.wave_speeds(&eos, &prim, &nhat);
         writes.push((
             format!("ws_l_{d}"),
@@ -1272,32 +1276,33 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
     (end_trace(), writes)
 }
 
-/// the FOFC ADMISSIBLE-BOUNDARY PROJECTION for GR-MHD — the magnetized twin of
+/// the FOFC admissible-boundary projection for GR-MHD — the magnetized twin of
 /// [`fofc_project_gr_gv`], and the provable replacement for the RMHD freeze parachute.
 ///
 /// two facts make the hydro projection carry over unchanged:
-/// - the RMHD c2p's OWN admissibility criterion is the B-FREE cone `E^2 > D^2 + gamma^{ij} S_i S_j`
-///   (`relativistic_cone_residual`, the wu 2017 bound shared with the hydro recovery) — the magnetic
-///   terms do not enter it, so `admissible_theta` is the same function;
-/// - because that cone is B-free it is CONVEX in `(D, S_i, tau)` at FIXED `B`, so blending only the
-///   hydro slots is sound. that matters: `B` is CONSTRAINED-TRANSPORT-evolved and must NOT be
-///   touched, or `div(B) = 0` breaks. the projection leaves the staggered field alone by
+/// - the RMHD c2p's own admissibility criterion is the B-free cone `E^2 > D^2 + gamma^{ij} S_i S_j`
+///   (`relativistic_cone_residual`, the wu 2017 bound shared with the hydro recovery) — it is built
+///   from the hydro slots alone, so `admissible_theta` is the same function;
+/// - because that cone is B-free it is convex in `(D, S_i, tau)` at fixed `B`, so blending the
+///   hydro slots alone is sound. that matters: `B` is constrained-transport-evolved and stays
+///   fixed, which is what holds `div(B) = 0`. the projection leaves the staggered field alone by
 ///   construction.
 ///
-/// GRMHD is UNDENSITIZED (the valencia state with the covariant killing energy in the `nrg` slot),
-/// so there is no `sqrt(-g)` here; the eulerian energy is recovered as
-/// `E = (ehat + D + beta^i S_i)/alpha`, the same inversion the GRMHD c2p performs.
+/// GRMHD is undensitized (the valencia state with the covariant killing energy in the `nrg` slot),
+/// so the stored slots are already the physical state and `sqrt(-g)` stays out of this kernel; the
+/// eulerian energy is recovered as `E = (ehat + D + beta^i S_i)/alpha`, the same inversion the
+/// GRMHD c2p performs.
 ///
-/// this enforces the SUFFICIENT admissibility condition, not merely the B-free cone: a state is
-/// admissible iff D > 0, q > 0 AND psi > 0, where psi carries the magnetic terms and rejects states
-/// whose magnetic energy leaves no positive gas pressure to recover. see
+/// this enforces the sufficient admissibility condition, which extends the B-free cone: a state is
+/// admissible iff D > 0, q > 0 and psi > 0, where psi carries the magnetic terms and rejects states
+/// whose magnetic energy exceeds the budget for a positive recoverable gas pressure. see
 /// `symbi_hydro::admissible::rmhd_admissible_residuals`.
 ///
 /// constrained transport owns the candidate magnetic field, so the anchor is rebuilt from the
-/// stage-input primitive gas state with that SAME field. converting this hybrid primitive state to
+/// stage-input primitive gas state with that same field. converting this hybrid primitive state to
 /// conserved form produces a guaranteed-admissible anchor in the affine slice B = B_candidate
-/// without modifying a shared face field. the projection can therefore always recover the gas state
-/// while preserving div(B) = 0.
+/// while the shared face field stays as constrained transport left it. the projection can therefore
+/// always recover the gas state while preserving div(B) = 0.
 pub fn fofc_project_gr_mhd_gv(
     coords: Coords,
     spacetime: Spacetime,
@@ -1330,21 +1335,21 @@ pub fn fofc_project_gr_mhd_gv(
     let read = |k: &str| Gv::field(k, k);
     let x_den = read("x_den");
     let x_nrg = read("x_nrg");
-    // RMHD momentum is ALWAYS a 3-vector (the physics is 3D; grid symmetry handles 1D/2D).
+    // RMHD momentum is always a 3-vector (the physics is 3D; grid symmetry handles 1D/2D).
     let x_mom: Vec<Gv> = (0..3).map(|k| read(&format!("x_mom_{k}"))).collect();
     let s_c = Tensor::<Gv, 3>::new(std::array::from_fn(|k| x_mom[k]));
     let beta_dot = |s: &Tensor<Gv, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
     let inv_alpha = Gv::ONE / alpha;
     let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
-    // the magnetic field is held FIXED at the candidate's cell-centered value: it is
+    // the magnetic field is held fixed at the candidate's cell-centered value: it is
     // constrained-transport-evolved on the staggered faces and shared between neighbors, so blending
     // it per cell would desynchronize the shared face value and break div(B) = 0.
     let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
         Gv::field(&format!("bcell_{k}"), &format!("mhd.bcell[{k}]"))
     }));
     // the stage-input primitives still occupy the primitive fields here: FOFC restored u_stage and
-    // ran c2p before constructing the first-order flux, while the candidate c2p has not run yet.
-    // combine that known-physical gas state with candidate B and convert it through the SAME GRMHD
+    // ran c2p before constructing the first-order flux, and the candidate c2p runs later.
+    // combine that known-physical gas state with candidate B and convert it through the same GRMHD
     // physics used by initialization. this makes the anchor admissible in the candidate magnetic
     // slice by construction.
     let anchor_gas = Prim {
@@ -1392,9 +1397,8 @@ pub fn fofc_project_gr_mhd_gv(
     );
     let a_nrg = alpha * e_a - a_den - beta_dot(&s_a);
     // 20 halvings resolve theta to ~1e-6. every iteration unrolls into the traced expression graph,
-    // and a truncated bisection only returns a SMALLER (more conservative) blend, never an
-    // inadmissible one, so the count trades kernel size against how sharply the projection hugs the
-    // boundary.
+    // and a truncated bisection returns a smaller, more conservative blend that stays admissible,
+    // so the count trades kernel size against how sharply the projection hugs the boundary.
     let theta = symbi_hydro::admissible::rmhd_admissible_theta(
         x_den, s_c, e_c, a_den, s_a, e_a, &b, &gm_inv, &gm, eps_d, eps_q, eps_psi, 20,
     );
@@ -1417,36 +1421,37 @@ pub fn fofc_project_gr_mhd_gv(
     (end_trace(), writes)
 }
 
-/// the STATE-CONSTRAINT PROJECTION (axioms A2-A4): blend the candidate toward the admissible anchor
-/// until EVERY declared constraint is satisfied, in one operation over the whole family.
+/// the state-constraint projection (axioms A2-A4): blend the candidate toward the admissible anchor
+/// until every declared constraint is satisfied, in one operation over the whole family.
 ///
-/// this traces `symbi_hydro::constraints` at `S = Gv`. it is not a second implementation of the
-/// projection — it is the SAME functions the host unit gates exercise, evaluated at the trace
-/// carrier, exactly as `admissible_theta` is already shared between `f64` and `Gv`. so the algebra
-/// cannot diverge between host and kernel; what an oracle must check here is the WIRING: that the
-/// anchor and candidate are not swapped, that each field lands in the slot the residual expects,
-/// that the metric enters with the valence each contraction demands, and that the stored covariant
-/// energy is mapped to the eulerian energy the admissible set is defined on.
+/// this traces `symbi_hydro::constraints` at `S = Gv`: the same functions the host unit gates
+/// exercise, evaluated at the trace carrier, exactly as `admissible_theta` is already shared
+/// between `f64` and `Gv`. the algebra is therefore identical between host and kernel, and what an
+/// oracle checks here is the wiring: that the anchor and candidate each land in their own role,
+/// that each field lands in the slot the residual expects, that the metric enters with the
+/// valence each contraction demands, and that the stored covariant energy is mapped to the
+/// eulerian energy the admissible set is defined on.
 ///
-/// the blend is applied to the STORED slots. that is legitimate rather than convenient: the stored
-/// to eulerian map `E = (ehat + D + beta^i S_i) / alpha` is AFFINE in the stored slots, so blending
+/// the blend is applied to the stored slots, and the affine map licenses it: the stored to
+/// eulerian map `E = (ehat + D + beta^i S_i) / alpha` is affine in the stored slots, so blending
 /// and converting commute, and a blend parameter computed on eulerian residuals applies unchanged
 /// to the stored state.
 ///
-/// each constraint's parameter is a RUNTIME scalar, so one baked kernel serves every configuration:
-/// a neutral value leaves a constraint declared, applicable and reporting a real residual, but never
-/// binding — which is deliberately NOT the same as a constraint that does not structurally apply.
+/// each constraint's parameter is a runtime scalar, so one baked kernel serves every configuration:
+/// a neutral value leaves a constraint declared, applicable and reporting a real residual with its
+/// theta pinned at 1 — a state deliberately distinct from a constraint that structurally sits out.
 ///
-/// PRECONDITION ON THE ANCHOR, and it is the sharp edge here. `a_*` must be admissible ALONGSIDE THE
-/// SAME cell-centered field `bc_*` the blend uses. constrained transport advances `B` on shared
-/// faces, so a conserved state taken from the stage input was certified against the STAGE-INPUT
-/// field, not the candidate's; pairing the two asserts the admissibility of a state that was never
-/// assembled, and the projection then recovers nothing at any blend while still returning a
-/// well-formed theta. an anchor for this kernel must therefore be RECONSTRUCTED — p2c from the
-/// stage-input primitive gas state combined with `bc_*`, then raised to the numerical margin — the
-/// way `fofc_project_gr_mhd_gv` builds it. `symbi_hydro::constraints::anchor_feasibility` is the
-/// residual that detects a violation; it is a distinct signal from `theta` and has to stay that way,
-/// because an infeasible anchor and a fully-corrected candidate both drive `theta` to zero.
+/// the anchor carries a precondition, and it is the sharp edge here: `a_*` is admissible alongside
+/// the same cell-centered field `bc_*` the blend uses. constrained transport advances `B` on shared
+/// faces, so a conserved state taken from the stage input carries a certificate against the
+/// stage-input field alone; pairing it with the candidate's field asserts the admissibility of an
+/// uncertified state, and the projection then leaves the candidate inadmissible at every blend
+/// while still returning a well-formed theta. an anchor for this kernel is therefore
+/// reconstructed — p2c from the stage-input primitive gas state combined with `bc_*`, then raised
+/// to the numerical margin — the way `fofc_project_gr_mhd_gv` builds it.
+/// `symbi_hydro::constraints::anchor_feasibility` is the residual that detects a violation; it is
+/// a distinct signal from `theta` and has to stay that way, because an infeasible anchor and a
+/// fully-corrected candidate both drive `theta` to zero.
 ///
 /// writes the projected conserved slots in place, plus `theta` (the joint blend, for the injected
 /// budget) and `binding` (the index of the constraint that bound, or -1 if none did, for the
@@ -1545,7 +1550,7 @@ pub fn constraint_projection_gv(
         };
 
     let read = |key: &str| Gv::field(key, key);
-    // `a_` is the ANCHOR (the admissible stage input), `x_` the CANDIDATE (projected in place).
+    // `a_` is the anchor (the admissible stage input), `x_` the candidate (projected in place).
     let a_den = read("a_den");
     let a_nrg = read("a_nrg");
     let a_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("a_mom_{k}"))));
@@ -1554,7 +1559,7 @@ pub fn constraint_projection_gv(
     let x_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("x_mom_{k}"))));
     let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("bc_{k}"))));
 
-    // the blended STORED state, mapped to the eulerian slots the admissible set is defined on.
+    // the blended stored state, mapped to the eulerian slots the admissible set is defined on.
     let blend_slots = |t: Gv| -> (Gv, Tensor<Gv, 3>, Gv) {
         let den = a_den + t * (x_den - a_den);
         let mom = Tensor::new(std::array::from_fn(|k| {
@@ -1576,8 +1581,8 @@ pub fn constraint_projection_gv(
         }
     };
 
-    // the admissibility margins come from the ANCHOR's own state scale — the same derivation the
-    // source-admissibility rate uses, rather than a constant re-chosen here.
+    // the admissibility margins come from the anchor's own state scale — the same derivation the
+    // source-admissibility rate uses, so one definition of the scale serves both.
     let anchor = blend(Gv::ZERO);
     let e_anchor = anchor.nrg.expect("the projection targets an energy regime");
     let state_scale =
@@ -1601,7 +1606,7 @@ pub fn constraint_projection_gv(
 
     let thetas = constraint_thetas(&family, &blend, 20);
     let theta = joint_theta(&thetas);
-    // the BINDING member, for the ledger. -1 when nothing bound, which is distinct from "member 0
+    // the binding member, for the ledger. -1 when nothing bound, which is distinct from "member 0
     // bound at theta = 1" and is what lets the budget separate a quiet substage from a charged one.
     let mut binding = Gv::from_f64(-1.0);
     let mut best = Gv::ONE;
@@ -1632,9 +1637,9 @@ pub fn constraint_projection_gv(
 
 /// the grmhd fofc geometric-source fraction. `a_*` is the admissible source-free
 /// low-order flux+ct anchor and `x_*` is the same conservative update with the full
-/// metric source. the kernel writes only `theta`; replaying the godunov stage with
+/// metric source. the kernel writes `theta` alone; replaying the godunov stage with
 /// that multiplier preserves the single-valued face fluxes and constrained-transport
-/// field instead of blending complete neighboring cell states.
+/// field, scaling the source in place of blending complete neighboring cell states.
 pub fn fofc_source_theta_gr_mhd_gv(
     coords: Coords,
     spacetime: Spacetime,
@@ -1673,8 +1678,9 @@ pub fn fofc_source_theta_gr_mhd_gv(
     let b = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("bc_{kk}"))));
     let beta_dot = |s: &Tensor<Gv, 3>| (0..3).fold(Gv::ZERO, |sum, kk| sum + beta[kk] * s[kk]);
     let e_anchor = (a_nrg + a_den + beta_dot(&a_mom)) / alpha;
-    // a geometric source has no baryon component, so both endpoints share the anchor density
-    // by construction. omitting candidate density from the graph makes that invariant structural.
+    // a geometric source acts on momentum and energy alone, so both endpoints share the anchor
+    // density by construction. reading the anchor density alone into the graph makes that
+    // invariant structural.
     let e_candidate = (x_nrg + a_den + beta_dot(&x_mom)) / alpha;
     let delta_s = Tensor::new(std::array::from_fn(|kk| x_mom[kk] - a_mom[kk]));
     let scale =
@@ -1701,13 +1707,13 @@ pub fn fofc_source_theta_gr_mhd_gv(
     (end_trace(), writes)
 }
 
-/// the FOFC ADMISSIBLE-BOUNDARY PROJECTION for GR-hydro (adiabatic) — the provable replacement for the
+/// the FOFC admissible-boundary projection for GR-hydro (adiabatic) — the provable replacement for the
 /// freeze parachute. where the spliced first-order conserved `x_*` is inadmissible, blend it toward the
 /// stage-input anchor `us_*` (admissible from stage entry) exactly onto the boundary of the
 /// relativistic admissible set `G = { D > 0, E^2 > D^2 + gamma^{ij} S_i S_j }` (wu & tang 2015). G is
-/// CONVEX, so the segment from an admissible anchor to any candidate crosses partial-G at most once and
-/// the projection ALWAYS yields an admissible state — an already-admissible cell passes through
-/// untouched (theta = 1), so no cell is ever unrecoverable. reads + writes the densitized conserveds
+/// convex, so the segment from an admissible anchor to any candidate crosses partial-G at most once and
+/// the projection always yields an admissible state — an already-admissible cell passes through
+/// untouched (theta = 1), so every cell stays recoverable. reads + writes the densitized conserveds
 /// `x_den`/`x_mom_k`/`x_nrg` in place, reads the anchor `us_*`; the metric at the cell midpoint supplies
 /// gamma^{ij} (for |S|^2) and alpha/beta (to reconstruct the eulerian energy E = (ehat + D + beta^i
 /// S_i)/alpha from the stored killing energy). densitization is a common positive factor that cancels
@@ -1782,10 +1788,11 @@ pub fn fofc_project_gr_gv(
     (end_trace(), writes)
 }
 
-/// the CLASSICAL (newtonian ideal-gas) per-cell wave speeds (`NewtonianMhd::wave_speeds` = the fast
+/// the classical (newtonian ideal-gas) per-cell wave speeds (`NewtonianMhd::wave_speeds` = the fast
 /// magnetosonic bound, lmin/lmax = v_n -/+ c_f). materializes `wave_speed_l/r[dir]` so UCT (which
-/// reads them for the edge-EMF coefficients) works for NMHD — the classical regimes compute speeds
-/// inline in the flux and otherwise do NOT store them. mirror of `rmhd_wave_speeds_cell_gv`.
+/// reads them for the edge-EMF coefficients) works for NMHD — the classical regimes otherwise
+/// compute speeds inline in the flux and leave those buffers empty. mirror of
+/// `rmhd_wave_speeds_cell_gv`.
 pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
@@ -1824,8 +1831,9 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
 
 /// isothermal-MHD per-cell wave speeds materialized for the UCT edge-EMF (`wave_speed_l/r[d]`).
 /// mirror of `nmhd_wave_speeds_cell_gv` with `IsothermalMhd::wave_speeds` (fast magnetosonic at
-/// a^2 = cs^2, NO pressure). lets isothermal MHD run UCT (the regime-generic HLL edge-EMF reads
-/// these speeds); without it `--ct-method uct` silently falls back to Contact.
+/// a^2 = cs^2, pressure-free). lets isothermal MHD run UCT (the regime-generic HLL edge-EMF reads
+/// these speeds); materializing them is what holds `--ct-method uct` on UCT, which silently falls
+/// back to Contact when those buffers are empty.
 pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
@@ -1863,7 +1871,7 @@ pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
 
 #[cfg(test)]
 mod log_radius_tests {
-    // the GR wave-speed maps must evaluate the metric at the SPACING-AWARE cell center. on a log
+    // the GR wave-speed maps evaluate the metric at the spacing-aware cell center. on a log
     // axis that is the geometric mean of the bounding faces (r_min * 10^((i+1/2) slope)); the
     // arithmetic `x_lo + (i+1/2) dx` puts every cell at ~r_min, suppressing alpha^2 / beta^r /
     // the scale factors and overestimating dt into a silent CFL violation.
@@ -1874,9 +1882,10 @@ mod log_radius_tests {
     fn eval(out: NodeId, values: &[(&str, f64)]) -> f64 {
         use symbi_ir::backends::interp::{Backend, Cpu};
         use symbi_ir::passes::scalarize::{LoweredFn, scalarize_kernel};
-        // the runtime spacing map emits `map_kind`'s cond as an `Op::IfElse`, which the single-output
-        // `scalarize` cannot lower (only `scalarize_kernel` handles it). lower the one output through
-        // `scalarize_kernel` and wrap it as a `LoweredFn` for the elemental interpreter.
+        // the runtime spacing map emits `map_kind`'s cond as an `Op::IfElse`, which
+        // `scalarize_kernel` lowers (the single-output `scalarize` handles straight-line graphs).
+        // lower the one output through `scalarize_kernel` and wrap it as a `LoweredFn` for the
+        // elemental interpreter.
         let lowered = with_trace(|t| {
             let sc = scalarize_kernel(t.graph(), &[out]);
             let ty = t.graph().ty(out).clone();

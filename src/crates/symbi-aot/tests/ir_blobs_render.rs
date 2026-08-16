@@ -3,12 +3,12 @@
 //
 // the CPU-side regression for the serialized backend-neutral IR: every
 // kernel build.rs emits is stored as a `<KERNEL>_IR` blob — the
-// serialized `Prepared`. this test deserializes the REAL generated blobs and
+// serialized `Prepared`. this test deserializes the real generated blobs and
 // renders them to CUDA source on the CPU (no GPU, no cuda feature, no nvcc).
 //
-// it guards two things the synthetic round-trip proof (symbi-ir) cannot:
+// it covers two things beyond the synthetic round-trip proof (symbi-ir):
 //   - serde DESERIALIZATION of the deepest real graphs — the 100-iter RMHD c2p
-//     bracketed iterate — does not trip serde_json's recursion limit.
+//     bracketed iterate — stays within serde_json's recursion limit.
 //   - the emitted blobs are well-formed: each renders to a named __global__.
 //
 // launching the rendered source and comparing against the CPU kernel needs a device, so
@@ -53,7 +53,7 @@ fn aot_ir_blobs_deserialize_and_render_to_cuda() {
     renders(RMHD_GHOST_FILL_3D_IR, "rmhd_ghost_fill_3d");
 }
 
-// the dimension-invariance proof: the SAME dim-generic builders, instantiated at 2D,
+// the dimension-invariance proof: the same dim-generic builders, instantiated at 2D,
 // emit well-formed kernels — c2p (iterative), the HLLE flux (2-component momentum),
 // and the godunov update (divergence over 2 sweep axes). once build.rs derives the
 // generated filename from kernel_name, going from 1D to 2D is just another instance.

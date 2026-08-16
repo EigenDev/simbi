@@ -11,10 +11,10 @@
 # needed and the metric is smooth throughout. uniform gas at rest free-falls under the
 # covariant geodesic source.
 #
-# the metric is EXACTLY symmetric under z -> -z (r = sqrt(R^2 + z^2) is even in z, and
+# the metric is exactly symmetric under z -> -z (r = sqrt(R^2 + z^2) is even in z, and
 # gamma_Rz / beta^z flip sign with the z-momentum), so a z-symmetric initial state on a
-# grid symmetric about z = 0 must evolve z-REFLECTION symmetrically to roundoff: rho / p
-# even in z, v_z ODD, v_R / v_phi even. the symmetry itself is the correctness gate for the
+# grid symmetric about z = 0 evolves z-reflection symmetrically to roundoff: rho / p
+# even in z, v_z odd, v_R / v_phi even. the symmetry itself is the correctness gate for the
 # cylindrical chart — the analog of the cartesian x <-> y test — catching any
 # coordinate-role or one-axis-shift bug (e.g. the densitization lapse using R as the
 # radius where the metric radius sqrt(R^2 + z^2) is required). horizon-penetrating, no floors.

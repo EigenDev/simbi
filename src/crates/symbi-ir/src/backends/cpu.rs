@@ -166,7 +166,7 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt, generic: bool) {
             result,
         } => {
             // Rust has first-class block expressions: `let name: ty = { body; result };`
-            // — the inner lets die at the closing brace, only `result` survives.
+            // — the inner lets end at the closing brace and `result` is the block's value.
             out.push_str("let ");
             out.push_str(name);
             out.push_str(": ");
@@ -185,11 +185,11 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt, generic: bool) {
             then_body,
             else_body,
         } => {
-            // declare the N result slots in the OUTER scope; each arm body ends
+            // declare the N result slots in the outer scope; each arm body ends
             // with `outs[j] = <arm result j>`. Rust definite-assignment accepts
-            // the deferred init since BOTH arms assign every slot before any
-            // use. only the taken arm runs — the carrier-portable early-out `if`
-            // (avoids the compute-all-paths cost), the DUAL of the `For`/`Break` iterate.
+            // the deferred init since both arms assign every slot ahead of any
+            // use. the taken arm alone runs — the carrier-portable early-out `if`,
+            // spending work on one path, the dual of the `For`/`Break` iterate.
             for (name, element) in outs {
                 out.push_str("let ");
                 out.push_str(name);
@@ -300,11 +300,10 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr, generic: bool) {
             out.push(']');
         }
         ScalarExpr::FieldLoadAt { .. } => {
-            // FieldLoadAt is a chalkboard-kernel-only construct: it only
-            // makes sense when there is a buffer-passing dispatch (the
-            // kernel pipeline). CPU elemental emission has no buffer
-            // dispatch — if an elemental tries to use gather_at the
-            // graph builder should have rejected it upstream.
+            // FieldLoadAt belongs to chalkboard-kernel emission, which carries a
+            // buffer-passing dispatch. the CPU elemental path emits pure scalar
+            // code over its params, so a `gather_at` inside an elemental is
+            // rejected by the graph builder upstream.
             panic!(
                 "emit_cpu::emit_expr: FieldLoadAt is only meaningful in \
                  chalkboard kernel emission; elemental CPU emission cannot \
@@ -479,8 +478,8 @@ mod tests {
     #[test]
     fn method_call_emits_dot_notation() {
         // abs is emitted as a method call `(x).abs()`; for generic-S kernels this
-        // resolves to the `Numeric` carrier's ternary `my_abs`, no
-        // scoped if-select (which would blow up rustc debuginfo on nested chains).
+        // resolves to the `Numeric` carrier's ternary `my_abs`. a scoped if-select
+        // in its place blows up rustc debuginfo on nested chains.
         let mut g = Graph::new();
         let x = g.add_scalar_param("x", ElementTy::F64);
         let a = g.element_wise(ElementWiseOp::Abs, vec![x], None);
@@ -585,7 +584,7 @@ mod tests {
 
         let src = emit_cpu(&fun);
         // canonical Rust block-expression shape — the let on the outside, the
-        // inner let dies at the closing brace, the result is the block's value.
+        // inner let ending at the closing brace, the result as the block's value.
         assert!(
             src.contains("let out: f64 = { let __t1: f64 = (a + b); (__t1 * a) };"),
             "expected canonical block-expression form; got:\n{src}",
@@ -595,8 +594,8 @@ mod tests {
         assert_parses(&src);
     }
 
-    /// nested scopes emit nested braces and still parse cleanly. validates
-    /// that the renderer is recursive and doesn't accidentally hoist.
+    /// nested scopes emit nested braces and still parse cleanly. validates that
+    /// the renderer recurses, keeping each scope's lets inside its own braces.
     #[test]
     fn scope_nests_correctly() {
         use crate::passes::scalarize::{

@@ -1,27 +1,27 @@
 // =============================================================================
 // rmhd_ct_curl_sph_divb.rs
 //
-// proves the CURVILINEAR (spherical) constrained-transport curl
-// (rmhd_ct_curl_3d_dir under Coords::Spherical) preserves the AREA-WEIGHTED
+// proves the curvilinear (spherical) constrained-transport curl
+// (rmhd_ct_curl_3d_dir under Coords::Spherical) preserves the area-weighted
 // div(B) = 0 to machine precision — the curvilinear generalization of the
 // cartesian rmhd_ct_curl3d_divb gate. this is the
 // non-negotiable correctness check for curvilinear CT.
 //
-// the curl is the ONE coord-generic orthogonal-curl in the scale factors h_p
-// (geometry.rs ct_curl_metric). adjacent faces SHARE each edge, and the edge
-// line-element weight h_p is a function of the GLOBAL edge index (same corner ->
+// the curl is the single coord-generic orthogonal-curl in the scale factors h_p
+// (geometry.rs ct_curl_metric). adjacent faces share each edge, and the edge
+// line-element weight h_p is a function of the global edge index (same corner ->
 // same h, scale_factor independent of the edge's own axis), so the point-form
 // area-weighted divergence telescopes to 0 exactly — same guarantee as
 // cartesian, independent of the metric.
 //
-// staggering (cell-indexed, row-major (i*M+j)*M+k): B_dir on the LOW dir-face,
+// staggering (cell-indexed, row-major (i*M+j)*M+k): B_dir on the low dir-face,
 // E_p on the edge parallel to p. div(B) is the point-form spherical flux balance
 //   div(B)[i,j,k] = A_r(i+1)Bx(i+1) - A_r(i)Bx(i)
 //                 + A_th(j+1)By(j+1) - A_th(j)By(j)
 //                 + A_ph(k+1)Bz(k+1) - A_ph(k)Bz(k)
 // with point-form face areas at the dir-face center (= 1 / the kernel's
 // 1/(h_p1c h_p2c) prefactor x dx_p1 dx_p2). B is initialized div-free as the
-// discrete curl of a vector potential A (run through the SAME kernel: b=0,
+// discrete curl of a vector potential A (run through the same kernel: b=0,
 // dt=1 -> B = curl A), then evolved one step by curl(E).
 // =============================================================================
 
@@ -172,7 +172,7 @@ fn ct_curl_sph_preserves_div_b() {
     // evolve one CT step by curl(E).
     let b2 = run_curl(&b, &e, DT);
 
-    // div(B) after the update must still be machine zero AND unchanged.
+    // div(B) after the update must stay machine zero and unchanged.
     let mut max_after = 0.0_f64;
     let mut max_change = 0.0_f64;
     for i in 0..M - 2 {
@@ -207,11 +207,11 @@ fn sf(c: usize, r: f64, theta: f64) -> f64 {
 
 #[test]
 fn ct_curl_sph_constant_edge_flux_is_curl_free() {
-    // E_c = C / h_c(edge) => the edge line-flux h_c E_c = C is CONSTANT along every
+    // E_c = C / h_c(edge) => the edge line-flux h_c E_c = C is constant along every
     // axis, so every weighted forward difference vanishes => curl = 0 for all three
-    // face components. a WRONG metric weight would not cancel. b=0, dt=1 => new_b
-    // must be machine zero. this pins the per-dir h-weighting (div B alone cannot —
-    // cartesian h=1 also telescopes).
+    // face components. the cancellation requires the correct metric weight on each
+    // edge. b=0, dt=1 => new_b must be machine zero. this pins the per-dir
+    // h-weighting, which div(B) alone leaves free (cartesian h=1 also telescopes).
     let f = M * M * M;
     let c0 = 1.7;
     let mut e = [vec![0.0; f], vec![0.0; f], vec![0.0; f]];
@@ -248,8 +248,8 @@ fn ct_curl_sph_constant_edge_flux_is_curl_free() {
 fn ct_curl_sph_b_r_matches_analytic() {
     // sharp magnitude test for B_r. E_theta = ALPHA*phi and E_phi = BETA*theta/sin(theta)
     // make h_theta E_theta (= r * ALPHA*phi) and h_phi E_phi (= r sin th * BETA th/sin th
-    // = r BETA th) LINEAR in their difference variables (phi, theta resp.), so the
-    // forward differences are EXACT. then the discrete
+    // = r BETA th) linear in their difference variables (phi, theta resp.), so the
+    // forward differences are exact. then the discrete
     //   curl_r = (1/(r sin th_c)) [ dE_theta/dphi - d(sin th E_phi)/dtheta ]
     //          = (1/(r sin th_c)) (ALPHA - BETA)
     // matches the closed-form substrate curl (= -(curl E)_r) at the face center to

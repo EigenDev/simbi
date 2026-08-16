@@ -28,7 +28,7 @@ pub mod runtime;
 mod space;
 mod token;
 // nvcc AOT compilation (CUDA source -> PTX). pure std (shells nvcc); always
-// available so symbi/build.rs can share the host-compiler probe without cuda.
+// available so symbi/build.rs can share the host-compiler probe independent of cuda.
 pub mod compile_cuda;
 
 #[cfg(feature = "cuda")]

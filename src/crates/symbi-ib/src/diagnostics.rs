@@ -26,8 +26,8 @@ use std::sync::Mutex;
 use symbi_ir::algebra::Scalar;
 
 /// diagnostic accumulator for body-fluid feedback.
-/// thread-safe via interior mutex. the mutex is taken once per tile merge,
-/// not per cell — contention is minimal with DomainForEach tiled dispatch.
+/// thread-safe via interior mutex. the mutex is taken once per tile merge, so
+/// contention stays low under DomainForEach tiled dispatch.
 pub struct DiagnosticAccumulator<S: Scalar, const D: usize> {
     // per-body accumulated deltas. protected by mutex for cross-tile merging.
     totals: Mutex<Vec<BodyDelta<S, D>>>,
@@ -54,9 +54,9 @@ impl<const D: usize> DiagnosticAccumulator<f64, D> {
     }
 
     /// accumulate a single cell's contribution to a body.
-    /// this acquires the mutex — call from serial tile inner loops,
-    /// not from individual cell iterations. for per-tile batching,
-    /// use accumulate_batch.
+    /// this acquires the mutex — call it once per serial tile inner loop.
+    /// for per-tile batching from individual cell iterations, use
+    /// accumulate_batch.
     pub fn accumulate(&self, delta: BodyDelta<f64, D>) {
         let mut totals = self.totals.lock().unwrap();
         if delta.idx < self.n_bodies {

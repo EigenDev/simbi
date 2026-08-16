@@ -1,11 +1,11 @@
 // =============================================================================
 // build.rs
 //
-// on macos the pyo3 `extension-module` feature deliberately does NOT link
-// libpython — the python symbols are resolved at import time by the host
+// on macos the pyo3 `extension-module` feature leaves libpython unlinked —
+// the python symbols are resolved at import time by the host
 // interpreter. the mach-o linker rejects the resulting undefined symbols
-// unless told to defer them, so pass `-undefined dynamic_lookup` scoped to
-// THIS crate's cdylib artifact only (not the whole workspace).
+// unless told to defer them, so pass `-undefined dynamic_lookup` scoped
+// narrowly to this crate's cdylib artifact.
 // =============================================================================
 
 fn main() {

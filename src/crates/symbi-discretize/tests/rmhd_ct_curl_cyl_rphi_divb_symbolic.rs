@@ -1,17 +1,18 @@
 // =============================================================================
 // rmhd_ct_curl_cyl_rphi_divb_symbolic.rs
 //
-// the SYMBOLIC proof that the 2D CYLINDRICAL (r, phi) DISK constrained-transport
-// curl (rmhd_ct_curl_cyl_rphi_gv) preserves the AREA-WEIGHTED div(B) = 0 EXACTLY —
+// the symbolic proof that the 2D cylindrical (r, phi) disk constrained-transport
+// curl (rmhd_ct_curl_cyl_rphi_gv) preserves the area-weighted div(B) = 0 exactly —
 // rational-function cancellation on the traced IR DAG. the structural guard for the
 // disk-plane induction (the nmhd_rotor_cyl_rphi numerical test only approximates it).
 //
 // the 2D curl from the single out-of-plane corner EMF E (`ez` = E_z):
 //   dir=0 (B_r, r-face):    dB_r/dt   = -(1/r_f) d_phi E   (1/r metric, r_f = r-face)
-//   dir=1 (B_phi, phi-face): dB_phi/dt = +d_r E             (flat, NO metric)
+//   dir=1 (B_phi, phi-face): dB_phi/dt = +d_r E             (flat, metric factor 1)
 // the point-form area-weighted divergence (cyl r-phi: (1/r)d_r(r B_r) + (1/r)d_phi B_phi):
 //   div(B) = (1/(r_c dr))(r_hi B_r[+r] - r_lo B_r) + (1/(r_c dphi))(B_phi[+phi] - B_phi)
-// with B = dt*curl(E), every E read cancels to the ZERO rational function. r is AFFINE; no sin.
+// with B = dt*curl(E), every E read cancels to the zero rational function. r is affine, so r
+// symbols alone span the coefficient ring.
 // =============================================================================
 
 use symbi_discretize::{Spacing, rmhd_ct_curl_cyl_rphi_gv};

@@ -14,10 +14,11 @@ from typing import Any, Optional, Sequence
 
 from .utils.colors import bcolors
 
-# directories that never hold simbi configs. pruned from the recursive walk so a
-# symlinked config tree (e.g., simbi_configs/science -> a sibling repo) does not
-# drag in its virtualenv / caches / build artifacts. any hidden dir (leading
-# dot, catches .venv/.git/.tox/...) is pruned too.
+# directories that hold tooling output. pruned from the recursive walk so a
+# symlinked config tree (e.g., simbi_configs/science -> a sibling repo)
+# contributes its own configs alone, leaving its virtualenv / caches / build
+# artifacts behind. any hidden dir (leading dot, catches .venv/.git/.tox/...)
+# is pruned too.
 _EXCLUDED_DIRS = frozenset(
     {
         "__pycache__",
@@ -171,10 +172,10 @@ def _is_config_file(path: Path) -> bool:
         return False
     try:
         with warnings.catch_warnings():
-            # classifying a candidate must stay silent: the scan inspects structure,
-            # it does not import or execute. a config tree's own latent warnings
-            # (invalid string escapes, deprecations) are surfaced when that config is
-            # actually run.
+            # classifying a candidate stays silent: the scan reads structure out of
+            # the parsed source, leaving import and execution to the run itself. a
+            # config tree's own latent warnings (invalid string escapes,
+            # deprecations) surface when that config is actually run.
             warnings.simplefilter("ignore")
             tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
     except (OSError, SyntaxError, ValueError):
@@ -183,9 +184,10 @@ def _is_config_file(path: Path) -> bool:
 
 
 def _find_configs(root: Path) -> list[Path]:
-    """walk `root` for config files, PRUNING excluded / hidden directories so a
-    symlinked tree's virtualenv and caches are never descended into. follows
-    symlinks (the `science` config link is intentional); the prune keeps it cheap.
+    """walk `root` for config files, pruning excluded / hidden directories so the
+    walk stays inside a symlinked tree's own sources and leaves its virtualenv and
+    caches alone. follows symlinks (the `science` config link is intentional); the
+    prune keeps it cheap.
     """
     root = Path(root)
     if not root.exists():
@@ -229,8 +231,8 @@ def config_roots() -> list[Path]:
 
 
 def get_available_configs():
-    # deduplicated by resolved path, so the same file is not listed twice when a root is
-    # a symlink to another or when you invoke this from the checkout itself.
+    # deduplicated by resolved path, so each file is listed once when a root is a
+    # symlink to another or when the call comes from the checkout itself.
     roots = config_roots()
     configs: list[Path] = []
     seen: set[Path] = set()

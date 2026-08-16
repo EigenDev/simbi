@@ -17,17 +17,17 @@ use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
 /// primitive (rho, v_{0,1,2}, pre, B_{0,1,2}) to the face, then the canonical
-/// `riemann::hlle(&NewtonianMhd, ...)`. unlike `rmhd_flux_gv`, the davis fan
-/// speeds are computed INLINE by `hlle` from the reconstructed L/R states (the
-/// closed-form magnetosonic is cheap), avoiding a materialized
-/// per-cell field and its kernel. `ndim` is the reconstruction grid; `dir`
+/// `riemann::hlle(&NewtonianMhd, ...)`. the davis fan speeds are computed inline by
+/// `hlle` from the reconstructed L/R states (the closed-form magnetosonic is cheap), so
+/// this arm runs off the face states alone, while `rmhd_flux_gv` materializes its quartic
+/// speeds in a per-cell field and kernel. `ndim` is the reconstruction grid; `dir`
 /// the sweep axis (RMHD/NMHD are fixed 3D in the velocity/field components).
 // shared NMHD face-flux reconstruction: bind gamma + theta, PLM-reconstruct the
 // 8-component MHD primitive (rho, v_{0..2}, pre, B_{0..2}) to the face. assumes
 // begin_trace() is active. returns the eos + L/R primitives + the sweep normal —
 // the solver (HLLE / HLLC / HLLD) is the only thing that differs.
 // reconstruct the L/R MHD primitives at the `dir`-grid face. the PLM stencil shifts along
-// GRID axis `dir`; the NORMAL is physical component `coord_n` (= axes[dir]; == dir for
+// grid axis `dir`; the normal is physical component `coord_n` (= axes[dir]; == dir for
 // cartesian/identity, [0,2][dir] for cyl r-z) — nhat and the staggered normal-B override
 // both index `coord_n`, while the face field is read along grid `dir`.
 fn nmhd_reconstruct(
@@ -65,11 +65,11 @@ fn nmhd_reconstruct(
         bl.push(l);
         br.push(r);
     }
-    // the NORMAL field is the staggered, divergence-free FACE field — read it DIRECTLY (one
-    // value at the face, no reconstruction) and override the cell-reconstructed B normal
+    // the normal field is the staggered, divergence-free face field — read it directly (a
+    // single value already living at the face) and override the cell-reconstructed B normal
     // component. gardiner-stone (2005) CT-godunov coupling: reconstructed bcell gives
     // bn_l != bn_r, breaking the riemann solver's constant-Bn assumption (OT noise/blow-up).
-    // the face field is read along GRID axis `dir`; the overridden component is the physical
+    // the face field is read along grid axis `dir`; the overridden component is the physical
     // normal `coord_n` (they coincide for cartesian; differ for the cyl r-z swirl/axisym).
     let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim, dir, 0);
     bl[coord_n] = bn_face;
@@ -130,7 +130,8 @@ pub fn nmhd_flux_gv(
 }
 
 /// NMHD HLLC face flux — `hllc_newtonian` (Li 2005, contact-resolving, transverse-B
-/// continuous) on the reconstructed L/R states. inline wave speeds (no ws_l/ws_r).
+/// continuous) on the reconstructed L/R states. wave speeds inline, from the face states
+/// alone (the manifest stays free of ws_l/ws_r).
 pub fn nmhd_hllc_flux_gv(
     ndim: u8,
     dir: u8,
@@ -165,8 +166,8 @@ pub fn nmhd_hlld_flux_gv(
 }
 
 // shared isothermal face-flux reconstruction: bind cs + theta, PLM-reconstruct the
-// 7-component iso-MHD primitive (rho, v_{0..2}, B_{0..2}) to the face. NO pre. the
-// NORMAL field comes from the staggered face field (bface coupling, see
+// 7-component iso-MHD primitive the isothermal system carries (rho, v_{0..2}, B_{0..2})
+// to the face. the face-normal field comes from the staggered face field (bface coupling, see
 // nmhd_reconstruct). returns the Isothermal eos + L/R primitives + the sweep normal.
 fn imhd_reconstruct(
     ndim: u8,
@@ -207,7 +208,7 @@ fn imhd_reconstruct(
         bl.push(l);
         br.push(r);
     }
-    // staggered div-free normal FACE field (gardiner-stone CT coupling): read along grid `dir`,
+    // staggered div-free normal face field (gardiner-stone CT coupling): read along grid `dir`,
     // override the physical normal component `coord_n` (= axes[dir]). see nmhd_reconstruct.
     let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim, dir, 0);
     bl[coord_n] = bn_face;
@@ -226,7 +227,7 @@ fn imhd_reconstruct(
     (Isothermal { cs }, left, right, nhat)
 }
 
-// the 7 conserved face-flux writes (D, S_{0..2}, B_{0..2}) — NO nrg.
+// the 7 conserved face-flux writes the isothermal system carries: D, S_{0..2}, B_{0..2}.
 fn imhd_flux_writes(flux: &IsoMhdCons<Gv, 3>) -> Vec<(String, FieldBind, NodeId)> {
     let mut writes = vec![(
         "flux_den".to_string(),
@@ -279,28 +280,28 @@ pub fn imhd_hlld_flux_gv(
 // =============================================================================
 // face flux — PLM reconstruction (Gv stencil) composed with the carrier-generic
 // `riemann::hlle` (symbi-hydro). the reconstruction is codegen-only (the host uses
-// the compiled kernel in place of a DomainForEach); the HLLE physics is the SINGLE source.
+// the compiled kernel in place of a DomainForEach); the HLLE physics has that one source.
 // =============================================================================
 
 /// the moving-mesh grid velocity at the face this thread owns:
 /// `vface = mesh_adot_{dir} * x_face + mesh_vtrans_{dir}`, with the face coordinate taken
-/// through the SAME axis map the cell geometry uses (the thread coordinate on a face domain IS
+/// through the axis map the cell geometry uses (the thread coordinate on a face domain is
 /// the face index). the dispatch decides the semantics per instance: homologous binds
-/// `mesh_adot_{dir} = a_dot/a` with PHYSICAL geometry scalars (so vface = H * r, and zero on
+/// `mesh_adot_{dir} = a_dot/a` with physical geometry scalars (so vface = H * r, and zero on
 /// non-expanding curvilinear axes); uniform translation binds `mesh_vtrans_{dir} = a_dot` on
 /// axis 0. the static binding (both zero) traces arithmetic that is bit-identical to the static
-/// flux. the per-axis names are the SAME convention the wave-speed map uses, minted through
-/// `MeshScalar` so the trace and the dispatch cannot drift.
+/// flux. the per-axis names follow the convention the wave-speed map uses, minted through
+/// `MeshScalar` so the trace and the dispatch stay in lockstep.
 ///
-/// the face position MUST come from `gv_axis_face_at`, not from a linear `x_lo + i*dx`. on a
-/// homologously expanding mesh the grid velocity is multiplied by the face AREA and differenced
-/// against the cell VOLUME, and both of those are built from the mapped faces. in spherical
+/// the face position comes from `gv_axis_face_at`, the mapped axis position. on a
+/// homologously expanding mesh the grid velocity is multiplied by the face area and differenced
+/// against the cell volume, and both of those are built from the mapped faces. in spherical
 /// geometry that difference is an exact identity —
 ///   div(rho vface) = [4 pi H rho r_hi^3 - 4 pi H rho r_lo^3] / [(4 pi/3)(r_hi^3 - r_lo^3)] = 3 H rho
-/// — which cancels the dilution term `mesh_hdil = 3 H` for ANY face positions, uniform or graded.
-/// the cancellation is therefore exact only while vface and the geometry agree on where the face
-/// IS; a linear position on a graded axis breaks it by the amount the two reconstructions differ,
-/// which grows with the grading.
+/// — which cancels the dilution term `mesh_hdil = 3 H` for any face positions, uniform or graded.
+/// the cancellation holds while vface and the geometry agree on where the face lies; a linear
+/// position `x_lo + i*dx` on a graded axis breaks it by the amount the two reconstructions
+/// differ, which grows with the grading.
 fn mesh_face_velocity_gv(dir: u8) -> Gv {
     let mesh_adot = Gv::scalar(&MeshScalar::Adot(dir).name());
     let x_face = crate::gv::geometry::gv_axis_face_at(dir as usize, Spacing::Uniform, 0);
@@ -312,7 +313,7 @@ fn mesh_face_velocity_gv(dir: u8) -> Gv {
 // primitive to the `dir`-grid face, and return the IdealGas eos + L/R primitives +
 // the sweep normal + the moving-face velocity. the solver (HLLE / HLLC) is the only
 // thing that differs. `ndim` is the reconstruction grid (stencil shifts along grid
-// axis `dir`); `coord_n` is the sweep COORDINATE (normal velocity is vel[coord_n]).
+// axis `dir`); `coord_n` is the sweep coordinate (normal velocity is vel[coord_n]).
 /// the well-balanced anchor: what a hydrostatic reconstruction needs to evaluate the body
 /// potential at the stencil's own positions. `None` reconstructs the state directly.
 #[derive(Clone, Copy)]
@@ -329,22 +330,22 @@ fn euler_reconstruct<const D: usize>(
     recon: Recon,
     balanced: Option<Balanced<'_>>,
 ) -> (Prim<Gv, D>, Prim<Gv, D>, Tensor<Gv, D>, Gv) {
-    // theta is SECOND in the manifest order [gamma, theta]: the caller registers gamma
+    // theta comes second in the manifest order [gamma, theta]: the caller registers gamma
     // inside the same trace before calling here (the eos construction lives with the
     // caller so the closure can be gamma-law or taub-mathews), and theta is registered
     // on every recon arm so the scalar tail is uniform; the ppm parabola carries its
-    // own monotonicity constraint and never reads it.
+    // own monotonicity constraint, so theta stays bound-but-inert there.
     let theta = Gv::scalar("theta");
-    // the THERMODYNAMIC pair is the only thing well-balancing changes: it limits each cell's
-    // departure from the hydrostatic profile through it instead of the state. everything after
+    // well-balancing changes the thermodynamic pair alone: the limiter acts on each cell's
+    // departure from the hydrostatic profile, in place of the raw state. everything after
     // this -- the velocity loop, the ppm flattening, the normal and the face velocity -- is
     // shared, which is the point. a second copy of this function silently lost the flattening
     // and hardcoded the normal to the sweep axis.
-    // FIELD-REGISTRATION ORDER IS ABI. the traced manifest records fields in first-read
+    // field-registration order is ABI. the traced manifest records fields in first-read
     // order, and every existing plain flux kernel registers [rho, v.., pre] -- so the plain
-    // branch must read the velocities BETWEEN the thermodynamic pair, exactly as it always
+    // branch must read the velocities between the thermodynamic pair, exactly as it always
     // has, or the manifest of every already-baked kernel silently reorders. the balanced
-    // branch computes rho and pre jointly (they share anchors and potentials), so its NEW
+    // branch computes rho and pre jointly (they share anchors and potentials), so its new
     // kernels register [rho, pre, v..]; that order is theirs from birth and equally stable.
     let (rho_l, rho_r, wb_pre) = match balanced {
         None => {
@@ -378,12 +379,12 @@ fn euler_reconstruct<const D: usize>(
     let mut pre_lr = (pre_l, pre_r);
     let mut vel_lr: Vec<(Gv, Gv)> = vl.into_iter().zip(vr).collect();
     if recon == Recon::Ppm {
-        // convergence-gated flattening, RUNTIME-DIALED: the monotonized
+        // convergence-gated flattening, runtime-dialed: the monotonized
         // parabola's dispersive truncation is anti-diffusive in strongly
         // converging flow, where its small face jumps also starve the riemann
         // solver's entropy-producing upwind dissipation — the pairing destroys
         // entropy (K = p/rho^gamma falls below its lagrangian value) in smooth
-        // SUSTAINED compressions such as gravitational infall onto a sink,
+        // sustained compressions such as gravitational infall onto a sink,
         // where a limited linear reconstruction holds the adiabat through its
         // larger dissipative jumps. blend each cell's interface values toward
         // its average by the compression the flow crosses per cell, measured
@@ -391,26 +392,26 @@ fn euler_reconstruct<const D: usize>(
         // c = max(0, -(v_{+1} - v_{-1})/2) / sqrt(p/rho), ramped from
         // `flatten_onset` to full at `flatten_full`.
         //
-        // the dials are RUNTIME scalars because no fixed pair serves every
+        // the dials are runtime scalars because the serving pair depends on the
         // regime: the sink-infall vent needs full flatten by c ~ 0.05 (the
         // sealed-wall standing layer; a mid-ramp coefficient there vents and
         // the dip grows with resolution), while trans-sonic turbulence lives
         // at c ~ 0.05-0.3 in every eddy collision — a flatten active there
         // degrades the parabola to first order across the box and its retained
         // kinetic energy falls below even coarse plm. the default (both dials
-        // zero) is the PURE parabola: `flatten_full <= flatten_onset` zeroes
+        // zero) is the pure parabola: `flatten_full <= flatten_onset` zeroes
         // the ramp inverse, so f = 0 everywhere and the blend is exact
         // passthrough. gravity-sink configs declare their own dials.
-        // INTERACTION WITH WELL-BALANCING. the blend pulls each face value toward its own
-        // CELL AVERAGE, and the two cells either side of a face have different averages -- so
+        // interaction with well-balancing. the blend pulls each face value toward its own
+        // cell average, and the two cells either side of a face have different averages -- so
         // where it fires it reintroduces the very jump the balanced reconstruction removes.
-        // it cannot fire on a state at rest: the sensor is the velocity convergence across the
-        // cell, which is identically zero there, so `f = 0` and the blend is exact passthrough.
+        // on a state at rest the sensor -- the velocity convergence across the cell -- is
+        // identically zero, so `f = 0` and the blend is exact passthrough.
         // a balanced atmosphere is therefore preserved exactly, and the degradation is confined
         // to genuinely compressing flow, where robustness is the reason the flatten exists.
-        // (blending toward the EQUILIBRIUM value rather than the cell average would preserve
-        // balance under compression too; not done, because it changes the flatten's meaning for
-        // every other kernel that shares it.)
+        // (blending toward the equilibrium value would preserve balance under compression too;
+        // the cell-average form is what stays, because the flatten is shared and its meaning
+        // has to hold for every kernel that reads it.)
         let onset = Gv::scalar("flatten_onset");
         let full = Gv::scalar("flatten_full");
         let half = Gv::from_f64(0.5);
@@ -439,7 +440,7 @@ fn euler_reconstruct<const D: usize>(
             ((c - onset) * ramp).max(Gv::ZERO).min(Gv::ONE)
         };
         // the face's left state is cell -1's right interface, the right state
-        // cell 0's left interface; each blends toward its OWN cell average. the
+        // cell 0's left interface; each blends toward its own cell average. the
         // coefficient is the max over the cell and both sweep neighbors — the
         // cell ahead of a steepening front is where the pre-front dispersive
         // error seeds, one cell before the front's own compression registers.
@@ -523,7 +524,7 @@ fn euler_flux_writes<const D: usize>(flux: &Cons<Gv, D>) -> Vec<(String, FieldBi
 /// carrier-generic physics. cartesian: ncomp == ndim == D, sweep coordinate == grid `dir`.
 /// generic over the regime (both `Newtonian` and `Rhd` have `Prim<S,D>` / `Cons<S,D>`).
 /// `D` is the velocity-component count (ncomp); `ndim` is the reconstruction grid (the
-/// stencil shifts along grid axis `dir`); `coord_n` is the sweep COORDINATE (the normal
+/// stencil shifts along grid axis `dir`); `coord_n` is the sweep coordinate (the normal
 /// velocity is `vel[coord_n]`, pressure goes on momentum `coord_n`). cartesian: ndim == D,
 /// coord_n == dir. cyl r-z: D = 3, ndim = 2, coord_n = axes[dir] (the swirl is the 3rd comp).
 fn euler_hlle_flux_gv<const D: usize, R>(
@@ -538,11 +539,11 @@ where
     R: Regime<Gv, D, Prim = Prim<Gv, D>, Cons = Cons<Gv, D>>,
 {
     begin_trace();
-    // gamma is FIRST in the manifest on every arm (the taub-mathews closure never reads
-    // it — the bound-but-inert scalar keeps the ABI uniform, exactly as theta under ppm).
+    // gamma comes first in the manifest on every arm (under the taub-mathews closure it is
+    // bound-but-inert, which keeps the ABI uniform, exactly as theta under ppm).
     let gamma = Gv::scalar("gamma");
     let eos = super::gv_eos(eos_arm, gamma);
-    // the SINGLE-SOURCE physics: reconstructed L/R primitives -> canonical HLLE.
+    // the single-source physics: reconstructed L/R primitives -> canonical HLLE.
     let (left, right, nhat, vface) = euler_reconstruct::<D>(ndim, dir, coord_n, recon, None);
     let flux = hlle(regime, &eos, &left, &right, &nhat, vface);
     let writes = euler_flux_writes(&flux);
@@ -569,7 +570,8 @@ pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, Vec<(String, FieldBind, N
 
 /// the RHD (special-relativistic euler) face flux — `euler_hlle_flux_gv` at the `Rhd`
 /// regime (relativistic U/F/wave speeds via mignone-bodo). replaces the `rhd_hlle_flux`
-/// Expr builder + `rhd_side`. cartesian-only (rhd has no cyl r-z), ncomp == ndim == D.
+/// Expr builder + `rhd_side`. cartesian-only (the rhd arm bakes on the cartesian chart),
+/// ncomp == ndim == D.
 pub fn rhd_flux_gv<const D: usize>(
     dir: u8,
     eos_arm: EosArm,
@@ -578,11 +580,11 @@ pub fn rhd_flux_gv<const D: usize>(
 }
 
 /// the RHD face flux on a curved spacetime — the `_schw`/`_ks` GR path. PLM-reconstruct the
-/// CONTRAVARIANT-velocity primitive, build the in-kernel 3+1 block (gamma/gamma^{-1}, lapse, shift)
+/// contravariant-velocity primitive, build the in-kernel 3+1 block (gamma/gamma^{-1}, lapse, shift)
 /// and the densitization measure `sqrt(det gamma)` from the metric at the swept-axis face, then run
 /// `riemann::hlle_with_speeds` at the `RhdGr` regime. the emitted flux is the fully densitized
 /// `sqrt(-g)[rho u^n, T^n_i, -(T^n_t + rho u^n)]`, so the godunov differences it in plain
-/// coordinates with no area, volume or lapse weight. `RhdGr` REDUCES to `Rhd` at identity gamma,
+/// coordinates, the measure already carried inside. `RhdGr` reduces to `Rhd` at identity gamma,
 /// unit lapse, zero shift and unit measure. D-generic over the sweep (metric at the swept-axis
 /// face, transverse coords at the centroid); baked only for a curved spacetime.
 pub fn rhd_flux_gr_gv<const D: usize>(
@@ -602,9 +604,9 @@ where
     KerrKS<Gv>: Metric<Gv, D>,
 {
     begin_trace();
-    // `D` is the momentum/velocity DOF; the RECONSTRUCTION grid is `axes.len()` — they differ for
+    // `D` is the momentum/velocity DOF; the reconstruction grid is `axes.len()` — they differ for
     // the spherical swirl (DOF = 3 on a 2D (r, theta) grid, out-of-plane v_phi reconstructed along
-    // the gridded sweeps like any transverse component). the sweep NORMAL is coordinate `axes[dir]`.
+    // the gridded sweeps like any transverse component). the sweep normal is coordinate `axes[dir]`.
     let ndim = axes.len();
     // the GR arm stays on the gamma-law closure; gamma keeps its first-in-manifest slot.
     let eos = IdealGas {
@@ -612,12 +614,12 @@ where
     };
     let (left, right, nhat, vface) =
         euler_reconstruct::<D>(ndim as u8, dir, axes[dir as usize], Recon::Plm, None);
-    // the in-kernel spatial metric + lapse at the SWEPT-axis face, transverse GRIDDED coordinates at
-    // the cell centroid — the correct face-metric position for a `dir` sweep. an ungridded symmetry
-    // slot (the axisymmetric phi) takes zero: the spherical metrics never read phi, and
-    // gamma_{phi phi} = r^2 sin^2(theta) needs only the gridded (r, theta).
-    // the transverse coordinate is the cell's ARITHMETIC MIDPOINT: the face flux is a face
-    // AVERAGE over the transverse coordinate extent, whose second-order sampling point is the
+    // the in-kernel spatial metric + lapse at the swept-axis face, transverse gridded coordinates at
+    // the cell centroid — the correct face-metric position for a `dir` sweep. the spherical metrics
+    // read the gridded (r, theta) alone — gamma_{phi phi} = r^2 sin^2(theta) — so an ungridded
+    // symmetry slot (the axisymmetric phi) takes zero.
+    // the transverse coordinate is the cell's arithmetic midpoint: the face flux is a face
+    // average over the transverse coordinate extent, whose second-order sampling point is the
     // midpoint — the same point the cell state densitizes at.
     let mid = gv_cell_midpoints(spacing, ndim);
     let x = Tensor::<Gv, D>::new(std::array::from_fn(|c| {
@@ -631,17 +633,17 @@ where
         }
     }));
     // the ADM face block, selected by (spacetime, chart): the kerr-schild spacetime is expressed in
-    // the SPHERICAL chart (SchwarzschildKS, radial shift) OR the CARTESIAN chart
+    // the spherical chart (SchwarzschildKS, radial shift) or the cartesian chart
     // (SchwarzschildKSCartesian, non-diagonal, shift along every axis). the shift `beta` is carried
     // out for the per-axis shift term below (zero for the static schwarzschild chart).
-    // `volume_factor` is sqrt(det gamma) of the FULL chart at any instantiated `D`, so a reduced
+    // `volume_factor` is sqrt(det gamma) of the full chart at any instantiated `D`, so a reduced
     // radial or equatorial block still carries the suppressed directions' measure (spherical 1D:
     // r^2/sqrt(f)); `alpha * volume_factor = sqrt(-g)` is the densitization the state and the flux
     // both ride on.
-    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update
+    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update
     // gamma_ij = delta_ij + 2H l_i l_j with the oblate-spheroidal radius; non-diagonal
     // gamma + shift on every axis, DOF == D (the frame dragging rides the swirl of l).
-    // spinning kerr on the SPHERICAL chart: non-diagonal gamma_{r phi} at the face —
+    // spinning kerr on the spherical chart: non-diagonal gamma_{r phi} at the face —
     // swirl (D = 3) only.
     let (gamma, gamma_inv, alpha, beta, sqrt_gamma) = {
         fn adm<const N: usize, M: Metric<Gv, N>>(
@@ -658,25 +660,26 @@ where
         }
         with_ks_metric!(spacetime, coords, "the GR flux", |m| adm(&m, x))
     };
-    // spinning kerr: re-reconstruct the AZIMUTHAL velocity in the angular-momentum-carrying
+    // spinning kerr: re-reconstruct the azimuthal velocity in the angular-momentum-carrying
     // variable w = v^phi + (gamma_{r phi} / gamma_{phi phi}) v^r, so a zero-angular-momentum
     // (S_phi = 0) state — whose frame-dragging v^phi exactly cancels against v^r in the covariant
-    // lowering — reconstructs to a face pair that STILL cancels: S_phi(face) = E gamma_{phi phi} w
+    // lowering — reconstructs to a face pair that still cancels: S_phi(face) = E gamma_{phi phi} w
     // exactly, and w = 0 to roundoff for dragging states. reconstructing v^phi raw mixes the
     // geometric dragging profile into the limited slopes and generates S_phi at truncation level.
     // the per-offset coefficient q = gamma_{r phi}/gamma_{phi phi} is evaluated at each stencil
-    // cell's ARITHMETIC MIDPOINT — the exact position the c2p inverted the metric at, so the
+    // cell's arithmetic midpoint — the exact position the c2p inverted the metric at, so the
     // cell-wise cancellation transfers to the stencil values at roundoff; the face coefficient
-    // comes from the SAME face matrices the riemann states lower with. gamma_{r phi} vanishes for
-    // every other background, so this block is kerr-only — and SPHERICAL-swirl-only: the cartesian
-    // kerr chart has DOF == D and no coordinate azimuth, so it reconstructs the raw v^i (the
-    // dragging profile enters the limited slopes at truncation level, which converges away).
+    // comes from the face matrices the riemann states lower with. gamma_{r phi} vanishes for
+    // every other background, so this block is kerr-only — and spherical-swirl-only: the cartesian
+    // kerr chart has DOF == D and carries cartesian velocity components, so it reconstructs the
+    // raw v^i (the dragging profile enters the limited slopes at truncation level, which
+    // converges away).
     let (left, right) = if spacetime == Spacetime::KerrKS && coords == Coords::Spherical {
         assert!(D == 3, "the kerr flux carries the swirl DOF");
         let mass = Gv::scalar("schwarzschild_mass");
         let spin = Gv::scalar("kerr_spin");
         // q at the arithmetic midpoint of the cell `off` steps along the sweep axis; the
-        // transverse coordinate sits at THIS cell's midpoint (the stencil shifts one axis only).
+        // transverse coordinate sits at this cell's midpoint (the stencil shifts one axis only).
         let half = Gv::from_f64(0.5);
         let q_at = |off: i32| -> Gv {
             let shifted_mid = |ax: usize| {
@@ -704,7 +707,7 @@ where
         };
         let (w_l, w_r) =
             plm_theta_from_stencil(stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim);
-        // back to v^phi with the FACE coefficient — the same matrices the riemann states lower
+        // back to v^phi with the face coefficient — the same matrices the riemann states lower
         // with, so the face cancellation is exact to roundoff.
         let q_face = gamma[(0, 2)] / gamma[(2, 2)];
         let mut lv = left;
@@ -722,11 +725,11 @@ where
         sqrt_gamma,
     };
     let coord_n = axes[dir as usize];
-    // RUSANOV / local lax-friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
-    // s = +/- alpha sqrt(gamma^{nn}) - beta^n — the STATE-INDEPENDENT maximal signal bound in
-    // COORDINATE form, matching the shift the flux carries. every fluid characteristic lies inside
-    // the light cone, so it cannot under-bound near the boundary of the physical set; the low-order
-    // update keeps the conserved state inside the physical cone.
+    // rusanov / local lax-friedrichs mode (the FOFC first-order fallback): the light-cone speeds
+    // s = +/- alpha sqrt(gamma^{nn}) - beta^n — the state-independent maximal signal bound in
+    // coordinate form, matching the shift the flux carries. every fluid characteristic lies inside
+    // the light cone, so the bound holds from above right up to the boundary of the physical set;
+    // the low-order update keeps the conserved state inside the physical cone.
     let (s_l, s_r) = if rusanov {
         let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
         let beta_n = beta[coord_n];
@@ -734,20 +737,20 @@ where
     } else {
         regime.extremal_speeds(&eos, &left, &right, &nhat)
     };
-    // one HLL fan on the densitized pair (U, F^n): both sides carry the SAME measure sqrt(-g), the
-    // shift rides inside F^n, and the signal speeds are the coordinate speeds lambda^n - beta^n, so
-    // no per-chart advection transform and no lapse re-weighting of any component. mesh motion
-    // (vface) never composes with a curved spacetime in the bake.
+    // one HLL fan on the densitized pair (U, F^n): both sides carry the one measure sqrt(-g), the
+    // shift rides inside F^n, and the signal speeds are the coordinate speeds lambda^n - beta^n,
+    // so the fan is complete in coordinate form — every component keeps that single sqrt(-g)
+    // weight, and the chart enters through the densitized pair alone. in the bake, mesh motion
+    // (vface) pairs with flat spacetime alone.
     let flux = hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r);
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
 
-/// the isothermal face flux — ISO-NATIVE through the gv path. traces the iso physics
-/// DIRECTLY (no `Regime` trait, no `IdealGas{gamma}` EOS, no energy U/F): U/F have
-/// `(den, mom_k)` only, wave speeds use `cs = sqrt(pre / rho)` with prim.pre carrying
-/// the locally-isothermal `cs^2(x) * rho` — exactly the substrate's locally-isothermal
-/// trick, but the energy nodes never enter the graph in the first place. matches the
+/// the isothermal face flux — iso-native through the gv path. traces the iso physics
+/// directly at the iso shape: U/F carry `(den, mom_k)`, wave speeds use `cs = sqrt(pre / rho)`
+/// with prim.pre carrying the locally-isothermal `cs^2(x) * rho` — exactly the substrate's
+/// locally-isothermal trick, with the graph built from those nodes alone. matches the
 /// type-system claim ([[isothermal.rs]]: "zero-overhead isothermal hydrodynamics via
 /// the energy model type system") at the gv-trace layer too. ncomp == ndim == D, sweep
 /// coordinate == grid `dir` (cartesian).
@@ -755,11 +758,11 @@ pub fn iso_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind
     iso_hlle_flux_gv::<D>(D as u8, dir, dir as usize)
 }
 
-/// build the iso HLLE face flux directly using Gv ops — no Regime trait detour, no
-/// generic `riemann::hlle` (which would force adiabatic-shaped `Cons<S,D>`). HLLE the
+/// build the iso HLLE face flux directly using Gv ops, at the iso shape (the generic
+/// `riemann::hlle` carries adiabatic-shaped `Cons<S,D>`). HLLE the
 /// algorithm is regime-generic; this is iso-shaped from the first node: U = (den, mom),
 /// F = (rho*vn, rho*vn*vel + p*nhat), cs = sqrt(p/rho). ndim is the reconstruction grid
-/// (stencil shifts along grid axis `dir`); `coord_n` is the sweep COORDINATE (normal
+/// (stencil shifts along grid axis `dir`); `coord_n` is the sweep coordinate (normal
 /// velocity is `vel[coord_n]`, pressure goes on momentum `coord_n`). cartesian: ndim ==
 /// D, coord_n == dir.
 fn iso_hlle_flux_gv<const D: usize>(
@@ -768,9 +771,10 @@ fn iso_hlle_flux_gv<const D: usize>(
     coord_n: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    // theta is the only scalar param — iso has no gamma. the substrate's dispatch_flux
-    // passes ISO_GAMMA, but `scalars_for` walks the kernel's manifest and only asks for
-    // declared scalars, so dropping gamma here drops it from the manifest cleanly.
+    // theta is the whole scalar tail — the isothermal closure is set by cs alone. the
+    // substrate's dispatch_flux passes ISO_GAMMA, and `scalars_for` walks the kernel's
+    // manifest asking for the declared scalars, so leaving gamma out here leaves it out
+    // of the manifest cleanly.
     let theta = Gv::scalar("theta");
 
     // primitives at the face: rho, each velocity component, and pre (= cs^2(x) * rho
@@ -793,8 +797,8 @@ fn iso_hlle_flux_gv<const D: usize>(
     let (pre_l, pre_r) = plm_theta_gv("prim_pre", "prim.pre", ndim, dir, theta);
 
     // iso conserved + flux (the algebra IsoNewtonian writes at Rust level, traced here
-    // as Gv ops — no energy slot, so no nrg arithmetic enters the graph). normal-velocity
-    // shorthands keep the writes-expression-tree small.
+    // as Gv ops — the state is (den, mom), so the graph holds that arithmetic alone).
+    // normal-velocity shorthands keep the writes-expression-tree small.
     let vn_l = vl[coord_n];
     let vn_r = vr[coord_n];
     let f_l_den = rho_l * vn_l;
@@ -879,7 +883,7 @@ fn iso_hlle_flux_gv<const D: usize>(
 /// gv single source: theta-MC PLM-reconstruct (rho, vel_{0,1,2}, pre, mag_{0,1,2}) to the
 /// face, then `riemann::hlle(Rmhd, IdealGas, L, R, n_hat, 0)` (symbi-hydro — the quartic
 /// wave speeds + induction flux, all S::select-traceable). replaces the `rmhd_hlle_flux`
-/// Expr builder + `lower_rmhd_side`. RMHD vectors are ALWAYS 3-component; `ndim` selects the
+/// Expr builder + `lower_rmhd_side`. RMHD vectors are 3-component on every grid; `ndim` selects the
 /// reconstruction grid + emit loop. writes the 8 conserved fluxes (D, S_k, tau, B_k).
 pub fn rmhd_flux_gv(
     ndim: u8,
@@ -919,7 +923,7 @@ pub fn rmhd_flux_gv(
         br.push(r);
     }
 
-    // the SINGLE-SOURCE physics: reconstructed L/R MHD primitives -> canonical HLLE.
+    // the single-source physics: reconstructed L/R MHD primitives -> canonical HLLE.
     let eos = IdealGas { gamma };
     let mk = |rho: Gv, v: &[Gv], p: Gv, b: &[Gv]| MhdPrim::<Gv, 3> {
         hydro: Prim {
@@ -929,7 +933,7 @@ pub fn rmhd_flux_gv(
         },
         mag: Tensor::new([b[0], b[1], b[2]]),
     };
-    // normal B from the staggered FACE field (gardiner-stone CT coupling) — reconstructed
+    // normal B from the staggered face field (gardiner-stone CT coupling) — reconstructed
     // bcell gives bn_l != bn_r, breaking the constant-Bn assumption. see nmhd_reconstruct.
     let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim, dir, 0);
     bl[coord_n] = bn_face;
@@ -939,7 +943,7 @@ pub fn rmhd_flux_gv(
     let nhat = Tensor::<Gv, 3>::unit(coord_n);
 
     // the wave speeds are materialized once per cell by rmhd_wave_speeds_cell_gv into
-    // wave_speed_l[dir]/wave_speed_r[dir] (the exact quartic) and READ here.
+    // wave_speed_l[dir]/wave_speed_r[dir] (the exact quartic) and read here.
     // the HLL fan is the cell-centered davis estimate over the two cells sharing this face:
     // plm_theta_gv reconstructs L from cell `coord - e_dir` (offset -1) and R from cell `coord`
     // (offset 0), so the fan reads those same two cells' speeds. the rmhd zero-clamp is applied
@@ -981,10 +985,10 @@ pub fn rmhd_flux_gv(
         ));
     }
 
-    // the smem tile: reconstruction is 1D ALONG `dir`, so the
-    // tile is a thin SLAB — halo on axis `dir` only, transverse axes unextended.
+    // the smem tile: reconstruction is 1D along `dir`, so the
+    // tile is a thin slab — halo on axis `dir`, transverse axes at their native extent.
     // the tiled set is derived from the graph (the shifted `LoadAt` fields: the 8
-    // reconstructed prim + the 2 per-cell wave speeds), computed automatically without a hand-kept list.
+    // reconstructed prim + the 2 per-cell wave speeds), computed automatically from the trace.
     let k = end_trace();
     let stencil_keys = k.stencil_read_field_keys();
     if stencil_keys.is_empty() {
@@ -999,16 +1003,17 @@ pub fn rmhd_flux_gv(
     (k, writes)
 }
 
-/// the RMHD face flux on a curved SPATIAL metric — the GRMHD path (valencia covariant U/F via
+/// the RMHD face flux on a curved spatial metric — the GRMHD path (valencia covariant U/F via
 /// `RmhdGr` + the fast-magnetosonic-bound coordinate wave speeds). PLM-reconstruct the 8 MHD
 /// primitives (the normal B from the staggered face field, gardiner-stone), build the in-kernel
 /// `SpatialMetric` + lapse at the swept-axis face, and run the HLL fan at the `RmhdGr` regime.
-/// wave speeds are INLINE (the bound is quartic-free), so the GR path skips the materialized
-/// per-cell quartic the flat kernel reads. on the kerr-schild chart the fan carries the radial
-/// shift exactly like the RHD GR flux — with the induction TRANSPOSE term: the true mag-row flux
+/// wave speeds are inline (the bound is closed-form), so the GR path computes them in the flux
+/// kernel where the flat kernel reads a materialized per-cell quartic. on the kerr-schild chart
+/// the fan carries the radial shift exactly like the RHD GR flux — with the induction transpose
+/// term: the true mag-row flux
 /// is `(alpha v^n - beta^n) B^i - (alpha v^i - beta^i) B^n`, so beyond the uniform
 /// `-(beta^n/alpha) U` subtraction every mag row i gains `+(beta^i/alpha) B^n` (the radial row of
-/// a transverse sweep included; B^n is the SHARED face field, so the term is side-symmetric).
+/// a transverse sweep included; B^n is the shared face field, so the term is side-symmetric).
 /// spinning kerr is excluded until the dragging-consistent reconstruction extends to B (design
 /// 44 phase C). the metric's ungridded polar slot takes the equatorial pi/2 (exact for the
 /// theta-symmetric 1D radial problem), the azimuthal slot zero.
@@ -1054,7 +1059,7 @@ pub fn rmhd_flux_gr_gv(
         bl.push(l);
         br.push(r);
     }
-    // normal B from the staggered FACE field (gardiner-stone CT coupling) — shared by both sides.
+    // normal B from the staggered face field (gardiner-stone CT coupling) — shared by both sides.
     let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim as u8, dir, 0);
     bl[coord_n] = bn_face;
     br[coord_n] = bn_face;
@@ -1071,7 +1076,7 @@ pub fn rmhd_flux_gr_gv(
     let right = mk(rho_r, &vr, pre_r, &br);
     let nhat = Tensor::<Gv, 3>::unit(coord_n);
 
-    // the metric at the SWEPT-axis face, transverse gridded slots at the cell centroid; the
+    // the metric at the swept-axis face, transverse gridded slots at the cell centroid; the
     // ungridded polar slot is the exact equatorial pi/2, the azimuthal slot zero.
     let geo = (ndim > 1).then(|| cell_geometry_gv(coords, spacing, axes, ndim));
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
@@ -1088,9 +1093,9 @@ pub fn rmhd_flux_gr_gv(
             }
         }
     }));
-    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
     // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. every spinning
-    // kerr chart (ingoing kerr-schild) carries a NON-DIAGONAL gamma_{r phi} (the tetrad
+    // kerr chart (ingoing kerr-schild) carries a non-diagonal gamma_{r phi} (the tetrad
     // handles it) and a radial shift (the moving-interface fan handles it); the flux is
     // otherwise metric-generic. the azimuthal momentum (swirl DOF) carries the frame dragging.
     let (gamma, gamma_inv, alpha, beta) = {
@@ -1107,14 +1112,14 @@ pub fn rmhd_flux_gr_gv(
         }
         with_ks_metric!(spacetime, coords, "the GRMHD flux", |m| adm(&m, x))
     };
-    // spinning kerr: re-reconstruct the AZIMUTHAL velocity in the angular-momentum-carrying variable
+    // spinning kerr: re-reconstruct the azimuthal velocity in the angular-momentum-carrying variable
     // w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r, so a zero-angular-momentum (S_phi = 0) dragging
-    // state reconstructs to a face pair that STILL cancels (S_phi(face) = (rho h W^2 + b^2) gamma_pp w,
+    // state reconstructs to a face pair that still cancels (S_phi(face) = (rho h W^2 + b^2) gamma_pp w,
     // exact to roundoff); reconstructing v^phi raw mixes the geometric dragging profile into the
     // limited slopes and generates S_phi at truncation level. mirrors the RHD GR flux. kerr-only
     // (gamma_{r phi} vanishes elsewhere). the per-offset q is at each cell's volume-weighted centroid
-    // (the c2p metric point), the face q from the SAME face matrix the riemann states lower with.
-    // spherical-swirl-only: the cartesian kerr chart reconstructs the raw v^i (no coordinate azimuth).
+    // (the c2p metric point), the face q from the face matrix the riemann states lower with.
+    // spherical-swirl-only: the cartesian kerr chart reconstructs the raw v^i (cartesian components).
     let (left, right) = if spacetime == Spacetime::KerrKS && coords == Coords::Spherical {
         let mass = Gv::scalar("schwarzschild_mass");
         let spin = Gv::scalar("kerr_spin");
@@ -1175,19 +1180,19 @@ pub fn rmhd_flux_gr_gv(
         alpha,
     };
     let has_shift = matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS);
-    // GR HLLD (the ORTHONORMAL-frame MUB09 fan): the spatial metric maps (via the tetrad) to the
+    // GR HLLD (the orthonormal-frame MUB09 fan): the spatial metric maps (via the tetrad) to the
     // local orthonormal frame where the validated flat solver runs, and the intercell flux maps back
-    // exactly. a SHIFTED chart (kerr-schild / kerr) rides the shift as the MOVING-INTERFACE speed
+    // exactly. a shifted chart (kerr-schild / kerr) rides the shift as the moving-interface speed
     // vface = beta^n/alpha, so the fan is evaluated at x/t = beta^n/alpha and the kernel flux is
     // F* - (beta^n/alpha) U* (the godunov re-applies alpha). the induction equation carries one more
     // shift term, the transpose +(beta^i/alpha) B^n; B^n is single-valued at the face, so it is a
     // constant added to the magnetic flux after the fan (identical to adding it to both sides).
     // covariant (killing) energy flux: F_ehat/alpha = alpha F_tau + (alpha-1) F_D - beta^i F_{S_i},
     // the linear re-split of the valencia numerical fluxes into the free-index-down energy current,
-    // in the SAME face convention the RHD arm stores: the godunov works in the flat coordinate
-    // measure (sqrt(gm) = sqrt(gm_flat)/alpha, static) and re-applies ONE cell lapse to the energy
-    // divergence like every other conserved law, so the face slot owes a 1/alpha — storing the
-    // fully self-contained sqrt(-g) current here instead leaves a spurious energy source
+    // in the face convention the RHD arm stores: the godunov works in the flat coordinate
+    // measure (sqrt(gm) = sqrt(gm_flat)/alpha, static) and re-applies one cell lapse to the energy
+    // divergence like every other conserved law, so the face slot owes a 1/alpha — a fully
+    // self-contained sqrt(-g) current stored here would leave a spurious energy source
     // f_ehat * d_n(ln alpha) on any chart with a varying lapse. both HLLD and HLLE emit the
     // valencia flux in the shifted-G "godunov re-applies alpha" convention
     // (F_X = F_X* - (beta^n/alpha) X*). alpha=1, beta=0 -> F_tau (the flat valencia energy flux).
@@ -1245,13 +1250,14 @@ pub fn rmhd_flux_gr_gv(
     // the HLL fan speeds. rusanov / local lax-friedrichs (the FOFC first-order fallback):
     // the light-cone speeds s = +/- alpha sqrt(gamma^{nn}) — the state-independent maximal
     // signal bound (the shift is applied by the has_shift fan below); provably
-    // admissibility-preserving because it cannot under-bound near the boundary of the
-    // physical set. otherwise: the per-cell EXACT-QUARTIC speeds materialized by the
-    // wave-speed cell kernel, davis min/max over the two cells sharing this face — the
-    // same one-computation-many-consumers layout as the flat flux. the stored values are
-    // COORDINATE speeds (the writing kernel subtracts beta^d at each cell), so the face
-    // shift is added back to restore the frame speeds this fan consumes; the relativistic
-    // zero-clamp then pins the stationary state inside the fan (stored speeds are raw).
+    // admissibility-preserving because it bounds every characteristic from above right up
+    // to the boundary of the physical set. otherwise: the per-cell exact-quartic speeds
+    // materialized by the wave-speed cell kernel, davis min/max over the two cells sharing
+    // this face — the same one-computation-many-consumers layout as the flat flux. the
+    // stored values are coordinate speeds (the writing kernel subtracts beta^d at each
+    // cell), so the face shift is added back to restore the frame speeds this fan
+    // consumes; the relativistic zero-clamp then pins the stationary state inside the fan
+    // (stored speeds are raw).
     let (s_l, s_r) = if rusanov {
         let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
         (Gv::ZERO - lam, lam)
@@ -1345,31 +1351,30 @@ pub fn rmhd_flux_gr_gv(
 // builder per regime (newtonian, RHD, RMHD) mirroring the HLLE builder shape:
 // same PLM reconstruction, same scalar tail (gamma, theta), same write manifest.
 // the riemann solver is the only structural difference. defaulted to the
-// Standard shock-smoother arm at trace time — fleischmann is host-time
-// dispatch knobs not exposed through the substrate yet.
+// Standard shock-smoother arm at trace time — fleischmann lives behind
+// host-time dispatch knobs the substrate has yet to expose.
 // =============================================================================
 
 /// adiabatic (ideal-gas newtonian euler) HLLC face flux. mirrors
-/// `euler_hlle_flux_gv(&Newtonian, ...)` but calls `riemann::hllc` instead of
-/// `riemann::hlle`. carrier-generic over Gv; iso is structurally excluded
-/// (no contact wave -> HLLE-only).
+/// `euler_hlle_flux_gv(&Newtonian, ...)` at `riemann::hllc`. carrier-generic over
+/// Gv; the iso fan carries two waves, so the iso system stays on HLLE.
 /// which reference mach number the low-mach ramp saturates at: the published constant, or the
-/// runtime kernel scalar the clamp-free arm exposes. a TAG rather than a `Gv`, because a `Gv`
-/// built at the call site would be built outside the trace this function opens.
+/// runtime kernel scalar the clamp-free arm exposes. a tag, since a `Gv` built at the call
+/// site would be built outside the trace this function opens.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MachRef {
     Published,
     Runtime,
 }
 
-/// the ONE adiabatic HLLC-family face flux, over the arms that actually differ.
+/// the single adiabatic HLLC-family face flux, over the arms that actually differ.
 ///
 /// four emitters used to spell this body verbatim, differing in a single `ShockwaveLimiter`
 /// variant -- while `rhd_hllc_at_arm`, ninety lines below, already factored exactly this shape
 /// for the relativistic side. the reference mach number was repeated three times with it, and
 /// one copy had already deviated.
 ///
-/// `balance` is INDEPENDENT of `smoother`: well-balancing is a property of the reconstruction
+/// `balance` is independent of `smoother`: well-balancing is a property of the reconstruction
 /// and the low-mach ramp a property of the solver, so every pairing is expressible -- including
 /// the one the first-order FOFC redo needs, which is HLLE with a balanced reconstruction.
 fn adiabatic_hllc_at_arm<const D: usize>(
@@ -1382,10 +1387,10 @@ fn adiabatic_hllc_at_arm<const D: usize>(
     axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    // BUILT INSIDE THE TRACE. a `Gv` handed in as an argument is constructed at the CALL site,
+    // built inside the trace. a `Gv` handed in as an argument is constructed at the call site,
     // before `begin_trace()` runs here, and every `Gv` op outside an active trace panics. the
     // reference mach number is therefore named by a plain tag and materialized below, which is
-    // also why it is a tag rather than a closure: there is nothing to capture.
+    // also why a tag suffices: the choice is one bit of static information.
     let mach_limit = match mach_ref {
         MachRef::Published => Gv::from_f64(symbi_hydro::dissipation::MACH_LIMIT),
         MachRef::Runtime => Gv::scalar("mach_limit"),
@@ -1416,15 +1421,15 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(
 }
 
 
-/// adiabatic HLLC-LM face flux AS PUBLISHED (Fleischmann, Adami & Adams 2020): the
-/// anti-diffusive star-state flux is scaled by `sin(min(1, Ma/0.1) pi/2)` on the FACE-NORMAL
+/// adiabatic HLLC-LM face flux as published (Fleischmann, Adami & Adams 2020): the
+/// anti-diffusive star-state flux is scaled by `sin(min(1, Ma/0.1) pi/2)` on the face-normal
 /// mach number, recovering classical HLLC above Ma = 0.1 and falling with the flow speed below
-/// it. cures the grid-aligned shock instability AND the HLLC low-mach over-dissipation, with no
-/// clamp on the pressure jump. newtonian only (the relativistic HLLC bodies ignore the LM
-/// correction). the `phi` helpers are fully branchless (`S::select`), so the fleischmann arm
-/// traces at S = Gv just like the Standard arm.
-/// adiabatic HLLC-LM face flux, the PUBLISHED scheme (Fleischmann, Adami & Adams 2020): the
-/// sine ramp on the acoustic signal speeds, reference mach number a RUNTIME scalar, composable
+/// it. cures the grid-aligned shock instability together with the HLLC low-mach
+/// over-dissipation, and the pressure jump enters unclamped. newtonian only (the relativistic
+/// HLLC bodies use the classical star state). the `phi` helpers are fully branchless
+/// (`S::select`), so the fleischmann arm traces at S = Gv just like the Standard arm.
+/// adiabatic HLLC-LM face flux, the published scheme (Fleischmann, Adami & Adams 2020): the
+/// sine ramp on the acoustic signal speeds, reference mach number a runtime scalar, composable
 /// with the well-balanced reconstruction through the `balance` axis. the clamped variant this
 /// name once carried is retired -- the balancing removes the hydrostatic residual the clamp
 /// damped, and `sealed_column_unclamped` gates the pairing.
@@ -1446,14 +1451,14 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     )
 }
 
-/// the adiabatic HLLE face flux with a WELL-BALANCED reconstruction: the first-order arm the
+/// the adiabatic HLLE face flux with a well-balanced reconstruction: the first-order arm the
 /// FOFC redo runs. HLLE at theta = 0 is piecewise-constant, and a piecewise-constant
-/// reconstruction of DEPARTURES is exactly balanced -- every departure is zero, so both sides of
+/// reconstruction of departures is exactly balanced -- every departure is zero, so both sides of
 /// a face return the profile evaluated there and agree. the redo therefore holds a stratified
 /// column that the un-balanced redo would have kicked, and the cells most likely to reach it are
 /// the stagnant stratified ones at a solid wall.
-/// classical HLLC with a WELL-BALANCED reconstruction: the solver-a/b partner of the
-/// low-mach arm, so a sweep can flip the SOLVER with the balance held fixed and the
+/// classical HLLC with a well-balanced reconstruction: the solver-a/b partner of the
+/// low-mach arm, so a sweep can flip the solver with the balance held fixed and the
 /// comparison stays one-variable.
 pub fn adiabatic_hllc_wb_flux_gv<const D: usize>(
     dir: u8,
@@ -1489,10 +1494,10 @@ pub fn adiabatic_hlle_wb_flux_gv<const D: usize>(
     )
 }
 
-/// adiabatic HLLC face flux with the ACOUSTIC-CONSISTENCY dissipation scaling: identical to
-/// `adiabatic_hllc_lm_flux_gv` except that the acoustic signal speeds are scaled by how much of
-/// the face data obeys the impedance relation `dp = rho c du` rather than by the local mach
-/// number against a reference. the traced body is the same; only the sensor differs.
+/// adiabatic HLLC face flux with the acoustic-consistency dissipation scaling: identical to
+/// `adiabatic_hllc_lm_flux_gv` up to the sensor. the acoustic signal speeds are scaled by how
+/// much of the face data obeys the impedance relation `dp = rho c du`, where the LM arm scales
+/// by the local mach number against a reference. the traced body is the same.
 pub fn adiabatic_hllc_acoustic_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
@@ -1506,8 +1511,8 @@ fn rhd_hllc_at_arm<const D: usize>(
     eos_arm: EosArm,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    // gamma keeps its first-in-manifest slot on every arm; the taub-mathews closure
-    // never reads it (bound-but-inert, exactly as theta under ppm).
+    // gamma keeps its first-in-manifest slot on every arm; under the taub-mathews closure
+    // it is bound-but-inert, exactly as theta under ppm.
     let gamma = Gv::scalar("gamma");
     let eos = super::gv_eos(eos_arm, gamma);
     let (left, right, nhat, vface) =
@@ -1584,22 +1589,22 @@ pub fn rmhd_hlld_flux_gv(
     (end_trace(), writes)
 }
 
-/// the THERMODYNAMIC face pair of a well-balanced reconstruction: each cell's DEPARTURE from
+/// the thermodynamic face pair of a well-balanced reconstruction: each cell's departure from
 /// the hydrostatic profile through it, limited by the ordinary operator, with the profile added
 /// back at the face.
 ///
-/// TWO ANCHORS PER FACE, one per side, and that is correctness rather than duplicated work. the
-/// departure at the anchor is exactly zero, so the limiter's one-sided differences about it
-/// reduce to `0 - d` and `d - 0` -- the plain differences EXACTLY, not to rounding. anchoring
-/// both sides on one cell would leave every difference as `(q_j - c) - (q_k - c)` and forfeit
-/// the gravity-free reduction. the operator is called once per anchor and only that side's
-/// output is kept.
+/// two anchors per face, one per side, and the duplication is load-bearing. the departure at
+/// the anchor is exactly zero, so the limiter's one-sided differences about it reduce to
+/// `0 - d` and `d - 0` -- the plain differences, exact in floating point. anchoring both sides
+/// on one cell would leave every difference as `(q_j - c) - (q_k - c)` and forfeit the
+/// gravity-free reduction. the operator is called once per anchor and that side's output is
+/// the one kept.
 ///
-/// the transform is independent of WHICH operator consumes it, so plm and ppm need no separate
-/// derivation. with no bodies every potential is exactly zero, the enthalpy ratio is exactly
-/// one, and the departures are exact differences -- so this returns the plain pair bit-for-bit
-/// under plm, and to within roundoff under ppm (a parabola is a weighted sum, whose re-centring
-/// rounds). proved in `symbi-hydro/tests/hydrostatic_reconstruction.rs`.
+/// the transform is independent of which operator consumes it, so plm and ppm share one
+/// derivation. in the body-free limit every potential is exactly zero, the enthalpy ratio is
+/// exactly one, and the departures are exact differences -- so this returns the plain pair
+/// bit-for-bit under plm, and to within roundoff under ppm (a parabola is a weighted sum, whose
+/// re-centering rounds). proved in `symbi-hydro/tests/hydrostatic_reconstruction.rs`.
 fn balanced_thermo_pair(
     ndim: u8,
     dir: u8,
@@ -1610,13 +1615,13 @@ fn balanced_thermo_pair(
     use symbi_hydro::hydrostatic::LocalEquilibrium;
 
     // the bake-time spacing enum is vestigial in the potential ladder: face positions come
-    // from the RUNTIME per-axis map (`map_kind_{ax}` in `gv_axis_face_at_index`), and odd
+    // from the runtime per-axis map (`map_kind_{ax}` in `gv_axis_face_at_index`), and odd
     // half-cells land on the map's own cell center (geometric mean on a log axis, arithmetic
     // midpoint otherwise) — the position `set_initial` seeds the column at, which is what
     // makes the anchor departures exactly zero on every grading.
     let spacing = vec![Spacing::Uniform; ndim as usize];
-    // offsets the limiter reads, and the anchor INDEX within them for each side of the shared
-    // face. the face sits on the lower face of cell 0, which is half-cell 0; a cell centre at
+    // offsets the limiter reads, and the anchor index within them for each side of the shared
+    // face. the face sits on the lower face of cell 0, which is half-cell 0; a cell center at
     // offset k is half-cell 2k+1.
     let (offsets, anchor_l, anchor_r): (&[i32], usize, usize) = match recon {
         Recon::Plm => (&[-2, -1, 0, 1], 1, 2),
@@ -1651,7 +1656,7 @@ fn balanced_thermo_pair(
     let side = |anchor: usize, take_left: bool| -> (Gv, Gv) {
         let eq =
             LocalEquilibrium::through(rho[anchor], pre[anchor], phi[anchor], Gv::scalar("gamma"));
-        // the ONE transform text -- the same function the host proof battery exercises.
+        // the single transform text -- the same function the host proof battery exercises.
         let (d_rho, d_pre) =
             symbi_hydro::hydrostatic::hydrostatic_departures(&rho, &pre, &phi, anchor, Gv::scalar("gamma"));
         let limit = |d: &[Gv]| match recon {

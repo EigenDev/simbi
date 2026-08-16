@@ -1,17 +1,17 @@
 // =============================================================================
 // horizon_ledger.rs
 //
-// the GR horizon shell-flux accretion ledger, END TO END through BOTH drivers:
+// the GR horizon shell-flux accretion ledger, end to end through each driver:
 // ambient gas on the cartesian kerr-schild chart falls toward the excised
 // hole, and the per-step boundary-flux reduction through the diagnostic shell
-// books a NONZERO (mdot, edot) onto the Horizon body — on the uni-grid driver
-// AND the single-level hierarchy the python frontend actually runs. the two
-// drivers execute the identical phase sequence at the identical dt, so their
-// ledgers must agree bitwise.
+// books a nonzero (mdot, edot) onto the Horizon body — on the uni-grid driver
+// and on the single-level hierarchy the python frontend runs. the two drivers
+// execute the identical phase sequence at the identical dt, so their ledgers
+// agree bitwise.
 //
-// the booking is per-driver, and a correct reducer is not enough: a driver that
-// never books writes permanently-zero mdot/edot while the shell-flux reduction
-// itself is exact. hence both drivers are gated here.
+// the booking is per-driver, and a correct reducer alone leaves it open: a
+// driver that skips the booking writes permanently-zero mdot/edot while the
+// shell-flux reduction itself stays exact. hence both drivers are gated here.
 //
 // run: cargo test -p symbi --test horizon_ledger
 // =============================================================================
@@ -92,10 +92,10 @@ fn both_drivers_book_the_same_nonzero_accretion_ledger() {
     hier.evolve(T_FINAL).expect("hierarchy GR infall");
     let (mb, eb, mdot_b, edot_b) = ledger(&hier.levels[0].state);
 
-    // infalling ambient gas MUST book a nonzero ACCUMULATED ledger on both
-    // drivers — a zero total is the silently-dead booking this gate exists to
-    // catch. the instantaneous mdot is the LAST step's rate and may be zero
-    // there (the final dt-clamped sliver), so only the integral is demanded.
+    // infalling ambient gas books a nonzero accumulated ledger on both drivers
+    // — a zero total is the silently-dead booking this gate exists to catch.
+    // the instantaneous mdot is the final step's rate and may be zero there
+    // (the final dt-clamped sliver), so the assertion is on the integral.
     assert!(ma.abs() > 1e-12, "uni-grid ledger dead: total {ma}");
     assert!(mb.abs() > 1e-12, "hierarchy ledger dead: total {mb}");
 

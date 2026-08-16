@@ -2,18 +2,20 @@
 // engine.rs
 //
 // the GPU mapping of the structured kernel ABI. the
-// substrate KernelSet builds ONE backend-neutral `KernelInvocation` per kernel
+// substrate KernelSet builds a single backend-neutral `KernelInvocation` per kernel
 // (ordered buffer handles + packed params); `symbi-aot::run_cpu` maps it to the
-// generated CPU fn, and `run_gpu` here maps the SAME invocation to a GPU launch:
+// generated CPU fn, and `run_gpu` here maps that same invocation to a GPU launch:
 //
 //   neutral IR blob --render_from_ir--> CUDA source --NVRTC(jit_kernel)--> module
 //   buffers (reordered into kernel binding order) + params --> cuLaunchKernel
 //
-// `dispatch` picks the path on `Mem::IS_DEVICE_ACCESSIBLE` — the SAME invocation,
-// one branch. unified memory (the default device memory) is host- AND
-// device-addressable, so the buffer's pointer is usable on-device as-is; the host
-// never dereferences it. an explicit-memory `BufHandle::Device` variant
-// (host cannot deref) is not present: unified memory covers every current path.
+// `dispatch` picks the path on `Mem::IS_DEVICE_ACCESSIBLE` — the same invocation,
+// one branch. unified memory (the default device memory) is host- and
+// device-addressable, so the buffer's pointer is usable on-device as-is while the
+// host treats it as an opaque handle to forward. unified memory covers every
+// current path, so `BufHandle::Host`/`HostMut` are the variants defined; an
+// explicit-memory `BufHandle::Device` variant, needed for host-inaccessible
+// memory, would serve a path outside what unified memory currently covers.
 // =============================================================================
 
 use symbi_aot::{CpuField, CpuFieldMut, KernelInvocation, OrderedNumeric, Scalar};
@@ -26,7 +28,7 @@ use symbi_xpu::MemorySpace;
 /// `crate::backends::kernel::CRenderer::preamble` — 8-byte ptr + 16 bytes lo +
 /// 16 bytes strides + 16 bytes extent = 56 bytes, naturally 8-byte aligned. one
 /// of these is passed by value per buffer to every GPU kernel. cfg-gated to
-/// the `cuda` feature: cpu-only builds never construct one.
+/// the `cuda` feature, so builds with it enabled are the ones that construct one.
 #[cfg(feature = "gpu")]
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -38,7 +40,7 @@ struct DeviceView {
 }
 
 // static ABI assertions: the CUDA `__symbi_View` struct emitted by the kernel
-// preamble assumes EXACTLY this layout (8-byte ptr at offset 0, 16 bytes of
+// preamble assumes this exact layout (8-byte ptr at offset 0, 16 bytes of
 // `lo` at offset 8, 16 bytes of `strides` at offset 24, 16 bytes of `extent` at
 // offset 40 — total 56 bytes). a drift here (an added field, a reorder, an
 // alignment change from a new `#[derive]`) would silently mis-bind every kernel
@@ -73,12 +75,13 @@ const _: () = {
 // GpuBackend — the device-backend abstraction.
 //
 // every GPU leak that names CUDA explicitly — the render-target token, the kernel
-// dispatcher, the launch-arg ABI for a field buffer — is funneled through this ONE
+// dispatcher, the launch-arg ABI for a field buffer — is funneled through this single
 // trait. `run_gpu` / `field_reduce_device` are generic over `B: GpuBackend`, so a
 // second backend (HIP/Metal/WebGPU) is a one-place add: a unit struct + impl that
 // names its Target token, its `KernelDispatcher`, and how it packs a field view.
-// no `&dyn` — the backend is a zero-size type param, fully monomorphized;
-// `DefaultGpuBackend` binds the compiled-in choice at the dispatch boundary.
+// the backend is a zero-size type param, fully monomorphized instead of dispatched
+// through a `&dyn` trait object; `DefaultGpuBackend` binds the compiled-in choice at
+// the dispatch boundary.
 // =============================================================================
 #[cfg(feature = "gpu")]
 pub trait GpuBackend: 'static {
@@ -88,7 +91,7 @@ pub trait GpuBackend: 'static {
     const TARGET: symbi_ir::emit::Target;
     // the process-global JIT dispatcher (render-cache + module-cache + runtime handle).
     fn dispatcher() -> &'static symbi_xpu::runtime::KernelDispatcher<Self::Runtime>;
-    // pack ONE field buffer into the launch ABI in this backend's binding convention.
+    // pack a single field buffer into the launch ABI in this backend's binding convention.
     // cuda: a 56-byte `DeviceView` (ptr+lo+strides+extent) pushed by value; the arena
     // copies the bytes, so the on-stack `view` is sound for the launch.
     fn push_field(args: &mut symbi_xpu::KernelArgs, ptr: *const u8, lo: &[i32], extent: &[u32]);
@@ -121,7 +124,7 @@ impl GpuBackend for CudaBackend {
 }
 
 // the hip backend: same `Target::Hip` (renders the identical cuda-c++ source),
-// the hip per-device dispatcher, and the SAME `DeviceView` launch ABI as cuda.
+// the hip per-device dispatcher, and the same `DeviceView` launch ABI as cuda.
 #[cfg(feature = "hip")]
 pub struct HipBackend;
 
@@ -154,9 +157,9 @@ pub type DefaultGpuBackend = CudaBackend;
 #[cfg(all(feature = "hip", not(feature = "cuda")))]
 pub type DefaultGpuBackend = HipBackend;
 
-/// the regime-AGNOSTIC CFL reduction: max over `domain` of a per-cell wave-speed
+/// the regime-agnostic CFL reduction: max over `domain` of a per-cell wave-speed
 /// scratch field. thin wrapper over the general `field_reduce` — every regime
-/// computes its OWN `wave_speed_map` (the regime-specific physics) into `scratch`,
+/// computes its own `wave_speed_map` (the regime-specific physics) into `scratch`,
 /// then calls this; the reduce is shared (was copy-pasted in three substrate sets).
 pub fn field_max_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
     field: &symbi_grid::Field<Sc, D, Mem>,
@@ -166,9 +169,9 @@ pub fn field_max_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: 
 }
 
 /// reduce `field` over `domain` by `op` (Add/Mul/Min/Max) — the substrate Reduce
-/// morphism. on HOST memory it's a plain fold; on DEVICE memory
-/// it runs a GPU block-reduction so only the per-block partials cross device->host;
-/// the host never scans every cell over unified memory.
+/// morphism. on host memory it's a plain fold; on device memory
+/// it runs a GPU block-reduction so only the per-block partials cross device->host,
+/// leaving the full cell scan on the device where the data already lives.
 /// the two algebras agree (max/min are exact; add/mul differ from the host's
 /// sequential fold only by reassociated rounding).
 pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
@@ -187,7 +190,7 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
             unreachable!("device-accessible memory requires a gpu feature (cuda or hip)");
         }
     }
-    // host fold (the CPU algebra of the Reduce morphism). LARGE
+    // host fold (the CPU algebra of the Reduce morphism). large
     // domains fold in parallel over outer-axis slabs — a serial fold here was
     // a measured per-root-step stall at production sizes (the cfl reduce runs
     // per level, the body-feedback sums per component). min/max are exact in
@@ -196,9 +199,9 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
     // (no rayon setup, bit-stable for the small exactness gates).
     let (identity, combine) = host_identity_combine(op);
     const PAR_THRESHOLD: usize = 1 << 16;
-    // slab the OUTERMOST axis, derived from the layout — `nest_order`'s first entry. splitting
+    // slab the outermost axis, derived from the layout — `nest_order`'s first entry. splitting
     // `CONTIGUOUS_AXIS` instead hands each worker a slab of one x-index spanning every other axis,
-    // so its reads stride by `extent[0]` and touch a fresh cache line per cell; the cost GROWS with
+    // so its reads stride by `extent[0]` and touch a fresh cache line per cell; the cost grows with
     // the grid (the stride is the row length). slabbing the outermost axis gives each worker a
     // contiguous run. min/max are exact in any order; add/mul reassociate within roundoff either way.
     let split = symbi_algebra::nest_order(D)
@@ -213,8 +216,8 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
                 let mut slab = domain.clone();
                 slab.spaces[split].lo = ii;
                 slab.spaces[split].hi = ii + 1;
-                // walk the slab in STORAGE order (CONTIGUOUS_AXIS innermost) via an odometer.
-                // `Domain::iter` advances the LAST axis fastest — the opposite of storage — so it
+                // walk the slab in storage order (CONTIGUOUS_AXIS innermost) via an odometer.
+                // `Domain::iter` advances the last axis fastest — the opposite of storage — so it
                 // strides the fold by `extent[0]` on every cell. the fold is a max/min (exact in any
                 // order) or an add/mul (reassociating within roundoff either way), so the visit order
                 // is free to follow memory.
@@ -236,14 +239,14 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
                 }
                 acc
             })
-            // DETERMINISTIC combine: collect the per-slab partials INDEXED BY SLAB
+            // deterministic combine: collect the per-slab partials indexed by slab
             // (order-stable regardless of work stealing), then fold them sequentially
             // in slab order. rayon's tree `reduce` combines partials in a
             // join-order-dependent shape, which reassociates Add/Mul differently run
-            // to run and across thread counts — and the body-feedback SUMS feed the
+            // to run and across thread counts — and the body-feedback sums feed the
             // body equations of motion, so that noise was a run-to-run trajectory
             // nondeterminism at production sizes. min/max were already exact either
-            // way; the fixed-order fold makes Add/Mul bit-reproducible for a FIXED
+            // way; the fixed-order fold makes Add/Mul bit-reproducible for a fixed
             // domain shape (a different tiling still regroups the partials — the
             // reproducibility contract is per-decomposition).
             .collect::<Vec<f64>>()
@@ -289,14 +292,13 @@ pub struct SegmentedReduction {
 /// `n_segments * values.len()` accumulators, where repeated whole-field reductions would
 /// need one pass apiece.
 ///
-/// the destination bucket is data-dependent, so this cannot be traced as pointwise code and
-/// sits beside the generated kernels rather than going through codegen, exactly as
-/// `field_reduce` does.
+/// the destination bucket is data-dependent, so the reduction sits beside the generated
+/// kernels rather than tracing as pointwise codegen, exactly as `field_reduce` does.
 ///
-/// HOST accumulates a private bucket set per outer-axis slab and folds the slabs in slab
+/// host accumulates a private bucket set per outer-axis slab and folds the slabs in slab
 /// order, so the answer is bit-reproducible across thread counts — the `field_reduce`
-/// contract. DEVICE accumulates through device-wide atomics, whose order the scheduler
-/// picks: `Min`/`Max` are order-agnostic and still exact, but `Add` reassociates. The
+/// contract. device accumulates through device-wide atomics, whose order the scheduler
+/// picks: `Min`/`Max` are order-agnostic and still exact, but `Add` reassociates. the
 /// returned `order` reports which of the two happened rather than leaving the caller to
 /// guess, because silently crossing that line is the failure mode worth avoiding.
 pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
@@ -314,8 +316,9 @@ pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, con
         n_segments >= 1,
         "field_segmented_reduce: needs at least one segment"
     );
-    // a product over a bin's cells overflows to zero or infinity at any realistic cell count
-    // and is not a census statistic; refused rather than silently producing garbage.
+    // a product over a bin's cells overflows to zero or infinity at any realistic cell
+    // count, so `Mul` is refused at the assert rather than allowed to stand in as a
+    // census statistic.
     assert!(
         !matches!(op, ReductionOp::Mul),
         "field_segmented_reduce: Mul is not a meaningful segmented reduction"
@@ -339,11 +342,11 @@ pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, con
     let (identity, combine) = host_identity_combine(op);
 
     // fold one cell's values into `acc`, skip it as excluded, or count it as outside the
-    // binning. the two exclusions are distinct: an excluded cell is not part of the
-    // reduction (covered by finer data, inside a body mask), while a cell past the last
-    // segment was to be reduced and fell outside the declared edges.
+    // binning. the two exclusions are distinct: an excluded cell sits outside the
+    // reduction entirely (covered by finer data, inside a body mask), while a cell past
+    // the last segment was meant for the reduction and fell outside the declared edges.
     let visit = |acc: &mut [f64], dropped: &mut u64, c: [isize; D]| {
-        // the marker rides the SCALAR carrier and is a small non-negative integer, so the cast is
+        // the marker rides the scalar carrier and is a small non-negative integer, so the cast is
         // exact: bucket in [0, n), `n` for a cell outside the declared edges, above `n` for one
         // excluded from the reduction entirely.
         let seg = segment.view().at(c).to_f64() as usize;
@@ -361,10 +364,10 @@ pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, con
     };
 
     const PAR_THRESHOLD: usize = 1 << 16;
-    // slab the OUTERMOST axis so each worker walks a contiguous run, and so the partition is
-    // a function of the domain shape ALONE — one slab per outer index, never one per thread.
-    // a thread-count-dependent partition would regroup the sums and move the low bits when
-    // the machine changed.
+    // slab the outermost axis so each worker walks a contiguous run, and so the partition is
+    // a function of the domain shape alone — one slab per outer index, regardless of thread
+    // count. a thread-count-dependent partition would regroup the sums and move the low bits
+    // when the machine changed.
     let split = symbi_algebra::nest_order(D)
         .next()
         .expect("Domain rank >= 1");
@@ -385,8 +388,8 @@ pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, con
                 (acc, dropped)
             })
             .collect();
-        // combine the slab partials in SLAB ORDER, never in rayon's join order — the fixed
-        // shape is what makes the sum reproducible.
+        // combine the slab partials in slab order: a fixed shape independent of rayon's
+        // join order, which is what makes the sum reproducible.
         let mut acc = vec![identity; n_slots];
         let mut dropped = 0u64;
         for (slab_acc, slab_dropped) in partials {
@@ -417,7 +420,7 @@ pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, con
 /// the host (f64) identity + combine for a reduction op — the CPU algebra mirroring
 /// the device's `reduction_identity_combine`.
 fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
-    // min/max MUST propagate NaN: `f64::min`/`f64::max` silently return the
+    // min/max must propagate NaN: `f64::min`/`f64::max` silently return the
     // non-NaN operand, which would drop a single poisoned wave-speed cell and let
     // garbage advance past `check_dt_or_panic` ([[feedback_no_silent_floors]]).
     // add/mul propagate NaN natively (a + NaN == NaN). `x != x` is the branchless
@@ -444,7 +447,7 @@ fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
 ///
 /// the closure pattern holds the slot's mutex for the entire kernel launch +
 /// host fold, so concurrent reductions from multiple threads serialize on
-/// the cache, so they never race on the buffer. uncontended in the single-
+/// the cache and take the buffer one at a time. uncontended in the single-
 /// simulation case (the common one); cheap when contested.
 #[cfg(feature = "gpu")]
 fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
@@ -479,7 +482,7 @@ fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
     }
     let ptr = guard.as_mut().unwrap().as_mut_ptr::<Sc>();
     f(ptr)
-    // `guard` drops here — releases the mutex AFTER the closure has consumed
+    // `guard` drops here — releases the mutex after the closure has consumed
     // the pointer (kernel launched + ctx_sync'd + host-folded).
 }
 
@@ -518,9 +521,9 @@ fn field_reduce_device<
         ReductionOp::Max => "max",
     };
     let name = format!("symbi_field_reduce_{op_tag}_{D}d");
-    // the reduction kernel SOURCE is still cuda-specific (`render_field_reduction` has no
+    // the reduction kernel source is still cuda-specific (`render_field_reduction` has no
     // target token); a second backend adds its own reduction renderer here. dispatcher +
-    // launch ABI ARE backend-generic via `B` below.
+    // launch ABI are backend-generic via `B` below.
     let desc = render_field_reduction(&name, D, precision, op);
 
     // the reduced window (interior) + the field's allocated buffer layout (view_t).
@@ -532,7 +535,7 @@ fn field_reduce_device<
     let buf_lo: Vec<i32> = (0..D).map(|a| alloc.spaces[a].lo as i32).collect();
 
     let num_blocks = total_cells.div_ceil(REDUCTION_BLOCK_SIZE).max(1);
-    // the partials buffer is CACHED ACROSS STEPS.
+    // the partials buffer is cached across steps.
     // a fresh `cuMemAllocManaged` on every reduction (every CFL step) was
     // pure smell: ~30 us of driver-allocator time per step x 25K steps =
     // ~750 ms wasted in the alloc path of a typical Kepler run. the partials
@@ -540,8 +543,8 @@ fn field_reduce_device<
     // size) and `sizeof(Sc)` — both static across a sim. cache once per
     // precision, grow-only when num_blocks ever needs more.
     //
-    // closure holds the cache mutex across the launch + sync + host fold so
-    // the next reducer can't race on the buffer.
+    // closure holds the cache mutex across the launch + sync + host fold, so
+    // reductions on the buffer stay strictly sequential.
     let bytes_needed = (num_blocks as usize) * std::mem::size_of::<Sc>();
     with_cached_partials::<Sc, f64>(bytes_needed, |partials_ptr| {
         let module_key = format!("{name}#{}", if is_f64 { "f64" } else { "f32" });
@@ -571,7 +574,7 @@ fn field_reduce_device<
         });
         ctx_sync();
 
-        // fold the per-block partials on the host with the SAME op — num_blocks scalars,
+        // fold the per-block partials on the host with the same op — num_blocks scalars,
         // one per block. (the device combined each block; this combines the blocks.)
         let (identity, combine) = host_identity_combine(op);
         let mut acc = identity;
@@ -583,9 +586,9 @@ fn field_reduce_device<
 }
 
 /// GPU segmented reduction: render the privatized-bucket kernel for this
-/// (ndim, precision, op, shape), NVRTC-compile (cached by shape), launch a FIXED block
+/// (ndim, precision, op, shape), NVRTC-compile (cached by shape), launch a fixed block
 /// count over a grid-stride walk of the window, and read back the
-/// `n_segments * n_values` accumulators. only the accumulators cross, never per-cell data.
+/// `n_segments * n_values` accumulators — the only values that cross back to the host.
 ///
 /// the accumulator and drop counter are allocated per call rather than cached across steps,
 /// unlike the CFL reduction's partials: a census samples once per level step, so the
@@ -611,7 +614,7 @@ fn field_segmented_reduce_device<
     use symbi_xpu::runtime::GpuRuntime;
     use symbi_xpu::{DeviceMemory, MemoryBlock};
 
-    // the device accumulators ride the FIELD's carrier, unlike the host path, which widens every
+    // the device accumulators ride the field's carrier, unlike the host path, which widens every
     // term to f64 before combining. a single-precision field therefore sums in single precision
     // here: over a few million cells the running sum outgrows the terms being added to it and the
     // tail of each bin is absorbed, giving a smooth, positive total wrong in its third digit. the
@@ -648,7 +651,8 @@ fn field_segmented_reduce_device<
     let acc_ptr = acc_host.as_mut_ptr::<Sc>();
     let dropped_ptr = dropped_host.as_mut_ptr::<u64>();
     // seed the accumulators with the op's identity. `Add` wants zero, but `Min`/`Max` want
-    // their sentinel, so a zeroed allocation is not enough.
+    // their sentinel, so the seed is written explicitly rather than left as a zeroed
+    // allocation.
     for i in 0..n_slots {
         unsafe { *acc_ptr.add(i) = Sc::from_f64(identity) };
     }
@@ -657,8 +661,8 @@ fn field_segmented_reduce_device<
     let module_key = format!("{name}#{}", if is_f64 { "f64" } else { "f32" });
     let kernel = B::dispatcher().jit_kernel_keyed(&desc.source, &module_key, &name);
 
-    // the block count is FIXED — the kernel grid-strides — so the launch shape does not
-    // grow with the resolution and the accumulator contention stays bounded.
+    // the block count is fixed — the kernel grid-strides — so the launch shape stays
+    // constant across resolutions and the accumulator contention stays bounded.
     let n_blocks = total_cells
         .div_ceil(REDUCTION_BLOCK_SIZE)
         .clamp(1, SEGMENTED_MAX_BLOCKS);
@@ -709,8 +713,8 @@ fn field_segmented_reduce_device<
         dropped,
         // the accumulators were combined by device-wide atomics in scheduler order. min/max
         // are order-agnostic and land on the same bits regardless; a sum reassociates.
-        // privatizing into shared memory cuts the contention, not the ordering, so the
-        // shape of the accumulator does not enter this choice.
+        // privatizing into shared memory cuts the contention, not the ordering, so this
+        // choice is independent of the accumulator's shape.
         order: if matches!(op, ReductionOp::Min | ReductionOp::Max) {
             ReductionOrder::Exact
         } else {
@@ -737,7 +741,7 @@ where
         }
         #[cfg(not(feature = "gpu"))]
         {
-            // device-accessible memory (DeviceMemory) exists ONLY under a gpu feature, so
+            // device-accessible memory (DeviceMemory) exists only under a gpu feature, so
             // this branch is unreachable in a host-only build.
             let _ = (ir, kernel_name, cpu);
             unreachable!("device-accessible memory requires a gpu feature (cuda or hip)");
@@ -755,8 +759,8 @@ where
 /// order via the rendered `field_bindings`, the exact inverse of `run_cpu`'s split.
 // the rendered CUDA descriptor (source + bindings + scalar_is_int) per (kernel,
 // precision). rendering = deserialize the IR blob + walk the scalarized body; the
-// NVRTC MODULE is already cached by the dispatcher, so without this the render is
-// pure waste on every launch after the first. keyed by precision since one kernel
+// NVRTC module is already cached by the dispatcher; re-rendering on every launch
+// after the first would be pure waste. keyed by precision since one kernel
 // renders to both f32 and f64.
 //
 // the cache value bundles the descriptor with a precomputed `module_key` (the string
@@ -774,12 +778,13 @@ static RENDER_CACHE: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
 
 /// the per-block dynamic-smem budget tiled launches are sized against. Turing (sm_75,
-/// the RTX 2070 dev part) allows 48 KB of dynamic `__shared__` without the
-/// `cudaFuncSetAttribute` opt-in; staying under it keeps the launch portable.
+/// the RTX 2070 dev part) grants 48 KB of dynamic `__shared__` by default, below the
+/// threshold where the `cudaFuncSetAttribute` opt-in is needed; staying under it keeps
+/// the launch portable.
 #[cfg(feature = "gpu")]
 const TILED_SMEM_LIMIT: usize = 48 * 1024;
 
-/// pick a BLOCK shape for a smem-tiled launch: balanced (cube-ish), clamped to the
+/// pick a block shape for a smem-tiled launch: balanced (cube-ish), clamped to the
 /// grid, total <= 256 threads, and — critically — whose `(block + 2*halo)` slab
 /// times `cell_bytes` fits `TILED_SMEM_LIMIT`. tries decreasing cube edges and
 /// shrinks the largest dim to meet the thread cap. `SYMBI_TILE_BLOCK="8,8,4"`
@@ -826,10 +831,10 @@ fn env_tile_block(ndim: usize) -> Option<[u32; 3]> {
     Some(b)
 }
 
-/// the HOST-READ BARRIER for asynchronous device launches: kernel launches are
+/// the host-read barrier for asynchronous device launches: kernel launches are
 /// asynchronous (same-stream semantics order kernel-to-kernel; the per-launch
 /// sync was removed for pipelining), so host code that reads — or writes —
-/// device-accessible memory the queued kernels touch MUST drain the device
+/// device-accessible memory the queued kernels touch must drain the device
 /// queue first. no-op on a host backend. call sites: the evolve callbacks,
 /// the amr hierarchy's api boundaries and host scans, and any test comparing
 /// device buffers right after a dispatch.
@@ -859,14 +864,14 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     use symbi_aot::BufHandle;
     use symbi_ir::emit::Precision;
     use symbi_ir::render_from_ir;
-    // ctx_sync is NOT called per-launch: same-stream CUDA semantics serialize
-    // kernel-to-kernel ordering. ctx_sync stays in field_reduce_device, where it
-    // crosses host-device for the cfl host-fold.
+    // same-stream CUDA semantics serialize kernel-to-kernel ordering on their own, so
+    // ctx_sync is reserved for field_reduce_device, where a result crosses host-device
+    // for the cfl host-fold.
     use symbi_xpu::LaunchConfig;
     use symbi_xpu::runtime::GpuRuntime;
 
     // precision is the scalar's width: f64 -> 8 bytes, f32 -> 4. render the kernel at
-    // that precision so the device reads the buffers (which ARE `Sc`) correctly.
+    // that precision so the device reads the buffers (which are `Sc`) correctly.
     let is_f64 = std::mem::size_of::<Sc>() == std::mem::size_of::<f64>();
     let precision = if is_f64 {
         Precision::F64
@@ -886,8 +891,8 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
             w.entry(key)
                 .or_insert_with(|| {
                     let mut d = render_from_ir(ir, B::TARGET, precision);
-                    // sort field_bindings by buffer_index ONCE at cache time so the
-                    // per-launch walk is just a linear iter, no heap-Vec, no sort.
+                    // sort field_bindings by buffer_index once at cache time, so the
+                    // per-launch walk is a linear iter over already-ordered bindings.
                     d.field_bindings.sort_by_key(|b| b.buffer_index);
                     let module_key =
                         format!("{}#{}", d.kernel_name, if is_f64 { "f64" } else { "f32" },);
@@ -917,7 +922,7 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     // build two stack-resident lookup tables from inv.buffers: one for Host slots
     // (kernel inputs), one for HostMut slots (kernel outputs). per-bucket order
     // matches inv.buffers' Host-first-then-HostMut layout (the same order `run_cpu`
-    // would re-split). MAX_BUFS_PER_KIND=48 covers the curvilinear FUSED god+bcell
+    // would re-split). MAX_BUFS_PER_KIND=48 covers the curvilinear fused god+bcell
     // (~36 inputs: geo-source prims + u_n + per-dir flux + bc/bcn/bf); overflow asserts
     // loudly before it can corrupt memory. (mirrors the CPU dispatch_named MAX_FIELDS=48.)
     const MAX_BUFS_PER_KIND: usize = 48;
@@ -951,22 +956,22 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     }
 
     // module cache keyed by precision too, so an f32 and f64 build of the same
-    // kernel name don't shadow each other in one process. module_key is precomputed
-    // at cache time (see `CachedDesc`) so the dispatch path here is a slice borrow
-    // with no allocation.
+    // kernel name land in separate cache slots in one process. module_key is
+    // precomputed at cache time (see `CachedDesc`) so the dispatch path here is a
+    // bare slice borrow, allocation-free.
     let kernel =
         B::dispatcher().jit_kernel_keyed(&desc.source, &cached.module_key, &desc.kernel_name);
 
-    // block shape is EXTENT-AWARE (`block_for`): a warp on the contiguous axis-0 (coalesced)
+    // block shape is extent-aware (`block_for`): a warp on the contiguous axis-0 (coalesced)
     // + transverse dims clamped to the actual `grid` extents, so a quasi-1D/2D run (a 3D
-    // kernel over a thin transverse axis) doesn't idle most of each block. an explicit
+    // kernel over a thin transverse axis) keeps most of each block active. an explicit
     // `SYMBI_BLOCK_{1D,2D,3D}` env var overrides it.
-    // a tiled kernel needs a block shape that BOUNDS the per-block smem
+    // a tiled kernel needs a block shape that bounds the per-block smem
     // slab `prod_a (block_a + 2*halo_a) * sizeof(S) * n_fields` under the device
     // limit. the warp-first `block_for` shape ([32,8,1]) makes a pathological slab
     // when the halo is on a thin (block=1) axis — e.g., dir-2 flux: 32*8*(1+4) cells
     // -> ~100 KB for 10 fields, past Turing's 48 KB. so a tiled launch picks a
-    // BALANCED block (cube-ish, fits smem) instead. block dims are read at runtime
+    // balanced block (cube-ish, fits smem) instead. block dims are read at runtime
     // by the kernel (blockDim.*), so only the byte count crosses here.
     let elem_bytes = std::mem::size_of::<Sc>();
     let b = match &desc.tile_spec {
@@ -989,7 +994,8 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     // arena is the thread-local pool, so after warmup zero allocations here. the
     // field_bindings walk consumes one host or hostmut slot per binding in
     // bucket-order (matching inv.buffers' Host-first-then-HostMut layout) and
-    // constructs the DeviceView ON-STACK before pushing — there is no `views` Vec.
+    // constructs the DeviceView on-stack, pushing each view straight to the arena
+    // one at a time.
     symbi_xpu::with_pooled_args(|args| {
         let (mut hi, mut mi) = (0usize, 0usize);
         for binding in &desc.field_bindings {
@@ -1030,8 +1036,8 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     // no per-launch `ctx_sync()`: a host-device sync on every dispatch would
     // serialize launches and kill pipelining (~20 launches per step spent in
     // pure stall). CUDA's same-stream semantics already serialize kernel-to-
-    // kernel ordering, so the next kernel reading these buffers cannot start
-    // before this one finishes — correctness preserved.
+    // kernel ordering, so the next kernel reading these buffers waits for this
+    // one to finish before it starts — correctness preserved.
     //
     // host-visible ordering is established explicitly where required:
     //   - `field_max_reduce` / `field_reduce` sync before the host-fold (they

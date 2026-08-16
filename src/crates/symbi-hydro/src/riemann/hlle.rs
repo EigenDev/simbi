@@ -2,7 +2,7 @@
 // riemann/hlle.rs
 //
 // the HLLE approximate riemann solver: a two-wave (regime-generic) solver that
-// works for ANY `Regime`. the regime supplies `to_conserved` / `to_flux` /
+// works for any `Regime`. the regime supplies `to_conserved` / `to_flux` /
 // `extremal_speeds`; HLLE combines them. pure math, GPU-callable (S::branch).
 //
 // usage:
@@ -16,13 +16,13 @@ use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
 
 /// HLLE approximate riemann solver. two-wave solver, any regime.
-/// pure math — no allocation, GPU-callable. `vface` is the grid velocity at the
+/// pure math — allocation-free, GPU-callable. `vface` is the grid velocity at the
 /// face (nhat direction) for ALE moving meshes; pass 0 for a static mesh.
 ///
-/// computes the fan speeds from the L/R states (`extremal_speeds`) then combines. when the
-/// caller ALREADY has the fan speeds (e.g., read from a per-cell wave-speed field — see
-/// `rmhd_wave_speeds_cell_gv`), call `hlle_with_speeds` directly to skip the (expensive)
-/// wave-speed recomputation.
+/// computes the fan speeds from the L/R states (`extremal_speeds`) then combines. a caller
+/// that already holds the fan speeds (e.g. read from a per-cell wave-speed field, as
+/// `rmhd_wave_speeds_cell_gv` materializes) calls `hlle_with_speeds` directly and skips the
+/// expensive wave-speed recomputation.
 pub fn hlle<S: Scalar, const D: usize, R: Regime<S, D>>(
     regime: &R,
     eos: &impl Eos<S>,
@@ -36,10 +36,10 @@ pub fn hlle<S: Scalar, const D: usize, R: Regime<S, D>>(
 }
 
 /// the HLLE combine with the fan speeds `(s_l, s_r)` supplied by the caller — the body of
-/// `hlle` after `extremal_speeds`. lets a face flux reuse wave speeds materialized once per
-/// cell, avoiding a re-solve of the (quartic, for RMHD) speed at every face.
+/// `hlle` past `extremal_speeds`. lets a face flux reuse wave speeds materialized once per
+/// cell, so the (quartic, for RMHD) speed solve happens once per cell instead of once per face.
 ///
-/// the fan is the CLAMPED closed form: with `bm = min(s_l - vface, 0)` and
+/// the fan is the clamped closed form: with `bm = min(s_l - vface, 0)` and
 /// `bp = max(s_r - vface, 0)`, the single expression
 /// `(bp*(f_l - vface*u_l) - bm*(f_r - vface*u_r) + bp*bm*(u_r - u_l)) / (bp - bm)`
 /// reduces algebraically to the upwind flux `f_l - vface*u_l` when `s_l >= vface`
@@ -107,11 +107,11 @@ mod tests {
         assert!(approx(flux.nrg, exact.nrg));
     }
 
-    // the clamped closed form must reduce to the pure upwind flux outside the fan:
+    // the clamped closed form reduces to the pure upwind flux outside the fan:
     // s_l >= vface collapses bm to zero and the expression to f_l - vface*u_l (up to
     // the bp*(x)*(1/bp) rounding of the closed form); s_r <= vface mirrors to the
     // right state. the match is tolerance-level because the closed form multiplies and
-    // divides by the surviving wave speed and cannot reproduce the exact upwind bits.
+    // divides by the surviving wave speed, which shifts the low bits off the upwind value.
     #[test]
     fn hlle_fan_reduces_to_upwind() {
         let regime = Newtonian;
@@ -162,7 +162,7 @@ mod tests {
         assert!(approx(flux3.nrg, f_r.nrg - vf * u_r.nrg));
     }
 
-    // `hlle` MUST equal `hlle_with_speeds` fed the same `extremal_speeds`, for any L/R states:
+    // `hlle` equals `hlle_with_speeds` fed the same `extremal_speeds`, for any L/R states:
     // the per-cell-wave-speed path (which calls hlle_with_speeds directly) is bit-identical to the
     // inline path when the supplied speeds match. covers the subsonic fan + both supersonic
     // branches.

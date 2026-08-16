@@ -2,22 +2,22 @@
 // expr_bridge.rs
 //
 // the bridge: lower a `symbi-expr` DAG (a parsed user script) into the `symbi-ir`
-// Graph — the ONE typed IR the physics is built on. a user expression becomes a
+// Graph — the single typed IR the physics is built on. a user expression becomes a
 // `BuiltSource` (graph + named params + output NodeIds), structurally identical to a
-// built-in `SourceSpec`'s output, so it rides the EXISTING splice/fuse path unchanged:
+// built-in `SourceSpec`'s output, so it rides the existing splice/fuse path unchanged:
 // `splice_built_source_into` fuses it into a godunov / ghost-fill kernel, which then
 // codegens (CPU + CUDA) or interprets. this collapses the two parallel expression
 // engines (`symbi-expr`'s register-VM and `symbi-ir`'s codegen substrate) into one IR
-// that codegens directly, with no per-cell VM interpreter.
+// that codegens directly, so every cell runs compiled code.
 //
 // the leaf convention matches the source vocabulary so a user expression fuses like any
 // other source: VariableX{1,2,3} -> `x_0/x_1/x_2` (the cell position, bound to the
 // centroid at splice), VariableT -> `t` (time), Parameter(i) -> `p{i}` (runtime scalar).
 //
-// the typed IR enforces carrier-traceability: a user `IF_THEN_ELSE` lowers to `Select` (no
-// native branch — the carrier dialect), comparisons produce a Bool consumed only by a
-// conditional, and ops with no carrier-traceable equivalent (`Sgn`, `Mod`) are REJECTED
-// at bridge time, so they cannot silently miscompile.
+// the typed IR enforces carrier-traceability: a user `IF_THEN_ELSE` lowers to `Select` (the
+// carrier dialect's branch), comparisons produce a Bool consumed only by a conditional, and
+// ops outside the carrier-traceable set (`Sgn`, `Mod`) are rejected at bridge time, so every
+// accepted graph compiles faithfully.
 //
 // usage:
 //   let nodes = dag.nodes().to_vec();
@@ -33,14 +33,14 @@ use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId};
 
 use crate::source_spec::BuiltSource;
 
-/// a `symbi-expr` op has no `symbi-ir` equivalent or the DAG is malformed.
+/// a `symbi-expr` op falls outside the `symbi-ir` vocabulary, or the DAG is malformed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeError {
-    /// op carries no carrier-traceable `symbi-ir` primitive (`Sgn`, `Mod`). rejected
-    /// at bridge time — the user gets a loud error, and a silently wrong kernel is never emitted.
+    /// op lies outside the carrier-traceable `symbi-ir` primitives (`Sgn`, `Mod`). rejected
+    /// at bridge time — the user gets a loud error, so every emitted kernel matches the script.
     UnsupportedOp(Op),
-    /// a node references a child index not yet defined (forward ref / out of range).
-    /// well-formed DAGs are topologically ordered, so this means malformed input.
+    /// a node references a child index outside the already-defined prefix (forward ref / out of
+    /// range). well-formed DAGs are topologically ordered, so this means malformed input.
     BadChild { node: usize, child: usize },
     /// payload shape disagrees with the op's arity (malformed input).
     BadPayload { node: usize, op: Op },
@@ -78,7 +78,7 @@ fn map_op(op: Op) -> Option<Mapped> {
         And => Mapped::Elem(ElementWiseOp::BitAnd),
         Or => Mapped::Elem(ElementWiseOp::BitOr),
         Not => Mapped::Elem(ElementWiseOp::BitNot),
-        // math functions -> Transcendental (the complete set; ElementWise lacks Tan/Exp/Log/...).
+        // math functions -> the transcendental members of ElementWiseOp (the complete set).
         Log => Mapped::Elem(ElementWiseOp::Log),
         Log10 => Mapped::Elem(ElementWiseOp::Log10),
         Exp => Mapped::Elem(ElementWiseOp::Exp),
@@ -95,7 +95,7 @@ fn map_op(op: Op) -> Option<Mapped> {
         Asinh => Mapped::Elem(ElementWiseOp::Asinh),
         Acosh => Mapped::Elem(ElementWiseOp::Acosh),
         Atanh => Mapped::Elem(ElementWiseOp::Atanh),
-        // leaves / ternary handled in the walk; Sgn + Mod have no carrier primitive.
+        // leaves / ternary handled in the walk; Sgn + Mod fall outside the carrier primitives.
         Constant | VariableX1 | VariableX2 | VariableX3 | VariableT | Parameter | VariableRho
         | VariableVel1 | VariableVel2 | VariableVel3 | VariablePressure | VariableCellVolume
         | IfThenElse | Sgn | Mod => return None,
@@ -103,7 +103,7 @@ fn map_op(op: Op) -> Option<Mapped> {
 }
 
 /// the leaf-param name for a `symbi-expr` variable op, matching the source vocabulary
-/// (`source_params::x` + `t`). non-variable / non-time ops return `None`.
+/// (`source_params::x` + `t`). every other op returns `None`.
 fn variable_name(op: Op) -> Option<&'static str> {
     match op {
         Op::VariableX1 => Some("x_0"),
@@ -126,7 +126,7 @@ fn variable_name(op: Op) -> Option<&'static str> {
 }
 
 /// get-or-declare a named scalar param leaf, recording first-seen order in `params` so
-/// repeated uses (e.g., `x_0` twice) share ONE leaf — the runtime fills one scalar.
+/// repeated uses (e.g., `x_0` twice) share one leaf — the runtime fills one scalar.
 fn declare_param(
     g: &mut Graph,
     name: &str,
@@ -248,20 +248,20 @@ pub fn lower_dag_to_builtsource(
     })
 }
 
-/// THE FRONT DOOR: turn a serialized `SourceConfig` (python -> json -> `SourceConfig::from_json`)
+/// the front door: turn a serialized `SourceConfig` (python -> json -> `SourceConfig::from_json`)
 /// into the axiomatic `BuiltSource`(s), wrapping the user's free field in the conservation law
 /// per `kind`. returns `(target_field, BuiltSource)` pairs ready to splice into the godunov source
 /// dispatch — `"force"` yields momentum (+ energy, if the regime has it), `"cooling"` yields a
 /// lone energy sink, `"inject"` writes the full conserved vector [den, mom, (nrg)] additively from
 /// one config (mass+momentum+energy deposition), `"raw"` writes the outputs straight to a single
-/// `target` (the escape hatch). the user never authors conservative components for force/cooling,
-/// so the coupling is unbreakable.
+/// `target` (the escape hatch). the framework authors the conservative components for
+/// force/cooling, so the coupling holds by construction.
 ///
-/// VALIDATION is regime-driven via `spec` (the static `RegimeSpec`), so an ill-posed config fails
-/// HERE — before attach, never as a mid-evolve panic:
-/// - `force`/`cooling`/`relax` carry NEWTONIAN conservation laws; they are REJECTED for a
+/// validation is regime-driven via `spec` (the static `RegimeSpec`), so an ill-posed config fails
+/// at build time, ahead of attach and well ahead of any evolve step:
+/// - `force`/`cooling`/`relax` carry newtonian conservation laws; they are rejected for a
 ///   relativistic regime (whose conserved momentum is `rho h W^2 v`, a different law). a
-///   relativistic regime must use `raw` (the user supplies conserved components).
+///   relativistic regime uses `raw`, supplying conserved components directly.
 /// - `cooling` (and `force`/`relax`'s energy overlay) require `has_energy`; cooling on an
 ///   energy-free (isothermal) regime is rejected loudly at bridge time.
 /// - `raw` targets must be a substrate conserved slot (`den | mom | nrg`), and `nrg` requires
@@ -272,20 +272,20 @@ pub fn lower_dag_to_builtsource(
 ///   cross-check is the const-generic apply path's, where DOF is known.)
 ///
 /// the **`region`** axis: if `cfg.region` names a mask node `chi(x)`, the
-/// contribution is multiplied by it. the conservation lifts are LINEAR in the field, so masking the
-/// field (for `relax`: only the rate `kappa`) equals masking the conserved contribution — no splice
-/// change, CPU + GPU fall out of the existing path.
-/// lower a census's bin-axis and value expressions into ONE `BuiltSource`, whose outputs are
+/// contribution is multiplied by it. the conservation lifts are linear in the field, so masking the
+/// field (for `relax`: the rate `kappa` alone) equals masking the conserved contribution — the
+/// splice is unchanged, and CPU + GPU fall out of the existing path.
+/// lower a census's bin-axis and value expressions into one `BuiltSource`, whose outputs are
 /// the axis coordinates followed by the accumulator values (the order
 /// `CensusConfig::output_nodes` declares).
 ///
 /// sharing one graph is the point: a shell census bins on `log r` and accumulates several
 /// moments that each reference `r`, so hash-consing the common subexpression evaluates the
-/// radius and its logarithm ONCE per cell rather than once per registered output. cost then
-/// scales with the size of the dag rather than with the number of accumulators.
+/// radius and its logarithm once per cell, shared across every registered output. cost then
+/// scales with the size of the dag, independent of the accumulator count.
 ///
-/// unlike a source, `dv` IS a legal leaf here — the cell measure is the natural weight for an
-/// extensive quantity, and it is what keeps a sum correct on a curvilinear grid.
+/// `dv` is a legal leaf here, where a source term refuses it: the cell measure is the natural
+/// weight for an extensive quantity, and it is what keeps a sum correct on a curvilinear grid.
 pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<BuiltSource, String> {
     if cfg.values.is_empty() {
         return Err(format!("census '{}': registers no values", cfg.name));
@@ -311,7 +311,7 @@ pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<BuiltS
         }
     }
     // constant-power strength reduction: `r ** (-2.0)` becomes a multiply/divide chain,
-    // avoiding a per-cell libm pow in a kernel that runs over every leaf cell.
+    // replacing a per-cell libm pow in a kernel that runs over every leaf cell.
     let (nodes, outputs) = symbi_expr::strength_reduce(&nodes, &outputs);
     lower_dag_to_builtsource(&nodes, &outputs)
         .map_err(|e| format!("census '{}': bridge: {e:?}", cfg.name))
@@ -322,14 +322,14 @@ pub fn build_user_source(
     spec: &crate::regime_spec::RegimeSpec,
 ) -> Result<Vec<(String, BuiltSource)>, String> {
     let nodes = symbi_expr::nodes_from_descs(&cfg.nodes).map_err(|e| format!("dag load: {e}"))?;
-    // lower the field once. if a region mask is declared, lower it as an EXTRA output in the SAME
-    // graph (so chi shares the field's leaves), then peel it off to mask with below.
+    // lower the field once. if a region mask is declared, lower it as an extra output in the same
+    // graph (so chi shares the field's leaves), then peel it off as the mask factor.
     let mut lower_outputs = cfg.outputs.clone();
     if let Some(r) = cfg.region {
         lower_outputs.push(r);
     }
     // constant-power strength reduction (symbi_expr::strength): `x ** (-2.0)` in a
-    // user config becomes a multiply/divide chain, avoiding a per-cell libm pow.
+    // user config becomes a multiply/divide chain, replacing a per-cell libm pow.
     let (nodes, lower_outputs) = symbi_expr::strength_reduce(&nodes, &lower_outputs);
     let mut field =
         lower_dag_to_builtsource(&nodes, &lower_outputs).map_err(|e| format!("bridge: {e:?}"))?;
@@ -338,10 +338,10 @@ pub fn build_user_source(
         .map(|_| field.outputs.pop().expect("region output"));
     let n_out = cfg.outputs.len();
 
-    // the cell-volume leaf is a REDUCTION weight, not a source-term input: a source is a
-    // density (per unit volume) added to a conserved density, so multiplying it by the cell
-    // measure would make the deposited amount depend on the grid. the per-cell source param
-    // resolver has no `dv` binding, so without this the run would panic mid-evolve instead.
+    // the cell-volume leaf is a reduction weight: a source is a density (per unit volume)
+    // added to a conserved density, so multiplying it by the cell measure would make the
+    // deposited amount depend on the grid. rejecting it here turns what the per-cell source
+    // param resolver (which binds no `dv`) would raise mid-evolve into a build-time error.
     if field.params.iter().any(|p| p == "dv") {
         return Err(
             "cell volume is not a source-term input: a source is a per-unit-volume density, so \
@@ -444,7 +444,7 @@ pub fn build_user_source(
                     1 + cfg.dim,
                 ));
             }
-            // region masks ONLY the rate kappa (output 0) — masking v_ref would corrupt the target.
+            // region masks the rate kappa (output 0) alone — masking v_ref would corrupt the target.
             mask_field(&mut field, region, 0..1);
             let mut out = vec![(
                 "mom".to_string(),
@@ -475,7 +475,7 @@ pub fn build_user_source(
                     if spec.has_energy { ", nrg_ref" } else { "" },
                 ));
             }
-            // region masks ONLY the rate kappa (output 0), which factors into all three channels;
+            // region masks the rate kappa (output 0) alone, which factors into all three channels;
             // masking the reference state would corrupt the target the flow relaxes toward.
             mask_field(&mut field, region, 0..1);
             let mut out = vec![
@@ -490,8 +490,8 @@ pub fn build_user_source(
             ];
             if spec.has_energy {
                 // inv_gm1 = 1/(gamma-1): the ideal-gas internal-energy coefficient, folded as a
-                // build-time constant so the energy channel reconstructs E from `pre` without a
-                // runtime gamma binding.
+                // build-time constant so the energy channel reconstructs E from `pre` using a
+                // compile-time coefficient.
                 let inv_gm1 = *cfg.params.first().ok_or_else(|| {
                     "'sponge' on an energy regime needs params=[inv_gm1] = 1/(gamma-1)".to_string()
                 })?;
@@ -503,13 +503,13 @@ pub fn build_user_source(
             Ok(out)
         }
         "inject" => {
-            // additive deposition of the FULL conserved vector in one config: outputs =
+            // additive deposition of the full conserved vector in one config: outputs =
             // [S_den, S_mom_0..S_mom_{D-1}, (S_nrg on energy regimes)], each written straight to
-            // its conserved slot (identity, like `raw`, but spanning every slot at once). this is
-            // the mass+momentum+energy injection (a jet/wind depositing all three) that a
-            // single-slot `raw` cannot express. relativistic-safe: the user supplies conserved
-            // components directly (no newtonian law wrap), so no `reject_relativistic` — the
-            // components ARE the regime's conserved rates (D=rho*W, S=rho*h*W^2*v, tau in rhd).
+            // its conserved slot (identity, like `raw`, spanning every slot at once). this is the
+            // mass+momentum+energy injection (a jet/wind depositing all three) that single-slot
+            // `raw` reaches one slot at a time. relativistic-safe: the user supplies conserved
+            // components directly, so the kind skips `reject_relativistic` — the components are
+            // the regime's conserved rates (D=rho*W, S=rho*h*W^2*v, tau in rhd).
             let want = if spec.has_energy {
                 2 + cfg.dim
             } else {
@@ -648,8 +648,8 @@ fn sum_built_sources(
 
 /// multiply the named `field` outputs by the region mask `chi` (in the field's own graph), if a
 /// region is present. the lifts are linear in these outputs, so this masks the final conserved
-/// contribution. `idxs` selects WHICH outputs carry the maskable quantity (e.g., relax masks only
-/// the rate `kappa`, leaving the reference velocity unmasked).
+/// contribution. `idxs` selects which outputs carry the maskable quantity (e.g., relax masks the
+/// rate `kappa` alone, leaving the reference velocity at full strength).
 fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Range<usize>) {
     let Some(chi) = chi else { return };
     for i in idxs {
@@ -661,19 +661,19 @@ fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Rang
     }
 }
 
-/// THE BOUNDARY FRONT DOOR: compile a `SourceConfig` into a DRIVEN-BOUNDARY
-/// prescription — a complete primitive state `[rho, vel_0..vel_{D-1}, pre]` the ghost cells are SET
+/// the boundary front door: compile a `SourceConfig` into a driven-boundary
+/// prescription — a complete primitive state `[rho, vel_0..vel_{D-1}, pre]` the ghost cells are set
 /// to (Dirichlet), `combine = overwrite`. returns `(slot, BuiltSource)` in the structural-slot
 /// convention `den`/`mom`/`nrg` that [`symbi_discretize::boundary_fill_from_built_gv`] writes to
-/// `prim.rho`/`prim.vel_k`/`prim.pre`. each slot is an INDEPENDENT lowering of the user DAG over its
+/// `prim.rho`/`prim.vel_k`/`prim.pre`. each slot is an independent lowering of the user DAG over its
 /// output subset, so the velocity vector lands as the `ncomp`-output `mom` slot.
 ///
-/// VALIDATION (regime-driven via `spec`, at attach — never mid-evolve):
-/// - **regime-agnostic across hydro AND mhd.** a prim prescription sets `prim` (no conservation
-///   law), valid for RHD too (`is_relativistic` ALLOWED). MHD additionally prescribes the CELL-B
-///   vector (`bcell` slot -> `prim.mag`): the OUT-OF-PLANE component (B_phi in a 2.5D axisymmetric
+/// validation (regime-driven via `spec`, at attach time):
+/// - **regime-agnostic across hydro and MHD.** a prim prescription assigns `prim` outright, which
+///   keeps it valid for RHD too (`is_relativistic` allowed). MHD additionally prescribes the cell-B
+///   vector (`bcell` slot -> `prim.mag`): the out-of-plane component (B_phi in a 2.5D axisymmetric
 ///   grid) is cell-centered + flux-evolved, so prescribing it is a plain Dirichlet; the CT
-///   tangential-EMF sub-problem arises only for a prescribed POLOIDAL/in-plane FACE field.
+///   tangential-EMF sub-problem belongs to a prescribed poloidal/in-plane face field.
 ///   the in-plane cell-B components are the user's responsibility to keep div-compatible (=0 for a
 ///   purely toroidal field) — `raw`-style: garbage in, garbage out.
 /// - **complete prim state.** the DAG must output exactly the regime's primitive components:
@@ -698,17 +698,17 @@ pub fn build_boundary_dag(
     let nodes = symbi_expr::nodes_from_descs(&cfg.nodes).map_err(|e| format!("dag load: {e}"))?;
     let (nodes, reduced_outputs) = symbi_expr::strength_reduce(&nodes, &cfg.outputs);
     let d = cfg.dim;
-    // MHD prescribes the cell-B vector too. the OUT-OF-PLANE component (B_phi in a 2.5D
+    // MHD prescribes the cell-B vector too. the out-of-plane component (B_phi in a 2.5D
     // axisymmetric grid: cell-centered, flux-evolved) is the safe toroidal case — div-free
-    // by axisymmetry. the IN-PLANE components are the user's responsibility to keep
-    // div-compatible (=0 for a purely toroidal field); they are NOT a CT face prescription
-    // here, so no tangential-EMF sub-problem — that constraint only applies to
-    // a prescribed POLOIDAL (in-plane face) field, which this does not provide.
+    // by axisymmetry. the in-plane components are the user's responsibility to keep
+    // div-compatible (=0 for a purely toroidal field); they enter as cell-centered values,
+    // so the tangential-EMF sub-problem stays with the CT face prescription, which is where
+    // a poloidal (in-plane face) field would be set.
     let n_prim = boundary_prim_arity(spec, d);
-    // a run carrying the passive scalar prescribes ONE more output, the dye concentration of the
+    // a run carrying the passive scalar prescribes one more output, the dye concentration of the
     // injected fluid, appended after the prim state. optional here because the dye is a run-level
-    // opt-in the regime spec cannot see; the config layer is what knows whether a dye is allocated
-    // and so what rejects a driven face that omits it.
+    // opt-in outside the regime spec's view; the config layer knows whether a dye is allocated
+    // and is what rejects a driven face that omits it.
     let has_dye = cfg.outputs.len() == n_prim + 1;
     if cfg.outputs.len() != n_prim && !has_dye {
         return Err(format!(
@@ -727,7 +727,7 @@ pub fn build_boundary_dag(
     }
     // split the user DAG into per-slot prescriptions: den <- rho, mom <- the d-vector vel,
     // nrg <- pre, bcell <- the d-vector cell B. each is an independent lowering over its
-    // output subset (own graph) — no graph cloning.
+    // output subset, building its own graph.
     let lower = |outs: &[usize]| {
         lower_dag_to_builtsource(&nodes, outs).map_err(|e| format!("bridge: {e:?}"))
     };
@@ -761,15 +761,15 @@ mod tests {
     use symbi_ir::backends::interp::{Backend, Cpu};
     use symbi_ir::passes::scalarize::scalarize;
 
-    // ---- the axiomatic VALIDATION gate (build_user_source vs RegimeSpec) -------------------
-    // each ill-posed config must fail HERE (pre-attach), driven entirely by the regime's spec,
-    // never as a mid-evolve panic.
+    // ---- the axiomatic validation gate (build_user_source vs RegimeSpec) -------------------
+    // each ill-posed config must fail here (pre-attach), driven entirely by the regime's spec,
+    // ahead of any evolve step.
 
     fn cfg_from(json: &str) -> symbi_expr::SourceConfig {
         symbi_expr::SourceConfig::from_json(json).expect("parse")
     }
 
-    // extract the error message (BuiltSource isn't Debug, so `unwrap_err` won't compile).
+    // extract the error message (BuiltSource lacks Debug, so this stands in for `unwrap_err`).
     fn expect_err(cfg: &symbi_expr::SourceConfig, spec: &crate::regime_spec::RegimeSpec) -> String {
         match build_user_source(cfg, spec) {
             Err(e) => e,
@@ -781,8 +781,8 @@ mod tests {
     fn cell_volume_is_rejected_as_a_source_input() {
         // a source term is a per-unit-volume density added to a conserved density. weighting
         // it by the cell measure would make the deposited amount scale with the resolution,
-        // so the leaf must be refused at build time — the per-cell source param resolver has
-        // no `dv` binding, and without this check the run panics mid-evolve instead.
+        // so the leaf is refused at build time; the per-cell source param resolver binds no
+        // `dv`, so this check converts a mid-evolve panic into a build-time error.
         let cfg = cfg_from(
             r#"{ "kind":"raw", "dim":1, "outputs":[1], "params":[], "target":"den",
                  "nodes":[ {"op":"VARIABLE_DV"},
@@ -820,7 +820,7 @@ mod tests {
 
     #[test]
     fn python_serialize_source_json_loads_and_lowers() {
-        // pins the cross-language wire: this is the EXACT json the python
+        // pins the cross-language wire: this is the exact json the python
         // CompiledExpr.serialize_source('force', 2) emits for a = (0, -1) gravity.
         // if the python adapter and this loader ever drift, this fails.
         let cfg = cfg_from(
@@ -969,7 +969,7 @@ mod tests {
 
     #[test]
     fn python_sponge_json_loads_and_lowers() {
-        // the EXACT json python's serialize_source(SourceKind.SPONGE, dim=3, params=[inv_gm1]) emits.
+        // the exact json python's serialize_source(SourceKind.SPONGE, dim=3, params=[inv_gm1]) emits.
         // outputs = [kappa, den_ref, mom_ref_0..2, nrg_ref] mapped to node indices; here kappa=2,
         // den_ref=1, mom_ref=(x_0,x_1,x_2) (reads position), nrg_ref=10, inv_gm1=2.5. pins the
         // cross-language wire for the buffer-zone sponge.
@@ -1005,7 +1005,8 @@ mod tests {
             "python sponge mom_0 wrong: {s_mom0}"
         );
         // S_nrg = kappa*(nrg_ref - (pre*inv_gm1 + 0.5*rho*|v|^2)) = 2*(10 - (5 + 6.75)) = -3.5.
-        // (the x_k leaves ride along in the spliced field — unused by the const nrg_ref, but present.)
+        // (the x_k leaves ride along in the spliced field, present in the param manifest even
+        // where the const nrg_ref reads none of them.)
         let (_, nrg) = &built[2];
         let s_nrg = eval_lowered(
             nrg,
@@ -1043,7 +1044,7 @@ mod tests {
 
     #[test]
     fn force_on_iso_drops_energy_overlay() {
-        // iso has no energy: the mom overlay survives, the nrg overlay is NOT emitted.
+        // iso has no energy: the mom overlay is the whole emission.
         let cfg = cfg_from(
             r#"{ "kind":"force", "dim":2, "outputs":[0,1], "params":[0.5],
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"CONSTANT","value":0.0} ] }"#,
@@ -1072,8 +1073,8 @@ mod tests {
     #[test]
     fn inject_on_newtonian_writes_all_conserved_slots() {
         // one config depositing mass+momentum+energy: outputs = [S_den, S_mom_0, S_mom_1, S_nrg]
-        // = [1, 2, 3, 4], each written IDENTITY to its conserved slot (no law wrap, like raw but
-        // spanning every slot at once). the multi-channel deposition a single-slot raw cannot do.
+        // = [1, 2, 3, 4], each written identity to its conserved slot (like raw, spanning every
+        // slot at once). the multi-channel deposition single-slot raw reaches one slot at a time.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":2, "outputs":[0,1,2,3], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
@@ -1101,7 +1102,8 @@ mod tests {
 
     #[test]
     fn inject_on_iso_drops_energy_channel() {
-        // iso has no energy: outputs = [S_den, S_mom_0, S_mom_1] (1+dim); the nrg slot is NOT emitted.
+        // iso has no energy: outputs = [S_den, S_mom_0, S_mom_1] (1+dim); den + mom are the
+        // whole emission.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":2, "outputs":[0,1,2], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
@@ -1116,8 +1118,8 @@ mod tests {
 
     #[test]
     fn inject_on_relativistic_is_accepted() {
-        // inject supplies CONSERVED components directly (like raw, no newtonian law wrap), so it is
-        // valid on a relativistic regime where force/cooling/relax are rejected. rhd has energy:
+        // inject supplies conserved components directly (like raw, with the law wrap left off), so
+        // it is valid on a relativistic regime where force/cooling/relax are rejected. rhd has energy:
         // [D_dot, S_dot_0, tau_dot] at dim=1 -> 3 outputs.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":1, "outputs":[0,1,2], "params":[],
@@ -1193,7 +1195,7 @@ mod tests {
     #[test]
     fn inject_wrong_arity_is_rejected() {
         // energy regime at dim=2 needs [den, mom_0, mom_1, nrg] = 4 outputs; supplying 3 is
-        // rejected pre-attach, never a mid-evolve panic.
+        // rejected pre-attach, ahead of any evolve step.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":2, "outputs":[0,1,2], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
@@ -1316,7 +1318,7 @@ mod tests {
             ["mom", "nrg"]
         );
         let (_, mom) = &built[0];
-        // kappa=2, rho=1, v_ref_0=0, vel_0=3 -> 2*1*(0-3) = -6: the drag OPPOSES the velocity.
+        // kappa=2, rho=1, v_ref_0=0, vel_0=3 -> 2*1*(0-3) = -6: the drag opposes the velocity.
         let s_mom0 = eval_lowered(
             mom,
             mom.outputs[0],
@@ -1332,7 +1334,7 @@ mod tests {
             (s_mom0 - (-6.0)).abs() < 1e-12,
             "relax drag wrong: {s_mom0}"
         );
-        // the energy overlay = work = sum vel_k * S_mom_k = 3*(-6) + 0 = -18 < 0: KE is REMOVED.
+        // the energy overlay = work = sum vel_k * S_mom_k = 3*(-6) + 0 = -18 < 0: KE is removed.
         let (_, nrg) = &built[1];
         let s_nrg = eval_lowered(
             nrg,
@@ -1353,8 +1355,8 @@ mod tests {
 
     #[test]
     fn relax_clamps_negative_rate_to_zero() {
-        // the stability invariant: a NEGATIVE kappa (anti-damping) is clamped to 0 -> no-op, so no
-        // energy-injecting instability arises. unexpressible by construction.
+        // the stability invariant: a negative kappa (anti-damping) is clamped to 0 -> no-op, so the
+        // flow keeps its energy. the energy-injecting mode is unexpressible by construction.
         let cfg = cfg_from(
             r#"{ "kind":"relax", "dim":1, "outputs":[0,1], "params":[-5.0, 0.0],
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
@@ -1395,7 +1397,7 @@ mod tests {
 
         // state: rho=1.5, vel=[3,0], pre=2 (each channel reads only what it needs from this).
         let state = [("rho", 1.5), ("vel_0", 3.0), ("vel_1", 0.0), ("pre", 2.0)];
-        // S_den = kappa*(den_ref - rho) = 2*(1 - 1.5) = -1.0 (density relaxes DOWN toward the ref).
+        // S_den = kappa*(den_ref - rho) = 2*(1 - 1.5) = -1.0 (density relaxes down toward the ref).
         let (_, den) = &built[0];
         let s_den = eval_lowered(den, den.outputs[0], &state);
         assert!(
@@ -1410,7 +1412,7 @@ mod tests {
             "sponge mom_0 wrong: {s_mom0}"
         );
         // S_nrg = kappa*(nrg_ref - E), E = pre*inv_gm1 + 0.5*rho*|v|^2 = 2*2.5 + 0.5*1.5*9 = 11.75;
-        //   -> 2*(10 - 11.75) = -3.5 (total energy relaxes DOWN toward the ref).
+        //   -> 2*(10 - 11.75) = -3.5 (total energy relaxes down toward the ref).
         let (_, nrg) = &built[2];
         let s_nrg = eval_lowered(nrg, nrg.outputs[0], &state);
         assert!((s_nrg - (-3.5)).abs() < 1e-12, "sponge nrg wrong: {s_nrg}");
@@ -1418,8 +1420,8 @@ mod tests {
 
     #[test]
     fn sponge_on_iso_drops_energy_channel() {
-        // iso has no energy: the reference is [kappa, den_ref, mom_ref_0] (2+D), and only den+mom
-        // channels are emitted (no nrg_ref, no inv_gm1 needed).
+        // iso has no energy: the reference is [kappa, den_ref, mom_ref_0] (2+D), and the den + mom
+        // channels are the whole emission — the list stops before nrg_ref, and inv_gm1 goes unused.
         let cfg = cfg_from(
             r#"{ "kind":"sponge", "dim":1, "outputs":[0,1,2], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
@@ -1430,7 +1432,7 @@ mod tests {
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["den", "mom"]
         );
-        // S_den = 1*(2 - rho); rho=0.5 -> 1.5 (density relaxes UP toward the ref).
+        // S_den = 1*(2 - rho); rho=0.5 -> 1.5 (density relaxes up toward the ref).
         let (_, den) = &built[0];
         let s_den = eval_lowered(den, den.outputs[0], &[("rho", 0.5)]);
         assert!(
@@ -1459,7 +1461,7 @@ mod tests {
     #[test]
     fn raw_source_reads_density_and_pressure() {
         // a radiative-cooling-style rate S_nrg = -(C * rho * pre): the user expression reads the
-        // per-cell STATE (density + pressure) — the capability that lets adiabatic cooling
+        // per-cell state (density + pressure) — the capability that lets adiabatic cooling
         // Lambda(rho, T), T = pre/rho, be user-defined. nodes: 0=PARAM C, 1=VARIABLE_RHO,
         // 2=VARIABLE_PRESSURE, 3=MUL(C,rho), 4=MUL(3,pre), 5=NEG(4). outputs=[5], target=nrg.
         let cfg = cfg_from(
@@ -1481,7 +1483,7 @@ mod tests {
             (s - (-1.5)).abs() < 1e-12,
             "cooling rate must read rho*pre: got {s}"
         );
-        // it genuinely DEPENDS on pressure: doubling pre doubles the rate.
+        // it genuinely depends on pressure: doubling pre doubles the rate.
         let s2 = eval_lowered(
             nrg,
             nrg.outputs[0],
@@ -1495,9 +1497,9 @@ mod tests {
 
     #[test]
     fn raw_source_targets_density_slot() {
-        // a density-only injection (pure mass loading, no momentum/energy) — a baryon source
-        // rate S_den = p0 * rho written straight to the `den` slot. the single-slot path for
-        // mass loading (the full-vector path is `inject`).
+        // a density-only injection (pure mass loading) — a baryon source rate S_den = p0 * rho
+        // written straight to the `den` slot. the single-slot path for mass loading, where
+        // `inject` carries the full conserved vector.
         let cfg = cfg_from(
             r#"{ "kind":"raw", "dim":1, "outputs":[2], "params":[0.5], "target":"den",
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"VARIABLE_RHO"},
@@ -1520,7 +1522,7 @@ mod tests {
 
     #[test]
     fn relax_on_iso_drops_energy_overlay() {
-        // iso has no energy: relax yields ONLY the momentum drag (no work term).
+        // iso has no energy: relax yields the momentum drag alone.
         let cfg = cfg_from(
             r#"{ "kind":"relax", "dim":1, "outputs":[0,1], "params":[1.0, 0.0],
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
@@ -1590,7 +1592,7 @@ mod tests {
 
     #[test]
     fn boundary_on_iso_drops_pressure() {
-        // iso has no energy: the prim state is [rho, vel] only — no pre slot.
+        // iso has no energy: the prim state is exactly [rho, vel].
         let cfg = cfg_from(
             r#"{ "kind":"dirichlet", "dim":1, "outputs":[0,1], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":0.5} ] }"#,
@@ -1602,8 +1604,8 @@ mod tests {
 
     #[test]
     fn boundary_on_rhd_is_allowed() {
-        // a prim prescription is regime-agnostic across hydro -> rhd (relativistic) is FINE,
-        // unlike force/cooling (whose newtonian conservation law is wrong for rhd).
+        // a prim prescription is regime-agnostic across hydro, so rhd (relativistic) is accepted,
+        // where force/cooling are rejected because their newtonian conservation law is wrong for rhd.
         let cfg = cfg_from(
             r#"{ "kind":"dirichlet", "dim":1, "outputs":[0,1,2], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":0.1},
@@ -1681,7 +1683,7 @@ mod tests {
     }
 
     /// the load-bearing bridge proof: a mixed user expression, lowered to the symbi-ir
-    /// Graph, evaluates IDENTICALLY to `symbi-expr`'s own register-VM interpreter — proving
+    /// Graph, evaluates identically to `symbi-expr`'s own register-VM interpreter — proving
     /// the two engines unify on one IR. exercises arithmetic, a transcendental, a parameter,
     /// variables, time, a comparison, and the IF_THEN_ELSE -> Select lowering.
     #[test]
@@ -1728,7 +1730,7 @@ mod tests {
 
     #[test]
     fn unsupported_ops_are_rejected_not_miscompiled() {
-        // `Sgn` / `Mod` have no carrier-traceable primitive — the bridge must reject them.
+        // `Sgn` / `Mod` fall outside the carrier-traceable primitives — the bridge must reject them.
         let mut dag = Dag::new();
         let x1 = dag.var_x1();
         let sgn = dag.unary(Op::Sgn, x1);

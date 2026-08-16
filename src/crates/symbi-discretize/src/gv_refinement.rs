@@ -5,15 +5,15 @@
 // (fine -> coarse conservative child average) and prolongation (coarse -> fine
 // limited interpolation, time-interpolated between two coarse snapshots) as
 // gv-traced pullbacks over the refinement lattice maps (lattice.rs
-// Refine / Coarsen). levels share ABSOLUTE index space: fine cell f covers
-// coarse cell floor_div(f, ratio), so no coverage-relative translation exists
-// anywhere — the destination thread coordinate IS the level-global index, and
-// each field buffer resolves it against its own lo.
+// Refine / Coarsen). levels share absolute index space: fine cell f covers
+// coarse cell floor_div(f, ratio), so every index stays level-global — the
+// destination thread coordinate is the level-global index, and each field
+// buffer resolves it against its own lo.
 //
 // the straightforward formulation of this transfer (symbi-amr prolong_nd /
 // restrict_nd) is an axis-by-axis sweep over scratch buffers — host-only by
 // construction. here the
-// sweep is INLINED per destination cell: pass order is axis 0 innermost, the
+// sweep is inlined per destination cell: pass order is axis 0 innermost, the
 // per-pass 1d operators (pcm / van-leer plm / monotonized ppm sub-cell average)
 // use the identical arithmetic, so the traced expression per output cell is
 // bit-identical to the reference sweep at f64. limiters are carrier-generic in
@@ -37,7 +37,7 @@ type Writes = Vec<(String, FieldBind, NodeId)>;
 
 /// prolongation order for the coarse-fine transfer. one order higher than the
 /// evolution reconstruction (pcm evolution -> plm prolong, plm -> ppm) so the
-/// coarse-fine boundary does not degrade the interior order.
+/// coarse-fine boundary preserves the interior order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProlongOrder {
     /// piecewise constant (order 0): parent injection. stencil halfwidth 0.
@@ -48,14 +48,14 @@ pub enum ProlongOrder {
     /// (conservative by construction). stencil halfwidth 2.
     Ppm,
     /// the exact degree-4 polynomial matching all five stencil cell averages
-    /// (order 4, conservative by construction — its cell-0 integral IS the
+    /// (order 4, conservative by construction — its cell-0 integral is the
     /// parent average), with the monotonized parabolic form as the fallback
     /// wherever the undivided second differences change sign across the
     /// stencil (a discontinuity; the raw quartic overshoots there). stencil
     /// halfwidth 2, identical to ppm. serves an evolution reconstruction of
     /// parabolic order: the coarse-fine ghost averages are O(h^5), so the
     /// interface layer's flux-divergence order loss lands at O(h^4) locally
-    /// and the boundary cannot degrade the interior order.
+    /// and the boundary preserves the interior order.
     Quartic,
 }
 
@@ -78,7 +78,7 @@ impl ProlongOrder {
 
 /// van leer (harmonic) limited slope: `2*dl*dr/(dl+dr)` when the one-sided
 /// differences share a strict sign, zero otherwise. the denominator is guarded
-/// BEFORE the select (Gv evaluates both arms; a same-signed pair has a nonzero
+/// before the select (Gv evaluates both arms; a same-signed pair has a nonzero
 /// sum, so the guard only replaces the discarded arm).
 fn van_leer<S: Scalar>(dl: S, dr: S) -> S {
     let prod = dl * dr;
@@ -94,7 +94,7 @@ fn plm_interp<S: Scalar>(vm: S, vc: S, vp: S, frac: S) -> S {
     vc + van_leer(vc - vm, vp - vc) * frac
 }
 
-/// the 1d ppm prolongation sub-cell AVERAGE over [xi_lo, xi_hi] (xi in [0,1]
+/// the 1d ppm prolongation sub-cell average over [xi_lo, xi_hi] (xi in [0,1]
 /// across the parent): 4th-order interface values clamped to the neighbor
 /// range, monotonized (the select form preserves the reference's sequential
 /// left-then-right overshoot correction), then the exact parabola
@@ -118,13 +118,13 @@ fn ppm_interp<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S, xi_lo: S, xi_hi:
     (a_hi - a_lo) * ratio
 }
 
-/// the 1d quartic prolongation sub-cell AVERAGE over [xi_lo, xi_hi] (xi in [0,1]
+/// the 1d quartic prolongation sub-cell average over [xi_lo, xi_hi] (xi in [0,1]
 /// across the parent): the unique degree-4 polynomial whose cell averages match
 /// all five stencil values (the derivative of the degree-5 interpolant of the
 /// primitive function), integrated exactly — so the children average back to the
 /// parent exactly and the sub-cell averages are O(h^5) on smooth data, including
-/// at extrema (no clamp, no flatten). wherever the undivided second differences
-/// at cells -1, 0, +1 do not share a strict sign — a discontinuity inside the
+/// at extrema, where the raw polynomial stands unclamped. wherever the undivided
+/// second differences at cells -1, 0, +1 differ in sign — a discontinuity inside the
 /// stencil, where the raw quartic rings — the value falls back to the
 /// monotonized parabolic average, so a shock crossing a refinement boundary sees
 /// the same bounded transfer as the ppm order.
@@ -187,8 +187,8 @@ fn quartic_interp<S: Scalar>(
 
 /// trace the fine -> coarse restriction: `dst[c] = sweep-average of
 /// src[ratio*c + o]` over the child offsets, axis 0 innermost (the reference
-/// restrict_nd pass order). input "src" is the FINE field, output "dst" the
-/// COARSE field; the dispatch domain is the coarse coverage in absolute coarse
+/// restrict_nd pass order). input "src" is the fine field, output "dst" the
+/// coarse field; the dispatch domain is the coarse coverage in absolute coarse
 /// indices.
 pub fn refine_restrict_gv(ndim: usize, ratio: i64) -> (GvKernel, Writes) {
     assert!(
@@ -272,7 +272,7 @@ pub fn field_fill_gv(ndim: usize) -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
-/// dst(c) += scale * src(c + arg), with per-axis runtime INTEGER offsets (the
+/// dst(c) += scale * src(c + arg), with per-axis runtime integer offsets (the
 /// lattice-style args) and a runtime scalar `scale`. serves the register's
 /// coarse-flux accumulation (arg = 0, scale = -A*w) and the reflux apply
 /// (src = the register face read at the cell's adjacent face, scale = sign/V).
@@ -337,7 +337,7 @@ pub fn refine_acc_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Wr
 }
 
 /// dst(g) += scale * sum over the `ratio` fine sub-edges of coarse edge g
-/// (child offsets along the EDGE axis only; every other index scales exactly)
+/// (child offsets along the edge axis only; every other index scales exactly)
 /// — the emf register's fine accumulation. `scale` carries the fine dt times
 /// the length-average factor 1/ratio.
 pub fn refine_acc_edge_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
@@ -388,8 +388,8 @@ pub fn refine_acc_edge_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Wr
     (end_trace(), writes)
 }
 
-/// the raw transverse child SUM (no averaging — the caller's scale carries
-/// the weights), normal axis passing through.
+/// the raw transverse child sum (the caller's scale carries the weights,
+/// averaging included), normal axis passing through.
 fn acc_face_sum(scaled: &[NodeId], ratio: i64, axis: usize, ax: isize, off: &mut [i64; 3]) -> Gv {
     if ax < 0 {
         let coords: Vec<NodeId> = with_trace(|t| {
@@ -421,16 +421,16 @@ fn acc_face_sum(scaled: &[NodeId], ratio: i64, axis: usize, ax: isize, off: &mut
 }
 
 // =============================================================================
-// face restriction: thread over the coarse coverage FACE domain, read the
+// face restriction: thread over the coarse coverage face domain, read the
 // ratio^(D-1) coincident fine faces (staggered fields)
 // =============================================================================
 
-/// trace the fine -> coarse FACE restriction for a face-normal staggered field
+/// trace the fine -> coarse face restriction for a face-normal staggered field
 /// (bface[axis]): `dst[c] = transverse-sweep-average of src[ratio*c + o]` where
 /// the child offsets `o` run over the transverse axes only — the normal index
 /// scales exactly (a coarse face is the union of its ratio^(D-1) fine faces,
 /// area-weighted average = plain average on a uniform cartesian grid). input
-/// "src" is the FINE face field, output "dst" the COARSE one; the dispatch
+/// "src" is the fine face field, output "dst" the coarse one; the dispatch
 /// domain is the coverage face domain in absolute coarse indices.
 pub fn refine_restrict_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
     assert!(
@@ -509,9 +509,9 @@ fn restrict_face_eval(
 /// parent neighborhood (`floor_div(f, ratio)` — the Coarsen map, absolute
 /// indices, ghost-safe for negatives) from the time-interpolated coarse state
 /// `(1 - alpha)*src_old + alpha*src_new`, then applies the inlined per-axis
-/// sweep at `order`. inputs "src_old"/"src_new" are the COARSE field snapshots
-/// (bind the same buffer twice when no time interpolation is wanted), scalar
-/// "alpha" the interpolation fraction; output "dst" is the FINE field. the
+/// sweep at `order`. inputs "src_old"/"src_new" are the coarse field snapshots
+/// (bind the same buffer twice to skip the time interpolation), scalar
+/// "alpha" the interpolation fraction; output "dst" is the fine field. the
 /// dispatch domain is the fine destination region (a coarse-fine ghost slab,
 /// or a freshly nested patch interior) in absolute fine indices.
 pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKernel, Writes) {
@@ -534,13 +534,13 @@ pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKer
     (end_trace(), writes)
 }
 
-/// trace the MULTI-FIELD (prim batch) cell prolongation: ONE kernel that sweeps
+/// trace the multi-field (prim batch) cell prolongation: one kernel that sweeps
 /// the shared coarse->fine stencil over `ncomp` co-located fields, reading
 /// `src_old_{k}`/`src_new_{k}` and writing `dst_{k}` for k in 0..ncomp. the
-/// per-cell geometry (parent index, parity, plm/ppm weights) is computed ONCE
-/// and reused across all components (graph CSE), and the host
-/// issues ONE dispatch (one rayon launch) for the whole prim set instead of
-/// `ncomp` separate launches. bit-identical to `ncomp` single-field prolongs.
+/// per-cell geometry (parent index, parity, plm/ppm weights) is computed once
+/// and reused across all components (graph CSE), and the host issues a single
+/// dispatch (one rayon launch) covering the whole prim set. bit-identical to
+/// `ncomp` single-field prolongs.
 /// buffers in signature order: src_old_0, src_new_0, .., src_old_{n-1},
 /// src_new_{n-1} (inputs) then dst_0..dst_{n-1} (outputs); scalar "alpha".
 pub fn refine_prolong_multi_gv(
@@ -577,10 +577,10 @@ pub fn refine_prolong_multi_gv(
     (end_trace(), writes)
 }
 
-/// the SINGLE-SNAPSHOT multi-field prolongation: `refine_prolong_multi_gv`
-/// with the leaf reading one coarse buffer per component ("src_{k}") — no time
-/// pair, no alpha. a `field_lerp` pass time-interpolates the coarse snapshots
-/// once per coarse cell, halving the gather traffic (a time pair reads 2x the
+/// the single-snapshot multi-field prolongation: `refine_prolong_multi_gv`
+/// with the leaf reading one coarse buffer per component ("src_{k}"), the time
+/// interpolation already folded in. a `field_lerp` pass time-interpolates the
+/// coarse snapshots once per coarse cell, halving the gather traffic (a time pair reads 2x the
 /// loads of a 5^3 ppm neighborhood, recomputed per fine cell). buffers in
 /// signature order: src_0..src_{n-1} (inputs) then dst_0..dst_{n-1} (outputs);
 /// no scalars.
@@ -609,15 +609,15 @@ pub fn refine_prolong_multi_1t_gv(
     (end_trace(), writes)
 }
 
-/// trace ONE PASS of the axis-split prolongation: the 1d
+/// trace one pass of the axis-split prolongation: the 1d
 /// interpolation operator applied along `sweep_axis` only, every other axis
 /// passing the thread coordinate through to the input load. the swept axis of
-/// the OUTPUT lattice is fine-indexed (parent = floor_div(c, r), parity = the
+/// the output lattice is fine-indexed (parent = floor_div(c, r), parity = the
 /// child sub-position), the unswept axes keep the input's indexing — chaining
-/// the passes axis 0 -> 1 -> 2 reproduces the inlined tensor product BIT FOR
-/// BIT (same 1d operators, same operand order, f64 intermediates). inputs
+/// the passes axis 0 -> 1 -> 2 reproduces the inlined tensor product bit for
+/// bit (same 1d operators, same operand order, f64 intermediates). inputs
 /// "src_{k}" (the lerped coarse for pass 0, the previous intermediate after),
-/// outputs "dst_{k}"; no scalars.
+/// outputs "dst_{k}"; scalars: none.
 pub fn refine_prolong_sweep_multi_gv(
     ndim: usize,
     ratio: i64,
@@ -642,7 +642,7 @@ pub fn refine_prolong_sweep_multi_gv(
         "refine_prolong_sweep_multi_gv: ncomp must be >= 1"
     );
     begin_trace();
-    // parent + parity on the SWEPT axis only (the same arithmetic
+    // parent + parity on the swept axis only (the same arithmetic
     // prolong_geometry builds per axis).
     let (parent, parity): (NodeId, NodeId) = with_trace(|t| {
         let c = t.coord(sweep_axis as u8);
@@ -705,7 +705,7 @@ pub fn refine_prolong_sweep_multi_gv(
 
 /// the pointwise time interpolation `dst_k = (1 - alpha)*src_old_k +
 /// alpha*src_new_k` over `ncomp` co-located fields in one dispatch — the pass
-/// that hoists the prolong leaf's per-fine-cell lerp to once per COARSE cell.
+/// that hoists the prolong leaf's per-fine-cell lerp to once per coarse cell.
 /// the expression is spelled exactly as the prolong leaf spelled it, so the
 /// lerp-then-prolong-1t chain is bit-identical to the fused time-pair kernel.
 /// buffers: src_old_0, src_new_0, .., interleaved (inputs) then dst_0..
@@ -736,7 +736,7 @@ pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
 // =============================================================================
 // balance-aware coarse-fine transfer: the fused lerp+encode over the coarse
 // parent region and the decode over the fine ghost slab. between them the
-// UNCHANGED prolong kernels act on departures from one hydrostatic anchor, so
+// unchanged prolong kernels act on departures from one hydrostatic anchor, so
 // coarse stencil data on one isentrope land the fine ghosts exactly back on it
 // at any prolongation order and any limiter. cartesian, gamma-law only, like
 // every balance-carrying kernel.
@@ -746,8 +746,8 @@ pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
 /// `body_{b}_pos_{g}` per grid axis, then `body_{b}_mass` / `_soft` /
 /// `_softkind` — the same slot layout the wb ghost fill and body source bind
 /// (an inert slot carries mass = 0 and contributes exactly zero potential).
-/// declared eagerly so the scalar manifest order is the declaration order
-/// here, never the trace's evaluation order.
+/// declared eagerly so the scalar manifest order follows the declaration order
+/// here, independent of the trace's evaluation order.
 fn declare_body_slots(ndim: usize, n_bodies: usize) -> Vec<([Gv; 3], Gv, Gv, Gv)> {
     (0..n_bodies)
         .map(|b| {
@@ -765,7 +765,7 @@ fn declare_body_slots(ndim: usize, n_bodies: usize) -> Vec<([Gv; 3], Gv, Gv, Gv)
         .collect()
 }
 
-/// the total body potential at a cartesian position (grid axes ARE the
+/// the total body potential at a cartesian position (grid axes are the
 /// coordinates; ungridded components zero), summed over every slot.
 fn body_slots_potential(pos: &[Gv; 3], slots: &[([Gv; 3], Gv, Gv, Gv)]) -> Gv {
     slots
@@ -789,18 +789,18 @@ fn centroid_position(ndim: usize, coords: &[NodeId], x_lo: &[Gv], dx: &[Gv]) -> 
     pos
 }
 
-/// trace the FUSED lerp + hydrostatic encode over the coarse parent region of a
+/// trace the fused lerp + hydrostatic encode over the coarse parent region of a
 /// coarse-fine ghost slab: every component is time-interpolated
 /// `(1 - alpha)*src_old_k + alpha*src_new_k`, and rho (component 0) and pre
 /// (component ncomp-1) additionally subtract the anchor equilibrium evaluated
-/// at the cell's own potential. the ANCHOR (rho, pre) is re-lerped IN-THREAD
-/// from the raw inputs at the `anchor_{ax}` index scalars — never read from the
-/// output, so no thread ever races the anchor cell's encode. the prolong
-/// kernels then act on the resulting departures unchanged.
+/// at the cell's own potential. the anchor (rho, pre) is re-lerped in-thread
+/// from the raw inputs at the `anchor_{ax}` index scalars, so each thread builds
+/// the anchor from immutable input, independent of the anchor cell's encode. the
+/// prolong kernels then act on the resulting departures unchanged.
 ///
 /// buffers: src_old_0, src_new_0, .., interleaved (inputs) then dst_0..
 /// (outputs). ints: anchor_{ax}. scalars: alpha, gamma, x_lo_{ax}, dx_{ax}
-/// (the COARSE lattice), then the body slots.
+/// (the coarse lattice), then the body slots.
 pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKernel, Writes) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
     assert!(
@@ -874,17 +874,17 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
     (end_trace(), writes)
 }
 
-/// trace the hydrostatic DECODE over the fine coarse-fine ghost slab: the
+/// trace the hydrostatic decode over the fine coarse-fine ghost slab: the
 /// prolonged departures already sit in the fine (rho, pre), and each ghost adds
-/// back the anchor equilibrium evaluated at ITS OWN potential. the encoded
-/// scratch holds a zero departure at the anchor, so the anchor state cannot be
-/// read from it — the raw coarse (rho, pre) snapshots bind as inputs and the
-/// anchor is re-lerped in-thread with the same alpha the encode used.
+/// back the anchor equilibrium evaluated at its own potential. the encoded
+/// scratch holds a zero departure at the anchor, so the anchor state comes from
+/// the raw coarse (rho, pre) snapshots, bound as inputs and re-lerped in-thread
+/// with the same alpha the encode used.
 ///
-/// buffers: src_old_rho, src_new_rho, src_old_pre, src_new_pre (the COARSE
-/// snapshots, inputs) then dst_rho, dst_pre (the fine ghosts, IN-PLACE
+/// buffers: src_old_rho, src_new_rho, src_old_pre, src_new_pre (the coarse
+/// snapshots, inputs) then dst_rho, dst_pre (the fine ghosts, in-place
 /// outputs). ints: anchor_{ax}. scalars: alpha, gamma, x_lo_{ax}, dx_{ax} (the
-/// FINE lattice), src_x_lo_{ax}, src_dx_{ax} (the COARSE lattice), then the
+/// fine lattice), src_x_lo_{ax}, src_dx_{ax} (the coarse lattice), then the
 /// body slots.
 pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
@@ -943,21 +943,21 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
 }
 
 // =============================================================================
-// face prolongation: thread over a fine FACE region (a bface transverse-halo
+// face prolongation: thread over a fine face region (a bface transverse-halo
 // slab at a coarse-fine boundary), read the time-interpolated coarse face
 // field — the fine boundary-edge EMF at the coarse-fine interface
 // =============================================================================
 
-/// trace the coarse -> fine FACE prolongation for a face-normal staggered
-/// field (bface[axis]). along the NORMAL axis the fine face lattice
+/// trace the coarse -> fine face prolongation for a face-normal staggered
+/// field (bface[axis]). along the normal axis the fine face lattice
 /// interleaves the coarse one: an even fine face (2c) coincides with coarse
 /// face c, an odd one (2c+1) sits at the midpoint of faces c and c+1 — the
 /// pair `floor_div(f, 2)` / `floor_div(f+1, 2)` collapses to (c, c) on even
-/// faces (the half-sum is then exact) and (c, c+1) on odd ones, so no read
-/// ever leaves the coarse face domain. TRANSVERSE axes use the van-leer plm
-/// sweep (axis 0 innermost among them): the coarse bface carries only a +/-1
-/// transverse halo, so the ppm stencil's reach is structurally unavailable —
-/// plm is the maximum order here, one above the pcm a plain copy would be.
+/// faces (the half-sum is then exact) and (c, c+1) on odd ones, so every read
+/// stays inside the coarse face domain. transverse axes use the van-leer plm
+/// sweep (axis 0 innermost among them): the coarse bface carries a +/-1
+/// transverse halo, exactly the reach the plm stencil needs, so plm is the
+/// maximum order here, one above the pcm a plain copy would be.
 /// inputs "src_old"/"src_new" + scalar "alpha" as in `refine_prolong_gv`.
 pub fn refine_prolong_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
     assert!(
@@ -1076,9 +1076,9 @@ fn face_prolong_eval(ctx: &FaceProlongCtx, ax: isize, off: &mut [i64; 3]) -> Gv 
     plm_interp(vals[0], vals[1], vals[2], ctx.frac[aa])
 }
 
-/// the coarse-field read the prolong leaf performs: the classic TIME PAIR
+/// the coarse-field read the prolong leaf performs: the classic time pair
 /// (`(1 - alpha)*old + alpha*new` per coarse cell, recomputed per fine cell)
-/// or a SINGLE pre-interpolated buffer (a `field_lerp` pass hoisted the time
+/// or a single pre-interpolated buffer (a `field_lerp` pass hoisted the time
 /// interpolation to once per coarse cell — half the gather traffic).
 enum ProlongSrc<'a> {
     TimePair {
@@ -1313,7 +1313,7 @@ mod quartic_interp_tests {
 
     /// a jump inside the stencil mixes the second-difference signs: the value
     /// must equal the monotonized parabolic fallback exactly (the raw quartic
-    /// rings by ~13% here and must never be emitted).
+    /// rings by ~13% here, so the fallback is what the kernel emits).
     #[test]
     fn falls_back_to_the_monotonized_parabola_at_a_jump() {
         let v: [f64; 5] = [1.0, 1.0, 1.0, 0.1, 0.1];

@@ -49,7 +49,7 @@ where
     evolve_with_callback(sim, kernels, t_final, u64::MAX, |_| {})
 }
 
-// advance the sim by ONE step at a caller-supplied dt. `evolve` hides the per-step
+// advance the sim by a single step at a caller-supplied dt. `evolve` hides the per-step
 // sequence inside its run-to-completion loop; the decomposition / spmd drivers need
 // per-step control so a shared dt + inter-subdomain halo exchange can be interleaved
 // between steps. prim + cons must be current at entry (prime with
@@ -89,15 +89,16 @@ where
 {
     // mesh motion is supported for single-grid hydro: homologous expansion on any geometry
     // (curvilinear scales the radial axis), and uniform translation on cartesian axis 0 (`a` is
-    // unused there and must stay 1). immersed bodies and the mhd substrates require a comoving-
-    // field convention the kernels do not carry.
+    // unused there and must stay 1). immersed bodies and the mhd substrates need a comoving-
+    // field convention still pending in the kernels.
     if sim.motion.a_dot != 0.0 || sim.motion.a != 1.0 {
         // homologous expansion multiplies every coordinate by one a(t), so a graded axis stays
-        // graded with its ratios untouched -- `kernel_geom` scales the axis's face-0 START and
+        // graded with its ratios untouched -- `kernel_geom` scales the axis's face-0 start and
         // leaves its shape parameter comoving, which for a log axis maps
-        // face(i) = start 10^(i s) -> a face(i). uniform TRANSLATION is a different motion: it
-        // shifts the axis rather than scaling it, and a shifted graded axis is not a rescaling of
-        // itself, so the comoving shape parameter no longer describes it.
+        // face(i) = start 10^(i s) -> a face(i). uniform translation is a different motion: it
+        // shifts the axis while scaling multiplies it; a shifted graded axis takes on a shape
+        // distinct from any rescaling of itself, so the comoving shape parameter applies only
+        // under scaling.
         assert!(
             sim.motion.homologous || sim.geom.maps.is_none(),
             "mesh motion: uniform translation needs uniform spacing (a translated graded axis is \
@@ -123,11 +124,12 @@ where
         );
     }
 
-    // MHD setup guardrail: constrained transport evolves the STAGGERED face B (`bface`) as the
-    // divergence-free ground truth. if it was never seeded, the CT integrates garbage faces — the
-    // classic first-MHD-run mistake (seeding cell-centered B via seed_cell/seed_cells alone does
-    // NOT initialize the faces). fail early + actionably here; otherwise the run marches to a deep c2p/dt panic.
-    // one-time check at entry (zero per-step cost); every real MHD IC sets the flag via seed_face.
+    // MHD setup guardrail: constrained transport evolves the staggered face B (`bface`) as the
+    // divergence-free ground truth, so an unseeded run leaves the CT integrating garbage faces —
+    // the classic first-MHD-run mistake (seeding cell-centered B via seed_cell/seed_cells alone
+    // leaves the faces uninitialized). fail early + actionably here; otherwise the run marches to
+    // a deep c2p/dt panic. one-time check at entry (zero per-step cost); every real MHD IC sets
+    // the flag via seed_face.
     if let Some(mhd) = sim.fields.mhd.as_ref() {
         assert!(
             mhd.bface_initialized
@@ -145,10 +147,9 @@ where
 
     // every c2p step is a
     // sum-reduction over per-cell error codes; nonzero means at least one
-    // cell failed inversion. on failure, panic with the decoded error code.
-    // without this check, NaN cons
-    // silently propagates and the runner marches to t_final with garbage,
-    // forcing checkpoints with invalid state.
+    // cell failed inversion. on failure, panic with the decoded error code:
+    // this check stops NaN cons at the source, before it can spread silently
+    // through the run and land in a checkpoint as invalid state.
     let initial_err = crate::sim::hydro_ops::scan_c2p_errors(sim);
     if initial_err.is_err() {
         return Err(symbi_xpu::XpuError {
@@ -190,7 +191,7 @@ where
             Ok(dt) => dt,
             Err(err) => {
                 // terminal NaN/inf cascade only: name the first bad cell before returning. one-time
-                // host scan at the failure boundary — never on the happy path (see report fn).
+                // host scan confined to the failure boundary, off the happy path entirely (see report fn).
                 crate::regimes::substrate_gpu::device_sync::<Mem>();
                 let _ = report_first_nonfinite_cell(sim);
                 return Err(err);
@@ -213,9 +214,9 @@ where
         // scan of c2p_error + cons.den costs ~1.3 ms/step on unified memory
         // via page-faults, which dominates step time.
         //
-        // the cfl scalar readback is the ONLY GPU->CPU roundtrip during
-        // computation. all per-cell validation runs on device, or doesn't
-        // run.
+        // the cfl scalar readback is the sole GPU->CPU roundtrip during
+        // computation; all per-cell validation either runs on device or is
+        // skipped entirely.
 
         // the scale factor advances for homologous expansion only; uniform
         // translation keeps a = 1 (the offset is a_dot * time, derivable).
@@ -232,14 +233,14 @@ where
             emit_trace_neighborhood(sim, c);
         }
 
-        // the constant-nu viscous transport, ONCE per step after
+        // the constant-nu viscous transport, once per step after
         // the RK combination — the primitive velocity is current (each stage ends
         // with c2p), and the pass reads prim / writes cons.mom, so it is body-
-        // independent and runs whether or not the sim carries immersed bodies.
+        // independent and runs regardless of whether the sim carries immersed bodies.
         // inert when inviscid (the kernel-set gates on nu > 0).
         prof("viscous", || kernels.viscous(sim, sim.dt));
 
-        // horizon excision, ONCE per step after the RK combination: overwrite the
+        // horizon excision, once per step after the RK combination: overwrite the
         // causally disconnected cells inside the excision sphere (within the
         // black-hole horizon on the cartesian kerr-schild chart) with a
         // zero-gradient outward primitive copy + local conserved rebuild, so the
@@ -248,9 +249,9 @@ where
         // inside the dispatch.
         kernels.excise(sim);
 
-        // the GR horizon shell-flux accretion, ONCE per step: the mass_flux / nrg_flux fields still
+        // the GR horizon shell-flux accretion, once per step: the mass_flux / nrg_flux fields still
         // hold the last stage's flux, so a GPU Add-reduction of the boundary flux through the
-        // diagnostic shell gives (mdot, edot) INTO the hole, booked onto the horizon body's ledger.
+        // diagnostic shell gives (mdot, edot) into the hole, booked onto the horizon body's ledger.
         if let Some((index, diagnostic_radius)) = horizon_request(sim) {
             let dt = sim.dt;
             let (mdot, edot) = prof("horizon_accretion", || {
@@ -266,11 +267,11 @@ where
             } else {
                 None
             };
-            // the IBM surface physics, ONCE per step AFTER the
+            // the IBM surface physics, once per step after the
             // full RK combination: applied inside the stage blend, a stage's
             // exponential removal is partially undone by the SSP convex
-            // combination while its receipt is not — the ledger then over-
-            // counts (RK2: 3/2x). post-step, receipt == removal exactly.
+            // combination, but the receipt stays at its full pre-blend value —
+            // the ledger then over-counts (RK2: 3/2x). post-step, receipt == removal exactly.
             prof("penalize", || kernels.penalize(sim, sim.dt));
             if let Some(density_before) = accretion_density.as_deref() {
                 crate::regimes::substrate_gpu::device_sync::<Mem>();
@@ -327,13 +328,14 @@ where
     Ok(())
 }
 
-/// failure-only NaN locator. scan the interior for the FIRST cell whose conserved state (density,
+/// failure-only NaN locator. scan the interior for the first cell whose conserved state (density,
 /// energy, or cell-centered B) is non-finite and report its index + physical coordinate + the
-/// offending values. called ONCE, only when the cfl `dt` has already gone non-finite (the terminal
-/// cascade, right before `check_dt_or_panic`) — NEVER in the happy path — so the one-time host-read
-/// page-fault cost is irrelevant (the process is about to panic anyway). this is the deliberate exception to
-/// the "no per-cell host scans" rule: it converts the bare "state went NaN/inf" into "cell [i,j,k]
-/// at x = .. went NaN, den=.. nrg=..", which is where a no-silent-floors debug session starts.
+/// offending values. called once, only when the cfl `dt` has already gone non-finite (the terminal
+/// cascade, right before `check_dt_or_panic`), confined entirely to that failure path — so the
+/// one-time host-read page-fault cost is irrelevant (the process is about to panic anyway). this
+/// is the deliberate exception to the "no per-cell host scans" rule: it converts the bare "state
+/// went NaN/inf" into "cell [i,j,k] at x = .. went NaN, den=.. nrg=..", which is where a
+/// no-silent-floors debug session starts.
 fn report_first_nonfinite_cell<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
 ) -> Option<[isize; D]>
@@ -381,7 +383,7 @@ where
 }
 
 // =============================================================================
-// the explicit SSP time step — ONE driver for every scheme.
+// the explicit SSP time step — a single driver for every scheme.
 //
 // the integrator is `sim.timestepping.stages()`: a list of Shu-Osher convex coefficients
 // `(a0, ac)`, one row per stage. each stage recomputes the spatial operator (reconstruct ->
@@ -392,9 +394,9 @@ where
 // =============================================================================
 
 // =============================================================================
-// stage pipeline: the per-stage kernel sequence as DATA.
+// stage pipeline: the per-stage kernel sequence as data.
 //
-// each `Phase` declares the field groups it READS + WRITES; `step` FOLDS over the
+// each `Phase` declares the field groups it reads and writes; `step` folds over the
 // list, and a debug-only assert verifies every phase's reads were produced by an
 // earlier phase's writes (or were stage-entry-current) — the implicit ordering
 // invariant made explicit + machine-checked. a reordered or newly-inserted phase
@@ -403,14 +405,14 @@ where
 // the assert is debug-only, and the calls / order / gates are byte-identical to
 // a hand-written imperative sequence.
 //
-// `FieldSet` tracks only the REGIME-INDEPENDENT data flow (cons / prim / flux /
-// u_stage) — every regime carries these, so the assert never false-positives.
+// `FieldSet` tracks only the regime-independent data flow (cons / prim / flux /
+// u_stage) — every regime carries these, so the assert's checks hold true for every regime.
 // regime-specific scratch (the RMHD wave-speed buffers `wave_speeds` -> `flux`
 // feeds; the MHD CT fields `efield` / `post_godunov` touch) is real but kept
-// OUTSIDE the checked set; those orderings are fixed by the pipeline below.
+// outside the checked set; those orderings are fixed by the pipeline below.
 // =============================================================================
 
-// the stage table + fold live in symbi-sim::stage (the ONE sequence every
+// the stage table + fold live in symbi-sim::stage (the sequence every
 // driver folds); this driver keeps only per-step scaffolding.
 use symbi_sim::stage::{StageArgs, fold_stage};
 
@@ -430,12 +432,12 @@ where
     if k.fofc_active() {
         prof("snapshot_retry", || k.snapshot_retry(sim));
     }
-    // snapshot u^n once for MULTI-STAGE schemes (RK2/RK3 corrector reads it with a0>0).
-    // forward-Euler (n=1, a0=0) never reads u_n with non-zero weight, so the snapshot
+    // snapshot u^n once for multi-stage schemes (RK2/RK3 corrector reads it with a0>0).
+    // forward-Euler (n=1, a0=0) reads u_n only at zero weight, so the snapshot
     // write is pure bandwidth waste. RMHD additionally saves bcell -> bcell_n for the
-    // CT magnetic-energy correction in the corrector — same logic applies (no corrector
-    // on Euler, no read of bcell_n). regime kernel-sets need not branch internally;
-    // the evolve loop is the single place to gate this.
+    // CT magnetic-energy correction in the corrector — same logic applies (Euler skips
+    // the corrector and the bcell_n read entirely). regime kernel-sets stay branch-free
+    // internally; the evolve loop is the single place to gate this.
     if needs_step_snapshot(stages) {
         prof("snapshot", || k.snapshot(sim));
     }
@@ -448,7 +450,7 @@ where
             .unwrap_or_else(|detail| panic!("ito transport initialization: {detail}"));
     }
     // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
-    // scalars from sim.motion, so a stage must see a(t) at its shu-osher ENTRY time
+    // scalars from sim.motion, so a stage must see a(t) at its shu-osher entry time
     // (the time of its input state — the same clock the amr cf ghosts use). a is
     // restored afterward; the canonical step advance lives in the caller. on a
     // static mesh the restore assigns a_n back to itself, a no-op.
@@ -463,17 +465,17 @@ where
             .map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
         let dt = sim.dt;
         set_stage_motion(&mut sim.motion, law_value, dt, a_n, stage.entry);
-        // FOLD the stage pipeline. each phase's semantics, in execution order:
-        //  - snapshot_stage: cons BEFORE godunov overwrites it, so the additive source pass
+        // fold the stage pipeline. each phase's semantics, in execution order:
+        //  - snapshot_stage: cons captured before godunov overwrites it, so the additive source pass
         //    evaluates S at the stage input (the state the fused stage uses).
-        //  - wave_speeds: materialize per-cell speeds on the CURRENT prim (RMHD quartic ->
+        //  - wave_speeds: materialize per-cell speeds on the current prim (RMHD quartic ->
         //    wave_speed_l/r) so flux reads them; no-op for inline-speed regimes.
         //  - godunov/source_apply/body_source share the SSP stage weight `ac*dt` (Euler ac=1
         //    -> dt; RK2 corrector ac=0.5 -> 0.5*dt, the RK2-consistent 0.5*dt*(S^n + S*)).
         // stage entry: cons + prim are current (init c2p+ghost, or the prior stage's tail).
         //
-        // at the FIRST stage of a multi-stage scheme the `snapshot` above wrote `cons -> u_n` and
-        // nothing has touched cons since, so u_n ALREADY holds the stage input. flag it and skip the
+        // at the first stage of a multi-stage scheme the `snapshot` above wrote `cons -> u_n` and
+        // nothing has touched cons since, so u_n already holds the stage input. flag it and skip the
         // `snapshot_stage` copy — `stage_input()` binds u_n for this stage. forward-Euler (n == 1)
         // takes no snapshot, so u_n is stale there and the copy stands.
         let outcome = fold_stage(
@@ -580,7 +582,7 @@ where
     false
 }
 
-/// the time fraction of the state AFTER each shu-osher stage: the convex
+/// the time fraction of the state after each shu-osher stage: the convex
 /// combine `u^{k+1} = a0*u^n + ac*(u^k + dt*L)` places it at
 
 // emit a 3-wide-on-each-axis neighborhood of trace lines around `center`.

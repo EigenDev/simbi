@@ -40,7 +40,8 @@ class FigureConfig(BaseModel):
     show_time: bool = True
     transparent: bool = False
     # overlay each immersed body's silhouette on the field plot (cartesian only; the
-    # body signed-distance is cartesian, so it does not align with a polar/spherical plot).
+    # body signed-distance is cartesian, so the silhouette registers with a cartesian
+    # plot alone -- a polar/spherical chart puts it elsewhere).
     draw_bodies: bool = False
     # overlay the black-hole event horizon (and excision surface) of a curved-spacetime
     # run, read from the checkpoint metadata; a flat (minkowski) run draws nothing.
@@ -100,8 +101,8 @@ class RefinementConfig(BaseModel):
     active_levels: Optional[set[int]] = None
     # the default renderer for every entry point: a quadmesh is one artist for
     # the whole field, where polygons are one per cell and cost a python loop
-    # to build. refined data overrides it, since a quadmesh cannot carry cells
-    # of two different sizes.
+    # to build. refined data overrides it, since a quadmesh carries cells of a
+    # single size.
     render_mode: Literal["polygons", "pcolormesh"] = "pcolormesh"
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}

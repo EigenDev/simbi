@@ -21,9 +21,9 @@ use symbi_ir::algebra::Scalar;
 const RMHD_MAX_ITER: usize = crate::c2p_result::C2P_MAX_ITER;
 /// convergence tolerance for false-position iteration (also the B=0 divzero guard).
 const CONVERGENCE_TOL: f64 = 1e-12;
-/// the MAX iteration cap for the `mu_+` bracketed Illinois solve (root of `kkc_fmu49` on `[0, 1]`).
-/// Illinois is superlinear so a warm cell converges in ~10 and early-breaks; this cap only bounds a
-/// pathological non-converging cell. generous headroom over the typical count.
+/// the iteration cap for the `mu_+` bracketed Illinois solve (root of `kkc_fmu49` on `[0, 1]`).
+/// Illinois is superlinear so a warm cell converges in ~10 and early-breaks; this cap bounds the
+/// pathological slow-converging cell. generous headroom over the typical count.
 const FIND_MU_PLUS_ITERS: usize = 54;
 
 /// KKC Eq. 49 auxiliary function (enthalpy limit h0 = 1): `f_a(mu) = mu*sqrt(1 + rbar_sq(mu)) - 1`.
@@ -51,7 +51,7 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
 
     let rhohat = dd / g;
     let eps = g * (qbar - mu * rbar_sq) + gbsq / (S::ONE + g);
-    // NO pressure floor: the RAW specific internal energy. a cold or unphysical (eps < 0) state
+    // the raw specific internal energy, floor-free. a cold or unphysical (eps < 0) state
     // recovers a small or negative pressure that the post-hoc c2p diagnostic flags (fail-loud);
     // a floor would silently warm it to eps_min = pfloor/(rho (gamma-1)), a spurious-physical
     // state that masks the failure. nu_hat is the enthalpy branch max unconditionally.
@@ -68,25 +68,25 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
 /// unique root of the auxiliary `kkc_fmu49` (KKC Eq. 49) on `(0, 1/h0]` with `h0 = 1`.
 ///
 /// KKC prove (Sec. II F, Eq. 54) that `f(mu_+) >= 0` while `f(0) < 0`, so the master root lies
-/// in `(0, mu_+]`, and (Sec. II G) that it is the UNIQUE root there. beyond `mu_+` the velocity
-/// cutoff in `kkc_fmu44` (the `v_limit` clamp) induces a "strong kink" that can produce a SECOND,
+/// in `(0, mu_+]`, and (Sec. II G) that it is the unique root there. beyond `mu_+` the velocity
+/// cutoff in `kkc_fmu44` (the `v_limit` clamp) induces a "strong kink" that can produce a second,
 /// spurious root corresponding to a superluminal, negative-pressure state.
 ///
-/// bracketing with the loose upper bound `1/h0 = 1` is valid ONLY when `r < h0` (KKC:
+/// bracketing with the loose upper bound `1/h0 = 1` holds where `r < h0` (KKC:
 /// then `f_a(1/h0) > 0`, so `[0, 1]` still straddles the single root). for `r >= h0` the interval
-/// `[0, 1]` spans BOTH the physical root and the spurious one, `f(1) < 0`, and the false-position
-/// converges to the spurious superluminal root. this manifests whenever `r.b != 0` (a shock-normal
-/// magnetic field), which is precisely when a shock drives `r` past `h0`. so `mu_+` must be
-/// computed for the general case.
+/// `[0, 1]` spans the physical root and the spurious one together, `f(1) < 0`, and the
+/// false-position converges to the spurious superluminal root. this arises whenever `r.b != 0` (a
+/// shock-normal magnetic field), which is precisely when a shock drives `r` past `h0`, so the
+/// general case is served by computing `mu_+`.
 ///
-/// the search runs on `[0, 1]` with no escalation of the upper end, which is exact here for two
+/// the search runs on `[0, 1]` with a fixed upper end, which is exact here for two
 /// reasons, both gated:
 ///
 /// - `f_a(0) = -1` identically. at `mu = 0` the factor `x = 1/(1 + mu b^2)` is 1 and
 ///   `rbar_sq = r^2`, so `f_a(0) = 0 * sqrt(1 + r^2) - 1`, independent of the state.
 /// - `f_a(1) >= 0` whenever `(r.b)^2 >= 0`. for `mu >= 0` and `b^2 >= 0` the factor `x` lies in
 ///   `(0, 1]`, so both terms of `rbar_sq = r^2 x^2 + mu x (1 + x) (r.b)^2` are non-negative and
-///   `sqrt(1 + rbar_sq(1)) >= 1`. the recovery supplies that hypothesis by SQUARING the
+///   `sqrt(1 + rbar_sq(1)) >= 1`. the recovery supplies that hypothesis by squaring the
 ///   metric-free pairing `r_i h^i`; the signed pairing of an anti-aligned field would drive
 ///   `rbar_sq` negative and put `f_a(1)` below zero.
 ///
@@ -94,7 +94,7 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
 /// makes the paper's interval `(0, 1/h0]` equal to `(0, 1]`; carrying a general `h0` would need the
 /// second bound re-derived on `[0, 1/h0]`.
 ///
-/// `f_a` is smooth and strictly increasing, and returning the UPPER end guarantees the result is
+/// `f_a` is smooth and strictly increasing, and returning the upper end guarantees the result is
 /// `>= root(f_a) = mu_+`, hence `f(result) >= 0` and a valid straddle `f(0) < 0 <= f(result)` for
 /// the master false-position.
 fn find_mu_plus<S: Scalar>(bee_sq: S, rdb_sq: S, r: S) -> S {
@@ -102,10 +102,10 @@ fn find_mu_plus<S: Scalar>(bee_sq: S, rdb_sq: S, r: S) -> S {
     let eps = S::from_f64(CONVERGENCE_TOL);
     // bracketed Illinois (regula falsi + stale-endpoint half-damp) on the monotone-increasing f_a.
     // superlinear, so it reaches tol in ~10 iters (vs ~54 for bisection); `converged` drives the
-    // IterateInline early-break so a converged cell stops. `hi` ALWAYS satisfies f_a(hi) >= 0 (the
-    // straddle-preserving upper bracket >= mu_+): every step either keeps the old hi or moves hi to
-    // a point with f_a >= 0. the halved f_hi/f_lo are interpolation weights only — the bracket
-    // POSITIONS keep their true signs, so the >= mu_+ guarantee is exact regardless of the damping.
+    // IterateInline early-break so a converged cell stops. `hi` satisfies f_a(hi) >= 0 at every
+    // step (the straddle-preserving upper bracket >= mu_+): each step either keeps the old hi or
+    // moves hi to a point with f_a >= 0. the halved f_hi/f_lo serve as interpolation weights, while
+    // the bracket positions keep their true signs, so the >= mu_+ guarantee holds under any damping.
     let f_lo0 = kkc_fmu49(S::ZERO, bee_sq, rdb_sq, r); // = -1 < 0
     let f_hi0 = kkc_fmu49(S::ONE, bee_sq, rdb_sq, r); // >= 0 for any state
     S::iterate_vec(

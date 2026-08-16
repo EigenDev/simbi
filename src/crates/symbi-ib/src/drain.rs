@@ -3,20 +3,21 @@
 //
 // the well-posed uniform-scaling volumetric drain:
 // the exact-exponential relaxation `U -> U exp(-chi dt / tau)`, applied
-// post-hydro on the masked cells. scaling EVERY conserved component by the SAME
-// factor `f` leaves each intensive primitive (velocity, specific internal
+// post-hydro on the masked cells. scaling every conserved component by one
+// common factor `f` leaves each intensive primitive (velocity, specific internal
 // energy, sound speed, temperature) pointwise invariant, so the drain is
-// positivity-preserving for ANY dt (no CFL tax), injects no acoustic/entropy
-// wave, and preserves the characteristic decomposition -- the no-reflection
-// property at `r_mask` inside the sonic surface. the accretion rate is
-// EMERGENT: the cell-integrated `U_old - U_new` reduced over the mask is a
-// functional of the solved flow, never a target rate fed in.
+// positivity-preserving at any dt (it carries its own stability, free of a CFL
+// tax), stays silent in the acoustic and entropy waves, and preserves the
+// characteristic decomposition -- outgoing characteristics pass cleanly through
+// `r_mask` when it sits inside the sonic surface. the accretion rate is
+// emergent: the cell-integrated `U_old - U_new` reduced over the mask is a
+// functional of the solved flow, read out of the solution.
 //
 // this is the well-posed replacement for the mass-only KMK04 sink
 // (`effects::accretion_source`): a mass-only sink removes rho at fixed momentum,
-// so it CHANGES the velocity when it drains, re-couples the primitive channels,
-// injects a back-pressure artifact, and (in the property algebra) destroys the
-// exact three-exponential decoupling. uniform scaling does none of these.
+// so it shifts the velocity as it drains, re-couples the primitive channels,
+// injects a back-pressure artifact, and (in the property algebra) breaks the
+// exact three-exponential decoupling. uniform scaling keeps all four.
 //
 // usage:
 //   let chi = drain_mask(dist, r_mask, w);
@@ -33,32 +34,32 @@ use crate::body_delta::BodyDelta;
 /// the mollified spherical mask value at coordinate distance `dist` from the
 /// mask center: `chi = 0.5 (1 - tanh((dist - r_mask) / w))`. `chi -> 1` well
 /// inside `r_mask`, `-> 0` well outside, with a tanh ramp of width `w` across
-/// the surface. the mollification keeps the drain isotropic on a cartesian grid
-/// (no staircasing) and stops the mask edge from acting as a sharp reflecting
-/// wall.
+/// the surface. the mollification keeps the drain isotropic on a cartesian grid,
+/// smoothing the staircase and softening the mask edge so it transmits rather
+/// than reflects.
 #[inline]
 pub fn drain_mask<S: Scalar>(dist: S, r_mask: S, w: S) -> S {
     S::from_f64(0.5) * (S::ONE - ((dist - r_mask) / w).tanh())
 }
 
 /// the drain timescale `tau = c_drain * dx / c_s` (local sound speed). drains
-/// fast enough that the mask stays evacuated and never backs up; in the
+/// fast enough to hold the mask evacuated against the inflow; in the
 /// well-posed regime (`r_mask` inside the sonic surface) the emergent rate is
-/// INSENSITIVE to `c_drain` once it is small enough -- the sonic surface
-/// sets the emergent rate. `c_drain` is a convergence-study dial,
-/// never tuned to hit a target rate.
+/// insensitive to `c_drain` once it is small enough -- the sonic surface
+/// sets the emergent rate. `c_drain` is a convergence-study dial, swept for
+/// plateau in the emergent rate.
 #[inline]
 pub fn drain_timescale<S: Scalar>(dx: S, c_s: S, c_drain: S) -> S {
     c_drain * dx / c_s
 }
 
 /// the exact-exponential uniform-scaling drain on one masked cell's conserved
-/// vector. returns the DRAINED state `U exp(-chi dt/tau)` and the cell's exact
+/// vector. returns the drained state `U exp(-chi dt/tau)` and the cell's exact
 /// contribution to the body -- the cell-integrated `U_old - U_new` (absorbed
 /// mass and drag force), which makes gas+body conservation exact to machine
-/// precision. the SAME scalar factor multiplies EVERY conserved component (the
-/// DESIGN INVARIANT), including the energy slot, so the intensive primitive state
-/// is untouched.
+/// precision. one scalar factor multiplies every conserved component, the energy
+/// slot included; that uniformity is the invariant the scheme rests on, and it
+/// leaves the intensive primitive state untouched.
 #[inline]
 pub fn drain_cell<S: Scalar, const D: usize, E: EnergyModel>(
     cons: &ConsG<S, D, E>,
@@ -70,25 +71,25 @@ pub fn drain_cell<S: Scalar, const D: usize, E: EnergyModel>(
 ) -> (ConsG<S, D, E>, BodyDelta<S, D>) {
     // f = exp(-chi dt / tau) in (0, 1]; f = 1 (exact no-op) where chi = 0.
     let f = (-(chi * dt / tau)).exp();
-    let drained = *cons * f; // UNIFORM scale of den, mom, AND the energy slot
+    let drained = *cons * f; // uniform scale of den, mom, and the energy slot
     let absorbed = *cons - drained; // = cons * (1 - f): the body's exact gain
     let mut delta = BodyDelta::new(idx);
     // cell-integrated absorbed mass (dM), drag force (dP/dt), and total energy (dE). the
-    // energy slot is zero for the isothermal regime (no energy channel). together these make
-    // gas+body conservation of mass, momentum, AND energy exact to machine precision.
+    // energy slot is zero for the isothermal regime, which carries no energy channel. together
+    // these make gas+body conservation of mass, momentum, and energy exact to machine precision.
     delta.mass_delta = absorbed.den * volume;
     delta.force_delta = absorbed.mom.scale(volume / dt);
     delta.energy_delta = absorbed.nrg.value() * volume;
     (drained, delta)
 }
 
-/// the adiabatic sound speed recovered directly from the UPDATED conserved state. the
-/// drain runs post-godunov but BEFORE c2p (spec ordering: hydro -> drain -> c2p+floors),
-/// so the stored primitive is stale; the drain timescale's `c_s` must come from the
+/// the adiabatic sound speed recovered directly from the updated conserved state. the
+/// drain runs between godunov and c2p (ordering: hydro -> drain -> c2p+floors), so the
+/// stored primitive is stale and the drain timescale's `c_s` comes from the
 /// just-updated `cons`. `e_int = (nrg - 0.5 |mom|^2 / den) / den`, then
-/// `c_s = sqrt(gamma (gamma - 1) e_int)`. a one-line inversion (no root-find: the sound
-/// speed needs only the internal energy). regime-local; the caller
-/// supplies gamma. NOT used by the isothermal regime, which carries a fixed `c_s = c_iso`.
+/// `c_s = sqrt(gamma (gamma - 1) e_int)`. a one-line inversion, since the sound speed
+/// depends on the internal energy alone. regime-local; the caller supplies gamma. the
+/// isothermal regime instead carries a fixed `c_s = c_iso`.
 #[inline]
 pub fn sound_speed_from_cons<S: Scalar>(den: S, mom_sq: S, nrg: S, gamma: S) -> S {
     let e_int = (nrg - S::from_f64(0.5) * mom_sq / den) / den;
@@ -142,8 +143,8 @@ mod tests {
         }
     }
 
-    // the DESIGN INVARIANT: uniform scaling leaves the intensive
-    // primitive state pointwise invariant. a mass-only sink would change the velocity.
+    // the invariant the scheme rests on: uniform scaling leaves the intensive
+    // primitive state pointwise invariant, where a mass-only sink shifts the velocity.
     #[test]
     fn uniform_scaling_leaves_intensive_primitives_invariant() {
         let cons = sample_cons();
@@ -191,10 +192,10 @@ mod tests {
         assert!((gas_nrg_lost - delta.energy_delta).abs() < 1e-15);
     }
 
-    // positivity for ANY dt (the whole reason for the exponential): f = exp(-x) in
-    // [0, 1] for x >= 0, so drained density is in [0, den] -- NEVER negative, never
-    // NaN/Inf. an explicit stiff source would overshoot to negative density and need a
-    // floor. at extreme dt the exponential underflows cleanly to 0 (fully drained).
+    // positivity at any dt, which is why the update is an exponential: f = exp(-x) in
+    // [0, 1] for x >= 0, so drained density stays in [0, den] and stays finite. an
+    // explicit stiff source would overshoot to negative density and need a floor. at
+    // extreme dt the exponential underflows cleanly to 0 (fully drained).
     #[test]
     fn positivity_preserved_for_any_dt() {
         let cons = sample_cons();
@@ -254,11 +255,11 @@ mod tests {
         );
     }
 
-    // the EMERGENT-RATE mechanics the post-godunov pass performs: reduce the per-cell
-    // drain deltas over a radial mask. asserts (1) only masked cells contribute, (2)
+    // the emergent-rate mechanics the post-godunov pass performs: reduce the per-cell
+    // drain deltas over a radial mask. asserts (1) the masked cells alone contribute, (2)
     // gas+body mass conservation is exact across the whole reduction, (3) Mdot is a
-    // FUNCTIONAL of the flow (doubling the density field doubles Mdot) -- never a
-    // target fed in.
+    // functional of the flow -- doubling the density field doubles Mdot, so the rate
+    // comes out of the solution.
     #[test]
     fn emergent_rate_reduces_and_conserves_over_a_mask() {
         let (r_mask, w, dx, c_s, c_drain, dt) = (6.0, 1.0, 1.0, 1.0, 1.0, 0.2);
@@ -297,8 +298,8 @@ mod tests {
             (mdot_mass - gas_lost).abs() < 1e-13,
             "reduction non-conservative"
         );
-        // (1) the mask LOCALIZES the drain: the deep-interior cell (chi~1) drains O(1e8)x more
-        // mass than a cell at ~3 r_mask (chi~0) -- the far field is untouched.
+        // (1) the mask localizes the drain: the deep-interior cell (chi~1) drains O(1e8)x more
+        // mass than a cell at ~3 r_mask (chi~0), leaving the far field at its incoming state.
         assert!(
             outer / inner < 1e-6,
             "drain not localized: outer/inner = {}",

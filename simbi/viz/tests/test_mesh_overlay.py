@@ -38,8 +38,8 @@ from simbi.viz.pipeline.transforms import _compose_polygons, prepare_figure
 from simbi.viz.types import Bounds, CoordSystem, FieldData
 
 # a wedge of a graded spherical mesh: the outermost cell is many times the
-# width of the innermost, so a decimated or mis-mapped overlay cannot hide
-# behind uniform spacing
+# width of the innermost, which exposes a decimated or mis-mapped overlay that
+# uniform spacing would hide
 THETA_EDGES = np.linspace(0.0, np.pi, 17)
 RADIAL_EDGES = np.geomspace(1.0, 10.0, 33)
 
@@ -68,8 +68,8 @@ def polar_quad(props: QuadPlotProps) -> tuple[plt.Axes, QuadPlotComponent]:
 
 def render_frames(component, frames, style: FigureConfig) -> plt.Axes:
     """drive the production path: components draw, and the figure composes the
-    view from what they report. the view is not a component's to set -- several
-    of them share one axes -- so a gate on it has to run through the figure."""
+    view from what they report. the figure owns the view -- several components
+    share one axes -- so a gate on it has to run through the figure."""
     config = VisualizationConfig(
         plot=PlotConfig(plot_type="multidim", fields=["rho"], ndim=2),
         figure=style,
@@ -365,8 +365,9 @@ def spherical_colorbar(component, data) -> tuple[plt.Axes, object]:
 
 def test_polygon_chart_carries_a_colorbar() -> None:
     """placing the bar takes the wedge's angular extent. taking it from the
-    field's own domain assumes vertex arrays, which a polygon render does not
-    carry -- and the failure costs the whole colorbar, not just its position."""
+    field's own domain assumes vertex arrays, where a polygon render carries
+    polygon geometry -- and the failure costs the whole colorbar, position and
+    bar alike."""
     ax, colorbar = spherical_colorbar(
         PolygonPlotComponent(PolygonPlotProps()),
         _compose_polygons([spherical_field()]),

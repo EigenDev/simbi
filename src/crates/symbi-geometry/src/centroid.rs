@@ -3,7 +3,7 @@
 //
 // the volume-weighted cell centroid per chart: the point at which a cell's
 // metric must be evaluated so that the covariant conserved state stored at seed
-// time inverts EXACTLY under the metric-aware c2p.
+// time inverts exactly under the metric-aware c2p.
 //
 // the weight is the chart's volume element, so the centroid is the first moment
 // of the coordinate over the cell:
@@ -17,8 +17,8 @@
 // carrier-generic: the same expression serves the host (S = f64, cell seeding)
 // and the traced kernel (S = Gv, in-kernel c2p + densitization lapse). storage
 // and recovery therefore sample the metric at the same point by construction —
-// evaluating them at different points leaves a per-cell state that the c2p
-// cannot invert, which on a curved chart drives the recovered pressure negative
+// evaluating them at different points leaves a per-cell state outside the range
+// of the c2p, which on a curved chart drives the recovered pressure negative
 // wherever the gas is cold enough that the (alpha - 1) D term dominates tau.
 //
 // usage:
@@ -29,8 +29,8 @@ use crate::metric::Geometry;
 use symbi_ir::algebra::Scalar;
 
 /// the volume-weighted centroid of coordinate `axis` over a cell spanning `lo..hi`
-/// on `coords`. `axis` is the COORDINATE slot (0 = r/R/x, 1 = theta/phi/y,
-/// 2 = phi/z/z), not the grid axis.
+/// on `coords`. `axis` is the coordinate slot (0 = r/R/x, 1 = theta/phi/y,
+/// 2 = phi/z/z), which the grid axis maps onto.
 pub fn volume_weighted_centroid<S: Scalar>(coords: Geometry, axis: usize, lo: S, hi: S) -> S {
     let two = S::from_f64(2.0);
     let midpoint = || (lo + hi) / two;
@@ -72,10 +72,10 @@ mod tests {
     #[test]
     fn each_chart_matches_its_first_moment_by_quadrature() {
         // the centroid is int x w(x) dx / int w(x) dx for the chart's radial weight;
-        // check against a fine midpoint quadrature, which knows nothing of the
+        // check against a fine midpoint quadrature, derived independently of the
         // closed forms above.
         // the midpoint rule is O(h^2), so the reference itself carries ~1e-11
-        // relative error — the closed forms are exact and a WRONG one is off at
+        // relative error — the closed forms are exact and an incorrect one lands at
         // the percent level, so this separates them by many orders of magnitude.
         let close = |a: f64, b: f64| (a - b).abs() < 1e-9 * a.abs().max(1.0);
         let quad = |lo: f64, hi: f64, w: fn(f64) -> f64| {
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn weight_free_slots_are_the_midpoint() {
-        // a slot whose volume weight does not depend on it: cartesian axes, both
+        // a slot whose volume weight is constant along it: cartesian axes, both
         // azimuths, and the cylindrical z.
         for (coords, axis) in [
             (Geometry::Cartesian, 0),

@@ -1,21 +1,21 @@
 // =============================================================================
 // field_ref.rs
 //
-// typed names for the kernel FIELD buffers that cross the trace -> dispatch ABI.
+// typed names for the kernel field buffers that cross the trace -> dispatch ABI.
 //
-// a kernel field is the link between the traced graph (which DECLARES it via
-// `Gv::field(key, runtime_path)`) and the host dispatch (which BINDS the backing
+// a kernel field is the link between the traced graph (which declares it via
+// `Gv::field(key, runtime_path)`) and the host dispatch (which binds the backing
 // buffer by that runtime path). that link is a bare dotted string — and the same
 // buffer is spelled three ways across five layers (`ir_key` `cons_mom_k`,
 // `runtime_path` `cons.mom_k`, source short name `mom`) with nothing forcing them
-// to agree. aliases make it worse: `flux.den` and `mass_flux[d]` name the SAME
+// to agree. aliases make it worse: `flux.den` and `mass_flux[d]` name the same
 // buffer under two spellings. a string minted on one side and matched on the
 // other drifts silently — the exact failure mode `MeshScalar` was built to kill.
 //
-// `FieldRef` mints each field's canonical wire name in EXACTLY one place
+// `FieldRef` mints each field's canonical wire name in exactly one place
 // (`name()`), and `parse()` recovers the typed ref from a runtime path. the
 // consumer (`resolve_path`) parses once at the decode boundary and matches
-// EXHAUSTIVELY — adding a field is then a compile error until every match covers
+// exhaustively — adding a field is then a compile error until every match covers
 // it. the `GvKernel` manifest stays string-typed; only the decode chokepoint
 // goes typed.
 //
@@ -74,7 +74,7 @@ pub enum StateComp {
 }
 
 /// a typed kernel field-buffer name. every variant round-trips through
-/// `name()`/`parse()`; `parse()` ALSO accepts the secondary index spellings the
+/// `name()`/`parse()`; `parse()` also accepts the secondary index spellings the
 /// producers emit (`_k` vs `[k]`) so a single ref absorbs both — `name()` mints
 /// the one canonical spelling, the round-trip is pinned on it.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
@@ -129,7 +129,7 @@ pub enum FieldRef {
     /// the cfl wave-speed scratch buffer, spelled `c` (an alias of `Scratch` —
     /// distinct wire name, same backing buffer).
     ScratchC,
-    /// the STAGGERED sweep-normal face B (`bface_n`) == the mhd `bface[dir]` for the dispatch's
+    /// the staggered sweep-normal face B (`bface_n`) == the mhd `bface[dir]` for the dispatch's
     /// sweep direction. its allocated domain differs from the cell fields (Gardiner-Stone CT
     /// coupling); the per-buffer dispatch layout (`Field::domain()`) binds it like any cell field.
     BFaceNormal,
@@ -138,31 +138,31 @@ pub enum FieldRef {
     /// HLLE flux (the Davis fan).
     WaveSpeedL(u8),
     WaveSpeedR(u8),
-    /// the CONSERVED magnetic component `cons.mag_{k}` — in ideal MHD the magnetic field is its
+    /// the conserved magnetic component `cons.mag_{k}` — in ideal MHD the magnetic field is its
     /// own (cell-centered) conserved variable, so this is the same buffer as the mhd `bcell[k]`
     /// (the c2p reads it as the conserved input). a distinct wire name for the same field, like
     /// `PrimMag`/`BCell`.
     ConsMag(u8),
-    /// the magnetic FLUX component `flux.mag_{k}` in the sweep direction — the induction flux ==
+    /// the magnetic flux component `flux.mag_{k}` in the sweep direction — the induction flux ==
     /// the mhd `bflux[dir][k]` for the dispatch's `dir` (the standalone face-flux spelling of the
     /// fused god+bcell's `bf_{d}_{c}`).
     FluxMag(u8),
 }
 
 impl FieldRef {
-    /// true for a field that is DERIVED FROM THE CURRENT PRIMITIVES WITHIN A STAGE and carries no
-    /// meaning across a stage boundary: the intercell fluxes (gas, induction, passive scalar) and
-    /// the per-cell Riemann wave speeds. every such field is produced by an earlier pass of the
-    /// same stage and consumed by a later one, so a read that finds no producer is a defect
-    /// regardless of what the buffer happens to hold.
+    /// true for a field derived from the current primitives within a stage, whose meaning is
+    /// confined to that stage: the intercell fluxes (gas, induction, passive scalar) and the
+    /// per-cell Riemann wave speeds. every such field is produced by an earlier pass of the same
+    /// stage and consumed by a later one, so a read that finds no producer is a defect regardless
+    /// of what the buffer happens to hold.
     ///
     /// the distinction matters because it separates the two ways a buffer can be read. the
     /// conserved state, the primitives, the staggered face field and the stage snapshots all
-    /// persist — a pass may legitimately read what a PREVIOUS stage or the initial condition left
-    /// there, and "not written yet in this stage" says nothing about them. these carry no such
-    /// history: an unwritten one holds its zero initialization, and zero wave speeds silently
-    /// collapse an HLL fan onto the shift, leaving a one-sided sweep with no dissipation on any
-    /// axis whose shift component vanishes.
+    /// persist — a pass may legitimately read what an earlier stage or the initial condition left
+    /// there, so whether this stage wrote it says nothing about their validity. these fields hold
+    /// meaning only within the stage that writes them: an unwritten one holds its zero
+    /// initialization, and zero wave speeds silently collapse an HLL fan onto the shift, leaving
+    /// a one-sided sweep with no dissipation on any axis whose shift component vanishes.
     pub fn is_stage_local(&self) -> bool {
         matches!(
             self,
@@ -269,7 +269,7 @@ impl FieldRef {
         }
     }
 
-    /// the ONE place a field runtime-path is minted. holds `parse(x.name()) ==
+    /// the sole place a field runtime-path is minted. holds `parse(x.name()) ==
     /// Some(x)` for every variant.
     pub fn name(self) -> String {
         match self {
@@ -301,10 +301,10 @@ impl FieldRef {
         }
     }
 
-    /// the inverse of `name`: recover the typed field from a runtime path, or
-    /// `None` when the path is not a known field. accepts both index spellings
-    /// (`prim.vel_2` and `prim.vel[2]`) so the c2p-write and reconstruction-read
-    /// forms of the same buffer parse to the same ref.
+    /// the inverse of `name`: recover the typed field from a runtime path, returning
+    /// `None` for a path outside the known field vocabulary. accepts both index
+    /// spellings (`prim.vel_2` and `prim.vel[2]`) so the c2p-write and
+    /// reconstruction-read forms of the same buffer parse to the same ref.
     pub fn parse(path: &str) -> Option<Self> {
         match path {
             "prim.rho" => return Some(FieldRef::PrimRho),
@@ -332,7 +332,7 @@ impl FieldRef {
         if let Some(r) = path.strip_prefix("flux.mag_") {
             return r.parse().ok().map(FieldRef::FluxMag);
         }
-        // `mhd.bcell[k]` — the iso lattice-map ghost-fill's spelling of the cell B; an ALIAS of
+        // `mhd.bcell[k]` — the iso lattice-map ghost-fill's spelling of the cell B; an alias of
         // the canonical `BCell(k)` (which mints `bc_{k}`), like `prim.vel_k` aliases `prim.vel[k]`.
         if let Some(r) = path.strip_prefix("mhd.bcell") {
             return parse_idx(r).map(FieldRef::BCell);
@@ -345,8 +345,8 @@ impl FieldRef {
             return parse_idx(r).map(FieldRef::PrimMag);
         }
 
-        // flux-divergence aliases. distinct prefixes from the `flux.` slot, so
-        // order is not load-bearing, but kept grouped.
+        // flux-divergence aliases. distinct prefixes from the `flux.` slot mean any
+        // check order here is correct; these stay grouped for readability.
         if let Some(r) = path.strip_prefix("mass_flux") {
             return parse_idx(r).map(FieldRef::MassFlux);
         }
@@ -400,16 +400,17 @@ fn parse_idx(s: &str) -> Option<u8> {
         .ok()
 }
 
-/// a SERIALIZED kernel field binding: the typed core (`Ref`) over the closed
+/// a serialized kernel field binding: the typed core (`Ref`) over the closed
 /// cell-centered vocabulary, plus an open tail (`Raw`) for the hand-built
 /// staggered/ct/geom/refinement kernels whose paths (`area_hi_0`, `bcell_p1`,
-/// `bface*`, edge fields, the reduction scratch `buf0`, ...) are NOT in `FieldRef`
-/// and bind positionally by buffer index — they round-trip losslessly as the raw
-/// string. this is the field analog of `ScalarBind` (typed core + open spec tail):
-/// the manifest is born typed for the dispatched cell-centered kernels, and the
-/// hand-built kernels keep their raw spelling without forcing `FieldRef` to cover
-/// them. the metadata-driven typed dispatch only ever sees `Ref`; a `Raw` reaching
-/// that path is a loud bug (those kernels never route through it).
+/// `bface*`, edge fields, the reduction scratch `buf0`, ...) fall outside
+/// `FieldRef` and bind positionally by buffer index — they round-trip losslessly
+/// as the raw string. this is the field analog of `ScalarBind` (typed core + open
+/// spec tail): the manifest is born typed for the dispatched cell-centered
+/// kernels, and hand-built kernels keep their raw spelling, outside `FieldRef`'s
+/// scope. the metadata-driven typed dispatch only ever sees `Ref`; a `Raw`
+/// reaching that path is a loud bug — hand-built kernels route through their own
+/// raw-string path only.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum FieldBind {
     Ref(FieldRef),
@@ -443,9 +444,9 @@ impl From<FieldRef> for FieldBind {
 }
 
 /// a raw runtime path classifies through `from_path` (closed vocab -> `Ref`, else `Raw`).
-/// a producer passing a `&str` path is classified here at
-/// construction, so the manifest is born-typed without requiring the call site to build a
-/// `FieldRef`. an unknown path lands in `Raw` (the open-vocabulary hand-built kernels).
+/// a producer passing a `&str` path is classified here at construction, so the manifest is
+/// born-typed straight from the bare string the call site already has. an unknown path lands
+/// in `Raw` (the open-vocabulary hand-built kernels).
 impl From<&str> for FieldBind {
     fn from(s: &str) -> Self {
         FieldBind::from_path(s)
@@ -526,7 +527,7 @@ mod tests {
 
     // the invariant the whole module exists for: name() and parse() are exact
     // inverses over every representable variant, so a producer and a consumer
-    // both routed through FieldRef cannot disagree on a name.
+    // both routed through FieldRef agree on a name.
     #[test]
     fn name_parse_round_trips() {
         for r in all_variants() {
@@ -584,7 +585,7 @@ mod tests {
             );
             assert_eq!(bind.name(), r.name(), "Ref round-trip failed for {r:?}");
         }
-        // hand-built / staggered / reduction paths are not FieldRef — they round-trip as Raw.
+        // hand-built / staggered / reduction paths live outside FieldRef — they round-trip as Raw.
         for raw in [
             "area_hi_0",
             "bcell_p1",

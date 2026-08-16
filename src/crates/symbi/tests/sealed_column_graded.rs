@@ -9,15 +9,15 @@
 // statement: every position in the balanced ladder (stencil anchors, source
 // face/center potentials, ghost centroids) now comes from the runtime spacing
 // map, and machine-exactness holds only because the ladder's cell centers are
-// the MAP's own centers — the geometric mean sqrt(r_lo r_hi) on a log axis,
+// the map's own centers — the geometric mean sqrt(r_lo r_hi) on a log axis,
 // the arithmetic face midpoint otherwise — i.e. the exact positions
 // `set_initial` seeds the column at through `stagger_coord(Center)`. an
 // arithmetic midpoint on the log axis would anchor the ladder O((dr/r)^2 r)
 // off every cell, and each gate asserts that displacement is many orders above
-// the exactness bound, so the center-definition premise cannot silently go
-// vacuous.
+// the exactness bound, so the center-definition premise stays live and any
+// collapse of it fails the gate loudly.
 //
-// the PLAIN arm at the same clock is each gate's positive control: its
+// the plain arm at the same clock is each gate's positive control: its
 // analytic rho*g source mismatches the discrete pressure gradient at
 // truncation order and its mirrored ghosts kick the walls, so it must vent
 // measurably or the balanced arm's stagnation proves nothing.
@@ -86,9 +86,9 @@ macro_rules! sealed_graded_gate {
                     .cfl(CFL)
                     .allocate()
                     .expect("sim construction failed")
-                    // the IC closure receives the MAP's cell centers (`stagger_coord`
+                    // the IC closure receives the map's cell centers (`stagger_coord`
                     // honors the attached maps), so the seeded column and the balanced
-                    // ladder agree on where every cell IS — the exactness premise.
+                    // ladder agree on every cell position — the exactness premise.
                     .set_initial(|x: [f64; 1]| hydrostatic(&phi, x[0], $x_outer))
                     .build();
                 let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
@@ -110,9 +110,10 @@ macro_rules! sealed_graded_gate {
             }
 
             /// the smallest `K/K_0` and the largest |v| inside the window, with cell
-            /// centers read from the SAME axis map the scheme and the seeding use. an
-            /// adiabatic gas cannot lose entropy, so anything below one in the first is
-            /// the scheme's own deficit; the second is the stagnancy precondition.
+            /// centers read from the same axis map the scheme and the seeding use. an
+            /// adiabatic gas holds its entropy as a one-way floor, so anything below one
+            /// in the first is the scheme's own deficit; the second is the stagnancy
+            /// precondition.
             fn run(balanced: bool) -> (f64, f64) {
                 let mut hier = build(balanced);
                 hier.evolve_steps(STEPS).unwrap();
@@ -165,11 +166,10 @@ macro_rules! sealed_graded_gate {
                     stringify!($modname)
                 );
 
-                // THE DISCRIMINATOR. the plain arm carries both the analytic-source
-                // truncation mismatch and the mirrored-ghost wall kick, so it must be
-                // measurably in motion -- that is what makes the balanced arm's
-                // stagnation a statement about the triple rather than about a quiet
-                // setup.
+                // the discriminating quantity is motion. the plain arm carries both the
+                // analytic-source truncation mismatch and the mirrored-ghost wall kick, so
+                // it moves measurably -- that is what makes the balanced arm's stagnation a
+                // statement about the triple, on a setup that is demonstrably live.
                 assert!(
                     v_plain > 1.0e-7,
                     "the PLAIN arm sits at |v| = {v_plain:.3e}; the column is not \
@@ -234,10 +234,10 @@ fn phi_offset(x: f64) -> f64 {
 // 6.1e-6 with deficits 4.7e-9 / 2.5e-8. the bounds carry roughly three orders of margin
 // over the balanced measurements and sit six orders under the plain vents.
 //
-// on the LOG axis the map center is the geometric mean, displaced from the arithmetic
-// face midpoint by ~r (dr/r)^2 / 8 ~ 4e-6 -- nine orders above the balanced bound, so
-// a ladder anchored at the arithmetic midpoint could not pass these levels; the gate
-// separates the two center definitions rather than merely tolerating either.
+// on the log axis the map center is the geometric mean, displaced from the arithmetic
+// face midpoint by ~r (dr/r)^2 / 8 ~ 4e-6 -- nine orders above the balanced bound. these
+// levels therefore pass only for a ladder anchored at the map center; the gate separates
+// the two center definitions, with tolerance for either ruled out.
 sealed_graded_gate!(
     log_spherical,
     symbi_geometry::Spherical,

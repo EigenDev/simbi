@@ -8,7 +8,7 @@
 // invariants:
 //   - every `NodeId` is in-bounds of `nodes` and `types`.
 //   - `types[i]` is the result type of node `i`.
-//   - `Const` and `Param` nodes have no input edges.
+//   - `Const` and `Param` nodes are leaves, carrying their payload inline.
 //   - all other op variants carry their input edges via NodeId.
 // =============================================================================
 
@@ -33,8 +33,8 @@ pub struct NodeId(pub u32);
 ///
 /// Hash + Eq are implemented over the *bit pattern* of floats.
 /// two F64(NaN) values with identical bit
-/// patterns are considered equal; two NaNs with different bit patterns
-/// are not. this is what hash-cons needs (structural identity).
+/// patterns compare equal; two NaNs with differing bit patterns compare
+/// distinct. this is what hash-cons needs (structural identity).
 #[derive(Clone, Debug)]
 pub enum ConstValue {
     F64(f64),
@@ -99,10 +99,10 @@ impl ConstValue {
     }
 }
 
-// serde via the float BIT PATTERN. kernels carry
-// `ConstValue::F64(f64::NAN)` / `INFINITY` (c2p sentinels); serde_json maps a
-// raw non-finite f64 to `null`, which would not round-trip. serializing the bits
-// (u64/u32) is exact for every value and matches this enum's bit-pattern Hash/Eq.
+// serde via the float bit pattern. kernels carry
+// `ConstValue::F64(f64::NAN)` / `INFINITY` (c2p sentinels), and serde_json maps a
+// raw non-finite f64 to `null`; serializing the bits (u64/u32) round-trips every
+// value exactly and matches this enum's bit-pattern Hash/Eq.
 #[derive(serde::Serialize, serde::Deserialize)]
 enum ConstValueRepr {
     F64(u64),
@@ -162,7 +162,7 @@ pub enum ElementWiseOp {
     // integer floor division (rounds toward negative infinity) — the index-space
     // primitive for refinement-lattice pullbacks (amr prolong: coarse parent of a
     // possibly-negative fine ghost index). integer-only: renders as `div_euclid`
-    // (rust), an explicit floor-division ternary (cuda). never promotes to float.
+    // (rust), an explicit floor-division ternary (cuda), and stays in integer space.
     FloorDiv,
     // arithmetic unary
     Neg,
@@ -172,11 +172,11 @@ pub enum ElementWiseOp {
     Ceil,
     Round,
     Trunc,
-    // transcendental unary (input: float, result: float). ONE tag per math op: these
-    // absorbed the parallel `TranscendentalOp` family, which carried the same eight ops
-    // under a second tag -- two tags for `sin(x)` defeated hash-consing between them, split
-    // the support-inference tables (asinh fell through the crack), and left the proof
-    // extractor blind to every op that only existed on the other tag.
+    // transcendental unary (input: float, result: float). one tag per math op, which is
+    // what keeps the layers coherent: a second tag carrying the same ops would defeat
+    // hash-consing between the two spellings of `sin(x)`, split the support-inference
+    // tables (an op like asinh falls through the gap), and leave the proof extractor
+    // blind to whichever ops lived under the other tag.
     Sin,
     Cos,
     Tan,
@@ -200,9 +200,9 @@ pub enum ElementWiseOp {
     // transcendental binary: Pow(a, b) = a^b (float)
     Pow,
     // numeric conversion (the usual-arithmetic-conversions primitive): `Cast(to)(x)`
-    // converts `x` to element type `to`. inserted IMPLICITLY by `element_wise` to
-    // promote a mixed-type op's narrower operand (e.g., an i32 index times an f64
-    // grid width) — callers never write it. unary; result element is `to`.
+    // converts `x` to element type `to`. inserted implicitly by `element_wise`, its
+    // sole producer, to promote a mixed-type op's narrower operand (e.g., an i32 index
+    // times an f64 grid width). unary; result element is `to`.
     Cast(ElementTy),
     // comparison binary (result: Bool)
     Eq,
@@ -215,9 +215,9 @@ pub enum ElementWiseOp {
     IsFinite,
     IsNaN,
     // bitwise / logical binary. on integer inputs: bitwise. on Bool
-    // inputs: logical (Rust's `&&` / `||` / `^` reduce to these
-    // after eager evaluation — pure-functional bodies don't observe
-    // short-circuit). result element matches input.
+    // inputs: logical (Rust's `&&` / `||` / `^` reduce to these after
+    // eager evaluation — a pure-functional body evaluates both operands,
+    // so eager and short-circuit forms agree). result element matches input.
     BitAnd,
     BitOr,
     BitXor,
@@ -229,9 +229,10 @@ pub enum ElementWiseOp {
 
 impl ElementWiseOp {
     pub fn arity(self) -> usize {
-        // EXHAUSTIVE on purpose: with a `_ => 1` catch-all, a new binary variant compiles
-        // and silently reports arity 1, so `element_wise` accepts a one-operand call and
-        // drops the second operand. a new variant must name its arity here or not build.
+        // exhaustive on purpose: with a `_ => 1` catch-all, a new binary variant would
+        // compile and silently report arity 1, letting `element_wise` accept a one-operand
+        // call and drop the second operand. the exhaustive match forces every new variant
+        // to name its arity here as a condition of building.
         match self {
             ElementWiseOp::Add
             | ElementWiseOp::Sub
@@ -374,8 +375,8 @@ impl ElementWiseOp {
 
     /// does this op participate in the usual arithmetic conversions — i.e., a binary
     /// numeric op whose mixed int/float operands should promote to a common float
-    /// type? arithmetic + comparison promote; bitwise + the conversion op itself do
-    /// not (bitwise needs matching int/bool; Cast is unary).
+    /// type? arithmetic + comparison promote; bitwise takes matching int/bool operands
+    /// and Cast is unary, so both stay outside promotion.
     pub fn promotes(self) -> bool {
         matches!(
             self,
@@ -396,30 +397,30 @@ impl ElementWiseOp {
     }
 }
 
-/// the usual arithmetic conversions, scoped to the ONE case the substrate needs:
+/// the usual arithmetic conversions, scoped to the one case the substrate needs:
 /// an integer promoted to a float (an i32 index times an f64 grid width -> the
 /// index becomes a physical-space real). returns the float operand's type.
 ///
-/// deliberately NARROW: float-width mismatch (f32 vs f64) and int-width mismatch
+/// deliberately narrow: float-width mismatch (f32 vs f64) and int-width mismatch
 /// stay strict errors. the substrate's precision is uniform per kernel (the graph
 /// is f64; f32 is a render-time choice), so a genuine f32+f64 in one graph is an
-/// anomaly worth catching. Bool never promotes.
+/// anomaly worth catching. Bool stands outside promotion entirely.
 fn numeric_promote(a: ElementTy, b: ElementTy) -> Option<ElementTy> {
     match (a.is_float(), b.is_float(), a.is_integer(), b.is_integer()) {
         // one float, one int -> the float type (the index promotes up to it).
         (true, false, false, true) => Some(a),
         (false, true, true, false) => Some(b),
-        // equal types, float-width mismatch, int-width mismatch, or any Bool: no
-        // implicit promotion (kept strict so accidental mixing is still caught).
+        // equal types, float-width mismatch, int-width mismatch, or any Bool: the pair
+        // stays as written, so accidental mixing surfaces as a strict error.
         _ => None,
     }
 }
 
-/// the GRAPH-level tensor reduction tag (axis reductions inside a traced
-/// expression); the variants here are the non-Sum reductions. DISTINCT from
+/// the graph-level tensor reduction tag (axis reductions inside a traced
+/// expression); the variants here are the non-Sum reductions. distinct from
 /// `emit::ReductionOp`, the launch-level whole-field combine descriptor
-/// (Add/Mul/Min/Max) -- the two layers share Min/Max by name but never convert:
-/// a graph reduce lowers to loop code, a field reduction is its own kernel.
+/// (Add/Mul/Min/Max) -- the two layers share Min/Max by name and stay separate
+/// types: a graph reduce lowers to loop code, a field reduction is its own kernel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ReduceOp {
     Min,
@@ -457,8 +458,8 @@ impl ReduceOp {
 /// Op + dependents implement Hash + Eq so the Graph can
 /// structural-hash-cons identical (Op, output-type) pairs into a single
 /// NodeId at construction. equal subgraphs collapse to shared NodeIds,
-/// which means sharing is preserved through scalarize / emit without
-/// the post-hoc-CSE recovery dance.
+/// so scalarize / emit inherit the sharing as built, which is what makes a
+/// post-hoc CSE recovery pass unnecessary.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
     /// rank-0 literal of the given element type.
@@ -500,8 +501,8 @@ pub enum Op {
     /// stored in the graph's `lambdas` table by FnId. the lambda's
     /// signature lives in FnDef.params; the body is a sub-Graph with
     /// `FnDef.output` as its result NodeId. Lambda nodes carry a
-    /// placeholder tensor type (rank-0 F64) — they're callable handles,
-    /// so they should only be consumed by `Op::Apply`.
+    /// placeholder tensor type (rank-0 F64) — they are callable handles,
+    /// consumed by `Op::Apply`.
     Lambda(FnId),
     /// apply a Lambda value to arguments. `lambda` must be a
     /// NodeId pointing at an `Op::Lambda` in the same graph. `args`
@@ -533,28 +534,28 @@ pub enum Op {
         init: NodeId,
         count: NodeId,
     },
-    /// component `idx` of the current accumulator VECTOR inside an `IterateInline`
+    /// component `idx` of the current accumulator vector inside an `IterateInline`
     /// loop body — a rank-0 placeholder leaf the scalarizer resolves to the loop's
     /// `idx`-th mutable accumulator local. scalar loops use a 1-component vector
-    /// (`IterAcc(0)`). only meaningful within the `steps` sub-DAGs of the
+    /// (`IterAcc(0)`). its meaning is scoped to the `steps` sub-DAGs of the
     /// `IterateInline` that owns it.
     IterAcc(u32),
-    /// an INLINE bounded iteration — the loop counterpart of `iterate`'s unroll.
-    /// emits the body ONCE as a real `for` over an `N`-component
-    /// accumulator VECTOR (N = `accs.len()`; scalar Newton is N=1, a bracketed
+    /// an inline bounded iteration — the loop counterpart of `iterate`'s unroll.
+    /// emits the body once as a real `for` over an `N`-component
+    /// accumulator vector (N = `accs.len()`; scalar Newton is N=1, a bracketed
     /// false-position root-find — KKC RMHD c2p — is N>1):
     ///
     ///   let mut acc_0 = init_0; ... let mut acc_{N-1} = init_{N-1};
     ///   for i in 0..count {
-    ///       // all `steps[j]` computed from the OLD acc_* (simultaneous / Jacobi)
+    ///       // all `steps[j]` computed from the old acc_* (simultaneous / Jacobi)
     ///       acc_0 = steps[0]; ...; acc_{N-1} = steps[N-1];
     ///   }
     ///   acc_{result}
     ///
-    /// each `steps[j]` lives in the MAIN graph, referencing the `accs` `IterAcc(_)`
-    /// placeholders PLUS loop-invariant nodes directly. the scalarizer lowers the
+    /// each `steps[j]` lives in the main graph, referencing the `accs` `IterAcc(_)`
+    /// placeholders plus loop-invariant nodes directly. the scalarizer lowers the
     /// union acc-dependent cone inside the `for` (invariants stay outside), emits
-    /// the `N` assigns AFTER the whole cone (so the update is simultaneous), and
+    /// the `N` assigns after the whole cone (so the update is simultaneous), and
     /// the node's value is `accs[result]` post-loop. `count` is a literal bound.
     IterateInline {
         accs: Vec<NodeId>,
@@ -562,46 +563,46 @@ pub enum Op {
         steps: Vec<NodeId>,
         count: usize,
         result: u32,
-        /// optional EARLY-BREAK predicate (rank-0 Bool). when `Some`, the
-        /// scalarizer emits `if break_when { break; }` at the END of the loop
-        /// body — after the step assigns — so once the freeze predicate from
-        /// `iterate` / `iterate_vec` first fires, no further iterations run.
-        /// without this, the steps' `select(conv, old, new)` would null out
-        /// the WRITES but still pay for the body's arithmetic every iteration.
+        /// optional early-break predicate (rank-0 Bool). when `Some`, the
+        /// scalarizer emits `if break_when { break; }` at the end of the loop
+        /// body — after the step assigns — so the loop stops at the iteration
+        /// where the freeze predicate from `iterate` / `iterate_vec` first fires.
+        /// the steps' `select(conv, old, new)` already nulls the writes; the
+        /// break is what drops the body's arithmetic for the remaining iterations.
         ///
         /// for the RMHD c2p (max_iter = 100, typical convergence ~8 iters),
         /// this turns ~92 dead bodies/cell into a real break — measurable.
         break_when: Option<NodeId>,
     },
     /// a bounded-pressure phase scope. `body`
-    /// lists the NodeIds CREATED inside a `Gv::scope` closure (in insertion
+    /// lists the NodeIds created inside a `Gv::scope` closure (in insertion
     /// order); they are temporaries that the lowered emit will surround
     /// with `{ ... }` braces so the codegen sees their lifetimes end at
     /// the closing brace. `result` is the value the scope returns to the
     /// enclosing context.
     ///
     /// invariants:
-    /// - `body` is non-empty (an empty scope is degenerate — the trace
-    ///   should not produce one; `Gv::scope` over a body that creates no
-    ///   new nodes just returns the result inline).
-    /// - `result` is either a member of `body` OR a NodeId from the
-    ///   ENCLOSING graph (in which case the scope is a "renaming" — the
+    /// - `body` holds at least one node (`Gv::scope` over a closure that
+    ///   creates no new nodes returns the result inline, so the trace emits
+    ///   a scope exactly when the closure produced nodes).
+    /// - `result` is either a member of `body` or a NodeId from the
+    ///   enclosing graph (in which case the scope is a "renaming" — the
     ///   body produces temps, the result is one of them or an external).
     /// - scalarize handles `Op::Scope` by emitting a `ScalarStmt::Scope`
     ///   wrapping the body's NodeIds in a brace block, with `result`
     ///   lowered as the block's tail expression.
-    /// - `Op::Scope` BYPASSES hash-cons (see `push()`): each scope is a
-    ///   distinct lexical region, even if two scopes happen to share the
+    /// - `Op::Scope` bypasses hash-cons (see `push()`): each scope is a
+    ///   distinct lexical region, even when two scopes share the
     ///   same body+result shape.
     Scope { body: Vec<NodeId>, result: NodeId },
-    /// the DUAL of `IterateInline`: a real data-dependent branch. `cond` is a
-    /// rank-0 Bool (Mask). exactly ONE arm executes at runtime — `then_results`
+    /// the dual of `IterateInline`: a real data-dependent branch. `cond` is a
+    /// rank-0 Bool (Mask). exactly one arm executes at runtime — `then_results`
     /// when `cond` is true, `else_results` otherwise. each `*_body` lists the
-    /// NodeIds CREATED inside that arm's `S::cond` closure (insertion order);
-    /// they are lowered INSIDE the arm's brace so the codegen evaluates them
-    /// only on the taken path. this is what lets carrier-generic physics get
+    /// NodeIds created inside that arm's `S::cond` closure (insertion order);
+    /// they are lowered inside the arm's brace so the codegen evaluates them
+    /// on the taken path alone. this is what lets carrier-generic physics get
     /// the early-out cost (skip the whole quartic on a fast path),
-    /// avoiding the compute-all-paths cost of `Op::Select`.
+    /// sparing the compute-all-paths cost of `Op::Select`.
     ///
     /// `*_results` are vectors so the vector form (`cond_vec`, the dual of
     /// `iterate_vec`) lands as a thin addition; scalar `S::cond` uses length-1
@@ -610,7 +611,7 @@ pub enum Op {
     ///
     /// invariants (mirror `Op::Scope`):
     /// - shared upstream values (the `cond`, any pre-branch subexpression) are
-    ///   created BEFORE the closures, so they sit OUTSIDE both bodies and are
+    ///   created before the closures, so they sit outside both bodies and are
     ///   computed unconditionally — exactly the cheap shared prefix.
     /// - cross-arm / leaks-outside hash-cons sharing is resolved by the
     ///   scalarizer's eviction pass (a shared NodeId is hoisted to the outer
@@ -624,37 +625,37 @@ pub enum Op {
         else_body: Vec<NodeId>,
         else_results: Vec<NodeId>,
     },
-    /// extract component `index` of a MULTI-OUTPUT node (the only such node: an `Op::IfElse`
+    /// extract component `index` of a multi-output node (the one such node: an `Op::IfElse`
     /// with N results, from `S::cond_vec`). the scalarizer binds the multi-
     /// output node to an N-component `Concrete` binding and `Proj` selects one
     /// component — the lightweight projection that lets `cond_vec` return N
-    /// distinct scalar values from a SINGLE shared branch (the arm computation
+    /// distinct scalar values from a single shared branch (the arm computation
     /// is traced once; each output is one `Proj`). rank-0 scalar.
     Proj { source: NodeId, index: u32 },
 }
 
 // =============================================================================
-// the SINGLE SOURCE OF TRUTH for Op's NodeId-field topology.
+// the single source of truth for Op's NodeId-field topology.
 //
 // every pass that walks operand edges (splice's remap, scalarize's cone /
 // in-degree / `inputs()`, const-folder / SSA-rewrite passes) needs the same
-// answer: "for THIS variant, which fields are NodeIds?". that answer lives in
+// answer: "for a given variant, which fields are NodeIds?". that answer lives in
 // exactly one place — `Op::try_map_inputs`, a fallible, in-place per-variant
-// traversal of every NodeId field. the read-only `inputs()` view is DERIVED
+// traversal of every NodeId field. the read-only `inputs()` view is derived
 // from it (a noop map that collects the visited ids). adding a NodeId field to
 // a variant is one match-arm edit; splitting the answer across passes risks a
-// silent miscompile-class bug when one copy is updated and the other is not.
+// silent miscompile-class bug the moment the copies drift.
 // =============================================================================
 impl Op {
     /// visit every NodeId field of this op, applying `f` to each in declared
-    /// order. errors short-circuit. ONE arm per variant — adding a new
-    /// variant or new NodeId field touches THIS method and nowhere else.
+    /// order. errors short-circuit. one arm per variant — adding a variant or a
+    /// NodeId field is an edit to this method alone.
     pub fn try_map_inputs<E>(
         &mut self,
         mut f: impl FnMut(NodeId) -> Result<NodeId, E>,
     ) -> Result<(), E> {
         match self {
-            // leaves: no NodeId fields.
+            // leaves: payload held inline, so the visit is a no-op.
             Op::Const(_) | Op::Param(_) | Op::Lambda(_) | Op::IterAcc(_) => Ok(()),
 
             // single NodeId field.
@@ -760,12 +761,12 @@ impl Op {
     }
 
     /// read-only view: every NodeId this op references as input, in declared
-    /// order. DERIVED from `try_map_inputs` — there is no second list to keep
-    /// in sync with the enum shape.
+    /// order. derived from `try_map_inputs`, so the enum shape has exactly one
+    /// list to stay in sync with.
     pub fn inputs(&self) -> Vec<NodeId> {
         let mut out = Vec::new();
         let mut clone = self.clone();
-        // infallible visit — the closure never errors, so the Result is `Ok`.
+        // infallible visit: the closure returns `Ok` for every id.
         let _: Result<(), std::convert::Infallible> = clone.try_map_inputs(|id| {
             out.push(id);
             Ok(id)
@@ -774,21 +775,21 @@ impl Op {
     }
 
     /// re-insert this op (already remapped to live in `target`'s NodeId space)
-    /// by calling the matching public builder on `target`. ONE arm per variant,
+    /// by calling the matching public builder on `target`. one arm per variant,
     /// dispatched in a single call (alongside `try_map_inputs` and `inputs`).
     ///
-    /// caller contract: every NodeId field of `self` MUST already be a valid
+    /// caller contract: every NodeId field of `self` is already a valid
     /// id in `target` (i.e., `try_map_inputs` has been run against the splice
     /// remap). builders re-run shape inference / hash-consing on `target`.
     ///
-    /// `Param` and `Lambda` are NOT generically dispatchable:
+    /// `Param` and `Lambda` carry cross-graph context, so the caller resolves them:
     ///   - `Param` needs a cross-graph symbol -> NodeId substitution table
-    ///     (splice's `param_subst`, import_subgraph's `resolve_leaf`) — the
-    ///     "remap" closure can't synthesize that.
+    ///     (splice's `param_subst`, import_subgraph's `resolve_leaf`), which
+    ///     lives with the caller rather than the "remap" closure.
     ///   - `Lambda(FnId)` references a `FnDef` in the source graph's `lambdas`
     ///     table; lifting it into `target` requires cloning the FnDef (and
     ///     recursively its body sub-graph), which the caller owns.
-    /// both variants panic via `unreachable!`; call sites MUST handle them
+    /// both variants panic via `unreachable!`, so call sites resolve them
     /// before delegating to `dispatch_builder`.
     pub fn dispatch_builder(self, target: &mut Graph, span: Option<Span>) -> NodeId {
         match self {
@@ -829,9 +830,9 @@ impl Op {
                 else_results,
             } => target.if_else(cond, then_body, then_results, else_body, else_results, span),
             Op::Proj { source, index } => target.proj(source, index, span),
-            // Param / Lambda CANNOT be dispatched generically — Param needs a
-            // param_subst lookup (cross-graph), Lambda needs FnDef cloning
-            // (cross-graph). callers handle these BEFORE calling dispatch_builder.
+            // Param / Lambda carry cross-graph context — Param needs a
+            // param_subst lookup, Lambda needs FnDef cloning. callers resolve
+            // these ahead of dispatch_builder.
             Op::Param(_) | Op::Lambda(_) => unreachable!(
                 "dispatch_builder: Param/Lambda require cross-graph context \
                  (param_subst / FnDef clone); call sites must handle them \
@@ -894,11 +895,11 @@ pub struct Graph {
     /// identical sub-graphs share a single NodeId, so downstream
     /// passes (scalarize, emit) walk shared subterms once.
     ///
-    /// the cache is intentionally NOT used for `Op::Param` — params
-    /// are already deduped via `param_index` keyed on the symbol,
-    /// which is the externally-visible identity for inputs. duplicate
-    /// non-param ops with mismatched span info still collapse; the
-    /// kept node uses the FIRST span seen.
+    /// the cache covers every op except `Op::Param` — params dedupe
+    /// through `param_index`, keyed on the symbol, which is the
+    /// externally-visible identity for inputs. duplicate non-param ops
+    /// with mismatched span info still collapse; the kept node uses the
+    /// first span seen.
     hashcons: HashMap<(Op, TensorTy), NodeId>,
     /// first-class function definitions. addressable by FnId
     /// (the index here). `Op::Lambda(FnId)` makes a NodeId for the
@@ -913,9 +914,9 @@ pub struct Graph {
 
 /// the arithmetic ops whose identity elements are safe to fold, and nothing more:
 /// x + 0, x - 0, x * 1, x / 1. folding beyond this set (x * 0 -> 0, x - x -> 0)
-/// changes NaN and signed-zero semantics. this table is the ONE statement of the
-/// rule; the graph-layer fold and the scalarize-pass fold both query it, so the
-/// two layers cannot drift.
+/// changes NaN and signed-zero semantics. this table is the single statement of
+/// the rule; the graph-layer fold and the scalarize-pass fold both query it, so
+/// the two layers stay in step.
 #[derive(Clone, Copy)]
 pub enum FoldableArith {
     Add,
@@ -925,7 +926,8 @@ pub enum FoldableArith {
 }
 
 /// (left identity, right identity) per foldable op. `None` on the left of the
-/// non-commutative ops: 0 - x and 1 / x are not x.
+/// non-commutative ops: 0 - x is -x and 1 / x is the reciprocal, so the left
+/// operand admits no identity element.
 pub fn arith_identity_elements(op: FoldableArith) -> (Option<f64>, Option<f64>) {
     match op {
         FoldableArith::Add => (Some(0.0), Some(0.0)),
@@ -998,7 +1000,7 @@ impl Graph {
         !self.errors.is_empty()
     }
 
-    /// peek at accumulated errors without consuming.
+    /// peek at accumulated errors, leaving them in place.
     pub fn errors(&self) -> &[ShapeError] {
         &self.errors
     }
@@ -1011,8 +1013,8 @@ impl Graph {
     }
 
     /// record a shape error. called by the op builders on a shape-inference
-    /// failure; public to let test code exercise the accumulator without
-    /// constructing a real op-failure path.
+    /// failure; public so test code can exercise the accumulator directly,
+    /// sidestepping a real op-failure path.
     pub fn record_error(&mut self, err: ShapeError) {
         self.errors.push(err);
     }
@@ -1026,9 +1028,9 @@ impl Graph {
         self.push(Op::Const(value), ty, span)
     }
 
-    /// add a typed parameter. the same symbol can only be registered
-    /// once per graph; subsequent attempts return the existing NodeId
-    /// without altering the graph.
+    /// add a typed parameter. a symbol registers once per graph;
+    /// subsequent attempts return the existing NodeId and leave the
+    /// graph as it stands.
     pub fn add_param(&mut self, name: Symbol, ty: TensorTy, span: Option<Span>) -> NodeId {
         if let Some(existing) = self.param_index.get(&name) {
             return *existing;
@@ -1057,7 +1059,7 @@ impl Graph {
                 message: "Construct requires at least one input element".to_string(),
                 span,
             });
-            // poison: rank-0 placeholder so downstream queries don't panic.
+            // poison: rank-0 placeholder that keeps downstream type queries well-defined.
             return self.push(Op::Construct(elems), TensorTy::scalar(ElementTy::F64), span);
         }
         let first_ty = self.types[elems[0].0 as usize].clone();
@@ -1209,9 +1211,9 @@ impl Graph {
 
         // the usual arithmetic conversions: a binary numeric op with mixed int/float
         // operands promotes the narrower operand to the common float type via an
-        // IMPLICIT `Cast` (e.g., an i32 index times an f64 grid width -> both f64).
-        // homogeneous ops are untouched (no Cast inserted), so existing kernels are
-        // byte-identical. this is the one bridge from index space to physical space.
+        // implicit `Cast` (e.g., an i32 index times an f64 grid width -> both f64).
+        // a homogeneous op passes through as written, so its kernel renders
+        // byte-identically. this is the one bridge from index space to physical space.
         if want_arity == 2 && op.promotes() {
             if let Some(common) = numeric_promote(in_tys[0].element, in_tys[1].element) {
                 for k in 0..2 {
@@ -1284,14 +1286,14 @@ impl Graph {
             }
         };
 
-        // Cast(to) always produces the TARGET element — the input type is what
-        // is being cast FROM. for every other op the output element follows
+        // Cast(to) always produces the target element — the input type is the
+        // one being cast from. for every other op the output element follows
         // the (homogeneous) input element. returns_bool ops always produce
-        // Bool. without this Cast case, an external caller that re-inserts a
+        // Bool. this Cast case is what lets an external caller re-inserting a
         // standalone Cast (splice / import_subgraph going through
-        // `dispatch_builder`) would type the result as the input element,
-        // miss hashcons against the existing target-typed node, and produce a
-        // duplicate that downstream promotion then double-wraps.
+        // `dispatch_builder`) type the result as the target element and
+        // hash-cons onto the existing target-typed node, keeping the graph free
+        // of a duplicate that downstream promotion would double-wrap.
         let out_element = if op.returns_bool() {
             ElementTy::Bool
         } else if let ElementWiseOp::Cast(to) = op {
@@ -1306,13 +1308,13 @@ impl Graph {
         };
         // arithmetic-identity smart-constructor fold. catches the
         // patterns the IR is most prone to emit when contracting against unit
-        // vectors / one-hot tensors: `x + 0`, `x * 1`, `x - 0`, `x / 1`. these
-        // never enter the graph — `self.push` is never reached for them, so
-        // they're never hash-consed, never lowered, never CSE'd, never emitted.
-        // the absorbing `x * 0 -> 0` pattern is NOT folded here OR in the
+        // vectors / one-hot tensors: `x + 0`, `x * 1`, `x - 0`, `x / 1`. the fold
+        // returns the surviving operand ahead of `self.push`, so these patterns
+        // stay outside the graph entirely — unconsed, unlowered, unemitted.
+        // the absorbing `x * 0 -> 0` pattern stays unfolded here and in the
         // ScalarExpr-level fold (see `passes/scalarize.rs::fold_arith_identity`):
-        // IEEE-754 `inf * 0 = NaN`, and `feedback_no_silent_floors` requires
-        // that NaN propagate so dt-reduction / regression machinery sees it.
+        // IEEE-754 `inf * 0 = NaN`, and that NaN must propagate so the
+        // dt-reduction / regression machinery sees it.
         if want_arity == 2
             && let Some(folded) = self.fold_arith_identity(op, inputs[0], inputs[1])
         {
@@ -1324,7 +1326,8 @@ impl Graph {
     /// recognise rank-0 F64/F32/I32/U32 literals equal to `target` (0.0 or 1.0).
     /// floats compare under `==`; literal `0.0`/`1.0` constants from the IR are
     /// always bit-exact zero / one, so this is the safe case the smart
-    /// constructor needs (no signed-zero / `NaN==NaN` traps).
+    /// constructor needs — bit-exact literals sidestep the signed-zero and
+    /// `NaN==NaN` traps.
     fn const_eq(&self, id: NodeId, target: f64) -> bool {
         let Op::Const(c) = &self.nodes[id.0 as usize].op else {
             return false;

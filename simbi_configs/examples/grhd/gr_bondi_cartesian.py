@@ -15,11 +15,11 @@
 #     reservoir (rho_inf, v = 0, p_inf) — a relativistic conserved-state sponge is
 #     unavailable, so a dirichlet reservoir is the buffer.
 #
-# the grid is a uniform cube [-L, L]^3 sized to contain the bondi radius. static
-# mesh refinement is NOT used: a fine level telescoping onto the accretor would
-# overlap the excised spheroid, which the excision gate forbids (a fine patch
-# would evolve the excised cells and restrict them back over the fill). resolution
-# comes from the base grid alone.
+# the grid is a uniform cube [-L, L]^3 sized to contain the bondi radius, and the
+# resolution comes from that base grid alone. a static-mesh-refinement level
+# telescoping onto the accretor would overlap the excised spheroid, which the excision
+# gate forbids (a fine patch would evolve the excised cells and restrict them back over
+# the fill).
 #
 # the accretion diagnostic is the rest-mass flux through a coordinate sphere,
 # well-posed OUTSIDE the horizon; its r-invariance once steady is the certificate:
@@ -127,7 +127,7 @@ class GrBondiCartesian(SimbiProblem):
         Regime, ProblemParam(Regime.RHD, description="physics regime")
     ]
     # the non-diagonal cartesian kerr-schild metric takes the fast-magnetosonic HLLE
-    # fan; the diagonal-metric HLLD/HLLC wrappers do not apply.
+    # fan; the HLLD/HLLC wrappers apply to diagonal metrics.
     solver: Annotated[
         Solver, ProblemParam(Solver.HLLE, description="riemann solver")
     ]
@@ -230,8 +230,8 @@ class GrBondiCartesian(SimbiProblem):
         nx, ny, nz = self.resolution
 
         def gas_state() -> GasStateGenerator:
-            # uniform gas at rest (rho, v_x, v_y, v_z, pre). the excised interior is
-            # overwritten by the fill from the first step, so its initial value never matters.
+            # uniform gas at rest (rho, v_x, v_y, v_z, pre). the fill overwrites the excised
+            # interior from the first step, so the ambient value serves there as anywhere.
             for _ in range(nx * ny * nz):
                 yield (self.rho_ambient, 0.0, 0.0, 0.0, self.p_ambient)
 

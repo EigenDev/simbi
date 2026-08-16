@@ -2,15 +2,15 @@
 // hiprtc.rs
 //
 // hipRTC: AMD's runtime HIP compiler (libhiprtc.so, often folded into libamdhip64).
-// compiles a HIP/cuda-c++ source string straight to a CODE OBJECT in-process -- the
+// compiles a HIP/cuda-c++ source string straight to a code object in-process -- the
 // hip analog of nvrtc. same rule: every
-// accelerator compiles at runtime via its OWN runtime compiler, no shelled toolchain.
+// accelerator compiles at runtime via its own runtime compiler, no shelled toolchain.
 //
 // unlike nvrtc (source -> virtual ptx, re-jitted by the driver at load), hiprtc emits
-// a FINAL code object for a specific gpu arch. so the target arch matters: it comes
+// a final code object for a specific gpu arch. so the target arch matters: it comes
 // from `SYMBI_HIP_ARCH` (e.g. `gfx90a`, `gfx942`) when set, else hiprtc defaults to the
 // attached device. set the env var on the cluster only if auto-detect is insufficient
-// (cross-arch build, or a driver that does not default).
+// (cross-arch build, or a driver with no default arch).
 //
 // link: -lhiprtc (set in build.rs under the hip feature).
 // =============================================================================

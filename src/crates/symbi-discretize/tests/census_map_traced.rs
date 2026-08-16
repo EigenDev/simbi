@@ -1,14 +1,14 @@
 // =============================================================================
 // census_map_traced.rs
 //
-// the TRACED census map against the same graph evaluated in f64 — the equivalence a device path
+// the traced census map against the same graph evaluated in f64 — the equivalence a device path
 // stands on. the host walks cells and interprets the registered expressions; this kernel is what a
 // device runs instead, and the two must agree cell for cell.
 //
-// the failure this exists to catch is not a crash. a traced map that binned differently, or read a
-// leaf the host resolves to something else, would still produce a smooth, positive, plausible
-// profile — and on a machine where only one of the two paths ever runs, nothing would compare
-// them. so the comparison happens here, where both are cheap.
+// the failure this exists to catch is a silent one. a traced map that binned differently, or read
+// a leaf the host resolves to something else, would still produce a smooth, positive, plausible
+// profile — and on a machine where one of the two paths runs alone, the two would stay
+// uncompared. so the comparison happens here, where both are cheap.
 // =============================================================================
 
 mod harness;
@@ -20,7 +20,7 @@ use symbi_hydro::CensusConfig;
 
 const N: usize = 16;
 const R_LO: f64 = 1.0;
-const DR: f64 = 0.4; // spans r ~ 1.1 to ~7.2, so cells fall BOTH inside and past the outer edge
+const DR: f64 = 0.4; // spans r ~ 1.1 to ~7.2, so cells fall both inside and past the outer edge
 
 struct Axis(Vec<f64>);
 impl CensusAxis for Axis {
@@ -144,8 +144,9 @@ fn the_traced_map_reproduces_the_host_evaluation_cell_for_cell() {
         );
     }
 
-    // the premise: the sweep must actually exercise BOTH outcomes. a grid entirely inside the
-    // edges never tests the drop path, and one entirely outside never tests the binning.
+    // the premise: the sweep exercises both outcomes. a grid held entirely inside the edges would
+    // exercise the binning alone, one held entirely outside the drop path alone, so the straddle
+    // is asserted.
     assert!(
         binned > 0 && binned < N,
         "the grid does not straddle the declared edges ({binned} of {N} cells binned); the \

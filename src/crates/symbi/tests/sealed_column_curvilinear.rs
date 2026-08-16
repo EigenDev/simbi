@@ -6,7 +6,7 @@
 // ghosts) holding a sealed, stagnant, strongly stratified RADIAL column on the
 // spherical and cylindrical charts. the chart is what changes the statement:
 // the momentum update now carries the area-weighted pressure flux divergence
-// AND the geometric pressure source `p (A_hi - A_lo)/V`, and the equilibrium
+// together with the geometric pressure source `p (A_hi - A_lo)/V`, and the equilibrium
 // is a discrete fixed point only because the wb gravity source is exactly the
 // three-way telescoping remainder
 //
@@ -119,8 +119,8 @@ macro_rules! sealed_radial_gate {
             }
 
             /// the smallest `K/K_0` and the largest |v| away from the walls. an adiabatic
-            /// gas cannot lose entropy, so anything below one in the first is the scheme's
-            /// own deficit; the second is the stagnancy precondition.
+            /// gas holds its entropy as a one-way floor, so anything below one in the first
+            /// is the scheme's own deficit; the second is the stagnancy precondition.
             fn run(balanced: bool) -> (f64, f64) {
                 let mut hier = build(balanced);
                 hier.evolve_steps(STEPS).unwrap();
@@ -159,11 +159,10 @@ macro_rules! sealed_radial_gate {
                     stringify!($modname)
                 );
 
-                // THE DISCRIMINATOR. the plain arm carries both the analytic-source
-                // truncation mismatch and the mirrored-ghost wall kick, so it must be
-                // measurably in motion -- that is what makes the balanced arm's
-                // stagnation a statement about the triple rather than about a quiet
-                // setup.
+                // the discriminating quantity is motion. the plain arm carries both the
+                // analytic-source truncation mismatch and the mirrored-ghost wall kick, so
+                // it moves measurably -- that is what makes the balanced arm's stagnation a
+                // statement about the triple, on a setup that is demonstrably live.
                 assert!(
                     v_plain > 1.0e-7,
                     "the PLAIN arm sits at |v| = {v_plain:.3e}; the column is not \

@@ -5,7 +5,7 @@
 // regime's CFL wave_speed_map kernel to CPU (Rust) source and counts the
 // expensive ops every cell executes per launch (post-scalarize, post-CSE — i.e.
 // exact ground truth). the rmhd quartic's select-blended cubic
-// resolvent computes ALL transcendental branches; the count is the proof.
+// resolvent computes every transcendental branch; the count is the proof.
 //
 // usage: cargo run -p symbi-discretize --release --example wave_speed_op_census
 // =============================================================================
@@ -58,8 +58,8 @@ fn render_rust(name: &str, ndim: u8, k: GvKernel, writes: Writes) -> String {
     desc.source
 }
 
-// count occurrences of `needle` whose char immediately before is NOT ascii
-// alphabetic — disambiguates `sinh(` inside `asinh(`, `cos(` inside `acos(`, etc.
+// count occurrences of `needle` preceded by a non-alphabetic ascii char (or at the
+// start) — disambiguates `sinh(` inside `asinh(`, `cos(` inside `acos(`, etc.
 fn count(src: &str, needle: &str) -> usize {
     let bytes = src.as_bytes();
     let mut n = 0;

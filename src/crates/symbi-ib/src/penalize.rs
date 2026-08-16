@@ -2,33 +2,33 @@
 // penalize.rs
 //
 // the composable immersed-boundary property algebra:
-// properties contribute relaxation RATES and TARGETS into a `Relax`
+// properties contribute a relaxation rate and a target into a `Relax`
 // accumulator; the engine integrates the accumulated system once, as exact
-// frozen-coefficient exponentials on three DISJOINT primitive channels —
+// frozen-coefficient exponentials on three disjoint primitive channels —
 //   rho:   den' = den * exp(-lambda_rho dt)          (the uniform drain)
 //   u:     u'   = u_solid + du_n e^-l_n + du_t e^-l_t (normal/tangential wall)
 //   e_int: e'   = e_wall + (e + Q - e_wall) e^-l_e    (thermal wall; Q = drag heat)
 // — where Q is the frictional dissipation of the velocity channel, so an isothermal
 // wall absorbs the drag heat and an adiabatic wall (l_e = 0) keeps it —
 // unconditionally stable for any dt, and commuting exactly under property stack
-// reordering: the energy reconstruction reads the TOTAL velocity relaxation (for the
-// wall-work / dissipation term below) summed across all properties, so
+// reordering: the energy reconstruction reads the velocity relaxation summed
+// across all properties (for the wall-work / dissipation term below), so
 // the accumulated Relax is order-independent.
 //
-// the conserved reconstruction is spelled as CONSERVED SCALING PLUS
-// CORRECTIONS THAT VANISH EXACTLY AT ZERO RATES:
+// the conserved reconstruction is spelled as a conserved scaling plus
+// corrections that vanish exactly at zero rates:
 //   den' = den f_rho
 //   mom' = mom f_rho + den' (u' - u)
 //   nrg' = nrg f_rho + den' [(e' - e) + (u' - u).u_solid]
-// where the energy correction is the WORK DONE ON THE WALL (the momentum transfer
+// where the energy correction is the work done on the wall (the momentum transfer
 // times the local wall velocity `u_solid`), so the gas total energy the wall
 // exchanges equals the body's mechanical work and gas+body energy is conserved; the
 // frictional dissipation (gas KE change minus that work) stays in the gas as
-// internal energy (heat). the energy channel therefore READS the velocity channel's
+// internal energy (heat). the energy channel therefore reads the velocity channel's
 // `u' - u` (it is the only cross-channel coupling; density + velocity stay disjoint).
 // with u' - u = -(du_n g_n + du_t g_t), e' - e = (e_target - e) g_e, and
 // g = 1 - exp(-lambda dt). when only the drain is active g_n = g_t = g_e = 0
-// EXACTLY, every correction is an exact zero, and the update reduces bit-for-
+// exactly, every correction is an exact zero, and the update reduces bit-for-
 // bit to `drain_cell`'s uniform scaling (up to the sign of exactly-zero
 // momentum components: x + 0.0 flips -0 to +0). that reduction is the p = 1
 // anchor the whole algebra rests on.
@@ -52,20 +52,20 @@ use crate::body_delta::BodyDelta;
 
 /// the body kinematics a property may target: the rigid-motion velocity field
 /// and the wall internal-energy target (from the wall temperature through the
-/// EOS; unused unless a thermal property is stacked). `u_solid` is the value
-/// AT THE CELL — for a spinning body, evaluate it per cell with `at()`.
+/// EOS; read once a thermal property is stacked). `u_solid` is the value at
+/// the cell — for a spinning body, evaluate it per cell with `at()`.
 #[derive(Clone, Copy, Debug)]
 pub struct BodyKin<S: Scalar, const D: usize> {
     pub u_solid: Tensor<S, D>,
-    /// rigid angular velocity about the body center. 2D: only the z component
-    /// acts; 1D: rotation has no meaning and the field is inert.
+    /// rigid angular velocity about the body center. 2D: the z component acts;
+    /// 1D: rotation requires a plane, so the field stays inert.
     pub omega: Tensor<S, 3>,
     pub e_wall: S,
 }
 
 /// `omega x r` restricted to the D in-plane components: the rigid-rotation
-/// velocity at offset `r` from the rotation center. 1D: exactly zero (no
-/// rotation in one dimension); 2D: the z-spin acting in the plane,
+/// velocity at offset `r` from the rotation center. 1D: exactly zero (rotation
+/// requires a plane); 2D: the z-spin acting in the plane,
 /// `(-w_z r_1, w_z r_0)`; 3D: the full cross product.
 pub fn omega_cross<S: Scalar, const D: usize>(
     omega: &Tensor<S, 3>,
@@ -113,18 +113,18 @@ impl<S: Scalar, const D: usize> BodyKin<S, D> {
 }
 
 /// the retention floor for the torque-free tangential channel. the retention is a
-/// GROWING exponential (`lambda_t < 0`); left unbounded it boosts the retained
+/// growing exponential (`lambda_t < 0`); left unbounded it boosts the retained
 /// angular momentum of a vanishing remnant to an infinite velocity, and forms
 /// `0 * inf = NaN` in the conserved momentum once the density underflows. the
 /// retention floor caps the tangential growth factor at `1 / f_floor`: torque-
-/// free is EXACT while a cell keeps a fraction `>= f_floor` of its mass over a
+/// free is exact while a cell keeps a fraction `>= f_floor` of its mass over a
 /// step, and degrades to a bounded standard drain below it (a cell drained past
 /// `f_floor` in one step is being annihilated — far outside any physical steady
 /// state, where drain balances inflow). analogous to a positivity floor.
 pub const TORQUE_FREE_RETENTION_FLOOR: f64 = 1e-4;
 
 /// the accumulated relaxation system: rates and targets per primitive channel.
-/// rates ADD across properties; targets are SET (single-body stack — the
+/// rates add across properties; targets are assigned (single-body stack — the
 /// multi-body nearest-wins policy composes above this).
 #[derive(Clone, Copy, Debug)]
 pub struct Relax<S: Scalar, const D: usize> {
@@ -158,7 +158,7 @@ impl<S: Scalar, const D: usize> Relax<S, D> {
 
 /// one boundary property: what it contributes to the relaxation system.
 /// coefficients are carrier values (f64 on the host, scalar params in a
-/// trace) as inverse timescales — the stiff limit is a LARGE `inv_*`, and
+/// trace) as inverse timescales — the stiff limit is a large `inv_*`, and
 /// zero is an exact off switch.
 #[derive(Clone, Copy, Debug)]
 pub enum Property<S: Scalar> {
@@ -182,12 +182,12 @@ pub enum Property<S: Scalar> {
         inv_eta_t: S,
     },
     /// the torque-free accretor: the drain plus a tangential
-    /// ANTI-relaxation locked to the drain rate, `lambda_t = -xi lambda_rho`.
+    /// anti-relaxation locked to the drain rate, `lambda_t = -xi lambda_rho`.
     /// the radial-relative momentum drains with the mass (accreted, zero center
     /// torque on a spherical mask where the normal is radial); the tangential
     /// (angular) momentum is retained by the factor `f_rho^{1-xi}`, so the
     /// removed tangential momentum is `rho (1 - f_rho^{1-xi}) du_t`:
-    /// `xi = 0` is the standard sink, `xi = 1` retains ALL angular momentum
+    /// `xi = 0` is the standard sink, `xi = 1` retains the angular momentum in full
     /// (torque-free). `xi in [0, 1]`. `lambda_t < 0` is a growing exponential —
     /// bounded in momentum, divergent in velocity as the mask evacuates (the
     /// well-posedness limit as the mask evacuates).
@@ -227,15 +227,15 @@ impl<S: Scalar> Property<S> {
             Property::TorqueFreeAccretor { inv_tau, xi } => {
                 let lambda_rho = chi * inv_tau;
                 acc.lambda_rho = acc.lambda_rho + lambda_rho;
-                // NEGATIVE tangential rate: the tangential (angular) momentum is
-                // retained as mass drains, so the accreted material carries no
+                // negative tangential rate: the tangential (angular) momentum is
+                // retained as mass drains, so the accreted material carries zero
                 // net moment about the sink. lambda_un stays 0 — the radial
                 // relative momentum drains with the mass (accreted, radial force
                 // has zero moment on a spherical mask).
                 acc.lambda_ut = acc.lambda_ut - xi * lambda_rho;
-                // the retention floor: bound the growing
-                // tangential factor so a fully draining cell cannot boost the
-                // retained momentum to an infinite velocity or a NaN.
+                // the retention floor: bound the growing tangential factor so a
+                // fully draining cell holds the retained momentum at a finite
+                // velocity.
                 acc.ut_growth_cap = S::from_f64(1.0 / TORQUE_FREE_RETENTION_FLOOR);
                 acc.u_solid = kin.u_solid;
             }
@@ -274,12 +274,12 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
     let u = cons.mom.scale(inv_den);
     let mom_sq = cons.mom.dot(&cons.mom);
     // the isothermal slot values to zero here; every consumer of e_int below
-    // is scaled into the energy slot and discarded again, so the junk never
-    // reaches a live channel (and the trace DCEs it).
+    // is scaled into the energy slot and discarded again, so the junk stays
+    // confined to that dead slot (and the trace DCEs it).
     let e_int = (cons.nrg.value() - half * mom_sq * inv_den) * inv_den;
 
     // velocity channel: du split along the body normal; each component decays
-    // at its own rate. u' - u = -(du_n g_n + du_t g_t) is EXACTLY +-0 when
+    // at its own rate. u' - u = -(du_n g_n + du_t g_t) is exactly +-0 when
     // both walls are off.
     let du = u - relax.u_solid;
     let du_n = normal.scale(du.dot(&normal));
@@ -288,8 +288,8 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
 
     let den_new = cons.den * f_rho;
     let mom_new = cons.mom.scale(f_rho) + u_delta.scale(den_new);
-    // ENERGY CONSERVATION. the gas total energy the wall exchanges with the body is the WORK DONE ON
-    // THE WALL — the transferred momentum times the LOCAL wall velocity `u_solid` (= v_com + omega x
+    // energy conservation. the gas total energy the wall exchanges with the body is the work done on
+    // the wall — the transferred momentum times the local wall velocity `u_solid` (= v_com + omega x
     // r, baked per cell) — so summed, `energy_delta` equals the body's mechanical work
     // `F.v_com + torque.omega` and gas+body mechanical energy conserves. the drag's frictional
     // dissipation is the gas kinetic-energy change minus that work, `Q = wall_work - ke_delta`
@@ -298,9 +298,10 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
     let wall_work = u_delta.dot(&relax.u_solid);
     let friction_heat = wall_work - ke_delta;
     // thermal channel: the wall carries heat toward its temperature target, relaxing the
-    // FRICTION-HEATED internal energy `e_int + Q`. an ISOTHERMAL wall (stiff g_e) absorbs the drag
+    // friction-heated internal energy `e_int + Q`. an isothermal wall (stiff g_e) absorbs the drag
     // dissipation — the gas stays at `e_target`, the heat flowing to the wall reservoir (booked in
-    // energy_delta); an ADIABATIC wall (no thermal property, g_e = 0) keeps `Q` in the gas as heat.
+    // energy_delta); an adiabatic wall (thermal property omitted, g_e = 0) keeps `Q` in the gas as
+    // heat.
     // exactly +-0 when the thermal channel is off.
     let e_delta = (relax.e_target - (e_int + friction_heat)) * g_e;
     let nrg_new = cons
@@ -313,9 +314,9 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
         mom: mom_new,
         nrg: nrg_new,
         // the sink removes gas together with the dye dissolved in it, so the conserved dye takes
-        // the SAME factor the density does and the concentration of the surviving gas is
-        // unchanged. the wall channels above move momentum and heat, never mass, so they leave the
-        // dye alone. `absorbed` below therefore books the accreted dye alongside the accreted mass.
+        // the same factor the density does and the concentration of the surviving gas is
+        // unchanged. the wall channels move momentum and heat alone, leaving the dye to ride with
+        // the mass, so `absorbed` books the accreted dye alongside the accreted mass.
         chi: cons.chi.scale(f_rho),
     };
     let absorbed = *cons - updated;
@@ -330,23 +331,23 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
 mod tests {
     use super::*;
 
-    /// an ADIABATIC wall must not destroy entropy.
+    /// an adiabatic wall drives the gas entropy upward.
     ///
-    /// `K = p / rho^gamma` is one-way for a gas with no heat sink: drag turns mechanical energy
-    /// into heat and nothing takes heat back out. the wall's three channels each respect that
-    /// separately, which is what makes the law assertable rather than approximate:
+    /// `K = p / rho^gamma` is one-way for a gas whose only thermal input is dissipation: drag
+    /// turns mechanical energy into heat and the gas keeps it. the wall's three channels each
+    /// respect that separately, which makes the law an exact assertion:
     ///
     /// - the mass channel is a uniform scaling `f_rho` of the whole conserved vector, which
     ///   leaves the velocity untouched and sends `K -> f_rho^(1-gamma) K`. for `f_rho <= 1` and
-    ///   `gamma > 1` that is a RISE.
+    ///   `gamma > 1` that is a rise.
     /// - the velocity channels move momentum toward the wall and book the difference between the
     ///   exact kinetic-energy change and the work done on the wall as friction heat `Q >= 0`.
-    /// - the thermal channel carries heat toward `e_target`, and IS a reservoir: an isothermal
-    ///   wall absorbing drag dissipation legitimately lowers the gas entropy. so it is switched
-    ///   OFF here (`lambda_e = 0`), and the law is scoped to the adiabatic wall.
+    /// - the thermal channel carries heat toward `e_target`, and is a reservoir: an isothermal
+    ///   wall absorbing drag dissipation legitimately lowers the gas entropy. this sweep sets
+    ///   `lambda_e = 0`, scoping the law to the adiabatic wall.
     ///
-    /// swept over a lattice rather than a point, because the sign of `Q` is the whole claim and a
-    /// single sample cannot show it holds where `u`, `u_solid` and the normal are misaligned.
+    /// swept over a lattice so the claim — the sign of `Q` — is exercised where `u`, `u_solid`
+    /// and the normal are misaligned; a single sample covers one alignment.
     #[test]
     fn an_adiabatic_wall_does_not_destroy_entropy() {
         const GAMMA: f64 = 5.0 / 3.0;
@@ -392,8 +393,9 @@ mod tests {
                                     e_target: 0.0,
                                     ut_growth_cap: f64::INFINITY,
                                 };
-                                // a normal deliberately misaligned with every velocity above, so
-                                // the normal/tangential split is exercised rather than degenerate.
+                                // a normal deliberately misaligned with every velocity in the
+                                // sweep, so the normal/tangential split is exercised on both
+                                // components at once.
                                 let n = Tensor::new([0.6, 0.8, 0.0]);
                                 let (out, _) = penalize_cell(&cons, &relax, n, dt, 1.0, 0);
 
@@ -422,7 +424,7 @@ mod tests {
                 }
             }
         }
-        // NON-VACUITY: the wall has to have actually done something on a real fraction of the
+        // non-vacuity: the wall has to have moved the entropy on a substantial fraction of the
         // lattice. a `Relax` that reduced to a no-op everywhere would satisfy the inequality
         // trivially.
         println!("adiabatic wall: {moved}/{checked} lattice points moved the entropy");
@@ -469,7 +471,7 @@ mod tests {
         (c.den, u, e)
     }
 
-    // the single-property (p = 1) case: the [Drain]-only stack reduces BIT-FOR-BIT
+    // the single-property (p = 1) case: the [Drain]-only stack reduces bit-for-bit
     // to drain_cell's uniform scaling — every correction term is an exact zero.
     #[test]
     fn drain_only_stack_is_bit_identical_to_drain_cell() {
@@ -595,7 +597,7 @@ mod tests {
     }
 
     // unconditional stability: a rate stiff beyond any explicit scheme's CFL
-    // drives the state TO the target, finitely, for any dt.
+    // drives the state onto the target, finitely, for any dt.
     #[test]
     fn stiff_rates_saturate_to_the_targets() {
         let cons = sample_cons();
@@ -615,14 +617,14 @@ mod tests {
             assert!((u1[a] - k.u_solid[a]).abs() < 1e-12);
         }
         // the stiff velocity relaxation dumps its full relative KE as frictional heat, but the stiff
-        // ISOTHERMAL channel absorbs ALL of it (the heat flows to the wall reservoir), so the gas
+        // isothermal channel absorbs all of it (the heat flows to the wall reservoir), so the gas
         // saturates back to the wall temperature e_wall.
         assert!((e1 - k.e_wall).abs() < 1e-12);
         // the drain channel was off: density untouched, bit-exact.
         assert_eq!(out.den.to_bits(), cons.den.to_bits());
     }
 
-    // the returned body delta IS the gas's loss — conservation is a
+    // the returned body delta is the gas's loss — conservation is a
     // subtraction, exact by construction, pinned here against regressions.
     #[test]
     fn gas_loss_equals_body_gain_exactly() {
@@ -654,14 +656,14 @@ mod tests {
     }
 
     // what the penalization sink does to a 2D orbiting flow: the pure drain
-    // (p = 1) removes mass at the LOCAL gas velocity, so the body absorbs the
+    // (p = 1) removes mass at the local gas velocity, so the body absorbs the
     // gas's full momentum -- force = Mdot u -- and the accretion torque is the
     // moment of that, Mdot (r x u)_z = Mdot |r| v_orb for azimuthal motion. this
-    // is a STANDARD (angular-momentum-absorbing) sink: the booked torque is the
+    // is a standard (angular-momentum-absorbing) sink: the booked torque is the
     // physical angular-momentum flux of the accreted gas, exact by conservation
     // (gas loss = body gain). a
-    // purely radial inflow (u parallel r) carries no angular momentum and books
-    // exactly zero torque -- the torque tracks the real flow.
+    // purely radial inflow (u parallel r) carries zero angular momentum and books
+    // exactly zero torque -- the torque tracks the flow it is given.
     #[test]
     fn drain_books_the_physical_accretion_torque_in_2d() {
         type Cons2 = ConsG<f64, 2, Adiabatic>;
@@ -709,7 +711,7 @@ mod tests {
     // torque about the sink center on a spherical mask (normal = radial),
     //   tau_z = |r| rho (1 - f_rho^{1-xi}) (n_hat x du_t) * (vol / dt),
     // the radial-relative momentum contributing zero moment. xi = 0 recovers the
-    // standard sink (full angular momentum), xi = 1 is EXACTLY torque-free.
+    // standard sink (full angular momentum), xi = 1 is exactly torque-free.
     #[test]
     fn torque_free_dial_books_the_analytic_torque_in_2d() {
         type Cons2 = ConsG<f64, 2, Adiabatic>;
@@ -745,20 +747,20 @@ mod tests {
             assert!((got - expect).abs() < 1e-11, "xi={xi}: {got} vs {expect}");
         }
 
-        // the torque-free endpoint is EXACTLY zero for this orbiting cell.
+        // the torque-free endpoint is exactly zero for this orbiting cell.
         let mut acc = Relax::none();
         Property::TorqueFreeAccretor { inv_tau, xi: 1.0 }.contribute(chi, &kin0, &mut acc);
         let (_o, d) = penalize_cell(&cons, &acc, n, dt, vol, 0);
         assert!(moment(&r, &d.force_delta)[2].abs() < 1e-12);
     }
 
-    // the RAW (uncapped) coupling — WHY the retention floor
-    // is needed. built by hand so the tangential growth cap is INFINITY (the
-    // Property sets a finite cap; see the saturation test). two regimes:
-    //   (1) strong-but-finite drain: tangential momentum retained (bounded) but
-    //       the primitive VELOCITY u'_t = du_t / f_rho diverges.
+    // the raw (uncapped) coupling, which is what the retention floor exists to
+    // bound. built by hand so the tangential growth cap is INFINITY (the
+    // Property sets a finite cap). two regimes:
+    //   (1) strong-but-finite drain: tangential momentum retained (bounded) while
+    //       the primitive velocity u'_t = du_t / f_rho diverges.
     //   (2) full evacuation (f_rho underflows to 0): `0 * inf = NaN` — the
-    //       CONSERVED momentum itself goes non-finite. the cliff to prevent.
+    //       conserved momentum itself goes non-finite. the cliff the floor averts.
     #[test]
     fn torque_free_raw_coupling_is_ill_posed_at_evacuation() {
         type Cons2 = ConsG<f64, 2, Adiabatic>;
@@ -796,9 +798,9 @@ mod tests {
         );
     }
 
-    // the retention floor keeps the CONSERVED
-    // state finite at full evacuation AND leaves torque-free EXACT in the
-    // physical regime (f_rho >> f_floor). the Property sets the cap.
+    // the retention floor keeps the conserved state finite at full evacuation
+    // and holds torque-free exact in the physical regime (f_rho >> f_floor).
+    // the Property sets the cap.
     #[test]
     fn torque_free_saturation_bounds_the_evacuation_limit() {
         type Cons2 = ConsG<f64, 2, Adiabatic>;
@@ -811,7 +813,7 @@ mod tests {
             e_wall: 0.0,
         };
 
-        // (1) full evacuation: the conserved state stays FINITE (no NaN). the cap
+        // (1) full evacuation: the conserved state stays finite. the cap
         // bounds the tangential factor at 1/f_floor, so `den' (du_t g_t)` is
         // `0 * finite = 0`, avoiding the `0 * inf = NaN` pathology.
         let u = Tensor::new([0.3, 0.7]);
@@ -837,7 +839,7 @@ mod tests {
         );
 
         // (2) physical regime: lambda_rho dt = 0.5 -> f_rho = 0.607, growth factor
-        // 1.65 << the 1e4 cap (inert) -> torque-free is EXACT.
+        // 1.65 << the 1e4 cap (inert) -> torque-free is exact.
         let u2 = Tensor::new([0.3, 0.8]);
         let cons2: Cons2 = ConsG {
             chi: Default::default(),
@@ -859,9 +861,9 @@ mod tests {
     }
 
     // the saturated torque-free sink holds torque == 0 across the
-    // WHOLE physical range of per-step drain fractions (f_rho down to the floor)
-    // — the cap is inert there — and reintroduces a bounded torque only once a
-    // cell is drained BELOW the floor in a single step (`inv_tau dt >> 1`, an
+    // whole physical range of per-step drain fractions (f_rho down to the floor)
+    // — the cap is inert there — and reintroduces a bounded torque once a
+    // cell is drained below the floor in a single step (`inv_tau dt >> 1`, an
     // over-aggressive/pathological rate carrying negligible mass). this is the
     // evidence that saturation preserves torque-free where the physics lives.
     #[test]
@@ -893,7 +895,7 @@ mod tests {
                 "torque-free at f_rho = {f_rho}"
             );
         }
-        // BELOW the floor (f_rho = 1e-6): the cap fires -> a bounded standard torque.
+        // below the floor (f_rho = 1e-6): the cap fires -> a bounded standard torque.
         let inv_tau = -(1e-6_f64).ln() / dt;
         let mut acc = Relax::none();
         Property::TorqueFreeAccretor { inv_tau, xi: 1.0 }.contribute(1.0, &kin0, &mut acc);
@@ -931,7 +933,7 @@ mod tests {
         assert_eq!(moment(&r1, &r1), Tensor::zeros());
     }
 
-    // the rotating target through the SAME exponentials —
+    // the rotating target rides the same exponentials —
     // u relaxes toward u_translation + omega x x_rel, analytic per channel.
     #[test]
     fn rotating_target_matches_the_analytic_exponential() {
@@ -1009,7 +1011,7 @@ mod tests {
         };
         let x_rel = Tensor::new([0.17, 0.29, -0.23]);
         let k = base.at(&x_rel);
-        // seed the gas EXACTLY co-moving: same helper, same bits. den is a
+        // seed the gas exactly co-moving: same helper, same bits. den is a
         // power of two so the kernel's u = mom * (1/den) round trip is exact
         // and du is a true +-0.
         let den = 2.0;
@@ -1037,7 +1039,7 @@ mod tests {
     }
 
     // free-slip porous surface (the porosity-slip dial):
-    // inv_eta_t = 0 is an EXACT off switch — the tangential velocity is
+    // inv_eta_t = 0 is an exact off switch — the tangential velocity is
     // bit-untouched while the normal channel relaxes.
     #[test]
     fn free_slip_leaves_the_tangential_velocity_bit_untouched() {
@@ -1075,9 +1077,9 @@ mod tests {
         assert_eq!(u1[2].to_bits(), u[2].to_bits());
     }
 
-    // the porosity endpoints: p = 1 accumulates EXACTLY the [Drain] relax
+    // the porosity endpoints: p = 1 accumulates exactly the [Drain] relax
     // (the wall term carries an exact (1 - p) = 0 factor), and p = 0
-    // accumulates a zero drain rate — no mass is removed, bit-exact.
+    // accumulates a zero drain rate, leaving the mass bit-exact.
     #[test]
     fn porosity_endpoints_reduce_exactly() {
         let cons = sample_cons();

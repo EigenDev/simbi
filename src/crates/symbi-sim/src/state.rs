@@ -32,10 +32,11 @@ use symbi_xpu::{DefaultMemory, DefaultSpace, ExecutionSpace, Executor, MemorySpa
 
 // =============================================================================
 // energy/pressure FIELD slot — the field-layer analog of
-// `symbi_hydro::energy::EnergySlot`. encodes energy presence at the TYPE level so
+// `symbi_hydro::energy::EnergySlot`. encodes energy presence at the type level so
 // `cons.nrg` / `prim.pre` are a real `Field` for energy regimes and a zero-sized
-// `FieldZero` for isothermal — retiring the runtime `Option<Field>`. lives HERE (not on
-// `EnergyModel`) because `symbi-hydro` cannot see `Field` (no `symbi-grid` dep).
+// `FieldZero` for isothermal — retiring the runtime `Option<Field>`. lives in this crate
+// rather than on `EnergyModel` because `Field` is visible here; `symbi-hydro` carries its
+// own dependency set, `symbi-grid` outside it.
 // =============================================================================
 
 /// the uniform surface of an energy/pressure field slot — a real `Field` (energy regimes) or the
@@ -46,7 +47,7 @@ pub trait EnergyFieldSlot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: Memo
 {
     /// allocate the slot (a zeroed `Field`, or the free `FieldZero`).
     fn alloc(domain: &Domain<D>) -> symbi_xpu::Result<Self>;
-    /// the backing field, if present (`None` for `FieldZero`). the ONE place absence is handled.
+    /// the backing field, if present (`None` for `FieldZero`). the single place absence is handled.
     fn as_field(&self) -> Option<&Field<Sc, D, Mem>>;
     /// the device pointer for the kernel ABI manifest (`0` when absent — the null slot).
     fn ptr(&self) -> u64;
@@ -101,9 +102,9 @@ impl FieldEnergy for symbi_hydro::energy::IsoModel {
 
 // the energy/pressure field storage stays `Option<Field>`. the
 // additive foundation above (`FieldEnergy`/`EnergyFieldSlot`/`FieldZero` + `Regime::Energy`) is
-// the type-level slot resolver; the field containers do not route their `nrg`/`pre` storage
-// through it (routing them would touch ~180 access sites across ~55 files plus the foreign-`Field`
-// trait scope).
+// the type-level slot resolver, and the field containers keep their `nrg`/`pre` storage in the
+// runtime option (routing it through the resolver would touch ~180 access sites across ~55 files
+// plus the foreign-`Field` trait scope).
 
 // =============================================================================
 // SoA field containers
@@ -165,10 +166,10 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
 
     /// the cell-centered conserved fields carried by the decomposition halo exchange and
     /// the output gather, in a fixed order: den, mom[0..DOF], nrg (adiabatic only), chi
-    /// (the passive scalar, run-level opt-in). the set is derived HERE, beside the fields,
-    /// so an optional slot cannot be silently dropped by a hand-maintained list in the
-    /// transport; a `None` slot contributes nothing, so hydro/iso and non-dye runs are
-    /// unchanged. `bcell`/`bface` live on the mhd side-car and are appended by the caller.
+    /// (the passive scalar, run-level opt-in). the set is derived here, beside the fields,
+    /// so every optional slot the store carries reaches the transport on its own; a `None`
+    /// slot contributes nothing, so hydro/iso and dye-free runs are unchanged.
+    /// `bcell`/`bface` live on the mhd side-car and are appended by the caller.
     pub fn exchange_fields(&self) -> Vec<&Field<Sc, NDIM, M>> {
         let mut fields: Vec<&Field<Sc, NDIM, M>> = Vec::with_capacity(DOF + 3);
         fields.push(&self.den);
@@ -183,10 +184,10 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
         Self::zeros_with_energy(domain, true)
     }
 
-    /// allocate fields. `nrg` is allocated IFF `has_energy` — isothermal regimes get
-    /// `nrg = None` (no energy equation, no slot), symmetric with `prim.pre`. this makes
-    /// `has_energy()` truthful (the allocated buffer set matches the regime's energy
-    /// semantics) and stops iso wasting a per-cell field the kernels never bind.
+    /// allocate fields. `nrg` is allocated exactly when `has_energy` — isothermal regimes get
+    /// `nrg = None`, matching a closure that carries no energy equation, and symmetric with
+    /// `prim.pre`. this makes `has_energy()` truthful (the allocated buffer set matches the
+    /// regime's energy semantics) and spares iso a per-cell field the kernels leave unbound.
     pub fn zeros_with_energy(domain: &Domain<NDIM>, has_energy: bool) -> symbi_xpu::Result<Self> {
         Ok(Self {
             den: Field::zeros(domain)?,
@@ -212,17 +213,18 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
         self.nrg_field().is_some()
     }
 
-    /// **the passive-scalar-slot accessor**: the ONE accessor for the `chi`
+    /// **the passive-scalar-slot accessor**: the single accessor for the `chi`
     /// field, mirroring `nrg_field`. `None` when the run carries no dye.
     #[inline]
     pub fn chi_field(&self) -> Option<&Field<Sc, NDIM, M>> {
         self.chi.as_ref()
     }
 
-    /// **the energy-slot accessor**: the ONE
-    /// accessor for the `nrg` field. ALL readers route through this, so swapping the representation
-    /// (`Option<Field>` -> a type-level `E::Slot`) is a one-place change behind this method; without
-    /// the accessor it would be a 180-site sweep. returns the backing field, or `None` when energy is absent (isothermal).
+    /// **the energy-slot accessor**: the single
+    /// accessor for the `nrg` field. every reader routes through this, so swapping the
+    /// representation (`Option<Field>` -> a type-level `E::Slot`) is a one-place change behind this
+    /// method; spread across the call sites it would be a 180-site sweep. returns the backing
+    /// field, or `None` for isothermal regimes, which carry no energy.
     #[inline]
     pub fn nrg_field(&self) -> Option<&Field<Sc, NDIM, M>> {
         self.nrg.as_ref()
@@ -281,8 +283,8 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     }
 }
 
-/// primitive state in SoA layout. pre is None for isothermal regimes
-/// (pressure is derived from the eos and never stored). `NDIM` = grid dim, `DOF` = velocity-component
+/// primitive state in SoA layout. pre is None for isothermal regimes, where the
+/// pressure is derived from the eos at each use. `NDIM` = grid dim, `DOF` = velocity-component
 /// dim (decoupled — the `PrimFields<D>` alias fills `DOF = NDIM = D`).
 pub struct PrimFieldsGeneric<
     const NDIM: usize,
@@ -355,9 +357,9 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
         Ok(())
     }
 
-    /// **the pressure-slot accessor**: the ONE
-    /// accessor for the `pre` field. ALL readers route through this so the representation is swappable
-    /// in one place. `None` when pressure is not stored (isothermal — derived from the EOS).
+    /// **the pressure-slot accessor**: the single
+    /// accessor for the `pre` field. every reader routes through this so the representation is
+    /// swappable in one place. `None` for isothermal, where the pressure comes from the EOS.
     #[inline]
     pub fn pre_field(&self) -> Option<&Field<Sc, NDIM, M>> {
         self.pre.as_ref()
@@ -372,8 +374,8 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// the cell-centered primitive components the flux stage reconstructs from and the
     /// decomposition exchanges each step, in a fixed order: rho, vel[0..DOF], pre
     /// (adiabatic only), chi (the passive scalar, run-level opt-in). derived beside the
-    /// fields for the same reason as the conserved set — an optional slot cannot be
-    /// forgotten by a transport-side list; a `None` slot contributes nothing.
+    /// fields for the same reason as the conserved set — every optional slot the store
+    /// carries reaches the transport; a `None` slot contributes nothing.
     pub fn exchange_fields(&self) -> Vec<&Field<Sc, NDIM, M>> {
         let mut fields: Vec<&Field<Sc, NDIM, M>> = Vec::with_capacity(DOF + 2);
         fields.push(&self.rho);
@@ -657,10 +659,11 @@ pub struct MhdStaggeredFields<
     /// only used in 2D/3D.
     pub bface: BfaceFields<D, M, Sc>,
 
-    /// FOFC: snapshot of `bface` taken in `post_godunov` immediately BEFORE the corrector/euler curl
-    /// (bface is untouched until then, so this is `bface^n`). the CT redo restores `bface <-
-    /// bface_n` and re-applies the curl from the SPLICED edge EMF (HO off the fallback region, FO on
-    /// it), so the curl is applied exactly ONCE. only used in 2D/3D, only touched on a firing substage.
+    /// FOFC: snapshot of `bface` taken in `post_godunov` immediately ahead of the corrector/euler
+    /// curl (bface still holds its step-start value there, so this is `bface^n`). the CT redo
+    /// restores `bface <- bface_n` and re-applies the curl from the spliced edge EMF (HO off the
+    /// fallback region, FO on it), so the curl is applied exactly once. used in 2D/3D, and touched
+    /// on a firing substage.
     pub bface_n: BfaceFields<D, M, Sc>,
 
     /// edge-centered E: efield[d] on edge_domain(d).
@@ -869,59 +872,61 @@ pub struct RkWorkspaceGeneric<
     /// invariant `godunov_with_fused_source` establishes. dead weight unless an
     /// additive source overlay is active (the step loop gates the snapshot).
     pub u_stage: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
-    /// when set, every `u_stage` binding resolves to `u_n` instead. at the FIRST stage of a
-    /// multi-stage SSP scheme `snapshot` has just copied `cons -> u_n` and nothing has touched cons
-    /// since, so `u_n` IS the stage input — copying cons a second time into `u_stage` moves a
-    /// full-grid conserved set for no information. `u_stage` is read-only once written (only
-    /// `snapshot_stage` writes it), so the alias can never be written through. the driver sets it per
-    /// stage; `binding.rs` is the single site that honours it.
+    /// when set, every `u_stage` binding resolves to `u_n`. at the first stage of a
+    /// multi-stage SSP scheme `snapshot` has just copied `cons -> u_n` and cons still holds that
+    /// value, so `u_n` is the stage input — a second copy into `u_stage` would move a full-grid
+    /// conserved set carrying the same data. `u_stage` is read-only once written (`snapshot_stage`
+    /// is its sole writer), so the alias stays read-only too. the driver sets it per
+    /// stage; `binding.rs` is the single site that honors it.
     pub stage_input_is_un: std::sync::atomic::AtomicBool,
     /// disables the stage-0 alias, forcing the `cons -> u_stage` copy at every stage. the
-    /// REFERENCE path: a reference run evolves the same state both ways and asserts a bit-identical
-    /// trajectory, so the elision cannot silently change physics. `true` (elide) in production.
+    /// reference path: a reference run evolves the same state both ways and asserts a bit-identical
+    /// trajectory, which pins the elision to the physics. `true` (elide) in production.
     pub elide_stage_snapshot: std::sync::atomic::AtomicBool,
-    /// first-order flux-correction scratch: the HIGH-ORDER per-direction conserved fluxes, saved
+    /// first-order flux-correction scratch: the high-order per-direction conserved fluxes, saved
     /// before FOFC redoes the substage at first order (which overwrites `fields.flux`). the
     /// face-based splice reads HO here and FO from the live `fields.flux`, choosing per face by the
-    /// fallback flag so every face carries ONE flux -> the re-godunov telescopes conservatively.
-    /// only touched when a substage fires FOFC; a no-op otherwise and for regimes without FOFC.
+    /// fallback flag so every face carries a single flux -> the re-godunov telescopes
+    /// conservatively. touched when a substage fires FOFC; a no-op otherwise and for regimes
+    /// that omit FOFC.
     pub flux_ho: [ConsFieldsGeneric<NDIM, DOF, M, Sc>; NDIM],
     /// the per-cell FOFC fallback flag over the allocated domain: 1 where the high-order c2p is
-    /// unphysical, else 0, with boundary-consistent ghosts (a face is first-order iff either
-    /// adjacent cell is flagged). the splice stencil reads it at the two cells sharing each face.
+    /// unphysical, else 0, with boundary-consistent ghosts (a face is first-order exactly when
+    /// either adjacent cell is flagged). the splice stencil reads it at the two cells sharing each
+    /// face.
     pub fofc_flag: Field<Sc, NDIM, M>,
-    /// body-feedback reduction scratch, allocated on first feedback dispatch (body-free sims
-    /// never touch it, and pay neither the memory nor a per-call allocation). the feedback
-    /// kernels assign-write every cell of their dispatch region before the reduction reads
-    /// it, so reuse across calls needs no re-zeroing. sized by the first caller — the split
-    /// cartesian path needs D+5 fields, the combined curvilinear path MAX_SOURCE_BODIES*(D+5);
-    /// a sim's geometry picks exactly one path for its lifetime.
+    /// body-feedback reduction scratch, allocated on the first feedback dispatch, so a body-free
+    /// sim pays neither the memory nor a per-call allocation. the feedback kernels assign-write
+    /// every cell of their dispatch region before the reduction reads it, so a reused buffer
+    /// arrives fully defined. sized by the first caller — the split cartesian path needs D+5
+    /// fields, the combined curvilinear path MAX_SOURCE_BODIES*(D+5); a sim's geometry picks
+    /// exactly one path for its lifetime.
     pub body_scratch: std::sync::OnceLock<Vec<Field<Sc, NDIM, M>>>,
     /// the stage-local write ledger (debug builds only): the set of buffers a dispatch has
-    /// WRITTEN since the stage began, identified by address so the several wire names that alias
+    /// written since the stage began, identified by address so the several wire names that alias
     /// one buffer (`prim.mag[k]` / `bcell[k]` / `cons.mag_k`, `flux.mag_k` / `bf_d_c`) collapse to
     /// one entry. `dispatch_named` records its outputs here and checks its stage-local inputs
     /// against it.
     ///
-    /// this closes a gap the phase table cannot see. that table declares reads and writes per
-    /// PHASE, but which fields a phase touches depends on the configuration — the curved HLL flux
+    /// this closes a gap that survives the phase table. that table declares reads and writes per
+    /// phase, and which fields a phase touches depends on the configuration — the curved HLL flux
     /// consumes the materialized wave speeds while the HLLD arm solves its own fan — so a phase
     /// whose kernel set makes it a no-op still credits its declared writes and the next phase's
-    /// read check passes on a buffer nobody filled. the ledger records what was ACTUALLY written.
+    /// read check passes on an unfilled buffer. the ledger records the writes that happened.
     ///
-    /// `None` OUTSIDE a stage, which disables the check. the question "did an earlier pass of this
-    /// stage write this?" only has an answer inside one; a caller driving a kernel directly (a
-    /// harness seeding flux buffers by hand, then invoking one substrate entry point) is not in a
-    /// stage and its writes never reach this ledger.
+    /// `None` outside a stage, which disables the check. the question "did an earlier pass of this
+    /// stage write this?" has an answer inside a stage; a caller driving a kernel directly (a
+    /// harness seeding flux buffers by hand, then invoking one substrate entry point) sits outside
+    /// one, and its writes stay out of this ledger.
     #[cfg(debug_assertions)]
     pub stage_writes: std::sync::Mutex<Option<std::collections::HashSet<usize>>>,
-    /// per-registration census scratch, allocated on the first sample and REUSED after.
+    /// per-registration census scratch, allocated on the first sample and reused after.
     ///
     /// one full-grid field per accumulator plus the segment — order 384 MB for sixteen
     /// accumulators over three million cells — so allocating and freeing it per sample churns
-    /// that much memory for artifacts whose shape never changes. the exclusion default is written
-    /// once with it: ghosts do not move, and the sweep overwrites every interior cell each sample,
-    /// so nothing carries over that is not immediately replaced.
+    /// that much memory for artifacts of fixed shape. the exclusion default is written once with
+    /// it: the ghost band is static, and the sweep overwrites every interior cell each sample, so
+    /// every value a sample reads is one it has just written.
     pub census_scratch: std::sync::OnceLock<Vec<crate::census::CensusFields<NDIM, M>>>,
 }
 
@@ -959,18 +964,18 @@ pub struct PartitionGeometry<const D: usize> {
     pub spacetime: symbi_geometry::Spacetime,
 
     /// the curved-spacetime runtime scalar params (from `M::spacetime_scalars()`), `(wire-name,
-    /// value)` — e.g. `[("schwarzschild_mass", M)]`. EMPTY for flat. the godunov dispatch resolves
+    /// value)` — e.g. `[("schwarzschild_mass", M)]`. empty for flat. the godunov dispatch resolves
     /// the kernel's spacetime scalars (the lapse `schwarzschild_mass`) against this by name.
     pub spacetime_scalars: Vec<(String, f64)>,
 
-    /// grid axis -> coordinate index map. identity for cartesian / spherical / 3D, so grid
-    /// axis d IS coordinate d. the AMBIGUOUS case is the cylindrical 2D plane, where MHD
-    /// carries a 3-vector B on a 2-axis grid (DOF > ndim) and the two physical planes are
-    /// indistinguishable by DOF alone: r-z axisymmetric (`[0, 2]`, out-of-plane phi) vs r-phi
-    /// disk (`[0, 1]`, out-of-plane z). this records WHICH plane, set at construction (default
+    /// grid axis -> coordinate index map. identity for cartesian / spherical / 3D, where grid
+    /// axis d is coordinate d. the ambiguous case is the cylindrical 2D plane, where MHD
+    /// carries a 3-vector B on a 2-axis grid (DOF > ndim) and DOF alone leaves the two physical
+    /// planes indistinguishable: r-z axisymmetric (`[0, 2]`, out-of-plane phi) vs r-phi
+    /// disk (`[0, 1]`, out-of-plane z). this records which plane, set at construction (default
     /// r-z for back-compat) and overridable via [`SimStateGeneric::with_cyl_plane`]. the MHD
     /// constrained-transport seam (`StaggerComplex` edges, the metric curl, the kernel-name
-    /// suffix) reads it; hydro ignores it (DOF == ndim disambiguates the cyl plane there).
+    /// suffix) reads it; for hydro, DOF == ndim already fixes the cyl plane.
     pub axes: [usize; D],
 
     /// per-axis coordinate maps. when Some, overrides dx/x_lo for
@@ -978,8 +983,8 @@ pub struct PartitionGeometry<const D: usize> {
     pub maps: Option<[symbi_geometry::AxisMap; D]>,
 }
 
-/// the cylindrical 2D plane an MHD sim grids — the only place the grid-axis set is ambiguous
-/// (both planes carry a 3-vector B, so DOF can't tell them apart). `RZ` = axisymmetric (r, z),
+/// the cylindrical 2D plane an MHD sim grids — the one place the grid-axis set is ambiguous
+/// (both planes carry a 3-vector B, so DOF reads the same on each). `RZ` = axisymmetric (r, z),
 /// out-of-plane swirl phi; `RPhi` = the disk (r, phi), out-of-plane vertical z.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CylPlane {
@@ -1035,7 +1040,7 @@ where
 }
 
 /// typestate markers for [`SimBuilder`] (safe-path-only frontend). the builder moves
-/// `NeedsGrid -> NeedsCells -> Ready`; `build()` is callable ONLY at `Ready`, so a sim with
+/// `NeedsGrid -> NeedsCells -> Ready`; `build()` is callable at `Ready` alone, so a sim with
 /// un-seeded fields (or un-seeded MHD faces) is unrepresentable at the type level.
 pub struct NeedsGrid;
 /// grid allocated, conserved fields not yet seeded.
@@ -1116,8 +1121,8 @@ where
         self
     }
 
-    /// construct the simulation. errors if `cells` was never set, or if neither `spacing` nor
-    /// `bounds` was given. applies the cyl-plane selection if requested.
+    /// construct the simulation. requires `cells`, plus one of `spacing` or `bounds`, and errors
+    /// when either is missing. applies the cyl-plane selection if requested.
     pub fn finish(self) -> symbi_xpu::Result<SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>> {
         let n = self.n_cells.expect("SimBuilder: .cells([..]) is required");
         let dx = self.dx.unwrap_or_else(|| {
@@ -1145,9 +1150,9 @@ where
         })
     }
 
-    /// validate the grid config, then ALLOCATE the sim's fields — the typestate gate from the
-    /// config phase (`NeedsGrid`) into the seeding phase (`NeedsCells`). errors BEFORE any
-    /// allocation if `cells` is unset, neither `spacing` nor `bounds` was given, or any of
+    /// validate the grid config, then allocate the sim's fields — the typestate gate from the
+    /// config phase (`NeedsGrid`) into the seeding phase (`NeedsCells`). errors ahead of any
+    /// allocation if `cells` is unset, both `spacing` and `bounds` are missing, or any of
     /// cells / spacing / cfl is non-positive. on success the partially-built sim is carried in
     /// the returned `NeedsCells` builder (cyl-plane applied), ready for `set_initial` / `seed_faces`.
     pub fn allocate(
@@ -1234,15 +1239,16 @@ where
 // the builder owns the allocated sim from here. `set_initial` seeds the cell-centered state via
 // the `seed_cells` / `seed_cell` internals; for MHD it leaves the staggered
 // faces owed (still NeedsCells) until `seed_faces` sets them (and the bface_initialized flag).
-// `build()` is reachable ONLY at Ready, so an un-seeded sim (or un-seeded MHD faces) can't be built.
+// `build()` is reachable at Ready alone, so every built sim carries seeded cells (and, for MHD,
+// seeded faces).
 // =============================================================================
 
 /// the typestate `set_initial` lands in, keyed on the regime's conserved state: pure hydro
 /// (`ConsG`) is fully seeded -> `Ready`; MHD (`MhdConsG`) still owes the staggered faces ->
-/// `NeedsCells`. ONE `set_initial` method routes through this associated state, so the two cases
-/// don't collide as duplicate inherent definitions. impl'd on the two CONCRETE cons types (no
-/// blanket, no coherence overlap). the empty `Magnetic`/`NonMagnetic` markers (symbi-hydro) carry
-/// the same hydro-vs-mhd distinction for the `seed_faces` gating.
+/// `NeedsCells`. one `set_initial` method routes through this associated state, which keeps the
+/// two cases from colliding as duplicate inherent definitions. impl'd on the two concrete cons
+/// types, so the impls are disjoint and coherence holds. the empty `Magnetic`/`NonMagnetic`
+/// markers (symbi-hydro) carry the same hydro-vs-mhd distinction for the `seed_faces` gating.
 pub trait AfterSetInitial {
     type State;
 }
@@ -1265,8 +1271,8 @@ where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    /// rebuild the builder in a new typestate, carrying every field through unchanged. the ONE
-    /// state-transition seam — pure phantom retag, no allocation.
+    /// rebuild the builder in a new typestate, carrying every field through unchanged. the single
+    /// state-transition seam — a pure phantom retag, allocation-free.
     fn retag<St2>(self) -> SimBuilder<R, D, DOF, M, E, S, Mem, Sc, St2> {
         SimBuilder {
             regime: self.regime,
@@ -1290,7 +1296,7 @@ where
 }
 
 // cell seeding (any regime): set_initial routes to Ready (hydro) or NeedsCells (MHD) via the
-// AfterSetInitial associated state. ONE method, no duplicate-definition clash.
+// AfterSetInitial associated state. one method, so the definitions stay disjoint.
 impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
     SimBuilder<R, D, DOF, M, E, S, Mem, Sc, NeedsCells>
 where
@@ -1302,7 +1308,7 @@ where
     Sc: Scalar + OrderedNumeric,
     <R as Regime<Sc, DOF>>::Cons: SeedableCons<Sc, DOF> + AfterSetInitial,
 {
-    /// seed EVERY interior cell from a primitive closure over the cell CENTER coordinate. routes to
+    /// seed every interior cell from a primitive closure over the cell center coordinate. routes to
     /// `Ready` (pure hydro — fully seeded) or `NeedsCells` (MHD — faces still owed) via the
     /// `AfterSetInitial` associated state. routes through `SimStateGeneric::seed_cells`.
     pub fn set_initial(
@@ -1423,7 +1429,7 @@ where
     }
 }
 
-// build() is reachable ONLY at Ready: the conserved fields (and, for MHD, the staggered faces) are
+// build() is reachable at Ready alone: the conserved fields (and, for MHD, the staggered faces) are
 // guaranteed seeded by the typestate.
 impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
     SimBuilder<R, D, DOF, M, E, S, Mem, Sc, Ready>
@@ -1442,9 +1448,9 @@ where
     }
 }
 
-/// staggering of a single axis: a quantity sampled at the lower cell FACE (the
-/// index plane `coord[ax]`) or at the cell CENTER (`coord[ax] + 1/2`). the per-axis
-/// choice is the ONLY thing distinguishing a cell-centered field, a face-normal
+/// staggering of a single axis: a quantity sampled at the lower cell face (the
+/// index plane `coord[ax]`) or at the cell center (`coord[ax] + 1/2`). the per-axis
+/// choice is what distinguishes a cell-centered field, a face-normal
 /// field (`bface[d]`: Face on `d`, Center elsewhere), and an edge field — see
 /// [`PartitionGeometry::stagger_coord`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1563,7 +1569,7 @@ pub enum BoundaryType {
 pub struct Boundaries<const D: usize>(pub [[BoundaryType; 2]; D]);
 
 impl<const D: usize> Boundaries<D> {
-    /// ONE boundary type for every face (the common uniform case).
+    /// a single boundary type for every face (the common uniform case).
     pub const fn uniform(bc: BoundaryType) -> Self {
         Self([[bc; 2]; D])
     }
@@ -1594,14 +1600,14 @@ impl<const D: usize> From<BoundaryType> for Boundaries<D> {
     }
 }
 
-/// the configuration errors `SimBuilder::allocate` surfaces BEFORE allocating fields (and the
+/// the configuration errors `SimBuilder::allocate` surfaces ahead of allocating fields (and the
 /// solver/regime mismatch the phase-2 wiring will check). a typed-result config
 /// seam.
 #[derive(Debug)]
 pub enum ConfigError {
-    /// `.cells([..])` was never set.
+    /// `.cells([..])` is missing.
     MissingCells,
-    /// neither `.spacing([..])` nor `.bounds(lo, hi)` was given.
+    /// `.spacing([..])` and `.bounds(lo, hi)` are both missing; one of them is required.
     MissingSpacing,
     /// a grid scalar (cells / spacing / cfl) was non-positive.
     NonPositive { field: &'static str, value: f64 },
@@ -1652,9 +1658,9 @@ impl Timestepping {
     /// where stage `i` updates `cons = a0*u_n + ac*(cons - dt*div(F) + dt*S)`. forward-Euler is
     /// the single row `(0, 1)`; SSP-RK2 (Heun) is the predictor `(0,1)` + the trapezoidal
     /// corrector `(1/2, 1/2)`; SSP-RK3 (Shu-Osher) adds the `(3/4, 1/4)` + `(1/3, 2/3)` rows.
-    /// `a0 + ac == 1` for every row (SSP consistency). this table IS the integrator — the one
-    /// `godunov_stage` kernel reads `(a0, ac)` as runtime scalars, so adding a scheme is a row,
-    /// never a new kernel.
+    /// `a0 + ac == 1` for every row (SSP consistency). this table is the integrator — the one
+    /// `godunov_stage` kernel reads `(a0, ac)` as runtime scalars, so adding a scheme is a row
+    /// in this table.
     pub fn stages(self) -> &'static [(f64, f64)] {
         match self {
             Self::Euler => &[(0.0, 1.0)],
@@ -1708,12 +1714,12 @@ pub struct ImmersedBodies<const NDIM: usize> {
     /// accepted per-cell mass removal for each body during the latest
     /// penalization pass. each body row follows `geom.interior.iter()` order.
     accretion_receipts: std::sync::Mutex<Vec<Vec<f64>>>,
-    /// the GLOBAL fast-magnetosonic Alfven stiffness c_a2 = max_interior |B|^2/rho for the wall
+    /// the global fast-magnetosonic Alfven stiffness c_a2 = max_interior |B|^2/rho for the wall
     /// relaxation. the max is a domain-global property, so under domain decomposition the
     /// decomposed loop reduces the per-tile maxima and publishes the global value here; the
     /// penalize then relaxes every tile's wall at the monolithic rate (a per-tile local max makes
     /// the same wall cell relax differently in a tile than in the monolithic run). NaN (the
-    /// default) means "compute the local max", which IS the global max on a monolithic single
+    /// default) means "compute the local max", which is the global max on a monolithic single
     /// grid. raw f64 bits for Sync interior mutability (set through the shared FieldStore inside
     /// the tiled loop).
     c_a2_override: std::sync::atomic::AtomicU64,
@@ -1754,10 +1760,10 @@ impl<const NDIM: usize> ImmersedBodies<NDIM> {
     }
 }
 
-/// the LOCAL fast-magnetosonic Alfven stiffness c_a2 = max over this store's interior of
-/// |B|^2/rho, the wall-relaxation rate lift for a magnetized immersed body. 0 off MHD (no
-/// magnetic field), where the rate reduces to the sound speed exactly. on a monolithic single
-/// grid this local max IS the global max; the decomposed loop reduces it across tiles and
+/// the local fast-magnetosonic Alfven stiffness c_a2 = max over this store's interior of
+/// |B|^2/rho, the wall-relaxation rate lift for a magnetized immersed body. 0 off MHD, where the
+/// gas carries no magnetic field and the rate reduces to the sound speed exactly. on a monolithic
+/// single grid this local max is the global max; the decomposed loop reduces it across tiles and
 /// publishes the global value via `ImmersedBodies::set_c_a2_override`.
 pub fn local_c_a2_max<const NDIM: usize, const DOF: usize, Mem, Sc>(
     store: &FieldStore<NDIM, DOF, Mem, Sc>,
@@ -1786,12 +1792,12 @@ where
     })
 }
 
-/// the simulation's mutable SUBSTANCE: every buffer + grid + time-state a kernel reads
-/// or writes. parametrized ONLY by storage shape — grid dim `NDIM`,
-/// vector dim `DOF`, memory space `Mem`, scalar `Sc` — NOT by the physics tags (`R`/`M`/`E`)
-/// or the executor (`S`). this is the keystone decoupling: a `KernelSet`
+/// the simulation's mutable substance: every buffer + grid + time-state a kernel reads
+/// or writes. parametrized by storage shape alone — grid dim `NDIM`,
+/// vector dim `DOF`, memory space `Mem`, scalar `Sc` — leaving the physics tags (`R`/`M`/`E`)
+/// and the executor (`S`) outside it. this is the keystone decoupling: a `KernelSet`
 /// takes `&FieldStore` and so carries 4 params, and the energy/schema bounds
-/// that ripple off `R` become LOCAL to this one struct; without it they would be an 80-site sweep.
+/// that ripple off `R` stay local to this one struct; spread out they would be an 80-site sweep.
 pub struct FieldStore<
     const NDIM: usize,
     const DOF: usize,
@@ -1839,7 +1845,7 @@ pub struct FieldStore<
 
     // ---- mesh motion (ALE) ----
     pub motion: MotionState<f64>,
-    // traced scale-factor law a(t)/a_dot(t); when present the time loop evaluates it EXACTLY each
+    // traced scale-factor law a(t)/a_dot(t); when present the time loop evaluates it exactly each
     // (sub)stage. None = static / linear.
     pub motion_law: Option<symbi_hydro::motion_law::MotionLaw>,
 
@@ -1852,9 +1858,9 @@ pub struct FieldStore<
     pub censuses: Vec<crate::census::RegisteredCensus>,
 }
 
-/// the TYPE-LEVEL physics tags: regime, metric, eos. pure config — never read by a kernel
-/// dispatch (the concrete `KernelSet` bakes `R::SPEC` / `eos_param` at construction); the
-/// sim-level helpers (`seed_cell`, `cons_at`, `to_conserved`) read them. holding them apart
+/// the type-level physics tags: regime, metric, eos. pure config, read by the sim-level helpers
+/// (`seed_cell`, `cons_at`, `to_conserved`); a kernel dispatch reads the concrete `KernelSet`,
+/// which bakes `R::SPEC` / `eos_param` at construction. holding them apart
 /// from `FieldStore` is what keeps the `R::Energy` / `R::Schema` bounds off the kernel path.
 pub struct Physics<R, M, E> {
     pub regime: R,
@@ -1877,7 +1883,7 @@ pub struct Context<S: ExecutionSpace> {
 impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>
     FieldStore<NDIM, DOF, Mem, Sc>
 {
-    /// THE stage-INPUT conserved set — the state an SSP stage's sources and its FOFC fallback must
+    /// the stage-input conserved set — the state an SSP stage's sources and its FOFC fallback
     /// evaluate against. it is `u_n` at the first stage of a multi-stage scheme (where `snapshot`
     /// has already captured it and the driver elides the redundant `cons -> u_stage` copy), and the
     /// `u_stage` snapshot otherwise. every reader routes here; branching on
@@ -1983,12 +1989,12 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     }
 }
 
-/// **the storage seam:** `SimStateGeneric` `Deref`s to its `FieldStore`. this is a
-/// DELIBERATE seam; the `Deref` is not inheritance: the `FieldStore` IS the sim's
-/// substance (1300+ `sim.fields` / `sim.geom` / `sim.time` accesses), while `physics` /
-/// `ctx` are rare type-level side-cars reached explicitly (`sim.physics.regime`,
-/// `sim.ctx.exec`). routing the substance through ONE target keeps every storage access —
-/// and every `kernels.flux(sim, ..)` (which coerces `&Sim -> &FieldStore`) — unchanged.
+/// **the storage seam:** `SimStateGeneric` `Deref`s to its `FieldStore`. a deliberate seam
+/// expressing containment: the `FieldStore` is the sim's substance (1300+ `sim.fields` /
+/// `sim.geom` / `sim.time` accesses), while `physics` / `ctx` are rare type-level side-cars
+/// reached explicitly (`sim.physics.regime`, `sim.ctx.exec`). routing the substance through
+/// one target keeps every storage access — and every `kernels.flux(sim, ..)` (which coerces
+/// `&Sim -> &FieldStore`) — unchanged.
 pub struct SimStateGeneric<
     R: Regime<Sc, NDIM>,
     const NDIM: usize,
@@ -2098,10 +2104,11 @@ pub fn axis_name(ax: usize) -> &'static str {
 }
 
 // the uniform IC seam: seed a cell from a primitive, regime-agnostically. invokes the
-// regime at the VECTOR dimension DOF (not the grid dim) so the state vector is full even
+// regime at the vector dimension DOF rather than the grid dim, so the state vector is full even
 // on a 1.5D/2.5D grid, then routes through to_conserved + the EnergyModel-generic
-// scatter_from + (for MHD) bcell <- the magnetic 3-vector. ONE entry point for every
-// regime/EOS — no hand-built `Cons { den, mom, nrg }`, no iso-vs-adiabatic improvisation.
+// scatter_from + (for MHD) bcell <- the magnetic 3-vector. one entry point for every
+// regime/EOS, so `Cons { den, mom, nrg }` is assembled here and the iso-vs-adiabatic split
+// is handled in one place.
 impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
     SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>
 where
@@ -2116,12 +2123,12 @@ where
     /// seed one cell from a primitive: conserved gas state <- to_conserved(prim) (scattered
     /// via the EnergyModel-generic scatter_from), and — for MHD regimes — the cell-centered B
     /// <- the primitive's magnetic 3-vector. the staggered bface is seeded separately by the
-    /// IC (face values are not a function of a single cell's primitive).
+    /// IC, since a face value is a property of the face rather than of a single cell's primitive.
     ///
-    /// on a curved spacetime the conserved momentum is the Valencia COVARIANT `S_i = rho h W^2
+    /// on a curved spacetime the conserved momentum is the Valencia covariant `S_i = rho h W^2
     /// gamma_ij v^j`, so the seed evaluates the spatial metric at the cell and stores the covariant
-    /// state (via `to_conserved_covariant`) — the metric radius is the VOLUME-WEIGHTED radial
-    /// centroid, the SAME point the metric-aware c2p inverts at, so the storage<->recovery round-trip
+    /// state (via `to_conserved_covariant`) — the metric radius is the volume-weighted radial
+    /// centroid, the point the metric-aware c2p inverts at, so the storage<->recovery round-trip
     /// is exact per cell. flat (Minkowski) keeps the orthonormal `to_conserved`.
     pub fn seed_cell(&self, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim) {
         use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
@@ -2129,9 +2136,9 @@ where
         let cons = if matches!(self.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
             <R as Regime<Sc, DOF>>::to_conserved(&self.physics.regime, &self.physics.eos, prim)
         } else {
-            // the metric point must be the SAME point the in-kernel geometry evaluates at
+            // the metric point matches the point the in-kernel geometry evaluates at
             // (`cell_geometry_gv`), so the covariant storage <-> metric-aware c2p round-trip
-            // is exact per cell. the spelling is CHART-dependent:
+            // is exact per cell. the spelling is chart-dependent:
             //   cartesian  — the face midpoint (lo + hi)/2 on every gridded axis; slot 0 is
             //                a plain length coordinate (treating it as a radius and applying the
             //                spherical volume-weighted formula to x mislocates the metric by
@@ -2159,18 +2166,18 @@ where
                 }))
             } else {
                 let chart = <M as Metric<Sc, DOF>>::geometry(&self.physics.metric);
-                // EVERY gridded slot takes its moment from the shared owner the in-kernel
+                // every gridded slot takes its moment from the shared owner the in-kernel
                 // geometry uses — under the chart's volume element the radial weight differs
                 // between spherical (r^2 dr) and cylindrical (R dR), and the spherical polar slot
                 // is sin-weighted rather than centered.
-                // grid axis `d` carries COORDINATE slot `axes[d]`, which is not the identity on
-                // the cylindrical r-z plane (axes = [0, 2]: grid axis 1 is the z coordinate,
+                // grid axis `d` carries coordinate slot `axes[d]`, which departs from the identity
+                // on the cylindrical r-z plane (axes = [0, 2]: grid axis 1 is the z coordinate,
                 // slot 2). indexing the slot by the grid axis puts z in the azimuthal slot and
                 // leaves slot 2 at zero, so a metric forming the spherical radius from the
                 // cylindrical pair, r = sqrt(R^2 + z^2), reads r = R everywhere off the
-                // midplane. the centroid moment is likewise a property of the COORDINATE, not
-                // of the grid axis.
-                // the moment depends on the MEASURE the scheme's cell average is taken against.
+                // midplane. the centroid moment is likewise a property of the coordinate, and
+                // the grid axis reaches it through `axes`.
+                // the moment depends on the measure the scheme's cell average is taken against.
                 // the area-weighted law integrates the chart's volume element and reads the
                 // volume-weighted centroid; the densitized relativistic-hydro law integrates the
                 // plain coordinate volume (its measure rides inside the conserved variable) and
@@ -2190,10 +2197,10 @@ where
                 Tensor::new(std::array::from_fn(|slot| {
                     match self.geom.axes.iter().position(|&a| a == slot) {
                         Some(d) => Sc::from_f64(centroid_of(d, slot)),
-                        // an ungridded POLAR slot (DOF-lifted vectors on a 1D radial grid) takes
+                        // an ungridded polar slot (DOF-lifted vectors on a 1D radial grid) takes
                         // the exact equatorial pi/2; zero would degenerate
                         // gamma_{phi phi} = r^2 sin^2(theta). every other ungridded slot is a
-                        // symmetry direction the metric never reads.
+                        // symmetry direction, so the metric is independent of its value.
                         None if slot == 1 && chart == symbi_geometry::Geometry::Spherical => {
                             Sc::from_f64(std::f64::consts::FRAC_PI_2)
                         }
@@ -2238,7 +2245,7 @@ where
         }
     }
 
-    /// seed EVERY interior cell from a closure over its physical CENTER position — the
+    /// seed every interior cell from a closure over its physical center position — the
     /// index->coordinate loop every IC otherwise hand-rolls. `sim.seed_cells(|x| prim_at(x))`
     /// replaces `for c in interior { let x = ...; sim.seed_cell(c, &prim_at(x)); }`. for MHD,
     /// pair with `seed_face` for the staggered face B (the CT ground truth).
@@ -2249,7 +2256,7 @@ where
         }
     }
 
-    /// rewrite EVERY interior cell in primitive space: `f` receives the cell's physical
+    /// rewrite every interior cell in primitive space: `f` receives the cell's physical
     /// center and its recovered primitive (c2p) and returns the primitive to store (p2c).
     /// the perturbation seam for an already-seeded state — a velocity field laid over a
     /// hydrostatic base, for instance — where re-deriving the base profile at the call
@@ -2265,8 +2272,8 @@ where
         }
     }
 
-    /// gather the regime's CONSERVED state at a cell — the inverse of `seed_cell`'s scatter, with
-    /// the cell-centered B folded in for MHD, so a caller never hand-assembles
+    /// gather the regime's conserved state at a cell — the inverse of `seed_cell`'s scatter, with
+    /// the cell-centered B folded in for MHD, so a caller receives a ready
     /// `MhdCons { hydro: Cons { den: *..view().at(c), mom: Tensor::new([..]), nrg: .. }, mag: .. }`.
     pub fn cons_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Cons {
         use symbi_hydro::state::SeedableCons;
@@ -2400,12 +2407,13 @@ where
             None
         };
 
-        // prim.pre allocation is REGIME-uniform across CPU and GPU: adiabatic
-        // allocates it (the pressure primitive); isothermal does NOT — iso's pressure lives in the
+        // prim.pre allocation is regime-uniform across CPU and GPU: adiabatic
+        // allocates it (the pressure primitive), and iso's pressure lives in the
         // kernel-set's substrate-owned `self.pre` (= cs^2*rho), bound by every iso kernel via the
-        // `pre` override on CPU AND GPU. an `|| S::IS_DEVICE` term would allocate a DEAD placeholder on
-        // iso-GPU (a positional-ABI "derefs pre unconditionally" path that is unused; nothing
-        // writes or reads `sim.fields.prim.pre` for iso) — a CPU/GPU storage divergence avoided here.
+        // `pre` override on CPU and GPU alike. an `|| S::IS_DEVICE` term would allocate a dead
+        // placeholder on iso-GPU (a positional-ABI "derefs pre unconditionally" path that stays
+        // unused, since `sim.fields.prim.pre` is untouched for iso) — a CPU/GPU storage
+        // divergence avoided here.
         let alloc_pre = has_energy;
 
         let fields = PartitionFieldsGeneric {
@@ -2506,8 +2514,8 @@ where
     /// select the cylindrical 2D MHD plane (r-z axisymmetric vs r-phi disk) — the grid-axis set
     /// the constrained-transport seam reads. only meaningful for a Cylindrical D==2 sim; a no-op
     /// otherwise (the axis set is unambiguous identity / `[0,2]` default). r-z is the default, so
-    /// call this with `RPhi` to grid the disk plane (out-of-plane vertical B_z). must be set
-    /// BEFORE seeding / evolving (it picks which `_cyl_rz` / `_cyl_rphi` kernels dispatch).
+    /// call this with `RPhi` to grid the disk plane (out-of-plane vertical B_z). set it ahead of
+    /// seeding / evolving (it picks which `_cyl_rz` / `_cyl_rphi` kernels dispatch).
     pub fn with_cyl_plane(mut self, plane: CylPlane) -> Self {
         if self.geom.coords == symbi_geometry::Geometry::Cylindrical && D == 2 {
             self.geom.axes = match plane {
@@ -2643,9 +2651,9 @@ where
     }
 
     /// attach the bonded-fragment pair physics (bonds + contact + mutual
-    /// gravity). required whenever the collection carries fragments — without
-    /// it a two-way fragment would feel wall forces but never move, so the
-    /// mismatch fails loud here rather than silently freezing bodies.
+    /// gravity). required whenever the collection carries fragments — the pair
+    /// physics is what turns the wall forces a two-way fragment feels into
+    /// motion, so a collection missing it fails loud here.
     pub fn attach_fragment_physics(&mut self, physics: symbi_ib::FragmentPhysics) {
         let im = self
             .immersed
@@ -2728,8 +2736,8 @@ where
 {
     /// reduce total mass / energy and max|div B| over this level's interior. cell
     /// volumes come from the block geometry so the sums are correct on curvilinear
-    /// grids (r^2 sin(theta) etc.) as well as cartesian. returns `None` when the
-    /// fields are not host-accessible (a device-resident gpu run), so the caller
+    /// grids (r^2 sin(theta) etc.) as well as cartesian. returns `None` on a
+    /// device-resident gpu run, where the fields stay off the host, so the caller
     /// simply omits the diagnostics.
     pub fn conservation_diag(&self) -> Option<ConservationDiag> {
         if !Mem::IS_HOST_ACCESSIBLE {
@@ -3279,10 +3287,10 @@ mod tests {
     use symbi_hydro::newtonian::Newtonian;
     use symbi_xpu::{CpuSpace, HostMemory};
 
-    // THE atlas invariant: the decomposition transport set is DERIVED from the store's
-    // populated slots, not a hand-maintained list. a passive scalar (dye), allocated as a
-    // run-level opt-in, must appear in the exchanged set the moment it exists and must be
-    // absent otherwise -- a hand-listed set is exactly what silently dropped it before.
+    // the atlas invariant: the decomposition transport set is derived from the store's
+    // populated slots. a passive scalar (dye), allocated as a run-level opt-in, appears in
+    // the exchanged set exactly while it exists -- a hand-listed set is what silently
+    // dropped it before.
     #[test]
     fn exchange_set_tracks_the_optional_passive_scalar_slot() {
         let domain = Domain::<2>::new([
@@ -3304,13 +3312,13 @@ mod tests {
         assert_eq!(cons.exchange_fields().len(), 4, "den, mom[0], mom[1], nrg");
         assert_eq!(prim.exchange_fields().len(), 4, "rho, vel[0], vel[1], pre");
 
-        // allocating the dye extends BOTH sets by exactly one, with no other change.
+        // allocating the dye extends each set by exactly one, leaving the rest as it was.
         cons.alloc_chi(&domain).unwrap();
         prim.alloc_chi(&domain).unwrap();
         assert_eq!(cons.exchange_fields().len(), 5, "dye adds cons.chi");
         assert_eq!(prim.exchange_fields().len(), 5, "dye adds prim.chi");
 
-        // the appended field IS the chi slot (the gather/exchange zip relies on chi being
+        // the appended field is the chi slot (the gather/exchange zip relies on chi being
         // last so global and tile sets stay aligned when both carry it).
         let cons_last = *cons.exchange_fields().last().unwrap() as *const _;
         assert_eq!(cons_last, cons.chi_field().unwrap() as *const _);
@@ -3318,8 +3326,8 @@ mod tests {
         assert_eq!(prim_last, prim.chi_field().unwrap() as *const _);
     }
 
-    // isothermal drops the energy/pressure slot, so the derived set must shrink -- the
-    // enumeration reads the actual slots, it does not assume the adiabatic arity.
+    // isothermal drops the energy/pressure slot, so the derived set shrinks -- the
+    // enumeration reads the slots the store holds and reports their count.
     #[test]
     fn exchange_set_omits_the_absent_isothermal_energy_slot() {
         let domain = Domain::<2>::new([

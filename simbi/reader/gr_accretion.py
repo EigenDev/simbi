@@ -2,14 +2,14 @@
 # gr_accretion.py
 #
 # the GR accretion well-posedness certificate: the rest-mass accretion rate as a
-# SURFACE FLUX on coordinate spheres, extracted at several radii. in steady state
-# a well-posed black-hole flow has Mdot(r_ex) INDEPENDENT of r_ex — the causal
+# surface flux on coordinate spheres, extracted at several radii. in steady state
+# a well-posed black-hole flow has Mdot(r_ex) independent of r_ex — the causal
 # analog of the Newtonian "Mdot independent of r_mask" gate. the inter-radius
-# spread IS the error bar.
+# spread is the error bar.
 #
 #   Mdot(r_ex) = - oint rho u^r sqrt(-g) dtheta dphi,   sqrt(-g) = r^2 sin(theta)
 #
-# velocity convention: the substrate stores the valencia CONTRAVARIANT 3-velocity
+# velocity convention: the substrate stores the valencia contravariant 3-velocity
 # v^i (the eulerian-observer velocity, = u^i/W + beta^i/alpha); the physical
 # orthonormal V^ihat differs by the spatial-metric scale factors. the lorentz
 # factor and coordinate 4-velocity are then
@@ -21,7 +21,8 @@
 # supported diagonal spherically-symmetric charts (both have sqrt(-g) = r^2 sin(theta)):
 #   schwarzschild  f = 1 - 2M/r,   gamma_rr = 1/f,  beta^r = 0,        alpha = sqrt(f)
 #   schwarzschild_ks  h = 1 + 2M/r, gamma_rr = h, beta^r = 2M/(r+2M), alpha = 1/sqrt(h)
-# kerr (non-diagonal spatial metric, frame dragging) is unsupported here.
+# kerr sits outside this pair: its spatial metric carries off-diagonal terms and
+# frame dragging, which this reducer leaves to a dedicated chart.
 # =============================================================================
 
 from __future__ import annotations
@@ -219,7 +220,7 @@ def cartesian_ks_u_xy(
     y: Array,
     mass: float,
 ) -> tuple[Array, Array, Array]:
-    """(u^x, u^y, W) from the stored CONTRAVARIANT valencia velocity on the cartesian
+    """(u^x, u^y, W) from the stored contravariant valencia velocity on the cartesian
     kerr-schild equatorial slice. the spatial metric is NON-diagonal,
     gamma_ij = delta_ij + 2H l_i l_j with H = M/r and l = x_i/r, so the norm carries
     the cross term; the shift is beta^i = (2H/(1+2H)) l^i and alpha = 1/sqrt(1+2H)."""

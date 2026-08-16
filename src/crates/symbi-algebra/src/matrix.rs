@@ -314,8 +314,8 @@ impl_matrix_vec_mul!(f32);
 // ============================================================
 
 /// `is_symmetric` requires host-side ordering (`if diff.abs() > tol`) — bound
-/// on `OrderedNumeric`, impl'd only by host numeric types (f64, f32). tracing
-/// carriers (Gv) cannot be smuggled in, preserving the A1 discipline.
+/// on `OrderedNumeric`, impl'd by the host numeric types (f64, f32). the bound
+/// admits host carriers alone, preserving the A1 discipline.
 impl<S: OrderedNumeric, const N: usize> Matrix<S, N> {
     pub fn is_symmetric(&self, tol: S) -> bool {
         for ii in 0..N {

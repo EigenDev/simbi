@@ -286,7 +286,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         choices=["pcolormesh", "polygons"],
         default=None,
         help="2d rendering mode (default: pcolormesh; refined data always uses"
-        " polygons, which a quadmesh cannot represent)",
+        " polygons, since a quadmesh represents a single uniform grid)",
     )
 
     # =========================================================================
@@ -436,7 +436,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
 
     # =========================================================================
-    # config file and props overrides (ALL component styling goes here)
+    # config file and props overrides; component styling lives here in full
     # =========================================================================
     parser.add_argument(
         "--config",

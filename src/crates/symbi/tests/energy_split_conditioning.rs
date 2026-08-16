@@ -14,7 +14,7 @@
 // the law: the reported value is the analytic ratio of the state it is given, it is the
 // MAXIMUM over the interior rather than a mean (one badly conditioned cell is the
 // problem, and an average over a large quiescent domain buries it), and it is absent for
-// the regimes where the subtraction does not occur.
+// the regimes whose c2p takes another route entirely.
 // =============================================================================
 
 use symbi::sim::state::*;
@@ -76,9 +76,9 @@ fn the_reported_ratio_is_the_analytic_one() {
 
 #[test]
 fn a_single_ill_conditioned_cell_is_reported_over_a_quiescent_domain() {
-    // the MAXIMUM, not a mean. the failure is local -- one cell whose internal energy is a
-    // vanishing fraction of its total -- and a domain average over a large quiet region
-    // reports it as healthy, which is exactly the silence this diagnostic removes.
+    // the statistic is the maximum over the interior. the failure is local -- one cell whose
+    // internal energy is a vanishing fraction of its total -- and a domain average over a large
+    // quiet region reports it as healthy, which is exactly the silence this diagnostic removes.
     let sim = uniform_newtonian(0.1, 1.0);
     let quiet = sim
         .conservation_diag()
@@ -124,9 +124,9 @@ fn a_single_ill_conditioned_cell_is_reported_over_a_quiescent_domain() {
 
 #[test]
 fn the_ratio_is_absent_where_the_subtraction_does_not_happen() {
-    // relativistic c2p is a bracketed root-find on a master function, not this
-    // subtraction, so reporting a newtonian-shaped ratio there would be a category error
-    // rather than a conservative over-report.
+    // relativistic c2p is a bracketed root-find on a master function, leaving the E - KE
+    // subtraction outside its algorithm entirely; reporting a newtonian-shaped ratio there
+    // would be a category error, well past a merely conservative over-report.
     let sim = SimRhd::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N])
         .spacing([1.0 / N as f64])
@@ -145,8 +145,8 @@ fn the_ratio_is_absent_where_the_subtraction_does_not_happen() {
         "a relativistic regime reported {:?}, but its c2p performs no E - KE subtraction",
         diag.max_ke_over_eint
     );
-    // the relativistic diagnostic that IS defined must still be present, so this is a
-    // scoping statement rather than the whole diagnostic having gone missing.
+    // the relativistic diagnostic that is defined stays populated, which makes this a scoping
+    // statement about one field and leaves the diagnostic as a whole live.
     assert!(
         diag.max_w.is_some(),
         "max_w must remain populated for a relativistic regime"

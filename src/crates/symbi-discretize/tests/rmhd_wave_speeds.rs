@@ -1,14 +1,14 @@
 // =============================================================================
 // rmhd_wave_speeds.rs
 //
-// validates the substrate RMHD CFL wave-speed MAP — the fully-gv `rmhd_wave_speed_map_gv`
-// (symbi-hydro's `Rmhd::wave_speeds_axis`, the SAME quartic the flux HLLE consumes, traced
-// at S=Gv with the in-kernel metric width + max-reduction in ONE graph) — against a
+// validates the substrate RMHD CFL wave-speed map — the fully-gv `rmhd_wave_speed_map_gv`
+// (symbi-hydro's `Rmhd::wave_speeds_axis`, the same quartic the flux HLLE consumes, traced
+// at S=Gv with the in-kernel metric width + max-reduction in one graph) — against a
 // straight-Rust transcription of wave_speeds.hpp::rmhd::wave_speeds.
 //
-// the SPEED physics itself (Eq.57 / Eq.58 / Eq.56 across regimes, and the
+// the speed physics itself (Eq.57 / Eq.58 / Eq.56 across regimes, and the
 // solve_cubic / solve_quartic polynomial solvers) is validated at the single source
-// in symbi-hydro (rmhd.rs tests); this test pins the substrate COMPOSITION: that the gv
+// in symbi-hydro (rmhd.rs tests); this test pins the substrate composition: that the gv
 // trace yields the right ABI manifest and the per-axis max with inv_dx is right.
 // =============================================================================
 
@@ -240,9 +240,9 @@ fn rmhd_wave_speed_map_bounds_cpp_quartic() {
     // the 3D CFL map (RMHD is 3D): lambda = max_d (max(|lambda_-|, |lambda_+|) * inv_dx_d).
     // the map traces `rmhd_magnetosonic_cfl_speeds` (the cheap c_f^2 upper bound); the
     // exact mignone & del zanna quartic stays on the riemann/flux path. so the
-    // contract is CFL-SAFETY: the bound must never
-    // UNDER-estimate the exact characteristic speed (an under-estimate would make dt too large
-    // and the scheme unstable), and it must stay subluminal. both are validated per state.
+    // contract is CFL-safety: the bound sits at or above the exact characteristic speed
+    // (an under-estimate would make dt too large and the scheme unstable), and it stays
+    // subluminal. both are validated per state.
     let g = 5.0 / 3.0;
     let states = [
         ([1.0, 0.1, 0.0, 0.0], 1.0, [0.5, 0.3, 0.2]),
@@ -273,7 +273,7 @@ fn rmhd_wave_speed_map_bounds_cpp_quartic() {
                 lo.abs().max(hi.abs())
             })
             .fold(0.0_f64, f64::max);
-        // never under-estimate (CFL-safe): the magnetosonic bound dominates the exact quartic.
+        // CFL-safe: the magnetosonic bound sits at or above the exact quartic.
         assert!(
             got[i] >= exact - 1e-9,
             "map state {i}: bound {} under-estimates exact quartic {exact} -> CFL-unsafe",

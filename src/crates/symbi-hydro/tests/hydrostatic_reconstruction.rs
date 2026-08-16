@@ -6,29 +6,29 @@
 // tolerance the proof allows -- roundoff where the statement is exact, a measured rate
 // where it is asymptotic.
 //
-//   T1 WELL-BALANCED. on a discretely balanced isentrope the two sides of every face
-//      agree to roundoff, so the numerical flux at rest carries no dissipation and the
+//   T1 well-balanced. on a discretely balanced isentrope the two sides of every face
+//      agree to roundoff, so the numerical flux at rest carries zero dissipation and the
 //      state is a discrete fixed point. this is what removes the entropy leak that
 //      forces a compressibility clamp onto the low-mach scheme.
 //
-//   T2 GRAVITY-FREE REDUCTION. with no potential difference across the stencil the
-//      scheme is BIT-IDENTICAL to plain theta-limited reconstruction, so every
-//      gravity-free result in the suite is untouched by construction rather than by
-//      re-validation.
+//   T2 gravity-free reduction. at zero potential difference across the stencil the
+//      scheme is bit-identical to plain theta-limited reconstruction, so every
+//      gravity-free result in the suite carries over by construction.
 //
-//   T3 ORDER. on a smooth state that is NOT an equilibrium the reconstruction is still
-//      second-order, so well-balancing costs no accuracy where it buys nothing.
+//   T3 order. on a smooth state away from equilibrium the reconstruction is still
+//      second-order, so the scheme keeps its order where well-balancing has nothing
+//      to gain.
 //
-//   T4 ERROR BOUND. on a hydrostatic column that is not isentropic the residual face
+//   T4 error bound. on a hydrostatic column with varying entropy the residual face
 //      jump is first order in the entropy variation across a cell and vanishes with it,
-//      so the scheme degrades continuously rather than at a threshold.
+//      so the scheme degrades continuously.
 //
-//   T5/T6 RECONSTRUCTION-AGNOSTIC. the well-balancing lives in the DEPARTURE TRANSFORM, not
-//      in the limiter that consumes it, so a parabolic (ppm-shaped) operator inherits T1 with
-//      no separate derivation. its gravity-free reduction is to ROUNDOFF rather than
+//   T5/T6 reconstruction-agnostic. the well-balancing lives in the departure transform,
+//      upstream of the limiter that consumes it, so a parabolic (ppm-shaped) operator
+//      inherits T1 directly. its gravity-free reduction holds to roundoff, where plm's is
 //      bit-exact: plm's face value is built from one-sided differences about an anchor whose
 //      departure is exactly zero, which rounds away to nothing, while a parabola is a weighted
-//      sum over four cells whose re-centring lands within a few ulp. measured, not assumed.
+//      sum over four cells whose re-centring lands within a few ulp. measured, and recorded.
 //
 // run: cargo test -p symbi-hydro --test hydrostatic_reconstruction -- --nocapture
 // =============================================================================
@@ -36,13 +36,13 @@
 use symbi_hydro::hydrostatic::{hydrostatic_face, plain_face};
 
 const GAMMA: f64 = 5.0 / 3.0;
-/// swept over BOTH limiter arms: theta-MC at +2, van leer at -1 (the kernel selects the
+/// swept over both limiter arms: theta-MC at +2, van leer at -1 (the kernel selects the
 /// smooth harmonic limiter on a negative theta, and a host reference that only ever ran
 /// positive theta was blind to a sign-flipped slope on that arm).
 const THETAS: [f64; 2] = [2.0, -1.0];
 const THETA: f64 = 2.0;
 /// the gravitating mass sits one domain width below x = 0, so the column covers r in
-/// [1, 2] with no singularity and a potential that is genuinely curved across it.
+/// [1, 2], clear of the singularity, with a potential that is genuinely curved across it.
 const G_OFFSET: f64 = 1.0;
 const GM: f64 = 3.0;
 
@@ -59,16 +59,17 @@ fn isentrope(x: f64, k_entropy: f64, h_const: f64) -> (f64, f64) {
 }
 
 /// a hydrostatic column whose entropy varies: `K(x) = k0 (1 + eps * x)`. integrating
-/// `dp/dx = -rho dphi/dx` with `p = K rho^gamma` no longer has a closed form, so the state
+/// `dp/dx = -rho dphi/dx` with `p = K rho^gamma` leaves the closed-form family, so the state
 /// is built by marching the balance on a grid far finer than the stencil and sampling it.
-/// eps = 0 returns the isentrope, which is what makes T4 a continuous statement rather
-/// than a comparison of two different constructions.
+/// eps = 0 returns the isentrope, which is what makes T4 a continuous statement about one
+/// construction.
 fn stratified_column(xs: &[f64], eps: f64, k0: f64, rho0: f64) -> Vec<(f64, f64)> {
-    // the column is marched DIRECTLY onto the stencil points, with many substeps between
-    // consecutive ones and no interpolation. sampling a fine grid by linear interpolation
-    // instead puts an O(h_fine^2) error into the state, and at small entropy variation that
-    // error exceeds the residual being measured -- the observed order in eps then bends
-    // toward zero and reports a property of the harness rather than of the scheme.
+    // the column is marched directly onto the stencil points, with many substeps between
+    // consecutive ones, so every stencil value comes straight from the integrator. sampling a
+    // fine grid by linear interpolation instead puts an O(h_fine^2) error into the state, and
+    // at small entropy variation that error exceeds the residual being measured -- the
+    // observed order in eps then bends toward zero and reports a property of the harness in
+    // place of the scheme.
     let k_of = |x: f64| k0 * (1.0 + eps * x);
     // dp/dx = -rho dphi/dx with p = K(x) rho^gamma, i.e.
     // K gamma rho^(gamma-1) rho' = -rho phi' - K' rho^gamma.
@@ -150,10 +151,10 @@ fn face_jump_theta(
 
 #[test]
 fn t1_the_face_jump_vanishes_on_a_discretely_balanced_isentrope() {
-    // the defining property. a limited reconstruction of the STATE leaves an O(dx^2) jump on
-    // this column; reconstructing the deviation leaves nothing, because the deviation is
-    // identically zero in the whole stencil. the positive control below shows the plain
-    // scheme really does leave a jump here, so passing is not vacuous.
+    // the defining property. a limited reconstruction of the state leaves an O(dx^2) jump on
+    // this column; reconstructing the deviation leaves zero, because the deviation is
+    // identically zero in the whole stencil. the positive control in this loop shows the plain
+    // scheme really does leave a jump here, so a pass carries weight.
     for theta in THETAS {
     for n in [16usize, 32, 64] {
         let h = 1.0 / n as f64;
@@ -200,8 +201,8 @@ fn t1_the_face_jump_vanishes_on_a_discretely_balanced_isentrope() {
 #[test]
 fn t2_it_is_bit_identical_to_plain_reconstruction_without_gravity() {
     // with a flat potential the local profile is the constant state, every departure is the
-    // plain difference, and the limiter sees identical arguments. BIT-identical, not close:
-    // the enthalpy ratio is exactly 1 and `1.0.powf(x)` is exact, so nothing rounds.
+    // plain difference, and the limiter sees identical arguments. identical to the last bit:
+    // the enthalpy ratio is exactly 1 and `1.0.powf(x)` is exact, so every operation is exact.
     // states chosen to span smooth, extremal and sign-flipping stencils so the limiter's
     // every branch is exercised.
     let cases: [[f64; 3]; 6] = [
@@ -241,9 +242,9 @@ fn t2_it_is_bit_identical_to_plain_reconstruction_without_gravity() {
 
 #[test]
 fn t3_it_stays_second_order_on_a_smooth_non_equilibrium_state() {
-    // well-balancing must not buy its exactness on the equilibrium by losing order off it.
-    // the state here is smooth and deliberately NOT hydrostatic, so the deviation carries
-    // real structure and the limiter is doing ordinary work.
+    // well-balancing must keep second-order accuracy off equilibrium while staying exact on
+    // it. the state here is smooth and deliberately off hydrostatic balance, so the deviation
+    // carries real structure and the limiter is doing ordinary work.
     let exact = |x: f64| (1.5 + 0.5 * (3.0 * x).sin(), 0.9 + 0.4 * (2.0 * x).cos());
     let mut prev: Option<(f64, f64)> = None;
     for n in [32usize, 64, 128, 256] {
@@ -285,10 +286,10 @@ fn t3_it_stays_second_order_on_a_smooth_non_equilibrium_state() {
 
 #[test]
 fn t4_the_residual_is_first_order_in_the_entropy_variation() {
-    // off the isentrope the scheme is no longer exact, and the honest statement is HOW it
-    // degrades: the residual face jump is proportional to the entropy variation the column
-    // carries, and returns to roundoff as that variation goes to zero. a scheme whose error
-    // did not vanish with eps would be balancing the wrong thing.
+    // off the isentrope the scheme trades exactness for a controlled residual, and the honest
+    // statement is how it degrades: the residual face jump is proportional to the entropy
+    // variation the column carries, and returns to roundoff as that variation goes to zero.
+    // an error that vanishes with eps is what identifies the followed balance as the right one.
     let n = 64usize;
     let h = 1.0 / n as f64;
     let xs: Vec<f64> = (0..n + 4).map(|ii| ii as f64 * h).collect();

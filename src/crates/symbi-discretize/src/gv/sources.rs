@@ -9,47 +9,48 @@ use symbi_geometry::{Cylindrical, CylindricalRPhi, Metric, Spherical};
 use symbi_hydro::spatial_metric::SpatialMetric;
 
 // =============================================================================
-// the conserved-update GODUNOV family in Gv — the finite-volume divergence (the Gv stencil
-// `field_shifted(F_i, +e_i) - field(F_i)`, no `MorphismKind::Diff`) composed with the
-// forward-euler / RK2 time update over the conserved set (mass + one scalar law per momentum
-// component + optional energy), and the snapshot copy. EOS- AND geometry-generic: snapshot is
-// a pure copy (every coord); the CARTESIAN-uniform divergence is `(F_hi - F_lo)/dx_i`, the
-// CURVILINEAR is the analytic area-weighted `(1/V)(F_hi*A_hi - F_lo*A_lo)` from the in-kernel
+// the conserved-update godunov family in Gv — the finite-volume divergence (the Gv stencil
+// `field_shifted(F_i, +e_i) - field(F_i)`, spelled as a plain subtraction of loads) composed with
+// the forward-euler / RK2 time update over the conserved set (mass + one scalar law per momentum
+// component + optional energy), and the snapshot copy. EOS- and geometry-generic: snapshot is
+// a pure copy (every coord); the cartesian-uniform divergence is `(F_hi - F_lo)/dx_i`, the
+// curvilinear is the analytic area-weighted `(1/V)(F_hi*A_hi - F_lo*A_lo)` from the in-kernel
 // `cell_geometry_gv` metric, plus the geometric momentum source `S^i = -Gamma^i_jk T^jk`
-// (the gv christoffel) on the curvilinear momentum laws. ONE trace per (regime, geom).
+// (the gv christoffel) on the curvilinear momentum laws. one trace per (regime, geom).
 // =============================================================================
 
-/// which geometric momentum source the CURVILINEAR godunov adds to the momentum laws. the
-/// flux divergence + the conserved-law structure are identical across regimes; only the source
-/// expression differs (the "one operator, regime supplies its physics" rule). cartesian = none.
+/// which geometric momentum source the curvilinear godunov adds to the momentum laws. the
+/// flux divergence + the conserved-law structure are identical across regimes; the source
+/// expression is what differs (the "one operator, regime supplies its physics" rule). on
+/// cartesian the connection vanishes and the source is zero.
 #[derive(Clone, Copy)]
 pub enum GeoSource {
     /// hydro / RHD: well-balanced pressure + (ndim>=2) velocity-quadratic centrifugal/coriolis,
-    /// regime-agnostic via the CONSERVED momentum (newtonian `mom=rho v`, RHD `mom=rho h W^2 v`).
+    /// regime-agnostic via the conserved momentum (newtonian `mom=rho v`, RHD `mom=rho h W^2 v`).
     Hydro { inertial: bool },
     /// RMHD: pressure + inertial + magnetic tension, from `rmhd_source_quantities` (cons.mom
-    /// carries B-momentum so it can't serve the source).
+    /// carries B-momentum, so the gas momentum comes from those quantities).
     Rmhd,
-    /// newtonian MHD: pressure (p + 1/2|B|^2) + gas inertial (cons.mom IS rho v — the maxwell
-    /// stress lives in the flux) + magnetic tension from the LAB-FRAME B (no
-    /// relativistic four-vector). simpler than RMHD: cons.mom serves the inertial directly.
+    /// newtonian MHD: pressure (p + 1/2|B|^2) + gas inertial (cons.mom is rho v — the maxwell
+    /// stress lives in the flux) + magnetic tension from the lab-frame B (where RMHD uses the
+    /// four-vector b^mu). simpler than RMHD: cons.mom serves the inertial directly.
     NewtonianMhd,
-    /// isothermal MHD: identical to `NewtonianMhd` but the gas pressure is `cs^2 rho` (no
-    /// energy / `prim.pre`); the closure scalar `cs` is read in-kernel.
+    /// isothermal MHD: identical to `NewtonianMhd`, with the gas pressure `cs^2 rho` supplied by
+    /// the closure (the state carries {den, mom, mag}); the closure scalar `cs` is read in-kernel.
     IsothermalMhd,
 }
 
-/// the centrifugal/coriolis INERTIAL momentum source per component `S^i = -Gamma^i_jk mom^j
-/// v^k` (the velocity-quadratic geometric terms), in Gv. delegates to the SINGLE-SOURCE
-/// carrier-generic `Metric<Gv, D>::momentum_source_inertial` (symbi-geometry) instead of
-/// re-deriving the christoffel by hand — one geometry source for the whole codebase.
+/// the centrifugal/coriolis inertial momentum source per component `S^i = -Gamma^i_jk mom^j
+/// v^k` (the velocity-quadratic geometric terms), in Gv. delegates to the single-source
+/// carrier-generic `Metric<Gv, D>::momentum_source_inertial` (symbi-geometry) — one christoffel
+/// derivation, shared by the whole codebase.
 ///
-/// REGIME-AGNOSTIC via the conserved `mom` (newtonian rho v; relativistic rho h W^2 v): the
-/// source is the bilinear `-Gamma(mom, v)`, so this same call ALSO serves the magnetic tension
-/// `-Gamma(b, b)` (caller passes `mom = vel = b`). `centroid` is COORDINATE-indexed (r at [0],
-/// theta/phi at [1]). dispatch is on the number of PROVIDED momentum components `mom.len()` (the
+/// regime-agnostic via the conserved `mom` (newtonian rho v; relativistic rho h W^2 v): the
+/// source is the bilinear `-Gamma(mom, v)`, so this same call also serves the magnetic tension
+/// `-Gamma(b, b)` (caller passes `mom = vel = b`). `centroid` is coordinate-indexed (r at [0],
+/// theta/phi at [1]). dispatch is on the number of provided momentum components `mom.len()` (the
 /// Hydro branch supplies the gridded `ndim`; the MHD branches supply the full `ncomp`); the
-/// momentum slot order is COORDINATE order, so cylindrical 2-component is the (r,phi) DISK plane
+/// momentum slot order is coordinate order, so cylindrical 2-component is the (r,phi) disk plane
 /// (e.g. an (r,z) grid with swirl carries [r, phi]) -> `CylindricalRPhi` (the (r,z)
 /// `Cylindrical<2>` axisymmetric reduction would zero the swirl). the result is padded to
 /// the full `ncomp` DOF — suppressed trailing components (e.g. z) carry zero inertial.
@@ -74,7 +75,7 @@ fn inertial_momentum_sources_gv(
         (0..D).map(|i| s[i]).collect()
     }
     let mut s = match (coords, mom.len()) {
-        (Coords::Cartesian, _) => Vec::new(), // flat space: no inertial source.
+        (Coords::Cartesian, _) => Vec::new(), // flat space: the connection vanishes.
         (Coords::Spherical, 1) => run::<_, 1>(Spherical, mom, vel, centroid),
         (Coords::Spherical, 2) => run::<_, 2>(Spherical, mom, vel, centroid),
         (Coords::Spherical, 3) => run::<_, 3>(Spherical, mom, vel, centroid),
@@ -88,11 +89,12 @@ fn inertial_momentum_sources_gv(
     s
 }
 
-/// the FULL geometric momentum source per component `S^i = -Gamma^i_jk T^jk` in Gv, split
+/// the full geometric momentum source per component `S^i = -Gamma^i_jk T^jk` in Gv, split
 /// into the three pieces every
-/// regime shares: well-balanced PRESSURE `ptot*(A_hi - A_lo)*inv_V`, INERTIAL `-Gamma(wgam2 v
-/// v)`, and (RMHD) MAGNETIC `+Gamma(bmu bmu)`. `gas_mom`/`vel`/`bmu` are the regime quantities;
-/// pass EMPTY `gas_mom` to skip the inertial (1D radial). `axes[d]` = the coord of grid axis d.
+/// regime shares: well-balanced pressure `ptot*(A_hi - A_lo)*inv_V`, inertial `-Gamma(wgam2 v
+/// v)`, and (RMHD) magnetic `+Gamma(bmu bmu)`. `gas_mom`/`vel`/`bmu` are the regime quantities;
+/// an empty `gas_mom` selects the pressure-only form (1D radial). `axes[d]` = the coord of grid
+/// axis d.
 fn geometric_momentum_sources_gv(
     coords: Coords,
     axes: &[usize],
@@ -104,7 +106,7 @@ fn geometric_momentum_sources_gv(
     vel: &[Gv],
     bmu: Option<&[Gv]>,
 ) -> Vec<Gv> {
-    // COORDINATE-indexed centroid (r at [0], theta at [1]). ungridded slots take the chart symmetry
+    // coordinate-indexed centroid (r at [0], theta at [1]). ungridded slots take the chart symmetry
     // default (spherical polar -> pi/2): a reduced-dimension spherical grid (a 1.5D radial
     // chart with ungridded theta, or a 2.5D r-phi chart) still evaluates the angular christoffels
     // cot(theta)/sin(theta) in the inertial source, and theta = 0 diverges cot(theta) and NaNs the
@@ -116,13 +118,14 @@ fn geometric_momentum_sources_gv(
     }
     let inertial = (!gas_mom.is_empty())
         .then(|| inertial_momentum_sources_gv(ncomp, coords, gas_mom, vel, &coord_centroid));
-    // the magnetic tension is the SAME christoffel on the four-vector, negated.
+    // the magnetic tension is the same christoffel on the four-vector, negated.
     let mag = bmu.map(|b| inertial_momentum_sources_gv(ncomp, coords, b, b, &coord_centroid));
     (0..ncomp)
         .map(|coord| {
-            // PRESSURE: only a GRIDDED coordinate has a pressure gradient; written in the
-            // divergence's (ptot*A_hi - ptot*A_lo)*inv_V form so a v=0 uniform-ptot state
-            // cancels the pressure flux divergence bit-exactly (well-balanced HSE).
+            // pressure: a gridded coordinate is the one carrying a pressure gradient;
+            // written in the divergence's (ptot*A_hi - ptot*A_lo)*inv_V form so a v=0
+            // uniform-ptot state cancels the pressure flux divergence bit-exactly
+            // (well-balanced HSE).
             let mut s = if let Some(d) = axes.iter().position(|&c| c == coord) {
                 (ptot * geo.area_hi[d] - ptot * geo.area_lo[d]) * geo.inv_volume
             } else {
@@ -140,11 +143,11 @@ fn geometric_momentum_sources_gv(
 }
 
 /// trace the regime's geometric momentum source quantities + form the per-component source.
-/// HYDRO/RHD: total pressure = `prim.pre`, gas momentum density * v = the CONSERVED momentum
-/// (cons.mom IS rho v / rho h W^2 v), no magnetic term. RMHD: the gas + magnetic quantities
-/// from symbi-hydro's `rmhd_source_quantities` (the SAME carrier-generic source the RMHD flux
-/// uses), gas_mom = wgam2*v, bmu = the spatial four-vector. `cons_mom` is the already-read
-/// in-place conserved momentum (shared so the gas-inertial reuses it — no duplicate buffer).
+/// hydro/RHD: total pressure = `prim.pre`, gas momentum density * v = the conserved momentum
+/// (cons.mom is rho v / rho h W^2 v), the stress being purely hydrodynamic. RMHD: the gas +
+/// magnetic quantities from symbi-hydro's `rmhd_source_quantities` (the carrier-generic source
+/// the RMHD flux uses), gas_mom = wgam2*v, bmu = the spatial four-vector. `cons_mom` is the
+/// already-read in-place conserved momentum, shared so the gas-inertial reuses that one buffer.
 pub(crate) fn gv_geometric_source(
     coords: Coords,
     axes: &[usize],
@@ -155,12 +158,13 @@ pub(crate) fn gv_geometric_source(
     cons_mom: &[Gv],
     mag_from_bcell: bool,
 ) -> Vec<Gv> {
-    // the cell-B the magnetic geo source reads. NORMALLY the primitive `prim.mag[k]`. but when
-    // this stage is FUSED with the cell-B predictor (which binds `bc_k` in-place), reading mag
-    // via the SAME `bc_k` key lets try_fuse merge the two cell-B reads into ONE binding — without
-    // it, `prim.mag[k]` and `bc_k` are distinct manifest entries that both resolve to bcell[k] at
-    // runtime, aliasing a read-only input to an in-place output (UB on CPU). both keys carry the
-    // SAME old-bcell value (the predictor writes after the source evaluates), so it's bit-identical.
+    // the cell-B the magnetic geo source reads: the primitive `prim.mag[k]` in the general case.
+    // when this stage is fused with the cell-B predictor (which binds `bc_k` in-place), reading mag
+    // via that same `bc_k` key lets try_fuse merge the two cell-B reads into one binding; keeping
+    // them apart leaves `prim.mag[k]` and `bc_k` as distinct manifest entries that both resolve to
+    // bcell[k] at runtime, aliasing a read-only input to an in-place output (UB on CPU). both keys
+    // carry the same old-bcell value (the predictor writes after the source evaluates), so it is
+    // bit-identical.
     let mag_field = |k: usize| -> Gv {
         if mag_from_bcell {
             Gv::field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
@@ -171,12 +175,13 @@ pub(crate) fn gv_geometric_source(
     match source {
         GeoSource::Hydro { inertial } => {
             let ptot = Gv::field("pre", FieldRef::PrimPre);
-            // the velocity-quadratic inertial vanishes for 1D radial — skip it (+ its vel reads).
+            // the velocity-quadratic inertial vanishes for 1D radial, so that arm leaves it and
+            // its vel reads out of the graph.
             let (gas_mom, vel): (Vec<Gv>, Vec<Gv>) = if inertial && ndim >= 2 {
                 let v = (0..ndim)
                     .map(|d| Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
                     .collect();
-                (cons_mom[..ndim].to_vec(), v) // gas_mom = cons.mom (shared, no duplicate read)
+                (cons_mom[..ndim].to_vec(), v) // gas_mom = cons.mom (shared, read once)
             } else {
                 (Vec::new(), Vec::new())
             };
@@ -206,8 +211,8 @@ pub(crate) fn gv_geometric_source(
             };
             // flat-frame metric = identity (constant-folds to euclidean norms; traced kernel bit-identical).
             let (wgam2, bmu, ptot) = rmhd_source_quantities(&eos, &prim, &SpatialMetric::flat());
-            // the inertial + magnetic geometric sources need ALL `ncomp` (DOF) components, not
-            // just the `ndim` gridded ones: a 2.5D spherical (r,theta) grid has DOF=3 and the
+            // the inertial + magnetic geometric sources need every `ncomp` (DOF) component,
+            // past the `ndim` gridded ones: a 2.5D spherical (r,theta) grid has DOF=3 and the
             // out-of-plane phi momentum (mom[2]) drives the S_theta cot term + the S_phi source.
             let gas_mom: Vec<Gv> = (0..ncomp).map(|k| wgam2 * vel[k]).collect();
             let vel_n: Vec<Gv> = vel[..ncomp].to_vec();
@@ -227,9 +232,10 @@ pub(crate) fn gv_geometric_source(
         GeoSource::NewtonianMhd => {
             // newtonian MHD stress: ptot = p + 1/2|B|^2; gas inertial via cons.mom (= rho v,
             // pure gas); magnetic tension via the lab-frame B (the maxwell stress -B_i B_j has
-            // the SAME christoffel form as the inertial, so it reuses the inertial builder, then
-            // is subtracted by geometric_momentum_sources_gv). no wgam2 / four-vector.
-            // ALL `ncomp` (DOF) components: a 2.5D spherical grid (DOF=3 > ndim=2) needs the
+            // the same christoffel form as the inertial, so it reuses the inertial builder, then
+            // is subtracted by geometric_momentum_sources_gv). the newtonian limit works from
+            // rho v and the lab-frame B, where RMHD carries wgam2 and the four-vector.
+            // every `ncomp` (DOF) component: a 2.5D spherical grid (DOF=3 > ndim=2) needs the
             // out-of-plane phi velocity/momentum/B for the S_theta cot + S_phi geometric sources.
             let vel: Vec<Gv> = (0..ncomp)
                 .map(|d| Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
@@ -253,9 +259,10 @@ pub(crate) fn gv_geometric_source(
             )
         }
         GeoSource::IsothermalMhd => {
-            // isothermal MHD stress: ptot = cs^2 rho + 1/2|B|^2 (no prim.pre; cs is a scalar).
-            // otherwise identical to NewtonianMhd (gas inertial via cons.mom, lab-frame B tension).
-            // ALL `ncomp` (DOF) components (see NewtonianMhd) for the spherical 2.5D out-of-plane source.
+            // isothermal MHD stress: ptot = cs^2 rho + 1/2|B|^2, the gas pressure coming from the
+            // `cs` scalar and rho. otherwise identical to NewtonianMhd (gas inertial via cons.mom,
+            // lab-frame B tension). every `ncomp` (DOF) component (see NewtonianMhd) for the
+            // spherical 2.5D out-of-plane source.
             let vel: Vec<Gv> = (0..ncomp)
                 .map(|d| Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
                 .collect();
@@ -281,11 +288,11 @@ pub(crate) fn gv_geometric_source(
     }
 }
 
-/// SPIKE probe: trace the carrier-generic `symbi_hydro::UniformAccel` source at S=Gv.
+/// spike probe: trace the carrier-generic `symbi_hydro::UniformAccel` source at S=Gv.
 /// constructs the source with `g_ext_k` runtime scalars (the same names the splice path
 /// declares), reads rho/vel as cell fields, and writes `s_mom_k` + `s_nrg`. a host test
 /// renders + evaluates this and asserts the analytical `rho*g_ext` / `rho*(v.g_ext)` — the
-/// SAME result `uniform_acceleration_*_source` produces via its hand-built graph, proving the
+/// same result `uniform_acceleration_*_source` produces via its hand-built graph, proving the
 /// carrier-generic form is a drop-in for the splice path (and is f64==Gv by construction).
 pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
@@ -313,7 +320,7 @@ pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, Field
 /// `symbi-ir` Graph via `symbi_hydro::expr_bridge`, optionally wrapped in a conservation law by
 /// `source_spec::user_force_*` / `user_cooling_source`) into a Gv trace — binding each declared
 /// param to a runtime Gv scalar of the same name — and write its outputs `s_k`. a user expression
-/// FUSES into a kernel graph and RENDERS (CPU + CUDA) through the exact same `splice_built_source_into`
+/// fuses into a kernel graph and renders (CPU + CUDA) through the exact same `splice_built_source_into`
 /// path a built-in source uses: the user script becomes compiled kernel code.
 /// carrier-equivalence + the work-energy coupling are gated by `source_term_carrier.rs`.
 pub fn splice_user_source_gv(
@@ -337,10 +344,10 @@ pub fn splice_user_source_gv(
     (end_trace(), writes)
 }
 
-/// SPIKE probe: trace the carrier-generic `symbi_hydro::PointMassGravity` source at S=Gv.
+/// spike probe: trace the carrier-generic `symbi_hydro::PointMassGravity` source at S=Gv.
 /// reads rho/vel as cell fields and the position `x_k`, mass position `xm_k`, and `gm` as
 /// runtime scalars (the same names the splice path declares); writes `s_mom_k` + `s_nrg`.
-/// a host test renders + evaluates it and asserts `-rho*GM*(x-xm)/|x-xm|^3` — the SAME form
+/// a host test renders + evaluates it and asserts `-rho*GM*(x-xm)/|x-xm|^3` — the same form
 /// `point_mass_{momentum,energy}_source` hand-builds, proving the carrier-generic form is a
 /// drop-in (and f64==Gv by construction). the shared `1/|x-xm|^3` is emitted once (hash-cons).
 pub fn point_mass_gravity_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
@@ -394,7 +401,7 @@ pub fn inertial_momentum_probe_gv(
     (end_trace(), writes)
 }
 
-/// the gv FULL geometric-momentum-source probe — the carrier mirror of the ctx
+/// the gv full geometric-momentum-source probe — the carrier mirror of the ctx
 /// `geometric_momentum_sources` path (+ the rmhd adapter): build the cell geometry, form the
 /// per-component source `S^i = -Gamma^i_jk T^jk` via [`gv_geometric_source`], write `s_k`. a host
 /// test bit-diffs it against the analytic pressure + inertial (+ rmhd magnetic) forms. `axes`
@@ -410,10 +417,10 @@ pub fn geometric_momentum_source_probe_gv(
     begin_trace();
     let geo = cell_geometry_gv(coords, spacing, axes, ndim);
     // hydro shares the conserved momentum (the gas inertial reads cons.mom); rmhd computes its
-    // gas momentum density from prim (cons.mom carries B-momentum), so it reads no cons.mom.
+    // gas momentum density from prim (cons.mom carries B-momentum), so its cons_mom list is empty.
     let cons_mom: Vec<Gv> = match source {
-        // hydro + newtonian MHD: cons.mom IS the gas momentum density (rho v), read directly.
-        // read ALL `ncomp` (DOF) components: a 2.5D spherical (r,theta) MHD grid
+        // hydro + newtonian MHD: cons.mom is the gas momentum density (rho v), read directly.
+        // read every `ncomp` (DOF) component: a 2.5D spherical (r,theta) MHD grid
         // has DOF=3 and the geometric S_theta/S_phi need the out-of-plane phi momentum (mom[2]).
         // hydro has ncomp==ndim so this is unchanged there.
         GeoSource::Hydro { .. } | GeoSource::NewtonianMhd | GeoSource::IsothermalMhd => (0..ncomp)

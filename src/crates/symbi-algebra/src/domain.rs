@@ -105,9 +105,9 @@ impl<const R: usize> Domain<R> {
         // threads accessed addresses `Ny*Nz` apart — uncoalesced reads cost
         // every gmem-touching kernel its memory bandwidth ceiling.
         //
-        // THE formula lives once in `layout::strides_from_extent` — every view
+        // the formula lives once in `layout::strides_from_extent` — every view
         // (this, the runtime CpuField/DeviceView, symbi-grid's View) derives from
-        // it, so they cannot drift apart.
+        // it, so they move together.
         let extent: [usize; R] = std::array::from_fn(|a| spaces[a].size());
         let mut strides = [0usize; R];
         crate::layout::strides_from_extent(&extent, &mut strides);
@@ -407,7 +407,7 @@ impl<const R: usize> Domain<R> {
         }))
     }
 
-    /// expand one axis by n on BOTH sides.
+    /// expand one axis by n on both sides.
     /// `dom.expand(0, 1)` adds 1 cell on left and 1 on right of axis 0.
     pub fn expand(&self, axis: impl IntoAxis, n: isize) -> Domain<R> {
         self.extend(axis.into_axis(), -n, n)
@@ -957,10 +957,10 @@ mod tests {
             index("j").over(64),
             index("k").over(64),
         ]);
-        // E_x at x-edges: extra in y AND z
+        // E_x at x-edges: extra in y and z
         let x_edge = interior.extend(1, 0, 1).extend(2, 0, 1);
         assert_eq!(x_edge.shape(), [64, 65, 65]);
-        // E_z at z-edges: extra in x AND y
+        // E_z at z-edges: extra in x and y
         let z_edge = interior.extend(0, 0, 1).extend(1, 0, 1);
         assert_eq!(z_edge.shape(), [65, 65, 64]);
     }
@@ -1091,22 +1091,22 @@ mod tests {
 // =============================================================================
 // algebraic laws (axioms)
 //
-// the domain algebra is verified against its GROUND-TRUTH semantics: a `Domain`
-// IS its set of integer lattice points, and every operation must agree with the
+// the domain algebra is verified against its ground-truth semantics: a `Domain`
+// is its set of integer lattice points, and every operation agrees with the
 // corresponding set / lattice operation on those points. these are the axioms
 // the rest of the codebase (fields, kernels, the amr ghost decomposition) is
 // entitled to assume. each is checked over a stream of randomly generated boxes.
 //
-// the structure is the LATTICE OF AXIS-ALIGNED BOXES under inclusion:
+// the structure is the lattice of axis-aligned boxes under inclusion:
 //   * meet   = `intersect`  (the largest box inside both)            [partial: may be empty]
 //   * join   = `hull`       (the smallest box containing both — the bounding box)
-//   * `difference` is a DISJOINT PARTITION of the set difference A \ B
+//   * `difference` is a disjoint partition of the set difference A \ B
 //   * `expand` / `contract_axis` are inverse on a single axis
 //   * `flat_index` / `unflatten` are mutually inverse coordinate <-> offset maps
 //
-// NOTE on `hull`: it is the box-lattice join; it is not a set union, since boxes are not
-// closed under union. so the law is the bounding-box law `A,B subseteq hull(A,B)`, and hull is
-// the LEAST box with that property; hull(A,B) is not the cell set `cells(A) union cells(B)`.
+// on `hull`: it is the box-lattice join, and the union of two boxes leaves the box lattice, so
+// the law is the bounding-box law `A,B subseteq hull(A,B)` with hull the least box carrying that
+// property. hull(A,B) is generally strictly larger than the cell set `cells(A) union cells(B)`.
 // =============================================================================
 #[cfg(test)]
 mod laws {
@@ -1173,8 +1173,8 @@ mod laws {
                 assert!(cells(&m).is_subset(&cells(&a)));
                 assert!(cells(&m).is_subset(&cells(&b)));
             } else {
-                // disjoint boxes do not overlap — and `overlaps` agrees with the
-                // set predicate exactly.
+                // disjoint boxes have empty intersection — and `overlaps` agrees
+                // with the set predicate exactly.
                 assert!(
                     (&cells(&a) & &cells(&b)).is_empty(),
                     "overlaps() lied: sets DO meet"
@@ -1277,7 +1277,7 @@ mod laws {
                 "guillotine parts not disjoint by volume"
             );
 
-            // SAME cell set as the maximal `difference` (both are A \ B).
+            // same cell set as the maximal `difference` (both are A \ B).
             let expected: HashSet<[isize; 3]> = &cells(&a) - &cells(&b);
             assert_eq!(union, expected, "guillotine_difference != set difference");
             let maximal: HashSet<[isize; 3]> =
@@ -1339,19 +1339,19 @@ mod laws {
         }
     }
 
-    // TRAP PIN: `DomainIter` advances LAST-axis-fastest, but storage is
-    // axis-0-fastest (`flat_index`). these orders differ for D>=2. this is
+    // trap pin: `DomainIter` advances last-axis-fastest, while storage is
+    // axis-0-fastest (`flat_index`). these orders differ for D>=2. that is
     // intentional (the iterator visits every cell exactly once — the bijection
-    // law above proves that), but it means `dom.iter()` does NOT yield cells in
-    // ascending `flat_index` order. any code that COLLECTS `iter()` into a
-    // sequential buffer and then reads it back BY POSITION is transposed (the
-    // checkpoint-restart bug was exactly this). this test makes the
-    // divergence explicit and load-bearing: a future "fix" that silently aligns
-    // the iterator to storage order must update this pin and audit collectors.
+    // law above proves that), and it means `dom.iter()` yields cells in an order
+    // of its own, distinct from ascending `flat_index`. code that collects
+    // `iter()` into a sequential buffer and reads it back by position ends up
+    // transposed (the checkpoint-restart bug was exactly this). this test makes
+    // the divergence explicit and load-bearing: a future "fix" that aligns the
+    // iterator to storage order updates this pin and audits the collectors.
     #[test]
     fn iter_order_is_not_storage_order_for_d_ge_2() {
         // a non-square 2d box: iteration walks j (axis 1) fastest, storage walks
-        // i (axis 0) fastest, so the produced flat-index sequence is not sorted.
+        // i (axis 0) fastest, so the produced flat-index sequence descends somewhere.
         let d = domain([index("i").over(3), index("j").over(4)]);
         let order: Vec<usize> = d.iter().map(|p| d.flat_index(p)).collect();
         assert!(

@@ -1,12 +1,12 @@
 // =============================================================================
 // refinement_well_balanced.rs
 //
-// a declared stationary target must be an EXACT fixed point of the refined scheme, and declaring
-// one must not cost conservation.
+// a declared stationary target is an exact fixed point of the refined scheme, and declaring one
+// leaves conservation intact.
 //
-// a hydrostatic atmosphere solves the continuum equations, not the discrete ones: the scheme
+// a hydrostatic atmosphere solves the continuum equations while the scheme discretizes them: it
 // leaves a residual `R = div_h F_h(qt) - s_h(qt)` at truncation order, so gas seeded on the exact
-// profile starts moving. `R` is also GRID-DEPENDENT, so the coarse-fine flux register differences
+// profile starts moving. `R` also depends on the grid, so the coarse-fine flux register differences
 // two unequal reconstructions of the same exact solution and applies the difference to the coarse
 // cells at the interface as a force — which is why a refined run drifts far faster than the single
 // grid it is built from.
@@ -17,8 +17,8 @@
 // register alone would conserve while still injecting momentum. only together do they say the
 // deviation from the target is what is being refluxed.
 //
-// VELOCITY is the probe: the target has `v = 0` identically, so any speed after a step is the
-// imbalance itself, with no reference state to subtract.
+// velocity is the probe: the target has `v = 0` identically, so any speed after a step is the
+// imbalance itself, read directly with no reference state to subtract.
 //
 // run: cargo test -p symbi --test refinement_well_balanced -- --nocapture
 // =============================================================================
@@ -130,7 +130,7 @@ fn worst_speed(hier: &Hier, level: usize) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
-/// mass over the ACTIVE composite: covered coarse cells are omitted and their finer children
+/// mass over the active composite: covered coarse cells are omitted and their finer children
 /// supply the mass instead, so each region of space is counted exactly once.
 fn composite_mass(hier: &Hier) -> f64 {
     let mut mass = 0.0;
@@ -148,7 +148,7 @@ fn composite_mass(hier: &Hier) -> f64 {
 }
 
 /// mass held by one level's uncovered cells alone. the composite total is blind to transport
-/// ACROSS the coarse-fine interface — that is exactly what it is supposed to cancel — so this is
+/// across the coarse-fine interface — that is exactly what it is supposed to cancel — so this is
 /// what shows whether any crossed at all.
 fn uncovered_mass(hier: &Hier, level: usize) -> f64 {
     let lvl = &hier.levels[level];
@@ -192,9 +192,9 @@ fn a_declared_target_is_held_exactly_and_conservatively() {
             ((m1 - m0) / m0).abs()
         );
 
-        // NON-VACUITY: without the declaration this setup must genuinely fail to hold the
-        // atmosphere, or the gate below is measuring a problem that is not there. a refined run
-        // drifts an order of magnitude past the single grid; even the single grid drifts.
+        // non-vacuity: undeclared, this setup drifts off the atmosphere on its own, which is what
+        // gives the gate below a real problem to measure. a refined run drifts an order of
+        // magnitude past the single grid; even the single grid drifts.
         for (ll, speed) in drift.iter().enumerate() {
             assert!(
                 *speed > 1.0e-5,
@@ -207,7 +207,7 @@ fn a_declared_target_is_held_exactly_and_conservatively() {
         // the target is an exact fixed point of the scheme: every flux and every source is
         // evaluated at it and the residual is subtracted back off, so what survives is roundoff in
         // the stage arithmetic. the bound sits far above the ~2.6e-15 measured floor and eight
-        // orders below the 5.8e-4 the same setup reaches without the declaration.
+        // orders below the 5.8e-4 the same setup reaches once the declaration is dropped.
         for (ll, speed) in held.iter().enumerate() {
             assert!(
                 *speed < 1.0e-12,
@@ -268,7 +268,7 @@ fn build_declared_ppm(regions: &[RefinementRegion<1>]) -> Hier {
 }
 
 /// the fixed-point law is reconstruction-agnostic: the residual `R` is measured
-/// through the SAME kernels that evolve the run — ppm fluxes against a ppm-built
+/// through the same kernels that evolve the run — ppm fluxes against a ppm-built
 /// target flux — and subtracted back off, so a declared target holds to roundoff
 /// under ppm exactly as under plm. this is the full production stack (hierarchy +
 /// declared stationary target + gravitational body + ppm + quartic prolongation)
@@ -300,7 +300,7 @@ fn a_declared_target_is_held_exactly_under_ppm() {
 #[test]
 fn the_correction_tracks_the_distance_from_the_target() {
     // a correction that merely suppressed the flux register would pass the fixed-point gate and
-    // leave the interface unrefluxed for every OTHER state. driving the same declared hierarchy
+    // leave the interface unrefluxed for every other state. driving the same declared hierarchy
     // with gas that is genuinely moving separates the two: the register now has real transport to
     // correct, and the composite total must still close.
     const MACH: f64 = 1.0e-3;
@@ -312,8 +312,8 @@ fn the_correction_tracks_the_distance_from_the_target() {
         for c in st.geom.interior.iter() {
             let rho = *st.fields.prim.rho.view().at(c);
             let pre = *st.fields.prim.pre_field().unwrap().view().at(c);
-            // a uniform mach number rather than a uniform speed, so the perturbation is the same
-            // physical size everywhere in an atmosphere whose sound speed varies by a factor of 3.
+            // a uniform mach number, so the perturbation carries the same physical size
+            // everywhere in an atmosphere whose sound speed varies by a factor of 3.
             let speed = MACH * (GAMMA * pre / rho).sqrt();
             st.seed_cell(
                 c,
@@ -341,8 +341,8 @@ fn the_correction_tracks_the_distance_from_the_target() {
          composite mass changed by {relative:.3e}"
     );
 
-    // NON-VACUITY: mass has to actually cross the coarse-fine interface, or "the composite total
-    // held" is a statement about a register that never had anything to correct.
+    // non-vacuity: mass has to cross the coarse-fine interface, so that "the composite total
+    // held" reports on a register with something real to correct.
     assert!(
         crossed > 1.0e-10,
         "only {crossed:.3e} of level 0's uncovered mass moved, so essentially nothing crossed the \
@@ -355,10 +355,10 @@ fn the_correction_tracks_the_distance_from_the_target() {
     );
 }
 
-/// the same atmosphere written for HALF the gravity the run actually applies. it is a perfectly
-/// good hydrostatic profile — for a different problem — so it is exactly the mistake that a
-/// pointwise inspection of the initial condition does not catch: smooth, positive, monotone, and
-/// wrong by a constant factor in one term.
+/// the same atmosphere written for half the gravity the run applies. it is a perfectly good
+/// hydrostatic profile — for a different problem — so it is exactly the mistake that survives a
+/// pointwise inspection of the initial condition: smooth, positive, monotone, and wrong by a
+/// constant factor in one term.
 fn hydrostatic_wrong_gravity(x: [f64; 1]) -> Prim<f64, 1> {
     let r = x[0] + G_OFFSET;
     let a = (GAMMA - 1.0) / (GAMMA * K0);
@@ -375,10 +375,10 @@ fn hydrostatic_wrong_gravity(x: [f64; 1]) -> Prim<f64, 1> {
 #[test]
 fn the_imbalance_of_a_true_steady_state_converges_under_refinement() {
     // nothing in the method checks that a declared target is stationary: the imbalance is measured
-    // and subtracted whatever it is, so a state merely ASSERTED to be an equilibrium gets held
-    // motionless while the run reports no error. what separates the two is how the imbalance
-    // behaves under refinement — truncation error falls with the cell width, the continuum
-    // residual of a state that does not solve the equations does not fall at all.
+    // and subtracted whatever it is, so a state merely asserted to be an equilibrium gets held
+    // motionless while the run reports success. what separates the two is how the imbalance
+    // behaves under refinement — truncation error falls with the cell width, while the continuum
+    // residual of a state that solves different equations stays fixed at every resolution.
     let real = build(&nested(2)).with_equilibrium(hydrostatic).unwrap();
     let measured = real
         .target_imbalance_convergence(0)
@@ -391,7 +391,7 @@ fn the_imbalance_of_a_true_steady_state_converges_under_refinement() {
         measured.sampled
     );
 
-    // NON-VACUITY: an imbalance already at zero would "converge" trivially. there has to be a real
+    // non-vacuity: an imbalance already at zero would "converge" trivially. there has to be a real
     // truncation error being measured, over enough cells for a median to mean anything.
     assert!(
         peak > 1.0e-6,
@@ -420,11 +420,11 @@ fn the_imbalance_of_a_true_steady_state_converges_under_refinement() {
 
 #[test]
 fn a_target_that_is_not_stationary_reads_as_non_converging() {
-    // the stationarity report is ADVISORY -- it never blocks, because for a strongly stratified
-    // target the imbalance lives only where the grid cannot resolve it and no threshold separates
-    // "steep" from "wrong" there. what it must still do is MEASURE correctly: a state that does
-    // not solve these equations leaves the continuum residual, which is grid-independent, so its
-    // ratio must sit at 1 on the cells where the grid does resolve the target.
+    // the stationarity report is advisory and lets every run proceed, because for a strongly
+    // stratified target the imbalance concentrates in cells the grid leaves unresolved, where
+    // "steep" and "wrong" produce the same reading. what it still owes is a correct measurement:
+    // a state that solves different equations leaves the continuum residual, which is
+    // grid-independent, so its ratio sits at 1 on the cells where the grid resolves the target.
     //
     // the profile below balances GM/2 while the body pulls with GM -- smooth, positive, monotone,
     // and wrong by a constant in one term.
@@ -450,8 +450,8 @@ fn a_target_that_is_not_stationary_reads_as_non_converging() {
          converging; the diagnostic can no longer tell a non-stationary state from a steep one",
         measured.ratio[1]
     );
-    // and the components that are NOT wrong must still converge, or the reading is not localizing
-    // anything -- it would flag every component of every target.
+    // the components that are right still converge, which is what makes the reading a localization
+    // -- otherwise it would flag every component of every target.
     for cc in [0usize, 2] {
         assert!(
             measured.ratio[cc] > 1.5,
@@ -462,7 +462,7 @@ fn a_target_that_is_not_stationary_reads_as_non_converging() {
     }
 }
 
-/// the same atmosphere written as an expression DAG, in the wire form a configured run emits.
+/// the same atmosphere written as an expression graph, in the wire form a configured run emits.
 ///
 /// `rho = (a (GM/r + c))^(1/(gamma-1))` with `r = x + G_OFFSET`, `p = K0 rho^gamma`, `v = 0`,
 /// where `a = (gamma-1)/(gamma K0)` and `c` normalizes `rho` to 1 at the outer edge.
@@ -494,10 +494,10 @@ fn hydrostatic_expression_json() -> String {
 
 #[test]
 fn a_target_declared_as_an_expression_matches_the_closure() {
-    // the target crosses the configuration wire as an expression rather than as sampled data,
-    // because a restart that adds a refinement level needs it evaluated on cells that did not
-    // exist when the run began. what that costs is a second way to say the same thing, so the two
-    // have to be held to producing the SAME state — not merely a similar one.
+    // the target crosses the configuration wire as an expression, so a restart that adds a
+    // refinement level can evaluate it on cells created after the run began. what that costs is a
+    // second way to say the same thing, so the two
+    // have to be held to producing bit-identical state, with similarity ruled out as a pass.
     let config = symbi_hydro::EquilibriumConfig::from_json(&hydrostatic_expression_json())
         .expect("the target expression parses");
 
@@ -550,13 +550,14 @@ fn a_target_declared_as_an_expression_matches_the_closure() {
 
 #[test]
 fn the_captured_imbalance_is_a_discrete_divergence() {
-    // `R = div_h F_h(qt) - s_h(qt)`. gravity sources momentum and energy but never mass, so R's
-    // mass component is a pure discrete divergence, and summing a divergence over a level bounded
-    // by reflecting walls telescopes to the flux through those walls. gas at rest sees a mirrored
-    // state across a wall, no jump, and therefore no mass flux — so the sum must vanish.
+    // `R = div_h F_h(qt) - s_h(qt)`. gravity sources momentum and energy alone, leaving mass
+    // untouched, so R's mass component is a pure discrete divergence, and summing a divergence
+    // over a level bounded by reflecting walls telescopes to the flux through those walls. gas at
+    // rest sees a mirrored state across a wall, zero jump, and therefore zero mass flux — so the
+    // sum vanishes.
     //
     // this is what separates the target's genuine imbalance from a limiter's response to an
-    // unphysical probe state: the latter is not a divergence and does not telescope.
+    // unphysical probe state: only a divergence telescopes this way.
     let hier = build_declared(&nested(2));
     let root = &hier.levels[0];
     let residual = root
@@ -576,7 +577,7 @@ fn the_captured_imbalance_is_a_discrete_divergence() {
         "\nroot level: sum V*R for mass = {mass_rate:+.3e}, largest single cell |V*R| = {scale:.3e}"
     );
 
-    // NON-VACUITY: a residual that is identically zero would telescope trivially and prove nothing
+    // non-vacuity: a residual that is identically zero would telescope trivially and say nothing
     // about the capture. the imbalance being removed has to be a real quantity.
     assert!(
         scale > 1.0e-6,
@@ -595,10 +596,11 @@ fn the_captured_imbalance_is_a_discrete_divergence() {
 /// the entropy `K = p / rho^gamma` against the `K0` the atmosphere was built with, over the cells
 /// this level actually contributes to the composite solution.
 ///
-/// covered cells are excluded because they are not part of the solution: the finer level owns that
-/// volume and the restriction overwrites them every parent step. they also cannot match `K0` even
-/// in principle — the hierarchy-consistent target restricts the CONSERVED state, which is linear,
-/// while `p / rho^gamma` is not, so their entropy differs from `K0` at t = 0 by construction.
+/// covered cells are excluded because the finer level owns that volume and supplies the composite
+/// solution there, with the restriction overwriting them every parent step. their entropy also
+/// departs from `K0` in principle — the hierarchy-consistent target restricts the conserved state,
+/// which is linear in the average, while `p / rho^gamma` is nonlinear, so a covered cell's entropy
+/// differs from `K0` at t = 0 by construction.
 fn worst_entropy_deviation(hier: &Hier, level: usize) -> f64 {
     let lvl = &hier.levels[level];
     let st = &lvl.state;
@@ -620,7 +622,7 @@ fn a_declared_target_stops_the_entropy_drift_at_the_interface() {
     // `p / rho^gamma` is a direct readout with no reference solution to subtract.
     //
     // the t = 0 value is reported beside it because they answer different questions: what a
-    // scheme DOES to the entropy is the change, not the offset it started with.
+    // scheme does to the entropy is the change, measured off whatever offset it started with.
     println!("\nentropy deviation |K - K0|/K0, uncovered cells, after {STEPS} root steps");
     println!("{:-<86}", "");
 
@@ -643,15 +645,15 @@ fn a_declared_target_stops_the_entropy_drift_at_the_interface() {
                 initial[ll]
             );
 
-            // NON-VACUITY: without the declaration the entropy has to actually move, or there is
-            // no leak here for the declaration to close.
+            // non-vacuity: undeclared, the entropy has to move on its own, which is what gives
+            // the declaration a leak to close.
             assert!(
                 drifted > 1.0e-9,
                 "level {ll} of the UNDECLARED {levels}-level run held its entropy to \
                  {drifted:.3e}; there is no drift here to fix and this gate says nothing"
             );
-            // the target is a fixed point of the scheme, so the state does not move and its
-            // entropy cannot either. what is asserted is the CHANGE, not the offset the
+            // the target is a fixed point of the scheme, so the state holds still and its
+            // entropy with it. the assertion is on the change, taken relative to the offset the
             // hierarchy-consistent target starts with.
             assert!(
                 moved < 1.0e-13,
@@ -666,10 +668,10 @@ fn a_declared_target_stops_the_entropy_drift_at_the_interface() {
 #[test]
 #[ignore = "diagnostic: reports how the undeclared interface leak grows with step count"]
 fn the_interface_entropy_leak_grows_with_step_count() {
-    // whether an interface leak threatens a long science run is a question about its GROWTH,
-    // not its size after a fixed number of steps. a leak that saturates is a bounded offset; one
-    // that accumulates linearly reaches any tolerance eventually, and the only thing that decides
-    // which is measuring more than one duration.
+    // whether an interface leak threatens a long science run is a question about its growth rate,
+    // which its size after a fixed number of steps leaves open. a leak that saturates is a bounded
+    // offset; one that accumulates linearly reaches any tolerance eventually, and measuring more
+    // than one duration is what separates the two.
     println!("\nundeclared 2-level run: entropy deviation vs steps");
     for steps in [20u64, 80, 320, 1280] {
         let mut hier = build(&nested(2));
@@ -687,7 +689,7 @@ fn the_interface_entropy_leak_grows_with_step_count() {
 
 #[test]
 fn the_fixed_point_survives_a_step_it_was_not_probed_at() {
-    // the imbalance is read off ONE stage of length `dt_probe`. if any part of what that stage
+    // the imbalance is read off a single stage of length `dt_probe`. if any part of what that stage
     // does to the target is quadratic in dt — a gravitational kick that carries its own
     // `0.5 rho |g|^2 dt^2` into the energy, for instance — then `R = (qt - advanced)/dt` picks up
     // a term proportional to `dt_probe`, and the correction only cancels the stage exactly when
@@ -707,7 +709,7 @@ fn the_fixed_point_survives_a_step_it_was_not_probed_at() {
         let speeds: Vec<String> = (0..2).map(|ll| format!("{:.3e}", worst_speed(&hier, ll))).collect();
         let label = if clamp == 0.0 { "cfl (= probe dt)".to_string() } else { format!("{clamp}x cfl") };
         println!("  dt = {label:<18} max|v| {speeds:?}");
-        // the imbalance is read off ONE stage at the target's own cfl step. if any part of what
+        // the imbalance is read off a single stage at the target's own cfl step. if any part of what
         // that stage does were quadratic in dt, the correction would cancel only at that step and
         // the fixed point would decay as the run's dt moved away from it.
         for ll in 0..2 {
@@ -723,9 +725,9 @@ fn the_fixed_point_survives_a_step_it_was_not_probed_at() {
 
 #[test]
 fn a_declared_target_restores_the_entropy_floor() {
-    // entropy is one-way: K may rise and must never fall below its initial value. a single grid
-    // with gravity obeys that; adding a refinement level breaks it. this asks whether removing
-    // the background's discrete imbalance is enough to put the floor back.
+    // entropy is one-way: K may rise, and its initial value is a floor. a single grid with
+    // gravity obeys that; adding a refinement level breaks it. this asks whether removing the
+    // background's discrete imbalance is enough to put the floor back.
     const LONG: u64 = 956;
     println!("\nmin K/K0 after {LONG} root steps (below 1 is entropy DESTROYED)");
     for levels in 1..=3usize {
@@ -757,16 +759,16 @@ fn a_declared_target_restores_the_entropy_floor() {
         for ll in 0..levels {
             let before: f64 = undeclared[ll].parse().unwrap();
             let after: f64 = declared[ll].parse().unwrap();
-            // NON-VACUITY: entropy has to actually be destroyed without the declaration, or
+            // non-vacuity: undeclared, this setup has to destroy entropy on its own, or
             // there is no one-way law being violated here to restore.
             assert!(
                 before < 1.0,
                 "level {ll} of the UNDECLARED {levels}-level run held K/K0 at {before:.7}; \
                  nothing is destroying entropy here and this gate says nothing"
             );
-            // entropy is ONE-WAY: K may rise and must never fall below the value the gas was
-            // built with. the target is a fixed point, so the state does not move and its
-            // entropy cannot -- the floor is exact, not approached.
+            // entropy is one-way: K may rise, with the value the gas was built with as its
+            // floor. the target is a fixed point, so the state holds still and its entropy with
+            // it -- the floor is met exactly, at equality.
             assert!(
                 after >= 1.0,
                 "level {ll} of the {levels}-level run destroyed entropy while sitting on its \
@@ -777,20 +779,20 @@ fn a_declared_target_restores_the_entropy_floor() {
 }
 
 // =============================================================================
-// a target that is steady but STEEP
+// a target that is steady and steep
 //
-// the atmosphere above is spread across its grid. a point mass sitting INSIDE the refined box
+// a spread-out atmosphere sits comfortably on its grid. a point mass placed inside the refined box
 // makes a very different shape: the density turns over inside a single coarse cell near the
-// centre, and no level resolves it. that region is real and is corrected like any other, but its
-// error is a limiter clipping rather than a truncation, so it carries no order and cannot testify
-// about whether the declared state solves the equations.
+// center, at a scale finer than any level resolves. that region is real and is corrected like any
+// other, but its error is a limiter clipping in place of a truncation, so it carries no order and
+// its testimony about whether the declared state solves the equations is empty.
 //
-// a convergence check that samples it anyway reports "does not converge" and REFUSES a perfectly
-// good equilibrium. this is that geometry, in one dimension.
+// a convergence check that samples it anyway reports non-convergence and refuses a perfectly good
+// equilibrium. this is that geometry, in one dimension.
 // =============================================================================
 
 /// softening length of the central body, in root cells. small enough that the density turns over
-/// inside one coarse cell near the centre — which is the point.
+/// inside one coarse cell near the center — which is the point.
 const CUSP_SOFTENING: f64 = 0.75 / N as f64;
 const CUSP_GM: f64 = 2.0;
 
@@ -800,7 +802,7 @@ fn cusp_potential(x: [f64; 1]) -> f64 {
     -CUSP_GM / (r * r + CUSP_SOFTENING * CUSP_SOFTENING).sqrt()
 }
 
-/// the isentropic atmosphere in balance against THAT potential, normalized at the wall.
+/// the isentropic atmosphere in balance against the plummer potential, normalized at the wall.
 fn cusped_atmosphere(x: [f64; 1]) -> Prim<f64, 1> {
     let scale = GAMMA * K0 / (GAMMA - 1.0);
     let invariant = scale * 1.0f64.powf(GAMMA - 1.0) + cusp_potential([0.0]);
@@ -841,7 +843,7 @@ fn build_cusped(levels: usize) -> Hier {
 
 #[test]
 fn a_steady_target_with_an_unresolved_cusp_is_accepted() {
-    // NON-VACUITY: the cusp has to actually be unresolved, or this is the smooth case again.
+    // non-vacuity: the cusp has to be genuinely unresolved, or this is the smooth case again.
     let dx = 1.0 / N as f64;
     let across = cusped_atmosphere([0.5 + 0.5 * dx]).rho / cusped_atmosphere([0.5 + 1.5 * dx]).rho;
     println!("\ndensity ratio across one coarse cell at the cusp: {across:.2}x");
@@ -851,8 +853,9 @@ fn a_steady_target_with_an_unresolved_cusp_is_accepted() {
          geometry no longer has an unresolved feature and the check below is the smooth case"
     );
 
-    // the target IS a steady state of the field the body applies, so it must be accepted. the
-    // cells at the cusp cannot testify about convergence and must not be allowed to veto it.
+    // the target is a steady state of the field the body applies, so the check accepts it. the
+    // cells at the cusp carry limiter clipping in place of truncation, so they are excluded from
+    // the verdict, leaving the verdict to the resolved cells.
     let hier = build_cusped(2).with_equilibrium(cusped_atmosphere).unwrap();
     let measured = hier
         .target_imbalance_convergence(0)
@@ -867,7 +870,7 @@ fn a_steady_target_with_an_unresolved_cusp_is_accepted() {
             .map(|r| format!("{r:.2}"))
             .collect::<Vec<_>>()
     );
-    // and the cusp has to have been EXCLUDED, or the acceptance came from somewhere else.
+    // and the cusp has to have been excluded, or the acceptance came from somewhere else.
     assert!(
         measured.resolved < measured.considered,
         "every one of the {} overlapping cells counted as resolved, so the cusp was never \
@@ -878,8 +881,8 @@ fn a_steady_target_with_an_unresolved_cusp_is_accepted() {
 
 #[test]
 fn the_cusped_target_is_still_held_exactly() {
-    // acceptance is worthless if the correction does not then work. the same steep target must be
-    // a fixed point to roundoff, cusp included.
+    // acceptance earns its keep only when the correction then works. the same steep target holds
+    // as a fixed point to roundoff, cusp included.
     let mut hier = build_cusped(2).with_equilibrium(cusped_atmosphere).unwrap();
     hier.seed_equilibrium();
     let m0 = composite_mass(&hier);
@@ -902,11 +905,11 @@ fn the_cusped_target_is_still_held_exactly() {
 
 #[test]
 fn a_correct_target_is_never_refused_however_steep() {
-    // the check must not reject an equilibrium for being sharp. as a target steepens its imbalance
-    // concentrates into cells the grid cannot resolve, and at some point there is nothing left to
-    // measure -- at which point the honest outcome is "unverified", never "wrong". a WRONG target
-    // stays detectable throughout, because its error is the continuum residual and that is present
-    // wherever the source is, including in the smooth cells.
+    // the check accepts an equilibrium however sharp. as a target steepens its imbalance
+    // concentrates into cells the grid leaves unresolved, and past some steepness the measurable
+    // signal is gone -- at which point the honest verdict is "unverified". a target that solves
+    // different equations stays detectable throughout, because its error is the continuum
+    // residual and that is present wherever the source is, including in the smooth cells.
     println!("\ncorrect targets across a range of steepness (none may be refused)");
     println!("{:>14} {:>15} {:>12}", "softening/dx", "rho ratio/cell", "verdict");
     for soft_cells in [2.0_f64, 1.5, 1.0, 0.75, 0.5, 0.35] {
@@ -934,7 +937,7 @@ fn a_correct_target_is_never_refused_however_steep() {
             )));
         for lvl in 1..hier.levels.len() { hier.levels[lvl].state.seed_cells(target); }
 
-        // NON-VACUITY: the target has to be genuinely steep, or this is the smooth case again.
+        // non-vacuity: the target has to be genuinely steep, or this is the smooth case again.
         assert!(
             across > 1.3,
             "the density changes by only {across:.2}x across a cell; not a steep target"
@@ -963,15 +966,15 @@ fn a_correct_target_is_never_refused_however_steep() {
 
 /// the stationarity diagnostic ignores the sink interior.
 ///
-/// a declared target is a steady state of the equations the STAGE PIPELINE applies. inside an
-/// accreting body it is not: the drain removes mass and energy, so the target's imbalance there
-/// carries the drain rather than truncation error and reports non-convergence however exact the
-/// declaration is everywhere else. the cells are still CORRECTED like any other -- the exclusion
-/// decides only which cells testify about convergence.
+/// a declared target is a steady state of the equations the stage pipeline applies. inside an
+/// accreting body the drain removes mass and energy, so the target's imbalance there carries the
+/// drain in place of truncation error and reports non-convergence however exact the declaration is
+/// everywhere else. those cells are still corrected like any other -- the exclusion decides which
+/// cells testify about convergence.
 ///
-/// the default comes from the bodies, so a run with a sink gets the exclusion without configuring
-/// it. the two clauses below are independent: that the default is nonzero, and that widening it
-/// actually removes cells from the statistic.
+/// the default comes from the bodies, so a run with a sink gets the exclusion for free. the two
+/// clauses below are independent: that the default is nonzero, and that widening it removes cells
+/// from the statistic.
 #[test]
 fn the_stationarity_diagnostic_excludes_the_sink_interior() {
     let hier = build(&nested(2)).with_equilibrium(hydrostatic).unwrap();
@@ -1000,7 +1003,7 @@ fn the_stationarity_diagnostic_excludes_the_sink_interior() {
         base.considered, masked.considered, unmasked.considered
     );
 
-    // NON-VACUITY: the overlap has to offer cells at all, or every claim below is trivially true.
+    // non-vacuity: the overlap has to offer cells at all, or every claim below is trivially true.
     assert!(
         unmasked.considered > 20,
         "the level pair offered only {} cells; the exclusion cannot be shown to do anything",
@@ -1013,9 +1016,9 @@ fn the_stationarity_diagnostic_excludes_the_sink_interior() {
         masked.considered,
         unmasked.considered
     );
-    // this fixture carries a gravitating body with no accretion radius, so the DEFAULT resolves
-    // to zero and must agree with the explicit zero. a fixture with a sink would differ here,
-    // which is the behaviour the default exists to provide.
+    // this fixture carries a gravitating body at zero accretion radius, so the default resolves
+    // to zero and agrees with the explicit zero. a fixture with a sink would differ here, which is
+    // the behavior the default exists to provide.
     assert_eq!(
         base.considered, unmasked.considered,
         "with no accreting body the default exclusion must be zero, but it removed cells"

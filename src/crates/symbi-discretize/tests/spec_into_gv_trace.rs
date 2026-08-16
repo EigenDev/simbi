@@ -6,17 +6,17 @@
 // recreates a `BuiltSource` graph inside the discretize crate's tracing
 // session, with param leaves replaced by Gv-trace-native NodeIds.
 //
-// splicing is what lets a spec-driven source ride INSIDE the godunov stage, so
-// flux divergence + source contribution + integrator run in ONE launch, over ONE
-// register-resident state, under ONE round of CSE.
+// splicing is what lets a spec-driven source ride inside the godunov stage, so
+// flux divergence + source contribution + integrator run in one launch, over one
+// register-resident state, under one round of CSE.
 //
 // asserted here:
 //   - inside an active Gv trace, calling `splice_built_source_into` with a
 //     `BuiltSource` (from `point_mass_gravity_sources` or similar) produces
 //     Gv-trace NodeIds that are valid `Gv::of(node)` values;
-//   - the spliced outputs evaluate to the SAME f64 values as the standalone
+//   - the spliced outputs evaluate to the same f64 values as the standalone
 //     BuiltSource at the same parameter state, so the splice preserves
-//     semantics and not merely structural validity;
+//     semantics on top of structural validity;
 //   - the trace's resulting Graph is well-formed (can be ended cleanly via
 //     `end_trace`).
 //
@@ -34,7 +34,7 @@ use symbi_ir::gv::{Gv, begin_trace, end_trace, with_trace};
 
 /// helper: evaluate a Gv-trace NodeId at f64 against a known parameter state,
 /// using scalarize + the Cpu interpreter on the trace's graph as it stands.
-/// the trace is left RUNNING — caller is responsible for `end_trace`.
+/// the trace is left running — caller is responsible for `end_trace`.
 fn eval_in_trace(out: NodeId, values: &[(&str, f64)]) -> f64 {
     use symbi_ir::backends::interp::{Backend, Cpu};
     use symbi_ir::passes::scalarize::scalarize;
@@ -62,7 +62,8 @@ fn eval_in_trace(out: NodeId, values: &[(&str, f64)]) -> f64 {
 #[test]
 fn splice_produces_valid_gv_node_ids() {
     // basic structural check: the splice mechanism returns NodeIds that
-    // wrap as Gv values inside the active trace. no semantic claim here.
+    // wrap as Gv values inside the active trace. a structural claim; the
+    // semantic one is gated below.
     begin_trace();
 
     // declare the leaves the spec needs as Gv-trace nodes. these stand in
@@ -117,17 +118,17 @@ fn splice_produces_valid_gv_node_ids() {
     }
 
     // the trace ends cleanly — the spliced ops + the leaves form a coherent
-    // graph; no orphaned references, no unresolved Params.
+    // graph: every reference resolves and every Param is bound.
     let _kernel = end_trace();
 }
 
 #[test]
 fn spliced_outputs_match_standalone_at_same_param_state() {
-    // **the load-bearing claim**: splicing preserves SEMANTICS — the
-    // evaluated values match, beyond structural validity. for a known parameter state, the spliced source evaluated
-    // inside the trace equals the standalone BuiltSource evaluated via
-    // scalarize+interp directly. proves the spliced graph computes the
-    // same function as the original.
+    // **the load-bearing claim**: splicing preserves semantics — the evaluated
+    // values match, beyond structural validity. for a known parameter state, the
+    // spliced source evaluated inside the trace equals the standalone BuiltSource
+    // evaluated via scalarize+interp directly. proves the spliced graph computes
+    // the same function as the original.
     use symbi_ir::backends::interp::{Backend, Cpu};
     use symbi_ir::passes::scalarize::scalarize;
 
@@ -231,7 +232,7 @@ fn declare_gravity_leaves() -> HashMap<String, NodeId> {
 }
 
 fn sample_param_value(name: &str) -> f64 {
-    // a fixed deterministic sample for cross-validation. no zeros at
+    // a fixed deterministic sample for cross-validation, held clear of the
     // singular positions (|x - xm| > 0).
     match name {
         "rho" => 1.5,

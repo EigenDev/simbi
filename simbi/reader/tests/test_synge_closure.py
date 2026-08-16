@@ -1,10 +1,10 @@
 # =============================================================================
 # test_synge_closure.py
 #
-# post-processing must compute derived fields with the equation of state the run was
-# integrated with. the synge (taub-mathews) closure is PARAMETER-FREE, and the `gamma`
-# attribute on its checkpoints is an inert placeholder written only so the plumbing has a
-# float to carry; reading it as an adiabatic index computes a different gas than the one
+# post-processing computes derived fields with the equation of state the run was
+# integrated with. the synge (taub-mathews) closure is parameter-free, and the `gamma`
+# attribute on its checkpoints is a reporting slot written so the plumbing has a float to
+# carry; reading it as an adiabatic index computes a different gas than the one
 # that was evolved — at p / rho = 20 the gamma-law enthalpy is 51 against the true 80.02,
 # a 36% error in every energy, momentum and enthalpy field derived from it.
 #
@@ -50,22 +50,23 @@ def test_synge_metadata_selects_the_parameter_free_closure() -> None:
 
 
 def test_a_checkpoint_predating_the_eos_attribute_reads_as_gamma_law() -> None:
-    # an empty slug means "not recorded", and only gamma-law runs predate the attribute.
+    # an empty slug marks a file written before the attribute existed, and every such run
+    # is gamma-law.
     assert closure_of(_meta(eos="")) == gamma_law_t(PLACEHOLDER_GAMMA)
     assert closure_of(SimpleNamespace(gamma=1.4)) == gamma_law_t(1.4)
 
 
 def test_taub_mathews_enthalpy_saturates_the_taub_inequality() -> None:
-    # (h - theta)(h - 4 theta) = 1 is an identity for this gas, not an approximation;
-    # it holds at every temperature and is the sharpest available check that the closed
-    # form was transcribed correctly.
+    # (h - theta)(h - 4 theta) = 1 is an exact identity for this gas; it holds at every
+    # temperature and is the sharpest available check that the closed form was
+    # transcribed correctly.
     #
-    # the residual is bounded by the CONDITIONING of the check rather than by a flat
-    # number: h -> 4 theta hot, so `h - 4 theta` is a cancelling difference of two values
-    # of size 4 theta. perturbing h by one ulp moves the product by
+    # the residual bound tracks the conditioning of the check, which makes it
+    # theta-dependent: h -> 4 theta hot, so `h - 4 theta` is a cancelling difference of
+    # two values of size 4 theta. perturbing h by one ulp moves the product by
     # |2h - 5 theta| * eps * h -> 12 eps theta^2, and by 2 eps in the cold limit where
     # h -> 1. the bound below is 5 eps (1 + theta^2), which the exact closed form clears
-    # with 3-5x of margin across twelve decades; an enthalpy that is merely CLOSE to
+    # with 3-5x of margin across twelve decades; an enthalpy merely close to
     # taub-mathews misses it by orders of magnitude at every theta.
     eos = taub_mathews_t()
     rho = np.ones(13)
@@ -209,16 +210,18 @@ def test_internal_energy_conjugate_form_recovers_the_cold_limit_digits() -> None
 
 def test_a_newtonian_checkpoint_refuses_the_relativistic_closure() -> None:
     # the parameter-free closure is rejected off the rhd regime at configuration time, so
-    # a newtonian file carrying it means the regime and eos attributes disagree; the
-    # alternative to failing here is inventing an adiabatic index it does not have.
+    # a newtonian file carrying it means the regime and eos attributes disagree. failing
+    # here is the correct response: computing on would mean inventing an adiabatic index
+    # for a parameter-free gas.
     with pytest.raises(FieldComputationError, match="no adiabatic index"):
         spec_enthalpy(taub_mathews_t(), RHO, PRE, "newtonian")
 
 
 def test_a_synge_pipeline_never_consults_an_adiabatic_index() -> None:
-    # the wiring gate: a metadata object with NO gamma attribute at all. the pipeline
-    # built for a parameter-free closure has nothing to read it for, so anything that
-    # still reaches for one fails here rather than silently using a placeholder.
+    # the wiring gate: a metadata object stripped of its gamma attribute. the pipeline
+    # built for a parameter-free closure draws every derived field from the closure, so
+    # a code path that reaches for an adiabatic index raises here, at the point where a
+    # placeholder would otherwise have been read silently.
     from simbi.reader.computation import create_computation_pipeline
 
     class _Meta:
