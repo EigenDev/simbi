@@ -167,6 +167,96 @@ fn the_wb_source_telescopes_against_divergence_and_geometric_source_per_chart() 
 }
 
 #[test]
+fn the_wb_source_telescopes_on_a_log_spaced_axis() {
+    // the identity is position-blind: it holds at whatever face/anchor positions the
+    // three terms share. what a LOG axis adds is the anchor convention -- the cell
+    // position is the map's own center, the GEOMETRIC mean sqrt(r_lo r_hi), not the
+    // arithmetic midpoint -- and the graded faces make every A/V ratio cell-dependent.
+    // the arithmetic-anchor control below shows the identity is anchor-consistent
+    // rather than anchor-forgiving: telescoping needs the same anchor in all three
+    // terms, and the seeded column supplies the map's.
+    let n = 64usize;
+    let slope = 2.0_f64.log10() / n as f64;
+    for chart in [Chart::Cartesian, Chart::Cylindrical, Chart::Spherical] {
+        // the radial column r in [1, 2] on log faces; anchors at the geometric mean,
+        // the kernel ladder's cell position on a log axis.
+        let face = |ii: usize| 10.0_f64.powf(ii as f64 * slope);
+        let anchor = |ii: i64| (face(ii as usize) * face(ii as usize + 1)).sqrt();
+
+        // the graded premise: arithmetic and geometric centers must genuinely separate,
+        // or this arm degenerates to the uniform test.
+        let sep = (0..n)
+            .map(|ii| (0.5 * (face(ii) + face(ii + 1)) - anchor(ii as i64)).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            sep > 1.0e-7,
+            "{}: log faces separate the two center definitions by only {sep:.3e}",
+            chart.name()
+        );
+
+        let mut worst_wb = 0.0_f64;
+        let mut worst_plain = 0.0_f64;
+        let mut scale = 0.0_f64;
+        for ii in 1..n - 1 {
+            let (r_lo, r_hi) = (face(ii), face(ii + 1));
+            let r_c = anchor(ii as i64);
+            let (a_lo, a_hi) = (chart.area(r_lo), chart.area(r_hi));
+            let inv_v = 1.0 / chart.volume(r_lo, r_hi);
+
+            let (rho_c, p_c) = isentrope(r_c);
+            let eq = LocalEquilibrium::through(rho_c, p_c, phi(r_c), GAMMA);
+
+            // face pressures from the NEIGHBOR cells' equilibria, as in the uniform
+            // test: the identity is exercised across the reconstruction-consistency
+            // seam.
+            let eq_dn = {
+                let (rho, p) = isentrope(anchor(ii as i64 - 1));
+                LocalEquilibrium::through(rho, p, phi(anchor(ii as i64 - 1)), GAMMA)
+            };
+            let eq_up = {
+                let (rho, p) = isentrope(anchor(ii as i64 + 1));
+                LocalEquilibrium::through(rho, p, phi(anchor(ii as i64 + 1)), GAMMA)
+            };
+            let p_face_lo = eq_dn.pressure_at(phi(r_lo));
+            let p_face_hi = eq_up.pressure_at(phi(r_hi));
+
+            let flux_div = (a_hi * p_face_hi - a_lo * p_face_lo) * inv_v;
+            let geo = p_c * (a_hi - a_lo) * inv_v;
+            let s_wb = (a_hi * (eq.pressure_at(phi(r_hi)) - p_c)
+                - a_lo * (eq.pressure_at(phi(r_lo)) - p_c))
+                * inv_v;
+
+            worst_wb = worst_wb.max((-flux_div + geo + s_wb).abs());
+            worst_plain = worst_plain.max((-flux_div + geo + rho_c * grav(r_c)).abs());
+            scale = scale.max(flux_div.abs());
+        }
+        let rel = worst_wb / scale;
+        println!(
+            "log {}: |flux_div - geo - S_wb| max {worst_wb:.3e} (rel {rel:.3e}), \
+             analytic-source residual {worst_plain:.3e}",
+            chart.name()
+        );
+        // measured mismatch: 1.7e-4 (cartesian), 8.3e-5 (cylindrical), 1.9e-4
+        // (spherical) -- truncation-scale, so the log column exercises the same
+        // flux/source mismatch the uniform one does.
+        assert!(
+            worst_plain > 1.0e-5,
+            "{}: positive control failed -- the analytic rho*g source leaves only \
+             {worst_plain:.3e}; this log column does not exercise the mismatch",
+            chart.name()
+        );
+        // measured max 1.5e-13 relative (spherical); same roundoff-of-O(p/h)
+        // argument as the uniform arm, same bound.
+        assert!(
+            rel < 1.0e-11,
+            "{}: the log-axis telescoping residual is {rel:.3e} of the flux-divergence \
+             scale; the wb source is not the exact remainder on a graded axis",
+            chart.name()
+        );
+    }
+}
+
+#[test]
 fn the_general_form_reduces_to_the_cartesian_pressure_difference() {
     // on the cartesian chart A_hi = A_lo = 1 and V = h, so the area-weighted form
     // collapses to the landed `(p_eq(phi_hi) - p_eq(phi_lo))/h` spelling. value

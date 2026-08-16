@@ -1017,8 +1017,11 @@ pub fn stencil_potential_gv(
     let geo = cell_geometry_gv(coords, spacing, axes, ndim);
 
     // natural-order coordinates: every axis at its own centroid, then the sweep axis replaced by
-    // the displaced position. a half-cell offset is the midpoint of the two bracketing faces, so
-    // both parities come from the same face ladder and no separate centre formula is needed.
+    // the displaced position. an even half-cell offset lands on a face of the runtime spacing
+    // map; an odd one lands on the CELL CENTER between the two bracketing faces, through the
+    // same map-aware center the host `stagger_coord(Center)` uses (geometric mean on a log
+    // axis, arithmetic midpoint otherwise) — the position the initial condition seeds the
+    // hydrostatic column at, which is what makes the anchor departures exactly zero.
     let mut coord3 = [Gv::ZERO; 3];
     for (g, &coord_idx) in axes.iter().enumerate() {
         if coord_idx < 3 {
@@ -1032,7 +1035,7 @@ pub fn stencil_potential_gv(
             lo
         } else {
             let hi = crate::gv::gv_axis_face_at(sweep_coord, spacing[dir], half_cells.div_euclid(2) + 1);
-            (lo + hi) * Gv::from_f64(0.5)
+            crate::gv::gv_axis_center_between(sweep_coord, lo, hi)
         };
     }
 
@@ -1102,6 +1105,9 @@ pub fn body_source_wb_gv(
     let (us_vel, _cs, e_int) = gas_state(ncomp, gamma, us_den, &us_mom, us_nrg);
     let p_us = (gamma - Gv::ONE) * us_den * e_int;
 
+    // the bake-time spacing enum is vestigial in the traced face map: `gv_axis_face_at_index`
+    // selects uniform/log/geometric at RUNTIME through the per-axis `map_kind_{ax}` scalar,
+    // so this one kernel serves every grading.
     let spacing = vec![Spacing::Uniform; ndim];
     // the curvilinear form needs the per-axis face areas and inverse volume; traced only on
     // the curvilinear arms so the cartesian graph — and the baked cartesian kernels — carry
@@ -1125,7 +1131,11 @@ pub fn body_source_wb_gv(
             // force the flux divergence carries instead of cancelling it, and a 400-step
             // stagnant column measured |v| = 8.1 under it against 2.9e-2 with the analytic
             // source: sign errors here announce themselves as detonations, not drifts.
-            None => (p_hi - p_lo) / Gv::scalar(&format!("dx_{ax}")),
+            // the width is the CELL's own, through the runtime spacing map (`gv_axis_width`
+            // reduces to the `dx_{ax}` scalar on an unmapped axis) -- a graded axis has no
+            // single `dx`, and the flux divergence this source telescopes against differences
+            // its faces over the same per-cell width.
+            None => (p_hi - p_lo) / crate::gv::gv_axis_width(ax, spacing[ax]),
             // the area-weighted form: `p_eq(phi_c)` is `p_us` bit-exactly (the isentrope's
             // anchor point), so the reference term is the raw stage-input pressure. on a
             // radial column the transverse axes see equal face potentials, equal `p_eq`,

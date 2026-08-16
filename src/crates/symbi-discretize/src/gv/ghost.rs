@@ -420,8 +420,9 @@ pub fn rmhd_kerr_ghost_fill_gv(
 ///
 ///   (rho, p)_ghost = LocalEquilibrium::through((rho, p)_src, phi_src).state_at(phi_ghost),
 ///
-/// with `phi` the total body potential at each cell's position — the per-axis arithmetic
-/// face midpoints, the same anchor ladder the balanced reconstruction evaluates, mapped to
+/// with `phi` the total body potential at each cell's position — the runtime spacing map's
+/// own cell centers (geometric mean of the faces on a log axis, arithmetic midpoint
+/// otherwise), the same anchor ladder the balanced reconstruction evaluates, mapped to
 /// cartesian through the chart embedding on a curvilinear grid. a mirrored copy of a
 /// stratified column is not the column's continuation, so a plain reflect ghost presents
 /// the balanced reconstruction with departures that are pure boundary artifact -- measured
@@ -448,11 +449,17 @@ pub fn wb_ghost_fill_gv(
     let vel_sign: Vec<Gv> = (0..ndim)
         .map(|ax| Gv::scalar(&format!("vel_sign_{ax}")))
         .collect();
+    // the bake-time spacing enum is vestigial: face positions and the cell center both come
+    // from the RUNTIME per-axis map (`map_kind_{ax}`), so this one kernel serves every
+    // grading. the center is the map's own (geometric mean on a log axis, arithmetic midpoint
+    // otherwise) — the same position `set_initial` seeds at and the balanced reconstruction's
+    // potential ladder anchors on, which is what makes the wall-face extension exact on the
+    // seeded column.
     let spacing = vec![Spacing::Uniform; ndim];
     let centroid = |ax: usize, i: Gv| -> Gv {
-        Gv::from_f64(0.5)
-            * (gv_axis_face_at_index(ax, spacing[ax], i)
-                + gv_axis_face_at_index(ax, spacing[ax], i + Gv::ONE))
+        let lo = gv_axis_face_at_index(ax, spacing[ax], i);
+        let hi = gv_axis_face_at_index(ax, spacing[ax], i + Gv::ONE);
+        crate::gv::gv_axis_center_between(ax, lo, hi)
     };
     let (phi_src, phi_ghost) = match coords {
         Coords::Cartesian => {

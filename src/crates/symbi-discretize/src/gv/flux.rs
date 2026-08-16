@@ -1609,6 +1609,11 @@ fn balanced_thermo_pair(
 ) -> (Gv, Gv, Gv, Gv) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
 
+    // the bake-time spacing enum is vestigial in the potential ladder: face positions come
+    // from the RUNTIME per-axis map (`map_kind_{ax}` in `gv_axis_face_at_index`), and odd
+    // half-cells land on the map's own cell center (geometric mean on a log axis, arithmetic
+    // midpoint otherwise) — the position `set_initial` seeds the column at, which is what
+    // makes the anchor departures exactly zero on every grading.
     let spacing = vec![Spacing::Uniform; ndim as usize];
     // offsets the limiter reads, and the anchor INDEX within them for each side of the shared
     // face. the face sits on the lower face of cell 0, which is half-cell 0; a cell centre at

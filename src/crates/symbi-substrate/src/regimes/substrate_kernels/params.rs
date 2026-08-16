@@ -378,6 +378,12 @@ where
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
+    // the body kernels read cell/face positions through the runtime spacing map, so the
+    // per-axis (x_lo, dx) they bind must be the MAP's parameters (face-0 position + linear
+    // width / log slope / geometric seed width) — the raw uniform grid scalars are wrong on
+    // a mapped axis. identical values on an unmapped grid; body kernels are static-mesh
+    // (a = 1).
+    let (x_lo_k, dx_k) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, 1.0);
     let bodies = sim.immersed.as_ref().map(|im| &im.bodies);
     scalars_for(name, |bind| {
         let ScalarBind::Ref(sref) = bind else {
@@ -402,7 +408,7 @@ where
                     body_scalar::<D>(bodies, idx, field)
                 }
             }
-            other => geom_scalar(&geom.x_lo, &geom.dx, &sim.geom.maps, other)
+            other => geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other)
                 .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
         };
         Sc::from_f64(v)

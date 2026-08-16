@@ -601,6 +601,17 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             format!("iso_ghost_fill{sfx}_{D}d")
         };
 
+        // the fill's face-position ladder reads the runtime spacing map, so the per-axis
+        // (x_lo, dx) it binds must be the MAP's parameters (face-0 position + linear width /
+        // log slope / geometric seed width) — identical to the raw grid scalars on an
+        // unmapped axis. ghost fills are static-mesh (a = 1).
+        let (x_lo_k, dx_k) = crate::regimes::substrate_kernels::kernel_geom(
+            &sim.geom.x_lo,
+            &sim.geom.dx,
+            &sim.geom.maps,
+            sim.geom.coords,
+            1.0,
+        );
         GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
             |region, p| {
                 // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes (the
@@ -630,10 +641,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                         // face-position ladder, which declares the per-axis grid origin
                         // and spacing like any position-reading kernel.
                         ScalarBind::Ref(other) => Sc::from_f64(
-                            geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
-                                .unwrap_or_else(|| {
-                                    panic!("ghost_fill: unexpected scalar {other:?}")
-                                }),
+                            geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other).unwrap_or_else(
+                                || panic!("ghost_fill: unexpected scalar {other:?}"),
+                            ),
                         ),
                         o => panic!("ghost_fill: unexpected scalar {o:?}"),
                     },

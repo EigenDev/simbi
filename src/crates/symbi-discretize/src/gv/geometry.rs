@@ -409,6 +409,28 @@ pub(crate) fn gv_axis_face_at_index(ax: usize, _spacing: Spacing, i: Gv) -> Gv {
     )
 }
 
+/// the cell-CENTER position between the bracketing faces `lo` and `hi` on grid axis `ax`,
+/// per the RUNTIME spacing map: a log axis (`map_kind = 1`) centers at the GEOMETRIC MEAN
+/// `sqrt(lo*hi)`, every other map at the arithmetic midpoint `(lo + hi)/2`. this is the
+/// in-kernel mirror of the host `AxisMap::center` — the single position definition
+/// `stagger_coord(Center)` reports and `set_initial` seeds primitives at. the well-balanced
+/// ladder MUST use this definition: its machine-exactness is the statement that the body
+/// potential is evaluated at the exact positions where the seeded column satisfies its
+/// discrete equilibrium, and an arithmetic midpoint on a log axis sits O((dr/r)^2 r) off
+/// every cell — the balance would then hold a column displaced from the evolved one.
+/// `map_kind` is per-launch-uniform, so the branch never diverges; on a uniform or
+/// geometric map the selected arm is the arithmetic midpoint, value-identical to the
+/// unconditional spelling.
+pub(crate) fn gv_axis_center_between(ax: usize, lo: Gv, hi: Gv) -> Gv {
+    let map_kind = Gv::scalar(&format!("map_kind_{ax}"));
+    let is_log = map_kind.cmp_gt(Gv::from_f64(0.5)) & map_kind.cmp_lt(Gv::from_f64(1.5));
+    Gv::cond(
+        is_log,
+        || (lo * hi).sqrt(),
+        || (lo + hi) * Gv::from_f64(0.5),
+    )
+}
+
 /// the diagonal scale factor `h_dir(pos)` — the metric lame coefficient. cartesian: 1;
 /// spherical: (1, r, r*sin(theta)); cylindrical: (1, r, 1). `pos` is coordinate-indexed
 /// (pos[0]=r, pos[1]=theta). the `match` is build-time (Coords is the codegen geometry).

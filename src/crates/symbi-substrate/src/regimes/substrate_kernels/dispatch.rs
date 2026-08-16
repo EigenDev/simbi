@@ -889,26 +889,6 @@ pub fn dispatch_c2p_status<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// the balanced scheme's anchor ladder places every cell's reference point at the arithmetic
-/// midpoint of its two faces, which is the finite-volume cell-position convention only on a
-/// UNIFORMLY spaced axis; on a log or geometric axis the anchor is displaced from the cell's
-/// own center and the reconstruction, source and ghosts all balance against a column the grid
-/// does not carry. refused rather than approximated, on every chart.
-pub(crate) fn assert_balance_uniform_spacing<const D: usize>(
-    maps: &Option<[symbi_geometry::AxisMap; D]>,
-) {
-    if let Some(maps) = maps {
-        assert!(
-            maps.iter()
-                .all(|m| matches!(m, symbi_geometry::AxisMap::Uniform { .. })),
-            "the well-balanced scheme's anchor ladder is uniform-spacing only: cell anchors \
-             sit at arithmetic face midpoints, which is not the cell position on a log- or \
-             geometrically-graded axis, so the balance would hold a column displaced from \
-             the evolved one. run the plain reconstruction on graded meshes"
-        );
-    }
-}
-
 /// the WELL-BALANCED forward body source: gravity as the (curvilinear: area-weighted)
 /// equilibrium-pressure difference at the cell faces, paired with the balanced
 /// reconstruction per chart (gravity-only -- the production drain lives in the
@@ -921,7 +901,6 @@ pub fn dispatch_body_source_wb<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    assert_balance_uniform_spacing::<D>(&sim.geom.maps);
     assert!(
         !sim.has_passive_scalar(),
         "the well-balanced body source carries no dye drain: it is gravity-only, and a dyed \
@@ -2833,7 +2812,6 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
                 "the well-balanced reconstruction is gamma-law only: its local profile is \
                  the ideal-gas isentrope, which is not an isentrope of the {eos:?} closure"
             );
-            assert_balance_uniform_spacing::<D>(&sim.geom.maps);
             symbi_discretize::kernel_slug::coord_suffix(sim.geom.coords)
         }
     };
