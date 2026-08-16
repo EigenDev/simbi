@@ -649,6 +649,12 @@ def scale_factor_derivative(self) -> Optional[Callable[[float], float]]:
 | `IMHD` | Isothermal MHD | Magnetized disks |
 | `RMHD` | Relativistic magnetohydrodynamics | AGN jets, pulsar wind nebulae, magnetic reconnection |
 
+The relativistic regimes also take an equation-of-state choice: `eos="synge"` swaps the
+constant-gamma law for the Taub-Mathews closure to the Synge relativistic perfect gas, whose
+effective adiabatic index walks from 5/3 in cold gas to 4/3 in hot — the physically right
+behavior for flows that cross the transrelativistic temperature range (a blast wave decelerating
+from ultrarelativistic to Newtonian, say) and it carries no free index at all.
+
 The `Spacetime` axis sets a run's relativity: `RHD`/`RMHD` on Minkowski are special-relativistic, on a curved spacetime general-relativistic. Checkpoints and configs written under the legacy `srhd`/`srmhd` slugs still load (mapped to `rhd`/`rmhd`).
 
 ### Spacetimes
@@ -686,8 +692,23 @@ for spinning (`KERR_KS`) horizons, on the GPU, and across the multi-GPU decompos
 **Riemann solvers:**
 - `HLLE`, the two-wave workhorse, written in a branch-free closed form the compiler can vectorize
 - `HLLC`, HLL with a contact wave, Toro's adaptive pressure estimates evaluated lazily — the shock estimate is paid for only in the cells that need it. Works on the MHD regimes too (HLLC flux + HLL edge EMF); the *isothermal* regimes stay on `HLLE`, whose two-wave fan matches their wave structure
-- `HLLC_LM`, the Fleischmann (2020) low-Mach / low-dissipation HLLC, for both Newtonian and relativistic hydro
+- `HLLC_LM`, the Fleischmann (2020) low-Mach / low-dissipation HLLC, for both Newtonian and relativistic hydro. The reference Mach number the acoustic ramp saturates at is a runtime knob, `mach_limit` (default 0.1, the published value) — below it the acoustic dissipation scales down with the local Mach number, which is what keeps subsonic turbulence alive instead of diffusing it away. Pair it with `wb_reconstruction` on stratified problems (see below)
 - `HLLD`, HLL with discontinuities (magnetohydrodynamics), faithful to Mignone & Del Zanna
+
+**Well-balanced reconstruction:**
+
+Set `wb_reconstruction=True` and the scheme reconstructs each cell's *departure* from the
+local isentrope through it (Käppeli & Mishra 2014) instead of the raw state, and applies the
+gravity source as the equilibrium-pressure difference at the cell faces. A hydrostatic
+atmosphere then presents no face jump at all — a sealed stratified column holds its discrete
+equilibrium to machine precision (velocity residual ~1e-15, entropy deficit ~1e-16), where
+plain reconstruction slowly stirs it at truncation level. The balancing runs through the whole
+stack: the reconstruction, the source, reflecting-wall ghosts, the first-order flux-correction
+fallback, and the coarse-fine transfer under refinement all speak the same departure language,
+so refinement boundaries in a stratified atmosphere stop shedding entropy too. Scope: Newtonian
+gamma-law hydro on cartesian grids, with `HLLE`, `HLLC`, or `HLLC_LM`. It needs an immersed
+gravitating body to balance against, and costs some extra arithmetic per face (about 1.4x on
+the flux stage, less end to end) — paid only when the flag is on.
 
 **Grid spacing:**
 - `LINEAR`, uniform spacing
@@ -720,8 +741,8 @@ a symbolic proof of div(curl) = 0 in the test suite, and bug-injection tests kee
 proof valid.
 
 **A few extras:**
-- `plm_theta`, the PLM reconstruction parameter (must be > 0 and <= 2, default 1.5). For piecewise-constant use `reconstruction=PCM` or `--order 1`
-- `reconstruction` picks `PCM` or `PLM`, and `limiter` picks `MINMOD` or `VAN_LEER` (van Leer is the smooth harmonic one and ignores `plm_theta`). `Limiter` lives at `simbi.types.input`
+- `reconstruction` picks `PCM`, `PLM`, or `PPM` — or use the shorthand `--order 1/2/3`, which pairs each reconstruction with its matching time integrator (PCM+RK1, PLM+RK2, PPM+RK3). The PPM implementation carries a convergence-gated flattener that closes a spurious entropy vent in smooth sustained compressions (gravitational infall onto a sink, most notably) without touching its formal order
+- `plm_theta`, the PLM limiter parameter (0 < theta <= 2, default 1.5; theta = 2 is the sharpest). `limiter` picks `MINMOD` or `VAN_LEER` (van Leer is the smooth harmonic one and ignores `plm_theta`); `Limiter` lives at `simbi.types.input`
 - First-order flux correction (FOFC): if a high-order update drives a cell unphysical, that cell is redone at first order, and the run reports how often that happened — per window while it runs, and again in the exit summary
 - Prolongation at refinement boundaries runs one order above the interior reconstruction, which preserves the scheme's accuracy across level edges
 
@@ -734,6 +755,7 @@ refused loudly when it falls outside the table, though it saves you a round trip
 |---|---|
 | `HLLC` / `HLLC_LM` | Newtonian hydro, RHD, and both MHD regimes (the ones carrying a contact wave). `HLLC_LM` is Newtonian + RHD |
 | `HLLD` | the MHD regimes |
+| `wb_reconstruction` | Newtonian gamma-law hydro, cartesian, with `HLLE`/`HLLC`/`HLLC_LM`; carries through refinement and needs a gravitating immersed body |
 | viscosity | adiabatic and isothermal, on every chart: cartesian, cylindrical, and spherical, in 2D, 2.5D (3-component on a 2-axis grid), and 3D. `RHD` accepts the coefficient and silently ignores it |
 | alpha-disk viscosity | the same charts as constant-nu viscosity, and it needs a central immersed body |
 | resistivity | cartesian 2.5D/3D, cylindrical r-z and r-phi, spherical r-theta |
