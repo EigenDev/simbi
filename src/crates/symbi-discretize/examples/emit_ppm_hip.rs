@@ -71,6 +71,7 @@ fn main() {
             dir,
             Recon::Ppm,
             symbi_discretize::coords::Balance::Plain,
+            false,
             symbi_discretize::coords::Coords::Cartesian,
             &[0, 1, 2],
         );

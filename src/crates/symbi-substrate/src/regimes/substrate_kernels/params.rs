@@ -204,10 +204,11 @@ pub(crate) fn motion_scalar(
 
 // ---- immersed-body forward source: gravity + accretion ----------
 
-/// resolve a body scalar ref `body_{idx}_{field}` to its value: `{mass,soft,racc,sink,delta}` and
-/// the per-axis `{pos,vel}_{ax}`. the branch-free-loop conventions: an inactive slot
+/// resolve a body scalar ref `body_{idx}_{field}` to its value: `{mass,soft,racc,rmask,sink,delta}`
+/// and the per-axis `{pos,vel}_{ax}`. the branch-free-loop conventions: an inactive slot
 /// (idx >= n_bodies) or a non-gravitating body -> mass=0 (zero gravity), soft=1 (r_eff>=1);
-/// a non-accreting body -> sink=0 (zero accretion), racc=1, delta=1.
+/// a non-accreting body -> sink=0 (zero accretion), racc=1, delta=1; a slot penalizing no
+/// surface -> rmask=0, the radius that makes a mask indicator vanish everywhere.
 pub(crate) fn body_scalar<const D: usize>(
     bodies: Option<&symbi_ib::BodyCollection<f64, D>>,
     idx: u8,
@@ -243,6 +244,9 @@ pub(crate) fn body_scalar<const D: usize>(
         // the penalization mask radius: the accretor's accretion radius or the rigid
         // body's physical radius; 1.0 for a body with no mask (never penalized).
         BodyScalar::Racc => body.mask_radius().unwrap_or(1.0),
+        // the same radius under the indicator contract: zero for a body that penalizes no
+        // surface, so a max over slots covers the penalized region and only it.
+        BodyScalar::Rmask => body.mask_radius().unwrap_or(0.0),
         BodyScalar::Sink => body.sink_rate().unwrap_or(0.0),
         BodyScalar::Delta => body.sink_delta().unwrap_or(1.0),
         // the spin state a shaped wall's mask rotates with: the angular-velocity vector

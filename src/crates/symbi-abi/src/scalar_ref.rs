@@ -46,6 +46,11 @@ pub enum BodyScalar {
     /// kernel serves both.
     SoftKind,
     Racc,
+    /// the radius of the surface this body penalizes, and zero for a body that penalizes none.
+    /// the zero absent-value is what makes a max over slots equal the penalized region exactly:
+    /// a purely gravitational slot then carries an indicator that vanishes at every point,
+    /// while `Racc` carries a placeholder radius its consumers screen off by other means.
+    Rmask,
     Sink,
     Delta,
     Pos(u8),
@@ -64,6 +69,7 @@ impl BodyScalar {
             BodyScalar::Soft => "soft".to_string(),
             BodyScalar::SoftKind => "softkind".to_string(),
             BodyScalar::Racc => "racc".to_string(),
+            BodyScalar::Rmask => "rmask".to_string(),
             BodyScalar::Sink => "sink".to_string(),
             BodyScalar::Delta => "delta".to_string(),
             BodyScalar::Pos(ax) => format!("pos_{ax}"),
@@ -91,6 +97,7 @@ impl BodyScalar {
             "soft" => Some(BodyScalar::Soft),
             "softkind" => Some(BodyScalar::SoftKind),
             "racc" => Some(BodyScalar::Racc),
+            "rmask" => Some(BodyScalar::Rmask),
             "sink" => Some(BodyScalar::Sink),
             "delta" => Some(BodyScalar::Delta),
             _ => None,
@@ -324,6 +331,7 @@ mod tests {
                 BodyScalar::Soft,
                 BodyScalar::SoftKind,
                 BodyScalar::Racc,
+                BodyScalar::Rmask,
                 BodyScalar::Sink,
                 BodyScalar::Delta,
             ] {

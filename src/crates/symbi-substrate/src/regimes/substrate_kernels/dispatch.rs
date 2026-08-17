@@ -2797,11 +2797,38 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // fan — a distinct baked kernel (`_rusanov`), the provably admissibility-preserving low-order
     // scheme. rusanov is GR-only (a curved-spacetime kernel); the flat first-order redo is HLLE at
     // theta = 0 through the normal solver suffix.
+
+    // the acoustic-dissipation floor inside an immersed penalization mask. the low-mach ramp
+    // reduces dissipation on the reading that a vanishing face-normal mach number means smooth
+    // subsonic flow; inside a mask the velocity is held at the wall's by the penalization, so
+    // that reading is empty and the classical dissipation belongs there. a slot penalizing no
+    // surface carries a zero mask radius, leaving the floor inert wherever no wall is imposed.
+    //
+    // the floor is PAIRED WITH THE BALANCED RECONSTRUCTION, and the pairing is what the
+    // measurements support. restored dissipation acting on a stratified structure the
+    // reconstruction has NOT balanced generates entropy of its own: on a sealed wall in a
+    // stratified atmosphere the floored plain arm reaches K/K_0 = 19.9 against 7.6 for the
+    // ramp alone, while the floored balanced arm holds 1.036 against 1.148. the balanced
+    // reconstruction removes the hydrostatic face jump that the extra dissipation would
+    // otherwise act on, so the two belong together exactly as the balanced reconstruction and
+    // its equilibrium-pressure source do. the mask-aware family is baked for the newtonian
+    // low-mach arm, which is where the ramp lives.
+    let mask_aware = solver == Solver::HllcLm
+        && prefix == "adiabatic"
+        && sim.immersed.is_some()
+        && balance == symbi_discretize::coords::Balance::Hydrostatic;
+    let mask_sfx = symbi_discretize::kernel_slug::ib_mask_suffix(mask_aware);
+
     // a well-balanced reconstruction evaluates the body potential at cartesian positions, so it
     // is the one flux baked per chart; the chart segment therefore rides with the balance axis
     // and is empty for a plain reconstruction. keying it on the balance rather than on the solver
     // is what lets the first-order redo be balanced: that redo runs HLLE.
     let wb_chart = match balance {
+        symbi_discretize::coords::Balance::Plain if mask_aware => {
+            // the mask indicator is evaluated at the face's cartesian position, so a floored
+            // flux is baked per chart exactly as a balanced one is.
+            symbi_discretize::kernel_slug::coord_suffix(sim.geom.coords)
+        }
         symbi_discretize::coords::Balance::Plain => "",
         symbi_discretize::coords::Balance::Hydrostatic => {
             // the balanced reconstruction's local profile is the gamma-law isentrope
@@ -2833,6 +2860,7 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         solver: solver_sfx,
         recon: recon_sfx,
         balance: balance.suffix(),
+        mask: mask_sfx,
         chart: wb_chart,
         eos: eos_sfx,
         geom: geom_sfx,

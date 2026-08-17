@@ -161,6 +161,14 @@ fn star_state<S: Scalar, const D: usize>(
 /// `shock_smoother`:
 ///   - `Standard`     — plain HLLC.
 ///   - `Fleischmann`  — symmetric flux (fleischmann eq 11) with adaptive phi.
+///
+/// `phi_floor` raises the acoustic-dissipation scaling to at least the supplied value, for a
+/// face whose flow speed reports a mach number the surrounding physics does not set. the
+/// scaling's premise is that a vanishing face-normal mach number means smooth subsonic flow, so
+/// the acoustic dissipation may fall with it; where a velocity is imposed instead of evolved
+/// that premise is empty and the floor restores the classical amount. `None` leaves the
+/// published scaling as the whole rule and adds no arithmetic to the traced graph.
+#[allow(clippy::too_many_arguments)]
 pub fn hllc<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
@@ -169,14 +177,25 @@ pub fn hllc<S: Scalar, const D: usize>(
     vface: S,
     shock_smoother: ShockwaveLimiter,
     mach_limit: S,
+    phi_floor: Option<S>,
 ) -> Cons<S, D> {
-    hllc_newtonian_body(eos, prim_l, prim_r, nhat, vface, shock_smoother, mach_limit)
+    hllc_newtonian_body(
+        eos,
+        prim_l,
+        prim_r,
+        nhat,
+        vface,
+        shock_smoother,
+        mach_limit,
+        phi_floor,
+    )
 }
 
 /// the newtonian HLLC body — Standard / Fleischmann star-state dispatch,
 /// cells to HLLE before reaching this point). callable directly for
 /// regression diff harnesses.
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn hllc_newtonian_body<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
@@ -185,6 +204,7 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
     vface: S,
     shock_smoother: ShockwaveLimiter,
     mach_limit: S,
+    phi_floor: Option<S>,
 ) -> Cons<S, D> {
     let regime = Newtonian;
     let u_l = prim_l.to_conserved(eos);
@@ -276,6 +296,14 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
                             // this arm serves `Fleischmann`, the published ramp, which
                             // reads the pressure jump raw; `Standard` dispatches elsewhere.
                             _ => fleischmann_phi(vn_l, vn_r, cs_l, cs_r, mach_limit),
+                        };
+                        // the floor on the acoustic dissipation, applied to the scaling and to
+                        // nothing else, so the wave speeds and the star states stay the
+                        // published ones. `None` leaves `phi` as the sole rule and emits no
+                        // node, keeping a floor-free face bit-identical to the plain arm.
+                        let phi = match phi_floor {
+                            Some(floor) => phi.max(floor),
+                            None => phi,
                         };
                         let s_l_lm = phi * s_l;
                         let s_r_lm = phi * s_r;
@@ -854,7 +882,7 @@ mod tests {
             pre: 1.0,
         };
         let nhat = Tensor::unit(0);
-        let flux = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT);
+        let flux = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT, None);
         let regime = Newtonian;
         let exact = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, exact.den));
@@ -872,7 +900,7 @@ mod tests {
         };
 
         let nhat_x = Tensor::unit(0);
-        let flux_x = hllc(&eos, &prim, &prim, &nhat_x, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT);
+        let flux_x = hllc(&eos, &prim, &prim, &nhat_x, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT, None);
         let regime = Newtonian;
         let exact_x = regime.to_flux(&prim, &nhat_x, &eos);
         assert!(approx(flux_x.den, exact_x.den));
@@ -881,7 +909,7 @@ mod tests {
         assert!(approx(flux_x.nrg, exact_x.nrg));
 
         let nhat_y = Tensor::unit(1);
-        let flux_y = hllc(&eos, &prim, &prim, &nhat_y, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT);
+        let flux_y = hllc(&eos, &prim, &prim, &nhat_y, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT, None);
         let exact_y = regime.to_flux(&prim, &nhat_y, &eos);
         assert!(approx(flux_y.den, exact_y.den));
         assert!(approx(flux_y.mom[0], exact_y.mom[0]));
@@ -912,6 +940,7 @@ mod tests {
             0.0,
             ShockwaveLimiter::Standard,
             MACH_LIMIT,
+            None,
         );
         assert!(flux.den > 0.0);
         assert!(flux.nrg > 0.0);
@@ -941,6 +970,7 @@ mod tests {
             0.0,
             ShockwaveLimiter::Standard,
             MACH_LIMIT,
+            None,
         );
 
         let prim_l_y = Prim {
@@ -961,6 +991,7 @@ mod tests {
             0.0,
             ShockwaveLimiter::Standard,
             MACH_LIMIT,
+            None,
         );
 
         assert!(approx(flux_x.den, flux_y.den));
@@ -997,8 +1028,8 @@ mod tests {
                 vel: Tensor::new([vr, 0.0]),
                 pre: pr,
             };
-            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT);
-            let lm = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Fleischmann, MACH_LIMIT);
+            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT, None);
+            let lm = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Fleischmann, MACH_LIMIT, None);
             let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1.0e-30);
             assert!(
                 rel(std.den, lm.den) < 1.0e-14 && rel(std.nrg, lm.nrg) < 1.0e-14,
@@ -1060,6 +1091,7 @@ mod tests {
             0.0,
             ShockwaveLimiter::Fleischmann,
             MACH_LIMIT,
+            None,
         );
         let regime = Newtonian;
         let exact = regime.to_flux(&prim, &nhat, &eos);
@@ -1529,8 +1561,8 @@ mod tests {
                 "this face does not saturate the sensor (phi = {phi}); it cannot test the \
                  phi = 1 equivalence"
             );
-            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT);
-            let acu = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Acoustic, MACH_LIMIT);
+            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT, None);
+            let acu = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Acoustic, MACH_LIMIT, None);
             let scale = std.den.abs().max(std.nrg.abs()).max(1.0);
             for (what, a, b) in [
                 ("den", std.den, acu.den),
@@ -1579,7 +1611,7 @@ mod tests {
                 (fl + fr) * 0.5
             };
             let dissipation = |lim| {
-                let f = hllc(&eos, &l, &r, &nhat, 0.0, lim, MACH_LIMIT);
+                let f = hllc(&eos, &l, &r, &nhat, 0.0, lim, MACH_LIMIT, None);
                 (f.mom[0] - central.mom[0]).abs()
             };
             let fleisch = dissipation(ShockwaveLimiter::Fleischmann);
@@ -1840,6 +1872,127 @@ mod tests {
             (a_r - relativistic).abs() < 1.0e-12 && (a_l + relativistic).abs() < 1.0e-12,
             "a state at rest must have acoustic speeds +/- cs_rel = +/-{relativistic}, got \
              ({a_l}, {a_r})"
+        );
+    }
+
+    /// a floor of one restores the classical amount of acoustic dissipation exactly: the
+    /// scaling is the sole difference between the two flux formulations, and at phi = 1 the
+    /// central form of the intermediate flux is an identity for the star states. this is what
+    /// the immersed-mask floor buys a face inside a penalized region, where the velocity is
+    /// the wall's and the mach number reports the boundary condition.
+    #[test]
+    fn a_unit_floor_returns_the_low_mach_flux_to_classical_hllc() {
+        let eos = IdealGas { gamma: 5.0 / 3.0f64 };
+        let nhat = Tensor::new([1.0, 0.0]);
+        // a stagnant face with a genuine thermodynamic jump — the state a penalized wall
+        // holds its masked cells in.
+        let l = Prim {
+            rho: 1.0,
+            vel: Tensor::new([1.0e-4, 0.0]),
+            pre: 1.0,
+        };
+        let r = Prim {
+            rho: 1.3,
+            vel: Tensor::new([-1.0e-4, 0.0]),
+            pre: 1.2,
+        };
+        let cs_l = eos.sound_speed(l.rho, l.pre);
+        let cs_r = eos.sound_speed(r.rho, r.pre);
+        let phi = fleischmann_phi(1.0e-4, -1.0e-4, cs_l, cs_r, MACH_LIMIT);
+        assert!(
+            phi < 0.01,
+            "this face must sit deep on the ramp for the floor to be doing anything, got \
+             phi = {phi}"
+        );
+        let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT, None);
+        let floored = hllc(
+            &eos,
+            &l,
+            &r,
+            &nhat,
+            0.0,
+            ShockwaveLimiter::Fleischmann,
+            MACH_LIMIT,
+            Some(1.0),
+        );
+        let scale = std.den.abs().max(std.nrg.abs()).max(1.0);
+        for (what, a, b) in [
+            ("den", std.den, floored.den),
+            ("mom_n", std.mom[0], floored.mom[0]),
+            ("nrg", std.nrg, floored.nrg),
+        ] {
+            assert!(
+                (a - b).abs() <= 1.0e-12 * scale,
+                "{what}: a unit floor must reproduce classical HLLC ({a:e} vs {b:e})"
+            );
+        }
+        // the premise: the unfloored ramp genuinely differs here, so the agreement above is
+        // attributable to the floor.
+        let ramp = hllc(
+            &eos,
+            &l,
+            &r,
+            &nhat,
+            0.0,
+            ShockwaveLimiter::Fleischmann,
+            MACH_LIMIT,
+            None,
+        );
+        assert!(
+            (ramp.nrg - std.nrg).abs() > 1.0e-3 * scale,
+            "the ramp and classical HLLC agree on this face anyway ({:e} vs {:e}); the floor \
+             is being credited with an equality that holds without it",
+            ramp.nrg,
+            std.nrg
+        );
+    }
+
+    /// a floor of zero leaves the published ramp as the whole rule. the mask indicator is zero
+    /// on every face outside a penalized region, so the floor changes the flux exactly where a
+    /// wall imposes a velocity and nowhere else.
+    #[test]
+    fn a_zero_floor_leaves_the_published_ramp_untouched() {
+        let eos = IdealGas { gamma: 1.4f64 };
+        let nhat = Tensor::new([1.0, 0.0]);
+        let l = Prim {
+            rho: 1.0,
+            vel: Tensor::new([2.0e-3, 0.0]),
+            pre: 1.0,
+        };
+        let r = Prim {
+            rho: 1.1,
+            vel: Tensor::new([1.0e-3, 0.0]),
+            pre: 1.05,
+        };
+        let ramp = hllc(
+            &eos,
+            &l,
+            &r,
+            &nhat,
+            0.0,
+            ShockwaveLimiter::Fleischmann,
+            MACH_LIMIT,
+            None,
+        );
+        let floored = hllc(
+            &eos,
+            &l,
+            &r,
+            &nhat,
+            0.0,
+            ShockwaveLimiter::Fleischmann,
+            MACH_LIMIT,
+            Some(0.0),
+        );
+        assert_eq!(
+            (ramp.den.to_bits(), ramp.mom[0].to_bits(), ramp.nrg.to_bits()),
+            (
+                floored.den.to_bits(),
+                floored.mom[0].to_bits(),
+                floored.nrg.to_bits()
+            ),
+            "a zero floor moved the flux; `max(phi, 0)` is the identity on a scaling that \
+             lives in [0, 1]"
         );
     }
 }

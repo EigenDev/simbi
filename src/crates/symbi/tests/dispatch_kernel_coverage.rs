@@ -478,6 +478,17 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                     } else {
                         &[symbi_discretize::coords::Balance::Plain]
                     };
+                    // the immersed-mask axis: the low-mach ramp's acoustic dissipation is
+                    // floored inside a penalization mask, and the dispatch selects that twin
+                    // off the presence of an immersed side-car alone. any run carrying a body
+                    // reaches it, so the family is baked over the full recon x balance x chart
+                    // product the floor-free arm covers.
+                    let masks: &[bool] =
+                        if regime == RegimeKind::Newtonian && *solver == Solver::HllcLm {
+                            &[false, true]
+                        } else {
+                            &[false]
+                        };
                     for &recon in recons {
                         for &eos in eoses {
                             for &balance in balances {
@@ -488,38 +499,50 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                                 {
                                     continue;
                                 }
-                                let charts: &[symbi_geometry::Geometry] = match balance {
-                                    symbi_discretize::coords::Balance::Plain => {
+                                for &mask in masks {
+                                    // the chart segment rides with whichever property makes the
+                                    // flux read a position: a balanced reconstruction evaluates
+                                    // the body potential, a mask-aware solver the body geometry.
+                                    let reads_position = mask
+                                        || balance
+                                            == symbi_discretize::coords::Balance::Hydrostatic;
+                                    let charts: &[symbi_geometry::Geometry] = if reads_position {
+                                        &[
+                                            symbi_geometry::Geometry::Cartesian,
+                                            symbi_geometry::Geometry::Cylindrical,
+                                            symbi_geometry::Geometry::Spherical,
+                                        ]
+                                    } else {
                                         &[symbi_geometry::Geometry::Cartesian]
-                                    }
-                                    symbi_discretize::coords::Balance::Hydrostatic => &[
-                                        symbi_geometry::Geometry::Cartesian,
-                                        symbi_geometry::Geometry::Cylindrical,
-                                        symbi_geometry::Geometry::Spherical,
-                                    ],
-                                };
-                                for &chart in charts {
-                                    checked += 1;
-                                    // through the same composer the bake and the dispatch use.
-                                    let name = symbi_discretize::kernel_slug::FaceFluxName {
-                                        prefix,
-                                        solver: solver.kernel_suffix(),
-                                        recon: recon.suffix(),
-                                        balance: balance.suffix(),
-                                        chart: symbi_discretize::kernel_slug::coord_suffix(chart),
-                                        eos: eos.suffix(),
-                                        ndim: ndim as usize,
-                                        dir: dir as usize,
-                                        ..Default::default()
-                                    }
-                                    .build();
-                                    if !kernel_exists(&name)
-                                        && !KNOWN_UNBAKED.contains(&name.as_str())
-                                    {
-                                        missing.push(format!(
-                                            "{solver:?}/{recon:?}/{eos:?}/{balance:?}/{chart:?} \
-                                             on {regime:?}: {name}"
-                                        ));
+                                    };
+                                    for &chart in charts {
+                                        checked += 1;
+                                        // through the same composer the bake and the dispatch use.
+                                        let name = symbi_discretize::kernel_slug::FaceFluxName {
+                                            prefix,
+                                            solver: solver.kernel_suffix(),
+                                            recon: recon.suffix(),
+                                            balance: balance.suffix(),
+                                            mask: symbi_discretize::kernel_slug::ib_mask_suffix(
+                                                mask,
+                                            ),
+                                            chart: symbi_discretize::kernel_slug::coord_suffix(
+                                                chart,
+                                            ),
+                                            eos: eos.suffix(),
+                                            ndim: ndim as usize,
+                                            dir: dir as usize,
+                                            ..Default::default()
+                                        }
+                                        .build();
+                                        if !kernel_exists(&name)
+                                            && !KNOWN_UNBAKED.contains(&name.as_str())
+                                        {
+                                            missing.push(format!(
+                                                "{solver:?}/{recon:?}/{eos:?}/{balance:?}/\
+                                                 {mask}/{chart:?} on {regime:?}: {name}"
+                                            ));
+                                        }
                                     }
                                 }
                             }
@@ -536,13 +559,15 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
     println!("coverage matrix: {checked} combinations");
     assert!(
         // measured, not guessed: the sweep over
-        // (regime x solver x dim x dir x recon x eos x balance x chart) is exactly 168
-        // combinations today -- it was 180 until 2026-08-15, when the clamped hllc_lm
-        // variant was retired and its solver row left the matrix (the surviving hllc_lm
-        // carries the balance x chart arms the retired name introduced). the floor sits at
-        // the measurement so any silent collapse of any axis fails here; move it only with
+        // (regime x solver x dim x dir x recon x eos x balance x mask x chart) is exactly 240
+        // combinations today. it was 180 until 2026-08-15, when the clamped hllc_lm variant
+        // was retired and its solver row left the matrix (the surviving hllc_lm carries the
+        // balance x chart arms the retired name introduced), leaving 168; the immersed-mask
+        // axis then added 72 -- the newtonian hllc_lm arm over 6 (dim, dir) x 2 recon x 3
+        // charts x 2 balances, each of which now also names a mask-aware twin. the floor sits
+        // at the measurement so any silent collapse of any axis fails here; move it only with
         // a deliberate matrix change, recorded like this one.
-        checked >= 168,
+        checked >= 240,
         "only {checked} (solver, regime, dim, dir) combination(s) were checked; the matrix or the          name protocol has drifted and this gate is not covering anything"
     );
     assert!(

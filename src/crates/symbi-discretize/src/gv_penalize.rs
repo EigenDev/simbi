@@ -260,6 +260,36 @@ fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
     body_mask_sdf_shaped(center, None)
 }
 
+/// the sharp indicator of the immersed penalization mask at a cartesian point: `1` strictly
+/// inside any body's masked region, `0` elsewhere. built from the same sphere geometry the
+/// penalization kernels drive their wall with, at the slot's `body_{b}_rmask` radius — the
+/// radius of the surface a body penalizes, and zero for a body that penalizes none, so an
+/// inert or purely gravitational slot contributes a sphere of zero radius whose strict
+/// interior is empty.
+///
+/// the indicator is sharp where the penalization's own `chi` is mollified over a cell. a
+/// mollified indicator would carry a fractional value through the seam cells, and this one
+/// feeds a floor whose meaningful values are the two endpoints: the interior of a mask holds a
+/// velocity that is imposed rather than evolved, and the exterior holds one the flow sets.
+pub(crate) fn body_mask_indicator_gv(
+    n_bodies: usize,
+    ndim: usize,
+    cart_axes: &[usize],
+    x: [Gv; 3],
+) -> Gv {
+    (0..n_bodies).fold(Gv::ZERO, |acc, b| {
+        let sphere = SdfExpr::<Gv, 3>::Sphere {
+            center: crate::gv_immersed::body_vec3(b, ndim, cart_axes, "pos"),
+            radius: Gv::scalar(&format!("body_{b}_rmask")),
+        };
+        acc.max(Gv::select(
+            sphere.dist(x).cmp_lt(Gv::ZERO),
+            Gv::ONE,
+            Gv::ZERO,
+        ))
+    })
+}
+
 /// the mask geometry with an optional config CSG. `None`: a sphere of runtime radius
 /// `body_0_racc` (the AOT kernel). `Some(shape)`: the shape — authored in the body-local
 /// frame as f64 constants — lifted to Gv constants and translated to the runtime center. so a

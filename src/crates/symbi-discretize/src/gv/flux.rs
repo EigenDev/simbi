@@ -1377,12 +1377,14 @@ enum MachRef {
 /// `balance` is independent of `smoother`: well-balancing is a property of the reconstruction
 /// and the low-mach ramp a property of the solver, so every pairing is expressible -- including
 /// the one the first-order FOFC redo needs, which is HLLE with a balanced reconstruction.
+#[allow(clippy::too_many_arguments)]
 fn adiabatic_hllc_at_arm<const D: usize>(
     dir: u8,
     recon: Recon,
     smoother: ShockwaveLimiter,
     mach_ref: MachRef,
     balance: Balance,
+    mask_aware: bool,
     coords: Coords,
     axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -1408,7 +1410,41 @@ fn adiabatic_hllc_at_arm<const D: usize>(
     };
     let (left, right, nhat, vface) =
         euler_reconstruct::<D>(D as u8, dir, axes[dir as usize], recon, balanced);
-    let flux = hllc(&eos, &left, &right, &nhat, vface, smoother, mach_limit);
+    // the acoustic-dissipation floor inside an immersed penalization mask. the low-mach ramp
+    // reads the face-normal mach number as a statement about the flow: a vanishing value means
+    // smooth subsonic motion, whose acoustic dissipation may fall with it. inside a mask the
+    // velocity is held at the wall's by the penalization, so the mach number reports the
+    // boundary condition rather than the flow, and the friction heat the wall deposits enters a
+    // region whose acoustic dissipation the ramp has switched off — the interior then supports
+    // a density contrast at fixed pressure and its sound speed runs away. the indicator restores
+    // the classical HLLC dissipation across exactly the masked faces and leaves every other face
+    // on the published ramp.
+    let phi_floor = mask_aware.then(|| {
+        let spacing = vec![Spacing::Uniform; D];
+        crate::gv_penalize::body_mask_indicator_gv(
+            symbi_ib::MAX_SOURCE_BODIES,
+            D,
+            &crate::gv_immersed::body_cart_axes(coords, D, axes),
+            crate::gv_immersed::stencil_position_cartesian_gv(
+                coords,
+                D,
+                dir as usize,
+                axes,
+                &spacing,
+                0,
+            ),
+        )
+    });
+    let flux = hllc(
+        &eos,
+        &left,
+        &right,
+        &nhat,
+        vface,
+        smoother,
+        mach_limit,
+        phi_floor,
+    );
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
@@ -1417,7 +1453,7 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Standard, MachRef::Published, Balance::Plain, Coords::Cartesian, &[0, 1, 2][..D])
+    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Standard, MachRef::Published, Balance::Plain, false, Coords::Cartesian, &[0, 1, 2][..D])
 }
 
 
@@ -1433,10 +1469,16 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(
 /// with the well-balanced reconstruction through the `balance` axis. the clamped variant this
 /// name once carried is retired -- the balancing removes the hydrostatic residual the clamp
 /// damped, and `sealed_column_unclamped` gates the pairing.
+///
+/// `mask_aware` floors the ramp to the classical dissipation inside an immersed body's
+/// penalization mask, an axis independent of `balance`: the mask is a property of where the
+/// velocity comes from and the balance a property of the reconstruction, so a masked body in a
+/// stratified atmosphere carries both.
 pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
     balance: Balance,
+    mask_aware: bool,
     coords: Coords,
     axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -1446,6 +1488,7 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
         ShockwaveLimiter::Fleischmann,
         MachRef::Runtime,
         balance,
+        mask_aware,
         coords,
         axes,
     )
@@ -1472,6 +1515,7 @@ pub fn adiabatic_hllc_wb_flux_gv<const D: usize>(
         ShockwaveLimiter::Standard,
         MachRef::Published,
         Balance::Hydrostatic,
+        false,
         coords,
         axes,
     )
@@ -1489,6 +1533,7 @@ pub fn adiabatic_hlle_wb_flux_gv<const D: usize>(
         ShockwaveLimiter::Standard,
         MachRef::Published,
         Balance::Hydrostatic,
+        false,
         coords,
         axes,
     )
@@ -1502,7 +1547,7 @@ pub fn adiabatic_hllc_acoustic_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Acoustic, MachRef::Published, Balance::Plain, Coords::Cartesian, &[0, 1, 2][..D])
+    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Acoustic, MachRef::Published, Balance::Plain, false, Coords::Cartesian, &[0, 1, 2][..D])
 }
 
 fn rhd_hllc_at_arm<const D: usize>(

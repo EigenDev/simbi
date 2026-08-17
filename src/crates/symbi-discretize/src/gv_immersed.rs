@@ -988,6 +988,50 @@ pub fn body_feedback_iso_gv(
     (end_trace(), writes)
 }
 
+/// the cartesian position of a point displaced `half_cells` half-cell widths from the current
+/// cell's lower face along the sweep axis: `half_cells = 2k` lands on the lower face of cell
+/// `i+k`, `2k+1` on that cell's centre.
+///
+/// natural-order coordinates: every axis at its own centroid, then the sweep axis replaced by the
+/// displaced position. an even half-cell offset lands on a face of the runtime spacing map; an odd
+/// one lands on the cell center between the two bracketing faces, through the same map-aware
+/// center the host `stagger_coord(Center)` uses (geometric mean on a log axis, arithmetic midpoint
+/// otherwise) — the position the initial condition seeds the hydrostatic column at, which is what
+/// makes the anchor departures exactly zero. the transverse coordinates hold at the current cell's
+/// own centre: the reconstruction is one-dimensional along `dir`, so only the sweep axis moves.
+///
+/// every consumer of a body's geometry along a sweep reads the same ladder, so the potential a
+/// well-balanced reconstruction cancels and the mask indicator a dissipation floor keys on are
+/// evaluated at one and the same point.
+pub(crate) fn stencil_position_cartesian_gv(
+    coords: Coords,
+    ndim: usize,
+    dir: usize,
+    axes: &[usize],
+    spacing: &[Spacing],
+    half_cells: i64,
+) -> [Gv; 3] {
+    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let mut coord3 = [Gv::ZERO; 3];
+    for (g, &coord_idx) in axes.iter().enumerate() {
+        if coord_idx < 3 {
+            coord3[coord_idx] = geo.centroid[g];
+        }
+    }
+    let sweep_coord = axes[dir];
+    if sweep_coord < 3 {
+        let lo = crate::gv::gv_axis_face_at(sweep_coord, spacing[dir], half_cells.div_euclid(2));
+        coord3[sweep_coord] = if half_cells.rem_euclid(2) == 0 {
+            lo
+        } else {
+            let hi =
+                crate::gv::gv_axis_face_at(sweep_coord, spacing[dir], half_cells.div_euclid(2) + 1);
+            crate::gv::gv_axis_center_between(sweep_coord, lo, hi)
+        };
+    }
+    to_cartesian_gv(coords, &coord3)
+}
+
 /// the total gravitational potential at a point displaced `half_cells` half-cell widths from the
 /// current cell's lower face along the sweep axis: `half_cells = 2k` lands on the lower face of
 /// cell `i+k`, `2k+1` on that cell's centre.
@@ -1013,32 +1057,7 @@ pub fn stencil_potential_gv(
     half_cells: i64,
 ) -> Gv {
     let cart_axes = body_cart_axes(coords, ndim, axes);
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
-
-    // natural-order coordinates: every axis at its own centroid, then the sweep axis replaced by
-    // the displaced position. an even half-cell offset lands on a face of the runtime spacing
-    // map; an odd one lands on the cell center between the two bracketing faces, through the
-    // same map-aware center the host `stagger_coord(Center)` uses (geometric mean on a log
-    // axis, arithmetic midpoint otherwise) — the position the initial condition seeds the
-    // hydrostatic column at, which is what makes the anchor departures exactly zero.
-    let mut coord3 = [Gv::ZERO; 3];
-    for (g, &coord_idx) in axes.iter().enumerate() {
-        if coord_idx < 3 {
-            coord3[coord_idx] = geo.centroid[g];
-        }
-    }
-    let sweep_coord = axes[dir];
-    if sweep_coord < 3 {
-        let lo = crate::gv::gv_axis_face_at(sweep_coord, spacing[dir], half_cells.div_euclid(2));
-        coord3[sweep_coord] = if half_cells.rem_euclid(2) == 0 {
-            lo
-        } else {
-            let hi = crate::gv::gv_axis_face_at(sweep_coord, spacing[dir], half_cells.div_euclid(2) + 1);
-            crate::gv::gv_axis_center_between(sweep_coord, lo, hi)
-        };
-    }
-
-    let cart = to_cartesian_gv(coords, &coord3);
+    let cart = stencil_position_cartesian_gv(coords, ndim, dir, axes, spacing, half_cells);
     (0..n_bodies)
         .map(|b| {
             let bpos = body_vec3(b, ndim, &cart_axes, "pos");

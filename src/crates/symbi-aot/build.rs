@@ -1295,7 +1295,47 @@ fn gen_adiabatic_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Reco
         dir,
         recon,
         b,
+        false,
         Coords::Cartesian,
+        &g.axes,
+    );
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the mask-aware low-mach arms: the published ramp with its acoustic dissipation floored to the
+// classical amount inside an immersed body's penalization mask, where the velocity is set by the
+// wall rather than by the flow. the indicator is evaluated at the face's cartesian position, so
+// these are baked per chart alongside the well-balanced arms, and per reconstruction balance,
+// since a masked body sitting in a stratified atmosphere carries both properties at once.
+fn gen_adiabatic_hllc_lm_ibmask_face_flux(
+    out_dir: &str,
+    ndim: u8,
+    dir: u8,
+    recon: Recon,
+    coords: Coords,
+    balance: symbi_discretize::coords::Balance,
+) {
+    let g = Geom::identity(coords, ndim);
+    let name = symbi_discretize::kernel_slug::FaceFluxName {
+        prefix: "adiabatic",
+        solver: "_hllc_lm",
+        recon: recon.suffix(),
+        balance: balance.suffix(),
+        mask: symbi_discretize::kernel_slug::ib_mask_suffix(true),
+        chart: coords_suffix(coords),
+        ndim: ndim as usize,
+        dir: dir as usize,
+        ..Default::default()
+    }
+    .build();
+    let (k, writes) = gv_dim!(
+        ndim,
+        symbi_discretize::gv::adiabatic_hllc_lm_flux_gv,
+        dir,
+        recon,
+        balance,
+        true,
+        coords,
         &g.axes,
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1332,6 +1372,7 @@ fn gen_adiabatic_wb_face_flux(
             dir,
             recon,
             symbi_discretize::coords::Balance::Hydrostatic,
+            false,
             coords,
             &g.axes,
         ),
@@ -3333,6 +3374,14 @@ fn main() {
             for cc in [Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {
                 for rc in [Recon::Plm, Recon::Ppm] {
                     gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, rc, cc, "_hllc_lm");
+                    // the mask-aware twins of the whole low-mach family, over both
+                    // reconstruction balances: an immersed body is dispatchable on either.
+                    for bl in [
+                        symbi_discretize::coords::Balance::Plain,
+                        symbi_discretize::coords::Balance::Hydrostatic,
+                    ] {
+                        gen_adiabatic_hllc_lm_ibmask_face_flux(&out_dir, ndim, dir, rc, cc, bl);
+                    }
                 }
                 // the first-order FOFC redo runs HLLE at theta = 0 on the plm kernel.
                 gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, Recon::Plm, cc, "");
