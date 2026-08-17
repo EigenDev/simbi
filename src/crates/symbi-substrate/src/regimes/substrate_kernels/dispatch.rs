@@ -2804,15 +2804,24 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // that reading is empty and the classical dissipation belongs there. a slot penalizing no
     // surface carries a zero mask radius, leaving the floor inert wherever no wall is imposed.
     //
-    // the floor is PAIRED WITH THE BALANCED RECONSTRUCTION, and the pairing is what the
+    // the floor is paired with the balanced reconstruction, and the pairing is what the
     // measurements support. restored dissipation acting on a stratified structure the
-    // reconstruction has NOT balanced generates entropy of its own: on a sealed wall in a
+    // reconstruction leaves unbalanced generates entropy of its own: on a sealed wall in a
     // stratified atmosphere the floored plain arm reaches K/K_0 = 19.9 against 7.6 for the
     // ramp alone, while the floored balanced arm holds 1.036 against 1.148. the balanced
     // reconstruction removes the hydrostatic face jump that the extra dissipation would
     // otherwise act on, so the two belong together exactly as the balanced reconstruction and
     // its equilibrium-pressure source do. the mask-aware family is baked for the newtonian
     // low-mach arm, which is where the ramp lives.
+    //
+    // the key is the declared reconstruction balance, a property of the scheme, and the
+    // balanced reconstruction carries a per-cell weight that fades its own profile out where
+    // the local isentrope reaches vacuum inside the reconstruction footprint. that weight
+    // leaves this selection untouched, so the floor holds across the faded cells too. it
+    // belongs there: the faded cells are the ones in transonic free fall through a drain,
+    // whose isentrope has terminated, and the entropy the 19.9 measurement charges to the
+    // floored plain arm is the amplification of a hydrostatic-equilibrium truncation residual
+    // — a residual an equilibrium has to exist to produce.
     let mask_aware = solver == Solver::HllcLm
         && prefix == "adiabatic"
         && sim.immersed.is_some()

@@ -363,12 +363,12 @@ fn t5_a_parabolic_operator_inherits_the_well_balanced_property() {
         let winp = |v: &Vec<f64>| -> [f64; 6] {
             [v[ii - 3], v[ii - 2], v[ii - 1], v[ii], v[ii + 1], v[ii + 2]]
         };
-        let (dl, _) = hydrostatic_departures(&win(&rho), &win(&pre), &winp(&phi), 2, GAMMA);
-        let (dr, _) = hydrostatic_departures(&win(&rho), &win(&pre), &winp(&phi), 3, GAMMA);
         let eq_l = symbi_hydro::hydrostatic::LocalEquilibrium::through(
             rho[ii - 1], pre[ii - 1], phi[ii - 1], GAMMA);
         let eq_r = symbi_hydro::hydrostatic::LocalEquilibrium::through(
             rho[ii], pre[ii], phi[ii], GAMMA);
+        let (dl, _) = hydrostatic_departures(&eq_l, &win(&rho), &win(&pre), &winp(&phi));
+        let (dr, _) = hydrostatic_departures(&eq_r, &win(&rho), &win(&pre), &winp(&phi));
         let face_l = eq_l.density_at(phi_face) + ppm_face(dl.clone().try_into().unwrap());
         let face_r = eq_r.density_at(phi_face) + ppm_face(dr.clone().try_into().unwrap());
         worst_wb = worst_wb.max((face_l - face_r).abs() / rho[ii]);
@@ -408,14 +408,14 @@ fn t6_the_parabolic_path_matches_plain_reconstruction_to_roundoff_without_gravit
     let mut worst_ulp = 0.0f64;
     for (q, p) in cases {
         for anchor in [2usize, 3] {
-            let (d, _) = hydrostatic_departures(&q, &p, &phi, anchor, GAMMA);
-        let d: [f64; 6] = d.try_into().unwrap();
+            let eq = symbi_hydro::hydrostatic::LocalEquilibrium::through(
+                q[anchor], p[anchor], phi[anchor], GAMMA);
+            let (d, _) = hydrostatic_departures(&eq, &q, &p, &phi);
+            let d: [f64; 6] = d.try_into().unwrap();
             assert_eq!(
                 d[anchor], 0.0,
                 "the anchor departure must be exactly zero — that is what carries T2"
             );
-            let eq = symbi_hydro::hydrostatic::LocalEquilibrium::through(
-                q[anchor], p[anchor], phi[anchor], GAMMA);
             let got = eq.density_at(phi[anchor]) + ppm_face(d);
             let want = ppm_face(q);
             let ulp = (got - want).abs() / want.abs().max(f64::MIN_POSITIVE) / f64::EPSILON;

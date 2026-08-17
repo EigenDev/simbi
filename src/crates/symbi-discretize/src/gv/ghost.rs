@@ -532,7 +532,19 @@ pub fn wb_ghost_fill_gv(
 
     let rho_src = gv_load_at("prim_rho", "prim.rho", &src);
     let pre_src = gv_load_at("prim_pre", "prim.pre", &src);
-    let eq = LocalEquilibrium::through(rho_src, pre_src, phi_src, Gv::scalar("gamma"));
+    // the extension spans one known excursion, `phi_ghost - phi_src`, so the weight comes from
+    // that excursion itself rather than from a footprint standing in for it. a ghost sitting
+    // above the source cell by more of the cell's enthalpy than the isentrope carries is placed
+    // by a faded profile, and at zero weight the fill is the plain pullback of the source state
+    // — the continuation an unstratified column has.
+    let rise = symbi_hydro::hydrostatic::potential_rise(phi_src, phi_ghost, phi_ghost);
+    let eq = LocalEquilibrium::faded(
+        rho_src,
+        pre_src,
+        phi_src,
+        Gv::scalar("gamma"),
+        rise,
+    );
     let (rho_g, pre_g) = eq.state_at(phi_ghost);
 
     let mut writes = vec![(

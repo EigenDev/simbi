@@ -216,14 +216,19 @@ fn scan(hier: &Hier) -> (f64, usize, f64, f64, f64) {
 ///
 /// measured, 600 steps, N = 32, four cells across the mask radius, balanced reconstruction:
 ///
-///   acoustic dissipation floored inside the mask   max K/K_0 = 1.0362, min dt = 1.1713e-3
-///   published ramp alone                           max K/K_0 = 1.1482, min dt = 1.1562e-3
+///   acoustic dissipation floored inside the mask   max K/K_0 = 1.0282, min dt = 1.1659e-3
+///   published ramp alone                           max K/K_0 = 1.1334, min dt = 1.1514e-3
 ///
-/// the entropy the masked interior accumulates above the ambient isentrope is 0.036 with the
-/// floor and 0.148 without it — a factor of four, held steady over the run (both arms are
-/// falling, 1.083 -> 1.036 and 1.188 -> 1.148, so the separation is the converged difference
-/// rather than a transient). the entropy bound below sits at 1.08, a factor of 2.2 above the
-/// floored measurement and a factor of 2.1 below the ramp-alone one.
+/// the entropy the masked interior accumulates above the ambient isentrope is 0.028 with the
+/// floor and 0.133 without it — a factor of five, held steady over the run (both arms are
+/// falling, so the separation is the converged difference rather than a transient). the entropy
+/// bound below sits at 1.08, a factor of 2.9 above the floored measurement and a factor of 1.6
+/// below the ramp-alone one.
+///
+/// the two cells nearest the body sit deep enough in the potential that the isentrope through
+/// them reaches vacuum within the reconstruction footprint, so the balanced reconstruction fades
+/// its profile out there and reconstructs the state itself; the floored arm reads 1.0282 with
+/// that fade and 1.0362 following the isentrope past its own domain boundary.
 ///
 /// the timestep bound guards the second production failure — a mask cell evacuating at fixed
 /// pressure drives `c_s` up and the CFL step down — and at this amplitude the two arms sit

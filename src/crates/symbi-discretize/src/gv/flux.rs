@@ -1698,12 +1698,32 @@ fn balanced_thermo_pair(
     // one side: departures against that side's own cell, the ordinary operator, profile back.
     // `state_at` returns both components sharing one `powf` -- the pressure exponent exceeds the
     // density exponent by exactly one, so the second transcendental is a multiply.
+    //
+    // the profile is weighted by how much of the anchor's enthalpy its own footprint spends:
+    // the potential at the two footprint endpoints, a fixed `BALANCE_STENCIL_REACH` cells either
+    // side of the anchor, feeds `balance_weight`. the same two endpoints are what the
+    // equilibrium-pressure body source reads for the same cell along the same axis, so the flux
+    // and the source follow one and the same profile and their telescoping on an equilibrium is
+    // exact. the endpoints are analytic positions on the face ladder rather than field reads, so
+    // the footprint is the same span under either limiter and needs no ghost width of its own.
+    let footprint = 2 * symbi_hydro::hydrostatic::BALANCE_STENCIL_REACH as i64;
     let side = |anchor: usize, take_left: bool| -> (Gv, Gv) {
-        let eq =
-            LocalEquilibrium::through(rho[anchor], pre[anchor], phi[anchor], Gv::scalar("gamma"));
+        let anchor_half = 2 * offsets[anchor] as i64 + 1;
+        let rise = symbi_hydro::hydrostatic::potential_rise(
+            phi[anchor],
+            phi_at(anchor_half - footprint),
+            phi_at(anchor_half + footprint),
+        );
+        let eq = LocalEquilibrium::faded(
+            rho[anchor],
+            pre[anchor],
+            phi[anchor],
+            Gv::scalar("gamma"),
+            rise,
+        );
         // the single transform text -- the same function the host proof battery exercises.
         let (d_rho, d_pre) =
-            symbi_hydro::hydrostatic::hydrostatic_departures(&rho, &pre, &phi, anchor, Gv::scalar("gamma"));
+            symbi_hydro::hydrostatic::hydrostatic_departures(&eq, &rho, &pre, &phi);
         let limit = |d: &[Gv]| match recon {
             Recon::Plm => crate::gv::plm_theta_from_stencil(d[0], d[1], d[2], d[3], theta),
             Recon::Ppm => crate::gv::ppm_from_stencil(d[0], d[1], d[2], d[3], d[4], d[5]),

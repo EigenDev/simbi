@@ -1134,13 +1134,25 @@ pub fn body_source_wb_gv(
 
     let mut mom_new: Vec<Gv> = mom.clone();
     let mut nrg_new = nrg;
+    let footprint = 2 * symbi_hydro::hydrostatic::BALANCE_STENCIL_REACH as i64;
     for ax in 0..ndim {
         // total body potential at this cell's two faces and centre along `ax`: half-cells
         // 0 (lower face), 1 (centre), 2 (upper face) on the face ladder.
         let phi_lo = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 0);
         let phi_c = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 1);
         let phi_hi = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 2);
-        let eq = LocalEquilibrium::through(us_den, p_us, phi_c, gamma);
+        // the profile carries the share of the potential variation its own reconstruction
+        // footprint supports: the potential `BALANCE_STENCIL_REACH` cells either side of this
+        // cell along `ax`, on the same face ladder the balanced reconstruction anchors on, so
+        // the source follows the profile the flux divergence it telescopes against was built
+        // from. an isentrope whose vacuum boundary lies inside that footprint is faded out on
+        // both sides together, which leaves the pair balanced at every weight.
+        let rise = symbi_hydro::hydrostatic::potential_rise(
+            phi_c,
+            stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 1 - footprint),
+            stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 1 + footprint),
+        );
+        let eq = LocalEquilibrium::faded(us_den, p_us, phi_c, gamma, rise);
         let (_, p_lo) = eq.state_at(phi_lo);
         let (_, p_hi) = eq.state_at(phi_hi);
         let s_m = match &geo {
