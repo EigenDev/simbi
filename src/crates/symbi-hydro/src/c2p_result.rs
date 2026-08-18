@@ -15,6 +15,9 @@
 /// the rmhd kkc false-position, and their metric-aware twins, on the host and in the
 /// baked kernels alike. the solvers converge in far fewer steps on admissible states;
 /// the cap only bounds pathological inputs, so one number serves them all.
+use symbi_algebra::OrderedNumeric;
+use symbi_ir::algebra::Scalar;
+
 pub const C2P_MAX_ITER: usize = 100;
 
 /// bitflag error code for cons-to-prim recovery.
@@ -166,7 +169,7 @@ pub const C2P_FAILURE_SENTINEL: f64 = 1.0;
 //                        and fofc kernels.
 //   * superluminal     : v^2 >= 1 (the Lorentz factor is finite only for v^2 < 1) or v^2
 //                        is NaN. no luminal margin.
-pub fn relativistic_c2p_code<S: symbi_ir::algebra::Scalar + symbi_algebra::OrderedNumeric>(
+pub fn relativistic_c2p_code<S: Scalar + OrderedNumeric>(
     rho: S,
     pre: S,
     v_sq: S,
@@ -187,7 +190,7 @@ pub fn relativistic_c2p_code<S: symbi_ir::algebra::Scalar + symbi_algebra::Order
 // shared input-density guard for relativistic c2p (a host-only early-out before the kernel
 // path). returns the failure code for a non-positive or non-finite conserved density, else
 // None. the NaN branch was present in RHD but missing in RMHD before the unification.
-pub fn relativistic_density_guard<S: symbi_ir::algebra::Scalar + symbi_algebra::OrderedNumeric>(
+pub fn relativistic_density_guard<S: Scalar + OrderedNumeric>(
     dd: S,
 ) -> Option<ErrorCode> {
     if dd <= S::ZERO || !(dd == dd) {
@@ -206,7 +209,7 @@ pub fn relativistic_density_guard<S: symbi_ir::algebra::Scalar + symbi_algebra::
 /// homogeneity under a change of density units while remaining finite and
 /// non-positive for every valid conserved density.
 #[inline]
-pub fn c2p_cone_fail_pressure<S: symbi_ir::algebra::Scalar>(den: S) -> S {
+pub fn c2p_cone_fail_pressure<S: Scalar>(den: S) -> S {
     S::ZERO - den.abs()
 }
 
@@ -217,7 +220,7 @@ pub fn c2p_cone_fail_pressure<S: symbi_ir::algebra::Scalar>(den: S) -> S {
 /// Lorentz factor / density finite for an out-of-cone input — no NaN. one source shared by
 /// `rhd_recover` and `rmhd_recover` so the two regimes cannot drift. carrier-generic.
 #[inline]
-pub fn relativistic_velocity_ceiling_sq<S: symbi_ir::algebra::Scalar>(r_sq: S) -> S {
+pub fn relativistic_velocity_ceiling_sq<S: Scalar>(r_sq: S) -> S {
     r_sq / (S::ONE + r_sq)
 }
 
@@ -227,7 +230,7 @@ pub fn relativistic_velocity_ceiling_sq<S: symbi_ir::algebra::Scalar>(r_sq: S) -
 /// recovery exists; non-positive marks an out-of-cone conserved state whose pressure the caller
 /// drives to [`c2p_cone_fail_pressure`]. one source shared by both recoveries.
 #[inline]
-pub fn relativistic_cone_residual<S: symbi_ir::algebra::Scalar>(qq: S, r_sq: S) -> S {
+pub fn relativistic_cone_residual<S: Scalar>(qq: S, r_sq: S) -> S {
     qq + S::ONE - (S::ONE + r_sq).sqrt()
 }
 

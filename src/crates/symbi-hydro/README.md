@@ -20,6 +20,9 @@ Above algebra, geometry, the IR, the JIT, and the expression language. Below the
 discretization and everything that runs a simulation. It has no runtime dependency
 on the orchestration crates.
 
+Before changing anything here, read `WRITING_PHYSICS.md` in this directory. It is
+the four things carrier-generic code costs you, and it is short.
+
 ## Where to start reading
 
 `state.rs` and `regime.rs` for what a fluid state is, `riemann/` for the solvers,
