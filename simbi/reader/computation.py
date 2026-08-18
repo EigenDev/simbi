@@ -38,6 +38,9 @@ class VectorMode(Enum):
     All = "all"
 
 
+from simbi.reader import frames
+
+
 def _dot_product(a: Sequence[Array], b: Sequence[Array]) -> Array:
     """dot product of two vector fields."""
     return np.sum([a[ii] * b[ii] for ii in range(len(a))], axis=0)
@@ -677,6 +680,26 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         cs = sound_speed(fields["rho"], fields["p"], eos, regime)
         return np.asanyarray(v_mag / cs)
 
+    def compute_static_mach_number(fields: dict[str, Array]) -> Array:
+        """the mach number a STATIC observer measures — what locates a transonic surface
+        on a curved background.
+
+        the stored `mach` is the valencia one, against the normal observer, which on a
+        horizon-penetrating chart is itself infalling: a michel inflow peaks near 0.2
+        there and never reaches its own sound speed, while the surface it does cross is
+        where this field reads unity. NaN at and inside the horizon, where no static
+        observer exists. identical to `mach` on a flat background."""
+        spacetime = str(getattr(data.metadata, "spacetime", "minkowski") or "minkowski")
+        mass = float(getattr(data.metadata, "schwarzschild_mass", 0.0) or 0.0)
+        if spacetime == "minkowski" or mass <= 0.0:
+            return compute_mach_number(fields)
+        coords = _broadcast_cell_centers(getattr(fields, "mesh"), ndim)
+        adm = frames.adm_decomposition(spacetime, mass, coords)
+        ut, ui = frames.four_velocity_from_valencia(get_velocities(fields), adm)
+        speed = frames.speed_from_lorentz(frames.static_lorentz(ut, ui, adm))
+        cs = sound_speed(fields["rho"], fields["p"], eos, regime)
+        return np.asanyarray(speed / cs)
+
     def compute_chi_density(fields: dict[str, Array]) -> Array:
         return (
             fields["rho"]
@@ -1043,6 +1066,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         "pmag": compute_magnetic_pressure,
         "emag": compute_magnetic_energy,
         "mach": compute_mach_number,
+        "mach_static": compute_static_mach_number,
         "chi_dens": compute_chi_density,
         "j": angular_momentum_density,
         "mass_flux": mass_flux,
