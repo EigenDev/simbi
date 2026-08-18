@@ -74,9 +74,13 @@ fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
 }
 
 fn build(solver: Solver) -> Hier {
+    build_n(solver, N)
+}
+
+fn build_n(solver: Solver, n: usize) -> Hier {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([N])
-        .spacing([1.0 / N as f64])
+        .cells([n])
+        .spacing([1.0 / n as f64])
         // a reflecting wall exerts no work on gas at rest, so the hydrostatic state is a
         // fixed point of the boundary as well as of the interior.
         .boundaries(Boundaries::uniform(BoundaryType::Reflect))
@@ -201,5 +205,33 @@ fn declaring_the_target_frees_the_solver_from_damping_the_residual() {
              must sit at the balance's own truncation rather than at its own dissipation",
             deficit(*k)
         );
+    }
+}
+
+/// how the undeclared deficit behaves under refinement, per solver.
+///
+/// the deficit's origin decides whether it is a cost or a defect. a hydrostatic state solves the
+/// continuum equations and not the discrete ones, so the residual that drives it is a truncation
+/// error and must shrink as the grid refines. a deficit that instead grows with resolution is
+/// not truncation at all but an amplification, the signature the acoustic-speed ramp showed on
+/// this same column before it was retired — max|v| of 7.6e-11 at 128 cells against 1.4e-3 at
+/// 256, seven orders across one refinement.
+///
+/// run: cargo test --release -p symbi --test well_balanced_solver_family -- --ignored deficit_trend --nocapture
+#[test]
+#[ignore = "diagnostic: undeclared entropy deficit against resolution, per solver"]
+fn diagnose_undeclared_deficit_trend() {
+    println!("\nundeclared sealed column, plain reconstruction, {STEPS} steps");
+    println!("{:>10} {:>6} {:>12} {:>9}", "solver", "n", "deficit", "ratio");
+    for solver in [Solver::Hllc, Solver::HllcPlus] {
+        let mut prev: Option<f64> = None;
+        for n in [64usize, 128, 256] {
+            let mut hier = build_n(solver, n);
+            hier.evolve_steps(STEPS).unwrap();
+            let deficit = (1.0 - worst_entropy_ratio(&hier)).max(0.0);
+            let ratio = prev.map_or(f64::NAN, |p: f64| deficit / p);
+            println!("{:>10} {n:>6} {deficit:>12.3e} {ratio:>9.3}", format!("{solver:?}"));
+            prev = Some(deficit);
+        }
     }
 }
