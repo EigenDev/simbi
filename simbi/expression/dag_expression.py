@@ -14,9 +14,12 @@ class SourceKind(str, enum.Enum):
     conserved vector [den, mom_0..mom_{D-1}, nrg] additively from one config — a
     mass+momentum+energy deposition (jet/wind), which reaches past the one slot
     RAW targets; like RAW it supplies conserved components, so it is valid on
-    relativistic/MHD. SPONGE is the full conserved-state relaxation (buffer
-    zone): it relaxes den, mom and nrg toward a reference conserved state, where
-    RELAX relaxes the velocity alone (density-preserving drag). ROTATING_FRAME takes
+    relativistic/MHD. SPONGE is the full-state relaxation (buffer zone): it
+    relaxes den, mom and nrg toward a reference given as PRIMITIVES
+    [kappa, rho_ref, vel_ref.., pre_ref], which the regime converts through its own
+    conservation law — so one wire serves newtonian, relativistic and curved
+    backgrounds alike, and no closure parameter rides the source. RELAX relaxes the
+    velocity alone (density-preserving drag). ROTATING_FRAME takes
     [omega, origin_x, origin_y] and applies the Newtonian Coriolis and centrifugal
     force for constant rotation about the positive z axis."""
 
@@ -1539,11 +1542,11 @@ class CompiledExpr:
           kind   -- 'force' | 'rotating_frame' | 'cooling' | 'relax' | 'sponge' |
                     'inject' | 'raw' (law wrap)
           dim    -- spatial dimensionality (force needs `dim` accel outputs,
-                    cooling 1, relax 1+dim; sponge [kappa, den_ref, dim*mom_ref,
-                    nrg_ref] = 3+dim on energy regimes, 2+dim on iso; inject
+                    cooling 1, relax 1+dim; sponge [kappa, rho_ref, dim*vel_ref,
+                    pre_ref] = 3+dim on energy regimes, 2+dim on iso; inject
                     [den, dim*mom, nrg] = 2+dim on energy regimes, 1+dim on iso)
           params -- runtime scalar VALUES for the parameter() nodes (p0, p1, ...);
-                    for sponge on an energy regime, params=[inv_gm1] = 1/(gamma-1)
+                    sponge takes no params: the closure comes from the regime
           region -- optional node index of a chi(x) mask folded into the source
           target -- for kind='raw' only: the conserved slot ('den'|'mom'|'nrg')
         """

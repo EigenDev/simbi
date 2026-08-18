@@ -251,9 +251,11 @@ def test_isothermal_raw_source_rejects_energy_target() -> None:
         runner._validate_expression_payloads(payload)
 
 
-@pytest.mark.parametrize("kind", ["force", "cooling", "relax", "sponge"])
+@pytest.mark.parametrize("kind", ["force", "cooling", "relax"])
 def test_relativistic_regime_rejects_newtonian_source_laws(kind: str) -> None:
-    counts = {"force": 2, "cooling": 1, "relax": 3, "sponge": 5}
+    # these kinds bake the newtonian conservation law into the term they emit, so the
+    # conserved state they push toward is one a relativistic evolution does not store.
+    counts = {"force": 2, "cooling": 1, "relax": 3}
     payload = {
         "source_expressions": [{
             "kind": kind,
@@ -264,6 +266,21 @@ def test_relativistic_regime_rejects_newtonian_source_laws(kind: str) -> None:
     }
     with pytest.raises(ValueError, match="relativistic"):
         runner._validate_expression_payloads(payload)
+
+
+def test_relativistic_regime_accepts_the_sponge() -> None:
+    # the sponge relaxes toward a reference given in PRIMITIVES, and the regime converts
+    # it through its own conservation law. nothing newtonian is baked into the wire, so
+    # the kind carries over to a relativistic evolution unchanged.
+    payload = {
+        "source_expressions": [{
+            "kind": "sponge",
+            "dim": 2,
+            "outputs": list(range(5)),
+        }],
+        "is_relativistic": True,
+    }
+    runner._validate_expression_payloads(payload)
 
 
 @pytest.mark.parametrize(

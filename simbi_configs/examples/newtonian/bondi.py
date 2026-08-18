@@ -430,8 +430,8 @@ class SphericalBondiTest(SimbiProblem):
         x3: expr.Expr,
     ) -> list[expr.Expr]:
         """the outer buffer zone as the rust `sponge` source's outputs
-        [kappa, den_ref, mom_ref_*, nrg_ref] (no nrg_ref on the isothermal
-        regime), relaxing toward the far-field asymptotic bondi state. one
+        [kappa, rho_ref, vel_ref_*, pre_ref] (the isothermal regime stops before
+        pre_ref), relaxing toward the far-field asymptotic bondi state. one
         shared text: `simbi.functional.bondi.far_field_sponge_outputs`."""
         buffer_params = self.buffer_parameters
         return bondi_shared.far_field_sponge_outputs(
@@ -450,8 +450,8 @@ class SphericalBondiTest(SimbiProblem):
     @property
     def source_expressions(self) -> list[ExpressionDict]:
         """the outer buffer-zone full-state sponge as a rust `sponge` source (or no source when
-        disabled). params=[inv_gm1] = 1/(gamma-1) lets the energy channel reconstruct the conserved
-        total energy from pressure. the well-posed (gamma < 5/3) Bondi test is regulated by the sonic
+        disabled). the reference travels as primitives and the regime
+        converts it, so no closure parameter rides the source. the well-posed (gamma < 5/3) Bondi test is regulated by the sonic
         surface, so the sponge is an outer-boundary nicety, not load-bearing."""
         if not self.use_buffer:
             return []
@@ -460,11 +460,9 @@ class SphericalBondiTest(SimbiProblem):
         x2 = expr.variable("x2", graph)
         x3 = expr.variable("x3", graph)
         outputs = self.buffer_sponge_terms(x1, x2, x3)
-        gamma = self.adiabatic_index
-        inv_gm1 = 1.0 / (gamma - 1.0) if gamma != 1.0 else 0.0
         return [
             graph.compile(outputs).serialize_source(
-                expr.SourceKind.SPONGE, dim=3, params=[inv_gm1]
+                expr.SourceKind.SPONGE, dim=3
             )
         ]
 

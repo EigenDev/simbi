@@ -29,6 +29,7 @@ pub mod motion_law;
 pub mod newtonian;
 pub mod newtonian_mhd;
 pub mod regime;
+pub mod state_law;
 pub mod regime_spec;
 pub mod rhd;
 pub mod riemann;

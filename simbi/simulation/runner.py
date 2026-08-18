@@ -452,7 +452,6 @@ def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
                 "rotating_frame",
                 "cooling",
                 "relax",
-                "sponge",
             }:
                 raise ValueError(
                     f"{field} kind={kind!r} bakes a Newtonian conservation law "
@@ -492,6 +491,8 @@ def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
                 "force": dim,
                 "cooling": 1,
                 "relax": 1 + dim,
+                # [kappa, rho_ref, vel_ref.., pre_ref] — primitives, converted to the
+                # conserved reference by the regime itself.
                 "sponge": (3 if has_energy else 2) + dim,
                 "inject": (2 if has_energy else 1) + dim,
             }.get(kind)

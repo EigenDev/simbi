@@ -567,10 +567,38 @@ where
     }
 }
 
+/// the conserved state this run's regime builds from primitives, for the sources that
+/// relax toward one. the background comes from the config's spacetime and mass, so a
+/// source on a curved chart relaxes toward the densitized state the evolution stores
+/// rather than its flat shadow.
+fn state_law_of(cfg: &Config, spec: &symbi_hydro::RegimeSpec) -> symbi_hydro::state_law::StateLaw {
+    use symbi_hydro::state_law::{Background, StateLaw};
+    let background = match cfg.spacetime.as_str() {
+        "schwarzschild_ks" => Background::SchwarzschildKsCartesian {
+            mass: cfg.schwarzschild_mass,
+        },
+        // a spinning hole drags the frame azimuthally, so its shift is not the
+        // non-rotating one and the conserved state built against the wrong shift is
+        // wrong in the momentum slots. the spin rides the background rather than
+        // being dropped.
+        "kerr_ks" => Background::KerrKsCartesian {
+            mass: cfg.schwarzschild_mass,
+            spin: cfg.kerr_spin,
+        },
+        _ => Background::Minkowski,
+    };
+    if spec.is_relativistic {
+        StateLaw::relativistic(cfg.gamma, background)
+    } else {
+        StateLaw::newtonian(cfg.gamma)
+    }
+}
+
 fn attach_configured_sources<T>(
     substrate: T,
     source_jsons: &[SourcePayload],
     spec: &symbi_hydro::RegimeSpec,
+    law: &symbi_hydro::state_law::StateLaw,
 ) -> Result<T, String>
 where
     T: AttachRuntimeSource + EnableSourceFusion,
@@ -578,7 +606,7 @@ where
     if source_jsons.is_empty() {
         return Ok(substrate.enable_source_fusion());
     }
-    let (built, params) = lower_configured_sources(source_jsons, spec)?;
+    let (built, params) = lower_configured_sources(source_jsons, spec, Some(law))?;
     substrate.attach_runtime_source(built, params)
 }
 
@@ -601,6 +629,7 @@ fn regime_spec_for(regime: &str) -> Result<&'static symbi_hydro::RegimeSpec, Str
 fn lower_configured_sources(
     source_jsons: &[SourcePayload],
     spec: &symbi_hydro::RegimeSpec,
+    law: Option<&symbi_hydro::state_law::StateLaw>,
 ) -> Result<
     (
         Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
@@ -613,12 +642,12 @@ fn lower_configured_sources(
         .map(|source| {
             let config = symbi_hydro::SourceConfig::from_json(&source.json)
                 .map_err(|error| format!("{} parse: {error}", source.origin))?;
-            symbi_hydro::expr_bridge::build_user_source(&config, spec)
+            symbi_hydro::expr_bridge::build_user_source_with_law(&config, spec, law)
                 .map_err(|error| format!("{} lower: {error}", source.origin))?;
             Ok(config)
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let (built, params) = symbi_hydro::expr_bridge::build_user_sources(&configs, spec)
+    let (built, params) = symbi_hydro::expr_bridge::build_user_sources_with_law(&configs, spec, law)
         .map_err(|error| format!("source expression lower: {error}"))?;
     Ok((built, params))
 }
@@ -639,7 +668,7 @@ mod source_collection_tests {
             }"#
             .to_string(),
         }];
-        let error = match lower_configured_sources(&sources, &symbi_hydro::NEWTONIAN_SPEC) {
+        let error = match lower_configured_sources(&sources, &symbi_hydro::NEWTONIAN_SPEC, None) {
             Err(error) => error,
             Ok(_) => panic!("unsupported source operation was accepted"),
         };
@@ -652,7 +681,7 @@ mod source_collection_tests {
             origin: "source_expressions[2]".to_string(),
             json: "{".to_string(),
         }];
-        let error = match lower_configured_sources(&sources, &symbi_hydro::NEWTONIAN_SPEC) {
+        let error = match lower_configured_sources(&sources, &symbi_hydro::NEWTONIAN_SPEC, None) {
             Err(error) => error,
             Ok(_) => panic!("malformed source json was accepted"),
         };
@@ -3446,7 +3475,12 @@ mod diagnostics_tests {
         b.torque = Tensor::new([7.0, 8.0, 9.0]);
         let bodies = BodyCollection::new().add(b);
 
-        let dir = std::env::temp_dir().join("symbi_diag_dat_3d");
+        // the process id keeps concurrent test binaries off each other's file. a fixed
+        // path under the system temp directory is shared by every run on the machine,
+        // and a second one appending while this one reads yields a row that parses as
+        // text rather than as numbers.
+        let dir = std::env::temp_dir()
+            .join(format!("symbi_diag_dat_3d_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("diagnostics.dat");
         let _ = std::fs::remove_file(&path);
@@ -3487,7 +3521,12 @@ mod diagnostics_tests {
             0.1,
             0.05,
         ));
-        let dir = std::env::temp_dir().join("symbi_diag_dat_2d");
+        // the process id keeps concurrent test binaries off each other's file. a fixed
+        // path under the system temp directory is shared by every run on the machine,
+        // and a second one appending while this one reads yields a row that parses as
+        // text rather than as numbers.
+        let dir = std::env::temp_dir()
+            .join(format!("symbi_diag_dat_2d_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("diagnostics.dat");
         let _ = std::fs::remove_file(&path);
@@ -4219,6 +4258,7 @@ macro_rules! build_and_run_hydro {
             sub,
             &cfg.source_jsons,
             <$regime_ty as Regime<f64, $dof>>::SPEC,
+            &state_law_of(cfg, <$regime_ty as Regime<f64, $dof>>::SPEC),
         )?;
         // register driven (dynamic) boundaries in Driven-id order so `Driven(id)` on a face
         // matches `driven_exprs[id]` — the complete prim prescription [rho, vel_0..DOF-1, pre]
@@ -4306,6 +4346,7 @@ macro_rules! build_and_run_hydro {
                 ks,
                 &cfg.source_jsons,
                 <$regime_ty as Regime<f64, $dof>>::SPEC,
+                &state_law_of(cfg, <$regime_ty as Regime<f64, $dof>>::SPEC),
             )
             .expect("fine-level source attach")
         });
@@ -4812,6 +4853,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         ks,
                         &cfg.source_jsons,
                         <$regime_ty as Regime<f64, $d>>::SPEC,
+                        &state_law_of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC),
                     )
                     .expect("tile source attach")
                 };
@@ -5100,6 +5142,7 @@ macro_rules! build_and_run_hydro_decomposed {
                     sub,
                     &cfg.source_jsons,
                     <$regime_ty as Regime<f64, $dof>>::SPEC,
+                    &state_law_of(cfg, <$regime_ty as Regime<f64, $dof>>::SPEC),
                 )?;
                 // register the driven (dynamic) boundary DAGs on every tile, in Driven-id order:
                 // the ids ride the boundary enum copied from the physical faces, so only edge
@@ -5589,6 +5632,7 @@ macro_rules! build_and_run_mhd {
             sub,
             &cfg.source_jsons,
             <$regime_ty as Regime<f64, $d>>::SPEC,
+            &state_law_of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC),
         )?;
         // register driven (dynamic) boundaries in Driven-id order so `Driven(id)` on a face
         // matches `driven_exprs[id]`. a complete prim prescription incl. the cell B (purely
@@ -5740,6 +5784,7 @@ macro_rules! build_and_run_imhd {
             sub,
             &cfg.source_jsons,
             <IsothermalMhd as Regime<f64, $d>>::SPEC,
+            &state_law_of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC),
         )?;
         // register driven (dynamic) boundaries in Driven-id order so `Driven(id)` on a face
         // matches `driven_exprs[id]`. the iso-MHD prescription is [rho, vel.., B..] (no
@@ -5914,6 +5959,7 @@ macro_rules! build_and_run_mhd_decomposed {
                     sub,
                     &cfg.source_jsons,
                     <$regime_ty as Regime<f64, $d>>::SPEC,
+                    &state_law_of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC),
                 )?;
                 // register the driven (dynamic) boundary DAGs on every tile, in Driven-id order:
                 // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
@@ -6113,6 +6159,7 @@ macro_rules! build_and_run_imhd_decomposed {
                     sub,
                     &cfg.source_jsons,
                     <IsothermalMhd as Regime<f64, $d>>::SPEC,
+                    &state_law_of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC),
                 )?;
                 // register the driven (dynamic) boundary DAGs on every tile, in Driven-id order:
                 // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
@@ -6471,6 +6518,7 @@ macro_rules! build_and_run_iso_decomposed {
                     sub,
                     &cfg.source_jsons,
                     <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                    &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
                 )?;
                 // register the driven (dynamic) boundary DAGs on every tile, in Driven-id order:
                 // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
@@ -6650,6 +6698,7 @@ macro_rules! build_and_run_iso {
             sub,
             &cfg.source_jsons,
             <IsoNewtonian as Regime<f64, $d>>::SPEC,
+            &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
         )?;
 
         // register driven (dynamic) boundaries in Driven-id order, lowered against the iso
@@ -6755,6 +6804,7 @@ macro_rules! build_and_run_iso {
                 ks,
                 &cfg.source_jsons,
                 <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
             )
             .expect("fine-level source attach")
         });
@@ -8191,7 +8241,14 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
     // relativistic regime, a cooling term on a regime with no energy equation, an operator
     // with no carrier primitive, a reference to the cell measure. parsing alone accepts all
     // of those and defers the failure to dispatch, after a queue slot has been spent.
-    lower_configured_sources(&cfg.source_jsons, regime_spec_for(&cfg.regime)?)?;
+    // the same law the run will attach under, so the pre-flight check validates the
+    // configuration that will actually execute rather than a flat stand-in.
+    let preflight_spec = regime_spec_for(&cfg.regime)?;
+    lower_configured_sources(
+        &cfg.source_jsons,
+        preflight_spec,
+        Some(&state_law_of(cfg, preflight_spec)),
+    )?;
     for (ii, json) in cfg.driven_exprs.iter().enumerate() {
         symbi_hydro::SourceConfig::from_json(json)
             .map_err(|err| format!("driven boundary {ii} parse: {err}"))?;

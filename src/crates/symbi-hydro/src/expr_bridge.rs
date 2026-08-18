@@ -317,10 +317,39 @@ pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<BuiltS
         .map_err(|e| format!("census '{}': bridge: {e:?}", cfg.name))
 }
 
+/// lower one user source without a state law. every kind but `sponge` is
+/// law-free; a sponge lowered through this door is refused, since relaxing toward
+/// a reference state means knowing which conserved state the regime stores.
 pub fn build_user_source(
     cfg: &symbi_expr::SourceConfig,
     spec: &crate::regime_spec::RegimeSpec,
 ) -> Result<Vec<(String, BuiltSource)>, String> {
+    build_user_source_with_law(cfg, spec, None)
+}
+
+/// lower one user source against `law`, the conserved state the regime builds from
+/// primitives. `sponge` relaxes toward that state and so requires it; the other
+/// kinds ignore it.
+pub fn build_user_source_with_law(
+    cfg: &symbi_expr::SourceConfig,
+    spec: &crate::regime_spec::RegimeSpec,
+    law: Option<&crate::state_law::StateLaw>,
+) -> Result<Vec<(String, BuiltSource)>, String> {
+    // a law and a spec describe the same regime from two directions, and a source that
+    // relaxes toward a conserved state built under one while the evolution stores the
+    // other would be wrong in a way no output reveals. the disagreement is a
+    // construction error at the call site, so it is caught here rather than carried.
+    if let Some(law) = law {
+        if law.relativistic != spec.is_relativistic {
+            return Err(format!(
+                "state law describes a {} gas while regime '{}' is {}; the source would \
+                 relax toward a conserved state the evolution does not store",
+                if law.relativistic { "relativistic" } else { "newtonian" },
+                spec.name,
+                if spec.is_relativistic { "relativistic" } else { "newtonian" },
+            ));
+        }
+    }
     let nodes = symbi_expr::nodes_from_descs(&cfg.nodes).map_err(|e| format!("dag load: {e}"))?;
     // lower the field once. if a region mask is declared, lower it as an extra output in the same
     // graph (so chi shares the field's leaves), then peel it off as the mask factor.
@@ -459,10 +488,17 @@ pub fn build_user_source(
             Ok(out)
         }
         "sponge" => {
-            // full conserved-state relaxation (buffer zone): S_U = kappa*(U_ref - U) for den, mom
-            // (+ nrg on energy regimes). the reference conserved state U_ref is supplied per-cell.
-            reject_relativistic("sponge")?;
-            // adiabatic: [kappa, den_ref, mom_ref_0..mom_ref_{D-1}, nrg_ref] = 3+D; iso drops nrg_ref.
+            // the buffer zone relaxes the whole conserved state toward a reference, and
+            // which state that is belongs to the regime: `rho v` on a newtonian gas,
+            // `rho h W^2 v` on a relativistic one, `sqrt(gamma) rho h W^2 v` on a curved
+            // background. the reference is therefore supplied as primitives and converted
+            // by the regime itself, which is why this kind needs a state law and why it is
+            // no longer restricted to newtonian regimes.
+            let law = law.ok_or_else(|| {
+                "'sponge' relaxes toward a conserved reference state and needs the state \
+                 law that builds it; lower it through `build_user_source_with_law`"
+                    .to_string()
+            })?;
             let want = if spec.has_energy {
                 3 + cfg.dim
             } else {
@@ -470,37 +506,16 @@ pub fn build_user_source(
             };
             if n_out != want {
                 return Err(format!(
-                    "'sponge' needs [kappa, den_ref, mom_ref_0..mom_ref_{}{}]: outputs.len() = {n_out}, expected {want}",
+                    "'sponge' needs [kappa, rho_ref, vel_ref_0..vel_ref_{}{}]: outputs.len() = {n_out}, expected {want}",
                     cfg.dim.saturating_sub(1),
-                    if spec.has_energy { ", nrg_ref" } else { "" },
+                    if spec.has_energy { ", pre_ref" } else { "" },
                 ));
             }
-            // region masks the rate kappa (output 0) alone, which factors into all three channels;
-            // masking the reference state would corrupt the target the flow relaxes toward.
+            // region masks the rate kappa (output 0) alone, which factors into every
+            // channel; masking the reference state would corrupt the target the flow
+            // relaxes toward rather than the region it relaxes in.
             mask_field(&mut field, region, 0..1);
-            let mut out = vec![
-                (
-                    "den".to_string(),
-                    crate::source_spec::user_sponge_density_source(&field, cfg.dim),
-                ),
-                (
-                    "mom".to_string(),
-                    crate::source_spec::user_sponge_momentum_source(&field, cfg.dim),
-                ),
-            ];
-            if spec.has_energy {
-                // inv_gm1 = 1/(gamma-1): the ideal-gas internal-energy coefficient, folded as a
-                // build-time constant so the energy channel reconstructs E from `pre` using a
-                // compile-time coefficient.
-                let inv_gm1 = *cfg.params.first().ok_or_else(|| {
-                    "'sponge' on an energy regime needs params=[inv_gm1] = 1/(gamma-1)".to_string()
-                })?;
-                out.push((
-                    "nrg".to_string(),
-                    crate::source_spec::user_sponge_energy_source(&field, cfg.dim, inv_gm1),
-                ));
-            }
-            Ok(out)
+            crate::source_spec::user_sponge_sources(&field, cfg.dim, law, spec.has_energy)
         }
         "inject" => {
             // additive deposition of the full conserved vector in one config: outputs =
@@ -569,9 +584,19 @@ pub fn build_user_source(
 /// lower an ordered collection of user sources into one runtime source set.
 /// parameter indices are made global before lowering, and contributions that
 /// target the same conserved field are summed component by component.
+/// lower an ordered collection without a state law; see `build_user_source`.
 pub fn build_user_sources(
     configs: &[symbi_expr::SourceConfig],
     spec: &crate::regime_spec::RegimeSpec,
+) -> Result<(Vec<(String, BuiltSource)>, Vec<f64>), String> {
+    build_user_sources_with_law(configs, spec, None)
+}
+
+/// lower an ordered collection against `law`; see `build_user_source_with_law`.
+pub fn build_user_sources_with_law(
+    configs: &[symbi_expr::SourceConfig],
+    spec: &crate::regime_spec::RegimeSpec,
+    law: Option<&crate::state_law::StateLaw>,
 ) -> Result<(Vec<(String, BuiltSource)>, Vec<f64>), String> {
     let mut parameter_offset = 0usize;
     let mut params = Vec::new();
@@ -586,7 +611,7 @@ pub fn build_user_sources(
         }
         parameter_offset += config.params.len();
         params.extend_from_slice(&config.params);
-        lowered.extend(build_user_source(&config, spec)?);
+        lowered.extend(build_user_source_with_law(&config, spec, law)?);
     }
 
     let mut composed: Vec<(String, BuiltSource)> = Vec::new();
@@ -770,10 +795,38 @@ mod tests {
     }
 
     // extract the error message (BuiltSource lacks Debug, so this stands in for `unwrap_err`).
+    /// the ideal-gas law the fixtures below lower against. a sponge relaxes toward a
+    /// reference state expressed in primitives, so lowering one needs the conversion its
+    /// regime uses; every other source kind ignores the law and lowers identically with it.
+    fn fixture_law() -> crate::state_law::StateLaw {
+        crate::state_law::StateLaw::newtonian(1.4)
+    }
+
+    /// the law matching `spec`'s regime. lowering rejects a law and a spec that disagree
+    /// about relativity, so a fixture that means to exercise some other rejection has to
+    /// hand over the law belonging to the regime it names.
+    fn law_for(spec: &crate::regime_spec::RegimeSpec) -> crate::state_law::StateLaw {
+        if spec.is_relativistic {
+            crate::state_law::StateLaw::relativistic(
+                1.4,
+                crate::state_law::Background::Minkowski,
+            )
+        } else {
+            fixture_law()
+        }
+    }
+
+    fn lower(
+        cfg: &symbi_expr::SourceConfig,
+        spec: &crate::regime_spec::RegimeSpec,
+    ) -> Result<Vec<(String, BuiltSource)>, String> {
+        build_user_source_with_law(cfg, spec, Some(&law_for(spec)))
+    }
+
     fn expect_err(cfg: &symbi_expr::SourceConfig, spec: &crate::regime_spec::RegimeSpec) -> String {
-        match build_user_source(cfg, spec) {
+        match lower(cfg, spec) {
             Err(e) => e,
-            Ok(_) => panic!("expected build_user_source to reject the config"),
+            Ok(_) => panic!("expected the config to be rejected"),
         }
     }
 
@@ -831,7 +884,7 @@ mod tests {
         assert_eq!(cfg.kind, "force");
         assert_eq!(cfg.dim, 2);
         assert_eq!(cfg.outputs, vec![0, 1]);
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("python force config lowers");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("python force config lowers");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["mom", "nrg"]
@@ -858,7 +911,7 @@ mod tests {
                 {"op":"IF_THEN_ELSE","condition":19,"true_case":16,"false_case":22}
             ]}"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("lower table");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("lower table");
         let evaluator = crate::SourceEvaluator::from_built(&built);
         assert_eq!(
             evaluator.eval("nrg", &[("x_0", 1.5)]).expect("interior"),
@@ -884,7 +937,7 @@ mod tests {
                           {"op": "CONSTANT", "value": 0.0},
                           {"op": "CONSTANT", "value": 0.0}]}"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("rotating frame config lowers");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("rotating frame config lowers");
         assert_eq!(
             built
                 .iter()
@@ -911,7 +964,8 @@ mod tests {
                           {"op": "CONSTANT", "value": 0.0}]}"#,
         );
         let (built, params) =
-            build_user_sources(&[rotating, sponge], &ISO_NEWTONIAN_SPEC).expect("compose");
+            build_user_sources_with_law(&[rotating, sponge], &ISO_NEWTONIAN_SPEC, Some(&fixture_law()))
+                .expect("compose");
         assert!(params.is_empty());
         assert_eq!(
             built.iter().filter(|(target, _)| target == "mom").count(),
@@ -969,61 +1023,52 @@ mod tests {
 
     #[test]
     fn python_sponge_json_loads_and_lowers() {
-        // the exact json python's serialize_source(SourceKind.sponge, dim=3, params=[inv_gm1]) emits.
-        // outputs = [kappa, den_ref, mom_ref_0..2, nrg_ref] mapped to node indices; here kappa=2,
-        // den_ref=1, mom_ref=(x_0,x_1,x_2) (reads position), nrg_ref=10, inv_gm1=2.5. pins the
-        // cross-language wire for the buffer-zone sponge.
+        // the exact json python's serialize_source(SourceKind.sponge, dim=3) emits.
+        // outputs = [kappa, rho_ref, vel_ref_0..2, pre_ref] mapped to node indices; here
+        // kappa=2, rho_ref=1, vel_ref=(x_0,x_1,x_2) (reads position), pre_ref=10. the wire
+        // carries PRIMITIVES, so the regime's own conversion supplies the conserved
+        // reference and the adiabatic index never crosses the language boundary.
         let cfg = cfg_from(
-            r#"{"kind": "sponge", "dim": 3, "outputs": [3, 4, 0, 1, 2, 5], "params": [2.5],
+            r#"{"kind": "sponge", "dim": 3, "outputs": [3, 4, 0, 1, 2, 5], "params": [],
                 "nodes": [{"op": "VARIABLE_X1"}, {"op": "VARIABLE_X2"}, {"op": "VARIABLE_X3"},
                           {"op": "CONSTANT", "value": 2.0}, {"op": "CONSTANT", "value": 1.0},
                           {"op": "CONSTANT", "value": 10.0}]}"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("python sponge config lowers");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("python sponge config lowers");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["den", "mom", "nrg"]
         );
-        // at x=(1,0,0), state rho=1.5, vel=(3,0,0), pre=2:
-        // S_mom_0 = kappa*(mom_ref_0 - rho*vel_0) = 2*(x_0 - 4.5) = 2*(1 - 4.5) = -7.
+        // at x=(1,0,0) the reference is rho=1, v=(1,0,0), p=10; the state is rho=1.5,
+        // v=(3,0,0), p=2, under gamma = 1.4.
+        let state: &[(&str, f64)] = &[
+            ("rho", 1.5),
+            ("vel_0", 3.0),
+            ("vel_1", 0.0),
+            ("vel_2", 0.0),
+            ("pre", 2.0),
+            ("x_0", 1.0),
+            ("x_1", 0.0),
+            ("x_2", 0.0),
+        ];
+        // S_den = kappa*(rho_ref - rho) = 2*(1 - 1.5) = -1.
+        let (_, den) = &built[0];
+        let s_den = eval_lowered(den, den.outputs[0], state);
+        assert!((s_den - (-1.0)).abs() < 1e-12, "python sponge den wrong: {s_den}");
+        // S_mom_0 = kappa*(rho_ref vel_ref_0 - rho vel_0) = 2*(1 - 4.5) = -7.
         let (_, mom) = &built[1];
-        let s_mom0 = eval_lowered(
-            mom,
-            mom.outputs[0],
-            &[
-                ("rho", 1.5),
-                ("vel_0", 3.0),
-                ("vel_1", 0.0),
-                ("vel_2", 0.0),
-                ("x_0", 1.0),
-                ("x_1", 0.0),
-                ("x_2", 0.0),
-            ],
-        );
+        let s_mom0 = eval_lowered(mom, mom.outputs[0], state);
         assert!(
             (s_mom0 - (-7.0)).abs() < 1e-12,
             "python sponge mom_0 wrong: {s_mom0}"
         );
-        // S_nrg = kappa*(nrg_ref - (pre*inv_gm1 + 0.5*rho*|v|^2)) = 2*(10 - (5 + 6.75)) = -3.5.
-        // (the x_k leaves ride along in the spliced field, present in the param manifest even
-        // where the const nrg_ref reads none of them.)
+        // the energy slot is where the conversion earns its keep: both sides are built by
+        // the regime, so the reference kinetic term rho_ref |v_ref|^2/2 is carried rather
+        // than dropped. S_nrg = 2*((10/0.4 + 0.5) - (2/0.4 + 6.75)) = 2*(25.5 - 11.75) = 27.5.
         let (_, nrg) = &built[2];
-        let s_nrg = eval_lowered(
-            nrg,
-            nrg.outputs[0],
-            &[
-                ("rho", 1.5),
-                ("vel_0", 3.0),
-                ("vel_1", 0.0),
-                ("vel_2", 0.0),
-                ("pre", 2.0),
-                ("x_0", 1.0),
-                ("x_1", 0.0),
-                ("x_2", 0.0),
-            ],
-        );
+        let s_nrg = eval_lowered(nrg, nrg.outputs[0], state);
         assert!(
-            (s_nrg - (-3.5)).abs() < 1e-12,
+            (s_nrg - 27.5).abs() < 1e-12,
             "python sponge nrg wrong: {s_nrg}"
         );
     }
@@ -1035,7 +1080,7 @@ mod tests {
             r#"{ "kind":"force", "dim":2, "outputs":[0,1], "params":[0.5],
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"CONSTANT","value":0.0} ] }"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("force ok on newtonian");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("force ok on newtonian");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["mom", "nrg"]
@@ -1049,7 +1094,7 @@ mod tests {
             r#"{ "kind":"force", "dim":2, "outputs":[0,1], "params":[0.5],
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"CONSTANT","value":0.0} ] }"#,
         );
-        let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("force ok on iso");
+        let built = lower(&cfg, &ISO_NEWTONIAN_SPEC).expect("force ok on iso");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["mom"]
@@ -1080,7 +1125,7 @@ mod tests {
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":3.0}, {"op":"CONSTANT","value":4.0} ] }"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("inject ok on newtonian");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("inject ok on newtonian");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["den", "mom", "nrg"]
@@ -1109,7 +1154,7 @@ mod tests {
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":3.0} ] }"#,
         );
-        let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("inject ok on iso");
+        let built = lower(&cfg, &ISO_NEWTONIAN_SPEC).expect("inject ok on iso");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["den", "mom"]
@@ -1274,7 +1319,7 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"CONSTANT","value":0.0},
                            {"op":"VARIABLE_X1"} ] }"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("force+region");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("force+region");
         let (tgt, mom) = &built[0];
         assert_eq!(tgt, "mom");
         let s_at = |x0: f64| {
@@ -1312,7 +1357,7 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1},
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("relax newtonian");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("relax newtonian");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["mom", "nrg"]
@@ -1361,7 +1406,7 @@ mod tests {
             r#"{ "kind":"relax", "dim":1, "outputs":[0,1], "params":[-5.0, 0.0],
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("relax");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("relax");
         let (_, mom) = &built[0];
         // kappa = -5 -> clamped to 0 -> S_mom_0 = 0 regardless of the velocity overshoot.
         let s = eval_lowered(
@@ -1379,17 +1424,23 @@ mod tests {
 
     #[test]
     fn sponge_relaxes_full_state_toward_reference() {
-        // outputs = [kappa, den_ref, mom_ref_0, mom_ref_1, nrg_ref] as constant nodes (the reference
-        // is a pure function of position — params carries only inv_gm1). the
-        // three channels each relax toward the reference conserved value.
-        //   kappa=2, den_ref=1, mom_ref=[0.5,0], nrg_ref=10, inv_gm1=2.5 (gamma=1.4).
+        // outputs = [kappa, rho_ref, vel_ref_0, vel_ref_1, pre_ref] as constant nodes. the
+        // reference is primitive and the regime converts it, so the conserved target is
+        //   den = rho_ref = 1, mom = rho_ref vel_ref = [0.5, 0],
+        //   nrg = pre_ref/(gamma-1) + rho_ref |vel_ref|^2 / 2 = 3.95*2.5 + 0.125 = 10,
+        // which is the same conserved reference this test asserted against when the wire
+        // carried it directly. the expected sources below are therefore unchanged: the
+        // meaning of the wire moved, the physics did not.
+        //   kappa=2, rho_ref=1, vel_ref=[0.5,0], pre_ref=3.95, gamma=1.4.
         let cfg = cfg_from(
-            r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2,3,4], "params":[2.5],
+            r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2,3,4], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":2.0}, {"op":"CONSTANT","value":1.0},
                            {"op":"CONSTANT","value":0.5}, {"op":"CONSTANT","value":0.0},
-                           {"op":"CONSTANT","value":10.0} ] }"#,
+                           {"op":"CONSTANT","value":3.95} ] }"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("sponge newtonian");
+        let law = crate::state_law::StateLaw::newtonian(1.4);
+        let built = build_user_source_with_law(&cfg, &NEWTONIAN_SPEC, Some(&law))
+            .expect("sponge newtonian");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["den", "mom", "nrg"]
@@ -1397,21 +1448,21 @@ mod tests {
 
         // state: rho=1.5, vel=[3,0], pre=2 (each channel reads only what it needs from this).
         let state = [("rho", 1.5), ("vel_0", 3.0), ("vel_1", 0.0), ("pre", 2.0)];
-        // S_den = kappa*(den_ref - rho) = 2*(1 - 1.5) = -1.0 (density relaxes down toward the ref).
+        // S_den = kappa*(rho_ref - rho) = 2*(1 - 1.5) = -1.0 (density relaxes down toward the ref).
         let (_, den) = &built[0];
         let s_den = eval_lowered(den, den.outputs[0], &state);
         assert!(
             (s_den - (-1.0)).abs() < 1e-12,
             "sponge density wrong: {s_den}"
         );
-        // S_mom_0 = kappa*(mom_ref_0 - rho*vel_0) = 2*(0.5 - 4.5) = -8.0 (opposes the momentum).
+        // S_mom_0 = kappa*(rho_ref vel_ref_0 - rho vel_0) = 2*(0.5 - 4.5) = -8.0 (opposes it).
         let (_, mom) = &built[1];
         let s_mom0 = eval_lowered(mom, mom.outputs[0], &state);
         assert!(
             (s_mom0 - (-8.0)).abs() < 1e-12,
             "sponge mom_0 wrong: {s_mom0}"
         );
-        // S_nrg = kappa*(nrg_ref - E), E = pre*inv_gm1 + 0.5*rho*|v|^2 = 2*2.5 + 0.5*1.5*9 = 11.75;
+        // S_nrg = kappa*(E_ref - E), E = pre/(gamma-1) + 0.5*rho*|v|^2 = 2*2.5 + 0.5*1.5*9 = 11.75;
         //   -> 2*(10 - 11.75) = -3.5 (total energy relaxes down toward the ref).
         let (_, nrg) = &built[2];
         let s_nrg = eval_lowered(nrg, nrg.outputs[0], &state);
@@ -1420,21 +1471,32 @@ mod tests {
 
     #[test]
     fn sponge_on_iso_drops_energy_channel() {
-        // iso has no energy: the reference is [kappa, den_ref, mom_ref_0] (2+D), and the den + mom
-        // channels are the whole emission — the list stops before nrg_ref, and inv_gm1 goes unused.
+        // iso has no energy: the reference is [kappa, rho_ref, vel_ref_0] (2+D), and the den +
+        // mom channels are the whole emission — the list stops before pre_ref. the mass and
+        // momentum a cold gas carries are the newtonian ones, so the law converts them the
+        // same way and only the energy slot, which iso does not evolve, is dropped.
+        //
+        // this arm also exercises the one-dimensional door: the curved charts start at two
+        // spatial dimensions, so a dimension-generic conversion admitting them would take
+        // this flat 1d sponge with them.
         let cfg = cfg_from(
             r#"{ "kind":"sponge", "dim":1, "outputs":[0,1,2], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
-        let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("sponge iso");
+        let law = crate::state_law::StateLaw::newtonian(5.0 / 3.0);
+        let built = build_user_source_with_law(&cfg, &ISO_NEWTONIAN_SPEC, Some(&law))
+            .expect("sponge iso");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["den", "mom"]
         );
         // S_den = 1*(2 - rho); rho=0.5 -> 1.5 (density relaxes up toward the ref).
+        // the conversion evaluates the whole conserved vector, so the velocity is in the
+        // signature of every channel built from it; a large value here proves the density
+        // channel emits the mass relaxation alone, with no momentum leaking into it.
         let (_, den) = &built[0];
-        let s_den = eval_lowered(den, den.outputs[0], &[("rho", 0.5)]);
+        let s_den = eval_lowered(den, den.outputs[0], &[("rho", 0.5), ("vel_0", 37.0)]);
         assert!(
             (s_den - 1.5).abs() < 1e-12,
             "iso sponge density wrong: {s_den}"
@@ -1442,8 +1504,117 @@ mod tests {
     }
 
     #[test]
+    fn sponge_relaxes_a_relativistic_state_through_the_relativistic_law() {
+        // the seam the primitive wire exists for: the same six outputs a newtonian gas
+        // sends, converted by the relativistic law instead. the density a relativistic
+        // evolution stores is D = rho W, so a reference at rest and a moving state differ
+        // by the lorentz factor -- a newtonian conversion would report the rest densities
+        // and relax toward a state the evolution does not store.
+        let cfg = cfg_from(
+            r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2,2,3], "params":[],
+                 "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
+                           {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":1.0} ] }"#,
+        );
+        let law = crate::state_law::StateLaw::relativistic(
+            4.0 / 3.0,
+            crate::state_law::Background::Minkowski,
+        );
+        let built = build_user_source_with_law(&cfg, &RHD_SPEC, Some(&law))
+            .expect("relativistic sponge lowers");
+        // v = 0.6 gives W = 1.25, so D = 1.25 against a reference D_ref = 2 at rest.
+        // S_den = kappa (D_ref - D) = 1*(2 - 1.25) = 0.75.
+        let (_, den) = &built[0];
+        let s_den = eval_lowered(
+            den,
+            den.outputs[0],
+            &[("rho", 1.0), ("vel_0", 0.6), ("vel_1", 0.0), ("pre", 0.1)],
+        );
+        assert!(
+            (s_den - 0.75).abs() < 1e-12,
+            "relativistic sponge density wrong: {s_den}; a newtonian conversion reports 1.0"
+        );
+    }
+
+    #[test]
+    fn a_massless_curved_sponge_matches_the_flat_one() {
+        // the curved law multiplies the conserved state by sqrt(det gamma), which is unity
+        // exactly when the hole has no mass. running the same reference and state through
+        // both arms at M = 0 therefore has to agree to roundoff, which pins the
+        // densitization to the metric rather than to a constant the arm carries.
+        let cfg = cfg_from(
+            r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2,2,3], "params":[],
+                 "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
+                           {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":1.0} ] }"#,
+        );
+        let state: &[(&str, f64)] = &[
+            ("rho", 1.0),
+            ("vel_0", 0.6),
+            ("vel_1", 0.0),
+            ("pre", 0.1),
+            ("x_0", 3.0),
+            ("x_1", 4.0),
+            ("x_2", 0.0),
+        ];
+        let mut channels = Vec::new();
+        for background in [
+            crate::state_law::Background::Minkowski,
+            crate::state_law::Background::SchwarzschildKsCartesian { mass: 0.0 },
+        ] {
+            let law = crate::state_law::StateLaw::relativistic(4.0 / 3.0, background);
+            let built = build_user_source_with_law(&cfg, &RHD_SPEC, Some(&law))
+                .expect("sponge lowers on both backgrounds");
+            channels.push(
+                built
+                    .iter()
+                    .map(|(target, source)| {
+                        let values: Vec<f64> = source
+                            .outputs
+                            .iter()
+                            .map(|out| eval_lowered(source, *out, state))
+                            .collect();
+                        (target.clone(), values)
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
+        assert_eq!(channels[0].len(), channels[1].len(), "channel counts differ");
+        for ((target, flat), (_, curved)) in channels[0].iter().zip(channels[1].iter()) {
+            for (ii, (a, b)) in flat.iter().zip(curved.iter()).enumerate() {
+                assert!(
+                    (a - b).abs() < 1e-14,
+                    "massless curved sponge differs from flat on {target}[{ii}]: {a} vs {b}"
+                );
+            }
+        }
+        // and the massless case is not vacuously zero: the flat arm carries real values.
+        assert!(
+            channels[0].iter().any(|(_, v)| v.iter().any(|x| x.abs() > 1e-9)),
+            "both arms emitted nothing, so the agreement tests nothing"
+        );
+        // giving the hole mass has to move the answer, or the agreement above would hold
+        // for a curved arm that never reached the metric at all. at r = 5 the spatial
+        // volume element is sqrt(1 + 2M/r) = 1.183 for M = 1.
+        let massive = crate::state_law::StateLaw::relativistic(
+            4.0 / 3.0,
+            crate::state_law::Background::SchwarzschildKsCartesian { mass: 1.0 },
+        );
+        let built = build_user_source_with_law(&cfg, &RHD_SPEC, Some(&massive))
+            .expect("sponge lowers on a massive hole");
+        let (_, den) = &built[0];
+        let s_den = eval_lowered(den, den.outputs[0], state);
+        let (_, flat_den) = &channels[0][0];
+        assert!(
+            (s_den - flat_den[0]).abs() > 1e-3,
+            "the mass left the conserved state untouched: {s_den} against the flat {}",
+            flat_den[0]
+        );
+    }
+
+    #[test]
     fn sponge_wrong_arity_is_rejected() {
-        // energy regime needs 3+D outputs (kappa, den_ref, D mom_ref, nrg_ref); a short list fails.
+        // an energy regime needs 3+D outputs (kappa, rho_ref, D vel_ref, pre_ref); a short
+        // list fails before anything is lowered, since a missing slot would otherwise be
+        // read from whichever output happened to sit at that index.
         let cfg = cfg_from(
             r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2], "params":[2.5],
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":1.0},
@@ -1451,7 +1622,7 @@ mod tests {
         );
         let err = expect_err(&cfg, &NEWTONIAN_SPEC);
         assert!(
-            err.contains("nrg_ref"),
+            err.contains("pre_ref"),
             "expected sponge arity rejection, got: {err}"
         );
     }
@@ -1470,7 +1641,7 @@ mod tests {
                            {"op":"VARIABLE_PRESSURE"}, {"op":"MULTIPLY","left":0,"right":1},
                            {"op":"MULTIPLY","left":3,"right":2}, {"op":"NEG","left":4} ] }"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("raw pressure-reading cooling");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("raw pressure-reading cooling");
         let (tgt, nrg) = &built[0];
         assert_eq!(tgt, "nrg");
         // S_nrg = -(C * rho * pre); C=0.25, rho=2, pre=3 -> -(0.25*2*3) = -1.5.
@@ -1505,7 +1676,7 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"VARIABLE_RHO"},
                            {"op":"MULTIPLY","left":0,"right":1} ] }"#,
         );
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("raw den ok");
+        let built = lower(&cfg, &NEWTONIAN_SPEC).expect("raw den ok");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["den"]
@@ -1527,7 +1698,7 @@ mod tests {
             r#"{ "kind":"relax", "dim":1, "outputs":[0,1], "params":[1.0, 0.0],
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         );
-        let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("relax iso");
+        let built = lower(&cfg, &ISO_NEWTONIAN_SPEC).expect("relax iso");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["mom"]
@@ -1740,5 +1911,50 @@ mod tests {
             matches!(result, Err(BridgeError::UnsupportedOp(Op::Sgn))),
             "Sgn must be rejected as unsupported",
         );
+    }
+}
+
+#[cfg(test)]
+mod state_law_seam_tests {
+    use super::*;
+    use crate::state_law::{Background, StateLaw};
+
+    fn force_cfg() -> symbi_expr::SourceConfig {
+        symbi_expr::SourceConfig::from_json(
+            r#"{"kind":"force","dim":1,"outputs":[0],"params":[0.0],
+                "nodes":[{"op":"PARAMETER","param_idx":0}]}"#,
+        )
+        .expect("parse")
+    }
+
+    #[test]
+    fn a_law_disagreeing_with_the_regime_is_refused_at_build_time() {
+        // the two describe the same regime from opposite ends. a relativistic law on a
+        // newtonian regime would have a source relax toward `rho h W^2 v` while the
+        // evolution stores `rho v` — a wrong answer no output reveals, so it is caught
+        // where the mismatch is made rather than carried into the graph.
+        let law = StateLaw::relativistic(4.0 / 3.0, Background::Minkowski);
+        let err = match build_user_source_with_law(&force_cfg(), &crate::NEWTONIAN_SPEC, Some(&law)) {
+            Err(e) => e,
+            Ok(_) => panic!("a relativistic law on a newtonian regime must be refused"),
+        };
+        assert!(err.contains("relativistic"), "unhelpful message: {err}");
+        assert!(err.contains("newtonian"), "unhelpful message: {err}");
+    }
+
+    #[test]
+    fn a_matching_law_lowers_exactly_as_no_law_does() {
+        // threading the law changes nothing for the kinds that do not read it, so every
+        // existing source keeps its graph. the sponge is what will consume it.
+        let law = StateLaw::newtonian(5.0 / 3.0);
+        let with = build_user_source_with_law(&force_cfg(), &crate::NEWTONIAN_SPEC, Some(&law))
+            .expect("lowers with a law");
+        let without =
+            build_user_source(&force_cfg(), &crate::NEWTONIAN_SPEC).expect("lowers without one");
+        assert_eq!(with.len(), without.len());
+        for ((ta, a), (tb, b)) in with.iter().zip(&without) {
+            assert_eq!(ta, tb, "target moved");
+            assert_eq!(a.outputs.len(), b.outputs.len(), "output count moved for {ta}");
+        }
     }
 }

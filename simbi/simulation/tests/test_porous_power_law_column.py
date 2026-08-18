@@ -164,13 +164,13 @@ def test_the_reservoir_holds_the_starting_column(porous_cls):
     state = _column(problem)
     buffer_radius = problem.buffer_parameters["buffer_radius"]
     for r in (buffer_radius, 1.05 * buffer_radius, 1.2 * buffer_radius):
-        rho_ref, nrg_ref = compiled.evaluate(x1=r, x2=0.0, x3=0.0)
+        rho_ref, pre_ref = compiled.evaluate(x1=r, x2=0.0, x3=0.0)
         rho, pre = state(r)
         # the sponge's radius carries a 1e-10 regularization against the origin, which the
         # column's does not; at the buffer radius that is a 2e-10 relative offset in
         # density, and the tolerance sits an order and a half above it.
         assert rho_ref == pytest.approx(rho, rel=1.0e-8)
-        assert nrg_ref == pytest.approx(pre / (gamma - 1.0), rel=1.0e-8)
+        assert pre_ref == pytest.approx(pre, rel=1.0e-8)
 
 
 def test_a_declared_density_index_is_refused(porous_cls):

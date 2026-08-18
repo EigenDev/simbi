@@ -242,11 +242,12 @@ class DittmannSingleDisk(SimbiProblem):
     def buffer_sponge_terms(
         self, x1: expr.Expr, x2: expr.Expr
     ) -> list[expr.Expr]:
-        """the iso sponge outputs [kappa, den_ref, mom_ref_x, mom_ref_y]: relax
-        the conserved state toward the outer disk equilibrium (Sigma -> 1 in
-        sub-keplerian rotation, well outside the cavity), kappa ramping
-        0 -> 1/damp_time across the buffer annulus. the rust `sponge` kind forms
-        S_U = kappa (U_ref - U) for density and momentum (iso: no energy)."""
+        """the iso sponge outputs [kappa, rho_ref, vel_ref_x, vel_ref_y]: relax
+        the state toward the outer disk equilibrium (Sigma -> 1 in sub-keplerian
+        rotation, well outside the cavity), kappa ramping 0 -> 1/damp_time across
+        the buffer annulus. the reference travels as primitives and the regime
+        converts it, forming S_U = kappa (U_ref - U) for density and momentum
+        (iso carries no energy equation)."""
         bp = self.buffer_parameters
         buffer_radius = expr.constant(bp["buffer_radius"], x1.graph)
         buffer_width = expr.constant(bp["buffer_width"], x1.graph)
@@ -263,14 +264,14 @@ class DittmannSingleDisk(SimbiProblem):
         # v_phi^2 = v_kep^2 - cs^2, tangential in the plane.
         gm = expr.constant(self.central_mass, x1.graph)
         cs2 = expr.constant(self.ambient_sound_speed ** 2, x1.graph)
-        den_ref = expr.constant(1.0, x1.graph)
+        rho_ref = expr.constant(1.0, x1.graph)
         v_phi = expr.sqrt(
             expr.max_expr(gm / r - cs2, expr.constant(0.0, x1.graph))
         )
         r_inv = 1.0 / r
-        mom_x = -1.0 * den_ref * v_phi * x2 * r_inv
-        mom_y = den_ref * v_phi * x1 * r_inv
-        return [kappa, den_ref, mom_x, mom_y]
+        vel_x = -1.0 * v_phi * x2 * r_inv
+        vel_y = v_phi * x1 * r_inv
+        return [kappa, rho_ref, vel_x, vel_y]
 
     @computed_field
     @property

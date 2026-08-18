@@ -1665,17 +1665,7 @@ fn op_inputs(op: &Op) -> Vec<NodeId> {
 /// for graph topology, see `Op::try_map_inputs` in `graph.rs`), so walking
 /// `inputs()` recursively from each output covers the entire live subgraph.
 fn reachable_from_outputs(graph: &Graph, outputs: &[NodeId]) -> HashSet<NodeId> {
-    let mut reachable = HashSet::new();
-    let mut stack: Vec<NodeId> = outputs.to_vec();
-    while let Some(id) = stack.pop() {
-        if !reachable.insert(id) {
-            continue;
-        }
-        for input in graph.node(id).op.inputs() {
-            stack.push(input);
-        }
-    }
-    reachable
+    graph.reachable_from(outputs)
 }
 
 /// the acc-dependent cone of an `IterateInline` — the nodes that

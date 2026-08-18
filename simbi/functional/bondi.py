@@ -14,7 +14,7 @@
 # - bondi_profile(r, ...): the analytical density / velocity / pressure profile
 # - sponge_ramp(...): the cubic smoothstep damping rate of an outer buffer
 # - bondi_far_field(r, ...): the subsonic asymptotic reference state
-# - sponge_wire(...): conserved reference outputs in the rust sponge order
+# - sponge_wire(...): primitive reference outputs in the rust sponge order
 # - far_field_sponge_outputs(...): ramp + far field + wire, composed for the
 #   non-rotating case
 # - refinement_levels / telescoping_regions: the nested-box ladder
@@ -136,23 +136,21 @@ def sponge_wire(
     cs_eq: expr.Expr,
     gamma: float,
 ) -> list[expr.Expr]:
-    """the rust `sponge` source's outputs [kappa, den_ref, mom_ref_x, mom_ref_y,
-    mom_ref_z, nrg_ref] from a reference state given as velocities. the energy
-    reference is p/(gamma-1) + rho|v|^2/2 with p = rho cs^2/gamma. the isothermal
-    regime (gamma = 1) has no energy equation: its spec takes five outputs, no
-    nrg_ref."""
-    rho_vx = rho_eq * vx
-    rho_vy = rho_eq * vy
-    rho_vz = rho_eq * vz
-    if gamma == 1.0:
-        return [kappa, rho_eq, rho_vx, rho_vy, rho_vz]
+    """the rust `sponge` source's outputs [kappa, rho_ref, vel_ref_x, vel_ref_y, vel_ref_z,
+    pre_ref] from a reference state given as velocities.
 
+    the reference travels as PRIMITIVES and the regime converts it through its own
+    conservation law, so one wire serves a newtonian gas, a relativistic one and a curved
+    background alike — `rho v`, `rho h W^2 v` and `sqrt(gamma) rho h W^2 v` are the
+    regime's business rather than this function's. the isothermal regime has no energy
+    equation: its spec takes five outputs, no pre_ref.
+
+    `gamma` selects the closure the reference pressure is written in, `p = rho cs^2/gamma`
+    for an ideal gas and `p = rho cs^2` at gamma = 1."""
+    if gamma == 1.0:
+        return [kappa, rho_eq, vx, vy, vz]
     pre_eq = rho_eq * cs_eq * cs_eq / gamma
-    energy_eq = (
-        pre_eq / (gamma - 1.0)
-        + 0.5 * (rho_vx * rho_vx + rho_vy * rho_vy + rho_vz * rho_vz) / rho_eq
-    )
-    return [kappa, rho_eq, rho_vx, rho_vy, rho_vz, energy_eq]
+    return [kappa, rho_eq, vx, vy, vz, pre_eq]
 
 
 def far_field_sponge_outputs(

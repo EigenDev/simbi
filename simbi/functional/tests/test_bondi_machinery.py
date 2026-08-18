@@ -126,7 +126,12 @@ def test_sponge_wire_isothermal_has_no_energy_channel() -> None:
     assert len(outputs) == 6
 
 
-def test_sponge_wire_energy_is_thermal_plus_kinetic() -> None:
+def test_sponge_wire_carries_primitives_under_the_ideal_gas_closure() -> None:
+    # the wire hands over a state, not a conserved vector: slot 5 is the reference
+    # PRESSURE under p = rho cs^2/gamma, and the velocity slots are velocities. the
+    # conserved reference -- including the kinetic term the energy needs -- is built
+    # by the evolving regime from these, which is what lets one wire serve a newtonian
+    # gas, a relativistic one and a curved background.
     gamma = 1.4
     graph = expr.ExprGraph()
     x1, x2, x3 = _coords(graph)
@@ -136,10 +141,10 @@ def test_sponge_wire_energy_is_thermal_plus_kinetic() -> None:
     zero = expr.constant(0.0, graph) + 0.0 * x1
     outputs = sponge_wire(zero, rho, vx, zero, zero, cs_eq=cs, gamma=gamma)
     vals = _eval_at(outputs, 1.0, 0.0, 0.0)
-    pre = 2.0 * 0.25 / gamma
-    expected = pre / (gamma - 1.0) + 0.5 * 2.0 * 0.09
-    assert abs(vals[5] - expected) < 1e-12
-    assert abs(vals[2] - 0.6) < 1e-12
+    assert abs(vals[5] - 2.0 * 0.25 / gamma) < 1e-12
+    # the velocity slot is the velocity itself, undivided by and unmultiplied by density:
+    # at rho = 2 a momentum wire would read 0.6 here.
+    assert abs(vals[2] - 0.3) < 1e-12
 
 
 def test_composed_outputs_match_the_pieces() -> None:

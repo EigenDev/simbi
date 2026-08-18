@@ -5,7 +5,7 @@
 #
 # two properties are being protected, and they fail differently.
 #
-# the sponge must impose no mass current. its inflow variant builds a momentum target from
+# the sponge must impose no mass current. its inflow variant builds a velocity target from
 # the analytic Bondi coefficient lambda = 1/4, which writes the analytic accretion rate into
 # the boundary condition of the experiment whose measurement is the accretion rate. the
 # static target fixes the reservoir's thermodynamic state and leaves the throughput to be
@@ -28,12 +28,16 @@ from simbi_configs.science.simbi_projects.porous_turbulent_accretor import (
 POROSITIES = [0.0, 0.125, 0.5, 1.0]
 
 
-def momentum_reference(problem: PorousTurbulentAccretor) -> list[float]:
-    """the sponge's momentum target sampled inside the damping shell, where kappa > 0."""
+def velocity_reference(problem: PorousTurbulentAccretor) -> list[float]:
+    """the sponge's velocity target sampled inside the damping shell, where kappa > 0.
+
+    the reference is a primitive state, so a zero here is a zero mass current at every
+    density the reservoir holds -- the target is kinematic rather than a momentum that
+    would have to be read against the local density to know what it prescribes."""
     graph = expr.ExprGraph()
     axes = [expr.variable(f"x{ii}", graph) for ii in (1, 2, 3)]
     outputs = problem.buffer_sponge_terms(*axes)
-    assert len(outputs) == 6, "sponge needs [kappa, den, mom_x..z, nrg]"
+    assert len(outputs) == 6, "sponge needs [kappa, rho_ref, vel_x..z, pre_ref]"
     return graph.compile(outputs[2:5]).evaluate(x1=0.9, x2=0.0, x3=0.0)
 
 
@@ -43,9 +47,9 @@ def test_the_reservoir_imposes_no_mass_current(porosity: float) -> None:
     # setting would leave the flag reading correctly while the run carried a momentum target.
     problem = PorousTurbulentAccretor(porosity=porosity)
     assert problem.buffer_bondi_inflow is False
-    momentum = momentum_reference(problem)
-    assert all(abs(v) < 1.0e-12 for v in momentum), (
-        f"porosity={porosity}: the reservoir carries a momentum target {momentum}, which "
+    velocity = velocity_reference(problem)
+    assert all(abs(v) < 1.0e-12 for v in velocity), (
+        f"porosity={porosity}: the reservoir carries a velocity target {velocity}, which "
         "prescribes a throughput in the experiment that measures throughput"
     )
 
@@ -64,12 +68,12 @@ def test_the_inflow_variant_is_still_reachable() -> None:
     # re-justified later.
     problem = PorousTurbulentAccretor(porosity=1.0, buffer_bondi_inflow=True)
     assert problem.buffer_bondi_inflow is True
-    momentum = momentum_reference(problem)
-    assert any(abs(v) > 1.0e-12 for v in momentum), (
-        "the inflow variant produced no momentum target, so the A/B compares nothing"
+    velocity = velocity_reference(problem)
+    assert any(abs(v) > 1.0e-12 for v in velocity), (
+        "the inflow variant produced no velocity target, so the A/B compares nothing"
     )
-    # and it must point inward: sampled on the +x axis, the x-momentum is negative.
-    assert momentum[0] < 0.0, f"the bondi target points outward: {momentum}"
+    # and it must point inward: sampled on the +x axis, the x-velocity is negative.
+    assert velocity[0] < 0.0, f"the bondi target points outward: {velocity}"
 
 
 @pytest.mark.parametrize("porosity", POROSITIES)

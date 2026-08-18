@@ -143,7 +143,7 @@ pub fn sponge_energy<S: Scalar>(rho: S, vel: &[S], pre: S, kappa: S, nrg_ref: S,
 /// negative rate would anti-damp (inject energy / destabilize). clamping in the
 /// lift leaves damping as the only expressible behavior — the stability invariant
 /// enforced by construction. carrier-safe (a branch-free `max`).
-fn clamp_rate<S: Scalar>(kappa: S) -> S {
+pub fn clamp_rate<S: Scalar>(kappa: S) -> S {
     kappa.max(S::ZERO)
 }
 

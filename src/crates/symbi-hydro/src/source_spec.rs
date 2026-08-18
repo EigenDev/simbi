@@ -32,6 +32,7 @@
 //   let total_rhs = compose(intrinsic, geometric);  // additive at A1
 // =============================================================================
 
+use symbi_algebra::algebra::Numeric;
 use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId};
 use symbi_ir::{ElementTy, Gv, with_trace};
 
@@ -1014,65 +1015,101 @@ pub fn user_relax_energy_source(field: &BuiltSource, d: usize) -> BuiltSource {
 // state; `nrg_ref` (output `2+D`) is present only when the regime has energy. all three sources
 // trace their lift over the same field so masking `kappa` (output 0) masks the whole relaxation.
 
-/// full-state relaxation mass source: `S_den = max(kappa,0) * (den_ref - rho)`. reads outputs
-/// `[kappa, den_ref]`; the momentum/energy outputs are consumed by the sibling sources.
-pub fn user_sponge_density_source(field: &BuiltSource, d: usize) -> BuiltSource {
-    assert!(
-        field.outputs.len() >= 2 + d,
-        "user_sponge_density_source: field must be [kappa, den_ref, mom_ref_0..mom_ref_{}, ..], got {} outputs",
-        d.saturating_sub(1),
-        field.outputs.len(),
-    );
-    lift_to_built(|| {
-        let rho = Gv::scalar(law_params::RHO);
-        let f = splice_field_into_trace(field);
-        vec![crate::source_term::sponge_density(rho, f[0], f[1])]
-    })
+/// the full-state relaxation of a buffer zone, as the three conserved sources
+/// `S_U = max(kappa,0) * (U_ref - U)` for den, mom and (on an energy regime) nrg.
+///
+/// the reference is supplied as PRIMITIVES — `[kappa, rho_ref, vel_ref_0..vel_ref_{D-1},
+/// pre_ref]` — and converted by the regime's own `to_conserved` through `law`, as is the
+/// cell's current state. that is what makes one wire serve every regime: a newtonian gas
+/// relaxes `rho v`, a relativistic one `rho h W^2 v`, and a curved background the
+/// densitized `sqrt(gamma) rho h W^2 v`, without any of those laws being restated here.
+/// it also removes the closure from the wire: the enthalpy comes from the regime, so a
+/// synge gas no longer needs a `1/(gamma-1)` that has no value under its closure.
+///
+/// masking rides `kappa` alone, which factors into every channel; masking the reference
+/// would corrupt the state the flow relaxes toward rather than where it relaxes.
+pub fn user_sponge_sources(
+    field: &BuiltSource,
+    d: usize,
+    law: &crate::state_law::StateLaw,
+    has_energy: bool,
+) -> Result<Vec<(String, BuiltSource)>, String> {
+    let want = if has_energy { 3 + d } else { 2 + d };
+    if field.outputs.len() != want {
+        return Err(format!(
+            "sponge needs [kappa, rho_ref, vel_ref_0..vel_ref_{}{}]: got {} outputs, expected {want}",
+            d.saturating_sub(1),
+            if has_energy { ", pre_ref" } else { "" },
+            field.outputs.len(),
+        ));
+    }
+    // the conserved pair at one slot: the reference state and the cell's own, both through
+    // the same conversion, so the difference is a genuine departure rather than a
+    // comparison between two spellings of "conserved".
+    let slot = |pick: SpongeSlot| -> Result<BuiltSource, String> {
+        let mut err: Option<String> = None;
+        let built = lift_to_built(|| {
+            let f = splice_field_into_trace(field);
+            let kappa = crate::source_term::clamp_rate(f[0]);
+            let cur_rho = Gv::scalar(law_params::RHO);
+            let cur_vel: Vec<Gv> = (0..d).map(|k| Gv::scalar(&law_params::vel(k))).collect();
+            let cur_pre = if has_energy {
+                Gv::scalar(law_params::PRE)
+            } else {
+                Gv::ZERO
+            };
+            let ref_pre = if has_energy { f[2 + d] } else { Gv::ZERO };
+            let convert = |rho: Gv, vel: &[Gv], pre: Gv| -> Result<Vec<Gv>, String> {
+                match d {
+                    1 => law.to_conserved_gv_flat::<1>(rho, vel, pre),
+                    2 => Ok(law.to_conserved_gv::<2>(rho, vel, pre)),
+                    3 => Ok(law.to_conserved_gv::<3>(rho, vel, pre)),
+                    other => Err(format!("sponge: unsupported dimension {other}")),
+                }
+            };
+            let u_ref = match convert(f[1], &f[2..2 + d], ref_pre) {
+                Ok(u) => u,
+                Err(e) => {
+                    err = Some(e);
+                    return vec![Gv::ZERO];
+                }
+            };
+            let u_cur = match convert(cur_rho, &cur_vel, cur_pre) {
+                Ok(u) => u,
+                Err(e) => {
+                    err = Some(e);
+                    return vec![Gv::ZERO];
+                }
+            };
+            let relax = |k: usize| kappa * (u_ref[k] - u_cur[k]);
+            match pick {
+                SpongeSlot::Den => vec![relax(0)],
+                SpongeSlot::Mom => (0..d).map(|k| relax(1 + k)).collect(),
+                SpongeSlot::Nrg => vec![relax(1 + d)],
+            }
+        });
+        match err {
+            Some(e) => Err(e),
+            None => Ok(built),
+        }
+    };
+
+    let mut out = vec![
+        ("den".to_string(), slot(SpongeSlot::Den)?),
+        ("mom".to_string(), slot(SpongeSlot::Mom)?),
+    ];
+    if has_energy {
+        out.push(("nrg".to_string(), slot(SpongeSlot::Nrg)?));
+    }
+    Ok(out)
 }
 
-/// full-state relaxation momentum source: `S_mom_k = max(kappa,0) * (mom_ref_k - rho*vel_k)`,
-/// relaxing the conserved momentum toward `mom_ref` (outputs `2..2+D`).
-pub fn user_sponge_momentum_source(field: &BuiltSource, d: usize) -> BuiltSource {
-    assert!(
-        field.outputs.len() >= 2 + d,
-        "user_sponge_momentum_source: field must be [kappa, den_ref, mom_ref_0..mom_ref_{}, ..], got {} outputs",
-        d.saturating_sub(1),
-        field.outputs.len(),
-    );
-    lift_to_built(|| {
-        let rho = Gv::scalar(law_params::RHO);
-        let vel: Vec<Gv> = (0..d).map(|k| Gv::scalar(&law_params::vel(k))).collect();
-        let f = splice_field_into_trace(field);
-        crate::source_term::sponge_momentum(rho, &vel, f[0], &f[2..2 + d])
-    })
-}
-
-/// full-state relaxation energy source: `S_nrg = max(kappa,0) * (nrg_ref - E)`, `E = pre*inv_gm1 +
-/// (1/2)*rho*|v|^2`. reads `nrg_ref` (output `2+D`); `inv_gm1 = 1/(gamma-1)` is folded in as a
-/// build-time constant (gamma is known at lower time). energy regimes only.
-pub fn user_sponge_energy_source(field: &BuiltSource, d: usize, inv_gm1: f64) -> BuiltSource {
-    assert_eq!(
-        field.outputs.len(),
-        3 + d,
-        "user_sponge_energy_source: field must be [kappa, den_ref, mom_ref_0..mom_ref_{}, nrg_ref], got {} outputs",
-        d.saturating_sub(1),
-        field.outputs.len(),
-    );
-    lift_to_built(|| {
-        let rho = Gv::scalar(law_params::RHO);
-        let vel: Vec<Gv> = (0..d).map(|k| Gv::scalar(&law_params::vel(k))).collect();
-        let pre = Gv::scalar(law_params::PRE);
-        let f = splice_field_into_trace(field);
-        let inv_gm1 = <Gv as symbi_algebra::Numeric>::from_f64(inv_gm1);
-        vec![crate::source_term::sponge_energy(
-            rho,
-            &vel,
-            pre,
-            f[0],
-            f[2 + d],
-            inv_gm1,
-        )]
-    })
+/// which conserved slot a sponge lift emits.
+#[derive(Clone, Copy)]
+enum SpongeSlot {
+    Den,
+    Mom,
+    Nrg,
 }
 
 /// identity passthrough of a contiguous output subrange of a lowered user `field` as a standalone

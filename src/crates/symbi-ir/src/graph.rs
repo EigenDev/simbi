@@ -978,6 +978,30 @@ impl Graph {
         &self.params
     }
 
+    /// the set of nodes backward-reachable from `roots`, i.e. the live subgraph that
+    /// actually feeds them. `Op::inputs` is the single source of truth for topology, so
+    /// walking it recursively covers every contributing node and nothing else.
+    ///
+    /// a graph carries whatever the trace touched, which is a superset of what its
+    /// outputs consume: a builder that computes a whole conserved vector and keeps one
+    /// component leaves the other components' arithmetic — and the params feeding it —
+    /// in the graph. callers that publish a signature use this to keep the signature to
+    /// the live set, so a kernel binds only the fields and scalars its writes depend on.
+    pub fn reachable_from(&self, roots: &[NodeId]) -> std::collections::HashSet<NodeId> {
+        let mut reachable = std::collections::HashSet::new();
+        let mut stack: Vec<NodeId> = roots.to_vec();
+        while let Some(id) = stack.pop() {
+            if !reachable.insert(id) {
+                continue;
+            }
+            for input in self.node(id).op.inputs() {
+                stack.push(input);
+            }
+        }
+        reachable
+    }
+
+
     /// look up a param by its symbol.
     pub fn param(&self, name: &Symbol) -> Option<NodeId> {
         self.param_index.get(name).copied()
