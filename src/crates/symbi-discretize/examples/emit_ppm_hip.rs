@@ -17,7 +17,7 @@
 use std::fs;
 
 use symbi_discretize::GvKernel;
-use symbi_discretize::gv::{adiabatic_hllc_lm_flux_gv, rhd_c2p_gv};
+use symbi_discretize::gv::{adiabatic_hllc_plus_flux_gv, rhd_c2p_gv};
 use symbi_discretize::{
     EosArm, ProlongOrder, Recon, field_lerp_multi_gv, refine_prolong_multi_1t_gv,
     refine_prolong_sweep_multi_gv,
@@ -63,19 +63,18 @@ fn main() {
         .unwrap_or_else(|| "target/ppm_hip".to_string());
     fs::create_dir_all(&out).expect("create out dir");
 
-    // the ppm face-flux twins, 3d, hllc-lm (the production sink solver): the
-    // -3..+2 parabola stencil + the fleischmann adaptive phi + the compression-
-    // gated flatten, all in one graph — the widest-stencil flux the device runs.
+    // the ppm face-flux twins, 3d, HLLC+ (the production sink solver): the -3..+2
+    // parabola stencil, the two velocity-jump dissipation rescalings and the
+    // compression-gated flatten, all in one graph — the widest-stencil flux the device runs.
     for dir in 0..3u8 {
-        let (k, w) = adiabatic_hllc_lm_flux_gv::<3>(
+        let (k, w) = adiabatic_hllc_plus_flux_gv::<3>(
             dir,
             Recon::Ppm,
             symbi_discretize::coords::Balance::Plain,
-            false,
             symbi_discretize::coords::Coords::Cartesian,
             &[0, 1, 2],
         );
-        emit_gv(&out, &format!("adiabatic_face_flux_hllc_lm_ppm_3d_{dir}"), 3, k, w);
+        emit_gv(&out, &format!("adiabatic_face_flux_hllc_plus_ppm_3d_{dir}"), 3, k, w);
     }
 
     // the quartic coarse-fine prolong family at the production component count

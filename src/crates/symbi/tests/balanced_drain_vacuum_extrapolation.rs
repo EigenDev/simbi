@@ -114,7 +114,7 @@ fn build() -> Hier {
         .set_initial(atmosphere)
         .build();
     let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
-        .with_solver(Solver::HllcLm)
+        .with_solver(Solver::HllcPlus)
         .expect("solver/regime mismatch")
         .reconstruction(Recon::Ppm)
         .well_balanced_reconstruction(true);

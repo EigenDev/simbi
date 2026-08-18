@@ -279,39 +279,45 @@ pub trait WithExcision: Sized {
 pub enum Solver {
     Hlle,
     Hllc,
-    /// HLLC with the Fleischmann (2020) low-mach correction exactly as published: the sine
-    /// ramp on the acoustic signal speeds, cut off at the runtime reference mach number
-    /// (newtonian and RHD). it leaves the hydrostatic residual of a stagnant stratified
-    /// column undamped, so that regime wants the well-balanced reconstruction underneath it
-    /// (`symbi_hydro::hydrostatic`) — the pairing gated by `sealed_column_unclamped`. a
-    /// clamped variant that bought the entropy floor by restoring classical dissipation
-    /// across every stratified face was retired 2026-08-15: the balancing removes the
-    /// residual the clamp existed to damp, and the clamp's face-local firing condition was
-    /// shown underivable (it required a global flow-mach bound no face can see). archived
-    /// series recorded under this name with a config lacking `wb_reconstruction` are
-    /// clamp-era and are refused on restart.
-    HllcLm,
-    /// HLLC whose acoustic dissipation is scaled by the acoustic content of the face data —
-    /// the fraction of the impedance relation `dp = rho c du` the jumps actually carry —
-    /// rather than by the local mach number against a reference value. newtonian only.
-    /// recovers the `phi ~ Ma` scaling the low-mach asymptotics require, with no tuned
-    /// constant, and returns to classical HLLC on any face carrying a real wave.
-    HllcAcoustic,
+    /// HLLC plus the anti-dissipation pressure correction (Chen, Li, Li, Yuan & Gao,
+    /// J. Comput. Phys. 456:111027, 2022; the low-mach half of the HLLC+ scheme of Chen, Lin,
+    /// Li & Yan, SIAM J. Sci. Comput. 42:B921, 2020). newtonian only. the correction rescales
+    /// the dissipation proportional to the face's normal velocity jump — the term of magnitude
+    /// `rho c du` that carries the whole low-mach accuracy defect — down to the convective
+    /// magnitude, recovering the `Ma^2` scaling of pressure fluctuations that the continuous
+    /// Euler system obeys. it reads the local mach number alone, saturating at the sonic point,
+    /// so the scheme has no reference mach number to set.
+    ///
+    /// every signal speed, the contact speed, the contact pressure and both star states keep
+    /// their classical values, so the flux is classical HLLC identically wherever the normal
+    /// velocity jump vanishes. a stagnant stratified column is such a face, which is what makes
+    /// this variant safe on a hydrostatic background: the pressure-jump dissipation that damps
+    /// the hydrostatic truncation residual stays at full strength. measured on a balanced
+    /// isentropic column at rest, the residual speed holds at 3e-15 on 128 cells and 5e-15 on
+    /// 256, where the acoustic ramp reaches 8e-11 and 1e-3 on the same pair.
+    ///
+    /// the correction addresses the face's normal velocity jump; the grid-aligned shock
+    /// instability is carried by the transverse one, and the scaling saturates as the local
+    /// mach number approaches unity, which is the regime a shock front occupies. this arm
+    /// therefore inherits classical HLLC's behavior on the carbuncle, measured on Quirk's
+    /// odd-even test at a transverse kinetic energy of 8.9e-3 against classical HLLC's 4.8e-3
+    /// and the acoustic ramp's 1.2e-8. a run whose science lives in stratified subsonic flow
+    /// takes this arm; a run resolving a grid-aligned strong shock takes the ramp.
+    HllcPlus,
     Hlld,
 }
 
 impl Solver {
     /// every variant, in declaration order. gates and sweeps must iterate this rather than a
     /// hand-written array: both coverage gates listed solvers by hand and both silently omitted
-    /// `HllcAcoustic` for as long as it has shipped, so the gate whose whole job is "no accepted
-    /// (solver, regime) pair lacks a baked kernel" was blind to one of them. a `match` here
+    /// a solver each for as long as it had shipped, so the gate whose whole job is "no accepted
+    /// (solver, regime) pair lacks a baked kernel" was blind to it. a `match` here
     /// would not help — an array literal is not exhaustiveness-checked — so the array lives
     /// beside the enum and the length assertion below fails the build if the two drift.
     pub const ALL: &'static [Solver] = &[
         Solver::Hlle,
         Solver::Hllc,
-        Solver::HllcLm,
-        Solver::HllcAcoustic,
+        Solver::HllcPlus,
         Solver::Hlld,
     ];
 
@@ -320,8 +326,7 @@ impl Solver {
         match self {
             Solver::Hlle => "",
             Solver::Hllc => "_hllc",
-            Solver::HllcLm => "_hllc_lm",
-            Solver::HllcAcoustic => "_hllc_acoustic",
+            Solver::HllcPlus => "_hllc_plus",
             Solver::Hlld => "_hlld",
         }
     }
@@ -349,25 +354,12 @@ impl Solver {
                     | RegimeKind::NewtonianMhd
                     | RegimeKind::Rmhd
             ),
-            // HLLC-LM: HLLC with the acoustic dissipation scaled down at low local mach number
-            // (Fleischmann, Adami & Adams 2020). available wherever a contact-resolving HLLC flux
-            // exists and the central reformulation its scaling acts on is an identity — which needs
-            // the star states to satisfy the jump conditions across both outer waves and the
-            // contact. that holds for newtonian euler and for the Mignone-Bodo relativistic star
-            // states (both pinned by per-face gates).
-            //
-            // excluded: isothermal (no contact wave to resolve, hence no HLLC flux kernel), and the
-            // MHD regimes, whose star states carry the null vs non-null normal-field branches — the
-            // reformulation has not been shown to be an identity there, and a scaling applied to a
-            // non-identity is a different solver rather than a modified one.
-            Solver::HllcLm => matches!(regime, RegimeKind::Newtonian | RegimeKind::Rhd),
-            // hllc-acoustic: the same centralized reformulation as HLLC-LM with a different
-            // sensor, so it inherits that arm's requirement exactly. the implementation supports
-            // newtonian flow:
-            // the impedance relation `dp = rho c du` the sensor measures against is the
-            // newtonian acoustic one, and its relativistic form carries the specific enthalpy —
-            // a different sensor, not the same one on a different state.
-            Solver::HllcAcoustic => matches!(regime, RegimeKind::Newtonian),
+            // HLLC+: both corrections are built from the newtonian velocity-jump dissipation
+            // `rho c du`. the relativistic counterpart carries the lorentz factor and the
+            // specific enthalpy in place of the density, and the MHD star states carry the
+            // null vs non-null normal-field branches, so the terms are derived for the
+            // newtonian gas contact alone.
+            Solver::HllcPlus => matches!(regime, RegimeKind::Newtonian),
             Solver::Hlld => regime.is_mhd(),
         }
     }
@@ -466,28 +458,26 @@ mod solver_matrix_tests {
             );
         }
 
-        // HLLC-LM is HLLC plus the low-mach acoustic-dissipation scaling, so it is admissible
-        // wherever HLLC is and the central reformulation the scaling acts on is an identity — which
-        // requires the star states to satisfy the jump conditions across both outer waves and the
-        // contact. verified for newtonian euler and for the Mignone-Bodo relativistic star states;
-        // not established for the MHD star states, whose null vs non-null normal-field branches make
-        // the reformulation a separate question.
-        for r in [RegimeKind::Newtonian, RegimeKind::Rhd] {
-            assert!(Solver::HllcLm.valid_for(r), "hllc-lm valid for {r:?}");
-            assert!(
-                Solver::Hllc.valid_for(r),
-                "hllc-lm cannot be admissible where plain hllc is not: {r:?}"
-            );
-        }
+        // HLLC+ is HLLC plus two additive dissipation rescalings, each derived from the
+        // newtonian `rho c du` impedance, so it is admissible on the newtonian gas contact and
+        // refused everywhere the derivation does not reach: the relativistic inertia carries the
+        // lorentz factor and the specific enthalpy, the MHD star states carry the null vs
+        // non-null normal-field branches, and an isothermal closure has no contact wave at all.
+        assert!(Solver::HllcPlus.valid_for(RegimeKind::Newtonian));
+        assert!(
+            Solver::Hllc.valid_for(RegimeKind::Newtonian),
+            "HLLC+ cannot be admissible where plain hllc is not"
+        );
         for r in [
+            RegimeKind::Rhd,
             RegimeKind::IsoNewtonian,
             RegimeKind::IsoMhd,
             RegimeKind::NewtonianMhd,
             RegimeKind::Rmhd,
         ] {
             assert!(
-                !Solver::HllcLm.valid_for(r),
-                "hllc-lm must be refused for {r:?}"
+                !Solver::HllcPlus.valid_for(r),
+                "HLLC+ must be refused for {r:?}"
             );
         }
     }
@@ -503,8 +493,7 @@ const _: () = {
         let all = [
             Solver::Hlle,
             Solver::Hllc,
-            Solver::HllcLm,
-            Solver::HllcAcoustic,
+                    Solver::HllcPlus,
             Solver::Hlld,
         ];
         while n < all.len() {

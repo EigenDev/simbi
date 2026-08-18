@@ -567,6 +567,13 @@ fn diagnose_entropy_residue_accumulates_or_rings() {
 /// violation that appears only on the low-mach arm localizes the production
 /// K < K_0 deficit to the flux, not the source or the wall ledger (both hold
 /// the floor on this exact setup under HLLE). production knobs: cfl 0.3, rk2.
+///
+/// the balanced low-mach arm's residual on this column is seeded by the last bits of the
+/// equilibrium profile and grows in proportion to that seed: 4982 steps leave a deficit of
+/// 1.9e-11 and max|v| of 1.1e-9, a factor 50 inside the 1e-9 floor the sweep asserts. a
+/// change to the arithmetic that evaluates the isentrope moves both numbers by its own
+/// factor in the last digits and leaves the bound untouched; a change that breaks the
+/// balance moves them by orders.
 #[test]
 fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
     use symbi::prelude::Solver;
@@ -579,7 +586,7 @@ fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
     for (name, solver, balanced) in [
         ("hlle", Solver::Hlle, false),
         ("hllc", Solver::Hllc, false),
-        ("hllc_lm", Solver::HllcLm, true),
+        ("hllc_lm", Solver::HllcPlus, true),
     ] {
         let mut sim = hydrostatic_atmosphere_full(gm, N, 0.3, Timestepping::Rk2, true);
         let kernels = Kset::new(GAMMA, 0.3, &sim.geom.allocated)
@@ -621,22 +628,26 @@ fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
 /// damps the hydrostatic residual and the ringing undershoots the adiabat. the
 /// balanced reconstruction removes that residual at its source — each cell's
 /// departure from the isentrope through it is what gets limited, so the balanced
-/// column presents no face jump and there is nothing to ring. (a compressibility
-/// clamp once restored classical dissipation here instead; retired 2026-08-15.)
+/// column presents no face jump and there is nothing to ring.
 #[test]
-fn the_low_mach_arm_holds_the_floor_with_the_ramp_engaged() {
+fn the_low_mach_arm_holds_the_floor_with_the_correction_active() {
     use symbi::prelude::Solver;
+    /// the residual mach number below which the correction has removed at least nine tenths
+    /// of the classical velocity-jump dissipation: the rescaling factor is the local mach
+    /// number itself, so this is a statement about how much of the damping is gone.
+    const CORRECTION_ACTIVE_BELOW: f64 = 0.1;
+
     let gm = 100.0;
     let mut sim = hydrostatic_atmosphere_full(gm, N, 0.3, Timestepping::Rk2, true);
     let kernels = Kset::new(GAMMA, 0.3, &sim.geom.allocated)
-        .with_solver(Solver::HllcLm)
+        .with_solver(Solver::HllcPlus)
         .expect("solver/regime mismatch")
         .well_balanced_reconstruction(true);
     evolve(&mut sim, &kernels, 2.0).expect("evolve failed");
 
-    // the precondition: the column's residual flow sits under the mach limit, so the
-    // ramp reduces the acoustic dissipation everywhere and the floor below is a
-    // statement about the clamped scheme, not about the ramp never activating.
+    // the precondition: the column's residual flow sits deep in the regime where the
+    // correction acts, so the floor below is a statement about a scheme running with most of
+    // its velocity-jump dissipation removed rather than about a correction that never engaged.
     let rho = sim.fields.prim.rho.view();
     let pre = sim.fields.prim.pre_field().expect("adiabatic pre").view();
     let vel = sim.fields.prim.vel[0].view();
@@ -646,15 +657,15 @@ fn the_low_mach_arm_holds_the_floor_with_the_ramp_engaged() {
         max_mach = max_mach.max(vel.at(c).abs() / cs);
     }
     assert!(
-        max_mach < symbi_hydro::dissipation::MACH_LIMIT,
-        "the column's residual flow reached mach {max_mach:.3}; the ramp is not engaged \
-         and the floor law is vacuous"
+        max_mach < CORRECTION_ACTIVE_BELOW,
+        "the column's residual flow reached mach {max_mach:.3}; the correction is barely \
+         engaged and the floor law is vacuous"
     );
 
     let worst = worst_entropy_ratio_away_from_walls(&sim, WALL_SKIP);
     assert!(
         worst > 1.0 - 1.0e-9,
-        "the clamped low-mach arm destroyed entropy on the sealed column: min K/K0 = \
+        "the low-mach arm destroyed entropy on the sealed column: min K/K0 = \
          {worst:.12} with max residual mach {max_mach:.4}"
     );
 }

@@ -92,7 +92,7 @@ macro_rules! sealed_graded_gate {
                     .set_initial(|x: [f64; 1]| hydrostatic(&phi, x[0], $x_outer))
                     .build();
                 let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
-                    .with_solver(Solver::HllcLm)
+                    .with_solver(Solver::HllcPlus)
                     .expect("solver/regime mismatch")
                     .well_balanced_reconstruction(balanced);
                 Hierarchy::single(sim, kernels).with_bodies(

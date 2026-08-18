@@ -96,7 +96,7 @@ fn build() -> Hier {
         .set_initial(atmosphere)
         .build();
     let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
-        .with_solver(Solver::HllcLm)
+        .with_solver(Solver::HllcPlus)
         .expect("solver/regime mismatch")
         // the production pairing: the ramp leaves a plain reconstruction's hydrostatic
         // truncation residual undamped, and the balanced reconstruction removes that

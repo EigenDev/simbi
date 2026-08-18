@@ -99,7 +99,7 @@ macro_rules! sealed_radial_gate {
                     .set_initial(hydrostatic)
                     .build();
                 let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
-                    .with_solver(Solver::HllcLm)
+                    .with_solver(Solver::HllcPlus)
                     .expect("solver/regime mismatch")
                     .well_balanced_reconstruction(balanced);
                 Hierarchy::single(sim, kernels).with_bodies(

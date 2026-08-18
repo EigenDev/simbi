@@ -81,7 +81,7 @@ fn kinetic_energy_after(solver: Solver, t_end: f64) -> f64 {
 #[test]
 fn the_low_mach_scheme_stays_less_dissipative_than_classical_hllc() {
     let t_end = 8.0;
-    let e_lm = kinetic_energy_after(Solver::HllcLm, t_end);
+    let e_lm = kinetic_energy_after(Solver::HllcPlus, t_end);
     let e_std = kinetic_energy_after(Solver::Hllc, t_end);
     let e0 = 0.25 * MACH * MACH; // mean of 1/2 rho v^2 over the taylor-green cell
     eprintln!(

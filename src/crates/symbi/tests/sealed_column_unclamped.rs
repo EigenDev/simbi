@@ -105,7 +105,7 @@ fn build_n(balanced: bool, n: usize) -> Hier {
         .set_initial(hydrostatic)
         .build();
     let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
-        .with_solver(Solver::HllcLm)
+        .with_solver(Solver::HllcPlus)
         .expect("solver/regime mismatch")
         .well_balanced_reconstruction(balanced);
     Hierarchy::single(sim, kernels).with_bodies(symbi_ib::BodyCollection::new().add(
@@ -197,16 +197,18 @@ fn the_published_ramp_holds_the_floor_on_a_balanced_reconstruction() {
 
 /// a measurement instrument. it prints the wall-clock cost of the balanced reconstruction
 /// relative to plain on the identical column; the number is for the record and no threshold
-/// is asserted on it. the balanced arm pays a
-/// powf per face side (the isentrope ratio); how that prices out against the full step
-/// (riemann solve, source, ghost fill) is settled by the clock, since an op count prices
-/// powf wrong. run with `cargo test --release -- --ignored wb_cost` and read the printed
-/// ratio; the production number comes from a release build, debug timings weighting powf
-/// differently.
-/// measured (2026-08-15, cpu, release, 3 runs each): flux-dominated at n = 65536 the
-/// ratio is 1.34-1.43; at the gate's n = 128 it is indistinguishable from 1 (0.97-1.10,
-/// per-step overhead dominates). the whole-step production cost sits below the
-/// flux-stage bound in proportion to the flux stage's share of the step.
+/// is asserted on it. the balanced arm pays one isentrope exponentiation per stencil offset
+/// per face side; how that prices out against the full step (riemann solve, source, ghost
+/// fill) is settled by the clock, since an op count prices a transcendental wrong. run with
+/// `cargo test --release -- --ignored wb_cost` and read the printed ratio; the production
+/// number comes from a release build, debug timings weighting transcendentals differently.
+/// at the gate's n = 128 the ratio is indistinguishable from 1 (0.97-1.10, per-step overhead
+/// dominates, measured 2026-08-15). flux-dominated at n = 65536 it is 1.55-1.72 on an idle
+/// arm64 cpu (3 runs, release, 2026-08-17). a sampling profile of that arm attributes about
+/// a quarter of the face-flux kernel to the isentrope exponentiation and another sixth to the
+/// transcendentals in the face-position coordinate map, so the elementary-function calls are
+/// the kernel's largest single term on this hardware. the whole-step production cost sits
+/// below the flux-stage bound in proportion to the flux stage's share of the step.
 #[test]
 #[ignore]
 fn wb_cost_probe() {

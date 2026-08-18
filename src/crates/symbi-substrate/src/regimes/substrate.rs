@@ -320,7 +320,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
             recon: symbi_discretize::Recon::Plm,
             eos: symbi_discretize::EosArm::IdealGamma,
             flatten: (0.0, 0.0),
-            mach_limit: symbi_hydro::dissipation::MACH_LIMIT,
             balance: symbi_discretize::coords::Balance::Plain,
             rusanov: false,
         }

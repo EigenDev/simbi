@@ -2695,10 +2695,6 @@ pub struct FluxSpec {
     // full <= onset — is the pure parabola; only the ppm kernels declare the
     // scalars, so the values are inert on every other reconstruction.
     pub flatten: (f64, f64),
-    // the reference mach number the published low-mach ramp saturates at, bound to the
-    // clamp-free kernel's `mach_limit` scalar. only that arm declares it, so this value is
-    // inert on every other solver.
-    pub mach_limit: f64,
     // whether the face reconstruction limits the state or its departure from local hydrostatic
     // equilibrium. an axis of the reconstruction, orthogonal to the solver, so every pairing is
     // dispatchable -- including the balanced HLLE the first-order redo needs.
@@ -2713,7 +2709,6 @@ impl FluxSpec {
     /// against taub-mathews states would splice a different physics into the
     /// troubled faces, and a plain-reconstruction fallback under a balanced
     /// evolution would deposit the hydrostatic residual it was invoked to avoid.
-    /// `mach_limit` is inert on hlle and rides along for the uniform ABI.
     pub fn first_order(self) -> Self {
         Self {
             theta: 0.0,
@@ -2742,7 +2737,6 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         recon,
         eos,
         flatten,
-        mach_limit,
         balance,
         rusanov,
     } = spec;
@@ -2798,46 +2792,11 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // scheme. rusanov is GR-only (a curved-spacetime kernel); the flat first-order redo is HLLE at
     // theta = 0 through the normal solver suffix.
 
-    // the acoustic-dissipation floor inside an immersed penalization mask. the low-mach ramp
-    // reduces dissipation on the reading that a vanishing face-normal mach number means smooth
-    // subsonic flow; inside a mask the velocity is held at the wall's by the penalization, so
-    // that reading is empty and the classical dissipation belongs there. a slot penalizing no
-    // surface carries a zero mask radius, leaving the floor inert wherever no wall is imposed.
-    //
-    // the floor is paired with the balanced reconstruction, and the pairing is what the
-    // measurements support. restored dissipation acting on a stratified structure the
-    // reconstruction leaves unbalanced generates entropy of its own: on a sealed wall in a
-    // stratified atmosphere the floored plain arm reaches K/K_0 = 19.9 against 7.6 for the
-    // ramp alone, while the floored balanced arm holds 1.036 against 1.148. the balanced
-    // reconstruction removes the hydrostatic face jump that the extra dissipation would
-    // otherwise act on, so the two belong together exactly as the balanced reconstruction and
-    // its equilibrium-pressure source do. the mask-aware family is baked for the newtonian
-    // low-mach arm, which is where the ramp lives.
-    //
-    // the key is the declared reconstruction balance, a property of the scheme, and the
-    // balanced reconstruction carries a per-cell weight that fades its own profile out where
-    // the local isentrope reaches vacuum inside the reconstruction footprint. that weight
-    // leaves this selection untouched, so the floor holds across the faded cells too. it
-    // belongs there: the faded cells are the ones in transonic free fall through a drain,
-    // whose isentrope has terminated, and the entropy the 19.9 measurement charges to the
-    // floored plain arm is the amplification of a hydrostatic-equilibrium truncation residual
-    // — a residual an equilibrium has to exist to produce.
-    let mask_aware = solver == Solver::HllcLm
-        && prefix == "adiabatic"
-        && sim.immersed.is_some()
-        && balance == symbi_discretize::coords::Balance::Hydrostatic;
-    let mask_sfx = symbi_discretize::kernel_slug::ib_mask_suffix(mask_aware);
-
     // a well-balanced reconstruction evaluates the body potential at cartesian positions, so it
     // is the one flux baked per chart; the chart segment therefore rides with the balance axis
     // and is empty for a plain reconstruction. keying it on the balance rather than on the solver
     // is what lets the first-order redo be balanced: that redo runs HLLE.
     let wb_chart = match balance {
-        symbi_discretize::coords::Balance::Plain if mask_aware => {
-            // the mask indicator is evaluated at the face's cartesian position, so a floored
-            // flux is baked per chart exactly as a balanced one is.
-            symbi_discretize::kernel_slug::coord_suffix(sim.geom.coords)
-        }
         symbi_discretize::coords::Balance::Plain => "",
         symbi_discretize::coords::Balance::Hydrostatic => {
             // the balanced reconstruction's local profile is the gamma-law isentrope
@@ -2869,7 +2828,6 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         solver: solver_sfx,
         recon: recon_sfx,
         balance: balance.suffix(),
-        mask: mask_sfx,
         chart: wb_chart,
         eos: eos_sfx,
         geom: geom_sfx,
@@ -2917,9 +2875,6 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
             }
             // the clamp-free HLLC-LM kernel declares this scalar, so the arm is
             // reached on that solver.
-            ScalarBind::Spec(spec) if &**spec == "mach_limit" => {
-                return Sc::from_f64(mach_limit);
-            }
             other => panic!("dispatch_flux: unexpected spec scalar {other:?}"),
         };
         match *sref {

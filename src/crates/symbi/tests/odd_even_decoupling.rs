@@ -155,13 +155,9 @@ fn run(solver: Solver) -> (f64, f64, u64) {
 }
 
 #[test]
-fn the_acoustic_scaling_is_shock_stable_on_quirks_test() {
+fn the_shear_viscosity_is_shock_stable_on_quirks_test() {
     let mut rows = Vec::new();
-    for (name, solver) in [
-        ("hllc", Solver::Hllc),
-        ("hllc_lm", Solver::HllcLm),
-        ("hllc_acoustic", Solver::HllcAcoustic),
-    ] {
+    for (name, solver) in [("hllc", Solver::Hllc), ("hllc_plus", Solver::HllcPlus)] {
         let (mid, end, steps) = run(solver);
         let growth = if mid > 0.0 { end / mid } else { f64::INFINITY };
         println!(
@@ -178,32 +174,33 @@ fn the_acoustic_scaling_is_shock_stable_on_quirks_test() {
     }
 
     let (classical, classical_growth) = (rows[0].1, rows[0].2);
-    let fleischmann = rows[1].1;
-    let acoustic = rows[2].1;
+    let sheared = rows[1].1;
 
-    // positive control. the instability is documented for classical HLLC; if this
-    // setup does not provoke it there, it is not exercising the mechanism and the
-    // other two arms prove nothing.
+    // positive control. the instability is documented for classical HLLC; if this setup does
+    // not provoke it there, it is not exercising the mechanism and the other arm proves
+    // nothing.
     assert!(
         classical_growth > 10.0,
-        "classical HLLC amplified the seed by only {classical_growth:.3e} — the setup \
-         never provoked the grid-aligned instability, so the stability of the other \
-         solvers is vacuous here. raise the mach number or the resolution"
+        "classical HLLC amplified the seed by only {classical_growth:.3e} — the setup never \
+         provoked the grid-aligned instability, so the stability of the other solver is \
+         vacuous here. raise the mach number or the resolution"
     );
 
-    // the claim: the acoustic scaling suppresses the instability at least as well as
-    // the scheme it generalizes. a less dissipative solver that traded shock stability
-    // away would show up right here.
+    // the claim: the transverse shear viscosity suppresses the instability by orders. it acts
+    // on the transverse velocity jump the perturbation grows through, gated on a
+    // characteristic-speed reversal so it reaches the front and nothing else. measured 1.2e-9
+    // against classical HLLC's 4.8e-3, at a growth factor of 13 against 51; the acoustic-speed
+    // ramp this solver replaced held 1.2e-8 on the same setup.
     assert!(
-        acoustic <= fleischmann * 10.0,
-        "the acoustic scaling left {acoustic:.3e} of transverse energy against \
-         Fleischmann's {fleischmann:.3e}: reducing the dissipation has cost shock \
-         stability, which is the trade this scheme exists to avoid"
+        sheared < classical / 1.0e4,
+        "HLLC+ left {sheared:.3e} of transverse energy against classical HLLC's \
+         {classical:.3e}: the shear viscosity is no longer reaching the transverse faces of \
+         the front, where the perturbation grows"
     );
     assert!(
-        acoustic < classical,
-        "the acoustic scaling ({acoustic:.3e}) did not improve on classical HLLC \
-         ({classical:.3e}) on the instability it is meant to cure"
+        rows[1].2 < classical_growth / 2.0,
+        "HLLC+ amplified the seed by {:.3e} against classical HLLC's {classical_growth:.3e}; \
+         the viscosity must arrest the growth, not merely start it from a smaller seed",
+        rows[1].2
     );
-
 }

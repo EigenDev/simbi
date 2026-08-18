@@ -170,10 +170,13 @@ class Limiter(str, ExtendedEnum):
 class Solver(str, ExtendedEnum):
     HLLE = "hlle"
     HLLC = "hllc"
-    HLLC_LM = "hllc_lm"  # fleischmann (2020) low-mach / low-dissipation HLLC (newtonian)
-    # acoustic dissipation scaled by the fraction of the impedance relation
-    # dp = rho c du the face data carries, rather than by a reference mach number
-    HLLC_ACOUSTIC = "hllc_acoustic"
+    # chen et al. (2020) HLLC+: classical HLLC plus two additive terms that rescale the
+    # dissipation on the face's normal velocity jump (down, restoring the Ma^2 scaling of
+    # pressure fluctuations at low mach number) and on its transverse one (up across a
+    # shock, damping the grid-aligned shock instability). every signal speed and star state
+    # stays classical, and both terms key on the local flow alone, so there is no reference
+    # mach number to set. newtonian only
+    HLLC_PLUS = "hllc_plus"
     HLLD = "hlld"
 
 
@@ -373,13 +376,9 @@ class Metadata:
     eos: str = ""
 
     # whether reconstruction ran on departures from the local hydrostatic isentrope.
-    # None means the attribute is absent from the file, which for `solver = hllc_lm`
-    # identifies the retired clamped scheme (the attribute and the published-ramp
-    # meaning of the name entered the format together): a different fact from False.
+    # None means the attribute is absent from the file, which is a different fact from
+    # False: the run predates the attribute and its reconstruction is unrecorded.
     wb_reconstruction: bool | None = None
-    # the mach threshold of the low-mach acoustic-speed ramp; None on files
-    # predating the attribute.
-    mach_limit: float | None = None
 
     # the stationary target the run is well-balanced against, as the serialized expression
     # wire. it is not a field, so nothing else in the file records it, and a run resumed

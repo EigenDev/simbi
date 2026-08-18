@@ -466,10 +466,10 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                     // itself, with no chart segment at all, which is how twelve curvilinear
                     // kernels were baked under a name the dispatch could never ask for.
                     // baked for the newtonian arms that carry it: HLLE (the first-order redo)
-                    // and the clamp-free low-mach arm.
+                    // and HLLC+.
                     let balances: &[symbi_discretize::coords::Balance] = if regime
                         == RegimeKind::Newtonian
-                        && matches!(solver, Solver::Hlle | Solver::HllcLm)
+                        && matches!(solver, Solver::Hlle | Solver::HllcPlus)
                     {
                         &[
                             symbi_discretize::coords::Balance::Plain,
@@ -478,17 +478,6 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                     } else {
                         &[symbi_discretize::coords::Balance::Plain]
                     };
-                    // the immersed-mask axis: the low-mach ramp's acoustic dissipation is
-                    // floored inside a penalization mask, and the dispatch selects that twin
-                    // off the presence of an immersed side-car alone. any run carrying a body
-                    // reaches it, so the family is baked over the full recon x balance x chart
-                    // product the floor-free arm covers.
-                    let masks: &[bool] =
-                        if regime == RegimeKind::Newtonian && *solver == Solver::HllcLm {
-                            &[false, true]
-                        } else {
-                            &[false]
-                        };
                     for &recon in recons {
                         for &eos in eoses {
                             for &balance in balances {
@@ -499,7 +488,8 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                                 {
                                     continue;
                                 }
-                                for &mask in masks {
+                            {
+                                let mask = false;
                                     // the chart segment rides with whichever property makes the
                                     // flux read a position: a balanced reconstruction evaluates
                                     // the body potential, a mask-aware solver the body geometry.
@@ -556,19 +546,26 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
     // the premise: the enumeration must actually reach the interesting pairs. a `valid_for` that
     // rejected everything, or a name protocol that drifted, would leave `missing` empty and this
     // gate silently vacuous.
-    println!("coverage matrix: {checked} combinations");
+    // the floor is derived from the matrix rather than recorded from a run, so retiring or
+    // adding a solver moves it automatically and only a genuine collapse of an axis trips it.
+    // every accepted (solver, regime) pair is swept over the same six (dim, dir) combinations
+    // and at least one arm of each remaining axis, so the enumeration cannot fall below that
+    // product without an axis having gone empty.
+    // one (dim, dir) pair per dimension the regime's dispatch is built for, summed over the
+    // accepted solvers: the smallest sweep an intact matrix can produce.
+    let floor: usize = regimes
+        .iter()
+        .map(|(regime, _, dims)| {
+            let dirs: usize = dims.iter().map(|&d| d as usize).sum();
+            dirs * solvers.iter().filter(|s| s.valid_for(*regime)).count()
+        })
+        .sum();
+    println!("coverage matrix: {checked} combinations, floor {floor}");
     assert!(
-        // measured, not guessed: the sweep over
-        // (regime x solver x dim x dir x recon x eos x balance x mask x chart) is exactly 240
-        // combinations today. it was 180 until 2026-08-15, when the clamped hllc_lm variant
-        // was retired and its solver row left the matrix (the surviving hllc_lm carries the
-        // balance x chart arms the retired name introduced), leaving 168; the immersed-mask
-        // axis then added 72 -- the newtonian hllc_lm arm over 6 (dim, dir) x 2 recon x 3
-        // charts x 2 balances, each of which now also names a mask-aware twin. the floor sits
-        // at the measurement so any silent collapse of any axis fails here; move it only with
-        // a deliberate matrix change, recorded like this one.
-        checked >= 240,
-        "only {checked} (solver, regime, dim, dir) combination(s) were checked; the matrix or the          name protocol has drifted and this gate is not covering anything"
+        checked >= floor,
+        "only {checked} combination(s) were checked against a floor of {floor} from the \
+         accepted (solver, regime) pairs and the dimensions each is built for; an axis of the \
+         sweep has gone empty or the name protocol has drifted, and this gate covers nothing"
     );
     assert!(
         missing.is_empty(),

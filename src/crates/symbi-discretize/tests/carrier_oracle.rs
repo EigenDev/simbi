@@ -1094,7 +1094,6 @@ fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
         &Tensor::unit(0),
         0.0,
         ShockwaveLimiter::Standard,
-        symbi_hydro::dissipation::MACH_LIMIT,
         None,
     );
     let out = run_uniform_euler_flux::<2>(adiabatic_hllc_flux_gv::<2>(0, Recon::Plm), &prim, GAMMA, 0);

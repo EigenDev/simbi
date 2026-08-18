@@ -4,10 +4,11 @@
 // measurement instrument, not a gate: the device wall-clock cost of the balanced
 // (hydrostatic-departure) reconstruction relative to plain, on the same sealed
 // plummer column the cpu probe times (sealed_column_unclamped::wb_cost_probe).
-// the balanced arm pays a powf per face side (the isentrope ratio); how that
-// prices out on device is a measurement, never an op count -- the cpu numbers
-// (1.34-1.43x flux-stage at n = 65536, noise at n = 128) do not transfer, since
-// the gpu amortizes transcendental latency differently and the kernel may be
+// the balanced arm pays one isentrope exponentiation per stencil offset per face
+// side; how that prices out on device is a measurement, never an op count -- the
+// cpu numbers (1.55-1.72x flux-stage at n = 65536, noise at n = 128) do not
+// transfer, since the gpu amortizes transcendental latency differently, carries
+// its own register-pressure penalty for them, and the kernel may be
 // bandwidth-bound. one correctness assertion rides along: the balanced arm must
 // hold the column stagnant on device exactly as it does on host.
 //
@@ -77,7 +78,7 @@ fn build(balanced: bool, n: usize) -> Hier {
         .set_initial(hydrostatic)
         .build();
     let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
-        .with_solver(Solver::HllcLm)
+        .with_solver(Solver::HllcPlus)
         .expect("solver/regime mismatch")
         .well_balanced_reconstruction(balanced);
     Hierarchy::single(sim, kernels).with_bodies(symbi_ib::BodyCollection::new().add(

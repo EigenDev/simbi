@@ -536,11 +536,6 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                     if "wb_reconstruction" in attrs
                     else None
                 ),
-                mach_limit=(
-                    float(attrs["mach_limit"])
-                    if "mach_limit" in attrs
-                    else None
-                ),
                 spacetime=decode_str(attrs.get("spacetime", "minkowski")),
                 schwarzschild_mass=float(attrs.get("schwarzschild_mass", 0.0)),
                 equilibrium_target=decode_str(attrs.get("equilibrium_target", "")),

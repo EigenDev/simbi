@@ -22,7 +22,7 @@ mod hllc;
 mod hlld;
 mod hlle;
 
-pub use hllc::{hllc, hllc_newtonian, hllc_rhd, hllc_rmhd};
+pub use hllc::{HllcPlusSensors, hllc, hllc_newtonian, hllc_rhd, hllc_rmhd};
 pub use hlld::{
     HlldStates, hlld_isothermal, hlld_isothermal_coeffs, hlld_newtonian, hlld_newtonian_coeffs,
     hlld_rmhd, hlld_rmhd_gr_ortho, hlld_rmhd_states, hlld_rmhd_states_gr_ortho,

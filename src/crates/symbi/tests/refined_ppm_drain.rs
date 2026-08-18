@@ -80,7 +80,7 @@ fn build(recon: Recon, ng: usize, prolong: ProlongOrder, stirred: bool) -> Hier 
     let dx = 1.0 / N as f64;
     let kset = move |s: &Sim| {
         Kset::new(GAMMA, CFL, &s.geom.allocated)
-            .with_solver(Solver::HllcLm)
+            .with_solver(Solver::HllcPlus)
             .expect("solver/regime mismatch")
             .reconstruction(recon)
     };

@@ -134,9 +134,6 @@ pub struct AdiabaticSubstrateKernelSet<
     pub recon: symbi_discretize::Recon,
     /// ppm flatten dials (onset, full); (0, 0) = pure parabola. see `ppm_flatten`.
     pub flatten: (f64, f64),
-    /// the reference mach number the published low-mach ramp saturates at. read only by
-    /// `Solver::HllcLm`; inert on every other solver. see `mach_limit`.
-    pub mach_limit: f64,
     /// whether the face reconstruction limits the state or its departure from local hydrostatic
     /// equilibrium. see `balance`.
     pub balance: symbi_discretize::coords::Balance,
@@ -173,7 +170,6 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             gradient_bcs: Vec::new(),
             solver: Solver::Hlle,
             flatten: (0.0, 0.0),
-            mach_limit: symbi_hydro::dissipation::MACH_LIMIT,
             balance: symbi_discretize::coords::Balance::Plain,
             recon: symbi_discretize::Recon::Plm,
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
@@ -349,17 +345,6 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self
     }
 
-    pub fn mach_limit(mut self, mach_limit: f64) -> Self {
-        assert!(
-            (0.0..=1.0).contains(&mach_limit),
-            "mach_limit must lie in [0, 1]; got {mach_limit}. above 1 the ramp would scale \
-             acoustic dissipation on supersonic faces, where the star states it multiplies \
-             are no longer the subsonic intermediate flux"
-        );
-        self.mach_limit = mach_limit;
-        self
-    }
-
     pub fn ppm_flatten(mut self, onset: f64, full: f64) -> Self {
         self.flatten = (onset, full);
         self
@@ -388,7 +373,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
             recon: self.recon,
             eos: symbi_discretize::EosArm::IdealGamma,
             flatten: self.flatten,
-            mach_limit: self.mach_limit,
             balance: self.balance,
             rusanov: false,
         }

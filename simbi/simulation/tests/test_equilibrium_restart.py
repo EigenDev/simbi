@@ -100,36 +100,44 @@ def test_adding_a_target_on_restart_is_refused() -> None:
         )
 
 
-def test_a_clamp_era_hllc_lm_checkpoint_is_refused() -> None:
-    # `solver = hllc_lm` changed meaning when the clamped variant was retired: the name
-    # now denotes the published fleischmann ramp. the wb_reconstruction attribute entered
-    # the checkpoint format together with the new scheme, so an hllc_lm file without it
-    # was written by the old numerics and must not be continued under the new ones.
-    with pytest.raises(ConfigError, match="RETIRED clamped hllc_lm"):
-        _assert_same_equilibrium_target(
-            FakeProblem(None),
-            metadata_with(None, solver="hllc_lm", wb_reconstruction=None),
-        )
+def test_a_retired_acoustic_ramp_checkpoint_is_refused() -> None:
+    # the acoustic-speed ramp family scaled the signal speeds, which damps the pressure jump
+    # along with the velocity jump; hllc_plus rescales the velocity jumps instead. continuing
+    # a series across that change would swap the numerics mid-run under an unchanged config,
+    # and nothing downstream of the checkpoint could tell.
+    for retired in ("hllc_lm", "hllc-lm", "hllc_acoustic"):
+        with pytest.raises(ConfigError, match="retired"):
+            _assert_same_equilibrium_target(
+                FakeProblem(None),
+                metadata_with(None, solver=retired, wb_reconstruction=None),
+            )
 
 
-def test_a_post_collapse_hllc_lm_checkpoint_resumes() -> None:
-    # the attribute's presence is the discriminator, not its value: a new-scheme run
-    # with balance off records False and must resume, else every fresh hllc_lm series
-    # would refuse its own first restart.
-    for wb in (True, False):
+def test_the_refusal_reads_the_solver_not_the_balance_attribute() -> None:
+    # the solver name alone decides. a retired-scheme file that happens to record a
+    # reconstruction balance is still a retired-scheme file, and a surviving solver resumes
+    # whether or not the attribute is present -- refusing on its absence would strand every
+    # archived series written before the attribute entered the format.
+    for wb in (True, False, None):
+        with pytest.raises(ConfigError, match="retired"):
+            _assert_same_equilibrium_target(
+                FakeProblem(None),
+                metadata_with(None, solver="hllc_lm", wb_reconstruction=wb),
+            )
         _assert_same_equilibrium_target(
             FakeProblem(None),
-            metadata_with(None, solver="hllc_lm", wb_reconstruction=wb),
+            metadata_with(None, solver="hllc_plus", wb_reconstruction=wb),
         )
 
 
 def test_other_solvers_never_trip_the_scheme_change_guard() -> None:
-    # only hllc_lm changed meaning; an old checkpoint from any other solver predates the
-    # attribute too, and refusing it would strand every archived series.
-    _assert_same_equilibrium_target(
-        FakeProblem(None),
-        metadata_with(None, solver="hllc", wb_reconstruction=None),
-    )
+    # only the retired family changed; an old checkpoint from any surviving solver must
+    # resume untouched.
+    for solver in ("hllc", "hlle", "hlld"):
+        _assert_same_equilibrium_target(
+            FakeProblem(None),
+            metadata_with(None, solver=solver, wb_reconstruction=None),
+        )
 
 
 def test_the_comparison_is_structural_not_textual() -> None:

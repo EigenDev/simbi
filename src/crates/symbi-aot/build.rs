@@ -1277,70 +1277,6 @@ fn gen_adiabatic_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) 
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-fn gen_adiabatic_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
-    let g = Geom::identity(Coords::Cartesian, ndim);
-    let name = symbi_discretize::kernel_slug::FaceFluxName {
-        prefix: "adiabatic",
-        solver: "_hllc_lm",
-        recon: recon.suffix(),
-        ndim: ndim as usize,
-        dir: dir as usize,
-        ..Default::default()
-    }
-    .build();
-    let b = symbi_discretize::coords::Balance::Plain;
-    let (k, writes) = gv_dim!(
-        ndim,
-        symbi_discretize::gv::adiabatic_hllc_lm_flux_gv,
-        dir,
-        recon,
-        b,
-        false,
-        Coords::Cartesian,
-        &g.axes,
-    );
-    emit_gv(out_dir, &name, ndim, &k, &writes);
-}
-
-// the mask-aware low-mach arms: the published ramp with its acoustic dissipation floored to the
-// classical amount inside an immersed body's penalization mask, where the velocity is set by the
-// wall rather than by the flow. the indicator is evaluated at the face's cartesian position, so
-// these are baked per chart alongside the well-balanced arms, and per reconstruction balance,
-// since a masked body sitting in a stratified atmosphere carries both properties at once.
-fn gen_adiabatic_hllc_lm_ibmask_face_flux(
-    out_dir: &str,
-    ndim: u8,
-    dir: u8,
-    recon: Recon,
-    coords: Coords,
-    balance: symbi_discretize::coords::Balance,
-) {
-    let g = Geom::identity(coords, ndim);
-    let name = symbi_discretize::kernel_slug::FaceFluxName {
-        prefix: "adiabatic",
-        solver: "_hllc_lm",
-        recon: recon.suffix(),
-        balance: balance.suffix(),
-        mask: symbi_discretize::kernel_slug::ib_mask_suffix(true),
-        chart: coords_suffix(coords),
-        ndim: ndim as usize,
-        dir: dir as usize,
-        ..Default::default()
-    }
-    .build();
-    let (k, writes) = gv_dim!(
-        ndim,
-        symbi_discretize::gv::adiabatic_hllc_lm_flux_gv,
-        dir,
-        recon,
-        balance,
-        true,
-        coords,
-        &g.axes,
-    );
-    emit_gv(out_dir, &name, ndim, &k, &writes);
-}
-
 // the well-balanced adiabatic arms. balance is its own axis: it rides the name beside the
 // reconstruction, not folded into the solver, so any solver may be balanced. only these arms
 // evaluate the body potential at cartesian positions, so only these are baked per chart --
@@ -1366,21 +1302,20 @@ fn gen_adiabatic_wb_face_flux(
     }
     .build();
     let (k, writes) = match solver_sfx {
-        "_hllc_lm" => gv_dim!(
-            ndim,
-            symbi_discretize::gv::adiabatic_hllc_lm_flux_gv,
-            dir,
-            recon,
-            symbi_discretize::coords::Balance::Hydrostatic,
-            false,
-            coords,
-            &g.axes,
-        ),
         "_hllc" => gv_dim!(
             ndim,
             symbi_discretize::gv::adiabatic_hllc_wb_flux_gv,
             dir,
             recon,
+            coords,
+            &g.axes,
+        ),
+        "_hllc_plus" => gv_dim!(
+            ndim,
+            symbi_discretize::gv::adiabatic_hllc_plus_flux_gv,
+            dir,
+            recon,
+            symbi_discretize::coords::Balance::Hydrostatic,
             coords,
             &g.axes,
         ),
@@ -1398,16 +1333,16 @@ fn gen_adiabatic_wb_face_flux(
 }
 
 
-fn gen_adiabatic_hllc_acoustic_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
-    let name = format!(
-        "adiabatic_face_flux_hllc_acoustic{}_{ndim}d_{dir}",
-        recon.suffix()
-    );
+fn gen_adiabatic_hllc_plus_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
+    let name = format!("adiabatic_face_flux_hllc_plus{}_{ndim}d_{dir}", recon.suffix());
     let (k, writes) = gv_dim!(
         ndim,
-        symbi_discretize::gv::adiabatic_hllc_acoustic_flux_gv,
+        symbi_discretize::gv::adiabatic_hllc_plus_flux_gv,
         dir,
         recon,
+        symbi_discretize::coords::Balance::Plain,
+        Coords::Cartesian,
+        &[0usize, 1, 2][..ndim as usize],
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -1415,12 +1350,6 @@ fn gen_adiabatic_hllc_acoustic_face_flux(out_dir: &str, ndim: u8, dir: u8, recon
 fn gen_rhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
     let name = format!("rhd_face_flux_hllc{}_{ndim}d_{dir}", eos.suffix());
     let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::rhd_hllc_flux_gv, dir, eos);
-    emit_gv(out_dir, &name, ndim, &k, &writes);
-}
-
-fn gen_rhd_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
-    let name = format!("rhd_face_flux_hllc_lm{}_{ndim}d_{dir}", eos.suffix());
-    let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::rhd_hllc_lm_flux_gv, dir, eos);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -3369,19 +3298,9 @@ fn main() {
             // only (curvilinear HLLC is unbaked).
             gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Plm);
             gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Ppm);
-            gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir, Recon::Plm);
-            gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir, Recon::Ppm);
             for cc in [Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {
                 for rc in [Recon::Plm, Recon::Ppm] {
-                    gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, rc, cc, "_hllc_lm");
-                    // the mask-aware twins of the whole low-mach family, over both
-                    // reconstruction balances: an immersed body is dispatchable on either.
-                    for bl in [
-                        symbi_discretize::coords::Balance::Plain,
-                        symbi_discretize::coords::Balance::Hydrostatic,
-                    ] {
-                        gen_adiabatic_hllc_lm_ibmask_face_flux(&out_dir, ndim, dir, rc, cc, bl);
-                    }
+                    gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, rc, cc, "_hllc_plus");
                 }
                 // the first-order FOFC redo runs HLLE at theta = 0 on the plm kernel.
                 gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, Recon::Plm, cc, "");
@@ -3390,12 +3309,10 @@ fn main() {
                 gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, Recon::Plm, cc, "_hllc");
                 gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, Recon::Ppm, cc, "_hllc");
             }
-            gen_adiabatic_hllc_acoustic_face_flux(&out_dir, ndim, dir, Recon::Plm);
-            gen_adiabatic_hllc_acoustic_face_flux(&out_dir, ndim, dir, Recon::Ppm);
+            gen_adiabatic_hllc_plus_face_flux(&out_dir, ndim, dir, Recon::Plm);
+            gen_adiabatic_hllc_plus_face_flux(&out_dir, ndim, dir, Recon::Ppm);
             gen_rhd_hllc_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);
             gen_rhd_hllc_face_flux(&out_dir, ndim, dir, EosArm::TaubMathews);
-            gen_rhd_hllc_lm_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);
-            gen_rhd_hllc_lm_face_flux(&out_dir, ndim, dir, EosArm::TaubMathews);
         }
     }
     // RMHD HLLC + HLLD — 1D + 3D variants matching the HLLE RMHD layout

@@ -1355,18 +1355,6 @@ pub fn rmhd_flux_gr_gv(
 // host-time dispatch knobs the substrate has yet to expose.
 // =============================================================================
 
-/// adiabatic (ideal-gas newtonian euler) HLLC face flux. mirrors
-/// `euler_hlle_flux_gv(&Newtonian, ...)` at `riemann::hllc`. carrier-generic over
-/// Gv; the iso fan carries two waves, so the iso system stays on HLLE.
-/// which reference mach number the low-mach ramp saturates at: the published constant, or the
-/// runtime kernel scalar the clamp-free arm exposes. a tag, since a `Gv` built at the call
-/// site would be built outside the trace this function opens.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MachRef {
-    Published,
-    Runtime,
-}
-
 /// the single adiabatic HLLC-family face flux, over the arms that actually differ.
 ///
 /// four emitters used to spell this body verbatim, differing in a single `ShockwaveLimiter`
@@ -1382,21 +1370,11 @@ fn adiabatic_hllc_at_arm<const D: usize>(
     dir: u8,
     recon: Recon,
     smoother: ShockwaveLimiter,
-    mach_ref: MachRef,
     balance: Balance,
-    mask_aware: bool,
     coords: Coords,
     axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    // built inside the trace. a `Gv` handed in as an argument is constructed at the call site,
-    // before `begin_trace()` runs here, and every `Gv` op outside an active trace panics. the
-    // reference mach number is therefore named by a plain tag and materialized below, which is
-    // also why a tag suffices: the choice is one bit of static information.
-    let mach_limit = match mach_ref {
-        MachRef::Published => Gv::from_f64(symbi_hydro::dissipation::MACH_LIMIT),
-        MachRef::Runtime => Gv::scalar("mach_limit"),
-    };
     let eos = IdealGas {
         gamma: Gv::scalar("gamma"),
     };
@@ -1410,31 +1388,10 @@ fn adiabatic_hllc_at_arm<const D: usize>(
     };
     let (left, right, nhat, vface) =
         euler_reconstruct::<D>(D as u8, dir, axes[dir as usize], recon, balanced);
-    // the acoustic-dissipation floor inside an immersed penalization mask. the low-mach ramp
-    // reads the face-normal mach number as a statement about the flow: a vanishing value means
-    // smooth subsonic motion, whose acoustic dissipation may fall with it. inside a mask the
-    // velocity is held at the wall's by the penalization, so the mach number reports the
-    // boundary condition rather than the flow, and the friction heat the wall deposits enters a
-    // region whose acoustic dissipation the ramp has switched off — the interior then supports
-    // a density contrast at fixed pressure and its sound speed runs away. the indicator restores
-    // the classical HLLC dissipation across exactly the masked faces and leaves every other face
-    // on the published ramp.
-    let phi_floor = mask_aware.then(|| {
-        let spacing = vec![Spacing::Uniform; D];
-        crate::gv_penalize::body_mask_indicator_gv(
-            symbi_ib::MAX_SOURCE_BODIES,
-            D,
-            &crate::gv_immersed::body_cart_axes(coords, D, axes),
-            crate::gv_immersed::stencil_position_cartesian_gv(
-                coords,
-                D,
-                dir as usize,
-                axes,
-                &spacing,
-                0,
-            ),
-        )
-    });
+    // the neighborhood pressure ratio the transverse shear viscosity is weighted by. only the
+    // HLLC+ arm carries that viscosity, so only it pays the off-axis reads the sensor needs.
+    let shear = matches!(smoother, ShockwaveLimiter::HllcPlus)
+        .then(|| hllc_plus_sensors(D as u8, dir, eos.gamma));
     let flux = hllc(
         &eos,
         &left,
@@ -1442,57 +1399,155 @@ fn adiabatic_hllc_at_arm<const D: usize>(
         &nhat,
         vface,
         smoother,
-        mach_limit,
-        phi_floor,
+        shear,
     );
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
 
-pub fn adiabatic_hllc_flux_gv<const D: usize>(
-    dir: u8,
-    recon: Recon,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Standard, MachRef::Published, Balance::Plain, false, Coords::Cartesian, &[0, 1, 2][..D])
+/// the smallest pressure ratio `min(p_a/p_b, p_b/p_a)` across any interface of either cell
+/// adjoining the face at `dir`, the shock indicator the transverse shear viscosity is weighted
+/// by (Chen, Lin, Li & Yan, SIAM J. Sci. Comput. 42:B921, 2020, eq. 24).
+///
+/// the neighborhood is what makes the indicator work. the faces the grid-aligned shock
+/// instability grows through are the ones transverse to the front, and along a planar front the
+/// flow is smooth — so such a face's own two states carry a pressure ratio near one and report
+/// no shock at all. the structure that identifies it sits on the shock-normal interfaces of the
+/// same two cells, one cell away in a transverse direction, which is why the sensor reads the
+/// cross and not the face.
+///
+/// the face at index `c` along `dir` lies between the cells at offsets -1 and 0, matching the
+/// reconstruction stencil, so the interfaces of those two cells are the three consecutive pairs
+/// along the sweep together with, for every transverse axis, the pair each cell forms with its
+/// two neighbors along that axis. the sweep pairs sit inside the reconstruction's own footprint;
+/// the transverse pairs carry the read one cell off-axis, which is the whole of this kernel's
+/// halo growth over a plain flux.
+/// the stencil quantities both HLLC+ corrections read: how much pressure structure the
+/// neighborhood carries, and whether a shock is present in it.
+///
+/// the pressure ratio alone measures how steep the pressure is across a cell, and a gas bound
+/// to a point mass is steep for a reason that has nothing to do with a shock: hydrostatic
+/// balance against a `1/r^2` field puts a large ratio across every cell of the atmosphere. read
+/// on its own the ratio therefore turns the viscosity on throughout a stratified envelope, and
+/// on a smoothly draining accretor — supersonic, unshocked, and strongly sheared near the sink
+/// — a full-strength transverse viscosity drives cells out of the admissible set.
+///
+/// a shock is what the weight is for, and what distinguishes one is that a characteristic speed
+/// reverses sign across it: gas ahead of the front outruns a wave that gas behind it cannot,
+/// so `u - a` or `u + a` changes sign between neighbors. a hydrostatic gradient reverses
+/// nothing, however steep. gating the ratio on that reversal leaves the viscosity at full
+/// strength across a front and absent from an atmosphere.
+fn hllc_plus_sensors(ndim: u8, dir: u8, gamma: Gv) -> symbi_hydro::riemann::HllcPlusSensors<Gv> {
+    let shocked = neighborhood_shock_indicator(ndim, dir, gamma);
+    symbi_hydro::riemann::HllcPlusSensors {
+        pressure_ratio: neighborhood_pressure_ratio(ndim, dir),
+        shocked: Gv::select(shocked, Gv::from_f64(1.0), Gv::from_f64(0.0)),
+    }
 }
 
+/// whether either cell adjoining the face at `dir` sits at a characteristic-speed reversal
+/// against one of its neighbors — the shock indicator of Chen, Lin, Li & Yan (SIAM J. Sci.
+/// Comput. 42:B921, 2020, eq. 16), evaluated on the acoustic characteristics `u -+ a` along
+/// each axis in turn. returns the boolean mask, true where a shock is present.
+fn neighborhood_shock_indicator(ndim: u8, dir: u8, gamma: Gv) -> symbi_ir::gv::GvMask {
+    let at = |ax: usize, sweep: i32, off: i32| {
+        let mut offsets = vec![0i32; ndim as usize];
+        offsets[dir as usize] = sweep;
+        offsets[ax] += off;
+        let rho = Gv::field_offset("prim_rho", FieldRef::PrimRho, ndim, &offsets);
+        let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, ndim, &offsets);
+        let vel = Gv::field_offset("prim_v0", FieldRef::PrimVel(ax as u8), ndim, &offsets);
+        let cs = (gamma * pre / rho).sqrt();
+        (vel - cs, vel + cs)
+    };
+    // seeded false: a face touches a front only if some pair below reverses.
+    let mut shocked = Gv::from_f64(0.0).cmp_gt(Gv::from_f64(1.0));
+    // the two cells adjoining this face, each against its neighbors along every axis. a
+    // reversal on any of those pairs marks the face as touching a front.
+    for ax in 0..ndim as usize {
+        for sweep in [-1i32, 0] {
+            let (minus_c, plus_c) = at(ax, sweep, 0);
+            for off in [-1i32, 1] {
+                let (minus_n, plus_n) = at(ax, sweep, off);
+                let zero = Gv::from_f64(0.0);
+                let slow = minus_c.cmp_gt(zero) & minus_n.cmp_lt(zero);
+                let fast = plus_c.cmp_gt(zero) & plus_n.cmp_lt(zero);
+                shocked = shocked | slow | fast;
+            }
+        }
+    }
+    shocked
+}
 
-/// adiabatic HLLC-LM face flux as published (Fleischmann, Adami & Adams 2020): the
-/// anti-diffusive star-state flux is scaled by `sin(min(1, Ma/0.1) pi/2)` on the face-normal
-/// mach number, recovering classical HLLC above Ma = 0.1 and falling with the flow speed below
-/// it. cures the grid-aligned shock instability together with the HLLC low-mach
-/// over-dissipation, and the pressure jump enters unclamped. newtonian only (the relativistic
-/// HLLC bodies use the classical star state). the `phi` helpers are fully branchless
-/// (`S::select`), so the fleischmann arm traces at S = Gv just like the Standard arm.
-/// adiabatic HLLC-LM face flux, the published scheme (Fleischmann, Adami & Adams 2020): the
-/// sine ramp on the acoustic signal speeds, reference mach number a runtime scalar, composable
-/// with the well-balanced reconstruction through the `balance` axis. the clamped variant this
-/// name once carried is retired -- the balancing removes the hydrostatic residual the clamp
-/// damped, and `sealed_column_unclamped` gates the pairing.
+fn neighborhood_pressure_ratio(ndim: u8, dir: u8) -> Gv {
+    let at = |sweep: i32, transverse: Option<(u8, i32)>| {
+        let mut offsets = vec![0i32; ndim as usize];
+        offsets[dir as usize] = sweep;
+        if let Some((ax, off)) = transverse {
+            offsets[ax as usize] = off;
+        }
+        Gv::field_offset("prim_pre", FieldRef::PrimPre, ndim, &offsets)
+    };
+    // the symmetric ratio of an interface, in (0, 1] for positive pressures: one at a smooth
+    // interface, falling toward zero as the jump across it strengthens, and blind to which side
+    // carries the compressed gas.
+    let ratio = |a: Gv, b: Gv| (a / b).min(b / a);
+
+    // the three interfaces along the sweep, spanning cells -2 through +1.
+    let mut weakest = ratio(at(-2, None), at(-1, None))
+        .min(ratio(at(-1, None), at(0, None)))
+        .min(ratio(at(0, None), at(1, None)));
+    // and, for each transverse axis, the two interfaces each adjoining cell forms across it.
+    for ax in 0..ndim {
+        if ax == dir {
+            continue;
+        }
+        for sweep in [-1i32, 0] {
+            let center = at(sweep, None);
+            weakest = weakest
+                .min(ratio(center, at(sweep, Some((ax, -1)))))
+                .min(ratio(center, at(sweep, Some((ax, 1)))));
+        }
+    }
+    weakest
+}
+
+/// adiabatic HLLC+ face flux (Chen, Lin, Li & Yan, SIAM J. Sci. Comput. 42:B921, 2020):
+/// classical HLLC plus two additive corrections. the first rescales the dissipation on the
+/// face's normal velocity jump down to the convective magnitude, restoring the `Ma^2` scaling
+/// of pressure fluctuations at low mach number; the second adds a dissipation on the transverse
+/// velocity jump across a shock, which is the jump the grid-aligned shock instability grows
+/// through. both saturate at the sonic point, so the arm carries no reference mach number and
+/// traces no runtime scalar for one.
 ///
-/// `mask_aware` floors the ramp to the classical dissipation inside an immersed body's
-/// penalization mask, an axis independent of `balance`: the mask is a property of where the
-/// velocity comes from and the balance a property of the reconstruction, so a masked body in a
-/// stratified atmosphere carries both.
-pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
+/// composable with the well-balanced reconstruction through the `balance` axis. each correction
+/// carries a velocity jump as a factor, so a face in hydrostatic balance — where the two sides
+/// share a velocity — sees the classical flux with its full pressure-jump dissipation, and the
+/// balance and the corrections act on disjoint structure.
+pub fn adiabatic_hllc_plus_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
     balance: Balance,
-    mask_aware: bool,
     coords: Coords,
     axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     adiabatic_hllc_at_arm::<D>(
         dir,
         recon,
-        ShockwaveLimiter::Fleischmann,
-        MachRef::Runtime,
+        ShockwaveLimiter::HllcPlus,
         balance,
-        mask_aware,
         coords,
         axes,
     )
 }
+
+pub fn adiabatic_hllc_flux_gv<const D: usize>(
+    dir: u8,
+    recon: Recon,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Standard, Balance::Plain, Coords::Cartesian, &[0, 1, 2][..D])
+}
+
 
 /// the adiabatic HLLE face flux with a well-balanced reconstruction: the first-order arm the
 /// FOFC redo runs. HLLE at theta = 0 is piecewise-constant, and a piecewise-constant
@@ -1513,9 +1568,7 @@ pub fn adiabatic_hllc_wb_flux_gv<const D: usize>(
         dir,
         recon,
         ShockwaveLimiter::Standard,
-        MachRef::Published,
         Balance::Hydrostatic,
-        false,
         coords,
         axes,
     )
@@ -1531,23 +1584,10 @@ pub fn adiabatic_hlle_wb_flux_gv<const D: usize>(
         dir,
         recon,
         ShockwaveLimiter::Standard,
-        MachRef::Published,
         Balance::Hydrostatic,
-        false,
         coords,
         axes,
     )
-}
-
-/// adiabatic HLLC face flux with the acoustic-consistency dissipation scaling: identical to
-/// `adiabatic_hllc_lm_flux_gv` up to the sensor. the acoustic signal speeds are scaled by how
-/// much of the face data obeys the impedance relation `dp = rho c du`, where the LM arm scales
-/// by the local mach number against a reference. the traced body is the same.
-pub fn adiabatic_hllc_acoustic_flux_gv<const D: usize>(
-    dir: u8,
-    recon: Recon,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Acoustic, MachRef::Published, Balance::Plain, false, Coords::Cartesian, &[0, 1, 2][..D])
 }
 
 fn rhd_hllc_at_arm<const D: usize>(
@@ -1574,16 +1614,6 @@ pub fn rhd_hllc_flux_gv<const D: usize>(
     eos_arm: EosArm,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::Standard, eos_arm)
-}
-
-/// RHD HLLC-LM face flux — the mignone-bodo star states with the acoustic dissipation scaled down
-/// at low local mach number. differs from `rhd_hllc_flux_gv` only in the limiter it selects; the
-/// scaling is a property of the riemann solver, so the traced kernel is the same body.
-pub fn rhd_hllc_lm_flux_gv<const D: usize>(
-    dir: u8,
-    eos_arm: EosArm,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::Fleischmann, eos_arm)
 }
 
 /// RMHD HLLC face flux — mignone-bodo (2006), null vs non-null normal B-field

@@ -131,8 +131,8 @@ fn run(solver: Solver, declared: bool) -> f64 {
 fn declaring_the_target_frees_the_solver_from_damping_the_residual() {
     let solvers = [
         ("hllc", Solver::Hllc),
-        ("hllc_lm", Solver::HllcLm),
-        ("hllc_acoustic", Solver::HllcAcoustic),
+        ("hllc_lm", Solver::HllcPlus),
+        ("hllc_acoustic", Solver::HllcPlus),
     ];
     println!("\nsealed stratified column, {STEPS} steps — min K/K_0 (deficit = 1 - K/K_0)");
     let mut undeclared = Vec::new();

@@ -104,7 +104,6 @@ struct Config {
     ppm_flatten_full: f64,
     timestepping: Timestepping,
     plm_theta: f64,
-    mach_limit: f64,
     wb_reconstruction: bool,
     dlogt: f64,
     viscosity: f64,
@@ -742,15 +741,24 @@ fn solver_from_str(s: &str) -> PyResult<Solver> {
     match s {
         "hlle" => Ok(Solver::Hlle),
         "hllc" => Ok(Solver::Hllc),
-        // fleischmann (2020) low-mach / low-dissipation HLLC (newtonian only).
-        "hllc_lm" | "hllc-lm" => Ok(Solver::HllcLm),
-        "hllc_lm_plain" | "hllc-lm-plain" => Err(PyValueError::new_err(
-            "solver 'hllc_lm_plain' was collapsed into 'hllc_lm' on 2026-08-15: hllc_lm now \
-             IS the published Fleischmann scheme (the clamped variant is retired). use \
-             solver=hllc_lm, with wb_reconstruction=True for stratified problems.",
-        )),
-        // acoustic-consistency scaling: no reference mach number (newtonian only).
-        "hllc_acoustic" | "hllc-acoustic" => Ok(Solver::HllcAcoustic),
+        // the retired low-mach family. both scaled the acoustic signal speeds, which
+        // multiplies the pressure jump along with the velocity jump, so both left the
+        // hydrostatic truncation residual of a stagnant stratified column undamped and both
+        // amplified it under refinement. hllc_plus rescales the two velocity jumps instead,
+        // leaving every signal speed classical, and covers the low-mach accuracy and the
+        // grid-aligned shock instability at once.
+        "hllc_lm" | "hllc-lm" | "hllc_lm_plain" | "hllc-lm-plain" | "hllc_acoustic"
+        | "hllc-acoustic" => Err(PyValueError::new_err(format!(
+            "solver '{s}' was retired on 2026-08-17. it scaled the acoustic signal speeds, \
+             which damps the pressure jump along with the velocity jump, so a stagnant \
+             stratified column lost the dissipation holding its hydrostatic residual down \
+             and the residual grew with resolution. use solver='hllc_plus', which rescales \
+             the velocity jumps alone and needs no reference mach number; pair it with \
+             wb_reconstruction=True for stratified problems."
+        ))),
+        // anti-dissipation pressure correction: rescales the velocity-jump dissipation alone,
+        // needing no reference mach number (newtonian only).
+        "hllc_plus" | "hllc-apc" => Ok(Solver::HllcPlus),
         "hlld" => Ok(Solver::Hlld),
         other => Err(PyValueError::new_err(format!("unknown solver '{other}'"))),
     }
@@ -1053,7 +1061,6 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         ppm_flatten_full: get_f64_or(dict, "ppm_flatten_full", 0.0),
         timestepping: timestepping_from_str(&enum_str(dict, "timestepping")?)?,
         plm_theta: get_f64_or(dict, "plm_theta", 1.5),
-        mach_limit: get_f64_or(dict, "mach_limit", symbi_hydro::dissipation::MACH_LIMIT),
         wb_reconstruction: dict
             .get_item("wb_reconstruction")
             .ok()
@@ -4192,7 +4199,6 @@ macro_rules! build_and_run_hydro {
             .theta(theta)
             .reconstruction(build_recon(cfg))
             .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                .mach_limit(cfg.mach_limit)
                 .well_balanced_reconstruction(cfg.wb_reconstruction)
             .with_eos(build_eos(cfg))
             .with_solver(cfg.solver)
@@ -4254,7 +4260,6 @@ macro_rules! build_and_run_hydro {
                 .theta(theta)
                 .reconstruction(build_recon(cfg))
                 .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                .mach_limit(cfg.mach_limit)
                 .well_balanced_reconstruction(cfg.wb_reconstruction)
                 .with_eos(build_eos(cfg))
                 .with_solver(solver)
@@ -7257,7 +7262,6 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         // guard refuses to continue it under the new numerics. every new file must record
         // it, else the guard would refuse its own series on first resume.
         .with("wb_reconstruction", cfg.wb_reconstruction)
-        .with("mach_limit", cfg.mach_limit)
         .with("initial_time", cfg.start_time)
         .with("time_unit", cfg.time_unit)
         .with("time_unit_label", cfg.time_unit_label.as_str())

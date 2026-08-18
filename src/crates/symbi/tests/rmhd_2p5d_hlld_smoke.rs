@@ -72,7 +72,7 @@ fn rmhd_2p5d_solver_matrix() {
         "hllc is valid for rmhd"
     );
     // the substrate kernel set is not Debug, so match the Result directly.
-    match sim.substrate().with_solver(Solver::HllcLm) {
+    match sim.substrate().with_solver(Solver::HllcPlus) {
         Err(ConfigError::SolverRegimeMismatch { .. }) => {}
         Err(e) => panic!("expected SolverRegimeMismatch, got {e:?}"),
         Ok(_) => panic!("hllc-lm must be rejected for rmhd"),

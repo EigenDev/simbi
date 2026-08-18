@@ -181,7 +181,7 @@ fn hllc_lm_low_mach_vortex_bit_identity() {
         .build();
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, &sim.geom.allocated)
-            .with_solver(Solver::HllcLm)
+            .with_solver(Solver::HllcPlus)
             .expect("solver/regime mismatch")
             .theta(THETA);
     evolve(&mut sim, &sub, 0.5).expect("evolve failed");

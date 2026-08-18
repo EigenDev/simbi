@@ -127,9 +127,6 @@ def metadata_to_config_dict(
     recorded_wb = getattr(metadata, "wb_reconstruction", None)
     if recorded_wb is not None:
         config["wb_reconstruction"] = recorded_wb
-    recorded_mach_limit = getattr(metadata, "mach_limit", None)
-    if recorded_mach_limit is not None:
-        config["mach_limit"] = recorded_mach_limit
 
     if metadata.subcycling_mode and metadata.subcycling_mode != "none":
         from simbi.types import SubCycleMode
@@ -176,24 +173,20 @@ def _assert_same_equilibrium_target(
 
     from .problem import ConfigError
 
-    # scheme-change guard. `solver = hllc_lm` changed meaning on 2026-08-15: the clamped
-    # variant was retired and the name now denotes the published Fleischmann ramp. a series
-    # recorded under the old meaning must not be continued under the new one -- same string,
-    # different numerics, and nothing downstream could ever tell. the discriminator is the
-    # `wb_reconstruction` file attribute, which entered the checkpoint format together with
-    # the new scheme: an hllc_lm file without it is clamp-era by construction.
+    # scheme-change guard. the acoustic-speed ramp family was retired on 2026-08-17: it
+    # scaled the signal speeds, which damps the pressure jump along with the velocity jump,
+    # so a stagnant stratified column lost the dissipation holding its hydrostatic residual
+    # down and the residual grew with resolution. a series recorded under one of those names
+    # cannot be continued under hllc_plus, which rescales the velocity jumps instead --
+    # different numerics, and nothing downstream could tell.
     recorded_solver = str(getattr(metadata, "solver", "") or "")
-    if recorded_solver in ("hllc_lm", "hllc-lm"):
-        if getattr(metadata, "wb_reconstruction", None) is None:
-            from .problem import ConfigError
-
-            raise ConfigError(
-                "this checkpoint was written by the RETIRED clamped hllc_lm scheme (it "
-                "predates the wb_reconstruction attribute). the name now denotes the "
-                "published Fleischmann ramp, so continuing the series would silently change "
-                "the numerics mid-run. start a fresh series, or pin the pre-2026-08-15 "
-                "binary to continue this one."
-            )
+    if recorded_solver.replace("-", "_") in ("hllc_lm", "hllc_acoustic"):
+        raise ConfigError(
+            f"this checkpoint was written by the retired '{recorded_solver}' scheme, which "
+            "scaled the acoustic signal speeds. continuing the series under hllc_plus would "
+            "silently change the numerics mid-run. start a fresh series, or pin the "
+            "pre-2026-08-17 binary to continue this one."
+        )
 
     declared = getattr(problem, "equilibrium_expressions", {}) or {}
     recorded_raw = getattr(metadata, "equilibrium_target", "") or ""
