@@ -153,13 +153,10 @@ class TumblingBody(SimbiProblem):
     @computed_field
     @property
     def bx1_inner_expressions(self) -> ExpressionDict:
-        g = expr.ExprGraph()
-        rho = expr.constant(RHO_INF, g)
-        vx = expr.constant(self.freestream_velocity(), g)
-        vy = expr.constant(0.0, g)
-        vz = expr.constant(0.0, g)
-        pre = expr.constant(PRE_INF, g)
-        return g.compile([rho, vx, vy, vz, pre]).serialize_boundary(dim=3)
+        return expr.boundary(
+            [RHO_INF, self.freestream_velocity(), 0.0, 0.0, PRE_INF],
+            dim=3,
+        )
 
     def initial_primitive_state(self) -> InitialStateType:
         """a uniform 3D wind fills the domain; the body tumbles + drifts through it."""

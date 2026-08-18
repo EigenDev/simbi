@@ -38,10 +38,7 @@ class TabulatedSource3D(SimbiProblem):
 
     @property
     def source_expressions(self) -> list[ExpressionDict]:
-        graph = expr.ExprGraph()
-        x = expr.variable("x1", graph)
-        y = expr.variable("x2", graph)
-        z = expr.variable("x3", graph)
+        x, y, z = expr.coords(3)
         samples = [0.0, 0.5, 1.0]
         heating = expr.tabulated_3d(
             x,
@@ -66,11 +63,7 @@ class TabulatedSource3D(SimbiProblem):
             bounds=expr.TableBounds.ZERO,
         )
         return [
-            graph.compile([heating]).serialize_source(
-                expr.SourceKind.RAW,
-                dim=3,
-                target=expr.ConservedField.ENERGY,
-            )
+            expr.raw([heating], dim=3, target=expr.ConservedField.ENERGY)
         ]
 
     def initial_primitive_state(self) -> InitialStateType:

@@ -35,43 +35,27 @@ class OrderedSources(SimbiProblem):
 
     @property
     def source_expressions(self) -> list[ExpressionDict]:
-        graph = expr.ExprGraph()
-        x = expr.variable("x1", graph)
-        y = expr.variable("x2", graph)
-        region = ((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) < 0.04
-        density = graph.compile(
-            [expr.constant(0.02, graph) * region]
-        ).serialize_source(
-            expr.SourceKind.RAW,
-            dim=2,
-            target=expr.ConservedField.DENSITY,
+        # each slot is its own graph, since a raw source reaches one conserved
+        # slot at a time. the blob is the same disc in every one of them.
+        def blob() -> tuple:
+            x, y = expr.coords(2)
+            return x, y, ((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) < 0.04
+
+        _, _, region = blob()
+        density = expr.raw(
+            [0.02 * region], dim=2, target=expr.ConservedField.DENSITY
         )
 
-        graph = expr.ExprGraph()
-        x = expr.variable("x1", graph)
-        y = expr.variable("x2", graph)
-        region = ((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) < 0.04
-        momentum = graph.compile(
-            [
-                expr.constant(0.01, graph) * region,
-                expr.constant(0.0, graph) * region,
-            ]
-        ).serialize_source(
-            expr.SourceKind.RAW,
+        _, _, region = blob()
+        momentum = expr.raw(
+            [0.01 * region, 0.0 * region],
             dim=2,
             target=expr.ConservedField.MOMENTUM,
         )
 
-        graph = expr.ExprGraph()
-        x = expr.variable("x1", graph)
-        y = expr.variable("x2", graph)
-        region = ((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) < 0.04
-        energy = graph.compile(
-            [expr.constant(0.03, graph) * region]
-        ).serialize_source(
-            expr.SourceKind.RAW,
-            dim=2,
-            target=expr.ConservedField.ENERGY,
+        _, _, region = blob()
+        energy = expr.raw(
+            [0.03 * region], dim=2, target=expr.ConservedField.ENERGY
         )
         return [density, momentum, energy]
 

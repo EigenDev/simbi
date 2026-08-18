@@ -60,6 +60,16 @@ pub enum SourceKind {
 /// scalar-targeted sources, D for momentum-targeted sources).
 pub struct BuiltSource {
     pub graph: Graph,
+    /// every scalar the trace touched, in the order it was first reached.
+    ///
+    /// this is a SUPERSET of what the outputs consume. a builder that evaluates a
+    /// whole conserved vector and publishes one component of it traces the other
+    /// components too, and their scalars stay in this list. the surplus is
+    /// deliberate: a caller supplies values positionally against a `LoweredFn`,
+    /// and `scalarize` lowers every node in the graph rather than only the live
+    /// ones, so the two lists line up entry for entry precisely because neither
+    /// is pruned. pruning either alone desynchronizes them and the arity assert
+    /// in the interpreter fires.
     pub params: Vec<String>,
     /// one output per component of the target field. routed into the
     /// runtime additive-RHS accumulator at the corresponding offset.

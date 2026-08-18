@@ -31,37 +31,15 @@ class RotatingSponge(SimbiProblem):
 
     @property
     def source_expressions(self) -> list[ExpressionDict]:
-        graph = expr.ExprGraph()
-        rotating = graph.compile(
-            [
-                expr.constant(0.25, graph),
-                expr.constant(0.0, graph),
-                expr.constant(0.0, graph),
-            ]
-        ).serialize_source(expr.SourceKind.ROTATING_FRAME, dim=2)
+        rotating = expr.rotating_frame([0.25, 0.0, 0.0], dim=2)
 
-        graph = expr.ExprGraph()
-        x = expr.variable("x1", graph)
-        y = expr.variable("x2", graph)
+        x, y = expr.coords(2)
         radius_sq = x * x + y * y
-        kappa = expr.where(
-            radius_sq > 0.64,
-            expr.constant(2.0, graph),
-            expr.constant(0.0, graph),
-        )
-        sponge = graph.compile(
-            [
-                kappa,
-                expr.constant(1.0, graph),
-                expr.constant(0.0, graph),
-                expr.constant(0.0, graph),
-                expr.constant(1.5, graph),
-            ]
-        ).serialize_source(
-            expr.SourceKind.SPONGE,
-            dim=2,
-            params=[1.0 / (self.adiabatic_index - 1.0)],
-        )
+        kappa = expr.where(radius_sq > 0.64, 2.0, 0.0)
+        # the reference is the ambient state the interior starts in, given as
+        # primitives: [kappa, rho_ref, vel_ref_x, vel_ref_y, pre_ref].
+        sponge = expr.sponge([kappa, 1.0, 0.0, 0.0, 1.0], dim=2)
+
         return [rotating, sponge]
 
     def initial_primitive_state(self) -> InitialStateType:

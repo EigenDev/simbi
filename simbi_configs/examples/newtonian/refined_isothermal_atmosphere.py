@@ -120,15 +120,15 @@ class RefinedIsothermalAtmosphere(SimbiProblem):
         ),
     ]
 
-    def _potential(self, graph: expr.ExprGraph) -> expr.Expr:
+    def _potential(self) -> expr.Expr:
         """phi = -GM/r with r = x + offset: a bare point mass sitting off the left edge."""
-        radius = expr.variable("x1", graph) + expr.constant(self.offset, graph)
-        return -expr.constant(self.gm, graph) / radius
+        (x,) = expr.coords(1)
+        return -self.gm / (x + self.offset)
 
-    def _atmosphere(self, graph: expr.ExprGraph) -> expr.Equilibrium:
+    def _atmosphere(self) -> expr.Equilibrium:
         """rho = exp(-(phi - phi_ref)/cs^2), normalized to rho = 1 at the outer edge."""
         return expr.isothermal_atmosphere(
-            self._potential(graph),
+            self._potential(),
             sound_speed=self.sound_speed,
             dim=1,
             reference_density=1.0,
@@ -141,27 +141,22 @@ class RefinedIsothermalAtmosphere(SimbiProblem):
         """the atmosphere, declared as the state the scheme must hold exactly. two
         components — density and velocity — because an isothermal regime stores no
         pressure."""
-        graph = expr.ExprGraph()
-        return graph.compile(self._atmosphere(graph).primitives).serialize_equilibrium(
-            dim=1
-        )
+        return expr.equilibrium(self._atmosphere().primitives, dim=1)
 
     @computed_field
     @property
     def source_expressions(self) -> list[ExpressionDict]:
         """the gravity the atmosphere is in balance against, as the gradient of the SAME
         potential the equilibrium was derived from."""
-        graph = expr.ExprGraph()
-        compiled = graph.compile(self._atmosphere(graph).acceleration)
-        return [compiled.serialize_source(expr.SourceKind.FORCE, dim=1)]
+        return [expr.force(self._atmosphere().acceleration, dim=1)]
 
     def initial_primitive_state(self) -> InitialStateType:
         """the atmosphere itself, sampled pointwise; `seed_from_equilibrium` replaces it
         with the hierarchy-consistent form of the same state."""
 
         def gas_state() -> GasStateGenerator:
-            graph = expr.ExprGraph()
-            compiled = graph.compile(self._atmosphere(graph).primitives)
+            primitives = self._atmosphere().primitives
+            compiled = primitives[0].graph.compile(primitives)
             (ncells,) = self.resolution
             xmin, xmax = self.bounds[0]
             dx = (xmax - xmin) / ncells

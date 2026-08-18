@@ -1305,6 +1305,14 @@ impl Scalarizer {
 ///
 /// every dim in every tensor type must be Literal. Generic dims trigger a
 /// panic; const-generic loop support is unimplemented.
+///
+/// this lowers EVERY node in the graph, including nodes no output reaches, so the
+/// resulting signature names every param the graph carries. `scalarize_kernel`
+/// takes several outputs and keeps only the nodes they reach, which gives it a
+/// shorter signature over the same graph. the difference is load-bearing rather
+/// than accidental: callers of this function supply values positionally from a
+/// param list gathered at trace time, which is itself unpruned, and the two agree
+/// only while both stay that way.
 pub fn scalarize(graph: &Graph, output: NodeId, name: &str) -> LoweredFn {
     let mut sc = Scalarizer::new();
     let in_degrees = Scalarizer::compute_in_degrees(graph);

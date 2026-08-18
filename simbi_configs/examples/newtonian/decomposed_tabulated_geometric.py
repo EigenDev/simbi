@@ -42,8 +42,7 @@ class DecomposedTabulatedGeometric(SimbiProblem):
 
     @property
     def source_expressions(self) -> list[ExpressionDict]:
-        graph = expr.ExprGraph()
-        x = expr.variable("x1", graph)
+        (x,) = expr.coords(1)
         heating = expr.tabulated_1d(
             x,
             [0.0, 0.4, 0.8, 1.0],
@@ -51,11 +50,7 @@ class DecomposedTabulatedGeometric(SimbiProblem):
             bounds=expr.TableBounds.ZERO,
         )
         return [
-            graph.compile([heating]).serialize_source(
-                expr.SourceKind.RAW,
-                dim=2,
-                target=expr.ConservedField.ENERGY,
-            )
+            expr.raw([heating], dim=2, target=expr.ConservedField.ENERGY)
         ]
 
     def initial_primitive_state(self) -> InitialStateType:

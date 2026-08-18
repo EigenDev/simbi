@@ -8,11 +8,11 @@
 
 import pytest
 
-from simbi.expression.dag_expression import variable
+from simbi.expression.dag_expression import ExprGraph, variable
 
 
 def _op_of(name: str) -> str:
-    expr = variable(name)
+    expr = variable(name, ExprGraph())
     nodes = expr.graph.compile([expr]).serialize_source(
         "raw", dim=1, target="den"
     )["nodes"]

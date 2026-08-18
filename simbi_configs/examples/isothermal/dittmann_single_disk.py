@@ -279,15 +279,8 @@ class DittmannSingleDisk(SimbiProblem):
         """the outer sponge as a rust `sponge` source (or none when disabled)."""
         if not self.use_buffer:
             return []
-        graph = expr.ExprGraph()
-        x1 = expr.variable("x1", graph)
-        x2 = expr.variable("x2", graph)
-        outputs = self.buffer_sponge_terms(x1, x2)
-        return [
-            graph.compile(outputs).serialize_source(
-                expr.SourceKind.SPONGE, dim=2, params=[0.0]
-            )
-        ]
+        outputs = self.buffer_sponge_terms(*expr.coords(2))
+        return [expr.sponge(outputs, dim=2)]
 
     def initial_primitive_state(self) -> InitialStateType:
         """cavity surface density + keplerian rotation with pressure correction."""

@@ -98,7 +98,7 @@ def test_velocity_axis_bounds() -> None:
     import pytest
 
     with pytest.raises(ValueError):
-        expr.velocity(3)
+        expr.velocity(3, expr.ExprGraph())
 
 
 def test_rt_config_emits_force_source() -> None:

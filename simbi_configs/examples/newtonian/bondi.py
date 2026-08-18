@@ -455,16 +455,8 @@ class SphericalBondiTest(SimbiProblem):
         surface, so the sponge is an outer-boundary nicety, not load-bearing."""
         if not self.use_buffer:
             return []
-        graph = expr.ExprGraph()
-        x1 = expr.variable("x1", graph)
-        x2 = expr.variable("x2", graph)
-        x3 = expr.variable("x3", graph)
-        outputs = self.buffer_sponge_terms(x1, x2, x3)
-        return [
-            graph.compile(outputs).serialize_source(
-                expr.SourceKind.SPONGE, dim=3
-            )
-        ]
+        outputs = self.buffer_sponge_terms(*expr.coords(3))
+        return [expr.sponge(outputs, dim=3)]
 
     # =========================================================================
     # analytical solution

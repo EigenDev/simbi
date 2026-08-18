@@ -140,10 +140,4 @@ class RayleighTaylor(SimbiProblem):
         """uniform downward gravity a = (0, -g0) as a `force` source — the rust
         backend lifts it to the newtonian momentum + energy overlays (S_mom=rho*a,
         S_nrg=rho*a.v). emitted in the rust `SourceConfig` wire format."""
-        graph = expr.ExprGraph()
-
-        x_comp = expr.constant(0.0, graph)
-        y_comp = expr.constant(-self.g0, graph)
-
-        compiled = graph.compile([x_comp, y_comp])
-        return [compiled.serialize_source(expr.SourceKind.FORCE, dim=2)]
+        return [expr.force([0.0, -self.g0], dim=2)]

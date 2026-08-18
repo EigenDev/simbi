@@ -215,17 +215,14 @@ class GrBondiCartesian(SimbiProblem):
         a pressure-supported inflow falls slower than that observer: the prescription is
         OUTWARD, +0.019 at the box face, where the coordinate four-velocity is -0.024 and
         the previous reservoir said zero."""
-        g = expr.ExprGraph()
-        x1 = expr.variable("x1", g)
-        x2 = expr.variable("x2", g)
-        x3 = expr.variable("x3", g)
+        x1, x2, x3 = expr.coords(3)
         r = expr.sqrt(x1 * x1 + x2 * x2 + x3 * x3)
         crit = self._critical_point()
         rho, u_r, pre = michel.far_field(r, crit=crit)
         vx, vy, vz = michel.valencia_velocity(
             u_r, x1, x2, x3, r, mass=self.schwarzschild_mass
         )
-        return g.compile([rho, vx, vy, vz, pre]).serialize_boundary(dim=3)
+        return expr.boundary([rho, vx, vy, vz, pre], dim=3)
 
     @computed_field
     @property

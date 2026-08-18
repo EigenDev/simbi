@@ -150,12 +150,10 @@ class WindTunnel(SimbiProblem):
     @property
     def bx1_inner_expressions(self) -> ExpressionDict:
         # drive the left face with the uniform supersonic freestream.
-        g = expr.ExprGraph()
-        rho = expr.constant(RHO_INF, g)
-        vx = expr.constant(self.freestream_velocity(), g)
-        vy = expr.constant(0.0, g)
-        pre = expr.constant(PRE_INF, g)
-        return g.compile([rho, vx, vy, pre]).serialize_boundary(dim=2)
+        return expr.boundary(
+            [RHO_INF, self.freestream_velocity(), 0.0, PRE_INF],
+            dim=2,
+        )
 
     def initial_primitive_state(self) -> InitialStateType:
         """a uniform freestream fills the tunnel; the obstacle carves the shock."""

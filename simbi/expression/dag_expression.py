@@ -443,45 +443,39 @@ class Expr:
 
 
 # factory functions
-def constant(value: float, graph: Optional[ExprGraph] = None) -> Expr:
+def constant(value: float, graph: ExprGraph) -> Expr:
     """Create a constant expression."""
-    g = graph or ExprGraph()
-    return Expr(g, g.add_node("constant", value=float(value)))
+    return Expr(graph, graph.add_node("constant", value=float(value)))
 
 
-def variable(name: str, graph: Optional[ExprGraph] = None) -> Expr:
+def variable(name: str, graph: ExprGraph) -> Expr:
     """Create a variable expression."""
-    g = graph or ExprGraph()
-    return Expr(g, g.add_node("variable", name=name))
+    return Expr(graph, graph.add_node("variable", name=name))
 
 
-def parameter(idx: int, graph: Optional[ExprGraph] = None) -> Expr:
+def parameter(idx: int, graph: ExprGraph) -> Expr:
     """Create a parameter expression."""
-    g = graph or ExprGraph()
-    return Expr(g, g.add_node("parameter", param_idx=idx))
+    return Expr(graph, graph.add_node("parameter", param_idx=idx))
 
 
-def density(graph: Optional[ExprGraph] = None) -> Expr:
+def density(graph: ExprGraph) -> Expr:
     """the per-cell density rho (a fluid-state leaf for state-dependent sources)."""
-    g = graph or ExprGraph()
-    return Expr(g, g.add_node("variable", name="rho"))
+    return Expr(graph, graph.add_node("variable", name="rho"))
 
 
-def velocity(axis: int, graph: Optional[ExprGraph] = None) -> Expr:
+def velocity(axis: int, graph: ExprGraph) -> Expr:
     """the per-cell velocity component `vel[axis]` (0-indexed: 0->vx, 1->vy, 2->vz)."""
     if axis not in (0, 1, 2):
         raise ValueError(f"velocity axis must be 0, 1, or 2, got {axis}")
-    g = graph or ExprGraph()
-    return Expr(g, g.add_node("variable", name=f"vel{axis + 1}"))
+    return Expr(graph, graph.add_node("variable", name=f"vel{axis + 1}"))
 
 
-def pressure(graph: Optional[ExprGraph] = None) -> Expr:
+def pressure(graph: ExprGraph) -> Expr:
     """the per-cell pressure (energy-bearing regimes only; rejected on isothermal)."""
-    g = graph or ExprGraph()
-    return Expr(g, g.add_node("variable", name="pre"))
+    return Expr(graph, graph.add_node("variable", name="pre"))
 
 
-def cell_volume(graph: Optional[ExprGraph] = None) -> Expr:
+def cell_volume(graph: ExprGraph) -> Expr:
     """the cell's lab-frame volume measure dV, the weight for an extensive quantity.
 
     this is the measure the finite-volume update itself uses, so `density() * cell_volume()`
@@ -490,8 +484,7 @@ def cell_volume(graph: Optional[ExprGraph] = None) -> Expr:
     per-unit-volume density and weighting it by the measure would make the deposited
     amount depend on the resolution.
     """
-    g = graph or ExprGraph()
-    return Expr(g, g.add_node("variable", name="dv"))
+    return Expr(graph, graph.add_node("variable", name="dv"))
 
 
 # math functions
@@ -639,15 +632,25 @@ def sgn(expr: Expr) -> Expr:
     return Expr(expr._graph, expr._graph.add_node("sgn", expr._node_id))
 
 
-def if_then_else(condition: Expr, true_case: Expr, false_case: Expr) -> Expr:
-    """If-then-else expression."""
+def if_then_else(
+    condition: Expr,
+    true_case: Union[Expr, float, int],
+    false_case: Union[Expr, float, int],
+) -> Expr:
+    """If-then-else expression.
+
+    either branch may be a plain number, which is lifted into the condition's
+    graph. a branch that is a bare constant is the common case (a damping rate
+    that is a fixed value inside a region and zero outside it)."""
+    true_expr = condition._ensure_expr(true_case)
+    false_expr = condition._ensure_expr(false_case)
     return Expr(
         condition._graph,
         condition._graph.add_node(
             "if_then_else",
             condition._node_id,
-            true_case._node_id,
-            false_case._node_id,
+            true_expr._node_id,
+            false_expr._node_id,
         ),
     )
 

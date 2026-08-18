@@ -133,16 +133,16 @@ class RefinedAtmosphere(SimbiProblem):
         ),
     ]
 
-    def _potential(self, graph: expr.ExprGraph) -> expr.Expr:
+    def _potential(self) -> expr.Expr:
         """phi = -GM/r with r = x + offset: a bare point mass sitting off the left edge."""
-        radius = expr.variable("x1", graph) + expr.constant(self.offset, graph)
-        return -expr.constant(self.gm, graph) / radius
+        (x,) = expr.coords(1)
+        return -self.gm / (x + self.offset)
 
-    def _atmosphere(self, graph: expr.ExprGraph) -> expr.Equilibrium:
+    def _atmosphere(self) -> expr.Equilibrium:
         """the isentropic atmosphere in balance against that potential, normalized to
         rho = 1 at the outer edge."""
         return expr.isentropic_atmosphere(
-            self._potential(graph),
+            self._potential(),
             gamma=self.adiabatic_index,
             k_entropy=self.entropy,
             dim=1,
@@ -154,19 +154,16 @@ class RefinedAtmosphere(SimbiProblem):
     @property
     def equilibrium_expressions(self) -> ExpressionDict:
         """the atmosphere, declared as the state the scheme must hold exactly."""
-        graph = expr.ExprGraph()
-        atmosphere = self._atmosphere(graph)
-        return graph.compile(atmosphere.primitives).serialize_equilibrium(dim=1)
+        atmosphere = self._atmosphere()
+        return expr.equilibrium(atmosphere.primitives, dim=1)
 
     @computed_field
     @property
     def source_expressions(self) -> list[ExpressionDict]:
         """the gravity the atmosphere is in balance against, as the gradient of the SAME
         potential the equilibrium was derived from."""
-        graph = expr.ExprGraph()
-        atmosphere = self._atmosphere(graph)
-        compiled = graph.compile(atmosphere.acceleration)
-        return [compiled.serialize_source(expr.SourceKind.FORCE, dim=1)]
+        atmosphere = self._atmosphere()
+        return [expr.force(atmosphere.acceleration, dim=1)]
 
     def initial_primitive_state(self) -> InitialStateType:
         """the atmosphere itself, sampled pointwise.
@@ -177,8 +174,8 @@ class RefinedAtmosphere(SimbiProblem):
         """
 
         def gas_state() -> GasStateGenerator:
-            graph = expr.ExprGraph()
-            compiled = graph.compile(self._atmosphere(graph).primitives)
+            primitives = self._atmosphere().primitives
+            compiled = primitives[0].graph.compile(primitives)
             (ncells,) = self.resolution
             xmin, xmax = self.bounds[0]
             dx = (xmax - xmin) / ncells
