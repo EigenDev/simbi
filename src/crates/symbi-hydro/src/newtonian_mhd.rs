@@ -50,7 +50,7 @@ pub fn nmhd_recover<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     cons: &MhdCons<S, D>,
 ) -> MhdPrim<S, D> {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let bsq = cons.mag.dot(&cons.mag);
     let hydro_cons = Cons {
         chi: Default::default(),
@@ -86,7 +86,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     #[inline]
     fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
         // hydro conserved (nrg = p/(g-1) + 1/2 rho v^2) plus magnetic energy 1/2 |B|^2.
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         let bsq = prim.mag.dot(&prim.mag);
         let hydro = prim.hydro.to_conserved(eos);
         MhdCons {
@@ -131,7 +131,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
 
     #[inline]
     fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         let vn = prim.vel.dot(nhat);
         let bn = prim.mag.dot(nhat);
         let bsq = prim.mag.dot(&prim.mag);

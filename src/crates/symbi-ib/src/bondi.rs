@@ -49,8 +49,8 @@ pub fn accretion_coefficient<S: Scalar + OrderedNumeric>(gamma: S) -> S {
 
     // general case
     let five = S::from_f64(5.0);
-    let three = S::from_f64(3.0);
-    let two = S::from_f64(2.0);
+    let three = S::THREE;
+    let two = S::TWO;
     let quarter = S::from_f64(0.25);
 
     let num = five - three * gamma;

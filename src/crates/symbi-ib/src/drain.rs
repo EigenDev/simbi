@@ -39,7 +39,7 @@ use crate::body_delta::BodyDelta;
 /// than reflects.
 #[inline]
 pub fn drain_mask<S: Scalar>(dist: S, r_mask: S, w: S) -> S {
-    S::from_f64(0.5) * (S::ONE - ((dist - r_mask) / w).tanh())
+    S::HALF * (S::ONE - ((dist - r_mask) / w).tanh())
 }
 
 /// the drain timescale `tau = c_drain * dx / c_s` (local sound speed). drains
@@ -92,7 +92,7 @@ pub fn drain_cell<S: Scalar, const D: usize, E: EnergyModel>(
 /// isothermal regime instead carries a fixed `c_s = c_iso`.
 #[inline]
 pub fn sound_speed_from_cons<S: Scalar>(den: S, mom_sq: S, nrg: S, gamma: S) -> S {
-    let e_int = (nrg - S::from_f64(0.5) * mom_sq / den) / den;
+    let e_int = (nrg - S::HALF * mom_sq / den) / den;
     (gamma * (gamma - S::ONE) * e_int).sqrt()
 }
 

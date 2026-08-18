@@ -172,7 +172,7 @@ impl<S: Scalar> Numeric for Dual<S> {
         // one-sided derivative is zero.
         let sv = self.value.sqrt();
         let nonzero = sv.cmp_gt(S::ZERO);
-        let divisor = S::select(nonzero, S::from_f64(2.0) * sv, S::ONE);
+        let divisor = S::select(nonzero, S::TWO * sv, S::ONE);
         Self {
             value: sv,
             tangent: S::select(nonzero, self.tangent / divisor, S::ZERO),
@@ -221,6 +221,23 @@ impl<S: Scalar> Scalar for Dual<S> {
     const NAN: Self = Dual {
         value: S::NAN,
         tangent: S::NAN,
+    };
+    // a numeric constant has no dependence on the seeded input, so its tangent is zero.
+    const HALF: Self = Dual {
+        value: S::HALF,
+        tangent: S::ZERO,
+    };
+    const TWO: Self = Dual {
+        value: S::TWO,
+        tangent: S::ZERO,
+    };
+    const THREE: Self = Dual {
+        value: S::THREE,
+        tangent: S::ZERO,
+    };
+    const FOUR: Self = Dual {
+        value: S::FOUR,
+        tangent: S::ZERO,
     };
 
     #[inline]

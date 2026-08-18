@@ -734,13 +734,13 @@ impl<S: Scalar> SchwarzschildKS<S> {
     /// (alpha^2 = 1/h). strictly positive for every r > 0, so the chart stays regular at the horizon.
     #[inline]
     fn h(&self, r: S) -> S {
-        S::ONE + S::from_f64(2.0) * self.mass / r
+        S::ONE + S::TWO * self.mass / r
     }
 
     /// the radial shift beta^r = (2M/r)/h = 2M/(r + 2M) — ingoing, finite everywhere r > 0.
     #[inline]
     fn beta_r(&self, r: S) -> S {
-        let two_m = S::from_f64(2.0) * self.mass;
+        let two_m = S::TWO * self.mass;
         two_m / (r + two_m)
     }
 }
@@ -998,7 +998,7 @@ impl<S: Scalar> SchwarzschildKSCartesian<S> {
         for ii in 0..D {
             r2 = r2 + x[ii] * x[ii];
         }
-        let r_g = S::from_f64(0.5) * self.mass;
+        let r_g = S::HALF * self.mass;
         let r_true = r2.sqrt();
         let r = r_true.max(r_g);
         // |l|^2 = |x|^2 / r_clamped^2, formed from the unrooted r2 so it stays differentiable at
@@ -1006,7 +1006,7 @@ impl<S: Scalar> SchwarzschildKSCartesian<S> {
         // where the true value is zero. outside the clamp |l|^2 is exactly 1 by construction, which
         // keeps every form below bit-identical to the unit-l one wherever the null condition holds.
         let ll2 = S::select(r_true.cmp_ge(r_g), S::ONE, r2 / (r * r));
-        (r, S::from_f64(2.0) * self.mass / r, ll2)
+        (r, S::TWO * self.mass / r, ll2)
     }
 }
 
@@ -1110,7 +1110,7 @@ impl<S: Scalar> KerrKSCartesian<S> {
     /// whose state matters ever reads a clamped value.
     #[inline]
     fn ks_quantities<const D: usize>(&self, x: Tensor<S, D>) -> (S, [S; 3], S) {
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         let p: [S; 3] = std::array::from_fn(|ii| if ii < D { x[ii] } else { S::ZERO });
         let a = self.spin;
         let r2_flat = p[0] * p[0] + p[1] * p[1] + p[2] * p[2];
@@ -1119,7 +1119,7 @@ impl<S: Scalar> KerrKSCartesian<S> {
         let r2 = d + (d * d + az * az).sqrt();
         let r = r2.sqrt().max(half * self.mass);
         let rr = r * r;
-        let two_h = (S::from_f64(2.0) * self.mass * rr * r) / (rr * rr + az * az);
+        let two_h = (S::TWO * self.mass * rr * r) / (rr * rr + az * az);
         let denom = S::ONE / (rr + a * a);
         let l = [
             (r * p[0] + a * p[1]) * denom,
@@ -1312,7 +1312,7 @@ impl<S: Scalar> KerrKSCylindrical<S> {
     /// determinant and sherman-morrison forms need on a non-identity base.
     #[inline]
     fn ks_quantities(&self, x: Tensor<S, 3>) -> (S, [S; 3], S) {
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         let (rr_cyl, z) = (x[0], x[2]);
         let a = self.spin;
         let r2_flat = rr_cyl * rr_cyl + z * z;
@@ -1321,7 +1321,7 @@ impl<S: Scalar> KerrKSCylindrical<S> {
         let r2 = d + (d * d + az * az).sqrt();
         let r = r2.sqrt().max(half * self.mass);
         let rr = r * r;
-        let two_h = (S::from_f64(2.0) * self.mass * rr * r) / (rr * rr + az * az);
+        let two_h = (S::TWO * self.mass * rr * r) / (rr * rr + az * az);
         let denom = S::ONE / (rr + a * a);
         let l = [
             r * rr_cyl * denom,
@@ -1456,7 +1456,7 @@ impl<S: Scalar> SchwarzschildKSCylindrical<S> {
     #[inline]
     fn radius_two_h(&self, big_r: S, z: S) -> (S, S) {
         let r = (big_r * big_r + z * z).sqrt();
-        (r, S::from_f64(2.0) * self.mass / r)
+        (r, S::TWO * self.mass / r)
     }
 }
 
@@ -1611,25 +1611,25 @@ impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
     }
 
     fn lapse(&self, x: Tensor<S, 2>) -> S {
-        let two_h = S::from_f64(2.0) * self.mass / x[0]; // 2M/R (r = R on the equator)
+        let two_h = S::TWO * self.mass / x[0]; // 2M/R (r = R on the equator)
         S::ONE / (S::ONE + two_h).sqrt()
     }
     fn lapse_sq(&self, x: Tensor<S, 2>) -> S {
-        let two_h = S::from_f64(2.0) * self.mass / x[0];
+        let two_h = S::TWO * self.mass / x[0];
         S::ONE / (S::ONE + two_h)
     }
     fn shift(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
-        let two_h = S::from_f64(2.0) * self.mass / x[0];
+        let two_h = S::TWO * self.mass / x[0];
         Tensor::new([two_h / (S::ONE + two_h), S::ZERO]) // beta^R = 2M/(R + 2M), beta^phi = 0
     }
     fn spatial_metric(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
         let big_r = x[0];
-        let two_h = S::from_f64(2.0) * self.mass / big_r;
+        let two_h = S::TWO * self.mass / big_r;
         Matrix::diag(Tensor::new([S::ONE + two_h, big_r * big_r]))
     }
     fn spatial_metric_inv(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
         let big_r = x[0];
-        let two_h = S::from_f64(2.0) * self.mass / big_r;
+        let two_h = S::TWO * self.mass / big_r;
         Matrix::diag(Tensor::new([
             S::ONE / (S::ONE + two_h),
             S::ONE / (big_r * big_r),
@@ -1637,7 +1637,7 @@ impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
     }
     fn sqrt_det_gamma(&self, x: Tensor<S, 2>) -> S {
         let big_r = x[0];
-        let two_h = S::from_f64(2.0) * self.mass / big_r;
+        let two_h = S::TWO * self.mass / big_r;
         big_r.abs() * (S::ONE + two_h).sqrt()
     }
     fn volume_factor(&self, x: Tensor<S, 2>) -> S {
@@ -1681,7 +1681,7 @@ impl<S: Scalar> KerrKS<S> {
     /// b = 2 M r / Sigma — the kerr-schild scalar; gamma_rr = 1 + b, alpha^2 = 1/(1 + b).
     #[inline]
     fn b(&self, r: S, theta: S) -> S {
-        S::from_f64(2.0) * self.mass * r / self.sigma(r, theta)
+        S::TWO * self.mass * r / self.sigma(r, theta)
     }
 }
 
@@ -1762,8 +1762,8 @@ impl<S: Scalar> Metric<S, 3> for KerrKS<S> {
         let radius_sq = cx * cx + cy * cy + cz * cz;
         let spin_sq = self.spin * self.spin;
         let delta = radius_sq - spin_sq;
-        let r_sq = (delta + (delta * delta + S::from_f64(4.0) * spin_sq * cz * cz).sqrt())
-            / S::from_f64(2.0);
+        let r_sq = (delta + (delta * delta + S::FOUR * spin_sq * cz * cz).sqrt())
+            / S::TWO;
         let r = r_sq.sqrt();
         let theta = (cz / r).acos();
         let phi = cy.atan2(cx) - self.spin.atan2(r);

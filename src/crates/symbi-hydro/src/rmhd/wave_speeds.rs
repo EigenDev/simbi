@@ -59,8 +59,8 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
             let fac = S::ONE / (rho * hh + bmu_sq);
             let bb_1 = S::ZERO - (bmu_sq + rho * hh * cssq + bn * bn * cssq) * fac;
             let cc_1 = cssq * bn * bn * fac;
-            let disq_1 = (bb_1 * bb_1 - S::from_f64(4.0) * cc_1).safe_sqrt();
-            let lambda_r_1 = (S::from_f64(0.5) * (S::ZERO - bb_1 + disq_1)).safe_sqrt();
+            let disq_1 = (bb_1 * bb_1 - S::FOUR * cc_1).safe_sqrt();
+            let lambda_r_1 = (S::HALF * (S::ZERO - bb_1 + disq_1)).safe_sqrt();
             [S::ZERO - lambda_r_1, lambda_r_1]
         },
         || {
@@ -71,11 +71,11 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
                     let vdbperp = vdb - vn * bn;
                     let qq = bmu_sq - cssq * vdbperp * vdbperp;
                     let a2_p2 = rho * hh * (cssq + w2 * (S::ONE - cssq)) + qq;
-                    let a1_p2 = S::ZERO - S::from_f64(2.0) * rho * hh * w2 * vn * (S::ONE - cssq);
+                    let a1_p2 = S::ZERO - S::TWO * rho * hh * w2 * vn * (S::ONE - cssq);
                     let a0_p2 = rho * hh * (S::ZERO - cssq + w2 * vn * vn * (S::ONE - cssq)) - qq;
-                    let disq_2 = (a1_p2 * a1_p2 - S::from_f64(4.0) * a2_p2 * a0_p2).max(S::ZERO);
-                    let sr_2 = S::from_f64(0.5) * (S::ZERO - a1_p2 + disq_2.sqrt()) / a2_p2;
-                    let sl_2 = S::from_f64(0.5) * (S::ZERO - a1_p2 - disq_2.sqrt()) / a2_p2;
+                    let disq_2 = (a1_p2 * a1_p2 - S::FOUR * a2_p2 * a0_p2).max(S::ZERO);
+                    let sr_2 = S::HALF * (S::ZERO - a1_p2 + disq_2.sqrt()) / a2_p2;
+                    let sl_2 = S::HALF * (S::ZERO - a1_p2 - disq_2.sqrt()) / a2_p2;
                     [sl_2, sr_2]
                 },
                 // path 3: the full quartic (Eq. 56) — reached where both fast
@@ -88,11 +88,11 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
                     let inv_a4 = S::ONE / a4;
 
                     let a3 = inv_a4
-                        * (S::from_f64(2.0) * bmu0 * bmun * cssq
-                            - S::from_f64(2.0) * bmu_sq * w2 * vn
-                            + S::from_f64(4.0) * cssq * w2 * w2 * hh * rho * vn
-                            - S::from_f64(2.0) * cssq * w2 * hh * rho * vn
-                            - S::from_f64(4.0) * w2 * w2 * hh * rho * vn);
+                        * (S::TWO * bmu0 * bmun * cssq
+                            - S::TWO * bmu_sq * w2 * vn
+                            + S::FOUR * cssq * w2 * w2 * hh * rho * vn
+                            - S::TWO * cssq * w2 * hh * rho * vn
+                            - S::FOUR * w2 * w2 * hh * rho * vn);
 
                     let a2_q = inv_a4
                         * (bmu0 * bmu0 * cssq + bmu_sq * w2 * vn2
@@ -104,11 +104,11 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
                             + S::from_f64(6.0) * w2 * w2 * hh * rho * vn2);
 
                     let a1_q = inv_a4
-                        * (S::ZERO - S::from_f64(2.0) * bmu0 * bmun * cssq
-                            + S::from_f64(2.0) * bmu_sq * w2 * vn
-                            + S::from_f64(4.0) * cssq * w2 * w2 * hh * rho * vn * vn2
-                            + S::from_f64(2.0) * cssq * w2 * hh * rho * vn
-                            - S::from_f64(4.0) * w2 * w2 * hh * rho * vn * vn2);
+                        * (S::ZERO - S::TWO * bmu0 * bmun * cssq
+                            + S::TWO * bmu_sq * w2 * vn
+                            + S::FOUR * cssq * w2 * w2 * hh * rho * vn * vn2
+                            + S::TWO * cssq * w2 * hh * rho * vn
+                            - S::FOUR * w2 * w2 * hh * rho * vn * vn2);
 
                     let a0_q = inv_a4
                         * (S::ZERO - bmu_sq * w2 * vn2 + bmun * bmun * cssq
@@ -232,7 +232,7 @@ pub fn rmhd_magnetosonic_cfl_speeds_gr<S: Scalar, const D: usize>(
 /// masked to sentinel values that leave min/max on the valid ones.
 fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
     let p = c - S::from_f64(0.375) * b * b;
-    let q = S::from_f64(0.125) * b * b * b - S::from_f64(0.5) * b * c + d;
+    let q = S::from_f64(0.125) * b * b * b - S::HALF * b * c + d;
     let m = solve_cubic_resolvent(
         p,
         S::from_f64(0.25) * p * p + S::from_f64(0.01171875) * b * b * b * b - e
@@ -243,10 +243,10 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
 
     let m_valid = m.cmp_ge(S::ZERO);
     let safe_m = m.max(S::ZERO);
-    let sqrt_2m = (S::from_f64(2.0) * safe_m).sqrt();
+    let sqrt_2m = (S::TWO * safe_m).sqrt();
     let eps = S::from_f64(1e-14);
     let qb4 = S::from_f64(-0.25) * b;
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let sent_hi = S::from_f64(1e30);
     let sent_lo = S::from_f64(-1e30);
 
@@ -256,7 +256,7 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
 
     // ---- q ~ 0 path: roots from degenerate biquadratic ----
     let disc_q0 = S::ZERO - safe_m - p;
-    let delta_q0 = (S::from_f64(2.0) * disc_q0.max(S::ZERO)).sqrt();
+    let delta_q0 = (S::TWO * disc_q0.max(S::ZERO)).sqrt();
     let r0_z = qb4 + half * (sqrt_2m - delta_q0);
     let r1_z = qb4 - half * (sqrt_2m - delta_q0);
     let r2_z = qb4 + half * (sqrt_2m + delta_q0);
@@ -273,12 +273,12 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
     let d2_valid = disc2.cmp_ge(S::ZERO);
 
     // root pair 1 (from disc1)
-    let delta1 = (S::from_f64(2.0) * disc1.max(S::ZERO)).sqrt();
+    let delta1 = (S::TWO * disc1.max(S::ZERO)).sqrt();
     let r0_nz = half * (S::ZERO - sqrt_2m + delta1) + qb4;
     let r1_nz = half * (S::ZERO - sqrt_2m - delta1) + qb4;
 
     // root pair 2 (from disc2)
-    let delta2 = (S::from_f64(2.0) * disc2.max(S::ZERO)).sqrt();
+    let delta2 = (S::TWO * disc2.max(S::ZERO)).sqrt();
     let r2_nz = half * (sqrt_2m + delta2) + qb4;
     let r3_nz = half * (sqrt_2m - delta2) + qb4;
 
@@ -296,7 +296,7 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
     // `cmp_*` returns a Bool node under the tracing carrier (Gv), so arithmetic on it
     // (`1-(1-a)(1-b)`) is a type error — select keeps it a clean 0/1 value.
     let any_valid = S::select(d1_valid, S::ONE, S::select(d2_valid, S::ONE, S::ZERO));
-    let has_roots = any_valid.cmp_gt(S::from_f64(0.5));
+    let has_roots = any_valid.cmp_gt(S::HALF);
     let smin_nz = S::select(has_roots, r0_lo.min(r1_lo).min(r2_lo).min(r3_lo), S::ZERO);
     let smax_nz = S::select(has_roots, r0_hi.max(r1_hi).max(r2_hi).max(r3_hi), S::ZERO);
 
@@ -320,10 +320,10 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
 /// hold bit-equivalence with the host f64 path, acting as the identity whenever
 /// the owning arm is taken.
 fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
-    let p = c - b * b / S::from_f64(3.0);
-    let q = S::from_f64(2.0) * b * b * b / S::from_f64(27.0) - b * c / S::from_f64(3.0) + d;
+    let p = c - b * b / S::THREE;
+    let q = S::TWO * b * b * b / S::from_f64(27.0) - b * c / S::THREE + d;
     let eps = S::from_f64(1e-14);
-    let third = S::ONE / S::from_f64(3.0);
+    let third = S::ONE / S::THREE;
     let b3 = b * third;
 
     // outer case split: p ~ 0 -> q ~ 0 -> general (each tier's expensive work
@@ -347,20 +347,20 @@ fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
                 // when its branch is taken.
                 || {
                     let safe_p = S::select(p.abs().cmp_gt(eps), p, S::ONE);
-                    let t = (p.abs() / S::from_f64(3.0)).sqrt();
+                    let t = (p.abs() / S::THREE).sqrt();
                     let g = S::from_f64(1.5) * q / (safe_p * t);
-                    let disc = S::from_f64(4.0) * p * p * p + S::from_f64(27.0) * q * q;
+                    let disc = S::FOUR * p * p * p + S::from_f64(27.0) * q * q;
                     S::cond(
                         p.cmp_gt(S::ZERO),
                         // case 3: p > 0 -> sinh formula.
-                        || S::ZERO - S::from_f64(2.0) * t * (g.asinh() * third).sinh() - b3,
+                        || S::ZERO - S::TWO * t * (g.asinh() * third).sinh() - b3,
                         || {
                             S::cond(
                                 disc.cmp_lt(S::ZERO),
                                 // case 4: three real roots -> cos formula (g in [-1,1]).
                                 || {
                                     let g_clamp = g.max(-S::ONE).min(S::ONE);
-                                    S::from_f64(2.0) * t * (g_clamp.acos() * third).cos() - b3
+                                    S::TWO * t * (g_clamp.acos() * third).cos() - b3
                                 },
                                 || {
                                     S::cond(
@@ -369,7 +369,7 @@ fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
                                         || {
                                             let ng_clamp = (S::ZERO - g).max(S::ONE);
                                             S::ZERO
-                                                - S::from_f64(2.0)
+                                                - S::TWO
                                                     * t
                                                     * (ng_clamp.acosh() * third).cosh()
                                                 - b3
@@ -377,7 +377,7 @@ fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
                                         // case 6: q <= 0 -> cosh formula (positive sign).
                                         || {
                                             let g_clamp_hi = g.max(S::ONE);
-                                            S::from_f64(2.0)
+                                            S::TWO
                                                 * t
                                                 * (g_clamp_hi.acosh() * third).cosh()
                                                 - b3

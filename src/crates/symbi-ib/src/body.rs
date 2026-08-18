@@ -335,7 +335,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     /// equals this KE gain plus the (non-negative) dissipated heat that stays in the gas — the
     /// gas+body conservation ledger for a sealed rigid wall.
     pub fn mechanical_ke(&self) -> S {
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         let mut ke = S::ZERO;
         for a in 0..D {
             ke = ke + half * self.mass * self.velocity[a] * self.velocity[a];
@@ -368,7 +368,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
 
     /// the translational kinetic energy `0.5 m |v|^2` (the rigid drift).
     pub fn translational_ke(&self) -> S {
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         let mut ke = S::ZERO;
         for a in 0..D {
             ke = ke + half * self.mass * self.velocity[a] * self.velocity[a];
@@ -378,7 +378,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
 
     /// the rotational kinetic energy `0.5 omega . I . omega = 0.5 sum_k inertia_body[k] (R^T omega)_k^2`.
     pub fn rotational_ke(&self) -> S {
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         let wb = matvec3(
             transpose3(self.orientation),
             [self.omega[0], self.omega[1], self.omega[2]],

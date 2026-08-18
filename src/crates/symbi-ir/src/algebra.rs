@@ -171,6 +171,19 @@ pub trait Scalar:
     /// where `x == x` fails), so `is_nan(x)` is the test that detects it.
     const NAN: Self;
 
+    // ── the small rationals a finite-volume scheme is written in ──────────
+    // halves (arithmetic means, midpoints), doubles (central differences), and
+    // the small integers of a stencil weight. naming them keeps
+    // `S::HALF * (a + b)` reading as the average it is.
+    /// one half.
+    const HALF: Self;
+    /// two.
+    const TWO: Self;
+    /// three.
+    const THREE: Self;
+    /// four.
+    const FOUR: Self;
+
     // ── method-form alias of `Numeric::ZERO` / `Numeric::one` (ergonomics) ─
     #[inline]
     fn zero() -> Self {
@@ -572,6 +585,10 @@ impl Scalar for f64 {
     const INFINITY: f64 = f64::INFINITY;
     const NEG_INFINITY: f64 = f64::NEG_INFINITY;
     const NAN: f64 = f64::NAN;
+    const HALF: f64 = 0.5;
+    const TWO: f64 = 2.0;
+    const THREE: f64 = 3.0;
+    const FOUR: f64 = 4.0;
 
     #[inline(always)]
     fn to_f64(self) -> f64 {
@@ -761,6 +778,10 @@ impl Scalar for f32 {
     const INFINITY: f32 = f32::INFINITY;
     const NEG_INFINITY: f32 = f32::NEG_INFINITY;
     const NAN: f32 = f32::NAN;
+    const HALF: f32 = 0.5;
+    const TWO: f32 = 2.0;
+    const THREE: f32 = 3.0;
+    const FOUR: f32 = 4.0;
 
     #[inline(always)]
     fn to_f64(self) -> f64 {

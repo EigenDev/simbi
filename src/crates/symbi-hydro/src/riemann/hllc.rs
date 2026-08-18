@@ -48,9 +48,9 @@ fn wave_properties<S: Scalar>(
     cs_r: S,
     gamma: S,
 ) -> (S, S, S) {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let one = S::ONE;
-    let two = S::from_f64(2.0);
+    let two = S::TWO;
 
     // pvrs estimate
     let rho_bar = half * (rho_l + rho_r);
@@ -59,7 +59,7 @@ fn wave_properties<S: Scalar>(
     let p_min = pre_l.min(pre_r);
     let p_max = pre_l.max(pre_r);
 
-    let q_user = S::from_f64(2.0);
+    let q_user = S::TWO;
 
     // pvrs when the pressure ratio is mild and pvrs is bounded, else rarefaction
     // (if pvrs <= p_min) or shock. the mask conjunction uses `&` on `S::Mask` (the
@@ -400,10 +400,10 @@ fn rhd_contact_props<S: Scalar, const D: usize>(
     let aa = fe;
     let bb = -(ee + fs_norm);
     let cc = s_norm;
-    let disc = bb * bb - S::from_f64(4.0) * aa * cc;
+    let disc = bb * bb - S::FOUR * aa * cc;
     let disc_sqrt = disc.abs().sqrt();
     let sgn_b = S::select(bb.cmp_ge(S::ZERO), S::ONE, -S::ONE);
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let quad = -half * (bb + sgn_b * disc_sqrt);
     // guard the contact-speed divide against the degenerate `quad -> 0` root (bb == 0 with fe or
     // s_norm == 0), where the raw divide returns NaN/Inf and poisons the flux. mirrors the RMHD
@@ -647,7 +647,7 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                     let c_coeff = S::select(null_cond, uhllm, uhllm - fdb);
 
                     let disc =
-                        (b_coeff * b_coeff - S::from_f64(4.0) * a_coeff * c_coeff).max(S::ZERO);
+                        (b_coeff * b_coeff - S::FOUR * a_coeff * c_coeff).max(S::ZERO);
                     let sgn_b = S::select(b_coeff.cmp_ge(S::ZERO), S::ONE, -S::ONE);
                     let quad = S::from_f64(-0.5) * (b_coeff + sgn_b * disc.sqrt());
                     let quad_scale = b_coeff.abs().max(disc.sqrt());
@@ -760,7 +760,7 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
 ) -> MhdCons<S, D> {
     let zero = S::ZERO;
     let one = S::ONE;
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let regime = NewtonianMhd;
 
     let hlle_flux = hlle(&regime, eos, prim_l, prim_r, nhat, vface);

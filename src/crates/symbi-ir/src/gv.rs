@@ -1032,6 +1032,10 @@ impl crate::algebra::Scalar for Gv {
     const INFINITY: Gv = Gv(GvVal::Lit(f64::INFINITY));
     const NEG_INFINITY: Gv = Gv(GvVal::Lit(f64::NEG_INFINITY));
     const NAN: Gv = Gv(GvVal::Lit(f64::NAN));
+    const HALF: Gv = Gv(GvVal::Lit(0.5));
+    const TWO: Gv = Gv(GvVal::Lit(2.0));
+    const THREE: Gv = Gv(GvVal::Lit(3.0));
+    const FOUR: Gv = Gv(GvVal::Lit(4.0));
 
     // from_f64 inherited from `Numeric for Gv`.
 

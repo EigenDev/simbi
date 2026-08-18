@@ -266,7 +266,7 @@ where
             }
             measure = measure
                 * match (self.metric.geometry(), slot) {
-                    (Geometry::Spherical, 1) => S::from_f64(2.0),
+                    (Geometry::Spherical, 1) => S::TWO,
                     (Geometry::Spherical, 2) => two_pi,
                     (Geometry::Cylindrical, 1) => two_pi,
                     _ => S::ONE,
@@ -309,7 +309,7 @@ where
     /// divergence into the diagnostic for a field that is exactly div-free in the scheme.
     #[inline]
     pub fn face_position(&self, idx: [isize; D], dir: usize) -> Tensor<S, D> {
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         Tensor::new(std::array::from_fn(|ax| {
             if ax == dir {
                 self.axis_face(idx, dir)
@@ -355,7 +355,7 @@ where
             let mut x = Tensor::<S, D>::zeros();
             for ax in 0..D {
                 let x_center =
-                    self.axis_face(idx, ax) + self.cell_width(idx, ax) * S::from_f64(0.5);
+                    self.axis_face(idx, ax) + self.cell_width(idx, ax) * S::HALF;
                 let dx_half = self.cell_width(idx, ax) * offset;
                 let sign = if (qq >> ax) & 1 == 0 { S::ONE } else { -S::ONE };
                 x[ax] = x_center + sign * dx_half;

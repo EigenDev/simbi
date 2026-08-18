@@ -70,7 +70,7 @@ pub fn rotating_frame_acceleration<S: Scalar>(
     let dy = position[1] - origin_y;
     let omega_sq = omega * omega;
     let mut accel = vec![S::ZERO; position.len()];
-    accel[0] = S::from_f64(2.0) * omega * vel[1] + omega_sq * dx;
+    accel[0] = S::TWO * omega * vel[1] + omega_sq * dx;
     accel[1] = S::from_f64(-2.0) * omega * vel[0] + omega_sq * dy;
     accel
 }
@@ -135,7 +135,7 @@ pub fn sponge_momentum<S: Scalar>(rho: S, vel: &[S], kappa: S, mom_ref: &[S]) ->
 /// 1/(gamma-1)` is the ideal-gas internal-energy coefficient — a build-time constant since
 /// gamma is known when the source is lowered, so the lift carries it as a literal.
 pub fn sponge_energy<S: Scalar>(rho: S, vel: &[S], pre: S, kappa: S, nrg_ref: S, inv_gm1: S) -> S {
-    let e = pre * inv_gm1 + S::from_f64(0.5) * rho * dot(vel, vel);
+    let e = pre * inv_gm1 + S::HALF * rho * dot(vel, vel);
     clamp_rate(kappa) * (nrg_ref - e)
 }
 
@@ -289,10 +289,10 @@ impl<S: Scalar> BodySource<S> {
         S::cond(
             r_mag.cmp_lt(r_cut),
             || {
-                let r_norm = r_mag / (S::from_f64(0.5) * self.racc);
+                let r_norm = r_mag / (S::HALF * self.racc);
                 let weight = (S::ZERO - r_norm * r_norm).exp();
                 let sound_rate = cs / min_w;
-                let freefall_rate = (S::from_f64(2.0) * self.mass / (r_mag * r_mag * r_mag)).sqrt();
+                let freefall_rate = (S::TWO * self.mass / (r_mag * r_mag * r_mag)).sqrt();
                 let nat_rate = sound_rate.max(freefall_rate);
                 let sr = self.sink.min(nat_rate).min(inv_dt);
                 rho * sr * weight

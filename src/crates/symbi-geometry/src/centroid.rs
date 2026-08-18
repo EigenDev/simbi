@@ -32,13 +32,13 @@ use symbi_ir::algebra::Scalar;
 /// on `coords`. `axis` is the coordinate slot (0 = r/R/x, 1 = theta/phi/y,
 /// 2 = phi/z/z), which the grid axis maps onto.
 pub fn volume_weighted_centroid<S: Scalar>(coords: Geometry, axis: usize, lo: S, hi: S) -> S {
-    let two = S::from_f64(2.0);
+    let two = S::TWO;
     let midpoint = || (lo + hi) / two;
     match (coords, axis) {
         // dV = r^2 sin(theta) dr dtheta dphi
         (Geometry::Spherical, 0) => {
-            let i_r2 = (hi.powi(3) - lo.powi(3)) / S::from_f64(3.0);
-            let i_r3 = (hi.powi(4) - lo.powi(4)) / S::from_f64(4.0);
+            let i_r2 = (hi.powi(3) - lo.powi(3)) / S::THREE;
+            let i_r3 = (hi.powi(4) - lo.powi(4)) / S::FOUR;
             i_r3 / i_r2
         }
         (Geometry::Spherical, 1) => {
@@ -51,7 +51,7 @@ pub fn volume_weighted_centroid<S: Scalar>(coords: Geometry, axis: usize, lo: S,
         // dV = R dR dphi dz
         (Geometry::Cylindrical, 0) => {
             let i_r = (hi.powi(2) - lo.powi(2)) / two;
-            let i_r2 = (hi.powi(3) - lo.powi(3)) / S::from_f64(3.0);
+            let i_r2 = (hi.powi(3) - lo.powi(3)) / S::THREE;
             i_r2 / i_r
         }
         // every remaining slot carries a weight independent of its own coordinate

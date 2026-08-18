@@ -295,7 +295,7 @@ pub fn hydrostatic_face<S: Scalar>(
     sign: S,
 ) -> (S, S) {
     let eq = LocalEquilibrium::through(rho[1], pre[1], phi[1], gamma);
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
 
     // departures via the one transform text the kernel path also compiles.
     let (d_rho, d_pre) = hydrostatic_departures(&eq, &rho, &pre, &phi);
@@ -324,7 +324,7 @@ pub fn hydrostatic_face<S: Scalar>(
 /// definition rather than against a second copy of the scheme under test.
 #[inline]
 pub fn plain_face<S: Scalar>(q: [S; 3], theta: S, sign: S) -> S {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let a = q[1] - q[0];
     let b = q[2] - q[1];
     // the same runtime limiter selection the kernel's plm carries: theta-MC minmod for

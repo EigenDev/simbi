@@ -104,7 +104,7 @@ fn ppm_interp<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S, xi_lo: S, xi_hi:
     let (a_l, a_r) = super::gv::ppm_cell_interfaces(vm2, vm1, vc, vp1, vp2);
     let two = S::ONE + S::ONE;
     let half = S::ONE / two;
-    let three = S::from_f64(3.0);
+    let three = S::THREE;
     let six = S::from_f64(6.0);
 
     // parabola u(xi) = a_l + xi*(a_r - a_l + (1-xi)*u6); the sub-cell average
@@ -163,8 +163,8 @@ fn quartic_interp<S: Scalar>(
     let anti = |x: S| {
         x * (c0
             + x * (c1 / two
-                + x * (c2 / S::from_f64(3.0)
-                    + x * (c3 / S::from_f64(4.0) + x * c4 / S::from_f64(5.0)))))
+                + x * (c2 / S::THREE
+                    + x * (c3 / S::FOUR + x * c4 / S::from_f64(5.0)))))
     };
     let quartic = (anti(xi_hi) - anti(xi_lo)) * ratio;
 

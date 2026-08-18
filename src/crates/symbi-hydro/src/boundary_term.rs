@@ -46,7 +46,7 @@ pub fn neumann_ghost<S: Scalar>(u_edge: S, q: S, dist: S) -> S {
 /// this degenerates to Dirichlet `U_face = c/a` at `b = 0` and to Neumann `dU/dn = c/b` at
 /// `a = 0`, so a single lift covers all three classical boundary conditions.
 pub fn robin_ghost<S: Scalar>(u_edge: S, a: S, b: S, c: S, h: S) -> S {
-    let a2 = S::from_f64(0.5) * a;
+    let a2 = S::HALF * a;
     let b_h = b / h;
     (c - u_edge * (a2 - b_h)) / (a2 + b_h)
 }

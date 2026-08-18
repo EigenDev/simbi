@@ -211,7 +211,7 @@ impl<S: Scalar> StateConstraint<S> for TemperatureFloor<S> {
         // the thermal margin available in the energy slot, above the rest mass and the field. the
         // momentum norm is left to the admissibility residual, which keeps this expression linear
         // in the conserved slots and hence concave.
-        let thermal = e - u.den - S::from_f64(0.5) * u.mag_norm_sq();
+        let thermal = e - u.den - S::HALF * u.mag_norm_sq();
         Some(thermal - self.f_min * u.den)
     }
 
@@ -340,7 +340,7 @@ where
     let mut lo = S::ZERO; // acceptable (the anchor)
     let mut hi = S::ONE; // infeasible end of the bracket (the candidate)
     for _ in 0..iters {
-        let mid = S::from_f64(0.5) * (lo + hi);
+        let mid = S::HALF * (lo + hi);
         let ok = ok_at(mid);
         lo = S::select(ok, mid, lo);
         hi = S::select(ok, hi, mid);

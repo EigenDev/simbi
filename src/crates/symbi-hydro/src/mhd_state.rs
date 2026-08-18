@@ -389,8 +389,8 @@ pub fn fast_magnetosonic_from<S: Scalar, const D: usize>(
     mag: &Tensor<S, D>,
     nhat: &Tensor<S, D>,
 ) -> S {
-    let half = S::from_f64(0.5);
-    let four = S::from_f64(4.0);
+    let half = S::HALF;
+    let four = S::FOUR;
     let bsq = mag.dot(mag);
     let bn = mag.dot(nhat);
     let ca_sq = bsq / rho;

@@ -114,7 +114,7 @@ pub fn compact_potential<S: Scalar>(rvec: [S; 3], mass: S, h: S) -> S {
 #[inline]
 pub fn drain_rate<S: Scalar>(r_mag: S, r_mask: S, min_w: S, sink: S, cs: S) -> S {
     let z = (r_mag - r_mask) / min_w;
-    let chi = S::from_f64(0.5) * (S::ONE - z.tanh());
+    let chi = S::HALF * (S::ONE - z.tanh());
     let sound_rate = cs / min_w;
     chi * sink.min(sound_rate)
 }
@@ -168,7 +168,7 @@ mod tests {
 pub fn body_gravity<S: Scalar>(rvec: [S; 3], mass: S, len: S, kind: S) -> [S; 3] {
     let compact = compact_gravity(rvec, mass, len);
     let plummer = softened_gravity(rvec, mass, len);
-    let is_compact = kind.cmp_gt(S::from_f64(0.5));
+    let is_compact = kind.cmp_gt(S::HALF);
     std::array::from_fn(|i| S::cond(is_compact, || compact[i], || plummer[i]))
 }
 
@@ -177,7 +177,7 @@ pub fn body_gravity<S: Scalar>(rvec: [S; 3], mass: S, len: S, kind: S) -> [S; 3]
 #[inline]
 pub fn body_potential<S: Scalar>(rvec: [S; 3], mass: S, len: S, kind: S) -> S {
     S::cond(
-        kind.cmp_gt(S::from_f64(0.5)),
+        kind.cmp_gt(S::HALF),
         || compact_potential(rvec, mass, len),
         || softened_potential(rvec, mass, len),
     )

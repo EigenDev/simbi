@@ -109,7 +109,7 @@ pub fn admissible_theta<S: Scalar>(
     eps_d: S,
     eps_f: S,
 ) -> S {
-    let two = S::from_f64(2.0);
+    let two = S::TWO;
     // B(u, v) = gamma^{ij} u_i v_j (the inverse-metric contraction on covariant momentum).
     let bil = |u: &Tensor<S, 3>, v: &Tensor<S, 3>| -> S {
         let mut acc = S::ZERO;
@@ -138,7 +138,7 @@ pub fn admissible_theta<S: Scalar>(
     // lies beyond theta = 1, so the raw root is >= 1 and the clamp returns exactly 1 (the candidate
     // passes through bit-for-bit); an inadmissible candidate has exactly one crossing, and this is it.
     let g0 = (c - eps_f).max(S::ZERO);
-    let disc = (b * b - S::from_f64(4.0) * a * g0).max(S::ZERO);
+    let disc = (b * b - S::FOUR * a * g0).max(S::ZERO);
     let denom_raw = (S::ZERO - b) + disc.sqrt();
     let coeff_scale = a.abs().max(b.abs()).max(g0.abs());
     let denom_floor = S::select(
@@ -221,10 +221,10 @@ pub fn rmhd_admissible_residuals<S: Scalar>(
     let q = e - (d * d + s2).max(S::ZERO).sqrt();
 
     let w = b2 - e;
-    let phi = (w * w + S::from_f64(3.0) * (e * e - d * d - s2))
+    let phi = (w * w + S::THREE * (e * e - d * d - s2))
         .max(S::ZERO)
         .sqrt();
-    let psi = (phi - S::from_f64(2.0) * w) * (phi + w).max(S::ZERO).sqrt()
+    let psi = (phi - S::TWO * w) * (phi + w).max(S::ZERO).sqrt()
         - (S::from_f64(13.5) * (d * d * b2 + sb * sb))
             .max(S::ZERO)
             .sqrt();
@@ -259,7 +259,7 @@ pub fn rmhd_anchor_energy_with_margin<S: Scalar>(
     let mut lo = e;
     let mut hi = e + state_scale;
     for _ in 0..iters {
-        let mid = S::from_f64(0.5) * (lo + hi);
+        let mid = S::HALF * (lo + hi);
         let mid_ok = ok(mid);
         hi = S::select(mid_ok, mid, hi);
         lo = S::select(mid_ok, lo, mid);
@@ -331,7 +331,7 @@ pub fn rmhd_admissible_theta<S: Scalar>(
     let mut lo = S::ZERO;
     let mut hi = S::ONE;
     for _ in 0..iters {
-        let mid = S::from_f64(0.5) * (lo + hi);
+        let mid = S::HALF * (lo + hi);
         let ok = ok_at(mid);
         lo = S::select(ok, mid, lo);
         hi = S::select(ok, hi, mid);
@@ -407,7 +407,7 @@ pub fn rmhd_source_admissible_time<S: Scalar>(
     let mut lo = S::ZERO;
     let mut hi = S::ONE;
     for _ in 0..iters {
-        let mid = S::from_f64(0.5) * (lo + hi);
+        let mid = S::HALF * (lo + hi);
         let ok = ok_at(mid);
         lo = S::select(ok, mid, lo);
         hi = S::select(ok, hi, mid);

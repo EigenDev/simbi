@@ -25,7 +25,7 @@ pub fn magnetic_pressure<S: Scalar, const D: usize>(
     let vsq = metric.norm_sq_contra(&prim.vel); // |v|^2
     let vdb = metric.contract_contra(&prim.vel, &prim.mag); // v.B = gamma_{ij} v^i B^j
     let w_sq = S::ONE / (S::ONE - vsq);
-    S::from_f64(0.5) * (bsq / w_sq + vdb * vdb)
+    S::HALF * (bsq / w_sq + vdb * vdb)
 }
 
 /// total pressure: p_gas + p_mag.

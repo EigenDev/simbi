@@ -39,7 +39,7 @@ fn kkc_fmu49<S: Scalar>(mu: S, bee_sq: S, rdb_sq: S, r: S) -> S {
 /// c2p solution. carrier-generic — every branch is a traceable `select`.
 #[allow(clippy::too_many_arguments)]
 fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: S, gamma: S) -> S {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let x = S::ONE / (S::ONE + mu * bee_sq);
     let rbar_sq = r * r * x * x + mu * x * (S::ONE + x) * rdb_sq;
     let qbar = qq - half * (bee_sq + mu * mu * x * x * bee_sq * rp_sq);
@@ -98,7 +98,7 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
 /// `>= root(f_a) = mu_+`, hence `f(result) >= 0` and a valid straddle `f(0) < 0 <= f(result)` for
 /// the master false-position.
 fn find_mu_plus<S: Scalar>(bee_sq: S, rdb_sq: S, r: S) -> S {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let eps = S::from_f64(CONVERGENCE_TOL);
     // bracketed Illinois (regula falsi + stale-endpoint half-damp) on the monotone-increasing f_a.
     // superlinear, so it reaches tol in ~10 iters (vs ~54 for bisection); `converged` drives the
@@ -147,7 +147,7 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let dd = cons.den;
     let tau = cons.nrg;
     let bfield = cons.mag;
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let gamma = eos.gamma();
     let eps = S::from_f64(CONVERGENCE_TOL); // 1e-12: the bracket guard + the convergence tol
 

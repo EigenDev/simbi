@@ -79,7 +79,7 @@ impl<S: Scalar> CoordMap<S> for UniformMap<S> {
     fn cell(&self, ii: isize) -> CellInterval<S> {
         let lo = self.face(ii);
         let hi = self.face(ii + 1);
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         CellInterval {
             lo,
             hi,
@@ -93,7 +93,7 @@ impl<S: Scalar> CoordMap<S> for UniformMap<S> {
     }
 
     fn center(&self, ii: isize) -> S {
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         self.start + self.dx * (S::from_f64(ii as f64) + half)
     }
 

@@ -79,7 +79,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         let mom = prim.vel.scale(mom_fac) - prim.mag.scale(vdb);
 
         // conserved energy (tau = E_total - D)
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         let p_tot = prim.pre + half * b_mu_sq;
         let nrg = rhw2 + bsq - p_tot - den;
 

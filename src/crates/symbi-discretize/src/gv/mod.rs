@@ -148,7 +148,7 @@ pub(crate) fn ppm_cell_interfaces<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2:
     // traced node order of the prolongation kernel fixed (hash-consed ids are assigned at
     // first construction).
     let _half = S::ONE / two;
-    let three = S::from_f64(3.0);
+    let three = S::THREE;
     let six = S::from_f64(6.0);
     let seven = S::from_f64(7.0);
     let twelve_inv = S::ONE / S::from_f64(12.0);
@@ -195,7 +195,7 @@ pub(crate) fn ppm_cell_interfaces<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2:
 fn ppm_cell_interfaces_ep<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S) -> (S, S) {
     let two = S::ONE + S::ONE;
     let half = S::ONE / two;
-    let three = S::from_f64(3.0);
+    let three = S::THREE;
     let six = S::from_f64(6.0);
     let seven = S::from_f64(7.0);
     let twelve_inv = S::ONE / S::from_f64(12.0);

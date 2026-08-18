@@ -151,7 +151,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
         let mom_fac = rhw2 + bsq;
         let mom =
             self.metric.lower(&prim.vel).scale(mom_fac) - self.metric.lower(&prim.mag).scale(vdb);
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         let p_tot = prim.pre + half * b_mu_sq;
         let nrg = rhw2 + bsq - p_tot - den;
 

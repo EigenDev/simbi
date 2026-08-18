@@ -258,7 +258,7 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
     volume: S,
     idx: usize,
 ) -> (ConsG<S, D, E, X>, BodyDelta<S, D>) {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let f_rho = (-(relax.lambda_rho * dt)).exp();
     let g_n = S::ONE - (-(relax.lambda_un * dt)).exp();
     // tangential growth factor, capped. for a decaying wall (lambda_ut >= 0) the
@@ -294,7 +294,7 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
     // `F.v_com + torque.omega` and gas+body mechanical energy conserves. the drag's frictional
     // dissipation is the gas kinetic-energy change minus that work, `Q = wall_work - ke_delta`
     // (>= 0): mechanical energy the relaxation turns to heat.
-    let ke_delta = half * (u.scale(S::from_f64(2.0)) + u_delta).dot(&u_delta);
+    let ke_delta = half * (u.scale(S::TWO) + u_delta).dot(&u_delta);
     let wall_work = u_delta.dot(&relax.u_solid);
     let friction_heat = wall_work - ke_delta;
     // thermal channel: the wall carries heat toward its temperature target, relaxing the

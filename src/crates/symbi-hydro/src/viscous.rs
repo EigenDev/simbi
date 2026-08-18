@@ -33,7 +33,7 @@ fn harmonic_mean<S: Scalar>(a: S, b: S) -> S {
     let sum = a + b;
     let nonzero = sum.cmp_gt(S::ZERO);
     let divisor = S::select(nonzero, sum, S::ONE);
-    S::select(nonzero, S::from_f64(2.0) * a * b / divisor, S::ZERO)
+    S::select(nonzero, S::TWO * a * b / divisor, S::ZERO)
 }
 
 /// the diagonal deviatoric viscous stress under the stokes hypothesis:
@@ -44,7 +44,7 @@ fn harmonic_mean<S: Scalar>(a: S, b: S) -> S {
 /// off-diagonal components are the plain symmetric part mu (d_j v_i + d_i v_j).
 #[inline]
 fn stokes_diag<S: Scalar>(mu: S, e_ii: S, div: S) -> S {
-    let two = S::from_f64(2.0);
+    let two = S::TWO;
     let two_thirds = S::from_f64(2.0 / 3.0);
     mu * (two * e_ii - two_thirds * div)
 }
@@ -80,8 +80,8 @@ pub fn viscous_update_2d<S: Scalar>(
     dy: S,
     dt: S,
 ) -> (Tensor<S, 2>, S) {
-    let four = S::from_f64(4.0);
-    let half = S::from_f64(0.5);
+    let four = S::FOUR;
+    let half = S::HALF;
 
     // the face dynamic viscosity is mu = rho_face * nu_face. the density uses the
     // harmonic (series) mean of the two straddling cells — the physically correct
@@ -171,9 +171,9 @@ fn cyl_stress<S: Scalar>(
     r: S,
     mu: S,
 ) -> (S, S, S) {
-    let two = S::from_f64(2.0);
-    let half = S::from_f64(0.5);
-    let inv_r = S::from_f64(1.0) / r;
+    let two = S::TWO;
+    let half = S::HALF;
+    let inv_r = S::ONE / r;
     let e_rr = du_dr;
     let e_pp = dw_dp * inv_r + u * inv_r;
     let e_rp = half * (du_dp * inv_r + dw_dr - w * inv_r);
@@ -202,9 +202,9 @@ pub fn viscous_mom_update_cyl_2d<S: Scalar>(
     dphi: S,
     dt: S,
 ) -> Tensor<S, 2> {
-    let half = S::from_f64(0.5);
-    let two = S::from_f64(2.0);
-    let four = S::from_f64(4.0);
+    let half = S::HALF;
+    let two = S::TWO;
+    let four = S::FOUR;
     let harm = harmonic_mean;
     let u = |j: usize, i: usize| v[j][i][0];
     let w = |j: usize, i: usize| v[j][i][1];
@@ -213,7 +213,7 @@ pub fn viscous_mom_update_cyl_2d<S: Scalar>(
     };
     let r_m = r_c - half * dr;
     let r_p = r_c + half * dr;
-    let inv_rc = S::from_f64(1.0) / r_c;
+    let inv_rc = S::ONE / r_c;
 
     // outer R-face (i+1/2), radius r_p: normal d/dR compact, transverse d/dphi 4-pt.
     let du_dr = (u(1, 2) - u(1, 1)) / dr;
@@ -292,10 +292,10 @@ fn ortho_stress<S: Scalar>(
     d1h2: S,
     mu: S,
 ) -> (S, S, S) {
-    let two = S::from_f64(2.0);
-    let half = S::from_f64(0.5);
-    let inv_h1 = S::from_f64(1.0) / h1;
-    let inv_h2 = S::from_f64(1.0) / h2;
+    let two = S::TWO;
+    let half = S::HALF;
+    let inv_h1 = S::ONE / h1;
+    let inv_h2 = S::ONE / h2;
     let inv_h1h2 = inv_h1 * inv_h2;
     let e11 = d1u1 * inv_h1 + u2 * d2h1 * inv_h1h2;
     let e22 = d2u2 * inv_h2 + u1 * d1h2 * inv_h1h2;
@@ -349,9 +349,9 @@ pub fn viscous_update_orthogonal_2d<S: Scalar>(
     dx2: S,
     dt: S,
 ) -> (Tensor<S, 2>, S) {
-    let half = S::from_f64(0.5);
-    let two = S::from_f64(2.0);
-    let four = S::from_f64(4.0);
+    let half = S::HALF;
+    let two = S::TWO;
+    let four = S::FOUR;
     let harm = harmonic_mean;
     let u1a: [[S; 3]; 3] = std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][0]));
     let u2a: [[S; 3]; 3] = std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][1]));
@@ -408,7 +408,7 @@ pub fn viscous_update_orthogonal_2d<S: Scalar>(
 
     // center: the hoop-stress source for the axis-1 force.
     let (h1_c, h2_c) = (h1[1][1], h2[1][1]);
-    let inv_h1h2 = S::from_f64(1.0) / (h1_c * h2_c);
+    let inv_h1h2 = S::ONE / (h1_c * h2_c);
     let d1u1_c = (u1a[1][2] - u1a[1][0]) / (two * dx1);
     let d2u1_c = (u1a[2][1] - u1a[0][1]) / (two * dx2);
     let d1u2_c = (u2a[1][2] - u2a[1][0]) / (two * dx1);
@@ -426,9 +426,9 @@ pub fn viscous_update_orthogonal_2d<S: Scalar>(
         * inv_h1h2
         + (t12_c * d2h1_c - t22_c * d1h2_c) * inv_h1h2;
     // axis-2 (angular) force: the conservative h2^2 flux + the h2 phi-divergence.
-    let inv_h1h2sq = S::from_f64(1.0) / (h1_c * h2_c * h2_c);
+    let inv_h1h2sq = S::ONE / (h1_c * h2_c * h2_c);
     let f2 = (h2_1p * h2_1p * t12_1p - h2_1m * h2_1m * t12_1m) * (inv_h1h2sq / dx1)
-        + (t22_2p - t22_2m) * (S::from_f64(1.0) / h2_c / dx2);
+        + (t22_2p - t22_2m) * (S::ONE / h2_c / dx2);
 
     // the viscous energy flux at those same faces: F1 = tau_11 u1 + tau_12 u2 on
     // x1-faces, F2 = tau_12 u1 + tau_22 u2 on x2-faces; its scale-factor
@@ -457,8 +457,8 @@ fn face_stress_2p5d<S: Scalar>(
     hi: bool,
     dx: [S; 2],
 ) -> [S; 3] {
-    let half = S::from_f64(0.5);
-    let two = S::from_f64(2.0);
+    let half = S::HALF;
+    let two = S::TWO;
     let (la, ra) = if hi {
         (1usize, 2usize)
     } else {
@@ -512,7 +512,7 @@ pub fn viscous_update_2p5d<S: Scalar>(
     dx: [S; 2],
     dt: S,
 ) -> (Tensor<S, 3>, S) {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let center = [1usize, 1usize];
     let g = |o: [usize; 2], c: usize| v[o[1]][o[0]][c];
     let mut dmom = [S::ZERO; 3];
@@ -550,7 +550,7 @@ fn face_stress_3d<S: Scalar>(
     hi: bool,
     dx: [S; 3],
 ) -> [S; 3] {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let (la, ra) = if hi {
         (1usize, 2usize)
     } else {
@@ -583,7 +583,7 @@ fn face_stress_3d<S: Scalar>(
             lm[b] = 0;
             rp[b] = 2;
             rm[b] = 0;
-            let two = S::from_f64(2.0);
+            let two = S::TWO;
             let cl = (g(lp, j) - g(lm, j)) / (two * dx[b]);
             let cr = (g(rp, j) - g(rm, j)) / (two * dx[b]);
             grad[j][b] = half * (cl + cr);
@@ -627,7 +627,7 @@ pub fn viscous_update_3d<S: Scalar>(
     dx: [S; 3],
     dt: S,
 ) -> (Tensor<S, 3>, S) {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let center = [1usize, 1, 1];
     let g = |o: [usize; 3], c: usize| v[o[2]][o[1]][o[0]][c];
     let mut dmom = [S::ZERO; 3];
@@ -1703,11 +1703,11 @@ fn ortho_stress_2p5d<S: Scalar>(
     d2h3: S,
     mu: S,
 ) -> (S, S, S, S, S, S) {
-    let two = S::from_f64(2.0);
-    let half = S::from_f64(0.5);
-    let inv_h1 = S::from_f64(1.0) / h1;
-    let inv_h2 = S::from_f64(1.0) / h2;
-    let inv_h3 = S::from_f64(1.0) / h3;
+    let two = S::TWO;
+    let half = S::HALF;
+    let inv_h1 = S::ONE / h1;
+    let inv_h2 = S::ONE / h2;
+    let inv_h3 = S::ONE / h3;
     let e11 = d1u1 * inv_h1 + u2 * d2h1 * inv_h1 * inv_h2;
     let e22 = d2u2 * inv_h2 + u1 * d1h2 * inv_h1 * inv_h2;
     let e33 = u1 * d1h3 * inv_h1 * inv_h3 + u2 * d2h3 * inv_h2 * inv_h3;
@@ -1751,10 +1751,10 @@ pub fn viscous_update_orthogonal_2p5d<S: Scalar>(
     dx2: S,
     dt: S,
 ) -> (Tensor<S, 3>, S) {
-    let half = S::from_f64(0.5);
-    let two = S::from_f64(2.0);
-    let four = S::from_f64(4.0);
-    let one = S::from_f64(1.0);
+    let half = S::HALF;
+    let two = S::TWO;
+    let four = S::FOUR;
+    let one = S::ONE;
     let harm = harmonic_mean;
     let comp =
         |c: usize| -> [[S; 3]; 3] { std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][c])) };
@@ -1910,10 +1910,10 @@ pub fn viscous_update_orthogonal_3d<S: Scalar>(
     dx: [S; 3],
     dt: S,
 ) -> (Tensor<S, 3>, S) {
-    let half = S::from_f64(0.5);
-    let two = S::from_f64(2.0);
-    let four = S::from_f64(4.0);
-    let one = S::from_f64(1.0);
+    let half = S::HALF;
+    let two = S::TWO;
+    let four = S::FOUR;
+    let one = S::ONE;
     let harm = harmonic_mean;
     let at = |x: &[[[S; 3]; 3]; 3], o: [usize; 3]| x[o[2]][o[1]][o[0]];
     let vat = |o: [usize; 3], c: usize| v[o[2]][o[1]][o[0]][c];

@@ -30,7 +30,7 @@ use symbi_ir::dual::Dual;
 /// division, same tanh), so a sphere SDF's chi is bit-equal to the mask the
 /// validated drain uses.
 pub fn chi<S: Scalar>(phi: S, w: S) -> S {
-    S::from_f64(0.5) * (S::ONE - (phi / w).tanh())
+    S::HALF * (S::ONE - (phi / w).tanh())
 }
 
 /// a signed-distance expression over carrier `S` in `D` dimensions. shape

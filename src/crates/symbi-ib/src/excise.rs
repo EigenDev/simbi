@@ -33,7 +33,7 @@ pub fn ks_excised<S: Scalar, const D: usize>(x_c: &[S; D], spin: S, r_exc: S) ->
     for kk in 0..D {
         rr2 = rr2 + x_c[kk] * x_c[kk];
     }
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let d = half * (rr2 - spin * spin);
     let az = spin * z;
     let r_ks2 = d + (d * d + az * az).sqrt();

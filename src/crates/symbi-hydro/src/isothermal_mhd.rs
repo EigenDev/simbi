@@ -104,7 +104,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
 
     #[inline]
     fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
-        let half = S::from_f64(0.5);
+        let half = S::HALF;
         let vn = prim.vel.dot(nhat);
         let bn = prim.mag.dot(nhat);
         let bsq = prim.mag.dot(&prim.mag);

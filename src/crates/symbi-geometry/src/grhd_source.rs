@@ -66,8 +66,8 @@ pub fn grhd_radial_geodesic_source<S: Scalar>(
     big_v: S,      // orthonormal radial velocity V
     p: S,
 ) -> (S, S) {
-    let two = S::from_f64(2.0);
-    let half = S::from_f64(0.5);
+    let two = S::TWO;
+    let half = S::HALF;
 
     // ---- the (t, r) block of the 4-metric from the ADM decomposition ----
     // g_tt = -alpha^2 + gamma_rr (beta^r)^2,  g_tr = gamma_rr beta^r,  g_rr = gamma_rr.
@@ -418,7 +418,7 @@ pub fn grmhd_covariant_source<S: Scalar, M, const D: usize>(
 where
     M: Metric<Dual<S>, D>,
 {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let adm = adm_contraction_blocks(g, x);
     let mut uhat = [S::ZERO; 4];
     uhat[0] = S::ONE / adm.alpha;
@@ -536,7 +536,7 @@ where
             }
             d_beta_low[ii] = s;
         }
-        let mut dtt = S::ZERO - S::from_f64(2.0) * alpha * d_alpha[kk];
+        let mut dtt = S::ZERO - S::TWO * alpha * d_alpha[kk];
         for ii in 0..D {
             dtt = dtt + d_beta_low[ii] * beta[ii] + beta_low[ii] * d_beta[kk][ii];
         }
@@ -581,7 +581,7 @@ fn contract_stress<S: Scalar, const D: usize>(
     adm: &AdmContractionBlocks<S, D>,
     t4: &[[S; 4]; 4],
 ) -> (Tensor<S, D>, S) {
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let (alpha, d_alpha, dg4, gi4) = (adm.alpha, &adm.d_alpha, &adm.dg4, &adm.gi4);
 
     // ---- momentum sources: S_j = (1/2) T^{mu nu} d_j g_{mu nu} (full symmetric double sum) ----

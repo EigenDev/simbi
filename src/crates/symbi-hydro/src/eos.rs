@@ -42,14 +42,14 @@ pub trait Eos<S: Scalar>: Copy {
     /// default: total energy = 0.5 * rho * v^2 + rho * e_int.
     /// isothermal overrides to store cs^2.
     fn conserved_energy(&self, rho: S, v_sq: S, pre: S) -> S {
-        S::from_f64(0.5) * rho * v_sq + rho * self.internal_energy(rho, pre)
+        S::HALF * rho * v_sq + rho * self.internal_energy(rho, pre)
     }
 
     /// recover pressure from conservative state.
     /// default: invert total energy to get e_int, then call pressure().
     /// isothermal overrides to read cs^2 from nrg.
     fn recover_pressure(&self, rho: S, v_sq: S, nrg: S) -> S {
-        let ke = S::from_f64(0.5) * rho * v_sq;
+        let ke = S::HALF * rho * v_sq;
         let e_int = (nrg - ke) / rho;
         self.pressure(rho, e_int)
     }
@@ -203,7 +203,7 @@ impl<S: Scalar> Eos<S> for TaubMathews {
         let h = S::from_f64(2.5) * theta
             + (S::from_f64(2.25) * theta * theta + S::ONE).sqrt();
         theta * (S::from_f64(5.0) * h - S::from_f64(8.0) * theta)
-            / (S::from_f64(3.0) * (h - theta))
+            / (S::THREE * (h - theta))
     }
 
     #[inline]
@@ -220,8 +220,8 @@ impl<S: Scalar> Eos<S> for TaubMathews {
     #[inline]
     fn pressure(&self, rho: S, e_int: S) -> S {
         // the closed-form inverse of `internal_energy`: p = rho e (e + 2) / (3 (e + 1)).
-        rho * e_int * (e_int + S::from_f64(2.0))
-            / (S::from_f64(3.0) * (e_int + S::ONE))
+        rho * e_int * (e_int + S::TWO)
+            / (S::THREE * (e_int + S::ONE))
     }
 
     /// no free adiabatic index exists for this gas; the value marks the kernel

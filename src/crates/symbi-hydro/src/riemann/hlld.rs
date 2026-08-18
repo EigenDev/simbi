@@ -242,7 +242,7 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
 
     // unphysical -> sentinel saturating the outer divergence guard.
     let f = S::select(physical, f_val_pre, big);
-    let vc = (vc_l + vc_r).scale(S::from_f64(0.5));
+    let vc = (vc_l + vc_r).scale(S::HALF);
 
     VdiffOut {
         f,
@@ -287,7 +287,7 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
         [p_init, f_init, p_perturbed, zero],
         SECANT_STEPS,
         |[p_prev, f_prev, p_cur, freeze]| {
-            let frozen = freeze.cmp_gt(S::from_f64(0.5));
+            let frozen = freeze.cmp_gt(S::HALF);
             let v = hlld_vdiff(p_cur, r_pair, lam, bn, nhat, metric);
             let f_cur = v.f;
             let f_too_big = f_cur.abs().cmp_gt(div_guard);
@@ -306,7 +306,7 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
             let p_cur_next = S::select(frozen, p_cur, p_next_naive);
             [p_prev_next, f_prev_next, p_cur_next, new_freeze]
         },
-        |_prev, [_p_prev, _f_prev, _p_cur, freeze]| freeze.cmp_gt(S::from_f64(0.5)),
+        |_prev, [_p_prev, _f_prev, _p_cur, freeze]| freeze.cmp_gt(S::HALF),
         2,
     );
 
@@ -445,7 +445,7 @@ where
 {
     let zero = S::ZERO;
     let one = S::ONE;
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
 
     // eagerly compute HLLE — fallback if HLLD reports divergence at the end.
     let hlle_flux = hlle(regime, eos, prim_l, prim_r, nhat, vface);
@@ -505,7 +505,7 @@ where
     let fmn_hll = hll_flux.mom.dot(nhat);
     let bb_q = et_hll - fmn_hll;
     let cc_q = fet_hll * mn_hll - et_hll * fmn_hll;
-    let disc = (bb_q * bb_q - S::from_f64(4.0) * cc_q).max(zero);
+    let disc = (bb_q * bb_q - S::FOUR * cc_q).max(zero);
     let p_lowb_raw = half * (-bb_q + disc.sqrt());
     let p_lowb = S::select(p_lowb_raw.cmp_le(zero), p_floor_val, p_lowb_raw);
 
@@ -659,7 +659,7 @@ where
 {
     let zero = S::ZERO;
     let one = S::ONE;
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     // the spatial metric at the face: `SpatialMetric::flat()` for the SR path (bit-identical to
     // euclidean), the metric-aware gamma for the GR path. the MUB09 star-state algebra
     // (`hlld_vdiff`/`hlld_rmhd_converge`) is fully metric-generic; only the L/R conserved/flux
@@ -698,7 +698,7 @@ where
     let fmn_hll = hll_flux.mom.dot(nhat);
     let bb_q = et_hll - fmn_hll;
     let cc_q = fet_hll * mn_hll - et_hll * fmn_hll;
-    let disc = (bb_q * bb_q - S::from_f64(4.0) * cc_q).max(zero);
+    let disc = (bb_q * bb_q - S::FOUR * cc_q).max(zero);
     let p_lowb_raw = half * (-bb_q + disc.sqrt());
     let p_lowb = S::select(p_lowb_raw.cmp_le(zero), p_floor_val, p_lowb_raw);
     let p_init = S::select(lowb_mask, p_lowb, p_hll);
@@ -752,7 +752,7 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
 ) -> MhdCons<S, D> {
     let zero = S::ZERO;
     let one = S::ONE;
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let neg = S::from_f64(-1.0);
     let regime = NewtonianMhd;
 
@@ -969,8 +969,8 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
 ) -> (S, S, S) {
     let zero = S::ZERO;
     let one = S::ONE;
-    let two = S::from_f64(2.0);
-    let half = S::from_f64(0.5);
+    let two = S::TWO;
+    let half = S::HALF;
     let relative_eps = S::from_f64(REL_EPS);
     let eps_deg = S::from_f64(ALFVEN_SEPARATION_TOL);
     let regime = NewtonianMhd;
@@ -1095,8 +1095,8 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     let regime = IsothermalMhd;
     let zero = S::ZERO;
     let one = S::ONE;
-    let two = S::from_f64(2.0);
-    let half = S::from_f64(0.5);
+    let two = S::TWO;
+    let half = S::HALF;
     let relative_eps = S::from_f64(REL_EPS);
     let eps_deg = S::from_f64(ALFVEN_SEPARATION_TOL);
 
@@ -1208,7 +1208,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     let regime = IsothermalMhd;
     let zero = S::ZERO;
     let one = S::ONE;
-    let half = S::from_f64(0.5);
+    let half = S::HALF;
     let neg = S::from_f64(-1.0);
 
     // transverse projection (any nhat): v - n (v.n).
