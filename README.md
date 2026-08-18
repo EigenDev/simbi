@@ -38,7 +38,7 @@ A quick note on what this is these days: SIMBI started life as a C++ code and wa
 - Six fluid regimes in one code: Newtonian hydro, relativistic hydro (RHD), Newtonian and relativistic MHD, plus isothermal variants of both
 - Spacetime as its own axis: hand the relativistic regimes a Minkowski or horizon-penetrating Kerr-Schild metric (nonspinning or Kerr) the same way you would pick a coordinate system
 - GPU acceleration on NVIDIA CUDA and AMD ROCm/HIP devices, with kernels compiled on the fly for the active accelerator
-- High-resolution shock capturing with HLLE, HLLC (plus a low-Mach variant, see [Fleischmann et al. 2020](https://www.sciencedirect.com/science/article/pii/S0021999120305362)), and HLLD Riemann solvers, backed by a first-order flux-correction safety net that logs every cell it touches (still working on strengthening this. Maybe I'll switch to [Zalesak and friends](https://apps.dtic.mil/sti/tr/pdf/ADA360122.pdf) at some point).
+- High-resolution shock capturing with HLLE, HLLC (plus HLLC+, a low-Mach and shock-stable variant, see [Chen et al. 2020](https://doi.org/10.1137/18M119032X)), and HLLD Riemann solvers, backed by a first-order flux-correction safety net that logs every cell it touches (still working on strengthening this. Maybe I'll switch to [Zalesak and friends](https://apps.dtic.mil/sti/tr/pdf/ADA360122.pdf) at some point).
 - Constrained-transport MHD (contact [Gardiner & Stone](https://arxiv.org/abs/0712.2634) or UCT ([Mignone & DelZanna (2021)](https://arxiv.org/abs/2004.10542)) edge EMFs) that keeps div B at machine zero by construction
 - Physical transport when you want it: Navier-Stokes viscosity (constant or alpha-disk) and Ohmic resistivity, layered on top of the ideal solvers
 - A rich immersed-boundary method: point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls of *any* constructive solid geometry (CSG) shape (spheres, boxes, unions/intersections) with no-penetration / no-slip porous surfaces. Bodies can be one-way (prescribed motion) or **two-way coupled** — the gas reaction force and torque then drive the body's full rigid-body dynamics: translation, plus rotation about an arbitrary axis via Euler's equations with a principal-moment inertia tensor, so an asymmetric body tumbles and precesses. Spinning walls drag the gas at omega x r, the gas <-> body energy exchange conserves total energy, and every body reports force / torque / accretion diagnostics. I took [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin)'s class during my time as a graduate student at NYU,
@@ -692,7 +692,11 @@ for spinning (`KERR_KS`) horizons, on the GPU, and across the multi-GPU decompos
 **Riemann solvers:**
 - `HLLE`, the two-wave workhorse, written in a branch-free closed form the compiler can vectorize
 - `HLLC`, HLL with a contact wave, Toro's adaptive pressure estimates evaluated lazily — the shock estimate is paid for only in the cells that need it. Works on the MHD regimes too (HLLC flux + HLL edge EMF); the *isothermal* regimes stay on `HLLE`, whose two-wave fan matches their wave structure
-- `HLLC_LM`, the Fleischmann (2020) low-Mach / low-dissipation HLLC, for both Newtonian and relativistic hydro. The reference Mach number the acoustic ramp saturates at is a runtime knob, `mach_limit` (default 0.1, the published value) — below it the acoustic dissipation scales down with the local Mach number, which is what keeps subsonic turbulence alive instead of diffusing it away. Pair it with `wb_reconstruction` on stratified problems (see below)
+- `HLLC_PLUS`, the [Chen et al. (2020)](https://doi.org/10.1137/18M119032X) HLLC+, which is plain HLLC plus two additive corrections that fix the two things HLLC gets wrong for opposite reasons. Both act on a velocity *jump* and leave every signal speed, the contact speed and both star states at their classical values, so there is no reference Mach number to tune — they read the local flow and switch themselves off at the sonic point.
+  - the **normal** jump carries the low-Mach accuracy defect: its damping scales with the sound speed rather than the flow speed, so it swamps the convective flux as `Ma -> 0` and pressure fluctuations pick up an `O(Ma)` error where the continuous Euler equations give `O(Ma^2)` ([Guillard & Viozat 1999](https://doi.org/10.1016/S0045-7930%2898%2900017-6) is the paper that pinned this down). Rescaling it to the convective magnitude is what keeps subsonic turbulence alive instead of diffusing it away. The same correction, restated as a framework you can bolt onto any Godunov flux, is [Chen et al. (2022)](https://doi.org/10.1016/j.jcp.2022.111027)
+  - the **transverse** jump carries the grid-aligned shock instability — the carbuncle. Along a planar front the flow is smooth in its own plane, so those faces get almost no dissipation and a wrinkle in the front grows through them. HLLC+ adds a shear viscosity there, gated on a characteristic-speed reversal between neighbors so it finds a genuine shock and not a steep hydrostatic gradient (a gas bound to a point mass has a big pressure ratio across every cell and reverses nothing)
+
+  Newtonian gets both halves; RHD gets the shear half, with the inertia rewritten from the mass density to the enthalpy density `rho h W^2 = e + p`, which is what relativistic jets and blast waves need since the carbuncle does not care how fast the front is moving. The isothermal regimes stay on `HLLE` — no thermal contact wave, so there is nothing for the contact-restoring family to restore. **Pair it with `wb_reconstruction` on any stratified problem**: HLLC+ removes exactly the damping that would otherwise hold a hydrostatic truncation residual down, and unbalanced it will quietly eat a percent or two of the entropy at *any* resolution (the deficit does not converge away, so refining past it is not an option)
 - `HLLD`, HLL with discontinuities (magnetohydrodynamics), faithful to Mignone & Del Zanna
 
 **Well-balanced reconstruction:**
@@ -707,7 +711,7 @@ stack: the reconstruction, the source, reflecting-wall ghosts, the first-order f
 fallback, and the coarse-fine transfer under refinement all speak the same departure language,
 so refinement boundaries in a stratified atmosphere stop shedding entropy too. Scope: Newtonian
 gamma-law hydro on cartesian, cylindrical, and spherical grids (uniform spacing), with `HLLE`,
-`HLLC`, or `HLLC_LM`. On the curvilinear charts the gravity source is the area-weighted
+`HLLC`, or `HLLC_PLUS`. On the curvilinear charts the gravity source is the area-weighted
 equilibrium-pressure difference, so it telescopes exactly against the geometric pressure source
 and the flux divergence. It needs an immersed
 gravitating body to balance against, and costs some extra arithmetic per face (about 1.4x on
@@ -756,9 +760,9 @@ refused loudly when it falls outside the table, though it saves you a round trip
 
 | Feature | Where it works |
 |---|---|
-| `HLLC` / `HLLC_LM` | Newtonian hydro, RHD, and both MHD regimes (the ones carrying a contact wave). `HLLC_LM` is Newtonian + RHD |
+| `HLLC` / `HLLC_PLUS` | Newtonian hydro, RHD, and both MHD regimes (the ones carrying a contact wave). `HLLC_PLUS` is Newtonian (both corrections) + RHD (the shear half) |
 | `HLLD` | the MHD regimes |
-| `wb_reconstruction` | Newtonian gamma-law hydro on cartesian, cylindrical, and spherical charts with `LINEAR`, `LOG`, or geometrically graded spacing, with `HLLE`/`HLLC`/`HLLC_LM`; carries through refinement and needs a gravitating immersed body |
+| `wb_reconstruction` | Newtonian gamma-law hydro on cartesian, cylindrical, and spherical charts with `LINEAR`, `LOG`, or geometrically graded spacing, with `HLLE`/`HLLC`/`HLLC_PLUS`; carries through refinement and needs a gravitating immersed body |
 | viscosity | adiabatic and isothermal, on every chart: cartesian, cylindrical, and spherical, in 2D, 2.5D (3-component on a 2-axis grid), and 3D. `RHD` accepts the coefficient and silently ignores it |
 | alpha-disk viscosity | the same charts as constant-nu viscosity, and it needs a central immersed body |
 | resistivity | every MHD chart: cartesian, cylindrical, and spherical, in 2.5D (r-z, r-phi, r-theta) and 3D |
@@ -860,7 +864,7 @@ for dashes; underscores also work). The CLI finds it by name, wherever it lives.
 | `srmhd/magnetic_shock_tube.py` | `magnetic-shock-tube` | 1D MHD shock |
 | `srmhd/rmhd_orszag_tang.py` | `rmhd-orszag-tang` | SRMHD Orszag-Tang vortex (Newtonian, isothermal, and resistive variants also ship) |
 | `newtonian/field_loop.py` | `field-loop` | Advected field loop — the constrained-transport regression |
-| `newtonian/quirk.py` | `quirk` | Odd-even decoupling — run it with `--solver hllc` and `hllc_lm` and diff |
+| `newtonian/quirk.py` | `quirk` | Odd-even decoupling — run it with `--solver hllc` and `hllc_plus` and diff |
 | `isothermal/kepler.py` | `kepler` | Keplerian disk with a central mass |
 | `newtonian/bondi.py` | `bondi` | 3D Bondi accretion onto a sink, with a buffer zone and optional refinement |
 | `newtonian/refined_blast.py` | `refined-blast` | Static mesh refinement on a blast wave |
@@ -991,6 +995,11 @@ the following people for their contributions to the project:
 - **[Andersson & Comer 2021](https://link.springer.com/article/10.1007/s41114-021-00031-6)**: A modern review on the general field of relavistic fluid dynamics. Super nice stuff with a great intro. Please check it out! 
 - **[Moseley et al. 2026](https://arxiv.org/abs/2604.23041)**: A modern technique for evolving Lagrangian tracer particles in an Eulerian fluid simulation. This is a very nice paper that I found to be very useful for my own work. Plus, I got to learn about it live from Romain Teyssier himself!
 - **[Berberich et al. 2021](https://www.sciencedirect.com/science/article/pii/S0045793021000244#section-cited-by)**: A modern and generic technique for well-balanced evolution that is equation of state independent.
+- **[Guillard & Viozat 1999](https://doi.org/10.1016/S0045-7930%2898%2900017-6)**: Why upwind schemes go soft at low Mach number. They do the asymptotic expansion and show the numerical viscosity scales like 1/Ma, so pressure fluctuations come out an order too big. Short, and it explains a whole family of fixes that came after.
+- **[Chen, Lin, Li & Yan 2020](https://doi.org/10.1137/18M119032X)**: HLLC+, the solver SIMBI runs for low-Mach work. What I like about it is the diagnosis: the accuracy problem lives in the *normal* velocity jump and the carbuncle lives in the *transverse* one, which is why one scheme can fix both without a knob. Appendix A has the whole thing in ~40 lines of pseudocode if you want to read the algebra straight.
+- **[Chen et al. 2022](https://doi.org/10.1016/j.jcp.2022.111027)**: The same low-Mach correction restated as a framework you can attach to Rusanov, HLL, Roe, HLLC or AUSM+ alike. Handy if you want to see the idea separated from any one solver.
+- **[Fleischmann, Adami & Adams 2020](https://www.sciencedirect.com/science/article/pii/S0021999120305362)**: HLLC-LM, which SIMBI used to ship and no longer does. Worth reading anyway — it is a clean paper, and it scales the acoustic *signal speeds*, which turns out to damp the pressure jump along with the velocity jump. On a stagnant stratified column that removes the only thing holding the hydrostatic residual down, and the residual then grows with resolution. A good lesson in scaling the jump rather than the wave.
+- **[Quirk 1994](https://doi.org/10.1002/fld.1650180603)**: The great Riemann solver debate, and the origin of the odd-even decoupling test SIMBI still runs as its carbuncle regression.
 ---
 
 <div align="center">
