@@ -39,6 +39,7 @@ from pydantic import computed_field
 
 import simbi.expression as expr
 from simbi import ProblemParam, SimbiProblem
+from simbi.functional import michel
 from simbi.types import (
     BoundaryCondition,
     CoordSystem,
@@ -163,9 +164,22 @@ class GrBondiCartesian(SimbiProblem):
         cs = self._c_inf()
         return self.schwarzschild_mass / (cs * cs)
 
+    def _critical_point(self) -> michel.CriticalPoint:
+        """the michel transonic point for the ambient reservoir, solved once."""
+        return michel.critical_point(
+            gamma=self.adiabatic_index,
+            density=self.rho_ambient,
+            pressure=self.p_ambient,
+            mass=self.schwarzschild_mass,
+        )
+
     def _r_sonic(self) -> float:
-        """the transonic radius r_s = (5 - 3 gamma)/4 * r_bondi (the classic bondi estimate)."""
-        return 0.25 * (5.0 - 3.0 * self.adiabatic_index) * self._r_bondi()
+        """the michel transonic radius, from `u_s^2 = M/(2 r_s)` closed against the
+        bernoulli invariant. the newtonian estimate `(5 - 3 gamma)/4 * r_bondi` that
+        stood here reported 3.75 M where the relativistic solution puts the surface at
+        7.35 M, so a run sized and read against it looked for the sonic sphere at half
+        its radius."""
+        return self._critical_point().radius
 
     def setup(self) -> None:
         """size the cube from r_bondi and auto-place the excision surface at 0.7 r_+."""
@@ -185,13 +199,33 @@ class GrBondiCartesian(SimbiProblem):
     # driven reservoir: every cube face held at the ambient gas at rest
     # =========================================================================
     def _reservoir(self) -> dict:
-        """the ambient reservoir prescription [rho, v_x, v_y, v_z, pre] = (rho_inf, 0, 0, 0, p_inf)
-        as a constant boundary DAG; one state serves all six far-field faces."""
+        """the far-field reservoir prescription [rho, v_x, v_y, v_z, pre], held at the
+        michel state the box face actually sits in rather than at the ambient state at
+        infinity.
+
+        clamping to ambient is not a small error here. the face at L = 3 r_bondi carries
+        rho/rho_inf = 1.47 in the true solution, so an ambient dirichlet injects a forty-
+        seven percent density deficit inward, continuously, for the whole run. the
+        asymptotic michel state is closed form where u^2 is negligible against 2M/r and
+        tracks the exact solution to under a percent everywhere beyond about three sonic
+        radii, which is where every face of this cube lies.
+
+        the velocity is the part a flat intuition gets wrong. the stored component is the
+        valencia one, against the infalling eulerian observer of the kerr-schild chart, and
+        a pressure-supported inflow falls slower than that observer: the prescription is
+        OUTWARD, +0.019 at the box face, where the coordinate four-velocity is -0.024 and
+        the previous reservoir said zero."""
         g = expr.ExprGraph()
-        rho = expr.constant(self.rho_ambient, g)
-        zero = expr.constant(0.0, g)
-        pre = expr.constant(self.p_ambient, g)
-        return g.compile([rho, zero, zero, zero, pre]).serialize_boundary(dim=3)
+        x1 = expr.variable("x1", g)
+        x2 = expr.variable("x2", g)
+        x3 = expr.variable("x3", g)
+        r = expr.sqrt(x1 * x1 + x2 * x2 + x3 * x3)
+        crit = self._critical_point()
+        rho, u_r, pre = michel.far_field(r, crit=crit)
+        vx, vy, vz = michel.valencia_velocity(
+            u_r, x1, x2, x3, r, mass=self.schwarzschild_mass
+        )
+        return g.compile([rho, vx, vy, vz, pre]).serialize_boundary(dim=3)
 
     @computed_field
     @property
