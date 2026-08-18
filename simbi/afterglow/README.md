@@ -1,13 +1,13 @@
 # Afterglow
 
-Turn a hydro snapshot into something an observer would actually see: light curves, spectra, sky
-maps, and polarization. The model is Sari, Piran & Narayan (1998) synchrotron plus equal-arrival-time
-(EATS) integration, so it's aimed at GRB-like relativistic blast waves — though nothing stops you
-pointing it at any relativistic outflow you've simulated.
+The afterglow tools turn hydrodynamic snapshots into synthetic light curves, spectra, sky maps, and
+polarization. They use the Sari, Piran & Narayan (1998) synchrotron model with equal-arrival-time
+surface (EATS) integration. The model is intended for GRB-like relativistic blast waves, but it can
+also be applied to other simulated relativistic outflows.
 
-This used to be a C++/pybind11 extension. It's Rust now, and the physics core has no `simbi`
-dependency at all — it operates on plain hydro arrays over a spherical mesh, so it's reusable
-outside this codebase if you ever want that.
+The original implementation was a C++/pybind11 extension. The current Rust physics core has no
+dependency on `simbi`; it operates on hydrodynamic arrays over a spherical mesh and can be reused
+independently.
 
 ---
 
@@ -21,8 +21,8 @@ complementary paths:
 | deterministic | `synchrotron` → `lightcurve` | per-cell broken-power-law spectrum fed into the equal-arrival-time flux integral. Noise-free. |
 | monte carlo | `transfer` → `observe` | samples beamed photon packets, propagates them with self-absorption / Thomson scattering / optional pair production, then reduces the catalog for any line of sight. |
 
-Supporting cast: `units` (compile-time M/L/T dimensional checking — a dimensionally wrong expression
-won't compile), `bm` (Blandford-McKee), `coords`, `deposit` (the noise-free imager), `event`,
+Supporting modules include `units` (compile-time M/L/T dimensional checking), `bm`
+(Blandford-McKee), `coords`, `deposit` (the noise-free imager), `event`,
 `ingest`, `rng`, `constants`. **`symbi-afterglow-io`** reads the checkpoints.
 
 **Python** (this directory) is the frontend: `generate.py`, `lightcurve.py`, `spec.py`,
@@ -33,7 +33,7 @@ break frequencies, handy for sanity-checking a numerical result against theory).
 
 ## Quick start
 
-Generate a photon catalog from a stack of checkpoints, then reduce it however you like:
+Generate a photon catalog from a set of checkpoints, then use it for one or more reductions:
 
 ```bash
 # build the event catalog (this is the expensive step; do it once)
@@ -51,7 +51,7 @@ simbi afterglow polarization events.h5 --observer-angle 6.0
 simbi afterglow movie events.h5 --output skymap.mp4
 ```
 
-Generate once, reduce many times — every reduction reads the same catalog.
+Each reduction reads the same catalog, so generation only needs to run once for a given set of events.
 
 `generate` also takes `--mcrt` to switch on the Monte-Carlo transfer (self-absorption, scattering),
 `--no-scattering` to keep absorption but drop scattering, and `--photons-per-cell` to control
@@ -67,8 +67,8 @@ Two files drive everything, and both are auto-discovered next to your data:
 - **`system.yaml`** — the code-unit → CGS conversion. Without it you fall back to `--scale`.
 - **`observer.yaml`** — redshift, luminosity distance, microphysics, **and the frequencies**.
 
-That last point matters: there is no `--frequencies` flag. Frequencies live in `observer.yaml`,
-which is the only place to set them. With no observer file you get defaults (10 pc, p = 2.5).
+There is no `--frequencies` flag; frequencies are configured in `observer.yaml`. Without an
+observer file, the defaults are 10 pc and p = 2.5.
 
 ---
 
@@ -117,8 +117,7 @@ On the Python side, `scales.py` carries the scale models (`Solar`, `BlandfordMck
 
 ## Sanity checks
 
-`spn98.py` gives you the analytic SPN98 break frequencies, which is the fastest way to tell whether a
-numerical light curve is behaving: compute the breaks for your parameters and check the measured
-slopes match the table above on either side of them. If the deterministic and Monte-Carlo paths
-disagree by more than shot noise, that's a real signal — the two are normalized against the same
-per-Hz emissivity precisely so they can be compared.
+`spn98.py` provides the analytic SPN98 break frequencies. Use it to compute the breaks for your
+parameters and compare the measured slopes with the table above. The deterministic and Monte Carlo
+paths use the same per-Hz emissivity normalization, so differences larger than the expected shot
+noise should be investigated.

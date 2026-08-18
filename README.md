@@ -29,20 +29,19 @@
 
 ## Overview
 
-SIMBI is a finite volume code for astrophysical fluid simulations. If you want to throw relativistic jets, shock tubes, stellar explosions, or magnetized turbulence at a grid and see what happens, this is the tool. Results from SIMBI have shown up in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, covering relativistic jets, shock morphology, accretion, and stellar explosions.
+SIMBI is a finite-volume code for astrophysical fluid simulations. If you want to put relativistic jets, shock tubes, stellar explosions, accretion flows, or magnetized turbulence on a grid and see what happens, this is the tool. Results from SIMBI have appeared in *The Astrophysical Journal* and *The Astrophysical Journal Letters*.
 
-A quick note on what this is these days: SIMBI started life as a C++ code and was rewritten from the ground up in Rust. I embarked on this because I got super interested in graph theory and how it can be used to help generate architecture-agnostic code, and I wanted to give it a shot from a clean slate in rust (see [Sethi & Ullman 1970](https://dl.acm.org/doi/10.1145/321607.321620) and works that cite them. Super interesting and deep stuff imo.) The physics is the same, the speed got better (because I became a better programmer over the years from the wee ol' monolithic-to-the-max days), and the codebase is a lot easier to reason about. You drive the whole thing from Python; the Rust is there when you want it.
+SIMBI started life as a C++ code. I eventually rewrote the compute backend in Rust after getting interested in graph theory and the possibility of generating architecture-agnostic code from one description of the physics. [Sethi and Ullman (1970)](https://dl.acm.org/doi/10.1145/321607.321620), and the work that followed it, provided some of the inspiration. The physics stayed the same, but years of experience gave me a chance to make the code faster and much easier to reason about. You still drive the whole thing from Python; the Rust API is there when you want it.
 <!--that the russt workspace is called `symbi` instead of `simbi`. Well, that's because I really love the idea of turning symbolic expressions into machine code, but since both "simbi" and "symbi" sound the same, I thought that shift was a cool nod to the new direction of the codebase. The Python package is still called `simbi`, so you can keep your scripts and configs the same.-->
 
 **What you get:**
 - Six fluid regimes in one code: Newtonian hydro, relativistic hydro (RHD), Newtonian and relativistic MHD, plus isothermal variants of both
 - Spacetime as its own axis: hand the relativistic regimes a Minkowski or horizon-penetrating Kerr-Schild metric (nonspinning or Kerr) the same way you would pick a coordinate system
 - GPU acceleration on NVIDIA CUDA and AMD ROCm/HIP devices, with kernels compiled on the fly for the active accelerator
-- High-resolution shock capturing with HLLE, HLLC (plus HLLC+, a low-Mach and shock-stable variant, see [Chen et al. 2020](https://doi.org/10.1137/18M119032X)), and HLLD Riemann solvers, backed by a first-order flux-correction safety net that logs every cell it touches (still working on strengthening this. Maybe I'll switch to [Zalesak and friends](https://apps.dtic.mil/sti/tr/pdf/ADA360122.pdf) at some point).
+- High-resolution shock capturing with HLLE, HLLC, HLLC+ (a low-Mach, shock-stable variant; see [Chen et al. 2020](https://doi.org/10.1137/18M119032X)), and HLLD Riemann solvers. First-order flux correction handles failed high-order updates and reports each affected cell. I am still working on making this safety mechanism stronger, possibly with a method in the spirit of [Zalesak et al.](https://apps.dtic.mil/sti/tr/pdf/ADA360122.pdf).
 - Constrained-transport MHD (contact [Gardiner & Stone](https://arxiv.org/abs/0712.2634) or UCT ([Mignone & DelZanna (2021)](https://arxiv.org/abs/2004.10542)) edge EMFs) that keeps div B at machine zero by construction
 - Physical transport when you want it: Navier-Stokes viscosity (constant or alpha-disk) and Ohmic resistivity, layered on top of the ideal solvers
-- A rich immersed-boundary method: point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls of *any* constructive solid geometry (CSG) shape (spheres, boxes, unions/intersections) with no-penetration / no-slip porous surfaces. Bodies can be one-way (prescribed motion) or **two-way coupled** — the gas reaction force and torque then drive the body's full rigid-body dynamics: translation, plus rotation about an arbitrary axis via Euler's equations with a principal-moment inertia tensor, so an asymmetric body tumbles and precesses. Spinning walls drag the gas at omega x r, the gas <-> body energy exchange conserves total energy, and every body reports force / torque / accretion diagnostics. I took [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin)'s class during my time as a graduate student at NYU,
-and I loved it so much that I thought it'd be cool to introduce it into my code! 
+- Immersed boundaries with point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls built from constructive solid geometry (CSG). Bodies support prescribed motion or two-way coupling, including translation, rotation, gas–body energy exchange, and force, torque, and accretion diagnostics. This part of SIMBI grew out of a class I took with [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin) as a graduate student at NYU; I loved the subject and wanted to bring some of those ideas into the code.
 - Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart the region inside the black hole is frozen at a cold vacuum, so you can swallow the singularity and still keep a well-posed accretion-rate certificate
 - Block-based static mesh refinement with [Berger-Colella](https://www.sciencedirect.com/science/article/pii/0021999189900351) subcycling
 - Single-node **multi-GPU domain decomposition** — set `gpus > 1` and the domain splits across the cards, halo-exchanged in lockstep and bit-identical to a monolithic run
@@ -52,10 +51,10 @@ and I loved it so much that I thought it'd be cool to introduce it into my code!
 - A live terminal dashboard while you run (pause, single-step, checkpoint on demand, field heatmaps), and `simbi attach` to peek at a headless run from another shell
 - A type-safe Python config system that generates its own CLI, so you stop hand-writing argument parsers
 
-> CUDA and HIP are peer production backends generated from the same kernel
-definitions. Multi-*node* decomposition is the next step on the roadmap;
-single-node multi-GPU already runs today.
-My science problems fit on one node these days, so multi-node sits far down the list.
+> CUDA and HIP use kernels generated from the same definitions. SIMBI currently
+> supports multi-GPU decomposition within one node; multi-node decomposition is
+> not yet implemented. Most of my current science problems fit on one node, so it
+> remains further down the roadmap.
 ---
 
 ## Simulation Gallery
@@ -76,7 +75,7 @@ My science problems fit on one node these days, so multi-node sits far down the 
 
 ## Quick Start
 
-If you only read one section, read this one. We lean hard on [uv](https://docs.astral.sh/uv/) here, and you should too — a strong recommendation, freely ignored. It is an absurdly fast Python package manager and environment tool, it replaces pip and venv and conda in one binary (though conda is objectively broader and more powerful; it's just a bit much for my use cases these days), and it makes the whole setup a two-line affair.
+If you only read one section, read this one. I strongly recommend [uv](https://docs.astral.sh/uv/) for creating the Python environment and installing SIMBI. It handles the jobs I once split between pip, venv, and conda, and keeps the setup short. Other environment managers are fine too.
 
 Need uv? Grab it:
 
@@ -97,8 +96,7 @@ uv run simbi run marti-muller --mode cpu --resolution 400
 # look at the result
 uv run simbi plot data/400.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" --fields rho v p
 ```
-You can also save a bunch of time by doing `source .venv/bin/activate` and you'll remain in the 
-simbi environment you created when you ran `uv venv`. 
+To work inside the environment without prefixing every command with `uv run`, activate it with `source .venv/bin/activate`.
 
 Got an NVIDIA or AMD accelerator? Select its production backend through the
 project helper:
@@ -109,11 +107,7 @@ uv sync --no-install-project   # puts maturin in the venv; dev.py needs it
 uv run simbi run marti-muller --mode gpu --resolution 1024
 ```
 
-That is the whole thing — cargo and maturin drive the build end to end.
-(Though, I am a big fan of CMake and Ninja! I learned so much about programming and developing
-a major project like this from utilizing those tools. It just becomes a bit much for me to
-deal with as I explore more architectures and directions. Cargo is standard enough for my 
-purposes these days. :D)
+Cargo and maturin handle the Rust and Python portions of the build. I still have a soft spot for CMake and Ninja—they taught me a lot while SIMBI was growing—but Cargo is a better fit for the range of architectures the project now covers.
 
 ---
 
@@ -128,21 +122,21 @@ purposes these days. :D)
 - For AMD GPU execution, ROCm providing `libamdhip64` and `libhiprtc`
 - On Linux, `patchelf` (uv and maturin will tell you if it is missing)
 
-That is it. Kernels compile at run time with NVRTC on NVIDIA devices and hipRTC
-on AMD devices, so the driver runtime is the whole GPU toolchain requirement.
+Kernels compile at run time with NVRTC on NVIDIA devices and hipRTC on AMD
+devices, so a separate CUDA or HIP compiler toolchain is not required.
 
 ### The uv way (recommended)
 
-Seriously, just use uv. It builds the Rust extension through maturin behind the scenes and stays out of your way from there on.
+uv builds the Rust extension through maturin and installs it into an isolated environment.
 
 ```bash
-# spin up an isolated environment
+# create an isolated environment
 uv venv
 
 # build and install the package
 uv pip install .
 
-# want the plotting and CLI niceties too?
+# include the optional plotting and CLI dependencies
 uv pip install ".[visual,cli]"
 ```
 
@@ -152,13 +146,13 @@ From here on, prefix commands with `uv run` and you are always using the right e
 uv run simbi run sedov --mode cpu
 ```
 
-Just want the `simbi` command on your PATH without thinking about environments? Since it is a CLI tool, this is the slick option:
+To install the `simbi` command as a standalone uv-managed tool:
 
 ```bash
 uv tool install .
 ```
 
-Now `simbi` works from anywhere, on its own.
+The `simbi` command will then be available without activating the project environment.
 
 ### Working on SIMBI itself?
 
@@ -259,11 +253,10 @@ simbi run simbi_configs/examples/newtonian/kh.py --mode cpu --resolution 512
 simbi run <problem> --checkpoint data/128x128.chkpt.000_400.h5
 ```
 
-The CLI tries to be a good roommate: config names match with or without kebab-case, a
-typo gets a "did you mean...?", and if two configs in different directories share a name,
-it lists both and asks.
+The CLI tries to be a good roommate: configuration names work with kebab-case or underscores,
+typos get a “did you mean…?”, and if two directories contain the same name, it lists both and asks.
 
-**Options you will reach for:**
+**Common options:**
 - `--mode cpu|gpu` sets the execution backend
 - `--resolution N`, `--resolution N,M`, or `--resolution N,M,K` sets the grid. Comma is required for 2D and 3D.
 - `--end-time` is when to stop
@@ -364,10 +357,10 @@ snapshot is removed when the run ends.
 
 ### In-situ profiles (census)
 
-Sometimes what you want out of a run is a scaling law, and dumping a thousand full snapshots to get
-one is silly. A census is a binned reduction: you declare the bin axes and what to accumulate as
-expressions, and the run reduces them on the device every cadence and tucks the result into each
-checkpoint, ready to read straight back out.
+Sometimes what you want from a run is a scaling law or radial profile, and writing a thousand full
+snapshots to get one is wasteful. A census is a binned reduction: you declare the bin axes and what
+to accumulate as expressions, and the run reduces them on the device at each cadence and stores the
+result in the checkpoint.
 
 ```python
 from simbi import expression as expr
@@ -809,11 +802,11 @@ refinement_subcycling_mode: Annotated[
 
 ## Architecture
 
-Here is the quick tour of how the Rust side fits together, in case you want to hack on it.
+Here is a quick tour of how the Rust side fits together.
 
-The compute backend is a Cargo workspace of small, focused crates. The interesting idea at the center of it: the physics is written ONCE, generically over a "carrier" type, and traced into an intermediate representation. That IR gets lowered to native CPU code (compiled by LLVM at build time), CUDA source (compiled at run time with NVRTC), HIP source (compiled at run time with hipRTC), or — for the source terms you write in Python — machine code JIT-compiled at startup with Cranelift. One definition of the math serves every backend. The same trick powers the test suite: the f64 evaluation of a kernel doubles as its own oracle, so CPU, GPU, and JIT are checked against each other bit-for-bit.
+The idea at the center of the backend is one I find genuinely neat: the physics is written once, generically over a carrier type, and traced into an intermediate representation (IR). The IR is lowered to native CPU code at build time, CUDA or HIP source at run time, or, for source terms written in Python, machine code compiled at startup with Cranelift. One definition of the math serves every backend. The same arrangement helps with testing: evaluating a kernel with `f64` gives us an oracle for checking CPU, GPU, and JIT output bit for bit.
 
-The compiler layer does a lot here: common-subexpression elimination, constant-power strength reduction (`r ** -2` in your config compiles down to two multiplies), automatic lazy scheduling of heavy conditional branches (a `where(...)` in your source expressions becomes a real branch once the arms are big enough to skip), and a select-vectorization pass that turns branch-free kernel bodies into NEON/SIMD-friendly straight-line code, gated on how much arithmetic the branches carry. The guiding rule, enforced by the graph itself: only compute what you actually need.
+The compiler performs common-subexpression elimination, constant-power strength reduction (`r ** -2` becomes two multiplies), lazy scheduling for sufficiently expensive conditional branches, and select vectorization for suitable branch-free kernel bodies. The graph tracks dependencies so generated kernels compute only the values needed by their outputs.
 
 A few core pieces:
 
@@ -839,7 +832,7 @@ A few design choices worth calling out. Fields are stored struct-of-arrays, whic
 
 The neutral IR is precision-agnostic too: the same traced graph renders to f64 or f32 at the target's launch precision (an f32 device run just halves the bandwidth bill), and the Cranelift runtime path is generic over the scalar the same way. The device backend is written against a backend-agnostic trait, so the production CUDA and HIP paths share one kernel definition and diverge only in the small target-specific runtime and token mapping at the bottom.
 
-On speed (one machine, one problem class, double precision): the 3D Newtonian linear wave solved to second order with the HLLE Riemann solver at 256^3 sustains ~38 million zone-cycles per second (MZCS) on an 8-performance-core Apple M4 Pro laptop, and a 2D Kelvin-Helmholtz with HLLE runs around 70. For a sense of scale, [AthenaK](https://github.com/IAS-Astrophysics/athenak) reports 34 Mzc/s for the same class of test on an M1 Pro. Your problems will have their own numbers — `SYMBI_PROFILE=1` will happily show you where every nanosecond goes.
+For one concrete reference point, in double precision on my Apple M4 Pro laptop with eight performance cores, a second-order 3D Newtonian linear-wave problem using HLLE at 256³ sustains about 38 million zone-cycles per second (MZCS). A 2D Kelvin–Helmholtz problem with HLLE runs at about 70 MZCS. Your problems will have their own numbers; set `SYMBI_PROFILE=1` to see where the time goes in a particular run.
 
 ---
 
@@ -981,25 +974,27 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 ---
 
 ## Acknowledgements
-SIMBI was developed at the Center for Cosmology and Paricle Physics (CCPP) at New York University, and I thank the CCPP group for their support and feedback. I also thanks
-the following people for their contributions to the project:
+
+SIMBI was developed at the Center for Cosmology and Particle Physics (CCPP) at New York University. I thank the CCPP group for its support and feedback, along with the following contributors:
+
 - **Andrew MacFadyen** (NYU) for his mentorship and guidance on the project.
-- **Jonathan Zrake** (Clemson University) for his intellectual feedback on the endeavor.
-- **Jim Stone** (Institute for Advanced Study) for his feedback on the MHD implementation and pointing me towards the robust conserved to primitive formalism of [Kastaun et al. 2021](https://scixplorer.org/abs/2021PhRvD.103b3018K/abstract).
-- **Romain Teyssier** (Princeton University) for his willingness to talk shop with me. Especially during my embarkment towards mesh refinement.
+- **Jonathan Zrake** (Clemson University) for his scientific feedback.
+- **Jim Stone** (Institute for Advanced Study) for his feedback on the MHD implementation and for pointing me to the robust conserved-to-primitive formalism of [Kastaun et al. 2021](https://scixplorer.org/abs/2021PhRvD.103b3018K/abstract).
+- **Romain Teyssier** (Princeton University) for conversations about mesh refinement.
 ---
 
-## Important Works For Folks Wanting to Learn More About the Physics and Numerics
-- **[Marti & Muller 1994](https://ui.adsabs.harvard.edu/abs/2003LRR.....6....7M/abstract)**: The original relativistic shock tube paper. This is the paper that started it all for me. I was a grad student at the time and I was trying to understand how to do relativistic hydrodynamics. This paper was a great starting point!
-- **[Font 2007](https://ui.adsabs.harvard.edu/abs/2008LRR....11....7F/abstract)**: A review of numerical methods for relativistic (magento)-hydrodynamics. This paper is a great resource for understanding the different numerical methods that can be used to solve the equations of GENERAL relativistic hydrodynamics.
-- **[Andersson & Comer 2021](https://link.springer.com/article/10.1007/s41114-021-00031-6)**: A modern review on the general field of relavistic fluid dynamics. Super nice stuff with a great intro. Please check it out! 
-- **[Moseley et al. 2026](https://arxiv.org/abs/2604.23041)**: A modern technique for evolving Lagrangian tracer particles in an Eulerian fluid simulation. This is a very nice paper that I found to be very useful for my own work. Plus, I got to learn about it live from Romain Teyssier himself!
+## Further reading on physics and numerical methods
+
+- **[Marti & Muller 1994](https://ui.adsabs.harvard.edu/abs/2003LRR.....6....7M/abstract)**: The relativistic shock-tube work that got me started. I found it while learning relativistic hydrodynamics as a graduate student, and it remains a good entry point.
+- **[Font 2007](https://ui.adsabs.harvard.edu/abs/2008LRR....11....7F/abstract)**: A review of numerical methods for relativistic magnetohydrodynamics.
+- **[Andersson & Comer 2021](https://link.springer.com/article/10.1007/s41114-021-00031-6)**: A modern review of relativistic fluid dynamics with a particularly good introduction.
+- **[Moseley et al. 2026](https://arxiv.org/abs/2604.23041)**: A method for evolving Lagrangian tracer particles in an Eulerian fluid simulation. I learned about this work directly from Romain Teyssier and found it very useful for SIMBI.
 - **[Berberich et al. 2021](https://www.sciencedirect.com/science/article/pii/S0045793021000244#section-cited-by)**: A modern and generic technique for well-balanced evolution that is equation of state independent.
-- **[Guillard & Viozat 1999](https://doi.org/10.1016/S0045-7930%2898%2900017-6)**: Why upwind schemes go soft at low Mach number. They do the asymptotic expansion and show the numerical viscosity scales like 1/Ma, so pressure fluctuations come out an order too big. Short, and it explains a whole family of fixes that came after.
-- **[Chen, Lin, Li & Yan 2020](https://doi.org/10.1137/18M119032X)**: HLLC+, the solver SIMBI runs for low-Mach work. What I like about it is the diagnosis: the accuracy problem lives in the *normal* velocity jump and the carbuncle lives in the *transverse* one, which is why one scheme can fix both without a knob. Appendix A has the whole thing in ~40 lines of pseudocode if you want to read the algebra straight.
-- **[Chen et al. 2022](https://doi.org/10.1016/j.jcp.2022.111027)**: The same low-Mach correction restated as a framework you can attach to Rusanov, HLL, Roe, HLLC or AUSM+ alike. Handy if you want to see the idea separated from any one solver.
-- **[Fleischmann, Adami & Adams 2020](https://www.sciencedirect.com/science/article/pii/S0021999120305362)**: HLLC-LM, which SIMBI used to ship and no longer does. Worth reading anyway — it is a clean paper, and it scales the acoustic *signal speeds*, which turns out to damp the pressure jump along with the velocity jump. On a stagnant stratified column that removes the only thing holding the hydrostatic residual down, and the residual then grows with resolution. A good lesson in scaling the jump rather than the wave.
-- **[Quirk 1994](https://doi.org/10.1002/fld.1650180603)**: The great Riemann solver debate, and the origin of the odd-even decoupling test SIMBI still runs as its carbuncle regression.
+- **[Guillard & Viozat 1999](https://doi.org/10.1016/S0045-7930%2898%2900017-6)**: An asymptotic analysis showing why numerical viscosity in upwind schemes scales poorly at low Mach number.
+- **[Chen, Lin, Li & Yan 2020](https://doi.org/10.1137/18M119032X)**: The HLLC+ solver used by SIMBI for low-Mach flows. It treats the normal velocity jump and transverse carbuncle instability separately; Appendix A gives concise pseudocode.
+- **[Chen et al. 2022](https://doi.org/10.1016/j.jcp.2022.111027)**: A general presentation of the low-Mach correction for Rusanov, HLL, Roe, HLLC, and AUSM+ solvers.
+- **[Fleischmann, Adami & Adams 2020](https://www.sciencedirect.com/science/article/pii/S0021999120305362)**: The HLLC-LM solver, which SIMBI previously included. Its signal-speed scaling also damps the pressure jump, an important distinction for hydrostatic problems.
+- **[Quirk 1994](https://doi.org/10.1002/fld.1650180603)**: The source of the odd-even decoupling test used by SIMBI as a carbuncle regression.
 ---
 
 <div align="center">
@@ -1010,4 +1005,4 @@ the following people for their contributions to the project:
 
 ---
 
-> Porting this to rust from c++ benefitted greatly from the use of the Claude Code tool. "Et tu, Brute?"
+The C++-to-Rust port benefited greatly from Claude Code. Et tu, Brute?
