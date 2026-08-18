@@ -691,7 +691,7 @@ for spinning (`KERR_KS`) horizons, on the GPU, and across the multi-GPU decompos
 
 **Riemann solvers:**
 - `HLLE`, the two-wave workhorse, written in a branch-free closed form the compiler can vectorize
-- `HLLC`, HLL with a contact wave, Toro's adaptive pressure estimates evaluated lazily — the shock estimate is paid for only in the cells that need it. Works on the MHD regimes too (HLLC flux + HLL edge EMF); the *isothermal* regimes stay on `HLLE`, whose two-wave fan matches their wave structure
+- `HLLC`, HLL with a contact wave, Toro's adaptive pressure estimates evaluated lazily — only the cells that actually need the shock estimate compute one. Works on the MHD regimes too (HLLC flux + HLL edge EMF); the *isothermal* regimes stay on `HLLE`, whose two-wave fan matches their wave structure
 - `HLLC_PLUS`, the [Chen et al. (2020)](https://doi.org/10.1137/18M119032X) HLLC+, which is plain HLLC plus two additive corrections that fix the two things HLLC gets wrong for opposite reasons. Both act on a velocity *jump* and leave every signal speed, the contact speed and both star states at their classical values, so there is no reference Mach number to tune — they read the local flow and switch themselves off at the sonic point.
   - the **normal** jump carries the low-Mach accuracy defect: its damping scales with the sound speed rather than the flow speed, so it swamps the convective flux as `Ma -> 0` and pressure fluctuations pick up an `O(Ma)` error where the continuous Euler equations give `O(Ma^2)` ([Guillard & Viozat 1999](https://doi.org/10.1016/S0045-7930%2898%2900017-6) is the paper that pinned this down). Rescaling it to the convective magnitude is what keeps subsonic turbulence alive instead of diffusing it away. The same correction, restated as a framework you can bolt onto any Godunov flux, is [Chen et al. (2022)](https://doi.org/10.1016/j.jcp.2022.111027)
   - the **transverse** jump carries the grid-aligned shock instability — the carbuncle. Along a planar front the flow is smooth in its own plane, so those faces get almost no dissipation and a wrinkle in the front grows through them. HLLC+ adds a shear viscosity there, gated on a characteristic-speed reversal between neighbors so it finds a genuine shock and not a steep hydrostatic gradient (a gas bound to a point mass has a big pressure ratio across every cell and reverses nothing)
@@ -714,14 +714,14 @@ gamma-law hydro on cartesian, cylindrical, and spherical grids (uniform spacing)
 `HLLC`, or `HLLC_PLUS`. On the curvilinear charts the gravity source is the area-weighted
 equilibrium-pressure difference, so it telescopes exactly against the geometric pressure source
 and the flux divergence. It needs an immersed
-gravitating body to balance against, and costs some extra arithmetic per face (about 1.4x on
-the flux stage, less end to end) — paid only when the flag is on.
+gravitating body to balance against, and adds some arithmetic per face (about 1.4x on
+the flux stage, less end to end), only when the flag is on.
 
 **Grid spacing:**
 - `LINEAR`, uniform spacing
 - `LOG`, log spacing, handy for spherical setups
 - `GEOMETRIC`, a graded mesh: each cell is a fixed ratio bigger than the last, so you can pack
-  resolution against one boundary (or both) without paying for it across the whole domain. Set the
+  resolution against one boundary (or both) without carrying it across the whole domain. Set the
   growth per axis with `x1_spacing_ratio` / `x2_spacing_ratio` / `x3_spacing_ratio` (and pick the
   spacing itself with `x1_spacing` and friends); see `geometric_boundaries.py` for the shape of it.
 
@@ -813,7 +813,7 @@ Here is the quick tour of how the Rust side fits together, in case you want to h
 
 The compute backend is a Cargo workspace of small, focused crates. The interesting idea at the center of it: the physics is written ONCE, generically over a "carrier" type, and traced into an intermediate representation. That IR gets lowered to native CPU code (compiled by LLVM at build time), CUDA source (compiled at run time with NVRTC), HIP source (compiled at run time with hipRTC), or — for the source terms you write in Python — machine code JIT-compiled at startup with Cranelift. One definition of the math serves every backend. The same trick powers the test suite: the f64 evaluation of a kernel doubles as its own oracle, so CPU, GPU, and JIT are checked against each other bit-for-bit.
 
-The compiler layer earns its keep: common-subexpression elimination, constant-power strength reduction (`r ** -2` in your config compiles down to two multiplies), automatic lazy scheduling of expensive conditional branches (a `where(...)` in your source expressions becomes a real branch when the arms are worth skipping), and a cost-gated select-vectorization pass that turns branch-free kernel bodies into NEON/SIMD-friendly straight-line code. The guiding rule, enforced by the graph itself: only compute what you actually need.
+The compiler layer does a lot here: common-subexpression elimination, constant-power strength reduction (`r ** -2` in your config compiles down to two multiplies), automatic lazy scheduling of heavy conditional branches (a `where(...)` in your source expressions becomes a real branch once the arms are big enough to skip), and a select-vectorization pass that turns branch-free kernel bodies into NEON/SIMD-friendly straight-line code, gated on how much arithmetic the branches carry. The guiding rule, enforced by the graph itself: only compute what you actually need.
 
 A few core pieces:
 
