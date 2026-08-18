@@ -1,7 +1,7 @@
 // =============================================================================
 // sealed_column_curvilinear.rs
 //
-// the curvilinear twin of `sealed_column_unclamped`: the balanced triple
+// the curvilinear twin of `sealed_column_balanced`: the balanced triple
 // (reconstruction + area-weighted equilibrium-pressure source + balance-aware
 // ghosts) holding a sealed, stagnant, strongly stratified radial column on the
 // spherical and cylindrical charts. the chart is what changes the statement:

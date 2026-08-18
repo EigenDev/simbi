@@ -1,7 +1,7 @@
 // =============================================================================
 // sealed_column_graded.rs
 //
-// the graded-mesh twin of `sealed_column_unclamped` / `sealed_column_curvilinear`:
+// the graded-mesh twin of `sealed_column_balanced` / `sealed_column_curvilinear`:
 // the balanced triple (reconstruction + equilibrium-pressure source + balance-
 // aware ghosts) holding a sealed, stagnant, strongly stratified column on a
 // non-uniformly spaced grid — log-radial spherical (the natural bondi-like

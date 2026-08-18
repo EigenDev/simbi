@@ -579,14 +579,14 @@ fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
     use symbi::prelude::Solver;
     let gm = 100.0;
     let mut rows = Vec::new();
-    // the low-mach arm pairs with the balanced reconstruction: since the clamp's
-    // retirement (2026-08-15) the published ramp leaves the hydrostatic residual undamped
-    // by design, and the balancing removes it instead -- unpaired, this exact column loses
-    // 4.2e-4 of the floor, which is the failure that once motivated the clamp.
+    // the low-mach arm pairs with the balanced reconstruction. a scheme that reduces the
+    // dissipation acting on a stagnant column leaves its hydrostatic residual to the
+    // balancing, which removes the residual at its source; unpaired, this exact column loses
+    // 4.2e-4 of the floor.
     for (name, solver, balanced) in [
         ("hlle", Solver::Hlle, false),
         ("hllc", Solver::Hllc, false),
-        ("hllc_lm", Solver::HllcPlus, true),
+        ("hllc_plus", Solver::HllcPlus, true),
     ] {
         let mut sim = hydrostatic_atmosphere_full(gm, N, 0.3, Timestepping::Rk2, true);
         let kernels = Kset::new(GAMMA, 0.3, &sim.geom.allocated)
@@ -620,7 +620,7 @@ fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
 }
 
 /// the low-mach arm's floor law with its precondition made explicit: the sealed
-/// stratified column holds `K >= K_0` under hllc_lm while the fleischmann ramp is
+/// stratified column holds `K >= K_0` under the low-mach arm while its reduction is
 /// genuinely engaged — the residual velocities stay below the mach limit, so a pass
 /// cannot come from the ramp being inactive. unpaired, this exact configuration loses
 /// 4.2e-4 of the floor at t = 2 (5.4e-4 at half the timestep — spatial

@@ -1125,7 +1125,7 @@ fn rhd_hllc_flux_matches_native_physics_on_uniform_state() {
         &prim,
         &Tensor::unit(0),
         0.0,
-        ShockwaveLimiter::Standard,
+        None,
     );
     let out = run_uniform_euler_flux::<2>(rhd_hllc_flux_gv::<2>(0, EosArm::IdealGamma), &prim, RHD_GAMMA, 0);
     out.expect(

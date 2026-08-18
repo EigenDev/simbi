@@ -153,7 +153,7 @@ fn plm_sod_1d_bit_identity() {
 /// is gated behaviorally in `lm_clamp_laws.rs` (the ramp stays strictly less
 /// dissipative than classical HLLC on this flow).
 #[test]
-fn hllc_lm_low_mach_vortex_bit_identity() {
+fn hllc_plus_low_mach_vortex_bit_identity() {
     const N: usize = 48;
     const MACH: f64 = 0.06;
     let dx = 1.0 / N as f64;
@@ -185,7 +185,7 @@ fn hllc_lm_low_mach_vortex_bit_identity() {
             .expect("solver/regime mismatch")
             .theta(THETA);
     evolve(&mut sim, &sub, 0.5).expect("evolve failed");
-    gate_or_record("vortex_2d_plm_hllc_lm_rk2", &serialize_cons(&sim));
+    gate_or_record("vortex_2d_plm_hllc_plus_rk2", &serialize_cons(&sim));
 }
 
 /// smooth 2d diagonal advection on a periodic box: the multi-dimensional sweep

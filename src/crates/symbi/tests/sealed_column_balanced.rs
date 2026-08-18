@@ -1,30 +1,27 @@
 // =============================================================================
-// sealed_column_unclamped.rs
+// sealed_column_balanced.rs
 //
-// the published low-mach ramp, taken verbatim with the compressibility clamp
-// disabled, holds the adiabatic entropy floor on a sealed,
-// stagnant, strongly stratified column — the regime a solid accretor wall keeps
-// its masked cells in, and the regime that motivated bolting a clamp onto the
-// published scheme in the first place.
+// a low-mach riemann solver holds the adiabatic entropy floor on a sealed, stagnant, strongly
+// stratified column when it is paired with the well-balanced reconstruction — the regime a
+// solid accretor wall keeps its masked cells in.
 //
-// the mechanism under test is a division of labor. the ramp removes acoustic
-// dissipation below the reference mach number; on a stagnant column that
-// dissipation is the sole damping on the hydrostatic truncation residual, so
-// the plain reconstruction rings and the floor fails — that arm is this test's
-// positive control, and it reproduces the failure that motivated the clamp. the
-// well-balanced reconstruction removes the residual at its source: each cell's
-// departure from the isentrope through it is what gets limited, so a balanced
-// column presents a flat face state and rings at zero amplitude. the clamp
-// bought the floor by giving up the low-mach reduction across every stratified
-// face; this buys it by construction, and the reduction survives.
+// the mechanism under test is a division of labor. a low-mach scheme reduces the dissipation a
+// face receives in proportion to the local flow speed; on a stagnant column that dissipation is
+// the only damping on the hydrostatic truncation residual, so the plain reconstruction rings
+// and the floor fails. that arm is this test's positive control. the well-balanced
+// reconstruction removes the residual at its source: each cell's departure from the isentrope
+// through it is what gets limited, so a balanced column presents a flat face state and rings at
+// zero amplitude. restoring the dissipation instead would buy the floor by giving up the
+// low-mach reduction across every stratified face; the balancing buys it by construction, and
+// the reduction survives.
 //
-// the column is the isentrope of the plummer-softened potential — the same
-// `body_potential` family the reconstruction balances against and the same
-// gravity the source applies (one field, autodiff-proven conservative), so the
-// only remaining imbalance is the smooth flux/source discretization mismatch,
-// which is second-order and self-limiting, oscillating about zero over a step.
+// the column is the isentrope of the plummer-softened potential — the same `body_potential`
+// family the reconstruction balances against and the same gravity the source applies (one
+// field, autodiff-proven conservative), so the only remaining imbalance is the smooth
+// flux/source discretization mismatch, which is second-order and self-limiting, oscillating
+// about zero over a step.
 //
-// run: cargo test -p symbi --test sealed_column_unclamped -- --nocapture
+// run: cargo test -p symbi --test sealed_column_balanced -- --nocapture
 // =============================================================================
 
 use symbi::prelude::Solver;
@@ -159,7 +156,7 @@ fn the_published_ramp_holds_the_floor_on_a_balanced_reconstruction() {
     let (k_wb, v_wb) = run(true);
     let (d_plain, d_wb) = ((1.0 - k_plain).max(0.0), (1.0 - k_wb).max(0.0));
     println!(
-        "\nsealed stagnant column, published ramp (no clamp), {STEPS} steps\n\
+        "\nsealed stagnant column, low-mach solver, {STEPS} steps\n\
          plain reconstruction:    min K/K_0 {k_plain:.12} (deficit {d_plain:.3e}), max|v| {v_plain:.3e}\n\
          balanced reconstruction: min K/K_0 {k_wb:.12} (deficit {d_wb:.3e}), max|v| {v_wb:.3e}"
     );
@@ -167,10 +164,10 @@ fn the_published_ramp_holds_the_floor_on_a_balanced_reconstruction() {
     // the discriminating quantity is stagnation, not the floor. on the potential-consistent
     // column the plain arm's entropy floor holds up, because its wall waves dissipate and
     // dissipation raises K; the floor-under-stress claim lives in gravity_source_entropy's
-    // 5000-step wall column. what separates the arms here by ten orders is stagnation:
-    // the plain arm's mirrored ghosts kick its walls every step and the drift reaches the
-    // window, while the balanced triple (reconstruction + source + ghosts) holds the
-    // discrete equilibrium to machine precision.
+    // 5000-step wall column. what separates the arms here by ten orders is stagnation: the
+    // plain arm's mirrored ghosts kick its walls every step and the drift reaches the window,
+    // while the balanced triple (reconstruction + source + ghosts) holds the discrete
+    // equilibrium to machine precision.
     assert!(
         v_plain > 1.0e-7,
         "the PLAIN arm sits at |v| = {v_plain:.3e}; the column is not exercising the \

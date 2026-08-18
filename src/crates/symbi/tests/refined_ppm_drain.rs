@@ -154,7 +154,7 @@ fn run_and_scan(recon: Recon, ng: usize, prolong: ProlongOrder, stirred: bool) -
 }
 
 /// the production combination (ppm + quartic prolongation + porous drain +
-/// hllc_lm on a stratified refined atmosphere) completes 60 root steps with a
+/// the low-mach solver on a stratified refined atmosphere) completes 60 root steps with a
 /// positive state everywhere; a persistent fofc freeze panics inside evolve.
 #[test]
 fn a_draining_accretor_in_a_stratified_atmosphere_survives_under_ppm() {

@@ -73,11 +73,9 @@ fn kinetic_energy_after(solver: Solver, t_end: f64) -> f64 {
 
 /// decaying taylor-green flow at mach 0.06: several eddy turnovers of viscous-free
 /// decay, where every dissipated joule is numerical. the low-mach scheme must retain
-/// strictly more kinetic energy than classical HLLC -- the reduction this solver
-/// exists for -- and the margin must be substantial. (measured under the retired
-/// clamped variant the retention was 0.8576 of E_0 against classical's 0.7125; the
-/// published ramp matched it to 1.4e-5 of E_0 on this flow, so the collapse of the
-/// two arms moved nothing here.)
+/// strictly more kinetic energy than classical HLLC -- the reduction this solver exists for
+/// -- and the margin must be substantial. measured retention is 0.8576 of E_0 against
+/// classical's 0.7125.
 #[test]
 fn the_low_mach_scheme_stays_less_dissipative_than_classical_hllc() {
     let t_end = 8.0;
@@ -85,19 +83,19 @@ fn the_low_mach_scheme_stays_less_dissipative_than_classical_hllc() {
     let e_std = kinetic_energy_after(Solver::Hllc, t_end);
     let e0 = 0.25 * MACH * MACH; // mean of 1/2 rho v^2 over the taylor-green cell
     eprintln!(
-        "E_kin(t={t_end})/E_0: hllc_lm {:.4}, hllc {:.4}",
+        "E_kin(t={t_end})/E_0: hllc_plus {:.4}, hllc {:.4}",
         e_lm / e0,
         e_std / e0
     );
     assert!(
         e_std > 0.0 && e_lm > e_std,
-        "the clamped low-mach scheme retained no more kinetic energy than classical \
-         HLLC (lm {e_lm:.6e} vs hllc {e_std:.6e}); the clamp has crept into smooth \
+        "the low-mach scheme retained no more kinetic energy than classical HLLC \
+         ({e_lm:.6e} vs {e_std:.6e}); its dissipation reduction has stopped reaching smooth \
          subsonic turbulence"
     );
-    // the retention gap must be a real dissipation difference, not roundoff: the
-    // pure-ramp scheme's advantage over classical HLLC on this flow is tens of
-    // percent of the dissipated energy.
+    // the retention gap must be a real dissipation difference, not roundoff: the low-mach
+    // scheme's advantage over classical HLLC on this flow is tens of percent of the
+    // dissipated energy.
     let dissipated_std = e0 - e_std;
     assert!(
         (e_lm - e_std) > 0.1 * dissipated_std,

@@ -446,18 +446,22 @@ fn rhd_star_state<S: Scalar, const D: usize>(
     }
 }
 
-/// HLLC for special-relativistic hydrodynamics (mignone-bodo 2005). one
-/// function for all dimensions and directions. honors the
-/// `Fleischmann` low-mach acoustic-dissipation scaling.
+/// HLLC for special-relativistic hydrodynamics (mignone-bodo 2005). one function for all
+/// dimensions and directions.
+///
+/// `shear` both selects and parameterizes the HLLC+ transverse viscosity, the shock-stability
+/// half of the scheme. the low-mach accuracy half stays newtonian: separating the velocity-jump dissipation
+/// from the pressure-jump dissipation in the relativistic flux is a distinct derivation, and the
+/// defect it corrects is a subsonic one. `None` is classical HLLC exactly.
 pub fn hllc_rhd<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
     nhat: &Tensor<S, D>,
     vface: S,
-    shock_smoother: ShockwaveLimiter,
+    shear: Option<HllcPlusSensors<S>>,
 ) -> Cons<S, D> {
-    hllc_rhd_body(eos, prim_l, prim_r, nhat, vface, shock_smoother)
+    hllc_rhd_body(eos, prim_l, prim_r, nhat, vface, shear)
 }
 
 /// the RHD HLLC body, split out so the outer function can wrap it without re-emitting it.
@@ -468,7 +472,7 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
     prim_r: &Prim<S, D>,
     nhat: &Tensor<S, D>,
     vface: S,
-    shock_smoother: ShockwaveLimiter,
+    shear: Option<HllcPlusSensors<S>>,
 ) -> Cons<S, D> {
     let regime = crate::rhd::Rhd;
     // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); this parameter
@@ -490,27 +494,67 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                 || {
                     let (a_star, p_star) =
                         rhd_contact_props(&u_l, &u_r, &f_l, &f_r, nhat, a_l, a_r);
-                    match shock_smoother {
-                        // the anti-dissipation correction is derived from the newtonian
-                        // velocity-jump dissipation `rho c du` and its relativistic counterpart
-                        // carries the lorentz factor and the specific enthalpy, so the
-                        // relativistic star states take the classical flux. the accepted
-                        // (solver, regime) table admits the correction for newtonian gas alone.
-                        ShockwaveLimiter::Standard | ShockwaveLimiter::HllcPlus => S::branch(
-                            a_star.cmp_ge(vface),
-                            || {
-                                let us = rhd_star_state(
-                                    prim_l, &u_l, a_l, a_star, p_star, nhat, &metric,
-                                );
-                                f_l + (us - u_l) * a_l - us * vface
-                            },
-                            || {
-                                let us = rhd_star_state(
-                                    prim_r, &u_r, a_r, a_star, p_star, nhat, &metric,
-                                );
-                                f_r + (us - u_r) * a_r - us * vface
-                            },
-                        ),
+                    let classical = S::branch(
+                        a_star.cmp_ge(vface),
+                        || {
+                            let us =
+                                rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
+                            f_l + (us - u_l) * a_l - us * vface
+                        },
+                        || {
+                            let us =
+                                rhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat, &metric);
+                            f_r + (us - u_r) * a_r - us * vface
+                        },
+                    );
+                    match shear {
+                        None => classical,
+                        Some(sensors) => {
+                            // the transverse shear viscosity, carried onto the Mignone-Bodo star
+                            // states. the grid-aligned shock instability grows through the
+                            // transverse velocity jump in the multidimensional momentum balance,
+                            // which is a statement about the momentum equation rather than about
+                            // the newtonian closure, so the cure carries into the relativistic
+                            // regime with the inertia rewritten.
+                            //
+                            // what changes is the coefficient. the newtonian dissipation on a
+                            // velocity jump is the density times the wave-frame flux,
+                            // `rho (S - u)`; relativistically the transverse momentum is
+                            // `rho h W^2 v`, so the inertia carrying that jump is the enthalpy
+                            // density `rho h W^2 = e + p` and the coefficient becomes
+                            // `(e + p)(a - v)`. at `h -> 1`, `W -> 1` the two coincide, which is
+                            // the limit `hllc_plus_shear_reduces_to_the_newtonian_coefficient`
+                            // pins.
+                            let inertia = |cons: &Cons<S, D>, prim: &Prim<S, D>, a: S, vn: S| {
+                                (cons.nrg + cons.den + prim.pre) * (a - vn)
+                            };
+                            let vn_l = prim_l.vel.dot(nhat);
+                            let vn_r = prim_r.vel.dot(nhat);
+                            let chi_l = inertia(&u_l, prim_l, a_l, vn_l);
+                            let chi_r = inertia(&u_r, prim_r, a_r, vn_r);
+                            let cs_l = crate::rhd::sound_speed_sq(eos, prim_l.rho, prim_l.pre).sqrt();
+                            let cs_r = crate::rhd::sound_speed_sq(eos, prim_r.rho, prim_r.pre).sqrt();
+                            // the mach number stays a ratio of coordinate speeds: the imbalance
+                            // being corrected is between wave speeds multiplying differences of
+                            // conserved states, and a proper-velocity mach number would carry the
+                            // full lorentz factor.
+                            let mach = mach_scale(prim_l.vel.norm(), prim_r.vel.norm(), cs_l, cs_r);
+                            let a_k = S::select(a_star.cmp_ge(vface), a_l, a_r);
+                            let upwind = a_k / (a_k - a_star);
+                            let dv = prim_r.vel - prim_l.vel;
+                            let dv_perp = dv - nhat.scale(dv.dot(nhat));
+                            let weight = chi_l * chi_r / (chi_r - chi_l)
+                                * upwind
+                                * sensors.shocked
+                                * shear_weight(sensors.pressure_ratio, mach);
+                            classical
+                                + Cons {
+                                    chi: Default::default(),
+                                    den: S::ZERO,
+                                    mom: dv_perp.scale(weight),
+                                    nrg: S::ZERO,
+                                }
+                        }
                     }
                 },
             )
@@ -980,7 +1024,7 @@ mod tests {
             pre: 1.0,
         };
         let nhat = Tensor::unit(0);
-        let flux = hllc_rhd(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard);
+        let flux = hllc_rhd(&eos, &prim, &prim, &nhat, 0.0, None);
         let exact = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, exact.den));
         assert!(approx(flux.mom[0], exact.mom[0]));
@@ -1426,6 +1470,133 @@ mod tests {
             "a state at rest must have acoustic speeds +/- cs_rel = +/-{relativistic}, got \
              ({a_l}, {a_r})"
         );
+    }
+
+    #[test]
+    fn the_relativistic_shear_coefficient_reduces_to_the_newtonian_one() {
+        // the coefficient carrying the transverse viscosity is the inertia the transverse
+        // momentum equation gives that jump: the mass density `rho` in the newtonian momentum
+        // `rho v`, and the enthalpy density `rho h W^2 = e + p` in the relativistic `rho h W^2 v`.
+        // the two agree in the limit the relativistic system reduces in, and this pins that:
+        // as the flow slows and the gas cools, `h -> 1` and `W -> 1` and the relativistic
+        // coefficient must approach the newtonian one it generalizes.
+        //
+        // the coefficient is `(e + p)(a - v)` against `rho (S - u)`, so the ratio measured is
+        // `(e + p)/rho = h W^2`, which carries the whole departure.
+        let gamma = 5.0f64 / 3.0;
+        let eos = IdealGas { gamma };
+        let nhat = Tensor::new([1.0, 0.0]);
+        let mut previous = f64::INFINITY;
+        // colder and slower at each step: the two knobs that carry `h` and `W` to one.
+        for (speed, theta) in [(0.3f64, 0.3f64), (0.1, 3.0e-2), (0.03, 3.0e-3), (0.01, 3.0e-4)] {
+            let rho = 1.0;
+            let prim = Prim {
+                rho,
+                vel: Tensor::new([speed, 0.0]),
+                pre: theta * rho,
+            };
+            let cons = crate::rhd::Rhd.to_conserved(&eos, &prim);
+            // `e = tau + D` is the total energy density; `e + p = rho h W^2`.
+            let enthalpy_density = cons.nrg + cons.den + prim.pre;
+            let departure = (enthalpy_density / rho - 1.0).abs();
+            assert!(
+                departure < previous,
+                "at v = {speed}, p/rho = {theta} the relativistic inertia departs from the \
+                 newtonian one by {departure:.3e}, no closer than the previous {previous:.3e}; \
+                 the coefficient must converge on `rho` as the gas cools and slows"
+            );
+            previous = departure;
+            let _ = nhat;
+        }
+        assert!(
+            previous < 1.0e-3,
+            "at the coldest, slowest state the relativistic inertia still departs from the \
+             newtonian one by {previous:.3e}; the reduction is not being reached"
+        );
+    }
+
+    #[test]
+    fn the_relativistic_shear_term_vanishes_without_a_transverse_velocity_jump() {
+        // the term carries the in-plane velocity jump as a factor, so a face whose two states
+        // share their transverse velocity receives the classical Mignone-Bodo flux however
+        // strong the shock across it. this is what keeps the viscosity out of a
+        // one-dimensional problem, where no shear wave exists to damp.
+        let eos = IdealGas { gamma: 4.0f64 / 3.0 };
+        let nhat = Tensor::new([1.0, 0.0]);
+        // a strong relativistic shock, with the transverse component equal on both sides.
+        for shared_vt in [0.0f64, 0.2, -0.35] {
+            let l = Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.6, shared_vt]),
+                pre: 10.0,
+            };
+            let r = Prim {
+                rho: 0.2,
+                vel: Tensor::new([0.1, shared_vt]),
+                pre: 0.5,
+            };
+            let sensors = HllcPlusSensors {
+                // a strong shock as far as the sensors are concerned, so the weight is at full
+                // strength and the vanishing is attributable to the jump alone.
+                pressure_ratio: 0.05,
+                shocked: 1.0,
+            };
+            let classical = hllc_rhd(&eos, &l, &r, &nhat, 0.0, None);
+            let sheared = hllc_rhd(&eos, &l, &r, &nhat, 0.0, Some(sensors));
+            assert_eq!(
+                (
+                    classical.den.to_bits(),
+                    classical.mom[1].to_bits(),
+                    classical.nrg.to_bits()
+                ),
+                (
+                    sheared.den.to_bits(),
+                    sheared.mom[1].to_bits(),
+                    sheared.nrg.to_bits()
+                ),
+                "at a shared transverse velocity {shared_vt} the shear term moved the flux; it \
+                 carries the in-plane velocity jump as a factor and that jump is zero here"
+            );
+        }
+    }
+
+    #[test]
+    fn the_relativistic_shear_term_damps_a_transverse_velocity_jump() {
+        // and where the jump exists the term opposes it: the transverse momentum flux moves
+        // against the jump, which is what removes energy from the perturbation a grid-aligned
+        // front grows through.
+        let eos = IdealGas { gamma: 4.0f64 / 3.0 };
+        let nhat = Tensor::new([1.0, 0.0]);
+        let sensors = HllcPlusSensors {
+            pressure_ratio: 0.05,
+            shocked: 1.0,
+        };
+        for jump in [0.2f64, -0.2] {
+            let l = Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.6, -0.5 * jump]),
+                pre: 10.0,
+            };
+            let r = Prim {
+                rho: 0.2,
+                vel: Tensor::new([0.1, 0.5 * jump]),
+                pre: 0.5,
+            };
+            let classical = hllc_rhd(&eos, &l, &r, &nhat, 0.0, None);
+            let sheared = hllc_rhd(&eos, &l, &r, &nhat, 0.0, Some(sensors));
+            let delta = sheared.mom[1] - classical.mom[1];
+            assert!(
+                delta * jump < 0.0,
+                "a transverse jump of {jump} moved the transverse momentum flux by \
+                 {delta:.3e}, which carries the jump's own sign; the viscosity must oppose the \
+                 jump rather than reinforce it"
+            );
+            assert!(
+                delta.abs() > 1.0e-6,
+                "the shear term moved the transverse momentum flux by only {delta:.3e} on a \
+                 jump of {jump}; the term is present but inert and the sign check is vacuous"
+            );
+        }
     }
 
     #[test]

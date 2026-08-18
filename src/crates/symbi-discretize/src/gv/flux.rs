@@ -1391,7 +1391,10 @@ fn adiabatic_hllc_at_arm<const D: usize>(
     // the neighborhood pressure ratio the transverse shear viscosity is weighted by. only the
     // HLLC+ arm carries that viscosity, so only it pays the off-axis reads the sensor needs.
     let shear = matches!(smoother, ShockwaveLimiter::HllcPlus)
-        .then(|| hllc_plus_sensors(D as u8, dir, eos.gamma));
+        .then(|| {
+            let gamma = eos.gamma;
+            hllc_plus_sensors(D as u8, dir, &move |rho, pre| (gamma * pre / rho).sqrt())
+        });
     let flux = hllc(
         &eos,
         &left,
@@ -1437,8 +1440,12 @@ fn adiabatic_hllc_at_arm<const D: usize>(
 /// so `u - a` or `u + a` changes sign between neighbors. a hydrostatic gradient reverses
 /// nothing, however steep. gating the ratio on that reversal leaves the viscosity at full
 /// strength across a front and absent from an atmosphere.
-fn hllc_plus_sensors(ndim: u8, dir: u8, gamma: Gv) -> symbi_hydro::riemann::HllcPlusSensors<Gv> {
-    let shocked = neighborhood_shock_indicator(ndim, dir, gamma);
+fn hllc_plus_sensors(
+    ndim: u8,
+    dir: u8,
+    sound_speed: &dyn Fn(Gv, Gv) -> Gv,
+) -> symbi_hydro::riemann::HllcPlusSensors<Gv> {
+    let shocked = neighborhood_shock_indicator(ndim, dir, sound_speed);
     symbi_hydro::riemann::HllcPlusSensors {
         pressure_ratio: neighborhood_pressure_ratio(ndim, dir),
         shocked: Gv::select(shocked, Gv::from_f64(1.0), Gv::from_f64(0.0)),
@@ -1449,7 +1456,18 @@ fn hllc_plus_sensors(ndim: u8, dir: u8, gamma: Gv) -> symbi_hydro::riemann::Hllc
 /// against one of its neighbors — the shock indicator of Chen, Lin, Li & Yan (SIAM J. Sci.
 /// Comput. 42:B921, 2020, eq. 16), evaluated on the acoustic characteristics `u -+ a` along
 /// each axis in turn. returns the boolean mask, true where a shock is present.
-fn neighborhood_shock_indicator(ndim: u8, dir: u8, gamma: Gv) -> symbi_ir::gv::GvMask {
+///
+/// `sound_speed` maps `(rho, pre)` to the regime's own sound speed, because the two regimes
+/// disagree on it by the specific enthalpy and the newtonian expression evaluated on a
+/// relativistic gas exceeds the speed of light. the relativistic characteristics compose the
+/// two speeds as `(v -+ a)/(1 -+ v a)`, whose denominator is positive for any subluminal state,
+/// so the sign the indicator reads is the sign of `v -+ a` in both regimes and one expression
+/// serves each.
+fn neighborhood_shock_indicator(
+    ndim: u8,
+    dir: u8,
+    sound_speed: &dyn Fn(Gv, Gv) -> Gv,
+) -> symbi_ir::gv::GvMask {
     let at = |ax: usize, sweep: i32, off: i32| {
         let mut offsets = vec![0i32; ndim as usize];
         offsets[dir as usize] = sweep;
@@ -1457,7 +1475,7 @@ fn neighborhood_shock_indicator(ndim: u8, dir: u8, gamma: Gv) -> symbi_ir::gv::G
         let rho = Gv::field_offset("prim_rho", FieldRef::PrimRho, ndim, &offsets);
         let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, ndim, &offsets);
         let vel = Gv::field_offset("prim_v0", FieldRef::PrimVel(ax as u8), ndim, &offsets);
-        let cs = (gamma * pre / rho).sqrt();
+        let cs = sound_speed(rho, pre);
         (vel - cs, vel + cs)
     };
     // seeded false: a face touches a front only if some pair below reverses.
@@ -1602,7 +1620,13 @@ fn rhd_hllc_at_arm<const D: usize>(
     let eos = super::gv_eos(eos_arm, gamma);
     let (left, right, nhat, vface) =
         euler_reconstruct::<D>(D as u8, dir, dir as usize, Recon::Plm, None);
-    let flux = hllc_rhd(&eos, &left, &right, &nhat, vface, smoother);
+    let shear = matches!(smoother, ShockwaveLimiter::HllcPlus).then(|| {
+        let eos = eos.clone();
+        hllc_plus_sensors(D as u8, dir, &move |rho, pre| {
+            symbi_hydro::rhd::sound_speed_sq(&eos, rho, pre).sqrt()
+        })
+    });
+    let flux = hllc_rhd(&eos, &left, &right, &nhat, vface, shear);
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
@@ -1614,6 +1638,22 @@ pub fn rhd_hllc_flux_gv<const D: usize>(
     eos_arm: EosArm,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::Standard, eos_arm)
+}
+
+/// relativistic HLLC+ face flux: the Mignone-Bodo star states plus the transverse shear
+/// viscosity that carries shock stability. the grid-aligned shock instability grows through
+/// the transverse velocity jump in the multidimensional momentum balance, which relativistic
+/// jets and blast waves carry as readily as newtonian ones; the coefficient is the enthalpy
+/// density `rho h W^2 = e + p` in place of the newtonian mass density.
+///
+/// the low-mach accuracy term of the newtonian arm stays behind: separating the velocity-jump
+/// dissipation from the pressure-jump dissipation in the relativistic flux is its own
+/// derivation, and the defect it corrects is a subsonic one.
+pub fn rhd_hllc_plus_flux_gv<const D: usize>(
+    dir: u8,
+    eos_arm: EosArm,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::HllcPlus, eos_arm)
 }
 
 /// RMHD HLLC face flux — mignone-bodo (2006), null vs non-null normal B-field

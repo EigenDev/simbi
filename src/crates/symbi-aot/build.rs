@@ -1347,6 +1347,12 @@ fn gen_adiabatic_hllc_plus_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Re
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+fn gen_rhd_hllc_plus_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
+    let name = format!("rhd_face_flux_hllc_plus{}_{ndim}d_{dir}", eos.suffix());
+    let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::rhd_hllc_plus_flux_gv, dir, eos);
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 fn gen_rhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
     let name = format!("rhd_face_flux_hllc{}_{ndim}d_{dir}", eos.suffix());
     let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::rhd_hllc_flux_gv, dir, eos);
@@ -3313,6 +3319,8 @@ fn main() {
             gen_adiabatic_hllc_plus_face_flux(&out_dir, ndim, dir, Recon::Ppm);
             gen_rhd_hllc_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);
             gen_rhd_hllc_face_flux(&out_dir, ndim, dir, EosArm::TaubMathews);
+            gen_rhd_hllc_plus_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);
+            gen_rhd_hllc_plus_face_flux(&out_dir, ndim, dir, EosArm::TaubMathews);
         }
     }
     // RMHD HLLC + HLLD — 1D + 3D variants matching the HLLE RMHD layout

@@ -354,12 +354,15 @@ impl Solver {
                     | RegimeKind::NewtonianMhd
                     | RegimeKind::Rmhd
             ),
-            // HLLC+: both corrections are built from the newtonian velocity-jump dissipation
-            // `rho c du`. the relativistic counterpart carries the lorentz factor and the
-            // specific enthalpy in place of the density, and the MHD star states carry the
-            // null vs non-null normal-field branches, so the terms are derived for the
-            // newtonian gas contact alone.
-            Solver::HllcPlus => matches!(regime, RegimeKind::Newtonian),
+            // HLLC+: the transverse shear viscosity is a property of the multidimensional
+            // momentum balance, so it carries into the relativistic regime with the inertia
+            // rewritten from the mass density to the enthalpy density `rho h W^2 = e + p`;
+            // the newtonian arm additionally carries the low-mach accuracy term, whose
+            // relativistic velocity-jump / pressure-jump split is a separate derivation.
+            // excluded: isothermal (no contact wave to resolve, hence no HLLC flux kernel),
+            // and the MHD regimes, whose star states carry the null vs non-null normal-field
+            // branches the shear coefficient is not derived across.
+            Solver::HllcPlus => matches!(regime, RegimeKind::Newtonian | RegimeKind::Rhd),
             Solver::Hlld => regime.is_mhd(),
         }
     }
@@ -468,8 +471,8 @@ mod solver_matrix_tests {
             Solver::Hllc.valid_for(RegimeKind::Newtonian),
             "HLLC+ cannot be admissible where plain hllc is not"
         );
+        assert!(Solver::HllcPlus.valid_for(RegimeKind::Rhd));
         for r in [
-            RegimeKind::Rhd,
             RegimeKind::IsoNewtonian,
             RegimeKind::IsoMhd,
             RegimeKind::NewtonianMhd,

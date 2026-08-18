@@ -3,7 +3,7 @@
 //
 // measurement instrument, not a gate: the device wall-clock cost of the balanced
 // (hydrostatic-departure) reconstruction relative to plain, on the same sealed
-// plummer column the cpu probe times (sealed_column_unclamped::wb_cost_probe).
+// plummer column the cpu probe times (sealed_column_balanced::wb_cost_probe).
 // the balanced arm pays one isentrope exponentiation per stencil offset per face
 // side; how that prices out on device is a measurement, never an op count -- the
 // cpu numbers (1.55-1.72x flux-stage at n = 65536, noise at n = 128) do not

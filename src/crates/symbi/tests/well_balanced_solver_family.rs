@@ -129,11 +129,7 @@ fn run(solver: Solver, declared: bool) -> f64 {
 
 #[test]
 fn declaring_the_target_frees_the_solver_from_damping_the_residual() {
-    let solvers = [
-        ("hllc", Solver::Hllc),
-        ("hllc_lm", Solver::HllcPlus),
-        ("hllc_acoustic", Solver::HllcPlus),
-    ];
+    let solvers = [("hllc", Solver::Hllc), ("hllc_plus", Solver::HllcPlus)];
     println!("\nsealed stratified column, {STEPS} steps — min K/K_0 (deficit = 1 - K/K_0)");
     let mut undeclared = Vec::new();
     let mut declared = Vec::new();
@@ -149,22 +145,23 @@ fn declaring_the_target_frees_the_solver_from_damping_the_residual() {
         undeclared.push((name, bare));
         declared.push((name, with_target));
     }
+    let deficit = |k: f64| (1.0 - k).max(0.0);
 
-    // positive control: the acoustic scaling is the one that under-damps the residual,
-    // so its undeclared arm must show a deficit. without that this column is not
-    // exercising the imbalance and the declared results say nothing.
-    let bare_acoustic = undeclared[2].1;
+    // positive control: the low-dissipation solver is the one that under-damps the residual,
+    // so its undeclared arm must show a deficit. without that this column is not exercising
+    // the imbalance and the declared results say nothing.
+    let bare_low_mach = undeclared[1].1;
     assert!(
-        bare_acoustic < 1.0 - 1.0e-6,
-        "undeclared, the acoustic scaling held the floor at {bare_acoustic:.12} — this \
-         column no longer exercises the hydrostatic residual, so the declared arm is \
-         vacuous. lengthen the run or steepen the stratification"
+        bare_low_mach < 1.0 - 1.0e-6,
+        "undeclared, HLLC+ held the floor at {bare_low_mach:.12} — this column no longer \
+         exercises the hydrostatic residual, so the declared arm is vacuous. lengthen the run \
+         or steepen the stratification"
     );
 
-    // declaring must never make a solver worse: the correction is the scheme's own
-    // measured imbalance, so subtracting it can only remove a deposit.
+    // declaring must never make a solver worse: the correction is the scheme's own measured
+    // imbalance, so subtracting it can only remove a deposit.
     for ((name, bare), (_, with_target)) in undeclared.iter().zip(&declared) {
-        let (d_bare, d_decl) = ((1.0 - bare).max(0.0), (1.0 - with_target).max(0.0));
+        let (d_bare, d_decl) = (deficit(*bare), deficit(*with_target));
         assert!(
             d_decl <= d_bare + 1.0e-12,
             "{name}: declaring the target made the deficit WORSE ({d_bare:.3e} -> \
@@ -172,27 +169,37 @@ fn declaring_the_target_frees_the_solver_from_damping_the_residual() {
         );
     }
 
-    // the claim under test: for the scaling that cannot damp the residual itself, moving
-    // that job to the well-balancing recovers most of the floor — the division of labour
-    // works, even if it is not exact.
-    let (d_bare, d_decl) = (
-        (1.0 - undeclared[2].1).max(0.0),
-        (1.0 - declared[2].1).max(0.0),
-    );
+    // the claim under test: for the solver that cannot damp the residual itself, moving that
+    // job to the well-balancing recovers the floor. measured 4.9e-2 undeclared against 2.1e-13
+    // declared — eleven orders, where the law asks only for one.
+    let (d_bare, d_decl) = (deficit(undeclared[1].1), deficit(declared[1].1));
     assert!(
         d_decl * 10.0 < d_bare,
-        "declaring the target improved the acoustic scaling's deficit only from \
-         {d_bare:.3e} to {d_decl:.3e}; the well-balancing is not taking over the job of \
-         damping the hydrostatic residual"
+        "declaring the target improved HLLC+'s deficit only from {d_bare:.3e} to \
+         {d_decl:.3e}; the well-balancing is not taking over the job of damping the \
+         hydrostatic residual"
     );
 
-    // and what it does not do: the residual deficit still orders by how much dissipation
-    // each solver applies, so the declaration relieves the solver without replacing it.
-    // recorded here because it is the reason a stratified science run should still prefer
-    // the mach-limited scaling over the aggressive one.
+    // and what the declaration buys, stated as the gap it closes. undeclared, the two solvers
+    // are separated by how much dissipation each applies to the residual: classical HLLC holds
+    // the floor outright while HLLC+, which removes the velocity-jump damping the residual
+    // would otherwise receive, loses a measurable fraction. declared, both sit at the
+    // truncation of the balance itself and the solver has stopped mattering — which is the
+    // property that lets a stratified science run choose its solver on the physics rather than
+    // on the residual.
     assert!(
-        (1.0 - declared[1].1).max(0.0) < (1.0 - declared[2].1).max(0.0),
-        "the mach-limited scaling no longer holds the floor better than the aggressive \
-         one; the dissipation ordering this conclusion rests on has changed"
+        deficit(undeclared[0].1) * 1.0e3 < deficit(undeclared[1].1),
+        "undeclared, classical HLLC ({:.3e}) and HLLC+ ({:.3e}) are no longer separated by \
+         their dissipation; the gap the declaration closes is what this measures",
+        deficit(undeclared[0].1),
+        deficit(undeclared[1].1)
     );
+    for (name, k) in &declared {
+        assert!(
+            deficit(*k) < 1.0e-10,
+            "{name}: declared, the deficit is {:.3e}; with the target declared every solver \
+             must sit at the balance's own truncation rather than at its own dissipation",
+            deficit(*k)
+        );
+    }
 }
