@@ -123,3 +123,47 @@ def test_the_corrected_field_stays_divergence_free(profile):
     assert np.max(np.abs(div)) < 1.0e-4 * scale, (
         f"max |div v| = {np.max(np.abs(div)):e} against a gradient scale of {scale:e}"
     )
+
+
+@pytest.mark.parametrize("porosity", ["0", "1"])
+def test_the_seeded_power_law_column_receives_the_scale_invariant_seed(porosity):
+    """the perturbation dispatch follows the seed rather than the profile's name.
+
+    the admission gate and the perturbation dispatch guard the same doorway from two
+    sides, and they fail worst when they disagree: a power-law run with seed_epsilon
+    dialed up would carry /eps in its path while laying down the zero-angular-momentum
+    symmetry break underneath, and the free-fall outcome would read as a null result of
+    an experiment the run never performed. the serialized wires are deterministic under
+    turb_seed, so equality against the seed builder is exact."""
+    p = _problem("power_law", turb_seed=7, eps=0.25)
+    assert p.perturbation_expressions == p._seed_expression()
+
+    # the seedless power-law column keeps its linear symmetry break, so the in-flight
+    # runs' semantics are untouched by the doorway widening.
+    flags = [
+        "--porosity", porosity, "--no-pilot",
+        "--initial-profile", "power_law",
+        "--entropy-slope", "0.1666666666666667",
+    ]
+    bare = PorousTurbulentAccretor.from_cli(flags)
+    assert bare.perturbation_expressions == bare._symmetry_break_expression()
+
+
+def test_the_seeded_power_law_path_is_its_own_directory(tmp_path, monkeypatch):
+    """the seeded experiment writes beside the seedless one rather than over it.
+
+    the /eps segment separates the two series, and the index it names is the column's
+    operative density slope -- on the power-law profile that is the derived
+    n = (1 - s)/(gamma - 1) rather than the initial_index knob the profile ignores."""
+    monkeypatch.setenv("SCRATCH", str(tmp_path))
+    seeded = _problem("power_law", turb_seed=7, eps=0.25)
+    seeded.setup()
+    bare_flags = [
+        "--porosity", "1", "--no-pilot",
+        "--initial-profile", "power_law",
+        "--entropy-slope", "0.1666666666666667",
+    ]
+    bare = PorousTurbulentAccretor.from_cli(bare_flags)
+    bare.setup()
+    assert seeded.data_directory != bare.data_directory
+    assert "/eps0.25_n1.25/" in str(seeded.data_directory) + "/"
