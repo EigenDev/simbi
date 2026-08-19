@@ -727,7 +727,8 @@ staggered magnetic faces.
 **Well-balanced reconstruction:**
 
 With `wb_reconstruction=True`, the scheme reconstructs each cell's departure from its local
-isentrope ([Käppeli & Mishra 2014](https://www.sam.math.ethz.ch/sam_reports/reports_final/reports2014/2014-37_rev1.pdf))
+hydrostatic equilibrium ([Käppeli & Mishra 2016](https://doi.org/10.1051/0004-6361/201527815)),
+including equilibria with arbitrary entropy stratification,
 and writes the gravity source as an equilibrium-pressure difference at the cell faces. A sealed
 stratified column then holds its discrete equilibrium to machine precision (velocity residual
 around 1e-15 and entropy deficit around 1e-16). The same representation is used for reconstruction,
