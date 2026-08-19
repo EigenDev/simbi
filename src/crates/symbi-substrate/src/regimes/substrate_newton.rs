@@ -402,6 +402,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         }
     }
 
+    fn gamma_law(&self) -> Option<f64> {
+        // the newtonian adiabatic set closes its energy with the gamma law alone
+        // (`with_eos` refuses the synge closure).
+        Some(self.gamma)
+    }
+
     fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // the primitives now hold a state recovered from the conserved fields; anything
         // reading prim.* outside the evolve loop checks this before trusting it.

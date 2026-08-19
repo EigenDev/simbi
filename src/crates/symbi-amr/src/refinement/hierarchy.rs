@@ -53,6 +53,7 @@ use super::tracer_interface::{
 use super::transfer::{
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
     cf_ghost_slabs, copy_field, prolong_face_field, prolong_field, prolong_prims_balanced,
+    restrict_band_balanced,
     prolong_prims_swept, restrict_bface, restrict_cell_field, restrict_cons,
 };
 use std::ops::ControlFlow;
@@ -124,6 +125,12 @@ where
     /// on every call (the step loop allocates nothing). uninitialized on the
     /// root.
     pub prolong_sweep: std::sync::OnceLock<Vec<ProlongSweepScratch<NDIM, DOF, Mem>>>,
+    /// this level's pressure departures from the composite-lattice equilibrium
+    /// under its parent's seam bands — the balanced restriction's fine scratch.
+    /// lazily allocated over this level's allocated domain on the first
+    /// balanced restriction, reused on every call. unused on the root and on
+    /// plain hierarchies.
+    pub band_departure: std::sync::OnceLock<Field<f64, NDIM, Mem>>,
     /// the region of this level covered by the next finer level, in absolute
     /// indices of this level. None on the finest. single-coverage cap: one
     /// refined box per level (static refinement / SMR — a single `Domain`,
@@ -935,6 +942,7 @@ where
                 prim_old: None,
                 prim_lerp: None,
                 prolong_sweep: std::sync::OnceLock::new(),
+                band_departure: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
                 coverage: None,
@@ -977,6 +985,7 @@ where
             prim_old: None,
             prim_lerp: None,
             prolong_sweep: std::sync::OnceLock::new(),
+            band_departure: std::sync::OnceLock::new(),
             bcell_old: None,
             bface_old: None,
             coverage: None,
@@ -1079,6 +1088,7 @@ where
                 prim_old: None,
                 prim_lerp: None,
                 prolong_sweep: std::sync::OnceLock::new(),
+                band_departure: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
                 coverage: None,
@@ -2592,11 +2602,57 @@ where
         });
         let l = &self.levels[level];
         prof("c2p", || l.kernels.c2p(&l.state));
+        if self.cf_transfer_balanced(level + 1) {
+            prof("refine_restrict_balanced", || self.restrict_band_balanced(level));
+        }
         if has_coarser {
             self.prolong_cf(level, alpha0 + 1.0 / RATIO as f64);
         }
         let l = &self.levels[level];
         prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+    }
+
+    /// the balanced restriction of level `level`'s seam bands from level `level + 1`:
+    /// the covered coarse cells within the evolution reach of each coarse-fine seam
+    /// are rewritten onto the coarse mechanical chain from the uncovered cell beyond
+    /// the seam, carrying the fine departure. runs after the conservative restriction
+    /// and the coarse c2p, and rebuilds the band's conserved energy, which requires
+    /// the gamma-law closure the kernel set reports.
+    fn restrict_band_balanced(&self, level: usize) {
+        let coarse = &self.levels[level];
+        let fine = &self.levels[level + 1];
+        let gamma = coarse.kernels.gamma_law().unwrap_or_else(|| {
+            panic!(
+                "the balanced coarse-fine restriction rebuilds the seam band's energy under the \
+                 gamma law; level {level}'s kernel set reports another energy closure"
+            )
+        });
+        let departure = fine
+            .band_departure
+            .get_or_init(|| Field::zeros(&fine.state.geom.allocated).expect("band departure scratch"));
+        restrict_band_balanced(
+            &fine.state.fields.prim,
+            &fine.state.geom.interior,
+            departure,
+            &coarse.state.fields.prim,
+            coarse.state.fields.cons.nrg_field().expect("the balanced restriction needs cons.nrg"),
+            &coarse.state.geom.interior,
+            coarse.coverage.as_ref().unwrap(),
+            // the uncovered cell's update over one step depends on cells within
+            // `reach` per stage; the band holds the cells its own stencils read
+            // and two more, each of which removes a limiter-slope hop from the
+            // path the conservatively restricted interior's class offset takes
+            // to reach it (measured ~10x attenuation per cell on the sealed
+            // class column). capped by the decode's unrolled chain.
+            (coarse.kernels.reconstruction_reach() as usize + 2)
+                .min(symbi_discretize::WB_CF_CHAIN_MAX as usize),
+            gamma,
+            &fine.state.geom.x_lo,
+            &fine.state.geom.dx,
+            &coarse.state.geom.x_lo,
+            &coarse.state.geom.dx,
+            &coarse.state.immersed.as_ref().unwrap().bodies,
+        );
     }
 
     /// advance this level's clock (fine levels only; the root clock is the driver's). pure extraction.

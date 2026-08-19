@@ -521,6 +521,173 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     );
 }
 
+/// the balanced restriction of a coarse seam band: after the conservative
+/// restriction and the coarse c2p, rewrite the pressure of the covered coarse
+/// cells within `band` cells of each coarse-fine seam so that they sit on the
+/// coarse mechanical chain from the uncovered cell beyond the seam, carrying the
+/// fine solution's departure from the composite-lattice equilibrium:
+///
+///   encode   — each fine cell under the band writes its pressure's departure
+///              from the equilibrium chained from the uncovered coarse cell,
+///              across the seam face, through the fine densities (`WbBandEncode`
+///              into the fine `departure` scratch).
+///   restrict — the departures average into the coarse band (`RefineRestrict`
+///              into the coarse pressure field, which the decode reads back).
+///   decode   — each band cell adds the coarse chain from the uncovered cell
+///              through the restricted coarse densities (`WbCfDecode`).
+///   energy   — the band's conserved energy follows the rewritten pressure
+///              under the gamma law (`BandEnergy`).
+///
+/// conservative averaging alone leaves every covered cell below its class
+/// pressure by the jensen gap `rho phi'' h^2 / 8` while the uncovered neighbor
+/// sits on the class, a standing pressure step the coarse stage fluxes kick
+/// every step. the band is the only covered data the uncovered stencils read
+/// (the evolution reach), so the deeper covered cells keep the conservative
+/// average; inside the band the energy differs from the fine average by that
+/// O(h^2) gap. the departures are measured against the uncovered cell continued
+/// across the seam, so a column balanced across the seam encodes to zero and a
+/// wave standing at the seam encodes to its full amplitude.
+#[allow(clippy::too_many_arguments)]
+pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    fine: &PrimFieldsGeneric<D, DOF, Mem>,
+    fine_interior: &Domain<D>,
+    departure: &symbi_grid::Field<f64, D, Mem>,
+    coarse_prim: &PrimFieldsGeneric<D, DOF, Mem>,
+    coarse_nrg: &symbi_grid::Field<f64, D, Mem>,
+    coarse_interior: &Domain<D>,
+    coverage: &Domain<D>,
+    band: usize,
+    gamma: f64,
+    fine_x_lo: &[f64; D],
+    fine_dx: &[f64; D],
+    coarse_x_lo: &[f64; D],
+    coarse_dx: &[f64; D],
+    bodies: &symbi_ib::BodyCollection<f64, D>,
+) {
+    assert!(
+        DOF == D,
+        "the balanced restriction is baked for ncomp = D + 2; DOF = {DOF} on a {D}d grid has no kernel"
+    );
+    let pre = "the balanced restriction requires an energy-carrying prim set";
+    let fine_pre = fine.pre_field().expect(pre);
+    let coarse_pre = coarse_prim.pre_field().expect(pre);
+    let band = band as isize;
+    assert!(
+        band as i64 <= symbi_discretize::WB_CF_CHAIN_MAX
+            && (2 * band - 1) as i64 <= symbi_discretize::WB_BAND_CHAIN_MAX,
+        "the balanced restriction band of {band} cells reaches past the unrolled chain bounds"
+    );
+
+    let mut body_scalars = Vec::new();
+    push_body_slot_scalars(bodies, &mut body_scalars);
+    let fine_lo: Vec<i32> = (0..D).map(|a| fine_interior.spaces[a].lo as i32).collect();
+    let fine_hi: Vec<i32> = (0..D)
+        .map(|a| fine_interior.spaces[a].hi as i32 - 1)
+        .collect();
+    let coarse_lo: Vec<i32> = (0..D).map(|a| coarse_interior.spaces[a].lo as i32).collect();
+    let coarse_hi: Vec<i32> = (0..D)
+        .map(|a| coarse_interior.spaces[a].hi as i32 - 1)
+        .collect();
+
+    // one band per coarse-fine seam face: the coverage edge on axis `ax`, low or
+    // high side, where an uncovered coarse cell lies beyond it inside the coarse
+    // interior. a coverage edge flush with the coarse interior is a physical
+    // boundary of the whole hierarchy and carries no seam.
+    for ax in 0..D {
+        for high in [false, true] {
+            let (c_lo, c_hi) = (coverage.spaces[ax].lo, coverage.spaces[ax].hi);
+            let uncovered = if high { c_hi } else { c_lo - 1 };
+            if uncovered < coarse_interior.spaces[ax].lo || uncovered >= coarse_interior.spaces[ax].hi {
+                continue;
+            }
+            // the coarse band along `ax`, full coverage extent elsewhere, and the
+            // fine cells under it.
+            let (b_lo, b_hi) = if high {
+                ((c_hi - band).max(c_lo), c_hi)
+            } else {
+                (c_lo, (c_lo + band).min(c_hi))
+            };
+            let mut band_dom = coverage.clone();
+            band_dom.spaces[ax].lo = b_lo;
+            band_dom.spaces[ax].hi = b_hi;
+            let mut fine_band = Domain::new(std::array::from_fn(|a| Space {
+                name: coverage.spaces[a].name,
+                lo: 2 * coverage.spaces[a].lo,
+                hi: 2 * coverage.spaces[a].hi,
+            }));
+            fine_band.spaces[ax].lo = 2 * b_lo;
+            fine_band.spaces[ax].hi = 2 * b_hi;
+            // the fine edge cell and the seam face along `ax`.
+            let edge = if high { 2 * c_hi - 1 } else { 2 * c_lo };
+            let face = fine_x_lo[ax] + (if high { 2 * c_hi } else { 2 * c_lo }) as f64 * fine_dx[ax];
+
+            // encode: fine departures from the uncovered cell continued across the seam.
+            let mut ints: Vec<i32> = Vec::new();
+            let mut lo = fine_lo.clone();
+            let mut hi = fine_hi.clone();
+            lo[ax] = edge as i32;
+            hi[ax] = edge as i32;
+            ints.extend(lo.iter());
+            ints.extend(hi.iter());
+            ints.push(uncovered as i32);
+            for a in 0..D {
+                ints.push((a == ax) as i32);
+            }
+            let mut scalars = vec![face];
+            scalars.extend_from_slice(fine_x_lo);
+            scalars.extend_from_slice(fine_dx);
+            scalars.extend_from_slice(coarse_x_lo);
+            scalars.extend_from_slice(coarse_dx);
+            scalars.extend_from_slice(&body_scalars);
+            dispatch_fields_each::<f64, Mem, D>(
+                KernelId::WbBandEncode { ndim: D as u8 }.name(),
+                &fine_band,
+                &[&fine.rho, fine_pre, &coarse_prim.rho, coarse_pre],
+                &[departure],
+                &ints,
+                &scalars,
+            );
+
+            // restrict the departures into the coarse band's pressure slots.
+            restrict_cell_field(departure, coarse_pre, &band_dom);
+
+            // decode: the coarse chain from the uncovered cell through the band.
+            let mut lo = coarse_lo.clone();
+            let mut hi = coarse_hi.clone();
+            lo[ax] = uncovered as i32;
+            hi[ax] = uncovered as i32;
+            let ints: Vec<i32> = lo.iter().chain(hi.iter()).copied().collect();
+            let mut scalars = Vec::new();
+            scalars.extend_from_slice(coarse_x_lo);
+            scalars.extend_from_slice(coarse_dx);
+            scalars.extend_from_slice(&body_scalars);
+            dispatch_fields_each::<f64, Mem, D>(
+                KernelId::WbCfDecode { ndim: D as u8 }.name(),
+                &band_dom,
+                &[&coarse_prim.rho],
+                &[coarse_pre],
+                &ints,
+                &scalars,
+            );
+
+            // the band's conserved energy follows its rewritten pressure.
+            let mut inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = vec![&coarse_prim.rho];
+            for k in 0..D {
+                inputs.push(&coarse_prim.vel[k]);
+            }
+            inputs.push(coarse_pre);
+            dispatch_fields_each::<f64, Mem, D>(
+                KernelId::BandEnergy { ndim: D as u8 }.name(),
+                &band_dom,
+                &inputs,
+                &[coarse_nrg],
+                &[],
+                &[gamma],
+            );
+        }
+    }
+}
+
 /// pack the balance-aware transfer's per-slot body scalars in the kernels'
 /// declared order: `pos[0..D], mass, soft, softkind` per slot, MAX_SOURCE_BODIES
 /// slots. an absent or non-gravitating slot carries mass = 0, which zeroes its

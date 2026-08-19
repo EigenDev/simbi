@@ -70,14 +70,22 @@ pub enum KernelId {
     /// alpha*new_k` — the coarse-side pass feeding `RefineProlongMulti1t`.
     FieldLerpMulti { ncomp: u8, ndim: u8 },
     /// the balance-aware coarse-fine encode: fused time lerp over the coarse
-    /// parent region with rho/pre written as departures from one hydrostatic
-    /// anchor equilibrium (the anchor re-lerped in-thread from the raw
-    /// inputs). cartesian gamma-law prim sets, ncomp = ndim + 2.
+    /// parent region with pre written as its departure from the mechanical
+    /// equilibrium chained from the coarse cell under the nearest fine interior
+    /// cell. cartesian prim sets, ncomp = ndim + 2.
     WbCfLerpEncode { ndim: u8 },
-    /// the balance-aware coarse-fine decode: the fine ghost rho/pre add back
-    /// the anchor equilibrium at the ghost's own potential, the anchor
-    /// re-lerped in-thread from the coarse rho/pre snapshots.
+    /// the balance-aware coarse-fine decode: the fine ghost pre adds back the
+    /// mechanical equilibrium chained from the nearest fine interior cell
+    /// through the fine densities; also the coarse-band decode of the balanced
+    /// restriction.
     WbCfDecode { ndim: u8 },
+    /// the balanced restriction's fine encode: fine pre under a coarse seam band
+    /// as its departure from the equilibrium chained from the uncovered coarse
+    /// cell beyond the seam, continued across the seam face.
+    WbBandEncode { ndim: u8 },
+    /// the gamma-law energy rebuild over a region whose pressure was rewritten
+    /// in primitive space.
+    BandEnergy { ndim: u8 },
     /// the immersed-boundary [Drain] penalization: the
     /// property-algebra kernel whose p = 1 stack reduces bit-exactly to the
     /// uniform-scaling drain. adiabatic, cartesian.
@@ -269,6 +277,16 @@ impl KernelId {
                 "wb_cf_decode_1d",
                 "wb_cf_decode_2d",
                 "wb_cf_decode_3d",
+            ][dim_ix(ndim)],
+            KernelId::WbBandEncode { ndim } => [
+                "wb_band_encode_1d",
+                "wb_band_encode_2d",
+                "wb_band_encode_3d",
+            ][dim_ix(ndim)],
+            KernelId::BandEnergy { ndim } => [
+                "band_energy_1d",
+                "band_energy_2d",
+                "band_energy_3d",
             ][dim_ix(ndim)],
             KernelId::PenalizeDrain { ndim } => [
                 "penalize_drain_1d",

@@ -426,6 +426,25 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
         &k,
         &writes,
     );
+    // the balanced restriction pair: the fine encode under a coarse seam band
+    // (chained from the uncovered coarse cell across the seam) and the gamma-law
+    // energy rebuild of the band after its decode through `WbCfDecode`.
+    let (k, writes) = symbi_discretize::wb_band_encode_gv(nd, MAX_SOURCE_BODIES);
+    emit_gv(
+        out_dir,
+        KernelId::WbBandEncode { ndim }.name(),
+        ndim,
+        &k,
+        &writes,
+    );
+    let (k, writes) = symbi_discretize::band_energy_gv(nd);
+    emit_gv(
+        out_dir,
+        KernelId::BandEnergy { ndim }.name(),
+        ndim,
+        &k,
+        &writes,
+    );
 }
 
 // passive-scalar (dye) transport: the donor-cell D_chi update from the

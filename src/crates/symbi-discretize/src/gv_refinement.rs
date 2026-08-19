@@ -751,12 +751,18 @@ pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
 // density and velocity pass through the transfer unchanged. cartesian.
 // =============================================================================
 
-/// the longest chain either transfer kernel unrolls, in cells along one axis:
-/// the fine ghost slab is the evolution halo (at most three cells for the
+/// the longest chain the coarse-fine transfer kernels unroll, in cells along one
+/// axis: the fine ghost slab is the evolution halo (at most three cells for the
 /// parabolic stencil), and the coarse parent region reaches the prolongation's
-/// own ghost width past the slab's parents. the host dispatch asserts both
-/// extents against this bound.
+/// own ghost width past the slab's parents. the balanced restriction's coarse
+/// band (the evolution reach, at most three) decodes through the same kernel.
+/// the host dispatch asserts every extent against this bound.
 pub const WB_CF_CHAIN_MAX: i64 = 4;
+
+/// the longest chain the balanced restriction's fine encode unrolls: the fine
+/// cells under a coarse band of up to `WB_CF_CHAIN_MAX` cells, chained from the
+/// fine interior edge — twice the band less one.
+pub const WB_BAND_CHAIN_MAX: i64 = 2 * WB_CF_CHAIN_MAX;
 
 /// the per-slot body scalars a balance-aware transfer kernel declares:
 /// `body_{b}_pos_{g}` per grid axis, then `body_{b}_mass` / `_soft` /
@@ -828,7 +834,7 @@ fn int_clamp(coord: NodeId, lo: NodeId, hi: NodeId) -> NodeId {
 /// reference cell `ref_idx` through the lattice's own cells along an
 /// axis-ordered staircase (axis 0 first): `p_ref` plus, for every step between
 /// adjacent cells, `rho_from (phi(c_from) - phi(F)) + rho_to (phi(F) - phi(c_to))`
-/// with `F` the face the two share. each leg unrolls `WB_CF_CHAIN_MAX` steps in
+/// with `F` the face the two share. each leg unrolls `max_steps` steps in
 /// each direction; steps past the leg's length are masked to zero and their
 /// loads clamp onto the leg's last cell, so every read lands on a visited cell.
 /// a thread sitting on the reference cell takes every mask and returns `p_ref`
@@ -844,6 +850,7 @@ fn chained_pressure(
     x_lo: &[Gv],
     dx: &[Gv],
     slots: &[([Gv; 3], Gv, Gv, Gv)],
+    max_steps: i64,
 ) -> Gv {
     let coords: Vec<NodeId> = with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
     let phi_center = |idx: &[NodeId]| -> Gv {
@@ -880,7 +887,7 @@ fn chained_pressure(
                 idx[ax] = int_select(inside, reached, coords[ax]);
                 idx
             };
-            for t in 1..=WB_CF_CHAIN_MAX {
+            for t in 1..=max_steps {
                 let from = at(t - 1);
                 let to = at(t);
                 // the face shared by `from` and `to`: `to`'s lower face walking
@@ -962,7 +969,7 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
         .collect();
     let p_ref = lerp_at(ncomp - 1, &ref_idx);
     let rho_at = |idx: &[NodeId]| lerp_at(0, idx);
-    let p_eq = chained_pressure(ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots);
+    let p_eq = chained_pressure(ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX);
 
     let mut writes = Vec::with_capacity(ncomp);
     for k in 0..ncomp {
@@ -1021,10 +1028,129 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
         .map(|ax| int_clamp(coords[ax], lo[ax], hi[ax]))
         .collect();
     let p_ref = gv_load_at("dst_pre", "dst_pre", &ref_idx);
-    let p_eq = chained_pressure(ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots);
+    let p_eq = chained_pressure(ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX);
 
     let pre_g = departure + p_eq;
     let writes = vec![("dst_pre".to_string(), "dst_pre".into(), pre_g.node())];
+    (end_trace(), writes)
+}
+
+/// trace the balanced restriction's fine encode over the fine cells under a
+/// coarse band at a coarse-fine seam: each fine cell's pressure becomes its
+/// departure from the mechanical equilibrium chained from the uncovered coarse
+/// cell beyond the seam, continued across the seam face and through the fine
+/// cells' own densities. the reference is the mechanical class of the
+/// composite lattice (the uncovered coarse cells together with the fine cells),
+/// which is the grid the solution lives on: the coarse cell `a` carries its own
+/// segment from its center to the seam face, the fine edge cell `e` carries the
+/// segment from that face point to its own center, and the fine chain runs on
+/// from `e`. a fine column balanced against its coarse neighbor across the seam
+/// encodes to departures that vanish identically; a wave standing at the seam
+/// encodes to its full amplitude, so the coarse side sees it.
+///
+/// buffers: src_rho, src_pre (the fine primitives, inputs), crs_rho, crs_pre
+/// (the coarse primitives, inputs) then dst (the fine departure, output). ints:
+/// lo_{ax}, hi_{ax} (the fine reference clamp: the fine interior edge on the
+/// seam's normal axis, the interior elsewhere), a (the uncovered coarse index on
+/// the normal axis), normal_{ax} (1 on the seam's normal axis, 0 elsewhere).
+/// scalars: face (the seam coordinate along the normal), x_lo_{ax}, dx_{ax}
+/// (fine), crs_x_lo_{ax}, crs_dx_{ax} (coarse), then the body slots.
+pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
+    assert!((1..=3).contains(&ndim), "wb_band_encode_gv: ndim must be 1..=3");
+    begin_trace();
+    let (lo, hi) = declare_interior_bounds(ndim);
+    let a_idx: NodeId = with_trace(|t| t.scalar_int("a"));
+    let normal: Vec<NodeId> = with_trace(|t| {
+        (0..ndim)
+            .map(|ax| t.scalar_int(&format!("normal_{ax}")))
+            .collect()
+    });
+    let face = Gv::scalar("face");
+    let x_lo: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
+        .collect();
+    let dx: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("dx_{ax}"))).collect();
+    let crs_x_lo: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("crs_x_lo_{ax}")))
+        .collect();
+    let crs_dx: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("crs_dx_{ax}")))
+        .collect();
+    let slots = declare_body_slots(ndim, n_bodies);
+
+    // registration order pins the buffer order: fine rho, fine pre, coarse rho,
+    // coarse pre, then the departure output.
+    let coords: Vec<NodeId> = with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+    let rho_at = |idx: &[NodeId]| gv_load_at("src_rho", "src_rho", idx);
+    let _ = rho_at(&coords);
+    let pre_cell = Gv::field("src_pre", "src_pre");
+    let ref_idx: Vec<NodeId> = (0..ndim)
+        .map(|ax| int_clamp(coords[ax], lo[ax], hi[ax]))
+        .collect();
+    // the uncovered coarse cell: `a` on the normal axis, the thread's own parent
+    // elsewhere.
+    let one_i = int_const(1);
+    let two_i = int_const(2);
+    let crs_idx: Vec<NodeId> = (0..ndim)
+        .map(|ax| {
+            let parent = int_op(ElementWiseOp::FloorDiv, coords[ax], two_i);
+            let is_normal = int_op(ElementWiseOp::Eq, normal[ax], one_i);
+            int_select(is_normal, a_idx, parent)
+        })
+        .collect();
+    let rho_a = gv_load_at("crs_rho", "crs_rho", &crs_idx);
+    let pre_a = gv_load_at("crs_pre", "crs_pre", &crs_idx);
+
+    // the coarse cell's center, the seam face point on its transverse center
+    // line, and the fine edge cell's center.
+    let c_a = centroid_position(ndim, &crs_idx, &crs_x_lo, &crs_dx);
+    let mut f_pt = c_a;
+    for ax in 0..ndim {
+        let on_normal = Gv::of(normal[ax]).cmp_gt(Gv::from_f64(0.5));
+        f_pt[ax] = Gv::select(on_normal, face, c_a[ax]);
+    }
+    let c_e = centroid_position(ndim, &ref_idx, &x_lo, &dx);
+    let phi_a = body_slots_potential(&c_a, &slots);
+    let phi_f = body_slots_potential(&f_pt, &slots);
+    let phi_e = body_slots_potential(&c_e, &slots);
+    let rho_e = rho_at(&ref_idx);
+    let p_ref = pre_a + rho_a * (phi_a - phi_f) + rho_e * (phi_f - phi_e);
+    let p_eq = chained_pressure(
+        ndim,
+        &ref_idx,
+        p_ref,
+        &rho_at,
+        &x_lo,
+        &dx,
+        &slots,
+        WB_BAND_CHAIN_MAX,
+    );
+    let departure = pre_cell - p_eq;
+    let writes = vec![("dst".to_string(), "dst".into(), departure.node())];
+    (end_trace(), writes)
+}
+
+/// trace the gamma-law energy rebuild over a region whose pressure was rewritten
+/// in primitive space: `nrg = pre / (gamma - 1) + rho |v|^2 / 2`.
+///
+/// buffers: prim_rho, prim_vel_0.., prim_pre (inputs) then cons_nrg (output).
+/// scalars: gamma.
+pub fn band_energy_gv(ndim: usize) -> (GvKernel, Writes) {
+    assert!((1..=3).contains(&ndim), "band_energy_gv: ndim must be 1..=3");
+    begin_trace();
+    let gamma = Gv::scalar("gamma");
+    let rho = Gv::field("prim_rho", "prim_rho");
+    let vel: Vec<Gv> = (0..ndim)
+        .map(|k| {
+            let key = format!("prim_vel_{k}");
+            Gv::field(&key, key.as_str())
+        })
+        .collect();
+    let pre = Gv::field("prim_pre", "prim_pre");
+    let half = Gv::from_f64(0.5);
+    let v2 = vel.iter().map(|&v| v * v).sum::<Gv>();
+    let nrg = pre / (gamma - Gv::ONE) + half * rho * v2;
+    let writes = vec![("cons_nrg".to_string(), "cons_nrg".into(), nrg.node())];
     (end_trace(), writes)
 }
 

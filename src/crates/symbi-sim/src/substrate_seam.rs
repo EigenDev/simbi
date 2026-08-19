@@ -74,6 +74,16 @@ where
     fn reconstruction_reach(&self) -> u8 {
         2
     }
+
+    /// the adiabatic index when this set's energy closure is the gamma law, which
+    /// is what lets a region's conserved energy be rebuilt from a pressure
+    /// rewritten in primitive space (`nrg = p / (gamma - 1) + rho v^2 / 2`). the
+    /// balanced restriction of a refinement hierarchy needs exactly that; any
+    /// other closure returns None and the hierarchy refuses to balance the
+    /// restriction rather than rebuild the energy with the wrong formula.
+    fn gamma_law(&self) -> Option<f64> {
+        None
+    }
     fn c2p(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>);
     // the SSP Shu-Osher stage update `cons = a0*u_n + ac*(cons - dt*div(F) + dt*S)`. one method
     // serves every explicit SSP scheme; the driver feeds the per-stage convex coefficients

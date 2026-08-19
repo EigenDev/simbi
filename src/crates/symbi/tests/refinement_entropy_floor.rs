@@ -853,6 +853,43 @@ fn diagnose_cf_transfer_ghost_exactness() {
     // no assertion: the numbers are the record; the permanent gate is the floor hold.
 }
 
+/// the class-residual probe across the lower seam: after one prime (prolong +
+/// restrict + balanced band), the coarse mechanical recursion residual across
+/// every coarse face from three cells below the seam through the band and into
+/// the conservatively restricted interior, and the fine recursion across the
+/// seam face. the face that carries a step is the operator that breaks the fixed
+/// point.
+///
+/// run: cargo test -p symbi --test refinement_entropy_floor -- --ignored band_residual --nocapture
+#[test]
+#[ignore = "diagnostic: coarse recursion residual across the seam band after one restriction"]
+fn diagnose_band_class_residual() {
+    let region = RefinementRegion {
+        x_lo: [0.3],
+        x_hi: [0.7],
+    };
+    let mut hier = build_gravity_wb_class(&[region], N, true);
+    hier.prime();
+    // one full root step so a restriction and the band rewrite have run.
+    hier.evolve_steps(1).unwrap();
+    let phi = |x: f64| -GM / (x + G_OFFSET);
+    let st = &hier.levels[0].state;
+    let rho = st.fields.prim.rho.view();
+    let pre = st.fields.prim.pre.as_ref().expect("adiabatic").view();
+    let ilo = st.geom.interior.spaces[0].lo;
+    let h = 1.0 / N as f64;
+    let a = (0.3 * N as f64) as isize - 1 + ilo;
+    println!("coarse recursion residual across faces (relative), lower seam, a = x {:.4}:", ((a - ilo) as f64 + 0.5) * h);
+    for k in (a - 3)..(a + 6) {
+        let (ra, pa) = (*rho.at([k]), *pre.at([k]));
+        let (rb, pb) = (*rho.at([k + 1]), *pre.at([k + 1]));
+        let (xa, xb) = (((k - ilo) as f64 + 0.5) * h, ((k + 1 - ilo) as f64 + 0.5) * h);
+        let f = 0.5 * (xa + xb);
+        let chained = pa + ra * (phi(xa) - phi(f)) + rb * (phi(f) - phi(xb));
+        println!("  face x = {f:.4}: residual {:.3e}", (pb - chained) / pb);
+    }
+}
+
 /// the coarse-fine entropy dipole, characterized in time under both reconstruction
 /// balances. the recorded pre-balance signature: the root-level K/K0 span at the
 /// patch's upper edge grows 1.8e-3 -> 9.3e-2 from t = 0.03 to t = 8 with no
@@ -901,41 +938,45 @@ fn diagnose_cf_dipole_growth() {
 /// the plain 2-level floor at t = 8 under the (t = 2, t = 8) schedule on the
 /// class-seeded column — the invariance pin's recorded value.
 const PLAIN_FLOOR_T8: f64 = 0.966946737203;
+/// the balanced seam's fixed-point bound: measured 1.0e-13 at t = 2 and 2.6e-13 at
+/// t = 8, three orders inside.
+const FIXED_POINT_BOUND: f64 = 1.0e-10;
 
 #[test]
 fn the_balanced_seam_transfer_holds_the_entropy_floor() {
-    // the theorem under gate: encode the coarse slab as departures from the local
-    // equilibrium, prolong the departures, decode on the equilibrium at the fine
-    // ghost's own potential — then coarse stencil data on the discrete equilibrium
-    // land the fine ghosts exactly back on it, at any prolongation order and any
-    // limiter, and the seam is a fixed point of the balanced hierarchy.
+    // the theorem under gate: a balanced two-level hierarchy holds a discretely
+    // balanced column as a fixed point across its coarse-fine seam. three
+    // operators share the seam and each is built on the mechanical equilibrium
+    // (Kaeppeli & Mishra, A&A 587, A94, 2016), the piecewise-constant-density
+    // chain of `-rho dphi`:
     //
-    // the mechanical (piecewise-constant-density) equilibrium satisfies that
-    // theorem through the chain form: the encode measures the coarse pressure
-    // against the chain from the coarse cell under the nearest fine interior
-    // cell, and the decode rebuilds each ghost on the fine chain from that
-    // interior cell through the ghosts' own densities. measured: the fine cf
-    // ghosts sit on the fine recursion against the interior to 3.6e-16 where
-    // raw prolongation leaves them 1.2e-4 off (the ghost-exactness diagnostic
-    // above), and the balanced 2-level deficit at t = 2 drops 1.04e-3 -> 5.3e-5.
+    //   the prolongation transfer encodes the coarse pressure as its departure
+    //   from the chain out of the coarse cell under the nearest fine interior
+    //   cell, prolongs the departures, and decodes each fine ghost on the fine
+    //   chain from that interior cell through the ghosts' own densities — the
+    //   ghost-exactness diagnostic above measures the fine ghosts on the fine
+    //   recursion to 3.6e-16 (raw prolongation: 1.2e-4);
     //
-    // the residual is the restriction layer, a separate operator: conservative
-    // averaging of on-class fine data lands every covered coarse cell below its
-    // class pressure by the jensen gap `rho [phi(C) - (phi(c_lo) + phi(c_hi))/2]`
-    // = rho phi'' h_f^2 / 8 on the concave potential, while the first uncovered
-    // coarse cell, never restricted, sits on the class exactly — a standing
-    // O(h^2) pressure step at the patch edge. each coarse stage's flux at that
-    // face kicks the uncovered neighbor; the flux register restores the net
-    // conserved flux at the end of the step, but the later stage's inner-face
-    // flux was already formed on the kicked state, so a deposit of order the
-    // step lands every step and the deficit grows linearly with the clock
-    // (5.3e-5 at t = 2, 2.1e-4 at t = 8). the test derives the step from the
-    // class column (1.5e-5 relative at the lower edge, 1.7e-5 at the upper) and
-    // bounds the transfer-on arm at five times it on the fixed t = 2 clock; the
-    // measured deficit is 3.1 times the step and the transfer-off arm 60 times,
-    // so one constant separates both arms with margin. closing the layer itself
-    // means a class-consistent restriction of the covered pressures, which is
-    // in tension with conservative averaging at O(h^2) and is its own design.
+    //   the balanced restriction rewrites the covered coarse cells within a band
+    //   of the seam (the evolution reach plus two) onto the coarse chain from the
+    //   uncovered cell beyond it, carrying the fine departure from the
+    //   composite-lattice equilibrium, and rebuilds their energy; without it,
+    //   conservative averaging leaves every covered cell below its class pressure
+    //   by the jensen gap `rho phi'' h_f^2 / 8` (derived below from the class
+    //   column: 1.5e-5 relative at the lower edge, 1.7e-5 at the upper) while the
+    //   uncovered neighbor sits on the class exactly, and that standing step kicks
+    //   the uncovered cell through the stage fluxes every step — a deficit growing
+    //   linearly with the clock (5.3e-5 at t = 2, 2.1e-4 at t = 8 with the
+    //   transfer exact and no band; 5.5e-7 at t = 2 with a band of the reach
+    //   alone, the step then reaching the uncovered cell through a two-hop
+    //   limiter path);
+    //
+    //   the flux register closes the conserved budget at the seam face.
+    //
+    // measured with all three active: deficit 1.0e-13 at t = 2 and 2.6e-13 at
+    // t = 8, the minimum no longer at the seam. the bound below is a fixed-point
+    // claim with three orders of margin, and the jensen step is kept as the scale
+    // the transfer-off arm must exceed for the positive control to be live.
     const T_GATE: f64 = 2.0;
     let region = || RefinementRegion {
         x_lo: [0.3],
@@ -961,7 +1002,7 @@ fn the_balanced_seam_transfer_holds_the_entropy_floor() {
             .fold(0.0_f64, f64::max)
     };
     let bound_on = 5.0 * jensen_step;
-    println!("restriction jensen step {jensen_step:.3e}; transfer-on bound {bound_on:.3e}");
+    println!("restriction jensen step {jensen_step:.3e}; transfer-off must exceed {bound_on:.3e}");
 
     // positive control: the plain 2-level seam vents visibly by this clock
     // (measured 1.2e-2). if this stops tripping, the setup no longer stresses the
@@ -1022,19 +1063,23 @@ fn the_balanced_seam_transfer_holds_the_entropy_floor() {
         1.0 - floor_off
     );
     assert!(
-        floor_on > 1.0 - bound_on,
-        "the balance-aware coarse-fine transfer left a deficit of {:.2e} on level {lvl}: \
-         beyond five restriction jensen steps ({jensen_step:.2e}), so the transfer is \
-         venting again",
+        floor_on > 1.0 - FIXED_POINT_BOUND,
+        "the balanced coarse-fine seam left a deficit of {:.2e} on level {lvl}; the \
+         balanced column is no longer a fixed point of the two-level hierarchy",
         1.0 - floor_on
     );
-    // the record at the longer clock: the restriction layer deposits per step, so
-    // the deficit grows about linearly (measured 2.1e-4, four times the t = 2
-    // value over four times the clock); a transfer leak would sit on top of that.
+    // the longer clock: a fixed point stays put, where the restriction layer alone
+    // deposited per step and grew linearly.
     on.evolve(8.0).unwrap();
     let (floor_on8, _, x_on8) = worst_entropy_ratio_vs_class(&on, &col, N);
     println!(
         "balanced 2-level column at t = 8: deficit {:.2e} at x = {x_on8:.4}",
+        1.0 - floor_on8
+    );
+    assert!(
+        floor_on8 > 1.0 - FIXED_POINT_BOUND,
+        "the balanced seam deficit grew to {:.2e} by t = 8; a per-step deposit is \
+         back on the seam",
         1.0 - floor_on8
     );
 }
