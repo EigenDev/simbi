@@ -179,11 +179,19 @@ def test_a_declared_density_index_is_refused(porous_cls):
         _problem(porous_cls, entropy_slope=1.0 / 6.0, initial_index=1.4)
 
 
-def test_the_loss_cone_seed_is_refused(porous_cls):
-    # the instability supplies its own driving, so the amplitude on this branch is set by
-    # linearity rather than by the loss cone.
-    with pytest.raises(ValueError, match="seed_epsilon requires"):
-        _problem(porous_cls, seed_epsilon=0.05)
+def test_the_column_admits_a_subsonic_seed_and_refuses_a_shocking_one(porous_cls):
+    """the seed is admitted on its mach, not on the column's name.
+
+    this column's sound speed tracks v_K -- cs^2 = gamma GM/((n+1) r) -- so the seed
+    carries ONE mach at every radius, which is the property that makes an ignition
+    outcome independent of r_acc/R_B. a subsonic seed on it is therefore weak everywhere
+    and is admitted. an amplitude whose delivered field goes supersonic shocks on
+    arrival, breaking the premise that the seed supplies the symmetry break while the
+    convection makes the turbulence, and is refused."""
+    admitted = _problem(porous_cls, seed_epsilon=0.05)
+    assert admitted.seed_mach_number() < 1.0
+    with pytest.raises(Exception, match="reaches mach"):
+        _problem(porous_cls, seed_epsilon=2.0)
 
 
 def test_the_entropy_slope_keys_the_output_path(porous_cls, tmp_path, monkeypatch):

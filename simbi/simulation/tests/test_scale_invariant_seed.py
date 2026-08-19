@@ -234,11 +234,13 @@ def test_mode_table_is_deterministic_and_well_formed() -> None:
 
 
 def test_seed_requires_the_stratified_start() -> None:
-    """on a constant medium the same seed is mach 0.12 at the outer boundary and
-    supersonic near the accretor, because cs no longer tracks v_K. the config must
-    refuse that pairing rather than run a seed whose weakness is radius-dependent."""
+    """on a constant medium the same seed is weak at the outer boundary and supersonic
+    near the accretor, because cs is fixed while v_K grows inward. no finite mach
+    describes that seed, so the config must refuse it rather than run one whose weakness
+    is radius-dependent. the refusal is keyed on the emitted seed's mach rather than on
+    the profile's name, so it states the condition it is protecting."""
     problem = _problem()
-    with pytest.raises(Exception, match="hydrostatic"):
+    with pytest.raises(Exception, match="no bounded seed mach"):
         type(problem)(
             seed_epsilon=_EPSILON, initial_profile="uniform", well_balanced=True
         )
