@@ -442,40 +442,56 @@ class Expr:
         return d(self._node_id)
 
 
+def _graph_of(where: "ExprGraph | Expr") -> ExprGraph:
+    """the graph to build a leaf in, named either directly or by any expression
+    already living in it.
+
+    a state leaf is almost always wanted alongside coordinates that exist, and
+    `density(x1)` says "the density at the same place as x1" without the caller
+    having to hold the graph in a variable to say it."""
+    return where.graph if isinstance(where, Expr) else where
+
+
 # factory functions
-def constant(value: float, graph: ExprGraph) -> Expr:
+def constant(value: float, graph: "ExprGraph | Expr") -> Expr:
     """Create a constant expression."""
-    return Expr(graph, graph.add_node("constant", value=float(value)))
+    g = _graph_of(graph)
+    return Expr(g, g.add_node("constant", value=float(value)))
 
 
-def variable(name: str, graph: ExprGraph) -> Expr:
+def variable(name: str, graph: "ExprGraph | Expr") -> Expr:
     """Create a variable expression."""
-    return Expr(graph, graph.add_node("variable", name=name))
+    g = _graph_of(graph)
+    return Expr(g, g.add_node("variable", name=name))
 
 
-def parameter(idx: int, graph: ExprGraph) -> Expr:
+def parameter(idx: int, graph: "ExprGraph | Expr") -> Expr:
     """Create a parameter expression."""
-    return Expr(graph, graph.add_node("parameter", param_idx=idx))
+    g = _graph_of(graph)
+    return Expr(g, g.add_node("parameter", param_idx=idx))
 
 
-def density(graph: ExprGraph) -> Expr:
+def density(graph: "ExprGraph | Expr") -> Expr:
     """the per-cell density rho (a fluid-state leaf for state-dependent sources)."""
-    return Expr(graph, graph.add_node("variable", name="rho"))
+    g = _graph_of(graph)
+    return Expr(g, g.add_node("variable", name="rho"))
 
 
-def velocity(axis: int, graph: ExprGraph) -> Expr:
+def velocity(axis: int, graph: "ExprGraph | Expr") -> Expr:
     """the per-cell velocity component `vel[axis]` (0-indexed: 0->vx, 1->vy, 2->vz)."""
     if axis not in (0, 1, 2):
         raise ValueError(f"velocity axis must be 0, 1, or 2, got {axis}")
-    return Expr(graph, graph.add_node("variable", name=f"vel{axis + 1}"))
+    g = _graph_of(graph)
+    return Expr(g, g.add_node("variable", name=f"vel{axis + 1}"))
 
 
-def pressure(graph: ExprGraph) -> Expr:
+def pressure(graph: "ExprGraph | Expr") -> Expr:
     """the per-cell pressure (energy-bearing regimes only; rejected on isothermal)."""
-    return Expr(graph, graph.add_node("variable", name="pre"))
+    g = _graph_of(graph)
+    return Expr(g, g.add_node("variable", name="pre"))
 
 
-def cell_volume(graph: ExprGraph) -> Expr:
+def cell_volume(graph: "ExprGraph | Expr") -> Expr:
     """the cell's lab-frame volume measure dV, the weight for an extensive quantity.
 
     this is the measure the finite-volume update itself uses, so `density() * cell_volume()`
@@ -484,7 +500,8 @@ def cell_volume(graph: ExprGraph) -> Expr:
     per-unit-volume density and weighting it by the measure would make the deposited
     amount depend on the resolution.
     """
-    return Expr(graph, graph.add_node("variable", name="dv"))
+    g = _graph_of(graph)
+    return Expr(g, g.add_node("variable", name="dv"))
 
 
 # math functions

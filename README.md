@@ -368,12 +368,11 @@ from simbi import expression as expr
 @computed_field
 @property
 def census_expressions(self) -> list[ExpressionDict]:
-    g = expr.ExprGraph()
-    x1, x2, x3 = (expr.variable(v, g) for v in ("x1", "x2", "x3"))
+    x1, x2, x3 = expr.coords(3)
     r = expr.sqrt(x1 * x1 + x2 * x2 + x3 * x3)
-    vx, vy, vz = (expr.velocity(ii, g) for ii in (0, 1, 2))
+    vx, vy, vz = (expr.velocity(ii, x1) for ii in (0, 1, 2))
     v_r = (x1 * vx + x2 * vy + x3 * vz) / r
-    rho, dv = expr.density(g), expr.cell_volume(g)
+    rho, dv = expr.density(x1), expr.cell_volume(x1)
     m = rho * dv
     return [
         expr.Census(
@@ -530,7 +529,7 @@ dashboard's setup panel — handy for the derived numbers you'd otherwise print 
 
 ### Source terms
 
-Add gravity or custom hydro sources as expression graphs:
+Add gravity or custom hydro sources as expressions. Constant downward gravity is one line:
 
 ```python
 from simbi import expression as expr
@@ -538,16 +537,33 @@ from simbi import expression as expr
 @computed_field
 @property
 def source_expressions(self) -> list[ExpressionDict]:
-    graph = expr.ExprGraph()
-    x_comp = expr.constant(0.0, graph)
-    y_comp = expr.constant(-0.1, graph)      # constant downward gravity
-    compiled = graph.compile([x_comp, y_comp])
-    return [compiled.serialize_source(expr.SourceKind.FORCE, dim=2)]
+    return [expr.force([0.0, -0.1], dim=2)]
 ```
 
-`FORCE` is one of several kinds — there's also `ROTATING_FRAME`, `COOLING`, `RELAX`, `SPONGE`,
-`INJECT`, and `RAW`, and `serialize_source` takes `params=` (runtime scalars), `region=` (a mask
-folded in), and `target=`. See `newtonian/rt.py` and `newtonian/ordered_sources.py`.
+Anything position-dependent starts from `coords`, which hands you the spatial variables.
+Ordinary arithmetic works on them, and plain numbers mix in freely:
+
+```python
+@computed_field
+@property
+def source_expressions(self) -> list[ExpressionDict]:
+    x, y = expr.coords(2)
+    r_sq = x * x + y * y
+    kappa = expr.where(r_sq > 0.64, 2.0, 0.0)          # damp the outer annulus
+    # [kappa, rho_ref, vel_ref_x, vel_ref_y, pre_ref], as primitives
+    return [expr.sponge([kappa, 1.0, 0.0, 0.0, 1.0], dim=2)]
+```
+
+There is a constructor per kind — `force`, `rotating_frame`, `cooling`, `relax`, `sponge`,
+`inject`, `raw` — plus `boundary` for a driven (Dirichlet) face and `equilibrium` for a
+stationary target the scheme must hold exactly. Each checks its own arity and names the
+slots it wants, so a short list fails in Python rather than in the solver. They all accept
+`region=` (a mask expression folded in), and `raw` takes `target=`.
+
+A reference state travels as **primitives**, and the regime converts it through its own
+conservation law. One sponge wire therefore serves a Newtonian gas, a relativistic one, and
+a curved background alike. See `newtonian/rt.py`, `newtonian/rotating_sponge.py`, and
+`grhd/gr_bondi_cartesian.py`.
 
 ### Immersed bodies
 
