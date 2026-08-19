@@ -8,7 +8,7 @@
 //     + p_cell (A_hi - A_lo) / V                   (geometric pressure source)
 //     + S_grav,
 //
-// and on a discretely balanced isentrope -- where the balanced reconstruction
+// and on a discretely balanced column -- where the balanced reconstruction
 // makes every face pressure the equilibrium pressure p_eq(phi_face) and the
 // cell pressure is p_eq(phi_c) -- the sum vanishes identically when
 //
@@ -17,12 +17,16 @@
 // checked per chart with the chart's own exact finite-volume factors (cartesian
 // A = 1, V = dr; cylindrical A = r, V = (r_hi^2 - r_lo^2)/2; spherical A = r^2,
 // V = (r_hi^3 - r_lo^3)/3) and the same `LocalEquilibrium` profile the kernels
-// trace. the face pressures come from the neighbor cell's equilibrium, so the
-// residual also carries the reconstruction-consistency statement (both anchors
-// give the face the same value to roundoff) rather than assuming it. positive
-// control: the analytic `rho g` source leaves a truncation-scale residual on
-// the same column, so a vanishing sum is a property of the pairing, not of a
-// quiet setup.
+// trace: the mechanical equilibrium (Kaeppeli & Mishra, A&A 587, A94, 2016),
+// whose segment sums define the discrete class the column is seeded in. the
+// density is deliberately non-isentropic -- the class carries arbitrary entropy
+// stratification, and the seeded modulation makes that the exercised case
+// rather than a corollary. the face pressures come from the neighbor cell's
+// equilibrium, so the residual also carries the reconstruction-consistency
+// statement (both anchors give a shared face the same value, exactly, by class
+// membership) rather than assuming it. positive control: the analytic `rho g`
+// source leaves a truncation-scale residual on the same column, so a vanishing
+// sum is a property of the pairing, not of a quiet setup.
 //
 // run: cargo test -p symbi-hydro --test wb_source_telescoping -- --nocapture
 // =============================================================================
@@ -33,22 +37,53 @@ const GAMMA: f64 = 5.0 / 3.0;
 const GM: f64 = 3.0;
 const K0: f64 = 0.7;
 
+/// the test potential: kepler plus a harmonic term. the addition is what keeps the
+/// positive control honest against the mechanical source, whose face differences are
+/// linear in phi: for the bare -GM/r, a geometric-mean anchor makes the face-difference
+/// quotient exact and the kepler identity r phi = const makes the cylindrical area
+/// weighting exact, so the analytic-source control telescopes to roundoff by
+/// coincidence and stops exercising the mismatch. the harmonic term breaks both
+/// identities on every chart while the telescoping property, which holds for any
+/// potential, is untouched.
 fn phi(r: f64) -> f64 {
-    -GM / r
+    -GM / r + 0.4 * r * r
 }
 
 /// gravitational acceleration -dphi/dr, for the analytic-source positive control.
 fn grav(r: f64) -> f64 {
-    -GM / (r * r)
+    -GM / (r * r) - 0.8 * r
 }
 
-/// the exact isentrope through `rho = rho0` at `r = r0`: bernoulli invariant
-/// `gamma K0/(gamma-1) rho^(gamma-1) + phi = const`.
-fn isentrope(r: f64) -> (f64, f64) {
+/// a smooth, deliberately non-isentropic density: the isentrope modulated by a
+/// finite ripple, so the seeded column carries genuine entropy stratification.
+fn stratified_rho(r: f64) -> f64 {
     let a = (GAMMA - 1.0) / (GAMMA * K0);
     let c = 1.0 / a + phi(2.0);
-    let rho = (a * (c - phi(r))).powf(1.0 / (GAMMA - 1.0));
-    (rho, K0 * rho.powf(GAMMA))
+    let iso = (a * (c - phi(r))).powf(1.0 / (GAMMA - 1.0));
+    iso * (1.0 + 0.3 * (7.0 * r).sin())
+}
+
+/// the column in the scheme's own discrete class: pressures related by the
+/// piecewise-constant-density segment sums, walking outward from the innermost
+/// anchor. membership is what makes two neighboring anchors' equilibria agree at
+/// their shared face exactly, whatever the stratification.
+fn balanced_column(anchors: &[f64], faces: &[f64]) -> (Vec<f64>, Vec<f64>) {
+    let rho: Vec<f64> = anchors.iter().map(|&r| stratified_rho(r)).collect();
+    let mut pre = vec![0.0; anchors.len()];
+    // deep enough that the segment sums stay positive over the whole column: the
+    // profile's positivity floor must never engage here, because a floored value is
+    // a clamp rather than a class member and the exact face agreement would be lost.
+    pre[0] = 12.0;
+    for k in 0..anchors.len() - 1 {
+        pre[k + 1] = pre[k]
+            + rho[k] * (phi(anchors[k]) - phi(faces[k + 1]))
+            + rho[k + 1] * (phi(faces[k + 1]) - phi(anchors[k + 1]));
+    }
+    assert!(
+        pre.iter().all(|&p| p > 1.0e-3),
+        "the seeded column left the physical regime; the class construction is vacuous"
+    );
+    (rho, pre)
 }
 
 /// per-chart face area and exact cell volume on [r_lo, r_hi] (per unit transverse
@@ -93,6 +128,9 @@ fn the_wb_source_telescopes_against_divergence_and_geometric_source_per_chart() 
         // the kernel ladder's cell positions on a uniform axis.
         let face = |ii: usize| 1.0 + ii as f64 * h;
         let anchor = |ii: usize| 0.5 * (face(ii) + face(ii + 1));
+        let anchors: Vec<f64> = (0..n).map(anchor).collect();
+        let faces: Vec<f64> = (0..=n).map(face).collect();
+        let (rho_col, pre_col) = balanced_column(&anchors, &faces);
 
         let mut worst_wb = 0.0_f64;
         let mut worst_plain = 0.0_f64;
@@ -103,21 +141,17 @@ fn the_wb_source_telescopes_against_divergence_and_geometric_source_per_chart() 
             let (a_lo, a_hi) = (chart.area(r_lo), chart.area(r_hi));
             let inv_v = 1.0 / chart.volume(r_lo, r_hi);
 
-            let (rho_c, p_c) = isentrope(r_c);
-            let eq = LocalEquilibrium::through(rho_c, p_c, phi(r_c), GAMMA);
+            let (rho_c, p_c) = (rho_col[ii], pre_col[ii]);
+            let eq = LocalEquilibrium::through(rho_c, p_c, phi(r_c));
 
             // face pressures as the balanced scheme produces them: the neighbor
             // cell's equilibrium evaluated at the shared face, so the identity is
             // exercised across the reconstruction-consistency seam rather than
             // against the cell's own profile alone.
-            let eq_dn = {
-                let (rho, p) = isentrope(anchor(ii - 1));
-                LocalEquilibrium::through(rho, p, phi(anchor(ii - 1)), GAMMA)
-            };
-            let eq_up = {
-                let (rho, p) = isentrope(anchor(ii + 1));
-                LocalEquilibrium::through(rho, p, phi(anchor(ii + 1)), GAMMA)
-            };
+            let eq_dn =
+                LocalEquilibrium::through(rho_col[ii - 1], pre_col[ii - 1], phi(anchor(ii - 1)));
+            let eq_up =
+                LocalEquilibrium::through(rho_col[ii + 1], pre_col[ii + 1], phi(anchor(ii + 1)));
             let p_face_lo = eq_dn.pressure_at(phi(r_lo));
             let p_face_hi = eq_up.pressure_at(phi(r_hi));
 
@@ -194,6 +228,10 @@ fn the_wb_source_telescopes_on_a_log_spaced_axis() {
             chart.name()
         );
 
+        let anchors: Vec<f64> = (0..n).map(|ii| anchor(ii as i64)).collect();
+        let faces: Vec<f64> = (0..=n).map(face).collect();
+        let (rho_col, pre_col) = balanced_column(&anchors, &faces);
+
         let mut worst_wb = 0.0_f64;
         let mut worst_plain = 0.0_f64;
         let mut scale = 0.0_f64;
@@ -203,20 +241,22 @@ fn the_wb_source_telescopes_on_a_log_spaced_axis() {
             let (a_lo, a_hi) = (chart.area(r_lo), chart.area(r_hi));
             let inv_v = 1.0 / chart.volume(r_lo, r_hi);
 
-            let (rho_c, p_c) = isentrope(r_c);
-            let eq = LocalEquilibrium::through(rho_c, p_c, phi(r_c), GAMMA);
+            let (rho_c, p_c) = (rho_col[ii], pre_col[ii]);
+            let eq = LocalEquilibrium::through(rho_c, p_c, phi(r_c));
 
             // face pressures from the neighbor cells' equilibria, as in the uniform
             // test: the identity is exercised across the reconstruction-consistency
             // seam.
-            let eq_dn = {
-                let (rho, p) = isentrope(anchor(ii as i64 - 1));
-                LocalEquilibrium::through(rho, p, phi(anchor(ii as i64 - 1)), GAMMA)
-            };
-            let eq_up = {
-                let (rho, p) = isentrope(anchor(ii as i64 + 1));
-                LocalEquilibrium::through(rho, p, phi(anchor(ii as i64 + 1)), GAMMA)
-            };
+            let eq_dn = LocalEquilibrium::through(
+                rho_col[ii - 1],
+                pre_col[ii - 1],
+                phi(anchor(ii as i64 - 1)),
+            );
+            let eq_up = LocalEquilibrium::through(
+                rho_col[ii + 1],
+                pre_col[ii + 1],
+                phi(anchor(ii as i64 + 1)),
+            );
             let p_face_lo = eq_dn.pressure_at(phi(r_lo));
             let p_face_hi = eq_up.pressure_at(phi(r_hi));
 
@@ -266,10 +306,12 @@ fn the_general_form_reduces_to_the_cartesian_pressure_difference() {
     let h = 1.0 / n as f64;
     let face = |ii: usize| 1.0 + ii as f64 * h;
     let anchor = |ii: usize| 0.5 * (face(ii) + face(ii + 1));
+    let anchors: Vec<f64> = (0..n).map(anchor).collect();
+    let faces: Vec<f64> = (0..=n).map(face).collect();
+    let (rho_col, pre_col) = balanced_column(&anchors, &faces);
     for ii in 1..n - 1 {
-        let r_c = anchor(ii);
-        let (rho_c, p_c) = isentrope(r_c);
-        let eq = LocalEquilibrium::through(rho_c, p_c, phi(r_c), GAMMA);
+        let (rho_c, p_c) = (rho_col[ii], pre_col[ii]);
+        let eq = LocalEquilibrium::through(rho_c, p_c, phi(anchors[ii]));
         let (p_lo, p_hi) = (eq.pressure_at(phi(face(ii))), eq.pressure_at(phi(face(ii + 1))));
         let general = ((p_hi - p_c) - (p_lo - p_c)) / h;
         let cartesian = (p_hi - p_lo) / h;

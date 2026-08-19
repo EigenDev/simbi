@@ -235,6 +235,100 @@ fn hydrostatic_atmosphere_ts(gm: f64, cells: usize, cfl: f64, ts: Timestepping) 
     hydrostatic_atmosphere_full(gm, cells, cfl, ts, true)
 }
 
+/// the atmosphere in the mechanical balanced scheme's own discrete class (Kaeppeli &
+/// Mishra, A&A 587, A94, 2016): densities are the isentropic profile sampled at cell
+/// centers, pressures follow the piecewise-constant-density segment sums of `-rho dphi`
+/// on the kernel's center/face ladder, marched inward from the outer wall where the
+/// pressure only grows. this column is the discrete fixed point the balanced
+/// reconstruction holds exactly; the analytic isentrope sits O(h^2) off it, which on a
+/// low-dissipation solver is a live perturbation rather than an equilibrium.
+fn class_column_atmosphere(gm: f64, cells: usize) -> Vec<(f64, f64)> {
+    let h = 1.0 / cells as f64;
+    let phi = |x: f64| -gm / (x + R_OFFSET);
+    let center = |k: usize| (k as f64 + 0.5) * h;
+    let face = |k: usize| k as f64 * h;
+    let mut col = vec![(0.0_f64, 0.0_f64); cells];
+    let rho_out = hydrostatic_density(center(cells - 1) + R_OFFSET, gm);
+    col[cells - 1] = (rho_out, k0() * rho_out.powf(GAMMA));
+    for k in (0..cells - 1).rev() {
+        let ra = hydrostatic_density(center(k) + R_OFFSET, gm);
+        let rb = hydrostatic_density(center(k + 1) + R_OFFSET, gm);
+        let pre = col[k + 1].1
+            + rb * (phi(center(k + 1)) - phi(face(k + 1)))
+            + ra * (phi(face(k + 1)) - phi(center(k)));
+        col[k] = (ra, pre);
+    }
+    assert!(
+        col.iter().all(|&(r, p)| r > 0.0 && p > 0.0),
+        "the class column left the physical regime; the fixed point is vacuous"
+    );
+    col
+}
+
+/// the atmosphere seeded on the class column, wall and body identical to
+/// `hydrostatic_atmosphere_full`.
+fn class_seeded_atmosphere(gm: f64, cells: usize, cfl: f64, ts: Timestepping) -> Sim {
+    let col = class_column_atmosphere(gm, cells);
+    let h = 1.0 / cells as f64;
+    let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([cells])
+        .spacing([h])
+        // a reflecting wall exerts no work on gas at rest, so the hydrostatic state is a
+        // fixed point of the boundary as well as of the interior.
+        .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+        .cfl(cfl)
+        .timestepping(ts)
+        .allocate()
+        .expect("sim construction failed")
+        .set_initial(move |x: [f64; 1]| {
+            let i = ((x[0] / h - 0.5).round() as usize).min(col.len() - 1);
+            let (rho, pre) = col[i];
+            Prim {
+                rho,
+                vel: Tensor::new([0.0]),
+                pre,
+            }
+        })
+        .build();
+    sim.with_bodies(BodyCollection::new().add(Body::gravitational(
+        0,
+        Tensor::new([-R_OFFSET]),
+        Tensor::zeros(),
+        gm,
+        1.0e-3,
+        SOFTENING,
+    )))
+}
+
+/// the worst per-cell `K(x, t) / K(x, 0)` against the seeded class column, with a
+/// fraction `skip` of the cells excluded at each wall. the class column carries a
+/// per-cell adiabat (its pressures come from the segment sums, its densities from the
+/// isentrope), so the floor is each cell against its own seed; anything below one is
+/// entropy the scheme destroyed.
+fn worst_entropy_ratio_vs_seed(sim: &Sim, col: &[(f64, f64)], skip_frac: f64) -> f64 {
+    let rho = sim.fields.prim.rho.view();
+    let pre = sim
+        .fields
+        .prim
+        .pre
+        .as_ref()
+        .expect("adiabatic carries pressure")
+        .view();
+    let ilo = sim.geom.interior.spaces[0].lo;
+    let cells: Vec<_> = sim.geom.interior.iter().collect();
+    let skip = (skip_frac * cells.len() as f64) as usize;
+    let mut worst = f64::INFINITY;
+    for c in cells.iter().skip(skip).take(cells.len() - 2 * skip) {
+        let r = *rho.at(*c);
+        if r > 0.0 {
+            let (rho0, pre0) = col[(c[0] - ilo) as usize];
+            let k_seed = pre0 / rho0.powf(GAMMA);
+            worst = worst.min(*pre.at(*c) / r.powf(GAMMA) / k_seed);
+        }
+    }
+    worst
+}
+
 #[test]
 fn a_hydrostatic_atmosphere_holds_its_entropy_at_every_field_strength() {
     // the exact solution is static at every `GM`: the pressure gradient balances gravity by
@@ -568,33 +662,32 @@ fn diagnose_entropy_residue_accumulates_or_rings() {
 /// K < K_0 deficit to the flux, not the source or the wall ledger (both hold
 /// the floor on this exact setup under HLLE). production knobs: cfl 0.3, rk2.
 ///
-/// the balanced low-mach arm's residual on this column is seeded by the last bits of the
-/// equilibrium profile and grows in proportion to that seed: 4982 steps leave a deficit of
-/// 1.9e-11 and max|v| of 1.1e-9, a factor 50 inside the 1e-9 floor the sweep asserts. a
-/// change to the arithmetic that evaluates the isentrope moves both numbers by its own
-/// factor in the last digits and leaves the bound untouched; a change that breaks the
-/// balance moves them by orders.
+/// every arm seeds the mechanical scheme's discrete class column and the floor is
+/// per-cell against the seed. for the dissipative arms the class column is the analytic
+/// atmosphere to truncation order and their dissipation holds the floor; for the
+/// balanced low-mach arm it is the exact discrete fixed point, so the residual sits at
+/// roundoff and a floor violation is entropy the flux itself destroyed.
 #[test]
 fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
     use symbi::prelude::Solver;
     let gm = 100.0;
+    let col = class_column_atmosphere(gm, N);
     let mut rows = Vec::new();
     // the low-mach arm pairs with the balanced reconstruction. a scheme that reduces the
     // dissipation acting on a stagnant column leaves its hydrostatic residual to the
-    // balancing, which removes the residual at its source; unpaired, this exact column loses
-    // 4.2e-4 of the floor.
+    // balancing, which removes the residual at its source.
     for (name, solver, balanced) in [
         ("hlle", Solver::Hlle, false),
         ("hllc", Solver::Hllc, false),
         ("hllc_plus", Solver::HllcPlus, true),
     ] {
-        let mut sim = hydrostatic_atmosphere_full(gm, N, 0.3, Timestepping::Rk2, true);
+        let mut sim = class_seeded_atmosphere(gm, N, 0.3, Timestepping::Rk2);
         let kernels = Kset::new(GAMMA, 0.3, &sim.geom.allocated)
             .with_solver(solver)
             .expect("solver/regime mismatch")
             .well_balanced_reconstruction(balanced);
         evolve(&mut sim, &kernels, T_HYDRO).expect("evolve failed");
-        let worst = worst_entropy_ratio_away_from_walls(&sim, WALL_SKIP);
+        let worst = worst_entropy_ratio_vs_seed(&sim, &col, WALL_SKIP);
         let vel = sim.fields.prim.vel[0].view();
         let mut vmax = 0.0_f64;
         for c in sim.geom.interior.iter() {
@@ -622,13 +715,12 @@ fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
 /// the low-mach arm's floor law with its precondition made explicit: the sealed
 /// stratified column holds `K >= K_0` under the low-mach arm while its reduction is
 /// genuinely engaged — the residual velocities stay below the mach limit, so a pass
-/// cannot come from the ramp being inactive. unpaired, this exact configuration loses
-/// 4.2e-4 of the floor at t = 2 (5.4e-4 at half the timestep — spatial
-/// anti-dissipation, not a source bias): the ramp cuts the acoustic dissipation that
-/// damps the hydrostatic residual and the ringing undershoots the adiabat. the
-/// balanced reconstruction removes that residual at its source — each cell's
-/// departure from the isentrope through it is what gets limited, so the balanced
-/// column presents no face jump and there is nothing to ring.
+/// cannot come from the ramp being inactive. the ramp cuts the acoustic dissipation
+/// that damps any hydrostatic residual, so whatever face jump the seeded column
+/// presents rings undamped and undershoots the adiabat. the balanced reconstruction
+/// removes the jump at its source — pressure departures from the segment-sum
+/// equilibrium through each cell are what gets limited, so the class column presents
+/// no face jump and there is nothing to ring.
 #[test]
 fn the_low_mach_arm_holds_the_floor_with_the_correction_active() {
     use symbi::prelude::Solver;
@@ -638,7 +730,8 @@ fn the_low_mach_arm_holds_the_floor_with_the_correction_active() {
     const CORRECTION_ACTIVE_BELOW: f64 = 0.1;
 
     let gm = 100.0;
-    let mut sim = hydrostatic_atmosphere_full(gm, N, 0.3, Timestepping::Rk2, true);
+    let col = class_column_atmosphere(gm, N);
+    let mut sim = class_seeded_atmosphere(gm, N, 0.3, Timestepping::Rk2);
     let kernels = Kset::new(GAMMA, 0.3, &sim.geom.allocated)
         .with_solver(Solver::HllcPlus)
         .expect("solver/regime mismatch")
@@ -662,7 +755,7 @@ fn the_low_mach_arm_holds_the_floor_with_the_correction_active() {
          engaged and the floor law is vacuous"
     );
 
-    let worst = worst_entropy_ratio_away_from_walls(&sim, WALL_SKIP);
+    let worst = worst_entropy_ratio_vs_seed(&sim, &col, WALL_SKIP);
     assert!(
         worst > 1.0 - 1.0e-9,
         "the low-mach arm destroyed entropy on the sealed column: min K/K0 = \

@@ -2,28 +2,22 @@
 // balanced_drain_vacuum_extrapolation.rs
 //
 // a spherical drain pulling supersonic inflow out of gas that sits below the
-// ambient isentrope, reconstructed on the departures from the local hydrostatic
-// profile.
+// ambient adiabat, reconstructed on the pressure departures from the local
+// mechanical equilibrium (Kaeppeli & Mishra, A&A 587, A94, 2016).
 //
-// the profile a balanced reconstruction extrapolates along is the isentrope
-// through the anchor cell, rho_eq ~ [1 + (gamma-1)(phi_anchor - phi)/cs^2]^
-// (1/(gamma-1)). the bracket reaches zero — the isentrope's own vacuum boundary
-// — once the potential climbs by more than cs^2/(gamma-1) across the
-// reconstruction footprint. cold gas in a deep potential reaches that boundary
-// within three cells: the free-fall mach number and the enthalpy the footprint
-// spends are the same number, and the boundary lands inside the stencil at
-// roughly mach 3. the equilibrium then collapses toward zero at the outer
-// stencil points while growing without bound at the inner ones, the limiter
-// sees departures spanning that whole range, and the face states it builds go
-// negative — which is what the first-order flux correction spends its budget
-// repairing.
+// the profile a balanced reconstruction extrapolates along is the linear segment
+// p_eq = p_anchor + rho_anchor (phi_anchor - phi). cold gas in a deep potential
+// drives that line past its positive domain within the reconstruction footprint:
+// the segment crosses zero once the potential climbs by p/rho across the stencil,
+// and a face state built on a negative equilibrium leaves the admissible set --
+// which is what the first-order flux correction would spend its budget repairing.
 //
-// the balancing carries a per-cell weight for exactly this: where the isentrope
-// terminates inside the footprint, the weight scales the potential variation
-// down and the profile degrades continuously to a constant, whose departures are
-// the plain differences of the state. this gate measures the flux correction's
-// firing count on a configuration that puts 500 cells past the vacuum boundary
-// while leaving the surrounding atmosphere balanced.
+// the profile carries a positivity floor for exactly this: past the crossing the
+// evaluation returns a floor rather than a negative pressure, the departure
+// carries the difference, and the limiter works on finite numbers. this gate
+// measures the flux correction's firing count on a configuration that puts
+// hundreds of cells past the segment's positive domain while leaving the
+// surrounding atmosphere balanced: the correction must find nothing to repair.
 //
 // run: cargo test -p symbi --test balanced_drain_vacuum_extrapolation -- --nocapture
 // =============================================================================
@@ -37,7 +31,6 @@ use symbi_algebra::Tensor;
 use symbi_discretize::Recon;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
-use symbi_hydro::hydrostatic::{BALANCE_FADE_FULL, BALANCE_STENCIL_REACH};
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, SurfaceSpec};
@@ -145,16 +138,20 @@ fn build() -> Hier {
     )
 }
 
-/// the largest share of a cell's enthalpy that the reconstruction footprint through it
-/// spends climbing the potential, over the interior, and the number of cells past the
-/// isentrope's vacuum boundary. this is the quantity the per-cell weight reads, evaluated
-/// here on the state the run actually reaches.
-fn footprint_enthalpy_spend(hier: &Hier) -> (f64, usize) {
+/// the reconstruction footprint in cell widths: the farthest offset the parabola's
+/// six-point window evaluates the equilibrium at.
+const FOOTPRINT_REACH: f64 = 3.0;
+
+/// the largest share of its segment's positive domain that a cell's reconstruction
+/// footprint spends climbing the potential, over the interior, and the number of cells
+/// whose footprint crosses the segment's zero (`rho * rise > p`, where the positivity
+/// floor engages). evaluated on the state the run actually reaches.
+fn footprint_overreach(hier: &Hier) -> (f64, usize) {
     let st = &hier.levels[0].state;
     let rho = st.fields.prim.rho.view();
     let pre = st.fields.prim.pre_field().expect("adiabatic pre").view();
     let lo: [isize; 3] = std::array::from_fn(|a| st.geom.interior.spaces[a].lo as isize);
-    let reach = BALANCE_STENCIL_REACH * DX;
+    let reach = FOOTPRINT_REACH * DX;
     let (mut worst, mut past) = (0.0_f64, 0usize);
     for c in st.geom.interior.iter() {
         let x: [f64; 3] =
@@ -169,49 +166,33 @@ fn footprint_enthalpy_spend(hier: &Hier) -> (f64, usize) {
                 rise = rise.max(phi(r) - phi_c);
             }
         }
-        let cs2 = GAMMA * pre.at(c) / rho.at(c);
-        let spend = (GAMMA - 1.0) * rise / cs2;
+        let spend = rho.at(c) * rise / pre.at(c);
         worst = worst.max(spend);
-        if spend >= BALANCE_FADE_FULL {
+        if spend >= 1.0 {
             past += 1;
         }
     }
     (worst, past)
 }
 
-/// the drain runs without spending the first-order flux correction on its own reconstruction.
-///
-/// measured, N = 32, four cells across the accretion radius, ppm + hllc-lm + balanced
-/// reconstruction, on the two arms that differ only in whether the local profile is weighted
-/// where its vacuum boundary lands inside the reconstruction footprint:
-///
-///   weighted by the isentrope's validity   40 steps, 0 fallback cell-substages, 0 frozen
-///   at full strength everywhere            first firing on step 4, 1058 fallback and 708
-///                                          frozen by step 11, then a halt on 16 consecutive
-///                                          unrecoverable freeze substages carrying
-///                                          rho = -83.1, p = -310 three cells off the accretor
-///
-/// at full strength the equilibrium collapses to the floor at the outer stencil points and
-/// grows without bound at the inner ones, so the face states the limiter builds on the
-/// resulting departures leave the admissible set across the draining core; the first-order
-/// redo reads the same poisoned reconstruction and cannot recover them, which is what turns
-/// the fallback into a freeze and the freeze streak into a halted run. weighted, the profile
-/// stays inside its own domain and the correction has nothing to repair.
-///
-/// the flow itself carries no shock — an atmosphere falling smoothly through a drain — so the
-/// admissible-set redo has no legitimate work in this domain and the count belongs entirely to
-/// the reconstruction.
+/// the drain runs without spending the first-order flux correction on its own
+/// reconstruction. the flow itself carries no shock — an atmosphere falling smoothly
+/// through a drain — so the admissible-set redo has no legitimate work in this domain,
+/// and every firing would be the balanced reconstruction extrapolating its equilibrium
+/// past the point where the segment describes a gas. the positivity floor and the
+/// departure that carries the clamped difference are what keep every face state
+/// admissible while hundreds of cells sit past the segment's zero crossing.
 #[test]
-fn a_supersonic_drain_does_not_reconstruct_past_the_isentropes_vacuum_boundary() {
+fn a_supersonic_drain_reconstructs_admissible_faces_past_the_segments_positive_domain() {
     fofc_reset_stats();
     let mut hier = build();
     // the footprint spend is a property of the state the run passes through, and the drain
     // heats its core as it empties it, so the deepest state is sampled step by step rather
     // than read off the end.
-    let (mut spend, mut past) = footprint_enthalpy_spend(&hier);
+    let (mut spend, mut past) = footprint_overreach(&hier);
     for _ in 0..STEPS {
         hier.evolve_steps(1).unwrap();
-        let (s, p) = footprint_enthalpy_spend(&hier);
+        let (s, p) = footprint_overreach(&hier);
         spend = spend.max(s);
         past = past.max(p);
     }
@@ -220,32 +201,33 @@ fn a_supersonic_drain_does_not_reconstruct_past_the_isentropes_vacuum_boundary()
         "\nsupersonic drain, {STEPS} steps, balanced ppm reconstruction\n\
          fofc fallback cell-substages: {fired}\n\
          fofc frozen cell-substages:   {froze}\n\
-         worst footprint enthalpy spend: {spend:.3}\n\
-         cells past the vacuum boundary: {past}"
+         worst footprint overreach: {spend:.3}\n\
+         cells past the segment's positive domain: {past}"
     );
 
-    // the premise: the configuration has to drive cells past the isentrope's vacuum boundary,
-    // or the reconstruction never reaches the state this gate is about and the firing count
-    // measures nothing.
+    // the premise: the configuration has to drive cells past the segment's positive
+    // domain, or the floor never engages, the reconstruction never reaches the state this
+    // gate is about, and the firing count measures nothing.
     assert!(
         past >= 100,
-        "only {past} cells carry a footprint that spends the whole enthalpy of the gas in \
-         them; the balanced reconstruction never reaches its profile's vacuum boundary here \
-         and the flux-correction count below is a measurement of an untested path. deepen the \
-         potential, cool the core, or coarsen the grid"
+        "only {past} cells carry a footprint that drives the equilibrium segment past its \
+         zero; the positivity floor never engages here and the flux-correction count below \
+         is a measurement of an untested path. deepen the potential, cool the core, or \
+         coarsen the grid"
     );
     assert!(
         spend > 2.0,
-        "the deepest footprint spends {spend:.3} of its cell's enthalpy; the defect this gate \
-         reproduces needs the vacuum boundary well inside the stencil rather than at its edge"
+        "the deepest footprint spends {spend:.3} of its segment's positive domain; the \
+         hazard this gate reproduces needs the zero crossing well inside the stencil rather \
+         than at its edge"
     );
 
     assert_eq!(
         fired, 0,
         "the first-order flux correction fired on {fired} cell-substages. a draining accretor \
          is a smooth supersonic inflow with no shock in the domain, so the admissible-set redo \
-         has no legitimate work here: every firing is the balanced reconstruction extrapolating \
-         its local isentrope past the point where the isentrope describes a gas"
+         has no legitimate work here: every firing is the balanced reconstruction building \
+         a face state its own floor and departures failed to keep admissible"
     );
     assert_eq!(
         froze, 0,

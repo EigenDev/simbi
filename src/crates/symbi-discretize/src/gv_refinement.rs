@@ -789,12 +789,12 @@ fn centroid_position(ndim: usize, coords: &[NodeId], x_lo: &[Gv], dx: &[Gv]) -> 
     pos
 }
 
-/// the potential rise the anchor equilibrium climbs over the balance-aware transfer's own
-/// footprint: `BALANCE_STENCIL_REACH` coarse cells either side of the anchor along each grid
-/// axis, taken on the coarse lattice the anchor lives on, and maxed over the axes. the encode
-/// and the decode evaluate one and the same expression from the same anchor index and the same
-/// lattice scalars, so the departures one writes and the profile the other adds back sit on one
-/// profile at every weight.
+
+/// the largest potential rise the reconstruction footprint about `phi_anchor` climbs,
+/// over the `BALANCE_STENCIL_REACH` endpoints on every axis. the encode and the decode
+/// evaluate one and the same expression from the same anchor index and the same lattice
+/// scalars, so the departures one writes and the profile the other adds back sit on one
+/// weighted profile.
 fn anchor_potential_rise(
     ndim: usize,
     anchor: &[NodeId],
@@ -814,12 +814,13 @@ fn anchor_potential_rise(
     for ax in 0..ndim {
         rise = rise.max(symbi_hydro::hydrostatic::potential_rise(
             phi_anchor,
-            shifted(ax, -reach),
+            shifted(ax, Gv::ZERO - reach),
             shifted(ax, reach),
         ));
     }
     rise
 }
+
 
 /// trace the fused lerp + hydrostatic encode over the coarse parent region of a
 /// coarse-fine ghost slab: every component is time-interpolated
@@ -847,7 +848,6 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
     // scalar manifest in declaration order: alpha, gamma float; anchor int lane;
     // grid origin/step; body slots.
     let alpha = Gv::scalar("alpha");
-    let gamma = Gv::scalar("gamma");
     let anchor: Vec<NodeId> = with_trace(|t| {
         (0..ndim)
             .map(|ax| t.scalar_int(&format!("anchor_{ax}")))
@@ -889,7 +889,7 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
     let phi_anchor = body_slots_potential(&centroid_position(ndim, &anchor, &x_lo, &dx), &slots);
     let phi_cell = body_slots_potential(&centroid_position(ndim, &cell_coords, &x_lo, &dx), &slots);
     let rise = anchor_potential_rise(ndim, &anchor, &x_lo, &dx, &slots, phi_anchor);
-    let eq = LocalEquilibrium::faded(rho_a, pre_a, phi_anchor, gamma, rise);
+    let eq = LocalEquilibrium::faded(rho_a, pre_a, phi_anchor, rise);
     let (r_eq, p_eq) = eq.state_at(phi_cell);
 
     let mut writes = Vec::with_capacity(ncomp);
@@ -924,7 +924,6 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
     assert!((1..=3).contains(&ndim), "wb_cf_decode_gv: ndim must be 1..=3");
     begin_trace();
     let alpha = Gv::scalar("alpha");
-    let gamma = Gv::scalar("gamma");
     let anchor: Vec<NodeId> = with_trace(|t| {
         (0..ndim)
             .map(|ax| t.scalar_int(&format!("anchor_{ax}")))
@@ -963,7 +962,7 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
         &slots,
     );
     let rise = anchor_potential_rise(ndim, &anchor, &src_x_lo, &src_dx, &slots, phi_anchor);
-    let eq = LocalEquilibrium::faded(rho_a, pre_a, phi_anchor, gamma, rise);
+    let eq = LocalEquilibrium::faded(rho_a, pre_a, phi_anchor, rise);
     let (r_eq, p_eq) = eq.state_at(phi_fine);
 
     // in-place: the prolonged departures already sit in the ghosts.

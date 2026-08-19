@@ -507,14 +507,15 @@ class SimbiProblem(BaseModel):
         ProblemParam(
             False,
             cli=True,
-            description="reconstruct each cell's DEPARTURE from the local isentropic "
-            "hydrostatic profile rather than the state itself (newtonian only). a discretely "
-            "balanced atmosphere then presents no face jump, so a low-dissipation riemann "
-            "solver has no hydrostatic residual to leave undamped -- the property that lets "
-            "a low-dissipation solver hold the entropy floor on a stagnant stratified "
-            "column. composes with ANY solver, and the first-order "
-            "fofc redo inherits it. exact on a locally isentropic column; degrades linearly "
-            "in the entropy variation. costs a per-stencil body-potential evaluation",
+            description="reconstruct each cell's pressure DEPARTURE from the local "
+            "mechanical equilibrium through it (Kaeppeli & Mishra 2016, A&A 587, A94) "
+            "rather than the pressure itself (newtonian only). a discretely balanced "
+            "atmosphere of ANY entropy stratification then presents no face jump, so a "
+            "low-dissipation riemann solver has no hydrostatic residual to leave "
+            "undamped -- the property that lets it hold the entropy floor on a stagnant "
+            "stratified column. density and velocity keep the plain reconstruction, the "
+            "scheme commits to no thermal structure, and every profile evaluation is a "
+            "multiply and an add; the cost is the per-stencil body-potential ladder",
         ),
     ]
     plm_theta: Annotated[

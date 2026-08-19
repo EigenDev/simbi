@@ -1141,18 +1141,20 @@ pub fn body_source_wb_gv(
         let phi_lo = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 0);
         let phi_c = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 1);
         let phi_hi = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 2);
-        // the profile carries the share of the potential variation its own reconstruction
-        // footprint supports: the potential `BALANCE_STENCIL_REACH` cells either side of this
-        // cell along `ax`, on the same face ladder the balanced reconstruction anchors on, so
-        // the source follows the profile the flux divergence it telescopes against was built
-        // from. an isentrope whose vacuum boundary lies inside that footprint is faded out on
-        // both sides together, which leaves the pair balanced at every weight.
+        // the mechanical equilibrium through the cell's own stage-input state: the face
+        // values are the cell's single density segment, `p +/- rho (phi_c - phi_face)`,
+        // the same segments the balanced reconstruction evaluates for this cell along
+        // this axis, weighted by the same footprint-endpoint validity — the potential
+        // `BALANCE_STENCIL_REACH` cells either side on the same face ladder — so the
+        // source follows the profile the flux divergence it telescopes against was
+        // built from, for any entropy stratification, and the pair fades together
+        // where the segment leaves its positive domain.
         let rise = symbi_hydro::hydrostatic::potential_rise(
             phi_c,
             stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 1 - footprint),
             stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 1 + footprint),
         );
-        let eq = LocalEquilibrium::faded(us_den, p_us, phi_c, gamma, rise);
+        let eq = LocalEquilibrium::faded(us_den, p_us, phi_c, rise);
         let (_, p_lo) = eq.state_at(phi_lo);
         let (_, p_hi) = eq.state_at(phi_hi);
         let s_m = match &geo {

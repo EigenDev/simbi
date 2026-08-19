@@ -9,17 +9,20 @@
 // face receives in proportion to the local flow speed; on a stagnant column that dissipation is
 // the only damping on the hydrostatic truncation residual, so the plain reconstruction rings
 // and the floor fails. that arm is this test's positive control. the well-balanced
-// reconstruction removes the residual at its source: each cell's departure from the isentrope
-// through it is what gets limited, so a balanced column presents a flat face state and rings at
-// zero amplitude. restoring the dissipation instead would buy the floor by giving up the
-// low-mach reduction across every stratified face; the balancing buys it by construction, and
-// the reduction survives.
+// reconstruction removes the residual at its source: each cell's pressure departure from the
+// mechanical equilibrium through it (Kaeppeli & Mishra, A&A 587, A94, 2016) is what gets
+// limited, so a balanced column presents a flat face state and rings at zero amplitude.
+// restoring the dissipation instead would buy the floor by giving up the low-mach reduction
+// across every stratified face; the balancing buys it by construction, and the reduction
+// survives.
 //
-// the column is the isentrope of the plummer-softened potential — the same `body_potential`
+// the column is seeded in the scheme's own discrete class — pressures related by the
+// piecewise-constant-density segment sums of the plummer-softened potential, on the kernel's
+// own lattice — with a deliberately non-isentropic density, so the fixed point under test is
+// the mechanical scheme's whole claim: a discretely balanced column of arbitrary entropy
+// stratification, held to machine precision. the potential is the same `body_potential`
 // family the reconstruction balances against and the same gravity the source applies (one
-// field, autodiff-proven conservative), so the only remaining imbalance is the smooth
-// flux/source discretization mismatch, which is second-order and self-limiting, oscillating
-// about zero over a step.
+// field, autodiff-proven conservative).
 //
 // run: cargo test -p symbi --test sealed_column_balanced -- --nocapture
 // =============================================================================
@@ -67,18 +70,41 @@ fn phi(x: f64) -> f64 {
     -GM / (r * r + SOFT * SOFT).sqrt()
 }
 
-/// the isentropic atmosphere in hydrostatic balance against the softened field, from the
-/// bernoulli invariant `gamma K0/(gamma-1) rho^(gamma-1) + phi = const`, normalized to
-/// `rho = 1` at the outer edge (x = 1).
-fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
+/// a deliberately non-isentropic density: the isentrope of the softened field modulated
+/// by a finite ripple, so the seeded column carries genuine entropy stratification and no
+/// thermal assumption could reproduce it.
+fn stratified_rho(x: f64) -> f64 {
     let a = (GAMMA - 1.0) / (GAMMA * K0);
     let c = 1.0 / a + phi(1.0);
-    let rho = (a * (c - phi(x[0]))).powf(1.0 / (GAMMA - 1.0));
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
+    (a * (c - phi(x))).powf(1.0 / (GAMMA - 1.0)) * (1.0 + 0.25 * (9.0 * x).sin())
+}
+
+/// the column in the scheme's own discrete class, on the kernel's own lattice: pressures
+/// follow the piecewise-constant-density segment sums of the mechanical equilibrium
+/// (Kaeppeli & Mishra, A&A 587, A94, 2016) over the cell centers and faces the balanced
+/// reconstruction anchors on. the march runs inward from the outer edge, where pressure
+/// only grows, so any positive stratification stays physical. class membership is what
+/// makes the column a discrete fixed point at machine precision, whatever the entropy
+/// profile — the property the isentropic predecessor reserved for one thermal family.
+fn class_column(n: usize) -> Vec<(f64, f64)> {
+    let dx = 1.0 / n as f64;
+    let center = |i: usize| (i as f64 + 0.5) * dx;
+    let face = |i: usize| i as f64 * dx;
+    let mut col = vec![(0.0_f64, 0.0_f64); n];
+    let rho_out = stratified_rho(center(n - 1));
+    col[n - 1] = (rho_out, K0 * rho_out.powf(GAMMA));
+    for k in (0..n - 1).rev() {
+        let (ra, rb) = (stratified_rho(center(k)), stratified_rho(center(k + 1)));
+        let pre = col[k + 1].1
+            + rb * (phi(center(k + 1)) - phi(face(k + 1)))
+            + ra * (phi(face(k + 1)) - phi(center(k)));
+        col[k] = (ra, pre);
     }
+    assert!(
+        col.iter().all(|&(r, p)| r > 0.0 && p > 0.0),
+        "the class column left the physical regime; the fixed point is vacuous"
+    );
+    col
 }
 
 type Sim = SimState<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -99,7 +125,19 @@ fn build_n(balanced: bool, n: usize) -> Hier {
         .cfl(CFL)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(hydrostatic)
+        .set_initial({
+            let col = class_column(n);
+            let dx = 1.0 / n as f64;
+            move |x: [f64; 1]| {
+                let i = ((x[0] / dx - 0.5).round() as usize).min(col.len() - 1);
+                let (rho, pre) = col[i];
+                Prim {
+                    rho,
+                    vel: symbi_algebra::Tensor::new([0.0]),
+                    pre,
+                }
+            }
+        })
         .build();
     let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
         .with_solver(Solver::HllcPlus)
@@ -121,10 +159,13 @@ fn build_n(balanced: bool, n: usize) -> Hier {
     ))
 }
 
-/// the smallest `K/K_0` and the largest |v| away from the walls. an adiabatic gas holds its
-/// entropy as a one-way floor, so anything below one in the first is the scheme's own deficit;
-/// the second is the stagnancy precondition.
+/// the smallest per-cell `K(x, t) / K(x, 0)` and the largest |v| away from the walls. the
+/// seeded column is entropy-stratified, so the floor is each cell against its own seeded
+/// adiabat rather than against one global constant: an adiabatic gas holds its entropy as
+/// a one-way floor cell by cell, and anything below one is the scheme's own deficit. the
+/// second quantity is the stagnancy precondition.
 fn run(balanced: bool) -> (f64, f64) {
+    let col = class_column(N);
     let mut hier = build(balanced);
     hier.evolve_steps(STEPS).unwrap();
     let st = &hier.levels[0].state;
@@ -143,7 +184,9 @@ fn run(balanced: bool) -> (f64, f64) {
         }
         in_window += 1;
         let c = [ii];
-        worst = worst.min(*pre.at(c) / rho.at(c).powf(GAMMA) / K0);
+        let (rho0, pre0) = col[(ii - ilo) as usize];
+        let k_seed = pre0 / rho0.powf(GAMMA);
+        worst = worst.min(*pre.at(c) / rho.at(c).powf(GAMMA) / k_seed);
         vmax = vmax.max(vel.at(c).abs());
     }
     assert!(in_window > 16, "window too narrow: {in_window} cells");

@@ -68,12 +68,16 @@ impl Axis {
             Axis::Log => (0.5, (50.0f64 / 0.5).log10() / N as f64),
         }
     }
-    /// the lower face of cell `i` — the same map `gv_axis_face_at_index` evaluates in-kernel.
+    /// the lower face of cell `i` — the same map `gv_axis_face_at_index` evaluates in-kernel,
+    /// spelled operation for operation. the log arm is the closed form's exponential,
+    /// `exp(i dx ln 10)`, which the kernel carries so one exponential serves every grading;
+    /// a base-10 power here would agree only to an ulp and a bitwise oracle would report
+    /// the spelling difference as a chain divergence.
     fn face(self, i: usize) -> f64 {
         let (start, param) = self.params();
         match self {
             Axis::Uniform => start + i as f64 * param,
-            Axis::Log => start * 10.0f64.powf(i as f64 * param),
+            Axis::Log => start * (i as f64 * param * std::f64::consts::LN_10).exp(),
         }
     }
     /// the densitized law's sampling point: the per-axis midpoint of the cell's own faces.

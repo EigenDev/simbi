@@ -3,19 +3,25 @@
 //
 // the graded-mesh twin of `sealed_column_balanced` / `sealed_column_curvilinear`:
 // the balanced triple (reconstruction + equilibrium-pressure source + balance-
-// aware ghosts) holding a sealed, stagnant, strongly stratified column on a
-// non-uniformly spaced grid — log-radial spherical (the natural bondi-like
-// grid) and geometrically graded cartesian. the spacing is what changes the
-// statement: every position in the balanced ladder (stencil anchors, source
-// face/center potentials, ghost centroids) now comes from the runtime spacing
-// map, and machine-exactness holds only because the ladder's cell centers are
-// the map's own centers — the geometric mean sqrt(r_lo r_hi) on a log axis,
-// the arithmetic face midpoint otherwise — i.e. the exact positions
-// `set_initial` seeds the column at through `stagger_coord(Center)`. an
-// arithmetic midpoint on the log axis would anchor the ladder O((dr/r)^2 r)
-// off every cell, and each gate asserts that displacement is many orders above
-// the exactness bound, so the center-definition premise stays live and any
-// collapse of it fails the gate loudly.
+// aware ghosts) holding a sealed, stagnant column of arbitrary entropy
+// stratification on a non-uniformly spaced grid — log-radial spherical (the
+// natural bondi-like grid) and geometrically graded cartesian. the column sits
+// in the mechanical scheme's own discrete class (Kaeppeli & Mishra, A&A 587,
+// A94, 2016): pressures follow the piecewise-constant-density segment sums of
+// -rho dphi on the center/face ladder the kernels themselves evaluate, marched
+// inward from the outer wall where the pressure only grows, with a deliberately
+// non-isentropic density so the stratification-blindness of the mechanical
+// scheme carries onto the graded axis.
+//
+// the spacing is what changes the statement: every position in the balanced
+// ladder (stencil anchors, source face/center potentials, ghost centroids)
+// comes from the runtime spacing map, and machine-exactness holds only because
+// the seeded column and the kernels agree on the map's own centers — the
+// geometric mean sqrt(r_lo r_hi) on a log axis, the arithmetic face midpoint
+// otherwise. an arithmetic midpoint on the log axis would anchor the ladder
+// O((dr/r)^2 r) off every cell, and the center-separation check asserts that
+// displacement is many orders above the exactness bound, so the
+// center-definition premise stays live and any collapse of it fails loudly.
 //
 // the plain arm at the same clock is each gate's positive control: its
 // analytic rho*g source mismatches the discrete pressure gradient at
@@ -45,18 +51,40 @@ const GM: f64 = 100.0;
 const SOFT: f64 = 1.0e-3;
 const STEPS: u64 = 400;
 
-/// the isentropic column in hydrostatic balance against the softened field of `phi`,
-/// from the bernoulli invariant `gamma K0/(gamma-1) rho^(gamma-1) + phi = const`,
-/// normalized to `rho = 1` at the outer wall.
-fn hydrostatic(phi: impl Fn(f64) -> f64, x: f64, x_outer: f64) -> Prim<f64, 1> {
+/// a deliberately non-isentropic density: the isentrope of the softened field,
+/// normalized to `rho = 1` at the outer wall, modulated by a finite ripple so the
+/// seeded column carries genuine entropy stratification.
+fn stratified_rho(phi: impl Fn(f64) -> f64, x: f64, x_outer: f64) -> f64 {
     let a = (GAMMA - 1.0) / (GAMMA * K0);
     let c = 1.0 / a + phi(x_outer);
-    let rho = (a * (c - phi(x))).powf(1.0 / (GAMMA - 1.0));
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
+    (a * (c - phi(x))).powf(1.0 / (GAMMA - 1.0)) * (1.0 + 0.25 * (9.0 * x).sin())
+}
+
+/// the column in the mechanical scheme's own discrete class on the graded ladder:
+/// pressures follow the piecewise-constant-density segment sums on the axis map's own
+/// center/face positions, marched inward from the outer wall where the pressure only
+/// grows. the hydrostatic relation `dp/dx = -rho dphi/dx` carries no chart factor, so
+/// one recursion serves the spherical and cartesian gates alike; what the map changes
+/// is where every rung of the ladder sits.
+fn class_column(map: &AxisMap, phi: impl Fn(f64) -> f64, x_outer: f64) -> Vec<(f64, f64)> {
+    let center = |k: usize| map.center(k as isize);
+    let face = |k: usize| map.face(k as isize);
+    let mut col = vec![(0.0_f64, 0.0_f64); N];
+    let rho_out = stratified_rho(&phi, center(N - 1), x_outer);
+    col[N - 1] = (rho_out, K0 * rho_out.powf(GAMMA));
+    for k in (0..N - 1).rev() {
+        let ra = stratified_rho(&phi, center(k), x_outer);
+        let rb = stratified_rho(&phi, center(k + 1), x_outer);
+        let pre = col[k + 1].1
+            + rb * (phi(center(k + 1)) - phi(face(k + 1)))
+            + ra * (phi(face(k + 1)) - phi(center(k)));
+        col[k] = (ra, pre);
     }
+    assert!(
+        col.iter().all(|&(r, p)| r > 0.0 && p > 0.0),
+        "the class column left the physical regime; the fixed point is vacuous"
+    );
+    col
 }
 
 macro_rules! sealed_graded_gate {
@@ -86,10 +114,32 @@ macro_rules! sealed_graded_gate {
                     .cfl(CFL)
                     .allocate()
                     .expect("sim construction failed")
-                    // the IC closure receives the map's cell centers (`stagger_coord`
-                    // honors the attached maps), so the seeded column and the balanced
-                    // ladder agree on every cell position — the exactness premise.
-                    .set_initial(|x: [f64; 1]| hydrostatic(&phi, x[0], $x_outer))
+                    .set_initial({
+                        // the IC closure receives the map's cell centers (`stagger_coord`
+                        // honors the attached maps); a nearest-center lookup binds each
+                        // received position to its rung of the class ladder, so the
+                        // seeded column and the balanced ladder agree on every cell.
+                        let col = class_column(&map, &phi, $x_outer);
+                        let centers: Vec<f64> =
+                            (0..N as isize).map(|k| map.center(k)).collect();
+                        move |x: [f64; 1]| {
+                            let mut best = 0usize;
+                            let mut sep = f64::INFINITY;
+                            for (k, &c) in centers.iter().enumerate() {
+                                let d = (x[0] - c).abs();
+                                if d < sep {
+                                    sep = d;
+                                    best = k;
+                                }
+                            }
+                            let (rho, pre) = col[best];
+                            Prim {
+                                rho,
+                                vel: symbi_algebra::Tensor::new([0.0]),
+                                pre,
+                            }
+                        }
+                    })
                     .build();
                 let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
                     .with_solver(Solver::HllcPlus)
@@ -109,31 +159,37 @@ macro_rules! sealed_graded_gate {
                 )
             }
 
-            /// the smallest `K/K_0` and the largest |v| inside the window, with cell
-            /// centers read from the same axis map the scheme and the seeding use. an
-            /// adiabatic gas holds its entropy as a one-way floor, so anything below one
-            /// in the first is the scheme's own deficit; the second is the stagnancy
-            /// precondition.
+            /// the smallest per-cell `K(x, t) / K(x, 0)` and the largest |v| inside the
+            /// window, with cell centers read from the same axis map the scheme and the
+            /// seeding use. the seeded column is entropy-stratified, so the floor is each
+            /// cell against its own seeded adiabat; anything below one is the scheme's own
+            /// deficit. the second quantity is the stagnancy precondition.
             fn run(balanced: bool) -> (f64, f64) {
+                let map: AxisMap = $map;
+                let phi = $phi;
+                let col = class_column(&map, &phi, $x_outer);
                 let mut hier = build(balanced);
                 hier.evolve_steps(STEPS).unwrap();
                 let st = &hier.levels[0].state;
-                let map: AxisMap = $map;
                 let window: (f64, f64) = $window;
                 let rho = st.fields.prim.rho.view();
                 let pre = st.fields.prim.pre_field().expect("prim.pre").view();
                 let vel = st.fields.prim.vel[0].view();
+                let ilo = st.geom.interior.spaces[0].lo;
                 let mut worst = f64::INFINITY;
                 let mut vmax = 0.0_f64;
                 let mut in_window = 0usize;
                 for ii in st.geom.interior.spaces[0].lo..st.geom.interior.spaces[0].hi {
-                    let x = map.center(ii);
+                    let k = (ii - ilo) as usize;
+                    let x = map.center(k as isize);
                     if x < window.0 || x > window.1 {
                         continue;
                     }
                     in_window += 1;
                     let c = [ii];
-                    worst = worst.min(*pre.at(c) / rho.at(c).powf(GAMMA) / K0);
+                    let (rho0, pre0) = col[k];
+                    let k_seed = pre0 / rho0.powf(GAMMA);
+                    worst = worst.min(*pre.at(c) / rho.at(c).powf(GAMMA) / k_seed);
                     vmax = vmax.max(vel.at(c).abs());
                 }
                 assert!(in_window > 16, "window too narrow: {in_window} cells");
@@ -229,10 +285,11 @@ fn phi_offset(x: f64) -> f64 {
 }
 
 // machine equilibrium, absolutely: measured at 400 wall-inclusive steps the balanced
-// arms sit at |v| = 2.4e-15 / deficit exactly 0 (log spherical) and |v| = 7.1e-16 /
-// deficit 1.1e-16, one ulp (geometric cartesian); the plain arms vent at |v| = 7.6e-6 /
-// 6.1e-6 with deficits 4.7e-9 / 2.5e-8. the bounds carry roughly three orders of margin
-// over the balanced measurements and sit six orders under the plain vents.
+// arms sit at |v| = 6.6e-15 / deficit 2.2e-16 (log spherical) and |v| = 1.4e-15 /
+// deficit 1.1e-16 (geometric cartesian) -- one ulp on the entropy ratio, on a column of
+// arbitrary stratification; the plain arms vent at |v| = 7.7e-6 / 7.8e-6. the bounds
+// carry roughly three orders of margin over the balanced measurements and sit six
+// orders under the plain vents.
 //
 // on the log axis the map center is the geometric mean, displaced from the arithmetic
 // face midpoint by ~r (dr/r)^2 / 8 ~ 4e-6 -- nine orders above the balanced bound. these

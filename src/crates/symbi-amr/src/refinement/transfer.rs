@@ -428,11 +428,10 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     coarse_bodies: &symbi_ib::BodyCollection<f64, D>,
     fine_bodies: &symbi_ib::BodyCollection<f64, D>,
 ) {
-    assert!(
-        gamma > 1.0,
-        "the balance-aware coarse-fine transfer is gamma-law only: LocalEquilibrium's \
-         isentrope is the ideal-gas one, and gamma = {gamma} does not describe it"
-    );
+    // the mechanical equilibrium decomposition commits to no thermal structure, so the
+    // transfer serves any eos; the parameter remains in the signature for the caller's
+    // stability and is otherwise unread.
+    let _ = gamma;
     assert!(
         DOF == D,
         "the balance-aware coarse-fine transfer is baked for ncomp = D + 2 \
@@ -466,7 +465,7 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
         inputs.push(old_c[k]);
         inputs.push(new_c[k]);
     }
-    let mut scalars = vec![alpha, gamma];
+    let mut scalars = vec![alpha];
     scalars.extend_from_slice(coarse_x_lo);
     scalars.extend_from_slice(coarse_dx);
     push_body_slot_scalars(coarse_bodies, &mut scalars);
@@ -493,7 +492,7 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
         new.pre_field().expect(pre),
     ];
     let b_outputs = [&dst.rho, dst.pre_field().expect(pre)];
-    let mut scalars = vec![alpha, gamma];
+    let mut scalars = vec![alpha];
     scalars.extend_from_slice(fine_x_lo);
     scalars.extend_from_slice(fine_dx);
     scalars.extend_from_slice(coarse_x_lo);

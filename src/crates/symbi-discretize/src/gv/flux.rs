@@ -336,27 +336,18 @@ fn euler_reconstruct<const D: usize>(
     // on every recon arm so the scalar tail is uniform; the ppm parabola carries its
     // own monotonicity constraint, so theta stays bound-but-inert there.
     let theta = Gv::scalar("theta");
-    // well-balancing changes the thermodynamic pair alone: the limiter acts on each cell's
-    // departure from the hydrostatic profile, in place of the raw state. everything after
-    // this -- the velocity loop, the ppm flattening, the normal and the face velocity -- is
-    // shared, which is the point. a second copy of this function silently lost the flattening
-    // and hardcoded the normal to the sweep axis.
+    // well-balancing changes the pressure alone: the limiter acts on each cell's pressure
+    // departure from the mechanical equilibrium through it, in place of the raw pressure,
+    // while density and velocity take the plain reconstruction — the equilibrium density
+    // is the piecewise-constant distribution and carries no correction. everything else
+    // -- the velocity loop, the ppm flattening, the normal and the face velocity -- is
+    // shared, which is the point. a second copy of this function silently lost the
+    // flattening and hardcoded the normal to the sweep axis.
     // field-registration order is ABI. the traced manifest records fields in first-read
-    // order, and every existing plain flux kernel registers [rho, v.., pre] -- so the plain
-    // branch must read the velocities between the thermodynamic pair, exactly as it always
-    // has, or the manifest of every already-baked kernel silently reorders. the balanced
-    // branch computes rho and pre jointly (they share anchors and potentials), so its new
-    // kernels register [rho, pre, v..]; that order is theirs from birth and equally stable.
-    let (rho_l, rho_r, wb_pre) = match balanced {
-        None => {
-            let (rl, rr) = recon_gv("prim_rho", "prim.rho", ndim, dir, theta, recon);
-            (rl, rr, None)
-        }
-        Some(b) => {
-            let (rl, rr, pl, pr) = balanced_thermo_pair(ndim, dir, recon, theta, b);
-            (rl, rr, Some((pl, pr)))
-        }
-    };
+    // order, and every flux kernel, plain or balanced, registers [rho, v.., pre]: the
+    // balanced branch touches only the pressure slot, so the manifest is one order for
+    // the whole family.
+    let (rho_l, rho_r) = recon_gv("prim_rho", "prim.rho", ndim, dir, theta, recon);
     let mut vl = Vec::with_capacity(D);
     let mut vr = Vec::with_capacity(D);
     for k in 0..D {
@@ -371,8 +362,8 @@ fn euler_reconstruct<const D: usize>(
         vl.push(l);
         vr.push(r);
     }
-    let (pre_l, pre_r) = match wb_pre {
-        Some(pair) => pair,
+    let (pre_l, pre_r) = match balanced {
+        Some(b) => balanced_pressure_pair(ndim, dir, recon, theta, b),
         None => recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon),
     };
     let mut rho_lr = (rho_l, rho_r);
@@ -1708,29 +1699,29 @@ pub fn rmhd_hlld_flux_gv(
     (end_trace(), writes)
 }
 
-/// the thermodynamic face pair of a well-balanced reconstruction: each cell's departure from
-/// the hydrostatic profile through it, limited by the ordinary operator, with the profile added
-/// back at the face.
+/// the pressure face pair of a well-balanced reconstruction: each cell's pressure
+/// departure from the mechanical equilibrium through it (Kaeppeli & Mishra, A&A 587,
+/// A94, 2016), limited by the ordinary operator, with the profile added back at the
+/// face. density and velocity take the plain reconstruction, because the equilibrium
+/// density is the piecewise-constant distribution itself and carries no correction.
 ///
-/// two anchors per face, one per side, and the duplication is load-bearing. the departure at
-/// the anchor is exactly zero, so the limiter's one-sided differences about it reduce to
-/// `0 - d` and `d - 0` -- the plain differences, exact in floating point. anchoring both sides
-/// on one cell would leave every difference as `(q_j - c) - (q_k - c)` and forfeit the
-/// gravity-free reduction. the operator is called once per anchor and that side's output is
-/// the one kept.
+/// two anchors per face, one per side, and the duplication is load-bearing. the
+/// departure at the anchor is exactly zero, so the limiter's one-sided differences
+/// about it reduce to `0 - d` and `d - 0` -- the plain differences, exact in floating
+/// point. anchoring both sides on one cell would forfeit the gravity-free reduction.
 ///
 /// the transform is independent of which operator consumes it, so plm and ppm share one
-/// derivation. in the body-free limit every potential is exactly zero, the enthalpy ratio is
-/// exactly one, and the departures are exact differences -- so this returns the plain pair
-/// bit-for-bit under plm, and to within roundoff under ppm (a parabola is a weighted sum, whose
-/// re-centering rounds). proved in `symbi-hydro/tests/hydrostatic_reconstruction.rs`.
-fn balanced_thermo_pair(
+/// derivation, and it commits to no thermal structure: a discretely balanced column of
+/// arbitrary entropy stratification presents identical face pressures from both anchors
+/// and the flux at rest is exact. proved in
+/// `symbi-hydro/tests/hydrostatic_reconstruction.rs`.
+fn balanced_pressure_pair(
     ndim: u8,
     dir: u8,
     recon: Recon,
     theta: Gv,
     b: Balanced<'_>,
-) -> (Gv, Gv, Gv, Gv) {
+) -> (Gv, Gv) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
 
     // the bake-time spacing enum is vestigial in the potential ladder: face positions come
@@ -1741,7 +1732,7 @@ fn balanced_thermo_pair(
     let spacing = vec![Spacing::Uniform; ndim as usize];
     // offsets the limiter reads, and the anchor index within them for each side of the shared
     // face. the face sits on the lower face of cell 0, which is half-cell 0; a cell center at
-    // offset k is half-cell 2k+1.
+    // offset k is half-cell 2k+1, and the face between offsets k and k+1 is half-cell 2k+2.
     let (offsets, anchor_l, anchor_r): (&[i32], usize, usize) = match recon {
         Recon::Plm => (&[-2, -1, 0, 1], 1, 2),
         Recon::Ppm => (&[-3, -2, -1, 0, 1, 2], 2, 3),
@@ -1758,7 +1749,14 @@ fn balanced_thermo_pair(
         )
     };
     let phi_face = phi_at(0);
-    let phi: Vec<Gv> = offsets.iter().map(|&k| phi_at(2 * k as i64 + 1)).collect();
+    let phi_c: Vec<Gv> = offsets.iter().map(|&k| phi_at(2 * k as i64 + 1)).collect();
+    // the interior faces of the stencil, where the piecewise-constant-density segments
+    // switch from one cell's density to the next. analytic positions on the face ladder
+    // rather than field reads, so the chain needs no ghost width of its own.
+    let phi_f: Vec<Gv> = offsets[..offsets.len() - 1]
+        .iter()
+        .map(|&k| phi_at(2 * k as i64 + 2))
+        .collect();
 
     let read = |key: &str, f: &str| -> Vec<Gv> {
         offsets
@@ -1769,47 +1767,40 @@ fn balanced_thermo_pair(
     let rho = read("prim_rho", "prim.rho");
     let pre = read("prim_pre", "prim.pre");
 
-    // one side: departures against that side's own cell, the ordinary operator, profile back.
-    // `state_at` returns both components sharing one `powf` -- the pressure exponent exceeds the
-    // density exponent by exactly one, so the second transcendental is a multiply.
+    // one side: pressure departures against that side's own anchor, the ordinary
+    // operator, the anchor's own segment back at the face. the same segment sums are
+    // what the equilibrium-pressure body source evaluates for the same cell along the
+    // same axis, so the flux and the source follow one and the same profile and their
+    // telescoping on an equilibrium is exact.
     //
-    // the profile is weighted by how much of the anchor's enthalpy its own footprint spends:
-    // the potential at the two footprint endpoints, a fixed `BALANCE_STENCIL_REACH` cells either
-    // side of the anchor, feeds `balance_weight`. the same two endpoints are what the
-    // equilibrium-pressure body source reads for the same cell along the same axis, so the flux
-    // and the source follow one and the same profile and their telescoping on an equilibrium is
-    // exact. the endpoints are analytic positions on the face ladder rather than field reads, so
-    // the footprint is the same span under either limiter and needs no ghost width of its own.
+    // the profile is weighted by how much of its positive domain the anchor's own
+    // footprint spends: the potential at the two footprint endpoints, a fixed
+    // `BALANCE_STENCIL_REACH` cells either side of the anchor, feeds `balance_weight`.
+    // the same endpoints are what the body source reads for the same cell, so the pair
+    // fades together, and a footprint that overreaches the segment degrades the whole
+    // reconstruction continuously to the plain one instead of building faces on a
+    // clamped equilibrium.
     let footprint = 2 * symbi_hydro::hydrostatic::BALANCE_STENCIL_REACH as i64;
-    let side = |anchor: usize, take_left: bool| -> (Gv, Gv) {
+    let side = |anchor: usize, take_left: bool| -> Gv {
         let anchor_half = 2 * offsets[anchor] as i64 + 1;
         let rise = symbi_hydro::hydrostatic::potential_rise(
-            phi[anchor],
+            phi_c[anchor],
             phi_at(anchor_half - footprint),
             phi_at(anchor_half + footprint),
         );
-        let eq = LocalEquilibrium::faded(
-            rho[anchor],
-            pre[anchor],
-            phi[anchor],
-            Gv::scalar("gamma"),
-            rise,
-        );
+        let weight =
+            symbi_hydro::hydrostatic::balance_weight(rho[anchor], pre[anchor], rise);
         // the single transform text -- the same function the host proof battery exercises.
-        let (d_rho, d_pre) =
-            symbi_hydro::hydrostatic::hydrostatic_departures(&eq, &rho, &pre, &phi);
+        let d = symbi_hydro::hydrostatic::hydrostatic_departures(
+            anchor, &pre, &rho, &phi_c, &phi_f, weight,
+        );
         let limit = |d: &[Gv]| match recon {
             Recon::Plm => crate::gv::plm_theta_from_stencil(d[0], d[1], d[2], d[3], theta),
             Recon::Ppm => crate::gv::ppm_from_stencil(d[0], d[1], d[2], d[3], d[4], d[5]),
         };
-        let (base_rho, base_pre) = eq.state_at(phi_face);
-        let pick = |pair: (Gv, Gv)| if take_left { pair.0 } else { pair.1 };
-        (
-            base_rho + pick(limit(&d_rho)),
-            base_pre + pick(limit(&d_pre)),
-        )
+        let eq = LocalEquilibrium::faded(rho[anchor], pre[anchor], phi_c[anchor], rise);
+        let pair = limit(&d);
+        eq.pressure_at(phi_face) + if take_left { pair.0 } else { pair.1 }
     };
-    let (rho_l, pre_l) = side(anchor_l, true);
-    let (rho_r, pre_r) = side(anchor_r, false);
-    (rho_l, rho_r, pre_l, pre_r)
+    (side(anchor_l, true), side(anchor_r, false))
 }

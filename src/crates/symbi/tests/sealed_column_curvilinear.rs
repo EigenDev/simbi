@@ -58,21 +58,40 @@ fn phi(r: f64) -> f64 {
     -GM / (r * r + SOFT * SOFT).sqrt()
 }
 
-/// the isentropic column in hydrostatic balance against the softened field, from the
-/// bernoulli invariant `gamma K0/(gamma-1) rho^(gamma-1) + phi = const`, normalized to
-/// `rho = 1` at the outer wall (r = 2). the hydrostatic ode `dp/dr = -rho dphi/dr`
-/// carries no chart factor -- the geometric terms of a radial momentum balance cancel
-/// between the area-weighted divergence and the geometric source -- so one profile
-/// serves both charts.
-fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
+/// a deliberately non-isentropic density: the isentrope of the softened field modulated
+/// by a finite ripple, so the seeded column carries genuine entropy stratification.
+fn stratified_rho(r: f64) -> f64 {
     let a = (GAMMA - 1.0) / (GAMMA * K0);
     let c = 1.0 / a + phi(2.0);
-    let rho = (a * (c - phi(x[0]))).powf(1.0 / (GAMMA - 1.0));
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
+    (a * (c - phi(r))).powf(1.0 / (GAMMA - 1.0)) * (1.0 + 0.25 * (9.0 * r).sin())
+}
+
+/// the radial column in the mechanical scheme's own discrete class (Kaeppeli & Mishra,
+/// A&A 587, A94, 2016): pressures follow the piecewise-constant-density segment sums on
+/// the kernel's own center/face ladder, marched inward from the outer wall where the
+/// pressure only grows. the hydrostatic relation `dp/dr = -rho dphi/dr` carries no chart
+/// factor -- the geometric terms of a radial momentum balance cancel between the
+/// area-weighted divergence and the geometric source -- so one column serves both charts,
+/// and its arbitrary stratification is the mechanical scheme's whole claim.
+fn class_column(n: usize) -> Vec<(f64, f64)> {
+    let dx = 1.0 / n as f64;
+    let center = |i: usize| R_IN + (i as f64 + 0.5) * dx;
+    let face = |i: usize| R_IN + i as f64 * dx;
+    let mut col = vec![(0.0_f64, 0.0_f64); n];
+    let rho_out = stratified_rho(center(n - 1));
+    col[n - 1] = (rho_out, K0 * rho_out.powf(GAMMA));
+    for k in (0..n - 1).rev() {
+        let (ra, rb) = (stratified_rho(center(k)), stratified_rho(center(k + 1)));
+        let pre = col[k + 1].1
+            + rb * (phi(center(k + 1)) - phi(face(k + 1)))
+            + ra * (phi(face(k + 1)) - phi(center(k)));
+        col[k] = (ra, pre);
     }
+    assert!(
+        col.iter().all(|&(r, p)| r > 0.0 && p > 0.0),
+        "the class column left the physical regime; the fixed point is vacuous"
+    );
+    col
 }
 
 macro_rules! sealed_radial_gate {
@@ -96,7 +115,20 @@ macro_rules! sealed_radial_gate {
                     .cfl(CFL)
                     .allocate()
                     .expect("sim construction failed")
-                    .set_initial(hydrostatic)
+                    .set_initial({
+                        let col = class_column(N);
+                        let dx = 1.0 / N as f64;
+                        move |x: [f64; 1]| {
+                            let i = (((x[0] - R_IN) / dx - 0.5).round() as usize)
+                                .min(col.len() - 1);
+                            let (rho, pre) = col[i];
+                            Prim {
+                                rho,
+                                vel: symbi_algebra::Tensor::new([0.0]),
+                                pre,
+                            }
+                        }
+                    })
                     .build();
                 let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
                     .with_solver(Solver::HllcPlus)
@@ -118,10 +150,12 @@ macro_rules! sealed_radial_gate {
                 )
             }
 
-            /// the smallest `K/K_0` and the largest |v| away from the walls. an adiabatic
-            /// gas holds its entropy as a one-way floor, so anything below one in the first
-            /// is the scheme's own deficit; the second is the stagnancy precondition.
+            /// the smallest per-cell `K(r, t) / K(r, 0)` and the largest |v| away from the
+            /// walls. the seeded column is entropy-stratified, so the floor is each cell
+            /// against its own seeded adiabat; anything below one is the scheme's own
+            /// deficit. the second quantity is the stagnancy precondition.
             fn run(balanced: bool) -> (f64, f64) {
+                let col = class_column(N);
                 let mut hier = build(balanced);
                 hier.evolve_steps(STEPS).unwrap();
                 let st = &hier.levels[0].state;
@@ -140,7 +174,9 @@ macro_rules! sealed_radial_gate {
                     }
                     in_window += 1;
                     let c = [ii];
-                    worst = worst.min(*pre.at(c) / rho.at(c).powf(GAMMA) / K0);
+                    let (rho0, pre0) = col[(ii - ilo) as usize];
+                    let k_seed = pre0 / rho0.powf(GAMMA);
+                    worst = worst.min(*pre.at(c) / rho.at(c).powf(GAMMA) / k_seed);
                     vmax = vmax.max(vel.at(c).abs());
                 }
                 assert!(in_window > 16, "window too narrow: {in_window} cells");

@@ -375,7 +375,8 @@ class Metadata:
     # than silently declaring a gamma-law one.
     eos: str = ""
 
-    # whether reconstruction ran on departures from the local hydrostatic isentrope.
+    # whether reconstruction ran on pressure departures from the local mechanical
+    # hydrostatic equilibrium (the balanced scheme carries any entropy stratification).
     # None means the attribute is absent from the file, which is a different fact from
     # False: the run predates the attribute and its reconstruction is unrecorded.
     wb_reconstruction: bool | None = None
