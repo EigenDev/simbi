@@ -396,24 +396,42 @@ pub(crate) fn gv_axis_face_at_index(ax: usize, _spacing: Spacing, i: Gv) -> Gv {
     // runtime map alone; the bake-time `spacing` enum stays in the signature through the
     // transition.
     //
-    // this is a real branch (`cond` -> `Op::IfElse`): the log `pow` is emitted
-    // inside the `if` arm and runs on a log axis alone — the uniform arm stays plain arithmetic.
-    // `map_kind` is per-launch-uniform (same for every cell/lane), so every lane takes one arm.
+    // the three maps are one closed form. writing E = exp(D),
+    //
+    //   uniform   : x(i) = x_lo + i dx
+    //   log       : x(i) = x_lo 10^(i dx)           = x_lo E^i,      D = dx ln 10
+    //   geometric : x(i) = x_lo + dx (r^i - 1)/(r-1)
+    //                    = [x_lo - dx/(r-1)] + [dx/(r-1)] E^i,       D = ln r
+    //
+    // so every map is `A + B i + C E^i` with the quadruple (A, B, C, D) fixed by the
+    // axis parameters alone. selecting the quadruple rather than the position leaves one
+    // exponential over an index that is the same shape on every axis, and the uniform map
+    // falls out at C = 0 with no branch to take. the coefficients are launch-uniform, so a
+    // graded axis pays one exponential per evaluation and a uniform axis pays it on a
+    // multiplier that is exactly zero.
     let map_kind = Gv::scalar(&format!("map_kind_{ax}"));
-    Gv::cond(
-        map_kind.cmp_gt(Gv::from_f64(1.5)),
-        || {
-            let ratio = Gv::scalar(&format!("map_param_{ax}"));
-            start + param * (ratio.powf(i) - Gv::ONE) / (ratio - Gv::ONE)
-        },
-        || {
-            Gv::cond(
-                map_kind.cmp_gt(Gv::from_f64(0.5)),
-                || start * Gv::from_f64(10.0).powf(i * param),
-                || start + i * param,
-            )
-        },
-    )
+    let ratio = Gv::scalar(&format!("map_param_{ax}"));
+    let is_geometric = map_kind.cmp_gt(Gv::from_f64(1.5));
+    let is_log = map_kind.cmp_gt(Gv::from_f64(0.5));
+    // the geometric lever dx/(r-1); the ratio is bounded away from one where it is read.
+    let lever = param / (ratio - Gv::ONE);
+    let a = Gv::select(
+        is_geometric,
+        start - lever,
+        Gv::select(is_log, Gv::ZERO, start),
+    );
+    let b = Gv::select(
+        is_geometric,
+        Gv::ZERO,
+        Gv::select(is_log, Gv::ZERO, param),
+    );
+    let c = Gv::select(is_geometric, lever, Gv::select(is_log, start, Gv::ZERO));
+    let d = Gv::select(
+        is_geometric,
+        ratio.ln(),
+        Gv::select(is_log, param * Gv::from_f64(std::f64::consts::LN_10), Gv::ZERO),
+    );
+    a + b * i + c * (i * d).exp()
 }
 
 /// the cell-center position between the bracketing faces `lo` and `hi` on grid axis `ax`,
