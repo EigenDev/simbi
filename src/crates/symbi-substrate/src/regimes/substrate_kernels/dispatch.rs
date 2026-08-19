@@ -899,6 +899,7 @@ pub fn dispatch_body_source_wb<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
     gamma: f64,
+    reach: i64,
 ) where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
@@ -909,7 +910,7 @@ pub fn dispatch_body_source_wb<const D: usize, const DOF: usize, Mem, Sc>(
          run would silently keep its dye where the analytic source drains it"
     );
     let chart = symbi_discretize::kernel_slug::coord_suffix(sim.geom.coords);
-    let name = format!("body_source_wb{chart}_{D}d");
+    let name = format!("body_source_wb{chart}_{D}d_r{reach}");
     let scalars = resolve_body_scalars(sim, dt, gamma, &name);
     let pre = sim.fields.prim.pre_field().expect("adiabatic body source needs prim.pre");
     dispatch_named(sim, pre, None, 0, &name, &sim.geom.interior, &[], &scalars);

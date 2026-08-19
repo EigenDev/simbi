@@ -1103,6 +1103,7 @@ pub fn body_source_wb_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
+    reach: i64,
 ) -> (GvKernel, Writes) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
     begin_trace();
@@ -1134,7 +1135,7 @@ pub fn body_source_wb_gv(
 
     let mut mom_new: Vec<Gv> = mom.clone();
     let mut nrg_new = nrg;
-    let footprint = 2 * symbi_hydro::hydrostatic::BALANCE_STENCIL_REACH as i64;
+    let footprint = 2 * reach;
     for ax in 0..ndim {
         // total body potential at this cell's two faces and centre along `ax`: half-cells
         // 0 (lower face), 1 (centre), 2 (upper face) on the face ladder.
@@ -1145,7 +1146,8 @@ pub fn body_source_wb_gv(
         // values are the cell's single density segment, `p +/- rho (phi_c - phi_face)`,
         // the same segments the balanced reconstruction evaluates for this cell along
         // this axis, weighted by the same footprint-endpoint validity — the potential
-        // `BALANCE_STENCIL_REACH` cells either side on the same face ladder — so the
+        // `reach` cells either side on the same face ladder, the reconstruction's own
+        // `Recon::balance_reach` — so the
         // source follows the profile the flux divergence it telescopes against was
         // built from, for any entropy stratification, and the pair fades together
         // where the segment leaves its positive domain.

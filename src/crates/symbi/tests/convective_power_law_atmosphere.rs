@@ -113,6 +113,37 @@ fn sound_speed(s: f64, r: f64) -> f64 {
     (GAMMA * GM / ((density_index(s) + 1.0) * r)).sqrt()
 }
 
+/// the power-law column in the mechanical scheme's own discrete class (Kaeppeli &
+/// Mishra, A&A 587, A94, 2016): densities are the power law at the cell centers,
+/// pressures follow the piecewise-constant-density segment sums of `-rho dphi` on the
+/// kernel's center/face ladder, marched inward from the outer wall where the pressure
+/// only grows. the mechanical scheme holds this column exactly at every entropy slope,
+/// so the balanced 1D arms measure the scheme against its own discrete fixed point.
+/// the compact softening is bare newtonian outside its support radius, so `-GM/r` is
+/// the potential the kernels evaluate everywhere in the domain.
+fn class_column(s: f64, cells: usize) -> Vec<(f64, f64)> {
+    let h = (R_OUT - R_IN) / cells as f64;
+    let phi = |r: f64| -GM / r;
+    let center = |k: usize| R_IN + (k as f64 + 0.5) * h;
+    let face = |k: usize| R_IN + k as f64 * h;
+    let mut col = vec![(0.0_f64, 0.0_f64); cells];
+    let (rho_out, pre_out) = column(s, center(cells - 1));
+    col[cells - 1] = (rho_out, pre_out);
+    for k in (0..cells - 1).rev() {
+        let ra = column(s, center(k)).0;
+        let rb = column(s, center(k + 1)).0;
+        let pre = col[k + 1].1
+            + rb * (phi(center(k + 1)) - phi(face(k + 1)))
+            + ra * (phi(face(k + 1)) - phi(center(k)));
+        col[k] = (ra, pre);
+    }
+    assert!(
+        col.iter().all(|&(r, p)| r > 0.0 && p > 0.0),
+        "the class column left the physical regime; the fixed point is vacuous"
+    );
+    col
+}
+
 /// the central point mass, as a gravity-only body at the chart origin under the compact
 /// softening family.
 fn central_mass<const D: usize>() -> BodyCollection<f64, D> {
@@ -161,7 +192,7 @@ type Sim1 = SimState<Newtonian, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemor
 type Kset1 = AdiabaticSubstrateKernelSet<HostMemory, f64, 1>;
 type Hier1 = Hierarchy<Newtonian, 1, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemory, Kset1>;
 
-fn build_column(s: f64, cells: usize, balanced: bool, solver: Solver) -> Hier1 {
+fn build_column(s: f64, cells: usize, balanced: bool, solver: Solver, in_class: bool) -> Hier1 {
     let sim = Sim1::build(Newtonian, IdealGas { gamma: GAMMA }, Spherical)
         .cells([cells])
         .origin([R_IN])
@@ -172,12 +203,21 @@ fn build_column(s: f64, cells: usize, balanced: bool, solver: Solver) -> Hier1 {
         .cfl(CFL)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|[r]: [f64; 1]| {
-            let (rho, pre) = column(s, r);
-            Prim {
-                rho,
-                vel: Tensor::new([0.0]),
-                pre,
+        .set_initial({
+            // `in_class` seeds the mechanical scheme's discrete fixed point; the analytic
+            // power law (which sits O(h^2) off that class) seeds the truncation arms.
+            let col = in_class.then(|| class_column(s, cells));
+            let h = (R_OUT - R_IN) / cells as f64;
+            move |[r]: [f64; 1]| {
+                let (rho, pre) = match &col {
+                    Some(col) => col[(((r - R_IN) / h - 0.5).round() as usize).min(col.len() - 1)],
+                    None => column(s, r),
+                };
+                Prim {
+                    rho,
+                    vel: Tensor::new([0.0]),
+                    pre,
+                }
             }
         })
         .build();
@@ -190,8 +230,14 @@ fn build_column(s: f64, cells: usize, balanced: bool, solver: Solver) -> Hier1 {
 
 /// the largest |v| and the largest relative density departure from the declared column,
 /// away from the walls, at `T_1D`.
-fn column_residual(s: f64, cells: usize, balanced: bool, solver: Solver) -> (f64, f64) {
-    let mut hier = build_column(s, cells, balanced, solver);
+fn column_residual(
+    s: f64,
+    cells: usize,
+    balanced: bool,
+    solver: Solver,
+    in_class: bool,
+) -> (f64, f64) {
+    let mut hier = build_column(s, cells, balanced, solver, in_class);
     hier.evolve(T_1D).unwrap();
     let st = &hier.levels[0].state;
     let rho = st.fields.prim.rho.view();
@@ -238,7 +284,7 @@ fn the_low_mach_correction_leaves_the_isentropic_column_at_rest_under_refinement
     const S: f64 = 0.0;
     const T_END: f64 = 8.0;
     let peak_speed = |balanced: bool, cells: usize| -> f64 {
-        let mut hier = build_column(S, cells, balanced, Solver::HllcPlus);
+        let mut hier = build_column(S, cells, balanced, Solver::HllcPlus, true);
         hier.evolve(T_END).unwrap();
         let st = &hier.levels[0].state;
         let vel = st.fields.prim.vel[0].view();
@@ -303,8 +349,8 @@ fn the_power_law_column_stands_still() {
     let measured: Vec<(f64, f64, f64)> = SLOPES
         .iter()
         .map(|&s| {
-            let (v_plain, d_plain) = column_residual(s, 128, false, SOLVER);
-            let (v_wb, d_wb) = column_residual(s, 128, true, SOLVER);
+            let (v_plain, d_plain) = column_residual(s, 128, false, SOLVER, true);
+            let (v_wb, d_wb) = column_residual(s, 128, true, SOLVER, true);
             println!(
                 "{:6.4} {:8.4} {:12.3e} {:12.3e} {:12.3e} {:12.3e}",
                 s,
@@ -328,12 +374,9 @@ fn the_power_law_column_stands_still() {
             "the plain arm sits at |v| = {v_plain:.3e} at s = {s}; the column is not \
              exercising the imbalance and the balanced arm proves nothing"
         );
-        // both arms carry an O(dx^2) truncation residual; the balanced arm's is the
-        // truncation of the column's departure from the local isentrope rather than of the
-        // full pressure gradient, and that departure is smaller by the entropy contrast the
-        // stencil spans. measured separation is a factor 400 at s = 1/6 and 250 at
-        // s = 0.47, so two orders is the requirement with the isentropic member, which has
-        // no departure at all, held separately below.
+        // the balanced arm sits on its own discrete fixed point at every slope and is
+        // held at machine zero below; the two-order separation is the cheap invariant
+        // that survives even a bound retune.
         assert!(
             v_wb * 1.0e2 < v_plain,
             "the balanced arm ({v_wb:.3e}) is within two orders of the plain arm \
@@ -342,25 +385,16 @@ fn the_power_law_column_stands_still() {
         );
     }
 
-    // the isentropic member is the balanced reconstruction's own profile: the transform
-    // reproduces it exactly and the column is a discrete fixed point to roundoff. measured
-    // 5.6e-16 over the full clock, so the bound carries three orders of margin.
-    let (_, _, isentropic) = measured[0];
-    assert!(
-        isentropic < 1.0e-12,
-        "the isentropic column drifts at |v| = {isentropic:.3e}; it lies on the local \
-         isentrope the balanced reconstruction transforms against and must be held at \
-         machine zero"
-    );
-    // a stratified-entropy column leaves that profile at second order in the potential
-    // difference across a cell, so it carries a genuine truncation residual. the bound is
-    // twice the largest measurement across the slopes, and the convergence gate below is
-    // what establishes the residual as truncation rather than a standing force.
-    for &(s, _, v_wb) in measured.iter().skip(1) {
+    // every slope is the mechanical scheme's own discrete fixed point: the segment-sum
+    // class carries arbitrary entropy stratification, so the balanced arm holds each
+    // column at machine zero — the isentrope enjoys no special status. measured 4.9e-16
+    // to 7.4e-16 across the four slopes at the full clock, three orders inside the bound.
+    for &(s, _, v_wb) in &measured {
         assert!(
-            v_wb < 2.5e-7,
-            "the s = {s} column drifts at |v| = {v_wb:.3e}, above the truncation residual \
-             the local-isentrope transform leaves on a stratified-entropy profile"
+            v_wb < 1.0e-12,
+            "the s = {s} column drifts at |v| = {v_wb:.3e}; a column seeded in the \
+             mechanical scheme's own discrete class is a fixed point at every entropy \
+             slope and must be held at machine zero"
         );
     }
     println!("elapsed {:.1} s", clock.elapsed().as_secs_f64());
@@ -381,7 +415,7 @@ fn the_stratified_column_residual_converges_at_second_order() {
     println!("\nstratified column residual under refinement, s = {s:.4}, {SOLVER:?} solver");
     let mut previous: Option<(usize, f64)> = None;
     for cells in [64usize, 128, 256] {
-        let (v, drho) = column_residual(s, cells, true, SOLVER);
+        let (v, drho) = column_residual(s, cells, true, SOLVER, false);
         let order = previous.map(|(pc, pv)| (pv / v).log2() / ((cells / pc) as f64).log2());
         println!(
             "{cells:5} cells: |v| {v:.3e}, drho/rho {drho:.3e}{}",

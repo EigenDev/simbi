@@ -41,36 +41,37 @@
 
 use symbi_ir::algebra::Scalar;
 
-/// the reconstruction footprint in cell widths: the farthest offset from its anchor cell
-/// that the widest stencil in the scheme (the parabola's six-point window) evaluates the
-/// local equilibrium at. every operator that extrapolates along the segment weighs its
-/// validity over this same span, so one cell carries one weight whichever operator reads
-/// it — the flux, the body source, the ghost fill and the coarse-fine transfer follow one
-/// profile, which is what keeps their telescoping exact at every weight.
-pub const BALANCE_STENCIL_REACH: f64 = 3.0;
-
 /// the share of the segment's positive domain an extrapolation may spend with the
-/// balancing at full strength.
-pub const BALANCE_FADE_ONSET: f64 = 0.8;
+/// balancing at full strength: the domain boundary itself. a discretely balanced column
+/// keeps its segment sums positive by construction, so every in-class footprint spends
+/// less than one and carries weight exactly one — including columns resolved at a few
+/// cells per pressure scale height, where an earlier onset inside the domain would
+/// un-balance precisely the stratifications the scheme exists to hold (measured on the
+/// sealed GM = 100 atmosphere at 128 cells: an onset of 0.8 left the wall band at
+/// weight ~0.1 and vented 3.5e-3 of the entropy floor; at onset 1.0 the same column
+/// holds the floor to roundoff).
+pub const BALANCE_FADE_ONSET: f64 = 1.0;
 
-/// the share at which the balancing is fully faded out. the linear segment crosses zero
-/// once the potential climbs by `p/rho` above the anchor, so `1.0` is the profile's own
-/// domain boundary.
-pub const BALANCE_FADE_FULL: f64 = 1.0;
+/// the share at which the balancing is fully faded out. with the ramp spanning
+/// [1, 2], the weighted spend `w(d) d = (2 - d) d` stays at or below one across the
+/// whole fade band — the weighted profile remains inside its positive domain, touching
+/// zero only at the onset point itself, so the positivity floor below stays disengaged
+/// and the fade hands over to the plain scheme continuously.
+pub const BALANCE_FADE_FULL: f64 = 2.0;
 
 /// the fraction of the potential variation the local segment carries over an
 /// extrapolation that climbs `dphi_up` above the reference point.
 ///
 /// `drop = rho dphi_up / p` is the share of the segment's positive domain the
-/// extrapolation spends; the segment reaches zero at `drop = 1`. scaling the potential
-/// variation by the returned weight holds the spent share at or below the onset, so the
-/// weighted equilibrium stays at or above `1 - BALANCE_FADE_ONSET = 0.2` of the anchor
-/// pressure and the departure a limiter carries is still a correction to the profile.
-/// a footprint the segment comfortably supports gets weight one exactly, and a factor of
-/// exactly one leaves an IEEE product unchanged — the healthy column keeps its bitwise
-/// arithmetic. at zero weight the profile collapses to the constant state, whose
-/// departures are the plain differences, so a draining near-vacuum core is reconstructed
-/// by the plain scheme rather than by a segment extrapolated past the gas it describes.
+/// extrapolation spends; the segment reaches zero at `drop = 1`. any footprint inside
+/// the positive domain gets weight one exactly, and a factor of exactly one leaves an
+/// IEEE product unchanged — the healthy column keeps its bitwise arithmetic, however
+/// steeply it is stratified. past the domain the weight ramps to zero while the
+/// weighted spend `(2 - drop) drop` stays at or below one, so the scaled profile never
+/// leaves its own positive domain on the way down. at zero weight the profile collapses
+/// to the constant state, whose departures are the plain differences, so a draining
+/// near-vacuum core is reconstructed by the plain scheme rather than by a segment
+/// extrapolated past the gas it describes.
 #[inline]
 pub fn balance_weight<S: Scalar>(rho: S, pre: S, dphi_up: S) -> S {
     let onset = S::from_f64(BALANCE_FADE_ONSET);

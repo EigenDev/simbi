@@ -383,34 +383,37 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
 
 /// prolong the prim batch through the hydrostatic-equilibrium decomposition:
 ///
-///   encode  — the time-lerped coarse (rho, pre) over the stencil's parent region
-///             become departures from one `LocalEquilibrium` anchor per slab (the
-///             coarse parent of the slab's center cell); velocities are lerped
-///             unchanged.
-///   prolong — the existing kernels, unchanged, act on (d_rho, vel.., d_pre).
-///   decode  — each fine ghost rebuilds (rho, pre) as the anchor equilibrium
-///             evaluated at the ghost centroid's own potential plus the prolonged
-///             departure. velocities pass through untouched.
+///   encode  — the time-lerped coarse pressure over the stencil's parent region
+///             becomes its departure from the mechanical equilibrium chained, on
+///             the coarse lattice, from the coarse cell under the nearest fine
+///             interior cell; density and velocities are lerped unchanged.
+///   prolong — the existing kernels, unchanged, act on (rho, vel.., d_pre).
+///   decode  — each fine ghost rebuilds pre as the equilibrium chained, on the
+///             fine lattice, from its nearest fine interior cell through the
+///             prolonged fine densities, plus the prolonged departure.
 ///
-/// on a coarse stencil lying on one isentrope every departure is identically zero,
-/// so the fine ghosts land exactly on the isentrope at any prolongation order and
-/// any limiter — the transfer's polynomial bias has nothing to act on. that is the
-/// premise a balanced reconstruction needs its ghosts to satisfy; prolonging the
-/// raw state instead deposits an O(dx^2) one-signed entropy drain at the first
-/// uncovered coarse cell every subcycle. any on-column anchor reproduces the whole
-/// isentrope exactly; off-column the departures stay small and smooth over a
-/// ghost-width slab.
+/// the chain is the piecewise-constant-density integral of `-rho dphi` with each
+/// cell's own density on its own segment (Kaeppeli & Mishra, A&A 587, A94,
+/// 2016). a coarse stencil in its discrete class encodes to departures that
+/// vanish identically, so at any prolongation order and any limiter the fine
+/// ghosts land exactly on the fine lattice's own recursion against the interior,
+/// for whatever density the prolongation hands them — the transfer's polynomial
+/// bias has nothing to act on. prolonging the raw state instead deposits an
+/// O(dx^2) one-signed entropy drain at the first uncovered coarse cell every
+/// subcycle. the reference lives on the fine interior, so the round trip is exact
+/// however restriction averages the covered coarse cells.
 ///
-/// the time-lerp commutes with the encode (the equilibrium offset is
-/// time-independent), so lerping first and encoding the lerped slab once is exact.
+/// the time-lerp commutes with the encode (the equilibrium chain is evaluated on
+/// the lerped densities), so lerping first and encoding the lerped slab once is
+/// exact.
 ///
 /// both passes are baked kernels (`wb_cf_lerp_encode` / `wb_cf_decode`), so the
-/// same transfer runs on host and device memory. the anchor state is re-lerped
-/// in-thread from the raw coarse snapshots in both kernels — the encode's output
-/// holds a zero departure at the anchor, and an in-place encode would race every
-/// thread's anchor read against the anchor thread's write. `scratch` is a
-/// caller-owned coarse buffer covering the parent stencil region (the lerp
-/// scratch). gamma-law only; the caller gates.
+/// same transfer runs on host and device memory. `scratch` is a caller-owned
+/// coarse buffer covering the parent stencil region (the lerp scratch). the
+/// decode reads the fine interior edge cell, which lies outside every slab, and
+/// the fine densities, which it leaves untouched, so its in-place pressure write
+/// is race-free. the mechanical equilibrium commits to no thermal structure, so
+/// the transfer serves any eos.
 #[allow(clippy::too_many_arguments)]
 pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace>(
     old: &PrimFieldsGeneric<D, DOF, Mem>,
@@ -418,9 +421,9 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     scratch: &PrimFieldsGeneric<D, DOF, Mem>,
     dst: &PrimFieldsGeneric<D, DOF, Mem>,
     region: &Domain<D>,
+    fine_interior: &Domain<D>,
     order: ProlongOrder,
     alpha: f64,
-    gamma: f64,
     coarse_x_lo: &[f64; D],
     coarse_dx: &[f64; D],
     fine_x_lo: &[f64; D],
@@ -428,10 +431,6 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     coarse_bodies: &symbi_ib::BodyCollection<f64, D>,
     fine_bodies: &symbi_ib::BodyCollection<f64, D>,
 ) {
-    // the mechanical equilibrium decomposition commits to no thermal structure, so the
-    // transfer serves any eos; the parameter remains in the signature for the caller's
-    // stability and is otherwise unread.
-    let _ = gamma;
     assert!(
         DOF == D,
         "the balance-aware coarse-fine transfer is baked for ncomp = D + 2 \
@@ -445,16 +444,37 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     let ncomp = 1 + DOF + 1;
     let parents = coarse_parents(region, order.ghost_width() as isize);
 
-    // the anchor: the coarse parent of the slab's center cell (euclidean division —
-    // ghost slab indices are negative).
-    let anchor: [isize; D] = std::array::from_fn(|a| {
-        let s = &region.spaces[a];
-        (s.lo + (s.hi - 1 - s.lo) / 2).div_euclid(2)
-    });
-    let ints: Vec<i32> = anchor.iter().map(|&a| a as i32).collect();
+    // the interior the chains start from, inclusive per axis: the fine interior
+    // for the decode, the coarse cells under it for the encode (euclidean
+    // division — ghost slab indices are negative).
+    let fine_lo: Vec<i32> = (0..D).map(|a| fine_interior.spaces[a].lo as i32).collect();
+    let fine_hi: Vec<i32> = (0..D)
+        .map(|a| fine_interior.spaces[a].hi as i32 - 1)
+        .collect();
+    let coarse_lo: Vec<i32> = fine_lo.iter().map(|&v| v.div_euclid(2)).collect();
+    let coarse_hi: Vec<i32> = fine_hi.iter().map(|&v| v.div_euclid(2)).collect();
+    // the kernels unroll a bounded chain; both regions must sit within it.
+    let max_reach = |dom: &Domain<D>, lo: &[i32], hi: &[i32]| -> i64 {
+        (0..D)
+            .map(|a| {
+                let (dlo, dhi) = (dom.spaces[a].lo as i64, dom.spaces[a].hi as i64 - 1);
+                (lo[a] as i64 - dlo).max(dhi - hi[a] as i64).max(0)
+            })
+            .max()
+            .unwrap_or(0)
+    };
+    let bound = symbi_discretize::WB_CF_CHAIN_MAX;
+    assert!(
+        max_reach(region, &fine_lo, &fine_hi) <= bound
+            && max_reach(&parents, &coarse_lo, &coarse_hi) <= bound,
+        "the coarse-fine transfer chain reaches past its unrolled bound of {bound} cells"
+    );
+    let ints: Vec<i32> = |lo: &[i32], hi: &[i32]| -> Vec<i32> {
+        lo.iter().chain(hi.iter()).copied().collect()
+    }(&coarse_lo, &coarse_hi);
 
     // fused lerp + encode into the coarse scratch: every component time-lerped,
-    // rho/pre written as departures from the anchor equilibrium.
+    // pre written as its departure from the coarse chain.
     let (old_c, new_c, scratch_c) = (
         prim_comps(old, has_pre),
         prim_comps(new, has_pre),
@@ -482,28 +502,21 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     // time endpoints: the lerp already happened in the encode.
     prolong_prims(scratch, scratch, dst, region, order, 0.0);
 
-    // decode: fine ghost (rho, pre) += the anchor equilibrium at the fine
-    // centroid's potential. the anchor re-lerps from the raw coarse snapshots.
+    // decode: fine ghost pre += the fine chain from the nearest interior cell.
     let pre = "the balance-aware transfer requires an energy-carrying prim set";
-    let b_inputs = [
-        &old.rho,
-        &new.rho,
-        old.pre_field().expect(pre),
-        new.pre_field().expect(pre),
-    ];
-    let b_outputs = [&dst.rho, dst.pre_field().expect(pre)];
-    let mut scalars = vec![alpha];
+    let b_inputs = [&dst.rho];
+    let b_outputs = [dst.pre_field().expect(pre)];
+    let fine_ints: Vec<i32> = fine_lo.iter().chain(fine_hi.iter()).copied().collect();
+    let mut scalars = Vec::new();
     scalars.extend_from_slice(fine_x_lo);
     scalars.extend_from_slice(fine_dx);
-    scalars.extend_from_slice(coarse_x_lo);
-    scalars.extend_from_slice(coarse_dx);
     push_body_slot_scalars(fine_bodies, &mut scalars);
     dispatch_fields_each::<f64, Mem, D>(
         KernelId::WbCfDecode { ndim: D as u8 }.name(),
         region,
         &b_inputs,
         &b_outputs,
-        &ints,
+        &fine_ints,
         &scalars,
     );
 }

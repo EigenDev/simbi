@@ -874,7 +874,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // reconstruction balanced -- measured as an O((dx/H)^2) per-step drift that walks a
         // sealed stagnant column to |v| ~ 3e-2 in 400 steps. the pair is the scheme.
         if self.balance == symbi_discretize::coords::Balance::Hydrostatic {
-            dispatch_body_source_wb(sim, dt, self.gamma);
+            dispatch_body_source_wb(sim, dt, self.gamma, self.recon.balance_reach());
         } else {
             dispatch_body_source(sim, dt, self.gamma);
         }

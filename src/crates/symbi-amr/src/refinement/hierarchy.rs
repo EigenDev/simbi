@@ -2658,10 +2658,11 @@ where
         let balanced = self.cf_transfer_balanced(level);
         for (slab, scratch) in slabs.iter().zip(sweep_scratch) {
             if balanced {
-                // the equilibrium decomposition: encode the lerped coarse slab as
-                // departures from one isentrope anchor, prolong the departures with
-                // the unchanged kernels, rebuild (rho, pre) on the isentrope at each
-                // fine ghost's own potential. baked kernel pair in the parent's lerp
+                // the equilibrium decomposition: encode the lerped coarse slab's
+                // pressure as its departure from the mechanical equilibrium chained
+                // out of the interior, prolong the departures with the unchanged
+                // kernels, rebuild each fine ghost's pressure on the fine chain from
+                // its nearest interior cell. baked kernel pair in the parent's lerp
                 // scratch (unused by the fallback prolong path this route replaces).
                 prolong_prims_balanced(
                     prim_old,
@@ -2669,9 +2670,9 @@ where
                     prim_lerp,
                     &fine.state.fields.prim,
                     slab,
+                    &fine.state.geom.interior,
                     self.prolong_order,
                     alpha,
-                    self.levels[0].state.physics.eos.gamma(),
                     &parent.state.geom.x_lo,
                     &parent.state.geom.dx,
                     &fine.state.geom.x_lo,

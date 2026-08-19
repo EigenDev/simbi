@@ -1774,13 +1774,13 @@ fn balanced_pressure_pair(
     // telescoping on an equilibrium is exact.
     //
     // the profile is weighted by how much of its positive domain the anchor's own
-    // footprint spends: the potential at the two footprint endpoints, a fixed
-    // `BALANCE_STENCIL_REACH` cells either side of the anchor, feeds `balance_weight`.
+    // footprint spends: the potential at the two footprint endpoints, the active
+    // reconstruction's own reach either side of the anchor, feeds `balance_weight`.
     // the same endpoints are what the body source reads for the same cell, so the pair
     // fades together, and a footprint that overreaches the segment degrades the whole
     // reconstruction continuously to the plain one instead of building faces on a
     // clamped equilibrium.
-    let footprint = 2 * symbi_hydro::hydrostatic::BALANCE_STENCIL_REACH as i64;
+    let footprint = 2 * recon.balance_reach();
     let side = |anchor: usize, take_left: bool| -> Gv {
         let anchor_half = 2 * offsets[anchor] as i64 + 1;
         let rise = symbi_hydro::hydrostatic::potential_rise(

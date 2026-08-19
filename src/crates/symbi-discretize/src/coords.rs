@@ -70,6 +70,21 @@ pub enum Recon {
     Ppm,
 }
 
+impl Recon {
+    /// the balance-fade footprint in cells: the farthest offset from its anchor cell at
+    /// which this reconstruction evaluates the local equilibrium (plm reads departures
+    /// two cells out; the ppm parabola's six-point window reads three). the balanced
+    /// flux and the equilibrium-pressure body source measure the segment's spend over
+    /// this same reach, so the KM pair fades together on one weight per cell.
+    pub fn balance_reach(self) -> i64 {
+        match self {
+            Recon::Plm => 2,
+            Recon::Ppm => 3,
+        }
+    }
+}
+
+
 /// whether a reconstruction limits the state or its departure from local hydrostatic
 /// equilibrium.
 ///

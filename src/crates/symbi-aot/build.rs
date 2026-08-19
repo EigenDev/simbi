@@ -2487,15 +2487,20 @@ fn gen_geometry_probe(out_dir: &str, ndim: u8, coords: Coords, spacing: &[Spacin
 // chart, gravity only.
 fn gen_body_source_wb(out_dir: &str, ndim: u8, coords: Coords) {
     let g = Geom::identity(coords, ndim);
-    let name = format!("body_source_wb{}_{ndim}d", coords_suffix(coords));
-    let (k, writes) = symbi_discretize::body_source_wb_gv(
-        MAX_SOURCE_BODIES,
-        coords,
-        ndim as usize,
-        g.ncomp as usize,
-        &g.axes,
-    );
-    emit_gv(out_dir, &name, ndim, &k, &writes);
+    // one variant per reconstruction reach (plm 2, ppm 3): the source's fade weight is
+    // the flux's, bitwise, so the pair telescopes at every weight for either recon.
+    for reach in [2i64, 3] {
+        let name = format!("body_source_wb{}_{ndim}d_r{reach}", coords_suffix(coords));
+        let (k, writes) = symbi_discretize::body_source_wb_gv(
+            MAX_SOURCE_BODIES,
+            coords,
+            ndim as usize,
+            g.ncomp as usize,
+            &g.axes,
+            reach,
+        );
+        emit_gv(out_dir, &name, ndim, &k, &writes);
+    }
 }
 
 fn gen_body_source(out_dir: &str, ndim: u8, coords: Coords) {

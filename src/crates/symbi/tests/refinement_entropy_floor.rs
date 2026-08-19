@@ -430,6 +430,139 @@ fn build_gravity_wb(
     hier
 }
 
+/// the root column in the mechanical balanced scheme's own discrete class (Kaeppeli &
+/// Mishra, A&A 587, A94, 2016): densities are the isentropic profile at the root cell
+/// centers, pressures follow the piecewise-constant-density segment sums of `-rho dphi`
+/// on the root center/face ladder, marched inward from the outer wall where the
+/// pressure only grows. this column is the discrete fixed point the balanced
+/// reconstruction holds exactly; the analytic isentrope sits O(h^2) off it and rings.
+fn class_root_column(ncells: usize) -> Vec<(f64, f64)> {
+    let h = 1.0 / ncells as f64;
+    let phi = |x: f64| -GM / (x + G_OFFSET);
+    let center = |k: usize| (k as f64 + 0.5) * h;
+    let face = |k: usize| k as f64 * h;
+    let mut col = vec![(0.0_f64, 0.0_f64); ncells];
+    let rho_out = hydrostatic([center(ncells - 1)]).rho;
+    col[ncells - 1] = (rho_out, K0 * rho_out.powf(GAMMA));
+    for k in (0..ncells - 1).rev() {
+        let ra = hydrostatic([center(k)]).rho;
+        let rb = hydrostatic([center(k + 1)]).rho;
+        let pre = col[k + 1].1
+            + rb * (phi(center(k + 1)) - phi(face(k + 1)))
+            + ra * (phi(face(k + 1)) - phi(center(k)));
+        col[k] = (ra, pre);
+    }
+    assert!(
+        col.iter().all(|&(r, p)| r > 0.0 && p > 0.0),
+        "the class column left the physical regime; the fixed point is vacuous"
+    );
+    col
+}
+
+/// the class seed at global coordinate `x`. root cells take the class column; fine
+/// cells take their parent segment's own continuation — density copied from the parent,
+/// pressure on the parent's linear-in-phi segment — which lies in the fine lattice's
+/// own discrete class because the density switches at a face the two lattices share,
+/// so the whole two-level hierarchy is seeded on one consistent mechanical equilibrium.
+fn class_seed(col: &[(f64, f64)], ncells: usize, x: f64, fine: bool) -> Prim<f64, 1> {
+    let h = 1.0 / ncells as f64;
+    let phi = |x: f64| -GM / (x + G_OFFSET);
+    let j = ((x / h) as usize).min(ncells - 1);
+    let (rho, pre_parent) = col[j];
+    let pre = if fine {
+        let xc = (j as f64 + 0.5) * h;
+        pre_parent + rho * (phi(xc) - phi(x))
+    } else {
+        pre_parent
+    };
+    Prim {
+        rho,
+        vel: symbi_algebra::Tensor::new([0.0]),
+        pre,
+    }
+}
+
+/// the 2-level hydrostatic seam seeded on the class column — the balanced gate's
+/// builder. wall, body and kernel wiring match `build_gravity_wb`.
+fn build_gravity_wb_class(
+    regions: &[RefinementRegion<1>],
+    ncells: usize,
+    balanced: bool,
+) -> Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
+    let col = class_root_column(ncells);
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([ncells])
+        .spacing([1.0 / ncells as f64])
+        .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim construction failed")
+        .set_initial({
+            let col = col.clone();
+            move |x: [f64; 1]| class_seed(&col, ncells, x[0], false)
+        })
+        .build();
+    let make: fn(&Sim) -> Kset = if balanced { kset_balanced } else { kset };
+    let ck = make(&coarse);
+    let hier = Hierarchy::with_refinement(coarse, ck, regions, ProlongOrder::Ppm, make)
+        .unwrap()
+        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+            0,
+            symbi_algebra::Tensor::new([-G_OFFSET]),
+            symbi_algebra::Tensor::zeros(),
+            GM,
+            1.0e-3,
+            0.0,
+        )));
+    for lvl in 1..hier.levels.len() {
+        let col = col.clone();
+        hier.levels[lvl]
+            .state
+            .seed_cells(move |x: [f64; 1]| class_seed(&col, ncells, x[0], true));
+    }
+    hier
+}
+
+/// the worst per-cell `K(x, t) / K(x, 0)` against the class seed, over every level. the
+/// class column carries a per-cell adiabat, so the floor is each cell against its own
+/// seed; anything below one is entropy the scheme destroyed.
+fn worst_entropy_ratio_vs_class(
+    hier: &Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset>,
+    col: &[(f64, f64)],
+    ncells: usize,
+) -> (f64, usize, f64) {
+    let mut worst = f64::INFINITY;
+    let mut worst_level = 0;
+    let mut worst_x = f64::NAN;
+    for (lvl, level) in hier.levels.iter().enumerate() {
+        let st = &level.state;
+        let rho = st.fields.prim.rho.view();
+        let pre = st
+            .fields
+            .prim
+            .pre
+            .as_ref()
+            .expect("adiabatic carries pressure")
+            .view();
+        for c in st.geom.interior.iter() {
+            let r = *rho.at(c);
+            if r <= 0.0 {
+                continue;
+            }
+            let x = st.geom.centroid([c[0] as isize])[0];
+            let seed = class_seed(col, ncells, x, lvl > 0);
+            let k_seed = seed.pre / seed.rho.powf(GAMMA);
+            let k = *pre.at(c) / r.powf(GAMMA) / k_seed;
+            if k < worst {
+                worst = k;
+                worst_level = lvl;
+                worst_x = x;
+            }
+        }
+    }
+    (worst, worst_level, worst_x)
+}
+
 /// the K/K0 span and floor over the root-level window straddling the patch's upper
 /// edge (the first uncovered coarse cells are where the dipole lives), plus the
 /// coordinate of the root minimum.
@@ -651,23 +784,26 @@ fn diagnose_cf_dipole_cfl_arm() {
 }
 
 /// the transfer-exactness probe: prolong the balanced hierarchy's coarse-fine
-/// ghosts once from the exact isentropic state and measure how far off the
-/// isentrope the fine ghosts land. the equilibrium decomposition's theorem says
-/// exactly on it (departures identically zero, prolongation of zero is zero),
-/// so anything above roundoff here is transfer bias; a clean pass relocates any
-/// remaining seam drain to the operators the transfer does not touch
-/// (restriction and the flux register).
+/// ghosts once from the class-seeded state and measure how far off the fine
+/// class continuation the fine ghosts land. the equilibrium decomposition's
+/// theorem says exactly on it (departures identically zero, prolongation of
+/// zero is zero, the decode chains from the fine interior through the ghosts'
+/// own densities), so anything above roundoff in the pressure ratio here is
+/// transfer bias; the density column reports the prolongation's own
+/// interpolation against the parent-copy seed and is informational. a clean
+/// pass relocates any remaining seam drain to the operators the transfer does
+/// not touch (restriction and the flux register).
 ///
 /// run: cargo test -p symbi --test refinement_entropy_floor -- --ignored ghost_exactness --nocapture
 #[test]
-#[ignore = "diagnostic: fine cf-ghost isentrope error after one balanced prolong"]
+#[ignore = "diagnostic: fine cf-ghost class error after one balanced prolong"]
 fn diagnose_cf_transfer_ghost_exactness() {
     for (label, forced) in [("transfer on", None), ("transfer off", Some(false))] {
         let region = RefinementRegion {
             x_lo: [0.3],
             x_hi: [0.7],
         };
-        let mut hier = build_gravity_wb(&[region], N, true, false);
+        let mut hier = build_gravity_wb_class(&[region], N, true);
         if let Some(on) = forced {
             hier = hier.balance_aware_transfer(on);
         }
@@ -686,27 +822,33 @@ fn diagnose_cf_transfer_ghost_exactness() {
             st.geom.allocated.spaces[0].lo,
             st.geom.allocated.spaces[0].hi,
         );
-        let mut worst = 0.0_f64;
-        let mut worst_rho = 0.0_f64;
-        for ii in (alo..ilo).chain(ihi..ahi) {
-            let (r, p) = (*rho.at([ii]), *pre.at([ii]));
+        let phi = |x: f64| -GM / (x + G_OFFSET);
+        let center = |ii: isize| st.geom.centroid([ii])[0];
+        // the fine recursion residual across the face between cells `a` and `b`
+        // (`b` one cell outward): `p_b - [p_a + rho_a (phi(c_a) - phi(F)) +
+        // rho_b (phi(F) - phi(c_b))]`, relative to `p_b`. the transfer's claim is
+        // that every ghost pair, starting from the interior edge, sits on this
+        // recursion to roundoff for whatever density the ghost carries.
+        let residual = |a: isize, b: isize| -> f64 {
+            let (ra, pa) = (*rho.at([a]), *pre.at([a]));
+            let (rb, pb) = (*rho.at([b]), *pre.at([b]));
             assert!(
-                r > 0.0 && p > 0.0 && r.is_finite(),
-                "{label}: cf ghost {ii} holds (rho, pre) = ({r}, {p}); the prolong never \
+                rb > 0.0 && pb > 0.0 && rb.is_finite(),
+                "{label}: cf ghost {b} holds (rho, pre) = ({rb}, {pb}); the prolong never \
                  wrote it and the probe below would be measuring nothing"
             );
-            let k = p / r.powf(GAMMA) / K0;
-            worst = worst.max((k - 1.0).abs());
-            // K alone cannot see a potential evaluated at the wrong position: any state
-            // on the anchor isentrope has K = K_anchor regardless of phi. the density
-            // against the analytic profile at the ghost's own centroid catches that.
-            let x = st.geom.centroid([ii]);
-            worst_rho = worst_rho.max((r / hydrostatic(x).rho - 1.0).abs());
+            let face = 0.5 * (center(a) + center(b));
+            let chained = pa + ra * (phi(center(a)) - phi(face)) + rb * (phi(face) - phi(center(b)));
+            ((pb - chained) / pb).abs()
+        };
+        let mut worst = 0.0_f64;
+        for ii in (alo..ilo).rev() {
+            worst = worst.max(residual(ii + 1, ii));
         }
-        println!(
-            "{label}: max |K/K0 - 1| = {worst:.4e}, max |rho/rho_exact - 1| = {worst_rho:.4e} \
-             over cf ghosts"
-        );
+        for ii in ihi..ahi {
+            worst = worst.max(residual(ii - 1, ii));
+        }
+        println!("{label}: max fine-recursion residual over cf ghost pairs = {worst:.4e}");
     }
     // no assertion: the numbers are the record; the permanent gate is the floor hold.
 }
@@ -756,40 +898,78 @@ fn diagnose_cf_dipole_growth() {
     }
 }
 
+/// the plain 2-level floor at t = 8 under the (t = 2, t = 8) schedule on the
+/// class-seeded column — the invariance pin's recorded value.
+const PLAIN_FLOOR_T8: f64 = 0.966946737203;
+
 #[test]
 fn the_balanced_seam_transfer_holds_the_entropy_floor() {
-    // the theorem under gate: encode the coarse slab as departures from one local
+    // the theorem under gate: encode the coarse slab as departures from the local
     // equilibrium, prolong the departures, decode on the equilibrium at the fine
-    // ghost's own potential — then coarse stencil data on one isentrope land the
-    // fine ghosts exactly back on it, at any prolongation order and any limiter.
-    // measured: the fine coarse-fine ghosts sit on the coarse isentrope to 2e-16
-    // where raw prolongation leaves them 4.6e-5 off (a one-signed K excess: the
-    // prolong kernels are cell-average operators, and averaging convex isentropic
-    // data overshoots K by jensen), and the balanced 2-level deficit at t = 2
-    // drops 1.7e-4 -> 1.8e-5.
+    // ghost's own potential — then coarse stencil data on the discrete equilibrium
+    // land the fine ghosts exactly back on it, at any prolongation order and any
+    // limiter, and the seam is a fixed point of the balanced hierarchy.
     //
-    // the residual 1.8e-5 is a separate, open layer, suspected restriction:
-    // conservative averaging of on-isentrope fine data lands the covered coarse
-    // cells at K above K0 by the same one-signed jensen O(dx^2) excess, and the
-    // first uncovered neighbor vents against the junction. it survives with the
-    // transfer exact (ghosts at 2e-16), and it shrinks but persists under
-    // average-consistent seeding (3.6e-5 at t = 8 against 6.8e-5 point-seeded),
-    // so no ghost-transfer policy can close it. the bounds here therefore sit
-    // between the transfer's contribution and that residual: 5e-5 is 2.7x above
-    // the measured post-transfer deficit and 3.4x below the deficit the transfer's
-    // absence restores, so the same constant separates both arms.
+    // the mechanical (piecewise-constant-density) equilibrium satisfies that
+    // theorem through the chain form: the encode measures the coarse pressure
+    // against the chain from the coarse cell under the nearest fine interior
+    // cell, and the decode rebuilds each ghost on the fine chain from that
+    // interior cell through the ghosts' own densities. measured: the fine cf
+    // ghosts sit on the fine recursion against the interior to 3.6e-16 where
+    // raw prolongation leaves them 1.2e-4 off (the ghost-exactness diagnostic
+    // above), and the balanced 2-level deficit at t = 2 drops 1.04e-3 -> 5.3e-5.
+    //
+    // the residual is the restriction layer, a separate operator: conservative
+    // averaging of on-class fine data lands every covered coarse cell below its
+    // class pressure by the jensen gap `rho [phi(C) - (phi(c_lo) + phi(c_hi))/2]`
+    // = rho phi'' h_f^2 / 8 on the concave potential, while the first uncovered
+    // coarse cell, never restricted, sits on the class exactly — a standing
+    // O(h^2) pressure step at the patch edge. each coarse stage's flux at that
+    // face kicks the uncovered neighbor; the flux register restores the net
+    // conserved flux at the end of the step, but the later stage's inner-face
+    // flux was already formed on the kicked state, so a deposit of order the
+    // step lands every step and the deficit grows linearly with the clock
+    // (5.3e-5 at t = 2, 2.1e-4 at t = 8). the test derives the step from the
+    // class column (1.5e-5 relative at the lower edge, 1.7e-5 at the upper) and
+    // bounds the transfer-on arm at five times it on the fixed t = 2 clock; the
+    // measured deficit is 3.1 times the step and the transfer-off arm 60 times,
+    // so one constant separates both arms with margin. closing the layer itself
+    // means a class-consistent restriction of the covered pressures, which is
+    // in tension with conservative averaging at O(h^2) and is its own design.
     const T_GATE: f64 = 2.0;
     let region = || RefinementRegion {
         x_lo: [0.3],
         x_hi: [0.7],
     };
+    let col = class_root_column(N);
+    // the restriction jensen step over the covered coarse cells, relative to the
+    // class pressure: the scale the transfer-on arm is bounded against.
+    let jensen_step = {
+        let h = 1.0 / N as f64;
+        let phi = |x: f64| -GM / (x + G_OFFSET);
+        (0..N)
+            .filter(|&k| {
+                let x = (k as f64 + 0.5) * h;
+                (region().x_lo[0]..=region().x_hi[0]).contains(&x)
+            })
+            .map(|k| {
+                let x = (k as f64 + 0.5) * h;
+                let (rho, pre) = col[k];
+                let avg = 0.5 * (phi(x - 0.25 * h) + phi(x + 0.25 * h));
+                (rho * (phi(x) - avg)).abs() / pre
+            })
+            .fold(0.0_f64, f64::max)
+    };
+    let bound_on = 5.0 * jensen_step;
+    println!("restriction jensen step {jensen_step:.3e}; transfer-on bound {bound_on:.3e}");
 
     // positive control: the plain 2-level seam vents visibly by this clock
     // (measured 1.2e-2). if this stops tripping, the setup no longer stresses the
     // seam and the quiet balanced arms below would be quiet about nothing.
-    let mut plain = build_gravity_wb(&[region()], N, false, false);
+    let mut plain = build_gravity_wb_class(&[region()], N, false);
     plain.evolve(T_GATE).unwrap();
-    let (floor_plain, _) = worst_entropy_ratio(&plain);
+    let (floor_plain, _, x_plain) = worst_entropy_ratio_vs_class(&plain, &col, N);
+    println!("plain floor at x = {x_plain:.4}");
     assert!(
         1.0 - floor_plain > 1.0e-3,
         "the plain seam stopped venting (deficit {:.2e}); the balanced-arm gate below \
@@ -801,41 +981,39 @@ fn the_balanced_seam_transfer_holds_the_entropy_floor() {
     // so the plain arm must reproduce its recorded floor — the fix must never leak
     // into an unbalanced hierarchy's arithmetic. the pin is schedule-specific:
     // every evolve() call clamps its final dt to land on the target, so the floor's
-    // 8th decimal depends on the sequence of targets. under this test's
-    // (t = 2, t = 8) schedule the plain floor is 0.976185775495; under the dipole
-    // diagnostic's six-sample schedule the same scheme reads 0.976185833. both are
-    // pinned to 1e-9 in their own tests, so a leak into plain arithmetic trips
-    // whichever runs.
+    // 8th decimal depends on the sequence of targets; the recorded value belongs to
+    // this test's (t = 2, t = 8) schedule on the class-seeded column.
     plain.evolve(8.0).unwrap();
-    let (floor_plain8, _) = worst_entropy_ratio(&plain);
+    let (floor_plain8, _, _) = worst_entropy_ratio_vs_class(&plain, &col, N);
     println!("plain 2-level column at t = 8: floor {floor_plain8:.12}");
     assert!(
-        (floor_plain8 - 0.976185775495).abs() < 1.0e-9,
+        (floor_plain8 - PLAIN_FLOOR_T8).abs() < 1.0e-9,
         "the plain 2-level floor at t = 8 moved to {floor_plain8:.12} from its recorded \
-         0.976185775495; the balance-aware transfer is leaking into plain hierarchies"
+         {PLAIN_FLOOR_T8}; the balance-aware transfer is leaking into plain hierarchies"
     );
 
     // the transfer is the load-bearing piece: the balanced reconstruction alone,
     // with the equilibrium transfer forced off, still vents well past the bound
-    // below (measured 1.7e-4) — raw-state prolongation keeps knocking the ghosts
-    // off the isentrope faster than the interior can hold the floor.
-    let mut off = build_gravity_wb(&[region()], N, true, false).balance_aware_transfer(false);
+    // below — raw-state prolongation keeps knocking the ghosts off the class
+    // column faster than the interior can hold the floor.
+    let mut off = build_gravity_wb_class(&[region()], N, true).balance_aware_transfer(false);
     off.evolve(T_GATE).unwrap();
-    let (floor_off, _) = worst_entropy_ratio(&off);
+    let (floor_off, _, x_off) = worst_entropy_ratio_vs_class(&off, &col, N);
+    println!("transfer-off floor at x = {x_off:.4}");
     assert!(
-        1.0 - floor_off > 5.0e-5,
+        1.0 - floor_off > bound_on,
         "balanced reconstruction with the equilibrium transfer disabled no longer vents \
-         (deficit {:.2e}); the transfer is not the load-bearing piece on this setup and \
-         the gate below proves nothing about it",
+         (deficit {:.2e} against the bound {bound_on:.2e}); the transfer is not the \
+         load-bearing piece on this setup and the gate below proves nothing about it",
         1.0 - floor_off
     );
 
     // the gate: with the transfer active the same column holds its floor inside the
-    // bound the transfer-off arm must exceed (measured deficit 1.8e-5, the open
-    // restriction-side residual).
-    let mut on = build_gravity_wb(&[region()], N, true, false);
+    // bound the transfer-off arm must exceed.
+    let mut on = build_gravity_wb_class(&[region()], N, true);
     on.evolve(T_GATE).unwrap();
-    let (floor_on, lvl) = worst_entropy_ratio(&on);
+    let (floor_on, lvl, x_on) = worst_entropy_ratio_vs_class(&on, &col, N);
+    println!("transfer-on floor at x = {x_on:.4}");
     println!(
         "balanced 2-level column at t = {T_GATE}: deficit {:.2e} (plain {:.2e}, \
          transfer-off {:.2e})",
@@ -844,10 +1022,20 @@ fn the_balanced_seam_transfer_holds_the_entropy_floor() {
         1.0 - floor_off
     );
     assert!(
-        floor_on > 1.0 - 5.0e-5,
+        floor_on > 1.0 - bound_on,
         "the balance-aware coarse-fine transfer left a deficit of {:.2e} on level {lvl}: \
-         beyond the restriction-side residual, so the transfer is venting again",
+         beyond five restriction jensen steps ({jensen_step:.2e}), so the transfer is \
+         venting again",
         1.0 - floor_on
+    );
+    // the record at the longer clock: the restriction layer deposits per step, so
+    // the deficit grows about linearly (measured 2.1e-4, four times the t = 2
+    // value over four times the clock); a transfer leak would sit on top of that.
+    on.evolve(8.0).unwrap();
+    let (floor_on8, _, x_on8) = worst_entropy_ratio_vs_class(&on, &col, N);
+    println!(
+        "balanced 2-level column at t = 8: deficit {:.2e} at x = {x_on8:.4}",
+        1.0 - floor_on8
     );
 }
 

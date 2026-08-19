@@ -736,11 +736,27 @@ pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
 // =============================================================================
 // balance-aware coarse-fine transfer: the fused lerp+encode over the coarse
 // parent region and the decode over the fine ghost slab. between them the
-// unchanged prolong kernels act on departures from one hydrostatic anchor, so
-// coarse stencil data on one isentrope land the fine ghosts exactly back on it
-// at any prolongation order and any limiter. cartesian, gamma-law only, like
-// every balance-carrying kernel.
+// unchanged prolong kernels act on pressure departures from the mechanical
+// equilibrium chained out of the interior (Kaeppeli & Mishra, A&A 587, A94,
+// 2016): pressure is the piecewise-constant-density path integral of
+// `-rho dphi`, with each cell's own density carrying its segment and the
+// segments meeting at the faces. the encode chains on the coarse lattice from
+// the coarse cell under the nearest fine interior cell; the decode chains on the
+// fine lattice from that interior cell itself, through the ghosts' own
+// densities. a coarse stencil in its discrete class encodes to departures that
+// vanish identically, and the decoded ghosts then satisfy the fine lattice's
+// own recursion against the interior for whatever density the prolongation
+// hands them — the seam is a fixed point of the balanced hierarchy, with no
+// thermal structure assumed and no dependence on how restriction averages.
+// density and velocity pass through the transfer unchanged. cartesian.
 // =============================================================================
+
+/// the longest chain either transfer kernel unrolls, in cells along one axis:
+/// the fine ghost slab is the evolution halo (at most three cells for the
+/// parabolic stencil), and the coarse parent region reaches the prolongation's
+/// own ghost width past the slab's parents. the host dispatch asserts both
+/// extents against this bound.
+pub const WB_CF_CHAIN_MAX: i64 = 4;
 
 /// the per-slot body scalars a balance-aware transfer kernel declares:
 /// `body_{b}_pos_{g}` per grid axis, then `body_{b}_mass` / `_soft` /
@@ -789,53 +805,116 @@ fn centroid_position(ndim: usize, coords: &[NodeId], x_lo: &[Gv], dx: &[Gv]) -> 
     pos
 }
 
+/// integer-index helpers on the trace graph: constants, arithmetic and the
+/// clamp-by-select the chain walk needs to keep every load inside the cells it
+/// actually visits.
+fn int_const(v: i64) -> NodeId {
+    with_trace(|t| t.graph().add_const(ConstValue::I32(v as i32), None))
+}
+fn int_op(op: ElementWiseOp, a: NodeId, b: NodeId) -> NodeId {
+    with_trace(|t| t.graph().element_wise(op, vec![a, b], None))
+}
+fn int_select(cond: NodeId, yes: NodeId, no: NodeId) -> NodeId {
+    with_trace(|t| t.graph().select(cond, yes, no, None))
+}
+/// `coord` clamped into the inclusive interior range `[lo, hi]` along one axis.
+fn int_clamp(coord: NodeId, lo: NodeId, hi: NodeId) -> NodeId {
+    let below = int_op(ElementWiseOp::Lt, coord, lo);
+    let above = int_op(ElementWiseOp::Gt, coord, hi);
+    int_select(below, lo, int_select(above, hi, coord))
+}
 
-/// the largest potential rise the reconstruction footprint about `phi_anchor` climbs,
-/// over the `BALANCE_STENCIL_REACH` endpoints on every axis. the encode and the decode
-/// evaluate one and the same expression from the same anchor index and the same lattice
-/// scalars, so the departures one writes and the profile the other adds back sit on one
-/// weighted profile.
-fn anchor_potential_rise(
+/// the mechanical equilibrium pressure at the thread's cell, chained from the
+/// reference cell `ref_idx` through the lattice's own cells along an
+/// axis-ordered staircase (axis 0 first): `p_ref` plus, for every step between
+/// adjacent cells, `rho_from (phi(c_from) - phi(F)) + rho_to (phi(F) - phi(c_to))`
+/// with `F` the face the two share. each leg unrolls `WB_CF_CHAIN_MAX` steps in
+/// each direction; steps past the leg's length are masked to zero and their
+/// loads clamp onto the leg's last cell, so every read lands on a visited cell.
+/// a thread sitting on the reference cell takes every mask and returns `p_ref`
+/// bit for bit. the chain carries no floor and no fade: it is a reference the
+/// departure is measured against on one lattice and added back on the other,
+/// and that round trip is exact linear algebra wherever the two lattices hold
+/// the same densities.
+fn chained_pressure(
     ndim: usize,
-    anchor: &[NodeId],
+    ref_idx: &[NodeId],
+    p_ref: Gv,
+    rho_at: &dyn Fn(&[NodeId]) -> Gv,
     x_lo: &[Gv],
     dx: &[Gv],
     slots: &[([Gv; 3], Gv, Gv, Gv)],
-    phi_anchor: Gv,
 ) -> Gv {
-    let reach = Gv::from_f64(symbi_hydro::hydrostatic::BALANCE_STENCIL_REACH);
-    let base = centroid_position(ndim, anchor, x_lo, dx);
-    let shifted = |ax: usize, step: Gv| -> Gv {
-        let mut pos = base;
-        pos[ax] = pos[ax] + step * dx[ax];
+    let coords: Vec<NodeId> = with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+    let phi_center = |idx: &[NodeId]| -> Gv {
+        body_slots_potential(&centroid_position(ndim, idx, x_lo, dx), slots)
+    };
+    // the face of cell `idx` on its lower (`side = 0`) or upper (`side = 1`) edge along `ax`.
+    let phi_face = |idx: &[NodeId], ax: usize, side: i64| -> Gv {
+        let mut pos = centroid_position(ndim, idx, x_lo, dx);
+        let face_index = int_op(ElementWiseOp::Add, idx[ax], int_const(side));
+        pos[ax] = x_lo[ax] + Gv::of(face_index) * dx[ax];
         body_slots_potential(&pos, slots)
     };
-    let mut rise = Gv::from_f64(0.0);
+    let zero = Gv::from_f64(0.0);
+    let mut p = p_ref;
+    // the staircase: leg `ax` walks from the point reached by the lower legs
+    // (thread coords on axes < ax, reference coords on axes >= ax) to the
+    // thread's coordinate on `ax`.
+    let mut base: Vec<NodeId> = ref_idx.to_vec();
     for ax in 0..ndim {
-        rise = rise.max(symbi_hydro::hydrostatic::potential_rise(
-            phi_anchor,
-            shifted(ax, Gv::ZERO - reach),
-            shifted(ax, reach),
-        ));
+        let d = int_op(ElementWiseOp::Sub, coords[ax], ref_idx[ax]);
+        let d_f = Gv::of(d);
+        for dir in [1i64, -1] {
+            // the cell `t` steps along `dir` from the leg's start, clamped onto
+            // the leg's end once `t` passes the leg's length.
+            let at = |t: i64| -> Vec<NodeId> {
+                let t_node = int_const(t);
+                let reached = int_op(ElementWiseOp::Add, base[ax], int_const(dir * t));
+                let inside = if dir > 0 {
+                    int_op(ElementWiseOp::Gt, d, t_node)
+                } else {
+                    int_op(ElementWiseOp::Lt, d, int_const(-t))
+                };
+                let mut idx = base.clone();
+                idx[ax] = int_select(inside, reached, coords[ax]);
+                idx
+            };
+            for t in 1..=WB_CF_CHAIN_MAX {
+                let from = at(t - 1);
+                let to = at(t);
+                // the face shared by `from` and `to`: `to`'s lower face walking
+                // up, its upper face walking down.
+                let phi_f = phi_face(&to, ax, if dir > 0 { 0 } else { 1 });
+                let step = rho_at(&from) * (phi_center(&from) - phi_f)
+                    + rho_at(&to) * (phi_f - phi_center(&to));
+                let live = if dir > 0 {
+                    d_f.cmp_ge(Gv::from_f64(t as f64))
+                } else {
+                    d_f.cmp_le(Gv::from_f64(-(t as f64)))
+                };
+                p = p + Gv::select(live, step, zero);
+            }
+        }
+        base[ax] = coords[ax];
     }
-    rise
+    p
 }
-
 
 /// trace the fused lerp + hydrostatic encode over the coarse parent region of a
 /// coarse-fine ghost slab: every component is time-interpolated
-/// `(1 - alpha)*src_old_k + alpha*src_new_k`, and rho (component 0) and pre
-/// (component ncomp-1) additionally subtract the anchor equilibrium evaluated
-/// at the cell's own potential. the anchor (rho, pre) is re-lerped in-thread
-/// from the raw inputs at the `anchor_{ax}` index scalars, so each thread builds
-/// the anchor from immutable input, independent of the anchor cell's encode. the
-/// prolong kernels then act on the resulting departures unchanged.
+/// `(1 - alpha)*src_old_k + alpha*src_new_k`, and pre (component ncomp-1)
+/// additionally subtracts the mechanical equilibrium chained from the coarse
+/// cell under the nearest fine interior cell — the thread's own coordinates
+/// clamped into `[lo_{ax}, hi_{ax}]` — through the lerped coarse densities. the
+/// prolong kernels then act on the resulting departures unchanged; density and
+/// velocities carry their lerped values.
 ///
 /// buffers: src_old_0, src_new_0, .., interleaved (inputs) then dst_0..
-/// (outputs). ints: anchor_{ax}. scalars: alpha, gamma, x_lo_{ax}, dx_{ax}
-/// (the coarse lattice), then the body slots.
+/// (outputs). ints: lo_{ax}, hi_{ax} (the coarse cells under the fine interior,
+/// inclusive). scalars: alpha, x_lo_{ax}, dx_{ax} (the coarse lattice), then
+/// the body slots.
 pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKernel, Writes) {
-    use symbi_hydro::hydrostatic::LocalEquilibrium;
     assert!(
         (1..=3).contains(&ndim),
         "wb_cf_lerp_encode_gv: ndim must be 1..=3"
@@ -845,14 +924,10 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
         "wb_cf_lerp_encode_gv: the balance-aware transfer carries rho + ndim velocities + pre"
     );
     begin_trace();
-    // scalar manifest in declaration order: alpha, gamma float; anchor int lane;
+    // scalar manifest in declaration order: alpha; the interior-bound int lanes;
     // grid origin/step; body slots.
     let alpha = Gv::scalar("alpha");
-    let anchor: Vec<NodeId> = with_trace(|t| {
-        (0..ndim)
-            .map(|ax| t.scalar_int(&format!("anchor_{ax}")))
-            .collect()
-    });
+    let (lo, hi) = declare_interior_bounds(ndim);
     let x_lo: Vec<Gv> = (0..ndim)
         .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
         .collect();
@@ -871,32 +946,27 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
             (one - alpha) * v_old + alpha * v_new
         })
         .collect();
-
-    // the anchor state, re-lerped in-thread from the same inputs (keys already
-    // registered — no new buffers).
-    let lerp_anchor = |k: usize| -> Gv {
+    // the lerped state at an arbitrary coarse index, from the same registered
+    // buffers.
+    let lerp_at = |k: usize, idx: &[NodeId]| -> Gv {
         let old_key = format!("src_old_{k}");
         let new_key = format!("src_new_{k}");
-        let v_old = gv_load_at(&old_key, old_key.as_str(), &anchor);
-        let v_new = gv_load_at(&new_key, new_key.as_str(), &anchor);
+        let v_old = gv_load_at(&old_key, old_key.as_str(), idx);
+        let v_new = gv_load_at(&new_key, new_key.as_str(), idx);
         (one - alpha) * v_old + alpha * v_new
     };
-    let rho_a = lerp_anchor(0);
-    let pre_a = lerp_anchor(ncomp - 1);
 
-    let cell_coords: Vec<NodeId> =
-        with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
-    let phi_anchor = body_slots_potential(&centroid_position(ndim, &anchor, &x_lo, &dx), &slots);
-    let phi_cell = body_slots_potential(&centroid_position(ndim, &cell_coords, &x_lo, &dx), &slots);
-    let rise = anchor_potential_rise(ndim, &anchor, &x_lo, &dx, &slots, phi_anchor);
-    let eq = LocalEquilibrium::faded(rho_a, pre_a, phi_anchor, rise);
-    let (r_eq, p_eq) = eq.state_at(phi_cell);
+    let coords: Vec<NodeId> = with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+    let ref_idx: Vec<NodeId> = (0..ndim)
+        .map(|ax| int_clamp(coords[ax], lo[ax], hi[ax]))
+        .collect();
+    let p_ref = lerp_at(ncomp - 1, &ref_idx);
+    let rho_at = |idx: &[NodeId]| lerp_at(0, idx);
+    let p_eq = chained_pressure(ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots);
 
     let mut writes = Vec::with_capacity(ncomp);
     for k in 0..ncomp {
-        let val = if k == 0 {
-            lerp_cell[k] - r_eq
-        } else if k == ncomp - 1 {
+        let val = if k == ncomp - 1 {
             lerp_cell[k] - p_eq
         } else {
             lerp_cell[k]
@@ -907,71 +977,54 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
     (end_trace(), writes)
 }
 
+/// the inclusive interior bounds per axis as int scalar lanes `lo_{ax}` / `hi_{ax}`.
+fn declare_interior_bounds(ndim: usize) -> (Vec<NodeId>, Vec<NodeId>) {
+    with_trace(|t| {
+        let lo = (0..ndim)
+            .map(|ax| t.scalar_int(&format!("lo_{ax}")))
+            .collect();
+        let hi = (0..ndim)
+            .map(|ax| t.scalar_int(&format!("hi_{ax}")))
+            .collect();
+        (lo, hi)
+    })
+}
+
 /// trace the hydrostatic decode over the fine coarse-fine ghost slab: the
-/// prolonged departures already sit in the fine (rho, pre), and each ghost adds
-/// back the anchor equilibrium evaluated at its own potential. the encoded
-/// scratch holds a zero departure at the anchor, so the anchor state comes from
-/// the raw coarse (rho, pre) snapshots, bound as inputs and re-lerped in-thread
-/// with the same alpha the encode used.
+/// prolonged pressure departure already sits in the fine `dst_pre`, and each
+/// ghost adds back the mechanical equilibrium chained from the nearest fine
+/// interior cell — its own coordinates clamped into `[lo_{ax}, hi_{ax}]` —
+/// through the fine densities the prolongation wrote. the interior cell is
+/// outside the slab, so its pressure is never a write of this pass, and the
+/// densities are read only, so the in-place pressure write is race-free.
 ///
-/// buffers: src_old_rho, src_new_rho, src_old_pre, src_new_pre (the coarse
-/// snapshots, inputs) then dst_rho, dst_pre (the fine ghosts, in-place
-/// outputs). ints: anchor_{ax}. scalars: alpha, gamma, x_lo_{ax}, dx_{ax} (the
-/// fine lattice), src_x_lo_{ax}, src_dx_{ax} (the coarse lattice), then the
-/// body slots.
+/// buffers: dst_rho (the fine density, input), dst_pre (the fine ghosts, in-place
+/// output). ints: lo_{ax}, hi_{ax} (the fine interior, inclusive). scalars:
+/// x_lo_{ax}, dx_{ax} (the fine lattice), then the body slots.
 pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
-    use symbi_hydro::hydrostatic::LocalEquilibrium;
     assert!((1..=3).contains(&ndim), "wb_cf_decode_gv: ndim must be 1..=3");
     begin_trace();
-    let alpha = Gv::scalar("alpha");
-    let anchor: Vec<NodeId> = with_trace(|t| {
-        (0..ndim)
-            .map(|ax| t.scalar_int(&format!("anchor_{ax}")))
-            .collect()
-    });
-    let fine_x_lo: Vec<Gv> = (0..ndim)
+    let (lo, hi) = declare_interior_bounds(ndim);
+    let x_lo: Vec<Gv> = (0..ndim)
         .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
         .collect();
-    let fine_dx: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("dx_{ax}"))).collect();
-    let src_x_lo: Vec<Gv> = (0..ndim)
-        .map(|ax| Gv::scalar(&format!("src_x_lo_{ax}")))
-        .collect();
-    let src_dx: Vec<Gv> = (0..ndim)
-        .map(|ax| Gv::scalar(&format!("src_dx_{ax}")))
-        .collect();
+    let dx: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("dx_{ax}"))).collect();
     let slots = declare_body_slots(ndim, n_bodies);
 
-    let one = Gv::from_f64(1.0);
-    // the coarse snapshots register first, in the dispatch's input order.
-    let lerp_anchor = |name: &str| -> Gv {
-        let old_key = format!("src_old_{name}");
-        let new_key = format!("src_new_{name}");
-        let v_old = gv_load_at(&old_key, old_key.as_str(), &anchor);
-        let v_new = gv_load_at(&new_key, new_key.as_str(), &anchor);
-        (one - alpha) * v_old + alpha * v_new
-    };
-    let rho_a = lerp_anchor("rho");
-    let pre_a = lerp_anchor("pre");
+    // registration order pins the buffer order: density first (input), then the
+    // pressure (in-place).
+    let rho_at = |idx: &[NodeId]| gv_load_at("dst_rho", "dst_rho", idx);
+    let coords: Vec<NodeId> = with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+    let _ = rho_at(&coords);
+    let departure = Gv::field("dst_pre", "dst_pre");
+    let ref_idx: Vec<NodeId> = (0..ndim)
+        .map(|ax| int_clamp(coords[ax], lo[ax], hi[ax]))
+        .collect();
+    let p_ref = gv_load_at("dst_pre", "dst_pre", &ref_idx);
+    let p_eq = chained_pressure(ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots);
 
-    let cell_coords: Vec<NodeId> =
-        with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
-    let phi_anchor =
-        body_slots_potential(&centroid_position(ndim, &anchor, &src_x_lo, &src_dx), &slots);
-    let phi_fine = body_slots_potential(
-        &centroid_position(ndim, &cell_coords, &fine_x_lo, &fine_dx),
-        &slots,
-    );
-    let rise = anchor_potential_rise(ndim, &anchor, &src_x_lo, &src_dx, &slots, phi_anchor);
-    let eq = LocalEquilibrium::faded(rho_a, pre_a, phi_anchor, rise);
-    let (r_eq, p_eq) = eq.state_at(phi_fine);
-
-    // in-place: the prolonged departures already sit in the ghosts.
-    let rho_g = Gv::field("dst_rho", "dst_rho") + r_eq;
-    let pre_g = Gv::field("dst_pre", "dst_pre") + p_eq;
-    let writes = vec![
-        ("dst_rho".to_string(), "dst_rho".into(), rho_g.node()),
-        ("dst_pre".to_string(), "dst_pre".into(), pre_g.node()),
-    ];
+    let pre_g = departure + p_eq;
+    let writes = vec![("dst_pre".to_string(), "dst_pre".into(), pre_g.node())];
     (end_trace(), writes)
 }
 
