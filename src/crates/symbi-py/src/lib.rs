@@ -376,7 +376,7 @@ fn get_source_json(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Strin
         return Ok(None);
     };
     // skip the empty-dict default (`return {}` in the base SimbiProblem).
-    if let Ok(d) = obj.downcast::<PyDict>() {
+    if let Ok(d) = obj.cast::<PyDict>() {
         if d.is_empty() {
             return Ok(None);
         }
@@ -393,7 +393,7 @@ fn get_source_json(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Strin
 fn get_census_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
     let mut censuses = Vec::new();
     if let Some(obj) = dict.get_item("census_expressions")? {
-        let list = obj.downcast::<PyList>().map_err(|_| {
+        let list = obj.cast::<PyList>().map_err(|_| {
             PyValueError::new_err("census_expressions must be a list of census payloads")
         })?;
         let json = obj.py().import("json")?;
@@ -435,7 +435,7 @@ fn lower_configured_censuses(
 fn get_source_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
     let mut sources = Vec::new();
     if let Some(obj) = dict.get_item("source_expressions")? {
-        let list = obj.downcast::<PyList>().map_err(|_| {
+        let list = obj.cast::<PyList>().map_err(|_| {
             PyValueError::new_err("source_expressions must be a list of source payloads")
         })?;
         let json = obj.py().import("json")?;
@@ -1206,7 +1206,7 @@ fn parse_bonded_assembly(dict: &Bound<'_, PyDict>) -> PyResult<Option<BondedAsse
         return Ok(None);
     }
     let d = obj
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyValueError::new_err("bonded_assembly must be a dict"))?;
     let get = |k: &str| -> PyResult<Bound<'_, PyAny>> {
         d.get_item(k)?
@@ -1243,7 +1243,7 @@ fn parse_bonded_assembly(dict: &Bound<'_, PyDict>) -> PyResult<Option<BondedAsse
     }
     let mat = get("bond_material")?;
     let md = mat
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyValueError::new_err("bond_material must be a dict"))?;
     let mf = |k: &str| -> PyResult<f64> {
         md.get_item(k)?
@@ -1261,7 +1261,7 @@ fn parse_bonded_assembly(dict: &Bound<'_, PyDict>) -> PyResult<Option<BondedAsse
     let contact = match d.get_item("contact")? {
         Some(c) if !c.is_none() => {
             let cd = c
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("contact must be a dict"))?
                 .clone();
             let cf = |k: &str| -> PyResult<f64> {
@@ -1281,7 +1281,7 @@ fn parse_bonded_assembly(dict: &Bound<'_, PyDict>) -> PyResult<Option<BondedAsse
     let gravity = match d.get_item("gravity")? {
         Some(g) if !g.is_none() => {
             let gd = g
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("gravity must be a dict"))?
                 .clone();
             let gf = |k: &str| -> PyResult<f64> {
@@ -1328,7 +1328,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
     };
     out.reserve(list.len());
     for item in &list {
-        let Ok(b) = item.downcast::<PyDict>() else {
+        let Ok(b) = item.cast::<PyDict>() else {
             continue;
         };
         let f = |k: &str| -> f64 {
@@ -1438,9 +1438,9 @@ struct BinaryCfg {
 /// the `body_system.binary_config` sub-dict, if the config carries a gravitational binary.
 fn binary_config_dict<'py>(dict: &Bound<'py, PyDict>) -> Option<Bound<'py, PyDict>> {
     let bs = dict.get_item("body_system").ok().flatten()?;
-    let bs = bs.downcast_into::<PyDict>().ok()?;
+    let bs = bs.cast_into::<PyDict>().ok()?;
     let bc = bs.get_item("binary_config").ok().flatten()?;
-    bc.downcast_into::<PyDict>().ok()
+    bc.cast_into::<PyDict>().ok()
 }
 
 fn parse_binary(dict: &Bound<'_, PyDict>) -> Option<BinaryCfg> {
@@ -1474,7 +1474,7 @@ fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) 
         return;
     };
     for (i, comp) in comps.iter().enumerate() {
-        let Ok(c) = comp.downcast::<PyDict>() else {
+        let Ok(c) = comp.cast::<PyDict>() else {
             continue;
         };
         let has_accretion = c.get_item("accretion").ok().flatten().is_some();
@@ -1529,7 +1529,7 @@ fn sub_str(body: &Bound<'_, PyDict>, group: &str, key: &str, default: &str) -> S
     body.get_item(group)
         .ok()
         .flatten()
-        .and_then(|g| g.downcast::<PyDict>().ok().cloned())
+        .and_then(|g| g.cast::<PyDict>().ok().cloned())
         .and_then(|gd| gd.get_item(key).ok().flatten())
         .and_then(|val| val.extract::<String>().ok())
         .unwrap_or_else(|| default.to_string())
@@ -1541,7 +1541,7 @@ fn sub_f64_opt(body: &Bound<'_, PyDict>, group: &str, key: &str) -> Option<f64> 
     body.get_item(group)
         .ok()
         .flatten()
-        .and_then(|g| g.downcast::<PyDict>().ok().cloned())
+        .and_then(|g| g.cast::<PyDict>().ok().cloned())
         .and_then(|gd| gd.get_item(key).ok().flatten())
         .and_then(|val| val.extract().ok())
 }
@@ -1554,14 +1554,14 @@ fn get_shape_json(body: &Bound<'_, PyDict>) -> Option<String> {
         .get_item("rigid")
         .ok()
         .flatten()?
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .ok()?
         .clone();
     let shape = rigid
         .get_item("shape")
         .ok()
         .flatten()?
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .ok()?
         .clone();
     let wire = shape.get_item("wire").ok().flatten()?;
@@ -1576,7 +1576,7 @@ fn sub_vec3(body: &Bound<'_, PyDict>, group: &str, key: &str, default: [f64; 3])
         .get_item(group)
         .ok()
         .flatten()
-        .and_then(|g| g.downcast::<PyDict>().ok().cloned())
+        .and_then(|g| g.cast::<PyDict>().ok().cloned())
         .and_then(|gd| gd.get_item(key).ok().flatten())
         .and_then(|val| val.extract().ok());
     match v {
@@ -1590,7 +1590,7 @@ fn sub_bool(body: &Bound<'_, PyDict>, group: &str, key: &str, default: bool) -> 
     body.get_item(group)
         .ok()
         .flatten()
-        .and_then(|g| g.downcast::<PyDict>().ok().cloned())
+        .and_then(|g| g.cast::<PyDict>().ok().cloned())
         .and_then(|gd| gd.get_item(key).ok().flatten())
         .and_then(|val| val.extract().ok())
         .unwrap_or(default)
@@ -8118,7 +8118,7 @@ fn run_simulation(
 
     // the solve is pure rust with no python access — release the gil so rayon
     // gets real parallelism (and python stays responsive).
-    py.allow_threads(|| dispatch_and_run(&cfg, &prims, &bfields))
+    py.detach(|| dispatch_and_run(&cfg, &prims, &bfields))
         .map_err(PyRuntimeError::new_err)
 }
 
@@ -8277,7 +8277,7 @@ fn validate_simulation(sim_info: &Bound<'_, PyDict>) -> PyResult<()> {
 #[pyfunction]
 #[pyo3(signature = (rundir, poll_ms = 250))]
 fn attach_dashboard(py: Python<'_>, rundir: String, poll_ms: u64) -> PyResult<()> {
-    py.allow_threads(|| symbi_display::run_attach(std::path::Path::new(&rundir), poll_ms))
+    py.detach(|| symbi_display::run_attach(std::path::Path::new(&rundir), poll_ms))
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
