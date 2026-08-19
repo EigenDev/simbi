@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 
 use symbi_discretize::coords::{Balance, Coords};
-use symbi_discretize::gv::adiabatic_hllc_plus_flux_gv;
+use symbi_discretize::gv::{adiabatic_hllc_flux_gv, adiabatic_hllc_plus_flux_gv};
 use symbi_discretize::Recon;
 use symbi_ir::graph::Op;
 
@@ -66,7 +66,41 @@ fn histogram(recon: Recon, balance: Balance) -> (BTreeMap<String, usize>, f64) {
     (h, cost)
 }
 
+fn ablate() {
+    // attribute the baseline divisions: plain hllc against hllc+, both unbalanced.
+    let count = |wb: bool, plus: bool| -> BTreeMap<String, usize> {
+        let bal = if wb { Balance::Hydrostatic } else { Balance::Plain };
+        let (k, w) = if plus {
+            adiabatic_hllc_plus_flux_gv::<3>(0, Recon::Plm, bal, Coords::Cartesian, &[0, 1, 2])
+        } else {
+            { let _ = bal; adiabatic_hllc_flux_gv::<3>(0, Recon::Plm) }
+        };
+        let outs: Vec<_> = w.iter().map(|(_, _, n)| *n).collect();
+        let live = k.graph.reachable_from(&outs);
+        let mut h = BTreeMap::new();
+        for (id, node, _) in k.graph.iter() {
+            if !live.contains(&id) { continue; }
+            let kind = match &node.op {
+                Op::ElementWise(op, _) => format!("{op:?}"),
+                Op::Select(..) => "Select".to_string(),
+                other => format!("{other:?}").split(['(', ' ', '{']).next().unwrap_or("?").to_string(),
+            };
+            *h.entry(kind).or_insert(0) += 1;
+        }
+        h
+    };
+    let hllc = count(false, false);
+    let plus = count(false, true);
+    println!("\n=== baseline division attribution (3d plm, unbalanced)");
+    for op in ["Div", "Sqrt", "Pow", "Exp", "Log"] {
+        let a = hllc.get(op).copied().unwrap_or(0);
+        let b = plus.get(op).copied().unwrap_or(0);
+        println!("   {op:<5} plain hllc {a:>4}   hllc+ {b:>4}   the shear/APC terms add {:>4}", b as i64 - a as i64);
+    }
+}
+
 fn main() {
+    ablate();
     emit_probe();
     for recon in [Recon::Plm, Recon::Ppm] {
         let (plain, c_plain) = histogram(recon, Balance::Plain);
@@ -90,6 +124,14 @@ fn main() {
             })
             .collect();
         rows.sort_by(|x, y| y.0.abs().partial_cmp(&x.0.abs()).unwrap());
+        // the baseline arm's own cost: what every run pays, wb or not.
+        let mut plain_rows: Vec<_> = plain.iter().map(|(k,&n)| (n as f64 * weight(k), k.clone(), n)).collect();
+        plain_rows.sort_by(|x,y| y.0.partial_cmp(&x.0).unwrap());
+        println!("  -- baseline arm, top cost centers --");
+        for (c, k, n) in plain_rows.into_iter().take(6) {
+            if c <= 0.0 { continue; }
+            println!("     {k:<12} n={n:<6} cost={c:>8.0}  ({:.0}% of plain)", 100.0*c/c_plain);
+        }
         for (dc, k, a, b) in rows.into_iter().take(10) {
             if a == b { continue; }
             println!("  {k:<12} {a:>8} {b:>8} {:>8} {dc:>10.0}", b as i64 - a as i64);
@@ -97,14 +139,16 @@ fn main() {
     }
 }
 
-// ---- does the spacing `pow` survive as a real branch, or get flattened? ----
+// ---- do the expensive arms survive as real branches, or get flattened? ----
+// a node inside a branch that a launch does not take costs nothing at runtime, and the
+// histogram above cannot see that. this reads the emitted source to tell the two apart.
 #[allow(dead_code)]
 fn emit_probe() {
     use symbi_ir::emit::{Precision, Target, TargetConfig};
     use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
-    let (k, w) = adiabatic_hllc_plus_flux_gv::<3>(0, Recon::Plm, Balance::Hydrostatic, Coords::Cartesian, &[0,1,2]);
+    let (k, w) = adiabatic_hllc_flux_gv::<3>(0, Recon::Plm);
     let desc = emit_kernel_from_lowering(&k.graph, &KernelEmitInputs {
-        kernel_name: "wb_probe", coalesce_layout: false, ndim: 3,
+        kernel_name: "plain_probe", coalesce_layout: false, ndim: 3,
         target: TargetConfig { target: Target::Hip, precision: Precision::F64 },
         field_inputs: &k.field_inputs, scalar_params: &k.scalar_params,
         field_writes: &w, coord_components: &k.coord_components,
@@ -128,7 +172,7 @@ fn emit_probe() {
     println!("   divisions by another literal        : {other_div}");
     let pows = src.matches("pow(").count();
     let ifs = src.matches("if (").count();
-    println!("\n=== emitted HIP for the WB PLM kernel");
+    println!("\n=== emitted HIP for the plain HLLC PLM kernel");
     println!("   pow( occurrences : {pows}");
     println!("   if (  occurrences : {ifs}");
     for (i, line) in src.lines().enumerate() {

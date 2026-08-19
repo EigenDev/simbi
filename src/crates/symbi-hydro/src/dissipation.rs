@@ -85,12 +85,50 @@ pub fn mach_scale<S: Scalar>(speed_l: S, speed_r: S, cs_l: S, cs_r: S) -> S {
 /// shock-normal interfaces of the same two cells.
 #[inline]
 pub fn shear_weight<S: Scalar>(pressure_ratio: S, mach: S) -> S {
-    S::ONE - pressure_ratio.powf(mach)
+    // `ratio^mach` composed from the logarithm rather than taken as a general power. the
+    // ratio is `min(a/b, b/a)` over positive pressures and so lies in (0, 1]; the floor
+    // keeps the logarithm finite where a floor-level pressure drives the ratio to zero,
+    // which is also where the general power's `0^0` convention and this composition would
+    // otherwise disagree.
+    //
+    // both limits that carry physical meaning stay exact. at `ratio = 1` (smooth flow)
+    // `ln 1 = 0` and `exp 0 = 1`, and at `mach = 0` (a subsonic region) the product is zero
+    // and the exponential is one, so each returns a weight of exactly zero and the shear
+    // viscosity is absent bit-for-bit rather than to rounding.
+    let base = pressure_ratio.max(S::from_f64(f64::MIN_POSITIVE));
+    S::ONE - (mach * base.ln()).exp()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// the shear weight switches the transverse viscosity off exactly, not to rounding, in
+    /// the two regimes where it must be absent: smooth flow (a unit pressure ratio) and a
+    /// subsonic region (zero mach). a residue of order epsilon here would seed viscosity in
+    /// a stratified atmosphere, which carries a large pressure ratio across every cell and
+    /// no shock at all.
+    #[test]
+    fn the_shear_weight_vanishes_exactly_where_the_viscosity_must_be_absent() {
+        for mach in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let w = shear_weight(1.0_f64, mach);
+            assert_eq!(w, 0.0, "smooth flow at mach {mach} left a weight {w:e}");
+        }
+        for ratio in [1.0e-12, 1.0e-4, 0.01, 0.5, 1.0] {
+            let w = shear_weight(ratio, 0.0_f64);
+            assert_eq!(w, 0.0, "subsonic at ratio {ratio} left a weight {w:e}");
+        }
+        // a floor-level pressure drives the ratio to zero; the weight stays a number.
+        assert!(shear_weight(0.0_f64, 0.0_f64).is_finite());
+        assert!(shear_weight(0.0_f64, 1.0_f64).is_finite());
+        // and it stays a weight: bounded in [0, 1] wherever it is consulted.
+        for ratio in [0.0, 1.0e-8, 0.3, 1.0] {
+            for mach in [0.0, 0.4, 1.0] {
+                let w = shear_weight(ratio, mach);
+                assert!((0.0..=1.0).contains(&w), "weight {w} out of range at ({ratio}, {mach})");
+            }
+        }
+    }
 
     #[test]
     fn the_scalings_depend_only_on_ratios_of_speeds() {

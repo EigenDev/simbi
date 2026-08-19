@@ -1509,7 +1509,11 @@ fn neighborhood_pressure_ratio(ndim: u8, dir: u8) -> Gv {
     // the symmetric ratio of an interface, in (0, 1] for positive pressures: one at a smooth
     // interface, falling toward zero as the jump across it strengthens, and blind to which side
     // carries the compressed gas.
-    let ratio = |a: Gv, b: Gv| (a / b).min(b / a);
+    // one reciprocal, not two: for positive pressures the smaller quotient is the smaller
+    // pressure over the larger, so `min(a/b, b/a)` and `min(a,b)/max(a,b)` are the same
+    // division and agree bit for bit. the sensor reads eleven interfaces per face in 3d,
+    // so the halving is eleven reciprocals off the baseline kernel.
+    let ratio = |a: Gv, b: Gv| a.min(b) / a.max(b);
 
     // the three interfaces along the sweep, spanning cells -2 through +1.
     let mut weakest = ratio(at(-2, None), at(-1, None))
