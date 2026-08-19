@@ -42,14 +42,14 @@ SIMBI started life as a C++ code. I eventually rewrote the compute backend in Ru
 - Constrained-transport MHD (contact [Gardiner & Stone](https://arxiv.org/abs/0712.2634) or UCT ([Mignone & DelZanna (2021)](https://arxiv.org/abs/2004.10542)) edge EMFs) that keeps div B at machine zero by construction
 - Physical transport when you want it: Navier-Stokes viscosity (constant or alpha-disk) and Ohmic resistivity, layered on top of the ideal solvers
 - Immersed boundaries with point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls built from constructive solid geometry (CSG). Bodies support prescribed motion or two-way coupling, including translation, rotation, gas–body energy exchange, and force, torque, and accretion diagnostics. This part of SIMBI grew out of a class I took with [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin) as a graduate student at NYU; I loved the subject and wanted to bring some of those ideas into the code.
-- Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart the region inside the black hole is frozen at a cold vacuum, so you can swallow the singularity and still keep a well-posed accretion-rate certificate
+- Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart, cells inside the horizon are held at a cold vacuum floor while the exterior flow remains regular
 - Block-based static mesh refinement with [Berger-Colella](https://www.sciencedirect.com/science/article/pii/0021999189900351) subcycling
 - Single-node **multi-GPU domain decomposition** — set `gpus > 1` and the domain splits across the cards, halo-exchanged in lockstep and bit-identical to a monolithic run
-- In-situ binned reductions (a "census"): declare shell profiles as expressions and the run reduces them on the device each cadence, straight into the checkpoint — handy when what you want out of a run is a scaling law
-- Lagrangian tracer particles that ride along with the flow, across refinement levels and multi-GPU cuts too
+- In-situ binned reductions (a "census") for shell profiles, scaling laws, and other summary quantities
+- Lagrangian tracer particles that follow the flow across refinement levels and multi-GPU boundaries
 - Afterglow radiation transport, so you can turn a simulation into synthetic observables
-- A live terminal dashboard while you run (pause, single-step, checkpoint on demand, field heatmaps), and `simbi attach` to peek at a headless run from another shell
-- A type-safe Python config system that generates its own CLI, so you stop hand-writing argument parsers
+- A live terminal dashboard with pause, single-step, on-demand checkpoints, and field heatmaps; `simbi attach` provides a read-only view of a headless run from another shell
+- A type-safe Python configuration system that generates its own CLI
 
 > CUDA and HIP use kernels generated from the same definitions. SIMBI currently
 > supports multi-GPU decomposition within one node; multi-node decomposition is
@@ -322,12 +322,11 @@ Checkpoints are named `<res>.chkpt.<time>.h5` — resolution as the per-axis int
 with `x`, then the sim time with the decimal rendered as `_` and zero-padded so a directory listing
 sorts chronologically. So `128x128.chkpt.000_400.h5`, `64x64x64.chkpt.009_000.h5`. Instead of a
 time you may see `final` (clean finish), `interrupted` (Ctrl-C, a scheduler eviction, or `q` in the
-TUI), or `crashed` (the solver gave up). All three are restartable, which is the point — a wall-clock
-kill on a cluster still leaves you something to resume from.
+TUI), or `crashed` (the solver stopped after an error). All three can be used to restart a run, so
+a job that reaches its wall-clock limit still leaves a usable checkpoint.
 
-> Heads up if you glob: `*.chkpt.final*.h5` only exists after a clean finish. A job killed at the
-> wall-clock limit leaves `interrupted`, so a downstream script keyed on `final` quietly finds
-> nothing.
+> If you use globs, note that `*.chkpt.final*.h5` only exists after a clean finish. A job stopped at
+> its wall-clock limit writes an `interrupted` checkpoint instead.
 
 Resuming with `--checkpoint` picks up the sim clock and the checkpoint numbering, so you get
 `031, 032, ...` alongside the earlier files. `end_time` becomes the larger of yours and
@@ -386,9 +385,9 @@ def census_expressions(self) -> list[ExpressionDict]:
     ]
 ```
 
-Note that you only ever accumulate sums. That's deliberate: sums are the quantity that merges
-cleanly across refinement levels, across decomposed tiles, and across restart segments. So the
-reader forms means and variances as ratios of sums when you ask for them:
+Census values are stored as sums because sums combine cleanly across refinement levels,
+decomposed tiles, and restart segments. The reader computes means and variances from ratios of
+those sums:
 
 ```python
 from simbi.reader import census_names, read_census
@@ -397,18 +396,17 @@ census_names("run.chkpt.final.h5")     # ('shells',)
 c = read_census("run.chkpt.final.h5", "shells")
 c.bin_centers(0)                       # the radial axis
 c.favre("mass_vr", "mass")             # mass-weighted <v_r> per shell
-c.assert_fully_binned()                # loud if cells fell outside the bins
+c.assert_fully_binned()                # raises if cells fell outside the bins
 ```
 
-Every row carries its level, sample count, time span, and a `dropped` count — cells that fell
-outside the bins. Worth watching, since a census that quietly under-covers its domain looks a lot
-like real structure. `PER_LEVEL_STEP` samples each refinement level on its own clock, which is
-usually what you want: root-step sampling under-resolves the innermost shells, and those are often
-the ones you're fitting a slope to.
+Every row carries its level, sample count, time span, and a `dropped` count for cells outside the
+bins. Check this count before interpreting a profile because incomplete bin coverage can resemble
+physical structure. `PER_LEVEL_STEP` samples each refinement level on its own clock. This gives the
+inner shells more samples than root-step sampling, which is useful when fitting their slopes.
 
-One gotcha: the history covers a single run segment and starts empty again on a restart. So for a
-restart chain, grab the last checkpoint of each segment and stitch them offline (accumulating rows
-combine as a count-weighted sum via `n_samples`).
+The history covers one run segment and starts empty after a restart. For a restart chain, read the
+last checkpoint from each segment and stitch the histories offline. Accumulating rows combine as a
+count-weighted sum through `n_samples`.
 
 ### Offline analysis
 
@@ -426,7 +424,8 @@ t0 = steady_state_time(diag.time, diag.mdot[:, 0])   # steady-state onset for bo
 
 ## Configuration System
 
-Problems are plain Python classes. You inherit from `SimbiProblem`, declare your parameters with `ProblemParam`, and SIMBI builds the CLI for you from the type annotations. No argparse boilerplate, and the types are checked.
+Problems are Python classes derived from `SimbiProblem`. Parameters declared with `ProblemParam`
+are type-checked and can be exposed through the generated CLI.
 
 ### Basic structure
 
@@ -507,9 +506,8 @@ class KelvinHelmholtz(SimbiProblem):
 | `cli_name="..."` | Override the derived kebab-case flag name |
 | `group="..."` | Section label in the live dashboard's setup panel |
 
-Note that `cli=True` is opt-in per field, and that includes `resolution` and `adiabatic_index` — a
-config only gets `--resolution` if it declares it. `simbi run <problem> --info` tells you which flags
-a given problem actually exposes.
+`cli=True` is set per field, including common fields such as `resolution` and `adiabatic_index`.
+Use `simbi run <problem> --info` to list the flags for a particular problem.
 
 ### Deriving fields from other fields
 
@@ -524,8 +522,8 @@ def setup(self) -> None:
     self.bondi_radius = self.central_mass / self.sound_speed**2
 ```
 
-There's also `summary()`, which returns `(group, label, value)` rows that show up in the live
-dashboard's setup panel — handy for the derived numbers you'd otherwise print by hand.
+The optional `summary()` method returns `(group, label, value)` rows for the setup panel in the live
+dashboard. It is a convenient place to report derived quantities.
 
 ### Source terms
 
@@ -540,8 +538,8 @@ def source_expressions(self) -> list[ExpressionDict]:
     return [expr.force([0.0, -0.1], dim=2)]
 ```
 
-Anything position-dependent starts from `coords`, which hands you the spatial variables.
-Ordinary arithmetic works on them, and plain numbers mix in freely:
+For position-dependent sources, `coords` returns the spatial variables. These expressions support
+ordinary arithmetic with one another and with numeric constants:
 
 ```python
 @computed_field
@@ -554,24 +552,28 @@ def source_expressions(self) -> list[ExpressionDict]:
     return [expr.sponge([kappa, 1.0, 0.0, 0.0, 1.0], dim=2)]
 ```
 
-There is a constructor per kind — `force`, `rotating_frame`, `cooling`, `relax`, `sponge`,
-`inject`, `raw` — plus `boundary` for a driven (Dirichlet) face and `equilibrium` for a
-stationary target the scheme must hold exactly. Each checks its own arity and names the
-slots it wants, so a short list fails in Python rather than in the solver. They all accept
-`region=` (a mask expression folded in), and `raw` takes `target=`.
+The available constructors are `force`, `rotating_frame`, `cooling`, `relax`, `sponge`, `inject`,
+and `raw`, along with `boundary` for a driven Dirichlet face and `equilibrium` for a stationary
+target. Each constructor validates its arguments in Python. All of them accept a `region=` mask,
+and `raw` also accepts `target=`.
 
-A reference state travels as **primitives**, and the regime converts it through its own
-conservation law. One sponge wire therefore serves a Newtonian gas, a relativistic one, and
-a curved background alike. See `newtonian/rt.py`, `newtonian/rotating_sponge.py`, and
-`grhd/gr_bondi_cartesian.py`.
+Reference states are given as primitive variables and converted by the conservation law for the
+selected regime. The same sponge interface therefore works for Newtonian, relativistic, and curved
+spacetime problems. See `newtonian/rt.py`, `newtonian/rotating_sponge.py`, and
+`grhd/gr_bondi_cartesian.py` for examples.
 
 ### Immersed bodies
 
-Drop objects into the domain. Each body carries one `capability`:
+Each immersed body has one `capability`:
 
 - `GRAVITATIONAL` — a fixed-potential (softened) point mass
-- `ACCRETION` — a Bondi-Hoyle sink: it removes mass, and its `AccretionProperties` can layer on a porous surface (a `porosity` dial), a no-penetration/no-slip wall, or a torque-free (Dittmann) sink that swallows mass without angular momentum
-- `RIGID` — a solid wall. Sphere by default, or *any* CSG `Shape` (boxes, spheres, `union`/`intersect`/`rotated`) authored in the body frame. The surface enforces no-penetration (`k_eta_n`) and, under `apply_no_slip`, no-slip tangential drag (`k_eta_t`)
+- `ACCRETION` — a Bondi-Hoyle sink. `AccretionProperties` can add a porous surface, a
+  no-penetration/no-slip wall, or a torque-free Dittmann sink that removes mass while preserving
+  angular momentum in the surrounding flow
+- `RIGID` — a solid wall, spherical by default or described by a CSG `Shape` in the body frame.
+  Available operations include boxes, spheres, unions, intersections, and rotations. `k_eta_n`
+  controls the no-penetration penalty, while `k_eta_t` controls tangential drag when
+  `apply_no_slip` is enabled
 
 The simplest case, a gravitating mass:
 
@@ -593,10 +595,9 @@ def immersed_bodies(self) -> list[ImmersedBodyConfig]:
     ]
 ```
 
-Flip `two_way_coupling=True` and the body stops being scenery: the gas reaction force and torque
-drive its full rigid-body motion — it translates, and rotates about an arbitrary axis via Euler's
-equations with an anisotropic inertia tensor, so an off-axis spin precesses and an asymmetric shape
-tumbles. A tumbling card in a wind tunnel:
+With `two_way_coupling=True`, the gas force and torque evolve the body's translation and rotation.
+Rotation follows Euler's equations and supports an anisotropic inertia tensor, so off-axis spins
+can precess and asymmetric bodies can tumble. Here is a card in a wind tunnel:
 
 ```python
 from simbi.types import ImmersedBodyConfig, BodyCapability, RigidProperties, Shape
@@ -608,7 +609,7 @@ ImmersedBodyConfig(
     radius=1.0,                 # the mask-gate scale; the CSG defines the geometry
     position=(0.0, 0.0, 0.0),
     velocity=(0.0, 0.0, 0.0),
-    two_way_coupling=True,      # the flow moves AND spins the body; the reaction acts back
+    two_way_coupling=True,      # evolve the body from the fluid force and torque
     rigid=RigidProperties(
         inertia=1.0,
         apply_no_slip=True,     # tangential drag on (free-slip if False)
@@ -622,8 +623,8 @@ ImmersedBodyConfig(
 )
 ```
 
-The gas <-> body energy exchange is conserved (drag heats the gas; an isothermal wall carries that
-heat off to its reservoir), and every body reports its force, torque, and accreted mass each step.
+Gas–body energy exchange is conservative. Drag heats the gas, while an isothermal wall transfers
+that heat to its reservoir. Every body reports its force, torque, and accreted mass each step.
 Bodies can also orbit as gravitational binaries, and MHD runs can give a body Ohmic `magnetic`
 coupling.
 
@@ -658,11 +659,11 @@ def scale_factor_derivative(self) -> Optional[Callable[[float], float]]:
 | `IMHD` | Isothermal MHD | Magnetized disks |
 | `RMHD` | Relativistic magnetohydrodynamics | AGN jets, pulsar wind nebulae, magnetic reconnection |
 
-The relativistic regimes also take an equation-of-state choice: `eos="synge"` swaps the
-constant-gamma law for the Taub-Mathews closure to the Synge relativistic perfect gas, whose
-effective adiabatic index walks from 5/3 in cold gas to 4/3 in hot — the physically right
-behavior for flows that cross the transrelativistic temperature range (a blast wave decelerating
-from ultrarelativistic to Newtonian, say) and it carries no free index at all.
+The relativistic regimes also take an equation-of-state choice. `eos="synge"` uses the
+Taub-Mathews closure to the Synge relativistic perfect gas in place of the constant-gamma law. Its
+effective adiabatic index varies from 5/3 in cold gas to 4/3 in hot gas, which is useful for flows
+that cross the transrelativistic temperature range, such as a blast wave decelerating into the
+Newtonian regime. It has no free adiabatic index.
 
 The `Spacetime` axis sets a run's relativity: `RHD`/`RMHD` on Minkowski are special-relativistic, on a curved spacetime general-relativistic. Checkpoints and configs written under the legacy `srhd`/`srmhd` slugs still load (mapped to `rhd`/`rmhd`).
 
@@ -673,64 +674,75 @@ relativistic regime, and the geometry supplies the metric the fluid evolves on:
 
 - `MINKOWSKI` — flat, i.e. plain special relativity
 - `SCHWARZSCHILD_KS` — nonspinning Schwarzschild in horizon-penetrating
-  Kerr-Schild coordinates; gas crosses r = 2M without drama
+  Kerr-Schild coordinates; gas can cross r = 2M
 - `KERR_KS` — spinning Kerr in horizon-penetrating Kerr-Schild coordinates
 
-So "GR hydro around a Kerr black hole" is the same `RHD` regime you already know,
-handed a different metric.
+For example, GR hydrodynamics around a Kerr black hole uses the `RHD` regime with the `KERR_KS`
+spacetime.
 
 ### Horizon excision
 
-Point a horizon-penetrating chart (`SCHWARZSCHILD_KS` or `KERR_KS`) at a black hole and you can actually
-*swallow* it. Set `excision_radius` to a radius inside the horizon (above the metric-guard radius
-M/2, so around 0.7 r_+) and every step the cells inside get frozen at a cold vacuum floor, with
-their conserved state rebuilt from the local metric. The exterior gas rarefies in and nothing comes
-back out, so the accretion-rate certificate stays well-posed and the chart stays regular straight
-through the horizon. Works for hydro and MHD (the staggered magnetic faces stay constrained-transport-owned),
-for spinning (`KERR_KS`) horizons, on the GPU, and across the multi-GPU decomposed path.
+Horizon-penetrating charts (`SCHWARZSCHILD_KS` and `KERR_KS`) support excision inside a black
+hole. Set `excision_radius` inside the horizon and above the metric guard at M/2 (roughly 0.7 r_+).
+At each step, cells inside that radius are set to a cold vacuum floor and their conserved state is
+rebuilt using the local metric. The exterior flow can cross the horizon while the computational
+domain remains regular. Excision works with hydro and MHD, including spinning `KERR_KS` horizons,
+GPU runs, and multi-GPU decomposition. In MHD, constrained transport continues to own the
+staggered magnetic faces.
 
 ### Coordinate systems
 
 - `CARTESIAN`, the usual x, y, z
 - `SPHERICAL`, r, theta, phi
-- `CYLINDRICAL` and `AXIS_CYLINDRICAL`, which in 2D both mean the r-z plane (they're the same metric; watch out, r-z is the default plane)
+- `CYLINDRICAL` and `AXIS_CYLINDRICAL`, which both use the r-z plane in 2D; r-z is the default plane
 - `PLANAR_CYLINDRICAL`, the r-phi plane
 
 ### Numerical methods
 
 **Riemann solvers:**
-- `HLLE`, the two-wave workhorse, written in a branch-free closed form the compiler can vectorize
-- `HLLC`, HLL with a contact wave, Toro's adaptive pressure estimates evaluated lazily — only the cells that actually need the shock estimate compute one. Works on the MHD regimes too (HLLC flux + HLL edge EMF); the *isothermal* regimes stay on `HLLE`, whose two-wave fan matches their wave structure
-- `HLLC_PLUS`, the [Chen et al. (2020)](https://doi.org/10.1137/18M119032X) HLLC+, which is plain HLLC plus two additive corrections that fix the two things HLLC gets wrong for opposite reasons. Both act on a velocity *jump* and leave every signal speed, the contact speed and both star states at their classical values, so there is no reference Mach number to tune — they read the local flow and switch themselves off at the sonic point.
-  - the **normal** jump carries the low-Mach accuracy defect: its damping scales with the sound speed rather than the flow speed, so it swamps the convective flux as `Ma -> 0` and pressure fluctuations pick up an `O(Ma)` error where the continuous Euler equations give `O(Ma^2)` ([Guillard & Viozat 1999](https://doi.org/10.1016/S0045-7930%2898%2900017-6) is the paper that pinned this down). Rescaling it to the convective magnitude is what keeps subsonic turbulence alive instead of diffusing it away. The same correction, restated as a framework you can bolt onto any Godunov flux, is [Chen et al. (2022)](https://doi.org/10.1016/j.jcp.2022.111027)
-  - the **transverse** jump carries the grid-aligned shock instability — the carbuncle. Along a planar front the flow is smooth in its own plane, so those faces get almost no dissipation and a wrinkle in the front grows through them. HLLC+ adds a shear viscosity there, gated on a characteristic-speed reversal between neighbors so it finds a genuine shock and not a steep hydrostatic gradient (a gas bound to a point mass has a big pressure ratio across every cell and reverses nothing)
+- `HLLE` uses a two-wave fan and a branch-free closed form that vectorizes well.
+- `HLLC` adds a contact wave to HLL. Toro's adaptive pressure estimate is evaluated only in cells
+  that need the shock estimate. The MHD regimes use HLLC fluxes with HLL edge EMFs. The isothermal
+  regimes use `HLLE`, since their wave structure has no thermal contact.
+- `HLLC_PLUS` implements the corrections from [Chen et al. (2020)](https://doi.org/10.1137/18M119032X).
+  The corrections act on the normal and transverse velocity jumps without changing the signal
+  speeds, contact speed, or star states. They depend on the local flow, vanish at the sonic point,
+  and do not require a reference Mach number.
+  - The **normal** correction reduces excessive dissipation at low Mach number. In the unmodified
+    scheme, this term scales with the sound speed and produces `O(Ma)` pressure fluctuations rather
+    than the `O(Ma^2)` behavior of the continuous Euler equations. [Guillard & Viozat
+    (1999)](https://doi.org/10.1016/S0045-7930%2898%2900017-6) gives the asymptotic analysis, and
+    [Chen et al. (2022)](https://doi.org/10.1016/j.jcp.2022.111027) presents the correction in a
+    form that applies to several Godunov fluxes.
+  - The **transverse** correction adds shear dissipation near grid-aligned shocks to suppress the
+    carbuncle instability. It is activated by a characteristic-speed reversal between neighboring
+    cells, which distinguishes a shock from a steep hydrostatic pressure gradient.
 
-  Newtonian gets both halves; RHD gets the shear half, with the inertia rewritten from the mass density to the enthalpy density `rho h W^2 = e + p`, which is what relativistic jets and blast waves need since the carbuncle does not care how fast the front is moving. The isothermal regimes stay on `HLLE` — no thermal contact wave, so there is nothing for the contact-restoring family to restore. **Pair it with `wb_reconstruction` on any stratified problem**: HLLC+ removes exactly the damping that would otherwise hold a hydrostatic truncation residual down, and unbalanced it will quietly eat a percent or two of the entropy at *any* resolution (the deficit does not converge away, so refining past it is not an option)
-- `HLLD`, HLL with discontinuities (magnetohydrodynamics), faithful to Mignone & Del Zanna
+  Newtonian hydrodynamics uses both corrections. RHD uses the transverse correction with the
+  relativistic enthalpy density `rho h W^2 = e + p` in place of mass density. For stratified
+  problems, use `HLLC_PLUS` with `wb_reconstruction`; otherwise the reduced low-Mach dissipation
+  allows the hydrostatic truncation residual to produce a non-convergent entropy deficit.
+- `HLLD` is the Mignone & Del Zanna solver for the MHD regimes.
 
 **Well-balanced reconstruction:**
 
-Set `wb_reconstruction=True` and the scheme reconstructs each cell's *departure* from the
-local isentrope through it ([Käppeli & Mishra 2014](https://www.sam.math.ethz.ch/sam_reports/reports_final/reports2014/2014-37_rev1.pdf)) instead of the raw state, and applies the
-gravity source as the equilibrium-pressure difference at the cell faces. A hydrostatic
-atmosphere then presents no face jump at all — a sealed stratified column holds its discrete
-equilibrium to machine precision (velocity residual ~1e-15, entropy deficit ~1e-16), where
-plain reconstruction slowly stirs it at truncation level. The balancing runs through the whole
-stack: the reconstruction, the source, reflecting-wall ghosts, the first-order flux-correction
-fallback, and the coarse-fine transfer under refinement all speak the same departure language,
-so refinement boundaries in a stratified atmosphere stop shedding entropy too. Scope: Newtonian
-gamma-law hydro on cartesian, cylindrical, and spherical grids (uniform spacing), with `HLLE`,
-`HLLC`, or `HLLC_PLUS`. On the curvilinear charts the gravity source is the area-weighted
-equilibrium-pressure difference, so it telescopes exactly against the geometric pressure source
-and the flux divergence. It needs an immersed
-gravitating body to balance against, and adds some arithmetic per face (about 1.4x on
-the flux stage, less end to end), only when the flag is on.
+With `wb_reconstruction=True`, the scheme reconstructs each cell's departure from its local
+isentrope ([Käppeli & Mishra 2014](https://www.sam.math.ethz.ch/sam_reports/reports_final/reports2014/2014-37_rev1.pdf))
+and writes the gravity source as an equilibrium-pressure difference at the cell faces. A sealed
+stratified column then holds its discrete equilibrium to machine precision (velocity residual
+around 1e-15 and entropy deficit around 1e-16). The same representation is used for reconstruction,
+source terms, reflecting-wall ghosts, first-order flux correction, and coarse-fine transfer.
+
+This is available for Newtonian gamma-law hydrodynamics on Cartesian, cylindrical, and spherical
+grids with `HLLE`, `HLLC`, or `HLLC_PLUS`. It requires an immersed gravitating body. On curvilinear
+grids, the area-weighted pressure difference balances the geometric pressure source and flux
+divergence. The extra work is about 1.4x in the flux stage and less over a complete step.
 
 **Grid spacing:**
 - `LINEAR`, uniform spacing
 - `LOG`, log spacing, handy for spherical setups
-- `GEOMETRIC`, a graded mesh: each cell is a fixed ratio bigger than the last, so you can pack
-  resolution against one boundary (or both) without carrying it across the whole domain. Set the
+- `GEOMETRIC`, a graded mesh in which each cell is a fixed ratio larger than the previous one. This
+  concentrates resolution near one or both boundaries. Set the
   growth per axis with `x1_spacing_ratio` / `x2_spacing_ratio` / `x3_spacing_ratio` (and pick the
   spacing itself with `x1_spacing` and friends); see `geometric_boundaries.py` for the shape of it.
 
@@ -750,35 +762,36 @@ There are also two dataclass boundaries you can drop into the per-face list alon
 
 **Constrained transport (MHD):**
 - `CONTACT`, Gardiner & Stone (2005) edge EMFs (default)
-- `UCT`, Del Zanna / Mignone & Del Zanna upwind CT (kills the checkerboard mode)
+- `UCT`, Del Zanna / Mignone & Del Zanna upwind CT, which suppresses the checkerboard mode
 
-Either way, div B stays at machine zero by construction — the curl-of-EMF update carries
-a symbolic proof of div(curl) = 0 in the test suite, and bug-injection tests keep the
-proof valid.
+Both methods keep div B at machine precision. The test suite checks the discrete identity
+div(curl) = 0 symbolically and includes bug-injection tests for this property.
 
 **A few extras:**
-- `reconstruction` picks `PCM`, `PLM`, or `PPM` — or use the shorthand `--order 1/2/3`, which pairs each reconstruction with its matching time integrator (PCM+RK1, PLM+RK2, PPM+RK3). The PPM implementation carries a convergence-gated flattener that closes a spurious entropy vent in smooth sustained compressions (gravitational infall onto a sink, most notably) without touching its formal order
+- `reconstruction` picks `PCM`, `PLM`, or `PPM`. The shorthand `--order 1/2/3` pairs each one with
+  its corresponding time integrator: PCM+RK1, PLM+RK2, or PPM+RK3. PPM includes a
+  convergence-gated flattener for spurious entropy loss in smooth sustained compression, such as
+  gravitational infall onto a sink, while retaining its formal order.
 - `plm_theta`, the PLM limiter parameter (0 < theta <= 2, default 1.5; theta = 2 is the sharpest). `limiter` picks `MINMOD` or `VAN_LEER` (van Leer is the smooth harmonic one and ignores `plm_theta`); `Limiter` lives at `simbi.types.input`
 - First-order flux correction (FOFC): if a high-order update drives a cell unphysical, that cell is redone at first order, and the run reports how often that happened — per window while it runs, and again in the exit summary
 - Prolongation at refinement boundaries runs one order above the interior reconstruction, which preserves the scheme's accuracy across level edges
 
 ### What runs where
 
-Feature coverage varies by chart and regime. Every combination below is checked at startup and
-refused loudly when it falls outside the table, though it saves you a round trip to know up front:
+Feature coverage varies by chart and regime. SIMBI validates these combinations at startup:
 
 | Feature | Where it works |
 |---|---|
 | `HLLC` / `HLLC_PLUS` | Newtonian hydro, RHD, and both MHD regimes (the ones carrying a contact wave). `HLLC_PLUS` is Newtonian (both corrections) + RHD (the shear half) |
 | `HLLD` | the MHD regimes |
 | `wb_reconstruction` | Newtonian gamma-law hydro on cartesian, cylindrical, and spherical charts with `LINEAR`, `LOG`, or geometrically graded spacing, with `HLLE`/`HLLC`/`HLLC_PLUS`; carries through refinement and needs a gravitating immersed body |
-| viscosity | adiabatic and isothermal, on every chart: cartesian, cylindrical, and spherical, in 2D, 2.5D (3-component on a 2-axis grid), and 3D. `RHD` accepts the coefficient and silently ignores it |
+| viscosity | adiabatic and isothermal, on every chart: cartesian, cylindrical, and spherical, in 2D, 2.5D (3-component on a 2-axis grid), and 3D. Viscosity is not implemented for `RHD`; its coefficient is currently accepted but ignored |
 | alpha-disk viscosity | the same charts as constant-nu viscosity, and it needs a central immersed body |
 | resistivity | every MHD chart: cartesian, cylindrical, and spherical, in 2.5D (r-z, r-phi, r-theta) and 3D |
 | refinement | cartesian with `LINEAR` spacing. MHD refinement is 3D cartesian only, and runs on its own — immersed bodies and mesh motion are separate paths |
 | passive scalar | Newtonian and isothermal, cartesian. carries through refinement, immersed bodies, mesh motion, and multi-GPU |
 | tracers | flat cartesian (refinement is fine) |
-| horizon excision | 3D cartesian, or 1D/2D spherical. 2D cartesian is refused on purpose — that slice is a black *string*, and the staircased excision circle seeds a growing m = 4 mode |
+| horizon excision | 3D cartesian, or 1D/2D spherical. 2D cartesian is unsupported because the slice represents a black string and the staircased excision circle seeds a growing m = 4 mode |
 
 For a GR run you'll also want `schwarzschild_mass` and, on Kerr, `kerr_spin` (with `|a| <= M`).
 `excision_radius` comes from your own subclass — declare it there, and keep it between `M/2`
@@ -820,7 +833,12 @@ refinement_subcycling_mode: Annotated[
 
 Here is a quick tour of how the Rust side fits together.
 
-The idea at the center of the backend is one I find genuinely neat: the physics is written once, generically over a carrier type, and traced into an intermediate representation (IR). The IR is lowered to native CPU code at build time, CUDA or HIP source at run time, or, for source terms written in Python, machine code compiled at startup with Cranelift. One definition of the math serves every backend. The same arrangement helps with testing: evaluating a kernel with `f64` gives us an oracle for checking CPU, GPU, and JIT output bit for bit.
+The physics is written once, generically over a carrier type, and traced into an intermediate
+representation (IR). I like this part of the design because it lets the code stay close to the
+mathematics while serving several backends. The IR becomes native CPU code at build time, CUDA or
+HIP source at run time, or, for Python source terms, machine code compiled at startup with
+Cranelift. Evaluating the same kernel with `f64` also gives the tests a reference for comparing CPU,
+GPU, and JIT results bit for bit.
 
 The compiler performs common-subexpression elimination, constant-power strength reduction (`r ** -2` becomes two multiplies), lazy scheduling for sufficiently expensive conditional branches, and select vectorization for suitable branch-free kernel bodies. The graph tracks dependencies so generated kernels compute only the values needed by their outputs.
 
@@ -830,12 +848,12 @@ A few core pieces:
 - **`symbi-hydro`** is the physics: regimes, equations of state, and the Riemann solvers
 - **`symbi-jit`** is the Cranelift JIT for runtime-authored kernels (your Python source expressions)
 - **`symbi`** is the top crate: the builder API and the single-grid `evolve` driver
-- **`symbi-sim`** is the hub everything orbits — simulation state, checkpoint I/O, the census, tracers, and the decomposed driver. It sits *below* the integrator on purpose, so nothing in it depends upward
-- **`symbi-discretize`** is where the carrier-generic physics actually gets traced into the IR
+- **`symbi-sim`** holds simulation state, checkpoint I/O, the census, tracers, and the decomposed driver. It sits below the integrator in the dependency graph
+- **`symbi-discretize`** traces the carrier-generic physics into the IR
 - **`symbi-aot`** bakes those traced kernels at build time
 - **`symbi-exec`** is the CPU executor and its cache-blocked cover
 - **`symbi-expr`** compiles the source expressions you write in Python (this is where the strength reduction lives)
-- **`symbi-geometry`** holds the metrics and charts — the whole `Spacetime` axis
+- **`symbi-geometry`** holds the metrics, coordinate charts, and the `Spacetime` implementations
 - **`symbi-io`** does the HDF5 checkpoints, and **`symbi-display`** is the live TUI
 - **`symbi-substrate`** assembles the per-regime kernel sets (flux, c2p, godunov, cfl, ghost fill)
 - **`symbi-amr`** is the refinement hierarchy: prolongation, restriction, flux registers, and subcycling
@@ -844,9 +862,18 @@ A few core pieces:
 - **`symbi-afterglow`** does the radiation transport and observables
 - **`symbi-py`** is the thin pyo3 bridge that becomes the `cpu_ext` and `gpu_ext` Python modules
 
-A few design choices worth calling out. Fields are stored struct-of-arrays, which is what lets the CPU vectorize and the GPU coalesce its memory reads. The CPU executor fans serial kernels over a cache-blocked cover whose tiles run the full grid row along the contiguous axis, which gives the vectorized kernel bodies the long unit-stride runs they thrive on. And the time step is sequenced entirely through a `KernelSet` trait, so the driver touches state only through that one interface. That last part is what makes multi-GPU work: a subdomain is just a self-contained simulation state, so `gpus > 1` splits the domain into tiles that halo-exchange between neighbors in lockstep — bit-identical to a monolithic run, and riding the exact halo machinery the refinement hierarchy already uses. Multi-*node* is the natural next step from here.
+Fields use a structure-of-arrays layout so CPU accesses can vectorize and GPU accesses can
+coalesce. On the CPU, kernels run over cache-blocked tiles whose contiguous axis spans a full grid
+row, giving the vectorized kernel bodies long unit-stride ranges. Time stepping goes through the
+`KernelSet` trait, which gives the driver one interface to the simulation state. A multi-GPU run
+treats each subdomain as its own simulation state and exchanges halos between neighboring tiles in
+lockstep. It uses the same halo machinery as the refinement hierarchy and gives bit-identical
+results to a monolithic run.
 
-The neutral IR is precision-agnostic too: the same traced graph renders to f64 or f32 at the target's launch precision (an f32 device run just halves the bandwidth bill), and the Cranelift runtime path is generic over the scalar the same way. The device backend is written against a backend-agnostic trait, so the production CUDA and HIP paths share one kernel definition and diverge only in the small target-specific runtime and token mapping at the bottom.
+The IR is precision-agnostic: the same graph renders to `f64` or `f32` at the target's launch
+precision, and the Cranelift path is generic over the scalar type as well. CUDA and HIP share the
+kernel definitions and have small target-specific implementations for the runtime and token
+mapping.
 
 For one concrete reference point, in double precision on my Apple M4 Pro laptop with eight performance cores, a second-order 3D Newtonian linear-wave problem using HLLE at 256³ sustains about 38 million zone-cycles per second (MZCS). A 2D Kelvin–Helmholtz problem with HLLE runs at about 70 MZCS. Your problems will have their own numbers; set `SYMBI_PROFILE=1` to see where the time goes in a particular run.
 
@@ -991,12 +1018,12 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 
 ## Acknowledgements
 
-SIMBI was developed at the Center for Cosmology and Particle Physics (CCPP) at New York University. I thank the CCPP group for its support and feedback, along with the following contributors:
+SIMBI was developed at the Center for Cosmology and Particle Physics (CCPP) at New York University, and I thank the CCPP group for their support and feedback. I also thank the following people for their contributions to the project:
 
 - **Andrew MacFadyen** (NYU) for his mentorship and guidance on the project.
-- **Jonathan Zrake** (Clemson University) for his scientific feedback.
+- **Jonathan Zrake** (Clemson University) for his intellectual feedback on the project.
 - **Jim Stone** (Institute for Advanced Study) for his feedback on the MHD implementation and for pointing me to the robust conserved-to-primitive formalism of [Kastaun et al. 2021](https://scixplorer.org/abs/2021PhRvD.103b3018K/abstract).
-- **Romain Teyssier** (Princeton University) for conversations about mesh refinement.
+- **Romain Teyssier** (Princeton University) for his willingness to talk shop with me, especially as I was getting into mesh refinement.
 ---
 
 ## Further reading on physics and numerical methods
