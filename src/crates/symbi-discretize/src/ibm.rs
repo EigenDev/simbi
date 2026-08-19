@@ -176,9 +176,24 @@ pub fn body_gravity<S: Scalar>(rvec: [S; 3], mass: S, len: S, kind: S) -> [S; 3]
 /// conservative-field proof can autodiff whichever family a body declares.
 #[inline]
 pub fn body_potential<S: Scalar>(rvec: [S; 3], mass: S, len: S, kind: S) -> S {
-    S::cond(
-        kind.cmp_gt(S::HALF),
-        || compact_potential(rvec, mass, len),
-        || softened_potential(rvec, mass, len),
-    )
+    // both profiles share one far field. writing s for the softening switch,
+    //
+    //   plummer : phi = -mass / sqrt(r^2 + h^2)     s = 1
+    //   compact : phi = -mass / sqrt(r^2)           s = 0   (bare point mass beyond h)
+    //
+    // so `-mass / sqrt(r^2 + s h^2)` is both, and only the compact profile's interior --
+    // a polynomial in (r/h)^2 that needs no root of its own -- stands outside it. selecting
+    // the switch rather than the potential leaves one square root and one reciprocal where
+    // evaluating both profiles took two of each. the fold is exact: `r^2 + 0` and `1 * h^2`
+    // are both identities in ieee, so every carrier reproduces its previous value bit for bit.
+    let is_compact = kind.cmp_gt(S::HALF);
+    let r_dist2 = sq(rvec[0]) + sq(rvec[1]) + sq(rvec[2]);
+    let h2 = sq(len);
+    let r_eff = (r_dist2 + S::select(is_compact, S::ZERO, S::ONE) * h2).sqrt();
+    // on the compact branch `r_eff` is the bare distance, so the interior test is the same
+    // `r < h` comparison the profile has always made; off that branch the mask discards it.
+    let u2 = r_dist2 / h2;
+    let inner = mass / len
+        * (S::from_f64(1.25) * u2 - S::from_f64(0.375) * sq(u2) - S::from_f64(1.875));
+    S::select(is_compact & r_eff.cmp_lt(len), inner, -mass / r_eff)
 }

@@ -27,7 +27,10 @@ use symbi_ir::graph::Op;
 /// double-precision routines, which is where the asymmetry lives.
 fn weight(kind: &str) -> f64 {
     match kind {
-        "Pow" => 60.0,
+        // a library double-precision pow against the ln/exp composition: hydrostatic.rs
+        // measures the composition at 0.67 of it on arm64 and notes the gpu margin is
+        // wider, so the general power carries ~1.5x the pair's 60.
+        "Pow" => 90.0,
         "Exp" | "Ln" | "Log" => 30.0,
         "Sqrt" | "Rsqrt" => 8.0,
         "Div" => 8.0,
@@ -108,6 +111,21 @@ fn emit_probe() {
         device_preamble: &[], tile_spec: None,
     });
     let src = desc.source;
+    // divisions by a literal: a power-of-two divisor is an exact multiply by its
+    // reciprocal, so folding it changes no bit and removes an 8-weight op.
+    let mut pow2 = 0usize; let mut other_div = 0usize;
+    for seg in src.split('/').skip(1) {
+        let t = seg.trim_start();
+        let lit: String = t.chars().take_while(|c| c.is_ascii_digit() || *c=='.').collect();
+        if lit.is_empty() { continue; }
+        match lit.parse::<f64>() {
+            Ok(v) if v > 0.0 && (v.log2().fract() == 0.0) => pow2 += 1,
+            Ok(_) => other_div += 1,
+            _ => {}
+        }
+    }
+    println!("   divisions by a power-of-two literal : {pow2}");
+    println!("   divisions by another literal        : {other_div}");
     let pows = src.matches("pow(").count();
     let ifs = src.matches("if (").count();
     println!("\n=== emitted HIP for the WB PLM kernel");

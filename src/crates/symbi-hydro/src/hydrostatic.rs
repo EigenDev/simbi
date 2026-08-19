@@ -180,7 +180,13 @@ impl<S: Scalar> LocalEquilibrium<S> {
     /// to be one choice.
     #[inline]
     fn ratio_power(ratio: S, exponent: S) -> S {
-        ratio.powf(exponent)
+        // the composition this function's contract names, rather than the general power.
+        // `enthalpy_ratio` floors the base strictly positive, so the negative-base,
+        // integer-exponent and inf/nan ladders a library `pow` carries are unreachable
+        // here and are pure cost. `ln 1 = 0` and `exp 0 = 1` hold exactly, so a cell still
+        // reproduces itself bit-for-bit at its own potential, which is the property the
+        // balance rests on.
+        (exponent * ratio.ln()).exp()
     }
 
     /// the equilibrium density at potential `phi`. returns `rho_ref` bit-exactly at
