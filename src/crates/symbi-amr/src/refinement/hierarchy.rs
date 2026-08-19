@@ -2719,8 +2719,9 @@ where
                 // out of the interior, prolong the departures with the unchanged
                 // kernels, rebuild each fine ghost's pressure on the fine chain from
                 // its nearest interior cell. baked kernel pair in the parent's lerp
-                // scratch (unused by the fallback prolong path this route replaces).
+                // scratch, with the slab's sweep intermediates carrying the departures.
                 prolong_prims_balanced(
+                    scratch,
                     prim_old,
                     &parent.state.fields.prim,
                     prim_lerp,

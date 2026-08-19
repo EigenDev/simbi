@@ -317,21 +317,13 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
 ) {
     let has_pre = old.pre_field().is_some();
     let ncomp = 1 + DOF + has_pre as usize;
-    if !(D == 3 && (ncomp == 4 || ncomp == 5) && order != ProlongOrder::Pcm) {
+    if !sweep_eligible::<D>(ncomp, order) {
         prof("refine_prolong_1t", || {
             prolong_prims_lerped(lerp, old, new, dst, region, order, alpha)
         });
         return;
     }
     let w = order.ghost_width() as isize;
-    let (a_dom, b_dom) = sweep_domains(region, w);
-    for a in 0..D {
-        let (sa, ea) = (&scratch.a.rho.domain().spaces[a], &a_dom.spaces[a]);
-        assert!(
-            sa.lo == ea.lo && sa.hi == ea.hi,
-            "prolong sweep scratch A does not match this region/order on axis {a}",
-        );
-    }
 
     // pass 0 feed: the time-lerped coarse snapshots over the parent region.
     let coarse = coarse_parents(region, w);
@@ -353,10 +345,39 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
     prof("refine_prolong_lerp", || {
         dispatch_fields_each::<f64, Mem, D>(name, &coarse, &lerp_in, &lerp_c, &[], &[alpha]);
     });
+    sweep_from_lerped(scratch, lerp, dst, region, order);
+}
 
-    // the three sweeps: lerp -> A -> B -> dst, axis 0 innermost first (the
-    // inlined kernel's nesting order — the bit-identity requirement).
-    let (a_c, b_c, dst_c) = (
+/// whether the axis-split sweep kernels exist for this prim batch: 3d, plm/ppm
+/// (pcm's single-load kernel cannot be beaten by three passes), ncomp 4 or 5.
+fn sweep_eligible<const D: usize>(ncomp: usize, order: ProlongOrder) -> bool {
+    D == 3 && (ncomp == 4 || ncomp == 5) && order != ProlongOrder::Pcm
+}
+
+/// the three sweeps of an already-lerped coarse scratch: lerp -> A -> B ->
+/// dst, axis 0 innermost first (the inlined kernel's nesting order — the
+/// bit-identity requirement). `scratch` must have been built with
+/// `for_slab(region, order, ..)` — a shape mismatch panics.
+fn sweep_from_lerped<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    scratch: &ProlongSweepScratch<D, DOF, Mem>,
+    lerp: &PrimFieldsGeneric<D, DOF, Mem>,
+    dst: &PrimFieldsGeneric<D, DOF, Mem>,
+    region: &Domain<D>,
+    order: ProlongOrder,
+) {
+    let has_pre = lerp.pre_field().is_some();
+    let ncomp = 1 + DOF + has_pre as usize;
+    let w = order.ghost_width() as isize;
+    let (a_dom, b_dom) = sweep_domains(region, w);
+    for a in 0..D {
+        let (sa, ea) = (&scratch.a.rho.domain().spaces[a], &a_dom.spaces[a]);
+        assert!(
+            sa.lo == ea.lo && sa.hi == ea.hi,
+            "prolong sweep scratch A does not match this region/order on axis {a}",
+        );
+    }
+    let (lerp_c, a_c, b_c, dst_c) = (
+        prim_comps(lerp, has_pre),
         prim_comps(&scratch.a, has_pre),
         prim_comps(&scratch.b, has_pre),
         prim_comps(dst, has_pre),
@@ -409,13 +430,15 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
 ///
 /// both passes are baked kernels (`wb_cf_lerp_encode` / `wb_cf_decode`), so the
 /// same transfer runs on host and device memory. `scratch` is a caller-owned
-/// coarse buffer covering the parent stencil region (the lerp scratch). the
+/// coarse buffer covering the parent stencil region (the lerp scratch) and
+/// `sweep` the slab's axis-split intermediates. the
 /// decode reads the fine interior edge cell, which lies outside every slab, and
 /// the fine densities, which it leaves untouched, so its in-place pressure write
 /// is race-free. the mechanical equilibrium commits to no thermal structure, so
 /// the transfer serves any eos.
 #[allow(clippy::too_many_arguments)]
 pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sweep: &ProlongSweepScratch<D, DOF, Mem>,
     old: &PrimFieldsGeneric<D, DOF, Mem>,
     new: &PrimFieldsGeneric<D, DOF, Mem>,
     scratch: &PrimFieldsGeneric<D, DOF, Mem>,
@@ -498,9 +521,16 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
         &scalars,
     );
 
-    // prolong the departures with the unchanged kernels. the scratch stands as both
-    // time endpoints: the lerp already happened in the encode.
-    prolong_prims(scratch, scratch, dst, region, order, 0.0);
+    // prolong the departures with the unchanged kernels: the axis-split sweeps
+    // where they exist (3d plm/ppm — bit-identical to the fused kernel at a
+    // fraction of its interpolation work), the fused kernel otherwise with the
+    // scratch standing as both time endpoints. the lerp already happened in the
+    // encode.
+    if sweep_eligible::<D>(ncomp, order) {
+        sweep_from_lerped(sweep, scratch, dst, region, order);
+    } else {
+        prolong_prims(scratch, scratch, dst, region, order, 0.0);
+    }
 
     // decode: fine ghost pre += the fine chain from the nearest interior cell.
     let pre = "the balance-aware transfer requires an energy-carrying prim set";
