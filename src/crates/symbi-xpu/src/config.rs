@@ -71,9 +71,26 @@ pub fn block_for(ndim: usize, extent: &[u32]) -> [u32; 3] {
 ///   - clamp every block dim to its extent (no lanes launched past a thin axis).
 ///   - redistribute any unspent budget x-first (coalescing), then y, then z; when x is the
 ///     thin axis (a 2-wide ghost layer) the budget flows to y, filling the block past a half-warp.
+/// the lanes that issue one instruction together: 64 on a CDNA wavefront, 32 on an
+/// NVIDIA warp. this is the width the contiguous axis wants to be a multiple of, because
+/// a group spanning two rows of axis 0 splits every load into two memory segments.
+pub const WAVE: u32 = if cfg!(feature = "hip") { 64 } else { 32 };
+
 pub fn extent_aware_block(ndim: usize, extent: &[u32]) -> [u32; 3] {
-    const WARP: u32 = 32;
-    let base = [[256u32, 1, 1], [16, 16, 1], [32, 8, 1]][ndim.clamp(1, 3) - 1];
+    block_for_wave(ndim, extent, WAVE)
+}
+
+/// [`extent_aware_block`] at an explicit group width, so both widths are exercisable from
+/// a host test rather than only the one the build's backend feature selects.
+pub fn block_for_wave(ndim: usize, extent: &[u32], wave: u32) -> [u32; 3] {
+    // the base shapes hold one group on one row of the contiguous axis at either width.
+    // at 32 lanes these are the validated shapes; at 64 the same 256-thread budget is
+    // redealt so axis 0 carries a whole wavefront rather than half of one.
+    let base = if wave == 64 {
+        [[256u32, 1, 1], [64, 4, 1], [64, 4, 1]][ndim.clamp(1, 3) - 1]
+    } else {
+        [[256u32, 1, 1], [16, 16, 1], [32, 8, 1]][ndim.clamp(1, 3) - 1]
+    };
     let target = base[0] * base[1] * base[2];
     let g = |a: usize| -> u32 {
         if a < ndim {
@@ -101,8 +118,8 @@ pub fn extent_aware_block(ndim: usize, extent: &[u32]) -> [u32; 3] {
             .product::<u32>();
         let room = (target / others.max(1)).max(1);
         let mut v = g.min(room);
-        if warp && v >= WARP {
-            v -= v % WARP;
+        if warp && v >= wave {
+            v -= v % wave;
         }
         b[axis] = v.max(b[axis]);
     };
@@ -191,6 +208,23 @@ mod tests {
         // 3D is warp-first: x gets a full warp, z tiles across the grid.
         // this fixes the flux face domains (transverse-expanded -> nz=3).
         assert_eq!(check(3, &[1030, 1032, 3]), [32, 8, 1]); // flux_0/1: was [10,8,3] @ 59% -> warp x
+    }
+
+    /// a CDNA wavefront is 64 lanes, so axis 0 must carry a whole one or every load
+    /// splits across two rows of the contiguous axis into two memory segments.
+    #[test]
+    fn wave64_keeps_a_wavefront_on_one_contiguous_row() {
+        let w = |nd: usize, e: &[u32]| super::block_for_wave(nd, e, 64);
+        // fat 3d and 2d domains: axis 0 gets the full wavefront, the budget stays 256.
+        assert_eq!(w(3, &[1030, 1032, 3]), [64, 4, 1]);
+        assert_eq!(w(2, &[1030, 1032]), [64, 4, 1]);
+        for e in [[1030u32, 1032, 3], [512, 512, 64], [96, 96, 96]] {
+            let b = w(3, &e);
+            assert_eq!(b[0] % 64, 0, "axis 0 not wavefront-aligned for {e:?}: {b:?}");
+            assert!(b[0] * b[1] * b[2] <= 256, "block over budget for {e:?}: {b:?}");
+        }
+        // a thin contiguous axis cannot be padded past its extent -- no idle lanes.
+        assert_eq!(w(3, &[2, 512, 512])[0], 2);
         assert_eq!(check(3, &[256, 256, 1]), [32, 8, 1]); // quasi-2D nz=1
         assert_eq!(check(3, &[256, 256, 4]), [32, 8, 1]); // nz=4 tiled across z-blocks
         assert_eq!(check(3, &[64, 64, 64]), [32, 8, 1]); // fat 3D: warp x, z tiled
