@@ -41,13 +41,13 @@ SIMBI started life as a C++ code. I eventually rewrote the compute backend in Ru
 - High-resolution shock capturing with HLLE, HLLC, HLLC+ (a low-Mach, shock-stable variant; see [Chen et al. 2020](https://doi.org/10.1137/18M119032X)), and HLLD Riemann solvers. First-order flux correction handles failed high-order updates and reports each affected cell. I am still working on making this safety mechanism stronger, possibly with a method in the spirit of [Zalesak et al.](https://apps.dtic.mil/sti/tr/pdf/ADA360122.pdf).
 - Constrained-transport MHD (contact [Gardiner & Stone](https://arxiv.org/abs/0712.2634) or UCT ([Mignone & DelZanna (2021)](https://arxiv.org/abs/2004.10542)) edge EMFs) that keeps div B at machine zero by construction
 - Physical transport when you want it: Navier-Stokes viscosity (constant or alpha-disk) and Ohmic resistivity, layered on top of the ideal solvers
-- Immersed boundaries with point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls built from constructive solid geometry (CSG). Bodies support prescribed motion or two-way coupling, including translation, rotation, gas–body energy exchange, and force, torque, and accretion diagnostics. This part of SIMBI grew out of a class I took with [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin) as a graduate student at NYU; I loved the subject and wanted to bring some of those ideas into the code.
+- Immersed boundaries with point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls built from constructive solid geometry (CSG). The surface coupling uses volume penalization in the spirit of [Angot, Bruneau & Fabrie (1999)](https://doi.org/10.1007/s002110050401). Bodies support prescribed motion or two-way coupling, including translation, rotation, gas–body energy exchange, and force, torque, and accretion diagnostics. This part of SIMBI grew out of a class I took with [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin) as a graduate student at NYU; I loved the subject and wanted to bring some of those ideas into the code.
 - Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart, cells inside the horizon are held at a cold vacuum floor while the exterior flow remains regular
 - Block-based static mesh refinement with [Berger-Colella](https://www.sciencedirect.com/science/article/pii/0021999189900351) subcycling
 - Single-node **multi-GPU domain decomposition** — set `gpus > 1` and the domain splits across the cards, halo-exchanged in lockstep and bit-identical to a monolithic run
 - In-situ binned reductions (a "census") for shell profiles, scaling laws, and other summary quantities
-- Lagrangian tracer particles that follow the flow across refinement levels and multi-GPU boundaries
-- Afterglow radiation transport, so you can turn a simulation into synthetic observables
+- Flux-based [Monte Carlo tracers from Genel et al. (2013)](https://doi.org/10.1093/mnras/stt1383) and continuous [Itô tracers from Moseley, Teyssier & Abel (2026)](https://arxiv.org/abs/2604.23041), including transport across refinement levels and multi-GPU boundaries
+- Afterglow radiation transport using the synchrotron model of [Sari, Piran & Narayan (1998)](https://doi.org/10.1086/311269), so you can turn a simulation into synthetic observables
 - A live terminal dashboard with pause, single-step, on-demand checkpoints, and field heatmaps; `simbi attach` provides a read-only view of a headless run from another shell
 - A type-safe Python configuration system that generates its own CLI
 
@@ -408,6 +408,19 @@ The history covers one run segment and starts empty after a restart. For a resta
 last checkpoint from each segment and stitch the histories offline. Accumulating rows combine as a
 count-weighted sum through `n_samples`.
 
+### Tracer particles
+
+Set `n_tracers` to seed a mass-weighted tracer population. `tracer_scheme="discrete"` uses the
+flux-based Monte Carlo method of [Genel et al. (2013)](https://doi.org/10.1093/mnras/stt1383): each
+accepted finite-volume mass flux defines the probability of a tracer moving between cells. `ito2`
+and `ito3` use the continuous-trajectory [Itô method of
+Moseley, Teyssier & Abel (2026)](https://arxiv.org/abs/2604.23041), matching the drift, diffusion,
+and, for `ito3`, dispersion of the numerical mass transport. The Itô schemes keep continuous
+particle positions while accounting for the diffusion introduced by the Eulerian solver.
+
+Tracer state is written into each checkpoint. The `traced-kh` example uses `ito3` and shows the
+configuration fields in context.
+
 ### Offline analysis
 
 Immersed-body runs write a `body_diagnostics` time series (Mdot, drag, torque) into every
@@ -568,8 +581,9 @@ Each immersed body has one `capability`:
 
 - `GRAVITATIONAL` — a fixed-potential (softened) point mass
 - `ACCRETION` — a Bondi-Hoyle sink. `AccretionProperties` can add a porous surface, a
-  no-penetration/no-slip wall, or a torque-free Dittmann sink that removes mass while preserving
-  angular momentum in the surrounding flow
+  no-penetration/no-slip wall, or the torque-free sink prescription of [Dittmann & Ryan
+  (2021)](https://arxiv.org/abs/2102.05684), which removes mass while preserving angular momentum
+  in the surrounding flow
 - `RIGID` — a solid wall, spherical by default or described by a CSG `Shape` in the body frame.
   Available operations include boxes, spheres, unions, intersections, and rotations. `k_eta_n`
   controls the no-penetration penalty, while `k_eta_t` controls tangential drag when
@@ -660,7 +674,8 @@ def scale_factor_derivative(self) -> Optional[Callable[[float], float]]:
 | `RMHD` | Relativistic magnetohydrodynamics | AGN jets, pulsar wind nebulae, magnetic reconnection |
 
 The relativistic regimes also take an equation-of-state choice. `eos="synge"` uses the
-Taub-Mathews closure to the Synge relativistic perfect gas in place of the constant-gamma law. Its
+[Taub–Mathews closure of Mignone, Plewa & Bodo (2005)](https://doi.org/10.1086/430905) to the
+Synge relativistic perfect gas in place of the constant-gamma law. Its
 effective adiabatic index varies from 5/3 in cold gas to 4/3 in hot gas, which is useful for flows
 that cross the transrelativistic temperature range, such as a blast wave decelerating into the
 Newtonian regime. It has no free adiabatic index.
@@ -701,7 +716,8 @@ staggered magnetic faces.
 
 **Riemann solvers:**
 - `HLLE` uses a two-wave fan and a branch-free closed form that vectorizes well.
-- `HLLC` adds a contact wave to HLL. Toro's adaptive pressure estimate is evaluated only in cells
+- `HLLC` adds a contact wave to HLL following [Toro, Spruce & Speares
+  (1994)](https://doi.org/10.1007/BF01414629). Toro's adaptive pressure estimate is evaluated only in cells
   that need the shock estimate. The MHD regimes use HLLC fluxes with HLL edge EMFs. The isothermal
   regimes use `HLLE`, since their wave structure has no thermal contact.
 - `HLLC_PLUS` implements the corrections from [Chen et al. (2020)](https://doi.org/10.1137/18M119032X).
@@ -722,7 +738,9 @@ staggered magnetic faces.
   relativistic enthalpy density `rho h W^2 = e + p` in place of mass density. For stratified
   problems, use `HLLC_PLUS` with `wb_reconstruction`; otherwise the reduced low-Mach dissipation
   allows the hydrostatic truncation residual to produce a non-convergent entropy deficit.
-- `HLLD` is the Mignone & Del Zanna solver for the MHD regimes.
+- `HLLD` uses [Miyoshi & Kusano (2005)](https://doi.org/10.1016/j.jcp.2005.02.017) for Newtonian
+  MHD, [Mignone (2007)](https://doi.org/10.1016/j.jcp.2006.12.031) for isothermal MHD, and
+  [Mignone, Ugliano & Bodo (2009)](https://doi.org/10.1111/j.1365-2966.2008.14221.x) for RMHD.
 
 **Well-balanced reconstruction:**
 
@@ -758,18 +776,22 @@ There are also two dataclass boundaries you can drop into the per-face list alon
 
 **Time integration:**
 - `RK1`, forward Euler (`EULER` also parses, as an alias)
-- `RK2`, second-order SSP Runge-Kutta (Berger-Colella subcycling under refinement)
-- `RK3`, third-order SSP Runge-Kutta
+- `RK2`, second-order SSP Runge-Kutta ([Shu 1988](https://doi.org/10.1137/0909073)); refinement
+  levels use Berger-Colella subcycling
+- `RK3`, third-order SSP Runge-Kutta ([Shu 1988](https://doi.org/10.1137/0909073))
 
 **Constrained transport (MHD):**
-- `CONTACT`, Gardiner & Stone (2005) edge EMFs (default)
-- `UCT`, Del Zanna / Mignone & Del Zanna upwind CT, which suppresses the checkerboard mode
+- `CONTACT`, the edge-EMF construction of [Gardiner & Stone
+  (2005)](https://doi.org/10.1016/j.jcp.2004.11.016) (default)
+- `UCT`, the upwind constrained-transport method of [Mignone & Del Zanna
+  (2021)](https://doi.org/10.1016/j.jcp.2020.109748), which suppresses the checkerboard mode
 
 Both methods keep div B at machine precision. The test suite checks the discrete identity
 div(curl) = 0 symbolically and includes bug-injection tests for this property.
 
 **A few extras:**
-- `reconstruction` picks `PCM`, `PLM`, or `PPM`. The shorthand `--order 1/2/3` pairs each one with
+- `reconstruction` picks `PCM`, `PLM`, or [PPM from Colella & Woodward
+  (1984)](https://doi.org/10.1016/0021-9991(84)90143-8). The shorthand `--order 1/2/3` pairs each one with
   its corresponding time integrator: PCM+RK1, PLM+RK2, or PPM+RK3. PPM includes a
   convergence-gated flattener for spurious entropy loss in smooth sustained compression, such as
   gravitational infall onto a sink, while retaining its formal order.
@@ -806,6 +828,10 @@ Two dissipative terms sit on top of the ideal solvers, both off by default (coef
 - `resistivity` — Ohmic resistivity for the MHD regimes; the field diffuses while constrained transport keeps div B at machine zero
 
 ### Static mesh refinement
+
+SIMBI uses the conservative level-transfer, subcycling, and flux-register construction of
+[Berger & Colella (1989)](https://doi.org/10.1016/0021-9991(89)90035-1). Refinement regions are
+currently specified in the problem configuration rather than selected dynamically.
 
 ```python
 # turn refinement on
