@@ -92,9 +92,30 @@ pub(crate) fn header(target: Target) -> &'static str {
     }
 }
 
+/// the largest launch a baked device kernel is compiled for, in threads per block.
+///
+/// with no bound declared, the compiler must assume the API maximum of 1024 threads and
+/// therefore reserve enough waves to hold one such block, which on gfx90a caps a kernel at
+/// 512/4 = 128 VGPRs and forces the rest of its live values to scratch. the launcher never
+/// asks for more than 256 threads (`block_for`'s budget), so that reservation is bought
+/// with spill traffic and nothing is gained. measured on the 3d hllc+ plm flux, gfx90a,
+/// declaring a bound of 512 or less: plain 128 VGPRs / 100 scratch bytes per lane / 24 VGPR
+/// spills -> 154 / 0 / 0, and the balanced twin 128 / 156 / 52 -> 158 / 0 / 0, each trading
+/// one wave per SIMD (4 -> 3) for the elimination of all scratch traffic.
+///
+/// 512 rather than 256 because the resource usage is identical at both and the looser bound
+/// leaves an 8^3 block legal for `SYMBI_BLOCK_3D`. `LaunchConfig` asserts against it, so a
+/// launch that would exceed what the kernel was compiled for fails loudly instead of at the
+/// driver.
+pub const MAX_BLOCK_THREADS: u32 = 512;
+
 pub(crate) fn global_qualifier(target: Target) -> &'static str {
     match target {
-        Target::Cuda | Target::Hip => "extern \"C\" __global__",
+        // the bound is part of the signature: a kernel compiled for it must not be
+        // launched wider, and the launcher holds the matching assert.
+        Target::Cuda | Target::Hip => {
+            concat!("extern \"C\" __global__ __launch_bounds__(", "512", ")")
+        }
         Target::Metal => "kernel",
     }
 }

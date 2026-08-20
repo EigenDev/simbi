@@ -834,8 +834,8 @@ fn int_clamp(coord: NodeId, lo: NodeId, hi: NodeId) -> NodeId {
 /// reference cell `ref_idx` through the lattice's own cells along an
 /// axis-ordered staircase (axis 0 first): `p_ref` plus, for every step between
 /// adjacent cells, `rho_from (phi(c_from) - phi(F)) + rho_to (phi(F) - phi(c_to))`
-/// with `F` the face the two share. each leg unrolls `max_steps` steps in
-/// each direction; steps past the leg's length are masked to zero and their
+/// with `F` the face the two share. each leg unrolls `max_steps` steps, carrying
+/// its direction as data; steps past the leg's length are masked to zero and their
 /// loads clamp onto the leg's last cell, so every read lands on a visited cell.
 /// a thread sitting on the reference cell takes every mask and returns `p_ref`
 /// bit for bit. the chain carries no floor and no fade: it is a reference the
@@ -851,57 +851,75 @@ fn chained_pressure(
     dx: &[Gv],
     slots: &[([Gv; 3], Gv, Gv, Gv)],
     max_steps: i64,
+    vary: &[bool],
 ) -> Gv {
     let coords: Vec<NodeId> = with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
     let phi_center = |idx: &[NodeId]| -> Gv {
         body_slots_potential(&centroid_position(ndim, idx, x_lo, dx), slots)
     };
-    // the face of cell `idx` on its lower (`side = 0`) or upper (`side = 1`) edge along `ax`.
-    let phi_face = |idx: &[NodeId], ax: usize, side: i64| -> Gv {
+    // the face of cell `idx` on its lower (`side = 0`) or upper (`side = 1`) edge along
+    // `ax`. the side rides as a value, since a walk carries its direction as data.
+    let phi_face = |idx: &[NodeId], ax: usize, side: NodeId| -> Gv {
         let mut pos = centroid_position(ndim, idx, x_lo, dx);
-        let face_index = int_op(ElementWiseOp::Add, idx[ax], int_const(side));
+        let face_index = int_op(ElementWiseOp::Add, idx[ax], side);
         pos[ax] = x_lo[ax] + Gv::of(face_index) * dx[ax];
         body_slots_potential(&pos, slots)
     };
     let zero = Gv::from_f64(0.0);
+    let zero_i = int_const(0);
     let mut p = p_ref;
     // the staircase: leg `ax` walks from the point reached by the lower legs
     // (thread coords on axes < ax, reference coords on axes >= ax) to the
     // thread's coordinate on `ax`.
     let mut base: Vec<NodeId> = ref_idx.to_vec();
     for ax in 0..ndim {
+        // a leg whose reference shares the thread's coordinate on this axis walks
+        // zero cells for every thread in the region. its steps would each mask to
+        // zero, and a select evaluates both arms, so an unrolled leg costs its
+        // potential evaluations and its loads to add an exact zero. the caller
+        // knows which axes its region can leave the reference on, so the graph
+        // carries only those.
+        if !vary[ax] {
+            base[ax] = coords[ax];
+            continue;
+        }
         let d = int_op(ElementWiseOp::Sub, coords[ax], ref_idx[ax]);
-        let d_f = Gv::of(d);
-        for dir in [1i64, -1] {
-            // the cell `t` steps along `dir` from the leg's start, clamped onto
-            // the leg's end once `t` passes the leg's length.
-            let at = |t: i64| -> Vec<NodeId> {
-                let t_node = int_const(t);
-                let reached = int_op(ElementWiseOp::Add, base[ax], int_const(dir * t));
-                let inside = if dir > 0 {
-                    int_op(ElementWiseOp::Gt, d, t_node)
-                } else {
-                    int_op(ElementWiseOp::Lt, d, int_const(-t))
-                };
-                let mut idx = base.clone();
-                idx[ax] = int_select(inside, reached, coords[ax]);
-                idx
-            };
-            for t in 1..=max_steps {
-                let from = at(t - 1);
-                let to = at(t);
-                // the face shared by `from` and `to`: `to`'s lower face walking
-                // up, its upper face walking down.
-                let phi_f = phi_face(&to, ax, if dir > 0 { 0 } else { 1 });
-                let step = rho_at(&from) * (phi_center(&from) - phi_f)
-                    + rho_at(&to) * (phi_f - phi_center(&to));
-                let live = if dir > 0 {
-                    d_f.cmp_ge(Gv::from_f64(t as f64))
-                } else {
-                    d_f.cmp_le(Gv::from_f64(-(t as f64)))
-                };
-                p = p + Gv::select(live, step, zero);
-            }
+        // the leg is one-sided. the reference is the thread's own coordinate clamped
+        // into a range, so a thread sits below that range, above it, or inside — never
+        // on both sides at once. the direction therefore rides as data and the graph
+        // unrolls a single leg, where a leg per direction would spend half its steps
+        // masked to zero for every thread.
+        let below = int_op(ElementWiseOp::Lt, d, zero_i);
+        let above = int_op(ElementWiseOp::Gt, d, zero_i);
+        let sgn = int_select(below, int_const(-1), int_select(above, int_const(1), zero_i));
+        let span = int_select(below, int_op(ElementWiseOp::Sub, zero_i, d), d);
+        let span_f = Gv::of(span);
+        // the face a step crosses is the lower face of the cell it arrives at when
+        // walking up, and that cell's upper face when walking down.
+        let face_side = int_select(below, int_const(1), zero_i);
+
+        let at = |t: i64| -> Vec<NodeId> {
+            let offset = int_op(ElementWiseOp::Mul, sgn, int_const(t));
+            let reached = int_op(ElementWiseOp::Add, base[ax], offset);
+            let inside = int_op(ElementWiseOp::Ge, span, int_const(t));
+            let mut idx = base.clone();
+            idx[ax] = int_select(inside, reached, coords[ax]);
+            idx
+        };
+
+        // a visited cell serves the step that arrives at it and the step that leaves
+        // it, so its centre potential and its density are formed once and carried.
+        let origin = at(0);
+        let (mut phi_prev, mut rho_prev) = (phi_center(&origin), rho_at(&origin));
+        for t in 1..=max_steps {
+            let cur = at(t);
+            let (phi_cur, rho_cur) = (phi_center(&cur), rho_at(&cur));
+            let phi_f = phi_face(&cur, ax, face_side);
+            let step = rho_prev * (phi_prev - phi_f) + rho_cur * (phi_f - phi_cur);
+            let live = span_f.cmp_ge(Gv::from_f64(t as f64));
+            p = p + Gv::select(live, step, zero);
+            phi_prev = phi_cur;
+            rho_prev = rho_cur;
         }
         base[ax] = coords[ax];
     }
@@ -969,7 +987,10 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
         .collect();
     let p_ref = lerp_at(ncomp - 1, &ref_idx);
     let rho_at = |idx: &[NodeId]| lerp_at(0, idx);
-    let p_eq = chained_pressure(ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX);
+    let all = vec![true; ndim];
+    let p_eq = chained_pressure(
+        ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX, &all,
+    );
 
     let mut writes = Vec::with_capacity(ncomp);
     for k in 0..ncomp {
@@ -1028,7 +1049,10 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
         .map(|ax| int_clamp(coords[ax], lo[ax], hi[ax]))
         .collect();
     let p_ref = gv_load_at("dst_pre", "dst_pre", &ref_idx);
-    let p_eq = chained_pressure(ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX);
+    let all = vec![true; ndim];
+    let p_eq = chained_pressure(
+        ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX, &all,
+    );
 
     let pre_g = departure + p_eq;
     let writes = vec![("dst_pre".to_string(), "dst_pre".into(), pre_g.node())];
@@ -1052,19 +1076,15 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
 /// (the coarse primitives, inputs) then dst (the fine departure, output). ints:
 /// lo_{ax}, hi_{ax} (the fine reference clamp: the fine interior edge on the
 /// seam's normal axis, the interior elsewhere), a (the uncovered coarse index on
-/// the normal axis), normal_{ax} (1 on the seam's normal axis, 0 elsewhere).
-/// scalars: face (the seam coordinate along the normal), x_lo_{ax}, dx_{ax}
-/// (fine), crs_x_lo_{ax}, crs_dx_{ax} (coarse), then the body slots.
-pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
+/// the normal axis). the normal itself is a bake-time axis, so the chain carries
+/// one leg. scalars: face (the seam coordinate along the normal), x_lo_{ax},
+/// dx_{ax} (fine), crs_x_lo_{ax}, crs_dx_{ax} (coarse), then the body slots.
+pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> (GvKernel, Writes) {
     assert!((1..=3).contains(&ndim), "wb_band_encode_gv: ndim must be 1..=3");
+    assert!(normal < ndim, "wb_band_encode_gv: the seam normal must be a grid axis");
     begin_trace();
     let (lo, hi) = declare_interior_bounds(ndim);
     let a_idx: NodeId = with_trace(|t| t.scalar_int("a"));
-    let normal: Vec<NodeId> = with_trace(|t| {
-        (0..ndim)
-            .map(|ax| t.scalar_int(&format!("normal_{ax}")))
-            .collect()
-    });
     let face = Gv::scalar("face");
     let x_lo: Vec<Gv> = (0..ndim)
         .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
@@ -1089,13 +1109,14 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
         .collect();
     // the uncovered coarse cell: `a` on the normal axis, the thread's own parent
     // elsewhere.
-    let one_i = int_const(1);
     let two_i = int_const(2);
     let crs_idx: Vec<NodeId> = (0..ndim)
         .map(|ax| {
-            let parent = int_op(ElementWiseOp::FloorDiv, coords[ax], two_i);
-            let is_normal = int_op(ElementWiseOp::Eq, normal[ax], one_i);
-            int_select(is_normal, a_idx, parent)
+            if ax == normal {
+                a_idx
+            } else {
+                int_op(ElementWiseOp::FloorDiv, coords[ax], two_i)
+            }
         })
         .collect();
     let rho_a = gv_load_at("crs_rho", "crs_rho", &crs_idx);
@@ -1105,16 +1126,17 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
     // line, and the fine edge cell's center.
     let c_a = centroid_position(ndim, &crs_idx, &crs_x_lo, &crs_dx);
     let mut f_pt = c_a;
-    for ax in 0..ndim {
-        let on_normal = Gv::of(normal[ax]).cmp_gt(Gv::from_f64(0.5));
-        f_pt[ax] = Gv::select(on_normal, face, c_a[ax]);
-    }
+    f_pt[normal] = face;
     let c_e = centroid_position(ndim, &ref_idx, &x_lo, &dx);
     let phi_a = body_slots_potential(&c_a, &slots);
     let phi_f = body_slots_potential(&f_pt, &slots);
     let phi_e = body_slots_potential(&c_e, &slots);
     let rho_e = rho_at(&ref_idx);
     let p_ref = pre_a + rho_a * (phi_a - phi_f) + rho_e * (phi_f - phi_e);
+    // the band spans the coverage transversely and the reference is its own edge
+    // cell, so a thread leaves the reference on the seam normal alone.
+    let mut vary = vec![false; ndim];
+    vary[normal] = true;
     let p_eq = chained_pressure(
         ndim,
         &ref_idx,
@@ -1124,6 +1146,7 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
         &dx,
         &slots,
         WB_BAND_CHAIN_MAX,
+        &vary,
     );
     let departure = pre_cell - p_eq;
     let writes = vec![("dst".to_string(), "dst".into(), departure.node())];

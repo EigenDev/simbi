@@ -512,14 +512,16 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     scalars.extend_from_slice(coarse_x_lo);
     scalars.extend_from_slice(coarse_dx);
     push_body_slot_scalars(coarse_bodies, &mut scalars);
-    dispatch_fields_each::<f64, Mem, D>(
-        KernelId::WbCfLerpEncode { ndim: D as u8 }.name(),
-        &parents,
-        &inputs,
-        &scratch_c,
-        &ints,
-        &scalars,
-    );
+    prof("wb_cf_encode", || {
+        dispatch_fields_each::<f64, Mem, D>(
+            KernelId::WbCfLerpEncode { ndim: D as u8 }.name(),
+            &parents,
+            &inputs,
+            &scratch_c,
+            &ints,
+            &scalars,
+        );
+    });
 
     // prolong the departures with the unchanged kernels: the axis-split sweeps
     // where they exist (3d plm/ppm — bit-identical to the fused kernel at a
@@ -541,14 +543,16 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     scalars.extend_from_slice(fine_x_lo);
     scalars.extend_from_slice(fine_dx);
     push_body_slot_scalars(fine_bodies, &mut scalars);
-    dispatch_fields_each::<f64, Mem, D>(
-        KernelId::WbCfDecode { ndim: D as u8 }.name(),
-        region,
-        &b_inputs,
-        &b_outputs,
-        &fine_ints,
-        &scalars,
-    );
+    prof("wb_cf_decode", || {
+        dispatch_fields_each::<f64, Mem, D>(
+            KernelId::WbCfDecode { ndim: D as u8 }.name(),
+            region,
+            &b_inputs,
+            &b_outputs,
+            &fine_ints,
+            &scalars,
+        );
+    });
 }
 
 /// the balanced restriction of a coarse seam band: after the conservative
@@ -660,26 +664,31 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
             ints.extend(lo.iter());
             ints.extend(hi.iter());
             ints.push(uncovered as i32);
-            for a in 0..D {
-                ints.push((a == ax) as i32);
-            }
             let mut scalars = vec![face];
             scalars.extend_from_slice(fine_x_lo);
             scalars.extend_from_slice(fine_dx);
             scalars.extend_from_slice(coarse_x_lo);
             scalars.extend_from_slice(coarse_dx);
             scalars.extend_from_slice(&body_scalars);
-            dispatch_fields_each::<f64, Mem, D>(
-                KernelId::WbBandEncode { ndim: D as u8 }.name(),
-                &fine_band,
-                &[&fine.rho, fine_pre, &coarse_prim.rho, coarse_pre],
-                &[departure],
-                &ints,
-                &scalars,
-            );
+            prof("wb_band_encode", || {
+                dispatch_fields_each::<f64, Mem, D>(
+                    KernelId::WbBandEncode {
+                        ndim: D as u8,
+                        axis: ax as u8,
+                    }
+                    .name(),
+                    &fine_band,
+                    &[&fine.rho, fine_pre, &coarse_prim.rho, coarse_pre],
+                    &[departure],
+                    &ints,
+                    &scalars,
+                );
+            });
 
             // restrict the departures into the coarse band's pressure slots.
-            restrict_cell_field(departure, coarse_pre, &band_dom);
+            prof("wb_band_restrict", || {
+                restrict_cell_field(departure, coarse_pre, &band_dom)
+            });
 
             // decode: the coarse chain from the uncovered cell through the band.
             let mut lo = coarse_lo.clone();
@@ -691,14 +700,16 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
             scalars.extend_from_slice(coarse_x_lo);
             scalars.extend_from_slice(coarse_dx);
             scalars.extend_from_slice(&body_scalars);
-            dispatch_fields_each::<f64, Mem, D>(
-                KernelId::WbCfDecode { ndim: D as u8 }.name(),
-                &band_dom,
-                &[&coarse_prim.rho],
-                &[coarse_pre],
-                &ints,
-                &scalars,
-            );
+            prof("wb_band_decode", || {
+                dispatch_fields_each::<f64, Mem, D>(
+                    KernelId::WbCfDecode { ndim: D as u8 }.name(),
+                    &band_dom,
+                    &[&coarse_prim.rho],
+                    &[coarse_pre],
+                    &ints,
+                    &scalars,
+                );
+            });
 
             // the band's conserved energy follows its rewritten pressure.
             let mut inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = vec![&coarse_prim.rho];
@@ -706,14 +717,16 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
                 inputs.push(&coarse_prim.vel[k]);
             }
             inputs.push(coarse_pre);
-            dispatch_fields_each::<f64, Mem, D>(
-                KernelId::BandEnergy { ndim: D as u8 }.name(),
-                &band_dom,
-                &inputs,
-                &[coarse_nrg],
-                &[],
-                &[gamma],
-            );
+            prof("wb_band_energy", || {
+                dispatch_fields_each::<f64, Mem, D>(
+                    KernelId::BandEnergy { ndim: D as u8 }.name(),
+                    &band_dom,
+                    &inputs,
+                    &[coarse_nrg],
+                    &[],
+                    &[gamma],
+                );
+            });
         }
     }
 }

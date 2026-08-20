@@ -14,7 +14,7 @@
 // usage:
 //   cargo run -p symbi-discretize --example emit_wb_hip -- <out_dir>
 //   then on the device host (MI250X = gfx90a):
-//     hipcc -c --offload-arch=gfx90a \
+//     hipcc -c -O3 --offload-arch=gfx90a \
 //       -Rpass-analysis=kernel-resource-usage <out_dir>/*.hip.cpp
 //   the remarks print VGPRs, ScratchSize [bytes/lane], and Occupancy
 //   [waves/SIMD] per kernel; nonzero scratch marks register spills.
@@ -55,8 +55,12 @@ fn emit_gv(out_dir: &str, name: &str, k: GvKernel, writes: Writes) {
             tile_spec: None,
         },
     );
+    // the emitted body names `blockIdx` / `threadIdx` and the device math, which the
+    // hip runtime header declares. carrying the include in the file keeps the census
+    // a plain `hipcc -c <file>` rather than a command line that has to remember it.
     let path = format!("{out_dir}/{name}.hip.cpp");
-    fs::write(&path, &desc.source).unwrap_or_else(|e| panic!("write {path}: {e}"));
+    let source = format!("#include <hip/hip_runtime.h>\n\n{}", desc.source);
+    fs::write(&path, &source).unwrap_or_else(|e| panic!("write {path}: {e}"));
     println!("emitted {path}");
 }
 

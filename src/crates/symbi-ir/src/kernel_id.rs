@@ -81,8 +81,9 @@ pub enum KernelId {
     WbCfDecode { ndim: u8 },
     /// the balanced restriction's fine encode: fine pre under a coarse seam band
     /// as its departure from the equilibrium chained from the uncovered coarse
-    /// cell beyond the seam, continued across the seam face.
-    WbBandEncode { ndim: u8 },
+    /// cell beyond the seam, continued across the seam face. one variant per seam
+    /// normal, since the chain walks that axis alone.
+    WbBandEncode { ndim: u8, axis: u8 },
     /// the gamma-law energy rebuild over a region whose pressure was rewritten
     /// in primitive space.
     BandEnergy { ndim: u8 },
@@ -278,11 +279,11 @@ impl KernelId {
                 "wb_cf_decode_2d",
                 "wb_cf_decode_3d",
             ][dim_ix(ndim)],
-            KernelId::WbBandEncode { ndim } => [
-                "wb_band_encode_1d",
-                "wb_band_encode_2d",
-                "wb_band_encode_3d",
-            ][dim_ix(ndim)],
+            KernelId::WbBandEncode { ndim, axis } => [
+                ["wb_band_encode_0_1d", "wb_band_encode_0_2d", "wb_band_encode_0_3d"],
+                ["wb_band_encode_1_1d", "wb_band_encode_1_2d", "wb_band_encode_1_3d"],
+                ["wb_band_encode_2_1d", "wb_band_encode_2_2d", "wb_band_encode_2_3d"],
+            ][axis as usize][dim_ix(ndim)],
             KernelId::BandEnergy { ndim } => [
                 "band_energy_1d",
                 "band_energy_2d",

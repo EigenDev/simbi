@@ -18,6 +18,10 @@
 use std::sync::OnceLock;
 
 /// grid and block dimensions for a kernel launch.
+/// the widest block a baked device kernel is compiled for, in threads. see
+/// [`LaunchConfig::assert_within_bound`].
+pub const MAX_BLOCK_THREADS: u32 = 512;
+
 #[derive(Clone, Copy, Debug)]
 pub struct LaunchConfig {
     pub grid: [u32; 3],
@@ -26,7 +30,29 @@ pub struct LaunchConfig {
 }
 
 impl LaunchConfig {
+    /// the block a baked device kernel may be launched with, in threads.
+    ///
+    /// every emitted CUDA/HIP kernel declares `__launch_bounds__` at this width, which is
+    /// what lets the compiler keep its live values in registers rather than spilling them
+    /// to scratch. a launch wider than the bound is undefined, so it is refused here,
+    /// where the shape is chosen and the message can name the override that produced it.
+    ///
+    /// the value is `symbi_ir::emit::MAX_BLOCK_THREADS`, repeated rather than imported:
+    /// this crate holds no runtime dependency on the IR (the layering is acyclic on
+    /// purpose), so `the_launch_bound_matches_the_emitters` pins the two together from
+    /// the test build, where the IR is available.
+    fn assert_within_bound(block: [u32; 3]) {
+        let threads = block[0] * block[1] * block[2];
+        assert!(
+            threads <= MAX_BLOCK_THREADS,
+            "block {block:?} is {threads} threads; baked kernels declare \
+             __launch_bounds__({MAX_BLOCK_THREADS}) and a wider launch is undefined. \
+             lower SYMBI_BLOCK_{{1D,2D,3D}}"
+        );
+    }
+
     pub fn for_1d(n: u32, block_size: u32) -> Self {
+        Self::assert_within_bound([block_size, 1, 1]);
         LaunchConfig {
             grid: [(n + block_size - 1) / block_size, 1, 1],
             block: [block_size, 1, 1],
@@ -35,6 +61,7 @@ impl LaunchConfig {
     }
 
     pub fn for_2d(nx: u32, ny: u32, bx: u32, by: u32) -> Self {
+        Self::assert_within_bound([bx, by, 1]);
         LaunchConfig {
             grid: [(nx + bx - 1) / bx, (ny + by - 1) / by, 1],
             block: [bx, by, 1],
@@ -43,6 +70,7 @@ impl LaunchConfig {
     }
 
     pub fn for_3d(nx: u32, ny: u32, nz: u32, bx: u32, by: u32, bz: u32) -> Self {
+        Self::assert_within_bound([bx, by, bz]);
         LaunchConfig {
             grid: [(nx + bx - 1) / bx, (ny + by - 1) / by, (nz + bz - 1) / bz],
             block: [bx, by, bz],
@@ -176,6 +204,15 @@ fn parse_block(var: &str, want: usize) -> Option<[u32; 3]> {
 
 #[cfg(test)]
 mod tests {
+    /// the launch bound the emitter writes into every CUDA/HIP kernel and the bound this
+    /// crate refuses to launch past are one number. they live in two crates because the
+    /// runtime layering is acyclic, so a drift between them would compile: a kernel built
+    /// for a narrower block than the launcher permits is undefined at run time and silent.
+    #[test]
+    fn the_launch_bound_matches_the_emitters() {
+        assert_eq!(super::MAX_BLOCK_THREADS, symbi_ir::emit::MAX_BLOCK_THREADS);
+    }
+
     use super::extent_aware_block;
 
     // invariants every shape must hold: total <= 256, each dim in [1, extent], block.x a
