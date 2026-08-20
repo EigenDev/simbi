@@ -41,7 +41,7 @@ SIMBI started life as a C++ code. I eventually rewrote the compute backend in Ru
 - High-resolution shock capturing with HLLE, HLLC, HLLC+ (a low-Mach, shock-stable variant; see [Chen et al. 2020](https://doi.org/10.1137/18M119032X)), and HLLD Riemann solvers. First-order flux correction handles failed high-order updates and reports each affected cell. I am still working on making this safety mechanism stronger, possibly with a method in the spirit of [Zalesak et al.](https://apps.dtic.mil/sti/tr/pdf/ADA360122.pdf).
 - Constrained-transport MHD (contact [Gardiner & Stone](https://arxiv.org/abs/0712.2634) or UCT ([Mignone & DelZanna (2021)](https://arxiv.org/abs/2004.10542)) edge EMFs) that keeps div B at machine zero by construction
 - Physical transport when you want it: Navier-Stokes viscosity (constant or alpha-disk) and Ohmic resistivity, layered on top of the ideal solvers
-- Immersed boundaries with point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls built from constructive solid geometry (CSG). The surface coupling uses volume penalization in the spirit of [Angot, Bruneau & Fabrie (1999)](https://doi.org/10.1007/s002110050401). Bodies support prescribed motion or two-way coupling, including translation, rotation, gas–body energy exchange, and force, torque, and accretion diagnostics. This part of SIMBI grew out of a class I took with [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin) as a graduate student at NYU; I loved the subject and wanted to bring some of those ideas into the code.
+- Immersed bodies with point-mass gravity, masked accretors for problems such as Bondi-Hoyle flow, and rigid walls built from constructive solid geometry (CSG). The surface coupling uses volume penalization in the spirit of [Angot, Bruneau & Fabrie (1999)](https://doi.org/10.1007/s002110050401). Bodies support prescribed motion or two-way coupling, including translation, rotation, gas–body energy exchange, and force, torque, and accretion diagnostics. This part of SIMBI grew out of a class I took with [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin) as a graduate student at NYU; I loved the subject and wanted to bring some of those ideas into the code.
 - Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart, cells inside the horizon are held at a cold vacuum floor while the exterior flow remains regular
 - Block-based static mesh refinement with [Berger-Colella](https://www.sciencedirect.com/science/article/pii/0021999189900351) subcycling
 - Single-node **multi-GPU domain decomposition** — set `gpus > 1` and the domain splits across the cards, halo-exchanged in lockstep and bit-identical to a monolithic run
@@ -580,10 +580,11 @@ spacetime problems. See `newtonian/rt.py`, `newtonian/rotating_sponge.py`, and
 Each immersed body has one `capability`:
 
 - `GRAVITATIONAL` — a fixed-potential (softened) point mass
-- `ACCRETION` — a Bondi-Hoyle sink. `AccretionProperties` can add a porous surface, a
-  no-penetration/no-slip wall, or the torque-free sink prescription of [Dittmann & Ryan
-  (2021)](https://arxiv.org/abs/2102.05684), which removes mass while preserving angular momentum
-  in the surrounding flow
+- `ACCRETION` — an immersed-boundary accretor. By default, a mollified spherical mask applies the
+  volume drain described above. `porosity` mixes that drain with no-penetration and no-slip wall
+  channels. The optional `torque_free_xi` parameter changes the tangential momentum channel using
+  the idea from [Dittmann & Ryan (2021)](https://arxiv.org/abs/2102.05684); at `xi = 1`, the masked
+  drain removes mass without transferring its angular momentum to the body
 - `RIGID` — a solid wall, spherical by default or described by a CSG `Shape` in the body frame.
   Available operations include boxes, spheres, unions, intersections, and rotations. `k_eta_n`
   controls the no-penetration penalty, while `k_eta_t` controls tangential drag when
