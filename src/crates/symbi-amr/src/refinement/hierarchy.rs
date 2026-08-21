@@ -2603,7 +2603,14 @@ where
         let l = &self.levels[level];
         prof("c2p", || l.kernels.c2p(&l.state));
         if self.cf_transfer_balanced(level + 1) {
-            prof("refine_restrict_balanced", || self.restrict_band_balanced(level));
+            // SYMBI_WB_BAND=0 withholds the band rewrite so the seam carries the
+            // conservative restriction alone; the identical binary then runs the
+            // counterfactual arm of the seam admissibility census, attributing
+            // decode abstentions between the band's anchor rewrite and the
+            // turbulent density contrast.
+            if wb_band_enabled() {
+                prof("refine_restrict_balanced", || self.restrict_band_balanced(level));
+            }
         }
         if has_coarser {
             self.prolong_cf(level, alpha0 + 1.0 / RATIO as f64);
@@ -4144,4 +4151,9 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
     }
     drain_devices::<Mem>(devices);
     let _ = on_checkpoint(iter, t, tiles);
+}
+
+fn wb_band_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("SYMBI_WB_BAND").map(|v| v != "0").unwrap_or(true))
 }

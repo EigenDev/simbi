@@ -543,6 +543,7 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     scalars.extend_from_slice(fine_x_lo);
     scalars.extend_from_slice(fine_dx);
     push_body_slot_scalars(fine_bodies, &mut scalars);
+    let departures = census_snapshot(dst.pre_field().expect(pre), region);
     prof("wb_cf_decode", || {
         dispatch_fields_each::<f64, Mem, D>(
             KernelId::WbCfDecode { ndim: D as u8 }.name(),
@@ -553,18 +554,27 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
             &scalars,
         );
     });
-    census_decoded_pressure("cf ghost decode", dst.pre_field().expect(pre), region);
+    census_decoded_pressure("cf ghost decode", departures, dst.pre_field().expect(pre), region);
 }
 
 
-/// admissibility census over a balanced decode's output: counts non-finite and
-/// non-positive pressures over `dom` and reports the first few with their
-/// location and value. the gamma-law energy rebuild turns a non-positive
-/// pressure into a negative internal energy in the next substage's anchor, and
-/// every first-order-redo tier replays the flux update from that anchor, so a
-/// poisoned write is only attributable at its source -- here. reads through
-/// host-visible views; enabled by SYMBI_WB_CENSUS=1.
+/// admissibility census over a balanced decode, from a snapshot of the
+/// departure field the decode consumes in place. the pressure slot holds the
+/// transported departures immediately before the decode and the guarded
+/// pressure immediately after, so the pair reconstructs the decode per cell:
+/// where the guard passed, `p_eq = after - dep` and the margin `|dep| / p_eq`
+/// measures how far the cell sat from the admissibility boundary; where the
+/// guard abstained onto the equilibrium, `after = p_eq` and the rejected value
+/// is `dep + after <= 0`. an abstention onto the anchor (the equilibrium
+/// itself inadmissible) evades this reconstruction, so the census reports
+/// every first-level abstention and the anchor tier separately through the
+/// non-finite scan. reads through host-visible views; enabled by
+/// SYMBI_WB_CENSUS=1.
 pub static WB_DECODE_BAD_CELLS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub static WB_DECODE_ABSTAIN_CELLS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub static WB_DECODE_TOTAL_CELLS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
 fn wb_census_enabled() -> bool {
@@ -572,27 +582,70 @@ fn wb_census_enabled() -> bool {
     *ON.get_or_init(|| std::env::var("SYMBI_WB_CENSUS").is_ok_and(|v| v == "1"))
 }
 
+/// the departure field over `dom`, copied out before the decode overwrites it.
+fn census_snapshot<const D: usize, Mem: MemorySpace>(
+    pre: &symbi_grid::Field<f64, D, Mem>,
+    dom: &Domain<D>,
+) -> Option<Vec<f64>> {
+    if !wb_census_enabled() {
+        return None;
+    }
+    let view = pre.view();
+    Some(dom.iter().map(|coord| *view.at(coord)).collect())
+}
+
 fn census_decoded_pressure<const D: usize, Mem: MemorySpace>(
     site: &str,
+    departures: Option<Vec<f64>>,
     pre: &symbi_grid::Field<f64, D, Mem>,
     dom: &Domain<D>,
 ) {
-    if !wb_census_enabled() {
+    let Some(departures) = departures else {
         return;
-    }
+    };
     let view = pre.view();
-    for coord in dom.iter() {
+    let mut abstained = 0u64;
+    let mut cells = 0u64;
+    let mut max_ratio = 0.0_f64;
+    let mut first_abstain = None;
+    for (coord, dep) in dom.iter().zip(departures) {
+        cells += 1;
         let p = *view.at(coord);
         if !(p > 0.0) || !p.is_finite() {
             let n = WB_DECODE_BAD_CELLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if n < 16 {
                 eprintln!(
-                    "[wb-census] {site}: inadmissible decoded pressure {p:.6e} at {coord:?} \
-                     (domain {:?})",
-                    dom.spaces
+                    "[wb-census] {site}: inadmissible written pressure {p:.6e} at {coord:?}"
                 );
             }
+            continue;
         }
+        if dep + p <= 0.0 {
+            abstained += 1;
+            if first_abstain.is_none() {
+                first_abstain = Some((coord, dep, p));
+            }
+        } else {
+            let p_eq = p - dep;
+            if p_eq > 0.0 {
+                max_ratio = max_ratio.max((dep / p_eq).abs());
+            }
+        }
+    }
+    WB_DECODE_TOTAL_CELLS.fetch_add(cells, std::sync::atomic::Ordering::Relaxed);
+    if abstained > 0 {
+        WB_DECODE_ABSTAIN_CELLS.fetch_add(abstained, std::sync::atomic::Ordering::Relaxed);
+        let (coord, dep, p_eq) = first_abstain.unwrap();
+        eprintln!(
+            "[wb-abstain] {site}: {abstained}/{cells} cells took the equilibrium fallback; \
+             first at {coord:?} rejected {:.4e} (dep {dep:.4e} on p_eq {p_eq:.4e}); \
+             passing-cell max |dep|/p_eq {max_ratio:.3e}",
+            dep + p_eq
+        );
+    } else if max_ratio > 0.25 {
+        eprintln!(
+            "[wb-margin] {site}: {cells} cells all passed; max |dep|/p_eq {max_ratio:.3e}"
+        );
     }
 }
 
@@ -766,6 +819,7 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
             scalars.extend_from_slice(coarse_x_lo);
             scalars.extend_from_slice(coarse_dx);
             scalars.extend_from_slice(&body_scalars);
+            let departures = census_snapshot(coarse_pre, &band_dom);
             prof("wb_band_decode", || {
                 dispatch_fields_each::<f64, Mem, D>(
                     KernelId::WbCfDecode { ndim: D as u8 }.name(),
@@ -776,7 +830,7 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
                     &scalars,
                 );
             });
-            census_decoded_pressure("band decode", coarse_pre, &band_dom);
+            census_decoded_pressure("band decode", departures, coarse_pre, &band_dom);
 
             // the band's conserved energy follows its rewritten pressure.
             let mut inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = vec![&coarse_prim.rho];
