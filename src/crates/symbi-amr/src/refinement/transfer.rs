@@ -553,6 +553,47 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
             &scalars,
         );
     });
+    census_decoded_pressure("cf ghost decode", dst.pre_field().expect(pre), region);
+}
+
+
+/// admissibility census over a balanced decode's output: counts non-finite and
+/// non-positive pressures over `dom` and reports the first few with their
+/// location and value. the gamma-law energy rebuild turns a non-positive
+/// pressure into a negative internal energy in the next substage's anchor, and
+/// every first-order-redo tier replays the flux update from that anchor, so a
+/// poisoned write is only attributable at its source -- here. reads through
+/// host-visible views; enabled by SYMBI_WB_CENSUS=1.
+pub static WB_DECODE_BAD_CELLS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+fn wb_census_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("SYMBI_WB_CENSUS").is_ok_and(|v| v == "1"))
+}
+
+fn census_decoded_pressure<const D: usize, Mem: MemorySpace>(
+    site: &str,
+    pre: &symbi_grid::Field<f64, D, Mem>,
+    dom: &Domain<D>,
+) {
+    if !wb_census_enabled() {
+        return;
+    }
+    let view = pre.view();
+    for coord in dom.iter() {
+        let p = *view.at(coord);
+        if !(p > 0.0) || !p.is_finite() {
+            let n = WB_DECODE_BAD_CELLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n < 16 {
+                eprintln!(
+                    "[wb-census] {site}: inadmissible decoded pressure {p:.6e} at {coord:?} \
+                     (domain {:?})",
+                    dom.spaces
+                );
+            }
+        }
+    }
 }
 
 /// the balanced restriction of a coarse seam band: after the conservative
@@ -651,6 +692,31 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
             }));
             fine_band.spaces[ax].lo = 2 * b_lo;
             fine_band.spaces[ax].hi = 2 * b_hi;
+            // the regions a dispatch covers must lie inside the lattices they index,
+            // and the chain's reference must lie outside the region the decode writes:
+            // every band cell runs concurrently on a device, so a reference inside the
+            // written set would read pressures its neighbours are overwriting.
+            for a in 0..D {
+                assert!(
+                    band_dom.spaces[a].lo >= coarse_interior.spaces[a].lo
+                        && band_dom.spaces[a].hi <= coarse_interior.spaces[a].hi,
+                    "band {:?} leaves the coarse interior {:?} on axis {a}",
+                    band_dom.spaces, coarse_interior.spaces
+                );
+                assert!(
+                    fine_band.spaces[a].lo >= fine_interior.spaces[a].lo
+                        && fine_band.spaces[a].hi <= fine_interior.spaces[a].hi,
+                    "fine band {:?} leaves the fine interior {:?} on axis {a}",
+                    fine_band.spaces, fine_interior.spaces
+                );
+            }
+            assert!(
+                uncovered < band_dom.spaces[ax].lo || uncovered >= band_dom.spaces[ax].hi,
+                "the decode's reference cell {uncovered} lies inside the band it writes, \
+                 {:?}: concurrent threads would read pressures being overwritten",
+                band_dom.spaces[ax]
+            );
+
             // the fine edge cell and the seam face along `ax`.
             let edge = if high { 2 * c_hi - 1 } else { 2 * c_lo };
             let face = fine_x_lo[ax] + (if high { 2 * c_hi } else { 2 * c_lo }) as f64 * fine_dx[ax];
@@ -710,6 +776,7 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
                     &scalars,
                 );
             });
+            census_decoded_pressure("band decode", coarse_pre, &band_dom);
 
             // the band's conserved energy follows its rewritten pressure.
             let mut inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = vec![&coarse_prim.rho];

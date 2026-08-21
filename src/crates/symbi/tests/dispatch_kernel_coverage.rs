@@ -104,7 +104,12 @@ fn every_balanced_body_source_and_ghost_kernel_is_emitted() {
     for coords in charts {
         let sfx = symbi_discretize::kernel_slug::coord_suffix(coords);
         for d in 1..=3usize {
-            assert_family(&mut missing, format!("body_source_wb{sfx}_{d}d"));
+            // the balanced body source is baked per reconstruction reach and the
+            // dispatch spells the reach into the name (plm 2 / ppm 3), so the
+            // requestable set is the cross product over both reaches.
+            for reach in [2, 3] {
+                assert_family(&mut missing, format!("body_source_wb{sfx}_{d}d_r{reach}"));
+            }
             assert_family(&mut missing, format!("wb_ghost_fill{sfx}_{d}d"));
         }
     }

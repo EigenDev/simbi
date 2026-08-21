@@ -1054,7 +1054,19 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
         ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX, &all,
     );
 
-    let pre_g = departure + p_eq;
+    // the decoded pressure is the local equilibrium plus the transported
+    // departure, and the decomposition holds only inside the physical regime.
+    // where the sum leaves it the cell takes the equilibrium alone -- the
+    // zero-departure decode, which keeps the cell on the mechanical recursion
+    // -- and where the chain itself has left the regime, the reference cell's
+    // own pressure, positive by construction as the anchor the chain starts
+    // from. a positive decoded value passes through bit for bit, so a balanced
+    // column's ghosts and the machine-exact seam gates carry the identical
+    // graph values.
+    let zero = Gv::from_f64(0.0);
+    let decoded = departure + p_eq;
+    let fallback = Gv::select(p_eq.cmp_gt(zero), p_eq, p_ref);
+    let pre_g = Gv::select(decoded.cmp_gt(zero), decoded, fallback);
     let writes = vec![("dst_pre".to_string(), "dst_pre".into(), pre_g.node())];
     (end_trace(), writes)
 }

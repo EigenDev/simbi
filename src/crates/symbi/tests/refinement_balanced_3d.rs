@@ -209,3 +209,62 @@ fn the_swept_balanced_transfer_lands_3d_ghosts_on_the_fine_recursion() {
          swept prolongation of the departures or the chain decode is broken"
     );
 }
+
+/// the deep-hierarchy twin: the production porous accretor runs eight telescoping
+/// levels, and the band restriction's regions are derived per seam from a coverage
+/// box that halves at every rung. the two-level gates above exercise one seam on a
+/// coverage that spans the interior; a deep ladder exercises seams whose coverage is
+/// a small box in the middle of its parent, which is where a region derived from the
+/// wrong lattice would leave its domain. the balanced restriction asserts its own
+/// region bounds, so this test's job is to reach them.
+#[test]
+fn a_deep_balanced_ladder_keeps_every_seam_region_inside_its_lattice() {
+    const ROOT: usize = 32;
+    let h = 1.0 / ROOT as f64;
+    let seed = move |x: [f64; 3]| -> Prim<f64, 3> {
+        let col = class_line(ROOT, h, x[1], x[2]);
+        let j = ((x[0] / h) as usize).min(ROOT - 1);
+        let (rho, pre) = col[j];
+        Prim { rho, vel: symbi_algebra::Tensor::zeros(), pre }
+    };
+    // telescoping boxes: each rung halves the previous one about the domain centre,
+    // the same ladder the production config builds.
+    let mut regions = Vec::new();
+    let (mut lo, mut hi) = (0.25_f64, 0.75_f64);
+    for _ in 0..5 {
+        regions.push(RefinementRegion { x_lo: [lo, lo, lo], x_hi: [hi, hi, hi] });
+        let mid = 0.5 * (lo + hi);
+        let quarter = 0.25 * (hi - lo);
+        lo = mid - quarter;
+        hi = mid + quarter;
+    }
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([ROOT, ROOT, ROOT])
+        .spacing([h, h, h])
+        .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim construction failed")
+        .set_initial(seed)
+        .build();
+    let make = kset(true);
+    let ck = make(&coarse);
+    let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, make)
+        .unwrap()
+        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+            0,
+            symbi_algebra::Tensor::new(BODY),
+            symbi_algebra::Tensor::zeros(),
+            GM,
+            1.0e-3,
+            0.0,
+        )));
+    for lvl in 1..hier.levels.len() {
+        hier.levels[lvl].state.seed_cells(seed);
+    }
+    assert!(hier.levels.len() >= 5, "the ladder did not build its rungs");
+    // one root step drives a restriction at every rung, so every seam's band is
+    // formed and its region bounds are checked.
+    hier.evolve_steps(1).unwrap();
+    println!("deep ladder: {} levels stepped", hier.levels.len());
+}

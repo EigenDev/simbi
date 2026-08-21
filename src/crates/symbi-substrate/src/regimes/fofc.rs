@@ -730,12 +730,10 @@ where
         let first_state = symbi_sim::hydro_ops::first_c2p_failure_state(sim)
             .unwrap_or_else(|| "unavailable".to_string());
         panic!(
-            "FOFC last-resort freeze fired on {streak} consecutive substages in the EXTERIOR (r > r_+, \
-             regime={prefix}{dof_sfx}): a physical zone is persistently unrecoverable by the first-order \
-             redo — a genuine breakdown, not the rare isolated parachute. projected c2p errors: \
-             {c2p_errors}; first host error: {first_error}; first state: {first_state}. \
-             check the source / initial \
-             data / boundary for a poison. (freezes inside the horizon are expected and do not halt.)"
+            "FOFC last-resort freeze fired on {streak} consecutive substages outside any configured \
+             excision region (regime={prefix}{dof_sfx}): the first-order redo leaves this zone's stage \
+             input outside the admissible set at every retried timestep. projected c2p errors: \
+             {c2p_errors}; first host error: {first_error}; first state: {first_state}."
         );
     }
     match body_freeze {
