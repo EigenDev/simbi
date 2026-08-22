@@ -348,6 +348,104 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
     sweep_from_lerped(scratch, lerp, dst, region, order);
 }
 
+/// prolong primitive departures from a fixed declared target and decode them
+/// against the fixed fine-level target. the coarse departure is formed after
+/// time interpolation, so a target state at both time endpoints remains exact.
+/// the fine interior is absent from the operator's argument list.
+#[allow(clippy::too_many_arguments)]
+pub fn prolong_prims_targeted<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sweep: &ProlongSweepScratch<D, DOF, Mem>,
+    lerp: &PrimFieldsGeneric<D, DOF, Mem>,
+    old: &PrimFieldsGeneric<D, DOF, Mem>,
+    new: &PrimFieldsGeneric<D, DOF, Mem>,
+    coarse_target: &PrimFieldsGeneric<D, DOF, Mem>,
+    fine_target: &PrimFieldsGeneric<D, DOF, Mem>,
+    dst: &PrimFieldsGeneric<D, DOF, Mem>,
+    region: &Domain<D>,
+    order: ProlongOrder,
+    alpha: f64,
+) {
+    let has_pre = old.pre_field().is_some();
+    assert_eq!(
+        has_pre,
+        coarse_target.pre_field().is_some(),
+        "coarse target primitive layout differs from the live state"
+    );
+    assert_eq!(
+        has_pre,
+        fine_target.pre_field().is_some(),
+        "fine target primitive layout differs from the live state"
+    );
+    let coarse = coarse_parents(region, order.ghost_width() as isize);
+    let old_c = prim_comps(old, has_pre);
+    let new_c = prim_comps(new, has_pre);
+    let target_c = prim_comps(coarse_target, has_pre);
+    let departure_c = prim_comps(lerp, has_pre);
+    let copy = KernelId::FieldCopy { ndim: D as u8 }.name();
+    let axpy = KernelId::FieldAxpyShift { ndim: D as u8 }.name();
+    let shift = vec![0i32; D];
+    for kk in 0..departure_c.len() {
+        dispatch_fields_each::<f64, Mem, D>(
+            copy,
+            &coarse,
+            &[old_c[kk]],
+            &[departure_c[kk]],
+            &[],
+            &[],
+        );
+        dispatch_fields_each::<f64, Mem, D>(
+            axpy,
+            &coarse,
+            &[new_c[kk]],
+            &[departure_c[kk]],
+            &shift,
+            &[alpha],
+        );
+        dispatch_fields_each::<f64, Mem, D>(
+            axpy,
+            &coarse,
+            &[old_c[kk]],
+            &[departure_c[kk]],
+            &shift,
+            &[-alpha],
+        );
+        dispatch_fields_each::<f64, Mem, D>(
+            axpy,
+            &coarse,
+            &[target_c[kk]],
+            &[departure_c[kk]],
+            &shift,
+            &[-1.0],
+        );
+    }
+
+    let ncomp = departure_c.len();
+    if sweep_eligible::<D>(ncomp, order) {
+        sweep_from_lerped(sweep, lerp, dst, region, order);
+    } else {
+        prolong_prims(lerp, lerp, dst, region, order, 0.0);
+    }
+
+    let target_f = prim_comps(fine_target, has_pre);
+    let dst_f = prim_comps(dst, has_pre);
+    dispatch_fields_each::<f64, Mem, D>(
+        KernelId::WbTargetDecode {
+            ncomp: ncomp as u8,
+            ndim: D as u8,
+        }
+        .name(),
+        region,
+        &target_f,
+        &dst_f,
+        &[],
+        &[],
+    );
+    census_positive_field("target cf ghost rho", &dst.rho, region);
+    if let Some(pre) = dst.pre_field() {
+        census_positive_field("target cf ghost pre", pre, region);
+    }
+}
+
 /// whether the axis-split sweep kernels exist for this prim batch: 3d, plm/ppm
 /// (pcm's single-load kernel cannot be beaten by three passes), ncomp 4 or 5.
 fn sweep_eligible<const D: usize>(ncomp: usize, order: ProlongOrder) -> bool {

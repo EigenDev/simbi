@@ -53,8 +53,8 @@ use super::tracer_interface::{
 use super::transfer::{
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
     cf_ghost_slabs, copy_field, prolong_face_field, prolong_field, prolong_prims_balanced,
-    restrict_band_balanced,
-    prolong_prims_swept, restrict_bface, restrict_cell_field, restrict_cons,
+    prolong_prims_swept, prolong_prims_targeted, restrict_band_balanced, restrict_bface,
+    restrict_cell_field, restrict_cons,
 };
 use std::ops::ControlFlow;
 use symbi_sim::decomp::{HaloTransport, drain_devices, exchange_grid, flatten, unflatten};
@@ -153,6 +153,11 @@ where
     /// the restriction the run performs every parent step leaves the target where it found it.
     /// defining it by an independent evaluation of the profile per level would move it.
     pub cons_eq: Option<ConsFieldsGeneric<NDIM, DOF, Mem>>,
+    /// the target primitives on this level after the same c2p and ghost-fill path
+    /// used by the live state. coarse-fine transfer prolongs live departures from
+    /// the parent target and decodes them against this fixed fine target, so the
+    /// boundary operator never reads the fine interior solution.
+    pub prim_eq: Option<PrimFieldsGeneric<NDIM, DOF, Mem>>,
 }
 
 // =============================================================================
@@ -949,6 +954,7 @@ where
                 flux_eq: None,
                 residual_eq: None,
                 cons_eq: None,
+                prim_eq: None,
             }],
             injection_ledger: std::collections::BTreeMap::new(),
             prolong_order: ProlongOrder::Plm,
@@ -992,6 +998,7 @@ where
             flux_eq: None,
             residual_eq: None,
             cons_eq: None,
+            prim_eq: None,
         }];
 
         for region in regions {
@@ -1095,6 +1102,7 @@ where
                 flux_eq: None,
                 residual_eq: None,
                 cons_eq: None,
+                prim_eq: None,
             });
         }
 
@@ -2602,7 +2610,7 @@ where
         });
         let l = &self.levels[level];
         prof("c2p", || l.kernels.c2p(&l.state));
-        if self.cf_transfer_balanced(level + 1) {
+        if self.levels[level].cons_eq.is_none() && self.cf_transfer_balanced(level + 1) {
             // SYMBI_WB_BAND=0 withholds the band rewrite so the seam carries the
             // conservative restriction alone; the identical binary then runs the
             // counterfactual arm of the seam admissibility census, attributing
@@ -2725,9 +2733,23 @@ where
                 .map(|s| ProlongSweepScratch::for_slab(s, self.prolong_order, has_pre))
                 .collect()
         });
+        let target = parent.prim_eq.as_ref().zip(fine.prim_eq.as_ref());
         let balanced = self.cf_transfer_balanced(level);
         for (slab, scratch) in slabs.iter().zip(sweep_scratch) {
-            if balanced {
+            if let Some((coarse_target, fine_target)) = target {
+                prolong_prims_targeted(
+                    scratch,
+                    prim_lerp,
+                    prim_old,
+                    &parent.state.fields.prim,
+                    coarse_target,
+                    fine_target,
+                    &fine.state.fields.prim,
+                    slab,
+                    self.prolong_order,
+                    alpha,
+                );
+            } else if balanced {
                 // the equilibrium decomposition: encode the lerped coarse slab's
                 // pressure as its departure from the mechanical equilibrium chained
                 // out of the interior, prolong the departures with the unchanged
@@ -2985,7 +3007,9 @@ where
         {
             level.flux_eq = Some(flux);
             level.residual_eq = Some(residual);
-            level.cons_eq = Some(anchored.into_cons());
+            let (cons, prim) = anchored.into_parts();
+            level.cons_eq = Some(cons);
+            level.prim_eq = Some(prim);
         }
         self.report_target_stationarity();
         Ok(self)

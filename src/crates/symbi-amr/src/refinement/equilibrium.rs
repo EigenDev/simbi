@@ -65,8 +65,13 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace> GasState<NDIM, DOF, 
     pub fn cons(&self) -> &ConsFieldsGeneric<NDIM, DOF, Mem> {
         &self.cons
     }
-    pub fn into_cons(self) -> ConsFieldsGeneric<NDIM, DOF, Mem> {
-        self.cons
+    pub fn into_parts(
+        self,
+    ) -> (
+        ConsFieldsGeneric<NDIM, DOF, Mem>,
+        PrimFieldsGeneric<NDIM, DOF, Mem>,
+    ) {
+        (self.cons, self.prim)
     }
 }
 

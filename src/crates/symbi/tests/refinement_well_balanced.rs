@@ -118,6 +118,111 @@ fn build_declared(regions: &[RefinementRegion<1>]) -> Hier {
     hier
 }
 
+#[test]
+fn declared_target_ghosts_do_not_read_the_fine_interior() {
+    let mut hier = build_declared(&nested(2));
+    hier.prime();
+    let ghost_cells: Vec<[isize; 1]> = {
+        let st = &hier.levels[1].state;
+        st.geom
+            .allocated
+            .iter()
+            .filter(|coord| !st.geom.interior.contains(*coord))
+            .collect()
+    };
+    let snapshot = |h: &Hier| -> Vec<[u64; 3]> {
+        let prim = &h.levels[1].state.fields.prim;
+        let (rho, vel, pre) = (
+            prim.rho.view(),
+            prim.vel[0].view(),
+            prim.pre.as_ref().expect("adiabatic target").view(),
+        );
+        ghost_cells
+            .iter()
+            .map(|coord| {
+                [
+                    rho.at(*coord).to_bits(),
+                    vel.at(*coord).to_bits(),
+                    pre.at(*coord).to_bits(),
+                ]
+            })
+            .collect()
+    };
+    let before = snapshot(&hier);
+
+    {
+        let st = &hier.levels[1].state;
+        let mut rho = st.fields.prim.rho.view_mut();
+        let mut vel = st.fields.prim.vel[0].view_mut();
+        let mut pre = st.fields.prim.pre.as_ref().expect("adiabatic").view_mut();
+        for coord in st.geom.interior.iter() {
+            *rho.at_mut(coord) *= 0.7;
+            *vel.at_mut(coord) += 3.0;
+            *pre.at_mut(coord) *= 1.9;
+        }
+    }
+    hier.prolong_cf(1, 1.0);
+    let after = snapshot(&hier);
+    assert_eq!(
+        after, before,
+        "a fixed coarse state produced different declared-target ghosts after only the fine \
+         interior changed"
+    );
+
+    let target = hier.levels[1].prim_eq.as_ref().expect("declared target primitives");
+    let (target_rho, target_vel, target_pre) = (
+        target.rho.view(),
+        target.vel[0].view(),
+        target.pre.as_ref().expect("adiabatic target").view(),
+    );
+    for (coord, got) in ghost_cells.iter().zip(after) {
+        assert_eq!(got[0], target_rho.at(*coord).to_bits());
+        assert_eq!(got[1], target_vel.at(*coord).to_bits());
+        assert_eq!(got[2], target_pre.at(*coord).to_bits());
+    }
+}
+
+#[test]
+fn inadmissible_declared_target_decode_falls_back_as_one_state() {
+    let mut hier = build_declared(&nested(2));
+    hier.prime();
+    {
+        let parent = &hier.levels[0].state;
+        let mut velocity = parent.fields.prim.vel[0].view_mut();
+        let mut pressure = parent.fields.prim.pre.as_ref().expect("adiabatic").view_mut();
+        for coord in parent.geom.allocated.iter() {
+            *velocity.at_mut(coord) = 7.0;
+            *pressure.at_mut(coord) = -1.0e30;
+        }
+    }
+    hier.prolong_cf(1, 1.0);
+
+    let fine = &hier.levels[1];
+    let target = fine.prim_eq.as_ref().expect("declared target primitives");
+    let live = &fine.state.fields.prim;
+    let (target_rho, target_vel, target_pre) = (
+        target.rho.view(),
+        target.vel[0].view(),
+        target.pre.as_ref().expect("adiabatic target").view(),
+    );
+    let (live_rho, live_vel, live_pre) = (
+        live.rho.view(),
+        live.vel[0].view(),
+        live.pre.as_ref().expect("adiabatic").view(),
+    );
+    for coord in fine
+        .state
+        .geom
+        .allocated
+        .iter()
+        .filter(|coord| !fine.state.geom.interior.contains(*coord))
+    {
+        assert_eq!(live_rho.at(coord).to_bits(), target_rho.at(coord).to_bits());
+        assert_eq!(live_vel.at(coord).to_bits(), target_vel.at(coord).to_bits());
+        assert_eq!(live_pre.at(coord).to_bits(), target_pre.at(coord).to_bits());
+    }
+}
+
 /// the largest speed anywhere on a level, walls included. a reflecting wall mirrors the state, so
 /// gas at rest sees no jump across it and the boundary holds the target exactly like the interior.
 fn worst_speed(hier: &Hier, level: usize) -> f64 {

@@ -79,6 +79,9 @@ pub enum KernelId {
     /// through the fine densities; also the coarse-band decode of the balanced
     /// restriction.
     WbCfDecode { ndim: u8 },
+    /// add a fixed fine-level target to prolonged primitive departures, falling
+    /// back to the target as one state when the decoded primitive is inadmissible.
+    WbTargetDecode { ncomp: u8, ndim: u8 },
     /// the balanced restriction's fine encode: fine pre under a coarse seam band
     /// as its departure from the equilibrium chained from the uncovered coarse
     /// cell beyond the seam, continued across the seam face. one variant per seam
@@ -280,6 +283,17 @@ impl KernelId {
                 "wb_cf_decode_2d",
                 "wb_cf_decode_3d",
             ][dim_ix(ndim)],
+            KernelId::WbTargetDecode { ncomp, ndim } => match (ncomp, ndim) {
+                (2, 1) => "wb_target_decode_2c_1d",
+                (3, 1) => "wb_target_decode_3c_1d",
+                (3, 2) => "wb_target_decode_3c_2d",
+                (4, 2) => "wb_target_decode_4c_2d",
+                (4, 3) => "wb_target_decode_4c_3d",
+                (5, 3) => "wb_target_decode_5c_3d",
+                (n, d) => panic!(
+                    "KernelId::WbTargetDecode: unsupported (ncomp={n}, ndim={d})"
+                ),
+            },
             KernelId::WbBandEncode { ndim, axis } => [
                 ["wb_band_encode_0_1d", "wb_band_encode_0_2d", "wb_band_encode_0_3d"],
                 ["wb_band_encode_1_1d", "wb_band_encode_1_2d", "wb_band_encode_1_3d"],

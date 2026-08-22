@@ -426,6 +426,16 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
         &k,
         &writes,
     );
+    for ncomp in [ndim + 1, ndim + 2] {
+        let (k, writes) = symbi_discretize::wb_target_decode_gv(nd, ncomp as usize);
+        emit_gv(
+            out_dir,
+            KernelId::WbTargetDecode { ncomp, ndim }.name(),
+            ndim,
+            &k,
+            &writes,
+        );
+    }
     let (k, writes) = symbi_discretize::wb_band_decode_gv(nd, MAX_SOURCE_BODIES);
     emit_gv(
         out_dir,

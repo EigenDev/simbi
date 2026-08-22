@@ -74,7 +74,7 @@ fn class_line(gm: f64, n: usize, h: f64, y: f64, z: f64) -> Vec<(f64, f64)> {
     col
 }
 
-fn build(gm: f64, balanced: bool) -> Hier {
+fn build(gm: f64, balanced: bool, declared: bool) -> Hier {
     let h = 1.0 / N as f64;
     let seed = move |x: [f64; 3], fine: bool| -> Prim<f64, 3> {
         let col = class_line(gm, N, h, x[1], x[2]);
@@ -108,7 +108,7 @@ fn build(gm: f64, balanced: bool) -> Hier {
         x_lo: [0.25, 0.0, 0.0],
         x_hi: [0.75, 1.0, 1.0],
     };
-    let hier = Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, make)
+    let mut hier = Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, make)
         .unwrap()
         .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
             0,
@@ -121,14 +121,18 @@ fn build(gm: f64, balanced: bool) -> Hier {
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(move |x| seed(x, true));
     }
+    if declared {
+        hier = hier.with_equilibrium(move |x| seed(x, true)).unwrap();
+        hier.seed_equilibrium();
+    }
     hier
 }
 
 /// one seam-response measurement: inject the departure, refill the ghosts
 /// through the production path, and return (anchor residual, truth residual),
 /// each the ghost-slab maximum normalized by the injected relative amplitude.
-fn seam_response(gm: f64, amp: f64, balanced: bool) -> (f64, f64) {
-    let mut hier = build(gm, balanced);
+fn seam_response(gm: f64, amp: f64, balanced: bool, declared: bool) -> (f64, f64) {
+    let mut hier = build(gm, balanced, declared);
     hier.prime();
 
     // the departure: a smooth log-pressure bump filling the strip beside the
@@ -211,11 +215,31 @@ fn the_seam_response_to_an_off_class_interior_is_measured() {
     println!("\nseam ghost response, residual/amplitude (anchor | truth):");
     for gm in [100.0, 400.0, 1600.0] {
         for amp in [0.01, 0.1, 0.5, 1.0] {
-            let (anchor, truth) = seam_response(gm, amp, true);
-            let (_, truth_plain) = seam_response(gm, amp, false);
+            let (anchor, truth) = seam_response(gm, amp, true, false);
+            let (_, truth_plain) = seam_response(gm, amp, false, false);
             println!(
                 "  GM {gm:>6.0} amp {amp:>5.2}:  anchor {anchor:.3e}   truth {truth:.3e}   \
                  plain-prolong truth {truth_plain:.3e}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_declared_target_has_zero_fine_feedback_at_every_amplitude() {
+    println!("\ndeclared-target seam response, residual/amplitude (anchor | truth):");
+    for gm in [100.0, 400.0, 1600.0] {
+        for amp in [0.01, 0.1, 0.5, 1.0] {
+            let (anchor, truth) = seam_response(gm, amp, true, true);
+            let (_, plain) = seam_response(gm, amp, false, false);
+            println!(
+                "  GM {gm:>6.0} amp {amp:>5.2}:  anchor {anchor:.3e}   truth {truth:.3e}   \
+                 plain-prolong truth {plain:.3e}"
+            );
+            assert!(
+                truth <= plain,
+                "GM={gm}, amp={amp}: declared-target truth response {truth:.3e} exceeds the \
+                 plain-prolongation floor {plain:.3e}"
             );
         }
     }

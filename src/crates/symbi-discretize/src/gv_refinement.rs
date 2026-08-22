@@ -1071,6 +1071,53 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
+/// add a fixed fine-level target to prolonged primitive departures. the
+/// candidate is accepted only when density and pressure are positive and every
+/// primitive component is finite; otherwise the entire target state is written.
+/// selecting one coherent fallback avoids combining a target density with a
+/// departed velocity or pressure.
+///
+/// buffers: target components (inputs), then departure/candidate components
+/// (in-place outputs), ordered as rho, velocities, optional pressure.
+pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
+    assert!((1..=3).contains(&ndim), "wb_target_decode_gv: ndim must be 1..=3");
+    assert!(
+        ncomp == ndim + 1 || ncomp == ndim + 2,
+        "wb_target_decode_gv: expected rho + ndim velocities + optional pressure"
+    );
+    begin_trace();
+    let mut target = Vec::with_capacity(ncomp);
+    let mut candidate = Vec::with_capacity(ncomp);
+    for kk in 0..ncomp {
+        let eq_key = format!("eq_{kk}");
+        let dst_key = format!("dst_{kk}");
+        let eq = Gv::field(&eq_key, eq_key.as_str());
+        let departure = Gv::field(&dst_key, dst_key.as_str());
+        target.push(eq);
+        candidate.push(eq + departure);
+    }
+    let finite = |value: Gv| (value - value).cmp_eq(Gv::ZERO);
+    let finite_pos = |value: Gv| finite(value) & value.cmp_gt(Gv::ZERO);
+    let mut physical = finite_pos(candidate[0]);
+    for kk in 1..=ndim {
+        physical = physical & finite(candidate[kk]);
+    }
+    if ncomp == ndim + 2 {
+        physical = physical & finite_pos(candidate[ncomp - 1]);
+    }
+    let writes = (0..ncomp)
+        .map(|kk| {
+            let dst_key = format!("dst_{kk}");
+            (
+                dst_key.clone(),
+                dst_key.into(),
+                Gv::select(physical, candidate[kk], target[kk]).node(),
+            )
+        })
+        .collect();
+    (end_trace(), writes)
+}
+
 /// trace the balanced band decode over the covered coarse band at a seam: each
 /// band cell adds the coarse mechanical chain from the uncovered cell beyond
 /// the seam to its restricted departure, and a sum outside the physical regime
