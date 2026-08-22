@@ -426,9 +426,17 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
         &k,
         &writes,
     );
-    // the balanced restriction pair: the fine encode under a coarse seam band
-    // (chained from the uncovered coarse cell across the seam) and the gamma-law
-    // energy rebuild of the band after its decode through `WbCfDecode`.
+    let (k, writes) = symbi_discretize::wb_band_decode_gv(nd, MAX_SOURCE_BODIES);
+    emit_gv(
+        out_dir,
+        KernelId::WbBandDecode { ndim }.name(),
+        ndim,
+        &k,
+        &writes,
+    );
+    // the balanced restriction triple: the fine encode under a coarse seam band
+    // (chained from the uncovered coarse cell across the seam), the band decode
+    // with its conservative fallback, and the gamma-law energy rebuild.
     for axis in 0..nd {
         let (k, writes) = symbi_discretize::wb_band_encode_gv(nd, MAX_SOURCE_BODIES, axis);
         emit_gv(

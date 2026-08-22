@@ -2637,10 +2637,17 @@ where
         let departure = fine
             .band_departure
             .get_or_init(|| Field::zeros(&fine.state.geom.allocated).expect("band departure scratch"));
+        // the coarse level's own scratch holds the restricted departures; its other
+        // role -- the fine encode target of the seam one level up -- writes the
+        // interior edge strips, disjoint from the coverage strips written here.
+        let coarse_departure = coarse
+            .band_departure
+            .get_or_init(|| Field::zeros(&coarse.state.geom.allocated).expect("band departure scratch"));
         restrict_band_balanced(
             &fine.state.fields.prim,
             &fine.state.geom.interior,
             departure,
+            coarse_departure,
             &coarse.state.fields.prim,
             coarse.state.fields.cons.nrg_field().expect("the balanced restriction needs cons.nrg"),
             &coarse.state.geom.interior,

@@ -1071,6 +1071,60 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
+/// trace the balanced band decode over the covered coarse band at a seam: each
+/// band cell adds the coarse mechanical chain from the uncovered cell beyond
+/// the seam to its restricted departure, and a sum outside the physical regime
+/// falls back to the cell's own conservative pressure -- the fine average the
+/// restriction wrote, which is the covered cell's honest value whenever the
+/// departure decomposition breaks. a drain-evacuated fine region under a dense
+/// exterior is the breaking configuration: the class continuation of the
+/// exterior overstates the evacuated gas by an order of magnitude, so the
+/// abstention must return the conservative average rather than the class.
+/// in-class the departure vanishes, the decoded value is the positive class
+/// pressure, and the guard passes it bit for bit.
+///
+/// the departures live in their own buffer, so the pressure field holds the
+/// conservative restriction until this pass overwrites it. each thread reads
+/// the pressure at the uncovered reference (outside the written band) and at
+/// its own cell, so the in-place write is race-free.
+///
+/// buffers: dst_rho (the restricted coarse density, input), band_dep (the
+/// restricted departures, input), dst_pre (conservative pressure in, decoded
+/// pressure out). ints: lo_{ax}, hi_{ax} (the uncovered reference row,
+/// inclusive). scalars: x_lo_{ax}, dx_{ax} (the coarse lattice), then the body
+/// slots.
+pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
+    assert!((1..=3).contains(&ndim), "wb_band_decode_gv: ndim must be 1..=3");
+    begin_trace();
+    let (lo, hi) = declare_interior_bounds(ndim);
+    let x_lo: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
+        .collect();
+    let dx: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("dx_{ax}"))).collect();
+    let slots = declare_body_slots(ndim, n_bodies);
+
+    // registration order pins the buffer order: density, departures, pressure.
+    let rho_at = |idx: &[NodeId]| gv_load_at("dst_rho", "dst_rho", idx);
+    let coords: Vec<NodeId> = with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+    let _ = rho_at(&coords);
+    let departure = Gv::field("band_dep", "band_dep");
+    let p_cons = Gv::field("dst_pre", "dst_pre");
+    let ref_idx: Vec<NodeId> = (0..ndim)
+        .map(|ax| int_clamp(coords[ax], lo[ax], hi[ax]))
+        .collect();
+    let p_ref = gv_load_at("dst_pre", "dst_pre", &ref_idx);
+    let all = vec![true; ndim];
+    let p_eq = chained_pressure(
+        ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX, &all,
+    );
+
+    let zero = Gv::from_f64(0.0);
+    let decoded = departure + p_eq;
+    let pre_g = Gv::select(decoded.cmp_gt(zero), decoded, p_cons);
+    let writes = vec![("dst_pre".to_string(), "dst_pre".into(), pre_g.node())];
+    (end_trace(), writes)
+}
+
 /// trace the balanced restriction's fine encode over the fine cells under a
 /// coarse band at a coarse-fine seam: each fine cell's pressure becomes its
 /// departure from the mechanical equilibrium chained from the uncovered coarse

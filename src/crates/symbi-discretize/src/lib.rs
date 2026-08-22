@@ -87,7 +87,8 @@ pub use gv_refinement::{
     refine_acc_edge_gv, refine_acc_face_gv, refine_prolong_face_gv, refine_prolong_gv,
     refine_prolong_multi_1t_gv, refine_prolong_multi_gv, refine_prolong_sweep_multi_gv,
     refine_restrict_face_gv, refine_restrict_gv, WB_BAND_CHAIN_MAX, WB_CF_CHAIN_MAX,
-    band_energy_gv, wb_band_encode_gv, wb_cf_decode_gv, wb_cf_lerp_encode_gv,
+    band_energy_gv, wb_band_decode_gv, wb_band_encode_gv, wb_cf_decode_gv,
+    wb_cf_lerp_encode_gv,
 };
 pub use gv_viscous::{
     OrthoPlane25, viscous_adiabatic_alpha_gv, viscous_adiabatic_alpha_gv_2p5d, viscous_adiabatic_alpha_gv_3d,

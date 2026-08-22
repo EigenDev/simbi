@@ -190,6 +190,11 @@ where
 /// survives FOFC recovery, without false-halting the rare correct parachute. generous margin.
 const FOFC_FREEZE_HALT_STREAK: u32 = 16;
 
+fn fofc_diagnostics_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("SIMBI_FOFC_DIAGNOSTICS").is_ok_and(|v| v == "1"))
+}
+
 fn advance_freeze_streak(freeze_streak: &AtomicU32, exterior_froze: u64) -> u32 {
     if exterior_froze > 0 {
         freeze_streak.fetch_add(1, Ordering::Relaxed) + 1
@@ -713,6 +718,22 @@ where
     };
     let exterior_froze = (froze as u64).saturating_sub(interior_froze);
     let streak = advance_freeze_streak(freeze_streak, exterior_froze);
+    // the halt above fires on a sixteen-substage streak, so the freezes that
+    // precede it are recovered silently; the first few carry the location where
+    // admissibility erosion begins, which no post-mortem can recover. enabled
+    // by SIMBI_FOFC_DIAGNOSTICS=1.
+    if exterior_froze > 0 && fofc_diagnostics_enabled() {
+        static LOGGED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if n < 64 {
+            let first = symbi_sim::hydro_ops::first_c2p_error(sim)
+                .map(|(coord, code)| format!("{coord:?}:{code}"))
+                .unwrap_or_else(|| "unavailable".to_string());
+            eprintln!(
+                "[fofc] {exterior_froze} exterior freeze(s), streak {streak}, first {first}"
+            );
+        }
+    }
     // tier 3, the last resort below the projection: an exterior cell that even the projection could
     // not land in G has an inadmissible anchor — its stage input is already unrecoverable — so the
     // substage cannot be completed at this timestep. replaying the whole step at a smaller dt is

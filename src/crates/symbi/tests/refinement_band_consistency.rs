@@ -224,3 +224,119 @@ fn the_balanced_restriction_band_converges_to_the_conservative_average() {
          with the mesh."
     );
 }
+
+/// the covered band strips of the low-x seam in coarse absolute indices.
+const BAND: usize = 4;
+
+/// the band decode's per-cell contract, pinned by direct dispatch with
+/// hand-written departures: an admissible sum decodes to departure plus chain,
+/// and an inadmissible one keeps the cell's conservative pressure bit for bit.
+/// the conservative value stands in for a drain-evacuated fine average, fifty
+/// times below the class, so a fallback onto the class or the anchor reads as
+/// a class-scale pressure and fails outright.
+#[test]
+fn an_inadmissible_band_decode_keeps_the_conservative_pressure() {
+    let mut hier = build(16);
+    hier.prime();
+
+    let coverage = hier.levels[0].coverage.clone().expect("covered root");
+    let mut band_c = coverage.clone();
+    band_c.spaces[0].hi = band_c.spaces[0].lo + BAND as isize;
+    let uncovered = band_c.spaces[0].lo - 1;
+
+    // the conservative stand-in: the class pressure scaled to a drained band.
+    let evac = 0.02;
+    let st = &hier.levels[0].state;
+    let cons: std::collections::HashMap<[isize; 3], f64> = {
+        let pre_v = st.fields.prim.pre.as_ref().expect("adiabatic").view();
+        let mut m = std::collections::HashMap::new();
+        for c in band_c.iter() {
+            m.insert(c, *pre_v.at(c) * evac);
+        }
+        m
+    };
+    {
+        let mut pre_v = st.fields.prim.pre.as_ref().expect("adiabatic").view_mut();
+        for (c, v) in &cons {
+            *pre_v.at_mut(*c) = *v;
+        }
+    }
+
+    // departures by parity of the x index: a value far below any pressure in
+    // the problem forces the inadmissible arm, and zero is the in-class value
+    // whose decode is the positive chain.
+    let scratch = symbi_grid::Field::<f64, 3, symbi_xpu::HostMemory>::zeros(&st.geom.allocated)
+        .expect("scratch");
+    {
+        let mut dep_v = scratch.view_mut();
+        for c in band_c.iter() {
+            *dep_v.at_mut(c) = if c[0] % 2 == 0 { -1.0e6 } else { 0.0 };
+        }
+    }
+
+    // the dispatch mirrors the transfer's band decode: the uncovered row as the
+    // reference clamp, the coarse lattice scalars, then the body slots in
+    // declared order (pos, mass, softening, softening kind per slot; an absent
+    // slot carries zero mass with unit softening).
+    let mut lo: Vec<i32> = (0..3).map(|a| st.geom.interior.spaces[a].lo as i32).collect();
+    let mut hi: Vec<i32> = (0..3)
+        .map(|a| st.geom.interior.spaces[a].hi as i32 - 1)
+        .collect();
+    lo[0] = uncovered as i32;
+    hi[0] = uncovered as i32;
+    let ints: Vec<i32> = lo.iter().chain(hi.iter()).copied().collect();
+    let mut scalars = Vec::new();
+    scalars.extend_from_slice(&st.geom.x_lo);
+    scalars.extend_from_slice(&st.geom.dx);
+    let bodies = &st.immersed.as_ref().unwrap().bodies;
+    for b in 0..symbi_ib::collection::MAX_SOURCE_BODIES {
+        if b < bodies.len() {
+            let body = bodies.get(b);
+            for ax in 0..3 {
+                scalars.push(body.position[ax]);
+            }
+            scalars.push(if body.has_gravity() { body.mass } else { 0.0 });
+            scalars.push(body.softening().unwrap_or(1.0));
+            scalars.push(body.softening_kind().unwrap_or(0.0));
+        } else {
+            scalars.extend_from_slice(&[0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        }
+    }
+    symbi::regimes::substrate_kernels::dispatch_fields_each::<f64, symbi_xpu::HostMemory, 3>(
+        symbi_ir::KernelId::WbBandDecode { ndim: 3 }.name(),
+        &band_c,
+        &[&st.fields.prim.rho, &scratch],
+        &[st.fields.prim.pre.as_ref().expect("adiabatic")],
+        &ints,
+        &scalars,
+    );
+
+    let pre_v = st.fields.prim.pre.as_ref().expect("adiabatic").view();
+    let mut abstained = 0usize;
+    let mut decoded = 0usize;
+    for (c, v) in &cons {
+        let p = *pre_v.at(*c);
+        if c[0] % 2 == 0 {
+            assert!(
+                p == *v,
+                "band cell {c:?} was forced inadmissible and holds {p:.6e}; the fallback \
+                 must return the conservative pressure {v:.6e} bit for bit"
+            );
+            abstained += 1;
+        } else {
+            assert!(
+                p > 0.0 && p.is_finite() && p != *v,
+                "band cell {c:?} carries a zero departure; its decode is the chain value, \
+                 which differs from the drained conservative stand-in {v:.6e}, got {p:.6e}"
+            );
+            assert!(
+                p > 10.0 * v,
+                "band cell {c:?} decoded to {p:.6e}; a zero-departure decode lands on the \
+                 class chain, which sits far above the drained stand-in {v:.6e}"
+            );
+            decoded += 1;
+        }
+    }
+    println!("band decode contract: {abstained} abstained bitwise, {decoded} decoded on the chain");
+    assert!(abstained > 0 && decoded > 0);
+}
