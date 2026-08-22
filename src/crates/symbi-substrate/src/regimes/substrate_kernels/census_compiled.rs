@@ -14,16 +14,19 @@
 // segment last.
 //
 // usage:
-//   if census_map_compiled(sim, &ev, &values, &segment) { /* compiled */ } else { /* interpret */ }
+//   if census_map_compiled(sim, &ev, &values, &segment, true) {
+//       /* compiled */
+//   } else {
+//       /* interpret */
+//   }
 // =============================================================================
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use symbi_algebra::OrderedNumeric;
+use symbi_aot::KernelInvocation;
 use symbi_grid::Field;
 use symbi_ir::ScalarRef;
-use symbi_ir::algebra::Scalar;
 use symbi_sim::census::CensusEvaluator;
 use symbi_sim::state::FieldStore;
 use symbi_xpu::MemorySpace;
@@ -38,19 +41,16 @@ use symbi_exec::policy::{ExecPolicy, policy_for};
 /// assignment. returns `false` when the compiled path does not apply, leaving the caller to
 /// interpret — the JIT reads and writes raw f64 buffers, so a non-f64 carrier declines here rather
 /// than silently reinterpreting them.
-pub fn census_map_compiled<const D: usize, const DOF: usize, Mem, Sc>(
-    sim: &FieldStore<D, DOF, Mem, Sc>,
+pub fn census_map_compiled<const D: usize, const DOF: usize, Mem>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
     ev: &CensusEvaluator,
     values: &[Field<f64, D, Mem>],
     segment: &Field<f64, D, Mem>,
+    write_segment: bool,
 ) -> bool
 where
-    Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
 {
-    if Mem::IS_DEVICE_ACCESSIBLE || std::any::TypeId::of::<Sc>() != std::any::TypeId::of::<f64>() {
-        return false;
-    }
     // the compiled kernel is cached across samples. tracing the graph and running the jit costs
     // orders of magnitude more than the sweep it produces — measured at 4.3 ms per sample over
     // 4096 cells when rebuilt every time, which is far more than the hydro step it observes — so
@@ -85,17 +85,30 @@ where
     }
 
     let pre = sim.fields.prim.pre_field();
-    let in_bases: Vec<*const f64> = entry
+    let input_fields: Vec<&Field<f64, D, Mem>> = entry
         .in_refs
         .iter()
-        .map(|&f| resolve_path(sim, pre, None, 0, f).as_ptr() as *const f64)
+        .map(|&f| resolve_path(sim, pre, None, 0, f))
         .collect();
     // values in registration order, then the segment — the order `census_map_gv` declares.
-    let out_bases: Vec<*mut f64> = values
-        .iter()
-        .map(|f| f.as_mut_ptr() as *mut f64)
-        .chain(std::iter::once(segment.as_mut_ptr() as *mut f64))
-        .collect();
+    let output_fields: Vec<&Field<f64, D, Mem>> = if write_segment {
+        values.iter().chain(std::iter::once(segment)).collect()
+    } else {
+        values.iter().collect()
+    };
+    let (host_kernel, device_name, device_ir) = if write_segment {
+        (
+            entry.host_kernel.as_ref(),
+            &entry.device_name,
+            &entry.device_ir,
+        )
+    } else {
+        (
+            entry.values_host_kernel.as_ref(),
+            &entry.values_device_name,
+            &entry.values_device_ir,
+        )
+    };
 
     let t = sim.time;
     let params = ev.params();
@@ -117,19 +130,60 @@ where
         })
         .collect();
 
-    let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
     let (grid, dlo) = exec_layout(&sim.geom.interior);
+    let shared = alloc_layout(&sim.geom.allocated);
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> =
+            std::iter::repeat(shared)
+                .take(input_fields.len() + output_fields.len())
+                .collect();
+        let buffers = super::exec::disjoint_host_buffers(
+            device_name,
+            &input_fields,
+            &output_fields,
+            &layouts,
+        );
+        let inv = KernelInvocation {
+            buffers,
+            grid: &grid,
+            dom_lo: &dlo,
+            ints: &[],
+            scalars: &scalars,
+        };
+        crate::regimes::substrate_gpu::dispatch::<f64, Mem, _>(
+            inv,
+            device_ir,
+            device_name,
+            |_, _, _, _, _, _| {
+                unreachable!("the census device map cannot dispatch through the cpu arm")
+            },
+        );
+        return true;
+    }
+
+    let Some(kernel) = host_kernel else {
+        return false;
+    };
+    let in_bases: Vec<*const f64> = input_fields
+        .iter()
+        .map(|f| f.as_ptr() as *const f64)
+        .collect();
+    let out_bases: Vec<*mut f64> = output_fields
+        .iter()
+        .map(|f| f.as_mut_ptr() as *mut f64)
+        .collect();
+    let (alo, aext, _vol) = shared;
     // safety: the same contract the compiled source pass runs under — one shared allocated layout,
     // cell-disjoint blocks, and outputs that alias no input (the accumulators and the segment are
     // scratch this call owns).
     unsafe {
-        match policy_for(&sim.geom.interior, Mem::IS_DEVICE_ACCESSIBLE) {
-            ExecPolicy::Cover(block) => entry.kernel.run_cover_raw(
+        match policy_for(&sim.geom.interior, false) {
+            ExecPolicy::Cover(block) => kernel.run_cover_raw(
                 &grid, &dlo, &alo, &aext, &block, &in_bases, &scalars, &out_bases,
             ),
-            ExecPolicy::Whole => entry
-                .kernel
-                .run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases),
+            ExecPolicy::Whole => {
+                kernel.run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases)
+            }
         }
     }
     true
@@ -137,7 +191,12 @@ where
 
 /// one compiled census map plus the bindings its manifest declares.
 struct Entry {
-    kernel: symbi_jit::CompiledKernel,
+    host_kernel: Option<symbi_jit::CompiledKernel>,
+    device_name: String,
+    device_ir: String,
+    values_host_kernel: Option<symbi_jit::CompiledKernel>,
+    values_device_name: String,
+    values_device_ir: String,
     in_refs: Vec<symbi_ir::FieldRef>,
     scalar_params: Vec<ScalarBind>,
 }
@@ -170,7 +229,21 @@ fn build_entry(
         spec.n_values(),
         spec.n_segments(),
     );
-    let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, ndim).ok()?;
+    let host_kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, ndim).ok();
+    let (device_name, device_ir) = super::runtime_source::gv_kernel_to_ir(
+        &gvk,
+        &writes,
+        ndim as u8,
+        &format!("rt_census_map_{ndim}d"),
+    );
+    let value_writes = &writes[..spec.n_values()];
+    let values_host_kernel = symbi_jit::compile_gv_kernel(&gvk, value_writes, ndim).ok();
+    let (values_device_name, values_device_ir) = super::runtime_source::gv_kernel_to_ir(
+        &gvk,
+        value_writes,
+        ndim as u8,
+        &format!("rt_census_values_{ndim}d"),
+    );
     Some(Entry {
         in_refs: gvk
             .field_inputs
@@ -187,7 +260,12 @@ fn build_entry(
             .iter()
             .map(|s| ScalarBind::from_name(s))
             .collect(),
-        kernel,
+        host_kernel,
+        device_name,
+        device_ir,
+        values_host_kernel,
+        values_device_name,
+        values_device_ir,
     })
 }
 

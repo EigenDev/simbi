@@ -486,6 +486,45 @@ fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
     // the pointer (kernel launched + ctx_sync'd + host-folded).
 }
 
+/// grow-only result storage for a segmented reduction.
+///
+/// A census used to allocate two managed blocks on every sample: one for the compact
+/// `segments * values` result and one for the dropped-cell counter.  Those allocations are
+/// pure driver overhead and are especially expensive at per-level cadence.  Keep one combined,
+/// suitably aligned block per precision and lend it to a complete seed/launch/readback cycle.
+/// Holding the mutex across the cycle prevents concurrent simulations from aliasing the slot.
+#[cfg(feature = "gpu")]
+fn with_cached_segmented_result<Sc: Scalar + OrderedNumeric, R>(
+    n_slots: usize,
+    f: impl FnOnce(*mut Sc, *mut u64) -> R,
+) -> R {
+    use std::sync::{Mutex, OnceLock};
+    use symbi_xpu::{DeviceMemory, MemoryBlock};
+
+    static F64_RESULT: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
+    static F32_RESULT: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
+    let slot = if std::mem::size_of::<Sc>() == std::mem::size_of::<f64>() {
+        F64_RESULT.get_or_init(|| Mutex::new(None))
+    } else {
+        F32_RESULT.get_or_init(|| Mutex::new(None))
+    };
+    let acc_bytes = n_slots * std::mem::size_of::<Sc>();
+    let dropped_offset = acc_bytes.next_multiple_of(std::mem::align_of::<u64>());
+    let bytes_needed = dropped_offset + std::mem::size_of::<u64>();
+    let mut guard = slot.lock().unwrap();
+    if guard.as_ref().is_none_or(|blk| blk.bytes() < bytes_needed) {
+        let alloc_bytes = bytes_needed.next_power_of_two().max(256);
+        *guard = Some(
+            MemoryBlock::<DeviceMemory>::new(alloc_bytes)
+                .expect("unified alloc for segmented reduction result"),
+        );
+    }
+    let base = guard.as_mut().unwrap().as_mut_ptr::<u8>();
+    let acc = base.cast::<Sc>();
+    let dropped = unsafe { base.add(dropped_offset).cast::<u64>() };
+    f(acc, dropped)
+}
+
 /// GPU reduction over `domain` of `field` via the substrate Reduce morphism: render
 /// the block-reduce at the scalar's precision, NVRTC-compile (cached), launch over
 /// the window, and fold the per-block partials on the host (only num_blocks scalars
@@ -590,10 +629,9 @@ fn field_reduce_device<
 /// count over a grid-stride walk of the window, and read back the
 /// `n_segments * n_values` accumulators — the only values that cross back to the host.
 ///
-/// the accumulator and drop counter are allocated per call rather than cached across steps,
-/// unlike the CFL reduction's partials: a census samples once per level step, so the
-/// allocation is amortized over a whole pass, and the buffer size follows the registered
-/// census shape rather than the grid.
+/// the accumulator and drop counter use a grow-only managed buffer cached across samples. their
+/// shape follows the registration rather than the grid, and a complete launch/readback holds the
+/// cache slot so two concurrent reductions cannot alias it.
 #[cfg(feature = "gpu")]
 fn field_segmented_reduce_device<
     B: GpuBackend,
@@ -612,7 +650,6 @@ fn field_segmented_reduce_device<
     use symbi_xpu::LaunchConfig;
     use symbi_xpu::ctx_sync;
     use symbi_xpu::runtime::GpuRuntime;
-    use symbi_xpu::{DeviceMemory, MemoryBlock};
 
     // the device accumulators ride the field's carrier, unlike the host path, which widens every
     // term to f64 before combining. a single-precision field therefore sums in single precision
@@ -644,20 +681,6 @@ fn field_segmented_reduce_device<
     let dom_lo: Vec<i32> = (0..D).map(|a| domain.spaces[a].lo as i32).collect();
 
     let (identity, _) = host_identity_combine(op);
-    let mut acc_host = MemoryBlock::<DeviceMemory>::new(n_slots * std::mem::size_of::<Sc>())
-        .expect("unified alloc for segmented reduction accumulators");
-    let mut dropped_host = MemoryBlock::<DeviceMemory>::new(std::mem::size_of::<u64>())
-        .expect("unified alloc for the segmented reduction drop counter");
-    let acc_ptr = acc_host.as_mut_ptr::<Sc>();
-    let dropped_ptr = dropped_host.as_mut_ptr::<u64>();
-    // seed the accumulators with the op's identity. `Add` wants zero, but `Min`/`Max` want
-    // their sentinel, so the seed is written explicitly rather than left as a zeroed
-    // allocation.
-    for i in 0..n_slots {
-        unsafe { *acc_ptr.add(i) = Sc::from_f64(identity) };
-    }
-    unsafe { *dropped_ptr = 0 };
-
     let module_key = format!("{name}#{}", if is_f64 { "f64" } else { "f32" });
     let kernel = B::dispatcher().jit_kernel_keyed(&desc.source, &module_key, &name);
 
@@ -671,56 +694,64 @@ fn field_segmented_reduce_device<
         block: [REDUCTION_BLOCK_SIZE, 1, 1],
         shared_mem_bytes: 0,
     };
-    let acc_arg = acc_ptr as *const u8;
-    let dropped_arg = dropped_ptr as *const u8;
-    symbi_xpu::with_pooled_args(|args| {
-        let alloc = segment.domain();
-        let buf_extent: Vec<u32> = (0..D).map(|a| alloc.spaces[a].size() as u32).collect();
-        let buf_lo: Vec<i32> = (0..D).map(|a| alloc.spaces[a].lo as i32).collect();
-        for field in values {
-            let a = field.domain();
-            let e: Vec<u32> = (0..D).map(|k| a.spaces[k].size() as u32).collect();
-            let l: Vec<i32> = (0..D).map(|k| a.spaces[k].lo as i32).collect();
-            B::push_field(args, field.as_ptr() as *const u8, &l, &e);
+    with_cached_segmented_result::<Sc, _>(n_slots, |acc_ptr, dropped_ptr| {
+        // seed the accumulators with the op's identity. `Add` wants zero, but `Min`/`Max` want
+        // their sentinel, so the seed is written explicitly rather than left as zeroed memory.
+        for i in 0..n_slots {
+            unsafe { *acc_ptr.add(i) = Sc::from_f64(identity) };
         }
-        B::push_field(args, segment.as_ptr() as *const u8, &buf_lo, &buf_extent);
-        args.push(&total_cells);
-        for g in &grid {
-            args.push(g);
-        }
-        for d in &dom_lo {
-            args.push(d);
-        }
-        args.push(&acc_arg);
-        args.push(&dropped_arg);
-        unsafe {
-            B::dispatcher()
-                .runtime()
-                .launch(&kernel, config, args.as_mut_slice())
-                .unwrap_or_else(|e| {
-                    panic!("GPU segmented reduction launch '{name}' failed: {e:?}")
-                });
-        }
-    });
-    ctx_sync();
+        unsafe { *dropped_ptr = 0 };
+        let acc_arg = acc_ptr as *const u8;
+        let dropped_arg = dropped_ptr as *const u8;
+        symbi_xpu::with_pooled_args(|args| {
+            let alloc = segment.domain();
+            let buf_extent: Vec<u32> = (0..D).map(|a| alloc.spaces[a].size() as u32).collect();
+            let buf_lo: Vec<i32> = (0..D).map(|a| alloc.spaces[a].lo as i32).collect();
+            for field in values {
+                let a = field.domain();
+                let e: Vec<u32> = (0..D).map(|k| a.spaces[k].size() as u32).collect();
+                let l: Vec<i32> = (0..D).map(|k| a.spaces[k].lo as i32).collect();
+                B::push_field(args, field.as_ptr() as *const u8, &l, &e);
+            }
+            B::push_field(args, segment.as_ptr() as *const u8, &buf_lo, &buf_extent);
+            args.push(&total_cells);
+            for g in &grid {
+                args.push(g);
+            }
+            for d in &dom_lo {
+                args.push(d);
+            }
+            args.push(&acc_arg);
+            args.push(&dropped_arg);
+            unsafe {
+                B::dispatcher()
+                    .runtime()
+                    .launch(&kernel, config, args.as_mut_slice())
+                    .unwrap_or_else(|e| {
+                        panic!("GPU segmented reduction launch '{name}' failed: {e:?}")
+                    });
+            }
+        });
+        ctx_sync();
 
-    let out: Vec<f64> = (0..n_slots)
-        .map(|i| unsafe { (*acc_ptr.add(i)).to_f64() })
-        .collect();
-    let dropped = unsafe { *dropped_ptr };
-    SegmentedReduction {
-        values: out,
-        dropped,
-        // the accumulators were combined by device-wide atomics in scheduler order. min/max
-        // are order-agnostic and land on the same bits regardless; a sum reassociates.
-        // privatizing into shared memory cuts the contention, not the ordering, so this
-        // choice is independent of the accumulator's shape.
-        order: if matches!(op, ReductionOp::Min | ReductionOp::Max) {
-            ReductionOrder::Exact
-        } else {
-            ReductionOrder::Unspecified
-        },
-    }
+        let out = (0..n_slots)
+            .map(|i| unsafe { (*acc_ptr.add(i)).to_f64() })
+            .collect();
+        let dropped = unsafe { *dropped_ptr };
+        SegmentedReduction {
+            values: out,
+            dropped,
+            // the accumulators were combined by device-wide atomics in scheduler order. min/max
+            // are order-agnostic and land on the same bits regardless; a sum reassociates.
+            // privatizing into shared memory cuts the contention, not the ordering, so this
+            // choice is independent of the accumulator's shape.
+            order: if matches!(op, ReductionOp::Min | ReductionOp::Max) {
+                ReductionOrder::Exact
+            } else {
+                ReductionOrder::Unspecified
+            },
+        }
+    })
 }
 
 /// dispatch a structured invocation to the GPU when `Mem` is device-accessible,

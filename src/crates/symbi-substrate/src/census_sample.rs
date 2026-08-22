@@ -51,9 +51,9 @@ where
     symbi_sim::driver::prof("census", || {
         let now = sim.time;
         censuses
-        .iter()
-        .enumerate()
-        .map(|(index, registered)| {
+            .iter()
+            .enumerate()
+            .map(|(index, registered)| {
             // not due: an empty partial, which `combine_partials` folds as a no-op and
             // `record_samples` skips. the alternative — dropping the entry — would misalign every
             // registration after it, since partials are matched to registrations by position.
@@ -204,19 +204,60 @@ where
     Mem: MemorySpace,
 {
     let scratch = sim.census_scratch_pooled(censuses, index)?;
+    let segment_stamp = if ev.axes_are_geometry_only() {
+        Some(static_segment_stamp(sim.motion.a, covered))
+    } else {
+        None
+    };
+    let segment_is_cached = segment_stamp.is_some_and(|stamp| {
+        scratch
+            .segment_stamp
+            .lock()
+            .unwrap()
+            .is_some_and(|cached| cached == stamp)
+    });
     let compiled = crate::regimes::substrate_kernels::census_compiled::census_map_compiled(
         &sim.store,
         ev,
         &scratch.values,
         &scratch.segment,
+        !segment_is_cached,
     );
     if !compiled {
         sim.census_fill_interpreted(ev, scratch)?;
     }
-    if let Some(region) = covered {
-        exclude_covered(ev, &scratch.segment, region);
+    // The interpreter always writes the segment. The split compiled kernel does so only when the
+    // geometry/coverage stamp changed; a cached segment already includes its covered-cell mask.
+    if !compiled || !segment_is_cached {
+        if let Some(region) = covered {
+            exclude_covered(ev, &scratch.segment, region);
+        }
+        if let Some(stamp) = segment_stamp {
+            *scratch.segment_stamp.lock().unwrap() = Some(stamp);
+        }
     }
     Some(scratch)
+}
+
+/// identity of everything a geometry-only bucket assignment depends on. The mesh scale factor
+/// invalidates expanding coordinates/volumes, and the covered domain invalidates the AMR leaf
+/// mask. Grid origin, spacing and allocated layout are immutable for a level's lifetime and the
+/// scratch itself belongs to exactly that level, so they need no per-sample contribution.
+fn static_segment_stamp<const D: usize>(
+    scale_factor: f64,
+    covered: Option<&symbi_algebra::Domain<D>>,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    scale_factor.to_bits().hash(&mut h);
+    covered.is_some().hash(&mut h);
+    if let Some(domain) = covered {
+        for space in &domain.spaces {
+            space.lo.hash(&mut h);
+            space.hi.hash(&mut h);
+        }
+    }
+    h.finish()
 }
 
 /// mark a level's covered cells excluded: the cells a finer level resolves are counted there, not

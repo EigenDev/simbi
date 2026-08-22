@@ -2699,6 +2699,16 @@ where
     /// (gamma-law; asserted at the transfer). the encode/decode are baked kernels,
     /// so host and device hierarchies take the same path.
     fn cf_transfer_balanced(&self, level: usize) -> bool {
+        // SYMBI_WB_GHOST=0 withholds the balanced ghost transfer alone: the seam
+        // ghosts take the plain prolongation while the in-level balanced flux,
+        // the balanced body source, and the restriction band keep their own
+        // switches. the ghost decode anchors on the fine interior, so a run
+        // with the switch off carries seam boundary data built from the coarse
+        // level only, which is the single-variable arm for attributing a seam
+        // failure to that anchoring.
+        if !wb_ghost_enabled() {
+            return false;
+        }
         let want = self
             .balance_aware_transfer
             .unwrap_or_else(|| self.levels[level].kernels.hydrostatic_balance());
@@ -4203,6 +4213,15 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
     }
     drain_devices::<Mem>(devices);
     let _ = on_checkpoint(iter, t, tiles);
+}
+
+fn wb_ghost_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("SYMBI_WB_GHOST")
+            .map(|v| v != "0")
+            .unwrap_or(true)
+    })
 }
 
 fn wb_band_enabled() -> bool {

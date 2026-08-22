@@ -117,6 +117,97 @@ pub trait CensusAxis {
     fn edges(&self) -> &[f64];
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BinLocator {
+    Linear { lo: f64, inv_step: f64 },
+    Log { ln_lo: f64, inv_ln_step: f64 },
+    OrderedEdges,
+}
+
+fn bin_locator(edges: &[f64]) -> BinLocator {
+    let n = edges.len() - 1;
+    let scale = edges.iter().copied().map(f64::abs).fold(1.0_f64, f64::max);
+    let tol = 64.0 * f64::EPSILON * scale;
+
+    let step = (edges[n] - edges[0]) / n as f64;
+    if edges
+        .iter()
+        .enumerate()
+        .all(|(k, &edge)| (edge - (edges[0] + k as f64 * step)).abs() <= tol)
+    {
+        return BinLocator::Linear {
+            lo: edges[0],
+            inv_step: step.recip(),
+        };
+    }
+
+    if edges[0] > 0.0 {
+        let ln_lo = edges[0].ln();
+        let ln_step = (edges[n].ln() - ln_lo) / n as f64;
+        let log_tol = 64.0 * f64::EPSILON * edges[n].ln().abs().max(1.0);
+        if edges
+            .iter()
+            .enumerate()
+            .all(|(k, &edge)| (edge.ln() - (ln_lo + k as f64 * ln_step)).abs() <= log_tol)
+        {
+            return BinLocator::Log {
+                ln_lo,
+                inv_ln_step: ln_step.recip(),
+            };
+        }
+    }
+
+    BinLocator::OrderedEdges
+}
+
+/// branch-free upper-bound search: the first edge strictly above `x`.
+/// the select tree has logarithmic depth and preserves the host partition-point
+/// semantics exactly for arbitrary declared edges.
+fn upper_bound_traced(edges: &[f64], x: Gv, lo: usize, hi: usize) -> Gv {
+    if lo == hi {
+        return Gv::from_f64(lo as f64);
+    }
+    let mid = lo + (hi - lo) / 2;
+    Gv::select(
+        x.cmp_lt(Gv::from_f64(edges[mid])),
+        upper_bound_traced(edges, x, lo, mid),
+        upper_bound_traced(edges, x, mid + 1, hi),
+    )
+}
+
+fn bin_traced(edges: &[f64], x: Gv) -> Gv {
+    let n_bins = edges.len() - 1;
+    let locator = bin_locator(edges);
+    let arithmetic = match locator {
+        BinLocator::Linear { lo, inv_step } => {
+            ((x - Gv::from_f64(lo)) * Gv::from_f64(inv_step)).floor()
+        }
+        BinLocator::Log { ln_lo, inv_ln_step } => {
+            ((x.ln() - Gv::from_f64(ln_lo)) * Gv::from_f64(inv_ln_step)).floor()
+        }
+        BinLocator::OrderedEdges => {
+            return (upper_bound_traced(edges, x, 0, edges.len()) - Gv::ONE)
+                .min(Gv::from_f64((n_bins - 1) as f64))
+                .max(Gv::ZERO);
+        }
+    };
+    // The arithmetic locators are the fast common case, but an exactly declared edge must enter
+    // the bin on its right. `log(edge)` and multiplication by a reciprocal can round an integer
+    // coordinate one ulp downward (for example 41 -> 40.99999...), so `floor` alone violates that
+    // contract. Correct exact edges from the original coordinate, before clamping the outer edge
+    // into the final bin. Equality is intentionally against the serialized edge itself: it does
+    // not move a representable value immediately below the edge into the next bucket.
+    let mut exact_edge = Gv::ZERO;
+    let mut is_exact_edge = x.cmp_eq(Gv::from_f64(edges[0]));
+    for (k, &edge) in edges.iter().enumerate().skip(1) {
+        let equal = x.cmp_eq(Gv::from_f64(edge));
+        exact_edge = Gv::select(equal, Gv::from_f64(k as f64), exact_edge);
+        is_exact_edge = is_exact_edge | equal;
+    }
+    let raw = Gv::select(is_exact_edge, exact_edge, arithmetic);
+    raw.min(Gv::from_f64((n_bins - 1) as f64)).max(Gv::ZERO)
+}
+
 /// the bucket index, branch-free, as the traced twin of the host search.
 ///
 /// kept here, so this crate stays free of a dependency on the spec type; it is the same
@@ -132,14 +223,28 @@ fn segment_marker_traced<A: CensusAxis>(bin_axes: &[A], coords: &[Gv], n_segment
         let n_bins = edges.len() - 1;
         all_in_range =
             all_in_range & x.cmp_ge(Gv::from_f64(edges[0])) & x.cmp_le(Gv::from_f64(edges[n_bins]));
-        let mut count = Gv::ZERO;
-        for &edge in edges {
-            count = count + Gv::select(x.cmp_ge(Gv::from_f64(edge)), Gv::ONE, Gv::ZERO);
-        }
-        let bin = (count - Gv::ONE)
-            .min(Gv::from_f64((n_bins - 1) as f64))
-            .max(Gv::ZERO);
+        let bin = bin_traced(edges, x);
         flat = flat * Gv::from_f64(n_bins as f64) + bin;
     }
     Gv::select(all_in_range, flat, Gv::from_f64(n_segments as f64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locator_recognizes_linear_log_and_arbitrary_edges() {
+        let linear: Vec<_> = (0..=64).map(|k| -2.0 + k as f64 * 0.125).collect();
+        assert!(matches!(bin_locator(&linear), BinLocator::Linear { .. }));
+
+        let lo = 1.0e-3_f64;
+        let step = (1.0e3_f64 / lo).ln() / 64.0;
+        let log: Vec<_> = (0..=64)
+            .map(|k| (lo.ln() + k as f64 * step).exp())
+            .collect();
+        assert!(matches!(bin_locator(&log), BinLocator::Log { .. }));
+
+        assert_eq!(bin_locator(&[1.0, 1.5, 3.0, 9.0]), BinLocator::OrderedEdges);
+    }
 }

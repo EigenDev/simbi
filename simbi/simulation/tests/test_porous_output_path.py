@@ -19,7 +19,7 @@ _CONFIG = (
     Path(__file__).resolve().parents[3]
     / "simbi_configs"
     / "science"
-    / "simbi_projects"
+    / "projects"
     / "porous_turbulent_accretor.py"
 )
 
@@ -51,12 +51,37 @@ def _path(cls, tmp_path, monkeypatch, **kwargs):
 
 
 def test_the_default_path_is_the_archived_one(porous_cls, tmp_path, monkeypatch) -> None:
-    # the segment-free layout every existing series wrote to; a drift here orphans
-    # the archive.
+    # HLLC+ is a complete low-Mach/hydrostatic method: setup derives both balance
+    # mechanisms before constructing the path, so it cannot resume an older unbalanced
+    # series by accident.
     assert (
         _path(porous_cls, tmp_path, monkeypatch)
-        == "porous_turbulent/uniform/p0/freeslip/mach0.0625/fmr8/racc4dx/hllc_plus"
+        == "porous_turbulent/uniform/p0/freeslip/mach0.0625/fmr8/racc4dx/wellbalanced/hllc_plus"
     )
+
+
+def test_hllc_plus_derives_the_complete_balanced_method(porous_cls) -> None:
+    problem = porous_cls(
+        porosity=0.0,
+        solver="hllc_plus",
+        wb_reconstruction=False,
+        well_balanced=False,
+    )
+    problem.setup()
+    assert problem.wb_reconstruction is True
+    assert problem.well_balanced is True
+
+
+def test_plain_hllc_remains_the_unbalanced_baseline(porous_cls) -> None:
+    problem = porous_cls(
+        porosity=0.0,
+        solver="hllc",
+        wb_reconstruction=False,
+        well_balanced=False,
+    )
+    problem.setup()
+    assert problem.wb_reconstruction is False
+    assert problem.well_balanced is False
 
 
 def test_swept_dials_append_their_segments(porous_cls, tmp_path, monkeypatch) -> None:

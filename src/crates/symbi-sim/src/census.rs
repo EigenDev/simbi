@@ -519,6 +519,42 @@ impl CensusEvaluator {
         &self.params
     }
 
+    /// whether every bin-axis expression depends only on geometry and fixed parameters.
+    ///
+    /// Such an axis has the same bucket assignment until the mesh geometry changes, so the
+    /// per-level segment field can be cached while the state-dependent accumulator values are
+    /// refreshed. This is deliberately a dependency proof over the registered DAG: an axis that
+    /// reads time or any primitive is never guessed static from its name or current values.
+    pub fn axes_are_geometry_only(&self) -> bool {
+        let mut dynamic = vec![false; self.cfg.nodes.len()];
+        for (i, node) in self.cfg.nodes.iter().enumerate() {
+            let leaf_is_dynamic = matches!(
+                node.op.as_str(),
+                "VARIABLE_T"
+                    | "VARIABLE_RHO"
+                    | "VARIABLE_VEL1"
+                    | "VARIABLE_VEL2"
+                    | "VARIABLE_VEL3"
+                    | "VARIABLE_PRESSURE"
+            );
+            let dependency_is_dynamic = [
+                node.left,
+                node.right,
+                node.condition,
+                node.true_case,
+                node.false_case,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|j| dynamic.get(j).copied().unwrap_or(true));
+            dynamic[i] = leaf_is_dynamic || dependency_is_dynamic;
+        }
+        self.cfg
+            .axes
+            .iter()
+            .all(|axis| !dynamic.get(axis.expr).copied().unwrap_or(true))
+    }
+
     pub fn params_for(&self) -> &[String] {
         self.eval
             .params_for(CENSUS_FIELD)
@@ -816,6 +852,9 @@ impl std::fmt::Debug for RegisteredCensus {
 pub struct CensusFields<const D: usize, Mem: symbi_xpu::MemorySpace> {
     pub values: Vec<symbi_grid::Field<f64, D, Mem>>,
     pub segment: symbi_grid::Field<f64, D, Mem>,
+    /// geometry/coverage stamp of a reusable, geometry-only segment field. `None` means the next
+    /// sample must produce the segment along with its values.
+    pub segment_stamp: std::sync::Mutex<Option<u64>>,
 }
 
 impl<R, const D: usize, const DOF: usize, M, E, S, Mem>
@@ -911,7 +950,11 @@ where
                 segment.view_mut().set(c, excluded);
             }
         }
-        Some(CensusFields { values, segment })
+        Some(CensusFields {
+            values,
+            segment,
+            segment_stamp: std::sync::Mutex::new(None),
+        })
     }
 
     /// mark a level's covered cells excluded, after a fill that did not know about them.
@@ -1051,6 +1094,31 @@ mod tests {
 
     fn axis(edges: &[f64]) -> BinAxis {
         BinAxis::new("a", edges.to_vec()).expect("valid edges")
+    }
+
+    #[test]
+    fn geometry_only_axes_are_cacheable_but_state_and_time_axes_are_not() {
+        let evaluator = |axis_node: &str| {
+            let cfg = symbi_hydro::CensusConfig::from_json(&format!(
+                r#"{{
+                    "name":"cacheability", "op":"add",
+                    "axes":[{{"name":"a", "expr":0, "edges":[0.0,1.0]}}],
+                    "values":[2], "value_names":["mass"], "params":[],
+                    "nodes":[
+                        {{"op":"{axis_node}"}},
+                        {{"op":"VARIABLE_RHO"}},
+                        {{"op":"VARIABLE_DV"}}
+                    ]
+                }}"#
+            ))
+            .unwrap();
+            CensusEvaluator::new(&cfg).unwrap()
+        };
+
+        assert!(evaluator("VARIABLE_X1").axes_are_geometry_only());
+        assert!(evaluator("VARIABLE_DV").axes_are_geometry_only());
+        assert!(!evaluator("VARIABLE_RHO").axes_are_geometry_only());
+        assert!(!evaluator("VARIABLE_T").axes_are_geometry_only());
     }
 
     #[test]

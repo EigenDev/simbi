@@ -20,7 +20,7 @@
 import pytest
 
 import simbi.expression as expr
-from simbi_configs.science.simbi_projects.porous_turbulent_accretor import (
+from simbi_configs.science.projects.porous_turbulent_accretor import (
     PorousTurbulentAccretor,
 )
 
