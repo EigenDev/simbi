@@ -908,12 +908,11 @@ mod tests {
         assert_eq!(desc.field_bindings[1].field.name(), "prim.den");
         assert!(desc.field_bindings[1].is_output);
         // signature shape
-        assert!(
-            desc.source
-                .contains("extern \"C\" __global__ void pass_1d("),
-            "src:\n{}",
-            desc.source
+        let signature = format!(
+            "{} void pass_1d(",
+            crate::emit::global_qualifier(Target::Cuda)
         );
+        assert!(desc.source.contains(&signature), "src:\n{}", desc.source);
         assert!(desc.source.contains("__symbi_View field0"));
         assert!(desc.source.contains("__symbi_View field1"));
         assert!(desc.source.contains("unsigned int grid_size_0"));
@@ -1096,10 +1095,11 @@ mod tests {
         let desc = render_field_reduction("rmhd_field_max_3d", 3, Precision::F64, ReductionOp::Max);
         let s = &desc.source;
         // a __global__ block-reduce over buf0 with a partials output.
-        assert!(
-            s.contains("extern \"C\" __global__ void rmhd_field_max_3d("),
-            "src:\n{s}"
+        let signature = format!(
+            "{} void rmhd_field_max_3d(",
+            crate::emit::global_qualifier(Target::Cuda)
         );
+        assert!(s.contains(&signature), "src:\n{s}");
         assert!(s.contains("__symbi_View field0"));
         assert!(s.contains("double* partials"));
         assert!(s.contains("__shared__ double sdata[256];"));
@@ -1140,10 +1140,11 @@ mod tests {
             8,
         );
         let s = &desc.source;
-        assert!(
-            s.contains("extern \"C\" __global__ void census_add_2d("),
-            "src:\n{s}"
+        let signature = format!(
+            "{} void census_add_2d(",
+            crate::emit::global_qualifier(Target::Cuda)
         );
+        assert!(s.contains(&signature), "src:\n{s}");
         // three value views, then the segment view; one binding each.
         assert!(s.contains("__symbi_View field0"));
         assert!(s.contains("__symbi_View field2"));
