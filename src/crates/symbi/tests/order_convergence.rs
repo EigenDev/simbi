@@ -161,7 +161,11 @@ fn adiabatic_ppm_rk3_beats_second_order() {
         .map(|&n| l1_after_one_period_ppm(n, Solver::Hllc))
         .collect();
     for w in errs.windows(2) {
-        eprintln!("PPM: ratio {:.2} (order ~{:.2})", w[0] / w[1], (w[0] / w[1]).log2());
+        eprintln!(
+            "PPM: ratio {:.2} (order ~{:.2})",
+            w[0] / w[1],
+            (w[0] / w[1]).log2()
+        );
     }
     let ratio = errs[1] / errs[2]; // 64 -> 128, matching the plm gate's pair
     // the bound pins the measured 15.7-15.9: a drop to ~8 means the interfaces lost

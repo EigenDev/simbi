@@ -253,7 +253,6 @@ impl FaceFluxName<'_> {
     }
 }
 
-
 /// the MHD curvilinear suffix, keyed on the grid-axis set. MHD B is always a
 /// 3-vector, so both cylindrical 2D planes carry DOF = 3 and the axis set is what
 /// tells them apart: r-z axisymmetric = axes `[0, 2]` (out-of-plane

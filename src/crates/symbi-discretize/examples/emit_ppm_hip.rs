@@ -74,7 +74,13 @@ fn main() {
             symbi_discretize::coords::Coords::Cartesian,
             &[0, 1, 2],
         );
-        emit_gv(&out, &format!("adiabatic_face_flux_hllc_plus_ppm_3d_{dir}"), 3, k, w);
+        emit_gv(
+            &out,
+            &format!("adiabatic_face_flux_hllc_plus_ppm_3d_{dir}"),
+            3,
+            k,
+            w,
+        );
     }
 
     // the quartic coarse-fine prolong family at the production component count
@@ -87,9 +93,14 @@ fn main() {
     let (k, w) = refine_prolong_multi_1t_gv(nd, 2, ProlongOrder::Quartic, ncomp);
     emit_gv(&out, "refine_prolong_quartic_3d_5c_1t", 3, k, w);
     for axis in 0..3usize {
-        let (k, w) =
-            refine_prolong_sweep_multi_gv(nd, 2, ProlongOrder::Quartic, axis, ncomp);
-        emit_gv(&out, &format!("refine_prolong_quartic_3d_5c_sw{axis}"), 3, k, w);
+        let (k, w) = refine_prolong_sweep_multi_gv(nd, 2, ProlongOrder::Quartic, axis, ncomp);
+        emit_gv(
+            &out,
+            &format!("refine_prolong_quartic_3d_5c_sw{axis}"),
+            3,
+            k,
+            w,
+        );
         // the ppm-order sweep: the device-proven baseline for the same pass.
         let (k, w) = refine_prolong_sweep_multi_gv(nd, 2, ProlongOrder::Ppm, axis, ncomp);
         emit_gv(&out, &format!("refine_prolong_ppm_3d_5c_sw{axis}"), 3, k, w);

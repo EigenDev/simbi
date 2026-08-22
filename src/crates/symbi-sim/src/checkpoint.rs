@@ -1469,8 +1469,7 @@ where
                 "{name}/mesh/geometry/dim_{slot}/start|end"
             )));
         };
-        let unscale =
-            motion_axis_scale(sim.physics.metric.geometry(), ax, D, a_checkpoint);
+        let unscale = motion_axis_scale(sim.physics.metric.geometry(), ax, D, a_checkpoint);
         let start = start / unscale;
         let end = end / unscale;
         // the run's comoving bounds, by the writer's own face arithmetic (the coordinate

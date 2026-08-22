@@ -200,10 +200,8 @@ impl<S: Scalar> Eos<S> for TaubMathews {
     #[inline]
     fn sound_speed_sq(&self, rho: S, pre: S) -> S {
         let theta = pre / rho;
-        let h = S::from_f64(2.5) * theta
-            + (S::from_f64(2.25) * theta * theta + S::ONE).sqrt();
-        theta * (S::from_f64(5.0) * h - S::from_f64(8.0) * theta)
-            / (S::THREE * (h - theta))
+        let h = S::from_f64(2.5) * theta + (S::from_f64(2.25) * theta * theta + S::ONE).sqrt();
+        theta * (S::from_f64(5.0) * h - S::from_f64(8.0) * theta) / (S::THREE * (h - theta))
     }
 
     #[inline]
@@ -220,8 +218,7 @@ impl<S: Scalar> Eos<S> for TaubMathews {
     #[inline]
     fn pressure(&self, rho: S, e_int: S) -> S {
         // the closed-form inverse of `internal_energy`: p = rho e (e + 2) / (3 (e + 1)).
-        rho * e_int * (e_int + S::TWO)
-            / (S::THREE * (e_int + S::ONE))
+        rho * e_int * (e_int + S::TWO) / (S::THREE * (e_int + S::ONE))
     }
 
     /// no free adiabatic index exists for this gas; the value marks the kernel
@@ -484,7 +481,10 @@ mod tests {
         assert!((cs_rel_sq(1e10) - 1.0 / 3.0).abs() < 1e-6);
         for k in -8..=8 {
             let c2 = cs_rel_sq(10.0_f64.powi(k));
-            assert!(c2 > 0.0 && c2 < 1.0 / 3.0 + 1e-12, "cs^2 out of range at 1e{k}");
+            assert!(
+                c2 > 0.0 && c2 < 1.0 / 3.0 + 1e-12,
+                "cs^2 out of range at 1e{k}"
+            );
         }
     }
 
@@ -493,8 +493,8 @@ mod tests {
     /// across the cold, trans-relativistic and hot regimes at half-lightspeed.
     #[test]
     fn taub_mathews_c2p_roundtrip_through_rhd_recover() {
-        use crate::rhd::Rhd;
         use crate::regime::Regime;
+        use crate::rhd::Rhd;
         use crate::spatial_metric::SpatialMetric;
         let eos = TaubMathews;
         for k in [-4, -1, 0, 1, 4] {
@@ -504,7 +504,12 @@ mod tests {
                 pre: 10.0_f64.powi(k),
             };
             let cons = Rhd.to_conserved(&eos, &prim);
-            let back = crate::rhd::rhd_recover(&eos, &cons, &SpatialMetric::flat(), crate::c2p_result::C2P_MAX_ITER);
+            let back = crate::rhd::rhd_recover(
+                &eos,
+                &cons,
+                &SpatialMetric::flat(),
+                crate::c2p_result::C2P_MAX_ITER,
+            );
             assert!(
                 (back.pre - prim.pre).abs() < 1e-9 * prim.pre
                     && (back.rho - prim.rho).abs() < 1e-9

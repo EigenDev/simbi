@@ -57,6 +57,7 @@ use super::transfer::{
     restrict_cell_field, restrict_cons,
 };
 use std::ops::ControlFlow;
+use symbi_hydro::state::PrimFromSlots;
 use symbi_sim::decomp::{HaloTransport, drain_devices, exchange_grid, flatten, unflatten};
 use symbi_sim::driver::{
     advance_clock, advance_state_clock, book_horizon_receipt, check_dt_or_panic, evolve_bodies,
@@ -68,7 +69,6 @@ use symbi_sim::state::{
     Boundaries, BoundaryType, ConsFieldsGeneric, FieldDecimation, FieldKind, FieldStore,
     PrimFieldsGeneric, SimStateGeneric, Timestepping, array_field_zeros, axis_name,
 };
-use symbi_hydro::state::PrimFromSlots;
 use symbi_sim::substrate_seam::KernelSet;
 
 /// the refinement ratio. fixed at 2 (the transfer kernels are baked at 2 in
@@ -2617,7 +2617,9 @@ where
             // decode abstentions between the band's anchor rewrite and the
             // turbulent density contrast.
             if wb_band_enabled() {
-                prof("refine_restrict_balanced", || self.restrict_band_balanced(level));
+                prof("refine_restrict_balanced", || {
+                    self.restrict_band_balanced(level)
+                });
             }
         }
         if has_coarser {
@@ -2642,22 +2644,27 @@ where
                  gamma law; level {level}'s kernel set reports another energy closure"
             )
         });
-        let departure = fine
-            .band_departure
-            .get_or_init(|| Field::zeros(&fine.state.geom.allocated).expect("band departure scratch"));
+        let departure = fine.band_departure.get_or_init(|| {
+            Field::zeros(&fine.state.geom.allocated).expect("band departure scratch")
+        });
         // the coarse level's own scratch holds the restricted departures; its other
         // role -- the fine encode target of the seam one level up -- writes the
         // interior edge strips, disjoint from the coverage strips written here.
-        let coarse_departure = coarse
-            .band_departure
-            .get_or_init(|| Field::zeros(&coarse.state.geom.allocated).expect("band departure scratch"));
+        let coarse_departure = coarse.band_departure.get_or_init(|| {
+            Field::zeros(&coarse.state.geom.allocated).expect("band departure scratch")
+        });
         restrict_band_balanced(
             &fine.state.fields.prim,
             &fine.state.geom.interior,
             departure,
             coarse_departure,
             &coarse.state.fields.prim,
-            coarse.state.fields.cons.nrg_field().expect("the balanced restriction needs cons.nrg"),
+            coarse
+                .state
+                .fields
+                .cons
+                .nrg_field()
+                .expect("the balanced restriction needs cons.nrg"),
             &coarse.state.geom.interior,
             coarse.coverage.as_ref().unwrap(),
             // the uncovered cell's update over one step depends on cells within
@@ -3186,7 +3193,10 @@ where
             .iter()
             .map(|field| {
                 let view = field.view();
-                inner.iter().map(|c| view.at(c).abs()).fold(0.0_f64, f64::max)
+                inner
+                    .iter()
+                    .map(|c| view.at(c).abs())
+                    .fold(0.0_f64, f64::max)
             })
             .collect();
 
@@ -3291,7 +3301,11 @@ where
             let target = level.cons_eq.as_ref().unwrap_or_else(|| {
                 panic!("level {ll} has no declared stationary target to seed from")
             });
-            equilibrium_overwrite(target, &level.state.fields.cons, &level.state.geom.allocated);
+            equilibrium_overwrite(
+                target,
+                &level.state.fields.cons,
+                &level.state.geom.allocated,
+            );
         }
         self.init_levels();
     }
@@ -3409,7 +3423,6 @@ fn for_each_child<const D: usize>(c: [isize; D], ratio: usize, mut f: impl FnMut
         f(child);
     }
 }
-
 
 /// the per-stage effective flux weights of an ssp scheme: stage i's operator
 /// enters the step total with `ac_i * prod_{k>i} ac_k` (each later convex
@@ -3608,7 +3621,17 @@ pub struct FineSubgrid<const NDIM: usize> {
 /// zero -- measured 7.2e-3 on a smooth bump centered on the cut, decaying as the flow smooths it,
 /// and growing with the prolongation order (a higher-degree interpolant weights the ghost cells
 /// more heavily). tile-local patches stay clear of every cut and behave identically either way.
-pub fn seed_decomposed_fine_from_coarse<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+pub fn seed_decomposed_fine_from_coarse<
+    R,
+    const NDIM: usize,
+    const DOF: usize,
+    M,
+    E,
+    S,
+    Mem,
+    K,
+    T,
+>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     counts: [usize; NDIM],
     devices: &[i32],
@@ -3625,10 +3648,8 @@ where
 {
     drain_devices::<Mem>(devices);
     {
-        let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = tiles
-            .iter()
-            .map(|t| &*t.levels[0].state)
-            .collect();
+        let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
+            tiles.iter().map(|t| &*t.levels[0].state).collect();
         symbi_sim::decomp::exchange_grid_cons(&states, counts, devices, transport);
     }
     let mut reseeded = 0usize;
@@ -4186,5 +4207,9 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
 
 fn wb_band_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("SYMBI_WB_BAND").map(|v| v != "0").unwrap_or(true))
+    *ON.get_or_init(|| {
+        std::env::var("SYMBI_WB_BAND")
+            .map(|v| v != "0")
+            .unwrap_or(true)
+    })
 }

@@ -1762,8 +1762,7 @@ impl<S: Scalar> Metric<S, 3> for KerrKS<S> {
         let radius_sq = cx * cx + cy * cy + cz * cz;
         let spin_sq = self.spin * self.spin;
         let delta = radius_sq - spin_sq;
-        let r_sq = (delta + (delta * delta + S::FOUR * spin_sq * cz * cz).sqrt())
-            / S::TWO;
+        let r_sq = (delta + (delta * delta + S::FOUR * spin_sq * cz * cz).sqrt()) / S::TWO;
         let r = r_sq.sqrt();
         let theta = (cz / r).acos();
         let phi = cy.atan2(cx) - self.spin.atan2(r);

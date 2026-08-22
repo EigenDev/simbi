@@ -108,7 +108,14 @@ fn main() {
     let (k, w) = iso_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);
     census("iso  (Newtonian) 1D", &render_rust("iso_ws", 1, k, w));
 
-    let (k, w) = rhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &cart1, &ax1, 1, EosArm::IdealGamma);
+    let (k, w) = rhd_wave_speed_map_gv(
+        Coords::Cartesian,
+        Spacetime::Minkowski,
+        &cart1,
+        &ax1,
+        1,
+        EosArm::IdealGamma,
+    );
     census("rhd 1D", &render_rust("rhd_ws", 1, k, w));
 
     let (k, w) = rmhd_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);

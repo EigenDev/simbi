@@ -504,7 +504,8 @@ fn rhd_flux_matches_native_physics() {
     };
     let eos = IdealGas { gamma: RHD_GAMMA };
     let f = Rhd.to_flux(&prim, &Tensor::unit(0), &eos);
-    let out = run_uniform_euler_flux::<2>(rhd_flux_gv::<2>(0, EosArm::IdealGamma), &prim, RHD_GAMMA, 0);
+    let out =
+        run_uniform_euler_flux::<2>(rhd_flux_gv::<2>(0, EosArm::IdealGamma), &prim, RHD_GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[
@@ -647,7 +648,7 @@ fn rhd_wave_speed_map_matches_native_physics() {
         &CART_1D,
         &AXES_1D,
         1,
-        EosArm::IdealGamma
+        EosArm::IdealGamma,
     ))
     .grid([N])
     .fields(&[("prim_rho", rho), ("prim_v0", v0), ("prim_pre", pre)])
@@ -1096,7 +1097,8 @@ fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
         ShockwaveLimiter::Standard,
         None,
     );
-    let out = run_uniform_euler_flux::<2>(adiabatic_hllc_flux_gv::<2>(0, Recon::Plm), &prim, GAMMA, 0);
+    let out =
+        run_uniform_euler_flux::<2>(adiabatic_hllc_flux_gv::<2>(0, Recon::Plm), &prim, GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[
@@ -1119,15 +1121,13 @@ fn rhd_hllc_flux_matches_native_physics_on_uniform_state() {
         pre: 1.0,
     };
     let eos = IdealGas { gamma: RHD_GAMMA };
-    let f = hllc_rhd(
-        &eos,
+    let f = hllc_rhd(&eos, &prim, &prim, &Tensor::unit(0), 0.0, None);
+    let out = run_uniform_euler_flux::<2>(
+        rhd_hllc_flux_gv::<2>(0, EosArm::IdealGamma),
         &prim,
-        &prim,
-        &Tensor::unit(0),
-        0.0,
-        None,
+        RHD_GAMMA,
+        0,
     );
-    let out = run_uniform_euler_flux::<2>(rhd_hllc_flux_gv::<2>(0, EosArm::IdealGamma), &prim, RHD_GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[

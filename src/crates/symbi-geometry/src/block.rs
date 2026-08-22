@@ -354,8 +354,7 @@ where
         for qq in 0..n_quad {
             let mut x = Tensor::<S, D>::zeros();
             for ax in 0..D {
-                let x_center =
-                    self.axis_face(idx, ax) + self.cell_width(idx, ax) * S::HALF;
+                let x_center = self.axis_face(idx, ax) + self.cell_width(idx, ax) * S::HALF;
                 let dx_half = self.cell_width(idx, ax) * offset;
                 let sign = if (qq >> ax) & 1 == 0 { S::ONE } else { -S::ONE };
                 x[ax] = x_center + sign * dx_half;

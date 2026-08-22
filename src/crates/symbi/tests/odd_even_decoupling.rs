@@ -90,7 +90,11 @@ fn shocked_duct() -> Sim {
                 }
             } else {
                 // the ambient the shock runs into, carrying the row-alternating seed
-                let zig = if idx[1] % 2 == 0 { 1.0 + SEED } else { 1.0 - SEED };
+                let zig = if idx[1] % 2 == 0 {
+                    1.0 + SEED
+                } else {
+                    1.0 - SEED
+                };
                 Prim {
                     rho: zig,
                     vel: Tensor::new([0.0, 0.0]),

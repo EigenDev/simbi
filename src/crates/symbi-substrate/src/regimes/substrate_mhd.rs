@@ -385,10 +385,7 @@ where
                 mhd_flux_suffix(sim.geom.coords, &sim.geom.axes),
             )
         } else {
-            (
-                gr_solver,
-                mhd_geom_suffix(sim.geom.coords, &sim.geom.axes),
-            )
+            (gr_solver, mhd_geom_suffix(sim.geom.coords, &sim.geom.axes))
         };
         symbi_discretize::kernel_slug::FaceFluxName {
             prefix: Self::kernel_prefix(),
@@ -1023,7 +1020,11 @@ where
             };
             match *sref {
                 sref @ (ScalarRef::Gamma | ScalarRef::Cs) => {
-                    crate::regimes::substrate_kernels::eos_scalar(self.eos_param, sref, "mhd scalar")
+                    crate::regimes::substrate_kernels::eos_scalar(
+                        self.eos_param,
+                        sref,
+                        "mhd scalar",
+                    )
                 }
                 ScalarRef::SchwarzschildMass => Sc::from_f64(
                     geom.spacetime_scalars

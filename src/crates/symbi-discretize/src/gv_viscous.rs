@@ -627,8 +627,7 @@ pub fn viscous_adiabatic_alpha_gv_3d() -> (GvKernel, Writes) {
         }
     }
 
-    let (dmom, dnrg) =
-        symbi_hydro::viscous::viscous_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
+    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
     let mut writes: Writes = Vec::new();
     for c in 0..3usize {
         let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));

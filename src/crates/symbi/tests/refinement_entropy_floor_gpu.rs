@@ -70,14 +70,16 @@ fn build(balanced: bool) -> Hier {
     let ck = make(&coarse);
     let hier = Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, make)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new([-G_OFFSET]),
-            symbi_algebra::Tensor::zeros(),
-            GM,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new([-G_OFFSET]),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )),
+        );
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(hydrostatic);
     }

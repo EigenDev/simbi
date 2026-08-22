@@ -5,12 +5,12 @@
 // =============================================================================
 
 use super::*;
+use crate::coords::Balance;
 use symbi_algebra::Matrix;
 use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
-use crate::coords::Balance;
 use symbi_hydro::RmhdGr;
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
@@ -410,20 +410,10 @@ fn euler_reconstruct<const D: usize>(
         let ramp = Gv::select(width.cmp_gt(Gv::ZERO), Gv::ONE / width, Gv::ZERO);
         let vkey = format!("prim_v{coord_n}");
         let flatten = |cell: i32| -> Gv {
-            let vm = Gv::field_shifted(
-                &vkey,
-                FieldRef::PrimVel(coord_n as u8),
-                ndim,
-                dir,
-                cell - 1,
-            );
-            let vp = Gv::field_shifted(
-                &vkey,
-                FieldRef::PrimVel(coord_n as u8),
-                ndim,
-                dir,
-                cell + 1,
-            );
+            let vm =
+                Gv::field_shifted(&vkey, FieldRef::PrimVel(coord_n as u8), ndim, dir, cell - 1);
+            let vp =
+                Gv::field_shifted(&vkey, FieldRef::PrimVel(coord_n as u8), ndim, dir, cell + 1);
             let p0 = Gv::field_shifted("prim_pre", "prim.pre", ndim, dir, cell);
             let r0 = Gv::field_shifted("prim_rho", "prim.rho", ndim, dir, cell);
             let conv = ((vm - vp) * half).max(Gv::ZERO);
@@ -460,8 +450,7 @@ fn euler_reconstruct<const D: usize>(
         );
         for (k, lr) in vel_lr.iter_mut().enumerate() {
             let key = format!("prim_v{k}");
-            let avg_l =
-                Gv::field_shifted(&key, FieldRef::PrimVel(k as u8), ndim, dir, -1);
+            let avg_l = Gv::field_shifted(&key, FieldRef::PrimVel(k as u8), ndim, dir, -1);
             let avg_r = Gv::field(&key, FieldRef::PrimVel(k as u8));
             *lr = (blend(lr.0, avg_l, f_l), blend(lr.1, avg_r, f_r));
         }
@@ -548,7 +537,14 @@ pub fn adiabatic_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    euler_hlle_flux_gv::<D, _>(&Newtonian, D as u8, dir, dir as usize, recon, EosArm::IdealGamma)
+    euler_hlle_flux_gv::<D, _>(
+        &Newtonian,
+        D as u8,
+        dir,
+        dir as usize,
+        recon,
+        EosArm::IdealGamma,
+    )
 }
 
 /// the cyl r-z (axisymmetric swirl) adiabatic face flux: ncomp = 3 (v_phi swirl folds
@@ -1381,20 +1377,11 @@ fn adiabatic_hllc_at_arm<const D: usize>(
         euler_reconstruct::<D>(D as u8, dir, axes[dir as usize], recon, balanced);
     // the neighborhood pressure ratio the transverse shear viscosity is weighted by. only the
     // HLLC+ arm carries that viscosity, so only it pays the off-axis reads the sensor needs.
-    let shear = matches!(smoother, ShockwaveLimiter::HllcPlus)
-        .then(|| {
-            let gamma = eos.gamma;
-            hllc_plus_sensors(D as u8, dir, &move |rho, pre| (gamma * pre / rho).sqrt())
-        });
-    let flux = hllc(
-        &eos,
-        &left,
-        &right,
-        &nhat,
-        vface,
-        smoother,
-        shear,
-    );
+    let shear = matches!(smoother, ShockwaveLimiter::HllcPlus).then(|| {
+        let gamma = eos.gamma;
+        hllc_plus_sensors(D as u8, dir, &move |rho, pre| (gamma * pre / rho).sqrt())
+    });
+    let flux = hllc(&eos, &left, &right, &nhat, vface, smoother, shear);
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
@@ -1558,9 +1545,15 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Standard, Balance::Plain, Coords::Cartesian, &[0, 1, 2][..D])
+    adiabatic_hllc_at_arm::<D>(
+        dir,
+        recon,
+        ShockwaveLimiter::Standard,
+        Balance::Plain,
+        Coords::Cartesian,
+        &[0, 1, 2][..D],
+    )
 }
-
 
 /// the adiabatic HLLE face flux with a well-balanced reconstruction: the first-order arm the
 /// FOFC redo runs. HLLE at theta = 0 is piecewise-constant, and a piecewise-constant
@@ -1715,13 +1708,7 @@ pub fn rmhd_hlld_flux_gv(
 /// arbitrary entropy stratification presents identical face pressures from both anchors
 /// and the flux at rest is exact. proved in
 /// `symbi-hydro/tests/hydrostatic_reconstruction.rs`.
-fn balanced_pressure_pair(
-    ndim: u8,
-    dir: u8,
-    recon: Recon,
-    theta: Gv,
-    b: Balanced<'_>,
-) -> (Gv, Gv) {
+fn balanced_pressure_pair(ndim: u8, dir: u8, recon: Recon, theta: Gv, b: Balanced<'_>) -> (Gv, Gv) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
 
     // the bake-time spacing enum is vestigial in the potential ladder: face positions come
@@ -1788,8 +1775,7 @@ fn balanced_pressure_pair(
             phi_at(anchor_half - footprint),
             phi_at(anchor_half + footprint),
         );
-        let weight =
-            symbi_hydro::hydrostatic::balance_weight(rho[anchor], pre[anchor], rise);
+        let weight = symbi_hydro::hydrostatic::balance_weight(rho[anchor], pre[anchor], rise);
         // the single transform text -- the same function the host proof battery exercises.
         let d = symbi_hydro::hydrostatic::hydrostatic_departures(
             anchor, &pre, &rho, &phi_c, &phi_f, weight,

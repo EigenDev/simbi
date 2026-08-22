@@ -45,9 +45,14 @@ pub enum ProlongTag {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KernelId {
     /// conservative cell restriction (fine -> coarse average).
-    RefineRestrict { ndim: u8 },
+    RefineRestrict {
+        ndim: u8,
+    },
     /// cell prolongation (coarse -> fine) at reconstruction `order`.
-    RefineProlong { order: ProlongTag, ndim: u8 },
+    RefineProlong {
+        order: ProlongTag,
+        ndim: u8,
+    },
     /// multi-field cell prolongation: one launch over `ncomp` co-located fields
     /// (the prim batch), sharing the per-cell stencil geometry. generated for the
     /// 3D hot path only (ncomp 4 = isothermal, 5 = adiabatic/rhd).
@@ -68,56 +73,85 @@ pub enum KernelId {
     },
     /// multi-field pointwise time interpolation `dst_k = (1-alpha)*old_k +
     /// alpha*new_k` — the coarse-side pass feeding `RefineProlongMulti1t`.
-    FieldLerpMulti { ncomp: u8, ndim: u8 },
+    FieldLerpMulti {
+        ncomp: u8,
+        ndim: u8,
+    },
     /// the balance-aware coarse-fine encode: fused time lerp over the coarse
     /// parent region with pre written as its departure from the mechanical
     /// equilibrium chained from the coarse cell under the nearest fine interior
     /// cell. cartesian prim sets, ncomp = ndim + 2.
-    WbCfLerpEncode { ndim: u8 },
+    WbCfLerpEncode {
+        ndim: u8,
+    },
     /// the balance-aware coarse-fine decode: the fine ghost pre adds back the
     /// mechanical equilibrium chained from the nearest fine interior cell
     /// through the fine densities; also the coarse-band decode of the balanced
     /// restriction.
-    WbCfDecode { ndim: u8 },
+    WbCfDecode {
+        ndim: u8,
+    },
     /// add a fixed fine-level target to prolonged primitive departures, falling
     /// back to the target as one state when the decoded primitive is inadmissible.
-    WbTargetDecode { ncomp: u8, ndim: u8 },
+    WbTargetDecode {
+        ncomp: u8,
+        ndim: u8,
+    },
     /// the balanced restriction's fine encode: fine pre under a coarse seam band
     /// as its departure from the equilibrium chained from the uncovered coarse
     /// cell beyond the seam, continued across the seam face. one variant per seam
     /// normal, since the chain walks that axis alone.
-    WbBandEncode { ndim: u8, axis: u8 },
-    WbBandDecode { ndim: u8 },
+    WbBandEncode {
+        ndim: u8,
+        axis: u8,
+    },
+    WbBandDecode {
+        ndim: u8,
+    },
     /// the gamma-law energy rebuild over a region whose pressure was rewritten
     /// in primitive space.
-    BandEnergy { ndim: u8 },
+    BandEnergy {
+        ndim: u8,
+    },
     /// the immersed-boundary [Drain] penalization: the
     /// property-algebra kernel whose p = 1 stack reduces bit-exactly to the
     /// uniform-scaling drain. adiabatic, cartesian.
-    PenalizeDrain { ndim: u8 },
+    PenalizeDrain {
+        ndim: u8,
+    },
     /// the isothermal twin: constant sound speed, no energy channel.
-    PenalizeDrainIso { ndim: u8 },
+    PenalizeDrainIso {
+        ndim: u8,
+    },
     /// the [PorousAccretor] penalization: the porosity
     /// dial p scales the drain, (1 - p) the wall channels; independent
     /// normal/tangential wall rates (free-slip = tangential rate zero,
     /// exactly). p = 1 reduces bit-exactly to `PenalizeDrain`. adiabatic,
     /// cartesian.
-    PenalizePorous { ndim: u8 },
+    PenalizePorous {
+        ndim: u8,
+    },
     /// the torque-free accretor penalization: the drain plus a
     /// tangential anti-relaxation `lambda_t = -xi lambda_rho` about the sphere
     /// normal, so the accreted mass carries no net angular momentum to the body
     /// (the Dittmann torque-free sink, coordinate-free). the retention floor
     /// bounds the growing tangential factor. xi = 0 reduces bit-exactly to
     /// `PenalizeDrainIso`. isothermal (thin-disk), cartesian.
-    PenalizeTorqueFreeIso { ndim: u8 },
+    PenalizeTorqueFreeIso {
+        ndim: u8,
+    },
     /// the constant-nu Navier-Stokes viscous operator: the
     /// conservative shear-stress flux divergence, a halo-1 stencil accumulated
     /// into cons.mom. isothermal (thin-disk), cartesian, 2D.
-    ViscousIso { ndim: u8 },
+    ViscousIso {
+        ndim: u8,
+    },
     /// the Shakura-Sunyaev alpha viscous operator: the same
     /// conservative shear-stress flux divergence, but with a spatially varying
     /// nu(x) = alpha c_s^2 / Omega_k(r) about the central body. isothermal, 2D.
-    ViscousIsoAlpha { ndim: u8 },
+    ViscousIsoAlpha {
+        ndim: u8,
+    },
     /// one pass of the axis-split prolongation: the 1d
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
@@ -129,19 +163,37 @@ pub enum KernelId {
         ndim: u8,
     },
     /// staggered face restriction on the `axis`-normal faces.
-    RefineRestrictFace { axis: u8, ndim: u8 },
+    RefineRestrictFace {
+        axis: u8,
+        ndim: u8,
+    },
     /// staggered face prolongation on the `axis`-normal faces.
-    RefineProlongFace { axis: u8, ndim: u8 },
+    RefineProlongFace {
+        axis: u8,
+        ndim: u8,
+    },
     /// fine-flux accumulation into the `axis`-normal flux register.
-    RefineAccFace { axis: u8, ndim: u8 },
+    RefineAccFace {
+        axis: u8,
+        ndim: u8,
+    },
     /// fine-EMF accumulation into the `axis`-edge register (3D CT).
-    RefineAccEdge { axis: u8, ndim: u8 },
+    RefineAccEdge {
+        axis: u8,
+        ndim: u8,
+    },
     /// whole-field copy (snapshot / save).
-    FieldCopy { ndim: u8 },
+    FieldCopy {
+        ndim: u8,
+    },
     /// whole-field constant fill (register zeroing).
-    FieldFill { ndim: u8 },
+    FieldFill {
+        ndim: u8,
+    },
     /// shifted axpy `dst += a * src(+shift)` (register accumulate / apply).
-    FieldAxpyShift { ndim: u8 },
+    FieldAxpyShift {
+        ndim: u8,
+    },
 }
 
 // ndim (1..=3) -> 0-based table index, with a loud message on an out-of-range
@@ -278,11 +330,9 @@ impl KernelId {
                 "wb_cf_lerp_encode_2d",
                 "wb_cf_lerp_encode_3d",
             ][dim_ix(ndim)],
-            KernelId::WbCfDecode { ndim } => [
-                "wb_cf_decode_1d",
-                "wb_cf_decode_2d",
-                "wb_cf_decode_3d",
-            ][dim_ix(ndim)],
+            KernelId::WbCfDecode { ndim } => {
+                ["wb_cf_decode_1d", "wb_cf_decode_2d", "wb_cf_decode_3d"][dim_ix(ndim)]
+            }
             KernelId::WbTargetDecode { ncomp, ndim } => match (ncomp, ndim) {
                 (2, 1) => "wb_target_decode_2c_1d",
                 (3, 1) => "wb_target_decode_3c_1d",
@@ -290,25 +340,33 @@ impl KernelId {
                 (4, 2) => "wb_target_decode_4c_2d",
                 (4, 3) => "wb_target_decode_4c_3d",
                 (5, 3) => "wb_target_decode_5c_3d",
-                (n, d) => panic!(
-                    "KernelId::WbTargetDecode: unsupported (ncomp={n}, ndim={d})"
-                ),
+                (n, d) => panic!("KernelId::WbTargetDecode: unsupported (ncomp={n}, ndim={d})"),
             },
             KernelId::WbBandEncode { ndim, axis } => [
-                ["wb_band_encode_0_1d", "wb_band_encode_0_2d", "wb_band_encode_0_3d"],
-                ["wb_band_encode_1_1d", "wb_band_encode_1_2d", "wb_band_encode_1_3d"],
-                ["wb_band_encode_2_1d", "wb_band_encode_2_2d", "wb_band_encode_2_3d"],
+                [
+                    "wb_band_encode_0_1d",
+                    "wb_band_encode_0_2d",
+                    "wb_band_encode_0_3d",
+                ],
+                [
+                    "wb_band_encode_1_1d",
+                    "wb_band_encode_1_2d",
+                    "wb_band_encode_1_3d",
+                ],
+                [
+                    "wb_band_encode_2_1d",
+                    "wb_band_encode_2_2d",
+                    "wb_band_encode_2_3d",
+                ],
             ][axis as usize][dim_ix(ndim)],
             KernelId::WbBandDecode { ndim } => [
                 "wb_band_decode_1d",
                 "wb_band_decode_2d",
                 "wb_band_decode_3d",
             ][dim_ix(ndim)],
-            KernelId::BandEnergy { ndim } => [
-                "band_energy_1d",
-                "band_energy_2d",
-                "band_energy_3d",
-            ][dim_ix(ndim)],
+            KernelId::BandEnergy { ndim } => {
+                ["band_energy_1d", "band_energy_2d", "band_energy_3d"][dim_ix(ndim)]
+            }
             KernelId::PenalizeDrain { ndim } => [
                 "penalize_drain_1d",
                 "penalize_drain_2d",

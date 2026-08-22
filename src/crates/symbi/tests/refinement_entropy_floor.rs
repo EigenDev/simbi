@@ -196,7 +196,6 @@ fn crossing_a_refinement_boundary_does_not_destroy_entropy() {
     );
 }
 
-
 /// nested patches, each half the previous, centred on the bump: `levels - 1` of them.
 /// this is the production shape -- an 8-level ladder is 7 nested patches -- and it is the
 /// only thing that varies across the sweep below.
@@ -268,7 +267,6 @@ fn the_entropy_deficit_does_not_grow_with_refinement_depth() {
     );
 }
 
-
 // =============================================================================
 // gravity across a refinement ladder
 // =============================================================================
@@ -314,14 +312,16 @@ fn build_gravity_ord(
     let ck = kset(&coarse);
     let hier = Hierarchy::with_refinement(coarse, ck, regions, ord, kset)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new([-G_OFFSET]),
-            symbi_algebra::Tensor::zeros(),
-            GM,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new([-G_OFFSET]),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )),
+        );
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(hydrostatic);
     }
@@ -416,14 +416,16 @@ fn build_gravity_wb(
     let ck = make(&coarse);
     let hier = Hierarchy::with_refinement(coarse, ck, regions, ProlongOrder::Ppm, make)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new([-G_OFFSET]),
-            symbi_algebra::Tensor::zeros(),
-            GM,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new([-G_OFFSET]),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )),
+        );
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(seed_fine);
     }
@@ -506,14 +508,16 @@ fn build_gravity_wb_class(
     let ck = make(&coarse);
     let hier = Hierarchy::with_refinement(coarse, ck, regions, ProlongOrder::Ppm, make)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new([-G_OFFSET]),
-            symbi_algebra::Tensor::zeros(),
-            GM,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new([-G_OFFSET]),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )),
+        );
     for lvl in 1..hier.levels.len() {
         let col = col.clone();
         hier.levels[lvl]
@@ -623,19 +627,18 @@ fn diagnose_cf_dipole_attribution() {
                 .set_initial(hydrostatic)
                 .build();
             let ck = kset_balanced(&coarse);
-            let mut hier =
-                Hierarchy::with_refinement(coarse, ck, &[region], ord, kset_balanced)
-                    .unwrap()
-                    .with_bodies(symbi_ib::BodyCollection::new().add(
-                        symbi_ib::Body::gravitational(
-                            0,
-                            symbi_algebra::Tensor::new([-G_OFFSET]),
-                            symbi_algebra::Tensor::zeros(),
-                            GM,
-                            1.0e-3,
-                            0.0,
-                        ),
-                    ));
+            let mut hier = Hierarchy::with_refinement(coarse, ck, &[region], ord, kset_balanced)
+                .unwrap()
+                .with_bodies(
+                    symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                        0,
+                        symbi_algebra::Tensor::new([-G_OFFSET]),
+                        symbi_algebra::Tensor::zeros(),
+                        GM,
+                        1.0e-3,
+                        0.0,
+                    )),
+                );
             for lvl in 1..hier.levels.len() {
                 hier.levels[lvl].state.seed_cells(hydrostatic);
             }
@@ -678,16 +681,16 @@ fn diagnose_cf_dipole_locality_arm() {
         let mut hier =
             Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, kset_balanced)
                 .unwrap()
-                .with_bodies(symbi_ib::BodyCollection::new().add(
-                    symbi_ib::Body::gravitational(
+                .with_bodies(
+                    symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
                         0,
                         symbi_algebra::Tensor::new([-G_OFFSET]),
                         symbi_algebra::Tensor::zeros(),
                         GM,
                         1.0e-3,
                         0.0,
-                    ),
-                ));
+                    )),
+                );
         for lvl in 1..hier.levels.len() {
             hier.levels[lvl].state.seed_cells(hydrostatic);
         }
@@ -763,14 +766,16 @@ fn diagnose_cf_dipole_cfl_arm() {
         let ck = make(&coarse);
         let mut hier = Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, make)
             .unwrap()
-            .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-                0,
-                symbi_algebra::Tensor::new([-G_OFFSET]),
-                symbi_algebra::Tensor::zeros(),
-                GM,
-                1.0e-3,
-                0.0,
-            )));
+            .with_bodies(
+                symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                    0,
+                    symbi_algebra::Tensor::new([-G_OFFSET]),
+                    symbi_algebra::Tensor::zeros(),
+                    GM,
+                    1.0e-3,
+                    0.0,
+                )),
+            );
         for lvl in 1..hier.levels.len() {
             hier.levels[lvl].state.seed_cells(hydrostatic);
         }
@@ -814,10 +819,7 @@ fn diagnose_cf_transfer_ghost_exactness() {
         let st = &hier.levels[1].state;
         let rho = st.fields.prim.rho.view();
         let pre = st.fields.prim.pre.as_ref().expect("adiabatic").view();
-        let (ilo, ihi) = (
-            st.geom.interior.spaces[0].lo,
-            st.geom.interior.spaces[0].hi,
-        );
+        let (ilo, ihi) = (st.geom.interior.spaces[0].lo, st.geom.interior.spaces[0].hi);
         let (alo, ahi) = (
             st.geom.allocated.spaces[0].lo,
             st.geom.allocated.spaces[0].hi,
@@ -838,7 +840,8 @@ fn diagnose_cf_transfer_ghost_exactness() {
                  wrote it and the probe below would be measuring nothing"
             );
             let face = 0.5 * (center(a) + center(b));
-            let chained = pa + ra * (phi(center(a)) - phi(face)) + rb * (phi(face) - phi(center(b)));
+            let chained =
+                pa + ra * (phi(center(a)) - phi(face)) + rb * (phi(face) - phi(center(b)));
             ((pb - chained) / pb).abs()
         };
         let mut worst = 0.0_f64;
@@ -879,11 +882,17 @@ fn diagnose_band_class_residual() {
     let ilo = st.geom.interior.spaces[0].lo;
     let h = 1.0 / N as f64;
     let a = (0.3 * N as f64) as isize - 1 + ilo;
-    println!("coarse recursion residual across faces (relative), lower seam, a = x {:.4}:", ((a - ilo) as f64 + 0.5) * h);
+    println!(
+        "coarse recursion residual across faces (relative), lower seam, a = x {:.4}:",
+        ((a - ilo) as f64 + 0.5) * h
+    );
     for k in (a - 3)..(a + 6) {
         let (ra, pa) = (*rho.at([k]), *pre.at([k]));
         let (rb, pb) = (*rho.at([k + 1]), *pre.at([k + 1]));
-        let (xa, xb) = (((k - ilo) as f64 + 0.5) * h, ((k + 1 - ilo) as f64 + 0.5) * h);
+        let (xa, xb) = (
+            ((k - ilo) as f64 + 0.5) * h,
+            ((k + 1 - ilo) as f64 + 0.5) * h,
+        );
         let f = 0.5 * (xa + xb);
         let chained = pa + ra * (phi(xa) - phi(f)) + rb * (phi(f) - phi(xb));
         println!("  face x = {f:.4}: residual {:.3e}", (pb - chained) / pb);
@@ -1127,7 +1136,10 @@ fn a_refinement_ladder_does_not_compound_the_gravitational_entropy_error() {
         println!(
             "levels={levels}  root_steps={:>5}  min K/K0: {:?}",
             hier.levels[0].state.iteration,
-            per_level.iter().map(|k| format!("{k:.7}")).collect::<Vec<_>>()
+            per_level
+                .iter()
+                .map(|k| format!("{k:.7}"))
+                .collect::<Vec<_>>()
         );
         coarsest.push(per_level[0]);
         finest.push(*per_level.last().unwrap());

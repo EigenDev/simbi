@@ -14,10 +14,10 @@
 // run: cargo test -p symbi --test rhd_taub_mathews
 // =============================================================================
 
+use symbi::EosArm;
 use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
-use symbi::EosArm;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::{EosSelect, IdealGas, TaubMathews};
@@ -163,7 +163,11 @@ fn taub_mathews_runs_the_spherical_blast_chart() {
         .allocate()
         .expect("rhd sim construction failed")
         .set_initial(|x| {
-            let (rho, pre) = if x[0] < 1.1 { (1.0, 100.0) } else { (1.0, 0.01) };
+            let (rho, pre) = if x[0] < 1.1 {
+                (1.0, 100.0)
+            } else {
+                (1.0, 0.01)
+            };
             Prim {
                 rho,
                 vel: Tensor::new([0.0]),
@@ -171,9 +175,8 @@ fn taub_mathews_runs_the_spherical_blast_chart() {
             }
         })
         .build();
-    let sub =
-        RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(5.0 / 3.0, 0.4, &sim.geom.allocated)
-            .with_eos(EosArm::TaubMathews);
+    let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(5.0 / 3.0, 0.4, &sim.geom.allocated)
+        .with_eos(EosArm::TaubMathews);
     evolve(&mut sim, &sub, 0.2).expect("spherical tm blast failed");
     let pre = sim.fields.prim.pre_field().expect("prim.pre");
     let mut max_v = 0.0_f64;
@@ -186,7 +189,10 @@ fn taub_mathews_runs_the_spherical_blast_chart() {
         assert!(v.abs() < 1.0, "superluminal velocity {v} at {c:?}");
         max_v = max_v.max(v.abs());
     }
-    assert!(max_v > 0.3, "the blast never became relativistic (max |v| = {max_v})");
+    assert!(
+        max_v > 0.3,
+        "the blast never became relativistic (max |v| = {max_v})"
+    );
 }
 
 /// evolve a uniform state and return its (rho, v, p) as recovered afterwards. a uniform
@@ -195,11 +201,7 @@ fn taub_mathews_runs_the_spherical_blast_chart() {
 /// the prim -> cons -> prim round trip, which is the seeding conversion followed by the
 /// arm's recovery. `host` and `arm` are supplied independently so a mismatched pair can be
 /// exhibited.
-fn uniform_roundtrip(
-    host: EosSelect<f64>,
-    arm: EosArm,
-    seed: (f64, f64, f64),
-) -> (f64, f64, f64) {
+fn uniform_roundtrip(host: EosSelect<f64>, arm: EosArm, seed: (f64, f64, f64)) -> (f64, f64, f64) {
     type Sim = SimState<Rhd, 1, Cartesian, EosSelect<f64>, CpuSpace, HostMemory>;
     let (rho, vel, pre) = seed;
     let dx = 1.0 / N as f64;
@@ -288,8 +290,7 @@ fn the_taub_mathews_arm_reads_no_adiabatic_index() {
 #[should_panic(expected = "flat rhd family")]
 fn taub_mathews_refuses_a_curved_spacetime() {
     use symbi_geometry::SchwarzschildKSCartesian;
-    type Sim =
-        SimState<Rhd, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
+    type Sim = SimState<Rhd, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
     let n = 32usize;
     let dx = 12.0 / n as f64;
     let mut sim = Sim::build(
@@ -309,8 +310,7 @@ fn taub_mathews_refuses_a_curved_spacetime() {
         pre: 0.1,
     })
     .build();
-    let sub =
-        RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(5.0 / 3.0, 0.3, &sim.geom.allocated)
-            .with_eos(EosArm::TaubMathews);
+    let sub = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(5.0 / 3.0, 0.3, &sim.geom.allocated)
+        .with_eos(EosArm::TaubMathews);
     evolve(&mut sim, &sub, 0.01).unwrap();
 }

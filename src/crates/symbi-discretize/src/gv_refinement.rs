@@ -146,25 +146,26 @@ fn quartic_interp<S: Scalar>(
         + S::from_f64(47.0 / 60.0) * vc
         + S::from_f64(-13.0 / 60.0) * vp1
         + S::from_f64(1.0 / 30.0) * vp2;
-    let c1 = S::from_f64(1.0 / 12.0) * vm2 + S::from_f64(-5.0 / 4.0) * vm1
+    let c1 = S::from_f64(1.0 / 12.0) * vm2
+        + S::from_f64(-5.0 / 4.0) * vm1
         + S::from_f64(5.0 / 4.0) * vc
         + S::from_f64(-1.0 / 12.0) * vp1;
     let c2 = S::from_f64(1.0 / 8.0) * vm2 + S::from_f64(1.0 / 4.0) * vm1 - vc
         + S::from_f64(3.0 / 4.0) * vp1
         + S::from_f64(-1.0 / 8.0) * vp2;
-    let c3 = S::from_f64(-1.0 / 6.0) * vm2 + S::from_f64(1.0 / 2.0) * vm1
+    let c3 = S::from_f64(-1.0 / 6.0) * vm2
+        + S::from_f64(1.0 / 2.0) * vm1
         + S::from_f64(-1.0 / 2.0) * vc
         + S::from_f64(1.0 / 6.0) * vp1;
-    let c4 = S::from_f64(1.0 / 24.0) * vm2 + S::from_f64(-1.0 / 6.0) * vm1
+    let c4 = S::from_f64(1.0 / 24.0) * vm2
+        + S::from_f64(-1.0 / 6.0) * vm1
         + S::from_f64(1.0 / 4.0) * vc
         + S::from_f64(-1.0 / 6.0) * vp1
         + S::from_f64(1.0 / 24.0) * vp2;
     // antiderivative difference over the sub-cell, scaled to an average.
     let anti = |x: S| {
         x * (c0
-            + x * (c1 / two
-                + x * (c2 / S::THREE
-                    + x * (c3 / S::FOUR + x * c4 / S::from_f64(5.0)))))
+            + x * (c1 / two + x * (c2 / S::THREE + x * (c3 / S::FOUR + x * c4 / S::from_f64(5.0)))))
     };
     let quartic = (anti(xi_hi) - anti(xi_lo)) * ratio;
 
@@ -891,7 +892,11 @@ fn chained_pressure(
         // masked to zero for every thread.
         let below = int_op(ElementWiseOp::Lt, d, zero_i);
         let above = int_op(ElementWiseOp::Gt, d, zero_i);
-        let sgn = int_select(below, int_const(-1), int_select(above, int_const(1), zero_i));
+        let sgn = int_select(
+            below,
+            int_const(-1),
+            int_select(above, int_const(1), zero_i),
+        );
         let span = int_select(below, int_op(ElementWiseOp::Sub, zero_i, d), d);
         let span_f = Gv::of(span);
         // the face a step crosses is the lower face of the cell it arrives at when
@@ -956,7 +961,9 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
     let x_lo: Vec<Gv> = (0..ndim)
         .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
         .collect();
-    let dx: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("dx_{ax}"))).collect();
+    let dx: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("dx_{ax}")))
+        .collect();
     let slots = declare_body_slots(ndim, n_bodies);
 
     let one = Gv::from_f64(1.0);
@@ -989,7 +996,15 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
     let rho_at = |idx: &[NodeId]| lerp_at(0, idx);
     let all = vec![true; ndim];
     let p_eq = chained_pressure(
-        ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX, &all,
+        ndim,
+        &ref_idx,
+        p_ref,
+        &rho_at,
+        &x_lo,
+        &dx,
+        &slots,
+        WB_CF_CHAIN_MAX,
+        &all,
     );
 
     let mut writes = Vec::with_capacity(ncomp);
@@ -1030,13 +1045,18 @@ fn declare_interior_bounds(ndim: usize) -> (Vec<NodeId>, Vec<NodeId>) {
 /// output). ints: lo_{ax}, hi_{ax} (the fine interior, inclusive). scalars:
 /// x_lo_{ax}, dx_{ax} (the fine lattice), then the body slots.
 pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "wb_cf_decode_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "wb_cf_decode_gv: ndim must be 1..=3"
+    );
     begin_trace();
     let (lo, hi) = declare_interior_bounds(ndim);
     let x_lo: Vec<Gv> = (0..ndim)
         .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
         .collect();
-    let dx: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("dx_{ax}"))).collect();
+    let dx: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("dx_{ax}")))
+        .collect();
     let slots = declare_body_slots(ndim, n_bodies);
 
     // registration order pins the buffer order: density first (input), then the
@@ -1051,7 +1071,15 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
     let p_ref = gv_load_at("dst_pre", "dst_pre", &ref_idx);
     let all = vec![true; ndim];
     let p_eq = chained_pressure(
-        ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX, &all,
+        ndim,
+        &ref_idx,
+        p_ref,
+        &rho_at,
+        &x_lo,
+        &dx,
+        &slots,
+        WB_CF_CHAIN_MAX,
+        &all,
     );
 
     // the decoded pressure is the local equilibrium plus the transported
@@ -1080,7 +1108,10 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
 /// buffers: target components (inputs), then departure/candidate components
 /// (in-place outputs), ordered as rho, velocities, optional pressure.
 pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "wb_target_decode_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "wb_target_decode_gv: ndim must be 1..=3"
+    );
     assert!(
         ncomp == ndim + 1 || ncomp == ndim + 2,
         "wb_target_decode_gv: expected rho + ndim velocities + optional pressure"
@@ -1141,13 +1172,18 @@ pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
 /// inclusive). scalars: x_lo_{ax}, dx_{ax} (the coarse lattice), then the body
 /// slots.
 pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "wb_band_decode_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "wb_band_decode_gv: ndim must be 1..=3"
+    );
     begin_trace();
     let (lo, hi) = declare_interior_bounds(ndim);
     let x_lo: Vec<Gv> = (0..ndim)
         .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
         .collect();
-    let dx: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("dx_{ax}"))).collect();
+    let dx: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("dx_{ax}")))
+        .collect();
     let slots = declare_body_slots(ndim, n_bodies);
 
     // registration order pins the buffer order: density, departures, pressure.
@@ -1162,7 +1198,15 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
     let p_ref = gv_load_at("dst_pre", "dst_pre", &ref_idx);
     let all = vec![true; ndim];
     let p_eq = chained_pressure(
-        ndim, &ref_idx, p_ref, &rho_at, &x_lo, &dx, &slots, WB_CF_CHAIN_MAX, &all,
+        ndim,
+        &ref_idx,
+        p_ref,
+        &rho_at,
+        &x_lo,
+        &dx,
+        &slots,
+        WB_CF_CHAIN_MAX,
+        &all,
     );
 
     let zero = Gv::from_f64(0.0);
@@ -1193,8 +1237,14 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
 /// one leg. scalars: face (the seam coordinate along the normal), x_lo_{ax},
 /// dx_{ax} (fine), crs_x_lo_{ax}, crs_dx_{ax} (coarse), then the body slots.
 pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "wb_band_encode_gv: ndim must be 1..=3");
-    assert!(normal < ndim, "wb_band_encode_gv: the seam normal must be a grid axis");
+    assert!(
+        (1..=3).contains(&ndim),
+        "wb_band_encode_gv: ndim must be 1..=3"
+    );
+    assert!(
+        normal < ndim,
+        "wb_band_encode_gv: the seam normal must be a grid axis"
+    );
     begin_trace();
     let (lo, hi) = declare_interior_bounds(ndim);
     let a_idx: NodeId = with_trace(|t| t.scalar_int("a"));
@@ -1202,7 +1252,9 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> (GvKern
     let x_lo: Vec<Gv> = (0..ndim)
         .map(|ax| Gv::scalar(&format!("x_lo_{ax}")))
         .collect();
-    let dx: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("dx_{ax}"))).collect();
+    let dx: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("dx_{ax}")))
+        .collect();
     let crs_x_lo: Vec<Gv> = (0..ndim)
         .map(|ax| Gv::scalar(&format!("crs_x_lo_{ax}")))
         .collect();
@@ -1272,7 +1324,10 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> (GvKern
 /// buffers: prim_rho, prim_vel_0.., prim_pre (inputs) then cons_nrg (output).
 /// scalars: gamma.
 pub fn band_energy_gv(ndim: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "band_energy_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "band_energy_gv: ndim must be 1..=3"
+    );
     begin_trace();
     let gamma = Gv::scalar("gamma");
     let rho = Gv::field("prim_rho", "prim_rho");
@@ -1656,7 +1711,10 @@ mod quartic_interp_tests {
         let lo: f64 = quartic_interp(v[0], v[1], v[2], v[3], v[4], 0.0, 0.5, 2.0);
         let hi: f64 = quartic_interp(v[0], v[1], v[2], v[3], v[4], 0.5, 1.0, 2.0);
         let resid = (0.5 * (lo + hi) - v[2]).abs();
-        assert!(resid < 1e-14, "children do not conserve the parent: resid {resid:e}");
+        assert!(
+            resid < 1e-14,
+            "children do not conserve the parent: resid {resid:e}"
+        );
     }
 
     /// a jump inside the stencil mixes the second-difference signs: the value

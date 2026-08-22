@@ -312,7 +312,10 @@ fn the_general_form_reduces_to_the_cartesian_pressure_difference() {
     for ii in 1..n - 1 {
         let (rho_c, p_c) = (rho_col[ii], pre_col[ii]);
         let eq = LocalEquilibrium::through(rho_c, p_c, phi(anchors[ii]));
-        let (p_lo, p_hi) = (eq.pressure_at(phi(face(ii))), eq.pressure_at(phi(face(ii + 1))));
+        let (p_lo, p_hi) = (
+            eq.pressure_at(phi(face(ii))),
+            eq.pressure_at(phi(face(ii + 1))),
+        );
         let general = ((p_hi - p_c) - (p_lo - p_c)) / h;
         let cartesian = (p_hi - p_lo) / h;
         let ulp_scale = (cartesian.abs() + p_c / h) * f64::EPSILON;

@@ -79,9 +79,7 @@ fn class_line(n: usize, h: f64, y: f64, z: f64) -> Vec<(f64, f64)> {
 }
 
 fn kset(balanced: bool) -> impl Fn(&Sim) -> Kset {
-    move |s: &Sim| {
-        Kset::new(GAMMA, CFL, &s.geom.allocated).well_balanced_reconstruction(balanced)
-    }
+    move |s: &Sim| Kset::new(GAMMA, CFL, &s.geom.allocated).well_balanced_reconstruction(balanced)
 }
 
 /// the two-level hierarchy with the patch spanning the interior transversely, so
@@ -124,14 +122,16 @@ fn build(balanced: bool) -> Hier {
     };
     let hier = Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, make)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new(BODY),
-            symbi_algebra::Tensor::zeros(),
-            GM,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new(BODY),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )),
+        );
     // the fine lattice carries its own (y, z) centers; the class line is
     // re-derived per fine cell from the full potential on that line.
     for lvl in 1..hier.levels.len() {
@@ -147,10 +147,7 @@ fn ghost_recursion_residual(hier: &Hier) -> f64 {
     let st = &hier.levels[1].state;
     let rho = st.fields.prim.rho.view();
     let pre = st.fields.prim.pre.as_ref().expect("adiabatic").view();
-    let (ilo, ihi) = (
-        st.geom.interior.spaces[0].lo,
-        st.geom.interior.spaces[0].hi,
-    );
+    let (ilo, ihi) = (st.geom.interior.spaces[0].lo, st.geom.interior.spaces[0].hi);
     let (alo, ahi) = (
         st.geom.allocated.spaces[0].lo,
         st.geom.allocated.spaces[0].hi,
@@ -225,14 +222,21 @@ fn a_deep_balanced_ladder_keeps_every_seam_region_inside_its_lattice() {
         let col = class_line(ROOT, h, x[1], x[2]);
         let j = ((x[0] / h) as usize).min(ROOT - 1);
         let (rho, pre) = col[j];
-        Prim { rho, vel: symbi_algebra::Tensor::zeros(), pre }
+        Prim {
+            rho,
+            vel: symbi_algebra::Tensor::zeros(),
+            pre,
+        }
     };
     // telescoping boxes: each rung halves the previous one about the domain centre,
     // the same ladder the production config builds.
     let mut regions = Vec::new();
     let (mut lo, mut hi) = (0.25_f64, 0.75_f64);
     for _ in 0..5 {
-        regions.push(RefinementRegion { x_lo: [lo, lo, lo], x_hi: [hi, hi, hi] });
+        regions.push(RefinementRegion {
+            x_lo: [lo, lo, lo],
+            x_hi: [hi, hi, hi],
+        });
         let mid = 0.5 * (lo + hi);
         let quarter = 0.25 * (hi - lo);
         lo = mid - quarter;
@@ -251,14 +255,16 @@ fn a_deep_balanced_ladder_keeps_every_seam_region_inside_its_lattice() {
     let ck = make(&coarse);
     let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, make)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new(BODY),
-            symbi_algebra::Tensor::zeros(),
-            GM,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new(BODY),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )),
+        );
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(seed);
     }

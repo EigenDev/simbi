@@ -97,14 +97,16 @@ fn build_at(regions: &[RefinementRegion<1>], ncells: usize) -> Hier {
     let ck = kset(&coarse);
     let hier = Hierarchy::with_refinement(coarse, ck, regions, ProlongOrder::Ppm, kset)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new([-G_OFFSET]),
-            symbi_algebra::Tensor::zeros(),
-            GM,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new([-G_OFFSET]),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )),
+        );
     // every level starts on the exact equilibrium, so the residual measured afterwards is the
     // scheme's, not an interpolation artifact left over from setting the levels up.
     for lvl in 1..hier.levels.len() {
@@ -126,7 +128,12 @@ fn worst_speed(hier: &Hier, level: usize) -> (f64, usize, bool, usize) {
     let skip = cells.len() / 5;
 
     let mut worst = (0.0_f64, 0usize);
-    for (ii, c) in cells.iter().enumerate().skip(skip).take(cells.len() - 2 * skip) {
+    for (ii, c) in cells
+        .iter()
+        .enumerate()
+        .skip(skip)
+        .take(cells.len() - 2 * skip)
+    {
         let _ = rho.at(*c);
         let speed = vel.at(*c).abs();
         if speed > worst.0 {
@@ -226,7 +233,9 @@ fn the_equilibrium_residual_localizes_at_the_coarse_fine_interface() {
         let cells: Vec<[isize; 1]> = lvl.state.geom.interior.iter().collect();
         let cov = lvl.coverage.as_ref().unwrap();
         let flags: Vec<bool> = cells.iter().map(|c| cov.contains(*c)).collect();
-        let edge = (1..flags.len()).find(|&ii| flags[ii] != flags[ii - 1]).unwrap();
+        let edge = (1..flags.len())
+            .find(|&ii| flags[ii] != flags[ii - 1])
+            .unwrap();
 
         println!("\ntransfer-induced velocity across the left patch edge (refined - control):");
         let (lo, hi) = (edge.saturating_sub(5), (edge + 5).min(cells.len()));
@@ -274,9 +283,7 @@ fn the_equilibrium_residual_localizes_at_the_coarse_fine_interface() {
         let m0 = composite_mass(&fresh);
         fresh.evolve_steps(1).unwrap();
         let m1 = composite_mass(&fresh);
-        println!(
-            "\nreflecting walls, one root step -- mass has no source, momentum has gravity:"
-        );
+        println!("\nreflecting walls, one root step -- mass has no source, momentum has gravity:");
         println!(
             "  composite MASS      {m0:.15e} -> {m1:.15e}   relative change {:.3e}",
             ((m1 - m0) / m0).abs()
@@ -352,7 +359,9 @@ fn the_hydrostatic_profile_satisfies_the_continuum_balance() {
     let peak = |v: &[f64]| v.iter().fold(0.0_f64, |m, e| m.max(e.abs()));
     let (coarse, fine) = (peak(&coarse_v), peak(&fine_v));
     let order = (coarse / fine).log2();
-    println!("continuum balance residual: h=1e-3 -> {coarse:.3e},  h=5e-4 -> {fine:.3e}   (order {order:.2})");
+    println!(
+        "continuum balance residual: h=1e-3 -> {coarse:.3e},  h=5e-4 -> {fine:.3e}   (order {order:.2})"
+    );
 
     // a central difference is second order, so halving the step must cut the residual by ~4. a
     // profile that did not solve the ode would leave a floor that does not move with h at all,
@@ -424,7 +433,10 @@ fn the_discrete_imbalance_of_the_analytic_profile_converges() {
             st.iteration > 0,
             "N={ncells} never stepped, so it cannot have drifted"
         );
-        println!("N={ncells:>4}  steps={:>4}  max|v| = {worst:.6e}", st.iteration);
+        println!(
+            "N={ncells:>4}  steps={:>4}  max|v| = {worst:.6e}",
+            st.iteration
+        );
         rows.push((ncells, worst));
     }
 

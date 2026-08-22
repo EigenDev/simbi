@@ -560,6 +560,10 @@ pub fn wb_ghost_fill_gv(
             v.node(),
         ));
     }
-    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), pre_g.node()));
+    writes.push((
+        "prim_pre".to_string(),
+        FieldRef::PrimPre.into(),
+        pre_g.node(),
+    ));
     (end_trace(), writes)
 }

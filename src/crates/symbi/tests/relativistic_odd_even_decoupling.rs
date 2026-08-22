@@ -76,7 +76,11 @@ fn shocked_duct() -> Sim {
                     pre: 500.0,
                 }
             } else {
-                let zig = if idx[1] % 2 == 0 { 1.0 + SEED } else { 1.0 - SEED };
+                let zig = if idx[1] % 2 == 0 {
+                    1.0 + SEED
+                } else {
+                    1.0 - SEED
+                };
                 Prim {
                     rho: zig,
                     vel: Tensor::new([0.0, 0.0]),
@@ -135,7 +139,10 @@ fn run(solver: Solver) -> (f64, f64, u64) {
 #[test]
 fn the_relativistic_shear_viscosity_is_shock_stable_on_quirks_test() {
     let mut rows = Vec::new();
-    for (name, solver) in [("rhd hllc", Solver::Hllc), ("rhd hllc_plus", Solver::HllcPlus)] {
+    for (name, solver) in [
+        ("rhd hllc", Solver::Hllc),
+        ("rhd hllc_plus", Solver::HllcPlus),
+    ] {
         let (mid, end, steps) = run(solver);
         let growth = if mid > 0.0 { end / mid } else { f64::INFINITY };
         println!(

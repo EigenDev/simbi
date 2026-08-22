@@ -82,7 +82,10 @@ fn gate_or_record(case: &str, bytes: &[u8]) {
         bytes.len() / 8,
         first_lane.unwrap()
     );
-    eprintln!("{case}: bit-identical to baseline ({} lanes)", bytes.len() / 8);
+    eprintln!(
+        "{case}: bit-identical to baseline ({} lanes)",
+        bytes.len() / 8
+    );
 }
 
 /// interior conserved state as little-endian f64 bytes: den, then each momentum

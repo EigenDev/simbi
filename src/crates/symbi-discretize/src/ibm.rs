@@ -102,7 +102,8 @@ pub fn compact_potential<S: Scalar>(rvec: [S; 3], mass: S, h: S) -> S {
     let r_dist2 = sq(rvec[0]) + sq(rvec[1]) + sq(rvec[2]);
     let r = r_dist2.sqrt();
     let u2 = r_dist2 / sq(h);
-    let inner = mass / h * (S::from_f64(1.25) * u2 - S::from_f64(0.375) * sq(u2) - S::from_f64(1.875));
+    let inner =
+        mass / h * (S::from_f64(1.25) * u2 - S::from_f64(0.375) * sq(u2) - S::from_f64(1.875));
     let outer = -mass / r;
     S::cond(r.cmp_lt(h), || inner, || outer)
 }
@@ -193,7 +194,7 @@ pub fn body_potential<S: Scalar>(rvec: [S; 3], mass: S, len: S, kind: S) -> S {
     // on the compact branch `r_eff` is the bare distance, so the interior test is the same
     // `r < h` comparison the profile has always made; off that branch the mask discards it.
     let u2 = r_dist2 / h2;
-    let inner = mass / len
-        * (S::from_f64(1.25) * u2 - S::from_f64(0.375) * sq(u2) - S::from_f64(1.875));
+    let inner =
+        mass / len * (S::from_f64(1.25) * u2 - S::from_f64(0.375) * sq(u2) - S::from_f64(1.875));
     S::select(is_compact & r_eff.cmp_lt(len), inner, -mass / r_eff)
 }

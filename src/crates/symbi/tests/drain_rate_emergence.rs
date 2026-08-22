@@ -242,7 +242,11 @@ fn the_accretion_rate_saturates_as_the_drain_dial_shrinks() {
         println!("{line}");
     }
     for (ii, s) in steps.iter().enumerate() {
-        println!("halving {} -> {}: relative change {s:.4}", dials[ii], dials[ii + 1]);
+        println!(
+            "halving {} -> {}: relative change {s:.4}",
+            dials[ii],
+            dials[ii + 1]
+        );
     }
 
     for ii in 1..steps.len() {

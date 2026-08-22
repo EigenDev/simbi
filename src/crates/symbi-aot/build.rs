@@ -36,23 +36,23 @@ static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 // drives them: build the graph via a builder, then emit (CPU Rust + CUDA source).
 use symbi_discretize::GvKernel;
 use symbi_discretize::{
-    Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, body_feedback_drain_gv, body_feedback_grav_gv,
-    body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv, c2p_status_gv,
-    chi_c2p_gv, chi_flux_gv, chi_godunov_gv, chi_snapshot_gv, fofc_bflux_splice_gv, fofc_copy_gv,
-    fofc_emf_splice_gv, fofc_exterior_flag_gv, fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv,
-    fofc_select_with_body_gv, fofc_splice_gv, geometric_momentum_source_probe_gv,
-    geometry_probe_gv, godunov_mass_gv, imhd_edge_emf_uct_hlld_gv, imhd_wave_speeds_cell_gv,
-    inertial_momentum_probe_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv, neumann_ghost_fill_gv,
-    wb_ghost_fill_gv,
-    nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, nmhd_wave_speed_map_gv,
-    nmhd_wave_speeds_cell_gv, rhd_wave_speed_map_gv, rmhd_average_efield_gv,
-    rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv, rmhd_bcell_godunov_rk2_gv,
-    rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_3d_dir_gv,
-    rmhd_ct_curl_cyl_rphi_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv,
-    rmhd_edge_emf_uct_hlld_gv, rmhd_ghost_fill_gv, rmhd_resistive_emf_2d_gv,
-    rmhd_resistive_emf_3d_dir_gv, rmhd_resistive_emf_cyl_rz_gv, rmhd_resistive_emf_ortho_gv,
-    rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, robin_ghost_fill_gv,
-    snapshot_gv, state_finite_probe_gv,
+    Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, body_feedback_drain_gv,
+    body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv, body_source_gv,
+    body_source_iso_gv, c2p_status_gv, chi_c2p_gv, chi_flux_gv, chi_godunov_gv, chi_snapshot_gv,
+    fofc_bflux_splice_gv, fofc_copy_gv, fofc_emf_splice_gv, fofc_exterior_flag_gv,
+    fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv, fofc_select_with_body_gv, fofc_splice_gv,
+    geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv,
+    imhd_edge_emf_uct_hlld_gv, imhd_wave_speeds_cell_gv, inertial_momentum_probe_gv,
+    iso_ghost_fill_gv, iso_wave_speed_map_gv, neumann_ghost_fill_gv, nmhd_edge_emf_uct_hllc_gv,
+    nmhd_edge_emf_uct_hlld_gv, nmhd_wave_speed_map_gv, nmhd_wave_speeds_cell_gv,
+    rhd_wave_speed_map_gv, rmhd_average_efield_gv, rmhd_bcell_from_bface_gv,
+    rmhd_bcell_godunov_euler_gv, rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv,
+    rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_3d_dir_gv, rmhd_ct_curl_cyl_rphi_gv,
+    rmhd_ct_curl_cyl_rz_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, rmhd_edge_emf_uct_hlld_gv,
+    rmhd_ghost_fill_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv,
+    rmhd_resistive_emf_cyl_rz_gv, rmhd_resistive_emf_ortho_gv, rmhd_save_efield_gv,
+    rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, robin_ghost_fill_gv, snapshot_gv,
+    state_finite_probe_gv, wb_ghost_fill_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::{Graph, NodeId};
@@ -1316,7 +1316,12 @@ fn gen_rmhd_face_flux(out_dir: &str, ndim: u8) {
 // HLLE-only by physics (no contact wave). cartesian, one per (ndim, dir).
 fn gen_adiabatic_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
     let name = format!("adiabatic_face_flux_hllc{}_{ndim}d_{dir}", recon.suffix());
-    let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::adiabatic_hllc_flux_gv, dir, recon);
+    let (k, writes) = gv_dim!(
+        ndim,
+        symbi_discretize::gv::adiabatic_hllc_flux_gv,
+        dir,
+        recon
+    );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1375,9 +1380,11 @@ fn gen_adiabatic_wb_face_flux(
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-
 fn gen_adiabatic_hllc_plus_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
-    let name = format!("adiabatic_face_flux_hllc_plus{}_{ndim}d_{dir}", recon.suffix());
+    let name = format!(
+        "adiabatic_face_flux_hllc_plus{}_{ndim}d_{dir}",
+        recon.suffix()
+    );
     let (k, writes) = gv_dim!(
         ndim,
         symbi_discretize::gv::adiabatic_hllc_plus_flux_gv,
@@ -1764,7 +1771,12 @@ fn gen_rmhd_face_flux_gr_mode(
 fn gen_rmhd_gr_gas_family(out_dir: &str, ndim: u8, geom: &Geom) {
     gen_rmhd_godunov_gr(out_dir, ndim, geom.clone());
     gen_rmhd_wave_speed_map(out_dir, ndim, geom.clone());
-    gen_rmhd_c2p_gr(out_dir, ndim, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
+    gen_rmhd_c2p_gr(
+        out_dir,
+        ndim,
+        symbi_hydro::c2p_result::C2P_MAX_ITER,
+        geom.clone(),
+    );
     for dir in 0..ndim {
         gen_rmhd_face_flux_gr(out_dir, ndim, dir, geom.clone(), false);
         gen_rmhd_face_flux_gr_mode(out_dir, ndim, dir, geom.clone(), false, true);
@@ -2689,7 +2701,13 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
         ),
     ] {
         let (k, writes) = builder(Coords::Cartesian, nd, nd, ax, false);
-        emit_gv(out_dir, &penalize_name(base, cart, nd, ax), ndim, &k, &writes);
+        emit_gv(
+            out_dir,
+            &penalize_name(base, cart, nd, ax),
+            ndim,
+            &k,
+            &writes,
+        );
     }
     // curvilinear variants (spherical + cylindrical): the mask distance maps the
     // coordinate centroid to Cartesian, and porous / torque-free rotate the surface
@@ -2701,7 +2719,10 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
                 "penalize_drain",
                 symbi_discretize::penalize_drain_gv as PenalizeBuilder,
             ),
-            ("penalize_drain_iso", symbi_discretize::penalize_drain_iso_gv),
+            (
+                "penalize_drain_iso",
+                symbi_discretize::penalize_drain_iso_gv,
+            ),
             ("penalize_porous", symbi_discretize::penalize_porous_gv),
             (
                 "penalize_torque_free_iso",
@@ -2717,7 +2738,13 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
             ),
         ] {
             let (k, writes) = builder(coords, nd, nd, ax, false);
-            emit_gv(out_dir, &penalize_name(base, geom, nd, ax), ndim, &k, &writes);
+            emit_gv(
+                out_dir,
+                &penalize_name(base, geom, nd, ax),
+                ndim,
+                &k,
+                &writes,
+            );
         }
     }
     // the dof-aware 2.5D MHD variants (ndim=2 grid, dof=3 momentum): a 2.5D MHD sink drains the
@@ -2731,7 +2758,10 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
         // the six surfaces at dof = 3, paired regime twins adjacent.
         let surfaces: [(&str, PenalizeBuilder); 6] = [
             ("penalize_drain", symbi_discretize::penalize_drain_gv),
-            ("penalize_drain_iso", symbi_discretize::penalize_drain_iso_gv),
+            (
+                "penalize_drain_iso",
+                symbi_discretize::penalize_drain_iso_gv,
+            ),
             ("penalize_porous", symbi_discretize::penalize_porous_gv),
             (
                 "penalize_porous_iso",
@@ -2757,7 +2787,10 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
                     "penalize_drain",
                     symbi_discretize::penalize_drain_gv as PenalizeBuilder,
                 ),
-                ("penalize_drain_iso", symbi_discretize::penalize_drain_iso_gv),
+                (
+                    "penalize_drain_iso",
+                    symbi_discretize::penalize_drain_iso_gv,
+                ),
             ] {
                 let (k, w) = builder(coords, nd, dof, ax, false);
                 emit_gv(out_dir, &n(base, geom), ndim, &k, &w);
@@ -3200,7 +3233,12 @@ fn main() {
         gen_rmhd_godunov_gr(&out_dir, 1, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_gr_wave_speeds_cell(&out_dir, 1, &geom);
-        gen_rmhd_c2p_gr(&out_dir, 1, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
+        gen_rmhd_c2p_gr(
+            &out_dir,
+            1,
+            symbi_hydro::c2p_result::C2P_MAX_ITER,
+            geom.clone(),
+        );
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), false);
         gen_rmhd_face_flux_gr_mode(&out_dir, 1, 0, geom.clone(), false, true); // FOFC rusanov fallback
         // the orthonormal-frame MUB09 HLLD gas flux: schwarzschild (zero shift) and kerr-schild

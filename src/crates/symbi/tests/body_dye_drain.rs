@@ -151,8 +151,7 @@ mod isothermal {
     const CHI: f64 = 0.7;
     const CS: f64 = 0.5;
 
-    type SimIso =
-        SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+    type SimIso = SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
 
     #[test]
     fn an_isothermal_sink_removes_mass_and_its_dye_together() {

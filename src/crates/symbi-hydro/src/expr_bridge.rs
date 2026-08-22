@@ -344,9 +344,17 @@ pub fn build_user_source_with_law(
             return Err(format!(
                 "state law describes a {} gas while regime '{}' is {}; the source would \
                  relax toward a conserved state the evolution does not store",
-                if law.relativistic { "relativistic" } else { "newtonian" },
+                if law.relativistic {
+                    "relativistic"
+                } else {
+                    "newtonian"
+                },
                 spec.name,
-                if spec.is_relativistic { "relativistic" } else { "newtonian" },
+                if spec.is_relativistic {
+                    "relativistic"
+                } else {
+                    "newtonian"
+                },
             ));
         }
     }
@@ -807,10 +815,7 @@ mod tests {
     /// hand over the law belonging to the regime it names.
     fn law_for(spec: &crate::regime_spec::RegimeSpec) -> crate::state_law::StateLaw {
         if spec.is_relativistic {
-            crate::state_law::StateLaw::relativistic(
-                1.4,
-                crate::state_law::Background::Minkowski,
-            )
+            crate::state_law::StateLaw::relativistic(1.4, crate::state_law::Background::Minkowski)
         } else {
             fixture_law()
         }
@@ -963,9 +968,12 @@ mod tests {
                           {"op": "CONSTANT", "value": 0.0},
                           {"op": "CONSTANT", "value": 0.0}]}"#,
         );
-        let (built, params) =
-            build_user_sources_with_law(&[rotating, sponge], &ISO_NEWTONIAN_SPEC, Some(&fixture_law()))
-                .expect("compose");
+        let (built, params) = build_user_sources_with_law(
+            &[rotating, sponge],
+            &ISO_NEWTONIAN_SPEC,
+            Some(&fixture_law()),
+        )
+        .expect("compose");
         assert!(params.is_empty());
         assert_eq!(
             built.iter().filter(|(target, _)| target == "mom").count(),
@@ -1054,7 +1062,10 @@ mod tests {
         // S_den = kappa*(rho_ref - rho) = 2*(1 - 1.5) = -1.
         let (_, den) = &built[0];
         let s_den = eval_lowered(den, den.outputs[0], state);
-        assert!((s_den - (-1.0)).abs() < 1e-12, "python sponge den wrong: {s_den}");
+        assert!(
+            (s_den - (-1.0)).abs() < 1e-12,
+            "python sponge den wrong: {s_den}"
+        );
         // S_mom_0 = kappa*(rho_ref vel_ref_0 - rho vel_0) = 2*(1 - 4.5) = -7.
         let (_, mom) = &built[1];
         let s_mom0 = eval_lowered(mom, mom.outputs[0], state);
@@ -1485,8 +1496,8 @@ mod tests {
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
         let law = crate::state_law::StateLaw::newtonian(5.0 / 3.0);
-        let built = build_user_source_with_law(&cfg, &ISO_NEWTONIAN_SPEC, Some(&law))
-            .expect("sponge iso");
+        let built =
+            build_user_source_with_law(&cfg, &ISO_NEWTONIAN_SPEC, Some(&law)).expect("sponge iso");
         assert_eq!(
             built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
             ["den", "mom"]
@@ -1577,7 +1588,11 @@ mod tests {
                     .collect::<Vec<_>>(),
             );
         }
-        assert_eq!(channels[0].len(), channels[1].len(), "channel counts differ");
+        assert_eq!(
+            channels[0].len(),
+            channels[1].len(),
+            "channel counts differ"
+        );
         for ((target, flat), (_, curved)) in channels[0].iter().zip(channels[1].iter()) {
             for (ii, (a, b)) in flat.iter().zip(curved.iter()).enumerate() {
                 assert!(
@@ -1588,7 +1603,9 @@ mod tests {
         }
         // and the massless case is not vacuously zero: the flat arm carries real values.
         assert!(
-            channels[0].iter().any(|(_, v)| v.iter().any(|x| x.abs() > 1e-9)),
+            channels[0]
+                .iter()
+                .any(|(_, v)| v.iter().any(|x| x.abs() > 1e-9)),
             "both arms emitted nothing, so the agreement tests nothing"
         );
         // giving the hole mass has to move the answer, or the agreement above would hold
@@ -1934,7 +1951,8 @@ mod state_law_seam_tests {
         // evolution stores `rho v` — a wrong answer no output reveals, so it is caught
         // where the mismatch is made rather than carried into the graph.
         let law = StateLaw::relativistic(4.0 / 3.0, Background::Minkowski);
-        let err = match build_user_source_with_law(&force_cfg(), &crate::NEWTONIAN_SPEC, Some(&law)) {
+        let err = match build_user_source_with_law(&force_cfg(), &crate::NEWTONIAN_SPEC, Some(&law))
+        {
             Err(e) => e,
             Ok(_) => panic!("a relativistic law on a newtonian regime must be refused"),
         };
@@ -1954,7 +1972,11 @@ mod state_law_seam_tests {
         assert_eq!(with.len(), without.len());
         for ((ta, a), (tb, b)) in with.iter().zip(&without) {
             assert_eq!(ta, tb, "target moved");
-            assert_eq!(a.outputs.len(), b.outputs.len(), "output count moved for {ta}");
+            assert_eq!(
+                a.outputs.len(),
+                b.outputs.len(),
+                "output count moved for {ta}"
+            );
         }
     }
 }

@@ -365,9 +365,8 @@ pub(crate) fn body_applied_gv(
 ) -> (Gv, Vec<Gv>, Gv, Gv) {
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
-    let (coord3, cell_cart, vel_cart, min_w, cs, _e_int) = cell_scaffold(
-        coords, ndim, ncomp, axes, gamma, src_den, src_mom, src_nrg,
-    );
+    let (coord3, cell_cart, vel_cart, min_w, cs, _e_int) =
+        cell_scaffold(coords, ndim, ncomp, axes, gamma, src_den, src_mom, src_nrg);
 
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
     let mut total_rate = Gv::ZERO;
@@ -1174,8 +1173,9 @@ pub fn body_source_wb_gv(
             // anchor point), so the reference term is the raw stage-input pressure. on a
             // radial column the transverse axes see equal face potentials, equal `p_eq`,
             // and a source of exactly zero.
-            Some(geo) => (geo.area_hi[ax] * (p_hi - p_us) - geo.area_lo[ax] * (p_lo - p_us))
-                * geo.inv_volume,
+            Some(geo) => {
+                (geo.area_hi[ax] * (p_hi - p_us) - geo.area_lo[ax] * (p_lo - p_us)) * geo.inv_volume
+            }
         };
         mom_new[ax] = mom_new[ax] + dt * s_m;
         nrg_new = nrg_new + dt * us_vel[ax] * s_m;

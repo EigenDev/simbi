@@ -105,8 +105,10 @@ fn pos_edge(fs: &Store, c: [isize; 3], edge_axis: usize) -> [f64; 3] {
 // seed bface = ct_curl(A) through the production curl (dt = 1 on a zero field): div-free by the
 // discrete d-of-d in exactly the divergence the evolution preserves. bcell is the face average,
 // and cons is rebuilt so the total energy carries the seeded magnetic contribution.
-fn seed<M>(sim: &mut SimState<NewtonianMhd, 3, M, IdealGas<f64>, CpuSpace, HostMemory>, chart: Chart)
-where
+fn seed<M>(
+    sim: &mut SimState<NewtonianMhd, 3, M, IdealGas<f64>, CpuSpace, HostMemory>,
+    chart: Chart,
+) where
     M: symbi_geometry::Metric<f64, 3> + Copy,
 {
     let (lo, hi) = bounds(chart);
@@ -211,8 +213,12 @@ fn divb_max(fs: &Store, chart: Chart) -> (f64, f64) {
 }
 
 fn substrate(sim: &Store, eta: Option<f64>) -> NewtonianMhdSubstrateKernelSet<HostMemory, f64, 3> {
-    let sub =
-        NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, 1.0, &sim.geom.allocated);
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 3>::new(
+        GAMMA,
+        CFL,
+        1.0,
+        &sim.geom.allocated,
+    );
     match eta {
         Some(e) => sub.with_resistivity(e),
         None => sub,

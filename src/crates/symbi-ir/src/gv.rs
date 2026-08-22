@@ -857,7 +857,6 @@ impl Gv {
         let x = self.node();
         Gv::of(with_trace(|t| t.graph.element_wise(op, vec![x], None)))
     }
-
 }
 
 // ---- std::ops: record element-wise nodes ----
@@ -1216,8 +1215,7 @@ impl crate::algebra::Scalar for Gv {
     fn atan2(self, o: Gv) -> Gv {
         let (y, x) = (self.node(), o.node());
         Gv::of(with_trace(|t| {
-            t.graph
-                .element_wise(ElementWiseOp::Atan2, vec![y, x], None)
+            t.graph.element_wise(ElementWiseOp::Atan2, vec![y, x], None)
         }))
     }
     fn exp(self) -> Gv {

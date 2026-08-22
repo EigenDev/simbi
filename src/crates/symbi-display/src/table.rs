@@ -871,7 +871,10 @@ mod tests {
         let mut table = Table::new("Cluster Run", true);
         // the test harness captures stdout (not a terminal), so a live request
         // degrades to line mode -- the same condition a batch job sees.
-        assert!(table.line_mode, "no terminal + dynamic request must select line mode");
+        assert!(
+            table.line_mode,
+            "no terminal + dynamic request must select line mode"
+        );
         table.set_system_info(&[["CPU", "cores", "8"]]);
         table.set_header(&["Iter", "Time"]);
         table.update_row(&["100", "1.5e-2"]);
@@ -891,5 +894,4 @@ mod tests {
         assert_eq!(second.lines().count(), 1, "one appended line per refresh");
         assert!(second.contains("iter=200 time=3.0e-2 done=6%"));
     }
-
 }

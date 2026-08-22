@@ -115,7 +115,10 @@ fn mach_scale_picks_the_faster_side_and_caps_at_the_sonic_point() {
     assert_eq!(mach_scale(3.0, 0.02, 1.0, 1.0), 1.0);
     assert_eq!(mach_scale(1.0, 1.0, 1.0, 1.0), 1.0);
     // a magnitude: the flow direction across the face does not enter.
-    assert_eq!(mach_scale(-0.4, 0.02, 1.0, 1.0), mach_scale(0.4, 0.02, 1.0, 1.0));
+    assert_eq!(
+        mach_scale(-0.4, 0.02, 1.0, 1.0),
+        mach_scale(0.4, 0.02, 1.0, 1.0)
+    );
     // per-side sound speeds: a colder side reaches saturation at a lower speed.
     assert_eq!(mach_scale(0.02, 0.02, 1.0, 0.02), 1.0);
 }
@@ -126,12 +129,12 @@ fn mach_scale_carrier_equivalence() {
     // whether the cap is active. a carrier that reorders either would show up here.
     let names = ["speed_l", "speed_r", "cs_l", "cs_r"];
     for inputs in [
-        [0.02, 0.40, 1.0, 1.0],   // right side wins, uncapped
-        [0.40, 0.02, 1.0, 1.0],   // left side wins, uncapped
-        [3.00, 0.02, 1.0, 1.0],   // capped
-        [1.00, 1.00, 1.0, 1.0],   // exactly at the cap
-        [-0.4, 0.02, 1.0, 1.0],   // negative speed, magnitude taken
-        [0.02, 0.02, 1.0, 0.02],  // the cold side saturates
+        [0.02, 0.40, 1.0, 1.0],  // right side wins, uncapped
+        [0.40, 0.02, 1.0, 1.0],  // left side wins, uncapped
+        [3.00, 0.02, 1.0, 1.0],  // capped
+        [1.00, 1.00, 1.0, 1.0],  // exactly at the cap
+        [-0.4, 0.02, 1.0, 1.0],  // negative speed, magnitude taken
+        [0.02, 0.02, 1.0, 0.02], // the cold side saturates
     ] {
         let want = mach_scale(inputs[0], inputs[1], inputs[2], inputs[3]);
         let got = gv_eval(

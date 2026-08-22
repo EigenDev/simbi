@@ -34,12 +34,11 @@ use std::sync::Arc;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_c2p_status,
+    FluxSpec, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_c2p_status,
     dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
-    dispatch_godunov, dispatch_gradient_boundaries, dispatch_runtime_source,
-    FluxSpec, dof_lift_suffix, fused_runtime_cpu_kernel, geom_scalar, gr_chart_dof_tag,
-    kernel_geom,
-    resolve_params, scalars_for, shell_accretion_rates, spacetime_slug,
+    dispatch_godunov, dispatch_gradient_boundaries, dispatch_runtime_source, dof_lift_suffix,
+    fused_runtime_cpu_kernel, geom_scalar, gr_chart_dof_tag, kernel_geom, resolve_params,
+    scalars_for, shell_accretion_rates, spacetime_slug,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Spacetime;
@@ -715,7 +714,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     );
                 }
             },
-            None,  // no body-evolved freeze parachute (no rhd body source)
+            None, // no body-evolved freeze parachute (no rhd body source)
             crate::regimes::fofc::CtHooks::none(),
             || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
             false, // no projection tier below the freeze; keep the parachute

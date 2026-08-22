@@ -63,8 +63,8 @@ fn potential(x: f64) -> f64 {
 /// the exact isentropic hydrostatic column: `(gamma/(gamma-1)) K rho^(gamma-1) + phi = H`.
 /// `k_entropy` selects which member, `h_const` fixes the normalization.
 fn isentrope(x: f64, k_entropy: f64, h_const: f64) -> (f64, f64) {
-    let rho = ((GAMMA - 1.0) / (GAMMA * k_entropy) * (h_const - potential(x)))
-        .powf(1.0 / (GAMMA - 1.0));
+    let rho =
+        ((GAMMA - 1.0) / (GAMMA * k_entropy) * (h_const - potential(x))).powf(1.0 / (GAMMA - 1.0));
     (rho, k_entropy * rho.powf(GAMMA))
 }
 
@@ -124,7 +124,8 @@ fn stratified_column(xs: &[f64], eps: f64, k0: f64, rho0: f64) -> Vec<(f64, f64)
         out.push((rho, k_of(w[1]) * rho.powf(GAMMA)));
     }
     assert!(
-        out.iter().all(|&(r, p)| r.is_finite() && p.is_finite() && r > 0.0 && p > 0.0),
+        out.iter()
+            .all(|&(r, p)| r.is_finite() && p.is_finite() && r > 0.0 && p > 0.0),
         "the marched column is not a positive finite state; the residual sweep would read \
          zero because f64::max discards NaN, and the theorem would pass vacuously"
     );
@@ -135,14 +136,7 @@ fn stratified_column(xs: &[f64], eps: f64, k0: f64, rho0: f64) -> Vec<(f64, f64)
 /// `ii + 1` on a lattice with centers `xc` and interior faces `xf` (`xf[k]` between
 /// centers `k - 1` and `k`): cell `ii` reconstructs to its upper face, `ii + 1` to its
 /// lower.
-fn face_jump(
-    rho: &[f64],
-    pre: &[f64],
-    xc: &[f64],
-    xf: &[f64],
-    ii: usize,
-    theta: f64,
-) -> f64 {
+fn face_jump(rho: &[f64], pre: &[f64], xc: &[f64], xf: &[f64], ii: usize, theta: f64) -> f64 {
     let phi_c = |k: usize| potential(xc[k]);
     let phi_f = |k: usize| potential(xf[k]);
     let pl = hydrostatic_face(
@@ -273,8 +267,7 @@ fn t2_it_is_bit_identical_to_plain_reconstruction_without_gravity() {
                 for sign in [1.0, -1.0] {
                     let phi_c = [-2.5, -2.5, -2.5];
                     let phi_f = [-2.5, -2.5];
-                    let p_wb =
-                        hydrostatic_face(rho, pre, phi_c, phi_f, -2.5, theta, sign);
+                    let p_wb = hydrostatic_face(rho, pre, phi_c, phi_f, -2.5, theta, sign);
                     assert_eq!(
                         p_wb,
                         plain_face(pre, theta, sign),
@@ -307,7 +300,11 @@ fn t3_it_stays_second_order_on_a_smooth_non_equilibrium_state() {
             let pl = hydrostatic_face(
                 [rho[ii - 1], rho[ii], rho[ii + 1]],
                 [pre[ii - 1], pre[ii], pre[ii + 1]],
-                [potential(xc[ii - 1]), potential(xc[ii]), potential(xc[ii + 1])],
+                [
+                    potential(xc[ii - 1]),
+                    potential(xc[ii]),
+                    potential(xc[ii + 1]),
+                ],
                 [potential(xf[ii - 1]), potential(xf[ii])],
                 potential(xf[ii]),
                 THETA,
@@ -452,9 +449,15 @@ fn t6_the_parabolic_path_matches_plain_reconstruction_to_roundoff_without_gravit
     // asserted, with the bit-exact claim kept where it is actually true (T2, the linear
     // operator).
     let cases: [([f64; 6], [f64; 6]); 3] = [
-        ([1.0, 2.5, 0.3, 7.25, 4.0, 0.125], [0.5, 1.5, 0.25, 3.0, 2.0, 0.0625]),
+        (
+            [1.0, 2.5, 0.3, 7.25, 4.0, 0.125],
+            [0.5, 1.5, 0.25, 3.0, 2.0, 0.0625],
+        ),
         ([1.0; 6], [0.6; 6]),
-        ([1e-3, 1e3, 1e-3, 1e3, 1e-3, 1e3], [1e-4, 1e2, 1e-4, 1e2, 1e-4, 1e2]),
+        (
+            [1e-3, 1e3, 1e-3, 1e3, 1e-3, 1e3],
+            [1e-4, 1e2, 1e-4, 1e2, 1e-4, 1e2],
+        ),
     ];
     let phi_c = [-2.5; 6];
     let phi_f = [-2.5; 5];

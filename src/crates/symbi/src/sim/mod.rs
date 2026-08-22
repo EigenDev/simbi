@@ -12,9 +12,7 @@
 
 // the sim-state core lives in `symbi-sim`; re-exported at the `crate::sim::*`
 // paths, which is where regimes, dispatch, the prelude, and tests name it.
-pub use symbi_sim::{
-    checkpoint, decomp, driver, hydro_ops, state, substrate_seam, tracers,
-};
+pub use symbi_sim::{checkpoint, decomp, driver, hydro_ops, state, substrate_seam, tracers};
 
 // SMR lives in the `symbi-amr` crate; re-exported at the `crate::sim::refinement`
 // path, which is where tests and examples name it.

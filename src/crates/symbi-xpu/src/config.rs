@@ -257,8 +257,15 @@ mod tests {
         assert_eq!(w(2, &[1030, 1032]), [64, 4, 1]);
         for e in [[1030u32, 1032, 3], [512, 512, 64], [96, 96, 96]] {
             let b = w(3, &e);
-            assert_eq!(b[0] % 64, 0, "axis 0 not wavefront-aligned for {e:?}: {b:?}");
-            assert!(b[0] * b[1] * b[2] <= 256, "block over budget for {e:?}: {b:?}");
+            assert_eq!(
+                b[0] % 64,
+                0,
+                "axis 0 not wavefront-aligned for {e:?}: {b:?}"
+            );
+            assert!(
+                b[0] * b[1] * b[2] <= 256,
+                "block over budget for {e:?}: {b:?}"
+            );
         }
         // a thin contiguous axis cannot be padded past its extent -- no idle lanes.
         assert_eq!(w(3, &[2, 512, 512])[0], 2);

@@ -58,7 +58,11 @@ fn render(expr: &ScalarExpr) -> String {
             format!("{:?}({}, {})", op, render(lhs), render(rhs))
         }
         ScalarExpr::UnaryOp(op, arg) => format!("{:?}({})", op, render(arg)),
-        ScalarExpr::MethodCall { receiver, method, args } => {
+        ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
             let rest: Vec<String> = args.iter().map(render).collect();
             format!("{}.{}({})", render(receiver), method, rest.join(", "))
         }
@@ -136,8 +140,11 @@ fn main() {
         .node()
     });
     let lowered = scalarize(&kernel.graph, out, "tau");
-    println!("\ntau traced to {} nodes, lowered to {} bound values:",
-        kernel.graph.len(), lowered.body.len());
+    println!(
+        "\ntau traced to {} nodes, lowered to {} bound values:",
+        kernel.graph.len(),
+        lowered.body.len()
+    );
     for stmt in &lowered.body {
         if let ScalarStmt::Let { name, value, .. } = stmt {
             println!("    let {name} = {}", render(value));
@@ -158,7 +165,11 @@ fn main() {
         })
         .collect();
     let from_graph = Cpu.eval_elemental(&lowered, &inputs)[0];
-    assert_eq!(tau(rho, pre, gamma, vsq), from_graph, "the two carriers disagree");
+    assert_eq!(
+        tau(rho, pre, gamma, vsq),
+        from_graph,
+        "the two carriers disagree"
+    );
     println!("\ntau = {from_graph}, again matching the f64 evaluation exactly.");
 
     // ---- and the same graph renders for either machine -----------------------

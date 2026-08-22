@@ -456,7 +456,15 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     transport: &T,
 ) {
     exchange_faces_set(
-        lo, hi, axis, processed, counts, lo_dev, hi_dev, transport, ExchangeSet::Prim,
+        lo,
+        hi,
+        axis,
+        processed,
+        counts,
+        lo_dev,
+        hi_dev,
+        transport,
+        ExchangeSet::Prim,
     )
 }
 

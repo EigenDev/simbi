@@ -54,7 +54,10 @@ impl Default for ShockwaveLimiter {
 /// rather than through it.
 #[inline]
 pub fn mach_scale<S: Scalar>(speed_l: S, speed_r: S, cs_l: S, cs_r: S) -> S {
-    (speed_l / cs_l).abs().max((speed_r / cs_r).abs()).min(S::ONE)
+    (speed_l / cs_l)
+        .abs()
+        .max((speed_r / cs_r).abs())
+        .min(S::ONE)
 }
 
 /// the strength of the transverse shear viscosity that makes the anti-dissipation family
@@ -125,7 +128,10 @@ mod tests {
         for ratio in [0.0, 1.0e-8, 0.3, 1.0] {
             for mach in [0.0, 0.4, 1.0] {
                 let w = shear_weight(ratio, mach);
-                assert!((0.0..=1.0).contains(&w), "weight {w} out of range at ({ratio}, {mach})");
+                assert!(
+                    (0.0..=1.0).contains(&w),
+                    "weight {w} out of range at ({ratio}, {mach})"
+                );
             }
         }
     }
@@ -172,7 +178,11 @@ mod tests {
         // average, would let a face with one nearly-stagnant side reduce its dissipation while
         // the other side is moving — dissipation set by half the Riemann problem.
         let both = mach_scale(0.5, 0.5, 1.0, 1.0);
-        assert_eq!(mach_scale(0.001, 0.5, 1.0, 1.0), both, "the moving side sets it");
+        assert_eq!(
+            mach_scale(0.001, 0.5, 1.0, 1.0),
+            both,
+            "the moving side sets it"
+        );
         assert_eq!(
             mach_scale(0.5, 0.001, 1.0, 1.0),
             both,
@@ -198,7 +208,10 @@ mod tests {
             );
         }
         // and it is a magnitude: a face is equally low-mach whichever way the flow crosses it.
-        assert_eq!(mach_scale(-0.05, 0.01, 1.0, 1.0), mach_scale(0.05, 0.01, 1.0, 1.0));
+        assert_eq!(
+            mach_scale(-0.05, 0.01, 1.0, 1.0),
+            mach_scale(0.05, 0.01, 1.0, 1.0)
+        );
     }
 
     #[test]

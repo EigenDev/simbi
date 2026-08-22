@@ -84,7 +84,6 @@ impl Recon {
     }
 }
 
-
 /// whether a reconstruction limits the state or its departure from local hydrostatic
 /// equilibrium.
 ///

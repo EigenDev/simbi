@@ -47,7 +47,6 @@ pub use gv::{
     imhd_flux_gv, imhd_ghost_fill_gv, imhd_hlld_flux_gv, imhd_wave_speed_map_gv,
     imhd_wave_speeds_cell_gv, inertial_momentum_probe_gv, iso_c2p_gv, iso_flux_gv,
     iso_ghost_fill_gv, iso_pre_gv, iso_wave_speed_map_gv, kerr_wave_speed_map_gv,
-    wb_ghost_fill_gv,
     neumann_ghost_fill_gv, nmhd_c2p_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv,
     nmhd_flux_gv, nmhd_hllc_flux_gv, nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv,
     nmhd_wave_speeds_cell_gv, point_mass_gravity_probe_gv, rhd_c2p_gr_gv, rhd_c2p_gv,
@@ -64,7 +63,7 @@ pub use gv::{
     rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gr_gv, rmhd_wave_speeds_cell_gv,
     robin_ghost_fill_gv, scalar_ghost_fill_gv, snapshot_gv, source_apply_from_built_gv,
     source_apply_gv, splice_user_source_gv, state_finite_probe_gv, uct_master_emf_proof_kernel,
-    uniform_accel_probe_gv,
+    uniform_accel_probe_gv, wb_ghost_fill_gv,
 };
 pub use gv_excise::{
     excise_fill_3d_gv, excise_fill_dof3_gv, excise_fill_gv, excise_fill_sph_1d_gv,
@@ -73,8 +72,8 @@ pub use gv_excise::{
     excise_writeback_dof1_gv, excise_writeback_dof3_gv, excise_writeback_gv, shell_flux_map_gv,
 };
 pub use gv_immersed::{
-    body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv,
-    body_evolved_probe_gv, body_source_gv, body_source_iso_gv, body_source_wb_gv,
+    body_evolved_probe_gv, body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv,
+    body_feedback_iso_gv, body_source_gv, body_source_iso_gv, body_source_wb_gv,
 };
 pub use gv_penalize::{
     body_resistive_emf_2d_gv, body_resistive_emf_3d_dir_gv, penalize_drain_gv,
@@ -83,19 +82,19 @@ pub use gv_penalize::{
     penalize_porous_iso_gv_spinning, penalize_torque_free_gv, penalize_torque_free_iso_gv,
 };
 pub use gv_refinement::{
-    ProlongOrder, field_axpy_shift_gv, field_copy_gv, field_fill_gv, field_lerp_multi_gv,
-    refine_acc_edge_gv, refine_acc_face_gv, refine_prolong_face_gv, refine_prolong_gv,
-    refine_prolong_multi_1t_gv, refine_prolong_multi_gv, refine_prolong_sweep_multi_gv,
-    refine_restrict_face_gv, refine_restrict_gv, WB_BAND_CHAIN_MAX, WB_CF_CHAIN_MAX,
-    band_energy_gv, wb_band_decode_gv, wb_band_encode_gv, wb_cf_decode_gv,
-    wb_cf_lerp_encode_gv, wb_target_decode_gv,
+    ProlongOrder, WB_BAND_CHAIN_MAX, WB_CF_CHAIN_MAX, band_energy_gv, field_axpy_shift_gv,
+    field_copy_gv, field_fill_gv, field_lerp_multi_gv, refine_acc_edge_gv, refine_acc_face_gv,
+    refine_prolong_face_gv, refine_prolong_gv, refine_prolong_multi_1t_gv, refine_prolong_multi_gv,
+    refine_prolong_sweep_multi_gv, refine_restrict_face_gv, refine_restrict_gv, wb_band_decode_gv,
+    wb_band_encode_gv, wb_cf_decode_gv, wb_cf_lerp_encode_gv, wb_target_decode_gv,
 };
 pub use gv_viscous::{
-    OrthoPlane25, viscous_adiabatic_alpha_gv, viscous_adiabatic_alpha_gv_2p5d, viscous_adiabatic_alpha_gv_3d,
-    viscous_adiabatic_alpha_ortho_gv, viscous_adiabatic_gv, viscous_adiabatic_gv_2p5d,
-    viscous_adiabatic_gv_3d, viscous_adiabatic_ortho_gv, viscous_iso_alpha_gv,
-    viscous_iso_alpha_gv_3d, viscous_iso_alpha_ortho_gv, viscous_iso_gv, viscous_iso_gv_2p5d,
-    viscous_iso_gv_3d, viscous_iso_ortho_gv, viscous_ortho_2p5d_gv, viscous_ortho_3d_gv,
+    OrthoPlane25, viscous_adiabatic_alpha_gv, viscous_adiabatic_alpha_gv_2p5d,
+    viscous_adiabatic_alpha_gv_3d, viscous_adiabatic_alpha_ortho_gv, viscous_adiabatic_gv,
+    viscous_adiabatic_gv_2p5d, viscous_adiabatic_gv_3d, viscous_adiabatic_ortho_gv,
+    viscous_iso_alpha_gv, viscous_iso_alpha_gv_3d, viscous_iso_alpha_ortho_gv, viscous_iso_gv,
+    viscous_iso_gv_2p5d, viscous_iso_gv_3d, viscous_iso_ortho_gv, viscous_ortho_2p5d_gv,
+    viscous_ortho_3d_gv,
 };
 pub use lattice::LatticeMap;
 pub use symbi_ir::{Gv, GvKernel};

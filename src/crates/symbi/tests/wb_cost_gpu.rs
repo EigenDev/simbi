@@ -64,8 +64,7 @@ fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
 
 type Sim = SimState<Newtonian, 1, Cartesian, IdealGas<f64>, CudaSpace, UnifiedMemory>;
 type Kset = AdiabaticSubstrateKernelSet<UnifiedMemory, f64, 1>;
-type Hier =
-    Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CudaSpace, UnifiedMemory, Kset>;
+type Hier = Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CudaSpace, UnifiedMemory, Kset>;
 
 fn build(balanced: bool, n: usize) -> Hier {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)

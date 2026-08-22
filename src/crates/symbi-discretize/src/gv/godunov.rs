@@ -2008,8 +2008,7 @@ pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)
     // face positions are selected at runtime by `map_kind_d`, so the widths come out per-cell on
     // any mesh, whatever the bake-time spacing tag says.
     let spacing = vec![Spacing::Uniform; ndim];
-    let new =
-        a0 * chin + ac * (dchi - dt * chi_flux_div_gv(ndim, &spacing) - dt * (h_dil * dchi));
+    let new = a0 * chin + ac * (dchi - dt * chi_flux_div_gv(ndim, &spacing) - dt * (h_dil * dchi));
     let writes = vec![(
         "chi_new".to_string(),
         FieldRef::cons_chi().into(),

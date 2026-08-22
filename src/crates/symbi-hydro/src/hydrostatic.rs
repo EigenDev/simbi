@@ -189,14 +189,12 @@ pub fn equilibrium_pressure_profile<S: Scalar>(
     // faded footprint degrades every point of the chain together.
     let mut corr = vec![S::ZERO; n];
     for k in anchor..n - 1 {
-        corr[k + 1] = corr[k]
-            + rho[k] * (phi_c[k] - phi_f[k])
-            + rho[k + 1] * (phi_f[k] - phi_c[k + 1]);
+        corr[k + 1] =
+            corr[k] + rho[k] * (phi_c[k] - phi_f[k]) + rho[k + 1] * (phi_f[k] - phi_c[k + 1]);
     }
     for k in (0..anchor).rev() {
-        corr[k] = corr[k + 1]
-            + rho[k + 1] * (phi_c[k + 1] - phi_f[k])
-            + rho[k] * (phi_f[k] - phi_c[k]);
+        corr[k] =
+            corr[k + 1] + rho[k + 1] * (phi_c[k + 1] - phi_f[k]) + rho[k] * (phi_f[k] - phi_c[k]);
     }
     corr.into_iter().map(|c| pre_anchor + weight * c).collect()
 }
@@ -357,9 +355,8 @@ mod tests {
         // column that walks into the floor is a clamp rather than a class member.
         let mut pre = [12.0_f64, 0.0, 0.0, 0.0, 0.0];
         for k in 0..4 {
-            pre[k + 1] = pre[k]
-                + rho[k] * (phi_c[k] - phi_f[k])
-                + rho[k + 1] * (phi_f[k] - phi_c[k + 1]);
+            pre[k + 1] =
+                pre[k] + rho[k] * (phi_c[k] - phi_f[k]) + rho[k + 1] * (phi_f[k] - phi_c[k + 1]);
         }
         assert!(
             pre.iter().all(|&p| p > 1.0e-3),
@@ -416,8 +413,7 @@ mod tests {
         let (phi_c, phi_f) = ([-2.0_f64; 3], [-2.0_f64; 2]);
         for theta in [1.5, 2.0, -1.0] {
             for sign in [1.0, -1.0] {
-                let balanced =
-                    hydrostatic_face(rho, pre, phi_c, phi_f, -2.0, theta, sign);
+                let balanced = hydrostatic_face(rho, pre, phi_c, phi_f, -2.0, theta, sign);
                 let plain = plain_face(pre, theta, sign);
                 assert_eq!(balanced, plain, "theta {theta}, sign {sign}");
             }

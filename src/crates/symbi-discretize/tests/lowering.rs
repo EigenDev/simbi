@@ -23,14 +23,13 @@ use symbi_discretize::gv::{
     adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, iso_flux_gv, rhd_flux_gv, rmhd_flux_gv,
 };
 use symbi_discretize::{
-    EosArm, Recon,
-    Coords, GeoSource, Spacetime, Spacing, adiabatic_c2p_gv, body_feedback_gv, body_source_gv,
-    geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv, godunov_stage_gv,
-    inertial_momentum_probe_gv, iso_c2p_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv, rhd_c2p_gv,
-    rhd_wave_speed_map_gv, rmhd_average_efield_gv, rmhd_bcell_from_bface_gv,
-    rmhd_bcell_godunov_euler_gv, rmhd_bcell_godunov_rk2_gv, rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv,
-    rmhd_ct_curl_3d_dir_gv, rmhd_edge_emf_gv, rmhd_ghost_fill_gv, rmhd_save_efield_gv,
-    rmhd_wave_speed_map_gv, snapshot_gv,
+    Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, adiabatic_c2p_gv, body_feedback_gv,
+    body_source_gv, geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv,
+    godunov_stage_gv, inertial_momentum_probe_gv, iso_c2p_gv, iso_ghost_fill_gv,
+    iso_wave_speed_map_gv, rhd_c2p_gv, rhd_wave_speed_map_gv, rmhd_average_efield_gv,
+    rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv, rmhd_bcell_godunov_rk2_gv, rmhd_c2p_gv,
+    rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_3d_dir_gv, rmhd_edge_emf_gv, rmhd_ghost_fill_gv,
+    rmhd_save_efield_gv, rmhd_wave_speed_map_gv, snapshot_gv,
 };
 
 // MAX_SOURCE_BODIES is owned by the runtime (symbi_ib::collection::MAX_SOURCE_BODIES = 2); mirrored
@@ -156,7 +155,7 @@ fn wave_speed_kernels_lower() {
         &[Spacing::Uniform],
         &[0],
         1,
-        EosArm::IdealGamma
+        EosArm::IdealGamma,
     ))
     .grid([8])
     .assert_lowers();
@@ -166,7 +165,7 @@ fn wave_speed_kernels_lower() {
         &[Spacing::Uniform; 3],
         &[0, 1, 2],
         3,
-        EosArm::IdealGamma
+        EosArm::IdealGamma,
     ))
     .grid([8, 8, 8])
     .assert_lowers();

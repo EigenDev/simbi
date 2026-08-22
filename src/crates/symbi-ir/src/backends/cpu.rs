@@ -384,8 +384,7 @@ pub(crate) fn rust_type_name(e: ElementTy, generic: bool) -> &'static str {
 mod tests {
     use super::*;
     use crate::{
-        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy,
-        scalarize,
+        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy, scalarize,
     };
 
     fn lit(n: usize) -> DimExpr {

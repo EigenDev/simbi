@@ -15,9 +15,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::{
-    ConstValue, DimIndex, ElementWiseOp, Graph, NodeId, Op, ReduceOp,
-};
+use crate::graph::{ConstValue, DimIndex, ElementWiseOp, Graph, NodeId, Op, ReduceOp};
 use crate::{DimExpr, ElementTy, Symbol, TensorTy};
 
 // ----- the lowered form -----

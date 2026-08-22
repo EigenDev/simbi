@@ -76,7 +76,11 @@ fn stirred_atmosphere(x: [f64; 3]) -> Prim<f64, 3> {
 }
 
 fn build(recon: Recon, ng: usize, prolong: ProlongOrder, stirred: bool) -> Hier {
-    let seed = if stirred { stirred_atmosphere } else { atmosphere };
+    let seed = if stirred {
+        stirred_atmosphere
+    } else {
+        atmosphere
+    };
     let dx = 1.0 / N as f64;
     let kset = move |s: &Sim| {
         Kset::new(GAMMA, CFL, &s.geom.allocated)
@@ -142,10 +146,7 @@ fn run_and_scan(recon: Recon, ng: usize, prolong: ProlongOrder, stirred: bool) -
         let pre = pre_f.view();
         for c in st.geom.interior.iter() {
             let (r, p) = (*rho.at(c), *pre.at(c));
-            assert!(
-                r.is_finite() && p.is_finite(),
-                "non-finite state at {c:?}"
-            );
+            assert!(r.is_finite() && p.is_finite(), "non-finite state at {c:?}");
             rho_min = rho_min.min(r);
             pre_min = pre_min.min(p);
         }
@@ -160,7 +161,10 @@ fn run_and_scan(recon: Recon, ng: usize, prolong: ProlongOrder, stirred: bool) -
 fn a_draining_accretor_in_a_stratified_atmosphere_survives_under_ppm() {
     let (rho_min, pre_min) = run_and_scan(Recon::Ppm, 3, ProlongOrder::Quartic, false);
     println!("ppm+quartic quiescent: min rho {rho_min:.6e}, min pre {pre_min:.6e}");
-    assert!(rho_min > 0.0 && pre_min > 0.0, "non-positive state survived c2p");
+    assert!(
+        rho_min > 0.0 && pre_min > 0.0,
+        "non-positive state survived c2p"
+    );
 }
 
 /// the plm control on the identical setup: a failure here too would place the fault in the
@@ -169,7 +173,10 @@ fn a_draining_accretor_in_a_stratified_atmosphere_survives_under_ppm() {
 fn the_plm_control_survives_the_same_drain() {
     let (rho_min, pre_min) = run_and_scan(Recon::Plm, 3, ProlongOrder::Ppm, false);
     println!("plm control: min rho {rho_min:.6e}, min pre {pre_min:.6e}");
-    assert!(rho_min > 0.0 && pre_min > 0.0, "non-positive state survived c2p");
+    assert!(
+        rho_min > 0.0 && pre_min > 0.0,
+        "non-positive state survived c2p"
+    );
 }
 
 /// the full production initial condition: the same drain with the mach-0.0625
@@ -179,5 +186,8 @@ fn the_plm_control_survives_the_same_drain() {
 fn the_stirred_production_initial_condition_survives_under_ppm() {
     let (rho_min, pre_min) = run_and_scan(Recon::Ppm, 3, ProlongOrder::Quartic, true);
     println!("ppm+quartic stirred: min rho {rho_min:.6e}, min pre {pre_min:.6e}");
-    assert!(rho_min > 0.0 && pre_min > 0.0, "non-positive state survived c2p");
+    assert!(
+        rho_min > 0.0 && pre_min > 0.0,
+        "non-positive state survived c2p"
+    );
 }

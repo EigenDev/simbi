@@ -279,10 +279,7 @@ fn ppm_cell_interfaces_ep<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S) -> (
     let e_l = vc + (u_l - vc) * scale;
     let e_r = vc + (u_r - vc) * scale;
 
-    (
-        S::select(extremum, e_l, a_l),
-        S::select(extremum, e_r, a_r),
-    )
+    (S::select(extremum, e_l, a_l), S::select(extremum, e_r, a_r))
 }
 
 /// PPM reconstruct: the monotonized-parabola face pair from six stencil values (offsets

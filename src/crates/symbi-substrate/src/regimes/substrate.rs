@@ -32,12 +32,11 @@ use symbi_hydro::source_spec::BuiltSource;
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FluxSpec, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
-    dispatch_named, geom_scalar, scalars_for,
-    motion_scalar,
     dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_c2p_status,
     dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
     dispatch_godunov_maybe_fused, dispatch_godunov_with_body_source, dispatch_gradient_boundaries,
-    dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel, resolve_params,
+    dispatch_named, dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel,
+    geom_scalar, motion_scalar, resolve_params, scalars_for,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Geometry;
@@ -420,7 +419,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             &self.pre,
             &self.cfl_scratch,
             "iso",
-                        symbi_discretize::EosArm::IdealGamma,
+            symbi_discretize::EosArm::IdealGamma,
             ISO_GAMMA,
             self.cfl_number,
             None,
@@ -614,7 +613,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             &scalars,
         );
         let cname = format!("chi_c2p_{D}d");
-        dispatch_named(sim, &self.pre, None, 0, &cname, &sim.geom.interior, &[], &[]);
+        dispatch_named(
+            sim,
+            &self.pre,
+            None,
+            0,
+            &cname,
+            &sim.geom.interior,
+            &[],
+            &[],
+        );
     }
 
     fn snapshot(&self, sim: &FieldStore<D, D, Mem, Sc>) {

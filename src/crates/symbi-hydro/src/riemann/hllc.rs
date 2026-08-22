@@ -193,15 +193,7 @@ pub fn hllc<S: Scalar, const D: usize>(
     shock_smoother: ShockwaveLimiter,
     shear: Option<HllcPlusSensors<S>>,
 ) -> Cons<S, D> {
-    hllc_newtonian_body(
-        eos,
-        prim_l,
-        prim_r,
-        nhat,
-        vface,
-        shock_smoother,
-        shear,
-    )
+    hllc_newtonian_body(eos, prim_l, prim_r, nhat, vface, shock_smoother, shear)
 }
 
 /// the newtonian HLLC body — Standard / Fleischmann star-state dispatch,
@@ -532,8 +524,10 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                             let vn_r = prim_r.vel.dot(nhat);
                             let chi_l = inertia(&u_l, prim_l, a_l, vn_l);
                             let chi_r = inertia(&u_r, prim_r, a_r, vn_r);
-                            let cs_l = crate::rhd::sound_speed_sq(eos, prim_l.rho, prim_l.pre).sqrt();
-                            let cs_r = crate::rhd::sound_speed_sq(eos, prim_r.rho, prim_r.pre).sqrt();
+                            let cs_l =
+                                crate::rhd::sound_speed_sq(eos, prim_l.rho, prim_l.pre).sqrt();
+                            let cs_r =
+                                crate::rhd::sound_speed_sq(eos, prim_r.rho, prim_r.pre).sqrt();
                             // the mach number stays a ratio of coordinate speeds: the imbalance
                             // being corrected is between wave speeds multiplying differences of
                             // conserved states, and a proper-velocity mach number would carry the
@@ -646,8 +640,7 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                         S::select(null_cond, -(fhllm + uhlle), -(fhllm + uhlle) + bpsq + fbpsq);
                     let c_coeff = S::select(null_cond, uhllm, uhllm - fdb);
 
-                    let disc =
-                        (b_coeff * b_coeff - S::FOUR * a_coeff * c_coeff).max(S::ZERO);
+                    let disc = (b_coeff * b_coeff - S::FOUR * a_coeff * c_coeff).max(S::ZERO);
                     let sgn_b = S::select(b_coeff.cmp_ge(S::ZERO), S::ONE, -S::ONE);
                     let quad = S::from_f64(-0.5) * (b_coeff + sgn_b * disc.sqrt());
                     let quad_scale = b_coeff.abs().max(disc.sqrt());
@@ -900,7 +893,15 @@ mod tests {
             pre: 1.0,
         };
         let nhat = Tensor::unit(0);
-        let flux = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard, None);
+        let flux = hllc(
+            &eos,
+            &prim,
+            &prim,
+            &nhat,
+            0.0,
+            ShockwaveLimiter::Standard,
+            None,
+        );
         let regime = Newtonian;
         let exact = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, exact.den));
@@ -918,7 +919,15 @@ mod tests {
         };
 
         let nhat_x = Tensor::unit(0);
-        let flux_x = hllc(&eos, &prim, &prim, &nhat_x, 0.0, ShockwaveLimiter::Standard, None);
+        let flux_x = hllc(
+            &eos,
+            &prim,
+            &prim,
+            &nhat_x,
+            0.0,
+            ShockwaveLimiter::Standard,
+            None,
+        );
         let regime = Newtonian;
         let exact_x = regime.to_flux(&prim, &nhat_x, &eos);
         assert!(approx(flux_x.den, exact_x.den));
@@ -927,7 +936,15 @@ mod tests {
         assert!(approx(flux_x.nrg, exact_x.nrg));
 
         let nhat_y = Tensor::unit(1);
-        let flux_y = hllc(&eos, &prim, &prim, &nhat_y, 0.0, ShockwaveLimiter::Standard, None);
+        let flux_y = hllc(
+            &eos,
+            &prim,
+            &prim,
+            &nhat_y,
+            0.0,
+            ShockwaveLimiter::Standard,
+            None,
+        );
         let exact_y = regime.to_flux(&prim, &nhat_y, &eos);
         assert!(approx(flux_y.den, exact_y.den));
         assert!(approx(flux_y.mom[0], exact_y.mom[0]));
@@ -1488,7 +1505,12 @@ mod tests {
         let nhat = Tensor::new([1.0, 0.0]);
         let mut previous = f64::INFINITY;
         // colder and slower at each step: the two knobs that carry `h` and `W` to one.
-        for (speed, theta) in [(0.3f64, 0.3f64), (0.1, 3.0e-2), (0.03, 3.0e-3), (0.01, 3.0e-4)] {
+        for (speed, theta) in [
+            (0.3f64, 0.3f64),
+            (0.1, 3.0e-2),
+            (0.03, 3.0e-3),
+            (0.01, 3.0e-4),
+        ] {
             let rho = 1.0;
             let prim = Prim {
                 rho,
@@ -1521,7 +1543,9 @@ mod tests {
         // share their transverse velocity receives the classical Mignone-Bodo flux however
         // strong the shock across it. this is what keeps the viscosity out of a
         // one-dimensional problem, where no shear wave exists to damp.
-        let eos = IdealGas { gamma: 4.0f64 / 3.0 };
+        let eos = IdealGas {
+            gamma: 4.0f64 / 3.0,
+        };
         let nhat = Tensor::new([1.0, 0.0]);
         // a strong relativistic shock, with the transverse component equal on both sides.
         for shared_vt in [0.0f64, 0.2, -0.35] {
@@ -1565,7 +1589,9 @@ mod tests {
         // and where the jump exists the term opposes it: the transverse momentum flux moves
         // against the jump, which is what removes energy from the perturbation a grid-aligned
         // front grows through.
-        let eos = IdealGas { gamma: 4.0f64 / 3.0 };
+        let eos = IdealGas {
+            gamma: 4.0f64 / 3.0,
+        };
         let nhat = Tensor::new([1.0, 0.0]);
         let sensors = HllcPlusSensors {
             pressure_ratio: 0.05,
@@ -1624,30 +1650,10 @@ mod tests {
                 vel: Tensor::new([common_v, 0.0]),
                 pre: 1.5,
             };
-            let std = hllc(
-                &eos,
-                &l,
-                &r,
-                &nhat,
-                0.0,
-                ShockwaveLimiter::Standard,
-                None,
-            );
-            let plus = hllc(
-                &eos,
-                &l,
-                &r,
-                &nhat,
-                0.0,
-                ShockwaveLimiter::HllcPlus,
-                None,
-            );
+            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard, None);
+            let plus = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::HllcPlus, None);
             assert_eq!(
-                (
-                    std.den.to_bits(),
-                    std.mom[0].to_bits(),
-                    std.nrg.to_bits()
-                ),
+                (std.den.to_bits(), std.mom[0].to_bits(), std.nrg.to_bits()),
                 (
                     plus.den.to_bits(),
                     plus.mom[0].to_bits(),
@@ -1693,24 +1699,8 @@ mod tests {
                 vel: Tensor::new([-v]),
                 pre: 1.0,
             };
-            let std = hllc(
-                &eos,
-                &l,
-                &r,
-                &nhat,
-                0.0,
-                ShockwaveLimiter::Standard,
-                None,
-            );
-            let plus = hllc(
-                &eos,
-                &l,
-                &r,
-                &nhat,
-                0.0,
-                ShockwaveLimiter::HllcPlus,
-                None,
-            );
+            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard, None);
+            let plus = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::HllcPlus, None);
             // the surviving fraction of the classical velocity-jump dissipation, read off the
             // normal momentum flux against the jump-free reference the two states share.
             let reference = 1.0f64;

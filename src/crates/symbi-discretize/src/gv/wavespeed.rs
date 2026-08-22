@@ -403,7 +403,9 @@ fn gr_metric_fields_gv(
             m.shift(x),
         )
     }
-    with_ks_metric!(spacetime, coords, "the GR metric-fields trace", |m| adm(&m, x))
+    with_ks_metric!(spacetime, coords, "the GR metric-fields trace", |m| adm(
+        &m, x
+    ))
 }
 
 /// the state-dependent curved-background RMHD CFL wave-speed map — the coordinate-frame
@@ -1330,7 +1332,9 @@ pub fn fofc_project_gr_mhd_gv(
                 m.shift(x),
             )
         }
-        with_ks_metric!(spacetime, coords, "the GRMHD FOFC projection", |m| adm(&m, x))
+        with_ks_metric!(spacetime, coords, "the GRMHD FOFC projection", |m| adm(
+            &m, x
+        ))
     };
     let read = |k: &str| Gv::field(k, k);
     let x_den = read("x_den");
@@ -1667,7 +1671,9 @@ pub fn fofc_source_theta_gr_mhd_gv(
                 m.shift(x),
             )
         }
-        with_ks_metric!(spacetime, coords, "the grmhd source limiter", |m| adm(&m, x))
+        with_ks_metric!(spacetime, coords, "the grmhd source limiter", |m| adm(
+            &m, x
+        ))
     };
     let read = |key: &str| Gv::field(key, key);
     let a_den = read("a_den");

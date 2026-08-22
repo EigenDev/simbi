@@ -452,7 +452,6 @@ impl ReduceOp {
     }
 }
 
-
 /// the IR op carried by a node.
 ///
 /// Op + dependents implement Hash + Eq so the Graph can
@@ -1000,7 +999,6 @@ impl Graph {
         }
         reachable
     }
-
 
     /// look up a param by its symbol.
     pub fn param(&self, name: &Symbol) -> Option<NodeId> {

@@ -32,16 +32,13 @@ use std::sync::{Arc, OnceLock};
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    FusedCpuKernel, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver,
+    FluxSpec, FusedCpuKernel, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver,
     body_fused_in, cfl_wave_speed, dispatch_body_feedback, dispatch_body_source,
-    dispatch_body_source_wb,
-    dispatch_c2p_status, dispatch_driven_boundaries, dispatch_fields, dispatch_flux,
-    dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_gradient_boundaries,
-    dispatch_named, dispatch_penalize, dispatch_runtime_source, dispatch_source_apply,
-    FluxSpec, dof_lift_suffix, fused_runtime_cpu_kernel, geom_scalar, resolve_body_only_fused,
-    resolve_params,
-    motion_scalar,
-    scalars_for,
+    dispatch_body_source_wb, dispatch_c2p_status, dispatch_driven_boundaries, dispatch_fields,
+    dispatch_flux, dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused,
+    dispatch_gradient_boundaries, dispatch_named, dispatch_penalize, dispatch_runtime_source,
+    dispatch_source_apply, dof_lift_suffix, fused_runtime_cpu_kernel, geom_scalar, motion_scalar,
+    resolve_body_only_fused, resolve_params, scalars_for,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_sim::state::FieldStore;
@@ -486,7 +483,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             pre,
             &self.cfl_scratch,
             "iso",
-                        symbi_discretize::EosArm::IdealGamma,
+            symbi_discretize::EosArm::IdealGamma,
             self.gamma,
             self.cfl_number,
             None,
@@ -571,13 +568,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             if has_bodies {
                 for axis_bc in bc.iter() {
                     for face_bc in axis_bc.iter() {
-                    assert!(
-                        *face_bc != symbi_grid::ghost::BcType::Periodic,
-                        "balance-aware ghost fill under a PERIODIC boundary with a body \
+                        assert!(
+                            *face_bc != symbi_grid::ghost::BcType::Periodic,
+                            "balance-aware ghost fill under a PERIODIC boundary with a body \
                          potential: the periodic images sit at different potentials, so \
                          the isentrope extension across the cut is unsound. use outflow \
                          or reflect walls, or run the plain reconstruction"
-                    );
+                        );
                     }
                 }
             }

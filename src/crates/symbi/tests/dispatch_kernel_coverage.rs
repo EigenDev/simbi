@@ -493,8 +493,8 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                                 {
                                     continue;
                                 }
-                            {
-                                let mask = false;
+                                {
+                                    let mask = false;
                                     // the chart segment rides with whichever property makes the
                                     // flux read a position: a balanced reconstruction evaluates
                                     // the body potential, a mask-aware solver the body geometry.

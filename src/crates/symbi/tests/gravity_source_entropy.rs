@@ -31,6 +31,7 @@
 // would accumulate fastest while staying invisible in the conserved totals.
 // =============================================================================
 
+use symbi::regimes::substrate_kernels::FusedSourceBinding;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
@@ -39,7 +40,6 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi::regimes::substrate_kernels::FusedSourceBinding;
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -195,7 +195,13 @@ fn worst_entropy_ratio_away_from_walls(sim: &Sim, skip_frac: f64) -> f64 {
 /// majority of its density contrast, under test.
 const WALL_SKIP: f64 = 0.2;
 
-fn hydrostatic_atmosphere_full(gm: f64, cells: usize, cfl: f64, ts: Timestepping, with_body: bool) -> Sim {
+fn hydrostatic_atmosphere_full(
+    gm: f64,
+    cells: usize,
+    cfl: f64,
+    ts: Timestepping,
+    with_body: bool,
+) -> Sim {
     let ic = move |x: [f64; 1]| {
         let rho = hydrostatic_density(x[0] + R_OFFSET, gm);
         Prim {
@@ -527,7 +533,10 @@ fn the_hydrostatic_residue_converges_at_third_order() {
                 let r = *rho.at(*c);
                 worst = worst.max((*pre.at(*c) / r.powf(GAMMA) / k0() - 1.0).abs());
             }
-            println!("GM = {gm:>6}  N = {n:>4}: {:>3} steps  |K/K0 - 1| = {worst:.4e}", sim.iteration);
+            println!(
+                "GM = {gm:>6}  N = {n:>4}: {:>3} steps  |K/K0 - 1| = {worst:.4e}",
+                sim.iteration
+            );
             // non-vacuity: a clamped `dt` would make this measure nothing at all.
             assert!(
                 sim.iteration >= 4,
@@ -542,10 +551,7 @@ fn the_hydrostatic_residue_converges_at_third_order() {
             );
             residue.push(worst);
         }
-        let orders: Vec<f64> = residue
-            .windows(2)
-            .map(|w| (w[0] / w[1]).log2())
-            .collect();
+        let orders: Vec<f64> = residue.windows(2).map(|w| (w[0] / w[1]).log2()).collect();
         println!("  observed orders: {orders:?}");
         for p in &orders {
             assert!(
@@ -557,7 +563,6 @@ fn the_hydrostatic_residue_converges_at_third_order() {
         }
     }
 }
-
 
 /// where in the column the entropy residue actually sits.
 ///
@@ -585,11 +590,17 @@ fn diagnose_entropy_residue_profile() {
             .collect();
 
         let n = ratio.len();
-        let worst_at = (0..n).min_by(|a, b| ratio[*a].total_cmp(&ratio[*b])).unwrap();
+        let worst_at = (0..n)
+            .min_by(|a, b| ratio[*a].total_cmp(&ratio[*b]))
+            .unwrap();
         println!(
             "\nGM = {gm}: {} cells, {} steps.  worst K/K0 = {:.9} at cell {} of {} \
              ({:.0}% of the way in from the near wall)",
-            n, sim.iteration, ratio[worst_at], worst_at, n,
+            n,
+            sim.iteration,
+            ratio[worst_at],
+            worst_at,
+            n,
             100.0 * worst_at as f64 / n as f64
         );
         let below: Vec<usize> = (0..n).filter(|i| ratio[*i] < 1.0 - 1.0e-9).collect();
@@ -606,12 +617,15 @@ fn diagnose_entropy_residue_profile() {
             .chain(n - 12..n)
             .collect();
         for i in show {
-            let mark = if ratio[i] < 1.0 - 1.0e-9 { "  <== below K0" } else { "" };
+            let mark = if ratio[i] < 1.0 - 1.0e-9 {
+                "  <== below K0"
+            } else {
+                ""
+            };
             println!("     cell {i:4}  K/K0 = {:.9}{mark}", ratio[i]);
         }
     }
 }
-
 
 /// whether the residue accumulates or oscillates.
 ///
@@ -640,7 +654,9 @@ fn diagnose_entropy_residue_accumulates_or_rings() {
                 .map(|c| (pre.at(*c) / rho.at(*c).powf(GAMMA)) / k0)
                 .collect();
             let n = ratio.len();
-            let at = (0..n).min_by(|a, b| ratio[*a].total_cmp(&ratio[*b])).unwrap();
+            let at = (0..n)
+                .min_by(|a, b| ratio[*a].total_cmp(&ratio[*b]))
+                .unwrap();
             let below = (0..n).filter(|i| ratio[*i] < 1.0 - 1.0e-9).count();
             println!(
                 "   t = {:6.3}  steps {:6}  worst K/K0 = {:.9} at cell {:3}   cells below K0: {}",
@@ -702,7 +718,10 @@ fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
             (1.0 - worst).max(0.0),
             sim.iteration
         );
-        assert!(sim.iteration > 1000, "{name}: too few steps; the probe is vacuous");
+        assert!(
+            sim.iteration > 1000,
+            "{name}: too few steps; the probe is vacuous"
+        );
         rows.push((name, worst));
     }
     for (name, worst) in &rows {

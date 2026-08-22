@@ -127,14 +127,16 @@ fn build(n: usize) -> Hier {
     };
     let hier = Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, make)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new(BODY),
-            symbi_algebra::Tensor::zeros(),
-            GM,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new(BODY),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )),
+        );
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(move |x| seed(x, true));
     }
@@ -278,7 +280,9 @@ fn an_inadmissible_band_decode_keeps_the_conservative_pressure() {
     // reference clamp, the coarse lattice scalars, then the body slots in
     // declared order (pos, mass, softening, softening kind per slot; an absent
     // slot carries zero mass with unit softening).
-    let mut lo: Vec<i32> = (0..3).map(|a| st.geom.interior.spaces[a].lo as i32).collect();
+    let mut lo: Vec<i32> = (0..3)
+        .map(|a| st.geom.interior.spaces[a].lo as i32)
+        .collect();
     let mut hi: Vec<i32> = (0..3)
         .map(|a| st.geom.interior.spaces[a].hi as i32 - 1)
         .collect();

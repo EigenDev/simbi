@@ -88,8 +88,7 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
                     let inv_a4 = S::ONE / a4;
 
                     let a3 = inv_a4
-                        * (S::TWO * bmu0 * bmun * cssq
-                            - S::TWO * bmu_sq * w2 * vn
+                        * (S::TWO * bmu0 * bmun * cssq - S::TWO * bmu_sq * w2 * vn
                             + S::FOUR * cssq * w2 * w2 * hh * rho * vn
                             - S::TWO * cssq * w2 * hh * rho * vn
                             - S::FOUR * w2 * w2 * hh * rho * vn);
@@ -369,18 +368,13 @@ fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
                                         || {
                                             let ng_clamp = (S::ZERO - g).max(S::ONE);
                                             S::ZERO
-                                                - S::TWO
-                                                    * t
-                                                    * (ng_clamp.acosh() * third).cosh()
+                                                - S::TWO * t * (ng_clamp.acosh() * third).cosh()
                                                 - b3
                                         },
                                         // case 6: q <= 0 -> cosh formula (positive sign).
                                         || {
                                             let g_clamp_hi = g.max(S::ONE);
-                                            S::TWO
-                                                * t
-                                                * (g_clamp_hi.acosh() * third).cosh()
-                                                - b3
+                                            S::TWO * t * (g_clamp_hi.acosh() * third).cosh() - b3
                                         },
                                     )
                                 },

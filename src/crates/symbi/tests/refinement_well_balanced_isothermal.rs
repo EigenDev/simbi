@@ -85,14 +85,16 @@ fn build(regions: &[RefinementRegion<1>]) -> Hier {
         Kset::new(CS, CFL, &s.geom.allocated)
     })
     .unwrap()
-    .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-        0,
-        Tensor::new([-G_OFFSET]),
-        Tensor::zeros(),
-        GM,
-        1.0e-3,
-        0.0,
-    )));
+    .with_bodies(
+        symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+            0,
+            Tensor::new([-G_OFFSET]),
+            Tensor::zeros(),
+            GM,
+            1.0e-3,
+            0.0,
+        )),
+    );
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(isothermal_atmosphere);
     }
@@ -141,7 +143,9 @@ fn an_energy_free_regime_holds_its_declared_target() {
         control.evolve_steps(STEPS).unwrap();
         let drift: Vec<f64> = (0..levels).map(|ll| worst_speed(&control, ll)).collect();
 
-        let mut hier = build(&nested(levels)).with_equilibrium(isothermal_atmosphere).unwrap();
+        let mut hier = build(&nested(levels))
+            .with_equilibrium(isothermal_atmosphere)
+            .unwrap();
         hier.seed_equilibrium();
         let m0 = composite_mass(&hier);
         hier.evolve_steps(STEPS).unwrap();
@@ -189,7 +193,9 @@ fn the_captured_target_carries_no_energy_component() {
     // so the captured imbalance and the target flux must both be one component shorter than
     // the adiabatic case — a reader that assumed a fixed layout would write the pressure into
     // the momentum slot and produce a moving atmosphere that still looked like an equilibrium.
-    let hier = build(&nested(2)).with_equilibrium(isothermal_atmosphere).unwrap();
+    let hier = build(&nested(2))
+        .with_equilibrium(isothermal_atmosphere)
+        .unwrap();
     for (ll, level) in hier.levels.iter().enumerate() {
         assert!(
             level.residual_eq.as_ref().unwrap().nrg_field().is_none(),

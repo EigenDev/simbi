@@ -101,8 +101,9 @@ fn build(gm: f64, balanced: bool, declared: bool) -> Hier {
         .expect("sim construction failed")
         .set_initial(move |x| seed(x, false))
         .build();
-    let make =
-        move |s: &Sim| Kset::new(GAMMA, CFL, &s.geom.allocated).well_balanced_reconstruction(balanced);
+    let make = move |s: &Sim| {
+        Kset::new(GAMMA, CFL, &s.geom.allocated).well_balanced_reconstruction(balanced)
+    };
     let ck = make(&coarse);
     let region = RefinementRegion {
         x_lo: [0.25, 0.0, 0.0],
@@ -110,14 +111,16 @@ fn build(gm: f64, balanced: bool, declared: bool) -> Hier {
     };
     let mut hier = Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, make)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new(BODY),
-            symbi_algebra::Tensor::zeros(),
-            gm,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new(BODY),
+                symbi_algebra::Tensor::zeros(),
+                gm,
+                1.0e-3,
+                0.0,
+            )),
+        );
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(move |x| seed(x, true));
     }
@@ -171,11 +174,7 @@ fn seam_response(gm: f64, amp: f64, balanced: bool, declared: bool) -> (f64, f64
     let st = &hier.levels[1].state;
     let rho_v = st.fields.prim.rho.view();
     let pre_v = st.fields.prim.pre.as_ref().expect("adiabatic").view();
-    let (alo, x_lo, dxf) = (
-        st.geom.allocated.spaces[0].lo,
-        st.geom.x_lo,
-        st.geom.dx,
-    );
+    let (alo, x_lo, dxf) = (st.geom.allocated.spaces[0].lo, st.geom.x_lo, st.geom.dx);
     let injected = amp.exp_m1().abs();
     let mut worst_anchor = 0.0_f64;
     let mut worst_truth = 0.0_f64;
@@ -202,7 +201,8 @@ fn seam_response(gm: f64, amp: f64, balanced: bool, declared: bool) -> (f64, f64
                 let f = [0.5 * (xa[0] + gx[0]), y, z];
                 let (ra, pa) = (*rho_v.at(na), *pre_v.at(na));
                 let rb = *rho_v.at(nb);
-                let chained = pa + ra * (phi(gm, xa) - phi(gm, f)) + rb * (phi(gm, f) - phi(gm, gx));
+                let chained =
+                    pa + ra * (phi(gm, xa) - phi(gm, f)) + rb * (phi(gm, f) - phi(gm, gx));
                 worst_anchor = worst_anchor.max(((p_g - chained) / p_truth).abs());
             }
         }

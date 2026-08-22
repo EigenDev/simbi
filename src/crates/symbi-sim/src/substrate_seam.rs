@@ -324,12 +324,8 @@ impl Solver {
     /// (solver, regime) pair lacks a baked kernel" was blind to it. a `match` here
     /// would not help — an array literal is not exhaustiveness-checked — so the array lives
     /// beside the enum and the length assertion below fails the build if the two drift.
-    pub const ALL: &'static [Solver] = &[
-        Solver::Hlle,
-        Solver::Hllc,
-        Solver::HllcPlus,
-        Solver::Hlld,
-    ];
+    pub const ALL: &'static [Solver] =
+        &[Solver::Hlle, Solver::Hllc, Solver::HllcPlus, Solver::Hlld];
 
     /// kernel-name suffix: matches the AOT emit names in `symbi-aot/build.rs`.
     pub fn kernel_suffix(self) -> &'static str {
@@ -503,12 +499,7 @@ const _: () = {
     let expected = {
         let mut n = 0;
         // one arm per variant; the compiler rejects a new variant that is not listed.
-        let all = [
-            Solver::Hlle,
-            Solver::Hllc,
-                    Solver::HllcPlus,
-            Solver::Hlld,
-        ];
+        let all = [Solver::Hlle, Solver::Hllc, Solver::HllcPlus, Solver::Hlld];
         while n < all.len() {
             n += 1;
         }

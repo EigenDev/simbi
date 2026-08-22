@@ -125,8 +125,7 @@ fn ppm_refuses_a_refined_hierarchy() {
         x_lo: [0.4],
         x_hi: [0.6],
     }];
-    let mut hier =
-        Hierarchy::with_refinement(sim, ck, &regions, ProlongOrder::Ppm, kern).unwrap();
+    let mut hier = Hierarchy::with_refinement(sim, ck, &regions, ProlongOrder::Ppm, kern).unwrap();
     hier.levels[1].state.seed_cells(|[x]| {
         if x < 0.5 {
             Prim {
@@ -232,7 +231,13 @@ fn ppm_strong_shock_stays_inside_the_wave_fan_band() {
     let (mut pre_lo, mut pre_hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for c in sim.geom.interior.iter() {
         let r = *sim.fields.prim.rho.view().at(c);
-        let p = *sim.fields.prim.pre_field().expect("adiabatic pre").view().at(c);
+        let p = *sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("adiabatic pre")
+            .view()
+            .at(c);
         rho_lo = rho_lo.min(r);
         rho_hi = rho_hi.max(r);
         pre_lo = pre_lo.min(p);
@@ -315,18 +320,22 @@ fn sealed_wall_infall_probe(
                 k_eta_t: 0.0,
             })
         } else {
-            Body::gravitational(0, Tensor::new([0.0; 3]), Tensor::zeros(), 1.0, R_BODY, R_BODY)
+            Body::gravitational(
+                0,
+                Tensor::new([0.0; 3]),
+                Tensor::zeros(),
+                1.0,
+                R_BODY,
+                R_BODY,
+            )
         }));
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(
-        5.0 / 3.0,
-        cfl,
-        &sim.geom.allocated,
-    )
-    .with_solver(solver)
-    .expect("solver/regime mismatch")
-    .theta(theta)
-    .ppm_flatten(flatten.0, flatten.1)
-    .reconstruction(recon);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(5.0 / 3.0, cfl, &sim.geom.allocated)
+            .with_solver(solver)
+            .expect("solver/regime mismatch")
+            .theta(theta)
+            .ppm_flatten(flatten.0, flatten.1)
+            .reconstruction(recon);
     evolve(&mut sim, &sub, t_end).expect("sealed wall evolve failed");
     assert!(sim.iteration > 10, "barely stepped; the probe is vacuous");
 
@@ -335,7 +344,13 @@ fn sealed_wall_infall_probe(
     let mut worst_c = [0isize; 3];
     for c in sim.geom.interior.iter() {
         let rho = *sim.fields.prim.rho.view().at(c);
-        let pre = *sim.fields.prim.pre_field().expect("adiabatic pre").view().at(c);
+        let pre = *sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("adiabatic pre")
+            .view()
+            .at(c);
         assert!(
             rho.is_finite() && pre.is_finite() && rho > 0.0 && pre > 0.0,
             "non-finite or non-positive state at {c:?} after {} steps",
@@ -470,7 +485,10 @@ fn diagnose_dip_trend_per_solver() {
             );
             let dip = (1.0 - k).max(0.0);
             let ratio = prev.map_or(f64::NAN, |p: f64| dip / p);
-            println!("{:>10} {n:>6} {dip:>12.3e} {ratio:>9.3}", format!("{solver:?}"));
+            println!(
+                "{:>10} {n:>6} {dip:>12.3e} {ratio:>9.3}",
+                format!("{solver:?}")
+            );
             prev = Some(dip);
         }
     }
@@ -585,4 +603,3 @@ fn the_ppm_entropy_dip_on_infall_is_small_and_converges_away() {
          regime it exists for"
     );
 }
-

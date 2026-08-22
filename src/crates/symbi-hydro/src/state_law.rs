@@ -40,12 +40,17 @@ use symbi_algebra::algebra::Numeric;
 pub enum Background {
     Minkowski,
     /// ingoing kerr-schild for a non-rotating hole, in cartesian coordinates.
-    SchwarzschildKsCartesian { mass: f64 },
+    SchwarzschildKsCartesian {
+        mass: f64,
+    },
     /// ingoing kerr-schild for a spinning hole, in cartesian coordinates. the spin is the
     /// specific angular momentum `a = J/M` about +z; the shift carries an azimuthal
     /// component, so treating a spinning hole as its non-rotating twin would build the
     /// conserved state against the wrong frame-dragging.
-    KerrKsCartesian { mass: f64, spin: f64 },
+    KerrKsCartesian {
+        mass: f64,
+        spin: f64,
+    },
 }
 
 /// the conservation law a source relaxes against: which background densitizes the
@@ -147,12 +152,7 @@ impl StateLaw {
     }
 
     /// the primitive state and closure every arm converts from.
-    fn inputs<const D: usize>(
-        &self,
-        rho: Gv,
-        vel: &[Gv],
-        pre: Gv,
-    ) -> (Prim<Gv, D>, IdealGas<Gv>) {
+    fn inputs<const D: usize>(&self, rho: Gv, vel: &[Gv], pre: Gv) -> (Prim<Gv, D>, IdealGas<Gv>) {
         (
             Prim::<Gv, D> {
                 rho,
@@ -293,7 +293,10 @@ mod tests {
     fn the_relativistic_arms_trace_at_every_supported_background() {
         // the point of the descriptor: one call site, several conservation laws. a
         // background whose metric failed to build would panic inside the trace.
-        assert_eq!(arity::<3>(StateLaw::relativistic(4.0 / 3.0, Background::Minkowski)), 5);
+        assert_eq!(
+            arity::<3>(StateLaw::relativistic(4.0 / 3.0, Background::Minkowski)),
+            5
+        );
         assert_eq!(
             arity::<3>(StateLaw::relativistic(
                 4.0 / 3.0,
@@ -304,7 +307,10 @@ mod tests {
         assert_eq!(
             arity::<3>(StateLaw::relativistic(
                 4.0 / 3.0,
-                Background::KerrKsCartesian { mass: 1.0, spin: 0.9 }
+                Background::KerrKsCartesian {
+                    mass: 1.0,
+                    spin: 0.9
+                }
             )),
             5
         );

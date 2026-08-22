@@ -14,9 +14,9 @@
 
 use std::collections::BTreeMap;
 
+use symbi_discretize::GvKernel;
 use symbi_discretize::coords::{Coords, Spacetime, Spacing};
 use symbi_discretize::gv::{adiabatic_c2p_gv, godunov_stage_gv, neumann_ghost_fill_gv};
-use symbi_discretize::GvKernel;
 use symbi_ir::graph::{NodeId, Op};
 
 fn weight(kind: &str) -> f64 {
@@ -62,7 +62,10 @@ fn price(name: &str, k: GvKernel, writes: Vec<(String, symbi_ir::FieldBind, Node
         "{name:<34} nodes {n:>5}   cost {cost:>7.0}   expensive-op share {:>4.0}%",
         100.0 * transcendental / cost.max(1.0)
     );
-    let mut rows: Vec<_> = h.iter().map(|(k, &c)| (c as f64 * weight(k), k.clone(), c)).collect();
+    let mut rows: Vec<_> = h
+        .iter()
+        .map(|(k, &c)| (c as f64 * weight(k), k.clone(), c))
+        .collect();
     rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
     let top: Vec<String> = rows
         .into_iter()
@@ -76,7 +79,13 @@ fn price(name: &str, k: GvKernel, writes: Vec<(String, symbi_ir::FieldBind, Node
 fn main() {
     let sp = [Spacing::Uniform, Spacing::Uniform, Spacing::Uniform];
     let (k, w) = godunov_stage_gv(
-        Coords::Cartesian, Spacetime::Minkowski, &sp, &[0, 1, 2], 3, 5, true,
+        Coords::Cartesian,
+        Spacetime::Minkowski,
+        &sp,
+        &[0, 1, 2],
+        3,
+        5,
+        true,
         symbi_discretize::gv::GeoSource::Hydro { inertial: false },
     );
     price("godunov_stage 3d (5 comp)", k, w);

@@ -659,8 +659,7 @@ fn cuda_method_to_fn(method: &str) -> &str {
 mod tests {
     use super::*;
     use crate::{
-        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy,
-        scalarize,
+        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy, scalarize,
     };
 
     fn lit(n: usize) -> DimExpr {

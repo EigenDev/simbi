@@ -729,9 +729,7 @@ where
             let first = symbi_sim::hydro_ops::first_c2p_error(sim)
                 .map(|(coord, code)| format!("{coord:?}:{code}"))
                 .unwrap_or_else(|| "unavailable".to_string());
-            eprintln!(
-                "[fofc] {exterior_froze} exterior freeze(s), streak {streak}, first {first}"
-            );
+            eprintln!("[fofc] {exterior_froze} exterior freeze(s), streak {streak}, first {first}");
         }
     }
     // tier 3, the last resort below the projection: an exterior cell that even the projection could

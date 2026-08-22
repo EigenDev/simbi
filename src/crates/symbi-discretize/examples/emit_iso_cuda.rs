@@ -17,9 +17,8 @@ use std::fs;
 use symbi_discretize::GvKernel;
 use symbi_discretize::{
     Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
-    godunov_mass_gv,
-    godunov_stage_gv, iso_c2p_gv, iso_flux_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,
-    rhd_c2p_gv, rhd_flux_gv, snapshot_gv,
+    godunov_mass_gv, godunov_stage_gv, iso_c2p_gv, iso_flux_gv, iso_ghost_fill_gv,
+    iso_wave_speed_map_gv, rhd_c2p_gv, rhd_flux_gv, snapshot_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::NodeId;

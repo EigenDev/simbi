@@ -647,8 +647,9 @@ fn lower_configured_sources(
             Ok(config)
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let (built, params) = symbi_hydro::expr_bridge::build_user_sources_with_law(&configs, spec, law)
-        .map_err(|error| format!("source expression lower: {error}"))?;
+    let (built, params) =
+        symbi_hydro::expr_bridge::build_user_sources_with_law(&configs, spec, law)
+            .map_err(|error| format!("source expression lower: {error}"))?;
     Ok((built, params))
 }
 
@@ -1492,8 +1493,7 @@ fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) 
             position: vec![pos[0], pos[1]],
             velocity: vec![vel[0], vel[1]],
             softening: sub_f64(c, "gravitational", "softening_length", 0.0),
-            softening_kind: if sub_str(c, "gravitational", "softening_kind", "plummer")
-                == "compact"
+            softening_kind: if sub_str(c, "gravitational", "softening_kind", "plummer") == "compact"
             {
                 1.0
             } else {
@@ -2857,7 +2857,10 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
         push(
             "Numerics",
             "ppm flatten",
-            format!("{:.3} -> {:.3}", cfg.ppm_flatten_onset, cfg.ppm_flatten_full),
+            format!(
+                "{:.3} -> {:.3}",
+                cfg.ppm_flatten_onset, cfg.ppm_flatten_full
+            ),
         );
     }
     push(
@@ -3124,7 +3127,11 @@ fn build_recon(cfg: &Config) -> symbi::Recon {
 /// allocated ghost width: the ppm face pair loads -3..+2 along the sweep, one cell
 /// beyond the plm default of 2.
 fn ghost_width(cfg: &Config) -> usize {
-    if cfg.reconstruction_name == "ppm" { 3 } else { 2 }
+    if cfg.reconstruction_name == "ppm" {
+        3
+    } else {
+        2
+    }
 }
 
 /// the eos closure arm for the kernel set. "synge" is the taub-mathews
@@ -3479,8 +3486,7 @@ mod diagnostics_tests {
         // path under the system temp directory is shared by every run on the machine,
         // and a second one appending while this one reads yields a row that parses as
         // text rather than as numbers.
-        let dir = std::env::temp_dir()
-            .join(format!("symbi_diag_dat_3d_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("symbi_diag_dat_3d_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("diagnostics.dat");
         let _ = std::fs::remove_file(&path);
@@ -3525,8 +3531,7 @@ mod diagnostics_tests {
         // path under the system temp directory is shared by every run on the machine,
         // and a second one appending while this one reads yields a row that parses as
         // text rather than as numbers.
-        let dir = std::env::temp_dir()
-            .join(format!("symbi_diag_dat_2d_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("symbi_diag_dat_2d_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("diagnostics.dat");
         let _ = std::fs::remove_file(&path);
@@ -7251,8 +7256,7 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         }
         if cfg.n_gpus > 1 {
             return Err(
-                "eos = 'synge' with gpus > 1 awaits the decomposed equivalence gate"
-                    .to_string(),
+                "eos = 'synge' with gpus > 1 awaits the decomposed equivalence gate".to_string(),
             );
         }
     }
@@ -8131,7 +8135,11 @@ fn run_simulation(
 /// viscous operator, with no `viscosity_alpha` to disambiguate it. guessing there is silent either
 /// way — read it as viscosity and a transport term appears uninvited, ignore it and one silently
 /// vanishes — so the ambiguous case is refused and the config is asked to say which it meant.
-fn alpha_key_verdict(regime: &str, bare_alpha_key: bool, viscosity_alpha: f64) -> Result<(), String> {
+fn alpha_key_verdict(
+    regime: &str,
+    bare_alpha_key: bool,
+    viscosity_alpha: f64,
+) -> Result<(), String> {
     let viscous_regime = matches!(regime, "newtonian" | "isothermal" | "nmhd" | "imhd");
     if viscous_regime && bare_alpha_key && viscosity_alpha == 0.0 {
         return Err(format!(

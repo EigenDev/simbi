@@ -94,14 +94,16 @@ fn build(regions: &[RefinementRegion<1>]) -> Hier {
     let ck = kset(&coarse);
     let hier = Hierarchy::with_refinement(coarse, ck, regions, ProlongOrder::Ppm, kset)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new([-G_OFFSET]),
-            symbi_algebra::Tensor::zeros(),
-            GM,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new([-G_OFFSET]),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )),
+        );
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(hydrostatic);
     }
@@ -169,7 +171,10 @@ fn declared_target_ghosts_do_not_read_the_fine_interior() {
          interior changed"
     );
 
-    let target = hier.levels[1].prim_eq.as_ref().expect("declared target primitives");
+    let target = hier.levels[1]
+        .prim_eq
+        .as_ref()
+        .expect("declared target primitives");
     let (target_rho, target_vel, target_pre) = (
         target.rho.view(),
         target.vel[0].view(),
@@ -189,7 +194,13 @@ fn inadmissible_declared_target_decode_falls_back_as_one_state() {
     {
         let parent = &hier.levels[0].state;
         let mut velocity = parent.fields.prim.vel[0].view_mut();
-        let mut pressure = parent.fields.prim.pre.as_ref().expect("adiabatic").view_mut();
+        let mut pressure = parent
+            .fields
+            .prim
+            .pre
+            .as_ref()
+            .expect("adiabatic")
+            .view_mut();
         for coord in parent.geom.allocated.iter() {
             *velocity.at_mut(coord) = 7.0;
             *pressure.at_mut(coord) = -1.0e30;
@@ -356,14 +367,16 @@ fn build_declared_ppm(regions: &[RefinementRegion<1>]) -> Hier {
     let ck = kset_ppm(&coarse);
     let hier = Hierarchy::with_refinement(coarse, ck, regions, ProlongOrder::Quartic, kset_ppm)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new([-G_OFFSET]),
-            symbi_algebra::Tensor::zeros(),
-            GM,
-            1.0e-3,
-            0.0,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new([-G_OFFSET]),
+                symbi_algebra::Tensor::zeros(),
+                GM,
+                1.0e-3,
+                0.0,
+            )),
+        );
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(hydrostatic);
     }
@@ -540,7 +553,10 @@ fn a_target_that_is_not_stationary_reads_as_non_converging() {
         .target_imbalance_convergence(0)
         .expect("levels 0 and 1 overlap");
     let shown: Vec<String> = measured.ratio.iter().map(|r| format!("{r:.3}")).collect();
-    println!("\nwrong-gravity target, per-component medians: {shown:?} (sampled {:?})", measured.sampled);
+    println!(
+        "\nwrong-gravity target, per-component medians: {shown:?} (sampled {:?})",
+        measured.sampled
+    );
 
     // momentum is the component the error lives in: the pressure gradient balances a different
     // gravity than the one applied.
@@ -737,7 +753,9 @@ fn a_declared_target_stops_the_entropy_drift_at_the_interface() {
 
         let mut hier = build_declared(&nested(levels));
         hier.prime();
-        let initial: Vec<f64> = (0..levels).map(|ll| worst_entropy_deviation(&hier, ll)).collect();
+        let initial: Vec<f64> = (0..levels)
+            .map(|ll| worst_entropy_deviation(&hier, ll))
+            .collect();
         hier.evolve_steps(STEPS).unwrap();
 
         for ll in 0..levels {
@@ -811,8 +829,14 @@ fn the_fixed_point_survives_a_step_it_was_not_probed_at() {
             }
         }
         hier.evolve_steps(STEPS).unwrap();
-        let speeds: Vec<String> = (0..2).map(|ll| format!("{:.3e}", worst_speed(&hier, ll))).collect();
-        let label = if clamp == 0.0 { "cfl (= probe dt)".to_string() } else { format!("{clamp}x cfl") };
+        let speeds: Vec<String> = (0..2)
+            .map(|ll| format!("{:.3e}", worst_speed(&hier, ll)))
+            .collect();
+        let label = if clamp == 0.0 {
+            "cfl (= probe dt)".to_string()
+        } else {
+            format!("{clamp}x cfl")
+        };
         println!("  dt = {label:<18} max|v| {speeds:?}");
         // the imbalance is read off a single stage at the target's own cfl step. if any part of what
         // that stage does were quadratic in dt, the correction would cancel only at that step and
@@ -932,14 +956,16 @@ fn build_cusped(levels: usize) -> Hier {
     let ck = kset(&coarse);
     let hier = Hierarchy::with_refinement(coarse, ck, &nested(levels), ProlongOrder::Ppm, kset)
         .unwrap()
-        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-            0,
-            symbi_algebra::Tensor::new([0.5]),
-            symbi_algebra::Tensor::zeros(),
-            CUSP_GM,
-            0.0,
-            CUSP_SOFTENING,
-        )));
+        .with_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                symbi_algebra::Tensor::new([0.5]),
+                symbi_algebra::Tensor::zeros(),
+                CUSP_GM,
+                0.0,
+                CUSP_SOFTENING,
+            )),
+        );
     for lvl in 1..hier.levels.len() {
         hier.levels[lvl].state.seed_cells(cusped_atmosphere);
     }
@@ -1016,7 +1042,10 @@ fn a_correct_target_is_never_refused_however_steep() {
     // different equations stays detectable throughout, because its error is the continuum
     // residual and that is present wherever the source is, including in the smooth cells.
     println!("\ncorrect targets across a range of steepness (none may be refused)");
-    println!("{:>14} {:>15} {:>12}", "softening/dx", "rho ratio/cell", "verdict");
+    println!(
+        "{:>14} {:>15} {:>12}",
+        "softening/dx", "rho ratio/cell", "verdict"
+    );
     for soft_cells in [2.0_f64, 1.5, 1.0, 0.75, 0.5, 0.35] {
         let soft = soft_cells / N as f64;
         let dx = 1.0 / N as f64;
@@ -1027,20 +1056,37 @@ fn a_correct_target_is_never_refused_however_steep() {
         let across = dens(0.5 + 0.5 * dx) / dens(0.5 + 1.5 * dx);
         let target = move |x: [f64; 1]| {
             let r = dens(x[0]);
-            Prim { rho: r, vel: symbi_algebra::Tensor::new([0.0]), pre: K0 * r.powf(GAMMA) }
+            Prim {
+                rho: r,
+                vel: symbi_algebra::Tensor::new([0.0]),
+                pre: K0 * r.powf(GAMMA),
+            }
         };
         let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
-            .cells([N]).spacing([dx])
+            .cells([N])
+            .spacing([dx])
             .boundaries(Boundaries::uniform(BoundaryType::Reflect))
-            .cfl(CFL).allocate().unwrap().set_initial(target).build();
+            .cfl(CFL)
+            .allocate()
+            .unwrap()
+            .set_initial(target)
+            .build();
         let ck = kset(&coarse);
         let hier = Hierarchy::with_refinement(coarse, ck, &nested(2), ProlongOrder::Ppm, kset)
             .unwrap()
-            .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-                0, symbi_algebra::Tensor::new([0.5]), symbi_algebra::Tensor::zeros(),
-                CUSP_GM, 0.0, soft,
-            )));
-        for lvl in 1..hier.levels.len() { hier.levels[lvl].state.seed_cells(target); }
+            .with_bodies(
+                symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                    0,
+                    symbi_algebra::Tensor::new([0.5]),
+                    symbi_algebra::Tensor::zeros(),
+                    CUSP_GM,
+                    0.0,
+                    soft,
+                )),
+            );
+        for lvl in 1..hier.levels.len() {
+            hier.levels[lvl].state.seed_cells(target);
+        }
 
         // non-vacuity: the target has to be genuinely steep, or this is the smooth case again.
         assert!(
@@ -1067,7 +1113,6 @@ fn a_correct_target_is_never_refused_however_steep() {
         }
     }
 }
-
 
 /// the stationarity diagnostic ignores the sink interior.
 ///

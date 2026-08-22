@@ -599,11 +599,11 @@ mod tests {
         // the semantics of each conserved field differ (newtonian den = rho;
         // rhd den = rho * W) but the layout collapses.
         assert_eq!(n.fields, s.fields);
-    assert_eq!(
-        n.primitive_fields, s.primitive_fields,
-        "rhd primitive schema drifted from newtonian: HDF5 dataset names diverge"
-    );
-    assert_eq!(n.laws, s.laws);
+        assert_eq!(
+            n.primitive_fields, s.primitive_fields,
+            "rhd primitive schema drifted from newtonian: HDF5 dataset names diverge"
+        );
+        assert_eq!(n.laws, s.laws);
 
         // shared metadata.
         assert_eq!(n.eos, s.eos);

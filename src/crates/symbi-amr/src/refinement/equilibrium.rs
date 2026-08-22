@@ -171,7 +171,10 @@ pub fn residual_norm<const NDIM: usize, const DOF: usize, Mem: MemorySpace>(
         .into_iter()
         .map(|field| {
             let view = field.view();
-            domain.iter().map(|c| view.at(c).abs() * volume).sum::<f64>()
+            domain
+                .iter()
+                .map(|c| view.at(c).abs() * volume)
+                .sum::<f64>()
         })
         .collect()
 }

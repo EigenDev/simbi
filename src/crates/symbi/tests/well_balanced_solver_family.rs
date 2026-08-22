@@ -222,7 +222,10 @@ fn declaring_the_target_frees_the_solver_from_damping_the_residual() {
 #[ignore = "diagnostic: undeclared entropy deficit against resolution, per solver"]
 fn diagnose_undeclared_deficit_trend() {
     println!("\nundeclared sealed column, plain reconstruction, {STEPS} steps");
-    println!("{:>10} {:>6} {:>12} {:>9}", "solver", "n", "deficit", "ratio");
+    println!(
+        "{:>10} {:>6} {:>12} {:>9}",
+        "solver", "n", "deficit", "ratio"
+    );
     for solver in [Solver::Hllc, Solver::HllcPlus] {
         let mut prev: Option<f64> = None;
         for n in [64usize, 128, 256] {
@@ -230,7 +233,10 @@ fn diagnose_undeclared_deficit_trend() {
             hier.evolve_steps(STEPS).unwrap();
             let deficit = (1.0 - worst_entropy_ratio(&hier)).max(0.0);
             let ratio = prev.map_or(f64::NAN, |p: f64| deficit / p);
-            println!("{:>10} {n:>6} {deficit:>12.3e} {ratio:>9.3}", format!("{solver:?}"));
+            println!(
+                "{:>10} {n:>6} {deficit:>12.3e} {ratio:>9.3}",
+                format!("{solver:?}")
+            );
             prev = Some(deficit);
         }
     }

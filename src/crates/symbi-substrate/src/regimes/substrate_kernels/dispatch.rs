@@ -27,8 +27,8 @@ use super::binding::{bind_manifest, kernel_bindings, kernel_field_binds, resolve
 use super::exec::{dispatch_fields, dispatch_fields_runtime_ir};
 use super::layout::{geom_suffix, gr_chart_dof_tag, penalize_name, spacetime_slug};
 use super::params::{
-    ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar,
-    resolve_body_scalars, scalars_for,
+    ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, resolve_body_scalars,
+    scalars_for,
 };
 use super::types::Solver;
 
@@ -912,7 +912,11 @@ pub fn dispatch_body_source_wb<const D: usize, const DOF: usize, Mem, Sc>(
     let chart = symbi_discretize::kernel_slug::coord_suffix(sim.geom.coords);
     let name = format!("body_source_wb{chart}_{D}d_r{reach}");
     let scalars = resolve_body_scalars(sim, dt, gamma, &name);
-    let pre = sim.fields.prim.pre_field().expect("adiabatic body source needs prim.pre");
+    let pre = sim
+        .fields
+        .prim
+        .pre_field()
+        .expect("adiabatic body source needs prim.pre");
     dispatch_named(sim, pre, None, 0, &name, &sim.geom.interior, &[], &scalars);
 }
 
@@ -1935,9 +1939,15 @@ fn shaped_penalize_gv(
     Vec<(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)>,
 ) {
     match (has_energy, spin) {
-        (true, false) => symbi_discretize::penalize_porous_gv_shaped(coords, ndim, dof, shape, false),
-        (true, true) => symbi_discretize::penalize_porous_gv_spinning(coords, ndim, dof, shape, false),
-        (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, dof, shape, false),
+        (true, false) => {
+            symbi_discretize::penalize_porous_gv_shaped(coords, ndim, dof, shape, false)
+        }
+        (true, true) => {
+            symbi_discretize::penalize_porous_gv_spinning(coords, ndim, dof, shape, false)
+        }
+        (false, false) => {
+            symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, dof, shape, false)
+        }
         (false, true) => {
             symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, dof, shape, false)
         }
@@ -2390,7 +2400,11 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         let cart = symbi_geometry::Geometry::Cartesian;
         let coords_g = geom.coords;
         // a dyed run selects the twin that also drains `cons.chi`.
-        let dye = if sim.has_passive_scalar() { "_dyed" } else { "" };
+        let dye = if sim.has_passive_scalar() {
+            "_dyed"
+        } else {
+            ""
+        };
         let name_owned: String = match (bodies.get(b).spec.surface, nrg.is_some()) {
             (symbi_ib::SurfaceSpec::Drain, true) => {
                 penalize_name(&format!("penalize_drain{dye}"), coords_g, D, &geom.axes)
@@ -2401,15 +2415,24 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             (symbi_ib::SurfaceSpec::Porous { .. }, true) => {
                 penalize_name(&format!("penalize_porous{dye}"), coords_g, D, &geom.axes)
             }
-            (symbi_ib::SurfaceSpec::Porous { .. }, false) => {
-                penalize_name(&format!("penalize_porous_iso{dye}"), coords_g, D, &geom.axes)
-            }
-            (symbi_ib::SurfaceSpec::TorqueFree { .. }, false) => {
-                penalize_name(&format!("penalize_torque_free_iso{dye}"), coords_g, D, &geom.axes)
-            }
-            (symbi_ib::SurfaceSpec::TorqueFree { .. }, true) => {
-                penalize_name(&format!("penalize_torque_free{dye}"), coords_g, D, &geom.axes)
-            }
+            (symbi_ib::SurfaceSpec::Porous { .. }, false) => penalize_name(
+                &format!("penalize_porous_iso{dye}"),
+                coords_g,
+                D,
+                &geom.axes,
+            ),
+            (symbi_ib::SurfaceSpec::TorqueFree { .. }, false) => penalize_name(
+                &format!("penalize_torque_free_iso{dye}"),
+                coords_g,
+                D,
+                &geom.axes,
+            ),
+            (symbi_ib::SurfaceSpec::TorqueFree { .. }, true) => penalize_name(
+                &format!("penalize_torque_free{dye}"),
+                coords_g,
+                D,
+                &geom.axes,
+            ),
         };
         // 2.5D MHD (DOF > D) selects the DOF-aware `_dof{DOF}` kernel that drains all momentum
         // components; hydro / full 3D MHD (DOF == D) keep the base name. the baked matrix covers
@@ -3167,8 +3190,13 @@ pub fn dispatch_godunov_with_sources<const D: usize, const DOF: usize, Mem, Sc>(
     let name = format!("{prefix}_godunov_stage_with_{source_id}{sfx}_{D}d");
     // map-aware: the kernel rebuilds face positions from (x_lo, dx, map kind), where `dx` is the
     // log decade-slope on a log axis. `kernel_geom` returns `physical_geom` verbatim without maps.
-    let (x_lo_phys, dx_phys) =
-        kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, sim.geom.coords, sim.motion.a);
+    let (x_lo_phys, dx_phys) = kernel_geom(
+        &geom.x_lo,
+        &geom.dx,
+        &geom.maps,
+        sim.geom.coords,
+        sim.motion.a,
+    );
     let scalars = scalars_for(&name, |bind| {
         match bind {
             ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(dt),

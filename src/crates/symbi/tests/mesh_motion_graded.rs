@@ -142,7 +142,10 @@ fn departures<M: Metric<f64, 1>>(sim: &Sim<M>) -> (f64, f64) {
             .iter()
             .map(|c| (rho.at(*c) - mean).abs() / mean)
             .fold(0.0_f64, f64::max),
-        cells.iter().map(|c| vel.at(*c).abs()).fold(0.0_f64, f64::max),
+        cells
+            .iter()
+            .map(|c| vel.at(*c).abs())
+            .fold(0.0_f64, f64::max),
     )
 }
 

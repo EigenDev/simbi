@@ -164,7 +164,9 @@ fn central_mass<const D: usize>() -> BodyCollection<f64, D> {
 /// the least-squares slope of `y` against `x`.
 fn slope(points: &[(f64, f64)]) -> f64 {
     let m = points.len() as f64;
-    let (sx, sy) = points.iter().fold((0.0, 0.0), |a, p| (a.0 + p.0, a.1 + p.1));
+    let (sx, sy) = points
+        .iter()
+        .fold((0.0, 0.0), |a, p| (a.0 + p.0, a.1 + p.1));
     let (mx, my) = (sx / m, sy / m);
     let num: f64 = points.iter().map(|p| (p.0 - mx) * (p.1 - my)).sum();
     let den: f64 = points.iter().map(|p| (p.0 - mx) * (p.0 - mx)).sum();
@@ -339,9 +341,7 @@ fn the_low_mach_correction_leaves_the_isentropic_column_at_rest_under_refinement
 #[test]
 fn the_power_law_column_stands_still() {
     let clock = Instant::now();
-    println!(
-        "\nradial power-law column, t = {T_1D} at 128 cells, r in [1, 2], {SOLVER:?} solver"
-    );
+    println!("\nradial power-law column, t = {T_1D} at 128 cells, r in [1, 2], {SOLVER:?} solver");
     println!(
         "{:>6} {:>8} {:>12} {:>12} {:>12} {:>12}",
         "s", "n", "|v| plain", "|v| wb", "drho plain", "drho wb"
@@ -788,4 +788,3 @@ fn the_marginal_wedge_does_not_grow() {
     );
     println!("elapsed {:.1} s", clock.elapsed().as_secs_f64());
 }
-

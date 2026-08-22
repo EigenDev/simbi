@@ -169,11 +169,7 @@ pub const C2P_FAILURE_SENTINEL: f64 = 1.0;
 //                        and fofc kernels.
 //   * superluminal     : v^2 >= 1 (the Lorentz factor is finite only for v^2 < 1) or v^2
 //                        is NaN. no luminal margin.
-pub fn relativistic_c2p_code<S: Scalar + OrderedNumeric>(
-    rho: S,
-    pre: S,
-    v_sq: S,
-) -> ErrorCode {
+pub fn relativistic_c2p_code<S: Scalar + OrderedNumeric>(rho: S, pre: S, v_sq: S) -> ErrorCode {
     let mut code = ErrorCode::NONE;
     if !(rho == rho) || !(pre == pre) {
         code = code.merge(ErrorCode::NON_FINITE);
@@ -190,9 +186,7 @@ pub fn relativistic_c2p_code<S: Scalar + OrderedNumeric>(
 // shared input-density guard for relativistic c2p (a host-only early-out before the kernel
 // path). returns the failure code for a non-positive or non-finite conserved density, else
 // None. the NaN branch was present in RHD but missing in RMHD before the unification.
-pub fn relativistic_density_guard<S: Scalar + OrderedNumeric>(
-    dd: S,
-) -> Option<ErrorCode> {
+pub fn relativistic_density_guard<S: Scalar + OrderedNumeric>(dd: S) -> Option<ErrorCode> {
     if dd <= S::ZERO || !(dd == dd) {
         let mut code = ErrorCode::NEGATIVE_DENSITY;
         if !(dd == dd) {

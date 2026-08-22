@@ -293,11 +293,10 @@ fn a_moving_mesh_checkpoint_verifies_against_the_comoving_rebuild() {
     let p = path.to_str().expect("utf-8");
 
     let fresh = ladder(1, true);
-    symbi_sim::checkpoint::verify_checkpoint_level_geometry(&fresh.levels[0].state, p, 0)
-        .expect(
-            "the comoving regions are identical; the stored bounds differ only by the \
+    symbi_sim::checkpoint::verify_checkpoint_level_geometry(&fresh.levels[0].state, p, 0).expect(
+        "the comoving regions are identical; the stored bounds differ only by the \
              checkpoint's own scale factor, which is motion, not a region change",
-        );
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

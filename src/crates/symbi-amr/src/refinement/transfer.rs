@@ -590,9 +590,10 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
             && max_reach(&parents, &coarse_lo, &coarse_hi) <= bound,
         "the coarse-fine transfer chain reaches past its unrolled bound of {bound} cells"
     );
-    let ints: Vec<i32> = |lo: &[i32], hi: &[i32]| -> Vec<i32> {
-        lo.iter().chain(hi.iter()).copied().collect()
-    }(&coarse_lo, &coarse_hi);
+    let ints: Vec<i32> =
+        |lo: &[i32], hi: &[i32]| -> Vec<i32> { lo.iter().chain(hi.iter()).copied().collect() }(
+            &coarse_lo, &coarse_hi,
+        );
 
     // fused lerp + encode into the coarse scratch: every component time-lerped,
     // pre written as its departure from the coarse chain.
@@ -652,10 +653,14 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
             &scalars,
         );
     });
-    census_decoded_pressure("cf ghost decode", departures, dst.pre_field().expect(pre), region);
+    census_decoded_pressure(
+        "cf ghost decode",
+        departures,
+        dst.pre_field().expect(pre),
+        region,
+    );
     census_positive_field("cf ghost rho", &dst.rho, region);
 }
-
 
 /// admissibility census over a balanced decode, from a snapshot of the
 /// departure field the decode consumes in place. the pressure slot holds the
@@ -669,8 +674,7 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
 /// every first-level abstention and the anchor tier separately through the
 /// non-finite scan. reads through host-visible views; enabled by
 /// SYMBI_WB_CENSUS=1.
-pub static WB_DECODE_BAD_CELLS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
+pub static WB_DECODE_BAD_CELLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static WB_DECODE_ABSTAIN_CELLS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 pub static WB_DECODE_TOTAL_CELLS: std::sync::atomic::AtomicU64 =
@@ -794,9 +798,7 @@ fn census_decoded_pressure<const D: usize, Mem: MemorySpace>(
         if !(p > 0.0) || !p.is_finite() {
             let n = WB_DECODE_BAD_CELLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if n < 16 {
-                eprintln!(
-                    "[wb-census] {site}: inadmissible written pressure {p:.6e} at {coord:?}"
-                );
+                eprintln!("[wb-census] {site}: inadmissible written pressure {p:.6e} at {coord:?}");
             }
             continue;
         }
@@ -823,9 +825,7 @@ fn census_decoded_pressure<const D: usize, Mem: MemorySpace>(
             dep + p_eq
         );
     } else if max_ratio > 0.25 {
-        eprintln!(
-            "[wb-margin] {site}: {cells} cells all passed; max |dep|/p_eq {max_ratio:.3e}"
-        );
+        eprintln!("[wb-margin] {site}: {cells} cells all passed; max |dep|/p_eq {max_ratio:.3e}");
     }
 }
 
@@ -893,7 +893,9 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     let fine_hi: Vec<i32> = (0..D)
         .map(|a| fine_interior.spaces[a].hi as i32 - 1)
         .collect();
-    let coarse_lo: Vec<i32> = (0..D).map(|a| coarse_interior.spaces[a].lo as i32).collect();
+    let coarse_lo: Vec<i32> = (0..D)
+        .map(|a| coarse_interior.spaces[a].lo as i32)
+        .collect();
     let coarse_hi: Vec<i32> = (0..D)
         .map(|a| coarse_interior.spaces[a].hi as i32 - 1)
         .collect();
@@ -906,7 +908,9 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
         for high in [false, true] {
             let (c_lo, c_hi) = (coverage.spaces[ax].lo, coverage.spaces[ax].hi);
             let uncovered = if high { c_hi } else { c_lo - 1 };
-            if uncovered < coarse_interior.spaces[ax].lo || uncovered >= coarse_interior.spaces[ax].hi {
+            if uncovered < coarse_interior.spaces[ax].lo
+                || uncovered >= coarse_interior.spaces[ax].hi
+            {
                 continue;
             }
             // the coarse band along `ax`, full coverage extent elsewhere, and the
@@ -935,13 +939,15 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
                     band_dom.spaces[a].lo >= coarse_interior.spaces[a].lo
                         && band_dom.spaces[a].hi <= coarse_interior.spaces[a].hi,
                     "band {:?} leaves the coarse interior {:?} on axis {a}",
-                    band_dom.spaces, coarse_interior.spaces
+                    band_dom.spaces,
+                    coarse_interior.spaces
                 );
                 assert!(
                     fine_band.spaces[a].lo >= fine_interior.spaces[a].lo
                         && fine_band.spaces[a].hi <= fine_interior.spaces[a].hi,
                     "fine band {:?} leaves the fine interior {:?} on axis {a}",
-                    fine_band.spaces, fine_interior.spaces
+                    fine_band.spaces,
+                    fine_interior.spaces
                 );
             }
             assert!(
@@ -953,7 +959,8 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
 
             // the fine edge cell and the seam face along `ax`.
             let edge = if high { 2 * c_hi - 1 } else { 2 * c_lo };
-            let face = fine_x_lo[ax] + (if high { 2 * c_hi } else { 2 * c_lo }) as f64 * fine_dx[ax];
+            let face =
+                fine_x_lo[ax] + (if high { 2 * c_hi } else { 2 * c_lo }) as f64 * fine_dx[ax];
 
             // encode: fine departures from the uncovered cell continued across the seam.
             let mut ints: Vec<i32> = Vec::new();
@@ -1013,7 +1020,13 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
                     &scalars,
                 );
             });
-            census_band_decode("band decode", cons_before, coarse_departure, coarse_pre, &band_dom);
+            census_band_decode(
+                "band decode",
+                cons_before,
+                coarse_departure,
+                coarse_pre,
+                &band_dom,
+            );
 
             // the band's conserved energy follows its rewritten pressure.
             let mut inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = vec![&coarse_prim.rho];
