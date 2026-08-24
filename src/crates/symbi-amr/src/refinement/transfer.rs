@@ -89,6 +89,25 @@ pub fn copy_field<const D: usize, Mem: MemorySpace>(
     );
 }
 
+/// copy `src` into `dst` over one same-index region.
+///
+/// unlike [`copy_field`], this is the composite-grid primitive: callers can restore an inactive
+/// part of a covered coarse level without touching the donor band next to its coarse-fine seam.
+pub fn copy_field_region<const D: usize, Mem: MemorySpace>(
+    src: &symbi_grid::Field<f64, D, Mem>,
+    dst: &symbi_grid::Field<f64, D, Mem>,
+    region: &Domain<D>,
+) {
+    dispatch_fields_each::<f64, Mem, D>(
+        KernelId::FieldCopy { ndim: D as u8 }.name(),
+        region,
+        &[src],
+        &[dst],
+        &[],
+        &[],
+    );
+}
+
 /// the typed prolong-kernel tag for a reconstruction order (the ABI mirror of
 /// `ProlongOrder`, consumed by `KernelId::RefineProlong`).
 pub fn prolong_tag(order: ProlongOrder) -> ProlongTag {

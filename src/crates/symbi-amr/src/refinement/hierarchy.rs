@@ -52,9 +52,9 @@ use super::tracer_interface::{
 };
 use super::transfer::{
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
-    cf_ghost_slabs, copy_field, prolong_face_field, prolong_field, prolong_prims_balanced,
-    prolong_prims_swept, prolong_prims_targeted, restrict_band_balanced, restrict_bface,
-    restrict_cell_field, restrict_cons,
+    cf_ghost_slabs, copy_field, copy_field_region, prolong_face_field, prolong_field,
+    prolong_prims_balanced, prolong_prims_swept, prolong_prims_targeted, restrict_band_balanced,
+    restrict_bface, restrict_cell_field, restrict_cons,
 };
 use std::ops::ControlFlow;
 use symbi_hydro::state::PrimFromSlots;
@@ -2129,6 +2129,31 @@ where
                 });
             }
             HookPoint::BeforeC2p => {
+                // only the covered shell next to a coarse-fine boundary participates in the
+                // composite update: it supplies stage-time prolongation data and the coarse face
+                // flux sampled by the register. the deep covered core is replaced by restriction
+                // after the fine subcycle, so evolving it is both unnecessary and, for a compact
+                // source resolved only on the fine grids, mathematically undefined. in particular,
+                // a point-sampled softened force can drive the central cell of an under-resolved
+                // covered level outside the admissible set before restriction gets a chance to
+                // overwrite it.
+                //
+                // preserve one cell beyond both stencils at the seam. restoring the remainder
+                // from this stage's input makes that inactive volume an identity update while
+                // leaving every coarse value observable by reconstruction or prolongation alone.
+                if let Some(coverage) = l.coverage.as_ref() {
+                    let donor_width = (l.kernels.reconstruction_reach() as usize)
+                        .max(this.prolong_order.ghost_width())
+                        + 1;
+                    if coverage
+                        .spaces
+                        .iter()
+                        .all(|space| space.size() > 2 * donor_width)
+                    {
+                        let inactive = coverage.contract(donor_width as isize);
+                        restore_cons_region(l.state.stage_input(), &l.state.fields.cons, &inactive);
+                    }
+                }
                 // the ssp recombination leaves `a0*u_n + ac*(qt - dt R) = qt - ac dt R` when the
                 // stage input is the target, so adding `ac dt R` back returns the target exactly.
                 // the weights are the stage's own, so this holds at every stage of every scheme.
@@ -3524,6 +3549,24 @@ fn gravity_only<const D: usize>(
         }
     });
     coll
+}
+
+/// restore the hydrodynamic conserved state over an inactive composite-grid region.
+fn restore_cons_region<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    src: &ConsFieldsGeneric<D, DOF, Mem>,
+    dst: &ConsFieldsGeneric<D, DOF, Mem>,
+    region: &Domain<D>,
+) {
+    copy_field_region(&src.den, &dst.den, region);
+    for dd in 0..DOF {
+        copy_field_region(&src.mom[dd], &dst.mom[dd], region);
+    }
+    if let (Some(sn), Some(dn)) = (src.nrg_field(), dst.nrg_field()) {
+        copy_field_region(sn, dn, region);
+    }
+    if let (Some(sc), Some(dc)) = (src.chi_field(), dst.chi_field()) {
+        copy_field_region(sc, dc, region);
+    }
 }
 
 /// whether an absolute index is inside a domain (per-axis half-open [lo, hi)).
