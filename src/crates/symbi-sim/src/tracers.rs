@@ -87,6 +87,13 @@ pub struct ContinuousTracerRecord<const D: usize> {
     pub random_counter: u64,
 }
 
+#[derive(Clone, Debug)]
+pub struct ContinuousTracerSnapshot<const D: usize> {
+    records: Vec<ContinuousTracerRecord<D>>,
+    next_id: u64,
+    injection_remainder: f64,
+}
+
 /// cell-centered flux-derived coefficients interpolated by continuous tracers.
 pub struct ItoCoefficientFields<const D: usize, Mem: symbi_xpu::MemorySpace> {
     pub drift: [symbi_grid::Field<f64, D, Mem>; D],
@@ -641,6 +648,53 @@ fn particle_blocks<const D: usize, Mem: symbi_xpu::MemorySpace, T>(
 }
 
 impl<const D: usize, Mem: symbi_xpu::MemorySpace> ContinuousTracerSet<D, Mem> {
+    /// Complete retry snapshot. Hierarchy tracer transport is host-or-unified by construction;
+    /// copying the records also preserves migrations between levels, which a per-level `step_x`
+    /// rewind cannot undo.
+    pub fn snapshot_retry(&self) -> Result<ContinuousTracerSnapshot<D>, String> {
+        if !Mem::IS_HOST_ACCESSIBLE {
+            return Err("continuous tracer retry snapshots require host-accessible memory".into());
+        }
+        let mut records = Vec::with_capacity(self.len);
+        unsafe {
+            for index in 0..self.len {
+                records.push(ContinuousTracerRecord {
+                    x: std::array::from_fn(|dd| *self.x[dd].as_ptr::<f64>().add(index)),
+                    step_x: std::array::from_fn(|dd| *self.step_x[dd].as_ptr::<f64>().add(index)),
+                    id: *self.id.as_ptr::<u64>().add(index),
+                    cohort: *self.cohort.as_ptr::<u16>().add(index),
+                    owner: *self
+                        .owner
+                        .as_ptr::<crate::mass_transport::ContainerId>()
+                        .add(index),
+                    escaped: *self.escaped.as_ptr::<u8>().add(index),
+                    crossed_sink: *self.crossed_sink.as_ptr::<u8>().add(index),
+                    crossing_time: *self.crossing_time.as_ptr::<f64>().add(index),
+                    random_counter: *self.random_counter.as_ptr::<u64>().add(index),
+                });
+            }
+        }
+        Ok(ContinuousTracerSnapshot {
+            records,
+            next_id: self.next_id,
+            injection_remainder: self.injection_remainder,
+        })
+    }
+
+    pub fn restore_retry(&mut self, snapshot: &ContinuousTracerSnapshot<D>) -> Result<(), String> {
+        if !Mem::IS_HOST_ACCESSIBLE {
+            return Err("continuous tracer retry restore requires host-accessible memory".into());
+        }
+        self.len = 0;
+        self.reserve_host(snapshot.records.len())?;
+        for record in &snapshot.records {
+            self.push_host(*record)?;
+        }
+        self.next_id = snapshot.next_id;
+        self.injection_remainder = snapshot.injection_remainder;
+        Ok(())
+    }
+
     pub fn allocate(
         capacity: usize,
         order: crate::mass_transport::ItoOrder,
@@ -1311,6 +1365,37 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn continuous_retry_snapshot_restores_records_and_spawn_counters() {
+        use symbi_xpu::HostMemory;
+
+        let seed = TracerSet::<1>::seed_stratified(&[([0.0], [1.0])], &[2], 0.5);
+        let mut tracers = ContinuousTracerSet::<1, HostMemory>::from_discrete(
+            &seed,
+            crate::mass_transport::ItoOrder::Three,
+        )
+        .unwrap();
+        tracers.next_id = 17;
+        tracers.injection_remainder = 0.125;
+        let snapshot = tracers.snapshot_retry().unwrap();
+        let removed = tracers.swap_remove_host(0).unwrap();
+        tracers
+            .push_host(ContinuousTracerRecord {
+                x: [9.0],
+                id: 999,
+                ..removed
+            })
+            .unwrap();
+        tracers.next_id = 1000;
+        tracers.injection_remainder = 0.0;
+
+        tracers.restore_retry(&snapshot).unwrap();
+        let restored = tracers.snapshot_retry().unwrap();
+        assert_eq!(restored.records, snapshot.records);
+        assert_eq!(tracers.next_id, 17);
+        assert_eq!(tracers.injection_remainder, 0.125);
+    }
 
     #[test]
     fn continuous_storage_preserves_seed_state_and_allocates_ssp_snapshot() {

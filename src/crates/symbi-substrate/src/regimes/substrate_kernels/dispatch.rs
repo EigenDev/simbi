@@ -34,11 +34,36 @@ use super::types::Solver;
 
 static CFL_DIAGNOSTIC_CALLS: AtomicU64 = AtomicU64::new(0);
 
+pub(crate) fn composite_max_reduce<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    field: &Field<Sc, D, Mem>,
+) -> f64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    sim.composite_ownership
+        .evolution_regions(&sim.geom.interior)
+        .iter()
+        .map(|region| field_max_reduce(field, region))
+        .fold(f64::NEG_INFINITY, f64::max)
+}
+
 fn plummer_peak_acceleration(mass: f64, softening: f64) -> f64 {
     if mass <= 0.0 || softening <= 0.0 {
         return 0.0;
     }
     2.0 * mass / (3.0 * 3.0_f64.sqrt() * softening * softening)
+}
+
+fn compact_peak_acceleration(mass: f64, softening: f64) -> f64 {
+    if mass <= 0.0 || softening <= 0.0 {
+        return 0.0;
+    }
+    // Inside the compact sphere, |g| h^2 / M = (5/2)u - (3/2)u^3.
+    // Its unique maximum on [0, 1] is at u = sqrt(5/9), with value
+    // 5 sqrt(5) / 9.  Outside h the Newtonian field decreases monotonically.
+    5.0 * 5.0_f64.sqrt() * mass / (9.0 * softening * softening)
 }
 
 fn gravity_limited_dt(
@@ -74,7 +99,14 @@ where
                 .map(|body| {
                     let body = immersed.bodies.get(body);
                     body.softening()
-                        .map(|softening| plummer_peak_acceleration(body.mass, softening))
+                        .map(|softening| match body.softening_kind {
+                            symbi_ib::SofteningKind::Plummer => {
+                                plummer_peak_acceleration(body.mass, softening)
+                            }
+                            symbi_ib::SofteningKind::Compact => {
+                                compact_peak_acceleration(body.mass, softening)
+                            }
+                        })
                         .unwrap_or(0.0)
                 })
                 .sum::<f64>()
@@ -100,7 +132,10 @@ fn fofc_primitive_component(path: &str) -> Option<String> {
 
 #[cfg(test)]
 mod body_gravity_cfl_tests {
-    use super::{fofc_primitive_component, gravity_limited_dt, plummer_peak_acceleration};
+    use super::{
+        compact_peak_acceleration, fofc_primitive_component, gravity_limited_dt,
+        plummer_peak_acceleration,
+    };
 
     #[test]
     fn plummer_peak_matches_the_analytic_maximum() {
@@ -114,6 +149,25 @@ mod body_gravity_cfl_tests {
             let sampled_radius = softening * 4.0 * (ii as f64 + 0.5) / 1000.0;
             let sampled = mass * sampled_radius
                 / (sampled_radius * sampled_radius + softening * softening).powf(1.5);
+            assert!(sampled <= peak * (1.0 + 16.0 * f64::EPSILON));
+        }
+    }
+
+    #[test]
+    fn compact_peak_matches_the_force_law_maximum() {
+        let mass = 2.5;
+        let softening = 0.4;
+        let radius = softening * (5.0_f64 / 9.0).sqrt();
+        let direct =
+            symbi_discretize::ibm::compact_gravity([radius, 0.0, 0.0], mass, softening)[0].abs();
+        let peak = compact_peak_acceleration(mass, softening);
+        assert!((peak - direct).abs() <= 16.0 * f64::EPSILON * peak);
+        for ii in 0..1000 {
+            let sampled_radius = softening * 4.0 * (ii as f64 + 0.5) / 1000.0;
+            let sampled =
+                symbi_discretize::ibm::compact_gravity([sampled_radius, 0.0, 0.0], mass, softening)
+                    [0]
+                .abs();
             assert!(sampled <= peak * (1.0 + 16.0 * f64::EPSILON));
         }
     }
@@ -249,13 +303,13 @@ where
         &scalars,
     );
     let diagnose_cfl = std::env::var_os("SIMBI_CFL_DIAGNOSTICS").is_some();
-    let flux_max = diagnose_cfl.then(|| field_max_reduce(scratch, &geom.interior));
+    let flux_max = diagnose_cfl.then(|| composite_max_reduce(sim, scratch));
     // fold the source-admissibility rate into the same scratch before the reduction (in place).
     if let Some(scfl) = source_cfl {
         let ss = scalars_for(scfl, &resolve);
         dispatch_named(sim, pre, Some(scratch), 0, scfl, &geom.interior, &[], &ss);
     }
-    let mut lambda_max = field_max_reduce(scratch, &geom.interior);
+    let mut lambda_max = composite_max_reduce(sim, scratch);
     if diagnose_cfl {
         let call = CFL_DIAGNOSTIC_CALLS.fetch_add(1, Ordering::Relaxed);
         if call == 0 || call.is_multiple_of(100) {
@@ -1432,13 +1486,15 @@ where
     };
     let geom = &sim.geom;
     let mut ratio_max = 0.0_f64;
-    for c in geom.interior.iter() {
-        let p = pre.view().at(c).to_f64();
-        let r = sim.fields.prim.rho.view().at(c).to_f64();
-        if !p.is_finite() || !r.is_finite() || r <= 0.0 {
-            return f64::INFINITY;
+    for region in sim.composite_ownership.evolution_regions(&geom.interior) {
+        for c in region.iter() {
+            let p = pre.view().at(c).to_f64();
+            let r = sim.fields.prim.rho.view().at(c).to_f64();
+            if !p.is_finite() || !r.is_finite() || r <= 0.0 {
+                return f64::INFINITY;
+            }
+            ratio_max = ratio_max.max(p / r);
         }
-        ratio_max = ratio_max.max(p / r);
     }
     // the farthest in-plane corner from the body (Omega_K is set by the in-plane radius alone).
     let plane = D.min(2);

@@ -101,3 +101,52 @@ fn root_step_respects_the_fine_level_cfl() {
         }
     }
 }
+
+#[test]
+fn inactive_covered_core_does_not_constrain_the_composite_cfl() {
+    let dx = 1.0 / N as f64;
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N; 3])
+        .origin([-0.5; 3])
+        .spacing([dx; 3])
+        .cfl(CFL)
+        .allocate()
+        .unwrap()
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::zeros(),
+            pre: 1.0,
+        })
+        .build();
+    let kernels = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
+    let mut hierarchy = Hierarchy::with_refinement(
+        coarse,
+        kernels,
+        &[RefinementRegion {
+            x_lo: [-0.25; 3],
+            x_hi: [0.25; 3],
+        }],
+        ProlongOrder::Ppm,
+        |state| Kset::new(GAMMA, CFL, &state.geom.allocated),
+    )
+    .unwrap();
+    fill(&hierarchy.levels[1].state);
+    hierarchy.prime();
+    let baseline = hierarchy.root_cfl_dt();
+    let inactive = hierarchy.levels[0]
+        .state
+        .composite_ownership
+        .inactive
+        .clone()
+        .expect("this patch has a deep covered core");
+    for cell in inactive.iter() {
+        hierarchy.levels[0].state.fields.prim.vel[0]
+            .view_mut()
+            .set(cell, 1.0e12);
+    }
+    let poisoned = hierarchy.root_cfl_dt();
+    assert_eq!(
+        poisoned, baseline,
+        "a value in the physically replaced core leaked into the composite CFL"
+    );
+}

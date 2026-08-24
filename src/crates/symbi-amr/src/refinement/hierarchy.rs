@@ -177,6 +177,15 @@ pub struct CrashReport {
     pub dt_prev: f64,
 }
 
+struct HierarchyRetrySidecars<const D: usize> {
+    discrete: Vec<Option<symbi_sim::tracers::TracerSet<D>>>,
+    continuous: Vec<Option<symbi_sim::tracers::ContinuousTracerSnapshot<D>>>,
+    bodies: Vec<Option<symbi_ib::BodyCollection<f64, D>>>,
+    motion: Vec<symbi_geometry::MotionState<f64>>,
+    clocks: Vec<(f64, u64, f64)>,
+    censuses: Vec<Vec<(symbi_sim::census::CensusHistory, Vec<Option<f64>>)>>,
+}
+
 pub struct Hierarchy<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
 where
     R: Regime<f64, NDIM>,
@@ -271,11 +280,7 @@ where
             let global_cells: [usize; NDIM] = std::array::from_fn(|aa| root_cells[aa] * scale);
             let geometry = level.state.geom.block_geometry(level.state.physics.metric);
             for coord in level.state.geom.interior.iter() {
-                if level
-                    .coverage
-                    .as_ref()
-                    .is_some_and(|coverage| coverage.contains(coord))
-                {
+                if !level.state.composite_ownership.owns_leaf(coord) {
                     continue;
                 }
                 let mut linear = 0usize;
@@ -516,10 +521,10 @@ where
 
     fn tracer_owner_is_active(&self, owner: symbi_sim::mass_transport::ContainerId) -> bool {
         self.tracer_cell(owner).is_some_and(|(level, coord)| {
-            !self.levels[level]
-                .coverage
-                .as_ref()
-                .is_some_and(|coverage| coverage.contains(coord))
+            self.levels[level]
+                .state
+                .composite_ownership
+                .owns_leaf(coord)
         })
     }
 
@@ -1111,6 +1116,16 @@ where
         let root_cells: [usize; NDIM] =
             std::array::from_fn(|aa| levels[0].state.geom.interior.spaces[aa].size());
         let mut tracer_interfaces = Vec::with_capacity(levels.len().saturating_sub(1));
+        for level in &mut levels {
+            let donor_width = (level.kernels.reconstruction_reach() as usize)
+                .max(prolong_order.ghost_width())
+                + 1;
+            level.state.composite_ownership = symbi_sim::state::CompositeOwnership::new(
+                level.coverage.clone(),
+                &level.state.geom.interior,
+                donor_width,
+            );
+        }
         for ll in 0..levels.len().saturating_sub(1) {
             flux_registers.push(FluxRegister::new(
                 levels[ll].coverage.as_ref().unwrap(),
@@ -1702,6 +1717,100 @@ where
         }
     }
 
+    fn snapshot_retry_sidecars(&self) -> HierarchyRetrySidecars<NDIM> {
+        HierarchyRetrySidecars {
+            discrete: self
+                .levels
+                .iter()
+                .map(|level| level.state.tracers.clone())
+                .collect(),
+            continuous: self
+                .levels
+                .iter()
+                .map(|level| {
+                    level
+                        .state
+                        .continuous_tracers
+                        .as_ref()
+                        .map(|tracers| tracers.snapshot_retry())
+                        .transpose()
+                        .unwrap_or_else(|detail| {
+                            panic!("continuous tracer retry snapshot: {detail}")
+                        })
+                })
+                .collect(),
+            bodies: self
+                .levels
+                .iter()
+                .map(|level| {
+                    level
+                        .state
+                        .immersed
+                        .as_ref()
+                        .map(|immersed| immersed.bodies.clone())
+                })
+                .collect(),
+            motion: self.levels.iter().map(|level| level.state.motion).collect(),
+            clocks: self
+                .levels
+                .iter()
+                .map(|level| (level.state.time, level.state.iteration, level.state.dt))
+                .collect(),
+            censuses: self
+                .levels
+                .iter()
+                .map(|level| {
+                    level
+                        .state
+                        .censuses
+                        .iter()
+                        .map(|registered| {
+                            (registered.history.clone(), registered.last_sample.clone())
+                        })
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+
+    fn restore_retry_sidecars(&mut self, snapshot: &HierarchyRetrySidecars<NDIM>) {
+        for (ii, level) in self.levels.iter_mut().enumerate() {
+            level.state.tracers.clone_from(&snapshot.discrete[ii]);
+            if let (Some(tracers), Some(saved)) = (
+                level.state.continuous_tracers.as_mut(),
+                snapshot.continuous[ii].as_ref(),
+            ) {
+                tracers
+                    .restore_retry(saved)
+                    .unwrap_or_else(|detail| panic!("continuous tracer retry restore: {detail}"));
+            }
+            if let (Some(immersed), Some(bodies)) =
+                (level.state.immersed.as_mut(), snapshot.bodies[ii].as_ref())
+            {
+                immersed.bodies.clone_from(bodies);
+            }
+            level.state.motion = snapshot.motion[ii];
+            level.state.time = snapshot.clocks[ii].0;
+            level.state.iteration = snapshot.clocks[ii].1;
+            level.state.dt = snapshot.clocks[ii].2;
+            assert_eq!(
+                level.state.censuses.len(),
+                snapshot.censuses[ii].len(),
+                "census registrations changed during a retryable step"
+            );
+            for (registered, (history, last_sample)) in
+                level.state.censuses.iter_mut().zip(&snapshot.censuses[ii])
+            {
+                registered.history.clone_from(history);
+                registered.last_sample.clone_from(last_sample);
+            }
+        }
+        self.injection_ledger.clear();
+        for ledger in &self.tracer_interface_ledgers {
+            ledger.borrow_mut().clear();
+        }
+    }
+
     /// one root step: cfl-limited dt (clamped to t_final), the recursive level
     /// advance, then the root clock + body state. every level limits the root
     /// step — covered coarse cells are conservative averages of fine data, so
@@ -1792,12 +1901,11 @@ where
         };
         let mut dt = dt_cfl.min(t_final - root.state.time);
         check_dt_or_panic(dt, root.state.iteration, root.state.time);
-        let motion_n: Vec<_> = self.levels.iter().map(|level| level.state.motion).collect();
-        let clocks_n: Vec<_> = self
-            .levels
-            .iter()
-            .map(|level| (level.state.time, level.state.iteration))
-            .collect();
+        // A rejection can originate in the second (or deeper) fine substep after an earlier
+        // substep has spawned/migrated tracers or booked a horizon receipt.  Field snapshots alone
+        // cannot invert those host-side commits, so the root attempt owns a complete transaction
+        // snapshot of every mutable side-car.
+        let retry_sidecars = self.snapshot_retry_sidecars();
         loop {
             for level in &self.levels {
                 if level.kernels.fofc_active() {
@@ -1807,16 +1915,12 @@ where
             if !self.advance_level(0, dt, 0.0) {
                 break;
             }
-            self.assert_step_is_reversible();
-            for (ii, level) in self.levels.iter_mut().enumerate() {
+            for level in &mut self.levels {
                 if level.kernels.fofc_active() {
                     level.kernels.restore_step(&level.state);
                 }
-                symbi_sim::tracers::restore_transport_state(&mut level.state.store);
-                level.state.motion = motion_n[ii];
-                level.state.time = clocks_n[ii].0;
-                level.state.iteration = clocks_n[ii].1;
             }
+            self.restore_retry_sidecars(&retry_sidecars);
             dt = symbi_sim::driver::retry_timestep(dt, time)
                 .unwrap_or_else(|err| panic!("{}", err.detail));
         }
@@ -1863,7 +1967,7 @@ where
                 registrations,
                 0,
                 root_step,
-                self.levels[0].coverage.as_ref(),
+                self.levels[0].state.composite_ownership.coverage.as_ref(),
             );
             for level in 1..self.levels.len() {
                 let partial = symbi_substrate::census_sample::level_partials(
@@ -1871,7 +1975,11 @@ where
                     registrations,
                     0,
                     root_step,
-                    self.levels[level].coverage.as_ref(),
+                    self.levels[level]
+                        .state
+                        .composite_ownership
+                        .coverage
+                        .as_ref(),
                 );
                 symbi_substrate::census_sample::combine_partials(&mut totals, partial, &ops);
             }
@@ -1937,28 +2045,6 @@ where
     /// at the interface — substep-start-frozen ghosts measurably collapse the
     /// boundary to first order. the stage loop mirrors sim/evolve.rs::step, and a
     /// 1-level hierarchy reproduces it bit-for-bit.
-    /// a rejected step rolls back the conserved gas state, the magnetic field, the primitives,
-    /// the mesh motion, the level clocks, and discrete-tracer ancestry. on a refined hierarchy a
-    /// level's step epilogue — tracer spawning, immersed-body accretion, the horizon receipt —
-    /// commits ahead of the finer level's subcycle, and those ledgers are append-only: a rejection
-    /// raised from inside the subcycle replays them and double-books. a single-level hierarchy
-    /// runs its epilogue once every stage is accepted, so it is reversible unconditionally.
-    fn assert_step_is_reversible(&self) {
-        if self.levels.len() == 1 {
-            return;
-        }
-        for (ll, level) in self.levels.iter().enumerate() {
-            assert!(
-                !level.state.has_tracers()
-                    && level.state.continuous_tracers.is_none()
-                    && !level.state.has_bodies(),
-                "level {ll} rejected a timestep while carrying tracers or immersed bodies: on a \
-                 refined hierarchy their step-epilogue ledgers commit before the finer level \
-                 subcycles and have no inverse"
-            );
-        }
-    }
-
     fn advance_level(&mut self, level: usize, dt: f64, alpha0: f64) -> bool {
         self.level_step_begin(level, dt);
         let n = self.levels[level].state.timestepping.stages().len();
@@ -2141,17 +2227,26 @@ where
                 // preserve one cell beyond both stencils at the seam. restoring the remainder
                 // from this stage's input makes that inactive volume an identity update while
                 // leaving every coarse value observable by reconstruction or prolongation alone.
-                if let Some(coverage) = l.coverage.as_ref() {
-                    let donor_width = (l.kernels.reconstruction_reach() as usize)
-                        .max(this.prolong_order.ghost_width())
-                        + 1;
-                    if coverage
-                        .spaces
-                        .iter()
-                        .all(|space| space.size() > 2 * donor_width)
+                if let Some(inactive) = l.state.composite_ownership.inactive.as_ref() {
+                    restore_cons_region(l.state.stage_input(), &l.state.fields.cons, inactive);
+                    // CT fields are part of the state, not diagnostics.  A covered-core identity
+                    // update must therefore restore both representations of B as well as U.
+                    // `*_old` is the level-step entry field; after every earlier stage the same
+                    // core was restored to it, so it is also this stage's core input.
+                    if let (Some(mhd), Some(bcell_old)) =
+                        (l.state.fields.mhd.as_ref(), l.bcell_old.as_ref())
                     {
-                        let inactive = coverage.contract(donor_width as isize);
-                        restore_cons_region(l.state.stage_input(), &l.state.fields.cons, &inactive);
+                        for comp in 0..DOF {
+                            copy_field_region(&bcell_old[comp], &mhd.bcell[comp], inactive);
+                        }
+                    }
+                    if let (Some(mhd), Some(bface_old)) =
+                        (l.state.fields.mhd.as_ref(), l.bface_old.as_ref())
+                    {
+                        for dir in 0..NDIM {
+                            let face_core = inactive.extend(dir, 0, 1);
+                            copy_field_region(&bface_old[dir], &mhd.bface[dir], &face_core);
+                        }
                     }
                 }
                 // the ssp recombination leaves `a0*u_n + ac*(qt - dt R) = qt - ac dt R` when the
@@ -2392,7 +2487,11 @@ where
             &self.levels[0].state.store.censuses,
             level,
             Some(symbi_sim::census::Cadence::PerLevelStep),
-            self.levels[level].coverage.as_ref(),
+            self.levels[level]
+                .state
+                .composite_ownership
+                .coverage
+                .as_ref(),
         );
         if partial.iter().all(|(values, _)| values.is_empty()) {
             return;
@@ -4099,107 +4198,168 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
         // global dt = min over tiles' root cfl, clamped to land exactly on t_final.
         let candidates =
             (0..n).map(|i| symbi_xpu::with_device(devices[i], || tiles[i].root_cfl_dt()));
-        let gdt = select_timestep(candidates, t_final - t, iter, t)
+        let mut gdt = select_timestep(candidates, t_final - t, iter, t)
             .unwrap_or_else(|err| panic!("{}", err.detail));
-        for i in 0..n {
-            symbi_xpu::with_device(devices[i], || tiles[i].level_step_begin(0, gdt));
-        }
-        // the root SSP stages, with a root halo exchange between each.
-        for ii in 0..nstages {
+        let retry_sidecars: Vec<_> = tiles
+            .iter()
+            .map(Hierarchy::snapshot_retry_sidecars)
+            .collect();
+        'attempt: loop {
             for i in 0..n {
-                let retry =
-                    symbi_xpu::with_device(devices[i], || tiles[i].level_stage(0, ii, gdt, 0.0));
-                assert!(
-                    !retry,
-                    "decomposed hierarchy retry requires collective rollback"
-                );
-            }
-            migrate_level_tracers(tiles, 0);
-            exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
-        }
-        spawn_decomposed_injections(tiles, &root_order, 0);
-        // root emf bookkeeping (mhd; no-op for hydro + unrefined tiles).
-        for i in 0..n {
-            symbi_xpu::with_device(devices[i], || tiles[i].level_tail_emf(0, gdt));
-        }
-        // the root excise, in the same position the uni-grid tail puts it (after the emf
-        // bookkeeping). the rest of the tail — viscous, horizon ledger, penalize — belongs to the
-        // finest level and is driven with the fine subcycle; the excise runs per level, because
-        // the excised region is owned by whichever level contains it and a refined root still
-        // owns its core.
-        for i in 0..n {
-            symbi_xpu::with_device(devices[i], || tiles[i].level_tail_excise(0));
-        }
-        // rigid walls also act on uncovered root cells when their shape crosses the refined
-        // patch boundary. covered root writes are replaced by restriction after the fine
-        // subcycle; accretion remains absent from root proxies.
-        for i in 0..n {
-            symbi_xpu::with_device(devices[i], || {
-                let level = &tiles[i].levels[0];
-                let has_rigid = level
-                    .state
-                    .immersed
-                    .as_ref()
-                    .is_some_and(|immersed| immersed.bodies.rigid_count() > 0);
-                if has_rigid {
-                    prof("penalize", || level.kernels.penalize(&level.state, gdt));
-                }
-            });
-        }
-        // the fine subcycle, decomposed across the refined tiles: ratio substeps, each fine substep
-        // driven stage-by-stage with a fine halo exchange (a no-op for a tile-local 1x1 sub-grid).
-        if let Some(fg) = &fine {
-            let fine_dt = gdt / RATIO as f64;
-            for sub in 0..RATIO {
-                let alpha = sub as f64 / RATIO as f64;
-                for (k, &i) in fg.order.iter().enumerate() {
-                    symbi_xpu::with_device(fg.devices[k], || {
-                        tiles[i].prolong_cf(1, alpha);
-                        tiles[i].levels[1]
-                            .kernels
-                            .ghost_fill(&tiles[i].levels[1].state);
-                    });
-                }
-                // fill the fine cut halo before the fine flux reads it.
-                exchange_level_halos(tiles, 1, &fg.order, fg.counts, &fg.devices, transport);
-                for (k, &i) in fg.order.iter().enumerate() {
-                    symbi_xpu::with_device(fg.devices[k], || tiles[i].level_step_begin(1, fine_dt));
-                }
-                for jj in 0..nstages {
-                    for (k, &i) in fg.order.iter().enumerate() {
-                        let retry = symbi_xpu::with_device(fg.devices[k], || {
-                            tiles[i].level_stage(1, jj, fine_dt, alpha)
+                for level in &tiles[i].levels {
+                    if level.kernels.fofc_active() {
+                        symbi_xpu::with_device(devices[i], || {
+                            level.kernels.snapshot_retry(&level.state)
                         });
-                        assert!(
-                            !retry,
-                            "decomposed hierarchy retry requires collective rollback"
-                        );
                     }
-                    migrate_level_tracers(tiles, 1);
-                    exchange_level_halos(tiles, 1, &fg.order, fg.counts, &fg.devices, transport);
                 }
-                spawn_decomposed_injections(tiles, &fg.order, 1);
-                for (k, &i) in fg.order.iter().enumerate() {
-                    let retry = symbi_xpu::with_device(fg.devices[k], || {
-                        tiles[i].level_step_tail(1, fine_dt, alpha)
+                symbi_xpu::with_device(devices[i], || tiles[i].level_step_begin(0, gdt));
+            }
+            let mut retry = false;
+            // the root SSP stages, with a root halo exchange between each.
+            for ii in 0..nstages {
+                for i in 0..n {
+                    retry |= symbi_xpu::with_device(devices[i], || {
+                        tiles[i].level_stage(0, ii, gdt, 0.0)
                     });
-                    assert!(
-                        !retry,
-                        "decomposed hierarchy retry requires collective rollback"
-                    );
+                }
+                if retry {
+                    break;
+                }
+                migrate_level_tracers(tiles, 0);
+                exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
+            }
+            if retry {
+                // handled by the common collective rollback at the end of the attempt.
+            } else {
+                spawn_decomposed_injections(tiles, &root_order, 0);
+                // root emf bookkeeping (mhd; no-op for hydro + unrefined tiles).
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || tiles[i].level_tail_emf(0, gdt));
+                }
+                // the root excise, in the same position the uni-grid tail puts it (after the emf
+                // bookkeeping). the rest of the tail — viscous, horizon ledger, penalize — belongs to the
+                // finest level and is driven with the fine subcycle; the excise runs per level, because
+                // the excised region is owned by whichever level contains it and a refined root still
+                // owns its core.
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || tiles[i].level_tail_excise(0));
+                }
+                // rigid walls also act on uncovered root cells when their shape crosses the refined
+                // patch boundary. covered root writes are replaced by restriction after the fine
+                // subcycle; accretion remains absent from root proxies.
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || {
+                        let level = &tiles[i].levels[0];
+                        let has_rigid = level
+                            .state
+                            .immersed
+                            .as_ref()
+                            .is_some_and(|immersed| immersed.bodies.rigid_count() > 0);
+                        if has_rigid {
+                            prof("penalize", || level.kernels.penalize(&level.state, gdt));
+                        }
+                    });
+                }
+                // the fine subcycle, decomposed across the refined tiles: ratio substeps, each fine substep
+                // driven stage-by-stage with a fine halo exchange (a no-op for a tile-local 1x1 sub-grid).
+                if let Some(fg) = &fine {
+                    let fine_dt = gdt / RATIO as f64;
+                    'fine_subcycle: for sub in 0..RATIO {
+                        let alpha = sub as f64 / RATIO as f64;
+                        for (k, &i) in fg.order.iter().enumerate() {
+                            symbi_xpu::with_device(fg.devices[k], || {
+                                tiles[i].prolong_cf(1, alpha);
+                                tiles[i].levels[1]
+                                    .kernels
+                                    .ghost_fill(&tiles[i].levels[1].state);
+                            });
+                        }
+                        // fill the fine cut halo before the fine flux reads it.
+                        exchange_level_halos(
+                            tiles,
+                            1,
+                            &fg.order,
+                            fg.counts,
+                            &fg.devices,
+                            transport,
+                        );
+                        for (k, &i) in fg.order.iter().enumerate() {
+                            symbi_xpu::with_device(fg.devices[k], || {
+                                tiles[i].level_step_begin(1, fine_dt)
+                            });
+                        }
+                        for jj in 0..nstages {
+                            for (k, &i) in fg.order.iter().enumerate() {
+                                retry |= symbi_xpu::with_device(fg.devices[k], || {
+                                    tiles[i].level_stage(1, jj, fine_dt, alpha)
+                                });
+                            }
+                            if retry {
+                                break 'fine_subcycle;
+                            }
+                            migrate_level_tracers(tiles, 1);
+                            exchange_level_halos(
+                                tiles,
+                                1,
+                                &fg.order,
+                                fg.counts,
+                                &fg.devices,
+                                transport,
+                            );
+                        }
+                        spawn_decomposed_injections(tiles, &fg.order, 1);
+                        for (k, &i) in fg.order.iter().enumerate() {
+                            retry |= symbi_xpu::with_device(fg.devices[k], || {
+                                tiles[i].level_step_tail(1, fine_dt, alpha)
+                            });
+                        }
+                        if retry {
+                            break 'fine_subcycle;
+                        }
+                    }
+                    // tile-local restrict + flux/emf reflux + c2p + ghost on each refined tile's root.
+                    if !retry {
+                        for (k, &i) in fg.order.iter().enumerate() {
+                            symbi_xpu::with_device(fg.devices[k], || {
+                                tiles[i].level_restrict_reflux(0, 0.0)
+                            });
+                        }
+                    }
+                }
+                // the root clock; the root post-step carries no mesh motion.
+                if !retry {
+                    for i in 0..n {
+                        symbi_xpu::with_device(devices[i], || {
+                            let s = &mut tiles[i].levels[0].state;
+                            (s.time, s.iteration) = advance_clock(s.time, s.iteration, gdt);
+                        });
+                    }
                 }
             }
-            // tile-local restrict + flux/emf reflux + c2p + ghost on each refined tile's root.
-            for (k, &i) in fg.order.iter().enumerate() {
-                symbi_xpu::with_device(fg.devices[k], || tiles[i].level_restrict_reflux(0, 0.0));
+            if !retry {
+                break 'attempt;
             }
-        }
-        // the root clock; the root post-step carries no mesh motion.
-        for i in 0..n {
-            symbi_xpu::with_device(devices[i], || {
-                let s = &mut tiles[i].levels[0].state;
-                (s.time, s.iteration) = advance_clock(s.time, s.iteration, gdt);
-            });
+            // Collective rollback: every tile returns to the same root-step entry before any halo is
+            // exchanged or the reduced timestep is replayed.  This includes host-side tracer/body
+            // state as well as each kernel set's conserved and magnetic retry snapshot.
+            for i in 0..n {
+                for level in &tiles[i].levels {
+                    if level.kernels.fofc_active() {
+                        symbi_xpu::with_device(devices[i], || {
+                            level.kernels.restore_step(&level.state)
+                        });
+                    }
+                }
+                tiles[i].restore_retry_sidecars(&retry_sidecars[i]);
+            }
+            drain_devices::<Mem>(devices);
+            exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
+            if let Some(fg) = &fine {
+                exchange_level_halos(tiles, 1, &fg.order, fg.counts, &fg.devices, transport);
+            }
+            gdt = symbi_sim::driver::retry_timestep(gdt, t)
+                .unwrap_or_else(|err| panic!("{}", err.detail));
         }
         // per-step immersed-body bookkeeping, the hierarchy form of the flat decomposed
         // body step: each tile's finest level reduces its local feedback partials (the

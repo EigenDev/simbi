@@ -1776,20 +1776,107 @@ where
         let den = store.fields.cons.den.view();
         let bcell: Vec<_> = (0..DOF).map(|k| mhd.bcell[k].view()).collect();
         let mut m = 0.0_f64;
-        for c in store.geom.interior.iter() {
-            let rho = (*den.at(c)).to_f64();
-            if rho <= 0.0 {
-                continue;
+        for region in store
+            .composite_ownership
+            .evolution_regions(&store.geom.interior)
+        {
+            for c in region.iter() {
+                let rho = (*den.at(c)).to_f64();
+                if rho <= 0.0 {
+                    continue;
+                }
+                let mut bsq = 0.0;
+                for view in &bcell {
+                    let b = (*view.at(c)).to_f64();
+                    bsq += b * b;
+                }
+                m = m.max(bsq / rho);
             }
-            let mut bsq = 0.0;
-            for view in &bcell {
-                let b = (*view.at(c)).to_f64();
-                bsq += b * b;
-            }
-            m = m.max(bsq / rho);
         }
         m
     })
+}
+
+/// One level's ownership in a composite static-refinement mesh.
+#[derive(Clone, Debug)]
+pub struct CompositeOwnership<const D: usize> {
+    pub coverage: Option<Domain<D>>,
+    pub inactive: Option<Domain<D>>,
+}
+
+impl<const D: usize> Default for CompositeOwnership<D> {
+    fn default() -> Self {
+        Self {
+            coverage: None,
+            inactive: None,
+        }
+    }
+}
+
+impl<const D: usize> CompositeOwnership<D> {
+    pub fn new(coverage: Option<Domain<D>>, interior: &Domain<D>, donor_width: usize) -> Self {
+        let inactive = coverage.as_ref().and_then(|covered| {
+            let spaces = std::array::from_fn(|axis| {
+                let covered_axis = &covered.spaces[axis];
+                let interior_axis = &interior.spaces[axis];
+                // A donor shell belongs only to a genuine coarse-fine face.  A clipped coverage
+                // face coincident with the tile interior boundary is a decomposition cut (or a
+                // physical boundary), not a refinement seam; contracting it would make ownership
+                // and CFL depend on the domain decomposition.
+                let lo_width = usize::from(covered_axis.lo > interior_axis.lo) * donor_width;
+                let hi_width = usize::from(covered_axis.hi < interior_axis.hi) * donor_width;
+                Space {
+                    name: covered_axis.name,
+                    lo: covered_axis.lo + lo_width as isize,
+                    hi: covered_axis.hi - hi_width as isize,
+                }
+            });
+            spaces
+                .iter()
+                .all(|space| space.hi > space.lo)
+                .then(|| Domain::new(spaces))
+        });
+        Self { coverage, inactive }
+    }
+
+    /// True precisely where this level contributes the physical composite solution.
+    pub fn owns_leaf(&self, coord: [isize; D]) -> bool {
+        !self
+            .coverage
+            .as_ref()
+            .is_some_and(|box_| box_.contains(coord))
+    }
+
+    /// Disjoint boxes whose union is `whole \\ excluded`.
+    fn complement_boxes(whole: &Domain<D>, excluded: Option<&Domain<D>>) -> Vec<Domain<D>> {
+        let Some(excluded) = excluded else {
+            return vec![whole.clone()];
+        };
+        let mut middle = whole.clone();
+        let mut boxes = Vec::with_capacity(2 * D);
+        for axis in 0..D {
+            let lo = excluded.spaces[axis].lo;
+            let hi = excluded.spaces[axis].hi;
+            if middle.spaces[axis].lo < lo {
+                boxes.push(middle.slab(axis, (middle.spaces[axis].lo, lo)));
+            }
+            if hi < middle.spaces[axis].hi {
+                boxes.push(middle.slab(axis, (hi, middle.spaces[axis].hi)));
+            }
+            middle = middle.slab(axis, (lo, hi));
+        }
+        boxes
+    }
+
+    /// Computational stage/CFL domain: leaf cells plus the coarse donor shell.
+    pub fn evolution_regions(&self, interior: &Domain<D>) -> Vec<Domain<D>> {
+        Self::complement_boxes(interior, self.inactive.as_ref())
+    }
+
+    /// Physical diagnostic domain: every cell owned by this level exactly once.
+    pub fn leaf_regions(&self, interior: &Domain<D>) -> Vec<Domain<D>> {
+        Self::complement_boxes(interior, self.coverage.as_ref())
+    }
 }
 
 /// the simulation's mutable substance: every buffer + grid + time-state a kernel reads
@@ -1811,6 +1898,15 @@ pub struct FieldStore<
     // ---- geometry ----
     pub geom: PartitionGeometry<NDIM>,
     pub boundaries: Boundaries<NDIM>,
+
+    /// Ownership of this level in a composite static-refinement mesh.
+    ///
+    /// `coverage` is replaced by the next finer level in the physical solution.  A narrow shell
+    /// remains computationally active because it supplies coarse fluxes and prolongation donors;
+    /// `inactive` is the deep covered core outside every such stencil.  Keeping both boxes on the
+    /// store gives the stage, CFL, fallback and diagnostic paths one definition of "active".
+    /// Single-grid stores carry the default (both `None`).
+    pub composite_ownership: CompositeOwnership<NDIM>,
 
     /// discrete mass-transport tracers. position is derived output state;
     /// material ownership is authoritative.
@@ -2447,6 +2543,7 @@ where
                 workspace,
                 geom,
                 boundaries,
+                composite_ownership: CompositeOwnership::default(),
                 // seeding writes the conserved state; the primitives stay meaningless
                 // until the recovery has run.
                 primitives_recovered: std::sync::atomic::AtomicBool::new(false),
@@ -3286,6 +3383,74 @@ mod tests {
     use symbi_hydro::eos::IdealGas;
     use symbi_hydro::newtonian::Newtonian;
     use symbi_xpu::{CpuSpace, HostMemory};
+
+    #[test]
+    fn composite_ownership_partitions_leaf_donor_and_inactive_cells_exactly() {
+        let interior = Domain::new([
+            Space {
+                name: "x",
+                lo: 0,
+                hi: 20,
+            },
+            Space {
+                name: "y",
+                lo: 0,
+                hi: 16,
+            },
+        ]);
+        let coverage = Domain::new([
+            Space {
+                name: "x",
+                lo: 4,
+                hi: 16,
+            },
+            Space {
+                name: "y",
+                lo: 3,
+                hi: 13,
+            },
+        ]);
+        let ownership = CompositeOwnership::new(Some(coverage.clone()), &interior, 2);
+        let evolution = ownership.evolution_regions(&interior);
+        let leaves = ownership.leaf_regions(&interior);
+        let inactive = ownership.inactive.as_ref().unwrap();
+        for cell in interior.iter() {
+            let evolution_count = evolution
+                .iter()
+                .filter(|region| region.contains(cell))
+                .count();
+            let leaf_count = leaves.iter().filter(|region| region.contains(cell)).count();
+            assert_eq!(evolution_count, (!inactive.contains(cell)) as usize);
+            assert_eq!(leaf_count, (!coverage.contains(cell)) as usize);
+            assert_eq!(ownership.owns_leaf(cell), !coverage.contains(cell));
+        }
+        assert_eq!(
+            evolution.iter().map(Domain::volume).sum::<usize>() + inactive.volume(),
+            interior.volume()
+        );
+        assert_eq!(
+            leaves.iter().map(Domain::volume).sum::<usize>() + coverage.volume(),
+            interior.volume()
+        );
+    }
+
+    #[test]
+    fn composite_inactive_core_is_invariant_under_a_decomposition_cut() {
+        let domain = |lo, hi| Domain::new([Space { name: "x", lo, hi }]);
+        let global_interior = domain(0, 32);
+        let global = CompositeOwnership::new(Some(domain(8, 24)), &global_interior, 2);
+        let left = CompositeOwnership::new(Some(domain(8, 16)), &domain(0, 16), 2);
+        let right = CompositeOwnership::new(Some(domain(16, 24)), &domain(16, 32), 2);
+        for cell in global_interior.iter() {
+            let global_inactive = global.inactive.as_ref().unwrap().contains(cell);
+            let tiled_inactive = if cell[0] < 16 {
+                left.inactive.as_ref().unwrap().contains(cell)
+            } else {
+                right.inactive.as_ref().unwrap().contains(cell)
+            };
+            assert_eq!(global_inactive, tiled_inactive, "mismatch at {cell:?}");
+        }
+    }
 
     // the atlas invariant: the decomposition transport set is derived from the store's
     // populated slots. a passive scalar (dye), allocated as a run-level opt-in, appears in

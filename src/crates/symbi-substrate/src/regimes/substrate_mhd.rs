@@ -1065,7 +1065,7 @@ where
         );
         let diagnose_cfl = std::env::var_os("SIMBI_CFL_DIAGNOSTICS").is_some();
         let flux_max = diagnose_cfl.then(|| {
-            crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior)
+            crate::regimes::substrate_kernels::composite_max_reduce(sim, &self.cfl_scratch)
         });
         // the wu 2017 (arXiv:1708.07267) source-admissibility rate: on a curved background the
         // geometric source S advances U -> U + dt S and can push the conserved state out of the
@@ -1112,7 +1112,7 @@ where
             );
         }
         let mut lambda_max =
-            crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior);
+            crate::regimes::substrate_kernels::composite_max_reduce(sim, &self.cfl_scratch);
         if diagnose_cfl {
             let call = MHD_CFL_DIAGNOSTIC_CALLS.fetch_add(1, Ordering::Relaxed);
             // `SIMBI_CFL_DIAGNOSTICS=all` reports every call. the sampled cadence shows the
@@ -1129,10 +1129,12 @@ where
                     let rho = sim.fields.prim.rho.view();
                     let pre = sim.fields.prim.pre_field().map(Field::view);
                     let mut best = None;
-                    for c in geom.interior.iter() {
-                        let rate = (*rates.at(c)).to_f64();
-                        if best.is_none_or(|(_, best_rate): (_, f64)| rate > best_rate) {
-                            best = Some((c, rate));
+                    for region in sim.composite_ownership.evolution_regions(&geom.interior) {
+                        for c in region.iter() {
+                            let rate = (*rates.at(c)).to_f64();
+                            if best.is_none_or(|(_, best_rate): (_, f64)| rate > best_rate) {
+                                best = Some((c, rate));
+                            }
                         }
                     }
                     best.map(|(c, rate)| {
