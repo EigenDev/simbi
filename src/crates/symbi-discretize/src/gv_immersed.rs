@@ -1031,6 +1031,50 @@ pub(crate) fn stencil_position_cartesian_gv(
     to_cartesian_gv(coords, &coord3)
 }
 
+/// the fraction of the local hydrodynamic operator that must use ordinary state variables rather
+/// than hydrostatic departures. the same mollified spherical indicator and one-cell width used by
+/// penalization define the jurisdiction, while porosity makes a sealed surface an exact zero and a
+/// pure drain the full mask. the maximum gives overlapping surfaces one conservative jurisdiction.
+pub(crate) fn surface_handover_weight_gv(
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    dir: usize,
+    axes: &[usize],
+    spacing: &[Spacing],
+    half_cells: i64,
+) -> Gv {
+    let point = stencil_position_cartesian_gv(coords, ndim, dir, axes, spacing, half_cells);
+    let cart_axes = body_cart_axes(coords, ndim, axes);
+    let mut min_w = crate::gv::gv_axis_width(0, spacing[0]);
+    for ax in 1..ndim {
+        min_w = min_w.min(crate::gv::gv_axis_width(ax, spacing[ax]));
+    }
+    let mut weight = Gv::ZERO;
+    for bb in 0..n_bodies {
+        let porosity = Gv::scalar(&format!("body_{bb}_porosity"));
+        let body_weight = Gv::cond(
+            porosity.cmp_gt(Gv::ZERO),
+            || {
+                let center = body_vec3(bb, ndim, &cart_axes, "pos");
+                let rvec: [Gv; 3] = std::array::from_fn(|aa| point[aa] - center[aa]);
+                let radius = (sq(rvec[0]) + sq(rvec[1]) + sq(rvec[2])).sqrt();
+                let mask_radius = Gv::scalar(&format!("body_{bb}_rmask"));
+                let support = mask_radius + Gv::from_f64(crate::ibm::DRAIN_SUPPORT_WIDTHS) * min_w;
+                let chi = Gv::cond(
+                    radius.cmp_lt(support),
+                    || symbi_ib::sdf::chi(radius - mask_radius, min_w),
+                    || Gv::ZERO,
+                );
+                porosity * chi
+            },
+            || Gv::ZERO,
+        );
+        weight = weight.max(body_weight);
+    }
+    weight.min(Gv::ONE).max(Gv::ZERO)
+}
+
 /// the total gravitational potential at a point displaced `half_cells` half-cell widths from the
 /// current cell's lower face along the sweep axis: `half_cells = 2k` lands on the lower face of
 /// cell `i+k`, `2k+1` on that cell's centre.
@@ -1127,6 +1171,27 @@ pub fn body_source_wb_gv(
     // selects uniform/log/geometric at runtime through the per-axis `map_kind_{ax}` scalar,
     // so this one kernel serves every grading.
     let spacing = vec![Spacing::Uniform; ndim];
+    let handover = surface_handover_weight_gv(n_bodies, coords, ndim, 0, axes, &spacing, 1);
+
+    // the ordinary gravity source evaluated at the same stage input. the drain handover blends
+    // this with the equilibrium-pressure source cellwise, so the reconstruction and its source
+    // leave the hydrostatic chart together where penalization evacuates the gas.
+    let cart_axes = body_cart_axes(coords, ndim, axes);
+    let (coord3, cell_cart, _, _, _, _) =
+        cell_scaffold(coords, ndim, ncomp, axes, gamma, us_den, &us_mom, us_nrg);
+    let mut plain_force = vec![Gv::ZERO; ncomp];
+    for bb in 0..n_bodies {
+        let center = body_vec3(bb, ndim, &cart_axes, "pos");
+        let rvec: [Gv; 3] = std::array::from_fn(|aa| cell_cart[aa] - center[aa]);
+        let mass = Gv::scalar(&format!("body_{bb}_mass"));
+        let soft = Gv::scalar(&format!("body_{bb}_soft"));
+        let soft_kind = Gv::scalar(&format!("body_{bb}_softkind"));
+        let gravity_cart = crate::ibm::body_gravity(rvec, mass, soft, soft_kind);
+        let gravity = vector_from_cartesian_gv(coords, &coord3, &gravity_cart, ncomp);
+        for comp in 0..ncomp {
+            plain_force[comp] = plain_force[comp] + us_den * gravity[comp];
+        }
+    }
     // the curvilinear form needs the per-axis face areas and inverse volume; traced only on
     // the curvilinear arms so the cartesian graph — and the baked cartesian kernels — carry
     // not one extra node.
@@ -1158,7 +1223,7 @@ pub fn body_source_wb_gv(
         let eq = LocalEquilibrium::faded(us_den, p_us, phi_c, rise);
         let (_, p_lo) = eq.state_at(phi_lo);
         let (_, p_hi) = eq.state_at(phi_hi);
-        let s_m = match &geo {
+        let balanced_force = match &geo {
             // at equilibrium `rho g = dp_eq/dx`, so the source is the discrete equilibrium
             // pressure gradient -- upper face minus lower. the flipped difference doubles the
             // force the flux divergence carries where the correct sign cancels it, and a 400-step
@@ -1177,8 +1242,9 @@ pub fn body_source_wb_gv(
                 (geo.area_hi[ax] * (p_hi - p_us) - geo.area_lo[ax] * (p_lo - p_us)) * geo.inv_volume
             }
         };
-        mom_new[ax] = mom_new[ax] + dt * s_m;
-        nrg_new = nrg_new + dt * us_vel[ax] * s_m;
+        let force = balanced_force + handover * (plain_force[ax] - balanced_force);
+        mom_new[ax] = mom_new[ax] + dt * force;
+        nrg_new = nrg_new + dt * us_vel[ax] * force;
     }
 
     let mut writes = Vec::with_capacity(ncomp + 1);

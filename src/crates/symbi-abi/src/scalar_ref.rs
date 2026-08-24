@@ -34,7 +34,7 @@
 use crate::scalar_param::MeshScalar;
 
 /// a body field within the immersed-body scalar block: the gravity/accretion
-/// knobs (`mass`/`soft`/`racc`/`sink`/`delta`) and the per-axis state
+/// knobs (`mass`/`soft`/`racc`/`sink`/`delta`), surface porosity, and the per-axis state
 /// (`pos`/`vel`). addressed under a body index in `ScalarRef::Body`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum BodyScalar {
@@ -51,6 +51,9 @@ pub enum BodyScalar {
     /// a purely gravitational slot then carries an indicator that vanishes at every point,
     /// while `Racc` carries a placeholder radius its consumers screen off by other means.
     Rmask,
+    /// the hydrodynamic surface's drain fraction: zero for a sealed wall, one for a pure drain,
+    /// and the declared porosity for the interpolating porous surface.
+    Porosity,
     Sink,
     Delta,
     Pos(u8),
@@ -70,6 +73,7 @@ impl BodyScalar {
             BodyScalar::SoftKind => "softkind".to_string(),
             BodyScalar::Racc => "racc".to_string(),
             BodyScalar::Rmask => "rmask".to_string(),
+            BodyScalar::Porosity => "porosity".to_string(),
             BodyScalar::Sink => "sink".to_string(),
             BodyScalar::Delta => "delta".to_string(),
             BodyScalar::Pos(ax) => format!("pos_{ax}"),
@@ -98,6 +102,7 @@ impl BodyScalar {
             "softkind" => Some(BodyScalar::SoftKind),
             "racc" => Some(BodyScalar::Racc),
             "rmask" => Some(BodyScalar::Rmask),
+            "porosity" => Some(BodyScalar::Porosity),
             "sink" => Some(BodyScalar::Sink),
             "delta" => Some(BodyScalar::Delta),
             _ => None,
@@ -332,6 +337,7 @@ mod tests {
                 BodyScalar::SoftKind,
                 BodyScalar::Racc,
                 BodyScalar::Rmask,
+                BodyScalar::Porosity,
                 BodyScalar::Sink,
                 BodyScalar::Delta,
             ] {

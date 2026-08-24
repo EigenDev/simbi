@@ -247,6 +247,11 @@ pub(crate) fn body_scalar<const D: usize>(
         // the same radius under the indicator contract: zero for a body that penalizes no
         // surface, so a max over slots covers the penalized region and only it.
         BodyScalar::Rmask => body.mask_radius().unwrap_or(0.0),
+        BodyScalar::Porosity => match body.spec.surface {
+            symbi_ib::SurfaceSpec::Drain => 1.0,
+            symbi_ib::SurfaceSpec::Porous { porosity, .. } => porosity,
+            symbi_ib::SurfaceSpec::TorqueFree { .. } => 1.0,
+        },
         BodyScalar::Sink => body.sink_rate().unwrap_or(0.0),
         BodyScalar::Delta => body.sink_delta().unwrap_or(1.0),
         // the spin state a shaped wall's mask rotates with: the angular-velocity vector

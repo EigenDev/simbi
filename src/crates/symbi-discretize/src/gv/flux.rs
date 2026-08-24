@@ -363,7 +363,33 @@ fn euler_reconstruct<const D: usize>(
         vr.push(r);
     }
     let (pre_l, pre_r) = match balanced {
-        Some(b) => balanced_pressure_pair(ndim, dir, recon, theta, b),
+        Some(b) => {
+            let balanced_pair = balanced_pressure_pair(ndim, dir, recon, theta, b);
+            let plain_pair = recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon);
+            let spacing = vec![Spacing::Uniform; ndim as usize];
+            let left_weight = crate::gv_immersed::surface_handover_weight_gv(
+                b.n_bodies,
+                b.coords,
+                ndim as usize,
+                dir as usize,
+                b.axes,
+                &spacing,
+                -1,
+            );
+            let right_weight = crate::gv_immersed::surface_handover_weight_gv(
+                b.n_bodies,
+                b.coords,
+                ndim as usize,
+                dir as usize,
+                b.axes,
+                &spacing,
+                1,
+            );
+            (
+                balanced_pair.0 + left_weight * (plain_pair.0 - balanced_pair.0),
+                balanced_pair.1 + right_weight * (plain_pair.1 - balanced_pair.1),
+            )
+        }
         None => recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon),
     };
     let mut rho_lr = (rho_l, rho_r);
