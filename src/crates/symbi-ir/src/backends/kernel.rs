@@ -410,17 +410,12 @@ fn smem_prelude_cuda(ty: &str, ndim: usize, halo: &[u8], tiled: &[(String, u32)]
 /// of `prepared_from_ir`). keeps serde_json contained to symbi-ir: build.rs and
 /// the runtime go through these helpers, so the wire format stays internal.
 pub fn prepared_to_ir(prepared: &Prepared) -> String {
-    serde_json::to_string(prepared).expect("prepared_to_ir: Prepared is not serializable")
+    super::wire::serialize(prepared).expect("prepared_to_ir: Prepared is not serializable")
 }
 
-/// deserialize compiler-generated IR without serde_json's generic document-depth
-/// ceiling. scalar expressions are recursive trees, and a valid generated kernel can
-/// exceed that ceiling after lowering. these blobs are trusted build artifacts rather
-/// than user documents; the lowering pipeline, not external input, bounds their depth.
+/// deserialize the flat, versioned compiler-generated IR representation.
 pub(crate) fn deserialize_prepared(ir: &str) -> Result<Prepared, serde_json::Error> {
-    let mut json = serde_json::Deserializer::from_str(ir);
-    json.disable_recursion_limit();
-    <Prepared as serde::Deserialize>::deserialize(&mut json)
+    super::wire::deserialize(ir)
 }
 
 /// deserialize a `Prepared` IR blob — the backend-neutral artifact `build.rs`
@@ -899,7 +894,7 @@ mod tests {
         use std::collections::BTreeMap;
 
         let mut expression = ScalarExpr::Const(ConstValue::F64(1.0));
-        for _ in 0..256 {
+        for _ in 0..4096 {
             expression = ScalarExpr::BinOp(
                 BinaryKind::Add,
                 Box::new(expression),
@@ -927,9 +922,39 @@ mod tests {
         };
 
         let ir = prepared_to_ir(&prepared);
+        assert!(ir.contains("\"version\":1"));
         let decoded = prepared_from_ir(&ir);
         assert_eq!(decoded.kernel_name, "deep_scalar_tree");
         assert_eq!(decoded.scalarized.outputs, prepared.scalarized.outputs);
+    }
+
+    #[test]
+    fn prepared_ir_rejects_an_invalid_flat_expression_index() {
+        let mut g = Graph::new();
+        let value = scalar_param(&mut g, "value");
+        let prepared = super::super::render::prepare(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "invalid_flat_index",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cuda_cfg(),
+                field_inputs: &[],
+                scalar_params: &["value".into()],
+                field_writes: &[("out".into(), "prim.rho".into(), value)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
+        let mut wire: serde_json::Value = serde_json::from_str(&prepared_to_ir(&prepared)).unwrap();
+        wire["scalarized"]["outputs"][0] = serde_json::json!(u32::MAX);
+        let error = deserialize_prepared(&serde_json::to_string(&wire).unwrap()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("invalid or forward scalar expression index")
+        );
     }
 
     #[test]

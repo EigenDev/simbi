@@ -18,3 +18,4 @@ pub mod interp;
 pub mod kernel;
 pub mod kernel_cpu;
 pub mod render;
+mod wire;

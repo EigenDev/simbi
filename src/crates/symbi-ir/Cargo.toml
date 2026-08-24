@@ -11,7 +11,7 @@ proc-macro2 = "1"
 # artifact: build.rs serializes it into the binary, the runtime renders+JITs any
 # accelerator from it. serde derives the round-trip; serde_json is the wire format.
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["unbounded_depth"] }
+serde_json = "1"
 # the `Gv` carrier (gv.rs) impls `symbi_algebra::Scalar` to trace carrier-generic
 # physics into this crate's tensor IR. consolidated 2026-05-30: symbi-core folded in.
 symbi-algebra = { path = "../symbi-algebra" }
