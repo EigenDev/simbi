@@ -413,12 +413,22 @@ pub fn prepared_to_ir(prepared: &Prepared) -> String {
     serde_json::to_string(prepared).expect("prepared_to_ir: Prepared is not serializable")
 }
 
+/// deserialize compiler-generated IR without serde_json's generic document-depth
+/// ceiling. scalar expressions are recursive trees, and a valid generated kernel can
+/// exceed that ceiling after lowering. these blobs are trusted build artifacts rather
+/// than user documents; the lowering pipeline, not external input, bounds their depth.
+pub(crate) fn deserialize_prepared(ir: &str) -> Result<Prepared, serde_json::Error> {
+    let mut json = serde_json::Deserializer::from_str(ir);
+    json.disable_recursion_limit();
+    <Prepared as serde::Deserialize>::deserialize(&mut json)
+}
+
 /// deserialize a `Prepared` IR blob — the backend-neutral artifact `build.rs`
 /// embeds per kernel. hides serde_json from consumers so the dep stays here;
 /// pair with `render(_, &SomeRenderer)`, where the renderer alone picks the
 /// backend.
 pub fn prepared_from_ir(ir: &str) -> Prepared {
-    serde_json::from_str(ir).expect("prepared_from_ir: malformed Prepared IR blob")
+    deserialize_prepared(ir).expect("prepared_from_ir: malformed Prepared IR blob")
 }
 
 /// the runtime render path: deserialize a `Prepared` IR blob and
@@ -880,6 +890,46 @@ mod tests {
 
     fn scalar_param(g: &mut Graph, name: &str) -> NodeId {
         g.add_param(Symbol::intern(name), TensorTy::scalar(ElementTy::F64), None)
+    }
+
+    #[test]
+    fn prepared_ir_accepts_a_scalar_tree_past_jsons_default_depth() {
+        use crate::passes::scalarize::{KernelScalarized, ScalarExpr};
+        use crate::{BinaryKind, ConstValue};
+        use std::collections::BTreeMap;
+
+        let mut expression = ScalarExpr::Const(ConstValue::F64(1.0));
+        for _ in 0..256 {
+            expression = ScalarExpr::BinOp(
+                BinaryKind::Add,
+                Box::new(expression),
+                Box::new(ScalarExpr::Const(ConstValue::F64(1.0))),
+            );
+        }
+        let prepared = Prepared {
+            kernel_name: "deep_scalar_tree".into(),
+            ndim: 1,
+            scalarized: KernelScalarized {
+                params: vec![],
+                body: vec![],
+                outputs: vec![expression],
+            },
+            bindings: vec![],
+            field_inputs: vec![],
+            field_writes: vec![],
+            scalar_params: vec![],
+            coord_components: vec![],
+            device_preamble: vec![],
+            param_elem: BTreeMap::new(),
+            tile_spec: None,
+            coalesce_layout: false,
+            output_support: None,
+        };
+
+        let ir = prepared_to_ir(&prepared);
+        let decoded = prepared_from_ir(&ir);
+        assert_eq!(decoded.kernel_name, "deep_scalar_tree");
+        assert_eq!(decoded.scalarized.outputs, prepared.scalarized.outputs);
     }
 
     #[test]

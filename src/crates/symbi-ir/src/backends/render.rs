@@ -347,7 +347,8 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
 /// a caller reads a kernel's `field_inputs` layout straight off the artifact —
 /// axis-role / ncomp / curvilinear ordering quirks included.
 pub fn kernel_bindings_from_ir(ir: &str) -> Vec<(FieldBind, bool)> {
-    let prepared: Prepared = serde_json::from_str(ir).expect("deserialize Prepared from kernel IR");
+    let prepared =
+        super::kernel::deserialize_prepared(ir).expect("deserialize Prepared from kernel IR");
     let mut by_idx = prepared.bindings;
     by_idx.sort_by_key(|b| b.buffer_index);
     by_idx.into_iter().map(|b| (b.field, b.is_output)).collect()
@@ -364,12 +365,14 @@ pub fn kernel_bindings_from_ir(ir: &str) -> Vec<(FieldBind, bool)> {
 /// layer evaluates a Ball's center/radius against its own scalar table to
 /// derive reduction / launch regions.
 pub fn kernel_output_support_from_ir(ir: &str) -> Option<crate::support::Support> {
-    let prepared: Prepared = serde_json::from_str(ir).expect("deserialize Prepared from kernel IR");
+    let prepared =
+        super::kernel::deserialize_prepared(ir).expect("deserialize Prepared from kernel IR");
     prepared.output_support
 }
 
 pub fn kernel_scalar_params_typed_from_ir(ir: &str) -> Vec<(ScalarBind, bool)> {
-    let prepared: Prepared = serde_json::from_str(ir).expect("deserialize Prepared from kernel IR");
+    let prepared =
+        super::kernel::deserialize_prepared(ir).expect("deserialize Prepared from kernel IR");
     prepared
         .scalar_params
         .iter()
