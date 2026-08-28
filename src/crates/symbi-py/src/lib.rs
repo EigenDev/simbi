@@ -2237,10 +2237,10 @@ where
             return std::ops::ControlFlow::Break(());
         }
 
-        // fatal cfl crash (set by the evolve loop when the wave speed went NaN / collapsed — an
-        // unphysical c2p, e.g. V -> 1 at the inner boundary): snapshot the last computed state as a
-        // `.crashed` checkpoint so it can be inspected, then stop.
-        if let Some(c) = h.crash {
+        // fatal crash (set by the evolve loop: the cfl watchdog on a NaN / collapsed wave speed,
+        // or a panic caught inside the step — the FOFC freeze-streak halt): snapshot the last
+        // computed state as a `.crashed` checkpoint so it can be inspected, then stop.
+        if let Some(c) = &h.crash {
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
@@ -2540,16 +2540,20 @@ where
 
     // crashed: the observer already snapshotted the `.crashed` state. surface the halt as the red
     // crash exit frame.
-    if let Some(c) = hier.crash {
+    if let Some(c) = &hier.crash {
         screen.leave();
         table.set_dynamic(false);
         let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
-        // report which halt condition fired and its numbers. the three are different failures with
-        // different fixes: a non-finite rate is a poisoned cell, a non-positive one a degenerate
-        // state, and a sudden jump means the cfl rate collapsed (the wave speeds went to zero, or
-        // the scratch the reduction reads was left holding something other than a rate). asserting
-        // one diagnosis for all three sends every investigation down the same wrong path.
-        let cause = if c.dt_cfl.is_nan() {
+        // report which halt condition fired and its numbers. the four are different failures with
+        // different fixes: a caught step panic carries its own message (the FOFC freeze-streak
+        // halt names the offending cell and state), a non-finite rate is a poisoned cell, a
+        // non-positive one a degenerate state, and a sudden jump means the cfl rate collapsed
+        // (the wave speeds went to zero, or the scratch the reduction reads was left holding
+        // something other than a rate). asserting one diagnosis for all sends every
+        // investigation down the same wrong path.
+        let cause = if let Some(msg) = &c.panic {
+            format!("step panic: {msg}")
+        } else if c.dt_cfl.is_nan() {
             "cfl dt is NaN — a non-finite wave speed (poisoned cell or boundary)".to_string()
         } else if c.dt_cfl <= 0.0 {
             format!("cfl dt is non-positive ({:.6e})", c.dt_cfl)
@@ -2567,6 +2571,12 @@ where
         );
         table.post_error(&summary);
         table.exit_frame(ExitKind::Crash, &summary);
+        // a panic-origin crash keeps the non-zero process exit the uncaught panic produced,
+        // so schedulers and chains read the same failure signal as before; the watchdog exit
+        // stays a reported halt.
+        if c.panic.is_some() {
+            return Err(summary.into());
+        }
         return Ok(());
     }
 

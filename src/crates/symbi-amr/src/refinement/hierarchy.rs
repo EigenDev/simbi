@@ -165,16 +165,20 @@ where
 // =============================================================================
 
 /// static-refinement hierarchy: levels[0] = coarsest, levels[n-1] = finest.
-/// a fatal CFL crash: the wave speed went NaN or collapsed (an unphysical c2p — e.g. V -> 1 near a
-/// boundary), so the next dt is NaN / non-positive / blown up. the evolve loop halts on the last
-/// computed state and the driver snapshots a `.crashed` checkpoint + reports it, so the crash
-/// reaches the user; clamping dt to t_final would instead let the run "finish" on garbage.
-#[derive(Clone, Copy, Debug)]
+/// a fatal crash: either the CFL watchdog (the wave speed went NaN or collapsed — an unphysical
+/// c2p, e.g. V -> 1 near a boundary — so the next dt is NaN / non-positive / blown up) or a panic
+/// caught inside the step (the FOFC freeze-streak halt, a poisoned-cell assertion). the evolve loop
+/// halts on the last computed state and the driver snapshots a `.crashed` checkpoint + reports it,
+/// so every crash of either class reaches the user with its state on disk.
+#[derive(Clone, Debug)]
 pub struct CrashReport {
     pub iter: u64,
     pub time: f64,
     pub dt_cfl: f64,
     pub dt_prev: f64,
+    /// the payload of a panic caught inside `step_root`; the dt fields carry NaN in
+    /// that case, and the watchdog's own reports leave this empty.
+    pub panic: Option<String>,
 }
 
 struct HierarchyRetrySidecars<const D: usize> {
@@ -1459,7 +1463,34 @@ where
         }
         let mut last_cb = self.levels[0].state.iteration;
         while self.levels[0].state.time < t_final {
-            self.step_root(t_final);
+            // a panic inside the step (the FOFC freeze-streak halt, a poisoned-cell assertion)
+            // carries the same diagnostic value as a watchdog crash and deserves the same exit:
+            // catch it, convert it into a crash report carrying the panic message, and let the
+            // observer below snapshot the `.crashed` checkpoint. the default panic hook has
+            // already printed the message and backtrace to stderr at the panic site, so the
+            // report reaches the log and the state reaches disk. the caught state is the
+            // mid-step one the panic fired on, which is exactly the state worth inspecting.
+            let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.step_root(t_final)
+            }));
+            if let Err(payload) = step {
+                let msg = payload
+                    .downcast_ref::<&'static str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "panic with a non-string payload".to_string());
+                let (iter, time) = {
+                    let r = &self.levels[0].state;
+                    (r.iteration, r.time)
+                };
+                self.crash = Some(CrashReport {
+                    iter,
+                    time,
+                    dt_cfl: f64::NAN,
+                    dt_prev: self.prev_dt_cfl,
+                    panic: Some(msg),
+                });
+            }
             // a crashed step records the crash and leaves the clock where it was: let the observer
             // snapshot the `.crashed` checkpoint + report it, then stop the march. marching on
             // would spin on the frozen time and clamp dt to t_final on garbage.
@@ -1886,6 +1917,7 @@ where
                 time,
                 dt_cfl,
                 dt_prev,
+                panic: None,
             });
             return;
         }
