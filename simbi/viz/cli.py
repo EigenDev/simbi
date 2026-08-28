@@ -362,6 +362,25 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "curved-spacetime run, read from the checkpoint metadata; flat runs draw nothing",
     )
     parser.add_argument(
+        "--show-scales",
+        action="store_true",
+        help="label the radial and angular scale on a polar chart; the labels "
+        "track the domain of a moving mesh as it expands",
+    )
+    parser.add_argument(
+        "--length-scale",
+        type=time_scale_converter,
+        default=None,
+        help="characteristic length: radial scale labels show r divided by it"
+        " (supports 'pi', 'e'); requires --show-scales",
+    )
+    parser.add_argument(
+        "--length-units",
+        type=str,
+        default="",
+        help="unit string appended to each radial scale label (e.g. pc)",
+    )
+    parser.add_argument(
         "--xlims",
         nargs=2,
         type=float,

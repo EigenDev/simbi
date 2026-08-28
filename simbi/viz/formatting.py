@@ -4,6 +4,7 @@ from typing import Any, Optional, Sequence
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 
 from simbi.viz.utility import get_field_str
 
@@ -242,8 +243,15 @@ class FigureFormatter:
             main_ax.set_theta_zero_location("N")
             main_ax.set_theta_direction(-1)
 
-            main_ax.set_xticklabels([])
-            main_ax.set_yticklabels([])
+            # the scale option keeps matplotlib's automatic tick locators, so
+            # the labeled radii follow the view limits each frame sets and
+            # stay current as a moving mesh expands. blanking installs a fixed
+            # empty formatter instead, which holds every later frame blank.
+            if getattr(self.style, "show_scales", False):
+                style_radial_scale(main_ax, self.style)
+            else:
+                main_ax.set_xticklabels([])
+                main_ax.set_yticklabels([])
 
         try:
             self._format_colorbars(
@@ -320,6 +328,14 @@ class FigureFormatter:
             bars = {}
             setattr(ax, "_simbi_colorbars", bars)
 
+        # the radial scale labels occupy a band below a hemisphere's flat
+        # edge, so the bars drop beneath it rather than print through it
+        clearance = (
+            RADIAL_LABEL_CLEARANCE
+            if getattr(self.style, "show_scales", False)
+            else 0.0
+        )
+
         for slot, (artist, name) in enumerate(entries):
             label = _colorbar_label(name, field_data)
             existing = bars.get(slot)
@@ -331,7 +347,7 @@ class FigureFormatter:
                     existing.set_label(label)
                 continue
 
-            box = under_wedge_box(ax, slot, len(entries))
+            box = under_wedge_box(ax, slot, len(entries), clearance=clearance)
             if box is not None:
                 # an inset rides with its parent, so a bar laid in the chart's
                 # own empty strip keeps its place when the layout reflows
@@ -355,6 +371,50 @@ class FigureFormatter:
             bars[slot] = bar
 
 
+# the labeled radial ticks a chart carries at most. each label is a number
+# plus a unit string laid along half the flat edge, so a handful is what fits
+RADIAL_TICK_BINS = 4
+
+
+class ScaledRadialLocator(MaxNLocator):
+    """tick radii that land on round values of r / scale.
+
+    picking nice values in data radii and dividing afterwards prints every
+    label at full float width (0.45 / 0.8779 = 0.512587...); picking them in
+    the scaled units and mapping back keeps the labels short."""
+
+    def __init__(self, scale: float):
+        super().__init__(nbins=RADIAL_TICK_BINS, steps=[1, 2, 2.5, 5, 10])
+        self._scale = scale
+
+    def tick_values(self, vmin: float, vmax: float) -> list[float]:
+        scaled = super().tick_values(vmin / self._scale, vmax / self._scale)
+        return [value * self._scale for value in scaled]
+
+
+def style_radial_scale(ax: Axes, style: Any) -> None:
+    """label the radial axis in the declared physical units.
+
+    the ticks land on round values of r / length_scale with the unit string
+    attached, so a run in code units reads in physical ones. locator and
+    formatter both run at draw time, which keeps the labels current as a
+    moving mesh carries the radial limits outward."""
+    from matplotlib.projections.polar import RadialLocator
+    from matplotlib.ticker import FuncFormatter
+
+    scale = getattr(style, "length_scale", None) or 1.0
+    units = getattr(style, "length_units", "")
+    suffix = f" {units}" if units else ""
+
+    def format_radius(value: float, _position: int) -> str:
+        return f"{value / scale:g}{suffix}"
+
+    # the radial wrapper keeps polar-specific behavior (ticks clipped to the
+    # visible annulus) around the scaled tick choice
+    ax.yaxis.set_major_locator(RadialLocator(ScaledRadialLocator(scale), ax))
+    ax.yaxis.set_major_formatter(FuncFormatter(format_radius))
+
+
 def _colorbar_label(name: Optional[str], field_data: Any) -> Optional[str]:
     """the axis label for the bar describing `name`, in display notation."""
     label = name or getattr(field_data, "name", None)
@@ -376,6 +436,9 @@ def colorbar_side(slot: int, total: int) -> str:
 BAR_THICKNESS = 0.035
 BAR_GAP = 0.03
 BAR_WIDTH_IN_CELL = 0.8
+# the band the radial scale labels occupy along the flat edge, kept clear of
+# the bars when the scale is drawn
+RADIAL_LABEL_CLEARANCE = 0.05
 
 
 def is_hemispherical(ax: Axes) -> bool:
@@ -422,17 +485,18 @@ def bar_cell(slot: int, total: int) -> int:
 
 
 def under_wedge_box(
-    ax: Axes, slot: int, total: int
+    ax: Axes, slot: int, total: int, clearance: float = 0.0
 ) -> Optional[list[float]]:
     """[x, y, width, height] for a bar beneath a hemispherical chart, or None
-    when the chart leaves no strip to put one in."""
+    when the chart leaves no strip to put one in. `clearance` widens the gap
+    below the flat edge, in axes fractions, leaving room for scale labels."""
     if not is_hemispherical(ax):
         return None
 
     left, right, bottom, _ = wedge_extent(ax)
 
     # the bar and the tick labels below it have to clear the axes floor
-    top = bottom - BAR_GAP
+    top = bottom - BAR_GAP - clearance
     if top - BAR_THICKNESS < 0.0:
         return None
 

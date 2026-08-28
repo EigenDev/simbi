@@ -49,6 +49,16 @@ class FigureConfig(BaseModel):
     # scatter mass-transport tracers on the field plot; a run with no
     # `tracers` group draws nothing.
     draw_tracers: bool = False
+    # label the spatial scale of a polar chart: radial and angular tick labels,
+    # placed by matplotlib's automatic locators so they follow the radial
+    # extent of a moving mesh as it expands between frames. left off, the
+    # chart draws as a pure field render with no axis numbers.
+    show_scales: bool = False
+    # characteristic length: radial scale labels are drawn as r / length_scale,
+    # so a run in code units reads in physical ones. read with show_scales.
+    length_scale: Optional[float] = None
+    # unit string appended to each radial scale label, e.g. "pc"
+    length_units: str = ""
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 

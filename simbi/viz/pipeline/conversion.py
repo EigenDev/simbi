@@ -95,6 +95,9 @@ def figure_config_from_args(args: Namespace) -> FigureConfig:
         draw_bodies=getattr(args, "draw_bodies", False),
         draw_tracers=getattr(args, "draw_tracers", False),
         draw_horizon=getattr(args, "draw_horizon", False),
+        show_scales=getattr(args, "show_scales", False),
+        length_scale=getattr(args, "length_scale", None),
+        length_units=getattr(args, "length_units", ""),
     )
 
 
