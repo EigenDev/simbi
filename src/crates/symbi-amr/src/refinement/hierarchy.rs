@@ -1723,21 +1723,27 @@ where
     /// global min of this across tiles, then drives each tile with `evolve(t + global_dt)` -- since
     /// the global dt is the min, each tile's internal `dt_cfl.min(global_dt)` collapses to
     /// global_dt, so the existing clamp alone produces a lockstep root step.
+    /// the raw cfl estimate over every level: `cfl(level) * RATIO^level` (level l subcycles
+    /// ratio^l times, so its limit enters scaled by ratio^l), minimized across levels. a
+    /// non-finite or non-positive per-level candidate propagates out unmodified so the
+    /// callers' crash heuristics see it.
+    fn raw_root_cfl(&self) -> f64 {
+        let mut dt = f64::INFINITY;
+        for (ll, lvl) in self.levels.iter().enumerate() {
+            let scale = RATIO.pow(ll as u32) as f64;
+            let candidate = lvl.kernels.cfl(&lvl.state) * scale;
+            if !candidate.is_finite() || candidate <= 0.0 {
+                return candidate;
+            }
+            dt = dt.min(candidate);
+        }
+        dt
+    }
+
     pub fn root_cfl_dt(&self) -> f64 {
         // same full-grid wave-speed pass as `step_root`; instrumented under the same phase name so a
         // decomposed run attributes it identically.
-        let dt_cfl = prof("cfl", || {
-            let mut dt = f64::INFINITY;
-            for (ll, lvl) in self.levels.iter().enumerate() {
-                let scale = RATIO.pow(ll as u32) as f64;
-                let candidate = lvl.kernels.cfl(&lvl.state) * scale;
-                if !candidate.is_finite() || candidate <= 0.0 {
-                    return candidate;
-                }
-                dt = dt.min(candidate);
-            }
-            dt
-        });
+        let dt_cfl = prof("cfl", || self.raw_root_cfl());
         // the user clamp (max_dt > 0): pins the dt sequence across runs whose CFL
         // estimators differ. applied after the raw-cfl crash heuristics elsewhere.
         let clamp = self.levels[0].state.max_dt;
@@ -1877,27 +1883,24 @@ where
         // full-grid read of prim on every level, once per step, and sits outside the substage loop:
         // at a small domain / high step count it is a large fraction of the step that per-phase
         // timing inside the substage loop would leave unattributed.
-        let dt_cfl = prof("cfl", || {
-            let mut dt = f64::INFINITY;
-            for (ll, lvl) in self.levels.iter().enumerate() {
-                let scale = RATIO.pow(ll as u32) as f64;
-                let candidate = lvl.kernels.cfl(&lvl.state) * scale;
-                if !candidate.is_finite() || candidate <= 0.0 {
-                    return candidate;
-                }
-                dt = dt.min(candidate);
-            }
-            dt
-        });
-        // a crashed state halts the run, and this detection runs ahead of the `t_final` clamp below.
-        // the clamp `dt_cfl.min(t_final - time)` silently replaces a NaN dt with the remaining time
-        // (f64::min returns the non-NaN operand) and pulls a collapsed-wave-speed blowup (an
-        // unphysical c2p cell — e.g. V->1 at the inner boundary — drives the cfl speed -> 0, so
-        // dt -> huge) down to the remaining time; either way the run would "finish" at t_final on
-        // garbage. a physical flow grows dt smoothly (cfl-limited), so a crash shows as: NaN /
-        // non-positive, or a sudden >1000x one-step jump in the raw cfl dt. a genuinely static state
-        // (dt_cfl = +inf) arises from the rest state at step 0 alone (dt_prev = 0, skipped) -> the
-        // clamp takes the run end.
+        let Some(dt) = self.watchdog_root_dt(t_final) else {
+            return;
+        };
+        self.step_root_with_dt(dt);
+    }
+
+    /// the watchdog-screened root timestep. the crash detection runs ahead of the `t_final`
+    /// clamp: the clamp `dt_cfl.min(t_final - time)` silently replaces a NaN dt with the
+    /// remaining time (f64::min returns the non-NaN operand) and pulls a collapsed-wave-speed
+    /// blowup (an unphysical c2p cell — e.g. V->1 at the inner boundary — drives the cfl speed
+    /// -> 0, so dt -> huge) down to the remaining time; either way the run would "finish" at
+    /// t_final on garbage. a physical flow grows dt smoothly (cfl-limited), so a crash shows
+    /// as: NaN / non-positive, or a sudden >1000x one-step jump in the raw cfl dt. a genuinely
+    /// static state (dt_cfl = +inf) arises from the rest state at step 0 alone (dt_prev = 0,
+    /// skipped) -> the clamp takes the run end. a fatal estimate records the crash and yields
+    /// nothing, so the caller halts on the last computed state.
+    fn watchdog_root_dt(&mut self, t_final: f64) -> Option<f64> {
+        let dt_cfl = prof("cfl", || self.raw_root_cfl());
         let (iter, time) = {
             let r = &self.levels[0].state;
             (r.iteration, r.time)
@@ -1919,20 +1922,30 @@ where
                 dt_prev,
                 panic: None,
             });
-            return;
+            return None;
         }
         // the guard's reference for the next step: the rate the wave speeds imply, before the
         // user clamp, the `t_final` clamp, or any rejection reduces it.
         self.prev_dt_cfl = dt_cfl;
-        let root = &mut self.levels[0];
+        let root = &self.levels[0];
         let user_clamp = root.state.max_dt;
         let dt_cfl = if user_clamp > 0.0 {
             dt_cfl.min(user_clamp)
         } else {
             dt_cfl
         };
-        let mut dt = dt_cfl.min(t_final - root.state.time);
+        let dt = dt_cfl.min(t_final - root.state.time);
         check_dt_or_panic(dt, root.state.iteration, root.state.time);
+        Some(dt)
+    }
+
+    /// one root step at an already-selected dt: the retry-snapshot transaction, the stage
+    /// recursion with its rejection replay, and the accepted-step tail (tracer migration,
+    /// census, clock and motion, body feedback). callable with any admissible dt, which is
+    /// what lets a multi-tile driver select a global minimum and drive each tile with it
+    /// while the uni-grid path arrives through `step_root`'s watchdog.
+    pub fn step_root_with_dt(&mut self, mut dt: f64) {
+        let time = self.levels[0].state.time;
         // A rejection can originate in the second (or deeper) fine substep after an earlier
         // substep has spawned/migrated tracers or booked a horizon receipt.  Field snapshots alone
         // cannot invert those host-side commits, so the root attempt owns a complete transaction
