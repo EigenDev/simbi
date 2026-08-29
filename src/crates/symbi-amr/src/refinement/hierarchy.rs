@@ -1971,101 +1971,109 @@ where
         // horizon-ledger / penalize run in the finest level's tail (level_step_tail),
         // in the uni-grid driver's exact order.
 
-        // the registered binned reductions, at the tail of the accepted step — the same point
-        // the uni-grid driver samples them, and for the same reason: the stage sequence has
-        // finished and its last stage ended in a conserved-to-primitive recovery, so the
-        // primitives every census reads belong to the state at this time. sampling mid-stage
-        // would bin a partially advanced state.
-        //
-        // every level contributes its leaf cells: a cell a finer level resolves is excluded
-        // here and counted there, so the refined volume enters the reduction exactly once at
-        // the finest resolution that covers it. counting a covered coarse cell as well would
-        // inflate every extensive total by the refined volume — a wrong number that looks
-        // entirely reasonable, since it is smooth, positive, and of the right order.
-        if !self.levels[0].state.censuses.is_empty() {
-            let ops: Vec<_> = self.levels[0]
-                .state
-                .censuses
-                .iter()
-                .map(|r| r.evaluator.spec().op())
-                .collect();
-            // the registrations live on the root, which owns the history; every level is reduced
-            // against that one list. a level carrying its own (empty) list would contribute
-            // nothing while its volume stayed excluded from the parent.
-            let registrations = &self.levels[0].state.store.censuses;
-            let root_step = Some(symbi_sim::census::Cadence::RootStep);
-            let mut totals = symbi_substrate::census_sample::level_partials(
-                &self.levels[0].state,
-                registrations,
-                0,
-                root_step,
-                self.levels[0].state.composite_ownership.coverage.as_ref(),
-            );
-            for level in 1..self.levels.len() {
-                let partial = symbi_substrate::census_sample::level_partials(
-                    &self.levels[level].state,
-                    registrations,
-                    0,
-                    root_step,
-                    self.levels[level]
-                        .state
-                        .composite_ownership
-                        .coverage
-                        .as_ref(),
-                );
-                symbi_substrate::census_sample::combine_partials(&mut totals, partial, &ops);
-            }
-            let time = self.levels[0].state.time;
-            symbi_substrate::census_sample::record_samples(&mut self.levels[0].state, time, totals);
-        }
+        self.census_sample_root_step();
 
         let root = &mut self.levels[0];
         // homologous linear advance, taken when the run leaves the motion law untraced.
         advance_state_clock(&mut root.state, dt);
 
-        // body feedback + motion: the finest level owns the sink and the
-        // diagnostics; advance the (prescribed) motion there once per root
-        // step at the root dt, then sync positions/velocities outward so
-        // every level's gravity sees the same bodies.
-        if self.levels[0].state.has_bodies() {
-            let fi = self.levels.len() - 1;
-            let finest = &mut self.levels[fi];
-            // the backward feedback reduction (force/torque/accreted-mass) is only
-            // needed for bodies whose dynamics consume it — two-way-coupled or
-            // accreting. a one-way fixed gravitational mass skips the entire pass.
-            let needs_fb = finest
-                .state
-                .immersed
-                .as_ref()
-                .is_some_and(|im| im.bodies.needs_feedback());
-            if needs_fb {
-                // the backward reduction sweeps the full domain (~11 outputs per
-                // body: force/torque/mass/energy) — a real per-step cost, instrumented
-                // so the profile accounts for it explicitly.
-                prof("body_feedback", || {
-                    finest.kernels.body_feedback(&finest.state, dt)
-                });
-            }
-            finest.state.dt = dt;
-            prof("body_motion", || evolve_bodies(&mut finest.state));
+        self.root_body_step(dt);
+    }
 
-            let truth: Vec<_> = {
-                let bodies = &self.levels[fi].state.immersed.as_ref().unwrap().bodies;
-                (0..bodies.len())
-                    .map(|bb| (bodies.get(bb).position, bodies.get(bb).velocity))
-                    .collect()
-            };
-            for ll in 0..fi {
-                if let Some(im) = self.levels[ll].state.immersed.as_mut() {
-                    for (bb, (pos, vel)) in truth.iter().enumerate() {
-                        let body = im.bodies.get_mut(bb);
-                        body.position = *pos;
-                        body.velocity = *vel;
-                    }
+    /// the registered binned reductions, at the tail of the accepted step: the stage sequence has
+    /// finished and its last stage ended in a conserved-to-primitive recovery, so the primitives
+    /// every census reads belong to the state at this time. sampling mid-stage would bin a
+    /// partially advanced state.
+    ///
+    /// every level contributes its leaf cells: a cell a finer level resolves is excluded here and
+    /// counted there, so the refined volume enters the reduction exactly once at the finest
+    /// resolution that covers it. counting a covered coarse cell as well would inflate every
+    /// extensive total by the refined volume — a wrong number that looks entirely reasonable,
+    /// since it is smooth, positive, and of the right order.
+    pub fn census_sample_root_step(&mut self) {
+        if self.levels[0].state.censuses.is_empty() {
+            return;
+        }
+        let ops: Vec<_> = self.levels[0]
+            .state
+            .censuses
+            .iter()
+            .map(|r| r.evaluator.spec().op())
+            .collect();
+        // the registrations live on the root, which owns the history; every level is reduced
+        // against that one list. a level carrying its own (empty) list would contribute
+        // nothing while its volume stayed excluded from the parent.
+        let registrations = &self.levels[0].state.store.censuses;
+        let root_step = Some(symbi_sim::census::Cadence::RootStep);
+        let mut totals = symbi_substrate::census_sample::level_partials(
+            &self.levels[0].state,
+            registrations,
+            0,
+            root_step,
+            self.levels[0].state.composite_ownership.coverage.as_ref(),
+        );
+        for level in 1..self.levels.len() {
+            let partial = symbi_substrate::census_sample::level_partials(
+                &self.levels[level].state,
+                registrations,
+                0,
+                root_step,
+                self.levels[level]
+                    .state
+                    .composite_ownership
+                    .coverage
+                    .as_ref(),
+            );
+            symbi_substrate::census_sample::combine_partials(&mut totals, partial, &ops);
+        }
+        let time = self.levels[0].state.time;
+        symbi_substrate::census_sample::record_samples(&mut self.levels[0].state, time, totals);
+    }
+
+    /// body feedback + motion at the tail of an accepted root step: the finest level owns the
+    /// sink and the diagnostics; the (prescribed) motion advances there once at the root dt,
+    /// then positions and velocities sync outward so every level's gravity sees the same bodies.
+    pub fn root_body_step(&mut self, dt: f64) {
+        if !self.levels[0].state.has_bodies() {
+            return;
+        }
+        let fi = self.levels.len() - 1;
+        let finest = &mut self.levels[fi];
+        // the backward feedback reduction (force/torque/accreted-mass) is only
+        // needed for bodies whose dynamics consume it — two-way-coupled or
+        // accreting. a one-way fixed gravitational mass skips the entire pass.
+        let needs_fb = finest
+            .state
+            .immersed
+            .as_ref()
+            .is_some_and(|im| im.bodies.needs_feedback());
+        if needs_fb {
+            // the backward reduction sweeps the full domain (~11 outputs per
+            // body: force/torque/mass/energy) — a real per-step cost, instrumented
+            // so the profile accounts for it explicitly.
+            prof("body_feedback", || {
+                finest.kernels.body_feedback(&finest.state, dt)
+            });
+        }
+        finest.state.dt = dt;
+        prof("body_motion", || evolve_bodies(&mut finest.state));
+
+        let truth: Vec<_> = {
+            let bodies = &self.levels[fi].state.immersed.as_ref().unwrap().bodies;
+            (0..bodies.len())
+                .map(|bb| (bodies.get(bb).position, bodies.get(bb).velocity))
+                .collect()
+        };
+        for ll in 0..fi {
+            if let Some(im) = self.levels[ll].state.immersed.as_mut() {
+                for (bb, (pos, vel)) in truth.iter().enumerate() {
+                    let body = im.bodies.get_mut(bb);
+                    body.position = *pos;
+                    body.velocity = *vel;
                 }
             }
-            self.assert_sinks_inside_finest();
         }
+        self.assert_sinks_inside_finest();
     }
 
     /// advance one level by dt, then subcycle the finer level, restrict, and
