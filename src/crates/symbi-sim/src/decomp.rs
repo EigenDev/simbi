@@ -600,6 +600,106 @@ pub fn decompose_grid<const D: usize>(
     Ok(counts)
 }
 
+/// the domain partition: per-axis interior cut points, the user-owned datum every
+/// decomposition derives from. axis `ax` splits into `cuts[ax].len() + 1` tiles at the
+/// listed interior cell indices, so the tile extents are the successive differences and
+/// non-uniform tiles are first-class: a centrally condensed problem puts its cuts where
+/// the refined levels are. the cartesian-product structure keeps the neighbor algebra
+/// trivial — a tile's neighbors differ by one along one axis — which is what makes the
+/// exchange schedule derivable from this value alone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Partition<const D: usize> {
+    n_cells: [usize; D],
+    cuts: [Vec<usize>; D],
+}
+
+impl<const D: usize> Partition<D> {
+    /// a partition at explicit per-axis cuts. each axis's list is strictly increasing
+    /// interior cell indices in (0, n_cells[ax]); an empty list leaves the axis uncut.
+    pub fn explicit(n_cells: [usize; D], cuts: [Vec<usize>; D]) -> Result<Self, String> {
+        for ax in 0..D {
+            let mut prev = 0usize;
+            for &c in &cuts[ax] {
+                if c <= prev || c >= n_cells[ax] {
+                    return Err(format!(
+                        "partition axis {ax}: cut {c} lies outside the strictly increasing \
+                         interior range (0, {}) after {prev}",
+                        n_cells[ax]
+                    ));
+                }
+                prev = c;
+            }
+        }
+        Ok(Self { n_cells, cuts })
+    }
+
+    /// the uniform partition: `counts[ax]` equal tiles per axis, so every cut list is
+    /// equally spaced. each axis's cell count must divide evenly.
+    pub fn uniform(n_cells: [usize; D], counts: [usize; D]) -> Result<Self, String> {
+        let mut cuts: [Vec<usize>; D] = std::array::from_fn(|_| Vec::new());
+        for ax in 0..D {
+            if counts[ax] == 0 || n_cells[ax] % counts[ax] != 0 {
+                return Err(format!(
+                    "uniform partition axis {ax}: {} cells split into {} equal tiles",
+                    n_cells[ax], counts[ax]
+                ));
+            }
+            let w = n_cells[ax] / counts[ax];
+            cuts[ax] = (1..counts[ax]).map(|i| i * w).collect();
+        }
+        Ok(Self { n_cells, cuts })
+    }
+
+    /// the balanced partition for `n_parts` tiles: the longest-axis-first heuristic
+    /// (`decompose_grid`) chooses the per-axis counts, realized uniformly.
+    pub fn auto(n_cells: [usize; D], n_parts: usize) -> Result<Self, String> {
+        Self::uniform(n_cells, decompose_grid(n_cells, n_parts)?)
+    }
+
+    /// tiles per axis.
+    pub fn counts(&self) -> [usize; D] {
+        std::array::from_fn(|ax| self.cuts[ax].len() + 1)
+    }
+
+    /// total tile count.
+    pub fn n_tiles(&self) -> usize {
+        self.counts().iter().product()
+    }
+
+    /// the global cell grid this partition splits.
+    pub fn n_cells(&self) -> [usize; D] {
+        self.n_cells
+    }
+
+    /// whether every axis's tiles are equal-width (the shape the even-division
+    /// exchange paths assume; an explicit ragged partition reports false).
+    pub fn is_uniform(&self) -> bool {
+        (0..D).all(|ax| {
+            let counts = self.cuts[ax].len() + 1;
+            self.n_cells[ax] % counts == 0 && {
+                let w = self.n_cells[ax] / counts;
+                self.cuts[ax].iter().enumerate().all(|(i, &c)| c == (i + 1) * w)
+            }
+        })
+    }
+
+    /// the [start, start + size) cell range of tile `i` along `ax`.
+    pub fn tile_range(&self, ax: usize, i: usize) -> (usize, usize) {
+        let start = if i == 0 { 0 } else { self.cuts[ax][i - 1] };
+        let end = if i == self.cuts[ax].len() {
+            self.n_cells[ax]
+        } else {
+            self.cuts[ax][i]
+        };
+        (start, end - start)
+    }
+
+    /// per-axis (start, size) for the tile at grid coordinate `tc`.
+    pub fn tile_extents(&self, tc: [usize; D]) -> [(usize, usize); D] {
+        std::array::from_fn(|ax| self.tile_range(ax, tc[ax]))
+    }
+}
+
 // row-major (axis-0 slowest) flat index over a box of size `dims`, and its inverse. the
 // tile grid uses this one convention for both construction and neighbor lookup (a `Domain`
 // is avoided here on purpose: its iter order and flat_index order differ, which is a
@@ -2175,9 +2275,53 @@ impl HaloTransport for PeerCopy {
 #[cfg(test)]
 mod tests {
     use super::{
-        LocalCopy, decompose_grid, exchange_ito_coefficients, migrate_continuous_tracers,
+        LocalCopy, Partition, decompose_grid, exchange_ito_coefficients, migrate_continuous_tracers,
         spawn_decomposed_continuous_injection,
     };
+
+    #[test]
+    fn partition_uniform_round_trips_counts_and_ranges() {
+        let p = Partition::uniform([64usize, 32, 16], [4, 2, 1]).unwrap();
+        assert_eq!(p.counts(), [4, 2, 1]);
+        assert_eq!(p.n_tiles(), 8);
+        assert!(p.is_uniform());
+        assert_eq!(p.tile_range(0, 0), (0, 16));
+        assert_eq!(p.tile_range(0, 3), (48, 16));
+        assert_eq!(p.tile_range(1, 1), (16, 16));
+        assert_eq!(p.tile_range(2, 0), (0, 16));
+        assert_eq!(p.tile_extents([2, 0, 0]), [(32, 16), (0, 16), (0, 16)]);
+    }
+
+    #[test]
+    fn partition_auto_matches_the_heuristic() {
+        let p = Partition::auto([64usize, 64, 64], 8).unwrap();
+        assert_eq!(p.counts(), decompose_grid([64, 64, 64], 8).unwrap());
+        assert!(p.is_uniform());
+    }
+
+    #[test]
+    fn partition_explicit_carries_ragged_tiles() {
+        let p = Partition::explicit([64usize], [vec![8, 24]]).unwrap();
+        assert_eq!(p.counts(), [3]);
+        assert!(!p.is_uniform());
+        let sizes: Vec<usize> = (0..3).map(|i| p.tile_range(0, i).1).collect();
+        assert_eq!(sizes, vec![8, 16, 40]);
+        assert_eq!(sizes.iter().sum::<usize>(), 64);
+    }
+
+    #[test]
+    fn partition_explicit_refuses_disordered_or_exterior_cuts() {
+        assert!(Partition::explicit([64usize], [vec![24, 8]]).is_err());
+        assert!(Partition::explicit([64usize], [vec![8, 8]]).is_err());
+        assert!(Partition::explicit([64usize], [vec![0]]).is_err());
+        assert!(Partition::explicit([64usize], [vec![64]]).is_err());
+    }
+
+    #[test]
+    fn partition_uniform_refuses_indivisible_axes() {
+        assert!(Partition::uniform([63usize], [2]).is_err());
+        assert!(Partition::uniform([64usize], [0]).is_err());
+    }
 
     #[test]
     fn decompose_one_part_is_monolithic() {

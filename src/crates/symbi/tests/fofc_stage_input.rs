@@ -13,7 +13,9 @@
 // both gates drive the production hierarchy loop (the same single-level wrap
 // every python run uses — the raw evolve() pipeline has no fofc phase):
 //   - a finite, unrecoverable energy sink must trip the persistent-freeze
-//     halt (a panic naming the freeze) — never march to t_final.
+//     halt (a crash report carrying the freeze panic's message; the evolve
+//     loop catches the halt and ends the march by report) — never march to
+//     t_final.
 //   - a recoverable strong blast fires FOFC and conserves the totals with
 //     zero freezes — the first-order tier recovers every flagged cell.
 // =============================================================================
@@ -78,34 +80,31 @@ fn sod(left_pressure: f64) -> Sim {
 #[test]
 fn unrecoverable_sink_trips_the_persistent_freeze_halt() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    let result = std::panic::catch_unwind(|| {
-        let sim = sod(1.0);
-        let cfg = SourceConfig::from_json(SINK_JSON).expect("parse sink");
-        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("lower sink");
-        let kset = sim
-            .substrate()
-            .with_runtime_source(built, cfg.params.clone());
-        let mut hier = Hierarchy::single(sim, kset);
-        hier.evolve(0.2).expect("hierarchy evolve returned");
-        let rho0 = *hier.levels[0]
-            .state
-            .fields
-            .prim
-            .rho
-            .view()
-            .at([N as isize / 2]);
-        panic!("no-halt: the poisoned run completed (mid rho = {rho0})");
-    });
-
-    let err = result.expect_err("the poisoned run must halt");
-    let msg = err
-        .downcast_ref::<String>()
-        .cloned()
-        .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
-        .unwrap_or_default();
+    let sim = sod(1.0);
+    let cfg = SourceConfig::from_json(SINK_JSON).expect("parse sink");
+    let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("lower sink");
+    let kset = sim
+        .substrate()
+        .with_runtime_source(built, cfg.params.clone());
+    let mut hier = Hierarchy::single(sim, kset);
+    // the freeze halt panics inside the step; the evolve loop catches it, records
+    // the crash, and ends the march by report — the run must never reach t_final.
+    hier.evolve(0.2).expect("the halted march ends by report");
+    let crash = hier
+        .crash
+        .as_ref()
+        .expect("the poisoned run must halt with a crash report");
+    let msg = crash
+        .panic
+        .as_ref()
+        .expect("the freeze halt surfaces as a caught step panic");
     assert!(
         msg.to_lowercase().contains("freeze"),
         "expected the persistent-freeze fail-loud, got: {msg}"
+    );
+    assert!(
+        hier.levels[0].state.time < 0.2,
+        "the halt must stop the march short of t_final"
     );
 }
 

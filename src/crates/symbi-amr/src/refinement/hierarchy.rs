@@ -61,7 +61,7 @@ use symbi_hydro::state::PrimFromSlots;
 use symbi_sim::decomp::{HaloTransport, drain_devices, exchange_grid, flatten, unflatten};
 use symbi_sim::driver::{
     advance_clock, advance_state_clock, book_horizon_receipt, check_dt_or_panic, evolve_bodies,
-    horizon_request, needs_step_snapshot, prof, select_timestep, stage_time_fractions,
+    horizon_request, needs_step_snapshot, prof, stage_time_fractions,
 };
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::stage::{HookPoint, StageArgs, fold_stage};
@@ -1461,61 +1461,17 @@ where
         if prepare_initial_state {
             self.init_levels();
         }
-        let mut last_cb = self.levels[0].state.iteration;
-        while self.levels[0].state.time < t_final {
-            // a panic inside the step (the FOFC freeze-streak halt, a poisoned-cell assertion)
-            // carries the same diagnostic value as a watchdog crash and deserves the same exit:
-            // catch it, convert it into a crash report carrying the panic message, and let the
-            // observer below snapshot the `.crashed` checkpoint. the default panic hook has
-            // already printed the message and backtrace to stderr at the panic site, so the
-            // report reaches the log and the state reaches disk. the caught state is the
-            // mid-step one the panic fired on, which is exactly the state worth inspecting.
-            let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.step_root(t_final)
-            }));
-            if let Err(payload) = step {
-                let msg = payload
-                    .downcast_ref::<&'static str>()
-                    .map(|s| s.to_string())
-                    .or_else(|| payload.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "panic with a non-string payload".to_string());
-                let (iter, time) = {
-                    let r = &self.levels[0].state;
-                    (r.iteration, r.time)
-                };
-                self.crash = Some(CrashReport {
-                    iter,
-                    time,
-                    dt_cfl: f64::NAN,
-                    dt_prev: self.prev_dt_cfl,
-                    panic: Some(msg),
-                });
-            }
-            // a crashed step records the crash and leaves the clock where it was: let the observer
-            // snapshot the `.crashed` checkpoint + report it, then stop the march. marching on
-            // would spin on the frozen time and clamp dt to t_final on garbage.
-            if self.crash.is_some() {
-                symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-                let _ = callback(self);
-                return Ok(());
-            }
-            if self.levels[0].state.iteration.saturating_sub(last_cb) >= interval {
-                last_cb = self.levels[0].state.iteration;
-                symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-                // a `Break` from the observer (e.g., a caught signal) stops the
-                // march early; the observer has already snapshotted state for
-                // restart. drain the queue so the host read in the caller is
-                // coherent, then return.
-                if callback(self).is_break() {
-                    symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-                    return Ok(());
-                }
-            }
-        }
-        // the caller reads fields next: drain the device queue (the
-        // host-read barrier; no-op on a host backend).
-        symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-        let _ = callback(self);
+        // the uni-grid march is the one-tile case of the shared driver: no decomposition
+        // context, so the exchange schedule is empty and the step runs the uni-grid
+        // transaction. the driver owns the watchdog, the step-panic catch, and the
+        // observer cadence for every shape.
+        evolve_tiles::<R, NDIM, DOF, M, E, S, Mem, K, symbi_sim::decomp::LocalCopy, _>(
+            std::slice::from_mut(self),
+            None,
+            t_final,
+            interval,
+            |ts| callback(&ts[0]),
+        );
         Ok(())
     }
 
@@ -4189,32 +4145,19 @@ fn spawn_decomposed_injections<R, const NDIM: usize, const DOF: usize, M, E, S, 
     }
 }
 
-/// the decomposed hierarchy driver (refinement x decomposition): lockstep-advance N
-/// per-tile hierarchies, decomposing the root and the first fine level. the root stages run with a
-/// root halo exchange between them (rk2 corrector reads each neighbor's stage-1 update); the fine
-/// subcycle is driven here so its stages can exchange the fine halos between fine tiles when a
-/// patch spans a tile cut. for a tile-local patch the fine sub-grid is 1x1, so the fine exchange
-/// is a no-op and this reduces to the tile-local case exactly. the flux/emf reflux registers stay
-/// tile-local (a coarse cell + the fine cells at its face are co-located; any register write to a
-/// cut-adjacent ghost is overwritten by the next root exchange). global dt = min over tiles of
-/// `root_cfl_dt()`. `decomposed == monolithic` holds for both tile-local and cut-spanning patches.
-///
-/// levels 2+ are advanced tile-locally (inside the level-1 fine tile, via the recursive
-/// `level_step_tail(1)`); a patch spanning a cut on a level >= 2 lies outside this driver's scope.
-/// hydro only in the root post-step (the root clock is advanced directly; mesh motion and immersed
-/// bodies belong to the single-grid path). `on_checkpoint(iteration, time, &tiles)` fires every
-/// `interval` root steps and once at the end (devices drained first).
-#[allow(clippy::too_many_arguments)]
-pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, F>(
+/// the one hierarchy march: N tiles advance in lockstep behind an agreed timestep, with
+/// the per-tile watchdog, the step-panic catch, the crash report, and the observer
+/// cadence shared by every shape. a single tile with no decomposition context steps
+/// through the uni-grid transaction (`step_root_with_dt`); a decomposed set steps
+/// through the collective attempt with halo exchanges. the observer fires every
+/// `interval` root iterations, once when a crash is recorded (the driver snapshots
+/// the `.crashed` state), and once after the final step, devices drained first.
+pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, F>(
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
-    counts: [usize; NDIM],
-    devices: &[i32],
-    transport: &T,
-    ts: Timestepping,
-    start_time: f64,
+    decomp: Option<(&[i32], [usize; NDIM], &T)>,
     t_final: f64,
     interval: u64,
-    mut on_checkpoint: F,
+    mut callback: F,
 ) where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
@@ -4223,40 +4166,156 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
     T: HaloTransport,
-    F: FnMut(u64, f64, &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>]) -> ControlFlow<()>,
+    F: FnMut(&[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>]) -> ControlFlow<()>,
 {
     let n = tiles.len();
-    // the finest-level tail owns the IBM surface physics, and the refined-
-    // decomposed step drives the fine tail alone, so a refined run needs at
-    // least one tile carrying a fine patch for its bodies to be penalized at
-    // all — a silent physics loss otherwise, refused here.
-    assert!(
-        tiles.iter().any(|h| h.levels.len() > 1)
-            || tiles.iter().all(|h| !h.levels[0].state.has_bodies()),
-        "refined-decomposed: no tile built a fine level while immersed bodies are active; \
-         the finest-level penalize would silently never run",
-    );
-    let nstages = ts.stages().len();
-    debug_assert_eq!(n, devices.len(), "tiles/devices length mismatch");
+    let drain = |decomp: Option<(&[i32], [usize; NDIM], &T)>| match decomp {
+        Some((devices, _, _)) => drain_devices::<Mem>(devices),
+        None => symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>(),
+    };
     let root_order: Vec<usize> = (0..n).collect();
-    let fine = fine_subgrid(tiles, counts, devices);
-
+    let nstages = tiles[0].levels[0].state.timestepping.stages().len();
+    let fine = match decomp {
+        Some((devices, counts, _)) => fine_subgrid(tiles, counts, devices),
+        None => None,
+    };
     // cut halos current before the first flux.
-    exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
+    if let Some((devices, counts, transport)) = decomp {
+        exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
+    }
 
-    let mut t = start_time;
-    let mut iter: u64 = 0;
-    let mut last_cb: u64 = 0;
-    while t < t_final {
-        // global dt = min over tiles' root cfl, clamped to land exactly on t_final.
-        let candidates =
-            (0..n).map(|i| symbi_xpu::with_device(devices[i], || tiles[i].root_cfl_dt()));
-        let mut gdt = select_timestep(candidates, t_final - t, iter, t)
-            .unwrap_or_else(|err| panic!("{}", err.detail));
-        let retry_sidecars: Vec<_> = tiles
-            .iter()
-            .map(Hierarchy::snapshot_retry_sidecars)
-            .collect();
+    let mut last_cb = tiles[0].levels[0].state.iteration;
+    while tiles[0].levels[0].state.time < t_final {
+        // the agreed timestep: every tile runs the watchdog-screened selection, and the
+        // minimum drives the lockstep step. a fatal estimate records the crash on its
+        // tile and the march halts on the last computed state below.
+        let mut gdt = f64::INFINITY;
+        let mut dt_crashed = false;
+        for i in 0..n {
+            let d = match decomp {
+                Some((devices, _, _)) => {
+                    symbi_xpu::with_device(devices[i], || tiles[i].watchdog_root_dt(t_final))
+                }
+                None => tiles[i].watchdog_root_dt(t_final),
+            };
+            match d {
+                Some(v) => gdt = gdt.min(v),
+                None => {
+                    dt_crashed = true;
+                    break;
+                }
+            }
+        }
+        if !dt_crashed {
+            // a panic inside the step (the FOFC freeze-streak halt, a poisoned-cell
+            // assertion) carries the same diagnostic value as a watchdog crash and
+            // deserves the same exit: catch it, convert it into a crash report carrying
+            // the panic message, and let the observer snapshot the `.crashed`
+            // checkpoint. the default panic hook has already printed the message and
+            // backtrace to stderr at the panic site, so the report reaches the log and
+            // the state reaches disk. the caught state is the mid-step one the panic
+            // fired on, which is exactly the state worth inspecting.
+            let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                match decomp {
+                    Some((devices, counts, transport)) => {
+                        let retry_sidecars: Vec<_> = tiles
+                            .iter()
+                            .map(Hierarchy::snapshot_retry_sidecars)
+                            .collect();
+                        let t = tiles[0].levels[0].state.time;
+                        let adt = decomposed_root_attempt(
+                            tiles,
+                            counts,
+                            devices,
+                            transport,
+                            &fine,
+                            &root_order,
+                            nstages,
+                            &retry_sidecars,
+                            gdt,
+                            t,
+                        );
+                        decomposed_root_post(
+                            tiles, counts, devices, transport, &root_order, adt, t,
+                        );
+                    }
+                    None => tiles[0].step_root_with_dt(gdt),
+                }
+            }));
+            if let Err(payload) = step {
+                let msg = payload
+                    .downcast_ref::<&'static str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "panic with a non-string payload".to_string());
+                let (iter, time) = {
+                    let r = &tiles[0].levels[0].state;
+                    (r.iteration, r.time)
+                };
+                tiles[0].crash = Some(CrashReport {
+                    iter,
+                    time,
+                    dt_cfl: f64::NAN,
+                    dt_prev: tiles[0].prev_dt_cfl,
+                    panic: Some(msg),
+                });
+            }
+        }
+        // a crashed step records the crash and leaves the clock where it was: let the
+        // observer snapshot the `.crashed` checkpoint + report it, then stop the march.
+        // marching on would spin on the frozen time and clamp dt to t_final on garbage.
+        if tiles.iter().any(|h| h.crash.is_some()) {
+            drain(decomp);
+            let _ = callback(tiles);
+            return;
+        }
+        let it = tiles[0].levels[0].state.iteration;
+        if it.saturating_sub(last_cb) >= interval {
+            last_cb = it;
+            drain(decomp);
+            // a `Break` from the observer (e.g., a caught signal) stops the march early;
+            // the observer has already snapshotted state for restart. drain the queue so
+            // the host read in the caller is coherent, then return.
+            if callback(tiles).is_break() {
+                drain(decomp);
+                return;
+            }
+        }
+    }
+    // the caller reads fields next: drain the device queue (the host-read barrier;
+    // no-op on a host backend).
+    drain(decomp);
+    let _ = callback(tiles);
+}
+
+/// one collective root step of the decomposed march at an agreed timestep: every tile
+/// snapshots its retry state, the root stages advance in lockstep with a halo exchange
+/// between each, the fine subcycle runs with its own exchanges, and a rejection anywhere
+/// rolls every tile back to the same entry state and replays the attempt at a reduced dt.
+/// returns the accepted timestep the tiles advanced by.
+#[allow(clippy::too_many_arguments)]
+fn decomposed_root_attempt<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+    fine: &Option<FineSubgrid<NDIM>>,
+    root_order: &[usize],
+    nstages: usize,
+    retry_sidecars: &[HierarchyRetrySidecars<NDIM>],
+    mut gdt: f64,
+    t: f64,
+) -> f64
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    let n = tiles.len();
         'attempt: loop {
             for i in 0..n {
                 for level in &tiles[i].levels {
@@ -4414,6 +4473,33 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
             gdt = symbi_sim::driver::retry_timestep(gdt, t)
                 .unwrap_or_else(|err| panic!("{}", err.detail));
         }
+    gdt
+}
+
+/// the accepted-step tail of the decomposed march: the per-step immersed-body bookkeeping
+/// (each tile's finest level reduces its local feedback partials — the tile finest interiors
+/// partition the sink region — the deltas sum across tiles into the true global reaction,
+/// and the identical global delta + prescribed advance applies to every tile's bodies, so
+/// all tiles stay in lockstep), then the root halo refresh for the next step's stage 0.
+fn decomposed_root_post<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+    root_order: &[usize],
+    gdt: f64,
+    t: f64,
+)
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    let n = tiles.len();
         // per-step immersed-body bookkeeping, the hierarchy form of the flat decomposed
         // body step: each tile's finest level reduces its local feedback partials (the
         // tile finest interiors partition the sink region — coarser levels carry a
@@ -4457,18 +4543,84 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
         // the restrict/c2p recomputed root prim over the allocated domain (incl. the cut halo from
         // stale halo cons, and the cut-adjacent reflux ghosts); refresh for the next step's stage 0.
         exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
+}
 
-        (t, iter) = advance_clock(t, iter, gdt);
-        if iter - last_cb >= interval {
-            last_cb = iter;
-            drain_devices::<Mem>(devices);
-            if on_checkpoint(iter, t, tiles).is_break() {
-                return;
-            }
-        }
-    }
-    drain_devices::<Mem>(devices);
-    let _ = on_checkpoint(iter, t, tiles);
+/// the decomposed hierarchy driver (refinement x decomposition): lockstep-advance N
+/// per-tile hierarchies, decomposing the root and the first fine level. the root stages run with a
+/// root halo exchange between them (rk2 corrector reads each neighbor's stage-1 update); the fine
+/// subcycle is driven here so its stages can exchange the fine halos between fine tiles when a
+/// patch spans a tile cut. for a tile-local patch the fine sub-grid is 1x1, so the fine exchange
+/// is a no-op and this reduces to the tile-local case exactly. the flux/emf reflux registers stay
+/// tile-local (a coarse cell + the fine cells at its face are co-located; any register write to a
+/// cut-adjacent ghost is overwritten by the next root exchange). global dt = min over tiles of
+/// `root_cfl_dt()`. `decomposed == monolithic` holds for both tile-local and cut-spanning patches.
+///
+/// levels 2+ are advanced tile-locally (inside the level-1 fine tile, via the recursive
+/// `level_step_tail(1)`); a patch spanning a cut on a level >= 2 lies outside this driver's scope.
+/// hydro only in the root post-step (the root clock is advanced directly; mesh motion and immersed
+/// bodies belong to the single-grid path). `on_checkpoint(iteration, time, &tiles)` fires every
+/// `interval` root steps and once at the end (devices drained first).
+#[allow(clippy::too_many_arguments)]
+pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, F>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+    ts: Timestepping,
+    start_time: f64,
+    t_final: f64,
+    interval: u64,
+    mut on_checkpoint: F,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+    F: FnMut(u64, f64, &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>]) -> ControlFlow<()>,
+{
+    let n = tiles.len();
+    // the finest-level tail owns the IBM surface physics, and the refined-
+    // decomposed step drives the fine tail alone, so a refined run needs at
+    // least one tile carrying a fine patch for its bodies to be penalized at
+    // all — a silent physics loss otherwise, refused here.
+    assert!(
+        tiles.iter().any(|h| h.levels.len() > 1)
+            || tiles.iter().all(|h| !h.levels[0].state.has_bodies()),
+        "refined-decomposed: no tile built a fine level while immersed bodies are active; \
+         the finest-level penalize would silently never run",
+    );
+    debug_assert_eq!(n, devices.len(), "tiles/devices length mismatch");
+    debug_assert_eq!(
+        ts.stages().len(),
+        tiles[0].levels[0].state.timestepping.stages().len(),
+        "the driver's declared timestepping matches the tiles' own"
+    );
+    // the tiles' own root clock is the march's time authority; the caller's start_time
+    // is the same value by construction (the restart path restores both from the
+    // checkpoint), asserted here so a drifting caller fails loudly.
+    debug_assert!(
+        (tiles[0].levels[0].state.time - start_time).abs()
+            <= start_time.abs().max(1.0) * 1e-12,
+        "start_time disagrees with the tiles' root clock"
+    );
+    // the decomposed march is the multi-tile case of the shared driver, which owns the
+    // watchdog screening, the step-panic catch, the crash report, and the observer
+    // cadence. the callback keeps its historical clock: iterations counted from this
+    // call's entry, alongside the root time the tiles carry.
+    let iter0 = tiles[0].levels[0].state.iteration;
+    evolve_tiles(
+        tiles,
+        Some((devices, counts, transport)),
+        t_final,
+        interval,
+        |march_tiles| {
+            let s = &march_tiles[0].levels[0].state;
+            on_checkpoint(s.iteration - iter0, s.time, march_tiles)
+        },
+    );
 }
 
 fn wb_ghost_enabled() -> bool {
