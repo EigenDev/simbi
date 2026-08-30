@@ -11,11 +11,23 @@
 // runtime-computed addressing, not fixed-offset stencils:
 //   - ghost fills: the source coord picks periodic/reflect/outflow through a
 //     runtime lattice-map select; the map keeps reads in range by construction
-//   - refinement transfers (refine_*, wb_cf_*): cross-grid addressing through scaled
-//     coords (fine = 2*coarse); the transfer layer computes its own reach. the
-//     coarse-fine departure encode/decode pair carries the wb_cf_ prefix rather than
-//     refine_, and is the same family: it lives beside the restriction kernels and is
-//     dispatched by the same transfer layer
+//   - refinement transfers (refine_*, wb_cf_*, wb_band_*): cross-grid addressing through
+//     scaled coords (fine = 2*coarse); the transfer layer computes its own reach. the
+//     departure encode/decode pairs carry the wb_cf_ and wb_band_ prefixes rather than
+//     refine_, and are the same family: they live beside the restriction kernels, are
+//     dispatched by the same transfer layer, and share one mechanical-chain walk.
+//
+//     that walk is why they are exempt rather than bounded. it reads at
+//     `select(span >= t, base + sgn*t, coord)`, where `base` is the thread's coordinate
+//     clamped into the uncovered reference row, `sgn` is the leg's direction as data, and
+//     `span` is its length. a step past the leg's end takes the `coord` arm, and a step
+//     within it walks from the reference toward the thread's own cell without overshooting
+//     -- so every read lands on a cell the walk has already visited. that holds because
+//     `sgn`, `span` and the mask are built from one subtraction and agree by construction,
+//     which is a semantic invariant of the leg. a syntactic reach analysis reading index
+//     expressions cannot establish it: taken apart, `base + sgn*t` is only bounded by the
+//     unrolled chain length (WB_CF_CHAIN_MAX = 4, doubled for the band encode), and the
+//     host dispatch asserts every band extent against that bound before launching.
 //   - field_axpy_shift: reads at a runtime shift parameter bounded by dispatch
 // an unbounded kernel outside these families fails the law.
 // =============================================================================
@@ -42,7 +54,8 @@ fn expected_ng(name: &str) -> u32 {
 
 // kernel-name families whose index expressions are runtime-directed rather
 // than fixed-offset stencils; unbounded reach is their design.
-const UNBOUNDED_BY_DESIGN: &[&str] = &["ghost_fill", "refine_", "wb_cf_", "field_axpy_shift"];
+const UNBOUNDED_BY_DESIGN: &[&str] =
+    &["ghost_fill", "refine_", "wb_cf_", "wb_band_", "field_axpy_shift"];
 
 // diagnostic census of the whole registry: reach per kernel/field/axis.
 #[test]

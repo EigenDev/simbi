@@ -38,7 +38,7 @@ pub enum AxisReach {
 
 impl AxisReach {
     /// the join of two reaches: bounded maxes combine; Unbounded absorbs.
-    fn join(self, other: AxisReach) -> AxisReach {
+    pub(crate) fn join(self, other: AxisReach) -> AxisReach {
         match (self, other) {
             (AxisReach::Bounded(a), AxisReach::Bounded(b)) => AxisReach::Bounded(a.max(b)),
             _ => AxisReach::Unbounded,
@@ -150,6 +150,11 @@ impl Affine {
 /// only ScalarStmt::Let enters — LetMut/Assign names are mutable and excluded.
 type AffineEnv = BTreeMap<String, Affine>;
 
+/// the same lets, kept as expressions. cse hoists a clamp's select tree into a
+/// let, so an index that reads `__cse_7` resolves to the select through here;
+/// the affine environment cannot hold one, a select not being affine.
+type LetExprs = BTreeMap<String, ScalarExpr>;
+
 /// extract the affine form of an integer index expression, or None when the
 /// expression is not a linear-integer function of the coord vars. mirrors the
 /// integer index grammar the emitters accept (`render_index_expr`), minus the
@@ -193,21 +198,65 @@ fn int_const(c: &ConstValue) -> Option<i64> {
     }
 }
 
-/// classify one load component at axis position `axis`: the |offset| of a
-/// unit-stride stencil read, or Unbounded for everything else. a coefficient
-/// other than 1 on the own axis, any cross-axis term, and a pure constant
-/// (absolute addressing) all escape a cell-relative halo bound.
-fn component_reach(e: &ScalarExpr, axis: usize, env: &AffineEnv) -> AxisReach {
-    match affine(e, env) {
-        Some(f) if f.is_unit_stencil(axis) => AxisReach::Bounded(f.constant.unsigned_abs() as u32),
-        _ => AxisReach::Unbounded,
+/// the runtime scalars that name an interior bound along `axis`: a kernel that
+/// clamps an index between them addresses a cell the dispatch placed inside the
+/// interior, so the read needs no ghost cells at all.
+fn is_interior_bound(name: &str, axis: usize) -> bool {
+    name == format!("lo_{axis}") || name == format!("hi_{axis}")
+}
+
+/// classify a select tree used as an index. the value is one of the arms, so the
+/// reach is their join -- and an arm that is an interior bound contributes zero,
+/// since a read there lands on an interior cell. this is what bounds a clamp of
+/// the form `select(c < lo, lo, select(c > hi, hi, c))`: every leaf is either a
+/// bound or the cell's own coordinate, so the load stays inside the interior
+/// whichever branch it takes, and the conditions need not be reasoned about.
+/// a select over anything else -- a lattice map's runtime source coordinate, a
+/// scaled coordinate -- keeps its Unbounded classification.
+fn select_reach(
+    e: &ScalarExpr,
+    axis: usize,
+    env: &AffineEnv,
+    lets: &LetExprs,
+    depth: u32,
+) -> Option<AxisReach> {
+    // the let graph is acyclic (fresh names, bound before use), so the cap only
+    // bounds work on a pathologically deep chain.
+    if depth > 32 {
+        return None;
     }
+    match e {
+        ScalarExpr::Select { then, else_, .. } => {
+            let a = select_reach(then, axis, env, lets, depth + 1)?;
+            let b = select_reach(else_, axis, env, lets, depth + 1)?;
+            Some(a.join(b))
+        }
+        ScalarExpr::Var(name) if is_interior_bound(name, axis) => Some(AxisReach::Bounded(0)),
+        ScalarExpr::Var(name) if affine(e, env).is_none() => {
+            select_reach(lets.get(name)?, axis, env, lets, depth + 1)
+        }
+        _ => match affine(e, env) {
+            Some(f) if f.is_unit_stencil(axis) => {
+                Some(AxisReach::Bounded(f.constant.unsigned_abs() as u32))
+            }
+            _ => None,
+        },
+    }
+}
+
+/// classify one load component at axis position `axis`: the |offset| of a
+/// unit-stride stencil read, the join over a select whose every arm is itself
+/// in range, or Unbounded for everything else. a coefficient other than 1 on the
+/// own axis, any cross-axis term, and a pure constant (absolute addressing) all
+/// escape a cell-relative halo bound.
+fn component_reach(e: &ScalarExpr, axis: usize, env: &AffineEnv, lets: &LetExprs) -> AxisReach {
+    select_reach(e, axis, env, lets, 0).unwrap_or(AxisReach::Unbounded)
 }
 
 /// recursively collect every FieldLoadAt in an expression tree into the report.
 /// components are walked too: a nested load used as an index is itself recorded
 /// (and the outer component that contains it classifies as Unbounded).
-fn visit_expr(e: &ScalarExpr, env: &AffineEnv, report: &mut ReachReport) {
+fn visit_expr(e: &ScalarExpr, env: &AffineEnv, lets: &LetExprs, report: &mut ReachReport) {
     if let ScalarExpr::FieldLoadAt {
         field_key,
         components,
@@ -216,12 +265,12 @@ fn visit_expr(e: &ScalarExpr, env: &AffineEnv, report: &mut ReachReport) {
         let axes: Vec<AxisReach> = components
             .iter()
             .enumerate()
-            .map(|(ax, comp)| component_reach(comp, ax, env))
+            .map(|(ax, comp)| component_reach(comp, ax, env, lets))
             .collect();
         report.record(field_key, &axes);
     }
     for child in e.children() {
-        visit_expr(child, env, report);
+        visit_expr(child, env, lets, report);
     }
 }
 
@@ -229,21 +278,27 @@ fn visit_expr(e: &ScalarExpr, env: &AffineEnv, report: &mut ReachReport) {
 /// loads, binding immutable lets into the environment in program order. kernel
 /// let names are globally fresh (the scalarizer's fresh-name counter), so one
 /// flat environment across nested scopes is sound.
-fn visit_stmts(stmts: &[ScalarStmt], env: &mut AffineEnv, report: &mut ReachReport) {
+fn visit_stmts(
+    stmts: &[ScalarStmt],
+    env: &mut AffineEnv,
+    lets: &mut LetExprs,
+    report: &mut ReachReport,
+) {
     for stmt in stmts {
         // sub-bodies first: a Scope's result references lets declared inside
         // its own body, so the body's bindings must be in the environment
         // before the immediate expression is classified.
         for body in stmt.child_stmt_bodies() {
-            visit_stmts(body, env, report);
+            visit_stmts(body, env, lets, report);
         }
         if let Some(e) = stmt.child_expr() {
-            visit_expr(e, env, report);
+            visit_expr(e, env, lets, report);
         }
-        if let ScalarStmt::Let { name, value, .. } = stmt
-            && let Some(f) = affine(value, env)
-        {
-            env.insert(name.clone(), f);
+        if let ScalarStmt::Let { name, value, .. } = stmt {
+            if let Some(f) = affine(value, env) {
+                env.insert(name.clone(), f);
+            }
+            lets.insert(name.clone(), value.clone());
         }
     }
 }
@@ -253,9 +308,10 @@ fn visit_stmts(stmts: &[ScalarStmt], env: &mut AffineEnv, report: &mut ReachRepo
 pub fn stencil_reach(k: &KernelScalarized) -> ReachReport {
     let mut report = ReachReport::default();
     let mut env = AffineEnv::new();
-    visit_stmts(&k.body, &mut env, &mut report);
+    let mut lets = LetExprs::new();
+    visit_stmts(&k.body, &mut env, &mut lets, &mut report);
     for out in &k.outputs {
-        visit_expr(out, &env, &mut report);
+        visit_expr(out, &env, &lets, &mut report);
     }
     report
 }
@@ -344,18 +400,91 @@ mod tests {
         assert_eq!(report.unbounded(), vec![("coarse_rho", 0)]);
     }
 
+    /// `_coord_axis + var`: the shift a periodic ghost fill applies, one interior
+    /// period wide and known only at run time.
+    fn runtime_shifted(axis: usize, var: &str) -> ScalarExpr {
+        ScalarExpr::BinOp(
+            BinaryKind::Add,
+            Box::new(coord(axis)),
+            Box::new(ScalarExpr::Var(var.to_string())),
+        )
+    }
+
     #[test]
     fn lattice_map_select_is_unbounded() {
-        // a ghost-fill source coord picks periodic/reflect by a runtime map_type:
-        // the index is data-independent but not affine — refuse to bound it.
+        // a ghost-fill source coord picks periodic/reflect by a runtime map_type, and the
+        // periodic arm shifts by the interior period — a runtime value, so the arm is not a
+        // cell-relative stencil and no join over the arms can bound it.
         let sel = ScalarExpr::Select {
             cond: ScalarExpr::Var("map_type".to_string()).into(),
-            then: shifted(0, 4).into(),
+            then: runtime_shifted(0, "period").into(),
             else_: coord(0).into(),
         };
         let body = vec![let_stmt("q", load("prim_rho", vec![sel]))];
         let report = stencil_reach(&kernel(body, Vec::new()));
         assert_eq!(report.per_field["prim_rho"], vec![AxisReach::Unbounded]);
+    }
+
+    #[test]
+    fn a_select_is_the_join_of_its_arms() {
+        // both arms are cell-relative reads, so the value is within the wider of them
+        // whichever branch runs, and the condition need not be reasoned about.
+        let sel = ScalarExpr::Select {
+            cond: ScalarExpr::Var("whatever".to_string()).into(),
+            then: shifted(0, 4).into(),
+            else_: shifted(0, -1).into(),
+        };
+        let body = vec![let_stmt("q", load("prim_rho", vec![sel]))];
+        let report = stencil_reach(&kernel(body, Vec::new()));
+        assert_eq!(report.per_field["prim_rho"], vec![AxisReach::Bounded(4)]);
+    }
+
+    #[test]
+    fn an_index_clamped_into_the_interior_needs_no_ghosts() {
+        // `select(c < lo, lo, select(c > hi, hi, c))`: every leaf is either an interior
+        // bound the dispatch places inside the domain or the cell's own coordinate, so the
+        // read lands on an interior cell and the halo it needs is zero. resolved through a
+        // let, which is how cse hoists the clamp.
+        let inner = ScalarExpr::Select {
+            cond: ScalarExpr::Var("above".to_string()).into(),
+            then: ScalarExpr::Var("hi_0".to_string()).into(),
+            else_: coord(0).into(),
+        };
+        let clamp = ScalarExpr::Select {
+            cond: ScalarExpr::Var("below".to_string()).into(),
+            then: ScalarExpr::Var("lo_0".to_string()).into(),
+            else_: inner.into(),
+        };
+        let body = vec![
+            let_stmt("__cse_0", clamp),
+            let_stmt(
+                "q",
+                load("dst_pre", vec![ScalarExpr::Var("__cse_0".to_string())]),
+            ),
+        ];
+        let report = stencil_reach(&kernel(body, Vec::new()));
+        assert_eq!(report.per_field["dst_pre"], vec![AxisReach::Bounded(0)]);
+        assert!(report.unbounded().is_empty());
+    }
+
+    #[test]
+    fn a_clamp_on_one_axis_does_not_excuse_a_runtime_index_on_another() {
+        // the bound is named per axis: clamping axis 0 says nothing about axis 1, whose
+        // runtime shift stays unbounded.
+        let clamp = ScalarExpr::Select {
+            cond: ScalarExpr::Var("below".to_string()).into(),
+            then: ScalarExpr::Var("lo_0".to_string()).into(),
+            else_: coord(0).into(),
+        };
+        let body = vec![let_stmt(
+            "q",
+            load("dst_pre", vec![clamp, runtime_shifted(1, "period")]),
+        )];
+        let report = stencil_reach(&kernel(body, Vec::new()));
+        assert_eq!(
+            report.per_field["dst_pre"],
+            vec![AxisReach::Bounded(0), AxisReach::Unbounded]
+        );
     }
 
     #[test]
