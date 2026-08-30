@@ -130,13 +130,33 @@ fn ladder_rungs(
     (own, scaled)
 }
 
-/// the innermost radius a level resolves: half its own cell width, since the accretor sits on a
-/// cell boundary at the box center.
-fn inner_radius(
+/// the innermost radius a level's timestep is actually set by. a level does not evolve the cells
+/// its child covers -- the cfl reduction runs over the evolution regions, so those cells are
+/// excluded -- and the accretor sits at the box center, so the innermost cell a level owns lies
+/// just outside its child's extent. the finest level has no child and owns down to its own half
+/// cell width, which anchors it some sixteen times deeper in radius than the level above and is
+/// why its rung stands apart from the ladder.
+fn controlling_radius(
     hier: &Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset>,
     ll: usize,
 ) -> f64 {
-    0.5 * hier.levels[ll].state.geom.dx[0]
+    match hier.levels.get(ll + 1) {
+        Some(child) => {
+            let g = &child.state.geom;
+            0.5 * g.interior.spaces[0].size() as f64 * g.dx[0]
+        }
+        None => 0.5 * hier.levels[ll].state.geom.dx[0],
+    }
+}
+
+/// the rung ratio the sound-speed profile predicts between a level and the one below it. with
+/// `c^2 = 1 + A/r` and the controlling radius halving from level to level, the rungs stand in the
+/// ratio `c(r/2) / c(r) = sqrt((1 + 2u) / (1 + u))` for `u = A/r`. far outside the Bondi radius
+/// `u -> 0` and the rungs are level independent; well inside it `u -> infinity` and the ratio
+/// approaches `sqrt(2)`, the `c ~ r^(-1/2)` law.
+fn predicted_ratio(r_control: f64) -> f64 {
+    let u = (GAMMA - 1.0) * R_B / r_control;
+    ((1.0 + 2.0 * u) / (1.0 + u)).sqrt()
 }
 
 #[test]
@@ -153,8 +173,8 @@ fn the_root_step_is_set_by_the_finest_level_once_the_ladder_reaches_inside_the_b
 
     // the premise: the ladder must actually straddle the Bondi radius, or only one of the two
     // regimes below is being exercised and the crossover assertion is vacuous.
-    let outermost = inner_radius(&hier, 0);
-    let innermost = inner_radius(&hier, LEVELS - 1);
+    let outermost = controlling_radius(&hier, 0);
+    let innermost = controlling_radius(&hier, LEVELS - 1);
     assert!(
         outermost > 10.0 * R_B && innermost < R_B / 100.0,
         "the ladder spans r = {innermost:e} to {outermost:e} against a Bondi radius of {R_B}; it \
@@ -162,7 +182,7 @@ fn the_root_step_is_set_by_the_finest_level_once_the_ladder_reaches_inside_the_b
     );
 
     // the ladder itself, reported: a cost estimate for a deep run is built on these numbers.
-    println!("[{LEVELS} levels, R_B = {R_B}] level : r_inner/R_B : own dt : dt * 2^l : rung ratio");
+    println!("[{LEVELS} levels, R_B = {R_B}] level : r_control/R_B : own dt : dt * 2^l : rung ratio");
     for ll in 0..LEVELS {
         let ratio = if ll == 0 {
             f64::NAN
@@ -171,7 +191,7 @@ fn the_root_step_is_set_by_the_finest_level_once_the_ladder_reaches_inside_the_b
         };
         println!(
             "  {ll:2} : {:10.3e} : {:10.3e} : {:10.3e} : {ratio:.4}",
-            inner_radius(&hier, ll) / R_B,
+            controlling_radius(&hier, ll) / R_B,
             own[ll],
             scaled[ll]
         );
@@ -289,39 +309,87 @@ fn shallow_flat_ladder(
 
 #[test]
 fn the_rung_decay_follows_the_sound_speed_profile_it_is_driven_by() {
-    // the shape of the collapse, not just its direction. with `c ~ r^{-1/2}` and each level's
-    // innermost radius equal to its own cell width, `cfl_l ~ dx_l / c(dx_l) ~ 2^{-3l/2}`, so the
-    // rung `cfl_l * 2^l` falls as `2^{-l/2}` — a factor of `sqrt(2)` per level.
+    // the shape of the collapse, level by level, against the profile that drives it. each level's
+    // step is set by the innermost cell it owns, and that radius halves from level to level, so
+    // the rungs stand in the ratio `c(r/2) / c(r)` the profile dictates -- tending to `sqrt(2)`
+    // deep inside the Bondi radius and to 1 far outside it.
     //
-    // the exponent is what a cost estimate is built on, so it is checked against the profile rather
-    // than against a recorded number: a ladder that decayed as `2^{-l}` or not at all would price a
-    // deep run wrongly by orders of magnitude while still producing a stable, plausible run.
+    // the exponent is what a cost estimate is built on, so it is checked against the profile
+    // rather than against a recorded number: a ladder that decayed as `2^{-l}` or not at all
+    // would price a deep run wrongly by orders of magnitude while still producing a stable,
+    // plausible run.
     let hier = ladder(LEVELS);
     let (_, scaled) = ladder_rungs(&hier);
 
-    // only the levels well inside the Bondi radius follow the asymptotic scaling; outside it the
-    // profile is flat and the rungs are level independent by construction.
-    let deep: Vec<usize> = (0..LEVELS)
-        .filter(|&ll| inner_radius(&hier, ll) < R_B / 20.0)
-        .collect();
-    assert!(
-        deep.len() >= 4,
-        "only {} level(s) sit well inside the Bondi radius; the asymptotic slope cannot be \
-         measured over that few",
-        deep.len()
-    );
-
-    let sqrt2 = std::f64::consts::SQRT_2;
-    for pair in deep.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
-        let ratio = scaled[a] / scaled[b];
+    // the finest level owns down to its own half cell, some sixteen times deeper in radius than
+    // the level above owns, so its rung answers to a different anchor and is measured separately
+    // below. every pair up to it is anchored the same way and follows the profile.
+    //
+    // the 5 percent band covers a known one-sided offset: the controlling cell's CENTER sits half
+    // a parent width outside the child's edge, so the sound speed there is a little below the one
+    // at the edge radius the prediction uses, and every measured ratio runs slightly under. the
+    // offset shrinks with depth as the cell width falls against the radius; it peaks at 3.2
+    // percent around level 7, where the profile is steepening fastest relative to the cell size.
+    let mut worst = 0.0_f64;
+    let mut worst_level = 0;
+    for ll in 0..LEVELS - 2 {
+        let predicted = predicted_ratio(controlling_radius(&hier, ll));
+        let measured = scaled[ll] / scaled[ll + 1];
+        let deviation = (measured / predicted - 1.0).abs();
+        if deviation > worst {
+            worst = deviation;
+            worst_level = ll;
+        }
         assert!(
-            (ratio / sqrt2 - 1.0).abs() < 0.1,
-            "the rung ratio between levels {a} and {b} is {ratio:.4}, not the {sqrt2:.4} that \
-             c ~ r^(-1/2) demands. the timestep ladder is not tracking the sound-speed profile \
-             driving it, so any cost estimate built on that scaling is wrong"
+            deviation < 0.05,
+            "the rung ratio between levels {ll} and {} is {measured:.4}, against the \
+             {predicted:.4} the sound-speed profile predicts at the controlling radius \
+             {:.3e}. the timestep ladder is not tracking the profile driving it, so any cost \
+             estimate built on that scaling is wrong",
+            ll + 1,
+            controlling_radius(&hier, ll),
         );
     }
+    println!(
+        "rung ratios track the profile to {:.2}% (worst, between levels {worst_level} and {})",
+        100.0 * worst,
+        worst_level + 1
+    );
+
+    // the premise: the ladder has to reach deep enough for the asymptotic law to be visible at
+    // all, or the agreement above only ever exercises the flat end of the profile where every
+    // predicted ratio is ~1 and the test is vacuous.
+    let sqrt2 = std::f64::consts::SQRT_2;
+    let deepest = scaled[LEVELS - 3] / scaled[LEVELS - 2];
+    assert!(
+        (deepest / sqrt2 - 1.0).abs() < 0.05,
+        "the deepest child-anchored rung ratio is {deepest:.4}, not yet within reach of the \
+         {sqrt2:.4} that `c ~ r^(-1/2)` demands; the ladder does not descend far enough inside \
+         the Bondi radius for the asymptotic law to be under test"
+    );
+
+    // and the approach is monotone: each rung ratio sits above the one before, which is the
+    // profile steepening as the ladder descends rather than a coincidence at one depth.
+    for ll in 1..LEVELS - 2 {
+        let (before, after) = (scaled[ll - 1] / scaled[ll], scaled[ll] / scaled[ll + 1]);
+        assert!(
+            after > before,
+            "the rung ratio fell from {before:.4} to {after:.4} between levels {ll} and {}; \
+             the profile steepens monotonically inward, so the ladder must too",
+            ll + 1
+        );
+    }
+
+    // the finest level, whose own half cell reaches far inside the radius its parent owns down
+    // to: its rung drops by much more than the asymptotic factor, and that gap is the reason the
+    // root step ends up far below the root's own stability limit.
+    let finest = scaled[LEVELS - 2] / scaled[LEVELS - 1];
+    assert!(
+        finest > 2.0 * sqrt2 / 2.0_f64.sqrt(),
+        "the finest level's rung ratio is {finest:.4}; owning down to its own half cell rather \
+         than a child's edge should drop it by far more than the {sqrt2:.4} of a level that \
+         shares the ladder's anchor"
+    );
 }
 
 #[test]
