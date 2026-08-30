@@ -52,13 +52,16 @@ use super::tracer_interface::{
 };
 use super::transfer::{
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
-    cf_ghost_slabs, copy_field, copy_field_region, prolong_face_field, prolong_field,
+    cf_ghost_slabs, clip_to_prolongable, copy_field, copy_field_region, prolong_face_field,
+    prolong_field,
     prolong_prims_balanced, prolong_prims_swept, prolong_prims_targeted, restrict_band_balanced,
     restrict_bface, restrict_cell_field, restrict_cons,
 };
 use std::ops::ControlFlow;
 use symbi_hydro::state::PrimFromSlots;
-use symbi_sim::decomp::{HaloTransport, drain_devices, exchange_grid, flatten, unflatten};
+use symbi_sim::decomp::{
+    HaloTransport, Topology, drain_devices, exchange_grid, flatten, schedule_of_tiles, unflatten,
+};
 use symbi_sim::driver::{
     advance_clock, advance_state_clock, book_horizon_receipt, check_dt_or_panic, evolve_bodies,
     horizon_request, needs_step_snapshot, prof, stage_time_fractions,
@@ -2561,7 +2564,11 @@ where
             &fine.state.geom.allocated,
             &fine.state.geom.interior,
             &fine.state.boundaries,
-        ) {
+        )
+        .iter()
+        .filter_map(|slab| {
+            clip_to_prolongable(slab, &parent.state.geom.allocated, self.prolong_order)
+        }) {
             for dd in 0..NDIM {
                 prolong_field(
                     &parent_coefficients.drift[dd],
@@ -2871,11 +2878,20 @@ where
             .prim_lerp
             .as_ref()
             .expect("the parent of a fine level carries prim_lerp");
-        let slabs = cf_ghost_slabs(
+        // a slab is clipped to the fine cells the parent can actually feed: a patch that
+        // runs out to the edge of a decomposed tile has ghost cells whose prolongation
+        // stencil reaches past the parent's own cells, and the fine halo exchange carries
+        // those from the neighbor tile's fine interior.
+        let slabs: Vec<_> = cf_ghost_slabs(
             &fine.state.geom.allocated,
             &fine.state.geom.interior,
             &fine.state.boundaries,
-        );
+        )
+        .iter()
+        .filter_map(|slab| {
+            clip_to_prolongable(slab, &parent.state.geom.allocated, self.prolong_order)
+        })
+        .collect();
         let sweep_scratch = fine.prolong_sweep.get_or_init(|| {
             let has_pre = fine.state.fields.prim.pre_field().is_some();
             slabs
@@ -3811,7 +3827,8 @@ where
     {
         let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
             tiles.iter().map(|t| &*t.levels[0].state).collect();
-        symbi_sim::decomp::exchange_grid_cons(&states, counts, devices, transport);
+        let schedule = schedule_of_tiles(&states, counts, &Topology::open());
+        symbi_sim::decomp::exchange_grid_cons(&states, &schedule, devices, transport);
     }
     let mut reseeded = 0usize;
     for (i, t) in tiles.iter().enumerate() {
@@ -4019,7 +4036,8 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
             .iter()
             .map(|&i| &*tiles[i].levels[level].state)
             .collect();
-        exchange_grid(&states, counts, devices, transport);
+        let schedule = schedule_of_tiles(&states, counts, &Topology::open());
+        exchange_grid(&states, &schedule, devices, transport);
     }
     for (k, &i) in order.iter().enumerate() {
         symbi_xpu::with_device(devices[k], || {

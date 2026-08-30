@@ -18,7 +18,8 @@
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
 use symbi::sim::decomp::{
-    LocalCopy, evolve_decomposed, exchange_grid, flatten, gather_faces, gather_interiors, unflatten,
+    LocalCopy, Schedule, evolve_decomposed, exchange_grid, flatten, gather_faces,
+    gather_interiors, unflatten,
 };
 use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
@@ -301,7 +302,8 @@ fn mhd_debug_rk2_stages() {
     let exch = |tiles: &[(Sim, Kern)], counts: [usize; 2]| {
         let stores: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
         let devs = vec![0i32; tiles.len()];
-        exchange_grid(&stores, counts, &devs, &LocalCopy);
+        let schedule = Schedule::open(counts, stores[0].geom.ng);
+        exchange_grid(&stores, &schedule, &devs, &LocalCopy);
     };
     // prime before cfl: cfl reads prim, which c2p populates (otherwise it returns inf).
     let prime = |tiles: &[(Sim, Kern)], counts: [usize; 2]| {

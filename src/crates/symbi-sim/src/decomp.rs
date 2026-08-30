@@ -20,7 +20,7 @@
 // =============================================================================
 
 use crate::driver::{advance_state_clock, book_horizon_receipt, horizon_request, prof};
-use crate::state::{FieldStore, PartitionGeometry, Timestepping};
+use crate::state::{BoundaryType, FieldStore, PartitionGeometry, Timestepping};
 use crate::substrate_seam::KernelSet;
 use std::ops::ControlFlow;
 use symbi_algebra::{Domain, Side};
@@ -53,6 +53,93 @@ pub trait HaloTransport {
         src_dev: i32,
         dst_dev: i32,
     );
+}
+
+/// the two halves of a transfer, for a holder of one side. a rank owning the source packs
+/// `region`'s cells into a message and posts it under `tag`; the rank owning the destination
+/// posts a receive under the same `tag` and scatters the message back over its own region.
+/// the two regions have identical shape, and both walks visit their cells in `Domain::iter`
+/// order, so the message needs no index metadata -- position in the message IS the cell.
+///
+/// this is the seam a wire transport implements: `copy_region` needs both fields at once and
+/// so bakes in a shared address space, while a send and a receive each touch one side. an
+/// in-process transport pairs a matched send and receive back into the direct copy, so a run
+/// whose tiles all live in this process moves the same bytes the same way.
+pub trait MessageTransport {
+    /// pack `region` of `field` and post it under `tag`.
+    fn send<const D: usize, M: MemorySpace>(
+        &self,
+        field: &Field<f64, D, M>,
+        region: &Domain<D>,
+        device: i32,
+        tag: u64,
+    );
+
+    /// take the message posted under `tag` and scatter it over `region` of `field`.
+    fn recv<const D: usize, M: MemorySpace>(
+        &self,
+        field: &Field<f64, D, M>,
+        region: &Domain<D>,
+        device: i32,
+        tag: u64,
+    );
+}
+
+/// an in-process message transport: sends pack into a queue keyed by tag, receives drain it.
+/// every exchange posts a tag's send before its receive, so a receive always finds its
+/// message and the queue empties within the exchange that filled it.
+#[derive(Default)]
+pub struct MessageQueue {
+    posted: std::cell::RefCell<std::collections::HashMap<u64, Vec<f64>>>,
+}
+
+impl MessageQueue {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// messages posted and never taken. an exchange that drains what it posts leaves zero.
+    pub fn outstanding(&self) -> usize {
+        self.posted.borrow().len()
+    }
+}
+
+impl MessageTransport for MessageQueue {
+    fn send<const D: usize, M: MemorySpace>(
+        &self,
+        field: &Field<f64, D, M>,
+        region: &Domain<D>,
+        _device: i32,
+        tag: u64,
+    ) {
+        let view = field.view();
+        let msg: Vec<f64> = region.iter().map(|c| *view.at(c)).collect();
+        let prior = self.posted.borrow_mut().insert(tag, msg);
+        debug_assert!(prior.is_none(), "tag {tag} was posted twice before being taken");
+    }
+
+    fn recv<const D: usize, M: MemorySpace>(
+        &self,
+        field: &Field<f64, D, M>,
+        region: &Domain<D>,
+        _device: i32,
+        tag: u64,
+    ) {
+        let msg = self
+            .posted
+            .borrow_mut()
+            .remove(&tag)
+            .expect("a receive takes a message its matching send posted");
+        debug_assert_eq!(
+            msg.len(),
+            region.volume(),
+            "message length differs from the receiving region's cell count"
+        );
+        let mut view = field.view_mut();
+        for (c, value) in region.iter().zip(msg) {
+            *view.at_mut(c) = value;
+        }
+    }
 }
 
 /// the proven in-process transport: a direct view-to-view copy.
@@ -201,21 +288,19 @@ impl HaloTransport for DeviceCopy {
     }
 }
 
-/// the ng-deep ghost strip on `side` of `axis`, with the transverse extent clipped to
-/// the interior on any cut axis not yet exchanged (`!processed[b] && counts[b] > 1`) --
-/// the two-pass corner rule. on a physical axis, or a cut axis already exchanged, the
-/// full allocated extent is kept (its ghosts are valid).
+/// the ng-deep ghost strip on `side` of `axis`, with the transverse extent clipped to the
+/// interior on every axis the leg marks -- the two-pass corner rule, carried by the leg.
+/// an unmarked axis keeps its full allocated extent, whose ghosts are valid there.
 fn ghost_strip<const D: usize>(
     geom: &PartitionGeometry<D>,
     axis: usize,
     side: Side,
-    processed: &[bool; D],
-    counts: &[usize; D],
+    clip: &[bool; D],
 ) -> Domain<D> {
     let ng = geom.ng as isize;
     let mut strip = geom.allocated.boundary(axis, side, ng);
     for b in 0..D {
-        if b != axis && !processed[b] && counts[b] > 1 {
+        if clip[b] {
             strip = strip.slab(b, (geom.interior.spaces[b].lo, geom.interior.spaces[b].hi));
         }
     }
@@ -259,18 +344,26 @@ pub fn gather_interiors<const D: usize, const DOF: usize, M: MemorySpace>(
     counts: [usize; D],
 ) {
     let gint = &global.geom.interior;
-    // cells per tile per axis = global interior extent / tile count.
-    let m: [usize; D] = std::array::from_fn(|ax| gint.spaces[ax].size() / counts[ax]);
+    // the tile extents come from the tiles' own interior sizes, so a ragged tile grid
+    // gathers as correctly as a uniform one and a tiling that fails to cover the global
+    // interior fails loudly here.
+    let partition = Partition::from_tile_sizes(
+        std::array::from_fn(|ax| gint.spaces[ax].size()),
+        counts,
+        |flat, ax| tiles[flat].geom.interior.spaces[ax].size(),
+    )
+    .expect("gather_interiors: the tiles tile the global interior");
     let glo: [isize; D] = std::array::from_fn(|ax| gint.spaces[ax].lo);
 
     for (flat, tile) in tiles.iter().enumerate() {
         let tc = unflatten(flat, counts);
         let src_region = tile.geom.interior.clone();
-        // the m-cell sub-box of the global interior this tile owns (global coords).
+        // the sub-box of the global interior this tile owns (global coords).
         let mut dst_region = global.geom.interior.clone();
         for ax in 0..D {
-            let lo = glo[ax] + (tc[ax] * m[ax]) as isize;
-            dst_region = dst_region.slab(ax, (lo, lo + m[ax] as isize));
+            let (start, size) = partition.tile_range(ax, tc[ax]);
+            let lo = glo[ax] + start as isize;
+            dst_region = dst_region.slab(ax, (lo, lo + size as isize));
         }
         for (gf, tf) in data_fields(global).into_iter().zip(data_fields(tile)) {
             LocalCopy.copy_region(tf, &src_region, gf, &dst_region, 0, 0);
@@ -341,7 +434,13 @@ pub fn gather_faces<const D: usize, const DOF: usize, M: MemorySpace>(
         return;
     };
     let gint = &global.geom.interior;
-    let m: [usize; D] = std::array::from_fn(|ax| gint.spaces[ax].size() / counts[ax]);
+    // the tile extents come from the tiles' own interior sizes (see gather_interiors).
+    let partition = Partition::from_tile_sizes(
+        std::array::from_fn(|ax| gint.spaces[ax].size()),
+        counts,
+        |flat, ax| tiles[flat].geom.interior.spaces[ax].size(),
+    )
+    .expect("gather_faces: the tiles tile the global interior");
     let glo: [isize; D] = std::array::from_fn(|ax| gint.spaces[ax].lo);
 
     for (flat, tile) in tiles.iter().enumerate() {
@@ -356,8 +455,9 @@ pub fn gather_faces<const D: usize, const DOF: usize, M: MemorySpace>(
             let src = tint.extend(d, 0, 1);
             let mut dst = gint.extend(d, 0, 1);
             for ax in 0..D {
-                let lo = glo[ax] + (tc[ax] * m[ax]) as isize;
-                let hi = lo + m[ax] as isize + if ax == d { 1 } else { 0 };
+                let (start, size) = partition.tile_range(ax, tc[ax]);
+                let lo = glo[ax] + start as isize;
+                let hi = lo + size as isize + if ax == d { 1 } else { 0 };
                 dst = dst.slab(ax, (lo, hi));
             }
             LocalCopy.copy_region(&tmhd.bface[d], &src, &gmhd.bface[d], &dst, 0, 0);
@@ -414,15 +514,14 @@ fn face_ghost_strip<const D: usize>(
     axis: usize,
     side: Side,
     d: usize,
-    processed: &[bool; D],
-    counts: &[usize; D],
+    clip: &[bool; D],
 ) -> Domain<D> {
     let ng = geom.ng as isize;
     let mut strip = alloc.boundary(axis, side, ng);
     for b in 0..D {
-        if b != axis && !processed[b] && counts[b] > 1 {
-            // clip to interior on un-processed cut axes (two-pass corner rule). on the face's
-            // own normal axis there is one extra face past the last interior cell.
+        if clip[b] {
+            // the leg's clipped axes come back to the interior (the two-pass corner rule). on
+            // the face's own normal axis there is one extra face past the last interior cell.
             let hi_ext = if b == d { 1 } else { 0 };
             strip = strip.slab(
                 b,
@@ -436,11 +535,10 @@ fn face_ghost_strip<const D: usize>(
     strip
 }
 
-/// exchange same-level halos across the shared face between `lo` (its hi face on `axis`)
-/// and `hi` (its lo face). `processed` marks the axes already exchanged this pass (for
-/// the two-pass transverse rule); `counts` is the per-axis tile count. fills the prim + bcell
-/// ghost cells and -- for MHD -- the staggered `bface` transverse halos (cons ghosts are never
-/// read by the flux stage).
+/// exchange same-level halos across the shared face a `leg` names: `lo`'s hi face on the
+/// leg's axis against `hi`'s lo face, with the leg's clip carrying the two-pass transverse
+/// rule and `reach` the halo width. fills the prim + bcell ghost cells and -- for MHD -- the
+/// staggered `bface` transverse halos (cons ghosts are never read by the flux stage).
 ///
 /// each ghost strip and its source strip share global cell positions and shape; the
 /// source strip is the ghost strip shifted along `axis` to the neighbor's matching
@@ -448,9 +546,8 @@ fn face_ghost_strip<const D: usize>(
 pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     lo: &FieldStore<D, DOF, M>,
     hi: &FieldStore<D, DOF, M>,
-    axis: usize,
-    processed: &[bool; D],
-    counts: &[usize; D],
+    leg: &Leg<D>,
+    reach: usize,
     lo_dev: i32,
     hi_dev: i32,
     transport: &T,
@@ -458,9 +555,8 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     exchange_faces_set(
         lo,
         hi,
-        axis,
-        processed,
-        counts,
+        leg,
+        reach,
         lo_dev,
         hi_dev,
         transport,
@@ -472,34 +568,36 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
 fn exchange_faces_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     lo: &FieldStore<D, DOF, M>,
     hi: &FieldStore<D, DOF, M>,
-    axis: usize,
-    processed: &[bool; D],
-    counts: &[usize; D],
+    leg: &Leg<D>,
+    reach: usize,
     lo_dev: i32,
     hi_dev: i32,
     transport: &T,
     set: ExchangeSet,
 ) {
-    let ng = lo.geom.ng as isize;
+    let axis = leg.axis;
+    let ng = reach as isize;
     let i_hi_lo = lo.geom.interior.spaces[axis].hi; // one past lo's last interior cell
     let i_lo_hi = hi.geom.interior.spaces[axis].lo; // hi's first interior cell
-
-    // lo's hi-ghost strip; hi's source is the same strip shifted to its first ng interior.
-    let lo_ghost = ghost_strip(&lo.geom, axis, Side::Hi, processed, counts);
-    let hi_src = lo_ghost.slab(axis, (i_lo_hi, i_lo_hi + ng));
-    // hi's lo-ghost strip; lo's source is its last ng interior.
-    let hi_ghost = ghost_strip(&hi.geom, axis, Side::Lo, processed, counts);
-    let lo_src = hi_ghost.slab(axis, (i_hi_lo - ng, i_hi_lo));
-
-    for (fl, fr) in exchange_set_fields(lo, set)
-        .into_iter()
-        .zip(exchange_set_fields(hi, set))
-    {
-        // hi interior -> lo ghost: source is the hi tile (hi_dev), dest is the lo tile (lo_dev).
-        transport.copy_region(fr, &hi_src, fl, &lo_ghost, hi_dev, lo_dev);
-        // lo interior -> hi ghost: source is the lo tile, dest is the hi tile.
-        transport.copy_region(fl, &lo_src, fr, &hi_ghost, lo_dev, hi_dev);
-    }
+    let dev_of = |tile: usize| if tile == leg.lo { lo_dev } else { hi_dev };
+    leg_transfers(
+        lo,
+        hi,
+        leg,
+        reach,
+        set,
+        0,
+        |src_tile, src_field, src_region, dst_tile, dst_field, dst_region, _tag| {
+            transport.copy_region(
+                src_field,
+                src_region,
+                dst_field,
+                dst_region,
+                dev_of(src_tile),
+                dev_of(dst_tile),
+            )
+        },
+    );
 
     // MHD: exchange the staggered face-B transverse halos. only `bface[d]` with `d != axis`
     // carries a halo on `axis` (the face is transverse to the cut, so `axis` indexes it like
@@ -524,10 +622,10 @@ fn exchange_faces_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
             let lo_alloc = fl.domain();
             let hi_alloc = fr.domain();
             let lo_ghost_f =
-                face_ghost_strip(&lo_alloc, &lo.geom, axis, Side::Hi, d, processed, counts);
+                face_ghost_strip(&lo_alloc, &lo.geom, axis, Side::Hi, d, &leg.clip);
             let hi_src_f = lo_ghost_f.slab(axis, (i_lo_hi, i_lo_hi + ng));
             let hi_ghost_f =
-                face_ghost_strip(&hi_alloc, &hi.geom, axis, Side::Lo, d, processed, counts);
+                face_ghost_strip(&hi_alloc, &hi.geom, axis, Side::Lo, d, &leg.clip);
             let lo_src_f = hi_ghost_f.slab(axis, (i_hi_lo - ng, i_hi_lo));
             transport.copy_region(fr, &hi_src_f, fl, &lo_ghost_f, hi_dev, lo_dev);
             transport.copy_region(fl, &lo_src_f, fr, &hi_ghost_f, lo_dev, hi_dev);
@@ -656,6 +754,57 @@ impl<const D: usize> Partition<D> {
         Self::uniform(n_cells, decompose_grid(n_cells, n_parts)?)
     }
 
+    /// the partition a laid-out tile grid implies: each tile reports its own interior
+    /// size along each axis (`size(flat_tile, ax)`), and the cuts are the prefix sums of
+    /// the sizes down each axis. equal tiles reproduce the uniform partition; unequal
+    /// tiles are read exactly as they are. rectilinearity is checked: every tile in a
+    /// given axis-`ax` slab carries that slab's width, and the widths sum to the global
+    /// cell count, so a mismatched or incomplete tiling fails here rather than writing
+    /// cells at the wrong global offsets.
+    pub fn from_tile_sizes(
+        n_cells: [usize; D],
+        counts: [usize; D],
+        size: impl Fn(usize, usize) -> usize,
+    ) -> Result<Self, String> {
+        let mut cuts: [Vec<usize>; D] = std::array::from_fn(|_| Vec::new());
+        for ax in 0..D {
+            if counts[ax] == 0 {
+                return Err(format!("tile grid axis {ax} carries no tiles"));
+            }
+            let widths: Vec<usize> = (0..counts[ax])
+                .map(|i| {
+                    let mut tc = [0usize; D];
+                    tc[ax] = i;
+                    size(flatten(tc, counts), ax)
+                })
+                .collect();
+            let total: usize = widths.iter().sum();
+            if total != n_cells[ax] {
+                return Err(format!(
+                    "tile widths along axis {ax} sum to {total} for {} global cells",
+                    n_cells[ax]
+                ));
+            }
+            let mut acc = 0usize;
+            for w in widths.iter().take(counts[ax] - 1) {
+                acc += w;
+                cuts[ax].push(acc);
+            }
+            let n_tiles: usize = counts.iter().product();
+            for flat in 0..n_tiles {
+                let tc = unflatten(flat, counts);
+                if size(flat, ax) != widths[tc[ax]] {
+                    return Err(format!(
+                        "tile {tc:?} spans {} cells along axis {ax} where its slab spans {}",
+                        size(flat, ax),
+                        widths[tc[ax]]
+                    ));
+                }
+            }
+        }
+        Self::explicit(n_cells, cuts)
+    }
+
     /// tiles per axis.
     pub fn counts(&self) -> [usize; D] {
         std::array::from_fn(|ax| self.cuts[ax].len() + 1)
@@ -700,6 +849,181 @@ impl<const D: usize> Partition<D> {
     }
 }
 
+/// which axes wrap. a periodic axis's first and last tiles are neighbors, so the schedule
+/// carries a leg across that seam like any other; an open axis leaves its end tiles to the
+/// physical boundary fill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Topology<const D: usize> {
+    periodic: [bool; D],
+}
+
+impl<const D: usize> Topology<D> {
+    /// every axis open: the first and last tiles carry physical boundaries.
+    pub fn open() -> Self {
+        Self {
+            periodic: [false; D],
+        }
+    }
+
+    /// the axes marked true wrap their end tiles onto each other.
+    pub fn wrapping(periodic: [bool; D]) -> Self {
+        Self { periodic }
+    }
+
+    pub fn is_periodic(&self, axis: usize) -> bool {
+        self.periodic[axis]
+    }
+}
+
+/// one same-level halo transfer across a cut: the `hi` tile's first `reach` interior cells
+/// fill the `lo` tile's hi ghosts, and the `lo` tile's last `reach` interior cells fill the
+/// `hi` tile's lo ghosts, both along `axis`. `clip[b]` marks a transverse axis whose ghost
+/// extent is cut back to the interior, which is what carries a corner value to its diagonal
+/// neighbor through a later axis's legs instead of over a diagonal transfer. tile indices are
+/// flat over the tile grid (`flatten`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Leg<const D: usize> {
+    pub axis: usize,
+    pub lo: usize,
+    pub hi: usize,
+    pub clip: [bool; D],
+}
+
+/// the ordered halo transfers a tile grid implies. derived once from the partition's tile
+/// counts, the stencil reach, and the boundary topology; the exchange functions walk the legs
+/// and move bytes, so neighbor discovery and pass ordering live in exactly one place and a
+/// transport sees a leg at a time.
+#[derive(Debug, Clone)]
+pub struct Schedule<const D: usize> {
+    counts: [usize; D],
+    reach: usize,
+    topology: Topology<D>,
+    legs: Vec<Leg<D>>,
+}
+
+impl<const D: usize> Schedule<D> {
+    /// axes in order, every adjacent tile pair along the current axis, plus the wrap pair on
+    /// a periodic axis carrying more than one tile. an axis whose legs have run already holds
+    /// valid ghosts, so a later axis keeps its full transverse extent there and the corner
+    /// values ride along; an axis still to come is clipped back to the interior. `counts` is
+    /// the partition's tile grid and `reach` the halo width the stencil declares.
+    pub fn derive(counts: [usize; D], reach: usize, topology: &Topology<D>) -> Self {
+        let total: usize = counts.iter().product();
+        let mut legs = Vec::new();
+        let mut processed = [false; D];
+        for axis in 0..D {
+            let clip: [bool; D] =
+                std::array::from_fn(|b| b != axis && !processed[b] && counts[b] > 1);
+            for flat in 0..total {
+                let tc = unflatten(flat, counts);
+                let wraps = tc[axis] + 1 == counts[axis];
+                // a single tile on a periodic axis wraps onto itself, which its own boundary
+                // fill already does; a cut periodic axis needs the end-to-end leg.
+                if wraps && !(topology.is_periodic(axis) && counts[axis] > 1) {
+                    continue;
+                }
+                let mut tc_hi = tc;
+                tc_hi[axis] = if wraps { 0 } else { tc[axis] + 1 };
+                legs.push(Leg {
+                    axis,
+                    lo: flat,
+                    hi: flatten(tc_hi, counts),
+                    clip,
+                });
+            }
+            processed[axis] = true;
+        }
+        Self {
+            counts,
+            reach,
+            topology: *topology,
+            legs,
+        }
+    }
+
+    /// the schedule for a tile grid whose end tiles carry physical boundaries.
+    pub fn open(counts: [usize; D], reach: usize) -> Self {
+        Self::derive(counts, reach, &Topology::open())
+    }
+
+    pub fn legs(&self) -> &[Leg<D>] {
+        &self.legs
+    }
+
+    pub fn reach(&self) -> usize {
+        self.reach
+    }
+
+    pub fn counts(&self) -> [usize; D] {
+        self.counts
+    }
+
+    /// whether the tile grid closes into a ring along `axis`. this is the domain's own law,
+    /// which a tile's boundaries no longer carry: on a wrapping axis the two faces at the
+    /// domain seam are declared as cuts, since the schedule's legs fill them.
+    pub fn wraps(&self, axis: usize) -> bool {
+        self.topology.is_periodic(axis)
+    }
+
+    pub fn n_tiles(&self) -> usize {
+        self.counts.iter().product()
+    }
+}
+
+/// the schedule a tile grid implies under `topology`, taking the halo width from the tiles
+/// themselves. a wrapping axis needs every one of its tile faces declared `CoarseFine`,
+/// including the two at the domain seam: a face declared periodic is refilled from its own
+/// tile's opposite interior after the exchange, which is the whole domain only on an uncut
+/// axis, and that refill would land on top of the wrap leg's cells.
+pub fn schedule_of_tiles<const D: usize, const DOF: usize, M: MemorySpace>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    counts: [usize; D],
+    topology: &Topology<D>,
+) -> Schedule<D> {
+    for ax in 0..D {
+        debug_assert!(
+            !(topology.is_periodic(ax)
+                && counts[ax] > 1
+                && tiles[0].boundaries.lo(ax) == BoundaryType::Periodic),
+            "axis {ax} wraps across a cut, so its seam faces are exchanged rather than \
+             filled: declare them CoarseFine"
+        );
+    }
+    Schedule::derive(counts, tiles[0].geom.ng, topology)
+}
+
+/// the four regions a leg moves: the `lo` tile's hi-ghost strip with the `hi`-tile source that
+/// fills it, and the `hi` tile's lo-ghost strip with the `lo`-tile source that fills it. every
+/// index comes from the tiles' own domains, so unequal tiles need no special case.
+struct LegRegions<const D: usize> {
+    lo_ghost: Domain<D>,
+    hi_src: Domain<D>,
+    hi_ghost: Domain<D>,
+    lo_src: Domain<D>,
+}
+
+fn leg_regions<const D: usize>(
+    lo: &PartitionGeometry<D>,
+    hi: &PartitionGeometry<D>,
+    leg: &Leg<D>,
+    reach: usize,
+) -> LegRegions<D> {
+    debug_assert_eq!(lo.ng, reach, "the schedule reach matches the tile halo width");
+    debug_assert_eq!(hi.ng, reach, "the schedule reach matches the tile halo width");
+    let ng = reach as isize;
+    let axis = leg.axis;
+    let i_hi_lo = lo.interior.spaces[axis].hi; // one past lo's last interior cell
+    let i_lo_hi = hi.interior.spaces[axis].lo; // hi's first interior cell
+    let lo_ghost = ghost_strip(lo, axis, Side::Hi, &leg.clip);
+    let hi_ghost = ghost_strip(hi, axis, Side::Lo, &leg.clip);
+    LegRegions {
+        hi_src: lo_ghost.slab(axis, (i_lo_hi, i_lo_hi + ng)),
+        lo_src: hi_ghost.slab(axis, (i_hi_lo - ng, i_hi_lo)),
+        lo_ghost,
+        hi_ghost,
+    }
+}
+
 // row-major (axis-0 slowest) flat index over a box of size `dims`, and its inverse. the
 // tile grid uses this one convention for both construction and neighbor lookup (a `Domain`
 // is avoided here on purpose: its iter order and flat_index order differ, which is a
@@ -733,57 +1057,172 @@ pub fn unflatten<const D: usize>(mut flat: usize, dims: [usize; D]) -> [usize; D
 /// real spmd driver keeps it); the field carries none -- the exchange is the one cross-device step.
 pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     tiles: &[&FieldStore<D, DOF, M>],
-    counts: [usize; D],
+    schedule: &Schedule<D>,
     devices: &[i32],
     transport: &T,
 ) {
-    exchange_grid_set(tiles, counts, devices, transport, ExchangeSet::Prim)
+    exchange_grid_set(tiles, schedule, devices, transport, ExchangeSet::Prim)
+}
+
+/// which process holds each tile. every transfer in a schedule has a source tile and a
+/// destination tile; a process takes part in the halves it holds.
+#[derive(Debug, Clone, Copy)]
+pub enum Ownership<'a> {
+    /// every tile lives in this process, so both halves of every transfer are in hand.
+    Whole,
+    /// `owner[tile]` names the process holding that tile, and `me` is this process.
+    Ranked { owner: &'a [usize], me: usize },
+}
+
+impl Ownership<'_> {
+    pub fn owns(&self, tile: usize) -> bool {
+        match self {
+            Ownership::Whole => true,
+            Ownership::Ranked { owner, me } => owner[tile] == *me,
+        }
+    }
+}
+
+/// the half of a phased exchange a process is running. transfers read interior cells and
+/// write ghost cells, so no transfer's source is another's destination and the two phases
+/// may run in either order across processes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    /// hand off every transfer whose source this process holds.
+    Post,
+    /// take every transfer whose destination this process holds.
+    Complete,
+}
+
+/// the cell-centered transfers a leg carries: for each field in `set`, the hi tile's interior
+/// feeding the lo tile's ghosts, then the lo tile's interior feeding the hi tile's ghosts.
+/// `visit` receives (source tile, source field, source region, destination tile, destination
+/// field, destination region, tag). the tag is a pure function of the leg's position, the
+/// direction and the field index, so two processes walking the same schedule name the same
+/// transfer identically.
+fn leg_transfers<const D: usize, const DOF: usize, M: MemorySpace, F>(
+    lo: &FieldStore<D, DOF, M>,
+    hi: &FieldStore<D, DOF, M>,
+    leg: &Leg<D>,
+    reach: usize,
+    set: ExchangeSet,
+    tag_base: u64,
+    mut visit: F,
+) where
+    F: FnMut(usize, &Field<f64, D, M>, &Domain<D>, usize, &Field<f64, D, M>, &Domain<D>, u64),
+{
+    let LegRegions {
+        lo_ghost,
+        hi_src,
+        hi_ghost,
+        lo_src,
+    } = leg_regions(&lo.geom, &hi.geom, leg, reach);
+    for (field_index, (fl, fr)) in exchange_set_fields(lo, set)
+        .into_iter()
+        .zip(exchange_set_fields(hi, set))
+        .enumerate()
+    {
+        let field_tag = (field_index as u64) << 1;
+        visit(leg.hi, fr, &hi_src, leg.lo, fl, &lo_ghost, tag_base | field_tag);
+        visit(leg.lo, fl, &lo_src, leg.hi, fr, &hi_ghost, tag_base | field_tag | 1);
+    }
+}
+
+/// run one phase of one axis of a halo exchange whose tiles are spread over several
+/// processes: pack and hand off the transfers this process sources, then take the ones it
+/// receives. a transfer with both halves in this process is moved directly by `transport`,
+/// which is the same copy the whole-ownership exchange performs.
+///
+/// **an axis has to finish before the next one starts.** the corner rule sends a later axis's
+/// legs over their full transverse extent, ghosts included, so their source regions cover the
+/// cells an earlier axis's legs wrote -- that is how a corner value reaches its diagonal
+/// neighbor without a diagonal transfer. a driver therefore runs, for `axis` in order, every
+/// process's `Post` and then every process's `Complete`. posting all axes before completing
+/// any packs the corner cells before they are filled.
+///
+/// `tiles` is indexed by the schedule's flat tile order throughout; a process reads only the
+/// entries it owns, and the halves it does not own reach it as messages.
+#[allow(clippy::too_many_arguments)]
+pub fn exchange_grid_phase<
+    const D: usize,
+    const DOF: usize,
+    M: MemorySpace,
+    T: HaloTransport,
+    Q: MessageTransport,
+>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    schedule: &Schedule<D>,
+    devices: &[i32],
+    ownership: Ownership<'_>,
+    transport: &T,
+    messages: &Q,
+    axis: usize,
+    phase: Phase,
+) {
+    for (leg_index, leg) in schedule.legs().iter().enumerate() {
+        if leg.axis != axis {
+            continue;
+        }
+        leg_transfers(
+            tiles[leg.lo],
+            tiles[leg.hi],
+            leg,
+            schedule.reach(),
+            ExchangeSet::Prim,
+            (leg_index as u64) << 20,
+            |src_tile, src_field, src_region, dst_tile, dst_field, dst_region, tag| {
+        let have_src = ownership.owns(src_tile);
+        let have_dst = ownership.owns(dst_tile);
+        match (have_src, have_dst, phase) {
+            (true, true, Phase::Post) => transport.copy_region(
+                src_field,
+                src_region,
+                dst_field,
+                dst_region,
+                devices[src_tile],
+                devices[dst_tile],
+            ),
+            (true, false, Phase::Post) => {
+                messages.send(src_field, src_region, devices[src_tile], tag)
+            }
+            (false, true, Phase::Complete) => {
+                messages.recv(dst_field, dst_region, devices[dst_tile], tag)
+            }
+            _ => {}
+        }
+            },
+        );
+    }
 }
 
 fn exchange_grid_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     tiles: &[&FieldStore<D, DOF, M>],
-    counts: [usize; D],
+    schedule: &Schedule<D>,
     devices: &[i32],
     transport: &T,
     set: ExchangeSet,
 ) {
-    let total: usize = counts.iter().product();
     debug_assert_eq!(
         tiles.len(),
-        total,
-        "tiles slice length does not match counts"
+        schedule.n_tiles(),
+        "tiles slice length does not match the schedule's tile grid"
     );
     debug_assert_eq!(
         devices.len(),
-        total,
-        "devices slice length does not match counts"
+        schedule.n_tiles(),
+        "devices slice length does not match the schedule's tile grid"
     );
-    let mut processed = [false; D];
-    for axis in 0..D {
-        for flat in 0..total {
-            let tc = unflatten(flat, counts);
-            if tc[axis] + 1 >= counts[axis] {
-                continue; // no neighbor on the hi side of this axis
-            }
-            let mut tc_hi = tc;
-            tc_hi[axis] += 1;
-            let lo_flat = flatten(tc, counts);
-            let hi_flat = flatten(tc_hi, counts);
-            let lo = tiles[lo_flat];
-            let hi = tiles[hi_flat];
-            exchange_faces_set(
-                lo,
-                hi,
-                axis,
-                &processed,
-                &counts,
-                devices[lo_flat],
-                devices[hi_flat],
-                transport,
-                set,
-            );
-        }
-        processed[axis] = true;
+    for leg in schedule.legs() {
+        exchange_faces_set(
+            tiles[leg.lo],
+            tiles[leg.hi],
+            leg,
+            schedule.reach(),
+            devices[leg.lo],
+            devices[leg.hi],
+            transport,
+            set,
+        );
     }
 }
 
@@ -792,74 +1231,60 @@ fn exchange_grid_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
 /// components through them. see [`ExchangeSet`].
 pub fn exchange_grid_cons<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     tiles: &[&FieldStore<D, DOF, M>],
-    counts: [usize; D],
+    schedule: &Schedule<D>,
     devices: &[i32],
     transport: &T,
 ) {
-    exchange_grid_set(tiles, counts, devices, transport, ExchangeSet::Cons)
+    exchange_grid_set(tiles, schedule, devices, transport, ExchangeSet::Cons)
 }
 
 fn exchange_ito_coefficients<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     tiles: &[&FieldStore<D, DOF, M>],
-    counts: [usize; D],
+    schedule: &Schedule<D>,
     devices: &[i32],
     transport: &T,
 ) {
-    let total: usize = counts.iter().product();
-    let mut processed = [false; D];
-    for axis in 0..D {
-        for flat in 0..total {
-            let tc = unflatten(flat, counts);
-            if tc[axis] + 1 >= counts[axis] {
-                continue;
-            }
-            let mut tc_hi = tc;
-            tc_hi[axis] += 1;
-            let lo_flat = flatten(tc, counts);
-            let hi_flat = flatten(tc_hi, counts);
-            let lo = tiles[lo_flat];
-            let hi = tiles[hi_flat];
-            let lo_fields = lo
-                .ito_coefficients
-                .as_ref()
-                .expect("continuous-tracer tile carries ito coefficients");
-            let hi_fields = hi
-                .ito_coefficients
-                .as_ref()
-                .expect("continuous-tracer tile carries ito coefficients");
-            let ng = lo.geom.ng as isize;
-            let i_hi_lo = lo.geom.interior.spaces[axis].hi;
-            let i_lo_hi = hi.geom.interior.spaces[axis].lo;
-            let lo_ghost = ghost_strip(&lo.geom, axis, Side::Hi, &processed, &counts);
-            let hi_src = lo_ghost.slab(axis, (i_lo_hi, i_lo_hi + ng));
-            let hi_ghost = ghost_strip(&hi.geom, axis, Side::Lo, &processed, &counts);
-            let lo_src = hi_ghost.slab(axis, (i_hi_lo - ng, i_hi_lo));
-            for dd in 0..D {
-                for (fl, fr) in [
-                    (&lo_fields.drift[dd], &hi_fields.drift[dd]),
-                    (&lo_fields.variance[dd], &hi_fields.variance[dd]),
-                    (&lo_fields.third[dd], &hi_fields.third[dd]),
-                ] {
-                    transport.copy_region(
-                        fr,
-                        &hi_src,
-                        fl,
-                        &lo_ghost,
-                        devices[hi_flat],
-                        devices[lo_flat],
-                    );
-                    transport.copy_region(
-                        fl,
-                        &lo_src,
-                        fr,
-                        &hi_ghost,
-                        devices[lo_flat],
-                        devices[hi_flat],
-                    );
-                }
+    for leg in schedule.legs() {
+        let lo = tiles[leg.lo];
+        let hi = tiles[leg.hi];
+        let lo_fields = lo
+            .ito_coefficients
+            .as_ref()
+            .expect("continuous-tracer tile carries ito coefficients");
+        let hi_fields = hi
+            .ito_coefficients
+            .as_ref()
+            .expect("continuous-tracer tile carries ito coefficients");
+        let LegRegions {
+            lo_ghost,
+            hi_src,
+            hi_ghost,
+            lo_src,
+        } = leg_regions(&lo.geom, &hi.geom, leg, schedule.reach());
+        for dd in 0..D {
+            for (fl, fr) in [
+                (&lo_fields.drift[dd], &hi_fields.drift[dd]),
+                (&lo_fields.variance[dd], &hi_fields.variance[dd]),
+                (&lo_fields.third[dd], &hi_fields.third[dd]),
+            ] {
+                transport.copy_region(
+                    fr,
+                    &hi_src,
+                    fl,
+                    &lo_ghost,
+                    devices[leg.hi],
+                    devices[leg.lo],
+                );
+                transport.copy_region(
+                    fl,
+                    &lo_src,
+                    fr,
+                    &hi_ghost,
+                    devices[leg.lo],
+                    devices[leg.hi],
+                );
             }
         }
-        processed[axis] = true;
     }
 }
 
@@ -1374,6 +1799,42 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     t_final: f64,
     interval: u64,
     transport: &T,
+    on_checkpoint: F,
+) where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    F: FnMut(u64, f64, &[&FieldStore<D, DOF, M, f64>]) -> ControlFlow<()>,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
+{
+    let schedule = Schedule::open(counts, stores[0].geom.ng);
+    evolve_scheduled(
+        stores,
+        kernels,
+        &schedule,
+        devices,
+        ts,
+        start_time,
+        t_final,
+        interval,
+        transport,
+        on_checkpoint,
+    )
+}
+
+/// march a decomposed grid whose halo schedule the caller derived, which is how a wrapping
+/// axis gets its end-to-end legs. `evolve_decomposed` is this with an open topology.
+#[allow(clippy::too_many_arguments)]
+pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    kernels: &[&K],
+    schedule: &Schedule<D>,
+    devices: &[i32],
+    ts: Timestepping,
+    start_time: f64,
+    t_final: f64,
+    interval: u64,
+    transport: &T,
     mut on_checkpoint: F,
 ) where
     M: MemorySpace,
@@ -1382,6 +1843,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     F: FnMut(u64, f64, &[&FieldStore<D, DOF, M, f64>]) -> ControlFlow<()>,
     symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
 {
+    let counts = schedule.counts();
     let stages = ts.stages();
     let multistage = crate::driver::needs_step_snapshot(stages);
     let n = stores.len();
@@ -1401,7 +1863,13 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 |(global_lo, global_hi), (lo, hi)| (global_lo.min(lo), global_hi.max(hi)),
             )
     });
+    // the global boundary each axis presents to a tracer. on a wrapping axis the tile faces
+    // at the domain seam are declared cuts, so the periodic law is read from the schedule;
+    // elsewhere it is the condition the outermost tile carries.
     let tracer_boundaries = crate::state::Boundaries::per_axis(std::array::from_fn(|dd| {
+        if schedule.wraps(dd) {
+            return [BoundaryType::Periodic; 2];
+        }
         let lo = stores
             .iter()
             .min_by(|left, right| {
@@ -1446,7 +1914,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             });
         }
         drain_devices::<M>(devices);
-        exchange_grid(&sh, counts, devices, transport);
+        exchange_grid(&sh, &schedule, devices, transport);
         // re-fill physical boundary ghosts after the exchange. at a corner where a domain-boundary
         // (outflow/reflect) meets a tile cut, the boundary ghost is derived from cells that include
         // the cut halo -- only valid post-exchange. with ghost_fill before the exchange, that corner
@@ -1572,7 +2040,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 }
                 // refresh the cut halos from each neighbor's stage-updated interior.
                 drain_devices::<M>(devices);
-                exchange_grid(&sh, counts, devices, transport);
+                exchange_grid(&sh, &schedule, devices, transport);
                 // re-fill physical boundary ghosts post-exchange (cut-corner consistency, see prime).
                 for i in 0..n {
                     symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
@@ -1656,7 +2124,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             drain_devices::<M>(devices);
             {
                 let sh = shared!();
-                exchange_grid(&sh, counts, devices, transport);
+                exchange_grid(&sh, &schedule, devices, transport);
                 for ii in 0..n {
                     symbi_xpu::with_device(devices[ii], || kernels[ii].ghost_fill(sh[ii]));
                 }
@@ -1689,7 +2157,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             }
             {
                 let sh = shared!();
-                exchange_ito_coefficients(&sh, counts, devices, transport);
+                exchange_ito_coefficients(&sh, &schedule, devices, transport);
             }
             drain_devices::<M>(devices);
             for store in stores.iter_mut() {
@@ -1761,13 +2229,13 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                         symbi_xpu::with_device(devices[i], || kernels[i].excise_sweep(sh[i]));
                     }
                     drain_devices::<M>(devices);
-                    exchange_grid(&sh, counts, devices, transport);
+                    exchange_grid(&sh, &schedule, devices, transport);
                 }
                 for i in 0..n {
                     symbi_xpu::with_device(devices[i], || kernels[i].excise_finalize(sh[i]));
                 }
                 drain_devices::<M>(devices);
-                exchange_grid(&sh, counts, devices, transport);
+                exchange_grid(&sh, &schedule, devices, transport);
             }
             let horizon = sh.first().and_then(|store| horizon_request(*store));
             if let Some((index, diagnostic_radius)) = horizon {
@@ -2275,8 +2743,8 @@ impl HaloTransport for PeerCopy {
 #[cfg(test)]
 mod tests {
     use super::{
-        LocalCopy, Partition, decompose_grid, exchange_ito_coefficients, migrate_continuous_tracers,
-        spawn_decomposed_continuous_injection,
+        LocalCopy, Partition, Schedule, Topology, decompose_grid, exchange_ito_coefficients,
+        migrate_continuous_tracers, spawn_decomposed_continuous_injection, unflatten,
     };
 
     #[test]
@@ -2315,6 +2783,98 @@ mod tests {
         assert!(Partition::explicit([64usize], [vec![8, 8]]).is_err());
         assert!(Partition::explicit([64usize], [vec![0]]).is_err());
         assert!(Partition::explicit([64usize], [vec![64]]).is_err());
+    }
+
+    // the gather path's constructor: tile sizes -> cuts. a 2x2 grid of tiles 13/19 by
+    // 7/25 recovers exactly the partition that produced those sizes.
+    // the pass structure: axis 0's legs run first and clip their transverse extent back to
+    // the interior on the still-unexchanged axis 1, then axis 1's legs keep their full
+    // extent, which is how a corner value reaches its diagonal neighbor without a diagonal
+    // transfer. on a 2x2 grid that is two legs per axis.
+    #[test]
+    fn schedule_orders_axes_and_clips_the_axes_still_to_come() {
+        let sched = Schedule::open([2usize, 2], 2);
+        let legs = sched.legs();
+        assert_eq!(legs.len(), 4);
+        assert_eq!(sched.reach(), 2);
+        assert_eq!(sched.n_tiles(), 4);
+
+        let axis0: Vec<_> = legs.iter().filter(|l| l.axis == 0).collect();
+        let axis1: Vec<_> = legs.iter().filter(|l| l.axis == 1).collect();
+        assert_eq!(axis0.len(), 2);
+        assert_eq!(axis1.len(), 2);
+        assert!(legs[..2].iter().all(|l| l.axis == 0), "axis 0 legs come first");
+        assert!(axis0.iter().all(|l| l.clip == [false, true]));
+        assert!(axis1.iter().all(|l| l.clip == [false, false]));
+
+        // tile pairs across the axis-0 cut: (0,0)-(1,0) and (0,1)-(1,1).
+        let pairs: Vec<_> = axis0.iter().map(|l| (l.lo, l.hi)).collect();
+        assert_eq!(pairs, vec![(0, 2), (1, 3)]);
+    }
+
+    // an uncut axis contributes nothing, and a single tile has no legs at all.
+    #[test]
+    fn schedule_of_an_uncut_grid_is_empty() {
+        assert!(Schedule::open([1usize, 1], 2).legs().is_empty());
+        let one_cut = Schedule::open([3usize, 1], 2);
+        assert_eq!(one_cut.legs().len(), 2);
+        assert!(one_cut.legs().iter().all(|l| l.axis == 0));
+    }
+
+    // a periodic axis closes the ring: the last tile's hi ghosts come from the first tile,
+    // which an open axis leaves to the physical boundary fill.
+    #[test]
+    fn a_periodic_axis_carries_the_wrap_leg() {
+        let open = Schedule::open([3usize], 2);
+        assert_eq!(
+            open.legs().iter().map(|l| (l.lo, l.hi)).collect::<Vec<_>>(),
+            vec![(0, 1), (1, 2)]
+        );
+        let ring = Schedule::derive([3usize], 2, &Topology::wrapping([true]));
+        assert_eq!(
+            ring.legs().iter().map(|l| (l.lo, l.hi)).collect::<Vec<_>>(),
+            vec![(0, 1), (1, 2), (2, 0)]
+        );
+        // two tiles on a ring still need both seams: the shared cut and the wrap.
+        let pair = Schedule::derive([2usize], 2, &Topology::wrapping([true]));
+        assert_eq!(
+            pair.legs().iter().map(|l| (l.lo, l.hi)).collect::<Vec<_>>(),
+            vec![(0, 1), (1, 0)]
+        );
+        // one tile wraps onto itself through its own boundary fill, so it carries no leg.
+        assert!(
+            Schedule::derive([1usize], 2, &Topology::wrapping([true]))
+                .legs()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn partition_from_tile_sizes_recovers_ragged_cuts() {
+        let want = Partition::explicit([32usize, 32], [vec![13], vec![7]]).unwrap();
+        let counts = want.counts();
+        let got = Partition::from_tile_sizes([32usize, 32], counts, |flat, ax| {
+            want.tile_extents(unflatten(flat, counts))[ax].1
+        })
+        .unwrap();
+        assert_eq!(got.counts(), counts);
+        for flat in 0..got.n_tiles() {
+            let tc = unflatten(flat, counts);
+            assert_eq!(got.tile_extents(tc), want.tile_extents(tc));
+        }
+    }
+
+    // a tiling that leaves cells uncovered, and one whose tiles disagree on a slab width,
+    // are both refused: either would gather cells to the wrong global offsets.
+    #[test]
+    fn partition_from_tile_sizes_refuses_a_tiling_that_does_not_cover() {
+        assert!(Partition::from_tile_sizes([32usize], [2], |flat, _| [13, 13][flat]).is_err());
+        // tile [1, 1] claims 13 cells along axis 0 where its slab spans 19
+        let ragged_slab = |flat: usize, ax: usize| match ax {
+            0 => [13, 13, 19, 13][flat],
+            _ => 16,
+        };
+        assert!(Partition::from_tile_sizes([32usize, 32], [2, 2], ragged_slab).is_err());
     }
 
     #[test]
@@ -2401,7 +2961,8 @@ mod tests {
                 .set(coord, 2.0);
         }
 
-        exchange_ito_coefficients(&[&lo, &hi], [2], &[0, 0], &LocalCopy);
+        let schedule = Schedule::open([2], lo.geom.ng);
+        exchange_ito_coefficients(&[&lo, &hi], &schedule, &[0, 0], &LocalCopy);
 
         let lo_hi_ghost = [lo.geom.interior.spaces[0].hi];
         let hi_lo_ghost = [hi.geom.interior.spaces[0].lo - 1];

@@ -433,6 +433,19 @@ class SimbiProblem(BaseModel):
             "to use at runtime",
         ),
     ]
+    decompose: Annotated[
+        list[list[int]],
+        ProblemParam(
+            [],
+            checkpoint_safe=True,
+            description="explicit per-axis decomposition cuts: one list of strictly "
+            "increasing interior cell indices per dimension (an empty inner list "
+            "leaves that axis uncut). the tile count the cuts imply must equal "
+            "`gpus`, since each tile binds one device. empty (default) selects the "
+            "balanced longest-axis heuristic. non-uniform cuts are first-class: "
+            "place them where the resolved structure lives",
+        ),
+    ]
     checkpoint_file: Annotated[
         Optional[str | Path],
         ProblemParam(

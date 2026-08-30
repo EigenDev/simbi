@@ -22,6 +22,9 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, Space};
+
+// a fine cell spans this many cells per axis of its parent.
+const RATIO: isize = 2;
 use symbi_xpu::MemorySpace;
 
 use symbi_ir::{KernelId, ProlongTag};
@@ -162,6 +165,30 @@ pub fn cf_ghost_slabs<const D: usize>(
         }
     }));
     cf_region.guillotine_difference(interior)
+}
+
+/// the part of `slab` a prolongation of `order` can fill from a parent whose cells
+/// span `parent`. the fine cell at absolute index `f` reads parent cells
+/// `f/2 - reach ..= f/2 + reach`, so an axis is fillable over
+/// `[2*(parent.lo + reach), 2*(parent.hi - reach))`. a fine ghost band reaching past
+/// the parent's own cells — the case when a refined patch runs out to the edge of a
+/// decomposed tile — clips away here, and the fine halo exchange carries those cells
+/// instead, from the neighbor tile's fine interior. `None` when nothing is left.
+pub fn clip_to_prolongable<const D: usize>(
+    slab: &Domain<D>,
+    parent: &Domain<D>,
+    order: ProlongOrder,
+) -> Option<Domain<D>> {
+    let reach = order.ghost_width() as isize;
+    let mut spaces = slab.spaces.clone();
+    for (a, space) in spaces.iter_mut().enumerate() {
+        space.lo = space.lo.max(RATIO * (parent.spaces[a].lo + reach));
+        space.hi = space.hi.min(RATIO * (parent.spaces[a].hi - reach));
+        if space.hi <= space.lo {
+            return None;
+        }
+    }
+    Some(Domain::new(spaces))
 }
 
 /// prolong one cell-centered scalar field from the time-interpolated coarse
@@ -1516,6 +1543,35 @@ mod tests {
             },
         ]);
         check_laws(&allocated, &interior);
+    }
+
+    // the prolongable band: a fine cell reads its parent cell +/- the order's reach,
+    // so a parent spanning [-2, 34) with a ppm reach of 2 feeds fine cells [0, 64).
+    // a slab inside the band survives whole; one that runs past it loses the overhang;
+    // one entirely outside it drops.
+    #[test]
+    fn prolongable_band_is_the_parent_cells_the_stencil_can_reach() {
+        let parent = Domain::new([Space {
+            name: "i",
+            lo: -2,
+            hi: 34,
+        }]);
+        let slab = |lo, hi| Domain::new([Space { name: "i", lo, hi }]);
+
+        let inside = clip_to_prolongable(&slab(10, 20), &parent, ProlongOrder::Ppm).unwrap();
+        assert_eq!((inside.spaces[0].lo, inside.spaces[0].hi), (10, 20));
+
+        let over = clip_to_prolongable(&slab(60, 70), &parent, ProlongOrder::Ppm).unwrap();
+        assert_eq!((over.spaces[0].lo, over.spaces[0].hi), (60, 64));
+
+        let under = clip_to_prolongable(&slab(-6, 4), &parent, ProlongOrder::Ppm).unwrap();
+        assert_eq!((under.spaces[0].lo, under.spaces[0].hi), (0, 4));
+
+        assert!(clip_to_prolongable(&slab(64, 72), &parent, ProlongOrder::Ppm).is_none());
+
+        // a shorter stencil reaches further: plm gives back two more fine cells per side.
+        let plm = clip_to_prolongable(&slab(60, 70), &parent, ProlongOrder::Plm).unwrap();
+        assert_eq!((plm.spaces[0].lo, plm.spaces[0].hi), (60, 66));
     }
 
     #[test]

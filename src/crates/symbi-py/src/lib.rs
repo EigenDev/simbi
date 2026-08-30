@@ -25,6 +25,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use symbi::prelude::*;
+use symbi::sim::decomp::{Partition, Topology};
 use symbi::sim::refinement::transfer::prolong_field;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi::symbi_grid::Field;
@@ -200,6 +201,10 @@ struct Config {
     // number of gpus to decompose the domain across, intra-node. 1 = single device;
     // >1 splits the grid into that many tiles evolved in lockstep with halo exchange.
     n_gpus: usize,
+    // explicit per-axis decomposition cuts (interior cell indices, strictly increasing
+    // per axis; one list per dimension). empty = the balanced longest-axis heuristic.
+    // the tile count the cuts imply must equal `n_gpus`: each tile binds one device.
+    decompose: Vec<Vec<usize>>,
 }
 
 struct SourcePayload {
@@ -1173,6 +1178,12 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .and_then(|v| v.extract::<usize>().ok())
             .unwrap_or(1)
             .max(1),
+        decompose: dict
+            .get_item("decompose")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<Vec<Vec<usize>>>().ok())
+            .unwrap_or_default(),
         // ordered source configs use the sole public source-expression wire.
         source_jsons: get_source_jsons(dict)?,
         // registered binned reductions, lowered at setup so a malformed one fails there.
@@ -1683,6 +1694,81 @@ fn boundaries_nd<const D: usize>(bcs: &[BoundaryType]) -> Boundaries<D> {
         let hi = bcs.get(2 * ax + 1).copied().unwrap_or(lo);
         [lo, hi]
     }))
+}
+
+/// whether a decomposed axis closes into a ring: declared periodic on both sides and carrying
+/// more than one tile. an uncut periodic axis wraps its single tile onto itself, which spans
+/// the whole domain, so it stays an ordinary periodic boundary.
+fn axis_wraps<const D: usize>(phys: &Boundaries<D>, counts: [usize; D], ax: usize) -> bool {
+    phys.lo(ax) == BoundaryType::Periodic
+        && phys.hi(ax) == BoundaryType::Periodic
+        && counts[ax] > 1
+}
+
+/// the boundaries one tile of a decomposed grid carries. a face between two tiles is a cut; a
+/// face at the domain edge carries the run's declared condition, except on an axis that wraps,
+/// where the two faces at the domain seam are closed by the schedule's end-to-end legs and so
+/// are cuts like any other. a seam face left declared periodic is refilled from its own tile's
+/// opposite interior, which is the far side of the domain only when the axis is uncut.
+fn tile_boundaries<const D: usize>(
+    phys: &Boundaries<D>,
+    tc: [usize; D],
+    counts: [usize; D],
+) -> Boundaries<D> {
+    Boundaries(std::array::from_fn(|ax| {
+        let edge = |side: usize| {
+            if axis_wraps(phys, counts, ax) {
+                BoundaryType::CoarseFine
+            } else {
+                phys.0[ax][side]
+            }
+        };
+        let lo = if tc[ax] == 0 {
+            edge(0)
+        } else {
+            BoundaryType::CoarseFine
+        };
+        let hi = if tc[ax] == counts[ax] - 1 {
+            edge(1)
+        } else {
+            BoundaryType::CoarseFine
+        };
+        [lo, hi]
+    }))
+}
+
+/// what a decomposed run may carry once an axis wraps. closing the domain seam with exchanged
+/// legs moves the periodic law out of the tile faces and into the schedule, and two things
+/// still read a tile's own faces to learn it. each is refused rather than approximated.
+fn wrap_capability<const D: usize>(
+    topology: &Topology<D>,
+    n_tracers: usize,
+    wb_reconstruction: bool,
+    has_bodies: bool,
+) -> Result<(), String> {
+    if !(0..D).any(|ax| topology.is_periodic(ax)) {
+        return Ok(());
+    }
+    if wb_reconstruction && has_bodies {
+        return Err("a periodic axis with an immersed body cannot use the balance-aware \
+                    reconstruction: the periodic images sit at different body potentials, so \
+                    the isentrope carried across the seam is a real state change. use outflow \
+                    or reflect walls, or run the plain reconstruction."
+            .to_string());
+    }
+    if n_tracers > 0 {
+        return Err("a decomposed run whose periodic axis is cut cannot carry tracers yet: the \
+                    mass-transport ledger places mass leaving the grid by the tile's own \
+                    boundary, which no longer names the domain's wrap, so seam mass would be \
+                    recorded as staying put. run it on one device, or drop the tracers."
+            .to_string());
+    }
+    Ok(())
+}
+
+/// the halo topology a decomposed run's declared boundaries imply.
+fn wrap_topology<const D: usize>(phys: &Boundaries<D>, counts: [usize; D]) -> Topology<D> {
+    Topology::wrapping(std::array::from_fn(|ax| axis_wraps(phys, counts, ax)))
 }
 
 fn seed_configured_tracers<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(
@@ -3944,6 +4030,31 @@ fn shift_axis_map(global: symbi_geometry::AxisMap, tile_lo: usize) -> symbi_geom
     }
 }
 
+/// the tile partition for a decomposed run: the config's explicit per-axis cuts when
+/// given, the balanced longest-axis heuristic otherwise. an explicit partition must
+/// yield exactly `n_gpus` tiles, since each tile binds one device.
+fn tile_partition<const D: usize>(n: [usize; D], cfg: &Config) -> Result<Partition<D>, String> {
+    if cfg.decompose.is_empty() {
+        return Partition::auto(n, cfg.n_gpus);
+    }
+    if cfg.decompose.len() != D {
+        return Err(format!(
+            "decompose carries {} axis cut lists for a {D}-dimensional run",
+            cfg.decompose.len()
+        ));
+    }
+    let cuts: [Vec<usize>; D] = std::array::from_fn(|ax| cfg.decompose[ax].clone());
+    let partition = Partition::explicit(n, cuts)?;
+    if partition.n_tiles() != cfg.n_gpus {
+        return Err(format!(
+            "decompose yields {} tiles for {} gpus; each tile binds one device",
+            partition.n_tiles(),
+            cfg.n_gpus
+        ));
+    }
+    Ok(partition)
+}
+
 /// the physical lower corner of a decomposed tile whose first global cell is `tile_lo`. the one
 /// place this formula lives: a uniform axis advances additively by `g dx`, a log axis
 /// multiplicatively by `10^(g slope)`, and a caller that assumed the uniform form on a log grid
@@ -4459,8 +4570,18 @@ where
     Cartesian: Metric<f64, D>,
 {
     use symbi::sim::decomp::{
-        enable_peer_mesh, evolve_decomposed, gather_faces, gather_interiors, gather_tracers,
+        Schedule, enable_peer_mesh, evolve_scheduled, gather_faces, gather_interiors,
+        gather_tracers,
     };
+
+    let phys = boundaries_nd::<D>(&cfg.boundaries);
+    let topology = wrap_topology(&phys, counts);
+    wrap_capability(
+        &topology,
+        cfg.n_tracers,
+        cfg.wb_reconstruction,
+        !cfg.bodies.is_empty(),
+    )?;
 
     let ntiles = tiles.len();
     let devices: Vec<i32> = (0..ntiles as i32).collect();
@@ -4537,10 +4658,11 @@ where
             stores.push(&mut **s);
             kernels.push(&*k);
         }
-        evolve_decomposed(
+        let schedule = Schedule::derive(counts, stores[0].geom.ng, &topology);
+        evolve_scheduled(
             &mut stores,
             &kernels,
-            counts,
+            &schedule,
             &devices,
             cfg.timestepping,
             cfg.start_time,
@@ -4630,6 +4752,16 @@ where
     use symbi::sim::refinement::{
         evolve_hierarchy_decomposed, fine_subgrid, gather_decomposed_hierarchy_tracers,
     };
+
+    // the fine levels exchange over their own tile grid, which carries no wrap legs, so a
+    // refined patch reaching a cut periodic seam would leave those fine ghosts unfilled.
+    let phys = boundaries_nd::<D>(&cfg.boundaries);
+    if (0..D).any(|ax| wrap_topology(&phys, counts).is_periodic(ax)) {
+        return Err("a refined decomposed run cannot close a periodic axis yet: the fine-level \
+                    halo schedule carries no wrap legs. run it on one device, or drop the \
+                    refinement."
+            .to_string());
+    }
 
     let ntiles = tiles.len();
     let devices: Vec<i32> = (0..ntiles as i32).collect();
@@ -4732,7 +4864,7 @@ where
 /// not carried here.
 macro_rules! build_and_run_hydro_decomposed_refined {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
-        use symbi::sim::decomp::{decompose_grid, unflatten};
+        use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
         type Sim = SimDefault<$regime_ty, $d, $geom_ty, EosSelect<f64>>;
@@ -4757,8 +4889,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         if prims.len() != total {
             return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
         }
-        let counts = decompose_grid(n, cfg.n_gpus)?;
-        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let partition = tile_partition(n, cfg)?;
+        let counts = partition.counts();
         let dx: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
         let ntiles: usize = counts.iter().product();
         let theta = build_theta(cfg);
@@ -4772,14 +4904,12 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             let tc = unflatten(flat, counts);
             // the tile's first global cell on each axis; the origin and the coordinate maps both
             // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| tc[ax] * m[ax]);
+            let ext = partition.tile_extents(tc);
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
+            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
             let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let phys = boundaries_nd::<$d>(&cfg.boundaries);
-            let bnd = Boundaries(std::array::from_fn(|ax| {
-                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
-                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
-                [lo, hi]
-            }));
+            let bnd = tile_boundaries(&phys, tc, counts);
             let tile_maps: [symbi_geometry::AxisMap; $d] = tile_axis_maps::<$d>(cfg, tile_lo)
                 .unwrap_or_else(|| std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform {
                     start: origin[ax], dx: dx[ax],
@@ -4802,7 +4932,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         let mut lin = 0usize;
                         let mut stride = 1usize;
                         for ax in 0..$d {
-                            lin += (tc[ax] * m[ax] + idx[ax] as usize) * stride;
+                            lin += (tile_lo[ax] + idx[ax] as usize) * stride;
                             stride *= n[ax];
                         }
                         let row = &prims[lin];
@@ -5012,7 +5142,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 /// are single-grid only. the correctness contract is decomposed == monolithic.
 macro_rules! build_and_run_hydro_decomposed {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $dof:literal, $geom:expr, $geom_ty:ty) => {{
-        use symbi::sim::decomp::{decompose_grid, unflatten};
+        use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
         // `$d` is the grid dimension, `$dof` the momentum-component count; they differ for the
@@ -5040,8 +5170,8 @@ macro_rules! build_and_run_hydro_decomposed {
             ));
         }
         // choose the tile grid (product == n_gpus), validate even divisibility.
-        let counts = decompose_grid(n, cfg.n_gpus)?;
-        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let partition = tile_partition(n, cfg)?;
+        let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
         let theta = build_theta(cfg);
         let solver = cfg.solver;
@@ -5054,14 +5184,12 @@ macro_rules! build_and_run_hydro_decomposed {
             let tc = unflatten(flat, counts);
             // the tile's first global cell on each axis; the origin and the coordinate maps both
             // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| tc[ax] * m[ax]);
+            let ext = partition.tile_extents(tc);
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
+            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
             let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
-            let bnd = Boundaries(std::array::from_fn(|ax| {
-                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
-                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
-                [lo, hi]
-            }));
+            let bnd = tile_boundaries(&phys, tc, counts);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
                 let sim = Sim::build($regime, host_eos(cfg), $geom)
@@ -5081,7 +5209,7 @@ macro_rules! build_and_run_hydro_decomposed {
                         let mut lin = 0usize;
                         let mut stride = 1usize;
                         for ax in 0..$d {
-                            let g = tc[ax] * m[ax] + idx[ax] as usize;
+                            let g = tile_lo[ax] + idx[ax] as usize;
                             lin += g * stride;
                             stride *= n[ax];
                         }
@@ -5113,7 +5241,7 @@ macro_rules! build_and_run_hydro_decomposed {
                             let mut lin = 0usize;
                             let mut stride = 1usize;
                             for ax in 0..$d {
-                                let g = tc[ax] * m[ax] + (c[ax] - ilo[ax]) as usize;
+                                let g = tile_lo[ax] + (c[ax] - ilo[ax]) as usize;
                                 lin += g * stride;
                                 stride *= n[ax];
                             }
@@ -5492,15 +5620,15 @@ fn face_avg_cell_b<const D: usize>(faces: &[f64], k: usize, idx: [isize; D], n: 
 /// slice a global per-axis staggered face buffer into the face buffer for one tile, in the
 /// axis-0-fastest order `seed_faces_indexed` consumes. `global` is the python `staggered_bfields`
 /// generator for axis `d`: axis-0-fastest over the global interior face domain (cell dims `n`
-/// extended +1 on `d`). the tile owns `m` cells per axis at tile coord `tc`; its axis-`d` face
-/// domain is `m` extended +1 on `d`. the shared internal face (a tile's hi-`d` face == its
+/// extended +1 on `d`). the tile owns `m` cells per axis; its axis-`d` face
+/// domain is `m` extended +1 on `d`, offset `tile_lo` cells into the global grid. the shared internal face (a tile's hi-`d` face == its
 /// neighbor's lo-`d` face) maps to the same global index in both tiles, so both seed it
 /// identically -- the CT normal-face consistency the decomposition requires, by construction.
 fn tile_face_buffer<const D: usize>(
     global: &[f64],
     n: [usize; D],
     m: [usize; D],
-    tc: [usize; D],
+    tile_lo: [usize; D],
     d: usize,
 ) -> Vec<f64> {
     let gdim: [usize; D] = std::array::from_fn(|ax| n[ax] + usize::from(ax == d));
@@ -5513,7 +5641,7 @@ fn tile_face_buffer<const D: usize>(
         let mut gi = 0usize;
         let mut stride = 1usize;
         for ax in 0..D {
-            gi += (tc[ax] * m[ax] + lc[ax]) * stride;
+            gi += (tile_lo[ax] + lc[ax]) * stride;
             stride *= gdim[ax];
         }
         out.push(global[gi]);
@@ -5859,7 +5987,7 @@ macro_rules! build_and_run_imhd {
 /// single-level only: refinement / bodies / user sources with gpus>1 are refused.
 macro_rules! build_and_run_mhd_decomposed {
     ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
-        use symbi::sim::decomp::{decompose_grid, unflatten};
+        use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
         let bufs: &[Vec<f64>] = $bufs;
@@ -5879,8 +6007,8 @@ macro_rules! build_and_run_mhd_decomposed {
         if bufs.len() < 3 {
             return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
         }
-        let counts = decompose_grid(n, cfg.n_gpus)?;
-        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let partition = tile_partition(n, cfg)?;
+        let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
         let theta = build_theta(cfg);
         let solver = cfg.solver;
@@ -5892,20 +6020,18 @@ macro_rules! build_and_run_mhd_decomposed {
             let tc = unflatten(flat, counts);
             // the tile's first global cell on each axis; the origin and the coordinate maps both
             // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| tc[ax] * m[ax]);
+            let ext = partition.tile_extents(tc);
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
+            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
             let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
-            let bnd = Boundaries(std::array::from_fn(|ax| {
-                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
-                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
-                [lo, hi]
-            }));
+            let bnd = tile_boundaries(&phys, tc, counts);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
                 // per-tile slice of each global face buffer (axis-0-fastest over the tile face
                 // domain); the shared internal face reads the same global value in both neighbors.
                 let tile_faces: Vec<Vec<f64>> =
-                    (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tc, d)).collect();
+                    (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                 let sim = Sim::build($regime, host_eos(cfg), $geom)
                     .cells(m)
                     .origin(origin)
@@ -5924,7 +6050,7 @@ macro_rules! build_and_run_mhd_decomposed {
                         let mut lin = 0usize;
                         let mut stride = 1usize;
                         for ax in 0..$d {
-                            lin += (tc[ax] * m[ax] + idx[ax] as usize) * stride;
+                            lin += (tile_lo[ax] + idx[ax] as usize) * stride;
                             stride *= n[ax];
                         }
                         let row = &prims[lin];
@@ -6067,7 +6193,7 @@ macro_rules! build_and_run_mhd_decomposed {
 /// eos closure is `p = cs^2 rho`. single-level only.
 macro_rules! build_and_run_imhd_decomposed {
     ($cfg:expr, $prims:expr, $bufs:expr, $d:literal, $geom:expr, $geom_ty:ty) => {{
-        use symbi::sim::decomp::{decompose_grid, unflatten};
+        use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
         let bufs: &[Vec<f64>] = $bufs;
@@ -6085,8 +6211,8 @@ macro_rules! build_and_run_imhd_decomposed {
         if bufs.len() < 3 {
             return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
         }
-        let counts = decompose_grid(n, cfg.n_gpus)?;
-        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let partition = tile_partition(n, cfg)?;
+        let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
         let theta = build_theta(cfg);
         let solver = cfg.solver;
@@ -6098,18 +6224,16 @@ macro_rules! build_and_run_imhd_decomposed {
             let tc = unflatten(flat, counts);
             // the tile's first global cell on each axis; the origin and the coordinate maps both
             // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| tc[ax] * m[ax]);
+            let ext = partition.tile_extents(tc);
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
+            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
             let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
-            let bnd = Boundaries(std::array::from_fn(|ax| {
-                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
-                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
-                [lo, hi]
-            }));
+            let bnd = tile_boundaries(&phys, tc, counts);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
                 let tile_faces: Vec<Vec<f64>> =
-                    (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tc, d)).collect();
+                    (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                 let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
                     .cells(m)
                     .origin(origin)
@@ -6125,7 +6249,7 @@ macro_rules! build_and_run_imhd_decomposed {
                         let mut lin = 0usize;
                         let mut stride = 1usize;
                         for ax in 0..$d {
-                            lin += (tc[ax] * m[ax] + idx[ax] as usize) * stride;
+                            lin += (tile_lo[ax] + idx[ax] as usize) * stride;
                             stride *= n[ax];
                         }
                         let row = &prims[lin];
@@ -6443,7 +6567,7 @@ macro_rules! imhd_dispatch {
 /// needs per-tile cs^2 setup and is refused. same non-AMR / no-bodies / no-source scope.
 macro_rules! build_and_run_iso_decomposed {
     ($cfg:expr, $prims:expr, $d:literal, $geom:expr, $geom_ty:ty) => {{
-        use symbi::sim::decomp::{decompose_grid, unflatten};
+        use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
         type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
@@ -6459,8 +6583,8 @@ macro_rules! build_and_run_iso_decomposed {
         if prims.len() != total {
             return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
         }
-        let counts = decompose_grid(n, cfg.n_gpus)?;
-        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let partition = tile_partition(n, cfg)?;
+        let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
         let theta = build_theta(cfg);
         let phys = boundaries_nd::<$d>(&cfg.boundaries);
@@ -6470,14 +6594,12 @@ macro_rules! build_and_run_iso_decomposed {
             let tc = unflatten(flat, counts);
             // the tile's first global cell on each axis; the origin and the coordinate maps both
             // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| tc[ax] * m[ax]);
+            let ext = partition.tile_extents(tc);
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
+            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
             let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
-            let bnd = Boundaries(std::array::from_fn(|ax| {
-                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
-                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
-                [lo, hi]
-            }));
+            let bnd = tile_boundaries(&phys, tc, counts);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
                 let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
@@ -6495,7 +6617,7 @@ macro_rules! build_and_run_iso_decomposed {
                         let mut lin = 0usize;
                         let mut stride = 1usize;
                         for ax in 0..$d {
-                            let g = tc[ax] * m[ax] + idx[ax] as usize;
+                            let g = tile_lo[ax] + idx[ax] as usize;
                             lin += g * stride;
                             stride *= n[ax];
                         }
@@ -8595,5 +8717,100 @@ mod tile_coord_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{tile_boundaries, wrap_capability, wrap_topology};
+    use symbi::sim::decomp::Topology;
+    use symbi::sim::state::{Boundaries, BoundaryType};
+
+    fn phys2(lo0: BoundaryType, hi0: BoundaryType, lo1: BoundaryType, hi1: BoundaryType) -> Boundaries<2> {
+        Boundaries([[lo0, hi0], [lo1, hi1]])
+    }
+
+    // a cut periodic axis has no domain edge left: both seam faces are exchanged, and the
+    // schedule closes the ring. the uncut axis keeps the conditions the run declared.
+    #[test]
+    fn a_cut_periodic_axis_turns_its_seam_faces_into_cuts() {
+        use BoundaryType::{CoarseFine, Outflow, Periodic};
+        let phys = phys2(Periodic, Periodic, Outflow, Outflow);
+        let counts = [2usize, 1];
+
+        let first = tile_boundaries(&phys, [0, 0], counts);
+        assert_eq!(first.lo(0), CoarseFine, "the domain seam is exchanged");
+        assert_eq!(first.hi(0), CoarseFine, "the interior cut is exchanged");
+        assert_eq!(first.lo(1), Outflow);
+        assert_eq!(first.hi(1), Outflow);
+
+        let last = tile_boundaries(&phys, [1, 0], counts);
+        assert_eq!(last.lo(0), CoarseFine);
+        assert_eq!(last.hi(0), CoarseFine, "the far domain seam is exchanged too");
+
+        assert!(wrap_topology(&phys, counts).is_periodic(0));
+        assert!(!wrap_topology(&phys, counts).is_periodic(1));
+    }
+
+    // one tile on a periodic axis wraps onto itself over the whole domain, so it keeps the
+    // periodic faces and the schedule carries no leg there.
+    #[test]
+    fn an_uncut_periodic_axis_keeps_its_own_wrap() {
+        use BoundaryType::{Outflow, Periodic};
+        let phys = phys2(Periodic, Periodic, Outflow, Outflow);
+        let counts = [1usize, 1];
+        let only = tile_boundaries(&phys, [0, 0], counts);
+        assert_eq!(only.lo(0), Periodic);
+        assert_eq!(only.hi(0), Periodic);
+        assert!(!wrap_topology(&phys, counts).is_periodic(0));
+    }
+
+    // a non-periodic cut axis is untouched: the end tiles keep the declared conditions and
+    // only the interior faces are cuts.
+    #[test]
+    fn a_cut_open_axis_keeps_its_domain_edges() {
+        use BoundaryType::{CoarseFine, Outflow, Reflect};
+        let phys = phys2(Reflect, Outflow, Outflow, Outflow);
+        let counts = [3usize, 1];
+        assert_eq!(tile_boundaries(&phys, [0, 0], counts).lo(0), Reflect);
+        assert_eq!(tile_boundaries(&phys, [0, 0], counts).hi(0), CoarseFine);
+        assert_eq!(tile_boundaries(&phys, [1, 0], counts).lo(0), CoarseFine);
+        assert_eq!(tile_boundaries(&phys, [2, 0], counts).hi(0), Outflow);
+        assert!(!wrap_topology(&phys, counts).is_periodic(0));
+    }
+
+    // a half-declared periodic axis is left exactly as the run declared it: closing a ring
+    // whose two ends disagree would invent a boundary condition the config never asked for.
+    #[test]
+    fn a_one_sided_periodic_declaration_does_not_wrap() {
+        use BoundaryType::{Outflow, Periodic};
+        let phys = phys2(Periodic, Outflow, Outflow, Outflow);
+        let counts = [2usize, 1];
+        assert_eq!(tile_boundaries(&phys, [0, 0], counts).lo(0), Periodic);
+        assert_eq!(tile_boundaries(&phys, [1, 0], counts).hi(0), Outflow);
+        assert!(!wrap_topology(&phys, counts).is_periodic(0));
+    }
+
+    // an open tile grid carries whatever the run declares; the refusals are about the wrap.
+    #[test]
+    fn an_open_decomposition_carries_everything() {
+        let open = Topology::<2>::open();
+        assert!(wrap_capability(&open, 4096, true, true).is_ok());
+    }
+
+    // the balance-aware reconstruction reads a body potential across the seam, and the
+    // mass-transport ledger places seam mass by the tile's own boundary: both are refused
+    // by name rather than approximated.
+    #[test]
+    fn a_wrapping_decomposition_refuses_what_it_cannot_carry() {
+        let ring = Topology::<2>::wrapping([true, false]);
+        assert!(wrap_capability(&ring, 0, false, false).is_ok());
+        assert!(wrap_capability(&ring, 0, true, false).is_ok(), "balancing alone is fine");
+        assert!(wrap_capability(&ring, 0, false, true).is_ok(), "a body alone is fine");
+
+        let bodies = wrap_capability(&ring, 0, true, true).unwrap_err();
+        assert!(bodies.contains("body potentials"), "{bodies}");
+        let tracers = wrap_capability(&ring, 16, false, false).unwrap_err();
+        assert!(tracers.contains("mass-transport"), "{tracers}");
     }
 }

@@ -15,7 +15,7 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{LocalCopy, unflatten};
+use symbi::sim::decomp::{LocalCopy, Partition, unflatten};
 use symbi::sim::refinement::{
     Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
     seed_decomposed_fine_from_coarse,
@@ -96,15 +96,18 @@ fn build_mono(ts: Timestepping) -> Hier {
     h
 }
 
-// 2 root tiles (x-cut); both refine -- each clips the global patch to its own physical x-range, so
-// the two fine grids meet at the cut. the fine sub-grid is therefore the same [2,1] as the root.
-fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
-    let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
-    let total: usize = counts.iter().product();
+// root tiles from the partition's own extents; each refines by clipping the global patch to its
+// physical range, so the fine grids meet at every cut the patch crosses. unequal root tiles give
+// unequal fine grids, which is the case the fine-level exchange has to handle.
+fn build_tiles(partition: &Partition<2>, ts: Timestepping) -> Vec<Hier> {
+    let counts = partition.counts();
+    let total = partition.n_tiles();
     let mut tiles = Vec::with_capacity(total);
     for flat in 0..total {
         let tc = unflatten(flat, counts);
-        let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+        let ext = partition.tile_extents(tc);
+        let m: [usize; 2] = [ext[0].1, ext[1].1];
+        let origin: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
         let hi: [f64; 2] = std::array::from_fn(|a| origin[a] + m[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let lo = if tc[a] == 0 {
@@ -174,12 +177,13 @@ fn run_p3(tiles: &mut [Hier], counts: [usize; 2], t_final: f64, ts: Timestepping
 // scatter every tile's root (outside coverage) + fine density into one global 2N x 2N composite,
 // keyed by global fine index (root cell g -> its 2x2 fine block; fine cell -> its global fine index
 // = tile_root_offset*ratio + local fine offset).
-fn composite_fine(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
+fn composite_fine(tiles: &[Hier], partition: &Partition<2>) -> Vec<f64> {
     let fn_n = RATIO * N;
+    let counts = partition.counts();
     let mut out = vec![f64::NAN; fn_n * fn_n];
-    let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
     for (flat, h) in tiles.iter().enumerate() {
         let tc = unflatten(flat, counts);
+        let ext = partition.tile_extents(tc);
         let root = &h.levels[0].state;
         let cov = h.levels[0].coverage.as_ref();
         let rlo: [isize; 2] = std::array::from_fn(|a| root.geom.interior.spaces[a].lo);
@@ -189,7 +193,7 @@ fn composite_fine(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
                     continue;
                 }
             }
-            let g: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a] + (c[a] - rlo[a]) as usize);
+            let g: [usize; 2] = std::array::from_fn(|a| ext[a].0 + (c[a] - rlo[a]) as usize);
             let d = *root.fields.cons.den.view().at(c);
             for sy in 0..RATIO {
                 for sx in 0..RATIO {
@@ -208,7 +212,7 @@ fn composite_fine(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
                 // cell's offset within the fine interior. this is consistent between the monolithic
                 // (one tile, full patch) and decomposed (per-tile clipped patch) runs.
                 let gf: [usize; 2] = std::array::from_fn(|a| {
-                    let cov_global_root = tc[a] * m[a] + (clo[a] - rlo[a]) as usize;
+                    let cov_global_root = ext[a].0 + (clo[a] - rlo[a]) as usize;
                     cov_global_root * RATIO + (c[a] - flo[a]) as usize
                 });
                 out[gf[1] * fn_n + gf[0]] = *fine.fields.cons.den.view().at(c);
@@ -226,14 +230,23 @@ fn max_err(a: &[f64], b: &[f64]) -> f64 {
 }
 
 fn assert_p3_matches(counts: [usize; 2], ts: Timestepping) {
+    let partition =
+        Partition::uniform([N, N], counts).expect("even tile counts divide the root grid");
+    assert_p3_matches_partition(&partition, ts);
+}
+
+fn assert_p3_matches_partition(partition: &Partition<2>, ts: Timestepping) {
+    let counts = partition.counts();
+    let whole =
+        Partition::explicit([N, N], [Vec::new(), Vec::new()]).expect("the uncut partition is one tile");
     let mut mono = build_mono(ts);
     // construction gate, before either side evolves: the seeded composites must already agree.
     // this is what localizes a future regression to seeding rather than to the driver -- the
     // divergence this test caught lived here, was smoothed by evolution, and read as a
     // dynamics bug for six hypotheses straight.
     {
-        let mono_c0 = composite_fine(std::slice::from_ref(&mono), [1, 1]);
-        let dec_c0 = composite_fine(&build_tiles(counts, ts), counts);
+        let mono_c0 = composite_fine(std::slice::from_ref(&mono), &whole);
+        let dec_c0 = composite_fine(&build_tiles(partition, ts), partition);
         let e0 = max_err(&mono_c0, &dec_c0);
         assert!(
             e0 < 1e-12,
@@ -242,11 +255,11 @@ fn assert_p3_matches(counts: [usize; 2], ts: Timestepping) {
         );
     }
     mono.evolve(T_FINAL).expect("mono evolve");
-    let mono_c = composite_fine(std::slice::from_ref(&mono), [1, 1]);
+    let mono_c = composite_fine(std::slice::from_ref(&mono), &whole);
 
-    let mut dec = build_tiles(counts, ts);
+    let mut dec = build_tiles(partition, ts);
     run_p3(&mut dec, counts, T_FINAL, ts);
-    let dec_c = composite_fine(&dec, counts);
+    let dec_c = composite_fine(&dec, partition);
 
     assert!(
         mono_c.iter().all(|v| v.is_finite()) && dec_c.iter().all(|v| v.is_finite()),
@@ -280,7 +293,8 @@ fn refine_p3_gather_reassembles_hierarchy() {
     let mut mono = build_mono(ts);
     mono.evolve(T_FINAL).expect("mono evolve");
 
-    let mut dec = build_tiles(counts, ts);
+    let partition = Partition::uniform([N, N], counts).expect("even counts divide the root grid");
+    let mut dec = build_tiles(&partition, ts);
     run_p3(&mut dec, counts, T_FINAL, ts);
 
     // a fresh full hierarchy as the gather target (root + the full patch), like the binding's global.
@@ -316,3 +330,32 @@ fn refine_p3_euler_x_cut() {
 fn refine_p3_rk2_x_cut() {
     assert_p3_matches([2, 1], Timestepping::Rk2);
 }
+
+// the patch spans cuts on BOTH axes: four root tiles each own a different corner of it,
+// and every fine tile's ghosts on its two cut sides sit beyond what its own parent can
+// feed, so those cells are carried by the fine halo exchange instead of prolongation.
+#[test]
+fn refine_p3_rk2_uniform_quad() {
+    assert_p3_matches([2, 2], Timestepping::Rk2);
+}
+
+// the same two-axis span with unequal cuts: root tiles of four different shapes.
+#[test]
+fn refine_p3_rk2_ragged_quad() {
+    let ragged = Partition::explicit([N, N], [vec![17], vec![15]])
+        .expect("interior cuts are strictly increasing and inside the grid");
+    assert!(!ragged.is_uniform(), "the gate must exercise unequal tiles");
+    assert_p3_matches_partition(&ragged, Timestepping::Rk2);
+}
+
+// an unequal x-cut at cell 17: root tiles of 17 and 15 cells, and the patch splits into fine
+// grids of 10 and 6 cells that still share the fine seam. tile extents come from the partition,
+// so the fine patch clip, the fine exchange and the composite all follow the actual cut.
+#[test]
+fn refine_p3_rk2_ragged_x_cut() {
+    let ragged = Partition::explicit([N, N], [vec![17], Vec::new()])
+        .expect("interior cuts are strictly increasing and inside the grid");
+    assert!(!ragged.is_uniform(), "the gate must exercise unequal tiles");
+    assert_p3_matches_partition(&ragged, Timestepping::Rk2);
+}
+

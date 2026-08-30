@@ -27,7 +27,7 @@
 
 use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
+use symbi::sim::decomp::{LocalCopy, Partition, evolve_decomposed, flatten, unflatten};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{AxisMap, Cylindrical, Spherical};
@@ -59,15 +59,15 @@ fn log_slope() -> f64 {
 }
 
 // the per-tile radial origin and coordinate maps for a tile whose first radial cell is the
-// global cell `tc0*m0`. uniform: the radial axis starts at R_LO + tc0*m0*dr and the builder's
+// global cell `lo0`. uniform: the radial axis starts at R_LO + tc0*m0*dr and the builder's
 // origin+spacing define the geometry (maps = None). log: the start is advanced
 // multiplicatively (R_LO * 10^(tile_lo*slope)) and a shifted Log map with the same slope carries
 // the geometry -- mirroring the production per-tile map shift, so a tile's local cell i sits at
 // the identical physical r as the undecomposed grid's global cell tc0*m0 + i.
-fn tile_radial(mode: u8, tc0: usize, m0: usize, z0: f64) -> (f64, Option<[AxisMap; 2]>) {
+fn tile_radial(mode: u8, lo0: usize, z0: f64) -> (f64, Option<[AxisMap; 2]>) {
     if mode == 1 {
         let slope = log_slope();
-        let r_start = R_LO * 10.0_f64.powf((tc0 * m0) as f64 * slope);
+        let r_start = R_LO * 10.0_f64.powf(lo0 as f64 * slope);
         (
             r_start,
             Some([
@@ -84,7 +84,7 @@ fn tile_radial(mode: u8, tc0: usize, m0: usize, z0: f64) -> (f64, Option<[AxisMa
     } else if mode == 2 {
         let ratio = 0.98_f64;
         let width = (R_HI - R_LO) * (ratio - 1.0) / (ratio.powf(NR as f64) - 1.0);
-        let offset = (tc0 * m0) as f64;
+        let offset = lo0 as f64;
         let global = AxisMap::Geometric {
             start: R_LO,
             width,
@@ -106,7 +106,7 @@ fn tile_radial(mode: u8, tc0: usize, m0: usize, z0: f64) -> (f64, Option<[AxisMa
             ]),
         )
     } else {
-        (R_LO + (tc0 * m0) as f64 * DR, None)
+        (R_LO + lo0 as f64 * DR, None)
     }
 }
 
@@ -160,18 +160,20 @@ macro_rules! curvilinear_harness {
                 (sim, k)
             }
 
-            // tile grid `counts` = [radial tiles, transverse tiles]. a tile gets a CoarseFine
-            // face wherever it borders a neighbor; the radial ends are outflow and the transverse
-            // ends are periodic (a z-uniform / theta-uniform pulse never reaches them, so periodic
-            // and outflow agree, and periodic avoids any ghost-extrapolation asymmetry at a cut).
-            fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
-                let m: [usize; 2] = [NR / counts[0], NT / counts[1]];
-                let total = counts[0] * counts[1];
-                (0..total)
+            // each tile's radial and transverse extents come from the partition, so unequal
+            // cuts are as ordinary as even ones. a tile gets a CoarseFine face wherever it
+            // borders a neighbor; the radial ends are outflow and the transverse ends are
+            // periodic (a z-uniform / theta-uniform pulse never reaches them, so periodic and
+            // outflow agree, and periodic avoids any ghost-extrapolation asymmetry at a cut).
+            fn grid_tiles(partition: &Partition<2>, ts: Timestepping) -> Vec<(Sim, Kern)> {
+                let counts = partition.counts();
+                (0..partition.n_tiles())
                     .map(|flat| {
                         let tc = unflatten(flat, counts);
-                        let z0 = (tc[1] * m[1]) as f64 * DT_AX;
-                        let (r0, maps) = tile_radial(MAP_MODE, tc[0], m[0], z0);
+                        let ext = partition.tile_extents(tc);
+                        let m: [usize; 2] = [ext[0].1, ext[1].1];
+                        let z0 = ext[1].0 as f64 * DT_AX;
+                        let (r0, maps) = tile_radial(MAP_MODE, ext[0].0, z0);
                         let origin = [r0, z0];
                         let bnd = Boundaries::per_axis([
                             [
@@ -226,16 +228,17 @@ macro_rules! curvilinear_harness {
                 );
             }
 
-            fn global_den(tiles: &[(Sim, Kern)], counts: [usize; 2]) -> Vec<f64> {
+            fn global_den(tiles: &[(Sim, Kern)], partition: &Partition<2>) -> Vec<f64> {
                 sync_devices();
-                let m: [usize; 2] = [NR / counts[0], NT / counts[1]];
+                let counts = partition.counts();
                 let mut out = vec![f64::NAN; NR * NT];
                 for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
                     let tc = unflatten(flat_tile, counts);
+                    let ext = partition.tile_extents(tc);
                     let ilo: [isize; 2] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
                     for c in sim.geom.interior.iter() {
                         let g: [usize; 2] =
-                            std::array::from_fn(|a| tc[a] * m[a] + (c[a] - ilo[a]) as usize);
+                            std::array::from_fn(|a| ext[a].0 + (c[a] - ilo[a]) as usize);
                         out[flatten(g, [NR, NT])] = *sim.fields.cons.den.view().at(c);
                     }
                 }
@@ -246,16 +249,25 @@ macro_rules! curvilinear_harness {
             // density grids agree to round-off -- the whole point on a curvilinear chart, where
             // each tile carries its own r-range and metric.
             pub fn assert_matches(counts: [usize; 2], ts: Timestepping) {
-                let mut mono = grid_tiles([1, 1], ts);
+                let partition = Partition::uniform([NR, NT], counts)
+                    .expect("even tile counts divide the grid");
+                assert_matches_partition(&partition, ts);
+            }
+
+            pub fn assert_matches_partition(partition: &Partition<2>, ts: Timestepping) {
+                let counts = partition.counts();
+                let whole = Partition::explicit([NR, NT], [Vec::new(), Vec::new()])
+                    .expect("the uncut partition is one tile");
+                let mut mono = grid_tiles(&whole, ts);
                 // the initial density, read before evolving -- the non-vacuity baseline, taken from
                 // the grid itself so it holds for both uniform and log radial cell centers.
-                let ic = global_den(&mono, [1, 1]);
+                let ic = global_den(&mono, &whole);
                 run(&mut mono, [1, 1], ts);
-                let mono_vals = global_den(&mono, [1, 1]);
+                let mono_vals = global_den(&mono, &whole);
 
-                let mut dec = grid_tiles(counts, ts);
+                let mut dec = grid_tiles(partition, ts);
                 run(&mut dec, counts, ts);
-                let dec_vals = global_den(&dec, counts);
+                let dec_vals = global_den(&dec, partition);
 
                 assert!(
                     mono_vals.iter().all(|v| v.is_finite())
@@ -346,6 +358,36 @@ fn sph_log_radial_four_tile_rk2() {
 #[test]
 fn sph_geometric_radial_four_tile_rk2() {
     sph_geometric::assert_matches([4, 1], Timestepping::Rk2);
+}
+
+// ragged radial cuts: tiles of 11, 18 and 19 cells span different r-ranges AND different
+// widths, so a tile's radial origin can only come from the partition's own extents. the
+// transverse cut is unequal too (7 and 17 cells), which exercises the corner ghosts between
+// tiles that share no edge length.
+#[test]
+fn cyl_ragged_six_tile_rk2() {
+    let ragged = Partition::explicit([NR, NT], [vec![11, 29], vec![7]])
+        .expect("interior cuts are strictly increasing and inside the grid");
+    assert!(!ragged.is_uniform(), "the gate must exercise unequal tiles");
+    cyl::assert_matches_partition(&ragged, Timestepping::Rk2);
+}
+
+// the log chart under ragged cuts: each tile's map start is R_LO * 10^(lo0 * slope) with lo0
+// read from the partition, so unequal tile widths land every cell at its monolithic radius.
+#[test]
+fn cyl_log_ragged_six_tile_rk2() {
+    let ragged = Partition::explicit([NR, NT], [vec![11, 29], vec![7]])
+        .expect("interior cuts are strictly increasing and inside the grid");
+    cyl_log::assert_matches_partition(&ragged, Timestepping::Rk2);
+}
+
+// the geometric chart under ragged cuts: the tile's first width is width * ratio^lo0, which
+// is wrong by a factor of ratio for every cell if tile extents are assumed even.
+#[test]
+fn sph_geometric_ragged_radial_rk2() {
+    let ragged = Partition::explicit([NR, NT], [vec![11, 29], Vec::new()])
+        .expect("interior cuts are strictly increasing and inside the grid");
+    sph_geometric::assert_matches_partition(&ragged, Timestepping::Rk2);
 }
 
 // =============================================================================
