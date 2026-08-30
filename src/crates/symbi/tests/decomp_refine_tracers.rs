@@ -121,7 +121,7 @@ fn global() -> Hier {
         coarse,
         kernels(&root(N, 0.0, Boundaries::uniform(BoundaryType::Periodic))),
         &[region()],
-        ProlongOrder::Plm,
+        ProlongOrder::Ppm,
         kernels,
     )
     .unwrap();
@@ -136,7 +136,7 @@ fn source_global() -> Hier {
         coarse,
         coarse_kernels,
         &[region()],
-        ProlongOrder::Plm,
+        ProlongOrder::Ppm,
         source_kernels,
     )
     .unwrap();
@@ -152,7 +152,7 @@ fn driven_global() -> Hier {
         coarse,
         coarse_kernels,
         &[region()],
-        ProlongOrder::Plm,
+        ProlongOrder::Ppm,
         driven_kernels,
     )
     .unwrap();
@@ -168,7 +168,7 @@ fn gradient_global() -> Hier {
         coarse,
         coarse_kernels,
         &[region()],
-        ProlongOrder::Plm,
+        ProlongOrder::Ppm,
         gradient_kernels,
     )
     .unwrap();
@@ -191,7 +191,7 @@ fn tiles() -> Vec<Hier> {
                 coarse,
                 coarse_kernels,
                 &[region()],
-                ProlongOrder::Plm,
+                ProlongOrder::Ppm,
                 kernels,
             )
             .unwrap();
@@ -222,7 +222,7 @@ fn source_tiles() -> Vec<Hier> {
                 coarse,
                 coarse_kernels,
                 &[region()],
-                ProlongOrder::Plm,
+                ProlongOrder::Ppm,
                 source_kernels,
             )
             .unwrap();
@@ -253,7 +253,7 @@ fn driven_tiles() -> Vec<Hier> {
                 coarse,
                 coarse_kernels,
                 &[region()],
-                ProlongOrder::Plm,
+                ProlongOrder::Ppm,
                 driven_kernels,
             )
             .unwrap();
@@ -284,7 +284,7 @@ fn gradient_tiles() -> Vec<Hier> {
                 coarse,
                 coarse_kernels,
                 &[region()],
-                ProlongOrder::Plm,
+                ProlongOrder::Ppm,
                 gradient_kernels,
             )
             .unwrap();

@@ -1813,31 +1813,35 @@ where
     /// a fast feature resolved only on the fine level is diluted out of the
     /// root's own cfl; level l subcycles ratio^l times, so its limit enters
     /// scaled by ratio^l.
-    fn step_root(&mut self, t_final: f64) {
-        // the coarse-fine invariant: the prolongation's smooth-data polynomial degree
-        // must be at least the evolution reconstruction's stencil reach (= its degree
-        // plus one: pcm evolution -> plm prolong, plm -> ppm, ppm -> quartic). the
-        // prolonged ghost averages then carry error one order above the interior
-        // truncation, so the interface layer's flux-divergence order loss leaves
-        // the interior order intact. a shallower prolongation would degrade it
-        // silently at every refinement boundary, so the pairing is asserted here.
-        // a single-level hierarchy is one grid with no coarse-fine boundary, and
-        // carries any pairing.
-        if self.levels.len() > 1 {
-            for lvl in &self.levels {
-                assert!(
-                    lvl.kernels.reconstruction_reach() <= self.prolong_order.degree(),
-                    "evolution reconstruction reach {} exceeds the {:?} prolongation's \
-                     degree {}: the coarse-fine ghost averages would carry a lower-order \
-                     error than the interior truncation and the refinement boundary would \
-                     degrade the interior order; pair this reconstruction with a \
-                     higher-degree prolongation (ppm evolution -> quartic)",
-                    lvl.kernels.reconstruction_reach(),
-                    self.prolong_order,
-                    self.prolong_order.degree(),
-                );
-            }
+    /// the coarse-fine order pairing: the prolongation's smooth-data polynomial degree must
+    /// be at least the evolution reconstruction's stencil reach (= its degree plus one: pcm
+    /// evolution -> plm prolong, plm -> ppm, ppm -> quartic). the prolonged ghost averages then
+    /// carry error one order above the interior truncation, so the interface layer's
+    /// flux-divergence order loss leaves the interior order intact. a shallower prolongation
+    /// degrades it at every refinement boundary with nothing in the output to show for it, so
+    /// the pairing is checked before each root step. a single-level hierarchy is one grid with
+    /// no coarse-fine boundary and carries any pairing.
+    pub fn assert_cf_order_pairing(&self) {
+        if self.levels.len() < 2 {
+            return;
         }
+        for lvl in &self.levels {
+            assert!(
+                lvl.kernels.reconstruction_reach() <= self.prolong_order.degree(),
+                "evolution reconstruction reach {} exceeds the {:?} prolongation's \
+                 degree {}: the coarse-fine ghost averages would carry a lower-order \
+                 error than the interior truncation and the refinement boundary would \
+                 degrade the interior order; pair this reconstruction with a \
+                 higher-degree prolongation (ppm evolution -> quartic)",
+                lvl.kernels.reconstruction_reach(),
+                self.prolong_order,
+                self.prolong_order.degree(),
+            );
+        }
+    }
+
+    fn step_root(&mut self, t_final: f64) {
+        self.assert_cf_order_pairing();
         // the per-root-step wave-speed pass + global min reduction. instrumented because it is a
         // full-grid read of prim on every level, once per step, and sits outside the substage loop:
         // at a small domain / high step count it is a large fraction of the step that per-phase
@@ -4207,6 +4211,9 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
         // the agreed timestep: every tile runs the watchdog-screened selection, and the
         // minimum drives the lockstep step. a fatal estimate records the crash on its
         // tile and the march halts on the last computed state below.
+        for tile in tiles.iter() {
+            tile.assert_cf_order_pairing();
+        }
         let mut gdt = f64::INFINITY;
         let mut dt_crashed = false;
         for i in 0..n {

@@ -90,7 +90,7 @@ fn build_mono(mk: fn(&Sim) -> Kern) -> Hier {
     let root = build_root([N, N], [-L, -L], Boundaries::uniform(BoundaryType::Outflow));
     let k = mk(&root);
     let mut h =
-        Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, mk).expect("mono hierarchy");
+        Hier::with_refinement(root, k, &[patch()], ProlongOrder::Ppm, mk).expect("mono hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
     h
@@ -122,7 +122,7 @@ fn build_tiles(counts: [usize; 2], mk: fn(&Sim) -> Kern) -> Vec<Hier> {
             (0..2).all(|a| origin[a] <= p.x_lo[a] && origin[a] + m[a] as f64 * DX >= p.x_hi[a]);
         let mut h = if owns_patch {
             let k = mk(&root);
-            let h = Hier::with_refinement(root, k, &[p], ProlongOrder::Plm, mk)
+            let h = Hier::with_refinement(root, k, &[p], ProlongOrder::Ppm, mk)
                 .expect("tile hierarchy");
             h.seed_fine_from_coarse().expect("seed fine");
             h
