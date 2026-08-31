@@ -3479,61 +3479,61 @@ fn face_destination<const D: usize>(
 /// tile grid is uniform, so it is a floor-divide by the per-tile extent; the flat index is the
 /// same `flatten` the decomposition addresses tiles by, so a tracer lands in the store the
 /// decomposition calls its owner.
+/// the tile holding a position: its global cell, then the tile whose extent contains that
+/// cell. read off the partition's own cuts rather than by dividing a domain length into equal
+/// tiles, so unequal tiles place a tracer as exactly as even ones do. `None` outside the grid.
 fn tile_owner<const D: usize>(
     x: &[f64; D],
     glo: [f64; D],
-    extent: [f64; D],
-    counts: [usize; D],
+    dx: [f64; D],
+    partition: &crate::decomp::Partition<D>,
 ) -> Option<usize> {
-    let mut tc = [0usize; D];
+    let n = partition.n_cells();
+    let mut cell = [0usize; D];
     for a in 0..D {
-        if x[a] < glo[a] || x[a] >= glo[a] + extent[a] * counts[a] as f64 {
+        let idx = ((x[a] - glo[a]) / dx[a]).floor();
+        if idx < 0.0 || idx >= n[a] as f64 {
             return None;
         }
-        let idx = ((x[a] - glo[a]) / extent[a]).floor() as isize;
-        tc[a] = idx.clamp(0, counts[a] as isize - 1) as usize;
+        cell[a] = idx as usize;
     }
-    Some(crate::decomp::flatten(tc, counts))
+    Some(crate::decomp::flatten(
+        partition.tile_of(cell),
+        partition.counts(),
+    ))
 }
 
 /// seed `n` tracers from `global`'s density (the monolithic seeding) and split them across the
-/// `counts` tiles by initial position, returning one set per tile in flat order. the monolithic
-/// and decomposed runs thus start from the identical population (same ids, same positions), so a
-/// decomposed run can be gated against the single-grid trajectories.
+/// partition's tiles by initial position, returning one set per tile in flat order. the
+/// monolithic and decomposed runs thus start from the identical population (same ids, same
+/// positions), so a decomposed run can be gated against the single-grid trajectories.
 pub fn seed_and_partition<const D: usize, const DOF: usize, Mem: MemorySpace>(
     global: &FieldStore<D, DOF, Mem, f64>,
     n: usize,
-    counts: [usize; D],
+    partition: &crate::decomp::Partition<D>,
 ) -> Vec<TracerSet<D>> {
     let set = seed_mass_weighted(global, n);
-    partition_seeded(global, set, counts)
+    partition_seeded(global, set, partition)
 }
 
 pub fn seed_and_partition_with_cohorts<const D: usize, const DOF: usize, Mem: MemorySpace>(
     global: &FieldStore<D, DOF, Mem, f64>,
     n: usize,
-    counts: [usize; D],
+    partition: &crate::decomp::Partition<D>,
     cell_cohorts: &[u16],
 ) -> Result<Vec<TracerSet<D>>, String> {
     let set = seed_mass_weighted_with_cohorts(global, n, cell_cohorts)?;
-    Ok(partition_seeded(global, set, counts))
+    Ok(partition_seeded(global, set, partition))
 }
 
 fn partition_seeded<const D: usize, const DOF: usize, Mem: MemorySpace>(
     global: &FieldStore<D, DOF, Mem, f64>,
     set: TracerSet<D>,
-    counts: [usize; D],
+    partition: &crate::decomp::Partition<D>,
 ) -> Vec<TracerSet<D>> {
-    // the per-tile extent from the full-size global grid: interior cells / tile counts, times dx.
-    let mut glo = [0.0; D];
-    let mut extent = [0.0; D];
-    for a in 0..D {
-        let n_int =
-            (global.geom.interior.spaces[a].hi - global.geom.interior.spaces[a].lo) as usize;
-        glo[a] = global.geom.x_lo[a];
-        extent[a] = (n_int / counts[a]) as f64 * global.geom.dx[a];
-    }
-    let ntiles: usize = counts.iter().product();
+    let glo: [f64; D] = std::array::from_fn(|a| global.geom.x_lo[a]);
+    let dx: [f64; D] = std::array::from_fn(|a| global.geom.dx[a]);
+    let ntiles: usize = partition.n_tiles();
     let mut per_tile: Vec<TracerSet<D>> = (0..ntiles)
         .map(|_| TracerSet {
             weight: set.weight,
@@ -3542,7 +3542,7 @@ fn partition_seeded<const D: usize, const DOF: usize, Mem: MemorySpace>(
         .collect();
     for i in 0..set.x.len() {
         // the seed is inside the domain by construction, so `tile_owner` is always Some.
-        let dest = tile_owner(&set.x[i], glo, extent, counts).unwrap_or(0);
+        let dest = tile_owner(&set.x[i], glo, dx, partition).unwrap_or(0);
         per_tile[dest].x.push(set.x[i]);
         per_tile[dest].id.push(set.id[i]);
         per_tile[dest].cohort.push(set.cohort[i]);

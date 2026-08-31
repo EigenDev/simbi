@@ -1859,15 +1859,15 @@ fn partition_configured_tracers<
 >(
     sim: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
     cfg: &Config,
-    counts: [usize; D],
+    partition: &Partition<D>,
 ) -> Vec<symbi_sim::tracers::TracerSet<D>> {
     if cfg.cohort_ic.is_empty() {
-        symbi_sim::tracers::seed_and_partition(sim, cfg.n_tracers, counts)
+        symbi_sim::tracers::seed_and_partition(sim, cfg.n_tracers, partition)
     } else {
         symbi_sim::tracers::seed_and_partition_with_cohorts(
             sim,
             cfg.n_tracers,
-            counts,
+            partition,
             &cfg.cohort_ic,
         )
         .unwrap_or_else(|detail| panic!("tracer cohort partition: {detail}"))
@@ -5356,7 +5356,7 @@ macro_rules! build_and_run_hydro_decomposed {
         // from the identical particles a single-grid run would. the output view carries an empty
         // set the checkpoint gather refills from the tiles each write.
         if cfg.n_tracers > 0 {
-            let per_tile = partition_configured_tracers(&global, cfg, counts);
+            let per_tile = partition_configured_tracers(&global, cfg, &partition);
             if let Some(order) = configured_ito_order(cfg)? {
                 for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
                     tile.continuous_tracers = Some(
@@ -6164,7 +6164,7 @@ macro_rules! build_and_run_mhd_decomposed {
             .build();
 
         if cfg.n_tracers > 0 {
-            let per_tile = partition_configured_tracers(&global, cfg, counts);
+            let per_tile = partition_configured_tracers(&global, cfg, &partition);
             if let Some(order) = configured_ito_order(cfg)? {
                 for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
                     tile.continuous_tracers = Some(
@@ -6358,7 +6358,7 @@ macro_rules! build_and_run_imhd_decomposed {
             .build();
 
         if cfg.n_tracers > 0 {
-            let per_tile = partition_configured_tracers(&global, cfg, counts);
+            let per_tile = partition_configured_tracers(&global, cfg, &partition);
             if let Some(order) = configured_ito_order(cfg)? {
                 for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
                     tile.continuous_tracers = Some(

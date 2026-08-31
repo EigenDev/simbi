@@ -754,6 +754,38 @@ impl<const D: usize> Partition<D> {
         Self::uniform(n_cells, decompose_grid(n_cells, n_parts)?)
     }
 
+    /// the partition a laid-out tile grid implies, deriving the global cell count from the
+    /// tiles rather than being told it: `size(flat_tile, ax)` reports each tile's own interior
+    /// width, the cuts are the prefix sums down each axis, and the axis's cell count is their
+    /// sum. rectilinearity is checked -- every tile in an axis-`ax` slab carries that slab's
+    /// width -- so a mismatched tiling fails here rather than placing cells at wrong offsets.
+    pub fn of_tiles(
+        counts: [usize; D],
+        size: impl Fn(usize, usize) -> usize,
+    ) -> Result<Self, String> {
+        let mut n_cells = [0usize; D];
+        for (ax, n) in n_cells.iter_mut().enumerate() {
+            if counts[ax] == 0 {
+                return Err(format!("tile grid axis {ax} carries no tiles"));
+            }
+            *n = (0..counts[ax])
+                .map(|i| {
+                    let mut tc = [0usize; D];
+                    tc[ax] = i;
+                    size(flatten(tc, counts), ax)
+                })
+                .sum();
+        }
+        Self::from_tile_sizes(n_cells, counts, size)
+    }
+
+    /// the tile grid coordinate whose extent contains the global `cell`: on each axis, the
+    /// number of cuts at or below it. exact for unequal tiles, where dividing by a single
+    /// tile's width is not.
+    pub fn tile_of(&self, cell: [usize; D]) -> [usize; D] {
+        std::array::from_fn(|ax| self.cuts[ax].partition_point(|&c| c <= cell[ax]))
+    }
+
     /// the partition a laid-out tile grid implies: each tile reports its own interior
     /// size along each axis (`size(flat_tile, ax)`), and the cuts are the prefix sums of
     /// the sizes down each axis. equal tiles reproduce the uniform partition; unequal
@@ -1380,23 +1412,41 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
     }
 }
 
+/// the partition a decomposed run's tiles lay out, read off the tiles themselves.
+fn tile_partition_of<const D: usize, const DOF: usize, M: MemorySpace>(
+    stores: &[&FieldStore<D, DOF, M, f64>],
+    counts: [usize; D],
+) -> Partition<D> {
+    Partition::of_tiles(counts, |flat, ax| {
+        stores[flat].geom.interior.spaces[ax].size()
+    })
+    .expect("the decomposed tiles tile their global grid")
+}
+
+/// the tile that owns the cell a tracer's owner id names. the id rides as a flat index over
+/// the global cell grid, axis-0 fastest; the partition's own cut lists resolve it, so tiles of
+/// unequal size resolve exactly as even ones do.
+fn owner_tile<const D: usize>(partition: &Partition<D>, owner: usize) -> usize {
+    let n = partition.n_cells();
+    let mut linear = owner;
+    let global: [usize; D] = std::array::from_fn(|dd| {
+        let index = linear % n[dd];
+        linear /= n[dd];
+        index
+    });
+    flatten(partition.tile_of(global), partition.counts())
+}
+
 fn migrate_mass_transport_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
     counts: [usize; D],
 ) {
-    let local_cells: [usize; D] =
-        std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
-    let global_cells: [usize; D] = std::array::from_fn(|dd| local_cells[dd] * counts[dd]);
-    let destination = |owner: crate::mass_transport::ContainerId| {
-        let mut linear = owner.0 as usize;
-        let global: [usize; D] = std::array::from_fn(|dd| {
-            let index = linear % global_cells[dd];
-            linear /= global_cells[dd];
-            index
-        });
-        let tile = std::array::from_fn(|dd| global[dd] / local_cells[dd]);
-        flatten(tile, counts)
+    let partition = {
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+        tile_partition_of(&sh, counts)
     };
+    let destination =
+        |owner: crate::mass_transport::ContainerId| owner_tile(&partition, owner.0 as usize);
 
     let mut moved = Vec::new();
     for (source, store) in stores.iter_mut().enumerate() {
@@ -1455,8 +1505,10 @@ fn migrate_continuous_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
             "continuous tracer migration requires a uniform Cartesian decomposition".to_string(),
         );
     }
-    let local_cells: [usize; D] =
-        std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
+    let partition = {
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+        tile_partition_of(&sh, counts)
+    };
     let dx = stores[0].geom.dx;
     let global_lo: [f64; D] = std::array::from_fn(|dd| {
         stores
@@ -1506,13 +1558,13 @@ fn migrate_continuous_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
             let global_cell: [usize; D] = std::array::from_fn(|dd| {
                 ((position[dd] - global_lo[dd]) / dx[dd]).floor() as usize
             });
-            let tile: [usize; D] = std::array::from_fn(|dd| global_cell[dd] / local_cells[dd]);
-            let target = flatten(tile, counts);
+            let target = flatten(partition.tile_of(global_cell), counts);
+            let n_global = partition.n_cells();
             let mut linear = 0usize;
             let mut stride = 1usize;
             for dd in 0..D {
                 linear += global_cell[dd] * stride;
-                stride *= local_cells[dd] * counts[dd];
+                stride *= n_global[dd];
             }
             let owner = crate::mass_transport::ContainerId(linear as u64);
             if target == source {
@@ -1614,9 +1666,10 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
     if injections.is_empty() {
         return;
     }
-    let local_cells: [usize; D] =
-        std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
-    let global_cells: [usize; D] = std::array::from_fn(|dd| local_cells[dd] * counts[dd]);
+    let partition = {
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+        tile_partition_of(&sh, counts)
+    };
     let global_lo = stores[0].geom.x_lo;
     let dx = stores[0].geom.dx;
     let first = stores
@@ -1649,10 +1702,11 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
             .into_iter()
             .map(|(destination, mass)| crate::mass_transport::MassTransfer { destination, mass }),
         |owner| {
+            let n_global = partition.n_cells();
             let mut linear = owner.0 as usize;
             std::array::from_fn(|dd| {
-                let index = linear % global_cells[dd];
-                linear /= global_cells[dd];
+                let index = linear % n_global[dd];
+                linear /= n_global[dd];
                 global_lo[dd] + (index as f64 + 0.5) * dx[dd]
             })
         },
@@ -1675,14 +1729,7 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
         .injection_remainder = spawned.injection_remainder;
 
     for ii in 0..spawned.len() {
-        let mut linear = spawned.owner[ii].0 as usize;
-        let global: [usize; D] = std::array::from_fn(|dd| {
-            let index = linear % global_cells[dd];
-            linear /= global_cells[dd];
-            index
-        });
-        let tile = std::array::from_fn(|dd| global[dd] / local_cells[dd]);
-        let target = flatten(tile, counts);
+        let target = owner_tile(&partition, spawned.owner[ii].0 as usize);
         let tracers = stores[target].tracers.as_mut().unwrap();
         tracers.x.push(spawned.x[ii]);
         tracers.id.push(spawned.id[ii]);
@@ -1708,9 +1755,10 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
     if injections.is_empty() {
         return Ok(0);
     }
-    let local_cells: [usize; D] =
-        std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
-    let global_cells: [usize; D] = std::array::from_fn(|dd| local_cells[dd] * counts[dd]);
+    let partition = {
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+        tile_partition_of(&sh, counts)
+    };
     let global_lo: [f64; D] = std::array::from_fn(|dd| {
         stores
             .iter()
@@ -1747,10 +1795,11 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
             .into_iter()
             .map(|(destination, mass)| crate::mass_transport::MassTransfer { destination, mass }),
         |owner| {
+            let n_global = partition.n_cells();
             let mut linear = owner.0 as usize;
             let index: [usize; D] = std::array::from_fn(|dd| {
-                let index = linear % global_cells[dd];
-                linear /= global_cells[dd];
+                let index = linear % n_global[dd];
+                linear /= n_global[dd];
                 index
             });
             (
@@ -1771,14 +1820,7 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
     }
     while spawned.len > 0 {
         let record = spawned.swap_remove_host(spawned.len - 1)?;
-        let mut linear = record.owner.0 as usize;
-        let global: [usize; D] = std::array::from_fn(|dd| {
-            let index = linear % global_cells[dd];
-            linear /= global_cells[dd];
-            index
-        });
-        let tile = std::array::from_fn(|dd| global[dd] / local_cells[dd]);
-        let target = flatten(tile, counts);
+        let target = owner_tile(&partition, record.owner.0 as usize);
         stores[target]
             .continuous_tracers
             .as_mut()
@@ -2058,8 +2100,11 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
                     }
                 }
                 if has_discrete_tracers || has_continuous_tracers {
-                    let local_cells: [usize; D] =
-                        std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
+                    let partition = {
+                        let sh: Vec<&FieldStore<D, DOF, M, f64>> =
+                            stores.iter().map(|s| &**s).collect();
+                        tile_partition_of(&sh, counts)
+                    };
                     for (flat, store) in stores.iter_mut().enumerate() {
                         if store.geom.coords != symbi_geometry::Geometry::Cartesian {
                             panic!(
@@ -2068,9 +2113,10 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
                         }
                         let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
                         let tile = unflatten(flat, counts);
+                        let ext = partition.tile_extents(tile);
                         let layout = crate::tracers::TransportLayout {
-                            global_cells: std::array::from_fn(|dd| local_cells[dd] * counts[dd]),
-                            tile_offset: std::array::from_fn(|dd| tile[dd] * local_cells[dd]),
+                            global_cells: partition.n_cells(),
+                            tile_offset: std::array::from_fn(|dd| ext[dd].0),
                             level: 0,
                         };
                         let mut injections = crate::tracers::boundary_injection_transfers_store(
@@ -2303,13 +2349,15 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
             }
         }
         if !accretion_density.is_empty() {
-            let local_cells: [usize; D] =
-                std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
+            let partition = {
+                let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+                tile_partition_of(&sh, counts)
+            };
             for (flat, store) in stores.iter_mut().enumerate() {
                 let tile = unflatten(flat, counts);
                 let layout = crate::tracers::TransportLayout {
-                    global_cells: std::array::from_fn(|dd| local_cells[dd] * counts[dd]),
-                    tile_offset: std::array::from_fn(|dd| tile[dd] * local_cells[dd]),
+                    global_cells: partition.n_cells(),
+                    tile_offset: std::array::from_fn(|dd| partition.tile_extents(tile)[dd].0),
                     level: 0,
                 };
                 let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
@@ -2345,13 +2393,15 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
             advance_state_clock(&mut **s, dt);
         }
         if has_discrete_tracers {
-            let local_cells: [usize; D] =
-                std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
+            let partition = {
+                let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+                tile_partition_of(&sh, counts)
+            };
             for (flat, store) in stores.iter_mut().enumerate() {
                 let tile = unflatten(flat, counts);
                 let layout = crate::tracers::TransportLayout {
-                    global_cells: std::array::from_fn(|dd| local_cells[dd] * counts[dd]),
-                    tile_offset: std::array::from_fn(|dd| tile[dd] * local_cells[dd]),
+                    global_cells: partition.n_cells(),
+                    tile_offset: std::array::from_fn(|dd| partition.tile_extents(tile)[dd].0),
                     level: 0,
                 };
                 let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
@@ -2861,6 +2911,48 @@ mod tests {
         for flat in 0..got.n_tiles() {
             let tc = unflatten(flat, counts);
             assert_eq!(got.tile_extents(tc), want.tile_extents(tc));
+        }
+    }
+
+    // reading a partition off a tile grid without being told the global extent: the widths
+    // sum to it. this is what the tracer subsystem uses, where only the tiles are in hand.
+    #[test]
+    fn partition_of_tiles_derives_the_global_extent() {
+        let want = Partition::explicit([32usize, 32], [vec![13], vec![7]]).unwrap();
+        let counts = want.counts();
+        let got = Partition::of_tiles(counts, |flat, ax| {
+            want.tile_extents(unflatten(flat, counts))[ax].1
+        })
+        .unwrap();
+        assert_eq!(got.n_cells(), [32, 32]);
+        assert_eq!(got.counts(), counts);
+        for flat in 0..got.n_tiles() {
+            let tc = unflatten(flat, counts);
+            assert_eq!(got.tile_extents(tc), want.tile_extents(tc));
+        }
+    }
+
+    // locating a cell's tile by the cuts, which dividing by one tile's width gets wrong the
+    // moment the tiles differ: cells 0..13 belong to tile 0 and 13..32 to tile 1, where
+    // `cell / 13` would send cell 26 to a tile 2 that does not exist.
+    #[test]
+    fn tile_of_locates_a_cell_in_unequal_tiles() {
+        let ragged = Partition::explicit([32usize], [vec![13]]).unwrap();
+        assert_eq!(ragged.tile_of([0]), [0]);
+        assert_eq!(ragged.tile_of([12]), [0]);
+        assert_eq!(ragged.tile_of([13]), [1], "the cut cell opens the next tile");
+        assert_eq!(ragged.tile_of([26]), [1]);
+        assert_eq!(ragged.tile_of([31]), [1]);
+        // every cell lands in the tile whose extent contains it, for any cut list.
+        let three = Partition::explicit([64usize], [vec![19, 37]]).unwrap();
+        for cell in 0..64usize {
+            let tc = three.tile_of([cell]);
+            let (start, size) = three.tile_range(0, tc[0]);
+            assert!(
+                (start..start + size).contains(&cell),
+                "cell {cell} placed in tile {tc:?} spanning [{start}, {})",
+                start + size
+            );
         }
     }
 

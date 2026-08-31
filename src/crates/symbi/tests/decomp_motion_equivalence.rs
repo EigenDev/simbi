@@ -148,7 +148,12 @@ fn assert_motion_matches(counts: [usize; 2], motion: MotionState<f64>) {
         Boundaries::uniform(BoundaryType::Outflow),
         motion,
     );
-    let per_tile = seed_and_partition(&mono, 2048, counts);
+        let partition = symbi::sim::decomp::Partition::uniform(
+        std::array::from_fn(|a| mono.geom.interior.spaces[a].size()),
+        counts,
+    )
+    .expect("even tile counts divide the grid");
+    let per_tile = seed_and_partition(&mono, 2048, &partition);
     mono.tracers = Some(seed_mass_weighted(&mono, 2048));
     let initial_owner = mono.tracers.as_ref().unwrap().owner.clone();
     evolve(&mut mono, &mk, T_FINAL).expect("mono evolve");
