@@ -200,7 +200,7 @@ fn tiles() -> Vec<Hier> {
         } else {
             Hier::single(coarse, coarse_kernels)
         };
-        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)]);
+        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)], [false]);
         hierarchy.prime();
         result.push(hierarchy);
     }
@@ -231,7 +231,7 @@ fn source_tiles() -> Vec<Hier> {
         } else {
             Hier::single(coarse, coarse_kernels)
         };
-        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)]);
+        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)], [false]);
         hierarchy.prime();
         result.push(hierarchy);
     }
@@ -262,7 +262,7 @@ fn driven_tiles() -> Vec<Hier> {
         } else {
             Hier::single(coarse, coarse_kernels)
         };
-        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)]);
+        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)], [false]);
         hierarchy.prime();
         result.push(hierarchy);
     }
@@ -293,7 +293,7 @@ fn gradient_tiles() -> Vec<Hier> {
         } else {
             Hier::single(coarse, coarse_kernels)
         };
-        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)]);
+        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)], [false]);
         hierarchy.prime();
         result.push(hierarchy);
     }

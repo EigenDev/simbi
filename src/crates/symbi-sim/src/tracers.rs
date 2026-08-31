@@ -13,7 +13,7 @@
 //
 // usage:
 //  let counts = systematic_counts(&cell_masses, n_tracers);
-//  let mut set = TracerSet::<2>::seed_stratified(&cells, &counts, mass_total / n as f64);
+//  let mut set = TracerSet::<2>::seed_stratified(&cells, &owners, &counts, mass_total / n as f64);
 // =============================================================================
 
 /// one tracer's provenance record: the crossing events the accretion ledgers
@@ -934,16 +934,10 @@ impl<const D: usize> TracerSet<D> {
     /// seed `counts[c]` tracers in each cell, stratified on the cell's own
     /// sub-lattice (deterministic: k of m tracers sits at fraction
     /// (k + 1/2)/m along axis 0, centered on the other axes). `cells` gives
-    /// each cell's low corner and widths.
-    pub fn seed_stratified(cells: &[([f64; D], [f64; D])], counts: &[usize], weight: f64) -> Self {
-        let owners: Vec<_> = (0..cells.len())
-            .map(|ii| crate::mass_transport::ContainerId(ii as u64))
-            .collect();
-        Self::seed_stratified_owned(cells, &owners, counts, weight)
-    }
-
-    /// seed stratified tracers into explicitly addressed material cells.
-    pub fn seed_stratified_owned(
+    /// each cell's low corner and widths, and `owners` the container address of
+    /// each, which the caller holds because only it knows the grid the cells
+    /// were drawn from.
+    pub fn seed_stratified(
         cells: &[([f64; D], [f64; D])],
         owners: &[crate::mass_transport::ContainerId],
         counts: &[usize],
@@ -1366,11 +1360,40 @@ where
 mod tests {
     use super::*;
 
+    /// arrays collected over `interior.iter()` are indexed by the ordinal, and the two must
+    /// stay the same walk. the container address of the same cell runs the opposite way, so
+    /// a grid unequal on every axis separates them: the ordinal of [1, 0, 0] here is 6 while
+    /// its address is 1.
+    #[test]
+    fn the_interior_ordinal_is_the_domain_iteration_index() {
+        let interior = symbi_algebra::Domain::new([
+            symbi_algebra::Space { name: "i", lo: -2, hi: 2 },
+            symbi_algebra::Space { name: "j", lo: 0, hi: 3 },
+            symbi_algebra::Space { name: "k", lo: 5, hi: 7 },
+        ]);
+        for (expected, coord) in interior.iter().enumerate() {
+            assert_eq!(
+                interior_ordinal(coord, &interior),
+                expected,
+                "cell {coord:?} is the {expected}th of the walk"
+            );
+        }
+        let layout = TransportLayout::single(&interior);
+        let corner = [interior.spaces[0].lo + 1, interior.spaces[1].lo, interior.spaces[2].lo];
+        assert_ne!(
+            interior_ordinal(corner, &interior),
+            cell_container_address(cell_container(corner, &interior, layout))
+                .expect("an interior cell has an address")
+                .1,
+            "the ordinal and the address must not be conflated on an unequal grid"
+        );
+    }
+
     #[test]
     fn continuous_retry_snapshot_restores_records_and_spawn_counters() {
         use symbi_xpu::HostMemory;
 
-        let seed = TracerSet::<1>::seed_stratified(&[([0.0], [1.0])], &[2], 0.5);
+        let seed = TracerSet::<1>::seed_stratified(&[([0.0], [1.0])], &[crate::mass_transport::ContainerId(0)], &[2], 0.5);
         let mut tracers = ContinuousTracerSet::<1, HostMemory>::from_discrete(
             &seed,
             crate::mass_transport::ItoOrder::Three,
@@ -1401,7 +1424,7 @@ mod tests {
     fn continuous_storage_preserves_seed_state_and_allocates_ssp_snapshot() {
         use symbi_xpu::HostMemory;
 
-        let seed = TracerSet::<2>::seed_stratified(&[([0.0, 1.0], [2.0, 4.0])], &[3], 0.25);
+        let seed = TracerSet::<2>::seed_stratified(&[([0.0, 1.0], [2.0, 4.0])], &[crate::mass_transport::ContainerId(0)], &[3], 0.25);
         let continuous = ContinuousTracerSet::<2, HostMemory>::from_discrete(
             &seed,
             crate::mass_transport::ItoOrder::Three,
@@ -1432,7 +1455,7 @@ mod tests {
     fn continuous_relocation_grows_storage_and_preserves_complete_records() {
         use symbi_xpu::HostMemory;
 
-        let seed = TracerSet::<2>::seed_stratified(&[([0.0, 1.0], [2.0, 4.0])], &[2], 0.25);
+        let seed = TracerSet::<2>::seed_stratified(&[([0.0, 1.0], [2.0, 4.0])], &[crate::mass_transport::ContainerId(0)], &[2], 0.25);
         let mut source = ContinuousTracerSet::<2, HostMemory>::from_discrete(
             &seed,
             crate::mass_transport::ItoOrder::Three,
@@ -1724,7 +1747,7 @@ mod tests {
             sim.fields.cons.den.view_mut().set(coord, density);
         }
         let cells = [([0.0], [1.0]), ([1.0], [1.0])];
-        sim.tracers = Some(TracerSet::seed_stratified(&cells, &[100, 100], 0.01));
+        sim.tracers = Some(TracerSet::seed_stratified(&cells, &[crate::mass_transport::ContainerId(0), crate::mass_transport::ContainerId(1)], &[100, 100], 0.01));
         snapshot_transport_state(&mut sim);
         accumulate_ito_transport_stage_store(&mut sim, &geometry, 1.0).unwrap();
         materialize_ito_coefficients_store(&mut sim, &geometry).unwrap();
@@ -1841,7 +1864,7 @@ mod tests {
             0,
         )
         .unwrap();
-        let seed = TracerSet::<1>::seed_stratified(&[([0.0], [1.0])], &[2], 0.5);
+        let seed = TracerSet::<1>::seed_stratified(&[([0.0], [1.0])], &[crate::mass_transport::ContainerId(0)], &[2], 0.5);
         let mut tracers = ContinuousTracerSet::<1, HostMemory>::from_discrete(
             &seed,
             crate::mass_transport::ItoOrder::Two,
@@ -2190,7 +2213,7 @@ mod tests {
         use symbi_xpu::HostMemory;
 
         let trajectory = |start: f64, end: f64, boundary| {
-            let seed = TracerSet::<1>::seed_stratified(&[([start], [0.1])], &[1], 1.0);
+            let seed = TracerSet::<1>::seed_stratified(&[([start], [0.1])], &[crate::mass_transport::ContainerId(0)], &[1], 1.0);
             let mut tracers = ContinuousTracerSet::<1, HostMemory>::from_discrete(
                 &seed,
                 crate::mass_transport::ItoOrder::Two,
@@ -2317,6 +2340,7 @@ mod tests {
         sim.dt = 0.5;
         sim.tracers = Some(TracerSet::seed_stratified(
             &[([0.0], [1.0]), ([1.0], [1.0])],
+            &[crate::mass_transport::ContainerId(0), crate::mass_transport::ContainerId(1)],
             &[100, 0],
             0.01,
         ));
@@ -2390,7 +2414,7 @@ mod tests {
     #[test]
     fn rejected_step_restores_discrete_tracer_ancestry() {
         let mut tracers =
-            TracerSet::seed_stratified(&[([0.0], [1.0]), ([1.0], [1.0])], &[1, 1], 1.0);
+            TracerSet::seed_stratified(&[([0.0], [1.0]), ([1.0], [1.0])], &[crate::mass_transport::ContainerId(0), crate::mass_transport::ContainerId(1)], &[1, 1], 1.0);
         tracers.step_owner.clone_from(&tracers.owner);
         tracers.step_flags.clone_from(&tracers.flags);
         tracers.owner.swap(0, 1);
@@ -2473,7 +2497,7 @@ mod tests {
         sim.mark_stage_input_captured();
         sim.fields.cons.den.view_mut().set(cell, 0.8);
         sim.dt = 0.5;
-        sim.tracers = Some(TracerSet::seed_stratified(&[([0.0], [1.0])], &[100], 0.01));
+        sim.tracers = Some(TracerSet::seed_stratified(&[([0.0], [1.0])], &[crate::mass_transport::ContainerId(0)], &[100], 0.01));
         snapshot_transport_state(&mut sim);
 
         advance_stage_mass_transport(&mut sim, 0.0, 1.0, 0).unwrap();
@@ -2558,7 +2582,7 @@ mod tests {
         sim.attach_bodies(bodies);
         let cell = [sim.geom.interior.spaces[0].lo];
         sim.fields.cons.den.view_mut().set(cell, 0.5);
-        sim.tracers = Some(TracerSet::seed_stratified(&[([0.0], [1.0])], &[100], 0.01));
+        sim.tracers = Some(TracerSet::seed_stratified(&[([0.0], [1.0])], &[crate::mass_transport::ContainerId(0)], &[100], 0.01));
         let immersed = sim.immersed.as_ref().unwrap();
         immersed.reset_accretion_receipts(1);
         immersed.record_accretion_receipt(0, [0.25]);
@@ -2626,7 +2650,7 @@ mod tests {
             .unwrap();
         let cell = [sim.geom.interior.spaces[0].lo];
         sim.fields.cons.den.view_mut().set(cell, 0.0);
-        let seed = TracerSet::<1>::seed_stratified(&[([0.0], [1.0])], &[1], 1.0);
+        let seed = TracerSet::<1>::seed_stratified(&[([0.0], [1.0])], &[crate::mass_transport::ContainerId(0)], &[1], 1.0);
         sim.continuous_tracers = Some(
             ContinuousTracerSet::<1, HostMemory>::from_discrete(
                 &seed,
@@ -2665,10 +2689,17 @@ pub fn seed_mass_weighted<const D: usize, const DOF: usize, Mem: MemorySpace>(
     n: usize,
 ) -> TracerSet<D> {
     let interior = sim.geom.interior.clone();
+    // the address a tracer's owner carries is the one the transport reads back, so it comes
+    // from the same function transport uses. the domain iterator walks the last axis fastest
+    // while a container address runs the first axis fastest, so the two orders are transposes
+    // and the position of a cell in this loop does not address it.
+    let layout = TransportLayout::single(&interior);
     let mut masses = Vec::new();
+    let mut owners: Vec<crate::mass_transport::ContainerId> = Vec::new();
     let mut cells: Vec<([f64; D], [f64; D])> = Vec::new();
     for c in interior.iter() {
         masses.push(*sim.fields.cons.den.view().at(c));
+        owners.push(cell_container(c, &interior, layout));
         let mut lo = [0.0; D];
         let mut dxs = [0.0; D];
         let center = sim.geom.centroid(c);
@@ -2685,7 +2716,7 @@ pub fn seed_mass_weighted<const D: usize, const DOF: usize, Mem: MemorySpace>(
     } else {
         masses.iter().sum::<f64>() * vol / n as f64
     };
-    let mut tracers = TracerSet::seed_stratified(&cells, &counts, weight);
+    let mut tracers = TracerSet::seed_stratified(&cells, &owners, &counts, weight);
     tracers.step_owner = tracers.owner.clone();
     tracers.step_flags = tracers.flags.clone();
     tracers
@@ -2724,7 +2755,7 @@ pub fn seed_weighted_cells<const D: usize>(
     } else {
         masses.iter().sum::<f64>() / n as f64
     };
-    let mut tracers = TracerSet::seed_stratified_owned(cells, owners, &counts, weight);
+    let mut tracers = TracerSet::seed_stratified(cells, owners, &counts, weight);
     tracers.step_owner = tracers.owner.clone();
     tracers.step_flags = tracers.flags.clone();
     tracers
@@ -2784,6 +2815,10 @@ where
 pub struct TransportLayout<const D: usize> {
     pub global_cells: [usize; D],
     pub tile_offset: [usize; D],
+    /// the axes whose tile grid closes into a ring. on a cut wrapping axis a tile's own face
+    /// at the domain seam is declared a cut, since the halo exchange fills it, so the tile's
+    /// boundaries no longer name the domain's periodicity and this carries it instead.
+    pub wraps: [bool; D],
     pub level: u8,
 }
 
@@ -2792,6 +2827,8 @@ impl<const D: usize> TransportLayout<D> {
         Self {
             global_cells: std::array::from_fn(|dd| domain.spaces[dd].size()),
             tile_offset: [0; D],
+            // one grid is its own domain, so its own faces still name the periodicity.
+            wraps: [false; D],
             level: 0,
         }
     }
@@ -3282,12 +3319,7 @@ where
             if !interior.contains(coord) {
                 continue;
             }
-            let mut linear = 0usize;
-            let mut stride = 1usize;
-            for dd in 0..D {
-                linear += (coord[dd] - interior.spaces[dd].lo) as usize * stride;
-                stride *= interior.spaces[dd].size();
-            }
+            let linear = interior_ordinal(coord, &interior);
             let source_mass = density_before[linear] * geometry.volume(coord);
             if !source_mass.is_finite() || source_mass <= 0.0 {
                 return Err("continuous accretion source mass must be positive and finite".into());
@@ -3398,19 +3430,47 @@ pub fn refresh_derived_positions_store<const D: usize, const DOF: usize, M, Mem>
     }
 }
 
+/// the ordinal of an interior cell in the domain's own iteration order, which walks the
+/// last axis fastest. this indexes arrays built by collecting over `interior.iter()`,
+/// such as the pre-step density an accretion receipt is measured against. the container
+/// address of the same cell runs the first axis fastest and is a different number.
+fn interior_ordinal<const D: usize>(
+    coord: [isize; D],
+    interior: &symbi_algebra::Domain<D>,
+) -> usize {
+    let mut ordinal = 0usize;
+    for dd in 0..D {
+        ordinal = ordinal * interior.spaces[dd].size()
+            + (coord[dd] - interior.spaces[dd].lo) as usize;
+    }
+    ordinal
+}
+
+/// the container address of an interior cell: its global index with the first axis
+/// running fastest, tagged with the refinement level. this is the one place the address
+/// is formed, so seeding, transport and the derived position all name the same cell.
+/// `container_cell` inverts it.
 fn cell_container<const D: usize>(
     coord: [isize; D],
     domain: &symbi_algebra::Domain<D>,
     layout: TransportLayout<D>,
 ) -> crate::mass_transport::ContainerId {
+    let global: [usize; D] =
+        std::array::from_fn(|dd| layout.tile_offset[dd] + (coord[dd] - domain.spaces[dd].lo) as usize);
+    cell_container_id(cell_address(global, layout.global_cells), layout.level)
+}
+
+/// the linear address of a global cell with the first axis running fastest. `cell_container`
+/// forms it from a tile-local coordinate; a caller already holding global indices uses this
+/// directly and tags the level with `cell_container_id`.
+pub fn cell_address<const D: usize>(cell: [usize; D], cells: [usize; D]) -> usize {
     let mut linear = 0usize;
     let mut stride = 1usize;
     for dd in 0..D {
-        let local = (coord[dd] - domain.spaces[dd].lo) as usize;
-        linear += (layout.tile_offset[dd] + local) * stride;
-        stride *= layout.global_cells[dd];
+        linear += cell[dd] * stride;
+        stride *= cells[dd];
     }
-    cell_container_id(linear, layout.level)
+    linear
 }
 
 fn container_cell<const D: usize>(
@@ -3445,29 +3505,31 @@ fn face_destination<const D: usize>(
     let mut global: [isize; D] =
         std::array::from_fn(|dd| (layout.tile_offset[dd] + local[dd]) as isize);
     global[axis] += if high { 1 } else { -1 };
+    let address = |cell: [isize; D]| {
+        cell_container_id(
+            cell_address(std::array::from_fn(|dd| cell[dd] as usize), layout.global_cells),
+            layout.level,
+        )
+    };
     if global[axis] >= 0 && global[axis] < layout.global_cells[axis] as isize {
-        let mut linear = 0usize;
-        let mut stride = 1usize;
-        for dd in 0..D {
-            linear += global[dd] as usize * stride;
-            stride *= layout.global_cells[dd];
-        }
-        return cell_container_id(linear, layout.level);
+        return address(global);
     }
-    match boundaries.0[axis][high as usize] {
+    // a wrapping axis sends mass leaving the grid to the far end, whether the tile spells that
+    // out on its own face or carries a cut there because the exchange fills it.
+    let periodic = layout.wraps[axis]
+        || boundaries.0[axis][high as usize] == crate::state::BoundaryType::Periodic;
+    match if periodic {
+        crate::state::BoundaryType::Periodic
+    } else {
+        boundaries.0[axis][high as usize]
+    } {
         crate::state::BoundaryType::Periodic => {
             global[axis] = if high {
                 0
             } else {
                 layout.global_cells[axis] as isize - 1
             };
-            let mut linear = 0usize;
-            let mut stride = 1usize;
-            for dd in 0..D {
-                linear += global[dd] as usize * stride;
-                stride *= layout.global_cells[dd];
-            }
-            cell_container_id(linear, layout.level)
+            address(global)
         }
         crate::state::BoundaryType::Reflect => cell_container(coord, domain, layout),
         crate::state::BoundaryType::CoarseFine => cell_container(coord, domain, layout),
@@ -3475,10 +3537,6 @@ fn face_destination<const D: usize>(
     }
 }
 
-/// the flat tile index owning a physical position, or None if outside the global domain. the
-/// tile grid is uniform, so it is a floor-divide by the per-tile extent; the flat index is the
-/// same `flatten` the decomposition addresses tiles by, so a tracer lands in the store the
-/// decomposition calls its owner.
 /// the tile holding a position: its global cell, then the tile whose extent contains that
 /// cell. read off the partition's own cuts rather than by dividing a domain length into equal
 /// tiles, so unequal tiles place a tracer as exactly as even ones do. `None` outside the grid.

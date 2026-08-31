@@ -29,22 +29,20 @@ pub struct InterfaceFace<const D: usize> {
     pub fine_cell: ContainerId,
 }
 
+/// the container address of a cell already held in absolute global indices.
+fn global_address<const D: usize>(coord: [isize; D], cells: [usize; D]) -> usize {
+    let cell: [usize; D] = std::array::from_fn(|aa| {
+        assert!(coord[aa] >= 0, "negative global tracer cell index");
+        coord[aa] as usize
+    });
+    symbi_sim::tracers::cell_address(cell, cells)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct InterfaceTransfer {
     pub source: ContainerId,
     pub destination: ContainerId,
     pub mass: f64,
-}
-
-fn linear<const D: usize>(coord: [isize; D], cells: [usize; D]) -> usize {
-    let mut result = 0usize;
-    let mut stride = 1usize;
-    for aa in 0..D {
-        assert!(coord[aa] >= 0, "negative global tracer cell index");
-        result += coord[aa] as usize * stride;
-        stride *= cells[aa];
-    }
-    result
 }
 
 /// enumerate every fine face on a coarse-fine interface. `coverage` is in
@@ -121,10 +119,10 @@ pub fn interface_faces_with_layout<const D: usize>(
                     high,
                     fine_face: coord,
                     coarse_cell: cell_container_id(
-                        linear(coarse_global, coarse_cells),
+                        global_address(coarse_global, coarse_cells),
                         coarse_level,
                     ),
-                    fine_cell: cell_container_id(linear(fine_global, fine_cells), coarse_level + 1),
+                    fine_cell: cell_container_id(global_address(fine_global, fine_cells), coarse_level + 1),
                 });
 
                 let mut advanced = false;

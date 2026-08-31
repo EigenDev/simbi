@@ -1738,11 +1738,10 @@ fn tile_boundaries<const D: usize>(
 }
 
 /// what a decomposed run may carry once an axis wraps. closing the domain seam with exchanged
-/// legs moves the periodic law out of the tile faces and into the schedule, and two things
-/// still read a tile's own faces to learn it. each is refused rather than approximated.
+/// legs moves the periodic law out of the tile faces and into the schedule. what still reads a
+/// tile's own faces to learn it is refused rather than approximated.
 fn wrap_capability<const D: usize>(
     topology: &Topology<D>,
-    n_tracers: usize,
     wb_reconstruction: bool,
     has_bodies: bool,
 ) -> Result<(), String> {
@@ -1754,13 +1753,6 @@ fn wrap_capability<const D: usize>(
                     reconstruction: the periodic images sit at different body potentials, so \
                     the isentrope carried across the seam is a real state change. use outflow \
                     or reflect walls, or run the plain reconstruction."
-            .to_string());
-    }
-    if n_tracers > 0 {
-        return Err("a decomposed run whose periodic axis is cut cannot carry tracers yet: the \
-                    mass-transport ledger places mass leaving the grid by the tile's own \
-                    boundary, which no longer names the domain's wrap, so seam mass would be \
-                    recorded as staying put. run it on one device, or drop the tracers."
             .to_string());
     }
     Ok(())
@@ -4576,12 +4568,7 @@ where
 
     let phys = boundaries_nd::<D>(&cfg.boundaries);
     let topology = wrap_topology(&phys, counts);
-    wrap_capability(
-        &topology,
-        cfg.n_tracers,
-        cfg.wb_reconstruction,
-        !cfg.bodies.is_empty(),
-    )?;
+    wrap_capability(&topology, cfg.wb_reconstruction, !cfg.bodies.is_empty())?;
 
     let ntiles = tiles.len();
     let devices: Vec<i32> = (0..ntiles as i32).collect();
@@ -5031,7 +5018,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     h = h.with_bodies(build_bodies_and_horizon::<$d>(cfg));
                     h.attach_body_shapes(build_body_shapes(&cfg.bodies));
                 }
-                h.set_tracer_root_layout(n, tile_lo);
+                let ring = wrap_topology(&phys, counts);
+                h.set_tracer_root_layout(n, tile_lo, std::array::from_fn(|ax| ring.is_periodic(ax)));
                 Ok(h)
             })?;
             tiles.push(built);
@@ -8791,26 +8779,23 @@ mod tests {
         assert!(!wrap_topology(&phys, counts).is_periodic(0));
     }
 
-    // an open tile grid carries whatever the run declares; the refusals are about the wrap.
+    // an open tile grid carries whatever the run declares; the refusal is about the wrap.
     #[test]
     fn an_open_decomposition_carries_everything() {
         let open = Topology::<2>::open();
-        assert!(wrap_capability(&open, 4096, true, true).is_ok());
+        assert!(wrap_capability(&open, true, true).is_ok());
     }
 
-    // the balance-aware reconstruction reads a body potential across the seam, and the
-    // mass-transport ledger places seam mass by the tile's own boundary: both are refused
-    // by name rather than approximated.
+    // the balance-aware reconstruction reads a body potential across the seam, which the wrap
+    // cannot make sound, so it is refused by name. each half alone is carried.
     #[test]
     fn a_wrapping_decomposition_refuses_what_it_cannot_carry() {
         let ring = Topology::<2>::wrapping([true, false]);
-        assert!(wrap_capability(&ring, 0, false, false).is_ok());
-        assert!(wrap_capability(&ring, 0, true, false).is_ok(), "balancing alone is fine");
-        assert!(wrap_capability(&ring, 0, false, true).is_ok(), "a body alone is fine");
+        assert!(wrap_capability(&ring, false, false).is_ok());
+        assert!(wrap_capability(&ring, true, false).is_ok(), "balancing alone is fine");
+        assert!(wrap_capability(&ring, false, true).is_ok(), "a body alone is fine");
 
-        let bodies = wrap_capability(&ring, 0, true, true).unwrap_err();
+        let bodies = wrap_capability(&ring, true, true).unwrap_err();
         assert!(bodies.contains("body potentials"), "{bodies}");
-        let tracers = wrap_capability(&ring, 16, false, false).unwrap_err();
-        assert!(tracers.contains("mass-transport"), "{tracers}");
     }
 }

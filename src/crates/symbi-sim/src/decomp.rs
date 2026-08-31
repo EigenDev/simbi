@@ -1423,6 +1423,29 @@ fn tile_partition_of<const D: usize, const DOF: usize, M: MemorySpace>(
     .expect("the decomposed tiles tile their global grid")
 }
 
+/// a position folded into the global domain on the axes the schedule closes into a ring. a
+/// tracer that leaves a wrapping axis re-enters at the far side, which is where the fields it
+/// rides already came from; an open axis leaves the position alone, so a tracer that left the
+/// grid there stays outside and its caller drops it.
+fn fold_into_domain<const D: usize>(
+    mut position: [f64; D],
+    schedule: &Schedule<D>,
+    lo: [f64; D],
+    hi: [f64; D],
+) -> [f64; D] {
+    for dd in 0..D {
+        if !schedule.wraps(dd) {
+            continue;
+        }
+        let span = hi[dd] - lo[dd];
+        if span > 0.0 {
+            let offset = (position[dd] - lo[dd]).rem_euclid(span);
+            position[dd] = lo[dd] + offset;
+        }
+    }
+    position
+}
+
 /// the tile that owns the cell a tracer's owner id names. the id rides as a flat index over
 /// the global cell grid, axis-0 fastest; the partition's own cut lists resolve it, so tiles of
 /// unequal size resolve exactly as even ones do.
@@ -1439,11 +1462,11 @@ fn owner_tile<const D: usize>(partition: &Partition<D>, owner: usize) -> usize {
 
 fn migrate_mass_transport_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
-    counts: [usize; D],
+    schedule: &Schedule<D>,
 ) {
     let partition = {
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
-        tile_partition_of(&sh, counts)
+        tile_partition_of(&sh, schedule.counts())
     };
     let destination =
         |owner: crate::mass_transport::ContainerId| owner_tile(&partition, owner.0 as usize);
@@ -1493,7 +1516,7 @@ fn migrate_mass_transport_tracers<const D: usize, const DOF: usize, M: MemorySpa
 
 fn migrate_continuous_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
-    counts: [usize; D],
+    schedule: &Schedule<D>,
 ) -> Result<usize, String> {
     if !M::IS_HOST_ACCESSIBLE {
         return Err("continuous tracer migration requires host-accessible memory".to_string());
@@ -1507,7 +1530,7 @@ fn migrate_continuous_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
     }
     let partition = {
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
-        tile_partition_of(&sh, counts)
+        tile_partition_of(&sh, schedule.counts())
     };
     let dx = stores[0].geom.dx;
     let global_lo: [f64; D] = std::array::from_fn(|dd| {
@@ -1549,24 +1572,28 @@ fn migrate_continuous_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
                 ii += 1;
                 continue;
             }
-            let position: [f64; D] =
+            let raw: [f64; D] =
                 unsafe { std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(ii)) };
+            // a wrapping axis re-enters the tracer at the far side; an open one leaves it
+            // outside, where it is left where it sits rather than placed in a tile.
+            let position = fold_into_domain(raw, schedule, global_lo, global_hi);
             if (0..D).any(|dd| position[dd] < global_lo[dd] || position[dd] >= global_hi[dd]) {
                 ii += 1;
                 continue;
             }
+            if position != raw {
+                for dd in 0..D {
+                    unsafe { *tracers.x[dd].as_mut_ptr::<f64>().add(ii) = position[dd] };
+                }
+            }
             let global_cell: [usize; D] = std::array::from_fn(|dd| {
                 ((position[dd] - global_lo[dd]) / dx[dd]).floor() as usize
             });
-            let target = flatten(partition.tile_of(global_cell), counts);
-            let n_global = partition.n_cells();
-            let mut linear = 0usize;
-            let mut stride = 1usize;
-            for dd in 0..D {
-                linear += global_cell[dd] * stride;
-                stride *= n_global[dd];
-            }
-            let owner = crate::mass_transport::ContainerId(linear as u64);
+            let target = flatten(partition.tile_of(global_cell), partition.counts());
+            let owner = crate::tracers::cell_container_id(
+                crate::tracers::cell_address(global_cell, partition.n_cells()),
+                0,
+            );
             if target == source {
                 unsafe {
                     *tracers
@@ -1654,7 +1681,7 @@ fn blend_mass_transport_ancestry<const D: usize, const DOF: usize, M: MemorySpac
 
 fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
-    counts: [usize; D],
+    schedule: &Schedule<D>,
     ledgers: Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
 ) {
     let mut injections = std::collections::BTreeMap::new();
@@ -1668,7 +1695,7 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
     }
     let partition = {
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
-        tile_partition_of(&sh, counts)
+        tile_partition_of(&sh, schedule.counts())
     };
     let global_lo = stores[0].geom.x_lo;
     let dx = stores[0].geom.dx;
@@ -1743,7 +1770,7 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
 
 fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: MemorySpace>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
-    counts: [usize; D],
+    schedule: &Schedule<D>,
     ledgers: Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
 ) -> Result<usize, String> {
     let mut injections = std::collections::BTreeMap::new();
@@ -1757,7 +1784,7 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
     }
     let partition = {
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
-        tile_partition_of(&sh, counts)
+        tile_partition_of(&sh, schedule.counts())
     };
     let global_lo: [f64; D] = std::array::from_fn(|dd| {
         stores
@@ -2117,6 +2144,7 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
                         let layout = crate::tracers::TransportLayout {
                             global_cells: partition.n_cells(),
                             tile_offset: std::array::from_fn(|dd| ext[dd].0),
+                            wraps: std::array::from_fn(|dd| schedule.wraps(dd)),
                             level: 0,
                         };
                         let mut injections = crate::tracers::boundary_injection_transfers_store(
@@ -2143,9 +2171,9 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
                         }
                     }
                     if has_discrete_tracers {
-                        migrate_mass_transport_tracers(stores, counts);
+                        migrate_mass_transport_tracers(stores, &schedule);
                         blend_mass_transport_ancestry(stores, stage.ac, stage.index);
-                        migrate_mass_transport_tracers(stores, counts);
+                        migrate_mass_transport_tracers(stores, &schedule);
                     }
                 }
             }
@@ -2179,7 +2207,7 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
                 crate::driver::retry_timestep(dt, t).unwrap_or_else(|err| panic!("{}", err.detail));
         };
         if has_discrete_tracers {
-            spawn_decomposed_injection(stores, counts, injection_ledgers.clone());
+            spawn_decomposed_injection(stores, &schedule, injection_ledgers.clone());
         }
         // the stage refresh mutated a; the step-tail advance below starts from the
         // step-entry value, mirroring the single-grid step's restore.
@@ -2240,9 +2268,9 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
                 .unwrap_or_else(|err| panic!("ito tracer boundaries failed: {err}"));
                 store.continuous_tracers = Some(tracers);
             }
-            migrate_continuous_tracers(stores, counts)
+            migrate_continuous_tracers(stores, &schedule)
                 .unwrap_or_else(|err| panic!("continuous tracer migration failed: {err}"));
-            spawn_decomposed_continuous_injection(stores, counts, injection_ledgers)
+            spawn_decomposed_continuous_injection(stores, &schedule, injection_ledgers)
                 .unwrap_or_else(|err| panic!("continuous tracer injection failed: {err}"));
         }
         let mut horizon_receipt = None;
@@ -2358,6 +2386,7 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
                 let layout = crate::tracers::TransportLayout {
                     global_cells: partition.n_cells(),
                     tile_offset: std::array::from_fn(|dd| partition.tile_extents(tile)[dd].0),
+                    wraps: std::array::from_fn(|dd| schedule.wraps(dd)),
                     level: 0,
                 };
                 let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
@@ -2402,6 +2431,7 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
                 let layout = crate::tracers::TransportLayout {
                     global_cells: partition.n_cells(),
                     tile_offset: std::array::from_fn(|dd| partition.tile_extents(tile)[dd].0),
+                    wraps: std::array::from_fn(|dd| schedule.wraps(dd)),
                     level: 0,
                 };
                 let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
@@ -3099,7 +3129,7 @@ mod tests {
         };
         let mut lo = make(0.0);
         let mut hi = make(2.0);
-        let seed = TracerSet::<1>::seed_stratified(&[([2.0], [1.0])], &[1], 0.5);
+        let seed = TracerSet::<1>::seed_stratified(&[([2.0], [1.0])], &[crate::mass_transport::ContainerId(0)], &[1], 0.5);
         let mut particles = ContinuousTracerSet::<1, HostMemory>::from_discrete(
             &seed,
             crate::mass_transport::ItoOrder::Three,
@@ -3112,7 +3142,9 @@ mod tests {
         hi.continuous_tracers =
             Some(ContinuousTracerSet::allocate(0, crate::mass_transport::ItoOrder::Three).unwrap());
 
-        let migrated = migrate_continuous_tracers(&mut [&mut lo, &mut hi], [2]).unwrap();
+        let schedule = Schedule::open([2], lo.geom.ng);
+        let migrated =
+            migrate_continuous_tracers(&mut [&mut lo, &mut hi], &schedule).unwrap();
 
         assert_eq!(migrated, 1);
         assert_eq!(lo.continuous_tracers.as_ref().unwrap().len, 0);
@@ -3163,9 +3195,10 @@ mod tests {
         let mut ledger = std::collections::BTreeMap::new();
         ledger.insert(crate::mass_transport::ContainerId(2), 0.25);
 
+        let schedule = Schedule::open([2], lo.geom.ng);
         let spawned = spawn_decomposed_continuous_injection(
             &mut [&mut lo, &mut hi],
-            [2],
+            &schedule,
             vec![ledger, Default::default()],
         )
         .unwrap();

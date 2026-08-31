@@ -215,6 +215,9 @@ where
     tracer_interface_ledgers: Vec<std::cell::RefCell<Vec<InterfaceTransfer>>>,
     tracer_root_global_cells: [usize; NDIM],
     tracer_root_offset: [usize; NDIM],
+    /// the axes whose tile grid closes into a ring, carried down to every level's layout: a
+    /// wrapping axis sends mass leaving the grid to the far end rather than out of it.
+    tracer_root_wraps: [bool; NDIM],
     /// set by `step_root` when the cfl dt is fatal (NaN / non-positive / a sudden blowup from a
     /// collapsed wave speed). `Some` halts the march at the last computed state; the driver writes a
     /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
@@ -290,16 +293,16 @@ where
                 if !level.state.composite_ownership.owns_leaf(coord) {
                     continue;
                 }
-                let mut linear = 0usize;
-                let mut stride = 1usize;
-                for aa in 0..NDIM {
-                    linear += coord[aa] as usize * stride;
-                    stride *= global_cells[aa];
-                }
                 let center = geometry.centroid(coord);
                 let widths = level.state.geom.dx;
                 let lo = std::array::from_fn(|aa| center[aa] - 0.5 * widths[aa]);
-                owners.push(symbi_sim::tracers::cell_container_id(linear, ll as u8));
+                // a level's index is already absolute on its own refined lattice, which the
+                // root grid anchors at zero, so the coordinate addresses that lattice directly.
+                let cell: [usize; NDIM] = std::array::from_fn(|aa| coord[aa] as usize);
+                owners.push(symbi_sim::tracers::cell_container_id(
+                    symbi_sim::tracers::cell_address(cell, global_cells),
+                    ll as u8,
+                ));
                 cells.push((lo, widths));
                 masses.push(*level.state.fields.cons.den.view().at(coord) * geometry.volume(coord));
             }
@@ -387,16 +390,17 @@ where
                     if !interior.contains(coord) {
                         return None;
                     }
-                    let mut linear = 0usize;
-                    let mut stride = 1usize;
-                    for dd in 0..NDIM {
-                        let local = (coord[dd] - interior.spaces[dd].lo) as usize;
-                        linear += (layout.tile_offset[dd] + local) * stride;
-                        stride *= layout.global_cells[dd];
-                    }
+                    // the level's own patch may start away from the origin, so rebase the
+                    // coordinate onto the tile before offsetting it into the global lattice.
+                    let cell: [usize; NDIM] = std::array::from_fn(|dd| {
+                        layout.tile_offset[dd] + (coord[dd] - interior.spaces[dd].lo) as usize
+                    });
                     Some((
                         *level,
-                        symbi_sim::tracers::cell_container_id(linear, layout.level),
+                        symbi_sim::tracers::cell_container_id(
+                            symbi_sim::tracers::cell_address(cell, layout.global_cells),
+                            layout.level,
+                        ),
                     ))
                 },
             )
@@ -500,6 +504,7 @@ where
             tile_offset: std::array::from_fn(|aa| {
                 self.tracer_root_offset[aa] * scale + interior.spaces[aa].lo as usize
             }),
+            wraps: self.tracer_root_wraps,
             level: level as u8,
         }
     }
@@ -508,9 +513,11 @@ where
         &mut self,
         global_cells: [usize; NDIM],
         tile_offset: [usize; NDIM],
+        wraps: [bool; NDIM],
     ) {
         self.tracer_root_global_cells = global_cells;
         self.tracer_root_offset = tile_offset;
+        self.tracer_root_wraps = wraps;
         let parent_cells: [usize; NDIM] =
             std::array::from_fn(|aa| self.levels[0].state.geom.interior.spaces[aa].size());
         self.tracer_interfaces = (0..self.levels.len().saturating_sub(1))
@@ -976,6 +983,7 @@ where
             tracer_interface_ledgers: Vec::new(),
             tracer_root_global_cells,
             tracer_root_offset: [0; NDIM],
+            tracer_root_wraps: [false; NDIM],
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
@@ -1168,6 +1176,7 @@ where
             tracer_interface_ledgers,
             tracer_root_global_cells: root_cells,
             tracer_root_offset: [0; NDIM],
+            tracer_root_wraps: [false; NDIM],
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,

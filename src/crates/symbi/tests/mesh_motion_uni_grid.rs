@@ -327,7 +327,12 @@ fn translated_contact_is_preserved_exactly_on_the_comoving_grid() {
         .unwrap();
     sim.motion = MotionState::uniform(1.0, vtrans);
     fill(&sim);
-    let seed = TracerSet::<3>::seed_stratified(&[([-0.25; 3], [0.5; 3])], &[512], 1.0);
+    let seed = TracerSet::<3>::seed_stratified(
+        &[([-0.25; 3], [0.5; 3])],
+        &[cell_container_id(0, 0)],
+        &[512],
+        1.0,
+    );
     let continuous =
         ContinuousTracerSet::<3, HostMemory>::from_discrete(&seed, ItoOrder::Two).unwrap();
     let continuous_initial: [Vec<f64>; 3] = std::array::from_fn(|dd| unsafe {
@@ -504,7 +509,7 @@ fn homologous_mesh_tracers_follow_accepted_geometry() {
     });
     let center = N / 2;
     let owner = cell_container_id(center + N * (center + N * center), 0);
-    sim.tracers = Some(TracerSet::seed_stratified_owned(
+    sim.tracers = Some(TracerSet::seed_stratified(
         &[([0.0; 3], [1.0 / N as f64; 3])],
         &[owner],
         &[2048],
@@ -564,7 +569,7 @@ fn translating_mesh_tracers_follow_accepted_ale_mass_flux() {
     });
     let center = N / 2;
     let owner = cell_container_id(center + N * (center + N * center), 0);
-    sim.tracers = Some(TracerSet::seed_stratified_owned(
+    sim.tracers = Some(TracerSet::seed_stratified(
         &[([0.0; 3], [1.0 / N as f64; 3])],
         &[owner],
         &[2048],

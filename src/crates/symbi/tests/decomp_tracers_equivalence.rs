@@ -220,6 +220,23 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
     let dec_owner = gather_owners(&dec);
     let dec_all = gather_all_owners(&dec);
 
+    // the exact-ownership claim below rests on the two arms seeing identical fluxes. the halo
+    // exchange reproduces the monolithic stencil bit for bit, so state the premise and let it
+    // fail here rather than as an unexplained tracer mismatch.
+    let mono_den = global_density(&mono, [1, 1]);
+    let dec_den = global_density(&dec, counts);
+    let differing = mono_den
+        .iter()
+        .zip(&dec_den)
+        .filter(|(a, b)| a != b)
+        .count();
+    assert_eq!(
+        differing, 0,
+        "decomposition {counts:?} ({ts:?}) changed the density field in {differing} of {} \
+         cells; the tracer comparison below assumes an identical fluid state",
+        N * N
+    );
+
     assert!(
         mono_owner.iter().all(|owner| owner.0 != u64::MAX)
             && dec_owner.iter().all(|owner| owner.0 != u64::MAX),
@@ -251,35 +268,43 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         "no tracer crossed a cut; migration was never exercised"
     );
 
-    let histogram = |owners: &[symbi_sim::mass_transport::ContainerId]| {
-        let mut counts = std::collections::BTreeMap::new();
-        for owner in owners {
-            *counts.entry(*owner).or_insert(0isize) += 1;
-        }
-        counts
-    };
-    let mono_histogram = histogram(&mono_all);
-    let dec_histogram = histogram(&dec_all);
-    let l1: usize = mono_histogram
-        .keys()
-        .chain(dec_histogram.keys())
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .map(|owner| {
-            (mono_histogram.get(owner).copied().unwrap_or(0)
-                - dec_histogram.get(owner).copied().unwrap_or(0))
-            .unsigned_abs()
-        })
-        .sum();
-    // decomposition changes the fluid trajectory at roundoff and therefore
-    // may change individual stochastic histories. the conserved observable is
-    // the ownership distribution. its total-variation discrepancy must remain
-    // below ten percent, comparable to the finite-population sampling scale
-    // 1/sqrt(n) and well below a resolved transport signal.
-    assert!(
-        l1 <= mono_all.len().max(dec_all.len()) / 5,
-        "decomposition {counts:?} ({ts:?}) changed the ownership histogram by l1={l1}"
+    assert_eq!(
+        mono_all.len(),
+        dec_all.len(),
+        "decomposition {counts:?} ({ts:?}) changed the population size"
     );
+
+    // the two arms carry the same population and, as the density check below establishes,
+    // the same fluid state bit for bit. transport is then a deterministic function of the
+    // fluxes, the ids and the keyed hashes, so every tracer must land on the same cell.
+    let diverged: Vec<usize> = (0..N_TRACERS)
+        .filter(|&ii| mono_owner[ii] != dec_owner[ii])
+        .collect();
+    assert!(
+        diverged.is_empty(),
+        "decomposition {counts:?} ({ts:?}) moved {} of {N_TRACERS} tracers to a different \
+         cell than the monolithic run; first is id {} at {:?} instead of {:?}",
+        diverged.len(),
+        diverged[0],
+        dec_owner[diverged[0]],
+        mono_owner[diverged[0]]
+    );
+}
+
+/// the interior density of a tile grid, scattered onto the global cell lattice.
+fn global_density(tiles: &[(Sim, Kern)], counts: [usize; 2]) -> Vec<f64> {
+    let cells_per_tile = [N / counts[0], N / counts[1]];
+    let mut out = vec![f64::NAN; N * N];
+    for (flat, (sim, _)) in tiles.iter().enumerate() {
+        let tc = unflatten(flat, counts);
+        let ilo: [isize; 2] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+        for c in sim.geom.interior.iter() {
+            let g: [usize; 2] =
+                std::array::from_fn(|a| tc[a] * cells_per_tile[a] + (c[a] - ilo[a]) as usize);
+            out[g[0] + N * g[1]] = *sim.fields.cons.den.view().at(c);
+        }
+    }
+    out
 }
 
 // a single-axis cut (migration across one boundary) and the 2x2 grid (corners: a tracer can
