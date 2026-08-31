@@ -83,6 +83,10 @@ pub trait MessageTransport {
         device: i32,
         tag: u64,
     );
+
+    /// messages posted and never taken. an exchange that drains what it posts leaves zero, so
+    /// a caller checks this to catch a leg whose two halves disagree on a tag.
+    fn outstanding(&self) -> usize;
 }
 
 /// an in-process message transport: sends pack into a queue keyed by tag, receives drain it.
@@ -96,11 +100,6 @@ pub struct MessageQueue {
 impl MessageQueue {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// messages posted and never taken. an exchange that drains what it posts leaves zero.
-    pub fn outstanding(&self) -> usize {
-        self.posted.borrow().len()
     }
 }
 
@@ -139,6 +138,10 @@ impl MessageTransport for MessageQueue {
         for (c, value) in region.iter().zip(msg) {
             *view.at_mut(c) = value;
         }
+    }
+
+    fn outstanding(&self) -> usize {
+        self.posted.borrow().len()
     }
 }
 
@@ -2481,6 +2484,64 @@ extern "C" __global__ void halo_scatter(
 }
 "#;
 
+// one launch of the strip kernels, on whichever device is current. `field_ptr` is the field's
+// base pointer, `buf_ptr` the contiguous strip, and `idx_ptr` the per-cell flat offsets the
+// caller has already written. `n` cells, one thread each.
+#[cfg(feature = "gpu")]
+fn launch_strip_kernel(source: &str, name: &str, key: &str, a: u64, b: u64, idx_ptr: u64, n: usize) {
+    let n_u32 = n as u32;
+    let kernel = current_dispatcher().jit_kernel_keyed(source, key, name);
+    let mut args = KernelArgs::new();
+    args.push(&a);
+    args.push(&b);
+    args.push(&idx_ptr);
+    args.push(&n_u32);
+    unsafe {
+        current_dispatcher()
+            .runtime()
+            .launch(&kernel, LaunchConfig::for_1d(n_u32, 64), args.as_mut_slice())
+            .unwrap_or_else(|e| panic!("{name} launch failed: {e:?}"));
+    }
+}
+
+/// pack a strided strip into the contiguous buffer: `buf[i] = field[idx[i]]`.
+#[cfg(feature = "gpu")]
+fn launch_gather(field_ptr: u64, buf_ptr: u64, idx_ptr: u64, n: usize) {
+    launch_strip_kernel(
+        HALO_GATHER_KERNEL,
+        "halo_gather",
+        "decomp/halo_gather",
+        field_ptr,
+        buf_ptr,
+        idx_ptr,
+        n,
+    );
+}
+
+/// scatter the contiguous buffer back over a strided strip: `field[idx[i]] = buf[i]`.
+#[cfg(feature = "gpu")]
+fn launch_scatter(field_ptr: u64, buf_ptr: u64, idx_ptr: u64, n: usize) {
+    launch_strip_kernel(
+        HALO_SCATTER_KERNEL,
+        "halo_scatter",
+        "decomp/halo_scatter",
+        field_ptr,
+        buf_ptr,
+        idx_ptr,
+        n,
+    );
+}
+
+/// write a region's per-cell flat offsets into a device index buffer, in `Domain::iter` order.
+/// that order is what makes position `i` of a strip the `i`th cell of the region, so a gather
+/// and the scatter that consumes it agree without carrying any index metadata.
+#[cfg(feature = "gpu")]
+fn write_region_offsets<const D: usize>(domain: &Domain<D>, region: &Domain<D>, idx: *mut u32) {
+    for (i, cell) in region.iter().enumerate() {
+        unsafe { *idx.add(i) = domain.flat_index(cell) as u32 };
+    }
+}
+
 // pooled staging buffers: the gather/scatter index arrays plus the contiguous f64 strip.
 #[cfg(feature = "gpu")]
 struct HaloStageBufs {
@@ -2530,8 +2591,6 @@ impl HaloTransport for StagedCopy {
         let ddom = dst.domain();
         let src_ptr = src.as_ptr() as u64;
         let dst_ptr = dst.as_mut_ptr() as u64;
-        let n_u32 = n as u32;
-        let config = LaunchConfig::for_1d(n_u32, 64);
 
         HALO_STAGE_BUFS.with(|cell| {
             let mut slot = cell.borrow_mut();
@@ -2544,57 +2603,16 @@ impl HaloTransport for StagedCopy {
                 });
             }
             let bufs = slot.as_mut().unwrap();
-            let sp = bufs.sidx.as_mut_ptr::<u32>();
-            let dp = bufs.didx.as_mut_ptr::<u32>();
-            for (i, (sc, dc)) in src_region.iter().zip(dst_region.iter()).enumerate() {
-                unsafe {
-                    *sp.add(i) = sdom.flat_index(sc) as u32;
-                    *dp.add(i) = ddom.flat_index(dc) as u32;
-                }
-            }
+            write_region_offsets(&sdom, src_region, bufs.sidx.as_mut_ptr::<u32>());
+            write_region_offsets(&ddom, dst_region, bufs.didx.as_mut_ptr::<u32>());
             let sidx_ptr = bufs.sidx.as_ptr::<u32>() as u64;
             let didx_ptr = bufs.didx.as_ptr::<u32>() as u64;
             let buf_ptr = bufs.buf.as_mut_ptr::<f64>() as u64;
 
-            // gather: buf[i] = src[sidx[i]] -- pack the strided strip into the contiguous buffer.
-            let gather = current_dispatcher().jit_kernel_keyed(
-                HALO_GATHER_KERNEL,
-                "decomp/halo_gather",
-                "halo_gather",
-            );
-            let mut g = KernelArgs::new();
-            g.push(&src_ptr);
-            g.push(&buf_ptr);
-            g.push(&sidx_ptr);
-            g.push(&n_u32);
-            unsafe {
-                current_dispatcher()
-                    .runtime()
-                    .launch(&gather, config, g.as_mut_slice())
-                    .expect("halo_gather launch failed");
-            }
-
-            // move: single device -- the buffer is the staging, nothing to move. across devices
-            // this is where the peer copy moves `buf` to the neighbor's
-            // buffer before the scatter runs there.
-
-            // scatter: dst[didx[i]] = buf[i].
-            let scatter = current_dispatcher().jit_kernel_keyed(
-                HALO_SCATTER_KERNEL,
-                "decomp/halo_scatter",
-                "halo_scatter",
-            );
-            let mut s = KernelArgs::new();
-            s.push(&dst_ptr);
-            s.push(&buf_ptr);
-            s.push(&didx_ptr);
-            s.push(&n_u32);
-            unsafe {
-                current_dispatcher()
-                    .runtime()
-                    .launch(&scatter, config, s.as_mut_slice())
-                    .expect("halo_scatter launch failed");
-            }
+            launch_gather(src_ptr, buf_ptr, sidx_ptr, n);
+            // one device: the contiguous buffer IS the staging, so the strip goes straight back
+            // out. `PeerCopy` moves this same buffer across the fabric between the two halves.
+            launch_scatter(dst_ptr, buf_ptr, didx_ptr, n);
             // drain before the pooled buffers are reused next call.
             ctx_sync();
         });
@@ -2727,8 +2745,6 @@ impl HaloTransport for PeerCopy {
         let ddom = dst.domain();
         let src_ptr = src.as_ptr() as u64;
         let dst_ptr = dst.as_mut_ptr() as u64;
-        let n_u32 = n as u32;
-        let config = LaunchConfig::for_1d(n_u32, 64);
 
         PEER_BUFS.with(|cell| {
             // stage 0: ensure both devices have buffers, write the per-cell flat offsets into
@@ -2739,22 +2755,10 @@ impl HaloTransport for PeerCopy {
                 ensure_peer_bufs(&mut pool, src_dev, n);
                 ensure_peer_bufs(&mut pool, dst_dev, n);
 
-                let sp = pool[src_dev as usize]
-                    .as_mut()
-                    .unwrap()
-                    .idx
-                    .as_mut_ptr::<u32>();
-                for (i, sc) in src_region.iter().enumerate() {
-                    unsafe { *sp.add(i) = sdom.flat_index(sc) as u32 };
-                }
-                let dp = pool[dst_dev as usize]
-                    .as_mut()
-                    .unwrap()
-                    .idx
-                    .as_mut_ptr::<u32>();
-                for (i, dc) in dst_region.iter().enumerate() {
-                    unsafe { *dp.add(i) = ddom.flat_index(dc) as u32 };
-                }
+                let sp = pool[src_dev as usize].as_mut().unwrap().idx.as_mut_ptr::<u32>();
+                write_region_offsets(&sdom, src_region, sp);
+                let dp = pool[dst_dev as usize].as_mut().unwrap().idx.as_mut_ptr::<u32>();
+                write_region_offsets(&ddom, dst_region, dp);
 
                 let s = pool[src_dev as usize].as_mut().unwrap();
                 let src_idx_ptr = s.idx.as_ptr::<u32>() as u64;
@@ -2767,22 +2771,7 @@ impl HaloTransport for PeerCopy {
 
             // stage 1: gather on the source device -- src_buf[i] = src[sidx[i]].
             with_device(src_dev, || {
-                let gather = current_dispatcher().jit_kernel_keyed(
-                    HALO_GATHER_KERNEL,
-                    "decomp/halo_gather",
-                    "halo_gather",
-                );
-                let mut g = KernelArgs::new();
-                g.push(&src_ptr);
-                g.push(&src_buf_ptr);
-                g.push(&src_idx_ptr);
-                g.push(&n_u32);
-                unsafe {
-                    current_dispatcher()
-                        .runtime()
-                        .launch(&gather, config, g.as_mut_slice())
-                        .expect("peer gather launch failed");
-                }
+                launch_gather(src_ptr, src_buf_ptr, src_idx_ptr, n);
                 ctx_sync();
             });
 
@@ -2798,25 +2787,245 @@ impl HaloTransport for PeerCopy {
 
             // stage 3: scatter on the destination device -- dst[didx[i]] = dst_buf[i].
             with_device(dst_dev, || {
-                let scatter = current_dispatcher().jit_kernel_keyed(
-                    HALO_SCATTER_KERNEL,
-                    "decomp/halo_scatter",
-                    "halo_scatter",
-                );
-                let mut s = KernelArgs::new();
-                s.push(&dst_ptr);
-                s.push(&dst_buf_ptr);
-                s.push(&dst_idx_ptr);
-                s.push(&n_u32);
-                unsafe {
-                    current_dispatcher()
-                        .runtime()
-                        .launch(&scatter, config, s.as_mut_slice())
-                        .expect("peer scatter launch failed");
-                }
+                launch_scatter(dst_ptr, dst_buf_ptr, dst_idx_ptr, n);
                 ctx_sync();
             });
         });
+    }
+}
+
+// a posted strip: the contiguous payload and the device it is resident on. a receive on
+// another device moves the bytes over the fabric before scattering; a receive on the same
+// device scatters in place, which is the single-device staging case. the host arm carries a
+// cpu backend, where a field is not device-addressable and the strip is an ordinary vector.
+#[cfg(feature = "gpu")]
+enum PostedStrip {
+    Host(Vec<f64>),
+    Device {
+        device: i32,
+        cap: usize,
+        len: usize,
+        buf: MemoryBlock<DeviceMemory>,
+    },
+}
+
+#[cfg(feature = "gpu")]
+thread_local! {
+    /// strips posted by a send and not yet taken by a receive, keyed by tag.
+    static POSTED_STRIPS: std::cell::RefCell<std::collections::HashMap<u64, PostedStrip>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    /// payload buffers a receive has finished with, per device, for the next send to reuse.
+    /// a halo exchange posts and takes the same number of strips every step, so the pool
+    /// reaches steady state in the first one and allocates nothing thereafter.
+    static STRIP_FREE: std::cell::RefCell<[Vec<(usize, MemoryBlock<DeviceMemory>)>; MAX_GPUS]> =
+        std::cell::RefCell::new([const { Vec::new() }; MAX_GPUS]);
+    /// per-device scratch for a strip's flat offsets. every gather and scatter drains before
+    /// returning, so one buffer per device serves all of that device's transfers in turn.
+    static STRIP_IDX: std::cell::RefCell<[Option<(usize, MemoryBlock<DeviceMemory>)>; MAX_GPUS]> =
+        std::cell::RefCell::new([const { None }; MAX_GPUS]);
+}
+
+/// the offset scratch for `device`, grown to hold `n` cells, as a raw pointer. allocated in the
+/// device's own context so the buffer is resident on the gpu that reads it.
+#[cfg(feature = "gpu")]
+fn strip_idx_ptr(device: i32, n: usize) -> *mut u32 {
+    STRIP_IDX.with(|cell| {
+        let mut pool = cell.borrow_mut();
+        let slot = &mut pool[device as usize];
+        if slot.as_ref().map_or(true, |(cap, _)| *cap < n) {
+            let block = with_device(device, || {
+                MemoryBlock::<DeviceMemory>::for_elements::<u32>(n).expect("strip idx alloc")
+            });
+            *slot = Some((n, block));
+        }
+        slot.as_mut().unwrap().1.as_mut_ptr::<u32>()
+    })
+}
+
+/// a payload buffer on `device` holding at least `n` doubles, recycled when one is free.
+#[cfg(feature = "gpu")]
+fn take_strip_buf(device: i32, n: usize) -> (usize, MemoryBlock<DeviceMemory>) {
+    STRIP_FREE.with(|cell| {
+        let mut pool = cell.borrow_mut();
+        let free = &mut pool[device as usize];
+        if let Some(i) = free.iter().position(|(cap, _)| *cap >= n) {
+            return free.swap_remove(i);
+        }
+        let block = with_device(device, || {
+            MemoryBlock::<DeviceMemory>::for_elements::<f64>(n).expect("strip payload alloc")
+        });
+        (n, block)
+    })
+}
+
+#[cfg(feature = "gpu")]
+fn return_strip_buf(device: i32, entry: (usize, MemoryBlock<DeviceMemory>)) {
+    STRIP_FREE.with(|cell| cell.borrow_mut()[device as usize].push(entry));
+}
+
+/// pack `region` of `field` into a strip and post it under `tag`. this is the send half the
+/// device transports share: `PeerCopy` and `StagedCopy` gather identically, and they differ
+/// only in whether the matching receive has to move the bytes.
+#[cfg(feature = "gpu")]
+fn strip_send<const D: usize, M: MemorySpace>(
+    field: &Field<f64, D, M>,
+    region: &Domain<D>,
+    device: i32,
+    tag: u64,
+) {
+    let n = region.volume();
+    let strip = if M::IS_DEVICE_ACCESSIBLE && n > 0 {
+        let (cap, mut buf) = take_strip_buf(device, n);
+        let field_ptr = field.as_ptr() as u64;
+        let domain = field.domain();
+        let buf_ptr = buf.as_mut_ptr::<f64>() as u64;
+        with_device(device, || {
+            let idx = strip_idx_ptr(device, n);
+            write_region_offsets(&domain, region, idx);
+            launch_gather(field_ptr, buf_ptr, idx as u64, n);
+            // drain so the strip is complete before a peer move or a scatter reads it, and so
+            // the shared offset scratch is free for this device's next transfer.
+            ctx_sync();
+        });
+        PostedStrip::Device {
+            device,
+            cap,
+            len: n,
+            buf,
+        }
+    } else {
+        let view = field.view();
+        PostedStrip::Host(region.iter().map(|c| *view.at(c)).collect())
+    };
+    let prior = POSTED_STRIPS.with(|cell| cell.borrow_mut().insert(tag, strip));
+    debug_assert!(prior.is_none(), "tag {tag} was posted twice before being taken");
+}
+
+/// take the strip posted under `tag` and scatter it over `region` of `field`. a strip resident
+/// on another device crosses the fabric first; one already on this device scatters in place.
+#[cfg(feature = "gpu")]
+fn strip_recv<const D: usize, M: MemorySpace>(
+    field: &Field<f64, D, M>,
+    region: &Domain<D>,
+    device: i32,
+    tag: u64,
+) {
+    let strip = POSTED_STRIPS
+        .with(|cell| cell.borrow_mut().remove(&tag))
+        .expect("a receive takes a strip its matching send posted");
+    let n = region.volume();
+    match strip {
+        PostedStrip::Host(msg) => {
+            debug_assert_eq!(msg.len(), n, "strip length differs from the receiving region");
+            let mut view = field.view_mut();
+            for (c, value) in region.iter().zip(msg) {
+                *view.at_mut(c) = value;
+            }
+        }
+        PostedStrip::Device {
+            device: src_dev,
+            cap,
+            len,
+            buf,
+        } => {
+            debug_assert_eq!(len, n, "strip length differs from the receiving region");
+            let field_ptr = field.as_mut_ptr() as u64;
+            let domain = field.domain();
+            // a strip from another device is moved into a buffer of this device's own before the
+            // scatter reads it. `memcpy_peer` takes the direct link when the pair can peer and
+            // stages through the host when it cannot, so the move costs bandwidth at worst.
+            let local = if src_dev == device {
+                None
+            } else {
+                let (local_cap, mut local_buf) = take_strip_buf(device, n);
+                memcpy_peer(
+                    local_buf.as_mut_ptr::<f64>() as u64,
+                    device,
+                    buf.as_ptr::<f64>() as u64,
+                    src_dev,
+                    n * std::mem::size_of::<f64>(),
+                )
+                .expect("strip peer copy failed");
+                Some((local_cap, local_buf))
+            };
+            let payload = local.as_ref().map_or(&buf, |(_, b)| b);
+            with_device(device, || {
+                let idx = strip_idx_ptr(device, n);
+                write_region_offsets(&domain, region, idx);
+                launch_scatter(field_ptr, payload.as_ptr::<f64>() as u64, idx as u64, n);
+                ctx_sync();
+            });
+            if let Some(entry) = local {
+                return_strip_buf(device, entry);
+            }
+            return_strip_buf(src_dev, (cap, buf));
+        }
+    }
+}
+
+/// strips outstanding across every device transport: posted by a send and never taken. an
+/// exchange that drains what it posts leaves zero, the same accounting `MessageQueue` reports.
+#[cfg(feature = "gpu")]
+pub fn posted_strips() -> usize {
+    POSTED_STRIPS.with(|cell| cell.borrow().len())
+}
+
+// the one-sided seam for the device transports. `StagedCopy` and `PeerCopy` gather and scatter
+// the same way and differ only in the move between: with both halves on one device there is
+// nothing to move, which is exactly `strip_recv`'s same-device arm. so both delegate, and the
+// distinction stays where it is real -- in `copy_region`, where `StagedCopy` is the proven
+// single-device path and `PeerCopy` adds the cross-device link.
+#[cfg(feature = "gpu")]
+impl MessageTransport for StagedCopy {
+    fn send<const D: usize, M: MemorySpace>(
+        &self,
+        field: &Field<f64, D, M>,
+        region: &Domain<D>,
+        device: i32,
+        tag: u64,
+    ) {
+        strip_send(field, region, device, tag);
+    }
+
+    fn recv<const D: usize, M: MemorySpace>(
+        &self,
+        field: &Field<f64, D, M>,
+        region: &Domain<D>,
+        device: i32,
+        tag: u64,
+    ) {
+        strip_recv(field, region, device, tag);
+    }
+
+    fn outstanding(&self) -> usize {
+        posted_strips()
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl MessageTransport for PeerCopy {
+    fn send<const D: usize, M: MemorySpace>(
+        &self,
+        field: &Field<f64, D, M>,
+        region: &Domain<D>,
+        device: i32,
+        tag: u64,
+    ) {
+        strip_send(field, region, device, tag);
+    }
+
+    fn recv<const D: usize, M: MemorySpace>(
+        &self,
+        field: &Field<f64, D, M>,
+        region: &Domain<D>,
+        device: i32,
+        tag: u64,
+    ) {
+        strip_recv(field, region, device, tag);
+    }
+
+    fn outstanding(&self) -> usize {
+        posted_strips()
     }
 }
 
