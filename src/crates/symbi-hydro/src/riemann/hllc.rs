@@ -177,12 +177,13 @@ pub struct HllcPlusSensors<S> {
 ///   - `Standard`     — plain HLLC.
 ///   - `HllcPlus`     — classical HLLC plus the two velocity-jump dissipation rescalings.
 ///
-/// `phi_floor` raises the acoustic-dissipation scaling to at least the supplied value, for a
-/// face whose flow speed reports a mach number the surrounding physics does not set. the
-/// scaling's premise is that a vanishing face-normal mach number means smooth subsonic flow, so
-/// the acoustic dissipation may fall with it; where a velocity is imposed instead of evolved
-/// that premise is empty and the floor restores the classical amount. `None` leaves the
-/// published scaling as the whole rule and adds no arithmetic to the traced graph.
+/// an immersed body's penalization mask imposes a velocity rather than evolving one, and a
+/// dissipation scaling keyed on that velocity would read the boundary condition as evidence of
+/// smooth subsonic flow. the HllcPlus arm carries no floor against it because neither of its
+/// corrections can be fooled that way: the term they rescale is proportional to the velocity
+/// JUMP across the face, which vanishes where both sides are relaxed onto the same wall
+/// velocity, and `mach_scale` takes the larger of the two sides' mach numbers, so at the mask's
+/// own boundary the moving side sets the scaling and the imposed side cannot lower it.
 #[allow(clippy::too_many_arguments)]
 pub fn hllc<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,

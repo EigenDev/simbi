@@ -158,14 +158,7 @@ pub fn fofc_project_name(
 
 /// the face-flux kernel name, built from named fields.
 ///
-/// the kernel-name segment for a flux whose acoustic dissipation is floored inside an immersed
-/// body's penalization mask. minted here so the bake and the dispatch spell it once; the
-/// floor-free family keeps its unsegmented names.
-pub fn ib_mask_suffix(mask_aware: bool) -> &'static str {
-    if mask_aware { "_ibmask" } else { "" }
-}
-
-/// `{prefix}_face_flux{solver}{recon}{balance}{mask}{chart}{eos}{geom}{spacetime}_{ndim}d_{dir}`.
+/// `{prefix}_face_flux{solver}{recon}{balance}{chart}{eos}{geom}{spacetime}_{ndim}d_{dir}`.
 ///
 /// eight suffix axes, whose order is the whole point. spelled at the call site it has been
 /// spelled three mutually incompatible ways -- the bake putting the reconstruction before the
@@ -187,15 +180,10 @@ pub fn ib_mask_suffix(mask_aware: bool) -> &'static str {
 ///                  any solver may be well-balanced: the first-order FOFC redo runs HLLE, and
 ///                  a piecewise-constant reconstruction of departures is exactly balanced, so
 ///                  the redo carries that property for free.
-///   - `mask`       whether the acoustic dissipation carries a floor inside an immersed body's
-///                  penalization mask (`ib_mask_suffix`). a property of the solver's
-///                  dissipation, so it sits beside the solver arms, and an axis of its own
-///                  because it composes with any reconstruction balance: a masked body in a
-///                  stratified atmosphere wants both.
-///   - `chart`      the coordinate chart, present for a flux that reads positions -- a
+///   - `chart`      the coordinate chart, present for a flux that reads positions: a
 ///                  well-balanced reconstruction evaluates the body potential at cartesian
-///                  coordinates and a mask indicator evaluates the body geometry there, so both
-///                  are baked per chart, while a position-free flux passes `""`.
+///                  coordinates, so it is baked per chart, while a position-free flux
+///                  passes `""`.
 ///   - `eos`        the equation-of-state arm (`EosArm::suffix`), `""` for gamma-law.
 ///   - `geom`       the DOF-lift / GR chart tag, a different axis from `chart`: it keys on
 ///                  momentum DOF exceeding the grid dimension, while `chart` keys on where a
@@ -207,7 +195,6 @@ pub struct FaceFluxName<'a> {
     pub solver: &'a str,
     pub recon: &'a str,
     pub balance: &'a str,
-    pub mask: &'a str,
     pub chart: &'a str,
     pub eos: &'a str,
     pub geom: &'a str,
@@ -223,7 +210,6 @@ impl Default for FaceFluxName<'_> {
             solver: "",
             recon: "",
             balance: "",
-            mask: "",
             chart: "",
             eos: "",
             geom: "",
@@ -237,12 +223,11 @@ impl Default for FaceFluxName<'_> {
 impl FaceFluxName<'_> {
     pub fn build(&self) -> String {
         format!(
-            "{}_face_flux{}{}{}{}{}{}{}{}_{}d_{}",
+            "{}_face_flux{}{}{}{}{}{}{}_{}d_{}",
             self.prefix,
             self.solver,
             self.recon,
             self.balance,
-            self.mask,
             self.chart,
             self.eos,
             self.geom,

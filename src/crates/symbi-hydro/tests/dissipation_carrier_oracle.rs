@@ -108,7 +108,10 @@ fn close(a: f64, b: f64, what: &str) {
 #[test]
 fn mach_scale_picks_the_faster_side_and_caps_at_the_sonic_point() {
     // a max over the two sides, each against its own sound speed: a face with one stagnant
-    // side takes its dissipation from the side that is moving.
+    // side takes its dissipation from the side that is moving. that is what makes an immersed
+    // body's penalization mask harmless here -- the mask imposes a velocity rather than
+    // evolving one, and a scaling that read the smaller side would take the boundary condition
+    // for smooth subsonic flow and strip the dissipation off the mask's own boundary faces.
     assert_eq!(mach_scale(0.02, 0.4, 1.0, 1.0), 0.4);
     assert_eq!(mach_scale(0.4, 0.02, 1.0, 1.0), 0.4);
     // the cap is what makes the correction inert on a shock, with no reference value to set.

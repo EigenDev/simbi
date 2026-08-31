@@ -494,13 +494,11 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                                     continue;
                                 }
                                 {
-                                    let mask = false;
-                                    // the chart segment rides with whichever property makes the
+                                    // the chart segment rides with the property that makes the
                                     // flux read a position: a balanced reconstruction evaluates
-                                    // the body potential, a mask-aware solver the body geometry.
-                                    let reads_position = mask
-                                        || balance
-                                            == symbi_discretize::coords::Balance::Hydrostatic;
+                                    // the body potential at cartesian coordinates.
+                                    let reads_position =
+                                        balance == symbi_discretize::coords::Balance::Hydrostatic;
                                     let charts: &[symbi_geometry::Geometry] = if reads_position {
                                         &[
                                             symbi_geometry::Geometry::Cartesian,
@@ -518,9 +516,6 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                                             solver: solver.kernel_suffix(),
                                             recon: recon.suffix(),
                                             balance: balance.suffix(),
-                                            mask: symbi_discretize::kernel_slug::ib_mask_suffix(
-                                                mask,
-                                            ),
                                             chart: symbi_discretize::kernel_slug::coord_suffix(
                                                 chart,
                                             ),
@@ -535,7 +530,7 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                                         {
                                             missing.push(format!(
                                                 "{solver:?}/{recon:?}/{eos:?}/{balance:?}/\
-                                                 {mask}/{chart:?} on {regime:?}: {name}"
+                                                 {chart:?} on {regime:?}: {name}"
                                             ));
                                         }
                                     }
