@@ -506,7 +506,10 @@ mod tests {
             ]
         );
         assert_eq!(k.scalar_params, vec!["gamma".to_string()]);
-        let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
+        let write_paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(write_paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
         assert!(
             !k.graph.has_errors(),
@@ -713,7 +716,10 @@ mod tests {
             "cs2 is a field, not a scalar: {:?}",
             k.scalar_params
         );
-        let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
+        let write_paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(write_paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
         assert!(
             !k.graph.has_errors(),
@@ -724,9 +730,9 @@ mod tests {
         // pre = recover_pressure = cs2 * rho (the per-cell sound-speed-squared times density).
         let pre_id = writes
             .iter()
-            .find(|(_, rt, _)| rt.name() == "prim.pre")
+            .find(|write| write.destination.name() == "prim.pre")
             .unwrap()
-            .2;
+            .value;
         assert!(
             matches!(
                 &k.graph.node(pre_id).op,
@@ -757,7 +763,10 @@ mod tests {
             ]
         );
         assert_eq!(k.scalar_params, vec!["gamma".to_string()]);
-        let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
+        let write_paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(write_paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
         assert!(
             !k.graph.has_errors(),
@@ -771,9 +780,9 @@ mod tests {
         // shared out-of-cone sentinel, which is non-positive (see c2p_result).
         let pre_id = writes
             .iter()
-            .find(|(_, rt, _)| rt.name() == "prim.pre")
+            .find(|write| write.destination.name() == "prim.pre")
             .unwrap()
-            .2;
+            .value;
         let newton_id = match &k.graph.node(pre_id).op {
             Op::Select(_, then_branch, _) => *then_branch,
             other => panic!("expected prim.pre = Select(cone, newton, sentinel), got {other:?}"),
@@ -812,7 +821,10 @@ mod tests {
             ]
         );
         assert_eq!(k.scalar_params, vec!["gamma".to_string()]);
-        let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
+        let write_paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(
             write_paths,
             vec![
