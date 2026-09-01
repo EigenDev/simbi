@@ -1448,9 +1448,9 @@ pub fn compile_kernel_prec(
 /// the kernel's ABI manifest. `writes` are the trace's `(key, runtime, node)` outputs. the bridge
 /// for v2 fusion: build the godunov+source `GvKernel` (`splice_fused_sources_to_contribs` /
 /// `godunov_stage_gv_with_fused_sources`), JIT it here, dispatch the fused single-pass kernel.
-pub fn compile_gv_kernel(
+pub fn compile_gv_kernel<W: symbi_ir::KernelWriteEffect>(
     kernel: &symbi_ir::GvKernel,
-    writes: &[(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)],
+    writes: &[W],
     ndim: usize,
 ) -> Result<CompiledKernel, JitError> {
     compile_gv_kernel_prec(kernel, writes, ndim, symbi_ir::emit::Precision::F64)
@@ -1459,15 +1459,17 @@ pub fn compile_gv_kernel(
 /// compile a runtime `GvKernel` at the given precision (the reduced-precision runtime-JIT path,
 /// e.g. an f32 shaped immersed-body wall). the graph is traced at f64; `precision` overrides the
 /// codegen element width.
-pub fn compile_gv_kernel_prec(
+pub fn compile_gv_kernel_prec<W: symbi_ir::KernelWriteEffect>(
     kernel: &symbi_ir::GvKernel,
-    writes: &[(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)],
+    writes: &[W],
     ndim: usize,
     precision: symbi_ir::emit::Precision,
 ) -> Result<CompiledKernel, JitError> {
     let field_inputs: Vec<String> = kernel.field_inputs.iter().map(|(k, _)| k.clone()).collect();
-    let field_writes: Vec<(String, symbi_ir::graph::NodeId)> =
-        writes.iter().map(|(k, _, n)| (k.clone(), *n)).collect();
+    let field_writes: Vec<(String, symbi_ir::graph::NodeId)> = writes
+        .iter()
+        .map(|write| (write.key().to_string(), write.value()))
+        .collect();
     compile_kernel_prec(
         &kernel.graph,
         &field_inputs,

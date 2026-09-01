@@ -47,7 +47,7 @@ use symbi_hydro::state::Prim;
 use symbi_hydro::{MhdPrim, RhdGr, RmhdGr};
 use symbi_ib::excise::ks_excised;
 use symbi_ir::algebra::Scalar;
-use symbi_ir::gv::Writes;
+use symbi_ir::gv::{KernelWrite, KernelWrites};
 use symbi_ir::{FieldRef, Gv, GvKernel, begin_trace, end_trace};
 
 use crate::coords::{Coords, Spacetime, Spacing};
@@ -109,7 +109,7 @@ fn excised_mask_3d(x: &[Gv; 3]) -> <Gv as Scalar>::Mask {
 /// filled state to the exc_0.. scratch (the commit is `excise_writeback`, so the
 /// fill sees the pre-pass state at every read). `dof = 2` is the in-plane GR-hydro state; `dof = 3`
 /// carries the out-of-plane momentum of the 2.5d MHD state.
-fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, Writes) {
+fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let names = prim_names(dof);
     let refs = prim_refs(dof);
@@ -127,59 +127,59 @@ fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, Writes) {
         .map(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]))
         .collect();
 
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for (kk, val) in filled.iter().enumerate() {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("exc_out_{kk}"),
-            format!("exc_{kk}").into(),
+            format!("exc_{kk}"),
             val.node(),
         ));
     }
     (end_trace(), writes)
 }
 
-pub fn excise_fill_gv() -> (GvKernel, Writes) {
+pub fn excise_fill_gv() -> (GvKernel, KernelWrites) {
     excise_fill_2d_dof_gv(2)
 }
 
 /// the 2.5d (dof = 3) gas fill: rho, vel_0..2, pre on the 2d grid — the
 /// magnetized equatorial slice's momentum set.
-pub fn excise_fill_dof3_gv() -> (GvKernel, Writes) {
+pub fn excise_fill_dof3_gv() -> (GvKernel, KernelWrites) {
     excise_fill_2d_dof_gv(3)
 }
 
 /// the sweep commit: copy the exc scratch back into the primitive fields.
 /// unmasked over the dispatch box — the fill wrote live cells' own values,
 /// so the copy is the bitwise identity there.
-fn excise_writeback_dof_gv(dof: usize) -> (GvKernel, Writes) {
+fn excise_writeback_dof_gv(dof: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let names = prim_names(dof);
     let refs = prim_refs(dof);
     let vals: Vec<Gv> = (0..refs.len())
         .map(|kk| Gv::field(&format!("exc_{kk}"), format!("exc_{kk}")))
         .collect();
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for kk in 0..refs.len() {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("{}_out", names[kk]),
-            refs[kk].into(),
+            refs[kk],
             vals[kk].node(),
         ));
     }
     (end_trace(), writes)
 }
 
-pub fn excise_writeback_gv() -> (GvKernel, Writes) {
+pub fn excise_writeback_gv() -> (GvKernel, KernelWrites) {
     excise_writeback_dof_gv(2)
 }
 
-pub fn excise_writeback_dof3_gv() -> (GvKernel, Writes) {
+pub fn excise_writeback_dof3_gv() -> (GvKernel, KernelWrites) {
     excise_writeback_dof_gv(3)
 }
 
 /// the 1d radial commit (dof = 1): rho, vel_0, pre. the writeback is a chart-free scratch copy,
 /// so this one serves the spherical row without a spacetime or geometry variant.
-pub fn excise_writeback_dof1_gv() -> (GvKernel, Writes) {
+pub fn excise_writeback_dof1_gv() -> (GvKernel, KernelWrites) {
     excise_writeback_dof_gv(1)
 }
 
@@ -190,7 +190,7 @@ pub fn excise_writeback_dof1_gv() -> (GvKernel, Writes) {
 /// factors, so setting the primitives and rebuilding locally is the exact route. live cells pass their conserved
 /// state through untouched (in-place select). the metric is the spinning-kerr
 /// rank-1 form with the host-filled `kerr_spin` (zero for the a = 0 chart).
-pub fn excise_p2c_gv() -> (GvKernel, Writes) {
+pub fn excise_p2c_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let gamma = Gv::scalar("gamma");
     let mass = Gv::scalar("schwarzschild_mass");
@@ -230,22 +230,22 @@ pub fn excise_p2c_gv() -> (GvKernel, Writes) {
     };
     let cons = regime.to_conserved(&IdealGas { gamma }, &prim);
 
-    let mut writes: Writes = Vec::new();
-    writes.push((
-        "den_out".to_string(),
-        FieldRef::cons_den().into(),
+    let mut writes = KernelWrites::new();
+    writes.push(KernelWrite::new(
+        "den_out",
+        FieldRef::cons_den(),
         Gv::select(excised, cons.den, den).node(),
     ));
     for kk in 0..2 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_out_{kk}"),
-            FieldRef::cons_mom(kk as u8).into(),
+            FieldRef::cons_mom(kk as u8),
             Gv::select(excised, cons.mom[kk], mom[kk]).node(),
         ));
     }
-    writes.push((
-        "nrg_out".to_string(),
-        FieldRef::cons_nrg().into(),
+    writes.push(KernelWrite::new(
+        "nrg_out",
+        FieldRef::cons_nrg(),
         Gv::select(excised, cons.nrg, nrg).node(),
     ));
     (end_trace(), writes)
@@ -290,7 +290,7 @@ fn excised_mask_sph(x_r: Gv) -> <Gv as Scalar>::Mask {
 /// live cells keep their own state. the same absorbing boundary the cartesian charts use — the
 /// exterior rarefies into the vacuum at the excision faces and stays there, which is the
 /// physical content of a horizon: every characteristic points inward.
-fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> (GvKernel, Writes) {
+fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let names = prim_names(dof);
     let refs = prim_refs(dof);
@@ -303,11 +303,11 @@ fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> (GvKernel, Writes) {
         .map(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]))
         .collect();
 
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for (kk, val) in filled.iter().enumerate() {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("exc_out_{kk}"),
-            format!("exc_{kk}").into(),
+            format!("exc_{kk}"),
             val.node(),
         ));
     }
@@ -315,12 +315,12 @@ fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> (GvKernel, Writes) {
 }
 
 /// the 1d radial gas fill (dof = 1): the michel / bondi row.
-pub fn excise_fill_sph_1d_gv() -> (GvKernel, Writes) {
+pub fn excise_fill_sph_1d_gv() -> (GvKernel, KernelWrites) {
     excise_fill_sph_dof_gv(1, 1)
 }
 
 /// the 2d (r, theta) gas fill with the azimuthal swirl momentum (dof = 3): the rotating GR flows.
-pub fn excise_fill_sph_2d_gv() -> (GvKernel, Writes) {
+pub fn excise_fill_sph_2d_gv() -> (GvKernel, KernelWrites) {
     excise_fill_sph_dof_gv(2, 3)
 }
 
@@ -328,7 +328,7 @@ pub fn excise_fill_sph_2d_gv() -> (GvKernel, Writes) {
 /// the ingoing kerr-schild metric at the cell's own sampling position; live cells pass their
 /// conserved state through untouched. the spinning form serves both charts — at `a = 0` it is the
 /// schwarzschild kerr-schild metric, so one kernel covers the whole horizon-penetrating family.
-fn excise_p2c_sph_ks_dof_gv(ndim: usize, dof: usize) -> (GvKernel, Writes) {
+fn excise_p2c_sph_ks_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let gamma = Gv::scalar("gamma");
     let mass = Gv::scalar("schwarzschild_mass");
@@ -368,31 +368,31 @@ fn excise_p2c_sph_ks_dof_gv(ndim: usize, dof: usize) -> (GvKernel, Writes) {
     };
     let cons = regime.to_conserved(&IdealGas { gamma }, &prim);
 
-    let mut writes: Writes = vec![(
-        "den_out".to_string(),
-        FieldRef::cons_den().into(),
+    let mut writes = vec![KernelWrite::new(
+        "den_out",
+        FieldRef::cons_den(),
         Gv::select(excised, cons.den, den).node(),
     )];
     for kk in 0..dof {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_out_{kk}"),
-            FieldRef::cons_mom(kk as u8).into(),
+            FieldRef::cons_mom(kk as u8),
             Gv::select(excised, cons.mom[kk], mom[kk]).node(),
         ));
     }
-    writes.push((
-        "nrg_out".to_string(),
-        FieldRef::cons_nrg().into(),
+    writes.push(KernelWrite::new(
+        "nrg_out",
+        FieldRef::cons_nrg(),
         Gv::select(excised, cons.nrg, nrg).node(),
     ));
     (end_trace(), writes)
 }
 
-pub fn excise_p2c_sph_ks_1d_gv() -> (GvKernel, Writes) {
+pub fn excise_p2c_sph_ks_1d_gv() -> (GvKernel, KernelWrites) {
     excise_p2c_sph_ks_dof_gv(1, 1)
 }
 
-pub fn excise_p2c_sph_ks_2d_gv() -> (GvKernel, Writes) {
+pub fn excise_p2c_sph_ks_2d_gv() -> (GvKernel, KernelWrites) {
     excise_p2c_sph_ks_dof_gv(2, 3)
 }
 
@@ -401,7 +401,7 @@ pub fn excise_p2c_sph_ks_2d_gv() -> (GvKernel, Writes) {
 /// their own state. the rho/vel_0..2/pre set serves both the 3d GR-hydro state
 /// and the 3d magnetized gas state (the field lives on the staggered faces,
 /// outside this fill).
-pub fn excise_fill_3d_gv() -> (GvKernel, Writes) {
+pub fn excise_fill_3d_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let names = prim_names(3);
     let refs = prim_refs(3);
@@ -418,11 +418,11 @@ pub fn excise_fill_3d_gv() -> (GvKernel, Writes) {
     let filled: [Gv; 5] =
         std::array::from_fn(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]));
 
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for (kk, val) in filled.iter().enumerate() {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("exc_out_{kk}"),
-            format!("exc_{kk}").into(),
+            format!("exc_{kk}"),
             val.node(),
         ));
     }
@@ -430,7 +430,7 @@ pub fn excise_fill_3d_gv() -> (GvKernel, Writes) {
 }
 
 /// the 3d sweep commit: copy the exc scratch back into the primitive fields.
-pub fn excise_writeback_3d_gv() -> (GvKernel, Writes) {
+pub fn excise_writeback_3d_gv() -> (GvKernel, KernelWrites) {
     excise_writeback_dof_gv(3)
 }
 
@@ -438,7 +438,7 @@ pub fn excise_writeback_3d_gv() -> (GvKernel, Writes) {
 /// the valencia `to_conserved` with the (spin-generic) cartesian kerr-schild spatial
 /// metric at the cell's own centroid; live cells pass their conserved state through
 /// untouched.
-pub fn excise_p2c_3d_gv() -> (GvKernel, Writes) {
+pub fn excise_p2c_3d_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let gamma = Gv::scalar("gamma");
     let mass = Gv::scalar("schwarzschild_mass");
@@ -478,22 +478,22 @@ pub fn excise_p2c_3d_gv() -> (GvKernel, Writes) {
     };
     let cons = regime.to_conserved(&IdealGas { gamma }, &prim);
 
-    let mut writes: Writes = Vec::new();
-    writes.push((
-        "den_out".to_string(),
-        FieldRef::cons_den().into(),
+    let mut writes = KernelWrites::new();
+    writes.push(KernelWrite::new(
+        "den_out",
+        FieldRef::cons_den(),
         Gv::select(excised, cons.den, den).node(),
     ));
     for kk in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_out_{kk}"),
-            FieldRef::cons_mom(kk as u8).into(),
+            FieldRef::cons_mom(kk as u8),
             Gv::select(excised, cons.mom[kk], mom[kk]).node(),
         ));
     }
-    writes.push((
-        "nrg_out".to_string(),
-        FieldRef::cons_nrg().into(),
+    writes.push(KernelWrite::new(
+        "nrg_out",
+        FieldRef::cons_nrg(),
         Gv::select(excised, cons.nrg, nrg).node(),
     ));
     (end_trace(), writes)
@@ -509,7 +509,7 @@ pub fn excise_p2c_3d_gv() -> (GvKernel, Writes) {
 /// through untouched. MHD momentum/velocity vectors are always 3-component
 /// (the 2d grid instance is the equatorial slice with z = 0 in the metric
 /// position), so one builder serves both grid dimensions.
-fn excise_p2c_mhd_dim_gv(ndim: usize) -> (GvKernel, Writes) {
+fn excise_p2c_mhd_dim_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let gamma = Gv::scalar("gamma");
     let mass = Gv::scalar("schwarzschild_mass");
@@ -559,32 +559,32 @@ fn excise_p2c_mhd_dim_gv(ndim: usize) -> (GvKernel, Writes) {
     cons.hydro.nrg =
         alpha * cons.hydro.nrg + (alpha - Gv::ONE) * cons.hydro.den - beta.dot(&cons.hydro.mom);
 
-    let mut writes: Writes = Vec::new();
-    writes.push((
-        "den_out".to_string(),
-        FieldRef::cons_den().into(),
+    let mut writes = KernelWrites::new();
+    writes.push(KernelWrite::new(
+        "den_out",
+        FieldRef::cons_den(),
         Gv::select(excised, cons.hydro.den, den).node(),
     ));
     for kk in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_out_{kk}"),
-            FieldRef::cons_mom(kk as u8).into(),
+            FieldRef::cons_mom(kk as u8),
             Gv::select(excised, cons.hydro.mom[kk], mom[kk]).node(),
         ));
     }
-    writes.push((
-        "nrg_out".to_string(),
-        FieldRef::cons_nrg().into(),
+    writes.push(KernelWrite::new(
+        "nrg_out",
+        FieldRef::cons_nrg(),
         Gv::select(excised, cons.hydro.nrg, nrg).node(),
     ));
     (end_trace(), writes)
 }
 
-pub fn excise_p2c_mhd_gv() -> (GvKernel, Writes) {
+pub fn excise_p2c_mhd_gv() -> (GvKernel, KernelWrites) {
     excise_p2c_mhd_dim_gv(2)
 }
 
-pub fn excise_p2c_mhd_3d_gv() -> (GvKernel, Writes) {
+pub fn excise_p2c_mhd_3d_gv() -> (GvKernel, KernelWrites) {
     excise_p2c_mhd_dim_gv(3)
 }
 
@@ -606,7 +606,7 @@ pub fn shell_flux_map_gv(
     axes: &[usize],
     ndim: usize,
     flux_base: &str,
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let geo = cell_geometry_gv(coords, spacing, axes, ndim);
     let r_d = Gv::scalar("diagnostic_radius");
@@ -640,9 +640,9 @@ pub fn shell_flux_map_gv(
     }
     (
         end_trace(),
-        vec![(
-            "shell_flux".to_string(),
-            FieldRef::Scratch.into(),
+        vec![KernelWrite::new(
+            "shell_flux",
+            FieldRef::Scratch,
             contrib.node(),
         )],
     )

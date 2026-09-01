@@ -57,7 +57,8 @@ use symbi_discretize::{
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::{Graph, NodeId};
 use symbi_ir::{
-    FieldBind, KernelEmitInputs, emit_kernel_cpu, emit_kernel_cpu_serial, prepare, prepared_to_ir,
+    FieldBind, KernelEmitInputs, KernelWriteEffect, KernelWrites, emit_kernel_cpu,
+    emit_kernel_cpu_serial, legacy_writes, prepare, prepared_to_ir,
 };
 
 // the immersed-body kernels pack one slot per body; the count is owned by the
@@ -730,12 +731,12 @@ macro_rules! gv_dim {
 // `GvKernel` already carries the graph + the ABI manifest (field inputs, scalar params, coord
 // axes), so the gen just asserts the graph is clean and write_both's it with the recorded
 // manifest.
-fn emit_gv(
+fn emit_gv<W: KernelWriteEffect>(
     out_dir: &str,
     kernel_name: &str,
     ndim: u8,
     k: &GvKernel,
-    writes: &[(String, FieldBind, NodeId)],
+    writes: &[W],
 ) {
     assert!(
         !k.graph.has_errors(),
@@ -752,6 +753,7 @@ fn emit_gv(
     } else {
         None
     };
+    let writes = legacy_writes(writes);
     write_both_with_support(
         out_dir,
         &k.graph,
@@ -765,7 +767,7 @@ fn emit_gv(
             coalesce_layout: symbi_discretize::kernel_coalesces_layout(kernel_name),
             field_inputs: &k.field_inputs,
             scalar_params: &k.scalar_params,
-            field_writes: writes,
+            field_writes: &writes,
             coord_components: &k.coord_components,
             device_preamble: &[],
             tile_spec: tile_spec.as_ref(),
@@ -2619,8 +2621,7 @@ fn gen_fofc_body_select(out_dir: &str, ndim: u8, coords: Coords, prefix: &str, h
 // an isothermal twin) share one (coords, ndim, dof, axes, has_dye) signature, so every
 // chart/dof block below is a (name-stem, builder) table. per-block arrays keep each
 // block's registration order (the registry records kernels in emission order).
-type PenalizeBuilder =
-    fn(Coords, usize, usize, &[usize], bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>);
+type PenalizeBuilder = fn(Coords, usize, usize, &[usize], bool) -> (GvKernel, KernelWrites);
 
 fn gen_penalize_dyed(out_dir: &str, ndim: u8) {
     use symbi_discretize::coords::Coords;

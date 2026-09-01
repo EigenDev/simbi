@@ -1993,10 +1993,7 @@ fn shaped_penalize_gv(
     has_energy: bool,
     spin: bool,
     shape: &symbi_ib::sdf::SdfExpr<f64, 3>,
-) -> (
-    symbi_discretize::GvKernel,
-    Vec<(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)>,
-) {
+) -> (symbi_discretize::GvKernel, symbi_ir::KernelWrites) {
     match (has_energy, spin) {
         (true, false) => {
             symbi_discretize::penalize_porous_gv_shaped(coords, ndim, dof, shape, false)
@@ -2041,6 +2038,7 @@ fn shaped_penalize_ir(
         return k.clone();
     }
     let (gvk, writes) = shaped_penalize_gv(coords, ndim, dof, has_energy, spin, shape);
+    let legacy_writes = symbi_ir::legacy_writes(&writes);
     // a unique name per distinct shape: the render cache aliases on the name.
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let name = format!("penalize_shaped_{id}");
@@ -2057,7 +2055,7 @@ fn shaped_penalize_ir(
         coalesce_layout: false,
         field_inputs: &gvk.field_inputs,
         scalar_params: &gvk.scalar_params,
-        field_writes: &writes,
+        field_writes: &legacy_writes,
         coord_components: &gvk.coord_components,
         device_preamble: &[],
         tile_spec: None,
