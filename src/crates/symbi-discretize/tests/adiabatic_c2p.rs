@@ -19,7 +19,7 @@ fn n_components<const NCOMP: usize>() -> usize {
     );
     writes
         .iter()
-        .filter(|(_, rt, _)| rt.name().starts_with("prim.vel["))
+        .filter(|write| write.destination.name().starts_with("prim.vel["))
         .count()
 }
 

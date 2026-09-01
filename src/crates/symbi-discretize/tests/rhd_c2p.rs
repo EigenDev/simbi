@@ -16,7 +16,7 @@ mod harness;
 use harness::KernelRun;
 
 use symbi_discretize::{EosArm, rhd_c2p_gv, rhd_flux_gv};
-use symbi_ir::graph::NodeId;
+use symbi_ir::KernelWrites;
 
 // emit the gv-built RHD c2p (`rhd_c2p_gv` = symbi-hydro's `rhd_recover` at S=Gv) as
 // CPU source. the const-generic <D> instance is selected by ndim (build.rs does the same).
@@ -84,10 +84,10 @@ fn rhd_c2p_1d_lowers_and_emits() {
 #[test]
 fn rhd_c2p_is_dimension_generic() {
     // the same gv builder yields D velocity components — 1D: 1, 2D: 2, 3D: 3.
-    let n_vel = |writes: &[(String, symbi_ir::FieldBind, NodeId)]| {
+    let n_vel = |writes: &KernelWrites| {
         writes
             .iter()
-            .filter(|(_, rt, _)| rt.name().starts_with("prim.vel["))
+            .filter(|write| write.destination.name().starts_with("prim.vel["))
             .count()
     };
     let (k1, w1) = rhd_c2p_gv::<1>(4, EosArm::IdealGamma);

@@ -11,14 +11,15 @@ use symbi_geometry::{
     SchwarzschildKSCylindrical,
 };
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
+use symbi_ir::{KernelWrite, KernelWrites};
 
 /// trace the real adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
 /// `S = Gv` — into a dispatchable kernel. the carrier-generic physics is the kernel
 /// builder; this is what replaces the hand-written `adiabatic_c2p` Expr builder. returns
-/// the `GvKernel` (graph + ABI manifest) and the `(write_key, runtime_path, root)` writes.
+/// the `GvKernel` (graph + ABI manifest) and its named write effects.
 /// note: the `Regime::to_primitive` wrapper's native error-code branches are host-only
 /// diagnostics — the kernel traces the branch-free math `Cons::to_primitive`.
-pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
     begin_trace();
     // input binding: the conserved fields + the eos scalar, as Gv leaves.
     let den = Gv::field("cons_den", FieldRef::cons_den());
@@ -39,21 +40,21 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, 
     let prim: Prim<Gv, D> = cons.to_primitive(&IdealGas { gamma });
 
     // decompose the recovered primitive into field writes.
-    let mut writes = vec![(
-        "prim_rho".to_string(),
-        FieldRef::PrimRho.into(),
+    let mut writes = vec![KernelWrite::new(
+        "prim_rho",
+        FieldRef::PrimRho,
         prim.rho.node(),
     )];
     for k in 0..D {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8).into(),
+            FieldRef::PrimVel(k as u8),
             prim.vel[k].node(),
         ));
     }
-    writes.push((
-        "prim_pre".to_string(),
-        FieldRef::PrimPre.into(),
+    writes.push(KernelWrite::new(
+        "prim_pre",
+        FieldRef::PrimPre,
         prim.pre.node(),
     ));
 
@@ -72,7 +73,7 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, 
 /// iso c2p is geometry-independent and ncomp == ndim (the cyl r-z swirl, with DOF > ndim,
 /// falls outside its coverage), so the `<D>` instance is a complete drop-in: one
 /// geometry-free builder serves every iso grid.
-pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
     begin_trace();
     // input binding: the conserved fields + the prescribed per-cell sound-speed-squared
     // field `cs2` (the local temperature; global isothermal is a uniform cs2). cs2 is bound
@@ -96,21 +97,21 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId
     };
     let prim = cons.to_primitive(&Isothermal { cs: Gv::ONE }); // cs unused: recover reads nrg
 
-    let mut writes = vec![(
-        "prim_rho".to_string(),
-        FieldRef::PrimRho.into(),
+    let mut writes = vec![KernelWrite::new(
+        "prim_rho",
+        FieldRef::PrimRho,
         prim.rho.node(),
     )];
     for k in 0..D {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8).into(),
+            FieldRef::PrimVel(k as u8),
             prim.vel[k].node(),
         ));
     }
-    writes.push((
-        "prim_pre".to_string(),
-        FieldRef::PrimPre.into(),
+    writes.push(KernelWrite::new(
+        "prim_pre",
+        FieldRef::PrimPre,
         prim.pre.node(),
     ));
 
@@ -123,7 +124,7 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId
 /// primitives alone, so the pressure there is re-derived from the prolonged rho — otherwise
 /// the face reconstruction sees a spurious vacuum at every level seam. pointwise
 /// and dimension-independent (emitted per ndim like the snapshot family).
-pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn iso_pre_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     let cs2 = Gv::field("cs2", "cs2");
@@ -131,7 +132,7 @@ pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     let pre = cs2 * rho;
     (
         end_trace(),
-        vec![("prim_pre".to_string(), FieldRef::PrimPre.into(), pre.node())],
+        vec![KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node())],
     )
 }
 
@@ -146,10 +147,7 @@ pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 /// `eos.pressure`/`sound_speed_sq`/explicit `h`.
 /// the host wrapper's input guard + post-hoc diagnostics are host-only — the kernel
 /// computes the raw recovery, exactly as the substrate already does.
-pub fn rhd_c2p_gv<const D: usize>(
-    max_iters: usize,
-    eos_arm: EosArm,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rhd_c2p_gv<const D: usize>(max_iters: usize, eos_arm: EosArm) -> (GvKernel, KernelWrites) {
     begin_trace();
     // input binding: the conserved fields + the eos scalar, as Gv leaves.
     let den = Gv::field("cons_den", FieldRef::cons_den());
@@ -178,21 +176,21 @@ pub fn rhd_c2p_gv<const D: usize>(
         max_iters,
     );
 
-    let mut writes = vec![(
-        "prim_rho".to_string(),
-        FieldRef::PrimRho.into(),
+    let mut writes = vec![KernelWrite::new(
+        "prim_rho",
+        FieldRef::PrimRho,
         prim.rho.node(),
     )];
     for k in 0..D {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8).into(),
+            FieldRef::PrimVel(k as u8),
             prim.vel[k].node(),
         ));
     }
-    writes.push((
-        "prim_pre".to_string(),
-        FieldRef::PrimPre.into(),
+    writes.push(KernelWrite::new(
+        "prim_pre",
+        FieldRef::PrimPre,
         prim.pre.node(),
     ));
 
@@ -214,7 +212,7 @@ pub fn rhd_c2p_gr_gv<const D: usize>(
     spacing: &[Spacing],
     axes: &[usize],
     max_iters: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
+) -> (GvKernel, KernelWrites)
 where
     SchwarzschildKS<Gv>: Metric<Gv, D>,
     SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
@@ -284,21 +282,21 @@ where
     };
     let prim = rhd_recover(&IdealGas { gamma }, &cons, &metric, max_iters);
 
-    let mut writes = vec![(
-        "prim_rho".to_string(),
-        FieldRef::PrimRho.into(),
+    let mut writes = vec![KernelWrite::new(
+        "prim_rho",
+        FieldRef::PrimRho,
         prim.rho.node(),
     )];
     for k in 0..D {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8).into(),
+            FieldRef::PrimVel(k as u8),
             prim.vel[k].node(),
         ));
     }
-    writes.push((
-        "prim_pre".to_string(),
-        FieldRef::PrimPre.into(),
+    writes.push(KernelWrite::new(
+        "prim_pre",
+        FieldRef::PrimPre,
         prim.pre.node(),
     ));
     (end_trace(), writes)
@@ -314,7 +312,7 @@ where
 /// 1D/2D cases), so this always traces `rmhd_recover::<Gv, 3>` — `ndim` selects the emit grid
 /// loop. reads the 8-field conserved (den, mom_{0,1,2}, nrg, mag_{0,1,2})
 /// + gamma; writes (rho, vel_{0,1,2}, pre). B passes through, recovered by the CT evolution.
-pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     // input binding, in the substrate's field-read order: den, mom, nrg (tau), mag, gamma.
     let den = Gv::field("cons_den", FieldRef::cons_den());
@@ -342,21 +340,21 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeI
         max_iters,
     );
 
-    let mut writes = vec![(
-        "prim_rho".to_string(),
-        FieldRef::PrimRho.into(),
+    let mut writes = vec![KernelWrite::new(
+        "prim_rho",
+        FieldRef::PrimRho,
         prim.rho.node(),
     )];
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8).into(),
+            FieldRef::PrimVel(k as u8),
             prim.vel[k].node(),
         ));
     }
-    writes.push((
-        "prim_pre".to_string(),
-        FieldRef::PrimPre.into(),
+    writes.push(KernelWrite::new(
+        "prim_pre",
+        FieldRef::PrimPre,
         prim.pre.node(),
     ));
 
@@ -376,7 +374,7 @@ pub fn rmhd_c2p_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     max_iters: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let den = Gv::field("cons_den", FieldRef::cons_den());
     let mom: [Gv; 3] =
@@ -431,21 +429,21 @@ pub fn rmhd_c2p_gr_gv(
     };
     let prim = rmhd_recover(&IdealGas { gamma: gamma_eos }, &cons, &metric, max_iters);
 
-    let mut writes = vec![(
-        "prim_rho".to_string(),
-        FieldRef::PrimRho.into(),
+    let mut writes = vec![KernelWrite::new(
+        "prim_rho",
+        FieldRef::PrimRho,
         prim.rho.node(),
     )];
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8).into(),
+            FieldRef::PrimVel(k as u8),
             prim.vel[k].node(),
         ));
     }
-    writes.push((
-        "prim_pre".to_string(),
-        FieldRef::PrimPre.into(),
+    writes.push(KernelWrite::new(
+        "prim_pre",
+        FieldRef::PrimPre,
         prim.pre.node(),
     ));
 
@@ -466,7 +464,7 @@ pub fn rmhd_c2p_gr_gv(
 /// (rho, vel, pre). the host-side `to_primitive` error codes stay on the host (the
 /// traced math is branch-free, comparisons living with the caller). reads `cons_mag_k` because
 /// recovering the gas pressure requires stripping 1/2|B|^2 from the total energy.
-pub fn nmhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn nmhd_c2p_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let den = Gv::field("cons_den", FieldRef::cons_den());
     let mom: [Gv; 3] =
@@ -487,21 +485,21 @@ pub fn nmhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     };
     let prim = nmhd_recover(&IdealGas { gamma }, &cons);
 
-    let mut writes = vec![(
-        "prim_rho".to_string(),
-        FieldRef::PrimRho.into(),
+    let mut writes = vec![KernelWrite::new(
+        "prim_rho",
+        FieldRef::PrimRho,
         prim.rho.node(),
     )];
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8).into(),
+            FieldRef::PrimVel(k as u8),
             prim.vel[k].node(),
         ));
     }
-    writes.push((
-        "prim_pre".to_string(),
-        FieldRef::PrimPre.into(),
+    writes.push(KernelWrite::new(
+        "prim_pre",
+        FieldRef::PrimPre,
         prim.pre.node(),
     ));
 
@@ -518,7 +516,7 @@ pub fn nmhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 
 /// trace the isothermal-MHD c2p — trivial inversion (rho = den, v = mom/den), writing rho
 /// and vel. the single source the substrate c2p kernel renders.
-pub fn imhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn imhd_c2p_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let den = Gv::field("cons_den", FieldRef::cons_den());
     let mom: [Gv; 3] =
@@ -539,15 +537,15 @@ pub fn imhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     // out of the manifest.
     let prim = imhd_recover(&Isothermal { cs: Gv::ZERO }, &cons);
 
-    let mut writes = vec![(
-        "prim_rho".to_string(),
-        FieldRef::PrimRho.into(),
+    let mut writes = vec![KernelWrite::new(
+        "prim_rho",
+        FieldRef::PrimRho,
         prim.rho.node(),
     )];
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8).into(),
+            FieldRef::PrimVel(k as u8),
             prim.vel[k].node(),
         ));
     }
