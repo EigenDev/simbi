@@ -859,11 +859,11 @@ pub fn user_defined_source(
 pub fn lift_to_built(build: impl FnOnce() -> Vec<Gv>) -> BuiltSource {
     // isolate the trace: these builders run both standalone (config-time, before any trace opens)
     // and partway through the godunov trace (the AOT/substrate fused-source bake calls
-    // `build_source` mid-trace). `in_isolated_trace` saves/restores any open outer trace so it
+    // `build_source` mid-trace). `trace` saves/restores any open outer trace so it
     // survives the inner build intact. node ids are collected inside the closure, while the inner
     // trace is live.
     let (kernel, outputs) =
-        symbi_ir::in_isolated_trace(|| build().iter().map(|g| g.node()).collect::<Vec<NodeId>>());
+        symbi_ir::trace(|| build().iter().map(|g| g.node()).collect::<Vec<NodeId>>());
     BuiltSource {
         graph: kernel.graph,
         params: kernel.scalar_params,

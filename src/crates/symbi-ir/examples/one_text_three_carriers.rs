@@ -16,9 +16,7 @@
 // =============================================================================
 
 use symbi_ir::algebra::Scalar;
-use symbi_ir::{
-    Backend, Cpu, Gv, ScalarExpr, ScalarStmt, emit_cpu, emit_cuda, in_isolated_trace, scalarize,
-};
+use symbi_ir::{Backend, Cpu, Gv, ScalarExpr, ScalarStmt, emit_cpu, emit_cuda, scalarize, trace};
 
 /// the specific enthalpy of an ideal gas, `h = 1 + gamma/(gamma - 1) p/rho`.
 ///
@@ -80,7 +78,7 @@ fn main() {
     // ---- carrier two: Gv. the same call records a graph. --------------------
     // `Gv::scalar(name)` is a leaf standing for a runtime input. every operator
     // the function applies to it appends a node to the trace opened here.
-    let (kernel, out) = in_isolated_trace(|| {
+    let (kernel, out) = trace(|| {
         let rho = Gv::scalar("rho");
         let pre = Gv::scalar("pre");
         let gamma = Gv::scalar("gamma");
@@ -130,7 +128,7 @@ fn main() {
     // expression. the relativistic energy density consults the lorentz factor
     // three times, and common subexpression elimination binds it once.
     let vsq = 0.36_f64;
-    let (kernel, out) = in_isolated_trace(|| {
+    let (kernel, out) = trace(|| {
         tau(
             Gv::scalar("rho"),
             Gv::scalar("pre"),
@@ -175,7 +173,7 @@ fn main() {
     // ---- and the same graph renders for either machine -----------------------
     // both emitters read the one lowered form, so the CPU and the GPU cannot
     // hold different opinions about what the physics is.
-    let (kernel, out) = in_isolated_trace(|| {
+    let (kernel, out) = trace(|| {
         specific_enthalpy(Gv::scalar("rho"), Gv::scalar("pre"), Gv::scalar("gamma")).node()
     });
     let h = scalarize(&kernel.graph, out, "specific_enthalpy");

@@ -155,9 +155,46 @@ impl LaunchGrade {
     }
 }
 
-/// the writes manifest each builder pairs with its `GvKernel`: per output, a
-/// `(write_key, born-typed runtime binding, root_node)` triple. fusion concatenates
-/// these after the splice remaps `root_node` into the fused graph.
+/// one effectful kernel output: the IR-side output name, its runtime
+/// destination, and the graph value stored there.
+///
+/// named fields make the three namespaces explicit. in particular, `key` is
+/// an IR/ABI symbol while `destination` identifies storage; neither can be
+/// mistaken for the graph-owned `value` as they could in a positional tuple.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelWrite {
+    pub key: String,
+    pub destination: FieldBind,
+    pub value: NodeId,
+}
+
+impl KernelWrite {
+    pub fn new(key: impl Into<String>, destination: impl Into<FieldBind>, value: NodeId) -> Self {
+        Self {
+            key: key.into(),
+            destination: destination.into(),
+            value,
+        }
+    }
+}
+
+impl From<(String, FieldBind, NodeId)> for KernelWrite {
+    fn from((key, destination, value): (String, FieldBind, NodeId)) -> Self {
+        Self::new(key, destination, value)
+    }
+}
+
+impl From<KernelWrite> for (String, FieldBind, NodeId) {
+    fn from(write: KernelWrite) -> Self {
+        (write.key, write.destination, write.value)
+    }
+}
+
+/// the named write-effect manifest used by kernel composition.
+pub type KernelWrites = Vec<KernelWrite>;
+
+/// legacy builder manifest. builder families migrate to [`KernelWrites`]
+/// incrementally; compiler composition already accepts only the named form.
 pub type Writes = Vec<(String, FieldBind, NodeId)>;
 
 #[derive(Clone, Debug)]
@@ -234,19 +271,32 @@ thread_local! {
     static GV_TRACE: RefCell<Option<GvTrace>> = const { RefCell::new(None) };
 }
 
+fn fresh_trace() -> GvTrace {
+    GvTrace {
+        graph: Graph::new(),
+        field_inputs: Vec::new(),
+        field_keys: HashSet::new(),
+        scalar_params: Vec::new(),
+        scalar_keys: HashSet::new(),
+        coord_components: Vec::new(),
+        coord_nodes: HashMap::new(),
+        node_supports: HashMap::new(),
+    }
+}
+
 /// open a fresh trace. `Gv` ops between this and `end_trace` record into it.
+///
+/// this low-level compatibility API rejects nesting instead of silently
+/// discarding the active graph. new code should use [`trace`], whose scope is
+/// panic-safe and which isolates a nested trace deliberately.
 pub fn begin_trace() {
     GV_TRACE.with(|t| {
-        *t.borrow_mut() = Some(GvTrace {
-            graph: Graph::new(),
-            field_inputs: Vec::new(),
-            field_keys: HashSet::new(),
-            scalar_params: Vec::new(),
-            scalar_keys: HashSet::new(),
-            coord_components: Vec::new(),
-            coord_nodes: HashMap::new(),
-            node_supports: HashMap::new(),
-        });
+        let mut active = t.borrow_mut();
+        assert!(
+            active.is_none(),
+            "begin_trace() while a trace is already active; use trace(|| ...) for deliberate nesting"
+        );
+        *active = Some(fresh_trace());
     });
 }
 
@@ -305,18 +355,44 @@ pub fn tag_support_ball(
     });
 }
 
-/// run `f` in a fresh, isolated trace and return the finished (untagged) kernel + `f`'s result.
-/// any trace already active on this thread is saved before and restored after, so this is safe
-/// to call while another trace is open (e.g., building a sub-source `BuiltSource` partway through
-/// a godunov trace). the save/restore is what keeps the outer trace's nodes and manifest intact
-/// across the inner `begin_trace`/`end_trace` pair, which share the one thread-local slot.
-pub fn in_isolated_trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
-    let saved = GV_TRACE.with(|t| t.borrow_mut().take());
-    begin_trace();
-    let r = f();
+/// restores the trace that surrounded a scoped [`trace`] call.
+///
+/// `Drop` is load-bearing: if tracing or `end_trace` panics, unwinding discards
+/// the incomplete inner graph and reinstates the outer graph before the panic
+/// can be caught. the ambient slot therefore behaves transactionally.
+struct TraceScope {
+    previous: Option<GvTrace>,
+}
+
+impl Drop for TraceScope {
+    fn drop(&mut self) {
+        GV_TRACE.with(|slot| {
+            *slot.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
+/// run `f` in a fresh isolated trace, returning the finished untagged kernel
+/// and the closure's ordinary result.
+///
+/// an outer trace, if present, is restored on both normal return and panic.
+/// deliberate nesting is therefore explicit and cannot overwrite the outer
+/// graph. this is the sanctioned construction API; `begin_trace` / `end_trace`
+/// remain temporarily for migration of existing builders.
+pub fn trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
+    let previous = GV_TRACE.with(|slot| slot.borrow_mut().take());
+    let scope = TraceScope { previous };
+    GV_TRACE.with(|slot| *slot.borrow_mut() = Some(fresh_trace()));
+
+    let result = f();
     let kernel = end_trace();
-    GV_TRACE.with(|t| *t.borrow_mut() = saved);
-    (kernel, r)
+    drop(scope);
+    (kernel, result)
+}
+
+/// compatibility name for [`trace`].
+pub fn in_isolated_trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
+    trace(f)
 }
 
 impl GvKernel {
@@ -365,7 +441,7 @@ impl GvKernel {
     /// the identity element for the fusion monoid at the given grade. an
     /// empty graph with empty writes and reads. `try_fuse(noop(g), k) == k` for any
     /// tagged `k` with `k.grade == g` (identity law).
-    pub fn noop(grade: LaunchGrade) -> (GvKernel, Writes) {
+    pub fn noop(grade: LaunchGrade) -> (GvKernel, KernelWrites) {
         (
             GvKernel {
                 graph: Graph::new(),
@@ -487,10 +563,10 @@ fn collect_support_params(e: &crate::support::ParamExpr, f: &mut impl FnMut(&str
 /// writes with NodeIds remapped through the splice.
 pub fn try_fuse(
     a: GvKernel,
-    a_writes: Writes,
+    a_writes: KernelWrites,
     b: GvKernel,
-    b_writes: Writes,
-) -> Result<(GvKernel, Writes), FusionError> {
+    b_writes: KernelWrites,
+) -> Result<(GvKernel, KernelWrites), FusionError> {
     use crate::passes::splice::splice_graph;
 
     // law: grade-equality + tagged-only.
@@ -517,8 +593,14 @@ pub fn try_fuse(
 
     // law: disjoint writes. compare by the canonical path name (both reads and writes are
     // born-typed FieldBind now), so the in-place/inter-dep detection is spelling-invariant.
-    let a_write_paths: HashSet<String> = a_writes.iter().map(|(_, p, _)| p.name()).collect();
-    let b_write_paths: HashSet<String> = b_writes.iter().map(|(_, p, _)| p.name()).collect();
+    let a_write_paths: HashSet<String> = a_writes
+        .iter()
+        .map(|write| write.destination.name())
+        .collect();
+    let b_write_paths: HashSet<String> = b_writes
+        .iter()
+        .map(|write| write.destination.name())
+        .collect();
     if let Some(p) = a_write_paths.intersection(&b_write_paths).next() {
         return Err(FusionError::WriteConflict {
             runtime_path: p.clone(),
@@ -577,7 +659,7 @@ pub fn try_fuse(
     }
 
     // splice b's full subgraph reachable from each write root.
-    let b_roots: Vec<NodeId> = b_writes.iter().map(|(_, _, n)| *n).collect();
+    let b_roots: Vec<NodeId> = b_writes.iter().map(|write| write.value).collect();
     let remapped_b_roots = splice_graph(&mut target, &b.graph, &b_roots, &subst)
         .map_err(|e| FusionError::Splice(format!("{}", e)))?;
 
@@ -627,9 +709,12 @@ pub fn try_fuse(
 
     // writes: a's preserved verbatim (target started as a's graph clone),
     // b's remapped to the spliced NodeIds.
-    let mut fused_writes: Writes = a_writes;
-    for ((k, p, _), new_root) in b_writes.into_iter().zip(remapped_b_roots) {
-        fused_writes.push((k, p, new_root));
+    let mut fused_writes: KernelWrites = a_writes;
+    for (write, new_root) in b_writes.into_iter().zip(remapped_b_roots) {
+        fused_writes.push(KernelWrite {
+            value: new_root,
+            ..write
+        });
     }
 
     Ok((fused, fused_writes))
@@ -1367,6 +1452,47 @@ impl crate::algebra::Scalar for Gv {
 // =============================================================================
 
 #[cfg(test)]
+mod trace_scope_laws {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[test]
+    fn scoped_trace_restores_outer_trace_after_panic() {
+        begin_trace();
+        let outer = Gv::param("outer");
+
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            let _ = trace(|| {
+                let inner = Gv::param("inner");
+                let _ = inner + Gv(GvVal::Lit(1.0));
+                panic!("deliberate inner-trace failure");
+            });
+        }));
+        assert!(panic.is_err());
+
+        // an operation after the caught panic must append to the restored
+        // outer graph, not to the discarded inner graph or an empty slot.
+        let root = (outer + Gv(GvVal::Lit(2.0))).node();
+        let kernel = end_trace();
+        assert!(kernel.graph.param(&Symbol::intern("outer")).is_some());
+        assert!(kernel.graph.param(&Symbol::intern("inner")).is_none());
+        assert!((root.0 as usize) < kernel.graph.len());
+    }
+
+    #[test]
+    fn low_level_begin_rejects_nesting_without_replacing_outer_trace() {
+        begin_trace();
+        let _outer = Gv::param("outer");
+
+        let nested = catch_unwind(begin_trace);
+        assert!(nested.is_err());
+
+        let kernel = end_trace();
+        assert!(kernel.graph.param(&Symbol::intern("outer")).is_some());
+    }
+}
+
+#[cfg(test)]
 mod fusion_laws {
     use super::*;
     use symbi_algebra::{Space, domain};
@@ -1399,14 +1525,14 @@ mod fusion_laws {
         out_key: &str,
         out_path: &str,
         grade: LaunchGrade,
-    ) -> (GvKernel, Writes) {
+    ) -> (GvKernel, KernelWrites) {
         begin_trace();
         let x = Gv::field(in_key, in_path);
         let two = Gv(GvVal::Lit(2.0));
         let y = x * two;
         let root = y.node();
         let kern = end_trace_with(grade);
-        let writes = vec![(out_key.to_string(), out_path.into(), root)];
+        let writes = vec![KernelWrite::new(out_key, out_path, root)];
         (kern, writes)
     }
 
@@ -1416,7 +1542,7 @@ mod fusion_laws {
     // duplicates), so the comparison is over semantic sets.
     fn manifest_sets(
         k: &GvKernel,
-        w: &Writes,
+        w: &KernelWrites,
     ) -> (HashSet<(String, String)>, HashSet<String>, HashSet<String>) {
         let inputs: HashSet<_> = k
             .field_inputs
@@ -1424,7 +1550,7 @@ mod fusion_laws {
             .map(|(k, b)| (k.clone(), b.name()))
             .collect();
         let scalars: HashSet<_> = k.scalar_params.iter().cloned().collect();
-        let writes: HashSet<_> = w.iter().map(|(_, p, _)| p.name()).collect();
+        let writes: HashSet<_> = w.iter().map(|write| write.destination.name()).collect();
         (inputs, scalars, writes)
     }
 
@@ -1508,26 +1634,27 @@ mod fusion_laws {
         let g = interior_grade();
         let (a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", g.clone());
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
-        let a_roots: Vec<NodeId> = aw.iter().map(|(_, _, n)| *n).collect();
+        let a_roots: Vec<NodeId> = aw.iter().map(|write| write.value).collect();
 
         let (fused, fused_w) = try_fuse(a, aw, b, bw).expect("fuse(a, b)");
 
         // a's writes preserved verbatim at the head of the writes manifest.
         for (i, &a_root) in a_roots.iter().enumerate() {
             assert_eq!(
-                fused_w[i].2, a_root,
+                fused_w[i].value, a_root,
                 "a-write root #{i} was renumbered; equivalence broken"
             );
         }
 
         // every fused write root is a valid node in the fused graph.
         let n_nodes = fused.graph.len();
-        for (k, p, root) in fused_w.iter() {
+        for write in &fused_w {
             assert!(
-                (root.0 as usize) < n_nodes,
-                "fused write {k}@{} has dangling NodeId {:?}",
-                p.name(),
-                root
+                (write.value.0 as usize) < n_nodes,
+                "fused write {}@{} has dangling NodeId {:?}",
+                write.key,
+                write.destination.name(),
+                write.value
             );
         }
     }
