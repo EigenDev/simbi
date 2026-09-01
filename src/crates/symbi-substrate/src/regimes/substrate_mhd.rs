@@ -807,8 +807,8 @@ where
             return;
         }
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, -1.0);
-        // eos_param is gamma (has_energy MHD); c_drain uses the adiabatic default 1.0.
-        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.eos_param.value(), 1.0);
+        // eos_param is gamma (has_energy MHD); both drain dials use the adiabatic defaults.
+        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.eos_param.value(), 1.0, 3.0);
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, 1.0);
     }
 

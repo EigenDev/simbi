@@ -168,8 +168,8 @@ where
 // =============================================================================
 
 /// static-refinement hierarchy: levels[0] = coarsest, levels[n-1] = finest.
-/// a fatal crash: either the CFL watchdog (the wave speed went NaN or collapsed — an unphysical
-/// c2p, e.g. V -> 1 near a boundary — so the next dt is NaN / non-positive / blown up) or a panic
+/// a fatal crash: either the CFL watchdog (the wave speed went NaN or made the timestep
+/// non-positive) or a panic
 /// caught inside the step (the FOFC freeze-streak halt, a poisoned-cell assertion). the evolve loop
 /// halts on the last computed state and the driver snapshots a `.crashed` checkpoint + reports it,
 /// so every crash of either class reaches the user with its state on disk.
@@ -182,6 +182,14 @@ pub struct CrashReport {
     /// the payload of a panic caught inside `step_root`; the dt fields carry NaN in
     /// that case, and the watchdog's own reports leave this empty.
     pub panic: Option<String>,
+}
+
+/// A positive CFL estimate may increase by an arbitrary factor after a transient fast cell
+/// disappears; only estimates that cannot advance time are fatal. Keep this predicate separate
+/// from the final-time/user clamps so NaN cannot be hidden by `f64::min`.
+#[inline]
+fn fatal_cfl_dt(dt_cfl: f64) -> bool {
+    dt_cfl.is_nan() || dt_cfl <= 0.0
 }
 
 struct HierarchyRetrySidecars<const D: usize> {
@@ -218,8 +226,8 @@ where
     /// the axes whose tile grid closes into a ring, carried down to every level's layout: a
     /// wrapping axis sends mass leaving the grid to the far end rather than out of it.
     tracer_root_wraps: [bool; NDIM],
-    /// set by `step_root` when the cfl dt is fatal (NaN / non-positive / a sudden blowup from a
-    /// collapsed wave speed). `Some` halts the march at the last computed state; the driver writes a
+    /// set by `step_root` when the cfl dt is fatal (NaN / non-positive). `Some` halts the march at
+    /// the last computed state; the driver writes a
     /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
     pub crash: Option<CrashReport>,
 
@@ -236,7 +244,7 @@ where
     /// every cell.
     pub equilibrium_mask_radius: Option<f64>,
 
-    /// the previous step's raw cfl-derived dt — the quantity the collapse guard compares against.
+    /// the previous step's raw cfl-derived dt, retained for crash diagnostics.
     /// the level's `state.dt` is the accepted dt, which the `t_final` clamp and an explicit-step
     /// rejection both shrink; comparing a fresh cfl estimate against it reports a "collapse" every
     /// time a rejected step is replayed at a smaller dt and then recovers. 0 before the first step.
@@ -1863,26 +1871,20 @@ where
 
     /// the watchdog-screened root timestep. the crash detection runs ahead of the `t_final`
     /// clamp: the clamp `dt_cfl.min(t_final - time)` silently replaces a NaN dt with the
-    /// remaining time (f64::min returns the non-NaN operand) and pulls a collapsed-wave-speed
-    /// blowup (an unphysical c2p cell — e.g. V->1 at the inner boundary — drives the cfl speed
-    /// -> 0, so dt -> huge) down to the remaining time; either way the run would "finish" at
-    /// t_final on garbage. a physical flow grows dt smoothly (cfl-limited), so a crash shows
-    /// as: NaN / non-positive, or a sudden >1000x one-step jump in the raw cfl dt. a genuinely
-    /// static state (dt_cfl = +inf) arises from the rest state at step 0 alone (dt_prev = 0,
-    /// skipped) -> the clamp takes the run end. a fatal estimate records the crash and yields
-    /// nothing, so the caller halts on the last computed state.
+    /// remaining time (f64::min returns the non-NaN operand). a larger positive CFL timestep is
+    /// never itself unsafe: it means the maximum signal speed fell. in particular, a transient
+    /// pressure-supported low-density cell can make one estimate tiny and then refill on the next
+    /// step; rejecting the ensuing increase mislabels that recovery as a wave-speed reduction
+    /// failure. a fatal estimate is therefore only NaN or non-positive. it records the crash and
+    /// yields nothing, so the caller halts on the last computed state.
     fn watchdog_root_dt(&mut self, t_final: f64) -> Option<f64> {
         let dt_cfl = prof("cfl", || self.raw_root_cfl());
         let (iter, time) = {
             let r = &self.levels[0].state;
             (r.iteration, r.time)
         };
-        // compare cfl estimate against cfl estimate. `state.dt` is the accepted dt, which both the
-        // `t_final` clamp and a rejected-step replay shrink below the rate the wave speeds imply —
-        // measuring a fresh estimate against it reports a collapse whenever a reduced step recovers.
         let dt_prev = self.prev_dt_cfl; // 0.0 before the first step
-        let crashed =
-            dt_cfl.is_nan() || dt_cfl <= 0.0 || (dt_prev > 0.0 && dt_cfl > 1.0e3 * dt_prev);
+        let crashed = fatal_cfl_dt(dt_cfl);
         if crashed {
             // record the crash and halt on this state: the evolve loop reports it and the driver
             // snapshots `.crashed.h5` from the last computed state and stops. the run therefore
@@ -1896,8 +1898,8 @@ where
             });
             return None;
         }
-        // the guard's reference for the next step: the rate the wave speeds imply, before the
-        // user clamp, the `t_final` clamp, or any rejection reduces it.
+        // Retain the raw rate-derived value for any next-step crash report, before user/final-time
+        // clamps or a rejected-step replay reduce the accepted step.
         self.prev_dt_cfl = dt_cfl;
         let root = &self.levels[0];
         let user_clamp = root.state.max_dt;
@@ -4673,4 +4675,21 @@ fn wb_band_enabled() -> bool {
             .map(|v| v != "0")
             .unwrap_or(true)
     })
+}
+
+#[cfg(test)]
+mod cfl_watchdog_tests {
+    use super::fatal_cfl_dt;
+
+    #[test]
+    fn recovered_transient_wave_speed_is_not_a_crash() {
+        // A pressure-supported density hole can briefly make c_s, and hence the CFL rate,
+        // enormous. Once it refills, an arbitrarily larger positive dt is safe.
+        assert!(!fatal_cfl_dt(1.653_851e-10));
+        assert!(!fatal_cfl_dt(4.127_354e-5));
+        assert!(!fatal_cfl_dt(f64::INFINITY));
+        assert!(fatal_cfl_dt(f64::NAN));
+        assert!(fatal_cfl_dt(0.0));
+        assert!(fatal_cfl_dt(-1.0));
+    }
 }

@@ -42,13 +42,13 @@ def test_zero_accretion_radius_rejected() -> None:
 
 @pytest.mark.parametrize("rate", [-1.0, 1.0e-30, 0.5, 1.0e6])
 def test_any_nonzero_sink_rate_rejected(rate: float) -> None:
-    # the drain rate is not a parameter. every immersed-boundary surface drains at the local
-    # sound-crossing rate `c_s / (c_drain * dx)`, and the sink scalar is bound to zero wherever a
-    # surface exists — which `penalize_owns_accretion` makes unconditional.
+    # the drain rate is not a parameter. the spherical accretor drains at the problem-data rate
+    # `k_drain * sqrt(GM / r_acc^3)`, and the sink scalar is bound to zero wherever a surface
+    # exists — which `penalize_owns_accretion` makes unconditional.
     #
     # any nonzero value is refused, not merely a negative one. a positive value is the dangerous
     # case: it is silently ignored, so a run asserts control over its accretion rate that it does not
-    # have, and the resulting Mdot is entirely reasonable-looking — it is simply the sound-crossing
+    # have, and the resulting Mdot is entirely reasonable-looking — it is simply the free-fall
     # drain, whatever the dial said. three shipped configs built scientific arguments on this dial,
     # including a proposed comparison against Xu (2023)'s smooth sink that was never reachable.
     with pytest.raises(ConfigError, match="sink_rate"):

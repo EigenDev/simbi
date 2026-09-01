@@ -141,8 +141,8 @@ fn field_gap(h: &HostSim, d: &DevSim) -> f64 {
 fn mhd_shaped_wall_penalize_matches_cpu_on_device() {
     let h = build::<CpuSpace, HostMemory>();
     let d = build::<CudaSpace, UnifiedMemory>();
-    dispatch_penalize(&h, 1e-3, GAMMA, 1.0);
-    dispatch_penalize(&d, 1e-3, GAMMA, 1.0);
+    dispatch_penalize(&h, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&d, 1e-3, GAMMA, 1.0, 3.0);
     symbi_xpu::cuda::ctx_sync();
 
     // penalize rewrites the gas cons (magnetosonic-stiff via c_a2) and leaves the cell B

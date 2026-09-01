@@ -79,8 +79,8 @@ fn build<Sc: Scalar + OrderedNumeric>()
 fn f32_shaped_wall_tracks_f64() {
     let h64 = build::<f64>();
     let h32 = build::<f32>();
-    dispatch_penalize(&h64, 1e-3, GAMMA, 1.0);
-    dispatch_penalize(&h32, 1e-3, GAMMA, 1.0);
+    dispatch_penalize(&h64, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&h32, 1e-3, GAMMA, 1.0, 3.0);
 
     // cons agree at f32 tolerance (the f32 codegen is physically correct).
     let mut gap = 0.0_f64;

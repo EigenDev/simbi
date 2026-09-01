@@ -60,14 +60,18 @@ fn make() -> Sim {
     .build();
     sim.with_bodies(
         BodyCollection::new().add(
-            Body::rigid_sphere(
+            // gravitating because the spherical drain rate is k_drain*sqrt(GM/r_acc^3);
+            // the pull never acts here, since the gravity source is not dispatched.
+            Body::black_hole(
                 0,
                 Tensor::new(BODY),
                 Tensor::zeros(),
                 1.0,
                 R_BODY,
+                R_BODY,
+                0.0,
                 1.0,
-                false,
+                R_BODY,
             )
             .with_surface(SurfaceSpec::Drain),
         ),

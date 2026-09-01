@@ -51,8 +51,13 @@ const ISO_GAMMA: f64 = 1.0;
 /// a D-generic isothermal `KernelSet`, every method substrate-generated.
 pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
     pub cs: f64,
-    /// the drain timescale dial tau = c_drain dx / c_s.
+    /// the shaped porous wall's drain timescale dial tau = c_drain dx / c_s.
     pub c_drain: f64,
+    /// the spherical drain rate dial: rate = k_drain sqrt(GM/r_acc^3), a constant of the
+    /// problem data. a mask cell empties within 1/k_drain of a free-fall crossing, so the
+    /// emergent accretion rate is flat in k_drain once it reaches order one — the convergence
+    /// study sweeps it. the shaped porous wall keeps its own dial `c_drain`.
+    pub k_drain: f64,
     /// constant kinematic viscosity nu. 0 = inviscid (the
     /// viscous pass and its CFL cap are inert). >0 selects the Navier-Stokes
     /// shear operator and caps dt at C_visc dx^2 / nu.
@@ -125,6 +130,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         Self {
             cs,
             c_drain: 1.0,
+            k_drain: 3.0,
             viscosity: 0.0,
             alpha: 0.0,
             cfl_number,
@@ -744,7 +750,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     fn penalize(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
         // the [Drain] stack: the sole accretion mechanism on
         // cartesian grids; the iso kernel reads `cs` through the eos-param slot.
-        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.cs, self.c_drain);
+        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.cs, self.c_drain, self.k_drain);
     }
 
     fn viscous(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {

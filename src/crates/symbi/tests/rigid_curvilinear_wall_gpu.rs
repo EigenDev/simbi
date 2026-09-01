@@ -146,8 +146,8 @@ fn penalize_once(
 ) -> ([f64; 2], [f64; 2], f64) {
     let h = build::<CpuSpace, HostMemory>(vel_x, true, body_vel, surface);
     let d = build::<CudaSpace, UnifiedMemory>(vel_x, true, body_vel, surface);
-    dispatch_penalize(&h, 1e-3, GAMMA, 1.0);
-    dispatch_penalize(&d, 1e-3, GAMMA, 1.0);
+    dispatch_penalize(&h, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&d, 1e-3, GAMMA, 1.0, 3.0);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
     let hf = h.immersed.as_ref().unwrap().diagnostics.consolidate()[0].force_delta;
     let df = d.immersed.as_ref().unwrap().diagnostics.consolidate()[0].force_delta;

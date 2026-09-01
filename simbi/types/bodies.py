@@ -222,24 +222,26 @@ class AccretionProperties:
                 f"gas. got {self.accretion_radius}."
             )
         # the drain rate is not a free parameter. every immersed-boundary surface (drain, porous,
-        # torque-free) drains through the penalization stack at `1 / tau` with
-        # `tau = c_drain * dx / c_s` — the local sound-crossing time of a cell, scaled by a
-        # convergence dial. the legacy in-godunov sink that `sink_rate` once set is retired, and the
-        # scalar is bound to zero wherever a surface exists, which is everywhere.
+        # torque-free) drains through the penalization stack. the spherical accretor drains at
+        # `k_drain * sqrt(GM / r_acc^3)` — a constant of the problem data, k_drain free-fall rates
+        # at the mask radius, so a mask cell empties within a fraction of a crossing and the
+        # emergent Mdot is set by the flow. the rate reads no cell state: a rate keyed to the
+        # cell's own sound speed feeds back at a pressure-fed evacuating seam cell and empties it
+        # in finite time, taking the timestep with it. the shaped porous wall relaxes on its own
+        # dial `tau = c_drain * dx / c_s`. the legacy in-godunov sink that `sink_rate` once set is
+        # retired, and the scalar is bound to zero wherever a surface exists, which is everywhere.
         #
         # refused rather than ignored: a run that sets it is asserting control over the accretion
-        # rate that it does not have, and the resulting Mdot looks entirely reasonable — it is simply
-        # the sound-crossing drain, whatever the dial said. with `r_acc` a fixed multiple of `dx` and
-        # `c_s ~ r^-1/2` near an accretor, that rate is a fixed multiple of the local dynamical rate
-        # `1 / t_acc` at every resolution, so the sink is self-similar and there is nothing here to
-        # tune per run.
+        # rate that it does not have, and the resulting Mdot looks entirely reasonable — it is
+        # simply the free-fall drain, whatever the dial said. the sink is self-similar across
+        # resolution by construction, so there is nothing here to tune per run.
         if self.sink_rate != 0.0:
             raise _config_error(
                 f"sink_rate={self.sink_rate} is not a live parameter: the immersed-boundary "
-                "penalization surface owns accretion, and it drains at the local sound-crossing "
-                "rate c_s/(c_drain*dx) — the scalar is bound to zero. drop the argument. to change "
-                "the drain rate the dial is `c_drain` on the substrate kernel set (tau = c_drain*dx"
-                "/c_s), which is not yet exposed to the configuration layer."
+                "penalization surface owns accretion, and the spherical drain runs at "
+                "k_drain*sqrt(GM/r_acc^3) — the scalar is bound to zero. drop the argument. to "
+                "change the drain rate the dial is `k_drain` on the substrate kernel set, which "
+                "is not yet exposed to the configuration layer."
             )
         if self.porosity is not None and not (0.0 <= self.porosity <= 1.0):
             raise _config_error(

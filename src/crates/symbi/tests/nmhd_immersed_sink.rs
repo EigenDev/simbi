@@ -197,7 +197,7 @@ fn nmhd_naive_drain_without_the_sandwich_corrupts_the_gas_energy() {
     // if this ever stops dropping, the sandwich has become a silent no-op.
     let sim = setup(0.5);
     let before = cell_state(&sim);
-    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0, 3.0);
     let after = cell_state(&sim);
 
     let mut drained = 0;

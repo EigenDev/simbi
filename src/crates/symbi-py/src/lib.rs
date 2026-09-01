@@ -2622,13 +2622,12 @@ where
         screen.leave();
         table.set_dynamic(false);
         let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
-        // report which halt condition fired and its numbers. the four are different failures with
+        // report which halt condition fired and its numbers. these are different failures with
         // different fixes: a caught step panic carries its own message (the FOFC freeze-streak
         // halt names the offending cell and state), a non-finite rate is a poisoned cell, a
-        // non-positive one a degenerate state, and a sudden jump means the cfl rate collapsed
-        // (the wave speeds went to zero, or the scratch the reduction reads was left holding
-        // something other than a rate). asserting one diagnosis for all sends every
-        // investigation down the same wrong path.
+        // non-positive one a degenerate state. a positive increase is allowed: it means the
+        // maximum signal speed fell and is not itself unsafe. asserting one diagnosis for all
+        // sends every investigation down the same wrong path.
         let cause = if let Some(msg) = &c.panic {
             format!("step panic: {msg}")
         } else if c.dt_cfl.is_nan() {
@@ -2636,12 +2635,7 @@ where
         } else if c.dt_cfl <= 0.0 {
             format!("cfl dt is non-positive ({:.6e})", c.dt_cfl)
         } else {
-            format!(
-                "cfl dt jumped {:.3e}x in one step ({:.6e} -> {:.6e}) — the cfl rate collapsed",
-                c.dt_cfl / c.dt_prev,
-                c.dt_prev,
-                c.dt_cfl
-            )
+            format!("invalid cfl dt ({:.6e})", c.dt_cfl)
         };
         let summary = format!(
             "crashed — {} steps, t = {:.4} — {cause} · state {crashed}",
