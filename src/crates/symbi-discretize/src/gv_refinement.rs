@@ -26,14 +26,11 @@
 // =============================================================================
 
 use symbi_algebra::algebra::Numeric;
-use symbi_ir::FieldBind;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::graph::{ConstValue, ElementWiseOp, NodeId};
-use symbi_ir::{Gv, GvKernel, begin_trace, end_trace, with_trace};
+use symbi_ir::{Gv, GvKernel, KernelWrite, KernelWrites, begin_trace, end_trace, with_trace};
 
 use super::gv::gv_load_at;
-
-type Writes = Vec<(String, FieldBind, NodeId)>;
 
 /// prolongation order for the coarse-fine transfer. one order higher than the
 /// evolution reconstruction (pcm evolution -> plm prolong, plm -> ppm) so the
@@ -191,7 +188,7 @@ fn quartic_interp<S: Scalar>(
 /// restrict_nd pass order). input "src" is the fine field, output "dst" the
 /// coarse field; the dispatch domain is the coarse coverage in absolute coarse
 /// indices.
-pub fn refine_restrict_gv(ndim: usize, ratio: i64) -> (GvKernel, Writes) {
+pub fn refine_restrict_gv(ndim: usize, ratio: i64) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "refine_restrict_gv: ndim must be 1..=3"
@@ -212,7 +209,7 @@ pub fn refine_restrict_gv(ndim: usize, ratio: i64) -> (GvKernel, Writes) {
     });
     let inv_r = Gv::from_f64(1.0 / ratio as f64);
     let val = restrict_eval(&scaled, ratio, inv_r, ndim as isize - 1, &mut [0; 3]);
-    let writes = vec![("dst".to_string(), "dst".into(), val.node())];
+    let writes = vec![KernelWrite::new("dst", "dst", val.node())];
     (end_trace(), writes)
 }
 
@@ -254,22 +251,22 @@ fn restrict_eval(scaled: &[NodeId], ratio: i64, inv_r: Gv, ax: isize, off: &mut 
 /// dst = src, pointwise — the device field snapshot (prim_old / bcell_old /
 /// bface_old). each buffer resolves the thread coord against its own lo, so
 /// staggered fields copy with the same kernel.
-pub fn field_copy_gv(ndim: usize) -> (GvKernel, Writes) {
+pub fn field_copy_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     assert!((1..=3).contains(&ndim), "field_copy_gv: ndim must be 1..=3");
     begin_trace();
     let v = Gv::field("src", "src");
     let _ = ndim;
-    let writes = vec![("dst".to_string(), "dst".into(), v.node())];
+    let writes = vec![KernelWrite::new("dst", "dst", v.node())];
     (end_trace(), writes)
 }
 
 /// dst = value (a runtime scalar), pointwise — the register zero.
-pub fn field_fill_gv(ndim: usize) -> (GvKernel, Writes) {
+pub fn field_fill_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     assert!((1..=3).contains(&ndim), "field_fill_gv: ndim must be 1..=3");
     begin_trace();
     let v = Gv::scalar("value");
     let _ = ndim;
-    let writes = vec![("dst".to_string(), "dst".into(), v.node())];
+    let writes = vec![KernelWrite::new("dst", "dst", v.node())];
     (end_trace(), writes)
 }
 
@@ -277,7 +274,7 @@ pub fn field_fill_gv(ndim: usize) -> (GvKernel, Writes) {
 /// lattice-style args) and a runtime scalar `scale`. serves the register's
 /// coarse-flux accumulation (arg = 0, scale = -A*w) and the reflux apply
 /// (src = the register face read at the cell's adjacent face, scale = sign/V).
-pub fn field_axpy_shift_gv(ndim: usize) -> (GvKernel, Writes) {
+pub fn field_axpy_shift_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "field_axpy_shift_gv: ndim must be 1..=3"
@@ -299,7 +296,7 @@ pub fn field_axpy_shift_gv(ndim: usize) -> (GvKernel, Writes) {
     let dst = Gv::field("dst", "dst");
     let src = gv_load_at("src", "src", &src_coords);
     let v = dst + scale * src;
-    let writes = vec![("dst".to_string(), "dst".into(), v.node())];
+    let writes = vec![KernelWrite::new("dst", "dst", v.node())];
     (end_trace(), writes)
 }
 
@@ -307,7 +304,7 @@ pub fn field_axpy_shift_gv(ndim: usize) -> (GvKernel, Writes) {
 /// coarse face c (transverse child offsets, the normal index scaling exactly)
 /// — the register's fine-flux accumulation. `scale` carries the fine face
 /// area times the stage weight.
-pub fn refine_acc_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
+pub fn refine_acc_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "refine_acc_face_gv: ndim must be 1..=3"
@@ -333,7 +330,7 @@ pub fn refine_acc_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Wr
     let dst = Gv::field("dst", "dst");
     let sum = acc_face_sum(&scaled, ratio, axis, ndim as isize - 1, &mut [0; 3]);
     let v = dst + scale * sum;
-    let writes = vec![("dst".to_string(), "dst".into(), v.node())];
+    let writes = vec![KernelWrite::new("dst", "dst", v.node())];
     (end_trace(), writes)
 }
 
@@ -341,7 +338,7 @@ pub fn refine_acc_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Wr
 /// (child offsets along the edge axis only; every other index scales exactly)
 /// — the emf register's fine accumulation. `scale` carries the fine dt times
 /// the length-average factor 1/ratio.
-pub fn refine_acc_edge_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
+pub fn refine_acc_edge_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "refine_acc_edge_gv: ndim must be 1..=3"
@@ -385,7 +382,7 @@ pub fn refine_acc_edge_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Wr
         sum = sum + load(kk);
     }
     let v = dst + scale * sum;
-    let writes = vec![("dst".to_string(), "dst".into(), v.node())];
+    let writes = vec![KernelWrite::new("dst", "dst", v.node())];
     (end_trace(), writes)
 }
 
@@ -433,7 +430,7 @@ fn acc_face_sum(scaled: &[NodeId], ratio: i64, axis: usize, ax: isize, off: &mut
 /// area-weighted average = plain average on a uniform cartesian grid). input
 /// "src" is the fine face field, output "dst" the coarse one; the dispatch
 /// domain is the coverage face domain in absolute coarse indices.
-pub fn refine_restrict_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
+pub fn refine_restrict_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "refine_restrict_face_gv: ndim must be 1..=3"
@@ -457,7 +454,7 @@ pub fn refine_restrict_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKerne
     });
     let inv_r = Gv::from_f64(1.0 / ratio as f64);
     let val = restrict_face_eval(&scaled, ratio, inv_r, axis, ndim as isize - 1, &mut [0; 3]);
-    let writes = vec![("dst".to_string(), "dst".into(), val.node())];
+    let writes = vec![KernelWrite::new("dst", "dst", val.node())];
     (end_trace(), writes)
 }
 
@@ -515,7 +512,7 @@ fn restrict_face_eval(
 /// "alpha" the interpolation fraction; output "dst" is the fine field. the
 /// dispatch domain is the fine destination region (a coarse-fine ghost slab,
 /// or a freshly nested patch interior) in absolute fine indices.
-pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKernel, Writes) {
+pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "refine_prolong_gv: ndim must be 1..=3"
@@ -531,7 +528,7 @@ pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKer
     };
     let ctx = geom.ctx(ndim, order, &src);
     let val = prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
-    let writes = vec![("dst".to_string(), "dst".into(), val.node())];
+    let writes = vec![KernelWrite::new("dst", "dst", val.node())];
     (end_trace(), writes)
 }
 
@@ -549,7 +546,7 @@ pub fn refine_prolong_multi_gv(
     ratio: i64,
     order: ProlongOrder,
     ncomp: usize,
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "refine_prolong_multi_gv: ndim must be 1..=3"
@@ -573,7 +570,7 @@ pub fn refine_prolong_multi_gv(
         };
         let ctx = geom.ctx(ndim, order, &src);
         let val = prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
-        writes.push((dst_name.clone(), dst_name.into(), val.node()));
+        writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
     }
     (end_trace(), writes)
 }
@@ -590,7 +587,7 @@ pub fn refine_prolong_multi_1t_gv(
     ratio: i64,
     order: ProlongOrder,
     ncomp: usize,
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "refine_prolong_multi_1t_gv: ndim must be 1..=3"
@@ -605,7 +602,7 @@ pub fn refine_prolong_multi_1t_gv(
         let src = ProlongSrc::Single { name: &src_name };
         let ctx = geom.ctx(ndim, order, &src);
         let val = prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
-        writes.push((dst_name.clone(), dst_name.into(), val.node()));
+        writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
     }
     (end_trace(), writes)
 }
@@ -625,7 +622,7 @@ pub fn refine_prolong_sweep_multi_gv(
     order: ProlongOrder,
     sweep_axis: usize,
     ncomp: usize,
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "refine_prolong_sweep_multi_gv: ndim must be 1..=3"
@@ -699,7 +696,7 @@ pub fn refine_prolong_sweep_multi_gv(
             ),
         };
         let dst_name = format!("dst_{k}");
-        writes.push((dst_name.clone(), dst_name.into(), val.node()));
+        writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
     }
     (end_trace(), writes)
 }
@@ -711,7 +708,7 @@ pub fn refine_prolong_sweep_multi_gv(
 /// lerp-then-prolong-1t chain is bit-identical to the fused time-pair kernel.
 /// buffers: src_old_0, src_new_0, .., interleaved (inputs) then dst_0..
 /// (outputs); scalar "alpha".
-pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
+pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "field_lerp_multi_gv: ndim must be 1..=3"
@@ -729,7 +726,7 @@ pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
         let v_new = Gv::field(&new_key, new_key.as_str());
         let v = (one - alpha) * v_old + alpha * v_new;
         let dst_name = format!("dst_{k}");
-        writes.push((dst_name.clone(), dst_name.into(), v.node()));
+        writes.push(KernelWrite::new(dst_name.clone(), dst_name, v.node()));
     }
     (end_trace(), writes)
 }
@@ -944,7 +941,11 @@ fn chained_pressure(
 /// (outputs). ints: lo_{ax}, hi_{ax} (the coarse cells under the fine interior,
 /// inclusive). scalars: alpha, x_lo_{ax}, dx_{ax} (the coarse lattice), then
 /// the body slots.
-pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKernel, Writes) {
+pub fn wb_cf_lerp_encode_gv(
+    ndim: usize,
+    ncomp: usize,
+    n_bodies: usize,
+) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "wb_cf_lerp_encode_gv: ndim must be 1..=3"
@@ -1015,7 +1016,7 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> (GvKe
             lerp_cell[k]
         };
         let dst_name = format!("dst_{k}");
-        writes.push((dst_name.clone(), dst_name.into(), val.node()));
+        writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
     }
     (end_trace(), writes)
 }
@@ -1044,7 +1045,7 @@ fn declare_interior_bounds(ndim: usize) -> (Vec<NodeId>, Vec<NodeId>) {
 /// buffers: dst_rho (the fine density, input), dst_pre (the fine ghosts, in-place
 /// output). ints: lo_{ax}, hi_{ax} (the fine interior, inclusive). scalars:
 /// x_lo_{ax}, dx_{ax} (the fine lattice), then the body slots.
-pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
+pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "wb_cf_decode_gv: ndim must be 1..=3"
@@ -1095,7 +1096,7 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
     let decoded = departure + p_eq;
     let fallback = Gv::select(p_eq.cmp_gt(zero), p_eq, p_ref);
     let pre_g = Gv::select(decoded.cmp_gt(zero), decoded, fallback);
-    let writes = vec![("dst_pre".to_string(), "dst_pre".into(), pre_g.node())];
+    let writes = vec![KernelWrite::new("dst_pre", "dst_pre", pre_g.node())];
     (end_trace(), writes)
 }
 
@@ -1107,7 +1108,7 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
 ///
 /// buffers: target components (inputs), then departure/candidate components
 /// (in-place outputs), ordered as rho, velocities, optional pressure.
-pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
+pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "wb_target_decode_gv: ndim must be 1..=3"
@@ -1139,9 +1140,9 @@ pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
     let writes = (0..ncomp)
         .map(|kk| {
             let dst_key = format!("dst_{kk}");
-            (
+            KernelWrite::new(
                 dst_key.clone(),
-                dst_key.into(),
+                dst_key,
                 Gv::select(physical, candidate[kk], target[kk]).node(),
             )
         })
@@ -1171,7 +1172,7 @@ pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
 /// pressure out). ints: lo_{ax}, hi_{ax} (the uncovered reference row,
 /// inclusive). scalars: x_lo_{ax}, dx_{ax} (the coarse lattice), then the body
 /// slots.
-pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
+pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "wb_band_decode_gv: ndim must be 1..=3"
@@ -1212,7 +1213,7 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
     let zero = Gv::from_f64(0.0);
     let decoded = departure + p_eq;
     let pre_g = Gv::select(decoded.cmp_gt(zero), decoded, p_cons);
-    let writes = vec![("dst_pre".to_string(), "dst_pre".into(), pre_g.node())];
+    let writes = vec![KernelWrite::new("dst_pre", "dst_pre", pre_g.node())];
     (end_trace(), writes)
 }
 
@@ -1236,7 +1237,7 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, Writes) {
 /// the normal axis). the normal itself is a bake-time axis, so the chain carries
 /// one leg. scalars: face (the seam coordinate along the normal), x_lo_{ax},
 /// dx_{ax} (fine), crs_x_lo_{ax}, crs_dx_{ax} (coarse), then the body slots.
-pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> (GvKernel, Writes) {
+pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "wb_band_encode_gv: ndim must be 1..=3"
@@ -1314,7 +1315,7 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> (GvKern
         &vary,
     );
     let departure = pre_cell - p_eq;
-    let writes = vec![("dst".to_string(), "dst".into(), departure.node())];
+    let writes = vec![KernelWrite::new("dst", "dst", departure.node())];
     (end_trace(), writes)
 }
 
@@ -1323,7 +1324,7 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> (GvKern
 ///
 /// buffers: prim_rho, prim_vel_0.., prim_pre (inputs) then cons_nrg (output).
 /// scalars: gamma.
-pub fn band_energy_gv(ndim: usize) -> (GvKernel, Writes) {
+pub fn band_energy_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "band_energy_gv: ndim must be 1..=3"
@@ -1341,7 +1342,7 @@ pub fn band_energy_gv(ndim: usize) -> (GvKernel, Writes) {
     let half = Gv::from_f64(0.5);
     let v2 = vel.iter().map(|&v| v * v).sum::<Gv>();
     let nrg = pre / (gamma - Gv::ONE) + half * rho * v2;
-    let writes = vec![("cons_nrg".to_string(), "cons_nrg".into(), nrg.node())];
+    let writes = vec![KernelWrite::new("cons_nrg", "cons_nrg", nrg.node())];
     (end_trace(), writes)
 }
 
@@ -1362,7 +1363,7 @@ pub fn band_energy_gv(ndim: usize) -> (GvKernel, Writes) {
 /// transverse halo, exactly the reach the plm stencil needs, so plm is the
 /// maximum order here, one above the pcm a plain copy would be.
 /// inputs "src_old"/"src_new" + scalar "alpha" as in `refine_prolong_gv`.
-pub fn refine_prolong_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
+pub fn refine_prolong_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, KernelWrites) {
     assert!(
         (1..=3).contains(&ndim),
         "refine_prolong_face_gv: ndim must be 1..=3"
@@ -1423,7 +1424,7 @@ pub fn refine_prolong_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel
         alpha,
     };
     let val = face_prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
-    let writes = vec![("dst".to_string(), "dst".into(), val.node())];
+    let writes = vec![KernelWrite::new("dst", "dst", val.node())];
     (end_trace(), writes)
 }
 
