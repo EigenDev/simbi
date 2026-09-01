@@ -18,7 +18,7 @@ use crate::passes::scalarize::{
 use crate::{ConstValue, DimExpr, ElementTy};
 use symbi_abi::{FieldBind, ScalarBind};
 
-const WIRE_VERSION: u8 = 1;
+const WIRE_VERSION: u8 = 2;
 type ExprId = u32;
 type StmtId = u32;
 
@@ -29,7 +29,7 @@ struct PreparedWire {
     ndim: u8,
     scalarized: FlatKernelScalarized,
     bindings: Vec<FieldBinding>,
-    field_inputs: Vec<(String, FieldBind)>,
+    field_inputs: Vec<(crate::InputKey, FieldBind)>,
     field_writes: Vec<FieldBind>,
     scalar_params: Vec<ScalarBind>,
     coord_components: Vec<u8>,

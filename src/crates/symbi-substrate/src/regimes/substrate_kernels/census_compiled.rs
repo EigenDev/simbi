@@ -258,7 +258,7 @@ fn build_entry(
         scalar_params: gvk
             .scalar_params
             .iter()
-            .map(|s| ScalarBind::from_name(s))
+            .map(|s| ScalarBind::from_name(s.as_str()))
             .collect(),
         host_kernel,
         device_name,

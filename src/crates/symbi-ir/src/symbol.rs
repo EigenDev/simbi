@@ -93,6 +93,68 @@ impl<'de> serde::Deserialize<'de> for Symbol {
     }
 }
 
+macro_rules! typed_symbol {
+    ($name:ident, $doc:literal) => {
+        #[doc = $doc]
+        #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+        #[serde(transparent)]
+        pub struct $name(Symbol);
+
+        impl $name {
+            pub fn new(name: impl AsRef<str>) -> Self {
+                Self(Symbol::intern(name.as_ref()))
+            }
+
+            pub fn as_str(&self) -> &str {
+                self.0.as_str()
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(name: &str) -> Self {
+                Self::new(name)
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(name: String) -> Self {
+                Self::new(name)
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
+
+        impl PartialEq<str> for $name {
+            fn eq(&self, other: &str) -> bool {
+                self.as_str() == other
+            }
+        }
+
+        impl PartialEq<&str> for $name {
+            fn eq(&self, other: &&str) -> bool {
+                self.as_str() == *other
+            }
+        }
+
+        impl PartialEq<String> for $name {
+            fn eq(&self, other: &String) -> bool {
+                self.as_str() == other
+            }
+        }
+    };
+}
+
+typed_symbol!(InputKey, "Interned identity of a graph field input.");
+typed_symbol!(OutputKey, "Interned identity of a graph output.");
+typed_symbol!(
+    ScalarParam,
+    "Interned identity of a scalar kernel parameter."
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

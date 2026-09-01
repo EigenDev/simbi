@@ -866,7 +866,11 @@ pub fn lift_to_built(build: impl FnOnce() -> Vec<Gv>) -> BuiltSource {
         symbi_ir::trace(|| build().iter().map(|g| g.node()).collect::<Vec<NodeId>>());
     BuiltSource {
         graph: kernel.graph,
-        params: kernel.scalar_params,
+        params: kernel
+            .scalar_params
+            .into_iter()
+            .map(|param| param.as_str().to_string())
+            .collect(),
         outputs,
     }
 }

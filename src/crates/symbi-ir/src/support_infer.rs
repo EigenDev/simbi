@@ -28,7 +28,6 @@ use std::collections::HashMap;
 use crate::FieldBind;
 use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId, Op};
 use crate::support::{ParamExpr, Support};
-use crate::symbol::Symbol;
 
 /// a symbolic ball over the kernel's scalar params. equality is structural:
 /// propagation only ever joins balls descending from the same tag, so the
@@ -352,7 +351,7 @@ fn classify_op(
 pub fn derive_output_support(
     graph: &Graph,
     tags: &HashMap<NodeId, SupportBall>,
-    field_inputs: &[(String, FieldBind)],
+    field_inputs: &[(crate::InputKey, FieldBind)],
     writes: &[crate::gv::KernelWrite],
 ) -> Support {
     if tags.is_empty() || writes.is_empty() {
@@ -371,7 +370,7 @@ pub fn derive_output_support(
                 let same_field_read = field_inputs
                     .iter()
                     .filter(|(_, fb)| fb == &write.destination)
-                    .filter_map(|(key, _)| graph.param(&Symbol::intern(key)))
+                    .filter_map(|(key, _)| graph.param(&crate::Symbol::intern(key.as_str())))
                     .any(|pid| pid == m);
                 if !same_field_read {
                     return Support::Everywhere;

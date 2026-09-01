@@ -497,7 +497,7 @@ mod tests {
         assert_eq!(
             k.field_inputs
                 .iter()
-                .map(|(k, b)| (k.clone(), b.name()))
+                .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect::<Vec<_>>(),
             vec![
                 ("cons_den".to_string(), FieldRef::cons_den().name()),
@@ -557,7 +557,7 @@ mod tests {
         assert_eq!(paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
         // Assign is a prescription, so it carries a bare value with no `dt` weight.
         assert!(
-            !k.scalar_params.contains(&"dt".to_string()),
+            !k.scalar_params.iter().any(|param| param.as_str() == "dt"),
             "Assign carries no dt weight"
         );
         // Coord binds position alone, so the kernel's inputs are free of `u_stage.*` / `cons.*`
@@ -688,7 +688,7 @@ mod tests {
         assert_eq!(
             k.field_inputs
                 .iter()
-                .map(|(k, b)| (k.clone(), b.name()))
+                .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect::<Vec<_>>(),
             vec![
                 ("cons_den".to_string(), FieldRef::cons_den().name()),
@@ -709,7 +709,7 @@ mod tests {
         assert_eq!(
             k.field_inputs
                 .iter()
-                .map(|(k, b)| (k.clone(), b.name()))
+                .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect::<Vec<_>>(),
             vec![
                 ("cons_den".to_string(), FieldRef::cons_den().name()),
@@ -760,7 +760,7 @@ mod tests {
         assert_eq!(
             k.field_inputs
                 .iter()
-                .map(|(k, b)| (k.clone(), b.name()))
+                .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect::<Vec<_>>(),
             vec![
                 ("cons_den".to_string(), FieldRef::cons_den().name()),
@@ -813,7 +813,7 @@ mod tests {
         assert_eq!(
             k.field_inputs
                 .iter()
-                .map(|(k, b)| (k.clone(), b.name()))
+                .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect::<Vec<_>>(),
             vec![
                 ("cons_den".to_string(), FieldRef::cons_den().name()),
@@ -868,7 +868,7 @@ mod tests {
         assert_eq!(
             k.field_inputs
                 .iter()
-                .map(|(k, b)| (k.clone(), b.name()))
+                .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect::<Vec<_>>(),
             vec![
                 ("prim_rho".to_string(), FieldRef::PrimRho.name()),
@@ -920,7 +920,7 @@ mod tests {
         assert_eq!(
             k.field_inputs
                 .iter()
-                .map(|(k, b)| (k.clone(), b.name()))
+                .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect::<Vec<_>>(),
             vec![
                 ("prim_rho".to_string(), FieldRef::PrimRho.name()),
@@ -964,7 +964,7 @@ mod tests {
         assert_eq!(
             k.field_inputs
                 .iter()
-                .map(|(k, b)| (k.clone(), b.name()))
+                .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect::<Vec<_>>(),
             vec![
                 ("prim_rho".to_string(), FieldRef::PrimRho.name()),
@@ -1078,7 +1078,7 @@ mod tests {
         assert_eq!(
             k.field_inputs
                 .iter()
-                .map(|(k, b)| (k.clone(), b.name()))
+                .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect::<Vec<_>>(),
             vec![("prim_rho".to_string(), FieldRef::PrimRho.name())],
         );
@@ -1586,8 +1586,12 @@ mod tests {
         let _x = Gv::coord(0) * Gv::scalar("dx_0") + Gv::scalar("x_lo_0");
         let k = end_trace();
         assert_eq!(k.coord_components, vec![0], "axis 0's _coord recorded once");
-        assert!(k.scalar_params.contains(&"dx_0".to_string()));
-        assert!(k.scalar_params.contains(&"x_lo_0".to_string()));
+        assert!(k.scalar_params.iter().any(|param| param.as_str() == "dx_0"));
+        assert!(
+            k.scalar_params
+                .iter()
+                .any(|param| param.as_str() == "x_lo_0")
+        );
         assert!(
             !k.graph.has_errors(),
             "graph errors: {:?}",

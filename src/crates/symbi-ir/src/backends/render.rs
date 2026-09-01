@@ -181,7 +181,7 @@ pub struct Prepared {
     pub bindings: Vec<FieldBinding>,
     /// (IR-side key, born-typed runtime binding) per field input, in buffer order. the
     /// key gates the base cell read + resolves FieldLoadAt; the FieldBind picks the buf.
-    pub field_inputs: Vec<(String, FieldBind)>,
+    pub field_inputs: Vec<(crate::InputKey, FieldBind)>,
     /// born-typed runtime binding per field write, zipped against `scalarized.outputs`.
     /// classified once at `prepare` (the transient `KernelEmitInputs` carries raw write
     /// strings; the producer mints the typed writes).
@@ -331,7 +331,7 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
         scalar_params: inputs
             .scalar_params
             .iter()
-            .map(|s| ScalarBind::from_name(s))
+            .map(|s| ScalarBind::from_name(s.as_str()))
             .collect(),
         coord_components: inputs.coord_components.to_vec(),
         device_preamble: inputs.device_preamble.to_vec(),
@@ -420,20 +420,23 @@ pub fn render<R: KernelRenderer>(mut prepared: Prepared, r: &R) -> KernelDescrip
     let key_to_buf: HashMap<String, u32> = prepared
         .field_inputs
         .iter()
-        .map(|(key, runtime)| (key.clone(), buf_idx_by_field[runtime]))
+        .map(|(key, runtime)| (key.as_str().to_string(), buf_idx_by_field[runtime]))
         .collect();
 
     // build the tile context from the spec, restricted to keys that are
     // real field inputs. `fields` follows field_inputs order so the smem slab
     // layout is deterministic. an empty/None spec leaves the flat gmem path.
     let tile: Option<TileCtx> = prepared.tile_spec.as_ref().map(|spec| {
-        let keys: std::collections::HashSet<String> =
-            spec.tiled_field_keys.iter().cloned().collect();
+        let keys: std::collections::HashSet<String> = spec
+            .tiled_field_keys
+            .iter()
+            .map(|key| key.as_str().to_string())
+            .collect();
         let fields: Vec<(String, u32)> = prepared
             .field_inputs
             .iter()
-            .filter(|(k, _)| keys.contains(k))
-            .map(|(k, _)| (k.clone(), key_to_buf[k]))
+            .filter(|(k, _)| keys.contains(k.as_str()))
+            .map(|(k, _)| (k.as_str().to_string(), key_to_buf[k.as_str()]))
             .collect();
         TileCtx {
             halo: spec.halo.clone(),
@@ -582,20 +585,20 @@ fn render_source<R: KernelRenderer>(
     // ---- base per-input loads at the cell coord (gated on usage) ----
     let base: Vec<String> = COORD_VARS[..ndim].iter().map(|s| s.to_string()).collect();
     for (ir_key, runtime_path) in &p.field_inputs {
-        if !scalarized_uses_var(scalarized, ir_key) {
+        if !scalarized_uses_var(scalarized, ir_key.as_str()) {
             continue;
         }
         let buf = buf_idx_by_field[runtime_path];
         // a tiled field's cell-center read comes from smem too (its slab holds
         // this thread's own cell at the tile center); otherwise gmem.
         let tiled_base = tile
-            .filter(|t| t.keys.contains(ir_key))
-            .and_then(|t| r.tiled_base_read(ir_key, &t.halo, p.ndim));
+            .filter(|t| t.keys.contains(ir_key.as_str()))
+            .and_then(|t| r.tiled_base_read(ir_key.as_str(), &t.halo, p.ndim));
         match tiled_base {
             Some(line) => out.push_str(&line),
             None => {
                 let flat = r.flat_index(p.ndim, buf, &base);
-                out.push_str(&r.base_read(ir_key, buf, &flat));
+                out.push_str(&r.base_read(ir_key.as_str(), buf, &flat));
             }
         }
         out.push('\n');

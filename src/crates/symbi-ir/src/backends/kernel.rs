@@ -57,10 +57,10 @@ pub struct KernelEmitInputs<'a> {
     /// (IR-side synthesized key, born-typed runtime binding). the IR key
     /// matches a Param node in the graph; the FieldBind is what ends up in
     /// `FieldBinding::field`, which the dispatch side consumes verbatim.
-    pub field_inputs: &'a [(String, FieldBind)],
+    pub field_inputs: &'a [(crate::InputKey, FieldBind)],
     /// IR-side param names that stay as scalar __global__ args (user
     /// scalars: dt, gamma, etc.), passed by value.
-    pub scalar_params: &'a [String],
+    pub scalar_params: &'a [crate::ScalarParam],
     /// (write key, runtime path, RHS NodeId). each entry produces one
     /// buffer store; if a write's runtime path matches an input, the
     /// buffer is shared and marked is_output.
@@ -924,7 +924,7 @@ mod tests {
         };
 
         let ir = prepared_to_ir(&prepared);
-        assert!(ir.contains("\"version\":1"));
+        assert!(ir.contains("\"version\":2"));
         let decoded = prepared_from_ir(&ir);
         assert_eq!(decoded.kernel_name, "deep_scalar_tree");
         assert_eq!(decoded.scalarized.outputs, prepared.scalarized.outputs);
@@ -1157,7 +1157,7 @@ mod tests {
                 ndim: 1,
                 target: cuda_cfg(),
                 field_inputs: &[("a".into(), "a".into())],
-                scalar_params: &["dt".to_string()],
+                scalar_params: &["dt".into()],
                 field_writes: &[crate::gv::KernelWrite::new("out", "out", prod)],
                 coord_components: &[],
                 device_preamble: &[],

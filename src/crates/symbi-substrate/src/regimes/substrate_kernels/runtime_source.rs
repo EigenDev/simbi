@@ -381,7 +381,7 @@ fn build_fused_cpu_kernel<const D: usize>(
         scalar_params: gvk
             .scalar_params
             .iter()
-            .map(|s| ScalarBind::from_name(s))
+            .map(|s| ScalarBind::from_name(s.as_str()))
             .collect(),
     })
 }
@@ -419,7 +419,7 @@ fn build_source_only_cpu_kernel<const D: usize>(
         scalar_params: gvk
             .scalar_params
             .iter()
-            .map(|s| ScalarBind::from_name(s))
+            .map(|s| ScalarBind::from_name(s.as_str()))
             .collect(),
     })
 }

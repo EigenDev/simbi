@@ -2066,7 +2066,7 @@ fn shaped_penalize_ir(
         scalar_params: gvk
             .scalar_params
             .iter()
-            .map(|s| super::params::ScalarBind::from_name(s))
+            .map(|s| super::params::ScalarBind::from_name(s.as_str()))
             .collect(),
     });
     w.insert(key, built.clone());
@@ -2109,7 +2109,7 @@ fn shaped_penalize_kernel(
                 scalar_params: gvk
                     .scalar_params
                     .iter()
-                    .map(|s| super::params::ScalarBind::from_name(s))
+                    .map(|s| super::params::ScalarBind::from_name(s.as_str()))
                     .collect(),
             })
         });

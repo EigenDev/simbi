@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId};
-use crate::{ElementTy, Symbol};
+use crate::{ElementTy, InputKey, OutputKey, ScalarParam, Symbol};
 use symbi_abi::FieldBind;
 use symbi_algebra::{Domain, FieldElement, Space};
 
@@ -36,8 +36,8 @@ pub struct GvKernel {
     /// born-typed runtime binding the producer minted. the binding is a
     /// `FieldBind` (typed `Ref` for the closed cell vocabulary, `Raw` for hand-built paths) —
     /// structured data every consumer reads directly.
-    pub field_inputs: Vec<(String, FieldBind)>,
-    pub scalar_params: Vec<String>,
+    pub field_inputs: Vec<(InputKey, FieldBind)>,
+    pub scalar_params: Vec<ScalarParam>,
     /// spatial axes whose `_coord_N` the trace referenced (for stencil `load_at`);
     /// empty for pointwise kernels. feeds `KernelEmitInputs::coord_components`.
     pub coord_components: Vec<u8>,
@@ -95,7 +95,7 @@ pub struct TileSpec {
     /// fields to prefetch into smem, by IR key (matching `field_inputs[i].0`).
     /// stencil `LoadAt` reads for these keys are routed through smem; pointwise
     /// reads of the remaining fields stay on gmem.
-    pub tiled_field_keys: Vec<String>,
+    pub tiled_field_keys: Vec<InputKey>,
 }
 
 impl TileSpec {
@@ -163,13 +163,17 @@ impl LaunchGrade {
 /// mistaken for the graph-owned `value` as they could in a positional tuple.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KernelWrite {
-    pub key: String,
+    pub key: OutputKey,
     pub destination: FieldBind,
     pub value: NodeId,
 }
 
 impl KernelWrite {
-    pub fn new(key: impl Into<String>, destination: impl Into<FieldBind>, value: NodeId) -> Self {
+    pub fn new(
+        key: impl Into<OutputKey>,
+        destination: impl Into<FieldBind>,
+        value: NodeId,
+    ) -> Self {
         Self {
             key: key.into(),
             destination: destination.into(),
@@ -238,10 +242,10 @@ impl std::error::Error for FusionError {}
 /// coord references are recorded. dedup sets keep the manifest first-seen-unique.
 pub struct GvTrace {
     graph: Graph,
-    field_inputs: Vec<(String, FieldBind)>,
-    field_keys: HashSet<String>,
-    scalar_params: Vec<String>,
-    scalar_keys: HashSet<String>,
+    field_inputs: Vec<(InputKey, FieldBind)>,
+    field_keys: HashSet<InputKey>,
+    scalar_params: Vec<ScalarParam>,
+    scalar_keys: HashSet<ScalarParam>,
     coord_components: Vec<u8>,
     coord_nodes: HashMap<u8, NodeId>,
     /// builder-tagged support balls by node: "this node is exactly zero
@@ -406,7 +410,7 @@ impl GvKernel {
     /// the restriction is a safety net). this is the smem-tile
     /// candidate set: stencil-read fields carry reusable neighbor data worth
     /// prefetching; a field read pointwise stays on gmem.
-    pub fn stencil_read_field_keys(&self) -> Vec<String> {
+    pub fn stencil_read_field_keys(&self) -> Vec<InputKey> {
         let manifest: std::collections::HashSet<&str> =
             self.field_inputs.iter().map(|(k, _)| k.as_str()).collect();
         let mut seen = std::collections::HashSet::new();
@@ -414,8 +418,8 @@ impl GvKernel {
         for (_, node, _) in self.graph.iter() {
             if let crate::graph::Op::LoadAt(sym, _) = &node.op {
                 let k = sym.as_str();
-                if manifest.contains(k) && seen.insert(k.to_string()) {
-                    keys.push(k.to_string());
+                if manifest.contains(k) && seen.insert(InputKey::new(k)) {
+                    keys.push(InputKey::new(k));
                 }
             }
         }
@@ -575,19 +579,18 @@ pub fn try_fuse(
         });
     }
 
-    // law: disjoint writes. compare by the canonical path name (both reads and writes are
-    // born-typed FieldBind now), so the in-place/inter-dep detection is spelling-invariant.
-    let a_write_paths: HashSet<String> = a_writes
+    // law: disjoint writes. compare semantic field identities; render a name only for diagnostics.
+    let a_write_paths: HashSet<FieldBind> = a_writes
         .iter()
-        .map(|write| write.destination.name())
+        .map(|write| write.destination.clone())
         .collect();
-    let b_write_paths: HashSet<String> = b_writes
+    let b_write_paths: HashSet<FieldBind> = b_writes
         .iter()
-        .map(|write| write.destination.name())
+        .map(|write| write.destination.clone())
         .collect();
     if let Some(p) = a_write_paths.intersection(&b_write_paths).next() {
         return Err(FusionError::WriteConflict {
-            runtime_path: p.clone(),
+            runtime_path: p.name(),
         });
     }
 
@@ -600,20 +603,19 @@ pub fn try_fuse(
     // bc_k in place, both off the timestep's pre-state; excluding the writer's in-place fields
     // lets that pair fuse safely. fusion joins same-stage kernels, so the reader always wants the
     // pre-state. the disjoint-writes law above still holds, keeping every fused output
-    // single-writer. compare by the canonical path name on both sides (reads via FieldBind::name,
-    // writes via from_path().name() below) so the in-place/inter-dep detection is
-    // spelling-invariant — a field read as `prim.vel[k]` and written as `prim.vel_k` is one buffer.
-    let a_input_paths: HashSet<String> = a.field_inputs.iter().map(|(_, p)| p.name()).collect();
-    let b_input_paths: HashSet<String> = b.field_inputs.iter().map(|(_, p)| p.name()).collect();
-    let a_inplace: HashSet<&String> = a_write_paths.intersection(&a_input_paths).collect();
-    let b_inplace: HashSet<&String> = b_write_paths.intersection(&b_input_paths).collect();
+    // single-writer. both sides compare the born-typed `FieldBind`, so aliases classified to the
+    // same `FieldRef` cannot evade dependency detection.
+    let a_input_paths: HashSet<FieldBind> = a.field_inputs.iter().map(|(_, p)| p.clone()).collect();
+    let b_input_paths: HashSet<FieldBind> = b.field_inputs.iter().map(|(_, p)| p.clone()).collect();
+    let a_inplace: HashSet<&FieldBind> = a_write_paths.intersection(&a_input_paths).collect();
+    let b_inplace: HashSet<&FieldBind> = b_write_paths.intersection(&b_input_paths).collect();
     if let Some(p) = a_write_paths
         .intersection(&b_input_paths)
         .find(|p| !a_inplace.contains(p))
     {
         return Err(FusionError::InterDep {
-            written: p.clone(),
-            read: p.clone(),
+            written: p.name(),
+            read: p.name(),
         });
     }
     if let Some(p) = b_write_paths
@@ -621,8 +623,8 @@ pub fn try_fuse(
         .find(|p| !b_inplace.contains(p))
     {
         return Err(FusionError::InterDep {
-            written: p.clone(),
-            read: p.clone(),
+            written: p.name(),
+            read: p.name(),
         });
     }
 
@@ -649,14 +651,14 @@ pub fn try_fuse(
 
     // manifest merge: deterministic first-seen order, a first, b appended.
     let mut field_inputs = a.field_inputs.clone();
-    let a_field_keys: HashSet<String> = a.field_inputs.iter().map(|(k, _)| k.clone()).collect();
+    let a_field_keys: HashSet<InputKey> = a.field_inputs.iter().map(|(k, _)| k.clone()).collect();
     for (k, p) in b.field_inputs.iter() {
         if !a_field_keys.contains(k) {
             field_inputs.push((k.clone(), p.clone()));
         }
     }
     let mut scalar_params = a.scalar_params.clone();
-    let a_scalar_set: HashSet<String> = a.scalar_params.iter().cloned().collect();
+    let a_scalar_set: HashSet<ScalarParam> = a.scalar_params.iter().cloned().collect();
     for s in b.scalar_params.iter() {
         if !a_scalar_set.contains(s) {
             scalar_params.push(s.clone());
@@ -743,17 +745,30 @@ impl GvTrace {
     /// the buffer is bound by `key` at load time; `runtime` is its dotted dispatch path.
     pub fn register_field(&mut self, key: &str, runtime: impl Into<FieldBind>) {
         let runtime = runtime.into();
-        if self.field_keys.insert(key.to_string()) {
-            self.field_inputs.push((key.to_string(), runtime));
+        let key = InputKey::new(key);
+        assert!(
+            !self
+                .scalar_keys
+                .iter()
+                .any(|scalar| scalar.as_str() == key.as_str()),
+            "graph ABI name `{key}` cannot be both a field input and scalar parameter",
+        );
+        if self.field_keys.insert(key.clone()) {
+            self.field_inputs.push((key, runtime));
         }
     }
 
     /// a deduped I32 scalar param (an integer index / lattice-map arg), returning its node —
     /// the integer analog of `Gv::scalar` (index math).
     pub fn scalar_int(&mut self, name: &str) -> NodeId {
+        assert!(
+            !self.field_keys.iter().any(|field| field.as_str() == name),
+            "graph ABI name `{name}` cannot be both a scalar parameter and field input",
+        );
         let id = self.graph.add_scalar_param(name, ElementTy::I32);
-        if self.scalar_keys.insert(name.to_string()) {
-            self.scalar_params.push(name.to_string());
+        let name = ScalarParam::new(name);
+        if self.scalar_keys.insert(name.clone()) {
+            self.scalar_params.push(name);
         }
         id
     }
@@ -806,9 +821,14 @@ impl Gv {
     pub fn field(key: &str, runtime: impl Into<FieldBind>) -> Gv {
         let runtime = runtime.into();
         Gv(GvVal::Node(with_trace(|t| {
+            assert!(
+                !t.scalar_keys.iter().any(|scalar| scalar.as_str() == key),
+                "graph ABI name `{key}` cannot be both a field input and scalar parameter",
+            );
             let id = t.graph.add_scalar_param(key, ElementTy::F64);
-            if t.field_keys.insert(key.to_string()) {
-                t.field_inputs.push((key.to_string(), runtime));
+            let key = InputKey::new(key);
+            if t.field_keys.insert(key.clone()) {
+                t.field_inputs.push((key, runtime));
             }
             id
         })))
@@ -833,9 +853,14 @@ impl Gv {
             return Gv::field(key, runtime);
         }
         Gv(GvVal::Node(with_trace(|t| {
+            assert!(
+                !t.scalar_keys.iter().any(|scalar| scalar.as_str() == key),
+                "graph ABI name `{key}` cannot be both a field input and scalar parameter",
+            );
             // register the field (the LoadAt resolves the buffer by this key, deduped).
-            if t.field_keys.insert(key.to_string()) {
-                t.field_inputs.push((key.to_string(), runtime));
+            let input_key = InputKey::new(key);
+            if t.field_keys.insert(input_key.clone()) {
+                t.field_inputs.push((input_key, runtime));
             }
             let comps: Vec<NodeId> = (0..ndim).map(|ax| coord_node(t, ax)).collect();
             let off = t.graph.add_const(ConstValue::I32(offset), None);
@@ -862,8 +887,13 @@ impl Gv {
             return Gv::field(key, runtime);
         }
         Gv(GvVal::Node(with_trace(|t| {
-            if t.field_keys.insert(key.to_string()) {
-                t.field_inputs.push((key.to_string(), runtime));
+            assert!(
+                !t.scalar_keys.iter().any(|scalar| scalar.as_str() == key),
+                "graph ABI name `{key}` cannot be both a field input and scalar parameter",
+            );
+            let input_key = InputKey::new(key);
+            if t.field_keys.insert(input_key.clone()) {
+                t.field_inputs.push((input_key, runtime));
             }
             let mut shifted: Vec<NodeId> = (0..ndim).map(|ax| coord_node(t, ax)).collect();
             for (ax, &o) in offsets.iter().enumerate() {
@@ -881,9 +911,14 @@ impl Gv {
     /// a scalar kernel param (e.g., `gamma`), recorded (deduped) in the manifest signature.
     pub fn scalar(name: &str) -> Gv {
         Gv(GvVal::Node(with_trace(|t| {
+            assert!(
+                !t.field_keys.iter().any(|field| field.as_str() == name),
+                "graph ABI name `{name}` cannot be both a scalar parameter and field input",
+            );
             let id = t.graph.add_scalar_param(name, ElementTy::F64);
-            if t.scalar_keys.insert(name.to_string()) {
-                t.scalar_params.push(name.to_string());
+            let name = ScalarParam::new(name);
+            if t.scalar_keys.insert(name.clone()) {
+                t.scalar_params.push(name);
             }
             id
         })))
@@ -1527,7 +1562,11 @@ mod fusion_laws {
     fn manifest_sets(
         k: &GvKernel,
         w: &KernelWrites,
-    ) -> (HashSet<(String, String)>, HashSet<String>, HashSet<String>) {
+    ) -> (
+        HashSet<(InputKey, String)>,
+        HashSet<ScalarParam>,
+        HashSet<String>,
+    ) {
         let inputs: HashSet<_> = k
             .field_inputs
             .iter()
@@ -1791,7 +1830,7 @@ mod fusion_laws {
         let (mut b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
         let spec = TileSpec {
             halo: vec![2],
-            tiled_field_keys: vec!["shared".to_string()],
+            tiled_field_keys: vec!["shared".into()],
         };
         a.tile_spec = Some(spec.clone());
         b.tile_spec = Some(spec.clone());
@@ -1812,7 +1851,7 @@ mod fusion_laws {
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
         a.tile_spec = Some(TileSpec {
             halo: vec![2],
-            tiled_field_keys: vec!["a_in".to_string()],
+            tiled_field_keys: vec!["a_in".into()],
         });
         match try_fuse(a, aw, b, bw) {
             Err(FusionError::TileSpecMismatch { a, b }) => {
@@ -1834,11 +1873,11 @@ mod fusion_laws {
         let (mut b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
         a.tile_spec = Some(TileSpec {
             halo: vec![2],
-            tiled_field_keys: vec!["a_in".to_string()],
+            tiled_field_keys: vec!["a_in".into()],
         });
         b.tile_spec = Some(TileSpec {
             halo: vec![3],
-            tiled_field_keys: vec!["b_in".to_string()],
+            tiled_field_keys: vec!["b_in".into()],
         });
         match try_fuse(a, aw, b, bw) {
             Err(FusionError::TileSpecMismatch { .. }) => {}
@@ -1855,7 +1894,7 @@ mod fusion_laws {
         let (a, _aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", g);
         let _ = a.with_tile_spec(TileSpec {
             halo: vec![2],
-            tiled_field_keys: vec!["not_in_manifest".to_string()],
+            tiled_field_keys: vec!["not_in_manifest".into()],
         });
     }
 
@@ -1868,7 +1907,7 @@ mod fusion_laws {
         let (a, _aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", g);
         let _ = a.with_tile_spec(TileSpec {
             halo: vec![0, 0, 0],
-            tiled_field_keys: vec!["a_in".to_string()],
+            tiled_field_keys: vec!["a_in".into()],
         });
     }
 
@@ -1884,11 +1923,11 @@ mod fusion_laws {
     fn tile_spec_smem_footprint_math() {
         let spec_cube = TileSpec {
             halo: vec![2, 2, 2],
-            tiled_field_keys: vec!["x".to_string()],
+            tiled_field_keys: vec!["x".into()],
         };
         assert_eq!(spec_cube.smem_bytes_per_block(&[16, 8, 4], 8), 1920 * 8);
 
-        let keys: Vec<String> = (0..8).map(|k| format!("f{k}")).collect();
+        let keys: Vec<InputKey> = (0..8).map(|k| InputKey::new(format!("f{k}"))).collect();
         let spec_slab = TileSpec {
             halo: vec![2, 0, 0],
             tiled_field_keys: keys,

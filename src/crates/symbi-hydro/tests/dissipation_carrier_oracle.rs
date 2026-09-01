@@ -73,7 +73,7 @@ where
         field_inputs: &[],
         scalar_params: &param_names
             .iter()
-            .map(|n| n.to_string())
+            .map(|n| symbi_ir::ScalarParam::new(n))
             .collect::<Vec<_>>(),
         field_writes: &[],
         coord_components: &[],

@@ -1213,8 +1213,8 @@ impl CompiledKernel {
 /// compile a kernel at f64 (the default precision). thin wrapper over `compile_kernel_prec`.
 pub fn compile_kernel(
     graph: &symbi_ir::graph::Graph,
-    field_inputs: &[String],
-    scalar_params: &[String],
+    field_inputs: &[symbi_ir::InputKey],
+    scalar_params: &[symbi_ir::ScalarParam],
     field_writes: &[symbi_ir::KernelWrite],
     ndim: usize,
 ) -> Result<CompiledKernel, JitError> {
@@ -1235,8 +1235,8 @@ pub fn compile_kernel(
 /// (never dereferenced) — the codegen owns the element stride.
 pub fn compile_kernel_prec(
     graph: &symbi_ir::graph::Graph,
-    field_inputs: &[String],
-    scalar_params: &[String],
+    field_inputs: &[symbi_ir::InputKey],
+    scalar_params: &[symbi_ir::ScalarParam],
     field_writes: &[symbi_ir::KernelWrite],
     ndim: usize,
     precision: symbi_ir::emit::Precision,
@@ -1254,7 +1254,7 @@ pub fn compile_kernel_prec(
     let field_idx: HashMap<String, usize> = field_inputs
         .iter()
         .enumerate()
-        .map(|(i, k)| (k.clone(), i))
+        .map(|(i, k)| (k.as_str().to_string(), i))
         .collect();
 
     // ---- module + shims (same setup as `compile`) ----
@@ -1367,7 +1367,7 @@ pub fn compile_kernel_prec(
             .load(ptr_ty, MemFlags::trusted(), in_bufs, i as i32 * psz);
         let addr = b.ins().iadd(base, idx0_off);
         let v = b.ins().load(fty, MemFlags::trusted(), addr, 0);
-        vars.insert(key.clone(), LocalSlot::Val(v));
+        vars.insert(key.as_str().to_string(), LocalSlot::Val(v));
     }
     for (i, name) in scalar_params.iter().enumerate() {
         // scalars stay f64 in the ABI (bind_value yields exact f64); narrow to the kernel
@@ -1380,7 +1380,7 @@ pub fn compile_kernel_prec(
         } else {
             raw
         };
-        vars.insert(name.clone(), LocalSlot::Val(v));
+        vars.insert(name.as_str().to_string(), LocalSlot::Val(v));
     }
     for ax in 0..ndim {
         let cf = b.ins().fcvt_from_sint(fty, coord_i[ax]);
@@ -1467,7 +1467,8 @@ pub fn compile_gv_kernel_prec(
     ndim: usize,
     precision: symbi_ir::emit::Precision,
 ) -> Result<CompiledKernel, JitError> {
-    let field_inputs: Vec<String> = kernel.field_inputs.iter().map(|(k, _)| k.clone()).collect();
+    let field_inputs: Vec<symbi_ir::InputKey> =
+        kernel.field_inputs.iter().map(|(k, _)| k.clone()).collect();
     compile_kernel_prec(
         &kernel.graph,
         &field_inputs,

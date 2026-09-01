@@ -437,10 +437,13 @@ impl Cpu {
                 env.insert(format!("_coord_{ax}"), Value::F(coord[ax] as f64));
             }
             for (key, _) in spec.field_inputs {
-                env.insert(key.clone(), Value::F(field_read(key, &coord)));
+                env.insert(
+                    key.as_str().to_string(),
+                    Value::F(field_read(key.as_str(), &coord)),
+                );
             }
             for (name, &v) in spec.scalar_params.iter().zip(scalars) {
-                env.insert(name.clone(), Value::F(v));
+                env.insert(name.as_str().to_string(), Value::F(v));
             }
             for stmt in &sc.body {
                 let _ = exec_stmt(stmt, &mut env, Some(&field_read));

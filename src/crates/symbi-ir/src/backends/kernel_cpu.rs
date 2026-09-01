@@ -757,7 +757,7 @@ fn descriptor_wrapper(
     name: &str,
     bindings: &[crate::emit::FieldBinding],
     _ndim: usize,
-    scalars: &[String],
+    scalars: &[crate::ScalarParam],
     scalar_is_int: &[bool],
 ) -> String {
     // `__raw` takes the view-struct refs directly, so the wrapper's whole job is

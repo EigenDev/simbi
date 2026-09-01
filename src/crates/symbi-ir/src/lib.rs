@@ -77,7 +77,7 @@ pub use error::ShapeError;
 pub use graph::{
     ConstValue, DimIndex, ElementWiseOp, FnDef, FnId, Graph, Node, NodeId, Op, ReduceOp,
 };
-pub use symbol::Symbol;
+pub use symbol::{InputKey, OutputKey, ScalarParam, Symbol};
 pub use ty::TensorTy;
 
 // passes surface

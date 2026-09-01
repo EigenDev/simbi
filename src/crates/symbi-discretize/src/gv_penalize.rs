@@ -1257,7 +1257,7 @@ mod twin_tests {
             let (ki, wi) = iso(Coords::Cartesian, 2, 2, &[0, 1], true);
             let names =
                 |w: &KernelWrites| w.iter().map(|write| write.key.clone()).collect::<Vec<_>>();
-            let expected: Vec<String> = names(&wa)
+            let expected: Vec<symbi_ir::OutputKey> = names(&wa)
                 .into_iter()
                 .filter(|n| n != "nrg_out" && n != "pen_energy")
                 .collect();

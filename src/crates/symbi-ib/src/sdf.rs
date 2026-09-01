@@ -710,7 +710,10 @@ mod tests {
             "sdf trace produced graph errors"
         );
         assert!(
-            kernel.scalar_params.iter().any(|p| p == "body_0_radius"),
+            kernel
+                .scalar_params
+                .iter()
+                .any(|p| p.as_str() == "body_0_radius"),
             "shape params must land in the scalar manifest",
         );
         let _ = d.node();

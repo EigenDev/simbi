@@ -123,9 +123,9 @@ impl KernelRun {
             .field_inputs
             .iter()
             .map(|(key, _)| {
-                if let Some(&v) = self.uniform.get(key) {
+                if let Some(&v) = self.uniform.get(key.as_str()) {
                     vec![v; n]
-                } else if let Some(f) = self.per_cell.get(key) {
+                } else if let Some(f) = self.per_cell.get(key.as_str()) {
                     (0..n).map(|flat| f(&unflatten(flat, &ext))).collect()
                 } else {
                     panic!(
@@ -150,11 +150,11 @@ impl KernelRun {
             .scalar_params
             .iter()
             .map(|name| {
-                if let Some(&v) = self.scalars.get(name) {
+                if let Some(&v) = self.scalars.get(name.as_str()) {
                     v
-                } else if name.starts_with("map_kind_")
-                    || name.starts_with("map_param_")
-                    || name.starts_with("x_lo_")
+                } else if name.as_str().starts_with("map_kind_")
+                    || name.as_str().starts_with("map_param_")
+                    || name.as_str().starts_with("x_lo_")
                 {
                     // spacing enters as a per-axis scalar at runtime: `map_kind_{ax}` selects
                     // the face map (0 = uniform, 1 = log, 2 = geometric cell widths) and
@@ -176,7 +176,11 @@ impl KernelRun {
             .collect();
 
         // one zeroed output buffer per write.
-        let names: Vec<String> = self.writes.iter().map(|write| write.key.clone()).collect();
+        let names: Vec<String> = self
+            .writes
+            .iter()
+            .map(|write| write.key.as_str().to_string())
+            .collect();
         let mut out_data: Vec<Vec<f64>> = self.writes.iter().map(|_| vec![0.0; n]).collect();
 
         let grid_sizes = self.window_size.clone().unwrap_or_else(|| ext.clone());
@@ -255,9 +259,14 @@ impl KernelRun {
                 .kernel
                 .field_inputs
                 .iter()
-                .map(|(k, b)| (k.clone(), b.name()))
+                .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect(),
-            scalar_params: self.kernel.scalar_params,
+            scalar_params: self
+                .kernel
+                .scalar_params
+                .into_iter()
+                .map(|param| param.as_str().to_string())
+                .collect(),
             writes: self.writes,
         }
     }
