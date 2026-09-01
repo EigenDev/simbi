@@ -18,17 +18,13 @@
 // Gv arithmetic + the transcendentals (exp) + `cell_geometry_gv` + begin/end_trace.
 // =============================================================================
 
-use symbi_ir::graph::NodeId;
-
 use symbi_algebra::algebra::Numeric;
 use symbi_ir::algebra::Scalar;
-use symbi_ir::{FieldBind, FieldRef};
+use symbi_ir::{FieldRef, KernelWrite, KernelWrites};
 
 use super::coords::{Coords, Spacing};
 use super::gv::{CellGeometryGv, cell_geometry_gv};
 use symbi_ir::{Gv, GvKernel, begin_trace, end_trace};
-
-type Writes = Vec<(String, FieldBind, NodeId)>;
 
 #[inline]
 fn sq(a: Gv) -> Gv {
@@ -408,7 +404,7 @@ pub fn body_source_gv(
     ncomp: usize,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let gamma = Gv::scalar("gamma");
@@ -429,30 +425,30 @@ pub fn body_source_gv(
         den, &mom, nrg, us_den, &us_mom, us_nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
     );
 
-    let mut writes = vec![(
-        "den_new".to_string(),
-        FieldRef::cons_den().into(),
+    let mut writes = vec![KernelWrite::new(
+        "den_new",
+        FieldRef::cons_den(),
         den_new.node(),
     )];
     for (comp, m) in mom_new.iter().enumerate() {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_{comp}_new"),
-            FieldRef::cons_mom(comp as u8).into(),
+            FieldRef::cons_mom(comp as u8),
             m.node(),
         ));
     }
-    writes.push((
-        "nrg_new".to_string(),
-        FieldRef::cons_nrg().into(),
+    writes.push(KernelWrite::new(
+        "nrg_new",
+        FieldRef::cons_nrg(),
         nrg_new.node(),
     ));
     // the dye drains with the mass it is dissolved in, so the concentration the surviving gas
     // carries is unchanged. the drain alone touches the dye; gravity only accelerates the gas.
     if has_dye {
         let chi = Gv::field("chi", FieldRef::cons_chi());
-        writes.push((
-            "chi_new".to_string(),
-            FieldRef::cons_chi().into(),
+        writes.push(KernelWrite::new(
+            "chi_new",
+            FieldRef::cons_chi(),
             (chi * drain).node(),
         ));
     }
@@ -464,7 +460,11 @@ pub fn body_source_gv(
 /// global support — every gas cell pulls on the body — so the runtime reduces it over
 /// the full interior. reads `cons.den` alone, so the pass streams a single field.
 /// slot-0 scalar names (`body_0_*`); the dispatch rebinds them per active body.
-pub fn body_feedback_grav_gv(coords: Coords, ndim: usize, axes: &[usize]) -> (GvKernel, Writes) {
+pub fn body_feedback_grav_gv(
+    coords: Coords,
+    ndim: usize,
+    axes: &[usize],
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let cart_axes = body_cart_axes(coords, ndim, axes);
     let den = Gv::field("den", FieldRef::cons_den());
@@ -483,12 +483,12 @@ pub fn body_feedback_grav_gv(coords: Coords, ndim: usize, axes: &[usize]) -> (Gv
     let bpos = body_vec3(0, ndim, &cart_axes, "pos");
     let rvec: [Gv; 3] = std::array::from_fn(|i| cell_cart[i] - bpos[i]);
     let g = crate::ibm::body_gravity(rvec, mass, soft, soft_kind);
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for ax in 0..ndim {
         let fc = -(den * g[cart_axes[ax]]) * dv;
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("b0_f{ax}"),
-            format!("fb_0_force_{ax}").into(),
+            format!("fb_0_force_{ax}"),
             fc.node(),
         ));
     }
@@ -507,7 +507,7 @@ pub fn body_feedback_drain_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let gamma = Gv::scalar("gamma");
@@ -557,11 +557,11 @@ pub fn body_feedback_drain_gv(
     for i in 0..3 {
         fa[i] = mom_cart[i] * frac * dv * inv_dt;
     }
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for ax in 0..ndim {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("b0_f{ax}"),
-            format!("fb_0_force_{ax}").into(),
+            format!("fb_0_force_{ax}"),
             fa[cart_axes[ax]].node(),
         ));
     }
@@ -570,20 +570,20 @@ pub fn body_feedback_drain_gv(
         .into_iter()
         .enumerate()
     {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("b0_t{t}"),
-            format!("fb_0_torque_{t}").into(),
+            format!("fb_0_torque_{t}"),
             tc.node(),
         ));
     }
-    writes.push((
-        "b0_m".to_string(),
-        "fb_0_mass".into(),
+    writes.push(KernelWrite::new(
+        "b0_m",
+        "fb_0_mass",
         (den * frac * dv).node(),
     ));
-    writes.push((
-        "b0_e".to_string(),
-        "fb_0_energy".into(),
+    writes.push(KernelWrite::new(
+        "b0_e",
+        "fb_0_energy",
         (nrg * frac * dv).node(),
     ));
     let kernel = end_trace().with_derived_support(&writes);
@@ -600,7 +600,7 @@ pub fn body_feedback_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let gamma = Gv::scalar("gamma");
@@ -623,7 +623,7 @@ pub fn body_feedback_gv(
     // the gas momentum in cartesian (den * v_cart): what the uniform drain removes proportionally.
     let mom_cart: [Gv; 3] = std::array::from_fn(|i| den * vel_cart[i]);
 
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for b in 0..n_bodies {
         let bc = body_contribution(
             b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
@@ -647,9 +647,9 @@ pub fn body_feedback_gv(
         // the body's ndim force components live at its cartesian axes.
         for ax in 0..ndim {
             let fc = force_cart[cart_axes[ax]];
-            writes.push((
+            writes.push(KernelWrite::new(
                 format!("b{b}_f{ax}"),
-                format!("fb_{b}_force_{ax}").into(),
+                format!("fb_{b}_force_{ax}"),
                 fc.node(),
             ));
         }
@@ -659,23 +659,23 @@ pub fn body_feedback_gv(
             .into_iter()
             .enumerate()
         {
-            writes.push((
+            writes.push(KernelWrite::new(
                 format!("b{b}_t{t}"),
-                format!("fb_{b}_torque_{t}").into(),
+                format!("fb_{b}_torque_{t}"),
                 tc.node(),
             ));
         }
         // absorbed mass = den * frac * dv (the emergent accretion, a functional of the flow).
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("b{b}_m"),
-            format!("fb_{b}_mass").into(),
+            format!("fb_{b}_mass"),
             (den * frac * dv).node(),
         ));
         // absorbed total (internal + kinetic) energy = nrg * frac * dv -- the accretion power,
         // closing the gas+body energy ledger. adiabatic only (the iso state carries den + mom).
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("b{b}_e"),
-            format!("fb_{b}_energy").into(),
+            format!("fb_{b}_energy"),
             (nrg * frac * dv).node(),
         ));
     }
@@ -745,7 +745,7 @@ pub fn body_source_iso_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let den = Gv::field("den", FieldRef::cons_den());
@@ -762,15 +762,15 @@ pub fn body_source_iso_gv(
         den, &mom, us_den, &us_mom, pre, dt, n_bodies, coords, ndim, ncomp, axes,
     );
 
-    let mut writes = vec![(
-        "den_new".to_string(),
-        FieldRef::cons_den().into(),
+    let mut writes = vec![KernelWrite::new(
+        "den_new",
+        FieldRef::cons_den(),
         den_new.node(),
     )];
     for (comp, m) in mom_new.iter().enumerate() {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_{comp}_new"),
-            FieldRef::cons_mom(comp as u8).into(),
+            FieldRef::cons_mom(comp as u8),
             m.node(),
         ));
     }
@@ -835,7 +835,7 @@ pub fn body_evolved_probe_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let gamma = Gv::scalar("gamma");
@@ -847,21 +847,21 @@ pub fn body_evolved_probe_gv(
     let (den_new, mom_new, nrg_new, _drain) = body_evolved_gv(
         den, &mom, nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
     );
-    let mut writes = vec![(
-        "den_new".to_string(),
-        FieldRef::cons_den().into(),
+    let mut writes = vec![KernelWrite::new(
+        "den_new",
+        FieldRef::cons_den(),
         den_new.node(),
     )];
     for (comp, m) in mom_new.iter().enumerate() {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_{comp}_new"),
-            FieldRef::cons_mom(comp as u8).into(),
+            FieldRef::cons_mom(comp as u8),
             m.node(),
         ));
     }
-    writes.push((
-        "nrg_new".to_string(),
-        FieldRef::cons_nrg().into(),
+    writes.push(KernelWrite::new(
+        "nrg_new",
+        FieldRef::cons_nrg(),
         nrg_new.node(),
     ));
     (end_trace(), writes)
@@ -926,7 +926,7 @@ pub fn body_feedback_iso_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let inv_dt = Gv::ONE / dt;
@@ -943,7 +943,7 @@ pub fn body_feedback_iso_gv(
     let dv = Gv::ONE / geo.inv_volume;
     let mom_cart: [Gv; 3] = std::array::from_fn(|i| den * vel_cart[i]);
 
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for b in 0..n_bodies {
         let bc = body_contribution(
             b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
@@ -961,9 +961,9 @@ pub fn body_feedback_iso_gv(
         }
         for ax in 0..ndim {
             let fc = force_cart[cart_axes[ax]];
-            writes.push((
+            writes.push(KernelWrite::new(
                 format!("b{b}_f{ax}"),
-                format!("fb_{b}_force_{ax}").into(),
+                format!("fb_{b}_force_{ax}"),
                 fc.node(),
             ));
         }
@@ -972,15 +972,15 @@ pub fn body_feedback_iso_gv(
             .into_iter()
             .enumerate()
         {
-            writes.push((
+            writes.push(KernelWrite::new(
                 format!("b{b}_t{t}"),
-                format!("fb_{b}_torque_{t}").into(),
+                format!("fb_{b}_torque_{t}"),
                 tc.node(),
             ));
         }
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("b{b}_m"),
-            format!("fb_{b}_mass").into(),
+            format!("fb_{b}_mass"),
             (den * frac * dv).node(),
         ));
     }
@@ -1147,7 +1147,7 @@ pub fn body_source_wb_gv(
     ncomp: usize,
     axes: &[usize],
     reach: i64,
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -1249,15 +1249,15 @@ pub fn body_source_wb_gv(
 
     let mut writes = Vec::with_capacity(ncomp + 1);
     for (comp, m) in mom_new.iter().enumerate() {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_{comp}_new"),
-            FieldRef::cons_mom(comp as u8).into(),
+            FieldRef::cons_mom(comp as u8),
             m.node(),
         ));
     }
-    writes.push((
-        "nrg_new".to_string(),
-        FieldRef::cons_nrg().into(),
+    writes.push(KernelWrite::new(
+        "nrg_new",
+        FieldRef::cons_nrg(),
         nrg_new.node(),
     ));
     (end_trace(), writes)
