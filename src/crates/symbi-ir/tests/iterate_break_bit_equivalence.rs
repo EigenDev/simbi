@@ -28,56 +28,16 @@
 
 use symbi_ir::graph::{ConstValue, ElementWiseOp, NodeId};
 use symbi_ir::passes::scalarize::{LoweredFn, scalarize_kernel};
-use symbi_ir::{Backend, Cpu, Gv, begin_trace, end_trace, with_trace};
+use symbi_ir::{Backend, Cpu, TraceCx, trace};
 
 // build a Newton-for-sqrt(2) iterate via raw Graph ops, returning a LoweredFn
 // the CPU interpreter can evaluate. `with_break = true` passes Some(conv);
 // `false` passes None. all other IR is bit-identical so only the break knob
 // is under test.
 fn build_newton_sqrt2(with_break: bool, max_steps: usize) -> LoweredFn {
-    begin_trace();
-
-    let x0 = Gv::param("x0").node();
-
-    // direct graph ops: the body is a Newton step rendered as raw NodeIds, so
-    // the predicate's NodeId is in scope for both `select` and `break_when`.
-    let (acc_id, two_id, eps_id) = with_trace(|t| {
-        let g = t.graph();
-        let acc = g.iter_acc(0, None);
-        let two = g.add_const(ConstValue::F64(2.0), None);
-        let eps = g.add_const(ConstValue::F64(1.0e-10), None);
-        (acc, two, eps)
+    let (kernel, root) = trace(|cx: TraceCx| {
+        build_newton_sqrt2_in(cx, with_break, max_steps)
     });
-
-    let x_new_id = with_trace(|t| {
-        let g = t.graph();
-        // body: x - (x*x - 2) / (x + x)
-        let xx = g.element_wise(ElementWiseOp::Mul, vec![acc_id, acc_id], None);
-        let f = g.element_wise(ElementWiseOp::Sub, vec![xx, two_id], None);
-        let fp = g.element_wise(ElementWiseOp::Add, vec![acc_id, acc_id], None);
-        let q = g.element_wise(ElementWiseOp::Div, vec![f, fp], None);
-        g.element_wise(ElementWiseOp::Sub, vec![acc_id, q], None)
-    });
-
-    // freeze predicate: conv = |x_new - acc| < eps. one node, used in both
-    // select(conv, acc, x_new) and break_when (Some/None).
-    let conv_id = with_trace(|t| {
-        let g = t.graph();
-        let delta = g.element_wise(ElementWiseOp::Sub, vec![x_new_id, acc_id], None);
-        let absd = g.element_wise(ElementWiseOp::Abs, vec![delta], None);
-        g.element_wise(ElementWiseOp::Lt, vec![absd, eps_id], None)
-    });
-
-    // step = select(conv, acc, x_new) — the freeze law.
-    let step_id = with_trace(|t| t.graph().select(conv_id, acc_id, x_new_id, None));
-
-    let break_when: Option<NodeId> = if with_break { Some(conv_id) } else { None };
-    let root = with_trace(|t| {
-        t.graph()
-            .iterate_inline_scalar(acc_id, x0, step_id, max_steps, break_when, None)
-    });
-
-    let kernel = end_trace();
     // scalarize_kernel handles IterateInline (cone-partitioned lowering into
     // a `for` with the body inside); plain `scalarize` doesn't, so the
     // kernel-scalarized output is lifted to a LoweredFn here.
@@ -90,6 +50,48 @@ fn build_newton_sqrt2(with_break: bool, max_steps: usize) -> LoweredFn {
         result_element: symbi_ir::ElementTy::F64,
         result_shape: Vec::new(),
     }
+}
+
+fn build_newton_sqrt2_in(cx: TraceCx<'_>, with_break: bool, max_steps: usize) -> NodeId {
+    let x0 = cx.param("x0").node();
+
+    // direct graph ops: the body is a Newton step rendered as raw NodeIds, so
+    // the predicate's NodeId is in scope for both `select` and `break_when`.
+    let (acc_id, two_id, eps_id) = cx.with_trace(|t| {
+        let g = t.graph();
+        let acc = g.iter_acc(0, None);
+        let two = g.add_const(ConstValue::F64(2.0), None);
+        let eps = g.add_const(ConstValue::F64(1.0e-10), None);
+        (acc, two, eps)
+    });
+
+    let x_new_id = cx.with_trace(|t| {
+        let g = t.graph();
+        // body: x - (x*x - 2) / (x + x)
+        let xx = g.element_wise(ElementWiseOp::Mul, vec![acc_id, acc_id], None);
+        let f = g.element_wise(ElementWiseOp::Sub, vec![xx, two_id], None);
+        let fp = g.element_wise(ElementWiseOp::Add, vec![acc_id, acc_id], None);
+        let q = g.element_wise(ElementWiseOp::Div, vec![f, fp], None);
+        g.element_wise(ElementWiseOp::Sub, vec![acc_id, q], None)
+    });
+
+    // freeze predicate: conv = |x_new - acc| < eps. one node, used in both
+    // select(conv, acc, x_new) and break_when (Some/None).
+    let conv_id = cx.with_trace(|t| {
+        let g = t.graph();
+        let delta = g.element_wise(ElementWiseOp::Sub, vec![x_new_id, acc_id], None);
+        let absd = g.element_wise(ElementWiseOp::Abs, vec![delta], None);
+        g.element_wise(ElementWiseOp::Lt, vec![absd, eps_id], None)
+    });
+
+    // step = select(conv, acc, x_new) — the freeze law.
+    let step_id = cx.with_trace(|t| t.graph().select(conv_id, acc_id, x_new_id, None));
+
+    let break_when: Option<NodeId> = if with_break { Some(conv_id) } else { None };
+    cx.with_trace(|t| {
+        t.graph()
+            .iterate_inline_scalar(acc_id, x0, step_id, max_steps, break_when, None)
+    })
 }
 
 #[test]

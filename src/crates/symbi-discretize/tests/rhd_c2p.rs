@@ -95,9 +95,9 @@ fn rhd_c2p_is_dimension_generic() {
     let (k3, w3) = rhd_c2p_gv::<3>(4, EosArm::IdealGamma);
     for (k, w, want) in [(&k1, &w1, 1usize), (&k2, &w2, 2), (&k3, &w3, 3)] {
         assert!(
-            !k.graph.has_errors(),
+            !k.graph().has_errors(),
             "rhd_c2p errors: {:?}",
-            k.graph.errors()
+            k.graph().errors()
         );
         assert_eq!(n_vel(w), want, "expected {want} velocity components");
     }

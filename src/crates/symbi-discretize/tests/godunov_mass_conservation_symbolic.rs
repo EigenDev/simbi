@@ -56,7 +56,7 @@ fn godunov_mass_conservation_symbolic() {
     );
     assert_eq!(writes.len(), 1, "mass builder must write exactly rho_new");
     let flux = flux_only(LinFormR::extract_rat(
-        &kernel.graph,
+        kernel.graph(),
         writes[0].value,
         FIELDS,
         SCALARS,

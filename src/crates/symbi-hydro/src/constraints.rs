@@ -306,7 +306,7 @@ impl<S: Scalar> StateConstraint<S> for DensityFloor<S> {
 /// through bit-for-bit (A2).
 pub fn constraint_theta<'a, S, C, B>(constraint: &C, blend: &B, iters: usize) -> Option<S>
 where
-    S: Scalar,
+    S: Scalar + 'a,
     C: StateConstraint<S> + ?Sized,
     B: Fn(S) -> ConstraintState<'a, S>,
 {
@@ -364,7 +364,7 @@ pub fn constraint_thetas<'a, S, B>(
     iters: usize,
 ) -> Vec<Option<S>>
 where
-    S: Scalar,
+    S: Scalar + 'a,
     B: Fn(S) -> ConstraintState<'a, S>,
 {
     family
@@ -401,7 +401,7 @@ pub fn joint_theta<S: Scalar>(thetas: &[Option<S>]) -> S {
 /// return keeps the two apart.
 pub fn anchor_feasibility<'a, S, B>(family: &[&dyn StateConstraint<S>], blend: &B) -> S
 where
-    S: Scalar,
+    S: Scalar + 'a,
     B: Fn(S) -> ConstraintState<'a, S>,
 {
     let at_anchor = blend(S::ZERO);

@@ -13,9 +13,9 @@ use symbi_discretize::adiabatic_c2p_gv;
 fn n_components<const NCOMP: usize>() -> usize {
     let (k, writes) = adiabatic_c2p_gv::<NCOMP>();
     assert!(
-        !k.graph.has_errors(),
+        !k.graph().has_errors(),
         "adiabatic_c2p graph errors: {:?}",
-        k.graph.errors()
+        k.graph().errors()
     );
     writes
         .iter()

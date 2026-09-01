@@ -66,8 +66,8 @@ pub use symbi_abi::{
 
 // carrier-side surface
 pub use gv::{
-    Gv, GvKernel, GvTrace, KernelWrite, KernelWrites, NumericalPolicy, RewriteClass, TileSpec,
-    begin_trace, end_trace, in_isolated_trace, tag_support_ball, trace, with_trace,
+    Gv, GvKernel, GvMask, GvTrace, KernelWrite, KernelWrites, NumericalPolicy, RewriteClass,
+    TileSpec, TraceCx, trace, trace_for_domain, trace_with,
 };
 
 // IR data surface

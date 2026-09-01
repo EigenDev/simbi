@@ -1241,7 +1241,7 @@ mod tests {
     // ---- carrier gate: newtonian wave_properties q-factor sqrt ----
 
     use symbi_ir::backends::interp::{Backend, Cpu};
-    use symbi_ir::{Gv, begin_trace, end_trace};
+    use symbi_ir::{Gv, trace};
 
     // trace `wave_properties` at S = Gv, scalarize each of the three signal-speed
     // outputs, and CPU-interpret them at the given f64 state. proves the body
@@ -1251,17 +1251,17 @@ mod tests {
         let names = [
             "rho_l", "rho_r", "pre_l", "pre_r", "vn_l", "vn_r", "cs_l", "cs_r", "gamma",
         ];
-        begin_trace();
-        let p: Vec<Gv> = names.iter().map(|n| Gv::param(n)).collect();
-        let (s_l, s_r, s_star) =
-            wave_properties::<Gv>(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);
-        let kernel = end_trace();
+        let (kernel, outputs) = trace(|cx| {
+            let p: Vec<Gv> = names.iter().map(|n| cx.param(n)).collect();
+            let (s_l, s_r, s_star) =
+                wave_properties::<Gv>(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);
+            [s_l.node(), s_r.node(), s_star.node()]
+        });
         // the kernel lowering: `Op::IfElse` (the pressure-estimate lazy branch)
         // lowers only through `scalarize_kernel`; the single-root elemental
         // path refuses it. the interpreter evaluates the IfElse statement
         // directly, so the lowered kernel adapts into a LoweredFn verbatim.
-        let outputs = [s_l.node(), s_r.node(), s_star.node()];
-        let k = symbi_ir::passes::scalarize::scalarize_kernel(&kernel.graph, &outputs);
+        let k = symbi_ir::passes::scalarize::scalarize_kernel(kernel.graph(), &outputs);
         assert!(
             !k.body.is_empty(),
             "wave_properties rendered an empty kernel"

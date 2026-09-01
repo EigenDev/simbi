@@ -67,7 +67,7 @@ fn divb_symbolic_telescoping() {
         let root = writes[0].value;
 
         // the dt*curl linear form (b stripped), canonicalized to physical axes.
-        let raw = curl_only(LinForm::extract(&kernel.graph, root, FIELDS, SCALARS));
+        let raw = curl_only(LinForm::extract(kernel.graph(), root, FIELDS, SCALARS));
         let curl = raw.canonicalize(&physical_rename(dir));
         assert!(
             !curl.is_zero(),

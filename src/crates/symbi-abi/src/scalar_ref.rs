@@ -6,7 +6,7 @@
 // discipline across the closed scalar vocabulary.
 //
 // a kernel scalar is the link between the traced graph (which declares it via
-// `Gv::scalar(name)`) and the host dispatch (which supplies its value by name).
+// `cx.scalar(name)`) and the host dispatch (which supplies its value by name).
 // that link is a bare string, minted independently on each side, so it drifts:
 // the same per-axis convention is spelled `inv_dx_0` / `x_lo_0` / `body_2_pos_0`
 // across the trace builders and the dispatch resolvers with nothing forcing the
@@ -24,7 +24,7 @@
 // closed typed core + an open spec tail.
 //
 // usage:
-//  // producer (trace): Gv::scalar(&ScalarRef::XLo(d).name())
+//  // producer (trace): cx.scalar(&ScalarRef::XLo(d).name())
 //  // consumer (dispatch): match ScalarRef::parse(name) {
 //  //     Some(ScalarRef::XLo(ax)) => x_lo[ax],
 //  //     None => spec_scalars[name],  // open user/spec knob

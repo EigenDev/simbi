@@ -113,7 +113,7 @@ pub mod laws {
 // =============================================================================
 
 pub trait Mask:
-    Copy + Send + Sync + 'static + BitAnd<Output = Self> + BitOr<Output = Self> + Not<Output = Self>
+    Copy + Send + Sync + BitAnd<Output = Self> + BitOr<Output = Self> + Not<Output = Self>
 {
 }
 
@@ -134,7 +134,6 @@ pub trait Scalar:
     Copy
     + Send
     + Sync
-    + 'static
     + Default
     + FieldElement<Scalar = Self>
     + symbi_algebra::algebra::Numeric

@@ -37,7 +37,7 @@ fn divb_2d_cartesian_symbolic_telescoping() {
         let (kernel, writes) = rmhd_ct_curl_2d_dir_gv(dir);
         assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
         let curl = curl_only(LinForm::extract(
-            &kernel.graph,
+            kernel.graph(),
             writes[0].value,
             FIELDS,
             SCALARS,

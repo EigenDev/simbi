@@ -46,10 +46,10 @@ fn histogram(recon: Recon, balance: Balance) -> (BTreeMap<String, usize>, f64) {
     let (k, writes) =
         adiabatic_hllc_plus_flux_gv::<3>(0, recon, balance, Coords::Cartesian, &[0, 1, 2]);
     let outputs: Vec<_> = writes.iter().map(|write| write.value).collect();
-    let live = k.graph.reachable_from(&outputs);
+    let live = k.graph().reachable_from(&outputs);
     let mut h: BTreeMap<String, usize> = BTreeMap::new();
     let mut cost = 0.0;
-    for (id, node, _) in k.graph.iter() {
+    for (id, node, _) in k.graph().iter() {
         if !live.contains(&id) {
             continue;
         }
@@ -84,9 +84,9 @@ fn ablate() {
             }
         };
         let outs: Vec<_> = w.iter().map(|write| write.value).collect();
-        let live = k.graph.reachable_from(&outs);
+        let live = k.graph().reachable_from(&outs);
         let mut h = BTreeMap::new();
-        for (id, node, _) in k.graph.iter() {
+        for (id, node, _) in k.graph().iter() {
             if !live.contains(&id) {
                 continue;
             }
@@ -187,7 +187,7 @@ fn emit_probe() {
     use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
     let (k, w) = adiabatic_hllc_flux_gv::<3>(0, Recon::Plm);
     let desc = emit_kernel_from_lowering(
-        &k.graph,
+        k.graph(),
         &KernelEmitInputs {
             kernel_name: "plain_probe",
             coalesce_layout: false,
@@ -196,10 +196,10 @@ fn emit_probe() {
                 target: Target::Hip,
                 precision: Precision::F64,
             },
-            field_inputs: &k.field_inputs,
-            scalar_params: &k.scalar_params,
+            field_inputs: k.field_inputs(),
+            scalar_params: k.scalar_params(),
             field_writes: &w,
-            coord_components: &k.coord_components,
+            coord_components: k.coord_components(),
             device_preamble: &[],
             tile_spec: None,
         },

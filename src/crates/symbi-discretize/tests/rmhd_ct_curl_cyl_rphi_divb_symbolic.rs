@@ -54,7 +54,7 @@ fn curl(dir: usize) -> LinFormR {
     let (kernel, writes) = rmhd_ct_curl_cyl_rphi_gv(dir, &[Spacing::Uniform; 2]);
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
     let lf = curl_only(LinFormR::extract_rat(
-        &kernel.graph,
+        kernel.graph(),
         writes[0].value,
         FIELDS,
         SCALARS,

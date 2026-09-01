@@ -34,10 +34,10 @@ fn weight(kind: &str) -> f64 {
 
 fn price(name: &str, k: GvKernel, writes: KernelWrites) {
     let outs: Vec<NodeId> = writes.iter().map(|write| write.value).collect();
-    let live = k.graph.reachable_from(&outs);
+    let live = k.graph().reachable_from(&outs);
     let mut h: BTreeMap<String, usize> = BTreeMap::new();
     let mut cost = 0.0;
-    for (id, node, _) in k.graph.iter() {
+    for (id, node, _) in k.graph().iter() {
         if !live.contains(&id) {
             continue;
         }

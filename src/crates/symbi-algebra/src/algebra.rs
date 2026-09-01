@@ -33,7 +33,6 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssi
 /// preserving "no silent A1 violation on Gv."
 pub trait Numeric:
     Copy
-    + 'static
     + Default
     + Add<Output = Self>
     + Sub<Output = Self>
@@ -63,7 +62,7 @@ pub trait Numeric:
 /// and the host-only Riemann solvers `riemann/hlld.rs` / `riemann/hllc.rs`).
 /// these methods are host computations on concrete tensors / matrices, distinct
 /// from the carrier-generic physics.
-pub trait OrderedNumeric: Numeric + PartialOrd {}
+pub trait OrderedNumeric: Numeric + PartialOrd + 'static {}
 
 impl Numeric for f64 {
     const ZERO: Self = 0.0;

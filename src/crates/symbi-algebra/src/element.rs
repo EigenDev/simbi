@@ -18,8 +18,8 @@
 /// # safety
 /// the type must be contiguous, fixed-size, and zero-initialized bytes
 /// must produce a valid value. Buffer<T> relies on alloc_zeroed.
-pub unsafe trait FieldElement: Copy + 'static {
-    type Scalar: Copy + Send + Sync + 'static;
+pub unsafe trait FieldElement: Copy {
+    type Scalar: Copy + Send + Sync;
 }
 
 unsafe impl FieldElement for f64 {

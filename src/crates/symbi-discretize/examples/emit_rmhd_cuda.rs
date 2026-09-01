@@ -26,15 +26,15 @@ use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering};
 // emit a Gv-traced kernel (graph + ABI manifest already carried) -> CUDA source.
 fn emit_gv(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: KernelWrites) {
     assert!(
-        !k.graph.has_errors(),
+        !k.graph().has_errors(),
         "{name} graph errors: {:?}",
-        k.graph.errors()
+        k.graph().errors()
     );
     // thread the kernel's declared smem tile intent so the emitted CUDA
     // exercises the smem prelude + redirected stencil reads through the PTX gate.
     let tile_spec = k.infer_tile_spec();
     let desc = emit_kernel_from_lowering(
-        &k.graph,
+        k.graph(),
         &KernelEmitInputs {
             kernel_name: name,
             coalesce_layout: symbi_discretize::kernel_coalesces_layout(name),
@@ -43,10 +43,10 @@ fn emit_gv(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: KernelWrite
                 target: Target::Cuda,
                 precision: Precision::F64,
             },
-            field_inputs: &k.field_inputs,
-            scalar_params: &k.scalar_params,
+            field_inputs: k.field_inputs(),
+            scalar_params: k.scalar_params(),
             field_writes: &writes,
-            coord_components: &k.coord_components,
+            coord_components: k.coord_components(),
             device_preamble: &[],
             tile_spec: tile_spec.as_ref(),
         },

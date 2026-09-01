@@ -20,45 +20,46 @@ use symbi_ir::{KernelWrite, KernelWrites};
 /// note: the `Regime::to_primitive` wrapper's native error-code branches are host-only
 /// diagnostics — the kernel traces the branch-free math `Cons::to_primitive`.
 pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
-    begin_trace();
-    // input binding: the conserved fields + the eos scalar, as Gv leaves.
-    let den = Gv::field("cons_den", FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..D)
-        .map(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
-        .collect();
-    let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
-    let gamma = Gv::scalar("gamma");
+    trace(|cx| {
+        // input binding: the conserved fields + the eos scalar, as Gv leaves.
+        let den = cx.field("cons_den", FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..D)
+            .map(|k| cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
+            .collect();
+        let nrg = cx.field("cons_nrg", FieldRef::cons_nrg());
+        let gamma = cx.scalar("gamma");
 
-    // the single-source physics, instantiated at the tracing carrier.
-    let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
-    let cons = Cons::<Gv, D> {
-        chi: Default::default(),
-        den,
-        mom: Tensor::new(mom_arr),
-        nrg,
-    };
-    let prim: Prim<Gv, D> = cons.to_primitive(&IdealGas { gamma });
+        // the single-source physics, instantiated at the tracing carrier.
+        let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
+        let cons = Cons::<Gv, D> {
+            chi: Default::default(),
+            den,
+            mom: Tensor::new(mom_arr),
+            nrg,
+        };
+        let prim: Prim<Gv, D> = cons.to_primitive(&IdealGas { gamma });
 
-    // decompose the recovered primitive into field writes.
-    let mut writes = vec![KernelWrite::new(
-        "prim_rho",
-        FieldRef::PrimRho,
-        prim.rho.node(),
-    )];
-    for k in 0..D {
+        // decompose the recovered primitive into field writes.
+        let mut writes = vec![KernelWrite::new(
+            "prim_rho",
+            FieldRef::PrimRho,
+            prim.rho.node(),
+        )];
+        for k in 0..D {
+            writes.push(KernelWrite::new(
+                format!("prim_vel_{k}"),
+                FieldRef::PrimVel(k as u8),
+                prim.vel[k].node(),
+            ));
+        }
         writes.push(KernelWrite::new(
-            format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8),
-            prim.vel[k].node(),
+            "prim_pre",
+            FieldRef::PrimPre,
+            prim.pre.node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "prim_pre",
-        FieldRef::PrimPre,
-        prim.pre.node(),
-    ));
 
-    (end_trace(), writes)
+        writes
+    })
 }
 
 /// trace the real isothermal c2p — symbi-hydro's `IsoNewtonian::to_primitive` (the pure
@@ -74,48 +75,49 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
 /// falls outside its coverage), so the `<D>` instance is a complete drop-in: one
 /// geometry-free builder serves every iso grid.
 pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
-    begin_trace();
-    // input binding: the conserved fields + the prescribed per-cell sound-speed-squared
-    // field `cs2` (the local temperature; global isothermal is a uniform cs2). cs2 is bound
-    // as a field so the run can be locally isothermal (cs varies per cell).
-    let den = Gv::field("cons_den", FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..D)
-        .map(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
-        .collect();
-    let cs2 = Gv::field("cs2", "cs2");
+    trace(|cx| {
+        // input binding: the conserved fields + the prescribed per-cell sound-speed-squared
+        // field `cs2` (the local temperature; global isothermal is a uniform cs2). cs2 is bound
+        // as a field so the run can be locally isothermal (cs varies per cell).
+        let den = cx.field("cons_den", FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..D)
+            .map(|k| cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
+            .collect();
+        let cs2 = cx.field("cs2", "cs2");
 
-    // the single-source physics: symbi-hydro's locally-isothermal recovery (state.rs
-    // `locally_isothermal_recover`) — `Cons::to_primitive` with the Isothermal eos reads
-    // cs^2 from the nrg slot: rho = den, vel = mom/rho, p = recover_pressure = cs2 * rho.
-    // the cs2 is the separate prescribed field, fed through the compute struct's nrg slot.
-    let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
-    let cons = Cons::<Gv, D> {
-        chi: Default::default(),
-        den,
-        mom: Tensor::new(mom_arr),
-        nrg: cs2,
-    };
-    let prim = cons.to_primitive(&Isothermal { cs: Gv::ONE }); // cs unused: recover reads nrg
+        // the single-source physics: symbi-hydro's locally-isothermal recovery (state.rs
+        // `locally_isothermal_recover`) — `Cons::to_primitive` with the Isothermal eos reads
+        // cs^2 from the nrg slot: rho = den, vel = mom/rho, p = recover_pressure = cs2 * rho.
+        // the cs2 is the separate prescribed field, fed through the compute struct's nrg slot.
+        let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
+        let cons = Cons::<Gv, D> {
+            chi: Default::default(),
+            den,
+            mom: Tensor::new(mom_arr),
+            nrg: cs2,
+        };
+        let prim = cons.to_primitive(&Isothermal { cs: Gv::ONE }); // cs unused: recover reads nrg
 
-    let mut writes = vec![KernelWrite::new(
-        "prim_rho",
-        FieldRef::PrimRho,
-        prim.rho.node(),
-    )];
-    for k in 0..D {
+        let mut writes = vec![KernelWrite::new(
+            "prim_rho",
+            FieldRef::PrimRho,
+            prim.rho.node(),
+        )];
+        for k in 0..D {
+            writes.push(KernelWrite::new(
+                format!("prim_vel_{k}"),
+                FieldRef::PrimVel(k as u8),
+                prim.vel[k].node(),
+            ));
+        }
         writes.push(KernelWrite::new(
-            format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8),
-            prim.vel[k].node(),
+            "prim_pre",
+            FieldRef::PrimPre,
+            prim.pre.node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "prim_pre",
-        FieldRef::PrimPre,
-        prim.pre.node(),
-    ));
 
-    (end_trace(), writes)
+        writes
+    })
 }
 
 /// the isothermal eos law `p = cs^2(x) * rho` as a standalone pointwise kernel, from the
@@ -125,15 +127,13 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
 /// the face reconstruction sees a spurious vacuum at every level seam. pointwise
 /// and dimension-independent (emitted per ndim like the snapshot family).
 pub fn iso_pre_gv() -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
-    let cs2 = Gv::field("cs2", "cs2");
-    // the materialized `Isothermal::pressure` closure, same single source as iso c2p.
-    let pre = cs2 * rho;
-    (
-        end_trace(),
-        vec![KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node())],
-    )
+    trace(|cx| {
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let cs2 = cx.field("cs2", "cs2");
+        // the materialized `Isothermal::pressure` closure, same single source as iso c2p.
+        let pre = cs2 * rho;
+        vec![KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node())]
+    })
 }
 
 /// trace the real RHD c2p — symbi-hydro's branch-free `rhd_recover` (the iterative
@@ -148,53 +148,54 @@ pub fn iso_pre_gv() -> (GvKernel, KernelWrites) {
 /// the host wrapper's input guard + post-hoc diagnostics are host-only — the kernel
 /// computes the raw recovery, exactly as the substrate already does.
 pub fn rhd_c2p_gv<const D: usize>(max_iters: usize, eos_arm: EosArm) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    // input binding: the conserved fields + the eos scalar, as Gv leaves.
-    let den = Gv::field("cons_den", FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..D)
-        .map(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
-        .collect();
-    let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
-    let gamma = Gv::scalar("gamma");
+    trace(|cx| {
+        // input binding: the conserved fields + the eos scalar, as Gv leaves.
+        let den = cx.field("cons_den", FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..D)
+            .map(|k| cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
+            .collect();
+        let nrg = cx.field("cons_nrg", FieldRef::cons_nrg());
+        let gamma = cx.scalar("gamma");
 
-    // the single-source physics, instantiated at the tracing carrier.
-    let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
-    let cons = Cons::<Gv, D> {
-        chi: Default::default(),
-        den,
-        mom: Tensor::new(mom_arr),
-        nrg,
-    };
-    // flat-frame spatial metric = identity (constant-folds to the euclidean norm, so the
-    // traced/compiled kernel is bit-identical). the GR metric threads in here. the newton
-    // is eos-generic — the closure arm selects gamma-law or taub-mathews at trace time
-    // (gamma stays bound on both arms; under the synge closure it is bound-but-inert).
-    let prim = rhd_recover(
-        &super::gv_eos(eos_arm, gamma),
-        &cons,
-        &SpatialMetric::flat(),
-        max_iters,
-    );
+        // the single-source physics, instantiated at the tracing carrier.
+        let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
+        let cons = Cons::<Gv, D> {
+            chi: Default::default(),
+            den,
+            mom: Tensor::new(mom_arr),
+            nrg,
+        };
+        // flat-frame spatial metric = identity (constant-folds to the euclidean norm, so the
+        // traced/compiled kernel is bit-identical). the GR metric threads in here. the newton
+        // is eos-generic — the closure arm selects gamma-law or taub-mathews at trace time
+        // (gamma stays bound on both arms; under the synge closure it is bound-but-inert).
+        let prim = rhd_recover(
+            &super::gv_eos(eos_arm, gamma),
+            &cons,
+            &SpatialMetric::flat(),
+            max_iters,
+        );
 
-    let mut writes = vec![KernelWrite::new(
-        "prim_rho",
-        FieldRef::PrimRho,
-        prim.rho.node(),
-    )];
-    for k in 0..D {
+        let mut writes = vec![KernelWrite::new(
+            "prim_rho",
+            FieldRef::PrimRho,
+            prim.rho.node(),
+        )];
+        for k in 0..D {
+            writes.push(KernelWrite::new(
+                format!("prim_vel_{k}"),
+                FieldRef::PrimVel(k as u8),
+                prim.vel[k].node(),
+            ));
+        }
         writes.push(KernelWrite::new(
-            format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8),
-            prim.vel[k].node(),
+            "prim_pre",
+            FieldRef::PrimPre,
+            prim.pre.node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "prim_pre",
-        FieldRef::PrimPre,
-        prim.pre.node(),
-    ));
 
-    (end_trace(), writes)
+        writes
+    })
 }
 
 /// the RHD cons->prim on a curved spacetime — the `_schw`/`_ks` GR path. it undensitizes the
@@ -214,92 +215,100 @@ pub fn rhd_c2p_gr_gv<const D: usize>(
     max_iters: usize,
 ) -> (GvKernel, KernelWrites)
 where
-    SchwarzschildKS<Gv>: Metric<Gv, D>,
-    SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
-    KerrKSCartesian<Gv>: Metric<Gv, D>,
-    KerrKSCylindrical<Gv>: Metric<Gv, D>,
-    SchwarzschildKSCylindrical<Gv>: Metric<Gv, D>,
-    KerrKS<Gv>: Metric<Gv, D>,
+    for<'t> SchwarzschildKS<Gv<'t>>: Metric<Gv<'t>, D>,
+    for<'t> SchwarzschildKSCartesian<Gv<'t>>: Metric<Gv<'t>, D>,
+    for<'t> KerrKSCartesian<Gv<'t>>: Metric<Gv<'t>, D>,
+    for<'t> KerrKSCylindrical<Gv<'t>>: Metric<Gv<'t>, D>,
+    for<'t> SchwarzschildKSCylindrical<Gv<'t>>: Metric<Gv<'t>, D>,
+    for<'t> KerrKS<Gv<'t>>: Metric<Gv<'t>, D>,
 {
-    begin_trace();
-    let den = Gv::field("cons_den", FieldRef::cons_den());
-    let mom: [Gv; D] =
-        std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
-    let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
-    let gamma = Gv::scalar("gamma");
+    trace(|cx| {
+        let den = cx.field("cons_den", FieldRef::cons_den());
+        let mom: [Gv; D] = std::array::from_fn(|k| {
+            cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
+        });
+        let nrg = cx.field("cons_nrg", FieldRef::cons_nrg());
+        let gamma = cx.scalar("gamma");
 
-    // the in-kernel spatial metric at the cell's arithmetic midpoint — the point the seeding
-    // densitizes at and the godunov evaluates the connection source at, so the stored state
-    // inverts exactly. the densitized law's cell average is over the plain coordinate volume, so
-    // the midpoint is its second-order sampling point, where the area-weighted law would read the
-    // chart's volume-weighted centroid. gridded coordinate slots take that midpoint; an ungridded
-    // symmetry slot (the axisymmetric phi of the spherical swirl) takes zero — the spherical
-    // metrics read the gridded (r, theta) alone, gamma_{phi phi} = r^2 sin^2(theta). a suppressed
-    // polar slot would zero sin(theta) (singular gamma) — rejected.
-    let ndim = axes.len();
-    let mid = gv_cell_midpoints(spacing, ndim);
-    let x = Tensor::<Gv, D>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => mid[d],
-            None => gv_ungridded_slot(coords, c),
+        // the in-kernel spatial metric at the cell's arithmetic midpoint — the point the seeding
+        // densitizes at and the godunov evaluates the connection source at, so the stored state
+        // inverts exactly. the densitized law's cell average is over the plain coordinate volume, so
+        // the midpoint is its second-order sampling point, where the area-weighted law would read the
+        // chart's volume-weighted centroid. gridded coordinate slots take that midpoint; an ungridded
+        // symmetry slot (the axisymmetric phi of the spherical swirl) takes zero — the spherical
+        // metrics read the gridded (r, theta) alone, gamma_{phi phi} = r^2 sin^2(theta). a suppressed
+        // polar slot would zero sin(theta) (singular gamma) — rejected.
+        let ndim = axes.len();
+        let mid = gv_cell_midpoints(cx, spacing, ndim);
+        let x = Tensor::<Gv, D>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => mid[d],
+                None => gv_ungridded_slot(coords, c),
+            }
+        }));
+        // the evolved state is the densitized sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)], so the
+        // recovery harvests the cell lapse, shift and full-chart measure `volume_factor`: undensitize
+        // by the known sqrt(det gamma)(x), then invert the killing energy back to the valencia tau the
+        // newton consumes, tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
+        // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. on the spherical
+        // chart the non-diagonal gamma_{r phi} means the azimuthal-momentum (swirl, D = 3)
+        // instantiation is the one carrying the metric; the D = 1/2 arms are unreachable at bake.
+        let (gm, gm_inv, alpha, beta, sqrt_gamma) = {
+            fn adm<'t, const N: usize, M: Metric<Gv<'t>, N>>(
+                m: &M,
+                x: Tensor<Gv<'t>, N>,
+            ) -> (
+                Matrix<Gv<'t>, N>,
+                Matrix<Gv<'t>, N>,
+                Gv<'t>,
+                Tensor<Gv<'t>, N>,
+                Gv<'t>,
+            ) {
+                (
+                    m.spatial_metric(x),
+                    m.spatial_metric_inv(x),
+                    m.lapse(x),
+                    m.shift(x),
+                    m.volume_factor(x),
+                )
+            }
+            with_ks_metric!(cx, spacetime, coords, "the GR c2p", |m| adm(&m, x))
+        };
+        let metric = SpatialMetric::<Gv, D>::new(Gamma::new(gm), GammaInv::new(gm_inv));
+
+        let inv_dens = Gv::ONE / sqrt_gamma;
+        let den = den * inv_dens;
+        let nrg = nrg * inv_dens;
+        let mom_t = Tensor::new(mom).scale(inv_dens);
+        let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
+        let cons = Cons::<Gv, D> {
+            chi: Default::default(),
+            den,
+            mom: mom_t,
+            nrg: tau,
+        };
+        let prim = rhd_recover(&IdealGas { gamma }, &cons, &metric, max_iters);
+
+        let mut writes = vec![KernelWrite::new(
+            "prim_rho",
+            FieldRef::PrimRho,
+            prim.rho.node(),
+        )];
+        for k in 0..D {
+            writes.push(KernelWrite::new(
+                format!("prim_vel_{k}"),
+                FieldRef::PrimVel(k as u8),
+                prim.vel[k].node(),
+            ));
         }
-    }));
-    // the evolved state is the densitized sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)], so the
-    // recovery harvests the cell lapse, shift and full-chart measure `volume_factor`: undensitize
-    // by the known sqrt(det gamma)(x), then invert the killing energy back to the valencia tau the
-    // newton consumes, tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
-    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
-    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. on the spherical
-    // chart the non-diagonal gamma_{r phi} means the azimuthal-momentum (swirl, D = 3)
-    // instantiation is the one carrying the metric; the D = 1/2 arms are unreachable at bake.
-    let (gm, gm_inv, alpha, beta, sqrt_gamma) = {
-        fn adm<const N: usize, M: Metric<Gv, N>>(
-            m: &M,
-            x: Tensor<Gv, N>,
-        ) -> (Matrix<Gv, N>, Matrix<Gv, N>, Gv, Tensor<Gv, N>, Gv) {
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-                m.volume_factor(x),
-            )
-        }
-        with_ks_metric!(spacetime, coords, "the GR c2p", |m| adm(&m, x))
-    };
-    let metric = SpatialMetric::<Gv, D>::new(Gamma::new(gm), GammaInv::new(gm_inv));
-
-    let inv_dens = Gv::ONE / sqrt_gamma;
-    let den = den * inv_dens;
-    let nrg = nrg * inv_dens;
-    let mom_t = Tensor::new(mom).scale(inv_dens);
-    let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
-    let cons = Cons::<Gv, D> {
-        chi: Default::default(),
-        den,
-        mom: mom_t,
-        nrg: tau,
-    };
-    let prim = rhd_recover(&IdealGas { gamma }, &cons, &metric, max_iters);
-
-    let mut writes = vec![KernelWrite::new(
-        "prim_rho",
-        FieldRef::PrimRho,
-        prim.rho.node(),
-    )];
-    for k in 0..D {
         writes.push(KernelWrite::new(
-            format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8),
-            prim.vel[k].node(),
+            "prim_pre",
+            FieldRef::PrimPre,
+            prim.pre.node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "prim_pre",
-        FieldRef::PrimPre,
-        prim.pre.node(),
-    ));
-    (end_trace(), writes)
+        writes
+    })
 }
 
 /// trace the real RMHD c2p — symbi-hydro's branch-free `rmhd_recover` (the KKC
@@ -313,52 +322,54 @@ where
 /// loop. reads the 8-field conserved (den, mom_{0,1,2}, nrg, mag_{0,1,2})
 /// + gamma; writes (rho, vel_{0,1,2}, pre). B passes through, recovered by the CT evolution.
 pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    // input binding, in the substrate's field-read order: den, mom, nrg (tau), mag, gamma.
-    let den = Gv::field("cons_den", FieldRef::cons_den());
-    let mom: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
-    let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
-    let gamma = Gv::scalar("gamma");
+    trace(|cx| {
+        // input binding, in the substrate's field-read order: den, mom, nrg (tau), mag, gamma.
+        let den = cx.field("cons_den", FieldRef::cons_den());
+        let mom: [Gv; 3] = std::array::from_fn(|k| {
+            cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
+        });
+        let nrg = cx.field("cons_nrg", FieldRef::cons_nrg());
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
+        let gamma = cx.scalar("gamma");
 
-    // the single-source physics at the tracing carrier (3-component RMHD state).
-    let cons = MhdCons::<Gv, 3> {
-        hydro: Cons {
-            chi: Default::default(),
-            den,
-            mom: Tensor::new(mom),
-            nrg,
-        },
-        mag: Tensor::new(mag),
-    };
-    let prim = rmhd_recover(
-        &IdealGas { gamma },
-        &cons,
-        &SpatialMetric::flat(),
-        max_iters,
-    );
+        // the single-source physics at the tracing carrier (3-component RMHD state).
+        let cons = MhdCons::<Gv, 3> {
+            hydro: Cons {
+                chi: Default::default(),
+                den,
+                mom: Tensor::new(mom),
+                nrg,
+            },
+            mag: Tensor::new(mag),
+        };
+        let prim = rmhd_recover(
+            &IdealGas { gamma },
+            &cons,
+            &SpatialMetric::flat(),
+            max_iters,
+        );
 
-    let mut writes = vec![KernelWrite::new(
-        "prim_rho",
-        FieldRef::PrimRho,
-        prim.rho.node(),
-    )];
-    for k in 0..3 {
+        let mut writes = vec![KernelWrite::new(
+            "prim_rho",
+            FieldRef::PrimRho,
+            prim.rho.node(),
+        )];
+        for k in 0..3 {
+            writes.push(KernelWrite::new(
+                format!("prim_vel_{k}"),
+                FieldRef::PrimVel(k as u8),
+                prim.vel[k].node(),
+            ));
+        }
         writes.push(KernelWrite::new(
-            format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8),
-            prim.vel[k].node(),
+            "prim_pre",
+            FieldRef::PrimPre,
+            prim.pre.node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "prim_pre",
-        FieldRef::PrimPre,
-        prim.pre.node(),
-    ));
 
-    (end_trace(), writes)
+        writes
+    })
 }
 
 /// the RMHD cons->prim on a curved spatial metric — the metric-aware KKC recovery
@@ -375,79 +386,86 @@ pub fn rmhd_c2p_gr_gv(
     axes: &[usize],
     max_iters: usize,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let den = Gv::field("cons_den", FieldRef::cons_den());
-    let mom: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
-    let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
-    let gamma_eos = Gv::scalar("gamma");
+    trace(|cx| {
+        let den = cx.field("cons_den", FieldRef::cons_den());
+        let mom: [Gv; 3] = std::array::from_fn(|k| {
+            cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
+        });
+        let nrg = cx.field("cons_nrg", FieldRef::cons_nrg());
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
+        let gamma_eos = cx.scalar("gamma");
 
-    let ndim = axes.len();
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => geo.centroid[d],
-            None => gv_ungridded_slot(coords, c),
+        let ndim = axes.len();
+        let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => geo.centroid[d],
+                None => gv_ungridded_slot(coords, c),
+            }
+        }));
+        // the covariant energy ehat = alpha tau + (alpha-1) D - beta^i S_i is what the godunov evolves,
+        // so the recovery harvests the cell lapse + shift to invert it back to the valencia tau the KKC
+        // c2p consumes: tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
+        // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. every spinning
+        // kerr chart has a theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta),
+        // so the polar axis must be gridded — the swirl 2D (r, theta) bake grids it (the
+        // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
+        let (gm, gm_inv, alpha, beta) = {
+            fn adm<'t, M: Metric<Gv<'t>, 3>>(
+                m: &M,
+                x: Tensor<Gv<'t>, 3>,
+            ) -> (
+                Matrix<Gv<'t>, 3>,
+                Matrix<Gv<'t>, 3>,
+                Gv<'t>,
+                Tensor<Gv<'t>, 3>,
+            ) {
+                (
+                    m.spatial_metric(x),
+                    m.spatial_metric_inv(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            with_ks_metric!(cx, spacetime, coords, "the GRMHD c2p", |m| adm(&m, x))
+        };
+        let metric = SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv));
+
+        let mom_t = Tensor::new(mom);
+        let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
+        let cons = MhdCons::<Gv, 3> {
+            hydro: Cons {
+                chi: Default::default(),
+                den,
+                mom: mom_t,
+                nrg: tau,
+            },
+            mag: Tensor::new(mag),
+        };
+        let prim = rmhd_recover(&IdealGas { gamma: gamma_eos }, &cons, &metric, max_iters);
+
+        let mut writes = vec![KernelWrite::new(
+            "prim_rho",
+            FieldRef::PrimRho,
+            prim.rho.node(),
+        )];
+        for k in 0..3 {
+            writes.push(KernelWrite::new(
+                format!("prim_vel_{k}"),
+                FieldRef::PrimVel(k as u8),
+                prim.vel[k].node(),
+            ));
         }
-    }));
-    // the covariant energy ehat = alpha tau + (alpha-1) D - beta^i S_i is what the godunov evolves,
-    // so the recovery harvests the cell lapse + shift to invert it back to the valencia tau the KKC
-    // c2p consumes: tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
-    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
-    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. every spinning
-    // kerr chart has a theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta),
-    // so the polar axis must be gridded — the swirl 2D (r, theta) bake grids it (the
-    // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
-    let (gm, gm_inv, alpha, beta) = {
-        fn adm<M: Metric<Gv, 3>>(
-            m: &M,
-            x: Tensor<Gv, 3>,
-        ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-            )
-        }
-        with_ks_metric!(spacetime, coords, "the GRMHD c2p", |m| adm(&m, x))
-    };
-    let metric = SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv));
-
-    let mom_t = Tensor::new(mom);
-    let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
-    let cons = MhdCons::<Gv, 3> {
-        hydro: Cons {
-            chi: Default::default(),
-            den,
-            mom: mom_t,
-            nrg: tau,
-        },
-        mag: Tensor::new(mag),
-    };
-    let prim = rmhd_recover(&IdealGas { gamma: gamma_eos }, &cons, &metric, max_iters);
-
-    let mut writes = vec![KernelWrite::new(
-        "prim_rho",
-        FieldRef::PrimRho,
-        prim.rho.node(),
-    )];
-    for k in 0..3 {
         writes.push(KernelWrite::new(
-            format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8),
-            prim.vel[k].node(),
+            "prim_pre",
+            FieldRef::PrimPre,
+            prim.pre.node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "prim_pre",
-        FieldRef::PrimPre,
-        prim.pre.node(),
-    ));
 
-    (end_trace(), writes)
+        writes
+    })
 }
 
 // =============================================================================
@@ -465,45 +483,47 @@ pub fn rmhd_c2p_gr_gv(
 /// traced math is branch-free, comparisons living with the caller). reads `cons_mag_k` because
 /// recovering the gas pressure requires stripping 1/2|B|^2 from the total energy.
 pub fn nmhd_c2p_gv() -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let den = Gv::field("cons_den", FieldRef::cons_den());
-    let mom: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
-    let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
-    let gamma = Gv::scalar("gamma");
+    trace(|cx| {
+        let den = cx.field("cons_den", FieldRef::cons_den());
+        let mom: [Gv; 3] = std::array::from_fn(|k| {
+            cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
+        });
+        let nrg = cx.field("cons_nrg", FieldRef::cons_nrg());
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
+        let gamma = cx.scalar("gamma");
 
-    let cons = MhdCons::<Gv, 3> {
-        hydro: Cons {
-            chi: Default::default(),
-            den,
-            mom: Tensor::new(mom),
-            nrg,
-        },
-        mag: Tensor::new(mag),
-    };
-    let prim = nmhd_recover(&IdealGas { gamma }, &cons);
+        let cons = MhdCons::<Gv, 3> {
+            hydro: Cons {
+                chi: Default::default(),
+                den,
+                mom: Tensor::new(mom),
+                nrg,
+            },
+            mag: Tensor::new(mag),
+        };
+        let prim = nmhd_recover(&IdealGas { gamma }, &cons);
 
-    let mut writes = vec![KernelWrite::new(
-        "prim_rho",
-        FieldRef::PrimRho,
-        prim.rho.node(),
-    )];
-    for k in 0..3 {
+        let mut writes = vec![KernelWrite::new(
+            "prim_rho",
+            FieldRef::PrimRho,
+            prim.rho.node(),
+        )];
+        for k in 0..3 {
+            writes.push(KernelWrite::new(
+                format!("prim_vel_{k}"),
+                FieldRef::PrimVel(k as u8),
+                prim.vel[k].node(),
+            ));
+        }
         writes.push(KernelWrite::new(
-            format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8),
-            prim.vel[k].node(),
+            "prim_pre",
+            FieldRef::PrimPre,
+            prim.pre.node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "prim_pre",
-        FieldRef::PrimPre,
-        prim.pre.node(),
-    ));
 
-    (end_trace(), writes)
+        writes
+    })
 }
 
 // =============================================================================
@@ -517,38 +537,40 @@ pub fn nmhd_c2p_gv() -> (GvKernel, KernelWrites) {
 /// trace the isothermal-MHD c2p — trivial inversion (rho = den, v = mom/den), writing rho
 /// and vel. the single source the substrate c2p kernel renders.
 pub fn imhd_c2p_gv() -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let den = Gv::field("cons_den", FieldRef::cons_den());
-    let mom: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
+    trace(|cx| {
+        let den = cx.field("cons_den", FieldRef::cons_den());
+        let mom: [Gv; 3] = std::array::from_fn(|k| {
+            cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
+        });
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
 
-    let cons = IsoMhdCons::<Gv, 3> {
-        hydro: ConsG {
-            chi: Default::default(),
-            den,
-            mom: Tensor::new(mom),
-            nrg: Zero::default(),
-        },
-        mag: Tensor::new(mag),
-    };
-    // imhd_recover is pure kinematics, so the EOS argument is inert; Gv::zero keeps `cs`
-    // out of the manifest.
-    let prim = imhd_recover(&Isothermal { cs: Gv::ZERO }, &cons);
+        let cons = IsoMhdCons::<Gv, 3> {
+            hydro: ConsG {
+                chi: Default::default(),
+                den,
+                mom: Tensor::new(mom),
+                nrg: Zero::default(),
+            },
+            mag: Tensor::new(mag),
+        };
+        // imhd_recover is pure kinematics, so the EOS argument is inert; Gv::zero keeps `cs`
+        // out of the manifest.
+        let prim = imhd_recover(&Isothermal { cs: Gv::ZERO }, &cons);
 
-    let mut writes = vec![KernelWrite::new(
-        "prim_rho",
-        FieldRef::PrimRho,
-        prim.rho.node(),
-    )];
-    for k in 0..3 {
-        writes.push(KernelWrite::new(
-            format!("prim_vel_{k}"),
-            FieldRef::PrimVel(k as u8),
-            prim.vel[k].node(),
-        ));
-    }
-    // the writes stop at vel — the isothermal closure sets the pressure from rho.
-    (end_trace(), writes)
+        let mut writes = vec![KernelWrite::new(
+            "prim_rho",
+            FieldRef::PrimRho,
+            prim.rho.node(),
+        )];
+        for k in 0..3 {
+            writes.push(KernelWrite::new(
+                format!("prim_vel_{k}"),
+                FieldRef::PrimVel(k as u8),
+                prim.vel[k].node(),
+            ));
+        }
+        // the writes stop at vel — the isothermal closure sets the pressure from rho.
+        writes
+    })
 }

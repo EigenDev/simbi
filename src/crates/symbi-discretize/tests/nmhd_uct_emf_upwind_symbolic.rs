@@ -50,7 +50,7 @@ fn coeff<'a>(lf: &'a LinForm, key: &str) -> &'a symbi_ir::proof::Poly {
 fn uct_emf_upwind_pairing_symbolic() {
     let (kernel, writes) = uct_master_emf_proof_kernel(false);
     let root = writes[0].value;
-    let lf = LinForm::extract(&kernel.graph, root, FIELDS, SCALARS);
+    let lf = LinForm::extract(kernel.graph(), root, FIELDS, SCALARS);
 
     // +x advection: a^L (al_x) weights the upwind West face by_w; a^R (ar_x) the
     // downwind East face by_e. the products are -vbar_x*al_x and -vbar_x*ar_x.
@@ -121,7 +121,7 @@ fn uct_emf_upwind_pairing_symbolic() {
 fn uct_emf_anti_upwind_pairing_is_rejected() {
     let (kernel, writes) = uct_master_emf_proof_kernel(true);
     let root = writes[0].value;
-    let lf = LinForm::extract(&kernel.graph, root, FIELDS, SCALARS);
+    let lf = LinForm::extract(kernel.graph(), root, FIELDS, SCALARS);
 
     // with by_w/by_e swapped, a^L lands on the downwind face and the upwind face
     // by_w carries a^R, which violates the upwind-pairing invariant.

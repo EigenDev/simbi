@@ -688,35 +688,35 @@ mod tests {
         // parameters as scalar params, the distance as a graph node. the
         // penalization kernel builder consumes exactly this path.
         use symbi_algebra::algebra::Numeric as _;
-        use symbi_ir::{Gv, begin_trace, end_trace};
-        begin_trace();
-        let body: SdfExpr<Gv, 3> = SdfExpr::Sphere {
-            center: [
-                Gv::scalar("body_0_pos_0"),
-                Gv::scalar("body_0_pos_1"),
-                Gv::scalar("body_0_pos_2"),
-            ],
-            radius: Gv::scalar("body_0_radius"),
-        }
-        .union(SdfExpr::Cuboid {
-            center: [Gv::from_f64(1.0), Gv::from_f64(0.0), Gv::from_f64(0.0)],
-            half_extents: [Gv::from_f64(0.5); 3],
+        use symbi_ir::{Gv, TraceCx, trace};
+        let (kernel, ()) = trace(|cx: TraceCx| {
+            let body: SdfExpr<Gv, 3> = SdfExpr::Sphere {
+                center: [
+                    cx.scalar("body_0_pos_0"),
+                    cx.scalar("body_0_pos_1"),
+                    cx.scalar("body_0_pos_2"),
+                ],
+                radius: cx.scalar("body_0_radius"),
+            }
+            .union(SdfExpr::Cuboid {
+                center: [Gv::from_f64(1.0), Gv::from_f64(0.0), Gv::from_f64(0.0)],
+                half_extents: [Gv::from_f64(0.5); 3],
+            });
+            let x = [cx.scalar("x0"), cx.scalar("x1"), cx.scalar("x2")];
+            let d = body.dist(x);
+            let _ = d.node();
         });
-        let x = [Gv::scalar("x0"), Gv::scalar("x1"), Gv::scalar("x2")];
-        let d = body.dist(x);
-        let kernel = end_trace();
         assert!(
-            !kernel.graph.has_errors(),
+            !kernel.graph().has_errors(),
             "sdf trace produced graph errors"
         );
         assert!(
             kernel
-                .scalar_params
+                .scalar_params()
                 .iter()
                 .any(|p| p.as_str() == "body_0_radius"),
             "shape params must land in the scalar manifest",
         );
-        let _ = d.node();
     }
 
     #[test]

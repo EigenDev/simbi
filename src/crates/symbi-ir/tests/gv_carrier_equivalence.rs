@@ -21,7 +21,7 @@
 
 use symbi_ir::algebra::Scalar;
 use symbi_ir::passes::scalarize::{LoweredFn, scalarize_kernel};
-use symbi_ir::{Backend, Cpu, Gv, begin_trace, end_trace};
+use symbi_ir::{Backend, Cpu, Gv, TraceCx, trace};
 
 /// run a Scalar-generic physics function at S = Gv, scalarize the resulting
 /// graph, and evaluate the LoweredFn at the given f64 inputs.
@@ -34,12 +34,12 @@ use symbi_ir::{Backend, Cpu, Gv, begin_trace, end_trace};
 /// returns one rank-0 scalar, which is exactly what kernel mode requires.
 fn gv_eval<F>(physics: F, param_names: &[&str], inputs: &[f64]) -> f64
 where
-    F: FnOnce(&[Gv]) -> Gv,
+    F: for<'t> FnOnce(&[Gv<'t>]) -> Gv<'t>,
 {
-    begin_trace();
-    let params: Vec<Gv> = param_names.iter().map(|n| Gv::param(n)).collect();
-    let root = physics(&params).node();
-    let kernel = end_trace();
+    let (kernel, root) = trace(|cx: TraceCx| {
+        let params: Vec<Gv> = param_names.iter().map(|n| cx.param(n)).collect();
+        physics(&params).node()
+    });
     let scalarized = scalarize_kernel(kernel.graph(), &[root]);
     let ty = kernel.graph().ty(root).clone();
     let lowered = LoweredFn {

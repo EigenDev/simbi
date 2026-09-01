@@ -137,7 +137,7 @@ fn divb_sph_symbolic_telescoping() {
         let root = writes[0].value;
 
         // the dt*curl rational linear form (b stripped), keys -> physical axes.
-        let raw = curl_only(LinFormR::extract_rat(&kernel.graph, root, FIELDS, SCALARS));
+        let raw = curl_only(LinFormR::extract_rat(kernel.graph(), root, FIELDS, SCALARS));
         let curl = raw.canonicalize_keys(&physical_rename(dir));
         assert!(
             !curl.is_zero(),

@@ -63,7 +63,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
         state ^= state << 17;
         (state >> 11) as f64 / (1u64 << 53) as f64 + 0.5 // [0.5, 1.5), keeps rho>0
     };
-    let in_bufs: Vec<Vec<f64>> = (0..gvk.field_inputs.len())
+    let in_bufs: Vec<Vec<f64>> = (0..gvk.field_inputs().len())
         .map(|_| (0..buf_len).map(|_| next()).collect())
         .collect();
 
@@ -90,7 +90,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
     .into_iter()
     .collect();
     let scalars: Vec<f64> = gvk
-        .scalar_params
+        .scalar_params()
         .iter()
         .map(|s| {
             *vals
@@ -108,10 +108,10 @@ fn jit_fused_godunov_matches_interp_bitwise() {
             target: Target::Cuda,
             precision: Precision::F64,
         },
-        field_inputs: &gvk.field_inputs,
-        scalar_params: &gvk.scalar_params,
+        field_inputs: gvk.field_inputs(),
+        scalar_params: gvk.scalar_params(),
         field_writes: &writes,
-        coord_components: &gvk.coord_components,
+        coord_components: gvk.coord_components(),
         device_preamble: &[],
         tile_spec: None,
     };
@@ -136,7 +136,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
             })
             .collect();
         Cpu.run_kernel(
-            &gvk.graph,
+            gvk.graph(),
             &spec,
             &in_fields,
             &mut out_fields,
@@ -169,7 +169,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
     let out_keys: Vec<&str> = writes.iter().map(|write| write.key.as_str()).collect();
     // map each write key to its input-buffer index (in-place: same ir-key appears as input + write).
     let in_key_idx: HashMap<&str, usize> = gvk
-        .field_inputs
+        .field_inputs()
         .iter()
         .enumerate()
         .map(|(i, (k, _))| (k.as_str(), i))
@@ -184,7 +184,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
             .enumerate()
             .map(|(i, b)| {
                 // if this input is an in-place cons field, point at the (aliased) alias buffer.
-                let key = gvk.field_inputs[i].0.as_str();
+                let key = gvk.field_inputs()[i].0.as_str();
                 match out_keys.iter().position(|k| *k == key) {
                     Some(w) => alias_bufs[w].as_ptr(),
                     None => b.as_ptr(),

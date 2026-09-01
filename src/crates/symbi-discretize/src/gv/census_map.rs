@@ -24,7 +24,7 @@ use symbi_algebra::algebra::Numeric;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::graph::NodeId;
 use symbi_ir::{
-    FieldRef, Gv, GvKernel, KernelWrite, KernelWrites, begin_trace, end_trace, with_trace,
+    FieldRef, Gv, GvKernel, KernelWrite, KernelWrites, trace,
 };
 
 use crate::coords::{Coords, Spacing};
@@ -48,25 +48,25 @@ pub fn census_map_gv<A: CensusAxis>(
     n_values: usize,
     n_segments: usize,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
 
     // the live primitives: a census bins the state at the time it is sampled, which is the tail
     // of an accepted step, after the recovery (the stage input holds the step's starting state).
     let mut env: HashMap<String, NodeId> = HashMap::new();
-    env.insert("rho".into(), Gv::field("rho", FieldRef::PrimRho).node());
-    env.insert("pre".into(), Gv::field("pre", FieldRef::PrimPre).node());
-    env.insert("t".into(), Gv::scalar("t").node());
+    env.insert("rho".into(), cx.field("rho", FieldRef::PrimRho).node());
+    env.insert("pre".into(), cx.field("pre", FieldRef::PrimPre).node());
+    env.insert("t".into(), cx.scalar("t").node());
     for k in 0..dof {
         env.insert(
             format!("vel_{k}"),
-            Gv::field(&format!("vel_{k}"), FieldRef::PrimVel(k as u8)).node(),
+            cx.field(&format!("vel_{k}"), FieldRef::PrimVel(k as u8)).node(),
         );
     }
 
     // the cell measure and the centroid come from one geometry evaluation. `dv` is what makes an
     // accumulator extensive, and it is the chart's own volume, so a spherical shell's mass is its
     // actual mass.
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim as usize);
+    let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim as usize);
     env.insert("dv".into(), (Gv::ONE / geo.inv_volume).node());
     for (d, c) in geo.centroid.iter().enumerate() {
         env.insert(format!("x_{d}"), c.node());
@@ -76,11 +76,11 @@ pub fn census_map_gv<A: CensusAxis>(
     // declares parameters is the one emitting scalar slots.
     for pname in built.params() {
         env.entry(pname.clone())
-            .or_insert_with(|| Gv::scalar(pname).node());
+            .or_insert_with(|| cx.scalar(pname).node());
     }
 
     let out =
-        with_trace(|t| symbi_hydro::source_spec::splice_built_source_into(built, t.graph(), &env));
+        cx.with_trace(|t| symbi_hydro::source_spec::splice_built_source_into(built, t.graph(), &env));
     let n_axes = bin_axes.len();
     assert_eq!(
         out.len(),
@@ -91,7 +91,7 @@ pub fn census_map_gv<A: CensusAxis>(
     );
 
     // the bucket, from the same expression the host evaluates.
-    let coords_gv: Vec<Gv> = out[..n_axes].iter().map(|&n| Gv::of(n)).collect();
+    let coords_gv: Vec<Gv> = out[..n_axes].iter().map(|&n| cx.gv(n)).collect();
     let segment = segment_marker_traced(bin_axes, &coords_gv, n_segments);
 
     let mut writes = KernelWrites::with_capacity(n_values + 1);
@@ -107,7 +107,8 @@ pub fn census_map_gv<A: CensusAxis>(
         "census_segment",
         segment.node(),
     ));
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// what the traced binning needs of an axis: its edges. a trait, so this crate stands clear of
@@ -162,7 +163,7 @@ fn bin_locator(edges: &[f64]) -> BinLocator {
 /// branch-free upper-bound search: the first edge strictly above `x`.
 /// the select tree has logarithmic depth and preserves the host partition-point
 /// semantics exactly for arbitrary declared edges.
-fn upper_bound_traced(edges: &[f64], x: Gv, lo: usize, hi: usize) -> Gv {
+fn upper_bound_traced<'t>(edges: &[f64], x: Gv<'t>, lo: usize, hi: usize) -> Gv<'t> {
     if lo == hi {
         return Gv::from_f64(lo as f64);
     }
@@ -174,7 +175,7 @@ fn upper_bound_traced(edges: &[f64], x: Gv, lo: usize, hi: usize) -> Gv {
     )
 }
 
-fn bin_traced(edges: &[f64], x: Gv) -> Gv {
+fn bin_traced<'t>(edges: &[f64], x: Gv<'t>) -> Gv<'t> {
     let n_bins = edges.len() - 1;
     let locator = bin_locator(edges);
     let arithmetic = match locator {
@@ -214,7 +215,11 @@ fn bin_traced(edges: &[f64], x: Gv) -> Gv {
 /// `bin = #{edges at or below x} - 1`, clamped into the last bin so a value exactly on the outer
 /// edge counts as data. a NaN coordinate compares false against both bounds and lands in the
 /// drop segment.
-fn segment_marker_traced<A: CensusAxis>(bin_axes: &[A], coords: &[Gv], n_segments: usize) -> Gv {
+fn segment_marker_traced<'t, A: CensusAxis>(
+    bin_axes: &[A],
+    coords: &[Gv<'t>],
+    n_segments: usize,
+) -> Gv<'t> {
     let mut flat = Gv::ZERO;
     let mut all_in_range = Gv::ONE.cmp_gt(Gv::ZERO);
     for (axis, &x) in bin_axes.iter().zip(coords) {

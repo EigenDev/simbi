@@ -725,7 +725,7 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
 #[derive(Debug, Clone, Copy)]
 pub struct SchwarzschildKS<S> {
     /// the geometric mass M (units G = c = 1); the horizon is at r = 2M. carrier-generic over `S`
-    /// (an `f64` host value or a `Gv::scalar` in the trace), exactly like [`Schwarzschild::mass`].
+    /// (an `f64` host value or a `cx.scalar(..)` leaf in the trace), exactly like [`Schwarzschild::mass`].
     pub mass: S,
 }
 
@@ -966,7 +966,7 @@ impl<S: Scalar> DiagonalMetric<S, 3> for SchwarzschildKS<S> {}
 #[derive(Debug, Clone, Copy)]
 pub struct SchwarzschildKSCartesian<S> {
     /// the geometric mass M (units G = c = 1); the horizon is at r = 2M. carrier-generic over `S`
-    /// (an `f64` host value or a `Gv::scalar` in the trace), exactly like [`SchwarzschildKS::mass`].
+    /// (an `f64` host value or a `cx.scalar(..)` leaf in the trace), exactly like [`SchwarzschildKS::mass`].
     pub mass: S,
 }
 

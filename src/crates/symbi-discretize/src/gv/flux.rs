@@ -24,25 +24,32 @@ use symbi_ir::{KernelWrite, KernelWrites};
 /// speeds in a per-cell field and kernel. `ndim` is the reconstruction grid; `dir`
 /// the sweep axis (RMHD/NMHD are fixed 3D in the velocity/field components).
 // shared NMHD face-flux reconstruction: bind gamma + theta, PLM-reconstruct the
-// 8-component MHD primitive (rho, v_{0..2}, pre, B_{0..2}) to the face. assumes
-// begin_trace() is active. returns the eos + L/R primitives + the sweep normal —
+// 8-component MHD primitive (rho, v_{0..2}, pre, B_{0..2}) to the face. runs inside the
+// caller's open trace through `cx`. returns the eos + L/R primitives + the sweep normal —
 // the solver (HLLE / HLLC / HLLD) is the only thing that differs.
 // reconstruct the L/R MHD primitives at the `dir`-grid face. the PLM stencil shifts along
 // grid axis `dir`; the normal is physical component `coord_n` (= axes[dir]; == dir for
 // cartesian/identity, [0,2][dir] for cyl r-z) — nhat and the staggered normal-B override
 // both index `coord_n`, while the face field is read along grid `dir`.
-fn nmhd_reconstruct(
+fn nmhd_reconstruct<'t>(
+    cx: TraceCx<'t>,
     ndim: u8,
     dir: u8,
     coord_n: usize,
-) -> (IdealGas<Gv>, MhdPrim<Gv, 3>, MhdPrim<Gv, 3>, Tensor<Gv, 3>) {
-    let gamma = Gv::scalar("gamma");
-    let theta = Gv::scalar("theta");
-    let (rho_l, rho_r) = plm_theta_gv("prim_rho", "prim.rho", ndim, dir, theta);
+) -> (
+    IdealGas<Gv<'t>>,
+    MhdPrim<Gv<'t>, 3>,
+    MhdPrim<Gv<'t>, 3>,
+    Tensor<Gv<'t>, 3>,
+) {
+    let gamma = cx.scalar("gamma");
+    let theta = cx.scalar("theta");
+    let (rho_l, rho_r) = plm_theta_gv(cx, "prim_rho", "prim.rho", ndim, dir, theta);
     let mut vl = Vec::with_capacity(3);
     let mut vr = Vec::with_capacity(3);
     for k in 0..3 {
         let (l, r) = plm_theta_gv(
+            cx,
             &format!("prim_v{k}"),
             FieldRef::PrimVel(k as u8),
             ndim,
@@ -52,11 +59,12 @@ fn nmhd_reconstruct(
         vl.push(l);
         vr.push(r);
     }
-    let (pre_l, pre_r) = plm_theta_gv("prim_pre", "prim.pre", ndim, dir, theta);
+    let (pre_l, pre_r) = plm_theta_gv(cx, "prim_pre", "prim.pre", ndim, dir, theta);
     let mut bl = Vec::with_capacity(3);
     let mut br = Vec::with_capacity(3);
     for k in 0..3 {
         let (l, r) = plm_theta_gv(
+            cx,
             &format!("prim_b{k}"),
             &format!("prim.mag[{k}]"),
             ndim,
@@ -72,10 +80,10 @@ fn nmhd_reconstruct(
     // bn_l != bn_r, breaking the riemann solver's constant-Bn assumption (OT noise/blow-up).
     // the face field is read along grid axis `dir`; the overridden component is the physical
     // normal `coord_n` (they coincide for cartesian; differ for the cyl r-z swirl/axisym).
-    let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim, dir, 0);
+    let bn_face = cx.field_shifted("bface_n", "bface_n", ndim, dir, 0);
     bl[coord_n] = bn_face;
     br[coord_n] = bn_face;
-    let mk = |rho: Gv, v: &[Gv], p: Gv, b: &[Gv]| MhdPrim::<Gv, 3> {
+    let mk = |rho, v: &[_], p, b: &[_]| MhdPrim::<Gv, 3> {
         hydro: Prim {
             rho,
             vel: Tensor::new([v[0], v[1], v[2]]),
@@ -90,7 +98,7 @@ fn nmhd_reconstruct(
 }
 
 // the 8 conserved face-flux writes (D, S_{0..2}, nrg, B_{0..2}).
-fn nmhd_flux_writes(flux: &MhdCons<Gv, 3>) -> KernelWrites {
+fn nmhd_flux_writes<'t>(flux: &MhdCons<Gv<'t>, 3>) -> KernelWrites {
     let mut writes = vec![KernelWrite::new(
         "flux_den",
         FieldRef::flux_den(),
@@ -119,62 +127,64 @@ fn nmhd_flux_writes(flux: &MhdCons<Gv, 3>) -> KernelWrites {
 }
 
 pub fn nmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
-    let flux = hlle(&NewtonianMhd, &eos, &left, &right, &nhat, Gv::ZERO);
-    let writes = nmhd_flux_writes(&flux);
-    (end_trace(), writes)
+    trace(|cx| {
+        let (eos, left, right, nhat) = nmhd_reconstruct(cx, ndim, dir, coord_n);
+        let flux = hlle(&NewtonianMhd, &eos, &left, &right, &nhat, Gv::ZERO);
+        nmhd_flux_writes(&flux)
+    })
 }
 
 /// NMHD HLLC face flux — `hllc_newtonian` (Li 2005, contact-resolving, transverse-B
 /// continuous) on the reconstructed L/R states. wave speeds inline, from the face states
 /// alone (the manifest stays free of ws_l/ws_r).
 pub fn nmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
-    let flux = hllc_newtonian(
-        &eos,
-        &left,
-        &right,
-        &nhat,
-        Gv::ZERO,
-        ShockwaveLimiter::Standard,
-    );
-    let writes = nmhd_flux_writes(&flux);
-    (end_trace(), writes)
+    trace(|cx| {
+        let (eos, left, right, nhat) = nmhd_reconstruct(cx, ndim, dir, coord_n);
+        let flux = hllc_newtonian(
+            &eos,
+            &left,
+            &right,
+            &nhat,
+            Gv::ZERO,
+            ShockwaveLimiter::Standard,
+        );
+        nmhd_flux_writes(&flux)
+    })
 }
 
 /// NMHD HLLD face flux — `hlld_newtonian` (miyoshi-kusano 2005, full 5-wave). the
 /// robust solver: the algebraic c2p + this closed-form HLLD make orszag-tang stable.
 pub fn nmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
-    let flux = hlld_newtonian(&eos, &left, &right, &nhat, Gv::ZERO);
-    let writes = nmhd_flux_writes(&flux);
-    (end_trace(), writes)
+    trace(|cx| {
+        let (eos, left, right, nhat) = nmhd_reconstruct(cx, ndim, dir, coord_n);
+        let flux = hlld_newtonian(&eos, &left, &right, &nhat, Gv::ZERO);
+        nmhd_flux_writes(&flux)
+    })
 }
 
 // shared isothermal face-flux reconstruction: bind cs + theta, PLM-reconstruct the
 // 7-component iso-MHD primitive the isothermal system carries (rho, v_{0..2}, B_{0..2})
 // to the face. the face-normal field comes from the staggered face field (bface coupling, see
 // nmhd_reconstruct). returns the Isothermal eos + L/R primitives + the sweep normal.
-fn imhd_reconstruct(
+fn imhd_reconstruct<'t>(
+    cx: TraceCx<'t>,
     ndim: u8,
     dir: u8,
     coord_n: usize,
 ) -> (
-    Isothermal<Gv>,
-    IsoMhdPrim<Gv, 3>,
-    IsoMhdPrim<Gv, 3>,
-    Tensor<Gv, 3>,
+    Isothermal<Gv<'t>>,
+    IsoMhdPrim<Gv<'t>, 3>,
+    IsoMhdPrim<Gv<'t>, 3>,
+    Tensor<Gv<'t>, 3>,
 ) {
-    let cs = Gv::scalar("cs");
-    let theta = Gv::scalar("theta");
-    let (rho_l, rho_r) = plm_theta_gv("prim_rho", "prim.rho", ndim, dir, theta);
+    let cs = cx.scalar("cs");
+    let theta = cx.scalar("theta");
+    let (rho_l, rho_r) = plm_theta_gv(cx, "prim_rho", "prim.rho", ndim, dir, theta);
     let mut vl = Vec::with_capacity(3);
     let mut vr = Vec::with_capacity(3);
     for k in 0..3 {
         let (l, r) = plm_theta_gv(
+            cx,
             &format!("prim_v{k}"),
             FieldRef::PrimVel(k as u8),
             ndim,
@@ -188,6 +198,7 @@ fn imhd_reconstruct(
     let mut br = Vec::with_capacity(3);
     for k in 0..3 {
         let (l, r) = plm_theta_gv(
+            cx,
             &format!("prim_b{k}"),
             &format!("prim.mag[{k}]"),
             ndim,
@@ -199,10 +210,10 @@ fn imhd_reconstruct(
     }
     // staggered div-free normal face field (gardiner-stone CT coupling): read along grid `dir`,
     // override the physical normal component `coord_n` (= axes[dir]). see nmhd_reconstruct.
-    let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim, dir, 0);
+    let bn_face = cx.field_shifted("bface_n", "bface_n", ndim, dir, 0);
     bl[coord_n] = bn_face;
     br[coord_n] = bn_face;
-    let mk = |rho: Gv, v: &[Gv], b: &[Gv]| IsoMhdPrim::<Gv, 3> {
+    let mk = |rho, v: &[_], b: &[_]| IsoMhdPrim::<Gv, 3> {
         hydro: PrimG {
             rho,
             vel: Tensor::new([v[0], v[1], v[2]]),
@@ -217,7 +228,7 @@ fn imhd_reconstruct(
 }
 
 // the 7 conserved face-flux writes the isothermal system carries: D, S_{0..2}, B_{0..2}.
-fn imhd_flux_writes(flux: &IsoMhdCons<Gv, 3>) -> KernelWrites {
+fn imhd_flux_writes<'t>(flux: &IsoMhdCons<Gv<'t>, 3>) -> KernelWrites {
     let mut writes = vec![KernelWrite::new(
         "flux_den",
         FieldRef::flux_den(),
@@ -242,20 +253,20 @@ fn imhd_flux_writes(flux: &IsoMhdCons<Gv, 3>) -> KernelWrites {
 
 /// isothermal-MHD HLLE face flux.
 pub fn imhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let (eos, left, right, nhat) = imhd_reconstruct(ndim, dir, coord_n);
-    let flux = hlle(&IsothermalMhd, &eos, &left, &right, &nhat, Gv::ZERO);
-    let writes = imhd_flux_writes(&flux);
-    (end_trace(), writes)
+    trace(|cx| {
+        let (eos, left, right, nhat) = imhd_reconstruct(cx, ndim, dir, coord_n);
+        let flux = hlle(&IsothermalMhd, &eos, &left, &right, &nhat, Gv::ZERO);
+        imhd_flux_writes(&flux)
+    })
 }
 
 /// isothermal-MHD HLLD face flux — `hlld_isothermal` (mignone 2007, 3-state).
 pub fn imhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let (eos, left, right, nhat) = imhd_reconstruct(ndim, dir, coord_n);
-    let flux = hlld_isothermal(&eos, &left, &right, &nhat, Gv::ZERO);
-    let writes = imhd_flux_writes(&flux);
-    (end_trace(), writes)
+    trace(|cx| {
+        let (eos, left, right, nhat) = imhd_reconstruct(cx, ndim, dir, coord_n);
+        let flux = hlld_isothermal(&eos, &left, &right, &nhat, Gv::ZERO);
+        imhd_flux_writes(&flux)
+    })
 }
 
 // =============================================================================
@@ -283,10 +294,10 @@ pub fn imhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Kernel
 /// the cancellation holds while vface and the geometry agree on where the face lies; a linear
 /// position `x_lo + i*dx` on a graded axis breaks it by the amount the two reconstructions
 /// differ, which grows with the grading.
-fn mesh_face_velocity_gv(dir: u8) -> Gv {
-    let mesh_adot = Gv::scalar(&MeshScalar::Adot(dir).name());
-    let x_face = crate::gv::geometry::gv_axis_face_at(dir as usize, Spacing::Uniform, 0);
-    mesh_adot * x_face + Gv::scalar(&MeshScalar::Vtrans(dir).name())
+fn mesh_face_velocity_gv<'t>(cx: TraceCx<'t>, dir: u8) -> Gv<'t> {
+    let mesh_adot = cx.scalar(&MeshScalar::Adot(dir).name());
+    let x_face = crate::gv::geometry::gv_axis_face_at(cx, dir as usize, Spacing::Uniform, 0);
+    mesh_adot * x_face + cx.scalar(&MeshScalar::Vtrans(dir).name())
 }
 
 // shared euler (ideal-gas newtonian/relativistic) face reconstruction: bind the
@@ -304,19 +315,20 @@ pub struct Balanced<'a> {
     pub axes: &'a [usize],
 }
 
-fn euler_reconstruct<const D: usize>(
+fn euler_reconstruct<'t, const D: usize>(
+    cx: TraceCx<'t>,
     ndim: u8,
     dir: u8,
     coord_n: usize,
     recon: Recon,
     balanced: Option<Balanced<'_>>,
-) -> (Prim<Gv, D>, Prim<Gv, D>, Tensor<Gv, D>, Gv) {
+) -> (Prim<Gv<'t>, D>, Prim<Gv<'t>, D>, Tensor<Gv<'t>, D>, Gv<'t>) {
     // theta comes second in the manifest order [gamma, theta]: the caller registers gamma
     // inside the same trace before calling here (the eos construction lives with the
     // caller so the closure can be gamma-law or taub-mathews), and theta is registered
     // on every recon arm so the scalar tail is uniform; the ppm parabola carries its
     // own monotonicity constraint, so theta stays bound-but-inert there.
-    let theta = Gv::scalar("theta");
+    let theta = cx.scalar("theta");
     // well-balancing changes the pressure alone: the limiter acts on each cell's pressure
     // departure from the mechanical equilibrium through it, in place of the raw pressure,
     // while density and velocity take the plain reconstruction — the equilibrium density
@@ -328,11 +340,12 @@ fn euler_reconstruct<const D: usize>(
     // order, and every flux kernel, plain or balanced, registers [rho, v.., pre]: the
     // balanced branch touches only the pressure slot, so the manifest is one order for
     // the whole family.
-    let (rho_l, rho_r) = recon_gv("prim_rho", "prim.rho", ndim, dir, theta, recon);
+    let (rho_l, rho_r) = recon_gv(cx, "prim_rho", "prim.rho", ndim, dir, theta, recon);
     let mut vl = Vec::with_capacity(D);
     let mut vr = Vec::with_capacity(D);
     for k in 0..D {
         let (l, r) = recon_gv(
+            cx,
             &format!("prim_v{k}"),
             FieldRef::PrimVel(k as u8),
             ndim,
@@ -345,10 +358,11 @@ fn euler_reconstruct<const D: usize>(
     }
     let (pre_l, pre_r) = match balanced {
         Some(b) => {
-            let balanced_pair = balanced_pressure_pair(ndim, dir, recon, theta, b);
-            let plain_pair = recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon);
+            let balanced_pair = balanced_pressure_pair(cx, ndim, dir, recon, theta, b);
+            let plain_pair = recon_gv(cx, "prim_pre", "prim.pre", ndim, dir, theta, recon);
             let spacing = vec![Spacing::Uniform; ndim as usize];
             let left_weight = crate::gv_immersed::surface_handover_weight_gv(
+                cx,
                 b.n_bodies,
                 b.coords,
                 ndim as usize,
@@ -358,6 +372,7 @@ fn euler_reconstruct<const D: usize>(
                 -1,
             );
             let right_weight = crate::gv_immersed::surface_handover_weight_gv(
+                cx,
                 b.n_bodies,
                 b.coords,
                 ndim as usize,
@@ -371,7 +386,7 @@ fn euler_reconstruct<const D: usize>(
                 balanced_pair.1 + right_weight * (plain_pair.1 - balanced_pair.1),
             )
         }
-        None => recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon),
+        None => recon_gv(cx, "prim_pre", "prim.pre", ndim, dir, theta, recon),
     };
     let mut rho_lr = (rho_l, rho_r);
     let mut pre_lr = (pre_l, pre_r);
@@ -410,19 +425,17 @@ fn euler_reconstruct<const D: usize>(
         // (blending toward the equilibrium value would preserve balance under compression too;
         // the cell-average form is what stays, because the flatten is shared and its meaning
         // has to hold for every kernel that reads it.)
-        let onset = Gv::scalar("flatten_onset");
-        let full = Gv::scalar("flatten_full");
+        let onset = cx.scalar("flatten_onset");
+        let full = cx.scalar("flatten_full");
         let half = Gv::from_f64(0.5);
         let width = full - onset;
         let ramp = Gv::select(width.cmp_gt(Gv::ZERO), Gv::ONE / width, Gv::ZERO);
         let vkey = format!("prim_v{coord_n}");
-        let flatten = |cell: i32| -> Gv {
-            let vm =
-                Gv::field_shifted(&vkey, FieldRef::PrimVel(coord_n as u8), ndim, dir, cell - 1);
-            let vp =
-                Gv::field_shifted(&vkey, FieldRef::PrimVel(coord_n as u8), ndim, dir, cell + 1);
-            let p0 = Gv::field_shifted("prim_pre", "prim.pre", ndim, dir, cell);
-            let r0 = Gv::field_shifted("prim_rho", "prim.rho", ndim, dir, cell);
+        let flatten = |cell: i32| {
+            let vm = cx.field_shifted(&vkey, FieldRef::PrimVel(coord_n as u8), ndim, dir, cell - 1);
+            let vp = cx.field_shifted(&vkey, FieldRef::PrimVel(coord_n as u8), ndim, dir, cell + 1);
+            let p0 = cx.field_shifted("prim_pre", "prim.pre", ndim, dir, cell);
+            let r0 = cx.field_shifted("prim_rho", "prim.rho", ndim, dir, cell);
             let conv = ((vm - vp) * half).max(Gv::ZERO);
             let c = conv / (p0 / r0).sqrt();
             ((c - onset) * ramp).max(Gv::ZERO).min(Gv::ONE)
@@ -438,27 +451,27 @@ fn euler_reconstruct<const D: usize>(
         let f_p1 = flatten(1);
         let f_l = f_m2.max(f_m1).max(f_0);
         let f_r = f_m1.max(f_0).max(f_p1);
-        let blend = |face: Gv, avg: Gv, f: Gv| face + (avg - face) * f;
+        let blend = |face, avg, f| face + (avg - face) * f;
         rho_lr = (
             blend(
                 rho_lr.0,
-                Gv::field_shifted("prim_rho", "prim.rho", ndim, dir, -1),
+                cx.field_shifted("prim_rho", "prim.rho", ndim, dir, -1),
                 f_l,
             ),
-            blend(rho_lr.1, Gv::field("prim_rho", "prim.rho"), f_r),
+            blend(rho_lr.1, cx.field("prim_rho", "prim.rho"), f_r),
         );
         pre_lr = (
             blend(
                 pre_lr.0,
-                Gv::field_shifted("prim_pre", "prim.pre", ndim, dir, -1),
+                cx.field_shifted("prim_pre", "prim.pre", ndim, dir, -1),
                 f_l,
             ),
-            blend(pre_lr.1, Gv::field("prim_pre", "prim.pre"), f_r),
+            blend(pre_lr.1, cx.field("prim_pre", "prim.pre"), f_r),
         );
         for (k, lr) in vel_lr.iter_mut().enumerate() {
             let key = format!("prim_v{k}");
-            let avg_l = Gv::field_shifted(&key, FieldRef::PrimVel(k as u8), ndim, dir, -1);
-            let avg_r = Gv::field(&key, FieldRef::PrimVel(k as u8));
+            let avg_l = cx.field_shifted(&key, FieldRef::PrimVel(k as u8), ndim, dir, -1);
+            let avg_r = cx.field(&key, FieldRef::PrimVel(k as u8));
             *lr = (blend(lr.0, avg_l, f_l), blend(lr.1, avg_r, f_r));
         }
     }
@@ -477,12 +490,12 @@ fn euler_reconstruct<const D: usize>(
         pre: pre_lr.1,
     };
     let nhat = Tensor::<Gv, D>::unit(coord_n);
-    let vface = mesh_face_velocity_gv(dir);
+    let vface = mesh_face_velocity_gv(cx, dir);
     (left, right, nhat, vface)
 }
 
 // the D+2 conserved face-flux writes (D, S_{0..D}, nrg) for an euler-shaped Cons.
-fn euler_flux_writes<const D: usize>(flux: &Cons<Gv, D>) -> KernelWrites {
+fn euler_flux_writes<'t, const D: usize>(flux: &Cons<Gv<'t>, D>) -> KernelWrites {
     let mut writes = vec![KernelWrite::new(
         "flux_den",
         FieldRef::flux_den(),
@@ -523,18 +536,19 @@ fn euler_hlle_flux_gv<const D: usize, R>(
     eos_arm: EosArm,
 ) -> (GvKernel, KernelWrites)
 where
-    R: Regime<Gv, D, Prim = Prim<Gv, D>, Cons = Cons<Gv, D>>,
+    R: for<'t> Regime<Gv<'t>, D, Prim = Prim<Gv<'t>, D>, Cons = Cons<Gv<'t>, D>>,
 {
-    begin_trace();
-    // gamma comes first in the manifest on every arm (under the taub-mathews closure it is
-    // bound-but-inert, which keeps the ABI uniform, exactly as theta under ppm).
-    let gamma = Gv::scalar("gamma");
-    let eos = super::gv_eos(eos_arm, gamma);
-    // the single-source physics: reconstructed L/R primitives -> canonical HLLE.
-    let (left, right, nhat, vface) = euler_reconstruct::<D>(ndim, dir, coord_n, recon, None);
-    let flux = hlle(regime, &eos, &left, &right, &nhat, vface);
-    let writes = euler_flux_writes(&flux);
-    (end_trace(), writes)
+    trace(|cx| {
+        // gamma comes first in the manifest on every arm (under the taub-mathews closure it is
+        // bound-but-inert, which keeps the ABI uniform, exactly as theta under ppm).
+        let gamma = cx.scalar("gamma");
+        let eos = super::gv_eos(eos_arm, gamma);
+        // the single-source physics: reconstructed L/R primitives -> canonical HLLE.
+        let (left, right, nhat, vface) =
+            euler_reconstruct::<D>(cx, ndim, dir, coord_n, recon, None);
+        let flux = hlle(regime, &eos, &left, &right, &nhat, vface);
+        euler_flux_writes(&flux)
+    })
 }
 
 /// the adiabatic (ideal-gas newtonian euler) face flux — `euler_hlle_flux_gv` at the
@@ -584,155 +598,162 @@ pub fn rhd_flux_gr_gv<const D: usize>(
     rusanov: bool,
 ) -> (GvKernel, KernelWrites)
 where
-    SchwarzschildKS<Gv>: Metric<Gv, D>,
-    SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
-    KerrKSCartesian<Gv>: Metric<Gv, D>,
-    KerrKSCylindrical<Gv>: Metric<Gv, D>,
-    SchwarzschildKSCylindrical<Gv>: Metric<Gv, D>,
-    KerrKS<Gv>: Metric<Gv, D>,
+    for<'t> SchwarzschildKS<Gv<'t>>: Metric<Gv<'t>, D>,
+    for<'t> SchwarzschildKSCartesian<Gv<'t>>: Metric<Gv<'t>, D>,
+    for<'t> KerrKSCartesian<Gv<'t>>: Metric<Gv<'t>, D>,
+    for<'t> KerrKSCylindrical<Gv<'t>>: Metric<Gv<'t>, D>,
+    for<'t> SchwarzschildKSCylindrical<Gv<'t>>: Metric<Gv<'t>, D>,
+    for<'t> KerrKS<Gv<'t>>: Metric<Gv<'t>, D>,
 {
-    begin_trace();
-    // `D` is the momentum/velocity DOF; the reconstruction grid is `axes.len()` — they differ for
-    // the spherical swirl (DOF = 3 on a 2D (r, theta) grid, out-of-plane v_phi reconstructed along
-    // the gridded sweeps like any transverse component). the sweep normal is coordinate `axes[dir]`.
-    let ndim = axes.len();
-    // the GR arm stays on the gamma-law closure; gamma keeps its first-in-manifest slot.
-    let eos = IdealGas {
-        gamma: Gv::scalar("gamma"),
-    };
-    let (left, right, nhat, vface) =
-        euler_reconstruct::<D>(ndim as u8, dir, axes[dir as usize], Recon::Plm, None);
-    // the in-kernel spatial metric + lapse at the swept-axis face, transverse gridded coordinates at
-    // the cell centroid — the correct face-metric position for a `dir` sweep. the spherical metrics
-    // read the gridded (r, theta) alone — gamma_{phi phi} = r^2 sin^2(theta) — so an ungridded
-    // symmetry slot (the axisymmetric phi) takes zero.
-    // the transverse coordinate is the cell's arithmetic midpoint: the face flux is a face
-    // average over the transverse coordinate extent, whose second-order sampling point is the
-    // midpoint — the same point the cell state densitizes at.
-    let mid = gv_cell_midpoints(spacing, ndim);
-    let x = Tensor::<Gv, D>::new(std::array::from_fn(|c| {
-        if c == axes[dir as usize] {
-            gv_axis_face_at(dir as usize, spacing[dir as usize], 0)
-        } else {
-            match axes.iter().position(|&a| a == c) {
-                Some(d) => mid[d],
-                None => gv_ungridded_slot(coords, c),
-            }
-        }
-    }));
-    // the ADM face block, selected by (spacetime, chart): the kerr-schild spacetime is expressed in
-    // the spherical chart (SchwarzschildKS, radial shift) or the cartesian chart
-    // (SchwarzschildKSCartesian, non-diagonal, shift along every axis). the shift `beta` is carried
-    // out for the per-axis shift term below (zero for the static schwarzschild chart).
-    // `volume_factor` is sqrt(det gamma) of the full chart at any instantiated `D`, so a reduced
-    // radial or equatorial block still carries the suppressed directions' measure (spherical 1D:
-    // r^2/sqrt(f)); `alpha * volume_factor = sqrt(-g)` is the densitization the state and the flux
-    // both ride on.
-    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update
-    // gamma_ij = delta_ij + 2H l_i l_j with the oblate-spheroidal radius; non-diagonal
-    // gamma + shift on every axis, DOF == D (the frame dragging rides the swirl of l).
-    // spinning kerr on the spherical chart: non-diagonal gamma_{r phi} at the face —
-    // swirl (D = 3) only.
-    let (gamma, gamma_inv, alpha, beta, sqrt_gamma) = {
-        fn adm<const N: usize, M: Metric<Gv, N>>(
-            m: &M,
-            x: Tensor<Gv, N>,
-        ) -> (Matrix<Gv, N>, Matrix<Gv, N>, Gv, Tensor<Gv, N>, Gv) {
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-                m.volume_factor(x),
-            )
-        }
-        with_ks_metric!(spacetime, coords, "the GR flux", |m| adm(&m, x))
-    };
-    // spinning kerr: re-reconstruct the azimuthal velocity in the angular-momentum-carrying
-    // variable w = v^phi + (gamma_{r phi} / gamma_{phi phi}) v^r, so a zero-angular-momentum
-    // (S_phi = 0) state — whose frame-dragging v^phi exactly cancels against v^r in the covariant
-    // lowering — reconstructs to a face pair that still cancels: S_phi(face) = E gamma_{phi phi} w
-    // exactly, and w = 0 to roundoff for dragging states. reconstructing v^phi raw mixes the
-    // geometric dragging profile into the limited slopes and generates S_phi at truncation level.
-    // the per-offset coefficient q = gamma_{r phi}/gamma_{phi phi} is evaluated at each stencil
-    // cell's arithmetic midpoint — the exact position the c2p inverted the metric at, so the
-    // cell-wise cancellation transfers to the stencil values at roundoff; the face coefficient
-    // comes from the face matrices the riemann states lower with. gamma_{r phi} vanishes for
-    // every other background, so this block is kerr-only — and spherical-swirl-only: the cartesian
-    // kerr chart has DOF == D and carries cartesian velocity components, so it reconstructs the
-    // raw v^i (the dragging profile enters the limited slopes at truncation level, which
-    // converges away).
-    let (left, right) = if spacetime == Spacetime::KerrKS && coords == Coords::Spherical {
-        assert!(D == 3, "the kerr flux carries the swirl DOF");
-        let mass = Gv::scalar("schwarzschild_mass");
-        let spin = Gv::scalar("kerr_spin");
-        // q at the arithmetic midpoint of the cell `off` steps along the sweep axis; the
-        // transverse coordinate sits at this cell's midpoint (the stencil shifts one axis only).
-        let half = Gv::from_f64(0.5);
-        let q_at = |off: i32| -> Gv {
-            let shifted_mid = |ax: usize| {
-                (gv_axis_face_at(ax, spacing[ax], off as i64)
-                    + gv_axis_face_at(ax, spacing[ax], off as i64 + 1))
-                    * half
-            };
-            let (r_c, th_c) = if dir == 0 {
-                (shifted_mid(0), mid[1])
+    trace(|cx| {
+        // `D` is the momentum/velocity DOF; the reconstruction grid is `axes.len()` — they differ for
+        // the spherical swirl (DOF = 3 on a 2D (r, theta) grid, out-of-plane v_phi reconstructed along
+        // the gridded sweeps like any transverse component). the sweep normal is coordinate `axes[dir]`.
+        let ndim = axes.len();
+        // the GR arm stays on the gamma-law closure; gamma keeps its first-in-manifest slot.
+        let eos = IdealGas {
+            gamma: cx.scalar("gamma"),
+        };
+        let (left, right, nhat, vface) =
+            euler_reconstruct::<D>(cx, ndim as u8, dir, axes[dir as usize], Recon::Plm, None);
+        // the in-kernel spatial metric + lapse at the swept-axis face, transverse gridded coordinates at
+        // the cell centroid — the correct face-metric position for a `dir` sweep. the spherical metrics
+        // read the gridded (r, theta) alone — gamma_{phi phi} = r^2 sin^2(theta) — so an ungridded
+        // symmetry slot (the axisymmetric phi) takes zero.
+        // the transverse coordinate is the cell's arithmetic midpoint: the face flux is a face
+        // average over the transverse coordinate extent, whose second-order sampling point is the
+        // midpoint — the same point the cell state densitizes at.
+        let mid = gv_cell_midpoints(cx, spacing, ndim);
+        let x = Tensor::<Gv, D>::new(std::array::from_fn(|c| {
+            if c == axes[dir as usize] {
+                gv_axis_face_at(cx, dir as usize, spacing[dir as usize], 0)
             } else {
-                (mid[0], shifted_mid(1))
+                match axes.iter().position(|&a| a == c) {
+                    Some(d) => mid[d],
+                    None => gv_ungridded_slot(coords, c),
+                }
+            }
+        }));
+        // the ADM face block, selected by (spacetime, chart): the kerr-schild spacetime is expressed in
+        // the spherical chart (SchwarzschildKS, radial shift) or the cartesian chart
+        // (SchwarzschildKSCartesian, non-diagonal, shift along every axis). the shift `beta` is carried
+        // out for the per-axis shift term below (zero for the static schwarzschild chart).
+        // `volume_factor` is sqrt(det gamma) of the full chart at any instantiated `D`, so a reduced
+        // radial or equatorial block still carries the suppressed directions' measure (spherical 1D:
+        // r^2/sqrt(f)); `alpha * volume_factor = sqrt(-g)` is the densitization the state and the flux
+        // both ride on.
+        // spinning kerr on the cartesian chart: the rank-1 kerr-schild update
+        // gamma_ij = delta_ij + 2H l_i l_j with the oblate-spheroidal radius; non-diagonal
+        // gamma + shift on every axis, DOF == D (the frame dragging rides the swirl of l).
+        // spinning kerr on the spherical chart: non-diagonal gamma_{r phi} at the face —
+        // swirl (D = 3) only.
+        let (gamma, gamma_inv, alpha, beta, sqrt_gamma) = {
+            fn adm<'t, const N: usize, M: Metric<Gv<'t>, N>>(
+                m: &M,
+                x: Tensor<Gv<'t>, N>,
+            ) -> (
+                Matrix<Gv<'t>, N>,
+                Matrix<Gv<'t>, N>,
+                Gv<'t>,
+                Tensor<Gv<'t>, N>,
+                Gv<'t>,
+            ) {
+                (
+                    m.spatial_metric(x),
+                    m.spatial_metric_inv(x),
+                    m.lapse(x),
+                    m.shift(x),
+                    m.volume_factor(x),
+                )
+            }
+            with_ks_metric!(cx, spacetime, coords, "the GR flux", |m| adm(&m, x))
+        };
+        // spinning kerr: re-reconstruct the azimuthal velocity in the angular-momentum-carrying
+        // variable w = v^phi + (gamma_{r phi} / gamma_{phi phi}) v^r, so a zero-angular-momentum
+        // (S_phi = 0) state — whose frame-dragging v^phi exactly cancels against v^r in the covariant
+        // lowering — reconstructs to a face pair that still cancels: S_phi(face) = E gamma_{phi phi} w
+        // exactly, and w = 0 to roundoff for dragging states. reconstructing v^phi raw mixes the
+        // geometric dragging profile into the limited slopes and generates S_phi at truncation level.
+        // the per-offset coefficient q = gamma_{r phi}/gamma_{phi phi} is evaluated at each stencil
+        // cell's arithmetic midpoint — the exact position the c2p inverted the metric at, so the
+        // cell-wise cancellation transfers to the stencil values at roundoff; the face coefficient
+        // comes from the face matrices the riemann states lower with. gamma_{r phi} vanishes for
+        // every other background, so this block is kerr-only — and spherical-swirl-only: the cartesian
+        // kerr chart has DOF == D and carries cartesian velocity components, so it reconstructs the
+        // raw v^i (the dragging profile enters the limited slopes at truncation level, which
+        // converges away).
+        let (left, right) = if spacetime == Spacetime::KerrKS && coords == Coords::Spherical {
+            assert!(D == 3, "the kerr flux carries the swirl DOF");
+            let mass = cx.scalar("schwarzschild_mass");
+            let spin = cx.scalar("kerr_spin");
+            // q at the arithmetic midpoint of the cell `off` steps along the sweep axis; the
+            // transverse coordinate sits at this cell's midpoint (the stencil shifts one axis only).
+            let half = Gv::from_f64(0.5);
+            let q_at = |off: i32| {
+                let shifted_mid = |ax: usize| {
+                    (gv_axis_face_at(cx, ax, spacing[ax], off as i64)
+                        + gv_axis_face_at(cx, ax, spacing[ax], off as i64 + 1))
+                        * half
+                };
+                let (r_c, th_c) = if dir == 0 {
+                    (shifted_mid(0), mid[1])
+                } else {
+                    (mid[0], shifted_mid(1))
+                };
+                let m = KerrKS { mass, spin };
+                let gm_c = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
+                    &m,
+                    Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
+                );
+                gm_c[(0, 2)] / gm_c[(2, 2)]
             };
-            let m = KerrKS { mass, spin };
-            let gm_c = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
-                &m,
-                Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
-            );
-            gm_c[(0, 2)] / gm_c[(2, 2)]
+            let theta_lim = cx.scalar("theta");
+            let stencil = |off: i32| {
+                let vr = cx.field_shifted("prim_v0", FieldRef::PrimVel(0), ndim as u8, dir, off);
+                let vp = cx.field_shifted("prim_v2", FieldRef::PrimVel(2), ndim as u8, dir, off);
+                vp + q_at(off) * vr
+            };
+            let (w_l, w_r) =
+                plm_theta_from_stencil(stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim);
+            // back to v^phi with the face coefficient — the same matrices the riemann states lower
+            // with, so the face cancellation is exact to roundoff.
+            let q_face = gamma[(0, 2)] / gamma[(2, 2)];
+            let mut lv = left;
+            let mut rv = right;
+            lv.vel[2] = w_l - q_face * lv.vel[0];
+            rv.vel[2] = w_r - q_face * rv.vel[0];
+            (lv, rv)
+        } else {
+            (left, right)
         };
-        let theta_lim = Gv::scalar("theta");
-        let stencil = |off: i32| -> Gv {
-            let vr = Gv::field_shifted("prim_v0", FieldRef::PrimVel(0), ndim as u8, dir, off);
-            let vp = Gv::field_shifted("prim_v2", FieldRef::PrimVel(2), ndim as u8, dir, off);
-            vp + q_at(off) * vr
+        let regime = RhdGr {
+            metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)),
+            alpha,
+            shift: beta,
+            sqrt_gamma,
         };
-        let (w_l, w_r) =
-            plm_theta_from_stencil(stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim);
-        // back to v^phi with the face coefficient — the same matrices the riemann states lower
-        // with, so the face cancellation is exact to roundoff.
-        let q_face = gamma[(0, 2)] / gamma[(2, 2)];
-        let mut lv = left;
-        let mut rv = right;
-        lv.vel[2] = w_l - q_face * lv.vel[0];
-        rv.vel[2] = w_r - q_face * rv.vel[0];
-        (lv, rv)
-    } else {
-        (left, right)
-    };
-    let regime = RhdGr {
-        metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)),
-        alpha,
-        shift: beta,
-        sqrt_gamma,
-    };
-    let coord_n = axes[dir as usize];
-    // rusanov / local lax-friedrichs mode (the FOFC first-order fallback): the light-cone speeds
-    // s = +/- alpha sqrt(gamma^{nn}) - beta^n — the state-independent maximal signal bound in
-    // coordinate form, matching the shift the flux carries. every fluid characteristic lies inside
-    // the light cone, so the bound holds from above right up to the boundary of the physical set;
-    // the low-order update keeps the conserved state inside the physical cone.
-    let (s_l, s_r) = if rusanov {
-        let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
-        let beta_n = beta[coord_n];
-        (Gv::ZERO - lam - beta_n, lam - beta_n)
-    } else {
-        regime.extremal_speeds(&eos, &left, &right, &nhat)
-    };
-    // one HLL fan on the densitized pair (U, F^n): both sides carry the one measure sqrt(-g), the
-    // shift rides inside F^n, and the signal speeds are the coordinate speeds lambda^n - beta^n,
-    // so the fan is complete in coordinate form — every component keeps that single sqrt(-g)
-    // weight, and the chart enters through the densitized pair alone. in the bake, mesh motion
-    // (vface) pairs with flat spacetime alone.
-    let flux = hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r);
-    let writes = euler_flux_writes(&flux);
-    (end_trace(), writes)
+        let coord_n = axes[dir as usize];
+        // rusanov / local lax-friedrichs mode (the FOFC first-order fallback): the light-cone speeds
+        // s = +/- alpha sqrt(gamma^{nn}) - beta^n — the state-independent maximal signal bound in
+        // coordinate form, matching the shift the flux carries. every fluid characteristic lies inside
+        // the light cone, so the bound holds from above right up to the boundary of the physical set;
+        // the low-order update keeps the conserved state inside the physical cone.
+        let (s_l, s_r) = if rusanov {
+            let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
+            let beta_n = beta[coord_n];
+            (Gv::ZERO - lam - beta_n, lam - beta_n)
+        } else {
+            regime.extremal_speeds(&eos, &left, &right, &nhat)
+        };
+        // one HLL fan on the densitized pair (U, F^n): both sides carry the one measure sqrt(-g), the
+        // shift rides inside F^n, and the signal speeds are the coordinate speeds lambda^n - beta^n,
+        // so the fan is complete in coordinate form — every component keeps that single sqrt(-g)
+        // weight, and the chart enters through the densitized pair alone. in the bake, mesh motion
+        // (vface) pairs with flat spacetime alone.
+        let flux = hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r);
+        let writes = euler_flux_writes(&flux);
+        writes
+    })
 }
 
 /// the isothermal face flux — iso-native through the gv path. traces the iso physics
@@ -754,113 +775,116 @@ pub fn iso_flux_gv<const D: usize>(dir: u8) -> (GvKernel, KernelWrites) {
 /// velocity is `vel[coord_n]`, pressure goes on momentum `coord_n`). cartesian: ndim ==
 /// D, coord_n == dir.
 fn iso_hlle_flux_gv<const D: usize>(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    // theta is the whole scalar tail — the isothermal closure is set by cs alone. the
-    // substrate's dispatch_flux passes ISO_GAMMA, and `scalars_for` walks the kernel's
-    // manifest asking for the declared scalars, so leaving gamma out here leaves it out
-    // of the manifest cleanly.
-    let theta = Gv::scalar("theta");
+    trace(|cx| {
+        // theta is the whole scalar tail — the isothermal closure is set by cs alone. the
+        // substrate's dispatch_flux passes ISO_GAMMA, and `scalars_for` walks the kernel's
+        // manifest asking for the declared scalars, so leaving gamma out here leaves it out
+        // of the manifest cleanly.
+        let theta = cx.scalar("theta");
 
-    // primitives at the face: rho, each velocity component, and pre (= cs^2(x) * rho
-    // via the substrate's locally-isothermal encoding; the per-cell cs(x) is whatever
-    // c2p put into prim.pre).
-    let (rho_l, rho_r) = plm_theta_gv("prim_rho", "prim.rho", ndim, dir, theta);
-    let mut vl: Vec<Gv> = Vec::with_capacity(D);
-    let mut vr: Vec<Gv> = Vec::with_capacity(D);
-    for k in 0..D {
-        let (l, r) = plm_theta_gv(
-            &format!("prim_v{k}"),
-            FieldRef::PrimVel(k as u8),
-            ndim,
-            dir,
-            theta,
-        );
-        vl.push(l);
-        vr.push(r);
-    }
-    let (pre_l, pre_r) = plm_theta_gv("prim_pre", "prim.pre", ndim, dir, theta);
+        // primitives at the face: rho, each velocity component, and pre (= cs^2(x) * rho
+        // via the substrate's locally-isothermal encoding; the per-cell cs(x) is whatever
+        // c2p put into prim.pre).
+        let (rho_l, rho_r) = plm_theta_gv(cx, "prim_rho", "prim.rho", ndim, dir, theta);
+        let mut vl: Vec<Gv> = Vec::with_capacity(D);
+        let mut vr: Vec<Gv> = Vec::with_capacity(D);
+        for k in 0..D {
+            let (l, r) = plm_theta_gv(
+                cx,
+                &format!("prim_v{k}"),
+                FieldRef::PrimVel(k as u8),
+                ndim,
+                dir,
+                theta,
+            );
+            vl.push(l);
+            vr.push(r);
+        }
+        let (pre_l, pre_r) = plm_theta_gv(cx, "prim_pre", "prim.pre", ndim, dir, theta);
 
-    // iso conserved + flux (the algebra IsoNewtonian writes at Rust level, traced here
-    // as Gv ops — the state is (den, mom), so the graph holds that arithmetic alone).
-    // normal-velocity shorthands keep the writes-expression-tree small.
-    let vn_l = vl[coord_n];
-    let vn_r = vr[coord_n];
-    let f_l_den = rho_l * vn_l;
-    let f_r_den = rho_r * vn_r;
-    let mut f_l_mom: Vec<Gv> = Vec::with_capacity(D);
-    let mut f_r_mom: Vec<Gv> = Vec::with_capacity(D);
-    let mut u_l_mom: Vec<Gv> = Vec::with_capacity(D);
-    let mut u_r_mom: Vec<Gv> = Vec::with_capacity(D);
-    for k in 0..D {
-        u_l_mom.push(rho_l * vl[k]);
-        u_r_mom.push(rho_r * vr[k]);
-        let base_l = f_l_den * vl[k];
-        let base_r = f_r_den * vr[k];
-        // pressure goes on the normal-direction momentum (= delta_{k,coord_n} * p).
-        let f_l_k = if k == coord_n { base_l + pre_l } else { base_l };
-        let f_r_k = if k == coord_n { base_r + pre_r } else { base_r };
-        f_l_mom.push(f_l_k);
-        f_r_mom.push(f_r_k);
-    }
+        // iso conserved + flux (the algebra IsoNewtonian writes at Rust level, traced here
+        // as Gv ops — the state is (den, mom), so the graph holds that arithmetic alone).
+        // normal-velocity shorthands keep the writes-expression-tree small.
+        let vn_l = vl[coord_n];
+        let vn_r = vr[coord_n];
+        let f_l_den = rho_l * vn_l;
+        let f_r_den = rho_r * vn_r;
+        let mut f_l_mom: Vec<Gv> = Vec::with_capacity(D);
+        let mut f_r_mom: Vec<Gv> = Vec::with_capacity(D);
+        let mut u_l_mom: Vec<Gv> = Vec::with_capacity(D);
+        let mut u_r_mom: Vec<Gv> = Vec::with_capacity(D);
+        for k in 0..D {
+            u_l_mom.push(rho_l * vl[k]);
+            u_r_mom.push(rho_r * vr[k]);
+            let base_l = f_l_den * vl[k];
+            let base_r = f_r_den * vr[k];
+            // pressure goes on the normal-direction momentum (= delta_{k,coord_n} * p).
+            let f_l_k = if k == coord_n { base_l + pre_l } else { base_l };
+            let f_r_k = if k == coord_n { base_r + pre_r } else { base_r };
+            f_l_mom.push(f_l_k);
+            f_r_mom.push(f_r_k);
+        }
 
-    // wave speeds: locally-isothermal `cs^2 = pre / rho` (= cs^2(x) since pre carries the
-    // per-cell encoding). davis bounds.
-    let cs_l = (pre_l / rho_l).sqrt();
-    let cs_r = (pre_r / rho_r).sqrt();
-    let s_l = (vn_l - cs_l).min(vn_r - cs_r);
-    let s_r = (vn_l + cs_l).max(vn_r + cs_r);
+        // wave speeds: locally-isothermal `cs^2 = pre / rho` (= cs^2(x) since pre carries the
+        // per-cell encoding). davis bounds.
+        let cs_l = (pre_l / rho_l).sqrt();
+        let cs_r = (pre_r / rho_r).sqrt();
+        let s_l = (vn_l - cs_l).min(vn_r - cs_r);
+        let s_r = (vn_l + cs_l).max(vn_r + cs_r);
 
-    // HLLE arms — same algorithm as `riemann::hlle` (moving-face form: fan
-    // comparisons against vface, `f - u*vface` per arm), specialised to iso's
-    // (den, mom) tuple. the static binding traces vface = 0*x — exactly zero.
-    let vface = mesh_face_velocity_gv(dir);
-    let inv = Gv::ONE / (s_r - s_l);
-    let den_hll = (f_l_den * s_r - f_r_den * s_l + (rho_r - rho_l) * (s_l * s_r)) * inv;
-    let den_u_hll = (rho_r * s_r - rho_l * s_l - f_r_den + f_l_den) * inv;
-    let den_flux = Gv::branch(
-        s_l.cmp_ge(vface),
-        || f_l_den - rho_l * vface,
-        || {
-            Gv::branch(
-                s_r.cmp_le(vface),
-                || f_r_den - rho_r * vface,
-                || den_hll - den_u_hll * vface,
-            )
-        },
-    );
-
-    let mut mom_flux: Vec<Gv> = Vec::with_capacity(D);
-    for k in 0..D {
-        let mom_hll =
-            (f_l_mom[k] * s_r - f_r_mom[k] * s_l + (u_r_mom[k] - u_l_mom[k]) * (s_l * s_r)) * inv;
-        let mom_u_hll = (u_r_mom[k] * s_r - u_l_mom[k] * s_l - f_r_mom[k] + f_l_mom[k]) * inv;
-        let mk = Gv::branch(
+        // HLLE arms — same algorithm as `riemann::hlle` (moving-face form: fan
+        // comparisons against vface, `f - u*vface` per arm), specialised to iso's
+        // (den, mom) tuple. the static binding traces vface = 0*x — exactly zero.
+        let vface = mesh_face_velocity_gv(cx, dir);
+        let inv = Gv::ONE / (s_r - s_l);
+        let den_hll = (f_l_den * s_r - f_r_den * s_l + (rho_r - rho_l) * (s_l * s_r)) * inv;
+        let den_u_hll = (rho_r * s_r - rho_l * s_l - f_r_den + f_l_den) * inv;
+        let den_flux = Gv::branch(
             s_l.cmp_ge(vface),
-            || f_l_mom[k] - u_l_mom[k] * vface,
+            || f_l_den - rho_l * vface,
             || {
                 Gv::branch(
                     s_r.cmp_le(vface),
-                    || f_r_mom[k] - u_r_mom[k] * vface,
-                    || mom_hll - mom_u_hll * vface,
+                    || f_r_den - rho_r * vface,
+                    || den_hll - den_u_hll * vface,
                 )
             },
         );
-        mom_flux.push(mk);
-    }
 
-    let mut writes = vec![KernelWrite::new(
-        "flux_den",
-        FieldRef::flux_den(),
-        den_flux.node(),
-    )];
-    for k in 0..D {
-        writes.push(KernelWrite::new(
-            format!("flux_mom_{k}"),
-            FieldRef::flux_mom(k as u8),
-            mom_flux[k].node(),
-        ));
-    }
-    (end_trace(), writes)
+        let mut mom_flux: Vec<Gv> = Vec::with_capacity(D);
+        for k in 0..D {
+            let mom_hll = (f_l_mom[k] * s_r - f_r_mom[k] * s_l
+                + (u_r_mom[k] - u_l_mom[k]) * (s_l * s_r))
+                * inv;
+            let mom_u_hll = (u_r_mom[k] * s_r - u_l_mom[k] * s_l - f_r_mom[k] + f_l_mom[k]) * inv;
+            let mk = Gv::branch(
+                s_l.cmp_ge(vface),
+                || f_l_mom[k] - u_l_mom[k] * vface,
+                || {
+                    Gv::branch(
+                        s_r.cmp_le(vface),
+                        || f_r_mom[k] - u_r_mom[k] * vface,
+                        || mom_hll - mom_u_hll * vface,
+                    )
+                },
+            );
+            mom_flux.push(mk);
+        }
+
+        let mut writes = vec![KernelWrite::new(
+            "flux_den",
+            FieldRef::flux_den(),
+            den_flux.node(),
+        )];
+        for k in 0..D {
+            writes.push(KernelWrite::new(
+                format!("flux_mom_{k}"),
+                FieldRef::flux_mom(k as u8),
+                mom_flux[k].node(),
+            ));
+        }
+        writes
+    })
 }
 
 /// trace the RMHD (relativistic MHD) face flux along sweep `dir` on an `ndim`-grid — the
@@ -870,106 +894,110 @@ fn iso_hlle_flux_gv<const D: usize>(ndim: u8, dir: u8, coord_n: usize) -> (GvKer
 /// Expr builder + `lower_rmhd_side`. RMHD vectors are 3-component on every grid; `ndim` selects the
 /// reconstruction grid + emit loop. writes the 8 conserved fluxes (D, S_k, tau, B_k).
 pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    // scalar params in the substrate order: gamma (EOS) then theta (limiter compression).
-    let gamma = Gv::scalar("gamma");
-    let theta = Gv::scalar("theta");
-    let (rho_l, rho_r) = plm_theta_gv("prim_rho", "prim.rho", ndim, dir, theta);
-    let mut vl = Vec::with_capacity(3);
-    let mut vr = Vec::with_capacity(3);
-    for k in 0..3 {
-        let (l, r) = plm_theta_gv(
-            &format!("prim_v{k}"),
-            FieldRef::PrimVel(k as u8),
-            ndim,
-            dir,
-            theta,
-        );
-        vl.push(l);
-        vr.push(r);
-    }
-    let (pre_l, pre_r) = plm_theta_gv("prim_pre", "prim.pre", ndim, dir, theta);
-    let mut bl = Vec::with_capacity(3);
-    let mut br = Vec::with_capacity(3);
-    for k in 0..3 {
-        let (l, r) = plm_theta_gv(
-            &format!("prim_b{k}"),
-            &format!("prim.mag[{k}]"),
-            ndim,
-            dir,
-            theta,
-        );
-        bl.push(l);
-        br.push(r);
-    }
+    let (k, writes) = trace(|cx| {
+        // scalar params in the substrate order: gamma (EOS) then theta (limiter compression).
+        let gamma = cx.scalar("gamma");
+        let theta = cx.scalar("theta");
+        let (rho_l, rho_r) = plm_theta_gv(cx, "prim_rho", "prim.rho", ndim, dir, theta);
+        let mut vl = Vec::with_capacity(3);
+        let mut vr = Vec::with_capacity(3);
+        for k in 0..3 {
+            let (l, r) = plm_theta_gv(
+                cx,
+                &format!("prim_v{k}"),
+                FieldRef::PrimVel(k as u8),
+                ndim,
+                dir,
+                theta,
+            );
+            vl.push(l);
+            vr.push(r);
+        }
+        let (pre_l, pre_r) = plm_theta_gv(cx, "prim_pre", "prim.pre", ndim, dir, theta);
+        let mut bl = Vec::with_capacity(3);
+        let mut br = Vec::with_capacity(3);
+        for k in 0..3 {
+            let (l, r) = plm_theta_gv(
+                cx,
+                &format!("prim_b{k}"),
+                &format!("prim.mag[{k}]"),
+                ndim,
+                dir,
+                theta,
+            );
+            bl.push(l);
+            br.push(r);
+        }
 
-    // the single-source physics: reconstructed L/R MHD primitives -> canonical HLLE.
-    let eos = IdealGas { gamma };
-    let mk = |rho: Gv, v: &[Gv], p: Gv, b: &[Gv]| MhdPrim::<Gv, 3> {
-        hydro: Prim {
-            rho,
-            vel: Tensor::new([v[0], v[1], v[2]]),
-            pre: p,
-        },
-        mag: Tensor::new([b[0], b[1], b[2]]),
-    };
-    // normal B from the staggered face field (gardiner-stone CT coupling) — reconstructed
-    // bcell gives bn_l != bn_r, breaking the constant-Bn assumption. see nmhd_reconstruct.
-    let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim, dir, 0);
-    bl[coord_n] = bn_face;
-    br[coord_n] = bn_face;
-    let left = mk(rho_l, &vl, pre_l, &bl);
-    let right = mk(rho_r, &vr, pre_r, &br);
-    let nhat = Tensor::<Gv, 3>::unit(coord_n);
+        // the single-source physics: reconstructed L/R MHD primitives -> canonical HLLE.
+        let eos = IdealGas { gamma };
+        let mk = |rho, v: &[_], p, b: &[_]| MhdPrim::<Gv, 3> {
+            hydro: Prim {
+                rho,
+                vel: Tensor::new([v[0], v[1], v[2]]),
+                pre: p,
+            },
+            mag: Tensor::new([b[0], b[1], b[2]]),
+        };
+        // normal B from the staggered face field (gardiner-stone CT coupling) — reconstructed
+        // bcell gives bn_l != bn_r, breaking the constant-Bn assumption. see nmhd_reconstruct.
+        let bn_face = cx.field_shifted("bface_n", "bface_n", ndim, dir, 0);
+        bl[coord_n] = bn_face;
+        br[coord_n] = bn_face;
+        let left = mk(rho_l, &vl, pre_l, &bl);
+        let right = mk(rho_r, &vr, pre_r, &br);
+        let nhat = Tensor::<Gv, 3>::unit(coord_n);
 
-    // the wave speeds are materialized once per cell by rmhd_wave_speeds_cell_gv into
-    // wave_speed_l[dir]/wave_speed_r[dir] (the exact quartic) and read here.
-    // the HLL fan is the cell-centered davis estimate over the two cells sharing this face:
-    // plm_theta_gv reconstructs L from cell `coord - e_dir` (offset -1) and R from cell `coord`
-    // (offset 0), so the fan reads those same two cells' speeds. the rmhd zero-clamp is applied
-    // here (the stored per-cell speeds are raw). this strips the 166-register / 12-transcendental
-    // quartic out of the flux kernel entirely.
-    let dim = ndim;
-    let lo = format!("wave_speed_l[{dir}]");
-    let hi = format!("wave_speed_r[{dir}]");
-    let wsl_m1 = Gv::field_shifted("ws_l", &lo, dim, dir, -1);
-    let wsl_0 = Gv::field_shifted("ws_l", &lo, dim, dir, 0);
-    let wsr_m1 = Gv::field_shifted("ws_r", &hi, dim, dir, -1);
-    let wsr_0 = Gv::field_shifted("ws_r", &hi, dim, dir, 0);
-    let s_l = wsl_m1.min(wsl_0).min(Gv::ZERO);
-    let s_r = wsr_m1.max(wsr_0).max(Gv::ZERO);
-    let flux = hlle_with_speeds(&Rmhd, &eos, &left, &right, &nhat, Gv::ZERO, s_l, s_r);
+        // the wave speeds are materialized once per cell by rmhd_wave_speeds_cell_gv into
+        // wave_speed_l[dir]/wave_speed_r[dir] (the exact quartic) and read here.
+        // the HLL fan is the cell-centered davis estimate over the two cells sharing this face:
+        // plm_theta_gv reconstructs L from cell `coord - e_dir` (offset -1) and R from cell `coord`
+        // (offset 0), so the fan reads those same two cells' speeds. the rmhd zero-clamp is applied
+        // here (the stored per-cell speeds are raw). this strips the 166-register / 12-transcendental
+        // quartic out of the flux kernel entirely.
+        let dim = ndim;
+        let lo = format!("wave_speed_l[{dir}]");
+        let hi = format!("wave_speed_r[{dir}]");
+        let wsl_m1 = cx.field_shifted("ws_l", &lo, dim, dir, -1);
+        let wsl_0 = cx.field_shifted("ws_l", &lo, dim, dir, 0);
+        let wsr_m1 = cx.field_shifted("ws_r", &hi, dim, dir, -1);
+        let wsr_0 = cx.field_shifted("ws_r", &hi, dim, dir, 0);
+        let s_l = wsl_m1.min(wsl_0).min(Gv::ZERO);
+        let s_r = wsr_m1.max(wsr_0).max(Gv::ZERO);
+        let flux = hlle_with_speeds(&Rmhd, &eos, &left, &right, &nhat, Gv::ZERO, s_l, s_r);
 
-    let mut writes = vec![KernelWrite::new(
-        "flux_den",
-        FieldRef::flux_den(),
-        flux.den.node(),
-    )];
-    for k in 0..3 {
+        let mut writes = vec![KernelWrite::new(
+            "flux_den",
+            FieldRef::flux_den(),
+            flux.den.node(),
+        )];
+        for k in 0..3 {
+            writes.push(KernelWrite::new(
+                format!("flux_mom_{k}"),
+                FieldRef::flux_mom(k as u8),
+                flux.mom[k].node(),
+            ));
+        }
         writes.push(KernelWrite::new(
-            format!("flux_mom_{k}"),
-            FieldRef::flux_mom(k as u8),
-            flux.mom[k].node(),
+            "flux_nrg",
+            FieldRef::flux_nrg(),
+            flux.nrg.node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "flux_nrg",
-        FieldRef::flux_nrg(),
-        flux.nrg.node(),
-    ));
-    for k in 0..3 {
-        writes.push(KernelWrite::new(
-            format!("flux_mag_{k}"),
-            format!("flux.mag_{k}"),
-            flux.mag[k].node(),
-        ));
-    }
+        for k in 0..3 {
+            writes.push(KernelWrite::new(
+                format!("flux_mag_{k}"),
+                format!("flux.mag_{k}"),
+                flux.mag[k].node(),
+            ));
+        }
+
+        writes
+    });
 
     // the smem tile: reconstruction is 1D along `dir`, so the
     // tile is a thin slab — halo on axis `dir`, transverse axes at their native extent.
     // the tiled set is derived from the graph (the shifted `LoadAt` fields: the 8
     // reconstructed prim + the 2 per-cell wave speeds), computed automatically from the trace.
-    let k = end_trace();
     let stencil_keys = k.stencil_read_field_keys();
     if stencil_keys.is_empty() {
         return (k, writes);
@@ -1006,190 +1034,284 @@ pub fn rmhd_flux_gr_gv(
     hlld: bool,
     rusanov: bool,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
     let ndim = axes.len();
-    let coord_n = axes[dir as usize];
-    let gamma_eos = Gv::scalar("gamma");
-    let theta_lim = Gv::scalar("theta");
-    let (rho_l, rho_r) = plm_theta_gv("prim_rho", "prim.rho", ndim as u8, dir, theta_lim);
-    let mut vl = Vec::with_capacity(3);
-    let mut vr = Vec::with_capacity(3);
-    for k in 0..3 {
-        let (l, r) = plm_theta_gv(
-            &format!("prim_v{k}"),
-            FieldRef::PrimVel(k as u8),
-            ndim as u8,
-            dir,
-            theta_lim,
-        );
-        vl.push(l);
-        vr.push(r);
-    }
-    let (pre_l, pre_r) = plm_theta_gv("prim_pre", "prim.pre", ndim as u8, dir, theta_lim);
-    let mut bl = Vec::with_capacity(3);
-    let mut br = Vec::with_capacity(3);
-    for k in 0..3 {
-        let (l, r) = plm_theta_gv(
-            &format!("prim_b{k}"),
-            &format!("prim.mag[{k}]"),
-            ndim as u8,
-            dir,
-            theta_lim,
-        );
-        bl.push(l);
-        br.push(r);
-    }
-    // normal B from the staggered face field (gardiner-stone CT coupling) — shared by both sides.
-    let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim as u8, dir, 0);
-    bl[coord_n] = bn_face;
-    br[coord_n] = bn_face;
-    let eos = IdealGas { gamma: gamma_eos };
-    let mk = |rho: Gv, v: &[Gv], p: Gv, b: &[Gv]| MhdPrim::<Gv, 3> {
-        hydro: Prim {
-            rho,
-            vel: Tensor::new([v[0], v[1], v[2]]),
-            pre: p,
-        },
-        mag: Tensor::new([b[0], b[1], b[2]]),
-    };
-    let left = mk(rho_l, &vl, pre_l, &bl);
-    let right = mk(rho_r, &vr, pre_r, &br);
-    let nhat = Tensor::<Gv, 3>::unit(coord_n);
-
-    // the metric at the swept-axis face, transverse gridded slots at the cell centroid; the
-    // ungridded polar slot is the exact equatorial pi/2, the azimuthal slot zero.
-    let geo = (ndim > 1).then(|| cell_geometry_gv(coords, spacing, axes, ndim));
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        if c == coord_n {
-            gv_axis_face_at(dir as usize, spacing[dir as usize], 0)
-        } else {
-            match axes.iter().position(|&a| a == c) {
-                Some(d) => {
-                    geo.as_ref()
-                        .expect("a transverse gridded axis implies ndim > 1")
-                        .centroid[d]
-                }
-                None => gv_ungridded_slot(coords, c),
-            }
-        }
-    }));
-    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
-    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. every spinning
-    // kerr chart (ingoing kerr-schild) carries a non-diagonal gamma_{r phi} (the tetrad
-    // handles it) and a radial shift (the moving-interface fan handles it); the flux is
-    // otherwise metric-generic. the azimuthal momentum (swirl DOF) carries the frame dragging.
-    let (gamma, gamma_inv, alpha, beta) = {
-        fn adm<M: Metric<Gv, 3>>(
-            m: &M,
-            x: Tensor<Gv, 3>,
-        ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-            )
-        }
-        with_ks_metric!(spacetime, coords, "the GRMHD flux", |m| adm(&m, x))
-    };
-    // spinning kerr: re-reconstruct the azimuthal velocity in the angular-momentum-carrying variable
-    // w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r, so a zero-angular-momentum (S_phi = 0) dragging
-    // state reconstructs to a face pair that still cancels (S_phi(face) = (rho h W^2 + b^2) gamma_pp w,
-    // exact to roundoff); reconstructing v^phi raw mixes the geometric dragging profile into the
-    // limited slopes and generates S_phi at truncation level. mirrors the RHD GR flux. kerr-only
-    // (gamma_{r phi} vanishes elsewhere). the per-offset q is at each cell's volume-weighted centroid
-    // (the c2p metric point), the face q from the face matrix the riemann states lower with.
-    // spherical-swirl-only: the cartesian kerr chart reconstructs the raw v^i (cartesian components).
-    let (left, right) = if spacetime == Spacetime::KerrKS && coords == Coords::Spherical {
-        let mass = Gv::scalar("schwarzschild_mass");
-        let spin = Gv::scalar("kerr_spin");
-        let geo_c = cell_geometry_gv(coords, spacing, axes, ndim);
-        let q_at = |off: i32| -> Gv {
-            let (r_c, th_c) = if dir == 0 {
-                let rl = gv_axis_face_at(0, spacing[0], off as i64);
-                let rh = gv_axis_face_at(0, spacing[0], off as i64 + 1);
-                (
-                    // the same centroid text `cell_geometry_gv` evaluates -- the c2p
-                    // inverted the metric there, and the dragging cancellation
-                    // transfers only at the bit-identical position.
-                    symbi_geometry::volume_weighted_centroid(
-                        symbi_geometry::Geometry::Spherical,
-                        0,
-                        rl,
-                        rh,
-                    ),
-                    geo_c.centroid[1],
-                )
-            } else {
-                let tl = gv_axis_face_at(1, spacing[1], off as i64);
-                let th = gv_axis_face_at(1, spacing[1], off as i64 + 1);
-                (
-                    geo_c.centroid[0],
-                    symbi_geometry::volume_weighted_centroid(
-                        symbi_geometry::Geometry::Spherical,
-                        1,
-                        tl,
-                        th,
-                    ),
-                )
-            };
-            let gm_c = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
-                &KerrKS { mass, spin },
-                Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
+    let (k, writes) = trace(|cx| {
+        let coord_n = axes[dir as usize];
+        let gamma_eos = cx.scalar("gamma");
+        let theta_lim = cx.scalar("theta");
+        let (rho_l, rho_r) = plm_theta_gv(cx, "prim_rho", "prim.rho", ndim as u8, dir, theta_lim);
+        let mut vl = Vec::with_capacity(3);
+        let mut vr = Vec::with_capacity(3);
+        for k in 0..3 {
+            let (l, r) = plm_theta_gv(
+                cx,
+                &format!("prim_v{k}"),
+                FieldRef::PrimVel(k as u8),
+                ndim as u8,
+                dir,
+                theta_lim,
             );
-            gm_c[(0, 2)] / gm_c[(2, 2)]
-        };
-        let stencil = |off: i32| -> Gv {
-            let vr = Gv::field_shifted("prim_v0", FieldRef::PrimVel(0), ndim as u8, dir, off);
-            let vp = Gv::field_shifted("prim_v2", FieldRef::PrimVel(2), ndim as u8, dir, off);
-            vp + q_at(off) * vr
-        };
-        let (w_l, w_r) =
-            plm_theta_from_stencil(stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim);
-        let q_face = gamma[(0, 2)] / gamma[(2, 2)];
-        let mut lv = left;
-        let mut rv = right;
-        lv.hydro.vel[2] = w_l - q_face * lv.hydro.vel[0];
-        rv.hydro.vel[2] = w_r - q_face * rv.hydro.vel[0];
-        (lv, rv)
-    } else {
-        (left, right)
-    };
-    let regime = RmhdGr {
-        metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)),
-        alpha,
-    };
-    let has_shift = matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS);
-    // GR HLLD (the orthonormal-frame MUB09 fan): the spatial metric maps (via the tetrad) to the
-    // local orthonormal frame where the validated flat solver runs, and the intercell flux maps back
-    // exactly. a shifted chart (kerr-schild / kerr) rides the shift as the moving-interface speed
-    // vface = beta^n/alpha, so the fan is evaluated at x/t = beta^n/alpha and the kernel flux is
-    // F* - (beta^n/alpha) U* (the godunov re-applies alpha). the induction equation carries one more
-    // shift term, the transpose +(beta^i/alpha) B^n; B^n is single-valued at the face, so it is a
-    // constant added to the magnetic flux after the fan (identical to adding it to both sides).
-    // covariant (killing) energy flux: F_ehat/alpha = alpha F_tau + (alpha-1) F_D - beta^i F_{S_i},
-    // the linear re-split of the valencia numerical fluxes into the free-index-down energy current,
-    // in the face convention the RHD arm stores: the godunov works in the flat coordinate
-    // measure (sqrt(gm) = sqrt(gm_flat)/alpha, static) and re-applies one cell lapse to the energy
-    // divergence like every other conserved law, so the face slot owes a 1/alpha — a fully
-    // self-contained sqrt(-g) current stored here would leave a spurious energy source
-    // f_ehat * d_n(ln alpha) on any chart with a varying lapse. both HLLD and HLLE emit the
-    // valencia flux in the shifted-G "godunov re-applies alpha" convention
-    // (F_X = F_X* - (beta^n/alpha) X*). alpha=1, beta=0 -> F_tau (the flat valencia energy flux).
-    let covariant_nrg = |f: &symbi_hydro::MhdCons<Gv, 3>| {
-        alpha * f.nrg + (alpha - Gv::ONE) * f.den - beta.dot(&f.mom)
-    };
-    if hlld && !rusanov {
-        let w = if has_shift {
-            beta[coord_n] / alpha
-        } else {
-            Gv::ZERO
-        };
-        let mut flux = hlld_rmhd_gr_ortho(&eos, &left, &right, coord_n, w, &regime.metric);
-        if has_shift {
-            flux.mag = flux.mag + beta.scale(bn_face / alpha);
+            vl.push(l);
+            vr.push(r);
         }
+        let (pre_l, pre_r) = plm_theta_gv(cx, "prim_pre", "prim.pre", ndim as u8, dir, theta_lim);
+        let mut bl = Vec::with_capacity(3);
+        let mut br = Vec::with_capacity(3);
+        for k in 0..3 {
+            let (l, r) = plm_theta_gv(
+                cx,
+                &format!("prim_b{k}"),
+                &format!("prim.mag[{k}]"),
+                ndim as u8,
+                dir,
+                theta_lim,
+            );
+            bl.push(l);
+            br.push(r);
+        }
+        // normal B from the staggered face field (gardiner-stone CT coupling) — shared by both sides.
+        let bn_face = cx.field_shifted("bface_n", "bface_n", ndim as u8, dir, 0);
+        bl[coord_n] = bn_face;
+        br[coord_n] = bn_face;
+        let eos = IdealGas { gamma: gamma_eos };
+        let mk = |rho, v: &[_], p, b: &[_]| MhdPrim::<Gv, 3> {
+            hydro: Prim {
+                rho,
+                vel: Tensor::new([v[0], v[1], v[2]]),
+                pre: p,
+            },
+            mag: Tensor::new([b[0], b[1], b[2]]),
+        };
+        let left = mk(rho_l, &vl, pre_l, &bl);
+        let right = mk(rho_r, &vr, pre_r, &br);
+        let nhat = Tensor::<Gv, 3>::unit(coord_n);
+
+        // the metric at the swept-axis face, transverse gridded slots at the cell centroid; the
+        // ungridded polar slot is the exact equatorial pi/2, the azimuthal slot zero.
+        let geo = (ndim > 1).then(|| cell_geometry_gv(cx, coords, spacing, axes, ndim));
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            if c == coord_n {
+                gv_axis_face_at(cx, dir as usize, spacing[dir as usize], 0)
+            } else {
+                match axes.iter().position(|&a| a == c) {
+                    Some(d) => {
+                        geo.as_ref()
+                            .expect("a transverse gridded axis implies ndim > 1")
+                            .centroid[d]
+                    }
+                    None => gv_ungridded_slot(coords, c),
+                }
+            }
+        }));
+        // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. every spinning
+        // kerr chart (ingoing kerr-schild) carries a non-diagonal gamma_{r phi} (the tetrad
+        // handles it) and a radial shift (the moving-interface fan handles it); the flux is
+        // otherwise metric-generic. the azimuthal momentum (swirl DOF) carries the frame dragging.
+        let (gamma, gamma_inv, alpha, beta) = {
+            fn adm<'t, M: Metric<Gv<'t>, 3>>(
+                m: &M,
+                x: Tensor<Gv<'t>, 3>,
+            ) -> (
+                Matrix<Gv<'t>, 3>,
+                Matrix<Gv<'t>, 3>,
+                Gv<'t>,
+                Tensor<Gv<'t>, 3>,
+            ) {
+                (
+                    m.spatial_metric(x),
+                    m.spatial_metric_inv(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            with_ks_metric!(cx, spacetime, coords, "the GRMHD flux", |m| adm(&m, x))
+        };
+        // spinning kerr: re-reconstruct the azimuthal velocity in the angular-momentum-carrying variable
+        // w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r, so a zero-angular-momentum (S_phi = 0) dragging
+        // state reconstructs to a face pair that still cancels (S_phi(face) = (rho h W^2 + b^2) gamma_pp w,
+        // exact to roundoff); reconstructing v^phi raw mixes the geometric dragging profile into the
+        // limited slopes and generates S_phi at truncation level. mirrors the RHD GR flux. kerr-only
+        // (gamma_{r phi} vanishes elsewhere). the per-offset q is at each cell's volume-weighted centroid
+        // (the c2p metric point), the face q from the face matrix the riemann states lower with.
+        // spherical-swirl-only: the cartesian kerr chart reconstructs the raw v^i (cartesian components).
+        let (left, right) = if spacetime == Spacetime::KerrKS && coords == Coords::Spherical {
+            let mass = cx.scalar("schwarzschild_mass");
+            let spin = cx.scalar("kerr_spin");
+            let geo_c = cell_geometry_gv(cx, coords, spacing, axes, ndim);
+            let q_at = |off: i32| {
+                let (r_c, th_c) = if dir == 0 {
+                    let rl = gv_axis_face_at(cx, 0, spacing[0], off as i64);
+                    let rh = gv_axis_face_at(cx, 0, spacing[0], off as i64 + 1);
+                    (
+                        // the same centroid text `cell_geometry_gv` evaluates -- the c2p
+                        // inverted the metric there, and the dragging cancellation
+                        // transfers only at the bit-identical position.
+                        symbi_geometry::volume_weighted_centroid(
+                            symbi_geometry::Geometry::Spherical,
+                            0,
+                            rl,
+                            rh,
+                        ),
+                        geo_c.centroid[1],
+                    )
+                } else {
+                    let tl = gv_axis_face_at(cx, 1, spacing[1], off as i64);
+                    let th = gv_axis_face_at(cx, 1, spacing[1], off as i64 + 1);
+                    (
+                        geo_c.centroid[0],
+                        symbi_geometry::volume_weighted_centroid(
+                            symbi_geometry::Geometry::Spherical,
+                            1,
+                            tl,
+                            th,
+                        ),
+                    )
+                };
+                let gm_c = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
+                    &KerrKS { mass, spin },
+                    Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
+                );
+                gm_c[(0, 2)] / gm_c[(2, 2)]
+            };
+            let stencil = |off: i32| {
+                let vr = cx.field_shifted("prim_v0", FieldRef::PrimVel(0), ndim as u8, dir, off);
+                let vp = cx.field_shifted("prim_v2", FieldRef::PrimVel(2), ndim as u8, dir, off);
+                vp + q_at(off) * vr
+            };
+            let (w_l, w_r) =
+                plm_theta_from_stencil(stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim);
+            let q_face = gamma[(0, 2)] / gamma[(2, 2)];
+            let mut lv = left;
+            let mut rv = right;
+            lv.hydro.vel[2] = w_l - q_face * lv.hydro.vel[0];
+            rv.hydro.vel[2] = w_r - q_face * rv.hydro.vel[0];
+            (lv, rv)
+        } else {
+            (left, right)
+        };
+        let regime = RmhdGr {
+            metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)),
+            alpha,
+        };
+        let has_shift = matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS);
+        // GR HLLD (the orthonormal-frame MUB09 fan): the spatial metric maps (via the tetrad) to the
+        // local orthonormal frame where the validated flat solver runs, and the intercell flux maps back
+        // exactly. a shifted chart (kerr-schild / kerr) rides the shift as the moving-interface speed
+        // vface = beta^n/alpha, so the fan is evaluated at x/t = beta^n/alpha and the kernel flux is
+        // F* - (beta^n/alpha) U* (the godunov re-applies alpha). the induction equation carries one more
+        // shift term, the transpose +(beta^i/alpha) B^n; B^n is single-valued at the face, so it is a
+        // constant added to the magnetic flux after the fan (identical to adding it to both sides).
+        // covariant (killing) energy flux: F_ehat/alpha = alpha F_tau + (alpha-1) F_D - beta^i F_{S_i},
+        // the linear re-split of the valencia numerical fluxes into the free-index-down energy current,
+        // in the face convention the RHD arm stores: the godunov works in the flat coordinate
+        // measure (sqrt(gm) = sqrt(gm_flat)/alpha, static) and re-applies one cell lapse to the energy
+        // divergence like every other conserved law, so the face slot owes a 1/alpha — a fully
+        // self-contained sqrt(-g) current stored here would leave a spurious energy source
+        // f_ehat * d_n(ln alpha) on any chart with a varying lapse. both HLLD and HLLE emit the
+        // valencia flux in the shifted-G "godunov re-applies alpha" convention
+        // (F_X = F_X* - (beta^n/alpha) X*). alpha=1, beta=0 -> F_tau (the flat valencia energy flux).
+        let covariant_nrg = |f: &symbi_hydro::MhdCons<_, 3>| {
+            alpha * f.nrg + (alpha - Gv::ONE) * f.den - beta.dot(&f.mom)
+        };
+        if hlld && !rusanov {
+            let w = if has_shift {
+                beta[coord_n] / alpha
+            } else {
+                Gv::ZERO
+            };
+            let mut flux = hlld_rmhd_gr_ortho(&eos, &left, &right, coord_n, w, &regime.metric);
+            if has_shift {
+                flux.mag = flux.mag + beta.scale(bn_face / alpha);
+            }
+            flux.hydro.nrg = covariant_nrg(&flux);
+            let mut writes = vec![KernelWrite::new(
+                "flux_den",
+                FieldRef::flux_den(),
+                flux.den.node(),
+            )];
+            for k in 0..3 {
+                writes.push(KernelWrite::new(
+                    format!("flux_mom_{k}"),
+                    FieldRef::flux_mom(k as u8),
+                    flux.mom[k].node(),
+                ));
+            }
+            writes.push(KernelWrite::new(
+                "flux_nrg",
+                FieldRef::flux_nrg(),
+                flux.nrg.node(),
+            ));
+            for k in 0..3 {
+                writes.push(KernelWrite::new(
+                    format!("flux_mag_{k}"),
+                    format!("flux.mag_{k}"),
+                    flux.mag[k].node(),
+                ));
+            }
+            return writes;
+        }
+        // the HLL fan speeds. rusanov / local lax-friedrichs (the FOFC first-order fallback):
+        // the light-cone speeds s = +/- alpha sqrt(gamma^{nn}) — the state-independent maximal
+        // signal bound (the shift is applied by the has_shift fan below); provably
+        // admissibility-preserving because it bounds every characteristic from above right up
+        // to the boundary of the physical set. otherwise: the per-cell exact-quartic speeds
+        // materialized by the wave-speed cell kernel, davis min/max over the two cells sharing
+        // this face — the same one-computation-many-consumers layout as the flat flux. the
+        // stored values are coordinate speeds (the writing kernel subtracts beta^d at each
+        // cell), so the face shift is added back to restore the frame speeds this fan
+        // consumes; the relativistic zero-clamp then pins the stationary state inside the fan
+        // (stored speeds are raw).
+        let (s_l, s_r) = if rusanov {
+            let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
+            (Gv::ZERO - lam, lam)
+        } else {
+            let lo = format!("wave_speed_l[{dir}]");
+            let hi = format!("wave_speed_r[{dir}]");
+            let wsl_m1 = cx.field_shifted("ws_l", &lo, ndim as u8, dir, -1);
+            let wsl_0 = cx.field_shifted("ws_l", &lo, ndim as u8, dir, 0);
+            let wsr_m1 = cx.field_shifted("ws_r", &hi, ndim as u8, dir, -1);
+            let wsr_0 = cx.field_shifted("ws_r", &hi, ndim as u8, dir, 0);
+            let beta_n = beta[coord_n];
+            (
+                (wsl_m1.min(wsl_0) + beta_n).min(Gv::ZERO),
+                (wsr_m1.max(wsr_0) + beta_n).max(Gv::ZERO),
+            )
+        };
+        let mut flux = if has_shift {
+            // the shifted-system HLL (the RHD GR fan) with the induction transpose add per side.
+            let beta_n = beta[coord_n];
+            let w = beta_n / alpha;
+            let u_l = regime.to_conserved(&eos, &left);
+            let u_r = regime.to_conserved(&eos, &right);
+            let f_l = regime.to_flux(&left, &nhat, &eos);
+            let f_r = regime.to_flux(&right, &nhat, &eos);
+            let mut g_l = f_l - u_l * w;
+            let mut g_r = f_r - u_r * w;
+            let transpose = beta.scale(bn_face / alpha);
+            g_l.mag = g_l.mag + transpose;
+            g_r.mag = g_r.mag + transpose;
+            let sh_l = s_l - beta_n;
+            let sh_r = s_r - beta_n;
+            Gv::branch(
+                sh_l.cmp_ge(Gv::ZERO),
+                || g_l,
+                || {
+                    Gv::branch(
+                        sh_r.cmp_le(Gv::ZERO),
+                        || g_r,
+                        || {
+                            let inv = Gv::ONE / (sh_r - sh_l);
+                            (g_l * sh_r - g_r * sh_l + (u_r - u_l) * (sh_l * sh_r / alpha)) * inv
+                        },
+                    )
+                },
+            )
+        } else {
+            hlle_with_speeds(&regime, &eos, &left, &right, &nhat, Gv::ZERO, s_l, s_r)
+        };
         flux.hydro.nrg = covariant_nrg(&flux);
+
         let mut writes = vec![KernelWrite::new(
             "flux_den",
             FieldRef::flux_den(),
@@ -1214,105 +1336,9 @@ pub fn rmhd_flux_gr_gv(
                 flux.mag[k].node(),
             ));
         }
-        let k = end_trace();
-        let stencil_keys = k.stencil_read_field_keys();
-        if stencil_keys.is_empty() {
-            return (k, writes);
-        }
-        let mut halo = vec![0u8; ndim];
-        halo[dir as usize] = 2;
-        let k = k.with_tile_spec(TileSpec {
-            halo,
-            tiled_field_keys: stencil_keys,
-        });
-        return (k, writes);
-    }
-    // the HLL fan speeds. rusanov / local lax-friedrichs (the FOFC first-order fallback):
-    // the light-cone speeds s = +/- alpha sqrt(gamma^{nn}) — the state-independent maximal
-    // signal bound (the shift is applied by the has_shift fan below); provably
-    // admissibility-preserving because it bounds every characteristic from above right up
-    // to the boundary of the physical set. otherwise: the per-cell exact-quartic speeds
-    // materialized by the wave-speed cell kernel, davis min/max over the two cells sharing
-    // this face — the same one-computation-many-consumers layout as the flat flux. the
-    // stored values are coordinate speeds (the writing kernel subtracts beta^d at each
-    // cell), so the face shift is added back to restore the frame speeds this fan
-    // consumes; the relativistic zero-clamp then pins the stationary state inside the fan
-    // (stored speeds are raw).
-    let (s_l, s_r) = if rusanov {
-        let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
-        (Gv::ZERO - lam, lam)
-    } else {
-        let lo = format!("wave_speed_l[{dir}]");
-        let hi = format!("wave_speed_r[{dir}]");
-        let wsl_m1 = Gv::field_shifted("ws_l", &lo, ndim as u8, dir, -1);
-        let wsl_0 = Gv::field_shifted("ws_l", &lo, ndim as u8, dir, 0);
-        let wsr_m1 = Gv::field_shifted("ws_r", &hi, ndim as u8, dir, -1);
-        let wsr_0 = Gv::field_shifted("ws_r", &hi, ndim as u8, dir, 0);
-        let beta_n = beta[coord_n];
-        (
-            (wsl_m1.min(wsl_0) + beta_n).min(Gv::ZERO),
-            (wsr_m1.max(wsr_0) + beta_n).max(Gv::ZERO),
-        )
-    };
-    let mut flux = if has_shift {
-        // the shifted-system HLL (the RHD GR fan) with the induction transpose add per side.
-        let beta_n = beta[coord_n];
-        let w = beta_n / alpha;
-        let u_l = regime.to_conserved(&eos, &left);
-        let u_r = regime.to_conserved(&eos, &right);
-        let f_l = regime.to_flux(&left, &nhat, &eos);
-        let f_r = regime.to_flux(&right, &nhat, &eos);
-        let mut g_l = f_l - u_l * w;
-        let mut g_r = f_r - u_r * w;
-        let transpose = beta.scale(bn_face / alpha);
-        g_l.mag = g_l.mag + transpose;
-        g_r.mag = g_r.mag + transpose;
-        let sh_l = s_l - beta_n;
-        let sh_r = s_r - beta_n;
-        Gv::branch(
-            sh_l.cmp_ge(Gv::ZERO),
-            || g_l,
-            || {
-                Gv::branch(
-                    sh_r.cmp_le(Gv::ZERO),
-                    || g_r,
-                    || {
-                        let inv = Gv::ONE / (sh_r - sh_l);
-                        (g_l * sh_r - g_r * sh_l + (u_r - u_l) * (sh_l * sh_r / alpha)) * inv
-                    },
-                )
-            },
-        )
-    } else {
-        hlle_with_speeds(&regime, &eos, &left, &right, &nhat, Gv::ZERO, s_l, s_r)
-    };
-    flux.hydro.nrg = covariant_nrg(&flux);
+        writes
+    });
 
-    let mut writes = vec![KernelWrite::new(
-        "flux_den",
-        FieldRef::flux_den(),
-        flux.den.node(),
-    )];
-    for k in 0..3 {
-        writes.push(KernelWrite::new(
-            format!("flux_mom_{k}"),
-            FieldRef::flux_mom(k as u8),
-            flux.mom[k].node(),
-        ));
-    }
-    writes.push(KernelWrite::new(
-        "flux_nrg",
-        FieldRef::flux_nrg(),
-        flux.nrg.node(),
-    ));
-    for k in 0..3 {
-        writes.push(KernelWrite::new(
-            format!("flux_mag_{k}"),
-            format!("flux.mag_{k}"),
-            flux.mag[k].node(),
-        ));
-    }
-    let k = end_trace();
     let stencil_keys = k.stencil_read_field_keys();
     if stencil_keys.is_empty() {
         return (k, writes);
@@ -1354,29 +1380,32 @@ fn adiabatic_hllc_at_arm<const D: usize>(
     coords: Coords,
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let eos = IdealGas {
-        gamma: Gv::scalar("gamma"),
-    };
-    let balanced = match balance {
-        Balance::Plain => None,
-        Balance::Hydrostatic => Some(Balanced {
-            n_bodies: symbi_ib::MAX_SOURCE_BODIES,
-            coords,
-            axes,
-        }),
-    };
-    let (left, right, nhat, vface) =
-        euler_reconstruct::<D>(D as u8, dir, axes[dir as usize], recon, balanced);
-    // the neighborhood pressure ratio the transverse shear viscosity is weighted by. only the
-    // HLLC+ arm carries that viscosity, so only it pays the off-axis reads the sensor needs.
-    let shear = matches!(smoother, ShockwaveLimiter::HllcPlus).then(|| {
-        let gamma = eos.gamma;
-        hllc_plus_sensors(D as u8, dir, &move |rho, pre| (gamma * pre / rho).sqrt())
-    });
-    let flux = hllc(&eos, &left, &right, &nhat, vface, smoother, shear);
-    let writes = euler_flux_writes(&flux);
-    (end_trace(), writes)
+    trace(|cx| {
+        let eos = IdealGas {
+            gamma: cx.scalar("gamma"),
+        };
+        let balanced = match balance {
+            Balance::Plain => None,
+            Balance::Hydrostatic => Some(Balanced {
+                n_bodies: symbi_ib::MAX_SOURCE_BODIES,
+                coords,
+                axes,
+            }),
+        };
+        let (left, right, nhat, vface) =
+            euler_reconstruct::<D>(cx, D as u8, dir, axes[dir as usize], recon, balanced);
+        // the neighborhood pressure ratio the transverse shear viscosity is weighted by. only the
+        // HLLC+ arm carries that viscosity, so only it pays the off-axis reads the sensor needs.
+        let shear = matches!(smoother, ShockwaveLimiter::HllcPlus).then(|| {
+            let gamma = eos.gamma;
+            hllc_plus_sensors(cx, D as u8, dir, &move |rho, pre| {
+                (gamma * pre / rho).sqrt()
+            })
+        });
+        let flux = hllc(&eos, &left, &right, &nhat, vface, smoother, shear);
+        let writes = euler_flux_writes(&flux);
+        writes
+    })
 }
 
 /// the smallest pressure ratio `min(p_a/p_b, p_b/p_a)` across any interface of either cell
@@ -1411,14 +1440,15 @@ fn adiabatic_hllc_at_arm<const D: usize>(
 /// so `u - a` or `u + a` changes sign between neighbors. a hydrostatic gradient reverses
 /// nothing, however steep. gating the ratio on that reversal leaves the viscosity at full
 /// strength across a front and absent from an atmosphere.
-fn hllc_plus_sensors(
+fn hllc_plus_sensors<'t>(
+    cx: TraceCx<'t>,
     ndim: u8,
     dir: u8,
-    sound_speed: &dyn Fn(Gv, Gv) -> Gv,
-) -> symbi_hydro::riemann::HllcPlusSensors<Gv> {
-    let shocked = neighborhood_shock_indicator(ndim, dir, sound_speed);
+    sound_speed: &dyn Fn(Gv<'t>, Gv<'t>) -> Gv<'t>,
+) -> symbi_hydro::riemann::HllcPlusSensors<Gv<'t>> {
+    let shocked = neighborhood_shock_indicator(cx, ndim, dir, sound_speed);
     symbi_hydro::riemann::HllcPlusSensors {
-        pressure_ratio: neighborhood_pressure_ratio(ndim, dir),
+        pressure_ratio: neighborhood_pressure_ratio(cx, ndim, dir),
         shocked: Gv::select(shocked, Gv::from_f64(1.0), Gv::from_f64(0.0)),
     }
 }
@@ -1434,18 +1464,19 @@ fn hllc_plus_sensors(
 /// two speeds as `(v -+ a)/(1 -+ v a)`, whose denominator is positive for any subluminal state,
 /// so the sign the indicator reads is the sign of `v -+ a` in both regimes and one expression
 /// serves each.
-fn neighborhood_shock_indicator(
+fn neighborhood_shock_indicator<'t>(
+    cx: TraceCx<'t>,
     ndim: u8,
     dir: u8,
-    sound_speed: &dyn Fn(Gv, Gv) -> Gv,
-) -> symbi_ir::gv::GvMask {
+    sound_speed: &dyn Fn(Gv<'t>, Gv<'t>) -> Gv<'t>,
+) -> symbi_ir::gv::GvMask<'t> {
     let at = |ax: usize, sweep: i32, off: i32| {
         let mut offsets = vec![0i32; ndim as usize];
         offsets[dir as usize] = sweep;
         offsets[ax] += off;
-        let rho = Gv::field_offset("prim_rho", FieldRef::PrimRho, ndim, &offsets);
-        let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, ndim, &offsets);
-        let vel = Gv::field_offset("prim_v0", FieldRef::PrimVel(ax as u8), ndim, &offsets);
+        let rho = cx.field_offset("prim_rho", FieldRef::PrimRho, ndim, &offsets);
+        let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, ndim, &offsets);
+        let vel = cx.field_offset("prim_v0", FieldRef::PrimVel(ax as u8), ndim, &offsets);
         let cs = sound_speed(rho, pre);
         (vel - cs, vel + cs)
     };
@@ -1468,14 +1499,14 @@ fn neighborhood_shock_indicator(
     shocked
 }
 
-fn neighborhood_pressure_ratio(ndim: u8, dir: u8) -> Gv {
+fn neighborhood_pressure_ratio<'t>(cx: TraceCx<'t>, ndim: u8, dir: u8) -> Gv<'t> {
     let at = |sweep: i32, transverse: Option<(u8, i32)>| {
         let mut offsets = vec![0i32; ndim as usize];
         offsets[dir as usize] = sweep;
         if let Some((ax, off)) = transverse {
             offsets[ax as usize] = off;
         }
-        Gv::field_offset("prim_pre", FieldRef::PrimPre, ndim, &offsets)
+        cx.field_offset("prim_pre", FieldRef::PrimPre, ndim, &offsets)
     };
     // the symmetric ratio of an interface, in (0, 1] for positive pressures: one at a smooth
     // interface, falling toward zero as the jump across it strengthens, and blind to which side
@@ -1484,7 +1515,7 @@ fn neighborhood_pressure_ratio(ndim: u8, dir: u8) -> Gv {
     // pressure over the larger, so `min(a/b, b/a)` and `min(a,b)/max(a,b)` are the same
     // division and agree bit for bit. the sensor reads eleven interfaces per face in 3d,
     // so the halving is eleven reciprocals off the baseline kernel.
-    let ratio = |a: Gv, b: Gv| a.min(b) / a.max(b);
+    let ratio = |a: Gv<'t>, b: Gv<'t>| a.min(b) / a.max(b);
 
     // the three interfaces along the sweep, spanning cells -2 through +1.
     let mut weakest = ratio(at(-2, None), at(-1, None))
@@ -1591,22 +1622,23 @@ fn rhd_hllc_at_arm<const D: usize>(
     smoother: ShockwaveLimiter,
     eos_arm: EosArm,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    // gamma keeps its first-in-manifest slot on every arm; under the taub-mathews closure
-    // it is bound-but-inert, exactly as theta under ppm.
-    let gamma = Gv::scalar("gamma");
-    let eos = super::gv_eos(eos_arm, gamma);
-    let (left, right, nhat, vface) =
-        euler_reconstruct::<D>(D as u8, dir, dir as usize, Recon::Plm, None);
-    let shear = matches!(smoother, ShockwaveLimiter::HllcPlus).then(|| {
-        let eos = eos.clone();
-        hllc_plus_sensors(D as u8, dir, &move |rho, pre| {
-            symbi_hydro::rhd::sound_speed_sq(&eos, rho, pre).sqrt()
-        })
-    });
-    let flux = hllc_rhd(&eos, &left, &right, &nhat, vface, shear);
-    let writes = euler_flux_writes(&flux);
-    (end_trace(), writes)
+    trace(|cx| {
+        // gamma keeps its first-in-manifest slot on every arm; under the taub-mathews closure
+        // it is bound-but-inert, exactly as theta under ppm.
+        let gamma = cx.scalar("gamma");
+        let eos = super::gv_eos(eos_arm, gamma);
+        let (left, right, nhat, vface) =
+            euler_reconstruct::<D>(cx, D as u8, dir, dir as usize, Recon::Plm, None);
+        let shear = matches!(smoother, ShockwaveLimiter::HllcPlus).then(|| {
+            let eos = eos.clone();
+            hllc_plus_sensors(cx, D as u8, dir, &move |rho, pre| {
+                symbi_hydro::rhd::sound_speed_sq(&eos, rho, pre).sqrt()
+            })
+        });
+        let flux = hllc_rhd(&eos, &left, &right, &nhat, vface, shear);
+        let writes = euler_flux_writes(&flux);
+        writes
+    })
 }
 
 /// RHD HLLC face flux — mignone-bodo (2005) quadratic for the contact speed.
@@ -1632,19 +1664,19 @@ pub fn rhd_hllc_plus_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> (GvKer
 /// branch. mirrors `rmhd_flux_gv` (8-component MHD primitive) but routes the
 /// reconstructed L/R state through `riemann::hllc_rmhd`; `rmhd_flux_gv` routes through `hlle`.
 pub fn rmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
-    let flux = hllc_rmhd(
-        &Rmhd,
-        &eos,
-        &left,
-        &right,
-        &nhat,
-        Gv::ZERO,
-        ShockwaveLimiter::Standard,
-    );
-    let writes = nmhd_flux_writes(&flux);
-    (end_trace(), writes)
+    trace(|cx| {
+        let (eos, left, right, nhat) = nmhd_reconstruct(cx, ndim, dir, coord_n);
+        let flux = hllc_rmhd(
+            &Rmhd,
+            &eos,
+            &left,
+            &right,
+            &nhat,
+            Gv::ZERO,
+            ShockwaveLimiter::Standard,
+        );
+        nmhd_flux_writes(&flux)
+    })
 }
 
 /// RMHD HLLD face flux — mignone, ugliano & bodo (2009) 5-wave solver, the
@@ -1653,19 +1685,19 @@ pub fn rmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Kernel
 /// HLLE as the divergence fallback, and selects via a success mask at the end.
 /// shares the MHD primitive shape with HLLE/HLLC.
 pub fn rmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
-    let flux = hlld_rmhd(
-        &Rmhd,
-        &eos,
-        &left,
-        &right,
-        &nhat,
-        Gv::ZERO,
-        &SpatialMetric::flat(),
-    );
-    let writes = nmhd_flux_writes(&flux);
-    (end_trace(), writes)
+    trace(|cx| {
+        let (eos, left, right, nhat) = nmhd_reconstruct(cx, ndim, dir, coord_n);
+        let flux = hlld_rmhd(
+            &Rmhd,
+            &eos,
+            &left,
+            &right,
+            &nhat,
+            Gv::ZERO,
+            &SpatialMetric::flat(),
+        );
+        nmhd_flux_writes(&flux)
+    })
 }
 
 /// the pressure face pair of a well-balanced reconstruction: each cell's pressure
@@ -1684,7 +1716,14 @@ pub fn rmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Kernel
 /// arbitrary entropy stratification presents identical face pressures from both anchors
 /// and the flux at rest is exact. proved in
 /// `symbi-hydro/tests/hydrostatic_reconstruction.rs`.
-fn balanced_pressure_pair(ndim: u8, dir: u8, recon: Recon, theta: Gv, b: Balanced<'_>) -> (Gv, Gv) {
+fn balanced_pressure_pair<'t>(
+    cx: TraceCx<'t>,
+    ndim: u8,
+    dir: u8,
+    recon: Recon,
+    theta: Gv<'t>,
+    b: Balanced<'_>,
+) -> (Gv<'t>, Gv<'t>) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
 
     // the bake-time spacing enum is vestigial in the potential ladder: face positions come
@@ -1702,6 +1741,7 @@ fn balanced_pressure_pair(ndim: u8, dir: u8, recon: Recon, theta: Gv, b: Balance
     };
     let phi_at = |half_cells: i64| {
         crate::gv_immersed::stencil_potential_gv(
+            cx,
             b.n_bodies,
             b.coords,
             ndim as usize,
@@ -1721,10 +1761,10 @@ fn balanced_pressure_pair(ndim: u8, dir: u8, recon: Recon, theta: Gv, b: Balance
         .map(|&k| phi_at(2 * k as i64 + 2))
         .collect();
 
-    let read = |key: &str, f: &str| -> Vec<Gv> {
+    let read = |key: &str, f: &str| -> Vec<Gv<'t>> {
         offsets
             .iter()
-            .map(|&k| Gv::field_shifted(key, f, ndim, dir, k))
+            .map(|&k| cx.field_shifted(key, f, ndim, dir, k))
             .collect()
     };
     let rho = read("prim_rho", "prim.rho");
@@ -1744,7 +1784,7 @@ fn balanced_pressure_pair(ndim: u8, dir: u8, recon: Recon, theta: Gv, b: Balance
     // reconstruction continuously to the plain one instead of building faces on a
     // clamped equilibrium.
     let footprint = 2 * recon.balance_reach();
-    let side = |anchor: usize, take_left: bool| -> Gv {
+    let side = |anchor: usize, take_left: bool| {
         let anchor_half = 2 * offsets[anchor] as i64 + 1;
         let rise = symbi_hydro::hydrostatic::potential_rise(
             phi_c[anchor],
@@ -1756,7 +1796,7 @@ fn balanced_pressure_pair(ndim: u8, dir: u8, recon: Recon, theta: Gv, b: Balance
         let d = symbi_hydro::hydrostatic::hydrostatic_departures(
             anchor, &pre, &rho, &phi_c, &phi_f, weight,
         );
-        let limit = |d: &[Gv]| match recon {
+        let limit = |d: &[_]| match recon {
             Recon::Plm => crate::gv::plm_theta_from_stencil(d[0], d[1], d[2], d[3], theta),
             Recon::Ppm => crate::gv::ppm_from_stencil(d[0], d[1], d[2], d[3], d[4], d[5]),
         };

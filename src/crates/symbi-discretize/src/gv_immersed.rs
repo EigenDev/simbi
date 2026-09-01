@@ -15,7 +15,7 @@
 // alone (c2p-free); the 0..n_bodies loop is branch-free (inactive body: mass=0 / sink_rate=0).
 //
 // this module sits outside the (already large) gv module and rides the public gv API alone —
-// Gv arithmetic + the transcendentals (exp) + `cell_geometry_gv` + begin/end_trace.
+// Gv arithmetic + the transcendentals (exp) + `cell_geometry_gv` + `trace`.
 // =============================================================================
 
 use symbi_algebra::algebra::Numeric;
@@ -24,10 +24,10 @@ use symbi_ir::{FieldRef, KernelWrite, KernelWrites};
 
 use super::coords::{Coords, Spacing};
 use super::gv::{CellGeometryGv, cell_geometry_gv};
-use symbi_ir::{Gv, GvKernel, begin_trace, end_trace};
+use symbi_ir::{Gv, GvKernel, TraceCx, trace};
 
 #[inline]
-fn sq(a: Gv) -> Gv {
+fn sq<'t>(a: Gv<'t>) -> Gv<'t> {
     a * a
 }
 
@@ -37,10 +37,10 @@ fn sq(a: Gv) -> Gv {
 /// uniform exponential scaling of every conserved component leaves the intensive primitive state
 /// invariant (acoustically silent, positivity-preserving for any dt) and the accretion rate is
 /// emergent (the reduced `U(1 - exp(-rate*dt))`).
-struct BodyContributionGv {
-    g: [Gv; 3],
-    drain_rate: Gv,
-    rvec: [Gv; 3],
+struct BodyContributionGv<'t> {
+    g: [Gv<'t>; 3],
+    drain_rate: Gv<'t>,
+    rvec: [Gv<'t>; 3],
 }
 
 /// the cartesian axes (0=x,1=y,2=z) a body's ndim-D position/velocity components map to — the
@@ -63,7 +63,7 @@ pub(crate) fn body_cart_axes(coords: Coords, ndim: usize, axes: &[usize]) -> Vec
 // only the immersed source uses these; co-located with their consumer.
 
 /// the cell cartesian position from its coordinate-basis position (3D embedding).
-pub(crate) fn to_cartesian_gv(coords: Coords, coord: &[Gv; 3]) -> [Gv; 3] {
+pub(crate) fn to_cartesian_gv<'t>(coords: Coords, coord: &[Gv<'t>; 3]) -> [Gv<'t>; 3] {
     match coords {
         Coords::Cartesian => *coord,
         Coords::Cylindrical => {
@@ -79,7 +79,7 @@ pub(crate) fn to_cartesian_gv(coords: Coords, coord: &[Gv; 3]) -> [Gv; 3] {
 }
 
 /// the orthonormal (unit) basis vector e_comp(coord) in cartesian, for coordinate index `comp`.
-fn basis_vec_gv(coords: Coords, coord: &[Gv; 3], comp: usize) -> [Gv; 3] {
+fn basis_vec_gv<'t>(coords: Coords, coord: &[Gv<'t>; 3], comp: usize) -> [Gv<'t>; 3] {
     let (z, o) = (Gv::ZERO, Gv::ONE);
     match (coords, comp) {
         (Coords::Cartesian, 0) => [o, z, z],
@@ -112,7 +112,12 @@ fn basis_vec_gv(coords: Coords, coord: &[Gv; 3], comp: usize) -> [Gv; 3] {
 
 /// project a cartesian vector `w` onto the orthonormal coordinate frame: the `ncomp` physical
 /// components `w . e_comp`.
-fn vector_from_cartesian_gv(coords: Coords, coord: &[Gv; 3], w: &[Gv; 3], ncomp: usize) -> Vec<Gv> {
+fn vector_from_cartesian_gv<'t>(
+    coords: Coords,
+    coord: &[Gv<'t>; 3],
+    w: &[Gv<'t>; 3],
+    ncomp: usize,
+) -> Vec<Gv<'t>> {
     (0..ncomp)
         .map(|comp| {
             let e = basis_vec_gv(coords, coord, comp);
@@ -122,7 +127,7 @@ fn vector_from_cartesian_gv(coords: Coords, coord: &[Gv; 3], w: &[Gv; 3], ncomp:
 }
 
 /// expand physical components `v` (coordinate frame) back to a cartesian vector `sum v[c] e_c`.
-fn vector_to_cartesian_gv(coords: Coords, coord: &[Gv; 3], v: &[Gv]) -> [Gv; 3] {
+fn vector_to_cartesian_gv<'t>(coords: Coords, coord: &[Gv<'t>; 3], v: &[Gv<'t>]) -> [Gv<'t>; 3] {
     let mut acc = [Gv::ZERO; 3];
     for (comp, &vc) in v.iter().enumerate() {
         let e = basis_vec_gv(coords, coord, comp);
@@ -136,16 +141,28 @@ fn vector_to_cartesian_gv(coords: Coords, coord: &[Gv; 3], v: &[Gv]) -> [Gv; 3] 
 // ---- gas state + per-cell scaffolding + per-body contribution -------------------------------
 
 // a body's 3D cartesian `pos`/`vel`: place its ndim components at `cart_axes`, 0 elsewhere.
-pub(crate) fn body_vec3(b: usize, ndim: usize, cart_axes: &[usize], name: &str) -> [Gv; 3] {
+pub(crate) fn body_vec3<'t>(
+    cx: TraceCx<'t>,
+    b: usize,
+    ndim: usize,
+    cart_axes: &[usize],
+    name: &str,
+) -> [Gv<'t>; 3] {
     let mut v = [Gv::ZERO; 3];
     for g in 0..ndim {
-        v[cart_axes[g]] = Gv::scalar(&format!("body_{b}_{name}_{g}"));
+        v[cart_axes[g]] = cx.scalar(&format!("body_{b}_{name}_{g}"));
     }
     v
 }
 
 // gas primitives from cons: (vel_physical[ncomp], cs, e_int).
-fn gas_state(ncomp: usize, gamma: Gv, den: Gv, mom: &[Gv], nrg: Gv) -> (Vec<Gv>, Gv, Gv) {
+fn gas_state<'t>(
+    ncomp: usize,
+    gamma: Gv<'t>,
+    den: Gv<'t>,
+    mom: &[Gv<'t>],
+    nrg: Gv<'t>,
+) -> (Vec<Gv<'t>>, Gv<'t>, Gv<'t>) {
     let inv_den = Gv::ONE / den;
     let vel: Vec<Gv> = (0..ncomp).map(|comp| mom[comp] * inv_den).collect();
     let ke = Gv::from_f64(0.5) * (0..ncomp).map(|comp| mom[comp] * vel[comp]).sum::<Gv>();
@@ -160,17 +177,18 @@ fn gas_state(ncomp: usize, gamma: Gv, den: Gv, mom: &[Gv], nrg: Gv) -> (Vec<Gv>,
 /// gridded coords from the centroid via the axis-role map, ungridded at symmetry 0), the cell
 /// cartesian position, the gas velocity in cartesian, min width, cs, e_int.
 #[allow(clippy::too_many_arguments)]
-fn cell_scaffold(
+fn cell_scaffold<'t>(
+    cx: TraceCx<'t>,
     coords: Coords,
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-    gamma: Gv,
-    den: Gv,
-    mom: &[Gv],
-    nrg: Gv,
-) -> ([Gv; 3], [Gv; 3], [Gv; 3], Gv, Gv, Gv) {
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
+    gamma: Gv<'t>,
+    den: Gv<'t>,
+    mom: &[Gv<'t>],
+    nrg: Gv<'t>,
+) -> ([Gv<'t>; 3], [Gv<'t>; 3], [Gv<'t>; 3], Gv<'t>, Gv<'t>, Gv<'t>) {
+    let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], axes, ndim);
     // coord3 in natural coordinate order: gridded coords from the centroid, ungridded = 0.
     let mut coord3 = [Gv::ZERO; 3];
     for (g, &coord_idx) in axes.iter().enumerate() {
@@ -182,29 +200,30 @@ fn cell_scaffold(
     let (vel_phys, cs, e_int) = gas_state(ncomp, gamma, den, mom, nrg);
     let vel_cart = vector_to_cartesian_gv(coords, &coord3, &vel_phys);
 
-    let mut min_w = Gv::scalar("dx_0");
+    let mut min_w = cx.scalar("dx_0");
     for ax in 1..ndim {
-        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+        min_w = min_w.min(cx.scalar(&format!("dx_{ax}")));
     }
     (coord3, cell_cart, vel_cart, min_w, cs, e_int)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn body_contribution(
+fn body_contribution<'t>(
+    cx: TraceCx<'t>,
     b: usize,
     ndim: usize,
     cart_axes: &[usize],
-    cell_cart: &[Gv; 3],
-    vel_cart: &[Gv; 3],
-    den: Gv,
-    cs: Gv,
-    min_w: Gv,
-    inv_dt: Gv,
-) -> BodyContributionGv {
-    let mass = Gv::scalar(&format!("body_{b}_mass"));
-    let soft = Gv::scalar(&format!("body_{b}_soft"));
-    let soft_kind = Gv::scalar(&format!("body_{b}_softkind"));
-    let bpos = body_vec3(b, ndim, cart_axes, "pos");
+    cell_cart: &[Gv<'t>; 3],
+    vel_cart: &[Gv<'t>; 3],
+    den: Gv<'t>,
+    cs: Gv<'t>,
+    min_w: Gv<'t>,
+    inv_dt: Gv<'t>,
+) -> BodyContributionGv<'t> {
+    let mass = cx.scalar(&format!("body_{b}_mass"));
+    let soft = cx.scalar(&format!("body_{b}_soft"));
+    let soft_kind = cx.scalar(&format!("body_{b}_softkind"));
+    let bpos = body_vec3(cx, b, ndim, cart_axes, "pos");
 
     // r_vec = cell_cart - body_pos; r_mag = |r_vec| (for the drain mask).
     let rvec: [Gv; 3] = std::array::from_fn(|i| cell_cart[i] - bpos[i]);
@@ -218,8 +237,8 @@ fn body_contribution(
     // 0.5(1 - tanh((r - r_mask)/w)) (w = one cell) times the sound-crossing-capped sink. `sink_rate`
     // (per body) is the user dial: 0 for a non-accreting body (drain_rate = 0, exact no-op), large ->
     // the full sound-crossing drain. carrier-generic form proven nonnegative -> f in (0,1] (`ibm.rs`).
-    let r_mask = Gv::scalar(&format!("body_{b}_racc"));
-    let sink_rate = Gv::scalar(&format!("body_{b}_sink"));
+    let r_mask = cx.scalar(&format!("body_{b}_racc"));
+    let sink_rate = cx.scalar(&format!("body_{b}_sink"));
     // spatial gate at the mask's exact support (ibm::DRAIN_SUPPORT_WIDTHS): beyond it the
     // ungated rate is exactly zero (tanh saturation), so the lazy branch skips the
     // tanh + divisions on the far field — ~all cells for a sink of a few cell widths — for a
@@ -257,22 +276,23 @@ fn body_contribution(
 /// a pure function of the cell state in registers, touching registers alone, so it composes into
 /// any kernel that already holds the conserved state with no materialized buffer. declares
 /// `dt` / `gamma` + the per-body scalars via `body_contribution`; unused body slots contribute zero.
-pub(crate) fn body_evolved_gv(
-    den: Gv,
-    mom: &[Gv],
-    nrg: Gv,
-    dt: Gv,
-    gamma: Gv,
+pub(crate) fn body_evolved_gv<'t>(
+    cx: TraceCx<'t>,
+    den: Gv<'t>,
+    mom: &[Gv<'t>],
+    nrg: Gv<'t>,
+    dt: Gv<'t>,
+    gamma: Gv<'t>,
     n_bodies: usize,
     coords: Coords,
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (Gv, Vec<Gv>, Gv, Gv) {
+) -> (Gv<'t>, Vec<Gv<'t>>, Gv<'t>, Gv<'t>) {
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
     let (coord3, cell_cart, vel_cart, min_w, cs, _e_int) =
-        cell_scaffold(coords, ndim, ncomp, axes, gamma, den, mom, nrg);
+        cell_scaffold(cx, coords, ndim, ncomp, axes, gamma, den, mom, nrg);
 
     // gravity is an additive momentum + energy source; the drain is the total rate over all bodies,
     // applied as one uniform multiplicative factor (the exact-exponential
@@ -281,7 +301,7 @@ pub(crate) fn body_evolved_gv(
     let mut total_rate = Gv::ZERO;
     for b in 0..n_bodies {
         let bc = body_contribution(
-            b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
+            cx, b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
         );
         let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
         for comp in 0..ncomp {
@@ -344,31 +364,32 @@ pub(crate) fn body_evolved_gv(
 /// vector, which is exact for the relaxation it solves and positivity-preserving for any `dt`
 /// regardless of the state it acts on. gravity accelerates, then the mask drains.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn body_applied_gv(
-    dst_den: Gv,
-    dst_mom: &[Gv],
-    dst_nrg: Gv,
-    src_den: Gv,
-    src_mom: &[Gv],
-    src_nrg: Gv,
-    dt: Gv,
-    gamma: Gv,
+pub(crate) fn body_applied_gv<'t>(
+    cx: TraceCx<'t>,
+    dst_den: Gv<'t>,
+    dst_mom: &[Gv<'t>],
+    dst_nrg: Gv<'t>,
+    src_den: Gv<'t>,
+    src_mom: &[Gv<'t>],
+    src_nrg: Gv<'t>,
+    dt: Gv<'t>,
+    gamma: Gv<'t>,
     n_bodies: usize,
     coords: Coords,
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (Gv, Vec<Gv>, Gv, Gv) {
+) -> (Gv<'t>, Vec<Gv<'t>>, Gv<'t>, Gv<'t>) {
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
     let (coord3, cell_cart, vel_cart, min_w, cs, _e_int) =
-        cell_scaffold(coords, ndim, ncomp, axes, gamma, src_den, src_mom, src_nrg);
+        cell_scaffold(cx, coords, ndim, ncomp, axes, gamma, src_den, src_mom, src_nrg);
 
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
     let mut total_rate = Gv::ZERO;
     for b in 0..n_bodies {
         let bc = body_contribution(
-            b, ndim, &cart_axes, &cell_cart, &vel_cart, src_den, cs, min_w, inv_dt,
+            cx, b, ndim, &cart_axes, &cell_cart, &vel_cart, src_den, cs, min_w, inv_dt,
         );
         let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
         for comp in 0..ncomp {
@@ -405,24 +426,25 @@ pub fn body_source_gv(
     axes: &[usize],
     has_dye: bool,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let gamma = Gv::scalar("gamma");
-    let den = Gv::field("den", FieldRef::cons_den());
+    trace(|cx| {
+    let dt = cx.scalar("dt");
+    let gamma = cx.scalar("gamma");
+    let den = cx.field("den", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .map(|comp| cx.field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
-    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    let nrg = cx.field("nrg", FieldRef::cons_nrg());
     // this pass runs after the godunov stage has advanced `cons`, so the body contribution is
     // evaluated at the stage input — the state the stage's flux divergence was also evaluated at —
     // and applied to the advanced `cons`.
-    let us_den = Gv::field("us_den", FieldRef::ustage_den());
+    let us_den = cx.field("us_den", FieldRef::ustage_den());
     let us_mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
+        .map(|comp| cx.field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
         .collect();
-    let us_nrg = Gv::field("us_nrg", FieldRef::ustage_nrg());
+    let us_nrg = cx.field("us_nrg", FieldRef::ustage_nrg());
     let (den_new, mom_new, nrg_new, drain) = body_applied_gv(
-        den, &mom, nrg, us_den, &us_mom, us_nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
+        cx, den, &mom, nrg, us_den, &us_mom, us_nrg, dt, gamma, n_bodies, coords, ndim, ncomp,
+        axes,
     );
 
     let mut writes = vec![KernelWrite::new(
@@ -445,14 +467,15 @@ pub fn body_source_gv(
     // the dye drains with the mass it is dissolved in, so the concentration the surviving gas
     // carries is unchanged. the drain alone touches the dye; gravity only accelerates the gas.
     if has_dye {
-        let chi = Gv::field("chi", FieldRef::cons_chi());
+        let chi = cx.field("chi", FieldRef::cons_chi());
         writes.push(KernelWrite::new(
             "chi_new",
             FieldRef::cons_chi(),
             (chi * drain).node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// backward feedback, gravity-reaction half (single body slot): per cell, the reaction
@@ -465,10 +488,10 @@ pub fn body_feedback_grav_gv(
     ndim: usize,
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let cart_axes = body_cart_axes(coords, ndim, axes);
-    let den = Gv::field("den", FieldRef::cons_den());
-    let geo: CellGeometryGv = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
+    let den = cx.field("den", FieldRef::cons_den());
+    let geo: CellGeometryGv = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], axes, ndim);
     let mut coord3 = [Gv::ZERO; 3];
     for (g, &coord_idx) in axes.iter().enumerate() {
         if coord_idx < 3 {
@@ -477,10 +500,10 @@ pub fn body_feedback_grav_gv(
     }
     let cell_cart = to_cartesian_gv(coords, &coord3);
     let dv = Gv::ONE / geo.inv_volume;
-    let mass = Gv::scalar("body_0_mass");
-    let soft = Gv::scalar("body_0_soft");
-    let soft_kind = Gv::scalar("body_0_softkind");
-    let bpos = body_vec3(0, ndim, &cart_axes, "pos");
+    let mass = cx.scalar("body_0_mass");
+    let soft = cx.scalar("body_0_soft");
+    let soft_kind = cx.scalar("body_0_softkind");
+    let bpos = body_vec3(cx, 0, ndim, &cart_axes, "pos");
     let rvec: [Gv; 3] = std::array::from_fn(|i| cell_cart[i] - bpos[i]);
     let g = crate::ibm::body_gravity(rvec, mass, soft, soft_kind);
     let mut writes = KernelWrites::new();
@@ -492,7 +515,8 @@ pub fn body_feedback_grav_gv(
             fc.node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// backward feedback, drain half (single body slot): the sink-weighted quantities —
@@ -508,24 +532,24 @@ pub fn body_feedback_drain_gv(
     ncomp: usize,
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let gamma = Gv::scalar("gamma");
+    let (kernel, writes) = trace(|cx| {
+    let dt = cx.scalar("dt");
+    let gamma = cx.scalar("gamma");
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
-    let den = Gv::field("den", FieldRef::cons_den());
+    let den = cx.field("den", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .map(|comp| cx.field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
-    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    let nrg = cx.field("nrg", FieldRef::cons_nrg());
     let (_coord3, cell_cart, vel_cart, min_w, cs, _e_int) =
-        cell_scaffold(coords, ndim, ncomp, axes, gamma, den, &mom, nrg);
-    let geo: CellGeometryGv = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
+        cell_scaffold(cx, coords, ndim, ncomp, axes, gamma, den, &mom, nrg);
+    let geo: CellGeometryGv = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], axes, ndim);
     let dv = Gv::ONE / geo.inv_volume;
     let mom_cart: [Gv; 3] = std::array::from_fn(|i| den * vel_cart[i]);
 
     let bc = body_contribution(
-        0, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
+        cx, 0, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
     );
     // the saturation lemma at the drain seam: the cond-gated rate is exactly
     // zero outside |x - body_pos| > racc + DRAIN_SUPPORT_WIDTHS*min(dx) (the
@@ -534,7 +558,7 @@ pub fn body_feedback_drain_gv(
     // lives in cartesian space, the one chart whose index box contains it.
     if matches!(coords, Coords::Cartesian) {
         use symbi_ir::ParamExpr;
-        symbi_ir::tag_support_ball(
+        cx.tag_support_ball(
             &bc.drain_rate,
             (0..ndim)
                 .map(|ax| ParamExpr::param(&format!("body_0_pos_{}", cart_axes[ax])))
@@ -586,7 +610,9 @@ pub fn body_feedback_drain_gv(
         "fb_0_energy",
         (nrg * frac * dv).node(),
     ));
-    let kernel = end_trace().with_derived_support(&writes);
+    writes
+    });
+    let kernel = kernel.with_derived_support(&writes);
     (kernel, writes)
 }
 
@@ -601,21 +627,21 @@ pub fn body_feedback_gv(
     ncomp: usize,
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let gamma = Gv::scalar("gamma");
+    trace(|cx| {
+    let dt = cx.scalar("dt");
+    let gamma = cx.scalar("gamma");
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
-    let den = Gv::field("den", FieldRef::cons_den());
+    let den = cx.field("den", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .map(|comp| cx.field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
-    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    let nrg = cx.field("nrg", FieldRef::cons_nrg());
     let (_coord3, cell_cart, vel_cart, min_w, cs, _e_int) =
-        cell_scaffold(coords, ndim, ncomp, axes, gamma, den, &mom, nrg);
+        cell_scaffold(cx, coords, ndim, ncomp, axes, gamma, den, &mom, nrg);
 
     // cell volume dv = 1 / inv_volume (cell_geometry recomputed here — CSE collapses it).
-    let geo: CellGeometryGv = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
+    let geo: CellGeometryGv = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], axes, ndim);
     let dv = Gv::ONE / geo.inv_volume;
     let dv_dt = dv * dt;
 
@@ -626,7 +652,7 @@ pub fn body_feedback_gv(
     let mut writes = KernelWrites::new();
     for b in 0..n_bodies {
         let bc = body_contribution(
-            b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
+            cx, b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
         );
         // the fraction of this cell drained by body b this step: frac = 1 - exp(-rate*dt). exact for
         // non-overlapping masks (each cell in at most one mask -> matches the forward's total-rate
@@ -679,7 +705,8 @@ pub fn body_feedback_gv(
             (nrg * frac * dv).node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 // =============================================================================
@@ -700,7 +727,12 @@ pub fn body_feedback_gv(
 
 // iso gas state from cons + the substrate pressure: (vel_physical[ncomp], cs).
 // `pre = cs^2(x)*rho` so `cs = sqrt(pre/rho)`. the isothermal closure returns velocity and cs.
-fn gas_state_iso(ncomp: usize, den: Gv, mom: &[Gv], pre: Gv) -> (Vec<Gv>, Gv) {
+fn gas_state_iso<'t>(
+    ncomp: usize,
+    den: Gv<'t>,
+    mom: &[Gv<'t>],
+    pre: Gv<'t>,
+) -> (Vec<Gv<'t>>, Gv<'t>) {
     let inv_den = Gv::ONE / den;
     let vel: Vec<Gv> = (0..ncomp).map(|comp| mom[comp] * inv_den).collect();
     let cs = (pre * inv_den).sqrt();
@@ -710,16 +742,17 @@ fn gas_state_iso(ncomp: usize, den: Gv, mom: &[Gv], pre: Gv) -> (Vec<Gv>, Gv) {
 /// the iso counterpart of `cell_scaffold`: identical geometry + velocity scaffold,
 /// but cs comes from `prim.pre` and there is no e_int.
 #[allow(clippy::too_many_arguments)]
-fn cell_scaffold_iso(
+fn cell_scaffold_iso<'t>(
+    cx: TraceCx<'t>,
     coords: Coords,
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-    den: Gv,
-    mom: &[Gv],
-    pre: Gv,
-) -> ([Gv; 3], [Gv; 3], [Gv; 3], Gv, Gv) {
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
+    den: Gv<'t>,
+    mom: &[Gv<'t>],
+    pre: Gv<'t>,
+) -> ([Gv<'t>; 3], [Gv<'t>; 3], [Gv<'t>; 3], Gv<'t>, Gv<'t>) {
+    let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], axes, ndim);
     let mut coord3 = [Gv::ZERO; 3];
     for (g, &coord_idx) in axes.iter().enumerate() {
         if coord_idx < 3 {
@@ -729,9 +762,9 @@ fn cell_scaffold_iso(
     let cell_cart = to_cartesian_gv(coords, &coord3);
     let (vel_phys, cs) = gas_state_iso(ncomp, den, mom, pre);
     let vel_cart = vector_to_cartesian_gv(coords, &coord3, &vel_phys);
-    let mut min_w = Gv::scalar("dx_0");
+    let mut min_w = cx.scalar("dx_0");
     for ax in 1..ndim {
-        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+        min_w = min_w.min(cx.scalar(&format!("dx_{ax}")));
     }
     (coord3, cell_cart, vel_cart, min_w, cs)
 }
@@ -746,20 +779,20 @@ pub fn body_source_iso_gv(
     ncomp: usize,
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let den = Gv::field("den", FieldRef::cons_den());
+    trace(|cx| {
+    let dt = cx.scalar("dt");
+    let den = cx.field("den", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .map(|comp| cx.field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
-    let pre = Gv::field("pre", FieldRef::PrimPre);
+    let pre = cx.field("pre", FieldRef::PrimPre);
     // evaluated at the stage input, applied to the godunov-advanced cons — see `body_applied_gv`.
-    let us_den = Gv::field("us_den", FieldRef::ustage_den());
+    let us_den = cx.field("us_den", FieldRef::ustage_den());
     let us_mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
+        .map(|comp| cx.field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
         .collect();
     let (den_new, mom_new) = body_applied_iso_gv(
-        den, &mom, us_den, &us_mom, pre, dt, n_bodies, coords, ndim, ncomp, axes,
+        cx, den, &mom, us_den, &us_mom, pre, dt, n_bodies, coords, ndim, ncomp, axes,
     );
 
     let mut writes = vec![KernelWrite::new(
@@ -774,7 +807,8 @@ pub fn body_source_iso_gv(
             m.node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the isothermal immersed-body evolution as a pure per-cell function of its arguments alone: the
@@ -782,21 +816,22 @@ pub fn body_source_iso_gv(
 /// pressure `pre` (which sets the sound speed), returns the state advanced by `dt` of softened
 /// newtonian gravity + bondi-hoyle accretion from `n_bodies` point masses. shared by the standalone
 /// iso body source and the FOFC freeze-select-with-body composition.
-pub(crate) fn body_evolved_iso_gv(
-    den: Gv,
-    mom: &[Gv],
-    pre: Gv,
-    dt: Gv,
+pub(crate) fn body_evolved_iso_gv<'t>(
+    cx: TraceCx<'t>,
+    den: Gv<'t>,
+    mom: &[Gv<'t>],
+    pre: Gv<'t>,
+    dt: Gv<'t>,
     n_bodies: usize,
     coords: Coords,
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (Gv, Vec<Gv>) {
+) -> (Gv<'t>, Vec<Gv<'t>>) {
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
     let (coord3, cell_cart, vel_cart, min_w, cs) =
-        cell_scaffold_iso(coords, ndim, ncomp, axes, den, mom, pre);
+        cell_scaffold_iso(cx, coords, ndim, ncomp, axes, den, mom, pre);
 
     // gravity additive, then the uniform drain (den + mom; no energy equation). see the adiabatic
     // `body_evolved_gv` for the operator-split rationale.
@@ -804,7 +839,7 @@ pub(crate) fn body_evolved_iso_gv(
     let mut total_rate = Gv::ZERO;
     for b in 0..n_bodies {
         let bc = body_contribution(
-            b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
+            cx, b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
         );
         let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
         for comp in 0..ncomp {
@@ -836,16 +871,16 @@ pub fn body_evolved_probe_gv(
     ncomp: usize,
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let gamma = Gv::scalar("gamma");
-    let den = Gv::field("den", FieldRef::cons_den());
+    trace(|cx| {
+    let dt = cx.scalar("dt");
+    let gamma = cx.scalar("gamma");
+    let den = cx.field("den", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .map(|comp| cx.field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
-    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    let nrg = cx.field("nrg", FieldRef::cons_nrg());
     let (den_new, mom_new, nrg_new, _drain) = body_evolved_gv(
-        den, &mom, nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
+        cx, den, &mom, nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
     );
     let mut writes = vec![KernelWrite::new(
         "den_new",
@@ -864,7 +899,8 @@ pub fn body_evolved_probe_gv(
         FieldRef::cons_nrg(),
         nrg_new.node(),
     ));
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the isothermal twin of [`body_applied_gv`]: the body contribution is evaluated at `src` (the
@@ -875,29 +911,30 @@ pub fn body_evolved_probe_gv(
 /// Runge-Kutta order. evaluating it alongside the flux keeps the isothermal and adiabatic bodies
 /// the same discrete operator.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn body_applied_iso_gv(
-    dst_den: Gv,
-    dst_mom: &[Gv],
-    src_den: Gv,
-    src_mom: &[Gv],
-    src_pre: Gv,
-    dt: Gv,
+pub(crate) fn body_applied_iso_gv<'t>(
+    cx: TraceCx<'t>,
+    dst_den: Gv<'t>,
+    dst_mom: &[Gv<'t>],
+    src_den: Gv<'t>,
+    src_mom: &[Gv<'t>],
+    src_pre: Gv<'t>,
+    dt: Gv<'t>,
     n_bodies: usize,
     coords: Coords,
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (Gv, Vec<Gv>) {
+) -> (Gv<'t>, Vec<Gv<'t>>) {
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
     let (coord3, cell_cart, vel_cart, min_w, cs) =
-        cell_scaffold_iso(coords, ndim, ncomp, axes, src_den, src_mom, src_pre);
+        cell_scaffold_iso(cx, coords, ndim, ncomp, axes, src_den, src_mom, src_pre);
 
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
     let mut total_rate = Gv::ZERO;
     for b in 0..n_bodies {
         let bc = body_contribution(
-            b, ndim, &cart_axes, &cell_cart, &vel_cart, src_den, cs, min_w, inv_dt,
+            cx, b, ndim, &cart_axes, &cell_cart, &vel_cart, src_den, cs, min_w, inv_dt,
         );
         let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
         for comp in 0..ncomp {
@@ -927,26 +964,26 @@ pub fn body_feedback_iso_gv(
     ncomp: usize,
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let dt = Gv::scalar("dt");
+    trace(|cx| {
+    let dt = cx.scalar("dt");
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
-    let den = Gv::field("den", FieldRef::cons_den());
+    let den = cx.field("den", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .map(|comp| cx.field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
-    let pre = Gv::field("pre", FieldRef::PrimPre);
+    let pre = cx.field("pre", FieldRef::PrimPre);
     let (_coord3, cell_cart, vel_cart, min_w, cs) =
-        cell_scaffold_iso(coords, ndim, ncomp, axes, den, &mom, pre);
+        cell_scaffold_iso(cx, coords, ndim, ncomp, axes, den, &mom, pre);
 
-    let geo: CellGeometryGv = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
+    let geo: CellGeometryGv = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], axes, ndim);
     let dv = Gv::ONE / geo.inv_volume;
     let mom_cart: [Gv; 3] = std::array::from_fn(|i| den * vel_cart[i]);
 
     let mut writes = KernelWrites::new();
     for b in 0..n_bodies {
         let bc = body_contribution(
-            b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
+            cx, b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
         );
         let frac = Gv::cond(
             bc.drain_rate.cmp_gt(Gv::ZERO),
@@ -984,7 +1021,8 @@ pub fn body_feedback_iso_gv(
             (den * frac * dv).node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the cartesian position of a point displaced `half_cells` half-cell widths from the current
@@ -1002,15 +1040,16 @@ pub fn body_feedback_iso_gv(
 /// every consumer of a body's geometry along a sweep reads the same ladder, so the potential a
 /// well-balanced reconstruction cancels and the mask indicator a dissipation floor keys on are
 /// evaluated at one and the same point.
-pub(crate) fn stencil_position_cartesian_gv(
+pub(crate) fn stencil_position_cartesian_gv<'t>(
+    cx: TraceCx<'t>,
     coords: Coords,
     ndim: usize,
     dir: usize,
     axes: &[usize],
     spacing: &[Spacing],
     half_cells: i64,
-) -> [Gv; 3] {
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+) -> [Gv<'t>; 3] {
+    let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
     let mut coord3 = [Gv::ZERO; 3];
     for (g, &coord_idx) in axes.iter().enumerate() {
         if coord_idx < 3 {
@@ -1019,13 +1058,13 @@ pub(crate) fn stencil_position_cartesian_gv(
     }
     let sweep_coord = axes[dir];
     if sweep_coord < 3 {
-        let lo = crate::gv::gv_axis_face_at(sweep_coord, spacing[dir], half_cells.div_euclid(2));
+        let lo = crate::gv::gv_axis_face_at(cx, sweep_coord, spacing[dir], half_cells.div_euclid(2));
         coord3[sweep_coord] = if half_cells.rem_euclid(2) == 0 {
             lo
         } else {
             let hi =
-                crate::gv::gv_axis_face_at(sweep_coord, spacing[dir], half_cells.div_euclid(2) + 1);
-            crate::gv::gv_axis_center_between(sweep_coord, lo, hi)
+                crate::gv::gv_axis_face_at(cx, sweep_coord, spacing[dir], half_cells.div_euclid(2) + 1);
+            crate::gv::gv_axis_center_between(cx, sweep_coord, lo, hi)
         };
     }
     to_cartesian_gv(coords, &coord3)
@@ -1035,7 +1074,8 @@ pub(crate) fn stencil_position_cartesian_gv(
 /// than hydrostatic departures. the same mollified spherical indicator and one-cell width used by
 /// penalization define the jurisdiction, while porosity makes a sealed surface an exact zero and a
 /// pure drain the full mask. the maximum gives overlapping surfaces one conservative jurisdiction.
-pub(crate) fn surface_handover_weight_gv(
+pub(crate) fn surface_handover_weight_gv<'t>(
+    cx: TraceCx<'t>,
     n_bodies: usize,
     coords: Coords,
     ndim: usize,
@@ -1043,23 +1083,23 @@ pub(crate) fn surface_handover_weight_gv(
     axes: &[usize],
     spacing: &[Spacing],
     half_cells: i64,
-) -> Gv {
-    let point = stencil_position_cartesian_gv(coords, ndim, dir, axes, spacing, half_cells);
+) -> Gv<'t> {
+    let point = stencil_position_cartesian_gv(cx, coords, ndim, dir, axes, spacing, half_cells);
     let cart_axes = body_cart_axes(coords, ndim, axes);
-    let mut min_w = crate::gv::gv_axis_width(0, spacing[0]);
+    let mut min_w = crate::gv::gv_axis_width(cx, 0, spacing[0]);
     for ax in 1..ndim {
-        min_w = min_w.min(crate::gv::gv_axis_width(ax, spacing[ax]));
+        min_w = min_w.min(crate::gv::gv_axis_width(cx, ax, spacing[ax]));
     }
     let mut weight = Gv::ZERO;
     for bb in 0..n_bodies {
-        let porosity = Gv::scalar(&format!("body_{bb}_porosity"));
+        let porosity = cx.scalar(&format!("body_{bb}_porosity"));
         let body_weight = Gv::cond(
             porosity.cmp_gt(Gv::ZERO),
             || {
-                let center = body_vec3(bb, ndim, &cart_axes, "pos");
+                let center = body_vec3(cx, bb, ndim, &cart_axes, "pos");
                 let rvec: [Gv; 3] = std::array::from_fn(|aa| point[aa] - center[aa]);
                 let radius = (sq(rvec[0]) + sq(rvec[1]) + sq(rvec[2])).sqrt();
-                let mask_radius = Gv::scalar(&format!("body_{bb}_rmask"));
+                let mask_radius = cx.scalar(&format!("body_{bb}_rmask"));
                 let support = mask_radius + Gv::from_f64(crate::ibm::DRAIN_SUPPORT_WIDTHS) * min_w;
                 let chi = Gv::cond(
                     radius.cmp_lt(support),
@@ -1090,7 +1130,8 @@ pub(crate) fn surface_handover_weight_gv(
 ///
 /// the transverse coordinates are the current cell's own centre: the reconstruction is
 /// one-dimensional along `dir`, so only the sweep axis moves.
-pub fn stencil_potential_gv(
+pub fn stencil_potential_gv<'t>(
+    cx: TraceCx<'t>,
     n_bodies: usize,
     coords: Coords,
     ndim: usize,
@@ -1098,18 +1139,18 @@ pub fn stencil_potential_gv(
     axes: &[usize],
     spacing: &[Spacing],
     half_cells: i64,
-) -> Gv {
+) -> Gv<'t> {
     let cart_axes = body_cart_axes(coords, ndim, axes);
-    let cart = stencil_position_cartesian_gv(coords, ndim, dir, axes, spacing, half_cells);
+    let cart = stencil_position_cartesian_gv(cx, coords, ndim, dir, axes, spacing, half_cells);
     (0..n_bodies)
         .map(|b| {
-            let bpos = body_vec3(b, ndim, &cart_axes, "pos");
+            let bpos = body_vec3(cx, b, ndim, &cart_axes, "pos");
             let rvec: [Gv; 3] = std::array::from_fn(|i| cart[i] - bpos[i]);
             crate::ibm::body_potential(
                 rvec,
-                Gv::scalar(&format!("body_{b}_mass")),
-                Gv::scalar(&format!("body_{b}_soft")),
-                Gv::scalar(&format!("body_{b}_softkind")),
+                cx.scalar(&format!("body_{b}_mass")),
+                cx.scalar(&format!("body_{b}_soft")),
+                cx.scalar(&format!("body_{b}_softkind")),
             )
         })
         .sum::<Gv>()
@@ -1149,21 +1190,21 @@ pub fn body_source_wb_gv(
     reach: i64,
 ) -> (GvKernel, KernelWrites) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let gamma = Gv::scalar("gamma");
+    trace(|cx| {
+    let dt = cx.scalar("dt");
+    let gamma = cx.scalar("gamma");
     let mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .map(|comp| cx.field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
-    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    let nrg = cx.field("nrg", FieldRef::cons_nrg());
     // evaluated at the stage input, exactly like the analytic body source: the stage's flux
     // divergence was reconstructed from this state, and the cancellation is a statement about
     // the pair.
-    let us_den = Gv::field("us_den", FieldRef::ustage_den());
+    let us_den = cx.field("us_den", FieldRef::ustage_den());
     let us_mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
+        .map(|comp| cx.field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
         .collect();
-    let us_nrg = Gv::field("us_nrg", FieldRef::ustage_nrg());
+    let us_nrg = cx.field("us_nrg", FieldRef::ustage_nrg());
     let (us_vel, _cs, e_int) = gas_state(ncomp, gamma, us_den, &us_mom, us_nrg);
     let p_us = (gamma - Gv::ONE) * us_den * e_int;
 
@@ -1171,21 +1212,21 @@ pub fn body_source_wb_gv(
     // selects uniform/log/geometric at runtime through the per-axis `map_kind_{ax}` scalar,
     // so this one kernel serves every grading.
     let spacing = vec![Spacing::Uniform; ndim];
-    let handover = surface_handover_weight_gv(n_bodies, coords, ndim, 0, axes, &spacing, 1);
+    let handover = surface_handover_weight_gv(cx, n_bodies, coords, ndim, 0, axes, &spacing, 1);
 
     // the ordinary gravity source evaluated at the same stage input. the drain handover blends
     // this with the equilibrium-pressure source cellwise, so the reconstruction and its source
     // leave the hydrostatic chart together where penalization evacuates the gas.
     let cart_axes = body_cart_axes(coords, ndim, axes);
     let (coord3, cell_cart, _, _, _, _) =
-        cell_scaffold(coords, ndim, ncomp, axes, gamma, us_den, &us_mom, us_nrg);
+        cell_scaffold(cx, coords, ndim, ncomp, axes, gamma, us_den, &us_mom, us_nrg);
     let mut plain_force = vec![Gv::ZERO; ncomp];
     for bb in 0..n_bodies {
-        let center = body_vec3(bb, ndim, &cart_axes, "pos");
+        let center = body_vec3(cx, bb, ndim, &cart_axes, "pos");
         let rvec: [Gv; 3] = std::array::from_fn(|aa| cell_cart[aa] - center[aa]);
-        let mass = Gv::scalar(&format!("body_{bb}_mass"));
-        let soft = Gv::scalar(&format!("body_{bb}_soft"));
-        let soft_kind = Gv::scalar(&format!("body_{bb}_softkind"));
+        let mass = cx.scalar(&format!("body_{bb}_mass"));
+        let soft = cx.scalar(&format!("body_{bb}_soft"));
+        let soft_kind = cx.scalar(&format!("body_{bb}_softkind"));
         let gravity_cart = crate::ibm::body_gravity(rvec, mass, soft, soft_kind);
         let gravity = vector_from_cartesian_gv(coords, &coord3, &gravity_cart, ncomp);
         for comp in 0..ncomp {
@@ -1195,7 +1236,7 @@ pub fn body_source_wb_gv(
     // the curvilinear form needs the per-axis face areas and inverse volume; traced only on
     // the curvilinear arms so the cartesian graph — and the baked cartesian kernels — carry
     // not one extra node.
-    let geo = (coords != Coords::Cartesian).then(|| cell_geometry_gv(coords, &spacing, axes, ndim));
+    let geo = (coords != Coords::Cartesian).then(|| cell_geometry_gv(cx, coords, &spacing, axes, ndim));
 
     let mut mom_new: Vec<Gv> = mom.clone();
     let mut nrg_new = nrg;
@@ -1203,9 +1244,9 @@ pub fn body_source_wb_gv(
     for ax in 0..ndim {
         // total body potential at this cell's two faces and centre along `ax`: half-cells
         // 0 (lower face), 1 (centre), 2 (upper face) on the face ladder.
-        let phi_lo = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 0);
-        let phi_c = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 1);
-        let phi_hi = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 2);
+        let phi_lo = stencil_potential_gv(cx, n_bodies, coords, ndim, ax, axes, &spacing, 0);
+        let phi_c = stencil_potential_gv(cx, n_bodies, coords, ndim, ax, axes, &spacing, 1);
+        let phi_hi = stencil_potential_gv(cx, n_bodies, coords, ndim, ax, axes, &spacing, 2);
         // the mechanical equilibrium through the cell's own stage-input state: the face
         // values are the cell's single density segment, `p +/- rho (phi_c - phi_face)`,
         // the same segments the balanced reconstruction evaluates for this cell along
@@ -1217,8 +1258,8 @@ pub fn body_source_wb_gv(
         // where the segment leaves its positive domain.
         let rise = symbi_hydro::hydrostatic::potential_rise(
             phi_c,
-            stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 1 - footprint),
-            stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 1 + footprint),
+            stencil_potential_gv(cx, n_bodies, coords, ndim, ax, axes, &spacing, 1 - footprint),
+            stencil_potential_gv(cx, n_bodies, coords, ndim, ax, axes, &spacing, 1 + footprint),
         );
         let eq = LocalEquilibrium::faded(us_den, p_us, phi_c, rise);
         let (_, p_lo) = eq.state_at(phi_lo);
@@ -1233,7 +1274,7 @@ pub fn body_source_wb_gv(
             // reduces to the `dx_{ax}` scalar on an unmapped axis) -- a graded axis carries a
             // distinct width per cell, and the flux divergence this source telescopes against
             // differences its faces over that same per-cell width.
-            None => (p_hi - p_lo) / crate::gv::gv_axis_width(ax, spacing[ax]),
+            None => (p_hi - p_lo) / crate::gv::gv_axis_width(cx, ax, spacing[ax]),
             // the area-weighted form: `p_eq(phi_c)` is `p_us` bit-exactly (the isentrope's
             // anchor point), so the reference term is the raw stage-input pressure. on a
             // radial column the transverse axes see equal face potentials, equal `p_eq`,
@@ -1260,5 +1301,6 @@ pub fn body_source_wb_gv(
         FieldRef::cons_nrg(),
         nrg_new.node(),
     ));
-    (end_trace(), writes)
+    writes
+    })
 }

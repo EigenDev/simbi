@@ -55,18 +55,23 @@ pub enum GeoSource {
 /// (e.g. an (r,z) grid with swirl carries [r, phi]) -> `CylindricalRPhi` (the (r,z)
 /// `Cylindrical<2>` axisymmetric reduction would zero the swirl). the result is padded to
 /// the full `ncomp` DOF — suppressed trailing components (e.g. z) carry zero inertial.
-fn inertial_momentum_sources_gv(
+fn inertial_momentum_sources_gv<'t>(
     ncomp: usize,
     coords: Coords,
-    mom: &[Gv],
-    vel: &[Gv],
-    centroid: &[Gv],
-) -> Vec<Gv> {
+    mom: &[Gv<'t>],
+    vel: &[Gv<'t>],
+    centroid: &[Gv<'t>],
+) -> Vec<Gv<'t>> {
     // const-D bridge: build the fixed-rank tensors from the runtime slices, evaluate the metric's
     // inertial source, splat back to a per-component Vec of length `mom.len()`.
-    fn run<M, const D: usize>(metric: M, mom: &[Gv], vel: &[Gv], x: &[Gv]) -> Vec<Gv>
+    fn run<'t, M, const D: usize>(
+        metric: M,
+        mom: &[Gv<'t>],
+        vel: &[Gv<'t>],
+        x: &[Gv<'t>],
+    ) -> Vec<Gv<'t>>
     where
-        M: Metric<Gv, D>,
+        M: Metric<Gv<'t>, D>,
     {
         let s = metric.momentum_source_inertial(
             Tensor::from_fn(|i| x[i]),
@@ -96,17 +101,17 @@ fn inertial_momentum_sources_gv(
 /// v)`, and (RMHD) magnetic `+Gamma(bmu bmu)`. `gas_mom`/`vel`/`bmu` are the regime quantities;
 /// an empty `gas_mom` selects the pressure-only form (1D radial). `axes[d]` = the coord of grid
 /// axis d.
-fn geometric_momentum_sources_gv(
+fn geometric_momentum_sources_gv<'t>(
     coords: Coords,
     axes: &[usize],
     ndim: usize,
     ncomp: usize,
-    geo: &CellGeometryGv,
-    ptot: Gv,
-    gas_mom: &[Gv],
-    vel: &[Gv],
-    bmu: Option<&[Gv]>,
-) -> Vec<Gv> {
+    geo: &CellGeometryGv<'t>,
+    ptot: Gv<'t>,
+    gas_mom: &[Gv<'t>],
+    vel: &[Gv<'t>],
+    bmu: Option<&[Gv<'t>]>,
+) -> Vec<Gv<'t>> {
     // coordinate-indexed centroid (r at [0], theta at [1]). ungridded slots take the chart symmetry
     // default (spherical polar -> pi/2): a reduced-dimension spherical grid (a 1.5D radial
     // chart with ungridded theta, or a 2.5D r-phi chart) still evaluates the angular christoffels
@@ -149,16 +154,17 @@ fn geometric_momentum_sources_gv(
 /// magnetic quantities from symbi-hydro's `rmhd_source_quantities` (the carrier-generic source
 /// the RMHD flux uses), gas_mom = wgam2*v, bmu = the spatial four-vector. `cons_mom` is the
 /// already-read in-place conserved momentum, shared so the gas-inertial reuses that one buffer.
-pub(crate) fn gv_geometric_source(
+pub(crate) fn gv_geometric_source<'t>(
+    cx: TraceCx<'t>,
     coords: Coords,
     axes: &[usize],
     ndim: usize,
     ncomp: usize,
-    geo: &CellGeometryGv,
+    geo: &CellGeometryGv<'t>,
     source: GeoSource,
-    cons_mom: &[Gv],
+    cons_mom: &[Gv<'t>],
     mag_from_bcell: bool,
-) -> Vec<Gv> {
+) -> Vec<Gv<'t>> {
     // the cell-B the magnetic geo source reads: the primitive `prim.mag[k]` in the general case.
     // when this stage is fused with the cell-B predictor (which binds `bc_k` in-place), reading mag
     // via that same `bc_k` key lets try_fuse merge the two cell-B reads into one binding; keeping
@@ -166,21 +172,21 @@ pub(crate) fn gv_geometric_source(
     // bcell[k] at runtime, aliasing a read-only input to an in-place output (ub on CPU). both keys
     // carry the same old-bcell value (the predictor writes after the source evaluates), so it is
     // bit-identical.
-    let mag_field = |k: usize| -> Gv {
+    let mag_field = |k: usize| {
         if mag_from_bcell {
-            Gv::field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
+            cx.field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
         } else {
-            Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8))
+            cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8))
         }
     };
     match source {
         GeoSource::Hydro { inertial } => {
-            let ptot = Gv::field("pre", FieldRef::PrimPre);
+            let ptot = cx.field("pre", FieldRef::PrimPre);
             // the velocity-quadratic inertial vanishes for 1D radial, so that arm leaves it and
             // its vel reads out of the graph.
             let (gas_mom, vel): (Vec<Gv>, Vec<Gv>) = if inertial && ndim >= 2 {
                 let v = (0..ndim)
-                    .map(|d| Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
+                    .map(|d| cx.field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
                     .collect();
                 (cons_mom[..ndim].to_vec(), v) // gas_mom = cons.mom (shared, read once)
             } else {
@@ -193,14 +199,14 @@ pub(crate) fn gv_geometric_source(
         GeoSource::Rmhd => {
             // the RMHD stress = pressure + gas inertial + magnetic tension: read prim + gamma,
             // trace symbi-hydro's `rmhd_source_quantities` (wgam2, bmu, ptot) at S=Gv.
-            let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+            let rho = cx.field("prim_rho", FieldRef::PrimRho);
             let vel: [Gv; 3] = std::array::from_fn(|k| {
-                Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8))
+                cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8))
             });
-            let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+            let pre = cx.field("prim_pre", FieldRef::PrimPre);
             let mag: [Gv; 3] = std::array::from_fn(|k| mag_field(k));
             let eos = IdealGas {
-                gamma: Gv::scalar("gamma"),
+                gamma: cx.scalar("gamma"),
             };
             let prim = MhdPrim::<Gv, 3> {
                 hydro: Prim {
@@ -239,10 +245,10 @@ pub(crate) fn gv_geometric_source(
             // every `ncomp` (DOF) component: a 2.5D spherical grid (DOF=3 > ndim=2) needs the
             // out-of-plane phi velocity/momentum/B for the S_theta cot + S_phi geometric sources.
             let vel: Vec<Gv> = (0..ncomp)
-                .map(|d| Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
+                .map(|d| cx.field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
                 .collect();
             let mag: [Gv; 3] = std::array::from_fn(|k| mag_field(k));
-            let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+            let pre = cx.field("prim_pre", FieldRef::PrimPre);
             let bsq = mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2];
             let ptot = pre + Gv::from_f64(0.5) * bsq;
             let gas_mom: Vec<Gv> = cons_mom[..ncomp].to_vec();
@@ -265,11 +271,11 @@ pub(crate) fn gv_geometric_source(
             // lab-frame B tension). every `ncomp` (DOF) component (see NewtonianMhd) for the
             // spherical 2.5D out-of-plane source.
             let vel: Vec<Gv> = (0..ncomp)
-                .map(|d| Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
+                .map(|d| cx.field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
                 .collect();
             let mag: [Gv; 3] = std::array::from_fn(|k| mag_field(k));
-            let rho = Gv::field("prim_rho", FieldRef::PrimRho);
-            let cs = Gv::scalar("cs");
+            let rho = cx.field("prim_rho", FieldRef::PrimRho);
+            let cs = cx.scalar("cs");
             let bsq = mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2];
             let ptot = cs * cs * rho + Gv::from_f64(0.5) * bsq;
             let gas_mom: Vec<Gv> = cons_mom[..ncomp].to_vec();
@@ -296,11 +302,11 @@ pub(crate) fn gv_geometric_source(
 /// same result `uniform_acceleration_*_source` produces via its hand-built graph, proving the
 /// carrier-generic form is a drop-in for the splice path (and is f64==Gv by construction).
 pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let rho = Gv::field("rho", FieldRef::cons_den());
+    trace(|cx| {
+    let rho = cx.field("rho", FieldRef::cons_den());
     let vel: [Gv; D] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let g_ext: [Gv; D] = std::array::from_fn(|k| Gv::scalar(&format!("g_ext_{k}")));
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let g_ext: [Gv; D] = std::array::from_fn(|k| cx.scalar(&format!("g_ext_{k}")));
     let src = symbi_hydro::UniformAccel::<Gv, D> { g_ext };
     let mom = src.momentum(rho);
     let nrg = src.energy(rho, &vel);
@@ -308,7 +314,8 @@ pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, KernelWrites) {
         .map(|k| KernelWrite::new(format!("s_mom_{k}"), format!("s_mom_{k}"), mom[k].node()))
         .collect();
     writes.push(KernelWrite::new("s_nrg", "s_nrg", nrg.node()));
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// splice an externally-lowered user-expression `BuiltSource` (a parsed script, bridged into the
@@ -321,14 +328,14 @@ pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, KernelWrites) {
 pub fn splice_user_source_gv(
     built: &symbi_hydro::source_spec::BuiltSource,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     // bind every declared param (x_k, t, p_i, ...) to a runtime Gv scalar of the same name;
     // in production the position `x_k` binds to the in-kernel centroid instead.
     let mut name_to_node = std::collections::HashMap::new();
     for p in built.params() {
-        name_to_node.insert(p.clone(), Gv::scalar(p).node());
+        name_to_node.insert(p.clone(), cx.scalar(p).node());
     }
-    let outs = with_trace(|t| {
+    let outs = cx.with_trace(|t| {
         symbi_hydro::source_spec::splice_built_source_into(built, t.graph(), &name_to_node)
     });
     let writes = outs
@@ -336,7 +343,8 @@ pub fn splice_user_source_gv(
         .enumerate()
         .map(|(k, &n)| KernelWrite::new(format!("s_{k}"), format!("s_{k}"), n))
         .collect();
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// spike probe: trace the carrier-generic `symbi_hydro::PointMassGravity` source at S=Gv.
@@ -346,14 +354,14 @@ pub fn splice_user_source_gv(
 /// `point_mass_{momentum,energy}_source` hand-builds, proving the carrier-generic form is a
 /// drop-in (and f64==Gv by construction). the shared `1/|x-xm|^3` is emitted once (hash-cons).
 pub fn point_mass_gravity_probe_gv<const D: usize>() -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let rho = Gv::field("rho", FieldRef::cons_den());
+    trace(|cx| {
+    let rho = cx.field("rho", FieldRef::cons_den());
     let vel: [Gv; D] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let x: [Gv; D] = std::array::from_fn(|k| Gv::scalar(&format!("x_{k}")));
-    let xm: [Gv; D] = std::array::from_fn(|k| Gv::scalar(&format!("xm_{k}")));
-    let gm = Gv::scalar("gm");
-    let eps = Gv::scalar("eps");
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let x: [Gv; D] = std::array::from_fn(|k| cx.scalar(&format!("x_{k}")));
+    let xm: [Gv; D] = std::array::from_fn(|k| cx.scalar(&format!("xm_{k}")));
+    let gm = cx.scalar("gm");
+    let eps = cx.scalar("eps");
     let src = symbi_hydro::PointMassGravity::<Gv, D> { gm, xm, eps };
     let mom = src.momentum(rho, &x);
     let nrg = src.energy(rho, &vel, &x);
@@ -361,7 +369,8 @@ pub fn point_mass_gravity_probe_gv<const D: usize>() -> (GvKernel, KernelWrites)
         .map(|k| KernelWrite::new(format!("s_mom_{k}"), format!("s_mom_{k}"), mom[k].node()))
         .collect();
     writes.push(KernelWrite::new("s_nrg", "s_nrg", nrg.node()));
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the gv inertial-source probe:
@@ -373,20 +382,21 @@ pub fn inertial_momentum_probe_gv(
     spacing: &[Spacing],
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let axes: Vec<usize> = (0..ndim).collect();
     let mom: Vec<Gv> = (0..ndim)
-        .map(|d| Gv::field(&format!("cons_mom_{d}"), FieldRef::cons_mom(d as u8)))
+        .map(|d| cx.field(&format!("cons_mom_{d}"), FieldRef::cons_mom(d as u8)))
         .collect();
     let vel: Vec<Gv> = (0..ndim)
-        .map(|d| Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
+        .map(|d| cx.field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
         .collect();
-    let geo = cell_geometry_gv(coords, spacing, &axes, ndim);
+    let geo = cell_geometry_gv(cx, coords, spacing, &axes, ndim);
     let s = inertial_momentum_sources_gv(ndim, coords, &mom, &vel, &geo.centroid);
     let writes = (0..ndim)
         .map(|d| KernelWrite::new(format!("s_{d}"), format!("s_{d}"), s[d].node()))
         .collect();
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the gv full geometric-momentum-source probe — the carrier mirror of the ctx
@@ -402,8 +412,8 @@ pub fn geometric_momentum_source_probe_gv(
     ncomp: usize,
     source: GeoSource,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    trace(|cx| {
+    let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
     // hydro shares the conserved momentum (the gas inertial reads cons.mom); rmhd computes its
     // gas momentum density from prim (cons.mom carries B-momentum), so its cons_mom list is empty.
     let cons_mom: Vec<Gv> = match source {
@@ -412,13 +422,14 @@ pub fn geometric_momentum_source_probe_gv(
         // has DOF=3 and the geometric S_theta/S_phi need the out-of-plane phi momentum (mom[2]).
         // hydro has ncomp==ndim so this is unchanged there.
         GeoSource::Hydro { .. } | GeoSource::NewtonianMhd | GeoSource::IsothermalMhd => (0..ncomp)
-            .map(|k| Gv::field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8)))
+            .map(|k| cx.field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8)))
             .collect(),
         GeoSource::Rmhd => Vec::new(),
     };
-    let s = gv_geometric_source(coords, axes, ndim, ncomp, &geo, source, &cons_mom, false);
+    let s = gv_geometric_source(cx, coords, axes, ndim, ncomp, &geo, source, &cons_mom, false);
     let writes = (0..ncomp)
         .map(|k| KernelWrite::new(format!("s_{k}"), format!("s_{k}"), s[k].node()))
         .collect();
-    (end_trace(), writes)
+    writes
+    })
 }

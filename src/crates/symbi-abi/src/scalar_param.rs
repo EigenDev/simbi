@@ -4,7 +4,7 @@
 // typed names for kernel scalar parameters that cross the trace -> dispatch ABI.
 //
 // a kernel scalar is the link between the traced graph (which declares it via
-// `Gv::scalar(name)`) and the host dispatch (which supplies its value by name).
+// `cx.scalar(name)`) and the host dispatch (which supplies its value by name).
 // that link is a bare string — and a string minted independently on each side
 // drifts: the moving-mesh rate was `mesh_adot` in the flux trace but
 // `mesh_adot_{axis}` in the wave-speed trace and the dispatch resolver, which
@@ -16,7 +16,7 @@
 // and adding a variant is a compile error until every `match` covers it.
 //
 // usage:
-//  // producer (trace): Gv::scalar(&MeshScalar::Adot(dir).name())
+//  // producer (trace): cx.scalar(&MeshScalar::Adot(dir).name())
 //  // consumer (dispatch): match MeshScalar::parse(name) { Some(MeshScalar::Adot(ax)) => .. }
 // =============================================================================
 

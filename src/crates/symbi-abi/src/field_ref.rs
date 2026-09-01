@@ -4,7 +4,7 @@
 // typed names for the kernel field buffers that cross the trace -> dispatch ABI.
 //
 // a kernel field is the link between the traced graph (which declares it via
-// `Gv::field(key, runtime_path)`) and the host dispatch (which binds the backing
+// `cx.field(key, runtime_path)`) and the host dispatch (which binds the backing
 // buffer by that runtime path). that link is a bare dotted string — and the same
 // buffer is spelled three ways across five layers (`ir_key` `cons_mom_k`,
 // `runtime_path` `cons.mom_k`, source short name `mom`) with nothing forcing them

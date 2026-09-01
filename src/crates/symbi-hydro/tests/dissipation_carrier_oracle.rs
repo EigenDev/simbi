@@ -23,8 +23,7 @@ use symbi_hydro::dissipation::{mach_scale, shear_weight};
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::passes::scalarize::scalarize;
 use symbi_ir::{
-    Backend, Cpu, Gv, KernelEmitInputs, begin_trace, emit_kernel_cpu, emit_kernel_from_lowering,
-    end_trace,
+    Backend, Cpu, Gv, KernelEmitInputs, emit_kernel_cpu, emit_kernel_from_lowering, trace,
 };
 
 // =============================================================================
@@ -37,13 +36,13 @@ use symbi_ir::{
 /// run `physics(&[Gv]) -> Gv` at S = Gv, scalarize, and interpret at `inputs`.
 fn gv_eval<F>(physics: F, param_names: &[&str], inputs: &[f64]) -> f64
 where
-    F: FnOnce(&[Gv]) -> Gv,
+    F: for<'t> FnOnce(&[Gv<'t>]) -> Gv<'t>,
 {
-    begin_trace();
-    let params: Vec<Gv> = param_names.iter().map(|n| Gv::param(n)).collect();
-    let root = physics(&params).node();
-    let kernel = end_trace();
-    let lowered = scalarize(&kernel.graph, root, "dissipation_probe");
+    let (kernel, root) = trace(|cx| {
+        let params: Vec<Gv> = param_names.iter().map(|n| cx.param(n)).collect();
+        physics(&params).node()
+    });
+    let lowered = scalarize(kernel.graph(), root, "dissipation_probe");
     Cpu.eval_elemental(&lowered, inputs)[0]
 }
 
@@ -51,16 +50,16 @@ where
 /// emit non-empty CPU (rust) and CUDA source. an unlowerable op panics here.
 fn assert_lowers<F>(physics: F, param_names: &[&str])
 where
-    F: FnOnce(&[Gv]) -> Gv,
+    F: for<'t> FnOnce(&[Gv<'t>]) -> Gv<'t>,
 {
-    begin_trace();
-    let params: Vec<Gv> = param_names.iter().map(|n| Gv::param(n)).collect();
-    let _root = physics(&params).node();
-    let kernel = end_trace();
+    let (kernel, _root) = trace(|cx| {
+        let params: Vec<Gv> = param_names.iter().map(|n| cx.param(n)).collect();
+        physics(&params).node()
+    });
     assert!(
-        !kernel.graph.has_errors(),
+        !kernel.graph().has_errors(),
         "graph errors: {:?}",
-        kernel.graph.errors()
+        kernel.graph().errors()
     );
     let inputs = KernelEmitInputs {
         kernel_name: "dissipation_lower_probe",
@@ -80,8 +79,8 @@ where
         device_preamble: &[],
         tile_spec: None,
     };
-    let cpu = emit_kernel_cpu(&kernel.graph, &inputs);
-    let cuda = emit_kernel_from_lowering(&kernel.graph, &inputs);
+    let cpu = emit_kernel_cpu(kernel.graph(), &inputs);
+    let cuda = emit_kernel_from_lowering(kernel.graph(), &inputs);
     assert!(
         !cpu.source.is_empty(),
         "lowerability: CPU (rust) emit produced no source"

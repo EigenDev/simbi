@@ -192,7 +192,7 @@ fn run_map(inputs: &[(&str, Vec<f64>)], gamma: f64) -> Vec<f64> {
     // output (write `lambda`) is the max over the 3 axes of the quartic characteristic speed.
     let built = rmhd_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform; 3], &[0, 1, 2], 3);
     assert_eq!(
-        built.0.scalar_params,
+        built.0.scalar_params(),
         vec![
             "gamma".to_string(),
             "map_kind_0".to_string(),

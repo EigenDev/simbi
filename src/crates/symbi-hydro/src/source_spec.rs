@@ -34,7 +34,7 @@
 
 use symbi_algebra::algebra::Numeric;
 use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId};
-use symbi_ir::{ElementTy, Gv, with_trace};
+use symbi_ir::{ElementTy, Gv, TraceCx};
 
 use crate::regime_spec::law_params;
 use crate::source_term::{PointMassGravity, UniformAccel};
@@ -160,7 +160,7 @@ pub mod source_params {
 //          builder methods, with operand NodeIds translated through the
 //          built-node-id -> dest-node-id map.
 //   - returns `Vec<NodeId>` — the dest NodeIds corresponding to
-//      `built.outputs[k]`. callers wrap these as `Gv::of(node)` when working
+//      `built.outputs[k]`. callers wrap these as `cx.gv(node)` when working
 //      in a Gv trace.
 //
 // supports the same Op subset the `BuiltSource` builders use (Const,
@@ -543,13 +543,15 @@ pub mod gravity_params {
 /// scalars. shared by the momentum + energy builders so the softened `accel` field is defined
 /// in one place — the `1/(|x-xm|^2 + eps^2)^{3/2}` scaffolding hash-conses across both when the
 /// fused family bakes them into one kernel. must be called inside an open trace ([`lift_to_built`]).
-fn point_mass_gv<const D: usize>() -> (Gv, [Gv; D], [Gv; D], PointMassGravity<Gv, D>) {
-    let rho = Gv::scalar(law_params::RHO);
-    let vel: [Gv; D] = std::array::from_fn(|k| Gv::scalar(&law_params::vel(k)));
-    let x: [Gv; D] = std::array::from_fn(|k| Gv::scalar(&source_params::x(k)));
-    let xm: [Gv; D] = std::array::from_fn(|k| Gv::scalar(&gravity_params::xm(k)));
-    let gm = Gv::scalar(gravity_params::GM);
-    let eps = Gv::scalar(gravity_params::EPS);
+fn point_mass_gv<'t, const D: usize>(
+    cx: TraceCx<'t>,
+) -> (Gv<'t>, [Gv<'t>; D], [Gv<'t>; D], PointMassGravity<Gv<'t>, D>) {
+    let rho = cx.scalar(law_params::RHO);
+    let vel: [Gv; D] = std::array::from_fn(|k| cx.scalar(&law_params::vel(k)));
+    let x: [Gv; D] = std::array::from_fn(|k| cx.scalar(&source_params::x(k)));
+    let xm: [Gv; D] = std::array::from_fn(|k| cx.scalar(&gravity_params::xm(k)));
+    let gm = cx.scalar(gravity_params::GM);
+    let eps = cx.scalar(gravity_params::EPS);
     (rho, vel, x, PointMassGravity { gm, xm, eps })
 }
 
@@ -558,17 +560,17 @@ fn point_mass_gv<const D: usize>() -> (Gv, [Gv; D], [Gv; D], PointMassGravity<Gv
 /// dimension is resolved by compile-time dispatch (`D` unrolls the carrier physics); `eps = 0`
 /// recovers the bare `1/r^3` form.
 fn point_mass_momentum_source(d: usize) -> BuiltSource {
-    lift_to_built(|| match d {
+    lift_to_built(|cx| match d {
         1 => {
-            let (rho, _v, x, src) = point_mass_gv::<1>();
+            let (rho, _v, x, src) = point_mass_gv::<1>(cx);
             src.momentum(rho, &x)
         }
         2 => {
-            let (rho, _v, x, src) = point_mass_gv::<2>();
+            let (rho, _v, x, src) = point_mass_gv::<2>(cx);
             src.momentum(rho, &x)
         }
         3 => {
-            let (rho, _v, x, src) = point_mass_gv::<3>();
+            let (rho, _v, x, src) = point_mass_gv::<3>(cx);
             src.momentum(rho, &x)
         }
         _ => panic!("point-mass gravity supports D in 1..=3, got {d}"),
@@ -579,17 +581,17 @@ fn point_mass_momentum_source(d: usize) -> BuiltSource {
 /// field does, via the shared force-energy lift. 1 output. emitted by
 /// `point_mass_gravity_sources` when the parent regime has energy; isothermal regimes drop it.
 fn point_mass_energy_source(d: usize) -> BuiltSource {
-    lift_to_built(|| match d {
+    lift_to_built(|cx| match d {
         1 => {
-            let (rho, vel, x, src) = point_mass_gv::<1>();
+            let (rho, vel, x, src) = point_mass_gv::<1>(cx);
             vec![src.energy(rho, &vel, &x)]
         }
         2 => {
-            let (rho, vel, x, src) = point_mass_gv::<2>();
+            let (rho, vel, x, src) = point_mass_gv::<2>(cx);
             vec![src.energy(rho, &vel, &x)]
         }
         3 => {
-            let (rho, vel, x, src) = point_mass_gv::<3>();
+            let (rho, vel, x, src) = point_mass_gv::<3>(cx);
             vec![src.energy(rho, &vel, &x)]
         }
         _ => panic!("point-mass gravity supports D in 1..=3, got {d}"),
@@ -866,18 +868,18 @@ pub fn user_defined_source(
 
 /// trace a carrier-generic conservation lift (a `source_term::*` function) into a standalone
 /// `BuiltSource`. the closure runs inside a fresh Gv trace: it declares its scalar leaves via
-/// [`Gv::scalar`] (rho, vel_k, ...) and the spliced user field, and returns the lifted output
-/// `Gv`s. `Gv::scalar` dedups by name in first-seen order, which is the `BuiltSource.params`
-/// contract — so the param manifest falls out of the trace. this is the same begin/end_trace
+/// `cx.scalar` (rho, vel_k, ...) and the spliced user field, and returns the lifted output
+/// `Gv`s. `cx.scalar` dedups by name in first-seen order, which is the `BuiltSource.params`
+/// contract — so the param manifest falls out of the trace. this is the same scoped-trace
 /// idiom the substrate kernels use; it builds IR once per source, at bake time.
-pub fn lift_to_built(build: impl FnOnce() -> Vec<Gv>) -> BuiltSource {
+pub fn lift_to_built(build: impl for<'t> FnOnce(TraceCx<'t>) -> Vec<Gv<'t>>) -> BuiltSource {
     // isolate the trace: these builders run both standalone (config-time, before any trace opens)
     // and partway through the godunov trace (the AOT/substrate fused-source bake calls
     // `build_source` mid-trace). `trace` saves/restores any open outer trace so it
     // survives the inner build intact. node ids are collected inside the closure, while the inner
     // trace is live.
     let (kernel, outputs) =
-        symbi_ir::trace(|| build().iter().map(|g| g.node()).collect::<Vec<NodeId>>());
+        symbi_ir::trace(|cx| build(cx).iter().map(|g| g.node()).collect::<Vec<NodeId>>());
     BuiltSource {
         graph: kernel.graph().clone(),
         params: kernel
@@ -890,18 +892,18 @@ pub fn lift_to_built(build: impl FnOnce() -> Vec<Gv>) -> BuiltSource {
 }
 
 /// splice a user field (its own lowered graph) into the active trace, binding each of its
-/// params to a same-named [`Gv::scalar`] leaf, and return its outputs as `Gv`s the lift can
+/// params to a same-named `cx.scalar` leaf, and return its outputs as `Gv`s the lift can
 /// consume. must be called inside an open trace ([`lift_to_built`]). a param shared with the
 /// lift (e.g., the field also reads `rho`) dedups onto the lift's leaf — same runtime scalar.
-fn splice_field_into_trace(field: &BuiltSource) -> Vec<Gv> {
+fn splice_field_into_trace<'t>(cx: TraceCx<'t>, field: &BuiltSource) -> Vec<Gv<'t>> {
     let name_to_node: std::collections::HashMap<String, NodeId> = field
         .params
         .iter()
-        .map(|p| (p.clone(), Gv::scalar(p).node()))
+        .map(|p| (p.clone(), cx.scalar(p).node()))
         .collect();
-    with_trace(|t| splice_built_source_into(field, t.graph(), &name_to_node))
+    cx.with_trace(|t| splice_built_source_into(field, t.graph(), &name_to_node))
         .into_iter()
-        .map(Gv::of)
+        .map(|node| cx.gv(node))
         .collect()
 }
 
@@ -916,9 +918,9 @@ pub fn user_force_momentum_source(accel: &BuiltSource, d: usize) -> BuiltSource 
         "user_force_momentum_source: acceleration field must have D = {d} outputs, got {}",
         accel.outputs.len(),
     );
-    lift_to_built(|| {
-        let rho = Gv::scalar(law_params::RHO);
-        let a = splice_field_into_trace(accel);
+    lift_to_built(|cx| {
+        let rho = cx.scalar(law_params::RHO);
+        let a = splice_field_into_trace(cx, accel);
         crate::source_term::force_momentum(rho, &a)
     })
 }
@@ -934,10 +936,10 @@ pub fn user_force_energy_source(accel: &BuiltSource, d: usize) -> BuiltSource {
         "user_force_energy_source: acceleration field must have D = {d} outputs, got {}",
         accel.outputs.len(),
     );
-    lift_to_built(|| {
-        let rho = Gv::scalar(law_params::RHO);
-        let vel: Vec<Gv> = (0..d).map(|k| Gv::scalar(&law_params::vel(k))).collect();
-        let a = splice_field_into_trace(accel);
+    lift_to_built(|cx| {
+        let rho = cx.scalar(law_params::RHO);
+        let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
+        let a = splice_field_into_trace(cx, accel);
         vec![crate::source_term::force_energy(rho, &vel, &a)]
     })
 }
@@ -947,11 +949,11 @@ pub fn user_force_energy_source(accel: &BuiltSource, d: usize) -> BuiltSource {
 /// evolving cell state, so this source composes with independent buffer sponges.
 pub fn user_rotating_frame_momentum_source(field: &BuiltSource, d: usize) -> BuiltSource {
     assert_eq!(field.outputs.len(), 3);
-    lift_to_built(|| {
-        let rho = Gv::scalar(law_params::RHO);
-        let position: Vec<Gv> = (0..d).map(|kk| Gv::scalar(&format!("x_{kk}"))).collect();
-        let vel: Vec<Gv> = (0..d).map(|kk| Gv::scalar(&law_params::vel(kk))).collect();
-        let values = splice_field_into_trace(field);
+    lift_to_built(|cx| {
+        let rho = cx.scalar(law_params::RHO);
+        let position: Vec<Gv> = (0..d).map(|kk| cx.scalar(&format!("x_{kk}"))).collect();
+        let vel: Vec<Gv> = (0..d).map(|kk| cx.scalar(&law_params::vel(kk))).collect();
+        let values = splice_field_into_trace(cx, field);
         let accel = crate::source_term::rotating_frame_acceleration(
             &position, &vel, values[0], values[1], values[2],
         );
@@ -963,11 +965,11 @@ pub fn user_rotating_frame_momentum_source(field: &BuiltSource, d: usize) -> Bui
 /// source, so energy and momentum stay in step.
 pub fn user_rotating_frame_energy_source(field: &BuiltSource, d: usize) -> BuiltSource {
     assert_eq!(field.outputs.len(), 3);
-    lift_to_built(|| {
-        let rho = Gv::scalar(law_params::RHO);
-        let position: Vec<Gv> = (0..d).map(|kk| Gv::scalar(&format!("x_{kk}"))).collect();
-        let vel: Vec<Gv> = (0..d).map(|kk| Gv::scalar(&law_params::vel(kk))).collect();
-        let values = splice_field_into_trace(field);
+    lift_to_built(|cx| {
+        let rho = cx.scalar(law_params::RHO);
+        let position: Vec<Gv> = (0..d).map(|kk| cx.scalar(&format!("x_{kk}"))).collect();
+        let vel: Vec<Gv> = (0..d).map(|kk| cx.scalar(&law_params::vel(kk))).collect();
+        let values = splice_field_into_trace(cx, field);
         let accel = crate::source_term::rotating_frame_acceleration(
             &position, &vel, values[0], values[1], values[2],
         );
@@ -984,8 +986,8 @@ pub fn user_cooling_source(rate: &BuiltSource, _d: usize) -> BuiltSource {
         "user_cooling_source: cooling rate field must have 1 output, got {}",
         rate.outputs.len(),
     );
-    lift_to_built(|| {
-        let lambda = splice_field_into_trace(rate);
+    lift_to_built(|cx| {
+        let lambda = splice_field_into_trace(cx, rate);
         vec![crate::source_term::cooling(lambda[0])]
     })
 }
@@ -1005,10 +1007,10 @@ pub fn user_relax_momentum_source(field: &BuiltSource, d: usize) -> BuiltSource 
         d - 1,
         field.outputs.len(),
     );
-    lift_to_built(|| {
-        let rho = Gv::scalar(law_params::RHO);
-        let vel: Vec<Gv> = (0..d).map(|k| Gv::scalar(&law_params::vel(k))).collect();
-        let f = splice_field_into_trace(field);
+    lift_to_built(|cx| {
+        let rho = cx.scalar(law_params::RHO);
+        let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
+        let f = splice_field_into_trace(cx, field);
         crate::source_term::relax_momentum(rho, &vel, f[0], &f[1..1 + d])
     })
 }
@@ -1025,10 +1027,10 @@ pub fn user_relax_energy_source(field: &BuiltSource, d: usize) -> BuiltSource {
         d - 1,
         field.outputs.len(),
     );
-    lift_to_built(|| {
-        let rho = Gv::scalar(law_params::RHO);
-        let vel: Vec<Gv> = (0..d).map(|k| Gv::scalar(&law_params::vel(k))).collect();
-        let f = splice_field_into_trace(field);
+    lift_to_built(|cx| {
+        let rho = cx.scalar(law_params::RHO);
+        let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
+        let f = splice_field_into_trace(cx, field);
         vec![crate::source_term::relax_energy(
             rho,
             &vel,
@@ -1076,22 +1078,22 @@ pub fn user_sponge_sources(
     // comparison between two spellings of "conserved".
     let slot = |pick: SpongeSlot| -> Result<BuiltSource, String> {
         let mut err: Option<String> = None;
-        let built = lift_to_built(|| {
-            let f = splice_field_into_trace(field);
+        let built = lift_to_built(|cx| {
+            let f = splice_field_into_trace(cx, field);
             let kappa = crate::source_term::clamp_rate(f[0]);
-            let cur_rho = Gv::scalar(law_params::RHO);
-            let cur_vel: Vec<Gv> = (0..d).map(|k| Gv::scalar(&law_params::vel(k))).collect();
+            let cur_rho = cx.scalar(law_params::RHO);
+            let cur_vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
             let cur_pre = if has_energy {
-                Gv::scalar(law_params::PRE)
+                cx.scalar(law_params::PRE)
             } else {
                 Gv::ZERO
             };
             let ref_pre = if has_energy { f[2 + d] } else { Gv::ZERO };
-            let convert = |rho: Gv, vel: &[Gv], pre: Gv| -> Result<Vec<Gv>, String> {
+            let convert = |rho, vel, pre| {
                 match d {
                     1 => law.to_conserved_gv_flat::<1>(rho, vel, pre),
-                    2 => Ok(law.to_conserved_gv::<2>(rho, vel, pre)),
-                    3 => Ok(law.to_conserved_gv::<3>(rho, vel, pre)),
+                    2 => Ok(law.to_conserved_gv::<2>(cx, rho, vel, pre)),
+                    3 => Ok(law.to_conserved_gv::<3>(cx, rho, vel, pre)),
                     other => Err(format!("sponge: unsupported dimension {other}")),
                 }
             };
@@ -1150,8 +1152,8 @@ pub fn user_inject_slot_source(
     field: &BuiltSource,
     outputs: std::ops::Range<usize>,
 ) -> BuiltSource {
-    lift_to_built(|| {
-        let f = splice_field_into_trace(field);
+    lift_to_built(|cx| {
+        let f = splice_field_into_trace(cx, field);
         f[outputs].to_vec()
     })
 }
@@ -1166,24 +1168,24 @@ pub fn user_inject_slot_source(
 
 /// declare the uniform-acceleration leaves (`g_ext_k`) at compile-time dimension `D` and build
 /// the carrier source [`UniformAccel`]. must be called inside an open trace ([`lift_to_built`]).
-fn uniform_accel_gv<const D: usize>() -> (Gv, UniformAccel<Gv, D>) {
-    let rho = Gv::scalar(law_params::RHO);
-    let g_ext: [Gv; D] = std::array::from_fn(|k| Gv::scalar(&user_params::g_ext(k)));
+fn uniform_accel_gv<'t, const D: usize>(cx: TraceCx<'t>) -> (Gv<'t>, UniformAccel<Gv<'t>, D>) {
+    let rho = cx.scalar(law_params::RHO);
+    let g_ext: [Gv; D] = std::array::from_fn(|k| cx.scalar(&user_params::g_ext(k)));
     (rho, UniformAccel { g_ext })
 }
 
 fn uniform_acceleration_momentum_source(d: usize) -> BuiltSource {
-    lift_to_built(|| match d {
+    lift_to_built(|cx| match d {
         1 => {
-            let (rho, src) = uniform_accel_gv::<1>();
+            let (rho, src) = uniform_accel_gv::<1>(cx);
             src.momentum(rho)
         }
         2 => {
-            let (rho, src) = uniform_accel_gv::<2>();
+            let (rho, src) = uniform_accel_gv::<2>(cx);
             src.momentum(rho)
         }
         3 => {
-            let (rho, src) = uniform_accel_gv::<3>();
+            let (rho, src) = uniform_accel_gv::<3>(cx);
             src.momentum(rho)
         }
         _ => panic!("uniform acceleration supports D in 1..=3, got {d}"),
@@ -1191,20 +1193,20 @@ fn uniform_acceleration_momentum_source(d: usize) -> BuiltSource {
 }
 
 fn uniform_acceleration_energy_source(d: usize) -> BuiltSource {
-    lift_to_built(|| match d {
+    lift_to_built(|cx| match d {
         1 => {
-            let (rho, src) = uniform_accel_gv::<1>();
-            let v = uniform_vel::<1>();
+            let (rho, src) = uniform_accel_gv::<1>(cx);
+            let v = uniform_vel::<1>(cx);
             vec![src.energy(rho, &v)]
         }
         2 => {
-            let (rho, src) = uniform_accel_gv::<2>();
-            let v = uniform_vel::<2>();
+            let (rho, src) = uniform_accel_gv::<2>(cx);
+            let v = uniform_vel::<2>(cx);
             vec![src.energy(rho, &v)]
         }
         3 => {
-            let (rho, src) = uniform_accel_gv::<3>();
-            let v = uniform_vel::<3>();
+            let (rho, src) = uniform_accel_gv::<3>(cx);
+            let v = uniform_vel::<3>(cx);
             vec![src.energy(rho, &v)]
         }
         _ => panic!("uniform acceleration supports D in 1..=3, got {d}"),
@@ -1213,8 +1215,8 @@ fn uniform_acceleration_energy_source(d: usize) -> BuiltSource {
 
 /// the velocity leaves `vel_k` the energy source dots against `g_ext`. declared separately from
 /// [`uniform_accel_gv`] so each source's param manifest lists exactly what it reads.
-fn uniform_vel<const D: usize>() -> [Gv; D] {
-    std::array::from_fn(|k| Gv::scalar(&law_params::vel(k)))
+fn uniform_vel<'t, const D: usize>(cx: TraceCx<'t>) -> [Gv<'t>; D] {
+    std::array::from_fn(|k| cx.scalar(&law_params::vel(k)))
 }
 
 /// the canonical "uniform external acceleration" user source pair — a

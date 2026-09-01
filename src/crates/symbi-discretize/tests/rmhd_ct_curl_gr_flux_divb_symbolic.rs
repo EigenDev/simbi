@@ -49,7 +49,7 @@ fn bare(dir: usize, spacetime: Spacetime, coords: Coords, axes: &[usize]) -> Lin
         rmhd_ct_curl_2d_sph_gr_gv(dir, spacetime, coords, &[Spacing::Uniform; 2], axes);
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
     let curl = curl_only(LinFormR::extract_rat(
-        &kernel.graph,
+        kernel.graph(),
         writes[0].value,
         FIELDS,
         SCALARS,
@@ -137,7 +137,7 @@ fn divb_gr_flux_symbolic_detects_missing_weight() {
             &[0, 1],
         );
         curl_only(LinFormR::extract_rat(
-            &kernel.graph,
+            kernel.graph(),
             writes[0].value,
             FIELDS,
             SCALARS,

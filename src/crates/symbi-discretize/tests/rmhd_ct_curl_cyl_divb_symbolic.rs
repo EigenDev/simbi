@@ -101,7 +101,7 @@ fn divb_cyl_symbolic_telescoping() {
         assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
         let root = writes[0].value;
 
-        let raw = curl_only(LinFormR::extract_rat(&kernel.graph, root, FIELDS, SCALARS));
+        let raw = curl_only(LinFormR::extract_rat(kernel.graph(), root, FIELDS, SCALARS));
         let curl = raw.canonicalize_keys(&physical_rename(dir));
         assert!(
             !curl.is_zero(),

@@ -27,7 +27,7 @@ use symbi_ir::algebra::Scalar;
 /// via `ord_key`). use `S::cmp_eq` returning `Self::Mask` for equality in
 /// carrier-generic code; tests can `assert_eq!` on concrete `f64` values
 /// because `f64: PartialEq` inherently.
-pub trait EnergySlot<S: Scalar>: Copy + Default + Debug + Send + Sync + 'static {
+pub trait EnergySlot<S: Scalar>: Copy + Default + Debug + Send + Sync {
     fn zero() -> Self;
     fn add(self, rhs: Self) -> Self;
     fn sub(self, rhs: Self) -> Self;

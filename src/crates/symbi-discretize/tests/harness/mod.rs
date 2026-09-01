@@ -48,9 +48,9 @@ impl KernelRun {
     /// take a builder's `(GvKernel, KernelWrites)` return; asserts the traced graph is clean.
     pub fn new((kernel, writes): (GvKernel, KernelWrites)) -> KernelRun {
         assert!(
-            !kernel.graph.has_errors(),
+            !kernel.graph().has_errors(),
             "graph errors: {:?}",
-            kernel.graph.errors()
+            kernel.graph().errors()
         );
         KernelRun {
             kernel,
@@ -120,7 +120,7 @@ impl KernelRun {
         // input buffers, in manifest order, from the named bindings (uniform or per-cell).
         let in_data: Vec<Vec<f64>> = self
             .kernel
-            .field_inputs
+            .field_inputs()
             .iter()
             .map(|(key, _)| {
                 if let Some(&v) = self.uniform.get(key.as_str()) {
@@ -147,7 +147,7 @@ impl KernelRun {
         // scalars, in manifest order.
         let scalars: Vec<f64> = self
             .kernel
-            .scalar_params
+            .scalar_params()
             .iter()
             .map(|name| {
                 if let Some(&v) = self.scalars.get(name.as_str()) {
@@ -194,10 +194,10 @@ impl KernelRun {
                 target: Target::Cuda,
                 precision: Precision::F64,
             },
-            field_inputs: &self.kernel.field_inputs,
-            scalar_params: &self.kernel.scalar_params,
+            field_inputs: self.kernel.field_inputs(),
+            scalar_params: self.kernel.scalar_params(),
             field_writes: &self.writes,
-            coord_components: &self.kernel.coord_components,
+            coord_components: self.kernel.coord_components(),
             device_preamble: &[],
             tile_spec: None,
         };
@@ -211,7 +211,7 @@ impl KernelRun {
                 })
                 .collect();
             Cpu.run_kernel(
-                &self.kernel.graph,
+                self.kernel.graph(),
                 &spec,
                 &in_bufs,
                 &mut outs,
@@ -236,7 +236,7 @@ impl KernelRun {
         let ndim = self.grid.len() as u8;
         assert!(ndim > 0, "KernelRun::emit_cpu: call .grid(...) to fix ndim");
         let desc = emit_kernel_cpu(
-            &self.kernel.graph,
+            self.kernel.graph(),
             &KernelEmitInputs {
                 kernel_name: "harness_kernel",
                 coalesce_layout: false,
@@ -245,10 +245,10 @@ impl KernelRun {
                     target: Target::Cuda,
                     precision: Precision::F64,
                 },
-                field_inputs: &self.kernel.field_inputs,
-                scalar_params: &self.kernel.scalar_params,
+                field_inputs: self.kernel.field_inputs(),
+                scalar_params: self.kernel.scalar_params(),
                 field_writes: &self.writes,
-                coord_components: &self.kernel.coord_components,
+                coord_components: self.kernel.coord_components(),
                 device_preamble: &[],
                 tile_spec: None,
             },
@@ -257,14 +257,14 @@ impl KernelRun {
             source: desc.source,
             field_inputs: self
                 .kernel
-                .field_inputs
+                .field_inputs()
                 .iter()
                 .map(|(k, b)| (k.as_str().to_string(), b.name()))
                 .collect(),
             scalar_params: self
                 .kernel
-                .scalar_params
-                .into_iter()
+                .scalar_params()
+                .iter()
                 .map(|param| param.as_str().to_string())
                 .collect(),
             writes: self.writes,
@@ -280,9 +280,9 @@ impl KernelRun {
         let ndim = self.grid.len() as u8;
         assert!(ndim > 0, "assert_lowers: call .grid(...) to fix ndim");
         assert!(
-            !self.kernel.graph.has_errors(),
+            !self.kernel.graph().has_errors(),
             "lowerability: graph has errors: {:?}",
-            self.kernel.graph.errors()
+            self.kernel.graph().errors()
         );
         // one input spec; the rust renderer (emit_kernel_cpu) ignores the target, the C renderer
         // (emit_kernel_from_lowering) reads it — Cuda is the GPU lowerability path.
@@ -294,15 +294,15 @@ impl KernelRun {
                 target: Target::Cuda,
                 precision: Precision::F64,
             },
-            field_inputs: &self.kernel.field_inputs,
-            scalar_params: &self.kernel.scalar_params,
+            field_inputs: self.kernel.field_inputs(),
+            scalar_params: self.kernel.scalar_params(),
             field_writes: &self.writes,
-            coord_components: &self.kernel.coord_components,
+            coord_components: self.kernel.coord_components(),
             device_preamble: &[],
             tile_spec: None,
         };
-        let cpu = emit_kernel_cpu(&self.kernel.graph, &inputs);
-        let cuda = emit_kernel_from_lowering(&self.kernel.graph, &inputs);
+        let cpu = emit_kernel_cpu(self.kernel.graph(), &inputs);
+        let cuda = emit_kernel_from_lowering(self.kernel.graph(), &inputs);
         assert!(
             !cpu.source.is_empty(),
             "lowerability: CPU (rust) emit produced no source"

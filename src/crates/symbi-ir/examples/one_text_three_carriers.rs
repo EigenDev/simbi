@@ -16,7 +16,9 @@
 // =============================================================================
 
 use symbi_ir::algebra::Scalar;
-use symbi_ir::{Backend, Cpu, Gv, ScalarExpr, ScalarStmt, emit_cpu, emit_cuda, scalarize, trace};
+use symbi_ir::{
+    Backend, Cpu, ScalarExpr, ScalarStmt, TraceCx, emit_cpu, emit_cuda, scalarize, trace,
+};
 
 /// the specific enthalpy of an ideal gas, `h = 1 + gamma/(gamma - 1) p/rho`.
 ///
@@ -76,24 +78,24 @@ fn main() {
     println!("evaluated at S = f64:  cs = {direct}");
 
     // ---- carrier two: Gv. the same call records a graph. --------------------
-    // `Gv::scalar(name)` is a leaf standing for a runtime input. every operator
+    // `cx.scalar(name)` is a leaf standing for a runtime input. every operator
     // the function applies to it appends a node to the trace opened here.
-    let (kernel, out) = trace(|| {
-        let rho = Gv::scalar("rho");
-        let pre = Gv::scalar("pre");
-        let gamma = Gv::scalar("gamma");
+    let (kernel, out) = trace(|cx: TraceCx| {
+        let rho = cx.scalar("rho");
+        let pre = cx.scalar("pre");
+        let gamma = cx.scalar("gamma");
         sound_speed(rho, pre, gamma).node()
     });
     println!(
         "traced at  S = Gv:     {} nodes, params {:?}",
-        kernel.graph.len(),
-        kernel.scalar_params
+        kernel.graph().len(),
+        kernel.scalar_params()
     );
 
     // ---- lowering: the graph becomes a flat statement list. -----------------
     // this is where common subexpression elimination has already run, so a value
     // used twice appears as one binding rather than being recomputed.
-    let lowered = scalarize(&kernel.graph, out, "sound_speed");
+    let lowered = scalarize(kernel.graph(), out, "sound_speed");
     println!("\nlowered to {} statements:", lowered.body.len());
     for stmt in &lowered.body {
         if let ScalarStmt::Let { name, value, .. } = stmt {
@@ -128,19 +130,19 @@ fn main() {
     // expression. the relativistic energy density consults the lorentz factor
     // three times, and common subexpression elimination binds it once.
     let vsq = 0.36_f64;
-    let (kernel, out) = trace(|| {
+    let (kernel, out) = trace(|cx: TraceCx| {
         tau(
-            Gv::scalar("rho"),
-            Gv::scalar("pre"),
-            Gv::scalar("gamma"),
-            Gv::scalar("vsq"),
+            cx.scalar("rho"),
+            cx.scalar("pre"),
+            cx.scalar("gamma"),
+            cx.scalar("vsq"),
         )
         .node()
     });
-    let lowered = scalarize(&kernel.graph, out, "tau");
+    let lowered = scalarize(kernel.graph(), out, "tau");
     println!(
         "\ntau traced to {} nodes, lowered to {} bound values:",
-        kernel.graph.len(),
+        kernel.graph().len(),
         lowered.body.len()
     );
     for stmt in &lowered.body {
@@ -173,10 +175,10 @@ fn main() {
     // ---- and the same graph renders for either machine -----------------------
     // both emitters read the one lowered form, so the CPU and the GPU cannot
     // hold different opinions about what the physics is.
-    let (kernel, out) = trace(|| {
-        specific_enthalpy(Gv::scalar("rho"), Gv::scalar("pre"), Gv::scalar("gamma")).node()
+    let (kernel, out) = trace(|cx: TraceCx| {
+        specific_enthalpy(cx.scalar("rho"), cx.scalar("pre"), cx.scalar("gamma")).node()
     });
-    let h = scalarize(&kernel.graph, out, "specific_enthalpy");
+    let h = scalarize(kernel.graph(), out, "specific_enthalpy");
     println!("\n---- emitted as CPU rust ----\n{}", emit_cpu(&h));
     println!("---- emitted as CUDA ----\n{}", emit_cuda(&h));
 }

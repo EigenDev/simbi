@@ -48,7 +48,7 @@ use symbi_hydro::{MhdPrim, RhdGr, RmhdGr};
 use symbi_ib::excise::ks_excised;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
-use symbi_ir::{FieldRef, Gv, GvKernel, begin_trace, end_trace};
+use symbi_ir::{FieldRef, Gv, GvKernel, TraceCx, trace};
 
 use crate::coords::{Coords, Spacetime, Spacing};
 use crate::gv::cell_geometry_gv;
@@ -56,11 +56,11 @@ use crate::gv::geometry::{gv_cell_midpoints, gv_ungridded_slot};
 
 /// the vacuum-floor primitive at storage slot `kk` of a `[rho, vel_0.., pre]` set of arity `nf`:
 /// `rho_floor` at the density slot, `p_floor` at the pressure slot, zero velocity between.
-fn vacuum_floor(kk: usize, nf: usize) -> Gv {
+fn vacuum_floor<'t>(cx: TraceCx<'t>, kk: usize, nf: usize) -> Gv<'t> {
     if kk == 0 {
-        Gv::scalar("excision_rho")
+        cx.scalar("excision_rho")
     } else if kk == nf - 1 {
-        Gv::scalar("excision_pre")
+        cx.scalar("excision_pre")
     } else {
         Gv::ZERO
     }
@@ -86,22 +86,22 @@ fn prim_names(dof: usize) -> Vec<String> {
 }
 
 /// the cell centroid of the uniform cartesian grid, as traced coordinates.
-fn centroid(ndim: usize) -> Vec<Gv> {
+fn centroid<'t>(cx: TraceCx<'t>, ndim: usize) -> Vec<Gv<'t>> {
     let spacing = vec![Spacing::Uniform; ndim];
     let axes: Vec<usize> = (0..ndim).collect();
-    let geo = cell_geometry_gv(Coords::Cartesian, &spacing, &axes, ndim);
+    let geo = cell_geometry_gv(cx, Coords::Cartesian, &spacing, &axes, ndim);
     geo.centroid
 }
 
 /// the excision mask at the traced centroid: r_ks(x; a) < r_exc with the
 /// host-filled `kerr_spin` / `excision_radius` scalars (spin = 0 for the
 /// schwarzschild chart). one definition shared by the fill and the rebuild.
-fn excised_mask_2d(x: &[Gv; 2]) -> <Gv as Scalar>::Mask {
-    ks_excised(x, Gv::scalar("kerr_spin"), Gv::scalar("excision_radius"))
+fn excised_mask_2d<'t>(cx: TraceCx<'t>, x: &[Gv<'t>; 2]) -> <Gv<'t> as Scalar>::Mask {
+    ks_excised(x, cx.scalar("kerr_spin"), cx.scalar("excision_radius"))
 }
 
-fn excised_mask_3d(x: &[Gv; 3]) -> <Gv as Scalar>::Mask {
-    ks_excised(x, Gv::scalar("kerr_spin"), Gv::scalar("excision_radius"))
+fn excised_mask_3d<'t>(cx: TraceCx<'t>, x: &[Gv<'t>; 3]) -> <Gv<'t> as Scalar>::Mask {
+    ks_excised(x, cx.scalar("kerr_spin"), cx.scalar("excision_radius"))
 }
 
 /// one 2d fill pass over `1 + dof + 1` gas primitives: every excised cell is
@@ -110,21 +110,21 @@ fn excised_mask_3d(x: &[Gv; 3]) -> <Gv as Scalar>::Mask {
 /// fill sees the pre-pass state at every read). `dof = 2` is the in-plane GR-hydro state; `dof = 3`
 /// carries the out-of-plane momentum of the 2.5d MHD state.
 fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let names = prim_names(dof);
     let refs = prim_refs(dof);
     let nf = refs.len();
 
-    let own: Vec<Gv> = (0..nf).map(|kk| Gv::field(&names[kk], refs[kk])).collect();
+    let own: Vec<Gv> = (0..nf).map(|kk| cx.field(&names[kk], refs[kk])).collect();
 
-    let c = centroid(2);
+    let c = centroid(cx, 2);
     let x = [c[0], c[1]];
-    let excised = excised_mask_2d(&x);
+    let excised = excised_mask_2d(cx, &x);
     // the vacuum-floor sink: an excised (inside-horizon) cell is frozen at a cold c2p-safe vacuum;
     // live cells keep their own state. the boundary riemann then rarefies the exterior gas into the
     // vacuum -- a one-way absorbing accretion bc (material crosses in and stays), the physical horizon.
     let filled: Vec<Gv> = (0..nf)
-        .map(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]))
+        .map(|kk| Gv::select(excised, vacuum_floor(cx, kk, nf), own[kk]))
         .collect();
 
     let mut writes = KernelWrites::new();
@@ -135,7 +135,8 @@ fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, KernelWrites) {
             val.node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 pub fn excise_fill_gv() -> (GvKernel, KernelWrites) {
@@ -152,11 +153,11 @@ pub fn excise_fill_dof3_gv() -> (GvKernel, KernelWrites) {
 /// unmasked over the dispatch box — the fill wrote live cells' own values,
 /// so the copy is the bitwise identity there.
 fn excise_writeback_dof_gv(dof: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let names = prim_names(dof);
     let refs = prim_refs(dof);
     let vals: Vec<Gv> = (0..refs.len())
-        .map(|kk| Gv::field(&format!("exc_{kk}"), format!("exc_{kk}")))
+        .map(|kk| cx.field(&format!("exc_{kk}"), format!("exc_{kk}")))
         .collect();
     let mut writes = KernelWrites::new();
     for kk in 0..refs.len() {
@@ -166,7 +167,8 @@ fn excise_writeback_dof_gv(dof: usize) -> (GvKernel, KernelWrites) {
             vals[kk].node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 pub fn excise_writeback_gv() -> (GvKernel, KernelWrites) {
@@ -191,23 +193,23 @@ pub fn excise_writeback_dof1_gv() -> (GvKernel, KernelWrites) {
 /// state through untouched (in-place select). the metric is the spinning-kerr
 /// rank-1 form with the host-filled `kerr_spin` (zero for the a = 0 chart).
 pub fn excise_p2c_gv() -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let gamma = Gv::scalar("gamma");
-    let mass = Gv::scalar("schwarzschild_mass");
-    let spin = Gv::scalar("kerr_spin");
+    trace(|cx| {
+    let gamma = cx.scalar("gamma");
+    let mass = cx.scalar("schwarzschild_mass");
+    let spin = cx.scalar("kerr_spin");
 
-    let rho = Gv::field("rho", FieldRef::PrimRho);
+    let rho = cx.field("rho", FieldRef::PrimRho);
     let vel: [Gv; 2] =
-        std::array::from_fn(|kk| Gv::field(&format!("vel_{kk}"), FieldRef::PrimVel(kk as u8)));
-    let pre = Gv::field("pre", FieldRef::PrimPre);
-    let den = Gv::field("den", FieldRef::cons_den());
+        std::array::from_fn(|kk| cx.field(&format!("vel_{kk}"), FieldRef::PrimVel(kk as u8)));
+    let pre = cx.field("pre", FieldRef::PrimPre);
+    let den = cx.field("den", FieldRef::cons_den());
     let mom: [Gv; 2] =
-        std::array::from_fn(|kk| Gv::field(&format!("mom_{kk}"), FieldRef::cons_mom(kk as u8)));
-    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+        std::array::from_fn(|kk| cx.field(&format!("mom_{kk}"), FieldRef::cons_mom(kk as u8)));
+    let nrg = cx.field("nrg", FieldRef::cons_nrg());
 
-    let c = centroid(2);
+    let c = centroid(cx, 2);
     let x = [c[0], c[1]];
-    let excised = excised_mask_2d(&x);
+    let excised = excised_mask_2d(cx, &x);
 
     let xt = Tensor::<Gv, 2>::new(x);
     let m = KerrKSCartesian { mass, spin };
@@ -248,7 +250,8 @@ pub fn excise_p2c_gv() -> (GvKernel, KernelWrites) {
         FieldRef::cons_nrg(),
         Gv::select(excised, cons.nrg, nrg).node(),
     ));
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the traced metric-sampling position of a spherical cell: the per-axis midpoint on every
@@ -263,9 +266,9 @@ pub fn excise_p2c_gv() -> (GvKernel, KernelWrites) {
 ///
 /// the face positions this is built from are selected at runtime by `map_kind_{ax}`, so one
 /// traced kernel serves a uniform and a log-radial grid alike.
-fn sample_position_sph<const D: usize>(ndim: usize) -> Tensor<Gv, D> {
+fn sample_position_sph<'t, const D: usize>(cx: TraceCx<'t>, ndim: usize) -> Tensor<Gv<'t>, D> {
     let spacing = vec![Spacing::Uniform; ndim];
-    let mid = gv_cell_midpoints(&spacing, ndim);
+    let mid = gv_cell_midpoints(cx, &spacing, ndim);
     Tensor::<Gv, D>::new(std::array::from_fn(|c| {
         if c < ndim {
             mid[c]
@@ -282,8 +285,8 @@ fn sample_position_sph<const D: usize>(ndim: usize) -> Tensor<Gv, D> {
 /// axis obliquely; here `r` is a coordinate, so the excised region is an exact slab of the
 /// innermost radial cells and its surface is a coordinate surface. the spin leaves that slab as it
 /// stands: the oblate spheroid of the cartesian chart is the `r = const` surface of this one.
-fn excised_mask_sph(x_r: Gv) -> <Gv as Scalar>::Mask {
-    x_r.cmp_lt(Gv::scalar("excision_radius"))
+fn excised_mask_sph<'t>(cx: TraceCx<'t>, x_r: Gv<'t>) -> <Gv<'t> as Scalar>::Mask {
+    x_r.cmp_lt(cx.scalar("excision_radius"))
 }
 
 /// the spherical-chart gas fill: every cell inside the horizon is frozen at the cold vacuum floor,
@@ -291,16 +294,16 @@ fn excised_mask_sph(x_r: Gv) -> <Gv as Scalar>::Mask {
 /// exterior rarefies into the vacuum at the excision faces and stays there, which is the
 /// physical content of a horizon: every characteristic points inward.
 fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let names = prim_names(dof);
     let refs = prim_refs(dof);
     let nf = refs.len();
-    let own: Vec<Gv> = (0..nf).map(|kk| Gv::field(&names[kk], refs[kk])).collect();
+    let own: Vec<Gv> = (0..nf).map(|kk| cx.field(&names[kk], refs[kk])).collect();
 
-    let x = sample_position_sph::<3>(ndim);
-    let excised = excised_mask_sph(x[0]);
+    let x = sample_position_sph::<3>(cx, ndim);
+    let excised = excised_mask_sph(cx, x[0]);
     let filled: Vec<Gv> = (0..nf)
-        .map(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]))
+        .map(|kk| Gv::select(excised, vacuum_floor(cx, kk, nf), own[kk]))
         .collect();
 
     let mut writes = KernelWrites::new();
@@ -311,7 +314,8 @@ fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites) {
             val.node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the 1d radial gas fill (dof = 1): the michel / bondi row.
@@ -329,24 +333,24 @@ pub fn excise_fill_sph_2d_gv() -> (GvKernel, KernelWrites) {
 /// conserved state through untouched. the spinning form serves both charts — at `a = 0` it is the
 /// schwarzschild kerr-schild metric, so one kernel covers the whole horizon-penetrating family.
 fn excise_p2c_sph_ks_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let gamma = Gv::scalar("gamma");
-    let mass = Gv::scalar("schwarzschild_mass");
-    let spin = Gv::scalar("kerr_spin");
+    trace(|cx| {
+    let gamma = cx.scalar("gamma");
+    let mass = cx.scalar("schwarzschild_mass");
+    let spin = cx.scalar("kerr_spin");
 
-    let rho = Gv::field("rho", FieldRef::PrimRho);
+    let rho = cx.field("rho", FieldRef::PrimRho);
     let vel: Vec<Gv> = (0..dof)
-        .map(|kk| Gv::field(&format!("vel_{kk}"), FieldRef::PrimVel(kk as u8)))
+        .map(|kk| cx.field(&format!("vel_{kk}"), FieldRef::PrimVel(kk as u8)))
         .collect();
-    let pre = Gv::field("pre", FieldRef::PrimPre);
-    let den = Gv::field("den", FieldRef::cons_den());
+    let pre = cx.field("pre", FieldRef::PrimPre);
+    let den = cx.field("den", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..dof)
-        .map(|kk| Gv::field(&format!("mom_{kk}"), FieldRef::cons_mom(kk as u8)))
+        .map(|kk| cx.field(&format!("mom_{kk}"), FieldRef::cons_mom(kk as u8)))
         .collect();
-    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    let nrg = cx.field("nrg", FieldRef::cons_nrg());
 
-    let x = sample_position_sph::<3>(ndim);
-    let excised = excised_mask_sph(x[0]);
+    let x = sample_position_sph::<3>(cx, ndim);
+    let excised = excised_mask_sph(cx, x[0]);
 
     let m = KerrKS { mass, spin };
     let metric = SpatialMetric::<Gv, 3>::new(
@@ -385,7 +389,8 @@ fn excise_p2c_sph_ks_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites)
         FieldRef::cons_nrg(),
         Gv::select(excised, cons.nrg, nrg).node(),
     ));
-    (end_trace(), writes)
+    writes
+    })
 }
 
 pub fn excise_p2c_sph_ks_1d_gv() -> (GvKernel, KernelWrites) {
@@ -402,21 +407,21 @@ pub fn excise_p2c_sph_ks_2d_gv() -> (GvKernel, KernelWrites) {
 /// and the 3d magnetized gas state (the field lives on the staggered faces,
 /// outside this fill).
 pub fn excise_fill_3d_gv() -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let names = prim_names(3);
     let refs = prim_refs(3);
 
-    let own: [Gv; 5] = std::array::from_fn(|kk| Gv::field(&names[kk], refs[kk]));
+    let own: [Gv; 5] = std::array::from_fn(|kk| cx.field(&names[kk], refs[kk]));
     let nf = refs.len();
 
-    let c = centroid(3);
+    let c = centroid(cx, 3);
     let x = [c[0], c[1], c[2]];
-    let excised = excised_mask_3d(&x);
+    let excised = excised_mask_3d(cx, &x);
     // the vacuum-floor sink: an excised (inside-horizon) cell is frozen at a cold c2p-safe vacuum;
     // live cells keep their own state. the boundary riemann rarefies the exterior gas into the
     // vacuum -- a one-way absorbing accretion bc (material crosses in and stays), the physical horizon.
     let filled: [Gv; 5] =
-        std::array::from_fn(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]));
+        std::array::from_fn(|kk| Gv::select(excised, vacuum_floor(cx, kk, nf), own[kk]));
 
     let mut writes = KernelWrites::new();
     for (kk, val) in filled.iter().enumerate() {
@@ -426,7 +431,8 @@ pub fn excise_fill_3d_gv() -> (GvKernel, KernelWrites) {
             val.node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the 3d sweep commit: copy the exc scratch back into the primitive fields.
@@ -439,23 +445,23 @@ pub fn excise_writeback_3d_gv() -> (GvKernel, KernelWrites) {
 /// metric at the cell's own centroid; live cells pass their conserved state through
 /// untouched.
 pub fn excise_p2c_3d_gv() -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let gamma = Gv::scalar("gamma");
-    let mass = Gv::scalar("schwarzschild_mass");
-    let spin = Gv::scalar("kerr_spin");
+    trace(|cx| {
+    let gamma = cx.scalar("gamma");
+    let mass = cx.scalar("schwarzschild_mass");
+    let spin = cx.scalar("kerr_spin");
 
-    let rho = Gv::field("rho", FieldRef::PrimRho);
+    let rho = cx.field("rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|kk| Gv::field(&format!("vel_{kk}"), FieldRef::PrimVel(kk as u8)));
-    let pre = Gv::field("pre", FieldRef::PrimPre);
-    let den = Gv::field("den", FieldRef::cons_den());
+        std::array::from_fn(|kk| cx.field(&format!("vel_{kk}"), FieldRef::PrimVel(kk as u8)));
+    let pre = cx.field("pre", FieldRef::PrimPre);
+    let den = cx.field("den", FieldRef::cons_den());
     let mom: [Gv; 3] =
-        std::array::from_fn(|kk| Gv::field(&format!("mom_{kk}"), FieldRef::cons_mom(kk as u8)));
-    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+        std::array::from_fn(|kk| cx.field(&format!("mom_{kk}"), FieldRef::cons_mom(kk as u8)));
+    let nrg = cx.field("nrg", FieldRef::cons_nrg());
 
-    let c = centroid(3);
+    let c = centroid(cx, 3);
     let x = [c[0], c[1], c[2]];
-    let excised = excised_mask_3d(&x);
+    let excised = excised_mask_3d(cx, &x);
 
     let xt = Tensor::<Gv, 3>::new(x);
     let m = KerrKSCartesian { mass, spin };
@@ -496,7 +502,8 @@ pub fn excise_p2c_3d_gv() -> (GvKernel, KernelWrites) {
         FieldRef::cons_nrg(),
         Gv::select(excised, cons.nrg, nrg).node(),
     ));
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the magnetized conserved rebuild of every excised cell: the ideal-GRMHD
@@ -510,29 +517,29 @@ pub fn excise_p2c_3d_gv() -> (GvKernel, KernelWrites) {
 /// (the 2d grid instance is the equatorial slice with z = 0 in the metric
 /// position), so one builder serves both grid dimensions.
 fn excise_p2c_mhd_dim_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let gamma = Gv::scalar("gamma");
-    let mass = Gv::scalar("schwarzschild_mass");
-    let spin = Gv::scalar("kerr_spin");
+    trace(|cx| {
+    let gamma = cx.scalar("gamma");
+    let mass = cx.scalar("schwarzschild_mass");
+    let spin = cx.scalar("kerr_spin");
 
-    let rho = Gv::field("rho", FieldRef::PrimRho);
+    let rho = cx.field("rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|kk| Gv::field(&format!("vel_{kk}"), FieldRef::PrimVel(kk as u8)));
-    let pre = Gv::field("pre", FieldRef::PrimPre);
+        std::array::from_fn(|kk| cx.field(&format!("vel_{kk}"), FieldRef::PrimVel(kk as u8)));
+    let pre = cx.field("pre", FieldRef::PrimPre);
     let mag: [Gv; 3] =
-        std::array::from_fn(|kk| Gv::field(&format!("bc_{kk}"), FieldRef::BCell(kk as u8)));
-    let den = Gv::field("den", FieldRef::cons_den());
+        std::array::from_fn(|kk| cx.field(&format!("bc_{kk}"), FieldRef::BCell(kk as u8)));
+    let den = cx.field("den", FieldRef::cons_den());
     let mom: [Gv; 3] =
-        std::array::from_fn(|kk| Gv::field(&format!("mom_{kk}"), FieldRef::cons_mom(kk as u8)));
-    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+        std::array::from_fn(|kk| cx.field(&format!("mom_{kk}"), FieldRef::cons_mom(kk as u8)));
+    let nrg = cx.field("nrg", FieldRef::cons_nrg());
 
-    let c = centroid(ndim);
+    let c = centroid(cx, ndim);
     // the metric position padded to 3 slots (the 2d grid is the z = 0 equatorial slice).
     let x3: [Gv; 3] = std::array::from_fn(|kk| c.get(kk).copied().unwrap_or(Gv::ZERO));
     let excised = if ndim == 2 {
-        excised_mask_2d(&[x3[0], x3[1]])
+        excised_mask_2d(cx, &[x3[0], x3[1]])
     } else {
-        excised_mask_3d(&x3)
+        excised_mask_3d(cx, &x3)
     };
 
     let xt = Tensor::<Gv, 3>::new(x3);
@@ -577,7 +584,8 @@ fn excise_p2c_mhd_dim_gv(ndim: usize) -> (GvKernel, KernelWrites) {
         FieldRef::cons_nrg(),
         Gv::select(excised, cons.hydro.nrg, nrg).node(),
     ));
-    (end_trace(), writes)
+    writes
+    })
 }
 
 pub fn excise_p2c_mhd_gv() -> (GvKernel, KernelWrites) {
@@ -607,11 +615,11 @@ pub fn shell_flux_map_gv(
     ndim: usize,
     flux_base: &str,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
-    let r_d = Gv::scalar("diagnostic_radius");
+    trace(|cx| {
+    let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
+    let r_d = cx.scalar("diagnostic_radius");
     let spin = if matches!(spacetime, Spacetime::KerrKS) {
-        Gv::scalar("kerr_spin")
+        cx.scalar("kerr_spin")
     } else {
         Gv::ZERO
     };
@@ -627,25 +635,23 @@ pub fn shell_flux_map_gv(
         let a = axes[d];
         // the previous cell's center (one cell back along the swept axis) for its membership.
         let mut x_prev = x_c;
-        x_prev[a] = x_c[a] - Gv::scalar(&format!("dx_{a}"));
+        x_prev[a] = x_c[a] - cx.scalar(&format!("dx_{a}"));
         let inside_prev = ks_excised(&x_prev, spin, r_d);
         // the densitized lo-face flux F_lo * A_lo (the field is face-centered at the lo faces).
         let densit =
-            Gv::field(&format!("{flux_base}_{d}"), &format!("{flux_base}[{d}]")) * geo.area_lo[d];
+            cx.field(&format!("{flux_base}_{d}"), &format!("{flux_base}[{d}]")) * geo.area_lo[d];
         // outward normal out of Omega: +d when the interior cell is on the -d side (prev inside),
         // -d when it is on the +d side (c inside). nonzero only on a boundary face (memberships differ).
         let from_prev_in = Gv::select(inside_c, Gv::ZERO, densit);
         let from_prev_out = Gv::select(inside_c, Gv::ZERO - densit, Gv::ZERO);
         contrib = contrib + Gv::select(inside_prev, from_prev_in, from_prev_out);
     }
-    (
-        end_trace(),
         vec![KernelWrite::new(
             "shell_flux",
             FieldRef::Scratch,
             contrib.node(),
-        )],
-    )
+        )]
+    })
 }
 
 #[cfg(test)]
@@ -657,13 +663,13 @@ mod shell_flux_tests {
         let (kernel, _) = excise_fill_gv();
         assert!(
             kernel
-                .scalar_params
+                .scalar_params()
                 .iter()
                 .any(|name| name == "excision_rho")
         );
         assert!(
             kernel
-                .scalar_params
+                .scalar_params()
                 .iter()
                 .any(|name| name == "excision_pre")
         );
@@ -682,17 +688,17 @@ mod shell_flux_tests {
             "mass_flux",
         );
         assert!(
-            k.scalar_params.iter().any(|s| s == "diagnostic_radius"),
+            k.scalar_params().iter().any(|s| s == "diagnostic_radius"),
             "must wire diagnostic_radius: {:?}",
-            k.scalar_params
+            k.scalar_params()
         );
         assert!(
-            k.scalar_params.iter().any(|s| s == "dx_0"),
+            k.scalar_params().iter().any(|s| s == "dx_0"),
             "must wire the grid spacing: {:?}",
-            k.scalar_params
+            k.scalar_params()
         );
         assert!(
-            !k.scalar_params.iter().any(|s| s == "kerr_spin"),
+            !k.scalar_params().iter().any(|s| s == "kerr_spin"),
             "schwarzschild ks carries no spin"
         );
         // the flux field is read at offset 0 (the cell's own lo face) — a direct read, bound at
@@ -709,7 +715,7 @@ mod shell_flux_tests {
             "nrg_flux",
         );
         assert!(
-            kk.scalar_params.iter().any(|s| s == "kerr_spin"),
+            kk.scalar_params().iter().any(|s| s == "kerr_spin"),
             "spinning kerr carries the spin scalar"
         );
     }

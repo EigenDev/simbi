@@ -24,14 +24,14 @@ pub fn nmhd_wave_speed_map_gv(
     axes: &[usize],
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    trace(|cx| {
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = cx.field("prim_pre", FieldRef::PrimPre);
     let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = Gv::scalar("gamma");
+        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let gamma = cx.scalar("gamma");
     let eos = IdealGas { gamma };
     let prim = MhdPrim::<Gv, 3> {
         hydro: Prim {
@@ -41,7 +41,7 @@ pub fn nmhd_wave_speed_map_gv(
         },
         mag: Tensor::new(mag),
     };
-    let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
+    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
     let mut lambda = Gv::ZERO;
     for d in 0..ndim {
         let nhat = Tensor::<Gv, 3>::unit(axes[d]);
@@ -49,7 +49,8 @@ pub fn nmhd_wave_speed_map_gv(
         lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
     }
     let writes = wave_speed_map_writes(lambda.node());
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// isothermal-MHD CFL wave-speed map — `IsothermalMhd::wave_speeds` (fast
@@ -60,13 +61,13 @@ pub fn imhd_wave_speed_map_gv(
     axes: &[usize],
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    trace(|cx| {
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
     let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let cs = Gv::scalar("cs");
+        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let cs = cx.scalar("cs");
     let eos = Isothermal { cs };
     let prim = IsoMhdPrim::<Gv, 3> {
         hydro: PrimG {
@@ -76,7 +77,7 @@ pub fn imhd_wave_speed_map_gv(
         },
         mag: Tensor::new(mag),
     };
-    let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
+    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
     let mut lambda = Gv::ZERO;
     for d in 0..ndim {
         let nhat = Tensor::<Gv, 3>::unit(axes[d]);
@@ -84,7 +85,8 @@ pub fn imhd_wave_speed_map_gv(
         lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
     }
     let writes = wave_speed_map_writes(lambda.node());
-    (end_trace(), writes)
+    writes
+    })
 }
 
 // =============================================================================
@@ -114,21 +116,27 @@ pub fn imhd_wave_speed_map_gv(
 /// long a step where cells are narrow, a stability violation well past a loss of accuracy. the
 /// uniform arm reads the host's precomputed reciprocal, so an unmapped run evaluates exactly
 /// the plain `inv_dx_d`, and `map_kind` is per-launch-uniform so every lane takes one branch.
-fn cfl_inv_widths_gv(coords: Coords, spacing: &[Spacing], axes: &[usize], ndim: usize) -> Vec<Gv> {
+fn cfl_inv_widths_gv<'t>(
+    cx: TraceCx<'t>,
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+    ndim: usize,
+) -> Vec<Gv<'t>> {
     if coords != Coords::Cartesian {
-        return cell_inv_phys_widths_gv(coords, spacing, axes, ndim);
+        return cell_inv_phys_widths_gv(cx, coords, spacing, axes, ndim);
     }
     (0..ndim)
         .map(|d| {
-            let map_kind = Gv::scalar(&format!("map_kind_{d}"));
+            let map_kind = cx.scalar(&format!("map_kind_{d}"));
             Gv::cond(
                 map_kind.cmp_gt(Gv::from_f64(0.5)),
                 || {
-                    let lo = gv_axis_face_at(d, spacing[d], 0);
-                    let hi = gv_axis_face_at(d, spacing[d], 1);
+                    let lo = gv_axis_face_at(cx, d, spacing[d], 0);
+                    let hi = gv_axis_face_at(cx, d, spacing[d], 1);
                     Gv::ONE / (hi - lo)
                 },
-                || Gv::scalar(&format!("inv_dx_{d}")),
+                || cx.scalar(&format!("inv_dx_{d}")),
             )
         })
         .collect()
@@ -146,16 +154,16 @@ fn wave_speed_map_writes(root: NodeId) -> KernelWrites {
 /// (alpha^2/beta^r/scale factors suppressed by f(r_min)/f(r)), overestimating dt into a
 /// silent CFL violation. bit-identical to the plain uniform formula on a `Uniform` axis
 /// (`face_at(0) + 1/2 dx = x_lo + (i + 1/2) dx`). single source shared by every wave-speed map.
-fn gv_cell_center(d: usize, spacing: &[Spacing]) -> Gv {
+fn gv_cell_center<'t>(cx: TraceCx<'t>, d: usize, spacing: &[Spacing]) -> Gv<'t> {
     let half = Gv::from_f64(0.5);
-    let lo = gv_axis_face_at(d, spacing[d], 0);
-    let hi = gv_axis_face_at(d, spacing[d], 1);
+    let lo = gv_axis_face_at(cx, d, spacing[d], 0);
+    let hi = gv_axis_face_at(cx, d, spacing[d], 1);
     // each map's own center convention, selected at runtime by `map_kind_d` so one kernel serves
     // every spacing: the geometric mean on a logarithmic axis (the point that sits midway in
     // log-space, where the arithmetic mean sits far outward and overestimates dt), the arithmetic
     // mean of the bounding faces on a geometrically graded one, and the plain `face + dx/2` on an
     // unmapped axis — which the face difference reproduces exactly, so a uniform run is unchanged.
-    let map_kind = Gv::scalar(&format!("map_kind_{d}"));
+    let map_kind = cx.scalar(&format!("map_kind_{d}"));
     Gv::cond(
         map_kind.cmp_gt(Gv::from_f64(1.5)),
         || (lo + hi) * half,
@@ -163,7 +171,7 @@ fn gv_cell_center(d: usize, spacing: &[Spacing]) -> Gv {
             Gv::cond(
                 map_kind.cmp_gt(Gv::from_f64(0.5)),
                 || (lo * hi).sqrt(),
-                || lo + half * Gv::scalar(&format!("dx_{d}")),
+                || lo + half * cx.scalar(&format!("dx_{d}")),
             )
         },
     )
@@ -186,25 +194,25 @@ pub fn euler_wave_speed_map_gv<R>(
     eos_arm: EosArm,
 ) -> (GvKernel, KernelWrites)
 where
-    R: Regime<Gv, 3, Prim = Prim<Gv, 3>, Cons = Cons<Gv, 3>>,
+    R: for<'t> Regime<Gv<'t>, 3, Prim = Prim<Gv<'t>, 3>, Cons = Cons<Gv<'t>, 3>>,
 {
-    begin_trace();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    trace(|cx| {
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     // the gridded normal velocities only; the non-gridded slots (cyl r-z's v_phi) stay at zero and
     // dead in the graph — `wave_speeds_axis` reads the normal velocity `vel[axes[d]]` alone.
     // the cell-center coordinate on the grid axis carrying coordinate `target` (radial = 0, polar =
     // 1), for the physical-velocity scale factors below. spacing-aware (log grids evaluate the metric
     // scale factors at the geometric-mean radius). `Some(center)` for a gridded `target`, `None`
     // otherwise.
-    let coord_at = |target: usize| -> Option<Gv> {
+    let coord_at = |target: usize| {
         axes.iter()
             .position(|&c| c == target)
-            .map(|d| gv_cell_center(d, spacing))
+            .map(|d| gv_cell_center(cx, d, spacing))
     };
     let mut vel = [Gv::ZERO; 3];
     for d in 0..ndim {
         let c = axes[d];
-        let raw = Gv::field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8));
+        let raw = cx.field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8));
         // valencia storage: `prim.vel` is the contravariant v^i; the SR characteristic speed is a
         // function of the physical velocity V^c = h_c v^c, with the metric scale factor h_c =
         // sqrt(gamma_cc). spherical GR: h_r = sqrt(gamma_rr) = 1/alpha (det-g-flat), h_theta = r,
@@ -215,7 +223,7 @@ where
         } else {
             let r = coord_at(0).expect("GR wave-speed map needs a radial axis");
             match c {
-                0 => raw / gv_metric_lapse_at(spacetime, r, None),
+                0 => raw / gv_metric_lapse_at(cx, spacetime, r, None),
                 1 => raw * r,
                 2 => {
                     raw * r
@@ -227,15 +235,15 @@ where
             }
         };
     }
-    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
-    let gamma = Gv::scalar("gamma");
+    let pre = cx.field("prim_pre", FieldRef::PrimPre);
+    let gamma = cx.scalar("gamma");
     let eos = super::gv_eos(eos_arm, gamma);
     let prim = Prim::<Gv, 3> {
         rho,
         vel: Tensor::new(vel),
         pre,
     };
-    let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
+    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
     // mesh motion: the cfl signal speed is relative to the grid, `|s -+ v_g|`
     // with per-axis `v_g = mesh_adot_d * x_centroid + mesh_vtrans_d`, the centroid taken from
     // the axis map so a graded axis is evaluated at its own cell centers (the dispatch binds the
@@ -261,7 +269,7 @@ where
                 .expect("GR wave-speed map needs a radial axis");
             // spacing-aware: the lapse/shift are evaluated at the geometric-mean radius on a log grid.
             // the arithmetic `x_lo + (i+1/2) dx` sits at ~r_min there — a silent CFL violation.
-            Some(gv_cell_center(d_r, spacing))
+            Some(gv_cell_center(cx, d_r, spacing))
         }
     };
     let mut lambda = Gv::ZERO;
@@ -271,9 +279,9 @@ where
         // own center. a graded axis places that center where its map does, so the linear form
         // `x_lo + (i + 1/2) dx` assigns each cell the velocity of a cell somewhere else, an error
         // that grows outward with the grading and is a CFL violation well past an inaccuracy.
-        let xc = gv_cell_center(d, spacing);
-        let vg = Gv::scalar(&MeshScalar::Adot(d as u8).name()) * xc
-            + Gv::scalar(&MeshScalar::Vtrans(d as u8).name());
+        let xc = gv_cell_center(cx, d, spacing);
+        let vg = cx.scalar(&MeshScalar::Adot(d as u8).name()) * xc
+            + cx.scalar(&MeshScalar::Vtrans(d as u8).name());
         let base = (sl - vg).abs().max((sr - vg).abs()) * inv_w[d];
         let contrib = match gr_radius {
             // flat: the SR CFL |s - vg| * inv_phys_width, untouched -> bit-identical.
@@ -282,13 +290,13 @@ where
                 let is_radial = axes[d] == 0;
                 // radial factor = alpha^2 = alpha sqrt(gamma^{rr}); angular factor = alpha.
                 let factor = if is_radial {
-                    gv_metric_lapse_sq_at(spacetime, r, None)
+                    gv_metric_lapse_sq_at(cx, spacetime, r, None)
                 } else {
-                    gv_metric_lapse_at(spacetime, r, None)
+                    gv_metric_lapse_at(cx, spacetime, r, None)
                 };
                 // the radial shift beta^r (kerr-schild only); zero-shift backgrounds -> None.
                 match if is_radial {
-                    gv_metric_shift_r_at(spacetime, r, None)
+                    gv_metric_shift_r_at(cx, spacetime, r, None)
                 } else {
                     None
                 } {
@@ -308,7 +316,8 @@ where
         lambda = lambda.max(contrib);
     }
     let writes = wave_speed_map_writes(lambda.node());
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the generic curved-background CFL wave-speed map — the coordinate light-cone bound per
@@ -328,13 +337,13 @@ pub fn gr_light_cone_wave_speed_map_gv(
     axes: &[usize],
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
+    trace(|cx| {
+    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
     // gridded cell-center positions, spacing-aware (log = geometric mean of faces, uniform = midpoint)
     // via the shared `gv_cell_center`; ungridded slots take the exact equatorial/azimuthal constant.
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
-            Some(d) => gv_cell_center(d, spacing),
+            Some(d) => gv_cell_center(cx, d, spacing),
             None => gv_ungridded_slot(coords, c),
         }
     }));
@@ -346,10 +355,13 @@ pub fn gr_light_cone_wave_speed_map_gv(
     // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
     // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
     let (alpha, gi, beta) = {
-        fn adm<M: Metric<Gv, 3>>(m: &M, x: Tensor<Gv, 3>) -> (Gv, Matrix<Gv, 3>, Tensor<Gv, 3>) {
+        fn adm<'t, M: Metric<Gv<'t>, 3>>(
+            m: &M,
+            x: Tensor<Gv<'t>, 3>,
+        ) -> (Gv<'t>, Matrix<Gv<'t>, 3>, Tensor<Gv<'t>, 3>) {
             (m.lapse(x), m.spatial_metric_inv(x), m.shift(x))
         }
-        with_ks_metric!(spacetime, coords, "the light-cone map", |m| adm(&m, x))
+        with_ks_metric!(cx, spacetime, coords, "the light-cone map", |m| adm(&m, x))
     };
     // per gridded axis: coordinate light-cone speed times the coordinate inverse width — the
     // flat physical inv width times the flat scale factor h_d at the cell center.
@@ -361,9 +373,10 @@ pub fn gr_light_cone_wave_speed_map_gv(
         let h_flat = gv_scale_factor(coords, c, &pos);
         lambda = lambda.max(lam_c * h_flat * inv_w[d]);
     }
-    let lambda = gv_state_finite_guard(lambda);
+    let lambda = gv_state_finite_guard(cx, lambda);
     let writes = wave_speed_map_writes(lambda.node());
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the fail-loud guard for a state-independent wave-speed map: a pure-geometry lambda breaks
@@ -373,9 +386,9 @@ pub fn gr_light_cone_wave_speed_map_gv(
 /// halts. the json ir carries finite literals only, so the inf is built at runtime as
 /// lambda/0; `probe - probe` is NaN for both NaN and +-inf inputs; the good path divides by one,
 /// bit-transparent. den + tau suffice: any physics NaN reaches them within one step's fluxes.
-fn gv_state_finite_guard(lambda: Gv) -> Gv {
+fn gv_state_finite_guard<'t>(cx: TraceCx<'t>, lambda: Gv<'t>) -> Gv<'t> {
     let probe =
-        Gv::field("cons_den", FieldRef::cons_den()) + Gv::field("cons_nrg", FieldRef::cons_nrg());
+        cx.field("cons_den", FieldRef::cons_den()) + cx.field("cons_nrg", FieldRef::cons_nrg());
     let diff = probe - probe;
     lambda / Gv::select(diff.cmp_eq(diff), Gv::ONE, Gv::ZERO)
 }
@@ -386,17 +399,18 @@ fn gv_state_finite_guard(lambda: Gv) -> Gv {
 /// sqrt(R^2 + z^2) (cylindrical) internally, so each chart gets the metric that reads its own
 /// coordinates; the spherical form reads x[0] as the radius and serves the spherical chart
 /// alone. mass and spin bind as runtime scalars.
-fn gr_metric_fields_gv(
+fn gr_metric_fields_gv<'t>(
+    cx: TraceCx<'t>,
     spacetime: Spacetime,
     coords: Coords,
-    x: Tensor<Gv, 3>,
-) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
+    x: Tensor<Gv<'t>, 3>,
+) -> (Matrix<Gv<'t>, 3>, Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
     // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
     // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-    fn adm<M: Metric<Gv, 3>>(
+    fn adm<'t, M: Metric<Gv<'t>, 3>>(
         m: &M,
-        x: Tensor<Gv, 3>,
-    ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
+        x: Tensor<Gv<'t>, 3>,
+    ) -> (Matrix<Gv<'t>, 3>, Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
         (
             m.spatial_metric(x),
             m.spatial_metric_inv(x),
@@ -404,7 +418,7 @@ fn gr_metric_fields_gv(
             m.shift(x),
         )
     }
-    with_ks_metric!(spacetime, coords, "the GR metric-fields trace", |m| adm(
+    with_ks_metric!(cx, spacetime, coords, "the GR metric-fields trace", |m| adm(
         &m, x
     ))
 }
@@ -428,14 +442,14 @@ pub fn rmhd_magnetosonic_cfl_map_gr_gv(
     axes: &[usize],
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    trace(|cx| {
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = cx.field("prim_pre", FieldRef::PrimPre);
     let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = Gv::scalar("gamma");
+        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let gamma = cx.scalar("gamma");
     let eos = IdealGas { gamma };
     let prim = MhdPrim::<Gv, 3> {
         hydro: Prim {
@@ -445,14 +459,14 @@ pub fn rmhd_magnetosonic_cfl_map_gr_gv(
         },
         mag: Tensor::new(mag),
     };
-    let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
+    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
-            Some(d) => gv_cell_center(d, spacing),
+            Some(d) => gv_cell_center(cx, d, spacing),
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let (gm, gm_inv, alpha, beta) = gr_metric_fields_gv(spacetime, coords, x);
+    let (gm, gm_inv, alpha, beta) = gr_metric_fields_gv(cx, spacetime, coords, x);
     let metric = SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv));
     let pos: Vec<Gv> = (0..3).map(|c| x[c]).collect();
     let mut lambda = Gv::ZERO;
@@ -466,7 +480,8 @@ pub fn rmhd_magnetosonic_cfl_map_gr_gv(
         lambda = lambda.max(lam_c * h_flat * inv_w[d]);
     }
     let writes = wave_speed_map_writes(lambda.node());
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the spinning-kerr CFL wave-speed map — the coordinate light-cone bound per gridded axis:
@@ -487,15 +502,15 @@ pub fn kerr_wave_speed_map_gv(
         coords == Coords::Spherical && ndim == 2 && axes == [0, 1],
         "the kerr wave-speed map is the (r, theta) swirl instance"
     );
-    begin_trace();
-    let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
+    trace(|cx| {
+    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
     // spacing-aware cell centers: the radial axis may be log (kerr log-radial is baked), so the
     // metric (lapse, shift, gamma^{cc}) must evaluate at the geometric-mean radius. theta is
     // uniform -> its center is the plain arithmetic midpoint.
-    let r = gv_cell_center(0, spacing);
-    let th = gv_cell_center(1, spacing);
-    let mass = Gv::scalar("schwarzschild_mass");
-    let spin = Gv::scalar("kerr_spin");
+    let r = gv_cell_center(cx, 0, spacing);
+    let th = gv_cell_center(cx, 1, spacing);
+    let mass = cx.scalar("schwarzschild_mass");
+    let spin = cx.scalar("kerr_spin");
     let g = KerrKS { mass, spin };
     let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
     let alpha = g.lapse(x);
@@ -507,9 +522,10 @@ pub fn kerr_wave_speed_map_gv(
     // polar: alpha sqrt(gamma^{theta theta}) = alpha/sqrt(Sigma) over the coordinate dtheta; the
     // physical inv width carries the flat h_theta = r, so multiply the ratio r/sqrt(Sigma) back.
     let lam_t = alpha * gi[(1, 1)].sqrt() * r * inv_w[1];
-    let lambda = gv_state_finite_guard(lam_r.max(lam_t));
+    let lambda = gv_state_finite_guard(cx, lam_r.max(lam_t));
     let writes = wave_speed_map_writes(lambda.node());
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the newtonian / isothermal CFL wave-speed map (gamma->1 drives isothermal, 1.4 adiabatic) —
@@ -560,14 +576,14 @@ pub fn rmhd_wave_speed_map_gv(
     axes: &[usize],
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    trace(|cx| {
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = cx.field("prim_pre", FieldRef::PrimPre);
     let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = Gv::scalar("gamma");
+        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let gamma = cx.scalar("gamma");
     let eos = IdealGas { gamma };
     let prim = MhdPrim::<Gv, 3> {
         hydro: Prim {
@@ -577,7 +593,7 @@ pub fn rmhd_wave_speed_map_gv(
         },
         mag: Tensor::new(mag),
     };
-    let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
+    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
     let mut lambda = Gv::ZERO;
     for d in 0..ndim {
         let nhat = Tensor::<Gv, 3>::unit(axes[d]);
@@ -585,7 +601,8 @@ pub fn rmhd_wave_speed_map_gv(
         lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
     }
     let writes = wave_speed_map_writes(lambda.node());
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// trace the per-cell RMHD wave speeds — the exact mignone & del zanna quartic
@@ -614,15 +631,15 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let ndim = axes.len();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = cx.field("prim_pre", FieldRef::PrimPre);
     let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = Gv::scalar("gamma");
+        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let gamma = cx.scalar("gamma");
     let eos = IdealGas { gamma };
     let prim = MhdPrim::<Gv, 3> {
         hydro: Prim {
@@ -632,14 +649,14 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
         },
         mag: Tensor::new(mag),
     };
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
             Some(d) => geo.centroid[d],
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let (gm, gm_inv, alpha, beta) = gr_metric_fields_gv(spacetime, coords, x);
+    let (gm, gm_inv, alpha, beta) = gr_metric_fields_gv(cx, spacetime, coords, x);
     let regime = RmhdGr {
         metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)),
         alpha,
@@ -671,7 +688,8 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
             (sr - bd).node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the source-admissibility CFL for gr-rmhd — the wu 2017 `lambda_S` mechanism. the covariant
@@ -694,14 +712,14 @@ pub fn rmhd_source_cfl_gr_gv(
     axes: &[usize],
     mag_from_bcell: bool,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let ndim = axes.len();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = cx.field("prim_pre", FieldRef::PrimPre);
     let v = Tensor::<Gv, 3>::new(vel);
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
             Some(d) => geo.centroid[d],
@@ -711,16 +729,16 @@ pub fn rmhd_source_cfl_gr_gv(
     // the metric-free rest enthalpy density rho_h = rho + Gamma/(Gamma-1) p (the source builds W
     // and b^mu from the harvested gamma internally); the cell magnetic field under the same key
     // convention as the fused godunov source.
-    let gamma_eos = Gv::scalar("gamma");
+    let gamma_eos = cx.scalar("gamma");
     let rho_h = rho + gamma_eos / (gamma_eos - Gv::ONE) * pre;
     let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
         if mag_from_bcell {
-            Gv::field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
+            cx.field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
         } else {
-            Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8))
+            cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8))
         }
     }));
-    let mass_gv = Gv::scalar("schwarzschild_mass");
+    let mass_gv = cx.scalar("schwarzschild_mass");
     let mass = Dual::constant(mass_gv);
     // the inverse spatial metric (raises the covariant momentum for the admissible-cone norm) and
     // the covariant source (autodiff Dual metric), dispatched by (spacetime, chart). the momentum
@@ -794,7 +812,7 @@ pub fn rmhd_source_cfl_gr_gv(
         // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
         (Spacetime::KerrKS, Coords::Cartesian) => {
-            let spin_gv = Gv::scalar("kerr_spin");
+            let spin_gv = cx.scalar("kerr_spin");
             let mg = KerrKSCartesian {
                 mass: mass_gv,
                 spin: spin_gv,
@@ -814,7 +832,7 @@ pub fn rmhd_source_cfl_gr_gv(
             )
         }
         (Spacetime::KerrKS, Coords::Cylindrical) => {
-            let spin_gv = Gv::scalar("kerr_spin");
+            let spin_gv = cx.scalar("kerr_spin");
             let mg = KerrKSCylindrical {
                 mass: mass_gv,
                 spin: spin_gv,
@@ -834,7 +852,7 @@ pub fn rmhd_source_cfl_gr_gv(
             )
         }
         (Spacetime::KerrKS, _) => {
-            let spin_gv = Gv::scalar("kerr_spin");
+            let spin_gv = cx.scalar("kerr_spin");
             let mg = KerrKS {
                 mass: mass_gv,
                 spin: spin_gv,
@@ -858,13 +876,13 @@ pub fn rmhd_source_cfl_gr_gv(
     // the admissible cone at the current cell: E = tau + D, |S|^2 = gamma^{ij} S_i S_j. the stored
     // energy is the covariant ehat, so E = (ehat + D + beta^i S_i) / alpha (metric-free b^2 blocks a
     // direct e - p reconstruction; the invert is exact).
-    let d_cons = Gv::field("cons_den", FieldRef::cons_den());
+    let d_cons = cx.field("cons_den", FieldRef::cons_den());
     let mom: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
-    let ehat = Gv::field("cons_nrg", FieldRef::cons_nrg());
+        std::array::from_fn(|k| cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
+    let ehat = cx.field("cons_nrg", FieldRef::cons_nrg());
     let beta_s = (0..3).fold(Gv::ZERO, |acc, k| acc + beta[k] * mom[k]);
     let e_cons = (ehat + d_cons + beta_s) / alpha;
-    let gamma_norm = |a: &[Gv; 3]| {
+    let gamma_norm = |a: &[_; 3]| {
         let mut acc = Gv::ZERO;
         for ii in 0..3 {
             for jj in 0..3 {
@@ -942,24 +960,22 @@ pub fn rmhd_source_cfl_gr_gv(
         && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
     {
         let spin = if spacetime == Spacetime::KerrKS {
-            Gv::scalar("kerr_spin")
+            cx.scalar("kerr_spin")
         } else {
             Gv::ZERO
         };
         let xc: [Gv; 3] = std::array::from_fn(|c| x[c]);
         let r_plus = mass_gv + (mass_gv * mass_gv - spin * spin).max(Gv::ZERO).sqrt();
-        let r_mask = r_plus.max(Gv::scalar("excision_radius"));
+        let r_mask = r_plus.max(cx.scalar("excision_radius"));
         let excised = symbi_ib::excise::ks_excised(&xc, spin, r_mask);
         Gv::select(excised, Gv::ZERO, lam_s)
     } else {
         lam_s
     };
-    let lam_flux = Gv::field("lambda", FieldRef::Scratch);
+    let lam_flux = cx.field("lambda", FieldRef::Scratch);
     let total = lam_flux + lam_s;
-    (
-        end_trace(),
-        vec![KernelWrite::new("lambda", FieldRef::Scratch, total.node())],
-    )
+        vec![KernelWrite::new("lambda", FieldRef::Scratch, total.node())]
+    })
 }
 
 /// the source-admissibility CFL for GR-hydro — the wu 2017 lambda_S mechanism, the perfect-fluid
@@ -981,21 +997,21 @@ pub fn rhd_source_cfl_gr_gv(
     axes: &[usize],
     ncomp: usize,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let ndim = axes.len();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] = std::array::from_fn(|k| {
         if k < ncomp {
-            Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8))
+            cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8))
         } else {
             Gv::ZERO
         }
     });
-    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+    let pre = cx.field("prim_pre", FieldRef::PrimPre);
     let v = Tensor::<Gv, 3>::new(vel);
     // the densitized law samples its metric coefficients at the cell's arithmetic midpoint, the
     // same point the c2p undensitizes at, so the cone reads the state the recovery produced.
-    let mid = gv_cell_midpoints(spacing, ndim);
+    let mid = gv_cell_midpoints(cx, spacing, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
             Some(d) => mid[d],
@@ -1006,16 +1022,16 @@ pub fn rhd_source_cfl_gr_gv(
     // are divided by the full-chart measure sqrt(det gamma) before entering it. the densitized
     // update adds `dt sqrt(-g) S` to `sqrt(det gamma) U`, so the undensitized source rate the cone
     // sees is `alpha S` — the lapse is applied to the connection source below.
-    let inv_dens = Gv::ONE / gv_metric_volume_factor_at(spacetime, coords, x);
-    let d_cons = Gv::field("cons_den", FieldRef::cons_den()) * inv_dens;
+    let inv_dens = Gv::ONE / gv_metric_volume_factor_at(cx, spacetime, coords, x);
+    let d_cons = cx.field("cons_den", FieldRef::cons_den()) * inv_dens;
     // the effective inertia e = rho h W^2 = h D^2 / rho_prim (W = D/rho_prim), reconstructed
     // metric-free and independent of the energy variable: the RHD nrg slot stores the killing
     // energy, and only the valencia tau would make `rho + tau + pre` name rho h W^2. the eulerian
     // energy for the admissibility cone follows as E = e - p = rho h W^2 - p = tau + D (below).
-    let gamma_eos = Gv::scalar("gamma");
+    let gamma_eos = cx.scalar("gamma");
     let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * pre / rho;
     let e = h_enth * d_cons * d_cons / rho;
-    let mass_gv = Gv::scalar("schwarzschild_mass");
+    let mass_gv = cx.scalar("schwarzschild_mass");
     let mass = Dual::constant(mass_gv);
     let (gm_inv, s_mom, _s_tau, alpha, beta): (
         Matrix<Gv, 3>,
@@ -1053,7 +1069,7 @@ pub fn rhd_source_cfl_gr_gv(
         // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
         (Spacetime::KerrKS, Coords::Cartesian) => {
-            let spin_gv = Gv::scalar("kerr_spin");
+            let spin_gv = cx.scalar("kerr_spin");
             let gi = KerrKSCartesian {
                 mass: mass_gv,
                 spin: spin_gv,
@@ -1075,7 +1091,7 @@ pub fn rhd_source_cfl_gr_gv(
             (gi, sm, st, al, bt)
         }
         (Spacetime::KerrKS, Coords::Cylindrical) => {
-            let spin_gv = Gv::scalar("kerr_spin");
+            let spin_gv = cx.scalar("kerr_spin");
             let gi = KerrKSCylindrical {
                 mass: mass_gv,
                 spin: spin_gv,
@@ -1098,7 +1114,7 @@ pub fn rhd_source_cfl_gr_gv(
             (gi, sm, st, al, bt)
         }
         (Spacetime::KerrKS, _) => {
-            let spin_gv = Gv::scalar("kerr_spin");
+            let spin_gv = cx.scalar("kerr_spin");
             let gi = KerrKS {
                 mass: mass_gv,
                 spin: spin_gv,
@@ -1125,7 +1141,7 @@ pub fn rhd_source_cfl_gr_gv(
     };
     let mom: [Gv; 3] = std::array::from_fn(|k| {
         if k < ncomp {
-            Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)) * inv_dens
+            cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)) * inv_dens
         } else {
             Gv::ZERO
         }
@@ -1138,7 +1154,7 @@ pub fn rhd_source_cfl_gr_gv(
     // the eulerian total energy E = tau + D = rho h W^2 - p = e - p (metric-free; no killing-energy
     // inversion needed for the admissibility cone).
     let e_cons = e - pre;
-    let gamma_norm = |a: &[Gv; 3]| {
+    let gamma_norm = |a: &[_; 3]| {
         let mut acc = Gv::ZERO;
         for ii in 0..3 {
             for jj in 0..3 {
@@ -1218,36 +1234,34 @@ pub fn rhd_source_cfl_gr_gv(
         && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
     {
         let spin = if spacetime == Spacetime::KerrKS {
-            Gv::scalar("kerr_spin")
+            cx.scalar("kerr_spin")
         } else {
             Gv::ZERO
         };
         let xc: [Gv; 3] = std::array::from_fn(|c| x[c]);
         let r_plus = mass_gv + (mass_gv * mass_gv - spin * spin).max(Gv::ZERO).sqrt();
-        let r_mask = r_plus.max(Gv::scalar("excision_radius"));
+        let r_mask = r_plus.max(cx.scalar("excision_radius"));
         let excised = symbi_ib::excise::ks_excised(&xc, spin, r_mask);
         Gv::select(excised, Gv::ZERO, lam_s)
     } else {
         lam_s
     };
-    let lam_flux = Gv::field("lambda", FieldRef::Scratch);
+    let lam_flux = cx.field("lambda", FieldRef::Scratch);
     let total = lam_flux + lam_s;
-    (
-        end_trace(),
-        vec![KernelWrite::new("lambda", FieldRef::Scratch, total.node())],
-    )
+        vec![KernelWrite::new("lambda", FieldRef::Scratch, total.node())]
+    })
 }
 
 /// RMHD is fixed 3D. reads the full 3-velocity + 3-magnetic-field prim + gamma.
 pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    trace(|cx| {
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = cx.field("prim_pre", FieldRef::PrimPre);
     let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = Gv::scalar("gamma");
+        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let gamma = cx.scalar("gamma");
     let eos = IdealGas { gamma };
     let prim = MhdPrim::<Gv, 3> {
         hydro: Prim {
@@ -1276,7 +1290,8 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
             lmax.node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the FOFC admissible-boundary projection for gr-mhd — the magnetized twin of
@@ -1312,9 +1327,9 @@ pub fn fofc_project_gr_mhd_gv(
     spacing: &[Spacing],
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let ndim = axes.len();
-    let mid = gv_cell_midpoints(spacing, ndim);
+    let mid = gv_cell_midpoints(cx, spacing, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
             Some(d) => mid[d],
@@ -1322,10 +1337,10 @@ pub fn fofc_project_gr_mhd_gv(
         }
     }));
     let (gm_inv, gm, alpha, beta) = {
-        fn adm<M: Metric<Gv, 3>>(
+        fn adm<'t, M: Metric<Gv<'t>, 3>>(
             m: &M,
-            x: Tensor<Gv, 3>,
-        ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
+            x: Tensor<Gv<'t>, 3>,
+        ) -> (Matrix<Gv<'t>, 3>, Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
             (
                 m.spatial_metric_inv(x),
                 m.spatial_metric(x),
@@ -1333,24 +1348,24 @@ pub fn fofc_project_gr_mhd_gv(
                 m.shift(x),
             )
         }
-        with_ks_metric!(spacetime, coords, "the GRMHD FOFC projection", |m| adm(
+        with_ks_metric!(cx, spacetime, coords, "the GRMHD FOFC projection", |m| adm(
             &m, x
         ))
     };
-    let read = |k: &str| Gv::field(k, k);
+    let read = |k: &str| cx.field(k, k);
     let x_den = read("x_den");
     let x_nrg = read("x_nrg");
     // RMHD momentum is always a 3-vector (the physics is 3D; grid symmetry handles 1D/2D).
     let x_mom: Vec<Gv> = (0..3).map(|k| read(&format!("x_mom_{k}"))).collect();
     let s_c = Tensor::<Gv, 3>::new(std::array::from_fn(|k| x_mom[k]));
-    let beta_dot = |s: &Tensor<Gv, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
+    let beta_dot = |s: &Tensor<_, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
     let inv_alpha = Gv::ONE / alpha;
     let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
     // the magnetic field is held fixed at the candidate's cell-centered value: it is
     // constrained-transport-evolved on the staggered faces and shared between neighbors, so blending
     // it per cell would desynchronize the shared face value and break div(B) = 0.
     let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
-        Gv::field(&format!("bcell_{k}"), &format!("mhd.bcell[{k}]"))
+        cx.field(&format!("bcell_{k}"), &format!("mhd.bcell[{k}]"))
     }));
     // the stage-input primitives still occupy the primitive fields here: FOFC restored u_stage and
     // ran c2p before constructing the first-order flux, and the candidate c2p runs later.
@@ -1358,11 +1373,11 @@ pub fn fofc_project_gr_mhd_gv(
     // physics used by initialization. this makes the anchor admissible in the candidate magnetic
     // slice by construction.
     let anchor_gas = Prim {
-        rho: Gv::field("prim_rho", FieldRef::PrimRho),
+        rho: cx.field("prim_rho", FieldRef::PrimRho),
         vel: Tensor::new(std::array::from_fn(|kk| {
-            Gv::field(&format!("prim_vel_{kk}"), FieldRef::PrimVel(kk as u8))
+            cx.field(&format!("prim_vel_{kk}"), FieldRef::PrimVel(kk as u8))
         })),
-        pre: Gv::field("prim_pre", FieldRef::PrimPre),
+        pre: cx.field("prim_pre", FieldRef::PrimPre),
     };
     let anchor_regime = RmhdGr {
         metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)),
@@ -1370,7 +1385,7 @@ pub fn fofc_project_gr_mhd_gv(
     };
     let anchor = anchor_regime.admissible_anchor(
         &IdealGas {
-            gamma: Gv::scalar("gamma"),
+            gamma: cx.scalar("gamma"),
         },
         anchor_gas,
         b,
@@ -1407,7 +1422,7 @@ pub fn fofc_project_gr_mhd_gv(
     let theta = symbi_hydro::admissible::rmhd_admissible_theta(
         x_den, s_c, e_c, a_den, s_a, e_a, &b, &gm_inv, &gm, eps_d, eps_q, eps_psi, 20,
     );
-    let proj = |xc: Gv, ua: Gv| ua + theta * (xc - ua);
+    let proj = |xc, ua| ua + theta * (xc - ua);
     let mut writes = KernelWrites::new();
     writes.push(KernelWrite::new(
         "x_den",
@@ -1427,7 +1442,8 @@ pub fn fofc_project_gr_mhd_gv(
         "x_nrg",
         proj(x_nrg, a_nrg).node(),
     ));
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the state-constraint projection (axioms A2-A4): blend the candidate toward the admissible anchor
@@ -1475,16 +1491,16 @@ pub fn constraint_projection_gv(
         ConstraintState, DensityFloor, MagnetizationCeiling, StateConstraint, TemperatureFloor,
         WuTangAdmissibility, constraint_thetas, joint_theta,
     };
-    begin_trace();
+    trace(|cx| {
     let ndim = axes.len();
-    let mid = gv_cell_midpoints(spacing, ndim);
+    let mid = gv_cell_midpoints(cx, spacing, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
             Some(d) => mid[d],
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let mass = Gv::scalar("schwarzschild_mass");
+    let mass = cx.scalar("schwarzschild_mass");
     let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
         match (spacetime, coords) {
             (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
@@ -1517,7 +1533,7 @@ pub fn constraint_projection_gv(
             (Spacetime::KerrKS, Coords::Cartesian) => {
                 let m = KerrKSCartesian {
                     mass,
-                    spin: Gv::scalar("kerr_spin"),
+                    spin: cx.scalar("kerr_spin"),
                 };
                 (
                     m.spatial_metric_inv(x),
@@ -1529,7 +1545,7 @@ pub fn constraint_projection_gv(
             (Spacetime::KerrKS, Coords::Cylindrical) => {
                 let m = KerrKSCylindrical {
                     mass,
-                    spin: Gv::scalar("kerr_spin"),
+                    spin: cx.scalar("kerr_spin"),
                 };
                 (
                     m.spatial_metric_inv(x),
@@ -1541,7 +1557,7 @@ pub fn constraint_projection_gv(
             (Spacetime::KerrKS, _) => {
                 let m = KerrKS {
                     mass,
-                    spin: Gv::scalar("kerr_spin"),
+                    spin: cx.scalar("kerr_spin"),
                 };
                 (
                     m.spatial_metric_inv(x),
@@ -1558,7 +1574,7 @@ pub fn constraint_projection_gv(
             ),
         };
 
-    let read = |key: &str| Gv::field(key, key);
+    let read = |key: &str| cx.field(key, key);
     // `a_` is the anchor (the admissible stage input), `x_` the candidate (projected in place).
     let a_den = read("a_den");
     let a_nrg = read("a_nrg");
@@ -1569,7 +1585,7 @@ pub fn constraint_projection_gv(
     let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("bc_{k}"))));
 
     // the blended stored state, mapped to the eulerian slots the admissible set is defined on.
-    let blend_slots = |t: Gv| -> (Gv, Tensor<Gv, 3>, Gv) {
+    let blend_slots = |t| {
         let den = a_den + t * (x_den - a_den);
         let mom = Tensor::new(std::array::from_fn(|k| {
             a_mom[k] + t * (x_mom[k] - a_mom[k])
@@ -1577,7 +1593,7 @@ pub fn constraint_projection_gv(
         let ehat = a_nrg + t * (x_nrg - a_nrg);
         (den, mom, ehat)
     };
-    let blend = |t: Gv| -> ConstraintState<'_, Gv> {
+    let blend = |t| {
         let (den, mom, ehat) = blend_slots(t);
         let beta_s = (0..3).fold(Gv::ZERO, |acc, k| acc + beta[k] * mom[k]);
         ConstraintState {
@@ -1603,13 +1619,13 @@ pub fn constraint_projection_gv(
         eps_psi: rel * state_scale * state_scale.sqrt(),
     };
     let temperature = TemperatureFloor {
-        f_min: Gv::scalar("floor_temperature"),
+        f_min: cx.scalar("floor_temperature"),
     };
     let magnetization = MagnetizationCeiling {
-        sigma_max: Gv::scalar("ceiling_magnetization"),
+        sigma_max: cx.scalar("ceiling_magnetization"),
     };
     let density = DensityFloor {
-        den_min: Gv::scalar("floor_density"),
+        den_min: cx.scalar("floor_density"),
     };
     let family: Vec<&dyn StateConstraint<Gv>> = vec![&g, &temperature, &magnetization, &density];
 
@@ -1641,7 +1657,8 @@ pub fn constraint_projection_gv(
             mom[k].node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the grmhd fofc geometric-source fraction. `a_*` is the admissible source-free
@@ -1655,9 +1672,9 @@ pub fn fofc_source_theta_gr_mhd_gv(
     spacing: &[Spacing],
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let ndim = axes.len();
-    let mid = gv_cell_midpoints(spacing, ndim);
+    let mid = gv_cell_midpoints(cx, spacing, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
             Some(d) => mid[d],
@@ -1665,10 +1682,10 @@ pub fn fofc_source_theta_gr_mhd_gv(
         }
     }));
     let (gm_inv, gm, alpha, beta) = {
-        fn adm<M: Metric<Gv, 3>>(
+        fn adm<'t, M: Metric<Gv<'t>, 3>>(
             m: &M,
-            x: Tensor<Gv, 3>,
-        ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
+            x: Tensor<Gv<'t>, 3>,
+        ) -> (Matrix<Gv<'t>, 3>, Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
             (
                 m.spatial_metric_inv(x),
                 m.spatial_metric(x),
@@ -1676,18 +1693,18 @@ pub fn fofc_source_theta_gr_mhd_gv(
                 m.shift(x),
             )
         }
-        with_ks_metric!(spacetime, coords, "the grmhd source limiter", |m| adm(
+        with_ks_metric!(cx, spacetime, coords, "the grmhd source limiter", |m| adm(
             &m, x
         ))
     };
-    let read = |key: &str| Gv::field(key, key);
+    let read = |key: &str| cx.field(key, key);
     let a_den = read("a_den");
     let a_nrg = read("a_nrg");
     let x_nrg = read("x_nrg");
     let a_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("a_mom_{kk}"))));
     let x_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("x_mom_{kk}"))));
     let b = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("bc_{kk}"))));
-    let beta_dot = |s: &Tensor<Gv, 3>| (0..3).fold(Gv::ZERO, |sum, kk| sum + beta[kk] * s[kk]);
+    let beta_dot = |s: &Tensor<_, 3>| (0..3).fold(Gv::ZERO, |sum, kk| sum + beta[kk] * s[kk]);
     let e_anchor = (a_nrg + a_den + beta_dot(&a_mom)) / alpha;
     // a geometric source acts on momentum and energy alone, so both endpoints share the anchor
     // density by construction. reading the anchor density alone into the graph makes that
@@ -1715,7 +1732,8 @@ pub fn fofc_source_theta_gr_mhd_gv(
         20,
     );
     let writes = vec![KernelWrite::new("theta", "theta", theta.node())];
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the FOFC admissible-boundary projection for GR-hydro (adiabatic) — the provable replacement for the
@@ -1736,9 +1754,9 @@ pub fn fofc_project_gr_gv(
     axes: &[usize],
     ncomp: usize,
 ) -> (GvKernel, KernelWrites) {
-    begin_trace();
+    trace(|cx| {
     let ndim = axes.len();
-    let mid = gv_cell_midpoints(spacing, ndim);
+    let mid = gv_cell_midpoints(cx, spacing, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
             Some(d) => mid[d],
@@ -1746,12 +1764,15 @@ pub fn fofc_project_gr_gv(
         }
     }));
     let (gm_inv, alpha, beta) = {
-        fn adm<M: Metric<Gv, 3>>(m: &M, x: Tensor<Gv, 3>) -> (Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
+        fn adm<'t, M: Metric<Gv<'t>, 3>>(
+            m: &M,
+            x: Tensor<Gv<'t>, 3>,
+        ) -> (Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
             (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        with_ks_metric!(spacetime, coords, "the FOFC projection", |m| adm(&m, x))
+        with_ks_metric!(cx, spacetime, coords, "the FOFC projection", |m| adm(&m, x))
     };
-    let read = |k: &str| Gv::field(k, k);
+    let read = |k: &str| cx.field(k, k);
     let x_den = read("x_den");
     let x_nrg = read("x_nrg");
     let us_den = read("us_den");
@@ -1759,7 +1780,7 @@ pub fn fofc_project_gr_gv(
     let x_mom: Vec<Gv> = (0..ncomp).map(|k| read(&format!("x_mom_{k}"))).collect();
     let us_mom: Vec<Gv> = (0..ncomp).map(|k| read(&format!("us_mom_{k}"))).collect();
     // pad the momentum to the metric's 3 slots (suppressed axes carry zero).
-    let pad = |m: &[Gv]| {
+    let pad = |m: &[_]| {
         Tensor::<Gv, 3>::new(std::array::from_fn(
             |k| if k < ncomp { m[k] } else { Gv::ZERO },
         ))
@@ -1767,7 +1788,7 @@ pub fn fofc_project_gr_gv(
     let s_c = pad(&x_mom);
     let s_a = pad(&us_mom);
     // E = (ehat + D + beta^i S_i)/alpha; beta^i contravariant, S_i covariant.
-    let beta_dot = |s: &Tensor<Gv, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
+    let beta_dot = |s: &Tensor<_, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
     let inv_alpha = Gv::ONE / alpha;
     let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
     let e_a = (us_nrg + us_den + beta_dot(&s_a)) * inv_alpha;
@@ -1780,7 +1801,7 @@ pub fn fofc_project_gr_gv(
     let theta = symbi_hydro::admissible::admissible_theta(
         x_den, s_c, e_c, us_den, s_a, e_a, &gm_inv, eps_d, eps_f,
     );
-    let proj = |xc: Gv, ua: Gv| ua + theta * (xc - ua);
+    let proj = |xc, ua| ua + theta * (xc - ua);
     let mut writes = KernelWrites::new();
     writes.push(KernelWrite::new(
         "x_den",
@@ -1800,7 +1821,8 @@ pub fn fofc_project_gr_gv(
         "x_nrg",
         proj(x_nrg, us_nrg).node(),
     ));
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// the classical (newtonian ideal-gas) per-cell wave speeds (`NewtonianMhd::wave_speeds` = the fast
@@ -1809,14 +1831,14 @@ pub fn fofc_project_gr_gv(
 /// compute speeds inline in the flux and leave those buffers empty. mirror of
 /// `rmhd_wave_speeds_cell_gv`.
 pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    trace(|cx| {
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = cx.field("prim_pre", FieldRef::PrimPre);
     let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = Gv::scalar("gamma");
+        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let gamma = cx.scalar("gamma");
     let eos = IdealGas { gamma };
     let prim = MhdPrim::<Gv, 3> {
         hydro: Prim {
@@ -1841,7 +1863,8 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
             lmax.node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 /// isothermal-MHD per-cell wave speeds materialized for the UCT edge-EMF (`wave_speed_l/r[d]`).
@@ -1850,13 +1873,13 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
 /// these speeds); materializing them is what holds `--ct-method uct` on UCT, which silently falls
 /// back to Contact when those buffers are empty.
 pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    begin_trace();
-    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    trace(|cx| {
+    let rho = cx.field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
     let mag: [Gv; 3] =
-        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let cs = Gv::scalar("cs");
+        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let cs = cx.scalar("cs");
     let eos = Isothermal { cs };
     let prim = IsoMhdPrim::<Gv, 3> {
         hydro: PrimG {
@@ -1881,7 +1904,8 @@ pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
             lmax.node(),
         ));
     }
-    (end_trace(), writes)
+    writes
+    })
 }
 
 #[cfg(test)]
@@ -1892,16 +1916,15 @@ mod log_radius_tests {
     // the scale factors and overestimating dt into a silent CFL violation.
     use super::*;
     use symbi_ir::graph::NodeId;
-    use symbi_ir::gv::{begin_trace, end_trace, with_trace};
 
-    fn eval(out: NodeId, values: &[(&str, f64)]) -> f64 {
+    fn eval(cx: TraceCx, out: NodeId, values: &[(&str, f64)]) -> f64 {
         use symbi_ir::backends::interp::{Backend, Cpu};
         use symbi_ir::passes::scalarize::{LoweredFn, scalarize_kernel};
         // the runtime spacing map emits `map_kind`'s cond as an `Op::IfElse`, which
         // `scalarize_kernel` lowers (the single-output `scalarize` handles straight-line graphs).
         // lower the one output through `scalarize_kernel` and wrap it as a `LoweredFn` for the
         // elemental interpreter.
-        let lowered = with_trace(|t| {
+        let lowered = cx.with_trace(|t| {
             let sc = scalarize_kernel(t.graph(), &[out]);
             let ty = t.graph().ty(out).clone();
             LoweredFn {
@@ -1931,22 +1954,23 @@ mod log_radius_tests {
 
     #[test]
     fn cell_center_is_geometric_mean_on_log_axis() {
-        begin_trace();
-        let node = gv_cell_center(0, &[Spacing::Log]).node();
         let (r_min, slope, i) = (3.0_f64, 0.02_f64, 10.0_f64);
-        // spacing is a runtime scalar: select the log map (map_kind_0 = 1). the `Spacing::Log`
-        // builder arg is inert — the face map reads `map_kind`.
-        let got = eval(
-            node,
-            &[
-                ("x_lo_0", r_min),
-                ("dx_0", slope),
-                ("_coord_0", i),
-                ("map_kind_0", 1.0),
-                ("map_param_0", 0.0),
-            ],
-        );
-        end_trace();
+        let (_kernel, got) = trace(|cx| {
+            let node = gv_cell_center(cx, 0, &[Spacing::Log]).node();
+            // spacing is a runtime scalar: select the log map (map_kind_0 = 1). the
+            // `Spacing::Log` builder arg is inert — the face map reads `map_kind`.
+            eval(
+                cx,
+                node,
+                &[
+                    ("x_lo_0", r_min),
+                    ("dx_0", slope),
+                    ("_coord_0", i),
+                    ("map_kind_0", 1.0),
+                    ("map_param_0", 0.0),
+                ],
+            )
+        });
         let geomean = r_min * 10f64.powf((i + 0.5) * slope); // sqrt(face_i * face_{i+1})
         let arithmetic_midpoint = r_min + (i + 0.5) * slope;
         assert!(
@@ -1961,20 +1985,21 @@ mod log_radius_tests {
 
     #[test]
     fn cell_center_is_bit_identical_on_uniform_axis() {
-        begin_trace();
-        let node = gv_cell_center(0, &[Spacing::Uniform]).node();
         let (x_lo, dx, i) = (2.0_f64, 0.5_f64, 7.0_f64);
-        let got = eval(
-            node,
-            &[
-                ("x_lo_0", x_lo),
-                ("dx_0", dx),
-                ("_coord_0", i),
-                ("map_kind_0", 0.0),
-                ("map_param_0", 1.0),
-            ],
-        );
-        end_trace();
+        let (_kernel, got) = trace(|cx| {
+            let node = gv_cell_center(cx, 0, &[Spacing::Uniform]).node();
+            eval(
+                cx,
+                node,
+                &[
+                    ("x_lo_0", x_lo),
+                    ("dx_0", dx),
+                    ("_coord_0", i),
+                    ("map_kind_0", 0.0),
+                    ("map_param_0", 1.0),
+                ],
+            )
+        });
         assert_eq!(
             got,
             x_lo + (i + 0.5) * dx,
@@ -1996,7 +2021,7 @@ mod pcp_source_theta_tests {
             &[0, 1, 2],
         );
         let paths: Vec<String> = kernel
-            .field_inputs
+            .field_inputs()
             .iter()
             .map(|(_, bind)| bind.name())
             .collect();

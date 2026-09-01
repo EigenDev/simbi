@@ -394,35 +394,37 @@ mod tests {
     use crate::regime::Regime;
     use crate::rmhd::Rmhd;
     use crate::state::Prim;
-    use symbi_ir::gv::{Gv, begin_trace, end_trace};
+    use symbi_ir::gv::{Gv, trace};
     use symbi_ir::passes::{cse, pressure, scalarize};
 
     // trace rmhd_wave_speeds at S=Gv (axis 0), scalarize through the same
     // pipeline the real kernel emit takes, run CSE, and return the peak
     // register-pressure report for the resulting kernel.
     fn trace_and_measure_pressure() -> pressure::PressureReport {
-        begin_trace();
-        let rho = Gv::field("prim_rho", "prim.rho");
-        let vel: [Gv; 3] =
-            std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), &format!("prim.vel[{k}]")));
-        let pre = Gv::field("prim_pre", "prim.pre");
-        let mag: [Gv; 3] =
-            std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), &format!("prim.mag[{k}]")));
-        let gamma = Gv::scalar("gamma");
-        let eos = IdealGas { gamma };
-        let prim = MhdPrim::<Gv, 3> {
-            hydro: Prim {
-                rho,
-                vel: Tensor::new(vel),
-                pre,
-            },
-            mag: Tensor::new(mag),
-        };
-        let nhat = Tensor::<Gv, 3>::unit(0);
-        let (sl, sr) = rmhd_wave_speeds(&eos, &prim, &nhat);
-        let outputs = [sl.node(), sr.node()];
-        let graph = end_trace().graph;
-        let mut k = scalarize::scalarize_kernel(&graph, &outputs);
+        let (kernel, outputs) = trace(|cx| {
+            let rho = cx.field("prim_rho", "prim.rho");
+            let vel: [Gv; 3] = std::array::from_fn(|kk| {
+                cx.field(&format!("prim_v{kk}"), &format!("prim.vel[{kk}]"))
+            });
+            let pre = cx.field("prim_pre", "prim.pre");
+            let mag: [Gv; 3] = std::array::from_fn(|kk| {
+                cx.field(&format!("prim_b{kk}"), &format!("prim.mag[{kk}]"))
+            });
+            let gamma = cx.scalar("gamma");
+            let eos = IdealGas { gamma };
+            let prim = MhdPrim::<Gv, 3> {
+                hydro: Prim {
+                    rho,
+                    vel: Tensor::new(vel),
+                    pre,
+                },
+                mag: Tensor::new(mag),
+            };
+            let nhat = Tensor::<Gv, 3>::unit(0);
+            let (sl, sr) = rmhd_wave_speeds(&eos, &prim, &nhat);
+            [sl.node(), sr.node()]
+        });
+        let mut k = scalarize::scalarize_kernel(kernel.graph(), &outputs);
         cse::cse_kernel(&mut k);
         pressure::peak_pressure_kernel(&k)
     }

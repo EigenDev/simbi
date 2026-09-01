@@ -53,7 +53,7 @@ fn user_source_none_matches_writes_of_plain_godunov() {
     // structural equivalence: passing `None` for `user_source` produces a kernel with
     // the same KernelWrites shape as the plain godunov builder, so a caller passing `None`
     // binds exactly the same ABI. (the check is KernelWrites-shape equivalence, the contract
-    // the runtime binds against; NodeId identity differs between two `begin_trace`
+    // the runtime binds against; NodeId identity differs between two `trace`
     // sessions.)
     let coords = Coords::Cartesian;
     let spacing = vec![Spacing::Uniform; 3];
@@ -252,7 +252,7 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
     // sanity: the kernel's underlying graph contains a Param leaf named
     // `g_ext_0` — proves uniform_acceleration's `g_ext_k` reached
     // the godunov trace, fused with the divergence + integrator.
-    let g = &kernel.graph;
+    let g = kernel.graph();
     let mut found_g_ext_0 = false;
     for (_id, node, _ty) in g.iter() {
         if let symbi_ir::graph::Op::Param(s) = &node.op {
@@ -280,7 +280,7 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
         GeoSource::Hydro { inertial: false },
     );
     let mut plain_has_g_ext = false;
-    for (_id, node, _ty) in k_plain.graph.iter() {
+    for (_id, node, _ty) in k_plain.graph().iter() {
         if let symbi_ir::graph::Op::Param(s) = &node.op {
             if s.as_str() == "g_ext_0" {
                 plain_has_g_ext = true;
@@ -444,7 +444,7 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
     // distinct NodeId per name, so the runtime fills a single leaf per
     // name.
     let mut seen: HashSet<String> = HashSet::new();
-    for (_id, node, _ty) in kernel.graph.iter() {
+    for (_id, node, _ty) in kernel.graph().iter() {
         if let symbi_ir::graph::Op::Param(sym) = &node.op {
             let name = sym.as_str();
             if name.starts_with("g_ext_") {
@@ -539,14 +539,7 @@ fn unsupported_target_field_panics_loudly() {
     fn empty_builder(_d: usize) -> symbi_hydro::source_spec::BuiltSource {
         // 1 output, bound to rho; the dispatch panic fires first, so this
         // graph stands unevaluated.
-        use symbi_ir::graph::Graph;
-        let mut g = Graph::new();
-        let rho = g.add_scalar_param("rho", symbi_ir::ElementTy::F64);
-        symbi_hydro::source_spec::BuiltSource {
-            graph: g,
-            outputs: vec![rho],
-            params: vec!["rho".to_string()],
-        }
+        symbi_hydro::source_spec::lift_to_built(|cx| vec![cx.scalar("rho")])
     }
     let bad_spec = symbi_hydro::source_spec::SourceSpec {
         kind: symbi_hydro::source_spec::SourceKind::UserDefined,

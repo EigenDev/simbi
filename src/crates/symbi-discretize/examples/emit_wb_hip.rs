@@ -30,12 +30,12 @@ use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering};
 
 fn emit_gv(out_dir: &str, name: &str, k: GvKernel, writes: KernelWrites) {
     assert!(
-        !k.graph.has_errors(),
+        !k.graph().has_errors(),
         "{name} graph errors: {:?}",
-        k.graph.errors()
+        k.graph().errors()
     );
     let desc = emit_kernel_from_lowering(
-        &k.graph,
+        k.graph(),
         &KernelEmitInputs {
             kernel_name: name,
             coalesce_layout: symbi_discretize::kernel_coalesces_layout(name),
@@ -44,10 +44,10 @@ fn emit_gv(out_dir: &str, name: &str, k: GvKernel, writes: KernelWrites) {
                 target: Target::Hip,
                 precision: Precision::F64,
             },
-            field_inputs: &k.field_inputs,
-            scalar_params: &k.scalar_params,
+            field_inputs: k.field_inputs(),
+            scalar_params: k.scalar_params(),
             field_writes: &writes,
-            coord_components: &k.coord_components,
+            coord_components: k.coord_components(),
             device_preamble: &[],
             tile_spec: None,
         },

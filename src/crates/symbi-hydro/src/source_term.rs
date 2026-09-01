@@ -24,7 +24,7 @@
 //     these same functions at S=Gv).
 //
 // params are carrier-typed: at S=f64 they are numbers (the analytical reference);
-// at S=Gv they are `Gv::scalar(name)` / spliced-DAG leaves the runtime fills per
+// at S=Gv they are `cx.scalar(name)` / spliced-DAG leaves the runtime fills per
 // step. the caller owns the names; the lift takes them as given.
 // =============================================================================
 
@@ -194,7 +194,7 @@ impl<S: Scalar, const D: usize> UniformAccel<S, D> {
 /// `1/|x-xm|^3` produces Inf in the cell containing the mass and traces straight
 /// into the kernel. the shared `1/(...)^{3/2}` scaffolding hash-conses across the
 /// momentum + energy lifts (one `sqrt`/division per kernel). a moving mass updates
-/// `xm` per step; at S=Gv `gm`/`xm`/`eps` are `Gv::scalar` leaves the runtime fills.
+/// `xm` per step; at S=Gv `gm`/`xm`/`eps` are `cx.scalar` leaves the runtime fills.
 pub struct PointMassGravity<S, const D: usize> {
     /// the product `G * M` (one scalar; repulsive forces flip its sign).
     pub gm: S,

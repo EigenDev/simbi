@@ -19,8 +19,8 @@
 // fail-safe to a too-wide region; a stale narrow ball would be unsound.
 //
 // usage:
-//   tag_support_ball(&chi, center_exprs, radius_expr);   // at the mask seam
-//   let kernel = end_trace().with_derived_support(&writes);
+//   cx.tag_support_ball(&chi, center_exprs, radius_expr);   // at the mask seam
+//   let kernel = kernel.with_derived_support(&writes);       // after the trace closes
 // =============================================================================
 
 use std::collections::HashMap;
@@ -402,7 +402,7 @@ mod tests {
     use super::*;
     use crate::FieldRef;
     use crate::algebra::Scalar;
-    use crate::gv::{Gv, KernelWrite, KernelWrites, begin_trace, end_trace, tag_support_ball};
+    use crate::gv::{Gv, KernelWrite, KernelWrites, TraceCx, trace};
     use symbi_algebra::algebra::Numeric;
 
     fn ball() -> SupportBall {
@@ -414,16 +414,16 @@ mod tests {
 
     // trace `f`, tagging the mask it returns, and derive the support of the
     // writes it produces.
-    fn derive(f: impl FnOnce(Gv) -> KernelWrites) -> Support {
-        begin_trace();
-        let den = Gv::field("den", FieldRef::cons_den());
-        // the stand-in mask: a field-dependent value the builder asserts is
-        // ball-supported (the lemma is the tag here; the algebra carries no support fact).
-        let chi = Gv::field("mask", FieldRef::PrimRho);
-        tag_support_ball(&chi, ball().center, ball().radius);
-        let _ = den;
-        let writes = f(chi);
-        let k = end_trace();
+    fn derive(f: impl for<'t> FnOnce(TraceCx<'t>, Gv<'t>) -> KernelWrites) -> Support {
+        let (k, writes) = trace(|cx: TraceCx| {
+            let den = cx.field("den", FieldRef::cons_den());
+            // the stand-in mask: a field-dependent value the builder asserts is
+            // ball-supported (the lemma is the tag here; the algebra carries no support fact).
+            let chi = cx.field("mask", FieldRef::PrimRho);
+            cx.tag_support_ball(&chi, ball().center, ball().radius);
+            let _ = den;
+            f(cx, chi)
+        });
         derive_output_support(k.graph(), k.node_supports(), k.field_inputs(), &writes)
     }
 
@@ -441,9 +441,9 @@ mod tests {
     fn pure_delta_chain_inherits_the_ball() {
         // the drain-delta shape: (1 - exp(-chi*k)) * den * const — zero outside
         // the mask through the 1-exp lemma and multiplicative transparency.
-        let s = derive(|chi| {
-            let den = Gv::field("den2", FieldRef::cons_den());
-            let g = Gv::ONE - (-(chi * Gv::scalar("k"))).exp();
+        let s = derive(|cx, chi| {
+            let den = cx.field("den2", FieldRef::cons_den());
+            let g = Gv::ONE - (-(chi * cx.scalar("k"))).exp();
             let delta = g * den * Gv::from_f64(0.5);
             vec![KernelWrite::new("d", FieldRef::Scratch, delta.node())]
         });
@@ -454,10 +454,10 @@ mod tests {
     fn in_place_write_unchanged_outside_the_ball() {
         // the cons-update shape: den_out = den * exp(-chi*k) + zero-supported
         // correction — equals the field's own read outside the mask.
-        let s = derive(|chi| {
-            let den = Gv::field("den2", FieldRef::cons_den());
-            let f_rho = (-(chi * Gv::scalar("k"))).exp();
-            let corr = chi * Gv::scalar("dt");
+        let s = derive(|cx, chi| {
+            let den = cx.field("den2", FieldRef::cons_den());
+            let f_rho = (-(chi * cx.scalar("k"))).exp();
+            let corr = chi * cx.scalar("dt");
             let out = den * f_rho + corr;
             vec![KernelWrite::new(
                 "den_out",
@@ -472,9 +472,9 @@ mod tests {
     fn absorbed_difference_is_ball_supported() {
         // delta = field - field*factor: the hash-consed field read makes the
         // subtraction structurally x - Eq(x, ball) -> Zero(ball).
-        let s = derive(|chi| {
-            let den = Gv::field("den2", FieldRef::cons_den());
-            let f_rho = (-(chi * Gv::scalar("k"))).exp();
+        let s = derive(|cx, chi| {
+            let den = cx.field("den2", FieldRef::cons_den());
+            let f_rho = (-(chi * cx.scalar("k"))).exp();
             let absorbed = den - den * f_rho;
             vec![KernelWrite::new("d", FieldRef::Scratch, absorbed.node())]
         });
@@ -485,9 +485,9 @@ mod tests {
     fn growth_cap_min_keeps_the_ball() {
         // the torque-free retention floor: min(exp(chi*k), cap>=1) stays one
         // outside the mask, so 1 - min(..) stays ball-supported.
-        let s = derive(|chi| {
-            let den = Gv::field("den2", FieldRef::cons_den());
-            let b_t = (-(chi * Gv::scalar("k"))).exp().min(Gv::from_f64(1.0e12));
+        let s = derive(|cx, chi| {
+            let den = cx.field("den2", FieldRef::cons_den());
+            let b_t = (-(chi * cx.scalar("k"))).exp().min(Gv::from_f64(1.0e12));
             let g_t = Gv::ONE - b_t;
             vec![KernelWrite::new("d", FieldRef::Scratch, (g_t * den).node())]
         });
@@ -498,9 +498,9 @@ mod tests {
     fn unmasked_contribution_widens_to_everywhere_fail_safe() {
         // a write mixing a masked term with a bare field term has no ball —
         // the derivation must refuse; keeping a stale narrow region would be unsound.
-        let s = derive(|chi| {
-            let den = Gv::field("den2", FieldRef::cons_den());
-            let masked = chi * Gv::scalar("dt");
+        let s = derive(|cx, chi| {
+            let den = cx.field("den2", FieldRef::cons_den());
+            let masked = chi * cx.scalar("dt");
             let leak = den * Gv::from_f64(2.0);
             vec![KernelWrite::new(
                 "d",
@@ -515,9 +515,9 @@ mod tests {
     fn in_place_write_against_a_different_field_widens() {
         // out bound to cons.nrg but equal to the den read outside the ball:
         // that is a genuine change to nrg everywhere — Everywhere.
-        let s = derive(|chi| {
-            let den = Gv::field("den2", FieldRef::cons_den());
-            let out = den * (-(chi * Gv::scalar("k"))).exp();
+        let s = derive(|cx, chi| {
+            let den = cx.field("den2", FieldRef::cons_den());
+            let out = den * (-(chi * cx.scalar("k"))).exp();
             vec![KernelWrite::new(
                 "nrg_out",
                 FieldRef::cons_nrg(),
@@ -529,10 +529,10 @@ mod tests {
 
     #[test]
     fn no_tags_derives_everywhere() {
-        begin_trace();
-        let den = Gv::field("den", FieldRef::cons_den());
-        let writes = vec![KernelWrite::new("d", FieldRef::Scratch, (den * den).node())];
-        let k = end_trace();
+        let (k, writes) = trace(|cx: TraceCx| {
+            let den = cx.field("den", FieldRef::cons_den());
+            vec![KernelWrite::new("d", FieldRef::Scratch, (den * den).node())]
+        });
         let s = derive_output_support(k.graph(), k.node_supports(), k.field_inputs(), &writes);
         assert_eq!(s, Support::Everywhere);
     }

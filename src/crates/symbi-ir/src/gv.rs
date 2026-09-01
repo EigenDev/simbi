@@ -1,20 +1,26 @@
 // =============================================================================
 // gv.rs
 //
-// the `Gv` ("graph value") carrier + the thread-local trace it records into.
-// `Gv` is a `symbi_algebra::Scalar` whose operations record a node into this
-// crate's tensor graph and return a handle to it; instantiating carrier-generic
-// physics (written over `S: Scalar`) at `S = Gv` traces it into the stencil IR —
-// the foundational "code -> graph" boundary. graph and carrier live in one
-// crate so the IR machine is a single layer.
+// the `Gv` ("graph value") carrier + the scoped trace it records into.
+// `Gv<'t>` is a `symbi_algebra::Scalar` whose operations record a node into
+// this crate's tensor graph and return a handle to it; instantiating
+// carrier-generic physics (written over `S: Scalar`) at `S = Gv` traces it into
+// the stencil IR — the foundational "code -> graph" boundary. graph and carrier
+// live in one crate so the IR machine is a single layer.
 //
-// arena pattern: a thread-local graph holds the active trace; `Gv` is a Copy
-// handle. `begin_trace()` opens it, ops push nodes, `end_trace()` takes the
-// graph out. build-time only, sidestepping the proc-macro cross-invocation footgun.
+// tracing is a scoped interpretation: `trace(|cx| ...)` opens a fresh graph,
+// runs the closure with a `TraceCx<'t>` token, and returns the finished
+// `GvKernel`. the closure is generative over the brand lifetime `'t`, so a
+// `Gv<'t>` provably cannot escape its trace or combine with a value from a
+// sibling trace — the compiler rejects both. a per-trace generation stamp on
+// every node handle backs the brand at runtime: a value from an enclosing
+// trace used inside a nested one panics at the recording site instead of
+// silently splicing foreign node ids. build-time only.
 //
-// the trace (`GvTrace`/`with_trace`/`coord_node`) is `pub` so the discretization
-// builders in symbi-discretize can construct raw index/stencil IR (integer coord
-// arithmetic, which lives in the graph's I32 domain alongside the f64 carrier).
+// the trace (`GvTrace`, reached through `TraceCx::with_trace`) is `pub` so the
+// discretization builders in symbi-discretize can construct raw index/stencil
+// IR (integer coord arithmetic, which lives in the graph's I32 domain alongside
+// the f64 carrier).
 // =============================================================================
 
 use std::cell::RefCell;
@@ -177,7 +183,7 @@ impl LaunchGrade {
         }
     }
 
-    /// the sentinel that opts out of fusion. used by `end_trace()`.
+    /// the sentinel that opts out of fusion. used by the plain [`trace`] entry.
     pub fn untagged() -> Self {
         Self::default()
     }
@@ -224,7 +230,7 @@ pub enum FusionError {
     /// the merged body over a domain that's wrong for at least one half.
     GradeMismatch { a: LaunchGrade, b: LaunchGrade },
     /// either kernel is untagged — fusion requires both sides to be tagged
-    /// with a real `Domain<R>` fingerprint via `end_trace_for_domain`.
+    /// with a real `Domain<R>` fingerprint via `trace_for_domain`.
     UntaggedKernel,
     NumericalPolicyMismatch {
         a: NumericalPolicy,
@@ -257,7 +263,7 @@ impl std::fmt::Display for FusionError {
             }
             FusionError::UntaggedKernel => write!(
                 f,
-                "fuse: at least one kernel is untagged; tag both via `end_trace_for_domain`"
+                "fuse: at least one kernel is untagged; tag both via `trace_for_domain`"
             ),
             FusionError::NumericalPolicyMismatch { a, b } => {
                 write!(f, "fuse: numerical-policy mismatch — a={a:?}, b={b:?}")
@@ -278,9 +284,18 @@ impl std::fmt::Display for FusionError {
 }
 impl std::error::Error for FusionError {}
 
+/// the invariant brand tying a symbolic value to the trace that owns it. the
+/// lifetime appears in both covariant and contravariant position, so two
+/// distinct trace scopes can never unify their brands.
+type Brand<'t> = std::marker::PhantomData<fn(&'t ()) -> &'t ()>;
+
 /// the active trace: graph + the manifest accumulated as field reads / scalar params /
 /// coord references are recorded. dedup sets keep the manifest first-seen-unique.
 pub struct GvTrace {
+    /// process-unique generation stamp minted at trace open. every node handle
+    /// carries its trace's stamp, and recording verifies the stamps agree —
+    /// the runtime backstop for the `'t` brand across nested traces.
+    id: u64,
     graph: Graph,
     field_inputs: Vec<(InputKey, FieldBind)>,
     field_keys: HashSet<InputKey>,
@@ -300,7 +315,9 @@ thread_local! {
 }
 
 fn fresh_trace() -> GvTrace {
+    static NEXT_TRACE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     GvTrace {
+        id: NEXT_TRACE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         graph: Graph::new(),
         field_inputs: Vec::new(),
         field_keys: HashSet::new(),
@@ -312,83 +329,11 @@ fn fresh_trace() -> GvTrace {
     }
 }
 
-/// open a fresh trace. `Gv` ops between this and `end_trace` record into it.
-///
-/// this low-level compatibility API rejects nesting instead of silently
-/// discarding the active graph. new code should use [`trace`], whose scope is
-/// panic-safe and which isolates a nested trace deliberately.
-pub fn begin_trace() {
-    GV_TRACE.with(|t| {
-        let mut active = t.borrow_mut();
-        assert!(
-            active.is_none(),
-            "begin_trace() while a trace is already active; use trace(|| ...) for deliberate nesting"
-        );
-        *active = Some(fresh_trace());
-    });
-}
-
-/// take the finished trace (graph + manifest) out, closing it.
-///
-/// the resulting kernel is **untagged**, so it stands outside `try_fuse`.
-/// callers indifferent to fusion use this; callers that want the fusion algebra
-/// should prefer `end_trace_for_domain(d)`.
-pub fn end_trace() -> GvKernel {
-    end_trace_with(LaunchGrade::untagged())
-}
-
-/// take the finished trace and tag it with the launch grade of the given
-/// `Domain<R>`. only tagged kernels participate in `try_fuse`.
-pub fn end_trace_for_domain<const R: usize>(d: &Domain<R>) -> GvKernel {
-    end_trace_with(LaunchGrade::from_domain(d))
-}
-
-/// the underlying take-and-tag. exposed for symmetry with `noop`; most callers
-/// should go through `end_trace_for_domain` instead.
-pub fn end_trace_with(grade: LaunchGrade) -> GvKernel {
-    let t = GV_TRACE
-        .with(|t| t.borrow_mut().take())
-        .expect("end_trace() without begin_trace()");
-    GvKernel {
-        graph: t.graph,
-        field_inputs: t.field_inputs,
-        scalar_params: t.scalar_params,
-        coord_components: t.coord_components,
-        grade,
-        numerical_policy: NumericalPolicy::StrictIeee,
-        tile_spec: None,
-        output_support: None,
-        node_supports: t.node_supports,
-    }
-}
-
-/// tag a traced value with a support ball: the builder asserts the value is
-/// exactly zero (f64) outside |x - center| > radius for every field input —
-/// the saturation lemma, stated where the mask that makes it true is built.
-/// consumed by `GvKernel::with_derived_support`, which propagates tags to the
-/// write roots; validated downstream by the compiled-kernel support sampler.
-pub fn tag_support_ball(
-    v: &Gv,
-    center: Vec<crate::support::ParamExpr>,
-    radius: crate::support::ParamExpr,
-) {
-    GV_TRACE.with(|t| {
-        let mut b = t.borrow_mut();
-        let tr = b
-            .as_mut()
-            .expect("tag_support_ball outside an active trace");
-        tr.node_supports.insert(
-            v.node(),
-            crate::support_infer::SupportBall { center, radius },
-        );
-    });
-}
-
 /// restores the trace that surrounded a scoped [`trace`] call.
 ///
-/// `Drop` is load-bearing: if tracing or `end_trace` panics, unwinding discards
-/// the incomplete inner graph and reinstates the outer graph before the panic
-/// can be caught. the ambient slot therefore behaves transactionally.
+/// `Drop` is load-bearing: if the closure panics, unwinding discards the
+/// incomplete inner graph and reinstates the outer graph before the panic can
+/// be caught. the ambient slot therefore behaves transactionally.
 struct TraceScope {
     previous: Option<GvTrace>,
 }
@@ -404,24 +349,269 @@ impl Drop for TraceScope {
 /// run `f` in a fresh isolated trace, returning the finished untagged kernel
 /// and the closure's ordinary result.
 ///
-/// an outer trace, if present, is restored on both normal return and panic.
-/// deliberate nesting is therefore explicit and cannot overwrite the outer
-/// graph. this is the sanctioned construction API; `begin_trace` / `end_trace`
-/// remain temporarily for migration of existing builders.
-pub fn trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
+/// the closure receives a [`TraceCx`] token branded with a lifetime unique to
+/// this call; every symbolic value it mints carries that brand, so the value
+/// is usable only inside the closure and only with values of the same trace.
+/// an enclosing trace, if present, is restored on both normal return and
+/// panic, so deliberate nesting is explicit and cannot overwrite the outer
+/// graph.
+///
+/// the resulting kernel is **untagged**, so it stands outside `try_fuse`.
+/// callers that want the fusion algebra use [`trace_for_domain`].
+///
+/// the brand makes escape a compile error:
+///
+/// ```compile_fail
+/// use symbi_ir::{trace, TraceCx};
+/// let (_kernel, leaked) = trace(|cx: TraceCx| cx.lit(1.0));
+/// ```
+///
+/// as is smuggling through a captured slot:
+///
+/// ```compile_fail
+/// use symbi_ir::{trace, Gv, TraceCx};
+/// let mut slot = None;
+/// trace(|cx: TraceCx| slot = Some(cx.lit(1.0)));
+/// ```
+///
+/// and cross-trace arithmetic:
+///
+/// ```compile_fail
+/// use symbi_ir::{trace, TraceCx};
+/// trace(|outer: TraceCx| {
+///     let a = outer.lit(1.0);
+///     trace(move |inner: TraceCx| {
+///         let b = inner.lit(2.0);
+///         let _ = a + b; // distinct brands
+///     });
+/// });
+/// ```
+pub fn trace<R>(f: impl for<'t> FnOnce(TraceCx<'t>) -> R) -> (GvKernel, R) {
+    trace_with(LaunchGrade::untagged(), f)
+}
+
+/// [`trace`], with the finished kernel tagged with the launch grade of the
+/// given `Domain<R>`. only tagged kernels participate in `try_fuse`.
+pub fn trace_for_domain<const D: usize, R>(
+    d: &Domain<D>,
+    f: impl for<'t> FnOnce(TraceCx<'t>) -> R,
+) -> (GvKernel, R) {
+    trace_with(LaunchGrade::from_domain(d), f)
+}
+
+/// the underlying open-run-close. exposed for callers that already hold a
+/// [`LaunchGrade`]; most go through [`trace`] or [`trace_for_domain`].
+pub fn trace_with<R>(grade: LaunchGrade, f: impl for<'t> FnOnce(TraceCx<'t>) -> R) -> (GvKernel, R) {
     let previous = GV_TRACE.with(|slot| slot.borrow_mut().take());
     let scope = TraceScope { previous };
     GV_TRACE.with(|slot| *slot.borrow_mut() = Some(fresh_trace()));
 
-    let result = f();
-    let kernel = end_trace();
+    let result = f(TraceCx {
+        _brand: std::marker::PhantomData,
+    });
+
+    let t = GV_TRACE
+        .with(|slot| slot.borrow_mut().take())
+        .expect("the trace closure ran with the trace slot filled");
     drop(scope);
+    let kernel = GvKernel {
+        graph: t.graph,
+        field_inputs: t.field_inputs,
+        scalar_params: t.scalar_params,
+        coord_components: t.coord_components,
+        grade,
+        numerical_policy: NumericalPolicy::StrictIeee,
+        tile_spec: None,
+        output_support: None,
+        node_supports: t.node_supports,
+    };
     (kernel, result)
 }
 
-/// compatibility name for [`trace`].
-pub fn in_isolated_trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
-    trace(f)
+/// the capability token for the trace scope opened by [`trace`]. Copy and
+/// zero-sized; its only state is the brand lifetime `'t`, which every minted
+/// `Gv<'t>` inherits. construction is private to [`trace_with`], so holding a
+/// `TraceCx` proves a trace is active.
+#[derive(Clone, Copy)]
+pub struct TraceCx<'t> {
+    _brand: Brand<'t>,
+}
+
+impl<'t> TraceCx<'t> {
+    /// a literal value awaiting materialization; touches the graph only when
+    /// first used in an operation. equivalent to `Gv::from_f64`, spelled on
+    /// the token for symmetry with the node-minting constructors.
+    pub fn lit(self, v: f64) -> Gv<'t> {
+        Gv(GvVal::Lit(v), std::marker::PhantomData)
+    }
+
+    /// brand a raw graph node built through [`Self::with_trace`]. the node is
+    /// stamped with the active trace, so it participates in carrier arithmetic
+    /// exactly like a minted value.
+    pub fn gv(self, node: NodeId) -> Gv<'t> {
+        Gv::of(node)
+    }
+
+    /// a fresh scalar param node named `name`, held out of the ABI manifest
+    /// (a bare leaf for unit tests). production inputs use `field` / `scalar`.
+    pub fn param(self, name: &str) -> Gv<'t> {
+        Gv::of(with_trace(|t| {
+            t.graph.add_scalar_param(name, ElementTy::F64)
+        }))
+    }
+
+    /// a per-cell field read: `key` is the IR-side buffer-load name, `runtime` the
+    /// dotted path the dispatch binds the buffer to (e.g., `"cons.den"`). recorded
+    /// (deduped) in the kernel ABI manifest — this is the input binding for a
+    /// carrier-generic physics fn instantiated at Gv.
+    pub fn field(self, key: &str, runtime: impl Into<FieldBind>) -> Gv<'t> {
+        let runtime = runtime.into();
+        Gv::of(with_trace(|t| {
+            assert!(
+                !t.scalar_keys.iter().any(|scalar| scalar.as_str() == key),
+                "graph ABI name `{key}` cannot be both a field input and scalar parameter",
+            );
+            let id = t.graph.add_scalar_param(key, ElementTy::F64);
+            let key = InputKey::new(key);
+            if t.field_keys.insert(key.clone()) {
+                t.field_inputs.push((key, runtime));
+            }
+            id
+        }))
+    }
+
+    /// a shifted per-cell field read for stencils (PLM reconstruction): the field `key`
+    /// loaded at `cell + offset` along `axis`, over an `ndim`-spatial grid. `offset == 0`
+    /// is the direct cell read (`Self::field`); nonzero builds the integer coord arithmetic
+    /// (`_coord_axis + offset`) + a `LoadAt`, registering the field and the coord axes in
+    /// the manifest. codegen-only: a stencil reaches past the pointwise `Scalar` surface,
+    /// so it lives on the trace token (the host runtime reads neighbors straight from the
+    /// Field buffer; the traced kernel is what needs the explicit `load_at`).
+    pub fn field_shifted(
+        self,
+        key: &str,
+        runtime: impl Into<FieldBind>,
+        ndim: u8,
+        axis: u8,
+        offset: i32,
+    ) -> Gv<'t> {
+        let runtime = runtime.into();
+        if offset == 0 {
+            return self.field(key, runtime);
+        }
+        Gv::of(with_trace(|t| {
+            assert!(
+                !t.scalar_keys.iter().any(|scalar| scalar.as_str() == key),
+                "graph ABI name `{key}` cannot be both a field input and scalar parameter",
+            );
+            // register the field (the LoadAt resolves the buffer by this key, deduped).
+            let input_key = InputKey::new(key);
+            if t.field_keys.insert(input_key.clone()) {
+                t.field_inputs.push((input_key, runtime));
+            }
+            let comps: Vec<NodeId> = (0..ndim).map(|ax| coord_node(t, ax)).collect();
+            let off = t.graph.add_const(ConstValue::I32(offset), None);
+            let mut shifted = comps.clone();
+            shifted[axis as usize] =
+                t.graph
+                    .element_wise(ElementWiseOp::Add, vec![comps[axis as usize], off], None);
+            t.graph.load_at(Symbol::intern(key), shifted, None)
+        }))
+    }
+
+    /// read a field at a multi-axis integer offset from the current cell — the
+    /// halo-stencil primitive for operators that read diagonals (e.g. the
+    /// viscous transverse gradient). `field_shifted` is the single-axis case.
+    /// `offsets[ax]` is the per-axis shift; `offsets.len()` must be `ndim`.
+    pub fn field_offset(
+        self,
+        key: &str,
+        runtime: impl Into<FieldBind>,
+        ndim: u8,
+        offsets: &[i32],
+    ) -> Gv<'t> {
+        assert_eq!(
+            offsets.len(),
+            ndim as usize,
+            "field_offset: one offset per axis"
+        );
+        let runtime = runtime.into();
+        if offsets.iter().all(|&o| o == 0) {
+            return self.field(key, runtime);
+        }
+        Gv::of(with_trace(|t| {
+            assert!(
+                !t.scalar_keys.iter().any(|scalar| scalar.as_str() == key),
+                "graph ABI name `{key}` cannot be both a field input and scalar parameter",
+            );
+            let input_key = InputKey::new(key);
+            if t.field_keys.insert(input_key.clone()) {
+                t.field_inputs.push((input_key, runtime));
+            }
+            let mut shifted: Vec<NodeId> = (0..ndim).map(|ax| coord_node(t, ax)).collect();
+            for (ax, &o) in offsets.iter().enumerate() {
+                if o != 0 {
+                    let off = t.graph.add_const(ConstValue::I32(o), None);
+                    shifted[ax] =
+                        t.graph
+                            .element_wise(ElementWiseOp::Add, vec![shifted[ax], off], None);
+                }
+            }
+            t.graph.load_at(Symbol::intern(key), shifted, None)
+        }))
+    }
+
+    /// a scalar kernel param (e.g., `gamma`), recorded (deduped) in the manifest signature.
+    pub fn scalar(self, name: &str) -> Gv<'t> {
+        Gv::of(with_trace(|t| {
+            assert!(
+                !t.field_keys.iter().any(|field| field.as_str() == name),
+                "graph ABI name `{name}` cannot be both a scalar parameter and field input",
+            );
+            let id = t.graph.add_scalar_param(name, ElementTy::F64);
+            let name = ScalarParam::new(name);
+            if t.scalar_keys.insert(name.clone()) {
+                t.scalar_params.push(name);
+            }
+            id
+        }))
+    }
+
+    /// the cell coordinate along spatial `axis` as a Gv value — the index->physical bridge for
+    /// in-kernel geometry. it is the integer `_coord_N` (recorded in the coord manifest, like
+    /// `field_shifted`); arithmetic against the f64 grid scalars (`x_lo_d`, `dx_d`) auto-promotes
+    /// at lowering (the IR's usual arithmetic conversions), so positions, scale factors, and cell
+    /// widths trace as pure Gv expressions. this is what lets the substrate geometry (curvilinear
+    /// metric, cell areas/volumes) be a Gv trace built directly from the cell index.
+    pub fn coord(self, axis: u8) -> Gv<'t> {
+        Gv::of(with_trace(|t| coord_node(t, axis)))
+    }
+
+    /// run a closure with mutable access to the active trace — the raw-IR door
+    /// for discretization builders (integer index arithmetic, select, load_at).
+    pub fn with_trace<R>(self, f: impl FnOnce(&mut GvTrace) -> R) -> R {
+        with_trace(f)
+    }
+
+    /// tag a traced value with a support ball: the builder asserts the value is
+    /// exactly zero (f64) outside |x - center| > radius for every field input —
+    /// the saturation lemma, stated where the mask that makes it true is built.
+    /// consumed by `GvKernel::with_derived_support`, which propagates tags to the
+    /// write roots; validated downstream by the compiled-kernel support sampler.
+    pub fn tag_support_ball(
+        self,
+        v: &Gv<'t>,
+        center: Vec<crate::support::ParamExpr>,
+        radius: crate::support::ParamExpr,
+    ) {
+        let node = v.node();
+        with_trace(|t| {
+            t.node_supports.insert(
+                node,
+                crate::support_infer::SupportBall { center, radius },
+            );
+        });
+    }
 }
 
 impl GvKernel {
@@ -806,12 +996,14 @@ fn coord_node(t: &mut GvTrace, ax: u8) -> NodeId {
     id
 }
 
-/// run a closure with mutable access to the active trace.
-pub fn with_trace<R>(f: impl FnOnce(&mut GvTrace) -> R) -> R {
+/// run a closure with mutable access to the active trace. crate-internal; the
+/// contributor-facing door is `TraceCx::with_trace`, whose brand proves a
+/// trace is open.
+pub(crate) fn with_trace<R>(f: impl FnOnce(&mut GvTrace) -> R) -> R {
     GV_TRACE.with(|t| {
         let mut b = t.borrow_mut();
         f(b.as_mut()
-            .expect("Gv op outside an active trace — call begin_trace() first"))
+            .expect("Gv op outside an active trace — enter one via trace(|cx| ...)"))
     })
 }
 
@@ -864,15 +1056,18 @@ impl GvTrace {
     }
 }
 
-/// a graph value: either a traced node, or a literal awaiting materialization.
+/// a graph value: either a traced node stamped with its trace generation, or
+/// a literal awaiting materialization.
 #[derive(Clone, Copy, Debug)]
 enum GvVal {
-    Node(NodeId),
+    Node(NodeId, u64),
     Lit(f64),
 }
 
 /// the tracing scalar carrier. `Copy` (a NodeId or a literal); every operation
-/// records a node into the thread-local trace graph.
+/// records a node into the active trace graph. the `'t` brand ties the value
+/// to the [`trace`] scope whose `TraceCx` minted it: escaping the scope or
+/// combining values across scopes fails to compile.
 ///
 /// a traced graph value carries no physical order or equality: `Scalar` leaves
 /// `PartialOrd`/`PartialEq` out of its bounds, and `Gv` leaves them unimplemented.
@@ -881,241 +1076,135 @@ enum GvVal {
 /// rejects them at compile time:
 ///
 /// ```compile_fail
-/// use symbi_ir::Gv;
-/// let a = Gv::param("a");
-/// let b = Gv::param("b");
-/// let _ = a < b; // no `PartialOrd` for `Gv` — must use `cmp_lt`
+/// use symbi_ir::{trace, TraceCx};
+/// trace(|cx: TraceCx| {
+///     let a = cx.param("a");
+///     let b = cx.param("b");
+///     let _ = a < b; // no `PartialOrd` for `Gv` — must use `cmp_lt`
+/// });
 /// ```
 #[derive(Clone, Copy, Debug)]
-pub struct Gv(GvVal);
+pub struct Gv<'t>(GvVal, Brand<'t>);
 
-impl Gv {
-    /// a fresh scalar param node named `name`, held out of the ABI manifest
-    /// (a bare leaf for unit tests). production inputs use `field` / `scalar`.
-    pub fn param(name: &str) -> Gv {
-        Gv(GvVal::Node(with_trace(|t| {
-            t.graph.add_scalar_param(name, ElementTy::F64)
-        })))
-    }
-
-    /// a per-cell field read: `key` is the IR-side buffer-load name, `runtime` the
-    /// dotted path the dispatch binds the buffer to (e.g., `"cons.den"`). recorded
-    /// (deduped) in the kernel ABI manifest — this is the input binding for a
-    /// carrier-generic physics fn instantiated at Gv.
-    pub fn field(key: &str, runtime: impl Into<FieldBind>) -> Gv {
-        let runtime = runtime.into();
-        Gv(GvVal::Node(with_trace(|t| {
-            assert!(
-                !t.scalar_keys.iter().any(|scalar| scalar.as_str() == key),
-                "graph ABI name `{key}` cannot be both a field input and scalar parameter",
-            );
-            let id = t.graph.add_scalar_param(key, ElementTy::F64);
-            let key = InputKey::new(key);
-            if t.field_keys.insert(key.clone()) {
-                t.field_inputs.push((key, runtime));
-            }
-            id
-        })))
-    }
-
-    /// a shifted per-cell field read for stencils (PLM reconstruction): the field `key`
-    /// loaded at `cell + offset` along `axis`, over an `ndim`-spatial grid. `offset == 0`
-    /// is the direct cell read (`Gv::field`); nonzero builds the integer coord arithmetic
-    /// (`_coord_axis + offset`) + a `LoadAt`, registering the field and the coord axes in
-    /// the manifest. codegen-only: a stencil reaches past the pointwise `Scalar` surface,
-    /// so it lives as a Gv method (the host runtime reads neighbors straight from the
-    /// Field buffer; the traced kernel is what needs the explicit `load_at`).
-    pub fn field_shifted(
-        key: &str,
-        runtime: impl Into<FieldBind>,
-        ndim: u8,
-        axis: u8,
-        offset: i32,
-    ) -> Gv {
-        let runtime = runtime.into();
-        if offset == 0 {
-            return Gv::field(key, runtime);
-        }
-        Gv(GvVal::Node(with_trace(|t| {
-            assert!(
-                !t.scalar_keys.iter().any(|scalar| scalar.as_str() == key),
-                "graph ABI name `{key}` cannot be both a field input and scalar parameter",
-            );
-            // register the field (the LoadAt resolves the buffer by this key, deduped).
-            let input_key = InputKey::new(key);
-            if t.field_keys.insert(input_key.clone()) {
-                t.field_inputs.push((input_key, runtime));
-            }
-            let comps: Vec<NodeId> = (0..ndim).map(|ax| coord_node(t, ax)).collect();
-            let off = t.graph.add_const(ConstValue::I32(offset), None);
-            let mut shifted = comps.clone();
-            shifted[axis as usize] =
-                t.graph
-                    .element_wise(ElementWiseOp::Add, vec![comps[axis as usize], off], None);
-            t.graph.load_at(Symbol::intern(key), shifted, None)
-        })))
-    }
-
-    /// read a field at a multi-axis integer offset from the current cell — the
-    /// halo-stencil primitive for operators that read diagonals (e.g. the
-    /// viscous transverse gradient). `field_shifted` is the single-axis case.
-    /// `offsets[ax]` is the per-axis shift; `offsets.len()` must be `ndim`.
-    pub fn field_offset(key: &str, runtime: impl Into<FieldBind>, ndim: u8, offsets: &[i32]) -> Gv {
-        assert_eq!(
-            offsets.len(),
-            ndim as usize,
-            "field_offset: one offset per axis"
-        );
-        let runtime = runtime.into();
-        if offsets.iter().all(|&o| o == 0) {
-            return Gv::field(key, runtime);
-        }
-        Gv(GvVal::Node(with_trace(|t| {
-            assert!(
-                !t.scalar_keys.iter().any(|scalar| scalar.as_str() == key),
-                "graph ABI name `{key}` cannot be both a field input and scalar parameter",
-            );
-            let input_key = InputKey::new(key);
-            if t.field_keys.insert(input_key.clone()) {
-                t.field_inputs.push((input_key, runtime));
-            }
-            let mut shifted: Vec<NodeId> = (0..ndim).map(|ax| coord_node(t, ax)).collect();
-            for (ax, &o) in offsets.iter().enumerate() {
-                if o != 0 {
-                    let off = t.graph.add_const(ConstValue::I32(o), None);
-                    shifted[ax] =
-                        t.graph
-                            .element_wise(ElementWiseOp::Add, vec![shifted[ax], off], None);
-                }
-            }
-            t.graph.load_at(Symbol::intern(key), shifted, None)
-        })))
-    }
-
-    /// a scalar kernel param (e.g., `gamma`), recorded (deduped) in the manifest signature.
-    pub fn scalar(name: &str) -> Gv {
-        Gv(GvVal::Node(with_trace(|t| {
-            assert!(
-                !t.field_keys.iter().any(|field| field.as_str() == name),
-                "graph ABI name `{name}` cannot be both a scalar parameter and field input",
-            );
-            let id = t.graph.add_scalar_param(name, ElementTy::F64);
-            let name = ScalarParam::new(name);
-            if t.scalar_keys.insert(name.clone()) {
-                t.scalar_params.push(name);
-            }
-            id
-        })))
-    }
-
-    /// the cell coordinate along spatial `axis` as a Gv value — the index->physical bridge for
-    /// in-kernel geometry. it is the integer `_coord_N` (recorded in the coord manifest, like
-    /// `field_shifted`); arithmetic against the f64 grid scalars (`x_lo_d`, `dx_d`) auto-promotes
-    /// at lowering (the IR's usual arithmetic conversions), so positions, scale factors, and cell
-    /// widths trace as pure Gv expressions. this is what lets the substrate geometry (curvilinear
-    /// metric, cell areas/volumes) be a Gv trace built directly from the cell index.
-    pub fn coord(axis: u8) -> Gv {
-        Gv(GvVal::Node(with_trace(|t| coord_node(t, axis))))
-    }
-
+impl<'t> Gv<'t> {
     /// the NodeId this value resolves to, materializing a literal to a `Const`
     /// node on demand (a literal touches the graph only here, on first use). pub so a gv
     /// builder in symbi-discretize can extract its write roots.
+    ///
+    /// a node handle carries the generation stamp of the trace that minted it;
+    /// resolving it inside a different (nested) trace is a cross-graph use and
+    /// panics here, at the recording site.
     pub fn node(self) -> NodeId {
         match self.0 {
-            GvVal::Node(n) => n,
+            GvVal::Node(n, stamp) => {
+                let active = with_trace(|t| t.id);
+                assert!(
+                    stamp == active,
+                    "Gv value belongs to a different trace — a value minted in an enclosing \
+                     trace cannot be used inside a nested one"
+                );
+                n
+            }
             GvVal::Lit(v) => with_trace(|t| t.graph.add_const(ConstValue::F64(v), None)),
         }
     }
 
+    /// wrap a node of the active trace, stamping it with the trace generation.
+    /// crate-internal; builders go through `TraceCx::gv`.
     #[inline]
-    pub fn of(n: NodeId) -> Gv {
-        Gv(GvVal::Node(n))
+    pub(crate) fn of(n: NodeId) -> Gv<'t> {
+        let stamp = with_trace(|t| t.id);
+        Gv(GvVal::Node(n, stamp), std::marker::PhantomData)
     }
 
     #[inline]
-    fn binop(self, rhs: Gv, op: ElementWiseOp) -> Gv {
+    const fn lit(v: f64) -> Gv<'t> {
+        Gv(GvVal::Lit(v), std::marker::PhantomData)
+    }
+
+    #[inline]
+    fn binop(self, rhs: Gv<'t>, op: ElementWiseOp) -> Gv<'t> {
         let a = self.node();
         let b = rhs.node();
         Gv::of(with_trace(|t| t.graph.element_wise(op, vec![a, b], None)))
     }
 
     #[inline]
-    fn unop(self, op: ElementWiseOp) -> Gv {
+    fn unop(self, op: ElementWiseOp) -> Gv<'t> {
         let x = self.node();
         Gv::of(with_trace(|t| t.graph.element_wise(op, vec![x], None)))
     }
 }
 
 // ---- std::ops: record element-wise nodes ----
-impl Add for Gv {
-    type Output = Gv;
-    fn add(self, r: Gv) -> Gv {
+impl<'t> Add for Gv<'t> {
+    type Output = Gv<'t>;
+    fn add(self, r: Gv<'t>) -> Gv<'t> {
         self.binop(r, ElementWiseOp::Add)
     }
 }
-impl Sub for Gv {
-    type Output = Gv;
-    fn sub(self, r: Gv) -> Gv {
+impl<'t> Sub for Gv<'t> {
+    type Output = Gv<'t>;
+    fn sub(self, r: Gv<'t>) -> Gv<'t> {
         self.binop(r, ElementWiseOp::Sub)
     }
 }
-impl Mul for Gv {
-    type Output = Gv;
-    fn mul(self, r: Gv) -> Gv {
+impl<'t> Mul for Gv<'t> {
+    type Output = Gv<'t>;
+    fn mul(self, r: Gv<'t>) -> Gv<'t> {
         self.binop(r, ElementWiseOp::Mul)
     }
 }
-impl Div for Gv {
-    type Output = Gv;
-    fn div(self, r: Gv) -> Gv {
+impl<'t> Div for Gv<'t> {
+    type Output = Gv<'t>;
+    fn div(self, r: Gv<'t>) -> Gv<'t> {
         self.binop(r, ElementWiseOp::Div)
     }
 }
-impl Neg for Gv {
-    type Output = Gv;
-    fn neg(self) -> Gv {
+impl<'t> Neg for Gv<'t> {
+    type Output = Gv<'t>;
+    fn neg(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Neg)
     }
 }
-impl AddAssign for Gv {
-    fn add_assign(&mut self, r: Gv) {
+impl<'t> AddAssign for Gv<'t> {
+    fn add_assign(&mut self, r: Gv<'t>) {
         *self = *self + r;
     }
 }
-impl SubAssign for Gv {
-    fn sub_assign(&mut self, r: Gv) {
+impl<'t> SubAssign for Gv<'t> {
+    fn sub_assign(&mut self, r: Gv<'t>) {
         *self = *self - r;
     }
 }
-impl MulAssign for Gv {
-    fn mul_assign(&mut self, r: Gv) {
+impl<'t> MulAssign for Gv<'t> {
+    fn mul_assign(&mut self, r: Gv<'t>) {
         *self = *self * r;
     }
 }
-impl DivAssign for Gv {
-    fn div_assign(&mut self, r: Gv) {
+impl<'t> DivAssign for Gv<'t> {
+    fn div_assign(&mut self, r: Gv<'t>) {
         *self = *self / r;
     }
 }
 
-impl std::iter::Sum for Gv {
-    fn sum<I: Iterator<Item = Gv>>(iter: I) -> Gv {
+impl<'t> std::iter::Sum for Gv<'t> {
+    fn sum<I: Iterator<Item = Gv<'t>>>(iter: I) -> Gv<'t> {
         // direct construction; zero comes from `<Gv as crate::algebra::Scalar>::ZERO`
         // but qualifying inline keeps this independent of import scope.
-        iter.fold(Gv(GvVal::Lit(0.0)), |a, b| a + b)
+        iter.fold(Gv::lit(0.0), |a, b| a + b)
     }
 }
 
-impl Default for Gv {
+impl<'t> Default for Gv<'t> {
     // direct construction (matches `<Gv as crate::algebra::Scalar>::ZERO`); kept as
     // a direct expression to stay independent of the trait import scope.
-    fn default() -> Gv {
-        Gv(GvVal::Lit(0.0))
+    fn default() -> Gv<'t> {
+        Gv::lit(0.0)
     }
 }
 
-impl std::fmt::Display for Gv {
+impl<'t> std::fmt::Display for Gv<'t> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.0)
     }
@@ -1123,8 +1212,8 @@ impl std::fmt::Display for Gv {
 
 // Gv is a Copy fixed-size handle whose lifetime is the build-time trace; it lives in the
 // trace alone, so the `Field<Gv>` buffer-layout contract holds vacuously.
-unsafe impl FieldElement for Gv {
-    type Scalar = Gv;
+unsafe impl<'t> FieldElement for Gv<'t> {
+    type Scalar = Gv<'t>;
 }
 
 // structural numeric impl — satisfies the in-crate `Tensor` / `Matrix` / `Indexed`
@@ -1132,12 +1221,12 @@ unsafe impl FieldElement for Gv {
 // ops the production `Scalar` impl below uses. `symbi_algebra::Numeric` is the minimal
 // subset that breaks the `symbi-algebra` <-> `symbi-ir` dep cycle for `Tensor`'s
 // scalar-bounded methods; the production carrier-generic surface is `Scalar`.
-impl symbi_algebra::algebra::Numeric for Gv {
-    const ZERO: Self = Gv(GvVal::Lit(0.0));
-    const ONE: Self = Gv(GvVal::Lit(1.0));
+impl<'t> symbi_algebra::algebra::Numeric for Gv<'t> {
+    const ZERO: Self = Gv::lit(0.0);
+    const ONE: Self = Gv::lit(1.0);
     #[inline]
     fn from_f64(v: f64) -> Self {
-        Gv(GvVal::Lit(v))
+        Gv::lit(v)
     }
     #[inline]
     fn sqrt(self) -> Self {
@@ -1172,12 +1261,12 @@ impl symbi_algebra::algebra::Numeric for Gv {
 /// type-safe Mask wrapper for Gv. wraps a Gv carrying a Bool-typed graph
 /// node. `pub(crate)` constructor — `Scalar::cmp_*` is the sole producer.
 #[derive(Copy, Clone, Debug)]
-pub struct GvMask(pub(crate) Gv);
+pub struct GvMask<'t>(pub(crate) Gv<'t>);
 
-impl std::ops::BitAnd for GvMask {
-    type Output = GvMask;
+impl<'t> std::ops::BitAnd for GvMask<'t> {
+    type Output = GvMask<'t>;
     #[inline]
-    fn bitand(self, rhs: GvMask) -> GvMask {
+    fn bitand(self, rhs: GvMask<'t>) -> GvMask<'t> {
         let a = self.0.node();
         let b = rhs.0.node();
         GvMask(Gv::of(with_trace(|t| {
@@ -1187,10 +1276,10 @@ impl std::ops::BitAnd for GvMask {
     }
 }
 
-impl std::ops::BitOr for GvMask {
-    type Output = GvMask;
+impl<'t> std::ops::BitOr for GvMask<'t> {
+    type Output = GvMask<'t>;
     #[inline]
-    fn bitor(self, rhs: GvMask) -> GvMask {
+    fn bitor(self, rhs: GvMask<'t>) -> GvMask<'t> {
         let a = self.0.node();
         let b = rhs.0.node();
         GvMask(Gv::of(with_trace(|t| {
@@ -1199,10 +1288,10 @@ impl std::ops::BitOr for GvMask {
     }
 }
 
-impl std::ops::Not for GvMask {
-    type Output = GvMask;
+impl<'t> std::ops::Not for GvMask<'t> {
+    type Output = GvMask<'t>;
     #[inline]
-    fn not(self) -> GvMask {
+    fn not(self) -> GvMask<'t> {
         let a = self.0.node();
         GvMask(Gv::of(with_trace(|t| {
             t.graph.element_wise(ElementWiseOp::BitNot, vec![a], None)
@@ -1210,19 +1299,19 @@ impl std::ops::Not for GvMask {
     }
 }
 
-impl crate::algebra::Mask for GvMask {}
+impl<'t> crate::algebra::Mask for GvMask<'t> {}
 
-impl crate::algebra::Scalar for Gv {
-    type Mask = GvMask;
+impl<'t> crate::algebra::Scalar for Gv<'t> {
+    type Mask = GvMask<'t>;
 
     // zero / one inherited from `Numeric for Gv`.
-    const INFINITY: Gv = Gv(GvVal::Lit(f64::INFINITY));
-    const NEG_INFINITY: Gv = Gv(GvVal::Lit(f64::NEG_INFINITY));
-    const NAN: Gv = Gv(GvVal::Lit(f64::NAN));
-    const HALF: Gv = Gv(GvVal::Lit(0.5));
-    const TWO: Gv = Gv(GvVal::Lit(2.0));
-    const THREE: Gv = Gv(GvVal::Lit(3.0));
-    const FOUR: Gv = Gv(GvVal::Lit(4.0));
+    const INFINITY: Gv<'t> = Gv::lit(f64::INFINITY);
+    const NEG_INFINITY: Gv<'t> = Gv::lit(f64::NEG_INFINITY);
+    const NAN: Gv<'t> = Gv::lit(f64::NAN);
+    const HALF: Gv<'t> = Gv::lit(0.5);
+    const TWO: Gv<'t> = Gv::lit(2.0);
+    const THREE: Gv<'t> = Gv::lit(3.0);
+    const FOUR: Gv<'t> = Gv::lit(4.0);
 
     // from_f64 inherited from `Numeric for Gv`.
 
@@ -1232,7 +1321,7 @@ impl crate::algebra::Scalar for Gv {
             // host-boundary escape — see `crate::algebra::Scalar::to_f64` doc.
             // a `Gv` on a traced node is a graph handle; extracting a concrete
             // value inside carrier-generic physics breaks the homomorphism.
-            GvVal::Node(_) => panic!(
+            GvVal::Node(..) => panic!(
                 "Gv::to_f64 on a traced node — carrier-generic physics must decide with \
                  cmp_*/select, not extract a concrete value"
             ),
@@ -1240,23 +1329,23 @@ impl crate::algebra::Scalar for Gv {
     }
 
     // ── comparisons return GvMask — the Mask discipline ──────────
-    fn cmp_lt(self, o: Gv) -> GvMask {
+    fn cmp_lt(self, o: Gv<'t>) -> GvMask<'t> {
         GvMask(self.binop(o, ElementWiseOp::Lt))
     }
-    fn cmp_le(self, o: Gv) -> GvMask {
+    fn cmp_le(self, o: Gv<'t>) -> GvMask<'t> {
         GvMask(self.binop(o, ElementWiseOp::Le))
     }
-    fn cmp_gt(self, o: Gv) -> GvMask {
+    fn cmp_gt(self, o: Gv<'t>) -> GvMask<'t> {
         GvMask(self.binop(o, ElementWiseOp::Gt))
     }
-    fn cmp_ge(self, o: Gv) -> GvMask {
+    fn cmp_ge(self, o: Gv<'t>) -> GvMask<'t> {
         GvMask(self.binop(o, ElementWiseOp::Ge))
     }
-    fn cmp_eq(self, o: Gv) -> GvMask {
+    fn cmp_eq(self, o: Gv<'t>) -> GvMask<'t> {
         GvMask(self.binop(o, ElementWiseOp::Eq))
     }
 
-    fn select(m: GvMask, yes: Gv, no: Gv) -> Gv {
+    fn select(m: GvMask<'t>, yes: Gv<'t>, no: Gv<'t>) -> Gv<'t> {
         let c = m.0.node();
         let y = yes.node();
         let n = no.node();
@@ -1312,7 +1401,7 @@ impl crate::algebra::Scalar for Gv {
     // created before the closures, so they fall outside both ranges and stay in
     // the outer body (computed once). cross-arm / leaks-outside hash-cons
     // sharing is resolved by scalarize's eviction pass, exactly as for Scope.
-    fn cond(m: GvMask, t: impl FnOnce() -> Gv, f: impl FnOnce() -> Gv) -> Gv {
+    fn cond(m: GvMask<'t>, t: impl FnOnce() -> Gv<'t>, f: impl FnOnce() -> Gv<'t>) -> Gv<'t> {
         let cond_node = m.0.node();
         let t_mark = with_trace(|tr| tr.graph.len());
         let t_res = t().node();
@@ -1345,10 +1434,10 @@ impl crate::algebra::Scalar for Gv {
     // selection) skip the whole quartic on the fast path. mirrors `cond` per
     // arm, adding the N-element result vectors + the projections.
     fn cond_vec<const N: usize>(
-        m: GvMask,
-        t: impl FnOnce() -> [Gv; N],
-        f: impl FnOnce() -> [Gv; N],
-    ) -> [Gv; N] {
+        m: GvMask<'t>,
+        t: impl FnOnce() -> [Gv<'t>; N],
+        f: impl FnOnce() -> [Gv<'t>; N],
+    ) -> [Gv<'t>; N] {
         let cond_node = m.0.node();
         let t_mark = with_trace(|tr| tr.graph.len());
         let t_res = t();
@@ -1378,45 +1467,45 @@ impl crate::algebra::Scalar for Gv {
     }
 
     // sqrt / abs / min / max inherited from `Numeric for Gv`.
-    fn recip(self) -> Gv {
+    fn recip(self) -> Gv<'t> {
         // 1 / self — use the const directly to avoid trait-method ambiguity.
-        let one = Gv(GvVal::Lit(1.0));
+        let one = Gv::lit(1.0);
         one / self
     }
 
     // ── transcendentals (one graph tag: ElementWise) ───
-    fn sin(self) -> Gv {
+    fn sin(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Sin)
     }
-    fn cos(self) -> Gv {
+    fn cos(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Cos)
     }
-    fn tan(self) -> Gv {
+    fn tan(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Tan)
     }
-    fn asin(self) -> Gv {
+    fn asin(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Asin)
     }
-    fn acos(self) -> Gv {
+    fn acos(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Acos)
     }
-    fn atan2(self, o: Gv) -> Gv {
+    fn atan2(self, o: Gv<'t>) -> Gv<'t> {
         let (y, x) = (self.node(), o.node());
         Gv::of(with_trace(|t| {
             t.graph.element_wise(ElementWiseOp::Atan2, vec![y, x], None)
         }))
     }
-    fn exp(self) -> Gv {
+    fn exp(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Exp)
     }
-    fn ln(self) -> Gv {
+    fn ln(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Log)
     }
-    fn log10(self) -> Gv {
+    fn log10(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Log10)
     }
 
-    fn powi(self, n: i32) -> Gv {
+    fn powi(self, n: i32) -> Gv<'t> {
         // lower to repeated multiplication (exponentiation by squaring):
         // `f64::powi` raises a negative base exactly (e.g., (-2)^2 = 4) while CUDA
         // `powf(neg, 2.0)` is NaN, so a `powf` lowering would break carrier equivalence
@@ -1424,11 +1513,11 @@ impl crate::algebra::Scalar for Gv {
         // at trace time, so the multiply chain unrolls into the DAG and the kernel keeps
         // to plain multiplies.
         if n == 0 {
-            return Gv(GvVal::Lit(1.0));
+            return Gv::lit(1.0);
         }
         let mut base = self;
         let mut exp = n.unsigned_abs();
-        let mut acc: Option<Gv> = None;
+        let mut acc: Option<Gv<'t>> = None;
         while exp > 0 {
             if exp & 1 == 1 {
                 acc = Some(match acc {
@@ -1443,39 +1532,39 @@ impl crate::algebra::Scalar for Gv {
         }
         let pos = acc.expect("n != 0 implies acc is set");
         if n < 0 {
-            Gv(GvVal::Lit(1.0)) / pos
+            Gv::lit(1.0) / pos
         } else {
             pos
         }
     }
-    fn powf(self, e: Gv) -> Gv {
+    fn powf(self, e: Gv<'t>) -> Gv<'t> {
         self.binop(e, ElementWiseOp::Pow)
     }
 
-    fn floor(self) -> Gv {
+    fn floor(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Floor)
     }
-    fn ceil(self) -> Gv {
+    fn ceil(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Ceil)
     }
 
     // ── hyperbolics — graph-op lowerings ────────────────
-    fn sinh(self) -> Gv {
+    fn sinh(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Sinh)
     }
-    fn cosh(self) -> Gv {
+    fn cosh(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Cosh)
     }
-    fn tanh(self) -> Gv {
+    fn tanh(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Tanh)
     }
-    fn asinh(self) -> Gv {
+    fn asinh(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Asinh)
     }
-    fn acosh(self) -> Gv {
+    fn acosh(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Acosh)
     }
-    fn atanh(self) -> Gv {
+    fn atanh(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Atanh)
     }
 
@@ -1484,8 +1573,8 @@ impl crate::algebra::Scalar for Gv {
         self,
         max_steps: usize,
         body: impl Fn(Self) -> Self,
-        converged: impl Fn(Self, Self) -> GvMask,
-    ) -> Gv {
+        converged: impl Fn(Self, Self) -> GvMask<'t>,
+    ) -> Gv<'t> {
         // carrier equivalence: the traced kernel returns the value the host loop
         // returns, for every input. freeze on convergence — see the freeze law
         // in `crate::algebra::Scalar::iterate` doc. `conv` also rides as the IR's
@@ -1510,9 +1599,9 @@ impl crate::algebra::Scalar for Gv {
         init: [Self; N],
         max_steps: usize,
         body: impl Fn([Self; N]) -> [Self; N],
-        converged: impl Fn([Self; N], [Self; N]) -> GvMask,
+        converged: impl Fn([Self; N], [Self; N]) -> GvMask<'t>,
         result: usize,
-    ) -> Gv {
+    ) -> Gv<'t> {
         let accs: [NodeId; N] =
             std::array::from_fn(|j| with_trace(|t| t.graph.iter_acc(j as u32, None)));
         let acc_gv: [Gv; N] = accs.map(Gv::of);
@@ -1561,37 +1650,58 @@ mod trace_scope_laws {
 
     #[test]
     fn scoped_trace_restores_outer_trace_after_panic() {
-        begin_trace();
-        let outer = Gv::param("outer");
+        let (kernel, root) = trace(|cx: TraceCx| {
+            let outer = cx.param("outer");
 
-        let panic = catch_unwind(AssertUnwindSafe(|| {
-            let _ = trace(|| {
-                let inner = Gv::param("inner");
-                let _ = inner + Gv(GvVal::Lit(1.0));
-                panic!("deliberate inner-trace failure");
-            });
-        }));
-        assert!(panic.is_err());
+            let panic = catch_unwind(AssertUnwindSafe(|| {
+                let _ = trace(|inner: TraceCx| {
+                    let v = inner.param("inner");
+                    let _ = v + inner.lit(1.0);
+                    panic!("deliberate inner-trace failure");
+                });
+            }));
+            assert!(panic.is_err());
 
-        // an operation after the caught panic must append to the restored
-        // outer graph, not to the discarded inner graph or an empty slot.
-        let root = (outer + Gv(GvVal::Lit(2.0))).node();
-        let kernel = end_trace();
+            // an operation after the caught panic must append to the restored
+            // outer graph, not to the discarded inner graph or an empty slot.
+            (outer + cx.lit(2.0)).node()
+        });
         assert!(kernel.graph.param(&Symbol::intern("outer")).is_some());
         assert!(kernel.graph.param(&Symbol::intern("inner")).is_none());
         assert!((root.0 as usize) < kernel.graph.len());
     }
 
     #[test]
-    fn low_level_begin_rejects_nesting_without_replacing_outer_trace() {
-        begin_trace();
-        let _outer = Gv::param("outer");
+    fn nested_trace_is_isolated_from_outer_graph() {
+        let (outer_kernel, inner_kernel) = trace(|cx: TraceCx| {
+            let _outer = cx.param("outer");
+            let (inner_kernel, ()) = trace(|inner: TraceCx| {
+                let _ = inner.param("inner");
+            });
+            inner_kernel
+        });
+        assert!(outer_kernel.graph.param(&Symbol::intern("outer")).is_some());
+        assert!(outer_kernel.graph.param(&Symbol::intern("inner")).is_none());
+        assert!(inner_kernel.graph.param(&Symbol::intern("inner")).is_some());
+        assert!(inner_kernel.graph.param(&Symbol::intern("outer")).is_none());
+    }
 
-        let nested = catch_unwind(begin_trace);
-        assert!(nested.is_err());
-
-        let kernel = end_trace();
-        assert!(kernel.graph.param(&Symbol::intern("outer")).is_some());
+    #[test]
+    fn cross_trace_value_use_panics_at_recording() {
+        let _ = trace(|cx: TraceCx| {
+            let outer = cx.param("outer");
+            let panicked = catch_unwind(AssertUnwindSafe(|| {
+                let _ = trace(move |_inner: TraceCx| {
+                    // `outer + outer` shares one brand, so it compiles; the
+                    // generation stamp catches the foreign graph at runtime.
+                    let _ = outer + outer;
+                });
+            }));
+            assert!(
+                panicked.is_err(),
+                "an enclosing-trace value recorded inside a nested trace must panic"
+            );
+        });
     }
 }
 
@@ -1650,12 +1760,11 @@ mod fusion_laws {
         out_path: &str,
         grade: LaunchGrade,
     ) -> (GvKernel, KernelWrites) {
-        begin_trace();
-        let x = Gv::field(in_key, in_path);
-        let two = Gv(GvVal::Lit(2.0));
-        let y = x * two;
-        let root = y.node();
-        let kern = end_trace_with(grade);
+        let (kern, root) = trace_with(grade, |cx: TraceCx| {
+            let x = cx.field(in_key, in_path);
+            let y = x * cx.lit(2.0);
+            y.node()
+        });
         let writes = vec![KernelWrite::new(out_key, out_path, root)];
         (kern, writes)
     }
@@ -2083,24 +2192,25 @@ mod scope_op_contract {
     #[test]
     fn gv_scope_emits_one_op_scope_node() {
         // scope-form: (x + y) * (x + y) wrapped in Gv::scope.
-        begin_trace();
-        let x = Gv::scalar("x");
-        let y = Gv::scalar("y");
-        let scope_root = <Gv as crate::algebra::Scalar>::scope(|| {
-            let s = x + y;
-            s * s
+        let (scope_kernel, scope_root_node) = trace(|cx: TraceCx| {
+            let x = cx.scalar("x");
+            let y = cx.scalar("y");
+            let scope_root = <Gv as crate::algebra::Scalar>::scope(|| {
+                let s = x + y;
+                s * s
+            });
+            scope_root.node()
         });
-        let scope_graph = end_trace_with(LaunchGrade::untagged()).graph;
-        let scope_root_node = scope_root.node();
+        let scope_graph = scope_kernel.graph;
 
         // inline-form: same math, no wrapper.
-        begin_trace();
-        let x = Gv::scalar("x");
-        let y = Gv::scalar("y");
-        let s = x + y;
-        let inline_root = s * s;
-        let inline_graph = end_trace_with(LaunchGrade::untagged()).graph;
-        let inline_root_node = inline_root.node();
+        let (inline_kernel, inline_root_node) = trace(|cx: TraceCx| {
+            let x = cx.scalar("x");
+            let y = cx.scalar("y");
+            let s = x + y;
+            (s * s).node()
+        });
+        let inline_graph = inline_kernel.graph;
 
         // scope-form has +1 node (the Op::Scope itself); body subgraph
         // matches inline-form node-for-node.
@@ -2158,15 +2268,16 @@ mod scope_op_contract {
     /// and the outer body contains the inner Op::Scope NodeId.
     #[test]
     fn gv_scope_nests_with_inner_op_scope() {
-        begin_trace();
-        let x = Gv::scalar("x");
-        let outer_root = <Gv as crate::algebra::Scalar>::scope(|| {
-            let a = <Gv as crate::algebra::Scalar>::scope(|| x + Gv::from_f64(1.0));
-            let b = <Gv as crate::algebra::Scalar>::scope(|| x * Gv::from_f64(2.0));
-            a + b
+        let (kernel, outer_root_node) = trace(|cx: TraceCx| {
+            let x = cx.scalar("x");
+            let outer_root = <Gv as crate::algebra::Scalar>::scope(|| {
+                let a = <Gv as crate::algebra::Scalar>::scope(|| x + Gv::from_f64(1.0));
+                let b = <Gv as crate::algebra::Scalar>::scope(|| x * Gv::from_f64(2.0));
+                a + b
+            });
+            outer_root.node()
         });
-        let graph = end_trace_with(LaunchGrade::untagged()).graph;
-        let outer_root_node = outer_root.node();
+        let graph = kernel.graph;
 
         // outer Op::Scope is the tail.
         match &graph.node(outer_root_node).op {
@@ -2194,17 +2305,18 @@ mod scope_op_contract {
     /// the graph free of an Op::Scope.
     #[test]
     fn gv_scope_empty_body_short_circuits() {
-        begin_trace();
-        let x = Gv::scalar("x");
-        let before = with_trace(|t| t.graph.len());
-        // closure result is `x` itself, so the closure pushes nothing.
-        let r = <Gv as crate::algebra::Scalar>::scope(|| x);
-        let after = with_trace(|t| t.graph.len());
-        let g = end_trace_with(LaunchGrade::untagged()).graph;
+        let (kernel, (before, after, r_node, x_node)) = trace(|cx: TraceCx| {
+            let x = cx.scalar("x");
+            let before = cx.with_trace(|t| t.graph.len());
+            // closure result is `x` itself, so the closure pushes nothing.
+            let r = <Gv as crate::algebra::Scalar>::scope(|| x);
+            let after = cx.with_trace(|t| t.graph.len());
+            (before, after, r.node(), x.node())
+        });
+        let g = kernel.graph;
         assert_eq!(before, after, "empty-body scope must not push any node");
         assert_eq!(
-            r.node(),
-            x.node(),
+            r_node, x_node,
             "empty-body scope must return the input directly"
         );
         // the final graph is free of Op::Scope.
@@ -2232,11 +2344,11 @@ mod powi_carrier_equiv {
     #[test]
     fn powi_lowers_to_multiplies_and_matches_f64_on_negative_base() {
         for n in [0_i32, 1, 2, 3, 4, 5, -2, -3] {
-            begin_trace();
-            let x = Gv::scalar("x");
-            let r = <Gv as crate::algebra::Scalar>::powi(x, n);
-            let root = r.node();
-            let graph = end_trace_with(LaunchGrade::untagged()).graph;
+            let (kernel, root) = trace(|cx: TraceCx| {
+                let x = cx.scalar("x");
+                <Gv as crate::algebra::Scalar>::powi(x, n).node()
+            });
+            let graph = kernel.graph;
 
             // structural: the multiply-chain lowering leaves the graph free of Pow ops.
             let has_pow = (0..graph.len()).any(|i| {
@@ -2269,10 +2381,11 @@ mod powi_carrier_equiv {
     fn safe_sqrt_and_clamp_trace_and_match_f64() {
         use crate::algebra::Scalar;
         // safe_sqrt
-        begin_trace();
-        let x = Gv::scalar("x");
-        let root = Scalar::safe_sqrt(x).node();
-        let g = end_trace_with(LaunchGrade::untagged()).graph;
+        let (kernel, root) = trace(|cx: TraceCx| {
+            let x = cx.scalar("x");
+            Scalar::safe_sqrt(x).node()
+        });
+        let g = kernel.graph;
         let f = scalarize(&g, root, "out");
         for &v in &[-4.0_f64, -1e-9, 0.0, 0.25, 9.0] {
             let got = Cpu.eval_elemental(&f, &[v])[0];
@@ -2283,12 +2396,11 @@ mod powi_carrier_equiv {
             );
         }
         // clamp into [-1, 1]
-        begin_trace();
-        let y = Gv::scalar("y");
-        let lo = Gv(GvVal::Lit(-1.0));
-        let hi = Gv(GvVal::Lit(1.0));
-        let croot = Scalar::clamp(y, lo, hi).node();
-        let cg = end_trace_with(LaunchGrade::untagged()).graph;
+        let (ckernel, croot) = trace(|cx: TraceCx| {
+            let y = cx.scalar("y");
+            Scalar::clamp(y, cx.lit(-1.0), cx.lit(1.0)).node()
+        });
+        let cg = ckernel.graph;
         let cf = scalarize(&cg, croot, "out");
         for &v in &[-3.0_f64, -1.0, -0.2, 0.5, 1.0, 5.0] {
             let got = Cpu.eval_elemental(&cf, &[v])[0];
