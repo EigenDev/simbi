@@ -550,7 +550,10 @@ mod tests {
             k.graph.errors()
         );
         // Assign writes the prim state, one DAG per slot.
-        let paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
+        let paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
         // Assign is a prescription, so it carries a bare value with no `dt` weight.
         assert!(
@@ -610,7 +613,10 @@ mod tests {
             "graph errors: {:?}",
             k.graph.errors()
         );
-        let paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
+        let paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(
             paths,
             vec![
@@ -1792,7 +1798,10 @@ mod tests {
             in_rt,
             vec!["cons.den", "cons.mom_0", "cons.mom_1", "cons.nrg"]
         );
-        let out_rt: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
+        let out_rt: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(out_rt, vec!["u_n.den", "u_n.mom_0", "u_n.mom_1", "u_n.nrg"]);
         assert!(
             !k.graph.has_errors(),
@@ -1915,7 +1924,10 @@ mod tests {
             vec![0, 1],
             "the +e_i divergence stencil records both axes"
         );
-        let out_rt: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
+        let out_rt: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(
             out_rt,
             vec!["cons.den", "cons.mom_0", "cons.mom_1", "cons.nrg"],
@@ -2019,7 +2031,8 @@ mod tests {
 
         // the lowered source is byte-identical — the strongest structural equality available
         // (`Graph` has no `PartialEq`; the emitted source captures the full computation).
-        let emit = |k: &GvKernel, w: &[(String, FieldBind, NodeId)]| {
+        let emit = |k: &GvKernel, w: &symbi_ir::KernelWrites| {
+            let field_writes = symbi_ir::legacy_writes(w);
             let spec = KernelEmitInputs {
                 kernel_name: "fused_eq",
                 coalesce_layout: false,
@@ -2030,7 +2043,7 @@ mod tests {
                 },
                 field_inputs: &k.field_inputs,
                 scalar_params: &k.scalar_params,
-                field_writes: w,
+                field_writes: &field_writes,
                 coord_components: &k.coord_components,
                 device_preamble: &[],
                 tile_spec: None,

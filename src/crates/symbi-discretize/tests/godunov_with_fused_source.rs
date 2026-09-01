@@ -80,14 +80,20 @@ fn user_source_none_matches_writes_of_plain_godunov() {
         &[],
         false,
     );
-    let names_plain: Vec<&str> = w_plain.iter().map(|(n, _, _)| n.as_str()).collect();
-    let names_fused: Vec<&str> = w_fused.iter().map(|(n, _, _)| n.as_str()).collect();
+    let names_plain: Vec<&str> = w_plain.iter().map(|write| write.key.as_str()).collect();
+    let names_fused: Vec<&str> = w_fused.iter().map(|write| write.key.as_str()).collect();
     assert_eq!(
         names_plain, names_fused,
         "writes name list must match plain godunov when user_source=None"
     );
-    let dests_plain: Vec<String> = w_plain.iter().map(|(_, d, _)| d.name()).collect();
-    let dests_fused: Vec<String> = w_fused.iter().map(|(_, d, _)| d.name()).collect();
+    let dests_plain: Vec<String> = w_plain
+        .iter()
+        .map(|write| write.destination.name())
+        .collect();
+    let dests_fused: Vec<String> = w_fused
+        .iter()
+        .map(|write| write.destination.name())
+        .collect();
     assert_eq!(
         dests_plain, dests_fused,
         "writes dest list must match plain godunov when user_source=None"

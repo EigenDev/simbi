@@ -13,27 +13,28 @@ use symbi_geometry::{
 };
 use symbi_ir::dual::Dual;
 use symbi_ir::gv::GvMask;
+use symbi_ir::{KernelWrite, KernelWrites};
 
 /// snapshot `u_n = cons` — a pure pointwise copy (the RK2 stage-0 hold), geometry-independent
 /// (works for every coord system). copies the energy too when `has_energy`. write root == the
 /// read field node (a direct buffer copy).
-pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     begin_trace();
     let den = Gv::field("cons_den", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
         .map(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
         .collect();
     let nrg = has_energy.then(|| Gv::field("cons_nrg", FieldRef::cons_nrg()));
-    let mut writes = vec![("u_n_den".to_string(), FieldRef::un_den().into(), den.node())];
+    let mut writes = vec![KernelWrite::new("u_n_den", FieldRef::un_den(), den.node())];
     for (k, m) in mom.iter().enumerate() {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("u_n_mom_{k}"),
-            FieldRef::un_mom(k as u8).into(),
+            FieldRef::un_mom(k as u8),
             m.node(),
         ));
     }
     if let Some(n) = nrg {
-        writes.push(("u_n_nrg".to_string(), FieldRef::un_nrg().into(), n.node()));
+        writes.push(KernelWrite::new("u_n_nrg", FieldRef::un_nrg(), n.node()));
     }
     (end_trace(), writes)
 }
@@ -43,15 +44,16 @@ pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, Fi
 /// stage-input state, and (b) save the high-order per-direction fluxes before the redo overwrites the
 /// live flux buffers (both are ConsFields). explicit-field dispatch: slots `s_*` (source) -> `d_*`
 /// (dest).
-pub fn fofc_copy_gv(
-    ncomp: usize,
-    has_energy: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn fofc_copy_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     begin_trace();
-    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    let mut writes = KernelWrites::new();
     let mut cp = |name: &str| {
         let v = Gv::field(&format!("s_{name}"), &format!("s_{name}"));
-        writes.push((format!("d_{name}"), format!("d_{name}").into(), v.node()));
+        writes.push(KernelWrite::new(
+            format!("d_{name}"),
+            format!("d_{name}"),
+            v.node(),
+        ));
     };
     cp("den");
     for k in 0..ncomp {
@@ -101,16 +103,13 @@ fn primitive_physical_gv(ncomp: usize, has_energy: bool) -> GvMask {
     physical
 }
 
-pub fn fofc_probe_gv(
-    ncomp: usize,
-    has_energy: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn fofc_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     begin_trace();
     let physical = primitive_physical_gv(ncomp, has_energy);
     let flag = Gv::select(physical, Gv::ZERO, Gv::ONE);
     (
         end_trace(),
-        vec![("flag".to_string(), FieldRef::Scratch.into(), flag.node())],
+        vec![KernelWrite::new("flag", FieldRef::Scratch, flag.node())],
     )
 }
 
@@ -128,7 +127,7 @@ pub fn fofc_exterior_flag_gv(
     spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let ndim = axes.len();
     let centroid = cell_geometry_gv(coords, spacing, axes, ndim).centroid;
@@ -155,7 +154,7 @@ pub fn fofc_exterior_flag_gv(
     };
     (
         end_trace(),
-        vec![("exterior".to_string(), "exterior".into(), exterior.node())],
+        vec![KernelWrite::new("exterior", "exterior", exterior.node())],
     )
 }
 
@@ -164,10 +163,7 @@ pub fn fofc_exterior_flag_gv(
 /// `INVALID_PRIMITIVE` means it lies outside. c2p and fofc share
 /// `primitive_physical_gv`, so their
 /// pressure-zero and finiteness semantics agree by construction.
-pub fn c2p_status_gv(
-    ncomp: usize,
-    has_energy: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn c2p_status_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     begin_trace();
     let status = Gv::select(
         primitive_physical_gv(ncomp, has_energy),
@@ -176,11 +172,7 @@ pub fn c2p_status_gv(
     );
     (
         end_trace(),
-        vec![(
-            "status".to_string(),
-            FieldRef::Scratch.into(),
-            status.node(),
-        )],
+        vec![KernelWrite::new("status", FieldRef::Scratch, status.node())],
     )
 }
 
@@ -191,13 +183,13 @@ pub fn c2p_status_gv(
 /// reach. a max-reduce > 0 forces the CFL rate to +inf (dt -> 0, the driver halts) — the fail-loud that
 /// survives FOFC recovery. density-only, so regime- and energy-independent (one kernel per dimension);
 /// a poison in any primitive reaches the density within one c2p / flux divergence.
-pub fn state_finite_probe_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn state_finite_probe_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     let flag = Gv::select((rho - rho).cmp_eq(Gv::ZERO), Gv::ZERO, Gv::ONE);
     (
         end_trace(),
-        vec![("flag".to_string(), FieldRef::Scratch.into(), flag.node())],
+        vec![KernelWrite::new("flag", FieldRef::Scratch, flag.node())],
     )
 }
 
@@ -208,10 +200,7 @@ pub fn state_finite_probe_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 /// fluxes on all its faces), driving this to zero, so a nonzero count localizes where a
 /// physical-constraint-preserving assumption leaks and the run trades a cell's conservation for
 /// finiteness.
-pub fn fofc_freeze_probe_gv(
-    ncomp: usize,
-    has_energy: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn fofc_freeze_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     begin_trace();
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
     let finite = |v: Gv| (v - v).cmp_eq(Gv::ZERO);
@@ -229,7 +218,7 @@ pub fn fofc_freeze_probe_gv(
     let frozen = Gv::select(physical, Gv::ZERO, Gv::ONE);
     (
         end_trace(),
-        vec![("freeze".to_string(), "freeze".into(), frozen.node())],
+        vec![KernelWrite::new("freeze", "freeze", frozen.node())],
     )
 }
 
@@ -241,10 +230,7 @@ pub fn fofc_freeze_probe_gv(
 /// holding its stage input so the state stays finite. that single-cell hold is the documented
 /// conservation waiver — it discards the cell's flux exchange, bounded by the persistent-freeze
 /// fail-loud. only the conserved is chosen; the primitive is re-derived by the c2p that follows.
-pub fn fofc_select_gv(
-    ncomp: usize,
-    has_energy: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     begin_trace();
     // finite and positive: (v - v) is 0 for a finite value and NaN for NaN or +-inf (inf - inf =
     // NaN), so cmp_eq(0) rejects every non-finite value; the > 0 rejects a vacuum/negative one. a
@@ -265,7 +251,7 @@ pub fn fofc_select_gv(
         let p = format!("x_vel_{k}");
         physical = physical & finite(Gv::field(&p, &p));
     }
-    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    let mut writes = KernelWrites::new();
     // the live cons (`x_*`) is read+write in place: it holds the spliced first-order result and is
     // overwritten with the chosen tier. one slot per component (read path == write path) so the IR
     // dedups it to a single in-place binding (the CT-`b` pattern), keeping input and output on a
@@ -274,7 +260,7 @@ pub fn fofc_select_gv(
         let path = format!("x_{comp}");
         let x = Gv::field(&path, &path);
         let chosen = Gv::select(physical, x, us);
-        writes.push((path.clone(), path.into(), chosen.node()));
+        writes.push(KernelWrite::new(path.clone(), path, chosen.node()));
     };
     sel_inplace("den", Gv::field("us_den", "us_den"));
     for k in 0..ncomp {
@@ -306,7 +292,7 @@ pub fn fofc_select_with_body_gv(
     ndim: usize,
     axes: &[usize],
     has_energy: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
     let finite = |v: Gv| (v - v).cmp_eq(Gv::ZERO);
@@ -360,12 +346,12 @@ pub fn fofc_select_with_body_gv(
     let parachute = |ub: Gv, us: Gv| Gv::select(usb_ok, ub, us);
     // main select in place: `x_*` (the spliced first-order cons) is kept where physical, else frozen
     // to the guarded body-evolved stage input.
-    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    let mut writes = KernelWrites::new();
     let mut sel = |comp: &str, par: Gv| {
         let path = format!("x_{comp}");
         let x = Gv::field(&path, &path);
         let chosen = Gv::select(physical_fo, x, par);
-        writes.push((path.clone(), path.into(), chosen.node()));
+        writes.push(KernelWrite::new(path.clone(), path, chosen.node()));
     };
     sel("den", parachute(b_den, us_den));
     for k in 0..ncomp {
@@ -391,20 +377,20 @@ pub fn fofc_splice_gv(
     dir: usize,
     ncomp: usize,
     has_energy: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let nd = ndim as u8;
     let d = dir as u8;
     let flag_c = Gv::field("flag", "flag");
     let flag_lo = Gv::field_shifted("flag", "flag", nd, d, -1);
     let face_fo = flag_c.cmp_gt(Gv::ZERO) | flag_lo.cmp_gt(Gv::ZERO);
-    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    let mut writes = KernelWrites::new();
     let mut splice = |comp: &str| {
         let fo_name = format!("fo_{comp}");
         let fo = Gv::field(&fo_name, &fo_name);
         let ho = Gv::field(&format!("ho_{comp}"), &format!("ho_{comp}"));
         let chosen = Gv::select(face_fo, fo, ho);
-        writes.push((fo_name.clone(), fo_name.into(), chosen.node()));
+        writes.push(KernelWrite::new(fo_name.clone(), fo_name, chosen.node()));
     };
     splice("den");
     for k in 0..ncomp {
@@ -424,24 +410,20 @@ pub fn fofc_splice_gv(
 /// is first-order iff `flag[c] > 0 OR flag[c - e_dir] > 0` — the identical mask to the gas splice.
 /// `fo_bflux_{c}` is read+write in place; the spliced induction flux feeds the cell-B predictor (HO
 /// off the fallback region, FO on it) and the Contact FO edge EMF.
-pub fn fofc_bflux_splice_gv(
-    ndim: usize,
-    dir: usize,
-    ncomp: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn fofc_bflux_splice_gv(ndim: usize, dir: usize, ncomp: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let nd = ndim as u8;
     let d = dir as u8;
     let flag_c = Gv::field("flag", "flag");
     let flag_lo = Gv::field_shifted("flag", "flag", nd, d, -1);
     let face_fo = flag_c.cmp_gt(Gv::ZERO) | flag_lo.cmp_gt(Gv::ZERO);
-    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    let mut writes = KernelWrites::new();
     for c in 0..ncomp {
         let fo_name = format!("fo_bflux_{c}");
         let fo = Gv::field(&fo_name, &fo_name);
         let ho = Gv::field(&format!("ho_bflux_{c}"), &format!("ho_bflux_{c}"));
         let chosen = Gv::select(face_fo, fo, ho);
-        writes.push((fo_name.clone(), fo_name.into(), chosen.node()));
+        writes.push(KernelWrite::new(fo_name.clone(), fo_name, chosen.node()));
     }
     (end_trace(), writes)
 }
@@ -454,14 +436,14 @@ pub fn godunov_mass_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: u8,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let geo = (!is_cartesian_uniform(coords, spacing))
         .then(|| cell_geometry_gv(coords, spacing, axes, ndim as usize));
     let rho = Gv::field("rho", FieldRef::cons_den());
     let rho_new = rho - dt * gv_divergence("mass_flux", ndim, &geo, spacing);
-    let writes = vec![("rho_new".to_string(), "cons.den_new".into(), rho_new.node())];
+    let writes = vec![KernelWrite::new("rho_new", "cons.den_new", rho_new.node())];
     (end_trace(), writes)
 }
 
@@ -491,7 +473,7 @@ pub fn godunov_stage_gv(
     ncomp: usize,
     has_energy: bool,
     source: GeoSource,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     godunov_stage_gv_with_fused_sources(
         coords,
         spacetime,
@@ -732,7 +714,7 @@ pub fn godunov_stage_gv_with_fused_sources(
     // via the predictor's `bc_k` key so try_fuse merges the two reads onto one binding.
     // the plain (unfused) stage passes false -> reads `prim.mag[k]`.
     mag_from_bcell: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     let builts: Vec<(&str, symbi_hydro::source_spec::BuiltSource)> = user_sources
         .iter()
         .map(|s| (s.target_field, (s.build_source)(ndim as usize)))
@@ -778,7 +760,7 @@ pub fn godunov_stage_gv_with_fused_built(
     // accretion drain) at weight `ac*dt`, so the single fused sweep equals `plain godunov +
     // source_apply + body_source`, in that order, bit-for-bit. 0 leaves the update body-free.
     n_bodies: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     godunov_stage_gv_with_fused_built_and_geo_weight(
         coords,
         spacetime,
@@ -815,7 +797,7 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     mag_from_bcell: bool,
     n_bodies: usize,
     weighted_geo_source: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let a0 = Gv::scalar("a0");
@@ -1339,22 +1321,22 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
         (rho_g, mom_g, nrg_g)
     };
 
-    let mut writes = vec![(
-        "rho".to_string(),
-        FieldRef::cons_den().into(),
+    let mut writes = vec![KernelWrite::new(
+        "rho",
+        FieldRef::cons_den(),
         rho_final.node(),
     )];
     for (k, m) in mom_final.iter().enumerate() {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_{k}"),
-            FieldRef::cons_mom(k as u8).into(),
+            FieldRef::cons_mom(k as u8),
             m.node(),
         ));
     }
     if let Some(nrg_new) = nrg_final {
-        writes.push((
-            "nrg".to_string(),
-            FieldRef::cons_nrg().into(),
+        writes.push(KernelWrite::new(
+            "nrg",
+            FieldRef::cons_nrg(),
             nrg_new.node(),
         ));
     }
@@ -1420,7 +1402,7 @@ fn apply_dag_core_gv(
     state: StateEnv,
     sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
     mode: WriteMode,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let geo = (!is_cartesian_uniform(coords, spacing))
         .then(|| cell_geometry_gv(coords, spacing, axes, ndim as usize));
@@ -1455,9 +1437,9 @@ fn apply_dag_core_gv(
             for c in &contribs.den {
                 rho_new = rho_new + dt * Gv::of(*c);
             }
-            let mut writes = vec![(
-                "rho".to_string(),
-                FieldRef::cons_den().into(),
+            let mut writes = vec![KernelWrite::new(
+                "rho",
+                FieldRef::cons_den(),
                 rho_new.node(),
             )];
             for k in 0..ncomp {
@@ -1466,9 +1448,9 @@ fn apply_dag_core_gv(
                 for c in &contribs.mom[k] {
                     mom_new = mom_new + dt * Gv::of(*c);
                 }
-                writes.push((
+                writes.push(KernelWrite::new(
                     format!("mom_{k}"),
-                    FieldRef::cons_mom(k as u8).into(),
+                    FieldRef::cons_mom(k as u8),
                     mom_new.node(),
                 ));
             }
@@ -1478,9 +1460,9 @@ fn apply_dag_core_gv(
                 for c in &contribs.nrg {
                     nrg_new = nrg_new + dt * Gv::of(*c);
                 }
-                writes.push((
-                    "nrg".to_string(),
-                    FieldRef::cons_nrg().into(),
+                writes.push(KernelWrite::new(
+                    "nrg",
+                    FieldRef::cons_nrg(),
                     nrg_new.node(),
                 ));
             }
@@ -1507,16 +1489,16 @@ fn apply_dag_core_gv(
                 1,
                 "Assign: prim.rho needs exactly one source DAG"
             );
-            let mut writes = vec![("rho".to_string(), FieldRef::PrimRho.into(), contribs.den[0])];
+            let mut writes = vec![KernelWrite::new("rho", FieldRef::PrimRho, contribs.den[0])];
             for k in 0..ncomp {
                 assert_eq!(
                     contribs.mom[k].len(),
                     1,
                     "Assign: prim.vel_{k} needs exactly one source DAG"
                 );
-                writes.push((
+                writes.push(KernelWrite::new(
                     format!("vel_{k}"),
-                    FieldRef::PrimVel(k as u8).into(),
+                    FieldRef::PrimVel(k as u8),
                     contribs.mom[k][0],
                 ));
             }
@@ -1526,7 +1508,7 @@ fn apply_dag_core_gv(
                     1,
                     "Assign: prim.pre needs exactly one source DAG"
                 );
-                writes.push(("pre".to_string(), FieldRef::PrimPre.into(), contribs.nrg[0]));
+                writes.push(KernelWrite::new("pre", FieldRef::PrimPre, contribs.nrg[0]));
             }
             // MHD driven boundary: prescribe the cell-B vector (prim.mag). out-of-plane B_phi
             // (cell-centered, flux-evolved) is the safe toroidal case; in-plane components are
@@ -1539,9 +1521,9 @@ fn apply_dag_core_gv(
                         1,
                         "Assign: prim.mag_{k} needs exactly one source DAG"
                     );
-                    writes.push((
+                    writes.push(KernelWrite::new(
                         format!("mag_{k}"),
-                        FieldRef::PrimMag(k as u8).into(),
+                        FieldRef::PrimMag(k as u8),
                         contribs.mag[k][0],
                     ));
                 }
@@ -1554,7 +1536,7 @@ fn apply_dag_core_gv(
                     1,
                     "Assign: prim.chi needs exactly one source DAG"
                 );
-                writes.push(("chi".to_string(), FieldRef::PrimChi.into(), contribs.chi[0]));
+                writes.push(KernelWrite::new("chi", FieldRef::PrimChi, contribs.chi[0]));
             }
             writes
         }
@@ -1573,7 +1555,7 @@ pub fn source_apply_gv(
     ncomp: usize,
     has_energy: bool,
     user_sources: &[&symbi_hydro::source_spec::SourceSpec],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     let builts: Vec<(&str, symbi_hydro::source_spec::BuiltSource)> = user_sources
         .iter()
         .map(|s| (s.target_field, (s.build_source)(ndim as usize)))
@@ -1604,7 +1586,7 @@ pub fn source_apply_from_built_gv(
     ncomp: usize,
     has_energy: bool,
     sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     apply_dag_core_gv(
         coords,
         spacing,
@@ -1630,7 +1612,7 @@ pub fn boundary_fill_from_built_gv(
     ncomp: usize,
     has_energy: bool,
     sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     apply_dag_core_gv(
         coords,
         spacing,
@@ -1820,7 +1802,7 @@ pub fn rmhd_bcell_godunov_euler_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let oop = oop_components(ncomp, axes);
     let bc: Vec<Gv> = oop
@@ -1840,7 +1822,7 @@ pub fn rmhd_bcell_godunov_euler_gv(
         .map(|i| {
             let c = oop[i];
             let bnew = bc[i] - dt * divs[i];
-            (format!("bc_{c}_new"), format!("bc_{c}").into(), bnew.node())
+            KernelWrite::new(format!("bc_{c}_new"), format!("bc_{c}"), bnew.node())
         })
         .collect();
     (end_trace(), writes)
@@ -1856,7 +1838,7 @@ pub fn rmhd_bcell_godunov_rk2_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let oop = oop_components(ncomp, axes);
     let bcn: Vec<Gv> = oop
@@ -1880,7 +1862,7 @@ pub fn rmhd_bcell_godunov_rk2_gv(
             let c = oop[i];
             let bc_star = bc[i] - dt * divs[i];
             let bnew = half * (bcn[i] + bc_star);
-            (format!("bc_{c}_new"), format!("bc_{c}").into(), bnew.node())
+            KernelWrite::new(format!("bc_{c}_new"), format!("bc_{c}"), bnew.node())
         })
         .collect();
     (end_trace(), writes)
@@ -1969,7 +1951,7 @@ fn chi_flux_div_gv(ndim: usize, spacing: &[Spacing]) -> Gv {
 /// difference between the fine-time-summed and coarse fluxes at the interface. `F_chi` is nonlinear
 /// in the state, so that correction has to read the stored dye flux itself; the mass-flux
 /// correction alone underdetermines it.
-pub fn chi_flux_gv(ndim: usize, dir: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn chi_flux_gv(ndim: usize, dir: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let zero_off = vec![0i32; ndim];
     let mut minus = zero_off.clone();
@@ -1982,9 +1964,9 @@ pub fn chi_flux_gv(ndim: usize, dir: usize) -> (GvKernel, Vec<(String, FieldBind
     let chi_m = gv_field_at("prim_chi", &chi_path, ndim, &minus);
     let chi_0 = gv_field_at("prim_chi", &chi_path, ndim, &zero_off);
     let upwind = Gv::select(f.cmp_ge(zero), chi_m, chi_0);
-    let writes = vec![(
+    let writes = vec![KernelWrite::new(
         format!("chi_flux_{dir}_new"),
-        FieldRef::ChiFlux(dir as u8).into(),
+        FieldRef::ChiFlux(dir as u8),
         (f * upwind).node(),
     )];
     (end_trace(), writes)
@@ -1994,7 +1976,7 @@ pub fn chi_flux_gv(ndim: usize, dir: usize) -> (GvKernel, Vec<(String, FieldBind
 /// `cons.chi = a0*u_n.chi + ac*(cons.chi - dt*div(F_chi))`, in place, with the
 /// per-stage convex coefficients as runtime scalars (forward-euler = (0, 1)) —
 /// one kernel serves every explicit SSP scheme.
-pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let chin = Gv::field("un_chi", FieldRef::un_chi());
     let dchi = Gv::field("cons_chi", FieldRef::cons_chi());
@@ -2009,9 +1991,9 @@ pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)
     // any mesh, whatever the bake-time spacing tag says.
     let spacing = vec![Spacing::Uniform; ndim];
     let new = a0 * chin + ac * (dchi - dt * chi_flux_div_gv(ndim, &spacing) - dt * (h_dil * dchi));
-    let writes = vec![(
-        "chi_new".to_string(),
-        FieldRef::cons_chi().into(),
+    let writes = vec![KernelWrite::new(
+        "chi_new",
+        FieldRef::cons_chi(),
         new.node(),
     )];
     (end_trace(), writes)
@@ -2020,25 +2002,25 @@ pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)
 /// the dye concentration recovery: `prim.chi = cons.chi / cons.den` — chi's whole
 /// cons2prim, run after the stage's density is final so the concentration is
 /// consistent with the same-instant mass.
-pub fn chi_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn chi_c2p_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let dchi = Gv::field("cons_chi", FieldRef::cons_chi());
     let den = Gv::field("cons_den", FieldRef::cons_den());
-    let writes = vec![(
-        "prim_chi_new".to_string(),
-        FieldRef::PrimChi.into(),
+    let writes = vec![KernelWrite::new(
+        "prim_chi_new",
+        FieldRef::PrimChi,
         (dchi / den).node(),
     )];
     (end_trace(), writes)
 }
 
 /// the dye step snapshot: `u_n.chi <- cons.chi`, the rk2 combine's step-start state.
-pub fn chi_snapshot_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn chi_snapshot_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let dchi = Gv::field("cons_chi", FieldRef::cons_chi());
-    let writes = vec![(
-        "un_chi_new".to_string(),
-        FieldRef::un_chi().into(),
+    let writes = vec![KernelWrite::new(
+        "un_chi_new",
+        FieldRef::un_chi(),
         dchi.node(),
     )];
     (end_trace(), writes)

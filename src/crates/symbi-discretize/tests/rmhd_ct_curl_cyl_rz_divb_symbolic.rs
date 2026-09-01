@@ -65,7 +65,7 @@ fn curl(dir: usize) -> LinFormR {
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
     let lf = curl_only(LinFormR::extract_rat(
         &kernel.graph,
-        writes[0].2,
+        writes[0].value,
         FIELDS,
         SCALARS,
     ));
