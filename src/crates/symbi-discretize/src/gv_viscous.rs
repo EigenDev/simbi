@@ -25,7 +25,7 @@ use symbi_hydro::viscous::{
     viscous_mom_update_2d, viscous_mom_update_3d, viscous_mom_update_orthogonal_2d,
 };
 use symbi_ir::algebra::Scalar as _;
-use symbi_ir::gv::Writes;
+use symbi_ir::gv::{KernelWrite, KernelWrites};
 use symbi_ir::{FieldRef, Gv, GvKernel, begin_trace, end_trace};
 
 use crate::coords::{Coords, Spacing};
@@ -64,25 +64,25 @@ fn prim_stencil() -> ([[Tensor<Gv, 2>; 3]; 3], [[Gv; 3]; 3]) {
 // profile) — an O(1) spurious torque on every rotating disk. (the contravariant
 // storage law belongs to the GR valencia path only.)
 
-fn accumulate_mom(dmom: Tensor<Gv, 2>) -> Writes {
+fn accumulate_mom(dmom: Tensor<Gv, 2>) -> KernelWrites {
     let mom0_c = Gv::field("mom0", FieldRef::cons_mom(0));
     let mom1_c = Gv::field("mom1", FieldRef::cons_mom(1));
     vec![
-        (
-            "mom_out_0".to_string(),
-            FieldRef::cons_mom(0).into(),
+        KernelWrite::new(
+            "mom_out_0",
+            FieldRef::cons_mom(0),
             (mom0_c + dmom[0]).node(),
         ),
-        (
-            "mom_out_1".to_string(),
-            FieldRef::cons_mom(1).into(),
+        KernelWrite::new(
+            "mom_out_1",
+            FieldRef::cons_mom(1),
             (mom1_c + dmom[1]).node(),
         ),
     ]
 }
 
 /// trace the constant-nu isothermal viscous operator, 2D cartesian.
-pub fn viscous_iso_gv() -> (GvKernel, Writes) {
+pub fn viscous_iso_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let nu = Gv::scalar("nu");
@@ -102,7 +102,7 @@ pub fn viscous_iso_gv() -> (GvKernel, Writes) {
 /// update as `viscous_iso_gv` plus the total-energy increment `dt div(tau . v)` — the viscous energy
 /// flux divergence — accumulated onto `cons.nrg`. total energy is conserved (flux form) and the
 /// irreversible heating warms the gas. runs post-c2p (prim current).
-pub fn viscous_adiabatic_gv() -> (GvKernel, Writes) {
+pub fn viscous_adiabatic_gv() -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let nu = Gv::scalar("nu");
@@ -116,21 +116,17 @@ pub fn viscous_adiabatic_gv() -> (GvKernel, Writes) {
     let mom1_c = Gv::field("mom1", FieldRef::cons_mom(1));
     let nrg_c = Gv::field("nrg", FieldRef::cons_nrg());
     let writes = vec![
-        (
-            "mom_out_0".to_string(),
-            FieldRef::cons_mom(0).into(),
+        KernelWrite::new(
+            "mom_out_0",
+            FieldRef::cons_mom(0),
             (mom0_c + dmom[0]).node(),
         ),
-        (
-            "mom_out_1".to_string(),
-            FieldRef::cons_mom(1).into(),
+        KernelWrite::new(
+            "mom_out_1",
+            FieldRef::cons_mom(1),
             (mom1_c + dmom[1]).node(),
         ),
-        (
-            "nrg_out".to_string(),
-            FieldRef::cons_nrg().into(),
-            (nrg_c + dnrg).node(),
-        ),
+        KernelWrite::new("nrg_out", FieldRef::cons_nrg(), (nrg_c + dnrg).node()),
     ];
     (end_trace(), writes)
 }
@@ -140,17 +136,17 @@ pub fn viscous_adiabatic_gv() -> (GvKernel, Writes) {
 /// (the isothermal alpha kernel uses the one global cs; on a varying-cs
 /// gas the local read is the shakura-sunyaev prescription). Omega_K from body 0's
 /// mass at the in-plane distance. cartesian 2D; carries the viscous heating.
-pub fn viscous_adiabatic_alpha_gv() -> (GvKernel, Writes) {
+pub fn viscous_adiabatic_alpha_gv() -> (GvKernel, KernelWrites) {
     viscous_adiabatic_alpha_impl(false)
 }
 
 /// the DOF = 3 (2.5D magnetized-gas) variant: diffuses the out-of-plane momentum
 /// too, same local-cs nu law.
-pub fn viscous_adiabatic_alpha_gv_2p5d() -> (GvKernel, Writes) {
+pub fn viscous_adiabatic_alpha_gv_2p5d() -> (GvKernel, KernelWrites) {
     viscous_adiabatic_alpha_impl(true)
 }
 
-fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, Writes) {
+fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -187,23 +183,23 @@ fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, Writes) {
         }
     }
 
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     if dof3 {
         let (vst, rst) = prim_stencil_2p5d();
         let (dmom, dnrg) =
             symbi_hydro::viscous::viscous_update_2p5d(&vst, &rst, &nust, [dx, dy], dt);
         for c in 0..3 {
             let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
-            writes.push((
+            writes.push(KernelWrite::new(
                 format!("mom_out_{c}"),
-                FieldRef::cons_mom(c as u8).into(),
+                FieldRef::cons_mom(c as u8),
                 (mom_c + dmom[c]).node(),
             ));
         }
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-        writes.push((
-            "nrg_out".to_string(),
-            FieldRef::cons_nrg().into(),
+        writes.push(KernelWrite::new(
+            "nrg_out",
+            FieldRef::cons_nrg(),
             (nrg + dnrg).node(),
         ));
     } else {
@@ -211,16 +207,16 @@ fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, Writes) {
         let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2d(&vst, &rst, &nust, dx, dy, dt);
         for c in 0..2 {
             let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
-            writes.push((
+            writes.push(KernelWrite::new(
                 format!("mom_out_{c}"),
-                FieldRef::cons_mom(c as u8).into(),
+                FieldRef::cons_mom(c as u8),
                 (mom_c + dmom[c]).node(),
             ));
         }
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-        writes.push((
-            "nrg_out".to_string(),
-            FieldRef::cons_nrg().into(),
+        writes.push(KernelWrite::new(
+            "nrg_out",
+            FieldRef::cons_nrg(),
             (nrg + dnrg).node(),
         ));
     }
@@ -258,7 +254,7 @@ pub(crate) fn scale_factors_at(coords: Coords, ndim: usize, x: &[Gv]) -> Vec<Gv>
 /// momenta and div(tau . u) onto the total energy. one kernel per chart; the
 /// heating and the momentum share their face stresses, so the discrete work
 /// telescopes and the pair conserves total energy up to the boundary flux.
-pub fn viscous_adiabatic_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
+pub fn viscous_adiabatic_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
     viscous_adiabatic_ortho_impl(coords, None)
 }
 
@@ -266,11 +262,14 @@ pub fn viscous_adiabatic_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
 /// per stencil cell (the local sound speed), with the keplerian frequency from the
 /// chart's radial coordinate (the central mass sits on the axis/origin, matching
 /// the iso ortho alpha kernel's convention).
-pub fn viscous_adiabatic_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
+pub fn viscous_adiabatic_alpha_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
     viscous_adiabatic_ortho_impl(coords, Some(()))
 }
 
-fn viscous_adiabatic_ortho_impl(coords: Coords, alpha_mode: Option<()>) -> (GvKernel, Writes) {
+fn viscous_adiabatic_ortho_impl(
+    coords: Coords,
+    alpha_mode: Option<()>,
+) -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -319,15 +318,15 @@ fn viscous_adiabatic_ortho_impl(coords: Coords, alpha_mode: Option<()>) -> (GvKe
     );
     let mut writes = accumulate_mom(dmom);
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-    writes.push((
-        "nrg_out".to_string(),
-        FieldRef::cons_nrg().into(),
+    writes.push(KernelWrite::new(
+        "nrg_out",
+        FieldRef::cons_nrg(),
         (nrg + dnrg).node(),
     ));
     (end_trace(), writes)
 }
 
-pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
+pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -368,7 +367,7 @@ pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
 /// varying `nu(R) = alpha c_s^2 / Omega_k(R)`, `Omega_k = sqrt(GM/R^3)`, `R` the
 /// radial coordinate `x0` (the orbital radius on both cylindrical and spherical,
 /// the central mass on the axis). one alpha kernel for every curvilinear chart.
-pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
+pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -431,31 +430,31 @@ fn prim_stencil_3d() -> ([[[Tensor<Gv, 3>; 3]; 3]; 3], [[[Gv; 3]; 3]; 3]) {
 }
 
 /// accumulate the 3D viscous increment onto cons.mom (in place, pointwise center).
-fn accumulate_mom_3d(dmom: Tensor<Gv, 3>) -> Writes {
+fn accumulate_mom_3d(dmom: Tensor<Gv, 3>) -> KernelWrites {
     let mom0_c = Gv::field("mom0", FieldRef::cons_mom(0));
     let mom1_c = Gv::field("mom1", FieldRef::cons_mom(1));
     let mom2_c = Gv::field("mom2", FieldRef::cons_mom(2));
     vec![
-        (
-            "mom_out_0".to_string(),
-            FieldRef::cons_mom(0).into(),
+        KernelWrite::new(
+            "mom_out_0",
+            FieldRef::cons_mom(0),
             (mom0_c + dmom[0]).node(),
         ),
-        (
-            "mom_out_1".to_string(),
-            FieldRef::cons_mom(1).into(),
+        KernelWrite::new(
+            "mom_out_1",
+            FieldRef::cons_mom(1),
             (mom1_c + dmom[1]).node(),
         ),
-        (
-            "mom_out_2".to_string(),
-            FieldRef::cons_mom(2).into(),
+        KernelWrite::new(
+            "mom_out_2",
+            FieldRef::cons_mom(2),
             (mom2_c + dmom[2]).node(),
         ),
     ]
 }
 
 /// trace the constant-nu isothermal viscous operator, 3D cartesian.
-pub fn viscous_iso_gv_3d() -> (GvKernel, Writes) {
+pub fn viscous_iso_gv_3d() -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let nu = Gv::scalar("nu");
@@ -474,7 +473,7 @@ pub fn viscous_iso_gv_3d() -> (GvKernel, Writes) {
 /// `viscous_iso_gv_3d` plus the total-energy increment `dt div(tau . v)` onto `cons.nrg`. serves
 /// adiabatic hydro and full-3D MHD alike (viscosity leaves B untouched, so the flux heats the gas with the
 /// 1/2 B^2 preserved). runs post-c2p.
-pub fn viscous_adiabatic_gv_3d() -> (GvKernel, Writes) {
+pub fn viscous_adiabatic_gv_3d() -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let nu = Gv::scalar("nu");
@@ -490,26 +489,10 @@ pub fn viscous_adiabatic_gv_3d() -> (GvKernel, Writes) {
     let mom2 = Gv::field("mom2", FieldRef::cons_mom(2));
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
     let writes = vec![
-        (
-            "mom_out_0".to_string(),
-            FieldRef::cons_mom(0).into(),
-            (mom0 + dmom[0]).node(),
-        ),
-        (
-            "mom_out_1".to_string(),
-            FieldRef::cons_mom(1).into(),
-            (mom1 + dmom[1]).node(),
-        ),
-        (
-            "mom_out_2".to_string(),
-            FieldRef::cons_mom(2).into(),
-            (mom2 + dmom[2]).node(),
-        ),
-        (
-            "nrg_out".to_string(),
-            FieldRef::cons_nrg().into(),
-            (nrg + dnrg).node(),
-        ),
+        KernelWrite::new("mom_out_0", FieldRef::cons_mom(0), (mom0 + dmom[0]).node()),
+        KernelWrite::new("mom_out_1", FieldRef::cons_mom(1), (mom1 + dmom[1]).node()),
+        KernelWrite::new("mom_out_2", FieldRef::cons_mom(2), (mom2 + dmom[2]).node()),
+        KernelWrite::new("nrg_out", FieldRef::cons_nrg(), (nrg + dnrg).node()),
     ];
     (end_trace(), writes)
 }
@@ -538,13 +521,13 @@ fn prim_stencil_2p5d() -> ([[Tensor<Gv, 3>; 3]; 3], [[Gv; 3]; 3]) {
 /// stencil + `viscous_update_2p5d`: the isothermal twin writes the 3 momentum components; the
 /// adiabatic twin also writes the total-energy heating. serves 2.5D MHD (the toroidal velocity
 /// diffuses; B is untouched so the heat warms the gas).
-pub fn viscous_iso_gv_2p5d() -> (GvKernel, Writes) {
+pub fn viscous_iso_gv_2p5d() -> (GvKernel, KernelWrites) {
     viscous_2p5d_impl(false)
 }
-pub fn viscous_adiabatic_gv_2p5d() -> (GvKernel, Writes) {
+pub fn viscous_adiabatic_gv_2p5d() -> (GvKernel, KernelWrites) {
     viscous_2p5d_impl(true)
 }
-fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, Writes) {
+fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, KernelWrites) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let nu = Gv::scalar("nu");
@@ -553,20 +536,20 @@ fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, Writes) {
     let (vst, rst) = prim_stencil_2p5d();
     let nust = [[nu; 3]; 3];
     let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2p5d(&vst, &rst, &nust, [dx, dy], dt);
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for c in 0..3 {
         let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_out_{c}"),
-            FieldRef::cons_mom(c as u8).into(),
+            FieldRef::cons_mom(c as u8),
             (mom_c + dmom[c]).node(),
         ));
     }
     if has_energy {
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-        writes.push((
-            "nrg_out".to_string(),
-            FieldRef::cons_nrg().into(),
+        writes.push(KernelWrite::new(
+            "nrg_out",
+            FieldRef::cons_nrg(),
             (nrg + dnrg).node(),
         ));
     }
@@ -587,7 +570,7 @@ fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, Writes) {
 /// nu here varies with height, where the isothermal 3D twin's is z-invariant: `Omega_k` is
 /// z-invariant in both, while the local `cs^2` varies with height through the stratified pressure
 /// and density, so each stencil cell carries its own nu. carries the viscous heating onto the total energy, like the other adiabatic forms.
-pub fn viscous_adiabatic_alpha_gv_3d() -> (GvKernel, Writes) {
+pub fn viscous_adiabatic_alpha_gv_3d() -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 3;
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -628,25 +611,25 @@ pub fn viscous_adiabatic_alpha_gv_3d() -> (GvKernel, Writes) {
     }
 
     let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for c in 0..3usize {
         let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_out_{c}"),
-            FieldRef::cons_mom(c as u8).into(),
+            FieldRef::cons_mom(c as u8),
             (mom_c + dmom[c]).node(),
         ));
     }
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-    writes.push((
-        "nrg_out".to_string(),
-        FieldRef::cons_nrg().into(),
+    writes.push(KernelWrite::new(
+        "nrg_out",
+        FieldRef::cons_nrg(),
         (nrg + dnrg).node(),
     ));
     (end_trace(), writes)
 }
 
-pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, Writes) {
+pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 3;
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -695,7 +678,7 @@ pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, Writes) {
 /// (G = 1, so GM is the central body mass). the sound speed is the constant
 /// `cs` param (globally isothermal). nu vanishes toward the sink (Omega_k -> inf) — the
 /// physical alpha-disk `nu ~ r^{3/2}`.
-pub fn viscous_iso_alpha_gv() -> (GvKernel, Writes) {
+pub fn viscous_iso_alpha_gv() -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -775,7 +758,7 @@ pub fn viscous_ortho_2p5d_gv(
     plane: OrthoPlane25,
     adiabatic: bool,
     alpha: bool,
-) -> (GvKernel, Writes) {
+) -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     let (coords, axes): (Coords, [usize; 2]) = match plane {
         OrthoPlane25::CylRPhi => (Coords::Cylindrical, [0, 1]),
@@ -848,22 +831,22 @@ pub fn viscous_ortho_2p5d_gv(
     let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_2p5d(
         &vst, &rst, &nust, &h1, &h2, &h3, dx1, dx2, dt,
     );
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for c in 0..3 {
         // carrier component c lands on its storage slot perm[c].
         let slot = perm[c] as u8;
         let mom_c = Gv::field(&format!("mom{}", perm[c]), FieldRef::cons_mom(slot));
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_out_{}", perm[c]),
-            FieldRef::cons_mom(slot).into(),
+            FieldRef::cons_mom(slot),
             (mom_c + dmom[c]).node(),
         ));
     }
     if adiabatic {
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-        writes.push((
-            "nrg_out".to_string(),
-            FieldRef::cons_nrg().into(),
+        writes.push(KernelWrite::new(
+            "nrg_out",
+            FieldRef::cons_nrg(),
             (nrg + dnrg).node(),
         ));
     }
@@ -873,7 +856,11 @@ pub fn viscous_ortho_2p5d_gv(
 /// trace the full-3D orthogonal viscous operator for the cylindrical
 /// (h = (1, r, 1)) or spherical (h = (1, r, r sin(theta))) chart: the general
 /// scale-factor stress + (adiabatic) heating; `alpha` as in the 2.5D twin.
-pub fn viscous_ortho_3d_gv(coords: Coords, adiabatic: bool, alpha: bool) -> (GvKernel, Writes) {
+pub fn viscous_ortho_3d_gv(
+    coords: Coords,
+    adiabatic: bool,
+    alpha: bool,
+) -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 3;
     assert!(
         matches!(coords, Coords::Cylindrical | Coords::Spherical),
@@ -931,20 +918,20 @@ pub fn viscous_ortho_3d_gv(coords: Coords, adiabatic: bool, alpha: bool) -> (GvK
         dx,
         dt,
     );
-    let mut writes: Writes = Vec::new();
+    let mut writes = KernelWrites::new();
     for cc in 0..3 {
         let mom_c = Gv::field(&format!("mom{cc}"), FieldRef::cons_mom(cc as u8));
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_out_{cc}"),
-            FieldRef::cons_mom(cc as u8).into(),
+            FieldRef::cons_mom(cc as u8),
             (mom_c + dmom[cc]).node(),
         ));
     }
     if adiabatic {
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-        writes.push((
-            "nrg_out".to_string(),
-            FieldRef::cons_nrg().into(),
+        writes.push(KernelWrite::new(
+            "nrg_out",
+            FieldRef::cons_nrg(),
             (nrg + dnrg).node(),
         ));
     }

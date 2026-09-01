@@ -24,20 +24,17 @@ use std::collections::HashMap;
 
 use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::graph::NodeId;
 use symbi_ir::{
-    Cpu, CpuField, CpuFieldMut, FieldBind, KernelEmitInputs, emit_kernel_cpu,
-    emit_kernel_from_lowering,
+    Cpu, CpuField, CpuFieldMut, KernelEmitInputs, KernelWrite, KernelWriteEffect, KernelWrites,
+    emit_kernel_cpu, emit_kernel_from_lowering, legacy_writes,
 };
-
-type Writes = Vec<(String, FieldBind, NodeId)>;
 
 /// a configured kernel run: the built graph + ABI manifest plus the named inputs
 /// to bind. construct from a builder's `(GvKernel, Writes)`, bind grid / fields /
 /// scalars fluently, then `run()` on the CPU interpreter for an `Out`.
 pub struct KernelRun {
     kernel: GvKernel,
-    writes: Writes,
+    writes: KernelWrites,
     grid: Vec<u32>,
     buffer_lo: Option<Vec<i32>>,
     window_lo: Option<Vec<i32>>,
@@ -49,7 +46,7 @@ pub struct KernelRun {
 
 impl KernelRun {
     /// take a builder's `(GvKernel, Writes)` return; asserts the traced graph is clean.
-    pub fn new((kernel, writes): (GvKernel, Writes)) -> KernelRun {
+    pub fn new<W: KernelWriteEffect>((kernel, writes): (GvKernel, Vec<W>)) -> KernelRun {
         assert!(
             !kernel.graph.has_errors(),
             "graph errors: {:?}",
@@ -57,7 +54,12 @@ impl KernelRun {
         );
         KernelRun {
             kernel,
-            writes,
+            writes: writes
+                .iter()
+                .map(|write| {
+                    KernelWrite::new(write.key(), write.destination().clone(), write.value())
+                })
+                .collect(),
             grid: Vec::new(),
             buffer_lo: None,
             window_lo: None,
@@ -179,12 +181,13 @@ impl KernelRun {
             .collect();
 
         // one zeroed output buffer per write.
-        let names: Vec<String> = self.writes.iter().map(|(w, _, _)| w.clone()).collect();
+        let names: Vec<String> = self.writes.iter().map(|write| write.key.clone()).collect();
         let mut out_data: Vec<Vec<f64>> = self.writes.iter().map(|_| vec![0.0; n]).collect();
 
         let grid_sizes = self.window_size.clone().unwrap_or_else(|| ext.clone());
         let dom_los = self.window_lo.clone().unwrap_or_else(|| lo.clone());
 
+        let field_writes = legacy_writes(&self.writes);
         let spec = KernelEmitInputs {
             kernel_name: "harness_kernel",
             coalesce_layout: false,
@@ -195,7 +198,7 @@ impl KernelRun {
             },
             field_inputs: &self.kernel.field_inputs,
             scalar_params: &self.kernel.scalar_params,
-            field_writes: &self.writes,
+            field_writes: &field_writes,
             coord_components: &self.kernel.coord_components,
             device_preamble: &[],
             tile_spec: None,
@@ -234,6 +237,7 @@ impl KernelRun {
     pub fn emit_cpu(self) -> Emit {
         let ndim = self.grid.len() as u8;
         assert!(ndim > 0, "KernelRun::emit_cpu: call .grid(...) to fix ndim");
+        let field_writes = legacy_writes(&self.writes);
         let desc = emit_kernel_cpu(
             &self.kernel.graph,
             &KernelEmitInputs {
@@ -246,7 +250,7 @@ impl KernelRun {
                 },
                 field_inputs: &self.kernel.field_inputs,
                 scalar_params: &self.kernel.scalar_params,
-                field_writes: &self.writes,
+                field_writes: &field_writes,
                 coord_components: &self.kernel.coord_components,
                 device_preamble: &[],
                 tile_spec: None,
@@ -280,6 +284,7 @@ impl KernelRun {
         );
         // one input spec; the rust renderer (emit_kernel_cpu) ignores the target, the C renderer
         // (emit_kernel_from_lowering) reads it — Cuda is the GPU lowerability path.
+        let field_writes = legacy_writes(&self.writes);
         let inputs = KernelEmitInputs {
             kernel_name: "lowering_probe",
             coalesce_layout: false,
@@ -290,7 +295,7 @@ impl KernelRun {
             },
             field_inputs: &self.kernel.field_inputs,
             scalar_params: &self.kernel.scalar_params,
-            field_writes: &self.writes,
+            field_writes: &field_writes,
             coord_components: &self.kernel.coord_components,
             device_preamble: &[],
             tile_spec: None,
@@ -317,7 +322,7 @@ pub struct Emit {
     pub source: String,
     pub field_inputs: Vec<(String, String)>,
     pub scalar_params: Vec<String>,
-    pub writes: Writes,
+    pub writes: KernelWrites,
 }
 
 /// the named output buffers of a run.
