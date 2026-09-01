@@ -47,7 +47,7 @@ fn signal_speed(cs: Gv) -> Gv {
 use crate::coords::{Coords, Spacing};
 use crate::gv::gv_field_at;
 use crate::gv::{cell_geometry_gv, gv_axis_width};
-use symbi_ir::{begin_trace, end_trace};
+use symbi_ir::trace;
 
 /// the 3-space axes whose torque component can be nonzero at dimension
 /// `ndim`: rotation needs a plane, so 1d carries zero, 2d the z moment alone,
@@ -405,39 +405,40 @@ fn tag_body_mask(
 pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, Writes) {
     let ndim = 2usize;
     let axes: &[usize] = &[0, 1, 2][..ndim];
-    begin_trace();
-    let ez = Gv::field("ez", "ez");
-    let eta = Gv::scalar("eta");
-    let bx = Gv::field("bx", "bx");
-    let by = Gv::field("by", "by");
-    let bx_jm = gv_field_at("bx", "bx", 2, &[0, -1]); // B_x at the neighbor below in y
-    let by_im = gv_field_at("by", "by", 2, &[-1, 0]); // B_y at the neighbor behind in x
-    let dx0 = Gv::scalar("dx_0");
-    let dx1 = Gv::scalar("dx_1");
-    let jz = (Gv::ONE / dx0) * (by - by_im) - (Gv::ONE / dx1) * (bx - bx_jm);
+    let (kernel, writes) = trace(|| {
+        let ez = Gv::field("ez", "ez");
+        let eta = Gv::scalar("eta");
+        let bx = Gv::field("bx", "bx");
+        let by = Gv::field("by", "by");
+        let bx_jm = gv_field_at("bx", "bx", 2, &[0, -1]); // B_x at the neighbor below in y
+        let by_im = gv_field_at("by", "by", 2, &[-1, 0]); // B_y at the neighbor behind in x
+        let dx0 = Gv::scalar("dx_0");
+        let dx1 = Gv::scalar("dx_1");
+        let jz = (Gv::ONE / dx0) * (by - by_im) - (Gv::ONE / dx1) * (bx - bx_jm);
 
-    // the geometry scaffold yields the cell centroid; the E_z corner is half a cell below it on each
-    // in-plane axis. sample the body mask at that corner so the dissipation registers with the edge.
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
-    let half = Gv::from_f64(0.5);
-    let corner = vec![geo.centroid[0] - half * dx0, geo.centroid[1] - half * dx1];
-    let x_cart = centroid_to_cartesian(coords, ndim, axes, &corner);
-    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_pos_{a}"))
-        } else {
-            Gv::ZERO
-        }
+        // the geometry scaffold yields the cell centroid; the E_z corner is half a cell below it on each
+        // in-plane axis. sample the body mask at that corner so the dissipation registers with the edge.
+        let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let half = Gv::from_f64(0.5);
+        let corner = vec![geo.centroid[0] - half * dx0, geo.centroid[1] - half * dx1];
+        let x_cart = centroid_to_cartesian(coords, ndim, axes, &corner);
+        let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
+        let center: [Gv; 3] = std::array::from_fn(|a| {
+            if a < ndim {
+                Gv::scalar(&format!("body_0_pos_{a}"))
+            } else {
+                Gv::ZERO
+            }
+        });
+        let min_w = dx0.min(dx1);
+        let phi = body_mask_sdf(center).dist(x);
+        let chi = symbi_ib::sdf::chi(phi, min_w);
+        tag_body_mask(&chi, coords, ndim, axes, None, false);
+
+        let ez_new = ez + eta * chi * jz;
+        vec![KernelWrite::new("ez_new", "ez", ez_new.node())]
     });
-    let min_w = dx0.min(dx1);
-    let phi = body_mask_sdf(center).dist(x);
-    let chi = symbi_ib::sdf::chi(phi, min_w);
-    tag_body_mask(&chi, coords, ndim, axes, None, false);
-
-    let ez_new = ez + eta * chi * jz;
-    let writes = vec![KernelWrite::new("ez_new", "ez", ez_new.node())];
-    let kernel = end_trace().with_derived_support(&writes);
+    let kernel = kernel.with_derived_support(&writes);
     (kernel, legacy_writes(writes))
 }
 
@@ -452,54 +453,55 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Wr
     let axes: &[usize] = &[0, 1, 2][..ndim];
     let p1 = (dir + 1) % 3;
     let p2 = (dir + 2) % 3;
-    begin_trace();
-    let emf = Gv::field("emf", "emf");
-    let eta = Gv::scalar("eta");
-    let b_p1 = Gv::field("b_p1", "b_p1");
-    let b_p2 = Gv::field("b_p2", "b_p2");
-    let back = |ax: usize| -> [i32; 3] {
-        let mut o = [0, 0, 0];
-        o[ax] = -1;
-        o
-    };
-    let b_p1_m = gv_field_at("b_p1", "b_p1", 3, &back(p2)); // dB_p1/dx_p2, backward
-    let b_p2_m = gv_field_at("b_p2", "b_p2", 3, &back(p1)); // dB_p2/dx_p1, backward
-    let dxp1 = Gv::scalar(&format!("dx_{p1}"));
-    let dxp2 = Gv::scalar(&format!("dx_{p2}"));
-    let j = (Gv::ONE / dxp1) * (b_p2 - b_p2_m) - (Gv::ONE / dxp2) * (b_p1 - b_p1_m);
+    let (kernel, writes) = trace(|| {
+        let emf = Gv::field("emf", "emf");
+        let eta = Gv::scalar("eta");
+        let b_p1 = Gv::field("b_p1", "b_p1");
+        let b_p2 = Gv::field("b_p2", "b_p2");
+        let back = |ax: usize| -> [i32; 3] {
+            let mut o = [0, 0, 0];
+            o[ax] = -1;
+            o
+        };
+        let b_p1_m = gv_field_at("b_p1", "b_p1", 3, &back(p2)); // dB_p1/dx_p2, backward
+        let b_p2_m = gv_field_at("b_p2", "b_p2", 3, &back(p1)); // dB_p2/dx_p1, backward
+        let dxp1 = Gv::scalar(&format!("dx_{p1}"));
+        let dxp2 = Gv::scalar(&format!("dx_{p2}"));
+        let j = (Gv::ONE / dxp1) * (b_p2 - b_p2_m) - (Gv::ONE / dxp2) * (b_p1 - b_p1_m);
 
-    // the dir-edge sits at the cell centroid shifted half a cell back on the two transverse axes
-    // (p1, p2) and centered along dir. sample the body mask at that edge so the dissipation registers
-    // with the edge EMF.
-    let dx: Vec<Gv> = (0..ndim).map(|a| Gv::scalar(&format!("dx_{a}"))).collect();
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
-    let half = Gv::from_f64(0.5);
-    let corner: Vec<Gv> = (0..ndim)
-        .map(|a| {
-            if a == dir {
-                geo.centroid[a]
+        // the dir-edge sits at the cell centroid shifted half a cell back on the two transverse axes
+        // (p1, p2) and centered along dir. sample the body mask at that edge so the dissipation registers
+        // with the edge EMF.
+        let dx: Vec<Gv> = (0..ndim).map(|a| Gv::scalar(&format!("dx_{a}"))).collect();
+        let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let half = Gv::from_f64(0.5);
+        let corner: Vec<Gv> = (0..ndim)
+            .map(|a| {
+                if a == dir {
+                    geo.centroid[a]
+                } else {
+                    geo.centroid[a] - half * dx[a]
+                }
+            })
+            .collect();
+        let x_cart = centroid_to_cartesian(coords, ndim, axes, &corner);
+        let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
+        let center: [Gv; 3] = std::array::from_fn(|a| {
+            if a < ndim {
+                Gv::scalar(&format!("body_0_pos_{a}"))
             } else {
-                geo.centroid[a] - half * dx[a]
+                Gv::ZERO
             }
-        })
-        .collect();
-    let x_cart = centroid_to_cartesian(coords, ndim, axes, &corner);
-    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_pos_{a}"))
-        } else {
-            Gv::ZERO
-        }
-    });
-    let min_w = dx.iter().copied().reduce(|a, b| a.min(b)).unwrap();
-    let phi = body_mask_sdf(center).dist(x);
-    let chi = symbi_ib::sdf::chi(phi, min_w);
-    tag_body_mask(&chi, coords, ndim, axes, None, false);
+        });
+        let min_w = dx.iter().copied().reduce(|a, b| a.min(b)).unwrap();
+        let phi = body_mask_sdf(center).dist(x);
+        let chi = symbi_ib::sdf::chi(phi, min_w);
+        tag_body_mask(&chi, coords, ndim, axes, None, false);
 
-    let emf_new = emf + eta * chi * j;
-    let writes = vec![KernelWrite::new("emf_new", "emf", emf_new.node())];
-    let kernel = end_trace().with_derived_support(&writes);
+        let emf_new = emf + eta * chi * j;
+        vec![KernelWrite::new("emf_new", "emf", emf_new.node())]
+    });
+    let kernel = kernel.with_derived_support(&writes);
     (kernel, legacy_writes(writes))
 }
 
@@ -548,100 +550,101 @@ fn penalize_drain_impl<E: EnergyModel>(
         (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
         "penalize_drain_gv: need 1<=ndim<=dof<=3"
     );
-    begin_trace();
-    let dt = Gv::scalar("dt");
+    let (kernel, writes) = trace(|| {
+        let dt = Gv::scalar("dt");
 
-    // conserved reads (in-place: the same fields are the writes). the momentum runs over dof (all
-    // active components), so a 2.5D MHD sink drains the out-of-plane momentum and its kinetic energy.
-    // the energy field exists only in the adiabatic regime; the iso slot is zero-sized.
-    let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..dof)
-        .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
-        .collect();
-    let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
-        <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(Gv::field(
-            "nrg",
-            symbi_ir::FieldRef::cons_nrg(),
-        ))
-    } else {
-        <E::Slot<Gv> as EnergySlot<Gv>>::zero()
-    };
-
-    // the cell centroid + volume from the shared geometry scaffold — the coordinate
-    // map every other body kernel of this chart evaluates.
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
-    let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = gv_axis_width(0, Spacing::Uniform);
-    for ax in 1..ndim {
-        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
-    }
-
-    // the mask geometry as a traced SDF: phi = |x - body_pos| - r_mask, and
-    // chi = 0.5 (1 - tanh(phi / w)). the distance is physical, so the coordinate
-    // centroid is mapped to cartesian first (identity on a cartesian grid).
-    let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_pos_{a}"))
+        // conserved reads (in-place: the same fields are the writes). the momentum runs over dof (all
+        // active components), so a 2.5D MHD sink drains the out-of-plane momentum and its kinetic energy.
+        // the energy field exists only in the adiabatic regime; the iso slot is zero-sized.
+        let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..dof)
+            .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
+            .collect();
+        let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
+            <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(Gv::field(
+                "nrg",
+                symbi_ir::FieldRef::cons_nrg(),
+            ))
         } else {
-            Gv::ZERO
+            <E::Slot<Gv> as EnergySlot<Gv>>::zero()
+        };
+
+        // the cell centroid + volume from the shared geometry scaffold — the coordinate
+        // map every other body kernel of this chart evaluates.
+        let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let dv = Gv::ONE / geo.inv_volume;
+        let mut min_w = gv_axis_width(0, Spacing::Uniform);
+        for ax in 1..ndim {
+            min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
         }
+
+        // the mask geometry as a traced SDF: phi = |x - body_pos| - r_mask, and
+        // chi = 0.5 (1 - tanh(phi / w)). the distance is physical, so the coordinate
+        // centroid is mapped to cartesian first (identity on a cartesian grid).
+        let center: [Gv; 3] = std::array::from_fn(|a| {
+            if a < ndim {
+                Gv::scalar(&format!("body_0_pos_{a}"))
+            } else {
+                Gv::ZERO
+            }
+        });
+        let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
+        let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
+        let sphere = body_mask_sdf(center);
+        let phi = sphere.dist(x);
+        let chi = symbi_ib::sdf::chi(phi, min_w);
+        tag_body_mask(&chi, coords, ndim, axes, None, false);
+
+        // this kernel is the sphere path by construction (it takes no shape parameter), so the
+        // drain runs at the problem-data rate `k_drain * Omega_ff`, independent of the cell state.
+        let inv_tau = spherical_drain_rate();
+
+        // the property stack: [Drain]. contribute at Gv, then
+        // the same integrator that runs at f64.
+        let kin = BodyKin::<Gv, 3> {
+            u_solid: Tensor::zeros(),
+            omega: Tensor::zeros(),
+            e_wall: Gv::ZERO,
+        };
+        let mut acc = Relax::<Gv, 3>::none();
+        Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
+        let cons = ConsG::<Gv, 3, E, Dyed> {
+            // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
+            // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
+            chi: if has_dye {
+                Gv::field("chi", symbi_ir::FieldRef::cons_chi())
+            } else {
+                Gv::ZERO
+            },
+            den,
+            mom: Tensor::new(std::array::from_fn(
+                |a| if a < dof { mom[a] } else { Gv::ZERO },
+            )),
+            nrg,
+        };
+        let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
+        // a bare drain has no wall surface -> a zero normal -> zero form drag (all force is accretion).
+        let n_cart: Vec<Gv> = vec![Gv::ZERO; ndim];
+        // the angular-momentum receipt: the lab-frame moment r_cart x F_cart of the
+        // cell's force receipt about the body center. exactly zero beyond the support
+        // ball (F vanishes there). 3d books all three components; 2d only z; 1d none.
+        let (f_cart, torque) = cartesian_receipt(
+            coords,
+            ndim,
+            axes,
+            &geo.centroid,
+            &x,
+            &center,
+            &delta.force_delta,
+        );
+
+        penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart)
     });
-    let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let sphere = body_mask_sdf(center);
-    let phi = sphere.dist(x);
-    let chi = symbi_ib::sdf::chi(phi, min_w);
-    tag_body_mask(&chi, coords, ndim, axes, None, false);
-
-    // this kernel is the sphere path by construction (it takes no shape parameter), so the
-    // drain runs at the problem-data rate `k_drain * Omega_ff`, independent of the cell state.
-    let inv_tau = spherical_drain_rate();
-
-    // the property stack: [Drain]. contribute at Gv, then
-    // the same integrator that runs at f64.
-    let kin = BodyKin::<Gv, 3> {
-        u_solid: Tensor::zeros(),
-        omega: Tensor::zeros(),
-        e_wall: Gv::ZERO,
-    };
-    let mut acc = Relax::<Gv, 3>::none();
-    Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, E, Dyed> {
-        // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
-        // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
-        chi: if has_dye {
-            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
-        } else {
-            Gv::ZERO
-        },
-        den,
-        mom: Tensor::new(std::array::from_fn(
-            |a| if a < dof { mom[a] } else { Gv::ZERO },
-        )),
-        nrg,
-    };
-    let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
-    // a bare drain has no wall surface -> a zero normal -> zero form drag (all force is accretion).
-    let n_cart: Vec<Gv> = vec![Gv::ZERO; ndim];
-    // the angular-momentum receipt: the lab-frame moment r_cart x F_cart of the
-    // cell's force receipt about the body center. exactly zero beyond the support
-    // ball (F vanishes there). 3d books all three components; 2d only z; 1d none.
-    let (f_cart, torque) = cartesian_receipt(
-        coords,
-        ndim,
-        axes,
-        &geo.centroid,
-        &x,
-        &center,
-        &delta.force_delta,
-    );
-
-    let writes = penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart);
 
     // the delta outputs vanish exactly beyond the tanh saturation radius; the
     // in-place cons writes are unchanged-value there, so the ball bounds
     // everything the reduction needs (dispatch may clip to it).
-    let kernel = end_trace().with_derived_support(&writes);
+    let kernel = kernel.with_derived_support(&writes);
     (kernel, legacy_writes(writes))
 }
 
@@ -855,181 +858,182 @@ fn penalize_porous_impl<E: EnergyModel>(
         (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
         "penalize_porous_gv: need 1<=ndim<=dof<=3"
     );
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    // the regime's eos handle: adiabatic reads `gamma` (the sound speed is recovered from the
-    // conserved state below); isothermal reads the constant sound speed `cs` directly.
-    let eos = Gv::scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
-    let c_drain = Gv::scalar("c_drain");
-    let porosity = Gv::scalar("porosity");
-    let k_eta_n = Gv::scalar("k_eta_n");
-    let k_eta_t = Gv::scalar("k_eta_t");
+    let (kernel, writes) = trace(|| {
+        let dt = Gv::scalar("dt");
+        // the regime's eos handle: adiabatic reads `gamma` (the sound speed is recovered from the
+        // conserved state below); isothermal reads the constant sound speed `cs` directly.
+        let eos = Gv::scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
+        let c_drain = Gv::scalar("c_drain");
+        let porosity = Gv::scalar("porosity");
+        let k_eta_n = Gv::scalar("k_eta_n");
+        let k_eta_t = Gv::scalar("k_eta_t");
 
-    // the wall normal + velocity target are ndim (in-plane); the momentum runs over dof so the
-    // out-of-plane component is carried as a purely tangential velocity (relaxed by k_eta_t) and its
-    // kinetic energy enters c_s. it exists in 2.5D MHD, where the drain and the wall both act on
-    // it; hydro runs at dof == ndim.
-    let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..dof)
-        .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
-        .collect();
-    let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
-        <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(Gv::field(
-            "nrg",
-            symbi_ir::FieldRef::cons_nrg(),
-        ))
-    } else {
-        <E::Slot<Gv> as EnergySlot<Gv>>::zero()
-    };
-
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
-    let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = gv_axis_width(0, Spacing::Uniform);
-    for ax in 1..ndim {
-        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
-    }
-
-    let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_pos_{a}"))
+        // the wall normal + velocity target are ndim (in-plane); the momentum runs over dof so the
+        // out-of-plane component is carried as a purely tangential velocity (relaxed by k_eta_t) and its
+        // kinetic energy enters c_s. it exists in 2.5D MHD, where the drain and the wall both act on
+        // it; hydro runs at dof == ndim.
+        let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..dof)
+            .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
+            .collect();
+        let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
+            <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(Gv::field(
+                "nrg",
+                symbi_ir::FieldRef::cons_nrg(),
+            ))
         } else {
-            Gv::ZERO
-        }
-    });
-    // the mask distance is physical: map the coordinate centroid to cartesian.
-    let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let sdf = if spin {
-        body_mask_sdf_spinning(center, shape.expect("a spinning wall must have a shape"))
-    } else {
-        body_mask_sdf_shaped(center, shape)
-    };
-    let phi = sdf.dist(x);
-    let chi = symbi_ib::sdf::chi(phi, min_w);
-    tag_body_mask(&chi, coords, ndim, axes, shape, spin);
+            <E::Slot<Gv> as EnergySlot<Gv>>::zero()
+        };
 
-    // tau = c_drain dx / c_s. the adiabatic c_s comes from the just-updated conserved
-    // state (post-godunov, pre-c2p); the isothermal c_s is the constant scalar.
-    let cs = if E::HAS_ENERGY {
-        let mut mom_sq = Gv::ZERO;
-        for m in &mom {
-            mom_sq = mom_sq + *m * *m;
+        let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let dv = Gv::ONE / geo.inv_volume;
+        let mut min_w = gv_axis_width(0, Spacing::Uniform);
+        for ax in 1..ndim {
+            min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
         }
-        symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg.value(), eos)
-    } else {
-        eos
-    };
-    // the sphere path drains at the problem-data rate `k_drain * Omega_ff` (the `r_acc` scalar
-    // supplies the radius). a shaped wall spans a range of radii, so it keeps the sound-crossing
-    // form tau = c_drain dx / c_s, whose state feedback the wall's own mass resupply bounds.
-    let inv_tau = if shape.is_none() {
-        spherical_drain_rate()
-    } else {
-        signal_speed(cs) / (c_drain * min_w)
-    };
-    let rate_scale = signal_speed(cs) / min_w;
 
-    // the outward surface normal in the cell's physical frame (the cartesian normal rotated into
-    // the orthonormal basis; identity on a cartesian grid). the sphere path is r_hat =
-    // x_rel/|x_rel|, with |x_rel| = 0 guarded to a zero normal (its whole du is tangential,
-    // finite). the shaped path is the exact CSG gradient — the SDF outward unit normal via Dual
-    // autodiff — which is the arbitrary surface's normal everywhere the distance is smooth.
-    let n_cart: Vec<Gv> = match shape {
-        None => {
+        let center: [Gv; 3] = std::array::from_fn(|a| {
+            if a < ndim {
+                Gv::scalar(&format!("body_0_pos_{a}"))
+            } else {
+                Gv::ZERO
+            }
+        });
+        // the mask distance is physical: map the coordinate centroid to cartesian.
+        let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
+        let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
+        let sdf = if spin {
+            body_mask_sdf_spinning(center, shape.expect("a spinning wall must have a shape"))
+        } else {
+            body_mask_sdf_shaped(center, shape)
+        };
+        let phi = sdf.dist(x);
+        let chi = symbi_ib::sdf::chi(phi, min_w);
+        tag_body_mask(&chi, coords, ndim, axes, shape, spin);
+
+        // tau = c_drain dx / c_s. the adiabatic c_s comes from the just-updated conserved
+        // state (post-godunov, pre-c2p); the isothermal c_s is the constant scalar.
+        let cs = if E::HAS_ENERGY {
+            let mut mom_sq = Gv::ZERO;
+            for m in &mom {
+                mom_sq = mom_sq + *m * *m;
+            }
+            symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg.value(), eos)
+        } else {
+            eos
+        };
+        // the sphere path drains at the problem-data rate `k_drain * Omega_ff` (the `r_acc` scalar
+        // supplies the radius). a shaped wall spans a range of radii, so it keeps the sound-crossing
+        // form tau = c_drain dx / c_s, whose state feedback the wall's own mass resupply bounds.
+        let inv_tau = if shape.is_none() {
+            spherical_drain_rate()
+        } else {
+            signal_speed(cs) / (c_drain * min_w)
+        };
+        let rate_scale = signal_speed(cs) / min_w;
+
+        // the outward surface normal in the cell's physical frame (the cartesian normal rotated into
+        // the orthonormal basis; identity on a cartesian grid). the sphere path is r_hat =
+        // x_rel/|x_rel|, with |x_rel| = 0 guarded to a zero normal (its whole du is tangential,
+        // finite). the shaped path is the exact CSG gradient — the SDF outward unit normal via Dual
+        // autodiff — which is the arbitrary surface's normal everywhere the distance is smooth.
+        let n_cart: Vec<Gv> = match shape {
+            None => {
+                let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
+                let r = x_rel.dot(&x_rel).sqrt();
+                let nonzero = r.cmp_gt(Gv::ZERO);
+                let divisor = Gv::select(nonzero, r, Gv::ONE);
+                let inv_r = Gv::select(nonzero, Gv::ONE / divisor, Gv::ZERO);
+                (0..ndim).map(|a| x_rel[a] * inv_r).collect()
+            }
+            Some(_) => {
+                let n = sdf.normal(x);
+                (0..ndim).map(|a| n[a]).collect()
+            }
+        };
+        let n_phys = vector_from_cartesian(coords, ndim, axes, &geo.centroid, &n_cart);
+        let normal = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
+            if a < ndim { n_phys[a] } else { Gv::ZERO }
+        }));
+
+        let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
+            if a < ndim {
+                Gv::scalar(&format!("body_0_vel_{a}"))
+            } else {
+                Gv::ZERO
+            }
+        }));
+        // a spinning wall's surface moves at u_solid + omega x r with the full world-frame
+        // angular-velocity vector (an arbitrary rotation axis; z-spin is the [0, 0, w] case).
+        let omega = if spin {
+            // the full angular-velocity vector (world frame): the surface drags the gas at omega x r
+            // about the (evolving) rotation axis.
+            Tensor::<Gv, 3>::new([
+                Gv::scalar("body_0_omega_0"),
+                Gv::scalar("body_0_omega_1"),
+                Gv::scalar("body_0_omega_2"),
+            ])
+        } else {
+            Tensor::zeros()
+        };
+        let base_kin = BodyKin::<Gv, 3> {
+            u_solid,
+            omega,
+            e_wall: Gv::ZERO,
+        };
+        // a spinning wall's velocity target is the local rigid-motion velocity u_solid + omega x r_cell;
+        // `at` bakes omega x r into u_solid per cell (the contribute path reads u_solid directly). the
+        // static path keeps the bare translational u_solid, bit-identical to before.
+        let kin_cart = if spin {
             let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
-            let r = x_rel.dot(&x_rel).sqrt();
-            let nonzero = r.cmp_gt(Gv::ZERO);
-            let divisor = Gv::select(nonzero, r, Gv::ONE);
-            let inv_r = Gv::select(nonzero, Gv::ONE / divisor, Gv::ZERO);
-            (0..ndim).map(|a| x_rel[a] * inv_r).collect()
-        }
-        Some(_) => {
-            let n = sdf.normal(x);
-            (0..ndim).map(|a| n[a]).collect()
-        }
-    };
-    let n_phys = vector_from_cartesian(coords, ndim, axes, &geo.centroid, &n_cart);
-    let normal = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim { n_phys[a] } else { Gv::ZERO }
-    }));
-
-    let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_vel_{a}"))
+            base_kin.at(&x_rel)
         } else {
-            Gv::ZERO
+            base_kin
+        };
+        // the surface velocity is assembled in the cartesian world frame; the gas
+        // momentum is stored in physical components, so the target rotates into the
+        // cell's orthonormal basis before the normal/tangential decomposition.
+        let kin = BodyKin::<Gv, 3> {
+            u_solid: solid_velocity_phys(coords, ndim, axes, &geo.centroid, &kin_cart.u_solid),
+            ..kin_cart
+        };
+        let mut acc = Relax::<Gv, 3>::none();
+        Property::PorousAccretor {
+            p: porosity,
+            inv_tau,
+            inv_eta_n: k_eta_n * rate_scale,
+            inv_eta_t: k_eta_t * rate_scale,
         }
-    }));
-    // a spinning wall's surface moves at u_solid + omega x r with the full world-frame
-    // angular-velocity vector (an arbitrary rotation axis; z-spin is the [0, 0, w] case).
-    let omega = if spin {
-        // the full angular-velocity vector (world frame): the surface drags the gas at omega x r
-        // about the (evolving) rotation axis.
-        Tensor::<Gv, 3>::new([
-            Gv::scalar("body_0_omega_0"),
-            Gv::scalar("body_0_omega_1"),
-            Gv::scalar("body_0_omega_2"),
-        ])
-    } else {
-        Tensor::zeros()
-    };
-    let base_kin = BodyKin::<Gv, 3> {
-        u_solid,
-        omega,
-        e_wall: Gv::ZERO,
-    };
-    // a spinning wall's velocity target is the local rigid-motion velocity u_solid + omega x r_cell;
-    // `at` bakes omega x r into u_solid per cell (the contribute path reads u_solid directly). the
-    // static path keeps the bare translational u_solid, bit-identical to before.
-    let kin_cart = if spin {
-        let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
-        base_kin.at(&x_rel)
-    } else {
-        base_kin
-    };
-    // the surface velocity is assembled in the cartesian world frame; the gas
-    // momentum is stored in physical components, so the target rotates into the
-    // cell's orthonormal basis before the normal/tangential decomposition.
-    let kin = BodyKin::<Gv, 3> {
-        u_solid: solid_velocity_phys(coords, ndim, axes, &geo.centroid, &kin_cart.u_solid),
-        ..kin_cart
-    };
-    let mut acc = Relax::<Gv, 3>::none();
-    Property::PorousAccretor {
-        p: porosity,
-        inv_tau,
-        inv_eta_n: k_eta_n * rate_scale,
-        inv_eta_t: k_eta_t * rate_scale,
-    }
-    .contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, E, Dyed> {
-        // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
-        // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
-        chi: if has_dye {
-            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
-        } else {
-            Gv::ZERO
-        },
-        den,
-        mom: Tensor::new(std::array::from_fn(
-            |a| if a < dof { mom[a] } else { Gv::ZERO },
-        )),
-        nrg,
-    };
-    let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let (f_cart, torque) = cartesian_receipt(
-        coords,
-        ndim,
-        axes,
-        &geo.centroid,
-        &x,
-        &center,
-        &delta.force_delta,
-    );
+        .contribute(chi, &kin, &mut acc);
+        let cons = ConsG::<Gv, 3, E, Dyed> {
+            // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
+            // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
+            chi: if has_dye {
+                Gv::field("chi", symbi_ir::FieldRef::cons_chi())
+            } else {
+                Gv::ZERO
+            },
+            den,
+            mom: Tensor::new(std::array::from_fn(
+                |a| if a < dof { mom[a] } else { Gv::ZERO },
+            )),
+            nrg,
+        };
+        let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
+        let (f_cart, torque) = cartesian_receipt(
+            coords,
+            ndim,
+            axes,
+            &geo.centroid,
+            &x,
+            &center,
+            &delta.force_delta,
+        );
 
-    let writes = penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart);
+        penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart)
+    });
 
-    let kernel = end_trace().with_derived_support(&writes);
+    let kernel = kernel.with_derived_support(&writes);
     (kernel, legacy_writes(writes))
 }
 
@@ -1081,108 +1085,109 @@ fn penalize_torque_free_impl<E: EnergyModel>(
         (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
         "penalize_torque_free_gv: need 1<=ndim<=dof<=3"
     );
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let xi = Gv::scalar("xi");
+    let (kernel, writes) = trace(|| {
+        let dt = Gv::scalar("dt");
+        let xi = Gv::scalar("xi");
 
-    let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..dof)
-        .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
-        .collect();
-    let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
-        <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(Gv::field(
-            "nrg",
-            symbi_ir::FieldRef::cons_nrg(),
-        ))
-    } else {
-        <E::Slot<Gv> as EnergySlot<Gv>>::zero()
-    };
-
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
-    let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = gv_axis_width(0, Spacing::Uniform);
-    for ax in 1..ndim {
-        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
-    }
-
-    let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_pos_{a}"))
+        let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..dof)
+            .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
+            .collect();
+        let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
+            <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(Gv::field(
+                "nrg",
+                symbi_ir::FieldRef::cons_nrg(),
+            ))
         } else {
-            Gv::ZERO
+            <E::Slot<Gv> as EnergySlot<Gv>>::zero()
+        };
+
+        let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let dv = Gv::ONE / geo.inv_volume;
+        let mut min_w = gv_axis_width(0, Spacing::Uniform);
+        for ax in 1..ndim {
+            min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
         }
+
+        let center: [Gv; 3] = std::array::from_fn(|a| {
+            if a < ndim {
+                Gv::scalar(&format!("body_0_pos_{a}"))
+            } else {
+                Gv::ZERO
+            }
+        });
+        // the mask distance is physical: map the coordinate centroid to cartesian.
+        let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
+        let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
+        let sphere = body_mask_sdf(center);
+        let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
+        tag_body_mask(&chi, coords, ndim, axes, None, false);
+
+        // this kernel is the sphere path by construction (it takes no shape parameter), so the
+        // drain runs at the problem-data rate `k_drain * Omega_ff`, independent of the cell state.
+        let inv_tau = spherical_drain_rate();
+
+        // the outward surface normal in the cell's physical frame: the cartesian
+        // r_hat from the body center rotated into the orthonormal basis (identity on
+        // a cartesian grid; e_r for a centered accretor). the torque-free channel's
+        // radial/tangential split is about this normal, so it must match the frame
+        // the momentum lives in.
+        let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
+        let r = x_rel.dot(&x_rel).sqrt();
+        let nonzero = r.cmp_gt(Gv::ZERO);
+        let divisor = Gv::select(nonzero, r, Gv::ONE);
+        let inv_r = Gv::select(nonzero, Gv::ONE / divisor, Gv::ZERO);
+        let n_cart: Vec<Gv> = (0..ndim).map(|a| x_rel[a] * inv_r).collect();
+        let n_phys = vector_from_cartesian(coords, ndim, axes, &geo.centroid, &n_cart);
+        let normal = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
+            if a < ndim { n_phys[a] } else { Gv::ZERO }
+        }));
+
+        let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
+            if a < ndim {
+                Gv::scalar(&format!("body_0_vel_{a}"))
+            } else {
+                Gv::ZERO
+            }
+        }));
+        // the body's translational velocity is a cartesian world vector; rotate it
+        // into the cell's physical basis to match the stored momentum components.
+        let kin = BodyKin::<Gv, 3> {
+            u_solid: solid_velocity_phys(coords, ndim, axes, &geo.centroid, &u_solid),
+            omega: Tensor::zeros(),
+            e_wall: Gv::ZERO,
+        };
+        let mut acc = Relax::<Gv, 3>::none();
+        Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
+        let cons = ConsG::<Gv, 3, E, Dyed> {
+            // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
+            // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
+            chi: if has_dye {
+                Gv::field("chi", symbi_ir::FieldRef::cons_chi())
+            } else {
+                Gv::ZERO
+            },
+            den,
+            mom: Tensor::new(std::array::from_fn(
+                |a| if a < dof { mom[a] } else { Gv::ZERO },
+            )),
+            nrg,
+        };
+        let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
+        let (f_cart, torque) = cartesian_receipt(
+            coords,
+            ndim,
+            axes,
+            &geo.centroid,
+            &x,
+            &center,
+            &delta.force_delta,
+        );
+
+        penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart)
     });
-    // the mask distance is physical: map the coordinate centroid to cartesian.
-    let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let sphere = body_mask_sdf(center);
-    let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
-    tag_body_mask(&chi, coords, ndim, axes, None, false);
 
-    // this kernel is the sphere path by construction (it takes no shape parameter), so the
-    // drain runs at the problem-data rate `k_drain * Omega_ff`, independent of the cell state.
-    let inv_tau = spherical_drain_rate();
-
-    // the outward surface normal in the cell's physical frame: the cartesian
-    // r_hat from the body center rotated into the orthonormal basis (identity on
-    // a cartesian grid; e_r for a centered accretor). the torque-free channel's
-    // radial/tangential split is about this normal, so it must match the frame
-    // the momentum lives in.
-    let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
-    let r = x_rel.dot(&x_rel).sqrt();
-    let nonzero = r.cmp_gt(Gv::ZERO);
-    let divisor = Gv::select(nonzero, r, Gv::ONE);
-    let inv_r = Gv::select(nonzero, Gv::ONE / divisor, Gv::ZERO);
-    let n_cart: Vec<Gv> = (0..ndim).map(|a| x_rel[a] * inv_r).collect();
-    let n_phys = vector_from_cartesian(coords, ndim, axes, &geo.centroid, &n_cart);
-    let normal = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim { n_phys[a] } else { Gv::ZERO }
-    }));
-
-    let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_vel_{a}"))
-        } else {
-            Gv::ZERO
-        }
-    }));
-    // the body's translational velocity is a cartesian world vector; rotate it
-    // into the cell's physical basis to match the stored momentum components.
-    let kin = BodyKin::<Gv, 3> {
-        u_solid: solid_velocity_phys(coords, ndim, axes, &geo.centroid, &u_solid),
-        omega: Tensor::zeros(),
-        e_wall: Gv::ZERO,
-    };
-    let mut acc = Relax::<Gv, 3>::none();
-    Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, E, Dyed> {
-        // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
-        // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
-        chi: if has_dye {
-            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
-        } else {
-            Gv::ZERO
-        },
-        den,
-        mom: Tensor::new(std::array::from_fn(
-            |a| if a < dof { mom[a] } else { Gv::ZERO },
-        )),
-        nrg,
-    };
-    let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let (f_cart, torque) = cartesian_receipt(
-        coords,
-        ndim,
-        axes,
-        &geo.centroid,
-        &x,
-        &center,
-        &delta.force_delta,
-    );
-
-    let writes = penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart);
-
-    let kernel = end_trace().with_derived_support(&writes);
+    let kernel = kernel.with_derived_support(&writes);
     (kernel, legacy_writes(writes))
 }
 
