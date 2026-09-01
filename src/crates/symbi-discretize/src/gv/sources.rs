@@ -7,6 +7,7 @@
 use super::*;
 use symbi_geometry::{Cylindrical, CylindricalRPhi, Metric, Spherical};
 use symbi_hydro::spatial_metric::SpatialMetric;
+use symbi_ir::{KernelWrite, KernelWrites};
 
 // =============================================================================
 // the conserved-update godunov family in Gv — the finite-volume divergence (the Gv stencil
@@ -294,7 +295,7 @@ pub(crate) fn gv_geometric_source(
 /// renders + evaluates this and asserts the analytical `rho*g_ext` / `rho*(v.g_ext)` — the
 /// same result `uniform_acceleration_*_source` produces via its hand-built graph, proving the
 /// carrier-generic form is a drop-in for the splice path (and is f64==Gv by construction).
-pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("rho", FieldRef::cons_den());
     let vel: [Gv; D] =
@@ -303,16 +304,10 @@ pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, Field
     let src = symbi_hydro::UniformAccel::<Gv, D> { g_ext };
     let mom = src.momentum(rho);
     let nrg = src.energy(rho, &vel);
-    let mut writes: Vec<(String, FieldBind, NodeId)> = (0..D)
-        .map(|k| {
-            (
-                format!("s_mom_{k}"),
-                format!("s_mom_{k}").into(),
-                mom[k].node(),
-            )
-        })
+    let mut writes: KernelWrites = (0..D)
+        .map(|k| KernelWrite::new(format!("s_mom_{k}"), format!("s_mom_{k}"), mom[k].node()))
         .collect();
-    writes.push(("s_nrg".to_string(), "s_nrg".into(), nrg.node()));
+    writes.push(KernelWrite::new("s_nrg", "s_nrg", nrg.node()));
     (end_trace(), writes)
 }
 
@@ -325,7 +320,7 @@ pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, Field
 /// carrier-equivalence + the work-energy coupling are gated by `source_term_carrier.rs`.
 pub fn splice_user_source_gv(
     built: &symbi_hydro::source_spec::BuiltSource,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     // bind every declared param (x_k, t, p_i, ...) to a runtime Gv scalar of the same name;
     // in production the position `x_k` binds to the in-kernel centroid instead.
@@ -339,7 +334,7 @@ pub fn splice_user_source_gv(
     let writes = outs
         .iter()
         .enumerate()
-        .map(|(k, &n)| (format!("s_{k}"), format!("s_{k}").into(), n))
+        .map(|(k, &n)| KernelWrite::new(format!("s_{k}"), format!("s_{k}"), n))
         .collect();
     (end_trace(), writes)
 }
@@ -350,8 +345,7 @@ pub fn splice_user_source_gv(
 /// a host test renders + evaluates it and asserts `-rho*GM*(x-xm)/|x-xm|^3` — the same form
 /// `point_mass_{momentum,energy}_source` hand-builds, proving the carrier-generic form is a
 /// drop-in (and f64==Gv by construction). the shared `1/|x-xm|^3` is emitted once (hash-cons).
-pub fn point_mass_gravity_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
-{
+pub fn point_mass_gravity_probe_gv<const D: usize>() -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("rho", FieldRef::cons_den());
     let vel: [Gv; D] =
@@ -363,16 +357,10 @@ pub fn point_mass_gravity_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, 
     let src = symbi_hydro::PointMassGravity::<Gv, D> { gm, xm, eps };
     let mom = src.momentum(rho, &x);
     let nrg = src.energy(rho, &vel, &x);
-    let mut writes: Vec<(String, FieldBind, NodeId)> = (0..D)
-        .map(|k| {
-            (
-                format!("s_mom_{k}"),
-                format!("s_mom_{k}").into(),
-                mom[k].node(),
-            )
-        })
+    let mut writes: KernelWrites = (0..D)
+        .map(|k| KernelWrite::new(format!("s_mom_{k}"), format!("s_mom_{k}"), mom[k].node()))
         .collect();
-    writes.push(("s_nrg".to_string(), "s_nrg".into(), nrg.node()));
+    writes.push(KernelWrite::new("s_nrg", "s_nrg", nrg.node()));
     (end_trace(), writes)
 }
 
@@ -384,7 +372,7 @@ pub fn inertial_momentum_probe_gv(
     coords: Coords,
     spacing: &[Spacing],
     ndim: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let axes: Vec<usize> = (0..ndim).collect();
     let mom: Vec<Gv> = (0..ndim)
@@ -396,7 +384,7 @@ pub fn inertial_momentum_probe_gv(
     let geo = cell_geometry_gv(coords, spacing, &axes, ndim);
     let s = inertial_momentum_sources_gv(ndim, coords, &mom, &vel, &geo.centroid);
     let writes = (0..ndim)
-        .map(|d| (format!("s_{d}"), format!("s_{d}").into(), s[d].node()))
+        .map(|d| KernelWrite::new(format!("s_{d}"), format!("s_{d}"), s[d].node()))
         .collect();
     (end_trace(), writes)
 }
@@ -413,7 +401,7 @@ pub fn geometric_momentum_source_probe_gv(
     ndim: usize,
     ncomp: usize,
     source: GeoSource,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let geo = cell_geometry_gv(coords, spacing, axes, ndim);
     // hydro shares the conserved momentum (the gas inertial reads cons.mom); rmhd computes its
@@ -430,7 +418,7 @@ pub fn geometric_momentum_source_probe_gv(
     };
     let s = gv_geometric_source(coords, axes, ndim, ncomp, &geo, source, &cons_mom, false);
     let writes = (0..ncomp)
-        .map(|k| (format!("s_{k}"), format!("s_{k}").into(), s[k].node()))
+        .map(|k| KernelWrite::new(format!("s_{k}"), format!("s_{k}"), s[k].node()))
         .collect();
     (end_trace(), writes)
 }
