@@ -26,17 +26,15 @@ use symbi_discretize::coords::{Balance, Coords};
 use symbi_discretize::gv::adiabatic_hllc_plus_flux_gv;
 use symbi_discretize::{GvKernel, Recon};
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::graph::NodeId;
-use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
+use symbi_ir::{KernelEmitInputs, KernelWriteEffect, emit_kernel_from_lowering, legacy_writes};
 
-type Writes = Vec<(String, symbi_ir::FieldBind, NodeId)>;
-
-fn emit_gv(out_dir: &str, name: &str, k: GvKernel, writes: Writes) {
+fn emit_gv<W: KernelWriteEffect>(out_dir: &str, name: &str, k: GvKernel, writes: Vec<W>) {
     assert!(
         !k.graph.has_errors(),
         "{name} graph errors: {:?}",
         k.graph.errors()
     );
+    let field_writes = legacy_writes(&writes);
     let desc = emit_kernel_from_lowering(
         &k.graph,
         &KernelEmitInputs {
@@ -49,7 +47,7 @@ fn emit_gv(out_dir: &str, name: &str, k: GvKernel, writes: Writes) {
             },
             field_inputs: &k.field_inputs,
             scalar_params: &k.scalar_params,
-            field_writes: &writes,
+            field_writes: &field_writes,
             coord_components: &k.coord_components,
             device_preamble: &[],
             tile_spec: None,

@@ -10,6 +10,7 @@ use symbi_geometry::{
     Geometry, KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
     SchwarzschildKSCartesian, SchwarzschildKSCylindrical, volume_weighted_centroid,
 };
+use symbi_ir::{KernelWrite, KernelWrites};
 
 /// one cartesian-uniform finite-volume divergence sum over the gridded axes:
 /// `sum_i (F_i[coord+e_i] - F_i[coord]) / dx_i`. `base` names the per-direction flux field
@@ -835,31 +836,15 @@ pub fn geometry_probe_gv(
     coords: Coords,
     spacing: &[Spacing],
     ndim: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let axes: Vec<usize> = (0..ndim).collect();
     let g = cell_geometry_gv(coords, spacing, &axes, ndim);
     let writes = vec![
-        (
-            "inv_volume".to_string(),
-            "inv_volume".into(),
-            g.inv_volume.node(),
-        ),
-        (
-            "area_lo_0".to_string(),
-            "area_lo_0".into(),
-            g.area_lo[0].node(),
-        ),
-        (
-            "area_hi_0".to_string(),
-            "area_hi_0".into(),
-            g.area_hi[0].node(),
-        ),
-        (
-            "centroid_0".to_string(),
-            "centroid_0".into(),
-            g.centroid[0].node(),
-        ),
+        KernelWrite::new("inv_volume", "inv_volume", g.inv_volume.node()),
+        KernelWrite::new("area_lo_0", "area_lo_0", g.area_lo[0].node()),
+        KernelWrite::new("area_hi_0", "area_hi_0", g.area_hi[0].node()),
+        KernelWrite::new("centroid_0", "centroid_0", g.centroid[0].node()),
     ];
     (end_trace(), writes)
 }

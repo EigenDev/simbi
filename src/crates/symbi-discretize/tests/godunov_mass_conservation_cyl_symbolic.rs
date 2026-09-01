@@ -36,8 +36,8 @@ const E_R: [i64; NDIM] = [1, 0, 0];
 fn cyl_areas() -> (RatFun, RatFun) {
     let (kernel, writes) = geometry_probe_gv(Coords::Cylindrical, &[Spacing::Uniform; NDIM], NDIM);
     // probe writes: 0=inv_volume, 1=area_lo_0, 2=area_hi_0, 3=centroid_0.
-    let area_lo = extract_scalar(&kernel.graph, writes[1].2, SCALARS);
-    let area_hi = extract_scalar(&kernel.graph, writes[2].2, SCALARS);
+    let area_lo = extract_scalar(&kernel.graph, writes[1].value, SCALARS);
+    let area_hi = extract_scalar(&kernel.graph, writes[2].value, SCALARS);
     (area_lo, area_hi)
 }
 

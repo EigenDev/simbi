@@ -37,8 +37,7 @@ use symbi_hydro::riemann::{hllc, hllc_rhd, hllc_rmhd, hlld_rmhd, hlle};
 use symbi_hydro::rmhd::{Rmhd, rmhd_magnetosonic_cfl_speeds};
 use symbi_hydro::state::PrimG;
 use symbi_hydro::state::{Cons, Prim};
-use symbi_ir::MeshScalar;
-use symbi_ir::graph::NodeId;
+use symbi_ir::{KernelWrites, MeshScalar};
 
 const N: usize = 6;
 const GAMMA: f64 = 1.4;
@@ -402,7 +401,7 @@ fn flux_cell<const D: usize>(dir: usize) -> [usize; D] {
 // run a cartesian euler-family flux kernel on a uniform state, computing only the interior
 // cell along sweep `dir`. binds rho/vel_{0..D-1}/pre + gamma/theta; returns the run output.
 fn run_uniform_euler_flux<const D: usize>(
-    kernel: (GvKernel, Vec<(String, symbi_ir::FieldBind, NodeId)>),
+    kernel: (GvKernel, KernelWrites),
     prim: &Prim<f64, D>,
     gamma: f64,
     dir: usize,

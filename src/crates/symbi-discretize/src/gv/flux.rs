@@ -14,6 +14,7 @@ use symbi_geometry::{
 use symbi_hydro::RmhdGr;
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
+use symbi_ir::{KernelWrite, KernelWrites};
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
 /// primitive (rho, v_{0,1,2}, pre, B_{0,1,2}) to the face, then the canonical
@@ -89,39 +90,35 @@ fn nmhd_reconstruct(
 }
 
 // the 8 conserved face-flux writes (D, S_{0..2}, nrg, B_{0..2}).
-fn nmhd_flux_writes(flux: &MhdCons<Gv, 3>) -> Vec<(String, FieldBind, NodeId)> {
-    let mut writes = vec![(
-        "flux_den".to_string(),
-        FieldRef::flux_den().into(),
+fn nmhd_flux_writes(flux: &MhdCons<Gv, 3>) -> KernelWrites {
+    let mut writes = vec![KernelWrite::new(
+        "flux_den",
+        FieldRef::flux_den(),
         flux.den.node(),
     )];
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("flux_mom_{k}"),
-            FieldRef::flux_mom(k as u8).into(),
+            FieldRef::flux_mom(k as u8),
             flux.mom[k].node(),
         ));
     }
-    writes.push((
-        "flux_nrg".to_string(),
-        FieldRef::flux_nrg().into(),
+    writes.push(KernelWrite::new(
+        "flux_nrg",
+        FieldRef::flux_nrg(),
         flux.nrg.node(),
     ));
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("flux_mag_{k}"),
-            format!("flux.mag_{k}").into(),
+            format!("flux.mag_{k}"),
             flux.mag[k].node(),
         ));
     }
     writes
 }
 
-pub fn nmhd_flux_gv(
-    ndim: u8,
-    dir: u8,
-    coord_n: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn nmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
     let flux = hlle(&NewtonianMhd, &eos, &left, &right, &nhat, Gv::ZERO);
@@ -132,11 +129,7 @@ pub fn nmhd_flux_gv(
 /// NMHD HLLC face flux — `hllc_newtonian` (Li 2005, contact-resolving, transverse-B
 /// continuous) on the reconstructed L/R states. wave speeds inline, from the face states
 /// alone (the manifest stays free of ws_l/ws_r).
-pub fn nmhd_hllc_flux_gv(
-    ndim: u8,
-    dir: u8,
-    coord_n: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn nmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
     let flux = hllc_newtonian(
@@ -153,11 +146,7 @@ pub fn nmhd_hllc_flux_gv(
 
 /// NMHD HLLD face flux — `hlld_newtonian` (miyoshi-kusano 2005, full 5-wave). the
 /// robust solver: the algebraic c2p + this closed-form HLLD make orszag-tang stable.
-pub fn nmhd_hlld_flux_gv(
-    ndim: u8,
-    dir: u8,
-    coord_n: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn nmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
     let flux = hlld_newtonian(&eos, &left, &right, &nhat, Gv::ZERO);
@@ -228,23 +217,23 @@ fn imhd_reconstruct(
 }
 
 // the 7 conserved face-flux writes the isothermal system carries: D, S_{0..2}, B_{0..2}.
-fn imhd_flux_writes(flux: &IsoMhdCons<Gv, 3>) -> Vec<(String, FieldBind, NodeId)> {
-    let mut writes = vec![(
-        "flux_den".to_string(),
-        FieldRef::flux_den().into(),
+fn imhd_flux_writes(flux: &IsoMhdCons<Gv, 3>) -> KernelWrites {
+    let mut writes = vec![KernelWrite::new(
+        "flux_den",
+        FieldRef::flux_den(),
         flux.den.node(),
     )];
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("flux_mom_{k}"),
-            FieldRef::flux_mom(k as u8).into(),
+            FieldRef::flux_mom(k as u8),
             flux.mom[k].node(),
         ));
     }
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("flux_mag_{k}"),
-            format!("flux.mag_{k}").into(),
+            format!("flux.mag_{k}"),
             flux.mag[k].node(),
         ));
     }
@@ -252,11 +241,7 @@ fn imhd_flux_writes(flux: &IsoMhdCons<Gv, 3>) -> Vec<(String, FieldBind, NodeId)
 }
 
 /// isothermal-MHD HLLE face flux.
-pub fn imhd_flux_gv(
-    ndim: u8,
-    dir: u8,
-    coord_n: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn imhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let (eos, left, right, nhat) = imhd_reconstruct(ndim, dir, coord_n);
     let flux = hlle(&IsothermalMhd, &eos, &left, &right, &nhat, Gv::ZERO);
@@ -265,11 +250,7 @@ pub fn imhd_flux_gv(
 }
 
 /// isothermal-MHD HLLD face flux — `hlld_isothermal` (mignone 2007, 3-state).
-pub fn imhd_hlld_flux_gv(
-    ndim: u8,
-    dir: u8,
-    coord_n: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn imhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let (eos, left, right, nhat) = imhd_reconstruct(ndim, dir, coord_n);
     let flux = hlld_isothermal(&eos, &left, &right, &nhat, Gv::ZERO);
@@ -501,22 +482,22 @@ fn euler_reconstruct<const D: usize>(
 }
 
 // the D+2 conserved face-flux writes (D, S_{0..D}, nrg) for an euler-shaped Cons.
-fn euler_flux_writes<const D: usize>(flux: &Cons<Gv, D>) -> Vec<(String, FieldBind, NodeId)> {
-    let mut writes = vec![(
-        "flux_den".to_string(),
-        FieldRef::flux_den().into(),
+fn euler_flux_writes<const D: usize>(flux: &Cons<Gv, D>) -> KernelWrites {
+    let mut writes = vec![KernelWrite::new(
+        "flux_den",
+        FieldRef::flux_den(),
         flux.den.node(),
     )];
     for k in 0..D {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("flux_mom_{k}"),
-            FieldRef::flux_mom(k as u8).into(),
+            FieldRef::flux_mom(k as u8),
             flux.mom[k].node(),
         ));
     }
-    writes.push((
-        "flux_nrg".to_string(),
-        FieldRef::flux_nrg().into(),
+    writes.push(KernelWrite::new(
+        "flux_nrg",
+        FieldRef::flux_nrg(),
         flux.nrg.node(),
     ));
     writes
@@ -540,7 +521,7 @@ fn euler_hlle_flux_gv<const D: usize, R>(
     coord_n: usize,
     recon: Recon,
     eos_arm: EosArm,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
+) -> (GvKernel, KernelWrites)
 where
     R: Regime<Gv, D, Prim = Prim<Gv, D>, Cons = Cons<Gv, D>>,
 {
@@ -559,10 +540,7 @@ where
 /// the adiabatic (ideal-gas newtonian euler) face flux — `euler_hlle_flux_gv` at the
 /// `Newtonian` regime. replaces the cartesian `hlle_flux(.., has_energy=true)` builder.
 /// cartesian: ncomp == ndim == D, sweep coordinate == grid `dir`.
-pub fn adiabatic_flux_gv<const D: usize>(
-    dir: u8,
-    recon: Recon,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn adiabatic_flux_gv<const D: usize>(dir: u8, recon: Recon) -> (GvKernel, KernelWrites) {
     euler_hlle_flux_gv::<D, _>(
         &Newtonian,
         D as u8,
@@ -576,7 +554,7 @@ pub fn adiabatic_flux_gv<const D: usize>(
 /// the cyl r-z (axisymmetric swirl) adiabatic face flux: ncomp = 3 (v_phi swirl folds
 /// into KE) on a 2D (r, z) grid; the sweep coordinate is `axes[dir]` ([0, 2][dir] — grid
 /// axis 1 is the z coordinate). replaces the cyl r-z `hlle_flux` Expr builder.
-pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, KernelWrites) {
     let coord_n = [0usize, 2][dir as usize]; // (r, z) grid axes -> coordinates 0, 2
     euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n, Recon::Plm, EosArm::IdealGamma)
 }
@@ -585,10 +563,7 @@ pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, Vec<(String, FieldBind, N
 /// regime (relativistic U/F/wave speeds via mignone-bodo). replaces the `rhd_hlle_flux`
 /// Expr builder + `rhd_side`. cartesian-only (the rhd arm bakes on the cartesian chart),
 /// ncomp == ndim == D.
-pub fn rhd_flux_gv<const D: usize>(
-    dir: u8,
-    eos_arm: EosArm,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rhd_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> (GvKernel, KernelWrites) {
     euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize, Recon::Plm, eos_arm)
 }
 
@@ -607,7 +582,7 @@ pub fn rhd_flux_gr_gv<const D: usize>(
     spacing: &[Spacing],
     axes: &[usize],
     rusanov: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
+) -> (GvKernel, KernelWrites)
 where
     SchwarzschildKS<Gv>: Metric<Gv, D>,
     SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
@@ -767,7 +742,7 @@ where
 /// type-system claim ([[isothermal.rs]]: "zero-overhead isothermal hydrodynamics via
 /// the energy model type system") at the gv-trace layer too. ncomp == ndim == D, sweep
 /// coordinate == grid `dir` (cartesian).
-pub fn iso_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn iso_flux_gv<const D: usize>(dir: u8) -> (GvKernel, KernelWrites) {
     iso_hlle_flux_gv::<D>(D as u8, dir, dir as usize)
 }
 
@@ -778,11 +753,7 @@ pub fn iso_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind
 /// (stencil shifts along grid axis `dir`); `coord_n` is the sweep coordinate (normal
 /// velocity is `vel[coord_n]`, pressure goes on momentum `coord_n`). cartesian: ndim ==
 /// D, coord_n == dir.
-fn iso_hlle_flux_gv<const D: usize>(
-    ndim: u8,
-    dir: u8,
-    coord_n: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+fn iso_hlle_flux_gv<const D: usize>(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     // theta is the whole scalar tail — the isothermal closure is set by cs alone. the
     // substrate's dispatch_flux passes ISO_GAMMA, and `scalars_for` walks the kernel's
@@ -877,15 +848,15 @@ fn iso_hlle_flux_gv<const D: usize>(
         mom_flux.push(mk);
     }
 
-    let mut writes = vec![(
-        "flux_den".to_string(),
-        FieldRef::flux_den().into(),
+    let mut writes = vec![KernelWrite::new(
+        "flux_den",
+        FieldRef::flux_den(),
         den_flux.node(),
     )];
     for k in 0..D {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("flux_mom_{k}"),
-            FieldRef::flux_mom(k as u8).into(),
+            FieldRef::flux_mom(k as u8),
             mom_flux[k].node(),
         ));
     }
@@ -898,11 +869,7 @@ fn iso_hlle_flux_gv<const D: usize>(
 /// wave speeds + induction flux, all S::select-traceable). replaces the `rmhd_hlle_flux`
 /// Expr builder + `lower_rmhd_side`. RMHD vectors are 3-component on every grid; `ndim` selects the
 /// reconstruction grid + emit loop. writes the 8 conserved fluxes (D, S_k, tau, B_k).
-pub fn rmhd_flux_gv(
-    ndim: u8,
-    dir: u8,
-    coord_n: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     // scalar params in the substrate order: gamma (EOS) then theta (limiter compression).
     let gamma = Gv::scalar("gamma");
@@ -973,27 +940,27 @@ pub fn rmhd_flux_gv(
     let s_r = wsr_m1.max(wsr_0).max(Gv::ZERO);
     let flux = hlle_with_speeds(&Rmhd, &eos, &left, &right, &nhat, Gv::ZERO, s_l, s_r);
 
-    let mut writes = vec![(
-        "flux_den".to_string(),
-        FieldRef::flux_den().into(),
+    let mut writes = vec![KernelWrite::new(
+        "flux_den",
+        FieldRef::flux_den(),
         flux.den.node(),
     )];
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("flux_mom_{k}"),
-            FieldRef::flux_mom(k as u8).into(),
+            FieldRef::flux_mom(k as u8),
             flux.mom[k].node(),
         ));
     }
-    writes.push((
-        "flux_nrg".to_string(),
-        FieldRef::flux_nrg().into(),
+    writes.push(KernelWrite::new(
+        "flux_nrg",
+        FieldRef::flux_nrg(),
         flux.nrg.node(),
     ));
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("flux_mag_{k}"),
-            format!("flux.mag_{k}").into(),
+            format!("flux.mag_{k}"),
             flux.mag[k].node(),
         ));
     }
@@ -1038,7 +1005,7 @@ pub fn rmhd_flux_gr_gv(
     axes: &[usize],
     hlld: bool,
     rusanov: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let ndim = axes.len();
     let coord_n = axes[dir as usize];
@@ -1223,27 +1190,27 @@ pub fn rmhd_flux_gr_gv(
             flux.mag = flux.mag + beta.scale(bn_face / alpha);
         }
         flux.hydro.nrg = covariant_nrg(&flux);
-        let mut writes = vec![(
-            "flux_den".to_string(),
-            FieldRef::flux_den().into(),
+        let mut writes = vec![KernelWrite::new(
+            "flux_den",
+            FieldRef::flux_den(),
             flux.den.node(),
         )];
         for k in 0..3 {
-            writes.push((
+            writes.push(KernelWrite::new(
                 format!("flux_mom_{k}"),
-                FieldRef::flux_mom(k as u8).into(),
+                FieldRef::flux_mom(k as u8),
                 flux.mom[k].node(),
             ));
         }
-        writes.push((
-            "flux_nrg".to_string(),
-            FieldRef::flux_nrg().into(),
+        writes.push(KernelWrite::new(
+            "flux_nrg",
+            FieldRef::flux_nrg(),
             flux.nrg.node(),
         ));
         for k in 0..3 {
-            writes.push((
+            writes.push(KernelWrite::new(
                 format!("flux_mag_{k}"),
-                format!("flux.mag_{k}").into(),
+                format!("flux.mag_{k}"),
                 flux.mag[k].node(),
             ));
         }
@@ -1321,27 +1288,27 @@ pub fn rmhd_flux_gr_gv(
     };
     flux.hydro.nrg = covariant_nrg(&flux);
 
-    let mut writes = vec![(
-        "flux_den".to_string(),
-        FieldRef::flux_den().into(),
+    let mut writes = vec![KernelWrite::new(
+        "flux_den",
+        FieldRef::flux_den(),
         flux.den.node(),
     )];
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("flux_mom_{k}"),
-            FieldRef::flux_mom(k as u8).into(),
+            FieldRef::flux_mom(k as u8),
             flux.mom[k].node(),
         ));
     }
-    writes.push((
-        "flux_nrg".to_string(),
-        FieldRef::flux_nrg().into(),
+    writes.push(KernelWrite::new(
+        "flux_nrg",
+        FieldRef::flux_nrg(),
         flux.nrg.node(),
     ));
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("flux_mag_{k}"),
-            format!("flux.mag_{k}").into(),
+            format!("flux.mag_{k}"),
             flux.mag[k].node(),
         ));
     }
@@ -1386,7 +1353,7 @@ fn adiabatic_hllc_at_arm<const D: usize>(
     balance: Balance,
     coords: Coords,
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let eos = IdealGas {
         gamma: Gv::scalar("gamma"),
@@ -1556,7 +1523,7 @@ pub fn adiabatic_hllc_plus_flux_gv<const D: usize>(
     balance: Balance,
     coords: Coords,
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     adiabatic_hllc_at_arm::<D>(
         dir,
         recon,
@@ -1567,10 +1534,7 @@ pub fn adiabatic_hllc_plus_flux_gv<const D: usize>(
     )
 }
 
-pub fn adiabatic_hllc_flux_gv<const D: usize>(
-    dir: u8,
-    recon: Recon,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn adiabatic_hllc_flux_gv<const D: usize>(dir: u8, recon: Recon) -> (GvKernel, KernelWrites) {
     adiabatic_hllc_at_arm::<D>(
         dir,
         recon,
@@ -1595,7 +1559,7 @@ pub fn adiabatic_hllc_wb_flux_gv<const D: usize>(
     recon: Recon,
     coords: Coords,
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     adiabatic_hllc_at_arm::<D>(
         dir,
         recon,
@@ -1611,7 +1575,7 @@ pub fn adiabatic_hlle_wb_flux_gv<const D: usize>(
     recon: Recon,
     coords: Coords,
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     adiabatic_hllc_at_arm::<D>(
         dir,
         recon,
@@ -1626,7 +1590,7 @@ fn rhd_hllc_at_arm<const D: usize>(
     dir: u8,
     smoother: ShockwaveLimiter,
     eos_arm: EosArm,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     // gamma keeps its first-in-manifest slot on every arm; under the taub-mathews closure
     // it is bound-but-inert, exactly as theta under ppm.
@@ -1647,10 +1611,7 @@ fn rhd_hllc_at_arm<const D: usize>(
 
 /// RHD HLLC face flux — mignone-bodo (2005) quadratic for the contact speed.
 /// mirrors `euler_hlle_flux_gv(&Rhd, ...)` but calls `riemann::hllc_rhd`.
-pub fn rhd_hllc_flux_gv<const D: usize>(
-    dir: u8,
-    eos_arm: EosArm,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> (GvKernel, KernelWrites) {
     rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::Standard, eos_arm)
 }
 
@@ -1663,21 +1624,14 @@ pub fn rhd_hllc_flux_gv<const D: usize>(
 /// the low-mach accuracy term of the newtonian arm stays behind: separating the velocity-jump
 /// dissipation from the pressure-jump dissipation in the relativistic flux is its own
 /// derivation, and the defect it corrects is a subsonic one.
-pub fn rhd_hllc_plus_flux_gv<const D: usize>(
-    dir: u8,
-    eos_arm: EosArm,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rhd_hllc_plus_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> (GvKernel, KernelWrites) {
     rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::HllcPlus, eos_arm)
 }
 
 /// RMHD HLLC face flux — mignone-bodo (2006), null vs non-null normal B-field
 /// branch. mirrors `rmhd_flux_gv` (8-component MHD primitive) but routes the
 /// reconstructed L/R state through `riemann::hllc_rmhd`; `rmhd_flux_gv` routes through `hlle`.
-pub fn rmhd_hllc_flux_gv(
-    ndim: u8,
-    dir: u8,
-    coord_n: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
     let flux = hllc_rmhd(
@@ -1698,11 +1652,7 @@ pub fn rmhd_hllc_flux_gv(
 /// for the 15-step secant on pressure (freeze-on-converged), eagerly computes
 /// HLLE as the divergence fallback, and selects via a success mask at the end.
 /// shares the MHD primitive shape with HLLE/HLLC.
-pub fn rmhd_hlld_flux_gv(
-    ndim: u8,
-    dir: u8,
-    coord_n: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
     let flux = hlld_rmhd(

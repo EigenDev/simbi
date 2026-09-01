@@ -12,6 +12,7 @@ use symbi_geometry::{
     SchwarzschildKSCylindrical,
 };
 use symbi_ir::dual::Dual;
+use symbi_ir::{KernelWrite, KernelWrites};
 
 /// trace the newtonian-MHD CFL wave-speed map — `NewtonianMhd::wave_speeds` (the
 /// exact closed-form fast magnetosonic; it is already cheap) folded
@@ -22,7 +23,7 @@ pub fn nmhd_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
@@ -58,7 +59,7 @@ pub fn imhd_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
@@ -134,8 +135,8 @@ fn cfl_inv_widths_gv(coords: Coords, spacing: &[Spacing], axes: &[usize], ndim: 
 }
 
 /// the lambda write list every wave-speed map returns: one scratch output `lambda`.
-fn wave_speed_map_writes(root: NodeId) -> Vec<(String, FieldBind, NodeId)> {
-    vec![("lambda".to_string(), FieldRef::Scratch.into(), root)]
+fn wave_speed_map_writes(root: NodeId) -> KernelWrites {
+    vec![KernelWrite::new("lambda", FieldRef::Scratch, root)]
 }
 
 /// the gridded cell-center coordinate on axis `d`, spacing-aware: the geometric mean of the bounding
@@ -183,7 +184,7 @@ pub fn euler_wave_speed_map_gv<R>(
     axes: &[usize],
     ndim: usize,
     eos_arm: EosArm,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
+) -> (GvKernel, KernelWrites)
 where
     R: Regime<Gv, 3, Prim = Prim<Gv, 3>, Cons = Cons<Gv, 3>>,
 {
@@ -326,7 +327,7 @@ pub fn gr_light_cone_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
     // gridded cell-center positions, spacing-aware (log = geometric mean of faces, uniform = midpoint)
@@ -426,7 +427,7 @@ pub fn rmhd_magnetosonic_cfl_map_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
@@ -481,7 +482,7 @@ pub fn kerr_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     assert!(
         coords == Coords::Spherical && ndim == 2 && axes == [0, 1],
         "the kerr wave-speed map is the (r, theta) swirl instance"
@@ -518,7 +519,7 @@ pub fn iso_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     // newtonian / isothermal are non-relativistic -> always flat spacetime + gamma-law.
     euler_wave_speed_map_gv(
         &Newtonian,
@@ -540,7 +541,7 @@ pub fn rhd_wave_speed_map_gv(
     axes: &[usize],
     ndim: usize,
     eos_arm: EosArm,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     euler_wave_speed_map_gv(&Rhd, coords, spacetime, spacing, axes, ndim, eos_arm)
 }
 
@@ -558,7 +559,7 @@ pub fn rmhd_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
@@ -612,7 +613,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     coords: Coords,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let ndim = axes.len();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
@@ -659,14 +660,14 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
             axes[d],
         );
         let bd = beta[axes[d]];
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("ws_l_{d}"),
-            format!("wave_speed_l[{d}]").into(),
+            format!("wave_speed_l[{d}]"),
             (sl - bd).node(),
         ));
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("ws_r_{d}"),
-            format!("wave_speed_r[{d}]").into(),
+            format!("wave_speed_r[{d}]"),
             (sr - bd).node(),
         ));
     }
@@ -692,7 +693,7 @@ pub fn rmhd_source_cfl_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     mag_from_bcell: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let ndim = axes.len();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
@@ -957,7 +958,7 @@ pub fn rmhd_source_cfl_gr_gv(
     let total = lam_flux + lam_s;
     (
         end_trace(),
-        vec![("lambda".to_string(), FieldRef::Scratch.into(), total.node())],
+        vec![KernelWrite::new("lambda", FieldRef::Scratch, total.node())],
     )
 }
 
@@ -979,7 +980,7 @@ pub fn rhd_source_cfl_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ncomp: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let ndim = axes.len();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
@@ -1233,12 +1234,12 @@ pub fn rhd_source_cfl_gr_gv(
     let total = lam_flux + lam_s;
     (
         end_trace(),
-        vec![("lambda".to_string(), FieldRef::Scratch.into(), total.node())],
+        vec![KernelWrite::new("lambda", FieldRef::Scratch, total.node())],
     )
 }
 
 /// RMHD is fixed 3D. reads the full 3-velocity + 3-magnetic-field prim + gamma.
-pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
@@ -1264,14 +1265,14 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
         // raw quartic min/max as the solver returns them; the flux clamps the fan, and the
         // zero-clamped form lives there as `extremal_speeds`.
         let (lmin, lmax) = Rmhd.wave_speeds(&eos, &prim, &nhat);
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("ws_l_{d}"),
-            format!("wave_speed_l[{d}]").into(),
+            format!("wave_speed_l[{d}]"),
             lmin.node(),
         ));
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("ws_r_{d}"),
-            format!("wave_speed_r[{d}]").into(),
+            format!("wave_speed_r[{d}]"),
             lmax.node(),
         ));
     }
@@ -1310,7 +1311,7 @@ pub fn fofc_project_gr_mhd_gv(
     spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let ndim = axes.len();
     let mid = gv_cell_midpoints(spacing, ndim);
@@ -1407,19 +1408,23 @@ pub fn fofc_project_gr_mhd_gv(
         x_den, s_c, e_c, a_den, s_a, e_a, &b, &gm_inv, &gm, eps_d, eps_q, eps_psi, 20,
     );
     let proj = |xc: Gv, ua: Gv| ua + theta * (xc - ua);
-    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
-    writes.push((
-        "x_den".to_string(),
-        "x_den".into(),
+    let mut writes = KernelWrites::new();
+    writes.push(KernelWrite::new(
+        "x_den",
+        "x_den",
         proj(x_den, a_den).node(),
     ));
     for k in 0..3 {
         let key = format!("x_mom_{k}");
-        writes.push((key.clone(), key.into(), proj(x_mom[k], s_a[k]).node()));
+        writes.push(KernelWrite::new(
+            key.clone(),
+            key,
+            proj(x_mom[k], s_a[k]).node(),
+        ));
     }
-    writes.push((
-        "x_nrg".to_string(),
-        "x_nrg".into(),
+    writes.push(KernelWrite::new(
+        "x_nrg",
+        "x_nrg",
         proj(x_nrg, a_nrg).node(),
     ));
     (end_trace(), writes)
@@ -1465,7 +1470,7 @@ pub fn constraint_projection_gv(
     spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     use symbi_hydro::constraints::{
         ConstraintState, DensityFloor, MagnetizationCeiling, StateConstraint, TemperatureFloor,
         WuTangAdmissibility, constraint_thetas, joint_theta,
@@ -1624,15 +1629,15 @@ pub fn constraint_projection_gv(
 
     let (den, mom, ehat) = blend_slots(theta);
     let mut writes = vec![
-        ("x_den".to_string(), "x_den".into(), den.node()),
-        ("x_nrg".to_string(), "x_nrg".into(), ehat.node()),
-        ("theta".to_string(), "theta".into(), theta.node()),
-        ("binding".to_string(), "binding".into(), binding.node()),
+        KernelWrite::new("x_den", "x_den", den.node()),
+        KernelWrite::new("x_nrg", "x_nrg", ehat.node()),
+        KernelWrite::new("theta", "theta", theta.node()),
+        KernelWrite::new("binding", "binding", binding.node()),
     ];
     for k in 0..3 {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("x_mom_{k}"),
-            format!("x_mom_{k}").into(),
+            format!("x_mom_{k}"),
             mom[k].node(),
         ));
     }
@@ -1649,7 +1654,7 @@ pub fn fofc_source_theta_gr_mhd_gv(
     spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let ndim = axes.len();
     let mid = gv_cell_midpoints(spacing, ndim);
@@ -1709,7 +1714,7 @@ pub fn fofc_source_theta_gr_mhd_gv(
         eps_psi,
         20,
     );
-    let writes = vec![("theta".to_string(), "theta".into(), theta.node())];
+    let writes = vec![KernelWrite::new("theta", "theta", theta.node())];
     (end_trace(), writes)
 }
 
@@ -1730,7 +1735,7 @@ pub fn fofc_project_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ncomp: usize,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
     let ndim = axes.len();
     let mid = gv_cell_midpoints(spacing, ndim);
@@ -1776,19 +1781,23 @@ pub fn fofc_project_gr_gv(
         x_den, s_c, e_c, us_den, s_a, e_a, &gm_inv, eps_d, eps_f,
     );
     let proj = |xc: Gv, ua: Gv| ua + theta * (xc - ua);
-    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
-    writes.push((
-        "x_den".to_string(),
-        "x_den".into(),
+    let mut writes = KernelWrites::new();
+    writes.push(KernelWrite::new(
+        "x_den",
+        "x_den",
         proj(x_den, us_den).node(),
     ));
     for k in 0..ncomp {
         let key = format!("x_mom_{k}");
-        writes.push((key.clone(), key.into(), proj(x_mom[k], us_mom[k]).node()));
+        writes.push(KernelWrite::new(
+            key.clone(),
+            key,
+            proj(x_mom[k], us_mom[k]).node(),
+        ));
     }
-    writes.push((
-        "x_nrg".to_string(),
-        "x_nrg".into(),
+    writes.push(KernelWrite::new(
+        "x_nrg",
+        "x_nrg",
         proj(x_nrg, us_nrg).node(),
     ));
     (end_trace(), writes)
@@ -1799,7 +1808,7 @@ pub fn fofc_project_gr_gv(
 /// reads them for the edge-EMF coefficients) works for NMHD — the classical regimes otherwise
 /// compute speeds inline in the flux and leave those buffers empty. mirror of
 /// `rmhd_wave_speeds_cell_gv`.
-pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
@@ -1821,14 +1830,14 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
     for d in 0..ndim {
         let nhat = Tensor::<Gv, 3>::unit(d);
         let (lmin, lmax) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("ws_l_{d}"),
-            format!("wave_speed_l[{d}]").into(),
+            format!("wave_speed_l[{d}]"),
             lmin.node(),
         ));
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("ws_r_{d}"),
-            format!("wave_speed_r[{d}]").into(),
+            format!("wave_speed_r[{d}]"),
             lmax.node(),
         ));
     }
@@ -1840,7 +1849,7 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
 /// a^2 = cs^2, pressure-free). lets isothermal MHD run UCT (the regime-generic HLL edge-EMF reads
 /// these speeds); materializing them is what holds `--ct-method uct` on UCT, which silently falls
 /// back to Contact when those buffers are empty.
-pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     begin_trace();
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     let vel: [Gv; 3] =
@@ -1861,14 +1870,14 @@ pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
     for d in 0..ndim {
         let nhat = Tensor::<Gv, 3>::unit(d);
         let (lmin, lmax) = IsothermalMhd.wave_speeds(&eos, &prim, &nhat);
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("ws_l_{d}"),
-            format!("wave_speed_l[{d}]").into(),
+            format!("wave_speed_l[{d}]"),
             lmin.node(),
         ));
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("ws_r_{d}"),
-            format!("wave_speed_r[{d}]").into(),
+            format!("wave_speed_r[{d}]"),
             lmax.node(),
         ));
     }
@@ -1997,7 +2006,7 @@ mod pcp_source_theta_tests {
             "a metric source must not introduce a second density endpoint"
         );
         assert_eq!(writes.len(), 1);
-        assert_eq!(writes[0].0, "theta");
-        assert_eq!(writes[0].1.name(), "theta");
+        assert_eq!(writes[0].key, "theta");
+        assert_eq!(writes[0].destination.name(), "theta");
     }
 }

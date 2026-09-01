@@ -45,7 +45,7 @@ fn weight(kind: &str) -> f64 {
 fn histogram(recon: Recon, balance: Balance) -> (BTreeMap<String, usize>, f64) {
     let (k, writes) =
         adiabatic_hllc_plus_flux_gv::<3>(0, recon, balance, Coords::Cartesian, &[0, 1, 2]);
-    let outputs: Vec<_> = writes.iter().map(|(_, _, n)| *n).collect();
+    let outputs: Vec<_> = writes.iter().map(|write| write.value).collect();
     let live = k.graph.reachable_from(&outputs);
     let mut h: BTreeMap<String, usize> = BTreeMap::new();
     let mut cost = 0.0;
@@ -83,7 +83,7 @@ fn ablate() {
                 adiabatic_hllc_flux_gv::<3>(0, Recon::Plm)
             }
         };
-        let outs: Vec<_> = w.iter().map(|(_, _, n)| *n).collect();
+        let outs: Vec<_> = w.iter().map(|write| write.value).collect();
         let live = k.graph.reachable_from(&outs);
         let mut h = BTreeMap::new();
         for (id, node, _) in k.graph.iter() {
@@ -184,8 +184,9 @@ fn main() {
 #[allow(dead_code)]
 fn emit_probe() {
     use symbi_ir::emit::{Precision, Target, TargetConfig};
-    use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
+    use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering, legacy_writes};
     let (k, w) = adiabatic_hllc_flux_gv::<3>(0, Recon::Plm);
+    let field_writes = legacy_writes(&w);
     let desc = emit_kernel_from_lowering(
         &k.graph,
         &KernelEmitInputs {
@@ -198,7 +199,7 @@ fn emit_probe() {
             },
             field_inputs: &k.field_inputs,
             scalar_params: &k.scalar_params,
-            field_writes: &w,
+            field_writes: &field_writes,
             coord_components: &k.coord_components,
             device_preamble: &[],
             tile_spec: None,

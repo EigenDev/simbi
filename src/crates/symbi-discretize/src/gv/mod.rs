@@ -884,7 +884,10 @@ mod tests {
             ]
         );
         assert_eq!(k.coord_components, vec![0]);
-        let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
+        let write_paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(write_paths, vec!["flux.den", "flux.mom_0", "flux.nrg"]);
         assert!(
             !k.graph.has_errors(),
@@ -932,7 +935,10 @@ mod tests {
                 "mesh_vtrans_0".to_string(),
             ]
         );
-        let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
+        let write_paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(write_paths, vec!["flux.den", "flux.mom_0", "flux.nrg"]);
         assert!(
             !k.graph.has_errors(),
@@ -972,7 +978,10 @@ mod tests {
                 "mesh_vtrans_0".to_string(),
             ]
         );
-        let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
+        let write_paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(
             write_paths,
             vec!["flux.den", "flux.mom_0"],
@@ -1008,7 +1017,10 @@ mod tests {
                 "ws_l", "ws_r", // <- the materialized per-cell wave speeds, read for the fan
             ]
         );
-        let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
+        let write_paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(
             write_paths,
             vec![
@@ -1525,7 +1537,7 @@ mod tests {
             EosArm::IdealGamma,
         );
         assert_eq!(writes.len(), 1, "one scratch lambda write");
-        assert_eq!(writes[0].1.name(), "scratch");
+        assert_eq!(writes[0].destination.name(), "scratch");
         assert_eq!(
             k.scalar_params,
             vec![
@@ -1721,7 +1733,10 @@ mod tests {
         // transcendentals, being the exact quartic — the cost lifted off the flux.
         let (k, writes) = rmhd_wave_speeds_cell_gv(3);
         assert_eq!(writes.len(), 6, "lambda_min/max per 3 directions");
-        let out_paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
+        let out_paths: Vec<String> = writes
+            .iter()
+            .map(|write| write.destination.name())
+            .collect();
         assert_eq!(
             out_paths,
             vec![
