@@ -193,6 +193,34 @@ impl From<KernelWrite> for (String, FieldBind, NodeId) {
 /// the named write-effect manifest used by kernel composition.
 pub type KernelWrites = Vec<KernelWrite>;
 
+/// semantic read-only view used while legacy builder families migrate from
+/// tuples to [`KernelWrite`]. algorithms depend on the named effect, not on a
+/// concrete storage representation.
+pub trait KernelWriteEffect {
+    fn destination(&self) -> &FieldBind;
+    fn value(&self) -> NodeId;
+}
+
+impl KernelWriteEffect for KernelWrite {
+    fn destination(&self) -> &FieldBind {
+        &self.destination
+    }
+
+    fn value(&self) -> NodeId {
+        self.value
+    }
+}
+
+impl KernelWriteEffect for (String, FieldBind, NodeId) {
+    fn destination(&self) -> &FieldBind {
+        &self.1
+    }
+
+    fn value(&self) -> NodeId {
+        self.2
+    }
+}
+
 /// legacy builder manifest. builder families migrate to [`KernelWrites`]
 /// incrementally; compiler composition already accepts only the named form.
 pub type Writes = Vec<(String, FieldBind, NodeId)>;
@@ -510,7 +538,7 @@ impl GvKernel {
     /// mask chain or an untagged trace derives Everywhere — fail-safe wide, so
     /// the declared region always contains the true support. ball params are
     /// manifest-validated exactly as a hand declaration would be.
-    pub fn with_derived_support(self, writes: &Writes) -> Self {
+    pub fn with_derived_support<W: KernelWriteEffect>(self, writes: &[W]) -> Self {
         let support = crate::support_infer::derive_output_support(
             &self.graph,
             &self.node_supports,

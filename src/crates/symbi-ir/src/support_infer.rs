@@ -349,11 +349,11 @@ fn classify_op(
 ///   unchanged-valued outside the ball and contributes it;
 /// - anything else widens to Everywhere.
 /// no tags -> Everywhere (nothing to propagate from).
-pub fn derive_output_support(
+pub fn derive_output_support<W: crate::gv::KernelWriteEffect>(
     graph: &Graph,
     tags: &HashMap<NodeId, SupportBall>,
     field_inputs: &[(String, FieldBind)],
-    writes: &[(String, FieldBind, NodeId)],
+    writes: &[W],
 ) -> Support {
     if tags.is_empty() || writes.is_empty() {
         return Support::Everywhere;
@@ -361,24 +361,25 @@ pub fn derive_output_support(
     let mut memo: HashMap<NodeId, Class> = HashMap::new();
     let mut acc: Option<SupportBall> = None;
     let mut any_ball = false;
-    for (_, bind, root) in writes {
-        let contribution: Option<SupportBall> = match classify(graph, tags, &mut memo, *root) {
-            Class::Zero(b) => b,
-            Class::Eq(m, b) => {
-                // the write must equal its own field outside the ball: find the
-                // offset-0 read param bound to the same runtime field.
-                let same_field_read = field_inputs
-                    .iter()
-                    .filter(|(_, fb)| fb == bind)
-                    .filter_map(|(key, _)| graph.param(&Symbol::intern(key)))
-                    .any(|pid| pid == m);
-                if !same_field_read {
-                    return Support::Everywhere;
+    for write in writes {
+        let contribution: Option<SupportBall> =
+            match classify(graph, tags, &mut memo, write.value()) {
+                Class::Zero(b) => b,
+                Class::Eq(m, b) => {
+                    // the write must equal its own field outside the ball: find the
+                    // offset-0 read param bound to the same runtime field.
+                    let same_field_read = field_inputs
+                        .iter()
+                        .filter(|(_, fb)| fb == write.destination())
+                        .filter_map(|(key, _)| graph.param(&Symbol::intern(key)))
+                        .any(|pid| pid == m);
+                    if !same_field_read {
+                        return Support::Everywhere;
+                    }
+                    Some(b)
                 }
-                Some(b)
-            }
-            _ => return Support::Everywhere,
-        };
+                _ => return Support::Everywhere,
+            };
         if let Some(b) = contribution {
             any_ball = true;
             match join(&acc, &Some(b)) {

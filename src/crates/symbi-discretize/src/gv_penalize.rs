@@ -33,7 +33,7 @@ use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::algebra::Scalar;
-use symbi_ir::gv::Writes;
+use symbi_ir::gv::{KernelWrite, KernelWrites, Writes};
 use symbi_ir::{Gv, GvKernel, ParamExpr};
 
 /// the wall/drain relaxation signal speed: the fast magnetosonic speed `sqrt(c_s^2 + c_a^2)`,
@@ -177,18 +177,27 @@ fn vector_to_cartesian(
 /// `force - force_normal`. a bare drain passes `n_cart = 0`, so its form drag is exactly zero. this
 /// is the last receipt block, appended after mass/force/energy/torque so every existing slot
 /// keeps its index.
-fn push_force_normal(writes: &mut Writes, ndim: usize, f_cart: &Tensor<Gv, 3>, n_cart: &[Gv]) {
+fn push_force_normal(
+    writes: &mut KernelWrites,
+    ndim: usize,
+    f_cart: &Tensor<Gv, 3>,
+    n_cart: &[Gv],
+) {
     let mut f_dot_n = Gv::ZERO;
     for a in 0..ndim {
         f_dot_n = f_dot_n + f_cart[a] * n_cart[a];
     }
     for a in 0..ndim {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("pen_force_normal_{a}"),
-            format!("pen_0_force_normal_{a}").into(),
+            format!("pen_0_force_normal_{a}"),
             (f_dot_n * n_cart[a]).node(),
         ));
     }
+}
+
+fn legacy_writes(writes: KernelWrites) -> Writes {
+    writes.into_iter().map(Into::into).collect()
 }
 
 /// the cell's force receipt in the cartesian world frame plus its lab-frame
@@ -427,9 +436,9 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, Writes) {
     tag_body_mask(&chi, coords, ndim, axes, None, false);
 
     let ez_new = ez + eta * chi * jz;
-    let writes: Writes = vec![("ez_new".to_string(), "ez".into(), ez_new.node())];
+    let writes = vec![KernelWrite::new("ez_new", "ez", ez_new.node())];
     let kernel = end_trace().with_derived_support(&writes);
-    (kernel, writes)
+    (kernel, legacy_writes(writes))
 }
 
 /// the 3D cartesian body-masked ohmic resistive edge EMF along edge `dir`: adds `eta * chi * J_dir`
@@ -489,9 +498,9 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Wr
     tag_body_mask(&chi, coords, ndim, axes, None, false);
 
     let emf_new = emf + eta * chi * j;
-    let writes: Writes = vec![("emf_new".to_string(), "emf".into(), emf_new.node())];
+    let writes = vec![KernelWrite::new("emf_new", "emf", emf_new.node())];
     let kernel = end_trace().with_derived_support(&writes);
-    (kernel, writes)
+    (kernel, legacy_writes(writes))
 }
 
 /// trace the [Drain]-stack penalization for the adiabatic regime, cartesian. `ndim` is the spatial
@@ -633,7 +642,7 @@ fn penalize_drain_impl<E: EnergyModel>(
     // in-place cons writes are unchanged-value there, so the ball bounds
     // everything the reduction needs (dispatch may clip to it).
     let kernel = end_trace().with_derived_support(&writes);
-    (kernel, writes)
+    (kernel, legacy_writes(writes))
 }
 
 /// the shared write list every penalization surface emits: the in-place conserved
@@ -652,24 +661,24 @@ fn penalize_writes<E: EnergyModel>(
     f_cart: &Tensor<Gv, 3>,
     torque: &Tensor<Gv, 3>,
     n_cart: &[Gv],
-) -> Writes {
-    let mut writes: Writes = Vec::new();
-    writes.push((
-        "den_out".to_string(),
-        symbi_ir::FieldRef::cons_den().into(),
+) -> KernelWrites {
+    let mut writes: KernelWrites = Vec::new();
+    writes.push(KernelWrite::new(
+        "den_out",
+        symbi_ir::FieldRef::cons_den(),
         out.den.node(),
     ));
     for a in 0..dof {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("mom_out_{a}"),
-            symbi_ir::FieldRef::cons_mom(a as u8).into(),
+            symbi_ir::FieldRef::cons_mom(a as u8),
             out.mom[a].node(),
         ));
     }
     if E::HAS_ENERGY {
-        writes.push((
-            "nrg_out".to_string(),
-            symbi_ir::FieldRef::cons_nrg().into(),
+        writes.push(KernelWrite::new(
+            "nrg_out",
+            symbi_ir::FieldRef::cons_nrg(),
             out.nrg.value().node(),
         ));
     }
@@ -677,35 +686,35 @@ fn penalize_writes<E: EnergyModel>(
     // same drain factor to both, so the concentration of the surviving gas is unchanged. the
     // iso regime has no energy write, so there the dye rides directly after the momentum block.
     if has_dye {
-        writes.push((
-            "chi_out".to_string(),
-            symbi_ir::FieldRef::cons_chi().into(),
+        writes.push(KernelWrite::new(
+            "chi_out",
+            symbi_ir::FieldRef::cons_chi(),
             out.chi.node(),
         ));
     }
-    writes.push((
-        "pen_mass".to_string(),
-        "pen_0_mass".into(),
+    writes.push(KernelWrite::new(
+        "pen_mass",
+        "pen_0_mass",
         delta.mass_delta.node(),
     ));
     for a in 0..ndim {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("pen_force_{a}"),
-            format!("pen_0_force_{a}").into(),
+            format!("pen_0_force_{a}"),
             f_cart[a].node(),
         ));
     }
     if E::HAS_ENERGY {
-        writes.push((
-            "pen_energy".to_string(),
-            "pen_0_energy".into(),
+        writes.push(KernelWrite::new(
+            "pen_energy",
+            "pen_0_energy",
             delta.energy_delta.node(),
         ));
     }
     for a in torque_axes(ndim) {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("pen_torque_{a}"),
-            format!("pen_0_torque_{a}").into(),
+            format!("pen_0_torque_{a}"),
             torque[a].node(),
         ));
     }
@@ -1021,7 +1030,7 @@ fn penalize_porous_impl<E: EnergyModel>(
     let writes = penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart);
 
     let kernel = end_trace().with_derived_support(&writes);
-    (kernel, writes)
+    (kernel, legacy_writes(writes))
 }
 
 /// the adiabatic torque-free accretor: the drain plus a tangential
@@ -1174,7 +1183,7 @@ fn penalize_torque_free_impl<E: EnergyModel>(
     let writes = penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart);
 
     let kernel = end_trace().with_derived_support(&writes);
-    (kernel, writes)
+    (kernel, legacy_writes(writes))
 }
 
 #[cfg(test)]
