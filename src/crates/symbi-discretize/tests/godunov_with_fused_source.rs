@@ -6,7 +6,7 @@
 // user momentum source (e.g., `uniform_acceleration_sources`). validates:
 //
 //   - structural — with `user_source = None` the fused builder reproduces
-//     `godunov_euler_gv` exactly; same Writes shape;
+//     `godunov_euler_gv` exactly; same KernelWrites shape;
 //   - semantic — for a uniform state (zero flux divergence), running the
 //     fused kernel with `uniform_acceleration` as the user source produces
 //     `mom_k_new = mom_k + dt * rho * g_ext_k`, exactly the analytical
@@ -51,8 +51,8 @@ use symbi_hydro::source_spec::uniform_acceleration_sources;
 #[test]
 fn user_source_none_matches_writes_of_plain_godunov() {
     // structural equivalence: passing `None` for `user_source` produces a kernel with
-    // the same Writes shape as the plain godunov builder, so a caller passing `None`
-    // binds exactly the same ABI. (the check is Writes-shape equivalence, the contract
+    // the same KernelWrites shape as the plain godunov builder, so a caller passing `None`
+    // binds exactly the same ABI. (the check is KernelWrites-shape equivalence, the contract
     // the runtime binds against; NodeId identity differs between two `begin_trace`
     // sessions.)
     let coords = Coords::Cartesian;

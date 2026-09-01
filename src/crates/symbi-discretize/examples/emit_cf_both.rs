@@ -24,7 +24,7 @@ use std::fs;
 
 use symbi_discretize::{GvKernel, wb_cf_decode_gv, wb_cf_lerp_encode_gv};
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering, legacy_writes};
+use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering};
 
 /// render one kernel at one target and return its source.
 fn render(name: &str, k: &GvKernel, writes: &KernelWrites, target: Target) -> String {
@@ -33,7 +33,6 @@ fn render(name: &str, k: &GvKernel, writes: &KernelWrites, target: Target) -> St
         "{name} graph errors: {:?}",
         k.graph.errors()
     );
-    let field_writes = legacy_writes(writes);
     emit_kernel_from_lowering(
         &k.graph,
         &KernelEmitInputs {
@@ -46,7 +45,7 @@ fn render(name: &str, k: &GvKernel, writes: &KernelWrites, target: Target) -> St
             },
             field_inputs: &k.field_inputs,
             scalar_params: &k.scalar_params,
-            field_writes: &field_writes,
+            field_writes: writes,
             coord_components: &k.coord_components,
             device_preamble: &[],
             tile_spec: None,

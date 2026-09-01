@@ -23,13 +23,12 @@ use std::collections::HashMap;
 use symbi_algebra::algebra::Numeric;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::graph::NodeId;
-use symbi_ir::{FieldRef, Gv, GvKernel, begin_trace, end_trace, with_trace};
+use symbi_ir::{
+    FieldRef, Gv, GvKernel, KernelWrite, KernelWrites, begin_trace, end_trace, with_trace,
+};
 
 use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
-
-/// the traced writes of a census map: one field per accumulator plus the bucket assignment.
-pub type CensusWrites = Vec<(String, symbi_ir::FieldBind, NodeId)>;
 
 /// trace the census map. `built` is the census's single lowered graph, whose outputs are the bin
 /// axis coordinates followed by the accumulator values — the order `CensusConfig::output_nodes`
@@ -48,7 +47,7 @@ pub fn census_map_gv<A: CensusAxis>(
     bin_axes: &[A],
     n_values: usize,
     n_segments: usize,
-) -> (GvKernel, CensusWrites) {
+) -> (GvKernel, KernelWrites) {
     begin_trace();
 
     // the live primitives: a census bins the state at the time it is sampled, which is the tail
@@ -95,17 +94,17 @@ pub fn census_map_gv<A: CensusAxis>(
     let coords_gv: Vec<Gv> = out[..n_axes].iter().map(|&n| Gv::of(n)).collect();
     let segment = segment_marker_traced(bin_axes, &coords_gv, n_segments);
 
-    let mut writes: CensusWrites = Vec::with_capacity(n_values + 1);
+    let mut writes = KernelWrites::with_capacity(n_values + 1);
     for v in 0..n_values {
-        writes.push((
+        writes.push(KernelWrite::new(
             format!("census_value_{v}"),
-            format!("census_value_{v}").into(),
+            format!("census_value_{v}"),
             out[n_axes + v],
         ));
     }
-    writes.push((
-        "census_segment".to_string(),
-        "census_segment".into(),
+    writes.push(KernelWrite::new(
+        "census_segment",
+        "census_segment",
         segment.node(),
     ));
     (end_trace(), writes)

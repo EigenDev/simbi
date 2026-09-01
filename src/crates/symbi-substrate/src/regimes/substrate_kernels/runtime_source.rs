@@ -372,7 +372,10 @@ fn build_fused_cpu_kernel<const D: usize>(
             .iter()
             .map(|(_, rt)| bind_ref(rt))
             .collect(),
-        out_refs: writes.iter().map(|(_, rt, _)| bind_ref(rt)).collect(),
+        out_refs: writes
+            .iter()
+            .map(|write| bind_ref(&write.destination))
+            .collect(),
         // the producer's GvKernel scalar names (raw strings) are classified to typed binds once at
         // build (off the per-stage host resolve).
         scalar_params: gvk
@@ -409,7 +412,10 @@ fn build_source_only_cpu_kernel<const D: usize>(
             .iter()
             .map(|(_, rt)| bind_ref(rt))
             .collect(),
-        out_refs: writes.iter().map(|(_, rt, _)| bind_ref(rt)).collect(),
+        out_refs: writes
+            .iter()
+            .map(|write| bind_ref(&write.destination))
+            .collect(),
         scalar_params: gvk
             .scalar_params
             .iter()
@@ -907,7 +913,7 @@ where
 /// a fixed name, hash it, rebuild with that hash. shared by the source + boundary IR builders.
 pub(crate) fn gv_kernel_to_ir(
     gvk: &symbi_ir::GvKernel,
-    writes: &[(String, FieldBind, symbi_ir::graph::NodeId)],
+    writes: &[symbi_ir::KernelWrite],
     ndim: u8,
     prefix: &str,
 ) -> (String, String) {

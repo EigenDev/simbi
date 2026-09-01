@@ -55,10 +55,10 @@ use symbi_discretize::{
     state_finite_probe_gv, wb_ghost_fill_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::graph::{Graph, NodeId};
+use symbi_ir::graph::Graph;
 use symbi_ir::{
-    FieldBind, KernelEmitInputs, KernelWriteEffect, KernelWrites, emit_kernel_cpu,
-    emit_kernel_cpu_serial, legacy_writes, prepare, prepared_to_ir,
+    KernelEmitInputs, KernelWrites, emit_kernel_cpu, emit_kernel_cpu_serial, prepare,
+    prepared_to_ir,
 };
 
 // the immersed-body kernels pack one slot per body; the count is owned by the
@@ -731,12 +731,12 @@ macro_rules! gv_dim {
 // `GvKernel` already carries the graph + the ABI manifest (field inputs, scalar params, coord
 // axes), so the gen just asserts the graph is clean and write_both's it with the recorded
 // manifest.
-fn emit_gv<W: KernelWriteEffect>(
+fn emit_gv(
     out_dir: &str,
     kernel_name: &str,
     ndim: u8,
     k: &GvKernel,
-    writes: &[W],
+    writes: &[symbi_ir::KernelWrite],
 ) {
     assert!(
         !k.graph.has_errors(),
@@ -753,7 +753,6 @@ fn emit_gv<W: KernelWriteEffect>(
     } else {
         None
     };
-    let writes = legacy_writes(writes);
     write_both_with_support(
         out_dir,
         &k.graph,
@@ -1512,7 +1511,7 @@ fn gen_rmhd_edge_emf(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) 
 //   rmhd_edge_emf_uct_hlld  — relativistic MUB09 wave-sum fan.
 // geometry-agnostic like the contact edge EMF — only the curl carries the metric, so
 // one bake per (ndim, edge) serves cartesian and spherical 2.5D.
-type EdgeEmfBuilder = fn(usize, usize, usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>);
+type EdgeEmfBuilder = fn(usize, usize, usize) -> (GvKernel, KernelWrites);
 
 fn gen_edge_emf_variant(
     out_dir: &str,

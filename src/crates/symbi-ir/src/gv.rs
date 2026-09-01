@@ -178,77 +178,8 @@ impl KernelWrite {
     }
 }
 
-impl From<(String, FieldBind, NodeId)> for KernelWrite {
-    fn from((key, destination, value): (String, FieldBind, NodeId)) -> Self {
-        Self::new(key, destination, value)
-    }
-}
-
-impl From<KernelWrite> for (String, FieldBind, NodeId) {
-    fn from(write: KernelWrite) -> Self {
-        (write.key, write.destination, write.value)
-    }
-}
-
 /// the named write-effect manifest used by kernel composition.
 pub type KernelWrites = Vec<KernelWrite>;
-
-/// semantic read-only view used while legacy builder families migrate from
-/// tuples to [`KernelWrite`]. algorithms depend on the named effect, not on a
-/// concrete storage representation.
-pub trait KernelWriteEffect {
-    fn key(&self) -> &str;
-    fn destination(&self) -> &FieldBind;
-    fn value(&self) -> NodeId;
-}
-
-impl KernelWriteEffect for KernelWrite {
-    fn key(&self) -> &str {
-        &self.key
-    }
-
-    fn destination(&self) -> &FieldBind {
-        &self.destination
-    }
-
-    fn value(&self) -> NodeId {
-        self.value
-    }
-}
-
-impl KernelWriteEffect for (String, FieldBind, NodeId) {
-    fn key(&self) -> &str {
-        &self.0
-    }
-
-    fn destination(&self) -> &FieldBind {
-        &self.1
-    }
-
-    fn value(&self) -> NodeId {
-        self.2
-    }
-}
-
-/// legacy builder manifest. builder families migrate to [`KernelWrites`]
-/// incrementally; compiler composition already accepts only the named form.
-pub type Writes = Vec<(String, FieldBind, NodeId)>;
-
-/// materialize the legacy tuple ABI at an emitter or runtime boundary.
-/// domain builders should retain [`KernelWrites`] and convert only where an
-/// unmigrated consumer still requires the old representation.
-pub fn legacy_writes<W: KernelWriteEffect>(writes: &[W]) -> Writes {
-    writes
-        .iter()
-        .map(|write| {
-            (
-                write.key().to_string(),
-                write.destination().clone(),
-                write.value(),
-            )
-        })
-        .collect()
-}
 
 #[derive(Clone, Debug)]
 pub enum FusionError {
@@ -563,7 +494,7 @@ impl GvKernel {
     /// mask chain or an untagged trace derives Everywhere — fail-safe wide, so
     /// the declared region always contains the true support. ball params are
     /// manifest-validated exactly as a hand declaration would be.
-    pub fn with_derived_support<W: KernelWriteEffect>(self, writes: &[W]) -> Self {
+    pub fn with_derived_support(self, writes: &[KernelWrite]) -> Self {
         let support = crate::support_infer::derive_output_support(
             &self.graph,
             &self.node_supports,

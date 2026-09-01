@@ -21,10 +21,10 @@ use symbi_discretize::{
     rmhd_resistive_emf_3d_dir_gv, rmhd_resistive_emf_cyl_rz_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::{KernelEmitInputs, KernelWriteEffect, emit_kernel_from_lowering, legacy_writes};
+use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering};
 
 // emit a Gv-traced kernel (graph + ABI manifest already carried) -> CUDA source.
-fn emit_gv<W: KernelWriteEffect>(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: Vec<W>) {
+fn emit_gv(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: KernelWrites) {
     assert!(
         !k.graph.has_errors(),
         "{name} graph errors: {:?}",
@@ -33,7 +33,6 @@ fn emit_gv<W: KernelWriteEffect>(out_dir: &str, name: &str, ndim: u8, k: GvKerne
     // thread the kernel's declared smem tile intent so the emitted CUDA
     // exercises the smem prelude + redirected stencil reads through the PTX gate.
     let tile_spec = k.infer_tile_spec();
-    let writes = legacy_writes(&writes);
     let desc = emit_kernel_from_lowering(
         &k.graph,
         &KernelEmitInputs {

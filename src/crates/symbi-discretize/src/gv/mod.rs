@@ -1197,7 +1197,7 @@ mod tests {
             begin_trace();
             let s = Gv::field("start", "start");
             let root = ramp::<Gv>(s, count, threshold).node();
-            let writes = vec![("out".to_string(), "out".into(), root)];
+            let writes = vec![symbi_ir::KernelWrite::new("out", "out", root)];
             let k = end_trace();
             assert!(
                 !k.graph.has_errors(),
@@ -1310,7 +1310,7 @@ mod tests {
             begin_trace();
             let xf = Gv::field("x", "x");
             let root = pick::<Gv>(xf).node();
-            let writes = vec![("out".to_string(), "out".into(), root)];
+            let writes = vec![symbi_ir::KernelWrite::new("out", "out", root)];
             let k = end_trace();
             assert!(
                 !k.graph.has_errors(),
@@ -1447,8 +1447,8 @@ mod tests {
             let xf = Gv::field("x", "x");
             let out = pick2::<Gv>(xf);
             let writes = vec![
-                ("o0".to_string(), "o0".into(), out[0].node()),
-                ("o1".to_string(), "o1".into(), out[1].node()),
+                symbi_ir::KernelWrite::new("o0", "o0", out[0].node()),
+                symbi_ir::KernelWrite::new("o1", "o1", out[1].node()),
             ];
             let k = end_trace();
             assert!(
@@ -2032,7 +2032,6 @@ mod tests {
         // the lowered source is byte-identical — the strongest structural equality available
         // (`Graph` has no `PartialEq`; the emitted source captures the full computation).
         let emit = |k: &GvKernel, w: &symbi_ir::KernelWrites| {
-            let field_writes = symbi_ir::legacy_writes(w);
             let spec = KernelEmitInputs {
                 kernel_name: "fused_eq",
                 coalesce_layout: false,
@@ -2043,7 +2042,7 @@ mod tests {
                 },
                 field_inputs: &k.field_inputs,
                 scalar_params: &k.scalar_params,
-                field_writes: &field_writes,
+                field_writes: w,
                 coord_components: &k.coord_components,
                 device_preamble: &[],
                 tile_spec: None,

@@ -1206,7 +1206,8 @@ impl CompiledKernel {
 }
 
 /// compile a scalarized stencil kernel. `field_inputs` = the cell-load / stencil-read field keys
-/// (input buffer order); `scalar_params` = kernel scalars; `field_writes` = `(key, RHS node)`.
+/// (input buffer order); `scalar_params` = kernel scalars; `field_writes` is the typed output
+/// manifest.
 /// the body may carry control flow (`For`/`If`/`Break`, e.g., an `IterateInline` root-find);
 /// only generic-dim `For` bounds reject -> caller falls back to the interpreter.
 /// compile a kernel at f64 (the default precision). thin wrapper over `compile_kernel_prec`.
@@ -1214,7 +1215,7 @@ pub fn compile_kernel(
     graph: &symbi_ir::graph::Graph,
     field_inputs: &[String],
     scalar_params: &[String],
-    field_writes: &[(String, symbi_ir::graph::NodeId)],
+    field_writes: &[symbi_ir::KernelWrite],
     ndim: usize,
 ) -> Result<CompiledKernel, JitError> {
     compile_kernel_prec(
@@ -1236,7 +1237,7 @@ pub fn compile_kernel_prec(
     graph: &symbi_ir::graph::Graph,
     field_inputs: &[String],
     scalar_params: &[String],
-    field_writes: &[(String, symbi_ir::graph::NodeId)],
+    field_writes: &[symbi_ir::KernelWrite],
     ndim: usize,
     precision: symbi_ir::emit::Precision,
 ) -> Result<CompiledKernel, JitError> {
@@ -1246,7 +1247,8 @@ pub fn compile_kernel_prec(
         types::F64
     };
     let fbytes = fty.bytes() as i64;
-    let write_nodes: Vec<symbi_ir::graph::NodeId> = field_writes.iter().map(|(_, n)| *n).collect();
+    let write_nodes: Vec<symbi_ir::graph::NodeId> =
+        field_writes.iter().map(|write| write.value).collect();
     let sc = symbi_ir::passes::scalarize::scalarize_kernel(graph, &write_nodes);
     let (n_in, n_out, n_scalar) = (field_inputs.len(), field_writes.len(), scalar_params.len());
     let field_idx: HashMap<String, usize> = field_inputs
@@ -1448,9 +1450,9 @@ pub fn compile_kernel_prec(
 /// the kernel's ABI manifest. `writes` are the trace's `(key, runtime, node)` outputs. the bridge
 /// for v2 fusion: build the godunov+source `GvKernel` (`splice_fused_sources_to_contribs` /
 /// `godunov_stage_gv_with_fused_sources`), JIT it here, dispatch the fused single-pass kernel.
-pub fn compile_gv_kernel<W: symbi_ir::KernelWriteEffect>(
+pub fn compile_gv_kernel(
     kernel: &symbi_ir::GvKernel,
-    writes: &[W],
+    writes: &[symbi_ir::KernelWrite],
     ndim: usize,
 ) -> Result<CompiledKernel, JitError> {
     compile_gv_kernel_prec(kernel, writes, ndim, symbi_ir::emit::Precision::F64)
@@ -1459,22 +1461,18 @@ pub fn compile_gv_kernel<W: symbi_ir::KernelWriteEffect>(
 /// compile a runtime `GvKernel` at the given precision (the reduced-precision runtime-JIT path,
 /// e.g. an f32 shaped immersed-body wall). the graph is traced at f64; `precision` overrides the
 /// codegen element width.
-pub fn compile_gv_kernel_prec<W: symbi_ir::KernelWriteEffect>(
+pub fn compile_gv_kernel_prec(
     kernel: &symbi_ir::GvKernel,
-    writes: &[W],
+    writes: &[symbi_ir::KernelWrite],
     ndim: usize,
     precision: symbi_ir::emit::Precision,
 ) -> Result<CompiledKernel, JitError> {
     let field_inputs: Vec<String> = kernel.field_inputs.iter().map(|(k, _)| k.clone()).collect();
-    let field_writes: Vec<(String, symbi_ir::graph::NodeId)> = writes
-        .iter()
-        .map(|write| (write.key().to_string(), write.value()))
-        .collect();
     compile_kernel_prec(
         &kernel.graph,
         &field_inputs,
         &kernel.scalar_params,
-        &field_writes,
+        writes,
         ndim,
         precision,
     )
@@ -1657,7 +1655,7 @@ mod tests {
             },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
-            field_writes: &[("out".into(), "out".into(), out)],
+            field_writes: &[symbi_ir::KernelWrite::new("out", "out", out)],
             coord_components: &[0],
             device_preamble: &[],
             tile_spec: None,
@@ -1689,8 +1687,14 @@ mod tests {
             &[0],
         );
 
-        let kernel = compile_kernel(&g, &["in".into()], &[], &[("out".into(), out)], 1)
-            .expect("jit compile_kernel");
+        let kernel = compile_kernel(
+            &g,
+            &["in".into()],
+            &[],
+            &[symbi_ir::KernelWrite::new("out", "out", out)],
+            1,
+        )
+        .expect("jit compile_kernel");
         let mut out_jit = vec![0.0f64; ext as usize];
         kernel.run(
             &[n as u32],
@@ -1742,7 +1746,7 @@ mod tests {
             },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
-            field_writes: &[("out".into(), "out".into(), it)],
+            field_writes: &[symbi_ir::KernelWrite::new("out", "out", it)],
             coord_components: &[],
             device_preamble: &[],
             tile_spec: None,
@@ -1771,8 +1775,14 @@ mod tests {
             &[0],
         );
 
-        let kernel = compile_kernel(&g, &["in".into()], &[], &[("out".into(), it)], 1)
-            .expect("jit compile_kernel (iterate)");
+        let kernel = compile_kernel(
+            &g,
+            &["in".into()],
+            &[],
+            &[symbi_ir::KernelWrite::new("out", "out", it)],
+            1,
+        )
+        .expect("jit compile_kernel (iterate)");
         let mut out_jit = vec![0.0f64; n];
         kernel.run(
             &[n as u32],
@@ -1844,8 +1854,8 @@ mod tests {
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
             field_writes: &[
-                ("out0".into(), "out0".into(), out0),
-                ("out1".into(), "out1".into(), out1),
+                symbi_ir::KernelWrite::new("out0", "out0", out0),
+                symbi_ir::KernelWrite::new("out1", "out1", out1),
             ],
             coord_components: &[0, 1],
             device_preamble: &[],
@@ -1883,7 +1893,10 @@ mod tests {
             &g,
             &["in".into()],
             &[],
-            &[("out0".into(), out0), ("out1".into(), out1)],
+            &[
+                symbi_ir::KernelWrite::new("out0", "out0", out0),
+                symbi_ir::KernelWrite::new("out1", "out1", out1),
+            ],
             2,
         )
         .expect("jit compile_kernel (2d)");
@@ -1980,7 +1993,7 @@ mod tests {
             },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
-            field_writes: &[("out".into(), "out".into(), out)],
+            field_writes: &[symbi_ir::KernelWrite::new("out", "out", out)],
             coord_components: &[0, 1],
             device_preamble: &[],
             tile_spec: None,
@@ -2004,8 +2017,14 @@ mod tests {
             &[0, 0],
         );
 
-        let kernel = compile_kernel(&g, &["in".into()], &[], &[("out".into(), out)], 2)
-            .expect("jit compile_kernel (ghost)");
+        let kernel = compile_kernel(
+            &g,
+            &["in".into()],
+            &[],
+            &[symbi_ir::KernelWrite::new("out", "out", out)],
+            2,
+        )
+        .expect("jit compile_kernel (ghost)");
         let mut out_par = vec![0.0f64; buf_len];
         kernel.run_parallel(
             &[n as u32, n as u32],
@@ -2077,7 +2096,7 @@ mod tests {
             },
             field_inputs: &[("x".into(), "x".into()), ("f".into(), "f".into())],
             scalar_params: &[],
-            field_writes: &[("x".into(), "x".into(), out)],
+            field_writes: &[symbi_ir::KernelWrite::new("x", "x", out)],
             coord_components: &[0],
             device_preamble: &[],
             tile_spec: None,
@@ -2109,8 +2128,14 @@ mod tests {
         );
 
         // jit: `x`'s one buffer aliased as both an input base and the output base; `f` read-only.
-        let kernel = compile_kernel(&g, &["x".into(), "f".into()], &[], &[("x".into(), out)], 1)
-            .expect("jit compile_kernel (in-place)");
+        let kernel = compile_kernel(
+            &g,
+            &["x".into(), "f".into()],
+            &[],
+            &[symbi_ir::KernelWrite::new("x", "x", out)],
+            1,
+        )
+        .expect("jit compile_kernel (in-place)");
         let mut buf = x0.clone();
         let base = buf.as_mut_ptr();
         // safety: `base` is the live `buf` allocation, sized to the (lo=0, extent) layout; aliasing
@@ -2187,8 +2212,14 @@ mod tests {
             .map(|i| 0.2 + 0.9 * ((i as f64) * 0.053).fract())
             .collect();
 
-        let kernel = compile_kernel(&g, &["x".into(), "f".into()], &[], &[("x".into(), out)], 3)
-            .expect("jit compile_kernel (3d cover)");
+        let kernel = compile_kernel(
+            &g,
+            &["x".into(), "f".into()],
+            &[],
+            &[symbi_ir::KernelWrite::new("x", "x", out)],
+            3,
+        )
+        .expect("jit compile_kernel (3d cover)");
 
         // the flat driver is the reference.
         let mut buf_par = x0.clone();

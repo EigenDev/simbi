@@ -252,7 +252,11 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
     );
 
     // ---- scalarize all output RHSes through one shared body ----
-    let output_nodes: Vec<NodeId> = inputs.field_writes.iter().map(|(_, _, id)| *id).collect();
+    let output_nodes: Vec<NodeId> = inputs
+        .field_writes
+        .iter()
+        .map(|write| write.value)
+        .collect();
     let mut scalarized = scalarize_kernel(graph, &output_nodes);
     // lazy scheduling of expensive select arms (passes::lazy_select): a select
     // whose arm-exclusive cost crosses the threshold becomes a real branch with
@@ -274,7 +278,7 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
     let write_fields: std::collections::HashSet<FieldBind> = inputs
         .field_writes
         .iter()
-        .map(|(_, w, _)| w.clone())
+        .map(|write| write.destination.clone())
         .collect();
     let mut bindings: Vec<FieldBinding> = Vec::new();
     let mut buf_idx_by_runtime: HashMap<FieldBind, u32> = HashMap::new();
@@ -290,8 +294,8 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
         });
         buf_idx_by_runtime.insert(runtime_path.clone(), buf_idx);
     }
-    for (_, write_runtime, _) in inputs.field_writes {
-        let wf = write_runtime.clone();
+    for write in inputs.field_writes {
+        let wf = write.destination.clone();
         if buf_idx_by_runtime.contains_key(&wf) {
             continue; // dedup a field written more than once.
         }
@@ -322,7 +326,7 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
         field_writes: inputs
             .field_writes
             .iter()
-            .map(|(_, rt, _)| rt.clone())
+            .map(|write| write.destination.clone())
             .collect(),
         scalar_params: inputs
             .scalar_params

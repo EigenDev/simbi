@@ -20,15 +20,14 @@ use symbi_discretize::{
 };
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::{KernelEmitInputs, KernelWriteEffect, emit_kernel_from_lowering, legacy_writes};
+use symbi_ir::{KernelEmitInputs, KernelWrite, emit_kernel_from_lowering};
 use symbi_xpu::nvrtc::compile_ptx;
 
 // render the runtime GvKernel to CUDA at f64 (the shaped ABI is raw f64) and
 // NVRTC-compile it, exactly as the device dispatch path will. the name mirrors
 // the AOT penalize convention: coalesce_layout is false (penalize buffers do not
 // share one layout), tile_spec None (the smem path is gated + unimplemented).
-fn nvrtc_ok<W: KernelWriteEffect>(name: &str, ndim: u8, k: &GvKernel, writes: &[W]) {
-    let writes = legacy_writes(writes);
+fn nvrtc_ok(name: &str, ndim: u8, k: &GvKernel, writes: &[KernelWrite]) {
     let inputs = KernelEmitInputs {
         kernel_name: name,
         ndim,

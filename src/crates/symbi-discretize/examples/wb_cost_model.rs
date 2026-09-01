@@ -184,9 +184,8 @@ fn main() {
 #[allow(dead_code)]
 fn emit_probe() {
     use symbi_ir::emit::{Precision, Target, TargetConfig};
-    use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering, legacy_writes};
+    use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
     let (k, w) = adiabatic_hllc_flux_gv::<3>(0, Recon::Plm);
-    let field_writes = legacy_writes(&w);
     let desc = emit_kernel_from_lowering(
         &k.graph,
         &KernelEmitInputs {
@@ -199,7 +198,7 @@ fn emit_probe() {
             },
             field_inputs: &k.field_inputs,
             scalar_params: &k.scalar_params,
-            field_writes: &field_writes,
+            field_writes: &w,
             coord_components: &k.coord_components,
             device_preamble: &[],
             tile_spec: None,

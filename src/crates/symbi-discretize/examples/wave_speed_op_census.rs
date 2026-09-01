@@ -16,7 +16,7 @@ use symbi_discretize::{
     rmhd_wave_speed_map_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::{KernelEmitInputs, KernelWriteEffect, emit_kernel_from_lowering, legacy_writes};
+use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering};
 
 // the expensive ops — each is a multi-cycle scalar instruction or a libm call.
 // textual occurrences in the rendered (CUDA C) body are counted. CSE has already
@@ -28,13 +28,12 @@ const TRANSCENDENTALS: &[&str] = &[
     "cos(", "exp(", "log(", "pow(",
 ];
 
-fn render_rust<W: KernelWriteEffect>(name: &str, ndim: u8, k: GvKernel, writes: Vec<W>) -> String {
+fn render_rust(name: &str, ndim: u8, k: GvKernel, writes: KernelWrites) -> String {
     assert!(
         !k.graph.has_errors(),
         "{name} graph errors: {:?}",
         k.graph.errors()
     );
-    let field_writes = legacy_writes(&writes);
     let desc = emit_kernel_from_lowering(
         &k.graph,
         &KernelEmitInputs {
@@ -47,7 +46,7 @@ fn render_rust<W: KernelWriteEffect>(name: &str, ndim: u8, k: GvKernel, writes: 
             },
             field_inputs: &k.field_inputs,
             scalar_params: &k.scalar_params,
-            field_writes: &field_writes,
+            field_writes: &writes,
             coord_components: &k.coord_components,
             device_preamble: &[],
             tile_spec: None,

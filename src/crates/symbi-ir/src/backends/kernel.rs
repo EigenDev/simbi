@@ -25,15 +25,17 @@
 //       target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
 //       field_inputs: &[(("cons_den".into(), "cons.den".into()))],
 //       scalar_params: &[],
-//       field_writes: &[(("prim_rho".into(), "prim.rho".into(), rho_node))],
+//       field_writes: &[KernelWrite::new("prim_rho", "prim.rho", rho_node)],
 //   });
 // =============================================================================
 
+#[cfg(test)]
+use crate::NodeId;
 use crate::backends::cuda::{emit_expr, emit_stmt};
 use crate::backends::render::{COORD_VARS, KernelRenderer, Prepared, emit_kernel_render, render};
 use crate::emit::{self, KernelDescriptor, Precision, ReductionOp, Target, TargetConfig};
 use crate::passes::scalarize::{ScalarExpr, ScalarStmt};
-use crate::{ElementTy, Graph, NodeId};
+use crate::{ElementTy, Graph};
 use symbi_abi::FieldBind;
 
 /// inputs to `emit_kernel_from_lowering`. the order of `field_inputs`
@@ -62,7 +64,7 @@ pub struct KernelEmitInputs<'a> {
     /// (write key, runtime path, RHS NodeId). each entry produces one
     /// buffer store; if a write's runtime path matches an input, the
     /// buffer is shared and marked is_output.
-    pub field_writes: &'a [(String, FieldBind, NodeId)],
+    pub field_writes: &'a [crate::gv::KernelWrite],
     /// kernel-coord component axes referenced by the body. each entry
     /// gets a `double _coord_N = (double)<thread-axis>;` line emitted
     /// after the thread-index prelude. body Param references
@@ -941,7 +943,7 @@ mod tests {
                 target: cuda_cfg(),
                 field_inputs: &[],
                 scalar_params: &["value".into()],
-                field_writes: &[("out".into(), "prim.rho".into(), value)],
+                field_writes: &[crate::gv::KernelWrite::new("out", "prim.rho", value)],
                 coord_components: &[],
                 device_preamble: &[],
                 tile_spec: None,
@@ -970,7 +972,9 @@ mod tests {
                 target: cuda_cfg(),
                 field_inputs: &[("cons_den".into(), "cons.den".into())],
                 scalar_params: &[],
-                field_writes: &[("prim_den".into(), "prim.den".into(), cons_den)],
+                field_writes: &[crate::gv::KernelWrite::new(
+                    "prim_den", "prim.den", cons_den,
+                )],
                 coord_components: &[],
                 device_preamble: &[],
                 tile_spec: None,
@@ -1012,7 +1016,9 @@ mod tests {
                 target: cuda_cfg(),
                 field_inputs: &[("cons_den".into(), "cons.den".into())],
                 scalar_params: &[],
-                field_writes: &[("prim_den".into(), "prim.den".into(), cons_den)],
+                field_writes: &[crate::gv::KernelWrite::new(
+                    "prim_den", "prim.den", cons_den,
+                )],
                 coord_components: &[],
                 device_preamble: &[],
                 tile_spec: None,
@@ -1047,7 +1053,7 @@ mod tests {
                     ("cons_nrg".into(), "cons.nrg".into()),
                 ],
                 scalar_params: &[],
-                field_writes: &[("prim_pre".into(), "prim.pre".into(), summed)],
+                field_writes: &[crate::gv::KernelWrite::new("prim_pre", "prim.pre", summed)],
                 coord_components: &[],
                 device_preamble: &[],
                 tile_spec: None,
@@ -1085,8 +1091,8 @@ mod tests {
                 ],
                 scalar_params: &[],
                 field_writes: &[
-                    ("prim_vel_0".into(), "prim.vel[0]".into(), cons_mom_0),
-                    ("prim_vel_1".into(), "prim.vel[1]".into(), cons_mom_1),
+                    crate::gv::KernelWrite::new("prim_vel_0", "prim.vel[0]", cons_mom_0),
+                    crate::gv::KernelWrite::new("prim_vel_1", "prim.vel[1]", cons_mom_1),
                 ],
                 coord_components: &[],
                 device_preamble: &[],
@@ -1119,7 +1125,7 @@ mod tests {
                 target: cuda_cfg(),
                 field_inputs: &[("cons_den".into(), "cons.den".into())],
                 scalar_params: &[],
-                field_writes: &[("cons_den".into(), "cons.den".into(), updated)],
+                field_writes: &[crate::gv::KernelWrite::new("cons_den", "cons.den", updated)],
                 coord_components: &[],
                 device_preamble: &[],
                 tile_spec: None,
@@ -1152,7 +1158,7 @@ mod tests {
                 target: cuda_cfg(),
                 field_inputs: &[("a".into(), "a".into())],
                 scalar_params: &["dt".to_string()],
-                field_writes: &[("out".into(), "out".into(), prod)],
+                field_writes: &[crate::gv::KernelWrite::new("out", "out", prod)],
                 coord_components: &[],
                 device_preamble: &[],
                 tile_spec: None,

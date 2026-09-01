@@ -349,11 +349,11 @@ fn classify_op(
 ///   unchanged-valued outside the ball and contributes it;
 /// - anything else widens to Everywhere.
 /// no tags -> Everywhere (nothing to propagate from).
-pub fn derive_output_support<W: crate::gv::KernelWriteEffect>(
+pub fn derive_output_support(
     graph: &Graph,
     tags: &HashMap<NodeId, SupportBall>,
     field_inputs: &[(String, FieldBind)],
-    writes: &[W],
+    writes: &[crate::gv::KernelWrite],
 ) -> Support {
     if tags.is_empty() || writes.is_empty() {
         return Support::Everywhere;
@@ -362,24 +362,24 @@ pub fn derive_output_support<W: crate::gv::KernelWriteEffect>(
     let mut acc: Option<SupportBall> = None;
     let mut any_ball = false;
     for write in writes {
-        let contribution: Option<SupportBall> =
-            match classify(graph, tags, &mut memo, write.value()) {
-                Class::Zero(b) => b,
-                Class::Eq(m, b) => {
-                    // the write must equal its own field outside the ball: find the
-                    // offset-0 read param bound to the same runtime field.
-                    let same_field_read = field_inputs
-                        .iter()
-                        .filter(|(_, fb)| fb == write.destination())
-                        .filter_map(|(key, _)| graph.param(&Symbol::intern(key)))
-                        .any(|pid| pid == m);
-                    if !same_field_read {
-                        return Support::Everywhere;
-                    }
-                    Some(b)
+        let contribution: Option<SupportBall> = match classify(graph, tags, &mut memo, write.value)
+        {
+            Class::Zero(b) => b,
+            Class::Eq(m, b) => {
+                // the write must equal its own field outside the ball: find the
+                // offset-0 read param bound to the same runtime field.
+                let same_field_read = field_inputs
+                    .iter()
+                    .filter(|(_, fb)| fb == &write.destination)
+                    .filter_map(|(key, _)| graph.param(&Symbol::intern(key)))
+                    .any(|pid| pid == m);
+                if !same_field_read {
+                    return Support::Everywhere;
                 }
-                _ => return Support::Everywhere,
-            };
+                Some(b)
+            }
+            _ => return Support::Everywhere,
+        };
         if let Some(b) = contribution {
             any_ball = true;
             match join(&acc, &Some(b)) {
@@ -403,7 +403,7 @@ mod tests {
     use super::*;
     use crate::FieldRef;
     use crate::algebra::Scalar;
-    use crate::gv::{Gv, Writes, begin_trace, end_trace, tag_support_ball};
+    use crate::gv::{Gv, KernelWrite, KernelWrites, begin_trace, end_trace, tag_support_ball};
     use symbi_algebra::algebra::Numeric;
 
     fn ball() -> SupportBall {
@@ -415,7 +415,7 @@ mod tests {
 
     // trace `f`, tagging the mask it returns, and derive the support of the
     // writes it produces.
-    fn derive(f: impl FnOnce(Gv) -> Writes) -> Support {
+    fn derive(f: impl FnOnce(Gv) -> KernelWrites) -> Support {
         begin_trace();
         let den = Gv::field("den", FieldRef::cons_den());
         // the stand-in mask: a field-dependent value the builder asserts is
@@ -446,7 +446,7 @@ mod tests {
             let den = Gv::field("den2", FieldRef::cons_den());
             let g = Gv::ONE - (-(chi * Gv::scalar("k"))).exp();
             let delta = g * den * Gv::from_f64(0.5);
-            vec![("d".into(), FieldRef::Scratch.into(), delta.node())]
+            vec![KernelWrite::new("d", FieldRef::Scratch, delta.node())]
         });
         expect_ball(&s);
     }
@@ -460,7 +460,11 @@ mod tests {
             let f_rho = (-(chi * Gv::scalar("k"))).exp();
             let corr = chi * Gv::scalar("dt");
             let out = den * f_rho + corr;
-            vec![("den_out".into(), FieldRef::cons_den().into(), out.node())]
+            vec![KernelWrite::new(
+                "den_out",
+                FieldRef::cons_den(),
+                out.node(),
+            )]
         });
         expect_ball(&s);
     }
@@ -473,7 +477,7 @@ mod tests {
             let den = Gv::field("den2", FieldRef::cons_den());
             let f_rho = (-(chi * Gv::scalar("k"))).exp();
             let absorbed = den - den * f_rho;
-            vec![("d".into(), FieldRef::Scratch.into(), absorbed.node())]
+            vec![KernelWrite::new("d", FieldRef::Scratch, absorbed.node())]
         });
         expect_ball(&s);
     }
@@ -486,7 +490,7 @@ mod tests {
             let den = Gv::field("den2", FieldRef::cons_den());
             let b_t = (-(chi * Gv::scalar("k"))).exp().min(Gv::from_f64(1.0e12));
             let g_t = Gv::ONE - b_t;
-            vec![("d".into(), FieldRef::Scratch.into(), (g_t * den).node())]
+            vec![KernelWrite::new("d", FieldRef::Scratch, (g_t * den).node())]
         });
         expect_ball(&s);
     }
@@ -499,7 +503,11 @@ mod tests {
             let den = Gv::field("den2", FieldRef::cons_den());
             let masked = chi * Gv::scalar("dt");
             let leak = den * Gv::from_f64(2.0);
-            vec![("d".into(), FieldRef::Scratch.into(), (masked + leak).node())]
+            vec![KernelWrite::new(
+                "d",
+                FieldRef::Scratch,
+                (masked + leak).node(),
+            )]
         });
         assert_eq!(s, Support::Everywhere);
     }
@@ -511,7 +519,11 @@ mod tests {
         let s = derive(|chi| {
             let den = Gv::field("den2", FieldRef::cons_den());
             let out = den * (-(chi * Gv::scalar("k"))).exp();
-            vec![("nrg_out".into(), FieldRef::cons_nrg().into(), out.node())]
+            vec![KernelWrite::new(
+                "nrg_out",
+                FieldRef::cons_nrg(),
+                out.node(),
+            )]
         });
         assert_eq!(s, Support::Everywhere);
     }
@@ -520,7 +532,7 @@ mod tests {
     fn no_tags_derives_everywhere() {
         begin_trace();
         let den = Gv::field("den", FieldRef::cons_den());
-        let writes: Writes = vec![("d".into(), FieldRef::Scratch.into(), (den * den).node())];
+        let writes = vec![KernelWrite::new("d", FieldRef::Scratch, (den * den).node())];
         let k = end_trace();
         let s = derive_output_support(&k.graph, &k.node_supports, &k.field_inputs, &writes);
         assert_eq!(s, Support::Everywhere);

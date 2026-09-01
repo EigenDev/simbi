@@ -405,7 +405,7 @@ impl Cpu {
         assert_eq!(dom_los.len(), ndim);
 
         // scalarize once: a shared body + one output expr per write.
-        let output_nodes: Vec<NodeId> = spec.field_writes.iter().map(|(_, _, n)| *n).collect();
+        let output_nodes: Vec<NodeId> = spec.field_writes.iter().map(|write| write.value).collect();
         let sc = scalarize_kernel(graph, &output_nodes);
 
         // field_key -> input buffer, for cell loads and stencil reads.

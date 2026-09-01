@@ -166,7 +166,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
     // ---- jit via run_parallel_raw with in-place aliased cons.* (the dispatch's exact pattern) ----
     // outputs are cons.den/mom_0/mom_1/nrg; each aliases its own input buffer. start the aliased
     // buffers from a copy of the inputs, run, compare to interp (which read the originals).
-    let out_keys: Vec<&str> = writes.iter().map(|(k, _, _)| k.as_str()).collect();
+    let out_keys: Vec<&str> = writes.iter().map(|write| write.key.as_str()).collect();
     // map each write key to its input-buffer index (in-place: same ir-key appears as input + write).
     let in_key_idx: HashMap<&str, usize> = gvk
         .field_inputs
@@ -207,7 +207,8 @@ fn jit_fused_godunov_matches_interp_bitwise() {
 
     // bit-for-bit per output, per interior cell — both the separate-buffer run() and the aliased
     // parallel run_parallel_raw must equal interp.
-    for (w, (key, _, _)) in writes.iter().enumerate() {
+    for (w, write) in writes.iter().enumerate() {
+        let key = &write.key;
         for jj in 0..ny {
             for ii in 0..nx {
                 let c = jj * ex as usize + ii;

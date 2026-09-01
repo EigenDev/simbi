@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use symbi_discretize::GvKernel;
 use symbi_discretize::coords::{Coords, Spacetime, Spacing};
 use symbi_discretize::gv::{adiabatic_c2p_gv, godunov_stage_gv, neumann_ghost_fill_gv};
-use symbi_ir::KernelWriteEffect;
+use symbi_ir::KernelWrites;
 use symbi_ir::graph::{NodeId, Op};
 
 fn weight(kind: &str) -> f64 {
@@ -32,8 +32,8 @@ fn weight(kind: &str) -> f64 {
     }
 }
 
-fn price<W: KernelWriteEffect>(name: &str, k: GvKernel, writes: Vec<W>) {
-    let outs: Vec<NodeId> = writes.iter().map(KernelWriteEffect::value).collect();
+fn price(name: &str, k: GvKernel, writes: KernelWrites) {
+    let outs: Vec<NodeId> = writes.iter().map(|write| write.value).collect();
     let live = k.graph.reachable_from(&outs);
     let mut h: BTreeMap<String, usize> = BTreeMap::new();
     let mut cost = 0.0;
