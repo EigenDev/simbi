@@ -325,7 +325,7 @@ pub fn splice_user_source_gv(
     // bind every declared param (x_k, t, p_i, ...) to a runtime Gv scalar of the same name;
     // in production the position `x_k` binds to the in-kernel centroid instead.
     let mut name_to_node = std::collections::HashMap::new();
-    for p in &built.params {
+    for p in built.params() {
         name_to_node.insert(p.clone(), Gv::scalar(p).node());
     }
     let outs = with_trace(|t| {

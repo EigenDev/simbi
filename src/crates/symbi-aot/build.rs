@@ -120,11 +120,13 @@ fn write_both_with_support(
     graph: &Graph,
     inputs: &KernelEmitInputs,
     output_support: Option<&symbi_ir::Support>,
+    numerical_policy: symbi_ir::NumericalPolicy,
 ) {
     let cpu_file = format!("{}_generated.rs", inputs.kernel_name);
     write_kernel(out_dir, &cpu_file, &emit_kernel_cpu(graph, inputs));
     let mut prepared = prepare(graph, inputs);
     prepared.output_support = output_support.cloned();
+    prepared.numerical_policy = numerical_policy;
     let ir = prepared_to_ir(&prepared);
     fs::write(
         Path::new(out_dir).join(format!("{}.ir.json", inputs.kernel_name)),
@@ -739,9 +741,9 @@ fn emit_gv(
     writes: &[symbi_ir::KernelWrite],
 ) {
     assert!(
-        !k.graph.has_errors(),
+        !k.graph().has_errors(),
         "{kernel_name} (gv) graph errors: {:?}",
-        k.graph.errors()
+        k.graph().errors()
     );
     // the smem tile intent (per-axis slab declared by the
     // builder via with_tile_spec) is opt-in behind SYMBI_GPU_SMEM, so the default
@@ -755,7 +757,7 @@ fn emit_gv(
     };
     write_both_with_support(
         out_dir,
-        &k.graph,
+        k.graph(),
         &KernelEmitInputs {
             kernel_name,
             ndim,
@@ -764,14 +766,15 @@ fn emit_gv(
                 precision: Precision::F64,
             },
             coalesce_layout: symbi_discretize::kernel_coalesces_layout(kernel_name),
-            field_inputs: &k.field_inputs,
-            scalar_params: &k.scalar_params,
+            field_inputs: k.field_inputs(),
+            scalar_params: k.scalar_params(),
             field_writes: &writes,
-            coord_components: &k.coord_components,
+            coord_components: k.coord_components(),
             device_preamble: &[],
             tile_spec: tile_spec.as_ref(),
         },
-        k.output_support.as_ref(),
+        k.output_support(),
+        k.numerical_policy(),
     );
 }
 
@@ -2515,7 +2518,7 @@ fn gen_rmhd_geometric_source(out_dir: &str, geom: Geom) {
         GeoSource::Rmhd,
     );
     assert!(
-        k.field_inputs
+        k.field_inputs()
             .iter()
             .any(|(_, rt)| rt.name() == "prim.mag[0]"),
         "RMHD source must read the magnetic field (the four-vector tension)"

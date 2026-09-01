@@ -401,37 +401,49 @@ fn parse_idx(s: &str) -> Option<u8> {
 }
 
 /// a serialized kernel field binding: the typed core (`Ref`) over the closed
-/// cell-centered vocabulary, plus an open tail (`Raw`) for the hand-built
+/// cell-centered vocabulary, plus two deliberately distinct open namespaces:
+/// compiler-owned `Scratch` and externally supplied `User` fields.
 /// staggered/ct/geom/refinement kernels whose paths (`area_hi_0`, `bcell_p1`,
 /// `bface*`, edge fields, the reduction scratch `buf0`, ...) fall outside
 /// `FieldRef` and bind positionally by buffer index — they round-trip losslessly
-/// as the raw string. this is the field analog of `ScalarBind` (typed core + open
+/// as an interned name. this is the field analog of `ScalarBind` (typed core + open
 /// spec tail): the manifest is born typed for the dispatched cell-centered
-/// kernels, and hand-built kernels keep their raw spelling, outside `FieldRef`'s
-/// scope. the metadata-driven typed dispatch only ever sees `Ref`; a `Raw`
+/// kernels, and hand-built kernels keep their scratch spelling, outside `FieldRef`'s
+/// scope. the metadata-driven typed dispatch only ever sees `Ref`; an open bind
 /// reaching that path is a loud bug — hand-built kernels route through their own
 /// raw-string path only.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum FieldBind {
     Ref(FieldRef),
-    Raw(Box<str>),
+    Scratch(Box<str>),
+    User(Box<str>),
 }
 
 impl FieldBind {
     /// classify a runtime path: a known closed-vocabulary field becomes `Ref`, any
-    /// other path is held verbatim as `Raw`. the inverse of `name()`.
+    /// other path is classified as compiler-owned scratch. User-controlled names
+    /// must enter explicitly through `user`, so they can never be confused with
+    /// generated temporaries.
     pub fn from_path(s: &str) -> Self {
         FieldRef::parse(s)
             .map(FieldBind::Ref)
-            .unwrap_or_else(|| FieldBind::Raw(s.into()))
+            .unwrap_or_else(|| FieldBind::Scratch(s.into()))
+    }
+
+    pub fn scratch(name: impl Into<Box<str>>) -> Self {
+        Self::Scratch(name.into())
+    }
+
+    pub fn user(name: impl Into<Box<str>>) -> Self {
+        Self::User(name.into())
     }
 
     /// the runtime path this bind names. `Ref` mints its canonical spelling through
-    /// `FieldRef::name`; `Raw` returns its stored string unchanged.
+    /// `FieldRef::name`; open namespaces return their stored spelling unchanged.
     pub fn name(&self) -> String {
         match self {
             FieldBind::Ref(f) => f.name(),
-            FieldBind::Raw(s) => s.to_string(),
+            FieldBind::Scratch(s) | FieldBind::User(s) => s.to_string(),
         }
     }
 }
@@ -443,10 +455,10 @@ impl From<FieldRef> for FieldBind {
     }
 }
 
-/// a raw runtime path classifies through `from_path` (closed vocab -> `Ref`, else `Raw`).
+/// a runtime path classifies through `from_path` (closed vocab -> `Ref`, else `Scratch`).
 /// a producer passing a `&str` path is classified here at construction, so the manifest is
 /// born-typed straight from the bare string the call site already has. an unknown path lands
-/// in `Raw` (the open-vocabulary hand-built kernels).
+/// in `Scratch` (the open-vocabulary hand-built kernels).
 impl From<&str> for FieldBind {
     fn from(s: &str) -> Self {
         FieldBind::from_path(s)
@@ -573,7 +585,7 @@ mod tests {
     }
 
     // a closed-vocabulary path binds typed (`Ref`); a hand-built / foreign path is
-    // held verbatim (`Raw`). both round-trip through name() exactly.
+    // held in the compiler-owned `Scratch` namespace. both round-trip through name().
     #[test]
     fn field_bind_classifies_and_round_trips() {
         for r in all_variants() {
@@ -585,7 +597,7 @@ mod tests {
             );
             assert_eq!(bind.name(), r.name(), "Ref round-trip failed for {r:?}");
         }
-        // hand-built / staggered / reduction paths live outside FieldRef — they round-trip as Raw.
+        // hand-built / staggered / reduction paths live outside FieldRef as Scratch.
         for raw in [
             "area_hi_0",
             "bcell_p1",
@@ -595,8 +607,19 @@ mod tests {
             "prim.foo",
         ] {
             let bind = FieldBind::from_path(raw);
-            assert_eq!(bind, FieldBind::Raw(raw.into()), "'{raw}' should bind Raw");
-            assert_eq!(bind.name(), raw, "Raw round-trip failed for '{raw}'");
+            assert_eq!(
+                bind,
+                FieldBind::Scratch(raw.into()),
+                "'{raw}' should bind Scratch"
+            );
+            assert_eq!(bind.name(), raw, "Scratch round-trip failed for '{raw}'");
         }
+    }
+
+    #[test]
+    fn user_fields_require_an_explicit_namespace() {
+        let bind = FieldBind::user("tracer.custom");
+        assert_eq!(bind, FieldBind::User("tracer.custom".into()));
+        assert_eq!(bind.name(), "tracer.custom");
     }
 }

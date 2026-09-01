@@ -31,20 +31,22 @@ use symbi_algebra::{Domain, FieldElement, Space};
 /// params, and the spatial coord axes a stencil references — all in first-seen order.
 #[derive(Clone, Debug)]
 pub struct GvKernel {
-    pub graph: Graph,
+    graph: Graph,
     /// field-buffer reads as `(ir_key, FieldBind)`: the IR-side load name paired with the
     /// born-typed runtime binding the producer minted. the binding is a
-    /// `FieldBind` (typed `Ref` for the closed cell vocabulary, `Raw` for hand-built paths) —
+    /// `FieldBind` (typed `Ref` for the closed cell vocabulary, `Scratch` for generated paths) —
     /// structured data every consumer reads directly.
-    pub field_inputs: Vec<(InputKey, FieldBind)>,
-    pub scalar_params: Vec<ScalarParam>,
+    field_inputs: Vec<(InputKey, FieldBind)>,
+    scalar_params: Vec<ScalarParam>,
     /// spatial axes whose `_coord_N` the trace referenced (for stencil `load_at`);
     /// empty for pointwise kernels. feeds `KernelEmitInputs::coord_components`.
-    pub coord_components: Vec<u8>,
+    coord_components: Vec<u8>,
     /// the launch grade this kernel is to be issued over. fusion (`try_fuse`)
     /// requires both sides to share a grade, and a tagged grade is what admits a
     /// kernel to fusion at all. see `LaunchGrade` and `try_fuse`.
-    pub grade: LaunchGrade,
+    grade: LaunchGrade,
+    /// floating-point rewrite theory under which this graph was constructed.
+    numerical_policy: NumericalPolicy,
     /// optional shared-memory tile specification. when `Some`, the CUDA emit is
     /// expected to allocate a per-block `__shared__` buffer for each tiled
     /// field, cooperatively prefetch the (block + halo) region, sync, and
@@ -54,17 +56,48 @@ pub struct GvKernel {
     /// the type carries the spec; the CUDA emit and LoadAt rewriting paths
     /// remain to be built. the field exists so builders, fusion, and the
     /// runtime extend behind a stable enum shape.
-    pub tile_spec: Option<TileSpec>,
+    tile_spec: Option<TileSpec>,
     /// the declared support of this kernel's outputs:
     /// a region outside which every output is exactly zero for any field input.
     /// declared by the builder (where the saturation constants live), carried
     /// into the serialized `Prepared` blob, consumed by dispatch (reduction /
     /// launch regions). `None` = Everywhere (always sound).
-    pub output_support: Option<crate::support::Support>,
+    output_support: Option<crate::support::Support>,
     /// builder-tagged support balls by node, carried from the trace for
     /// `with_derived_support` propagation. build-time metadata that stays in
     /// memory; fusion drops it (fused kernels derive support before fusing).
-    pub node_supports: std::collections::HashMap<NodeId, crate::support_infer::SupportBall>,
+    node_supports: std::collections::HashMap<NodeId, crate::support_infer::SupportBall>,
+}
+
+/// The analytic theory available to IR rewrites. A policy grants permission;
+/// it never forces a backend to perform a relaxed rewrite.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum NumericalPolicy {
+    #[default]
+    StrictIeee,
+    FiniteOnly,
+    FastMath,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RewriteClass {
+    Structural,
+    BitExact,
+    FiniteOnly,
+    FastMath,
+}
+
+impl NumericalPolicy {
+    pub const fn permits(self, rewrite: RewriteClass) -> bool {
+        match (self, rewrite) {
+            (_, RewriteClass::Structural | RewriteClass::BitExact) => true,
+            (Self::FiniteOnly | Self::FastMath, RewriteClass::FiniteOnly) => true,
+            (Self::FastMath, RewriteClass::FastMath) => true,
+            _ => false,
+        }
+    }
 }
 
 /// shared-memory tile spec for stencil kernels. names the fields to prefetch
@@ -193,6 +226,10 @@ pub enum FusionError {
     /// either kernel is untagged — fusion requires both sides to be tagged
     /// with a real `Domain<R>` fingerprint via `end_trace_for_domain`.
     UntaggedKernel,
+    NumericalPolicyMismatch {
+        a: NumericalPolicy,
+        b: NumericalPolicy,
+    },
     /// both kernels write the same runtime path. data races by construction.
     WriteConflict { runtime_path: String },
     /// one kernel writes a path the other reads. fusing them would change
@@ -222,6 +259,9 @@ impl std::fmt::Display for FusionError {
                 f,
                 "fuse: at least one kernel is untagged; tag both via `end_trace_for_domain`"
             ),
+            FusionError::NumericalPolicyMismatch { a, b } => {
+                write!(f, "fuse: numerical-policy mismatch — a={a:?}, b={b:?}")
+            }
             FusionError::WriteConflict { runtime_path } => {
                 write!(f, "fuse: both kernels write `{runtime_path}`")
             }
@@ -315,6 +355,7 @@ pub fn end_trace_with(grade: LaunchGrade) -> GvKernel {
         scalar_params: t.scalar_params,
         coord_components: t.coord_components,
         grade,
+        numerical_policy: NumericalPolicy::StrictIeee,
         tile_spec: None,
         output_support: None,
         node_supports: t.node_supports,
@@ -384,6 +425,41 @@ pub fn in_isolated_trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
 }
 
 impl GvKernel {
+    /// Explicit compiler view of the graph representation. Physics builders
+    /// should use the carrier API; lowering, validation, and backends use this.
+    pub fn graph(&self) -> &Graph {
+        &self.graph
+    }
+    pub fn field_inputs(&self) -> &[(InputKey, FieldBind)] {
+        &self.field_inputs
+    }
+    pub fn scalar_params(&self) -> &[ScalarParam] {
+        &self.scalar_params
+    }
+    pub fn coord_components(&self) -> &[u8] {
+        &self.coord_components
+    }
+    pub fn grade(&self) -> &LaunchGrade {
+        &self.grade
+    }
+    pub fn numerical_policy(&self) -> NumericalPolicy {
+        self.numerical_policy
+    }
+    pub fn tile_spec(&self) -> Option<&TileSpec> {
+        self.tile_spec.as_ref()
+    }
+    pub fn output_support(&self) -> Option<&crate::support::Support> {
+        self.output_support.as_ref()
+    }
+    #[cfg(test)]
+    pub(crate) fn node_supports(&self) -> &HashMap<NodeId, crate::support_infer::SupportBall> {
+        &self.node_supports
+    }
+
+    pub fn with_numerical_policy(mut self, policy: NumericalPolicy) -> Self {
+        self.numerical_policy = policy;
+        self
+    }
     /// infer this kernel's shared-memory tile intent. an explicit
     /// `tile_spec` overrides; otherwise a stencil kernel (non-empty
     /// `coord_components` — it does shifted `load_at` reads, so it has a halo and
@@ -437,6 +513,7 @@ impl GvKernel {
                 scalar_params: Vec::new(),
                 coord_components: Vec::new(),
                 grade,
+                numerical_policy: NumericalPolicy::StrictIeee,
                 tile_spec: None,
                 output_support: None,
                 node_supports: std::collections::HashMap::new(),
@@ -567,6 +644,12 @@ pub fn try_fuse(
             b: b.grade,
         });
     }
+    if a.numerical_policy != b.numerical_policy {
+        return Err(FusionError::NumericalPolicyMismatch {
+            a: a.numerical_policy,
+            b: b.numerical_policy,
+        });
+    }
 
     // law: tile-spec equality. a fused launch carries one block layout + smem
     // prelude, so both halves declare the same spec: identical halos and
@@ -684,6 +767,7 @@ pub fn try_fuse(
         scalar_params,
         coord_components,
         grade: a.grade,
+        numerical_policy: a.numerical_policy,
         // tile_spec is preserved across fusion: the pre-check guaranteed
         // a.tile_spec == b.tile_spec, so either side's value serves.
         tile_spec: a.tile_spec,
@@ -1534,6 +1618,27 @@ mod fusion_laws {
             lo: 0,
             hi: 5,
         }]))
+    }
+
+    #[test]
+    fn numerical_policy_is_a_permission_lattice() {
+        assert!(NumericalPolicy::StrictIeee.permits(RewriteClass::BitExact));
+        assert!(!NumericalPolicy::StrictIeee.permits(RewriteClass::FiniteOnly));
+        assert!(NumericalPolicy::FiniteOnly.permits(RewriteClass::FiniteOnly));
+        assert!(!NumericalPolicy::FiniteOnly.permits(RewriteClass::FastMath));
+        assert!(NumericalPolicy::FastMath.permits(RewriteClass::FastMath));
+    }
+
+    #[test]
+    fn fusion_rejects_mixed_numerical_theories() {
+        let grade = interior_grade();
+        let (a, aw) = GvKernel::noop(grade.clone());
+        let (b, bw) = GvKernel::noop(grade);
+        let b = b.with_numerical_policy(NumericalPolicy::FiniteOnly);
+        assert!(matches!(
+            try_fuse(a, aw, b, bw),
+            Err(FusionError::NumericalPolicyMismatch { .. })
+        ));
     }
 
     // build a single-output kernel that reads `in_key`@`in_path`, doubles it,

@@ -2052,19 +2052,21 @@ fn shaped_penalize_ir(
             precision: symbi_ir::emit::Precision::F64,
         },
         coalesce_layout: false,
-        field_inputs: &gvk.field_inputs,
-        scalar_params: &gvk.scalar_params,
+        field_inputs: gvk.field_inputs(),
+        scalar_params: gvk.scalar_params(),
         field_writes: &writes,
-        coord_components: &gvk.coord_components,
+        coord_components: gvk.coord_components(),
         device_preamble: &[],
         tile_spec: None,
     };
-    let ir = symbi_ir::prepared_to_ir(&symbi_ir::prepare(&gvk.graph, &inputs));
+    let mut prepared = symbi_ir::prepare(gvk.graph(), &inputs);
+    prepared.numerical_policy = gvk.numerical_policy();
+    let ir = symbi_ir::prepared_to_ir(&prepared);
     let built = Arc::new(ShapedIr {
         name,
         ir,
         scalar_params: gvk
-            .scalar_params
+            .scalar_params()
             .iter()
             .map(|s| super::params::ScalarBind::from_name(s.as_str()))
             .collect(),
@@ -2107,7 +2109,7 @@ fn shaped_penalize_kernel(
             Arc::new(ShapedPenalizeKernel {
                 kernel,
                 scalar_params: gvk
-                    .scalar_params
+                    .scalar_params()
                     .iter()
                     .map(|s| super::params::ScalarBind::from_name(s.as_str()))
                     .collect(),

@@ -175,6 +175,10 @@ struct TileCtx {
 pub struct Prepared {
     pub kernel_name: String,
     pub ndim: u8,
+    /// Rewrite theory attached by the graph producer and preserved through the
+    /// durable artifact. Backends may use only transformations it permits.
+    #[serde(default)]
+    pub numerical_policy: crate::gv::NumericalPolicy,
     /// the shared scalarized body + outputs, with FieldLoadAt still symbolic.
     pub scalarized: KernelScalarized,
     /// buffer assignment (inputs first, then output-only), in buffer order.
@@ -320,6 +324,7 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
     Prepared {
         kernel_name: inputs.kernel_name.to_string(),
         ndim: inputs.ndim,
+        numerical_policy: crate::gv::NumericalPolicy::StrictIeee,
         scalarized,
         bindings,
         field_inputs: inputs.field_inputs.to_vec(),
@@ -411,7 +416,7 @@ pub fn render<R: KernelRenderer>(mut prepared: Prepared, r: &R) -> KernelDescrip
     // spellings for the same buffer (`prim.vel_k` c2p-write vs `prim.vel[k]`
     // reconstruction-read), and both parse to the same `FieldRef` — so a string key
     // would silently miss across the dual spellings. parsing each side to `FieldBind`
-    // unifies them (and a hand-built `Raw` path matches itself verbatim).
+    // unifies them (and a hand-built `Scratch` path matches itself verbatim).
     let buf_idx_by_field: HashMap<FieldBind, u32> = prepared
         .bindings
         .iter()

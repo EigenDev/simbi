@@ -424,7 +424,7 @@ mod tests {
         let _ = den;
         let writes = f(chi);
         let k = end_trace();
-        derive_output_support(&k.graph, &k.node_supports, &k.field_inputs, &writes)
+        derive_output_support(k.graph(), k.node_supports(), k.field_inputs(), &writes)
     }
 
     fn expect_ball(s: &Support) {
@@ -533,7 +533,7 @@ mod tests {
         let den = Gv::field("den", FieldRef::cons_den());
         let writes = vec![KernelWrite::new("d", FieldRef::Scratch, (den * den).node())];
         let k = end_trace();
-        let s = derive_output_support(&k.graph, &k.node_supports, &k.field_inputs, &writes);
+        let s = derive_output_support(k.graph(), k.node_supports(), k.field_inputs(), &writes);
         assert_eq!(s, Support::Everywhere);
     }
 }

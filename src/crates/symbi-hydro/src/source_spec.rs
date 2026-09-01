@@ -59,7 +59,7 @@ pub enum SourceKind {
 /// graph + declared param names + per-component output NodeIds (1 for
 /// scalar-targeted sources, D for momentum-targeted sources).
 pub struct BuiltSource {
-    pub graph: Graph,
+    pub(crate) graph: Graph,
     /// every scalar the trace touched, in the order it was first reached.
     ///
     /// this is a SUPERSET of what the outputs consume. a builder that evaluates a
@@ -70,10 +70,24 @@ pub struct BuiltSource {
     /// ones, so the two lists line up entry for entry precisely because neither
     /// is pruned. pruning either alone desynchronizes them and the arity assert
     /// in the interpreter fires.
-    pub params: Vec<String>,
+    pub(crate) params: Vec<String>,
     /// one output per component of the target field. routed into the
     /// runtime additive-RHS accumulator at the corresponding offset.
-    pub outputs: Vec<NodeId>,
+    pub(crate) outputs: Vec<NodeId>,
+}
+
+impl BuiltSource {
+    /// Compiler-facing view of a source artifact. Physical source laws should
+    /// construct through `lift_to_built`, never manipulate this graph directly.
+    pub fn graph(&self) -> &Graph {
+        &self.graph
+    }
+    pub fn params(&self) -> &[String] {
+        &self.params
+    }
+    pub fn outputs(&self) -> &[NodeId] {
+        &self.outputs
+    }
 }
 
 /// declarative description of one additive RHS contribution. analogous to
@@ -865,10 +879,10 @@ pub fn lift_to_built(build: impl FnOnce() -> Vec<Gv>) -> BuiltSource {
     let (kernel, outputs) =
         symbi_ir::trace(|| build().iter().map(|g| g.node()).collect::<Vec<NodeId>>());
     BuiltSource {
-        graph: kernel.graph,
+        graph: kernel.graph().clone(),
         params: kernel
-            .scalar_params
-            .into_iter()
+            .scalar_params()
+            .iter()
             .map(|param| param.as_str().to_string())
             .collect(),
         outputs,

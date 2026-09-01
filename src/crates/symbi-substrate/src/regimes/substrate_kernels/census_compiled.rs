@@ -246,17 +246,17 @@ fn build_entry(
     );
     Some(Entry {
         in_refs: gvk
-            .field_inputs
+            .field_inputs()
             .iter()
             .map(|(_, bind)| match bind {
                 symbi_ir::FieldBind::Ref(f) => *f,
-                symbi_ir::FieldBind::Raw(s) => {
+                symbi_ir::FieldBind::Scratch(s) | symbi_ir::FieldBind::User(s) => {
                     panic!("census map: input '{s}' is not a known FieldRef")
                 }
             })
             .collect(),
         scalar_params: gvk
-            .scalar_params
+            .scalar_params()
             .iter()
             .map(|s| ScalarBind::from_name(s.as_str()))
             .collect(),

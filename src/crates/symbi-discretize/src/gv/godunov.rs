@@ -566,7 +566,7 @@ fn splice_fused_sources_to_contribs(
         // duplicates the adiabatic godunov's own flux-reconstruction read -> input/output aliasing.
         let needs_pre = sources
             .iter()
-            .any(|(_, b)| b.params.iter().any(|p| p == "pre"));
+            .any(|(_, b)| b.params().iter().any(|p| p == "pre"));
         if has_energy && needs_pre {
             shared_params.insert(
                 "pre".to_string(),
@@ -582,7 +582,7 @@ fn splice_fused_sources_to_contribs(
     // keep the prior scalar manifest unchanged.
     let needs_position = sources.iter().any(|(_, built)| {
         built
-            .params
+            .params()
             .iter()
             .any(|p| (0..(ndim as usize)).any(|k| *p == format!("x_{k}")))
     });
@@ -608,7 +608,7 @@ fn splice_fused_sources_to_contribs(
     };
     for (target_field, built) in sources {
         let mut name_to_node = shared_params.clone();
-        for pname in &built.params {
+        for pname in built.params() {
             if name_to_node.contains_key(pname) {
                 continue;
             }

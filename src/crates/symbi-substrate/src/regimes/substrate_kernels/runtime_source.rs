@@ -357,18 +357,18 @@ fn build_fused_cpu_kernel<const D: usize>(
     // an out-of-JIT-subset node -> `None` -> the caller runs the two-pass (the safe fallback). not
     // an error: the gate is "compile when possible, else interpret", never miscompile.
     let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, D).ok()?;
-    // reads and writes are born-typed FieldBind; a `Raw` reaching the fused-source path is a
+    // reads and writes are born-typed FieldBind; an open bind reaching this path is a
     // wiring bug (these kernels are closed-vocabulary), so demand `Ref` loudly.
     let bind_ref = |b: &FieldBind| match b {
         FieldBind::Ref(f) => *f,
-        FieldBind::Raw(s) => {
+        FieldBind::Scratch(s) | FieldBind::User(s) => {
             panic!("fused runtime source: manifest path '{s}' is not a known FieldRef")
         }
     };
     Some(FusedCpuKernel {
         kernel,
         in_refs: gvk
-            .field_inputs
+            .field_inputs()
             .iter()
             .map(|(_, rt)| bind_ref(rt))
             .collect(),
@@ -379,7 +379,7 @@ fn build_fused_cpu_kernel<const D: usize>(
         // the producer's GvKernel scalar names (raw strings) are classified to typed binds once at
         // build (off the per-stage host resolve).
         scalar_params: gvk
-            .scalar_params
+            .scalar_params()
             .iter()
             .map(|s| ScalarBind::from_name(s.as_str()))
             .collect(),
@@ -401,14 +401,14 @@ fn build_source_only_cpu_kernel<const D: usize>(
     let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, D).ok()?;
     let bind_ref = |b: &FieldBind| match b {
         FieldBind::Ref(f) => *f,
-        FieldBind::Raw(s) => {
+        FieldBind::Scratch(s) | FieldBind::User(s) => {
             panic!("compiled runtime source: manifest path '{s}' is not a known FieldRef")
         }
     };
     Some(FusedCpuKernel {
         kernel,
         in_refs: gvk
-            .field_inputs
+            .field_inputs()
             .iter()
             .map(|(_, rt)| bind_ref(rt))
             .collect(),
@@ -417,7 +417,7 @@ fn build_source_only_cpu_kernel<const D: usize>(
             .map(|write| bind_ref(&write.destination))
             .collect(),
         scalar_params: gvk
-            .scalar_params
+            .scalar_params()
             .iter()
             .map(|s| ScalarBind::from_name(s.as_str()))
             .collect(),
@@ -933,14 +933,16 @@ pub(crate) fn gv_kernel_to_ir(
                 precision: Precision::F64,
             },
             coalesce_layout: symbi_discretize::kernel_coalesces_layout(nm),
-            field_inputs: &gvk.field_inputs,
-            scalar_params: &gvk.scalar_params,
+            field_inputs: gvk.field_inputs(),
+            scalar_params: gvk.scalar_params(),
             field_writes: writes,
-            coord_components: &gvk.coord_components,
+            coord_components: gvk.coord_components(),
             device_preamble: &[],
             tile_spec: None,
         };
-        prepared_to_ir(&prepare(&gvk.graph, &inputs))
+        let mut prepared = prepare(gvk.graph(), &inputs);
+        prepared.numerical_policy = gvk.numerical_policy();
+        prepared_to_ir(&prepared)
     };
     let probe = mk_ir(&format!("{prefix}_probe"));
     let mut h = std::collections::hash_map::DefaultHasher::new();

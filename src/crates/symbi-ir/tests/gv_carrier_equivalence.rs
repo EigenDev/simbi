@@ -40,8 +40,8 @@ where
     let params: Vec<Gv> = param_names.iter().map(|n| Gv::param(n)).collect();
     let root = physics(&params).node();
     let kernel = end_trace();
-    let scalarized = scalarize_kernel(&kernel.graph, &[root]);
-    let ty = kernel.graph.ty(root).clone();
+    let scalarized = scalarize_kernel(kernel.graph(), &[root]);
+    let ty = kernel.graph().ty(root).clone();
     let lowered = LoweredFn {
         name: "oracle_probe".to_string(),
         params: scalarized.params,

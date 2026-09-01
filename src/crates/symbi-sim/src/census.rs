@@ -466,7 +466,7 @@ impl CensusEvaluator {
     pub fn new(cfg: &symbi_hydro::CensusConfig) -> Result<Self, String> {
         let spec = CensusSpec::from_config(cfg)?;
         let built = symbi_hydro::expr_bridge::build_census_expressions(cfg)?;
-        let n_nodes = built.graph.len();
+        let n_nodes = built.graph().len();
         let eval = symbi_hydro::SourceEvaluator::from_built(&[(CENSUS_FIELD.to_string(), built)]);
         Ok(CensusEvaluator {
             spec,

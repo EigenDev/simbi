@@ -739,8 +739,8 @@ pub fn render_field_segmented_reduction(
         field_bindings: (0..=seg_buf)
             .map(|b| crate::emit::FieldBinding {
                 // the census scratch buffers are hand-built, outside the closed cell-centered
-                // vocab — held verbatim as Raw, as the whole-field reduction's input is.
-                field: symbi_abi::FieldBind::Raw(format!("buf{b}").into()),
+                // vocab — held in the explicit compiler-scratch namespace.
+                field: symbi_abi::FieldBind::scratch(format!("buf{b}")),
                 buffer_index: b as u32,
                 is_output: false,
             })
@@ -861,8 +861,8 @@ pub fn render_field_reduction(
         kernel_name: kernel_name.to_string(),
         field_bindings: vec![crate::emit::FieldBinding {
             // the reduction scratch buffer is hand-built, outside the closed cell-centered
-            // vocab — held verbatim as Raw.
-            field: symbi_abi::FieldBind::Raw("buf0".into()),
+            // vocab — held in the explicit compiler-scratch namespace.
+            field: symbi_abi::FieldBind::scratch("buf0"),
             buffer_index: 0,
             is_output: false,
         }],
@@ -906,6 +906,7 @@ mod tests {
         let prepared = Prepared {
             kernel_name: "deep_scalar_tree".into(),
             ndim: 1,
+            numerical_policy: crate::gv::NumericalPolicy::FiniteOnly,
             scalarized: KernelScalarized {
                 params: vec![],
                 body: vec![],
@@ -924,9 +925,13 @@ mod tests {
         };
 
         let ir = prepared_to_ir(&prepared);
-        assert!(ir.contains("\"version\":2"));
+        assert!(ir.contains("\"version\":3"));
         let decoded = prepared_from_ir(&ir);
         assert_eq!(decoded.kernel_name, "deep_scalar_tree");
+        assert_eq!(
+            decoded.numerical_policy,
+            crate::gv::NumericalPolicy::FiniteOnly
+        );
         assert_eq!(decoded.scalarized.outputs, prepared.scalarized.outputs);
     }
 

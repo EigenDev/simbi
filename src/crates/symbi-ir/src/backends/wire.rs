@@ -18,7 +18,7 @@ use crate::passes::scalarize::{
 use crate::{ConstValue, DimExpr, ElementTy};
 use symbi_abi::{FieldBind, ScalarBind};
 
-const WIRE_VERSION: u8 = 2;
+const WIRE_VERSION: u8 = 3;
 type ExprId = u32;
 type StmtId = u32;
 
@@ -27,6 +27,7 @@ struct PreparedWire {
     version: u8,
     kernel_name: String,
     ndim: u8,
+    numerical_policy: crate::gv::NumericalPolicy,
     scalarized: FlatKernelScalarized,
     bindings: Vec<FieldBinding>,
     field_inputs: Vec<(crate::InputKey, FieldBind)>,
@@ -453,6 +454,7 @@ impl From<&Prepared> for PreparedWire {
             version: WIRE_VERSION,
             kernel_name: prepared.kernel_name.clone(),
             ndim: prepared.ndim,
+            numerical_policy: prepared.numerical_policy,
             scalarized: FlatKernelScalarized {
                 params: prepared.scalarized.params.clone(),
                 exprs: encoder.exprs,
@@ -496,6 +498,7 @@ impl TryFrom<PreparedWire> for Prepared {
         Ok(Prepared {
             kernel_name: wire.kernel_name,
             ndim: wire.ndim,
+            numerical_policy: wire.numerical_policy,
             scalarized: KernelScalarized {
                 params: wire.scalarized.params,
                 body,

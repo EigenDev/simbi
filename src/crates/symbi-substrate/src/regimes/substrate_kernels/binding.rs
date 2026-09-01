@@ -64,24 +64,24 @@ where
 
 // project a typed serialized manifest (`FieldBind`) onto the dispatch's closed `FieldRef`
 // vocabulary. the manifest is born typed at codegen, so no string parse happens here — a
-// `Ref` passes through, a `Raw` is a loud bug: hand-built staggered/ct/geom kernels carry
-// `Raw` paths but never route through this typed dispatch (they bind positionally). keeping
+// `Ref` passes through, an open bind is a loud bug: hand-built staggered/ct/geom kernels carry
+// `Scratch` paths but never route through this typed dispatch (they bind positionally). keeping
 // the return type `Vec<(FieldRef, bool)>` leaves the rest of the dispatch (resolve_path,
 // bind_manifest) unchanged.
 pub(crate) fn parse_manifest(ctx: &str, raw: Vec<(FieldBind, bool)>) -> Vec<(FieldRef, bool)> {
     raw.into_iter()
         .map(|(bind, is_out)| match bind {
             FieldBind::Ref(fref) => (fref, is_out),
-            FieldBind::Raw(s) => panic!(
+            FieldBind::Scratch(s) | FieldBind::User(s) => panic!(
                 "{ctx}: typed dispatch got non-FieldRef path '{s}' — hand-built kernels bind positionally and must not route through the typed path"
             ),
         })
         .collect()
 }
 
-/// the raw field manifest (un-projected `FieldBind`, `Ref` or `Raw`), cached per name. the
+/// the open field manifest (un-projected `FieldBind`), cached per name. the
 /// component-agnostic CT kernels (edge EMF / curl) declare generic slot names (`vel_p1`, `bflux_a`,
-/// `emf`) that are `Raw` by construction — they bind positionally, so `kernel_bindings`'s
+/// `emf`) that are `Scratch` by construction — they bind positionally, so `kernel_bindings`'s
 /// `FieldRef` projection would (correctly) panic on them. this accessor preserves the slot names so
 /// the runtime can order its per-edge field bind by manifest (no hand-sequenced buffer list).
 pub(crate) fn kernel_field_binds(name: &str) -> Arc<[(FieldBind, bool)]> {

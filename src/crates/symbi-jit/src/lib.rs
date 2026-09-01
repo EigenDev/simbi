@@ -1467,12 +1467,15 @@ pub fn compile_gv_kernel_prec(
     ndim: usize,
     precision: symbi_ir::emit::Precision,
 ) -> Result<CompiledKernel, JitError> {
-    let field_inputs: Vec<symbi_ir::InputKey> =
-        kernel.field_inputs.iter().map(|(k, _)| k.clone()).collect();
+    let field_inputs: Vec<symbi_ir::InputKey> = kernel
+        .field_inputs()
+        .iter()
+        .map(|(k, _)| k.clone())
+        .collect();
     compile_kernel_prec(
-        &kernel.graph,
+        kernel.graph(),
         &field_inputs,
-        &kernel.scalar_params,
+        kernel.scalar_params(),
         writes,
         ndim,
         precision,

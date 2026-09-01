@@ -74,7 +74,7 @@ pub fn census_map_gv<A: CensusAxis>(
 
     // the config's tunables, bound lazily by the names the graph actually reads: a census that
     // declares parameters is the one emitting scalar slots.
-    for pname in &built.params {
+    for pname in built.params() {
         env.entry(pname.clone())
             .or_insert_with(|| Gv::scalar(pname).node());
     }
