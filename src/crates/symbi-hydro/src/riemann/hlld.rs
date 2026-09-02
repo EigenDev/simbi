@@ -10,8 +10,9 @@
 // (host f64 + traced Gv).
 // =============================================================================
 
-use crate::energy::Zero;
-use crate::eos::Eos;
+use crate::energy::{IsoModel, Zero};
+use crate::energy::Adiabatic;
+use crate::eos::EosFor;
 use crate::isothermal_mhd::IsothermalMhd;
 use crate::mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdPrim};
 use crate::newtonian_mhd::NewtonianMhd;
@@ -337,7 +338,7 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
 /// spatial metric: diagonal Schwarzschild/KS (E diagonal, reduces to the sqrt(g_i) scaling) and the
 /// non-diagonal spinning-Kerr gamma alike.
 pub fn hlld_rmhd_gr_ortho<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     dir: usize,
@@ -390,7 +391,7 @@ pub fn hlld_rmhd_gr_ortho<S: Scalar, const D: usize>(
 /// contravariant B_t flux, so Phi is the coordinate EMF. exact for any symmetric-positive spatial
 /// metric (diagonal Schwarzschild/KS and non-diagonal Kerr alike).
 pub fn hlld_rmhd_states_gr_ortho<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     dir: usize,
@@ -433,7 +434,7 @@ pub fn hlld_rmhd_states_gr_ortho<S: Scalar, const D: usize>(
 
 pub fn hlld_rmhd<S: Scalar, const D: usize, R>(
     regime: &R,
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, R::Energy>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &R::Normal,
@@ -649,7 +650,7 @@ pub struct HlldStates<S: Scalar, const D: usize> {
 /// the flux solve. carrier-generic.
 pub fn hlld_rmhd_states<S: Scalar, const D: usize, R>(
     regime: &R,
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, R::Energy>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &R::Normal,
@@ -746,7 +747,7 @@ where
 /// valid flux. one source, host f64 + traced Gv. wave structure (left->right):
 /// S_L < S*_L (alfven) < S_M (contact) < S*_R (alfven) < S_R.
 pub fn hlld_newtonian<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -965,7 +966,7 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
 /// states the gas flux uses therefore makes the EMF's fan identical to the flux's, the
 /// CT-consistency M&DZ require. carrier-generic; the coefficients stand as Eq. 44 gives them.
 pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -1091,7 +1092,7 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
 /// so the EMF fan == the flux fan at the same reconstructed face state. carrier-generic; the
 /// coefficients stand as the appendix gives them.
 pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, IsoModel>,
     prim_l: &IsoMhdPrim<S, D>,
     prim_r: &IsoMhdPrim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -1204,7 +1205,7 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
 /// solver) so the substrate's staggered bface coupling feeds it consistently.
 #[allow(clippy::too_many_lines)]
 pub fn hlld_isothermal<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, IsoModel>,
     prim_l: &IsoMhdPrim<S, D>,
     prim_r: &IsoMhdPrim<S, D>,
     nhat: &Normalized<Physical<S, D>>,

@@ -544,6 +544,7 @@ where
         Prim = Prim<Gv<'t>, D>,
         Cons = Cons<Gv<'t>, D>,
         Normal = Normalized<Physical<Gv<'t>, D>>,
+        Energy = symbi_hydro::energy::Adiabatic,
     >,
 {
     trace(|cx| {

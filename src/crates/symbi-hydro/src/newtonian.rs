@@ -16,7 +16,7 @@
 
 use crate::quantity::{Density, Pressure};
 use crate::c2p_result::{C2pResult, ErrorCode};
-use crate::eos::Eos;
+use crate::eos::{EosFor};
 use crate::regime::Regime;
 use crate::state::{Cons, Prim};
 use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical};
@@ -37,12 +37,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     type Energy = crate::energy::Adiabatic;
 
     #[inline]
-    fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
+    fn to_conserved(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> Self::Cons {
         prim.to_conserved(eos)
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -72,7 +72,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
         let nhat = nhat.components();
         let vn = prim.vel.dot(nhat); // normal velocity
         let cons = prim.to_conserved(eos);
@@ -85,7 +85,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
         let nhat = nhat.components();
         let a = eos.sound_speed(Density(prim.rho), Pressure(prim.pre));
         let vn = prim.vel.dot(nhat);
@@ -93,7 +93,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     }
 
     #[inline]
-    fn wave_speeds_axis(&self, eos: &impl Eos<S>, prim: &Self::Prim, axis: usize) -> (S, S) {
+    fn wave_speeds_axis(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, axis: usize) -> (S, S) {
         // the speed depends only on the normal velocity -> read vel[axis] directly (no dot).
         let a = eos.sound_speed(Density(prim.rho), Pressure(prim.pre));
         let vn = prim.vel[axis];
@@ -101,13 +101,13 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     }
 
     #[inline]
-    fn max_wave_speed(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn max_wave_speed(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         let a = eos.sound_speed(Density(prim.rho), Pressure(prim.pre));
         prim.vel.map(|v| v.abs() + a).component_max()
     }
 
     #[inline]
-    fn effective_inertia(&self, _eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn effective_inertia(&self, _eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         prim.rho
     }
 }

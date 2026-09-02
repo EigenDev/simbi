@@ -24,7 +24,8 @@ use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Covariant, Tensor};
 use symbi_carrier::Scalar;
 
 use crate::c2p_result::C2pResult;
-use crate::eos::Eos;
+use crate::energy::Adiabatic;
+use crate::eos::{EosFor};
 use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::state::Valencia;
 use crate::regime::Regime;
@@ -69,7 +70,7 @@ pub struct RmhdGr<S: Scalar, const D: usize> {
 /// quartic bit-for-bit: at zero mass the curved and flat speeds are identical to the last bit, an
 /// exact equality rather than a tolerance.
 pub fn rmhd_gr_wave_speeds_axis<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim: &MhdPrim<S, D>,
     metric: &SpatialMetric<S, D>,
     alpha: S,
@@ -114,7 +115,7 @@ impl<S: Scalar, const D: usize> RmhdGr<S, D> {
     #[inline]
     pub fn admissible_anchor(
         &self,
-        eos: &impl Eos<S>,
+        eos: &impl EosFor<S, Adiabatic>,
         stage_gas: Prim<S, D>,
         candidate_mag: Tensor<S, D>,
     ) -> MhdCons<S, D> {
@@ -141,7 +142,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     type Energy = crate::energy::Adiabatic;
 
     #[inline]
-    fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
+    fn to_conserved(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> Self::Cons {
         let prim = &prim.0;
         // Valencia: S_i = (rho h W^2 + B^2) v_i - (v.B) B_i with v_i/B_i lowered;
         // tau = rho h W^2 + B^2 - (p + b^2/2) - D. identity gamma -> lower = id, every
@@ -173,7 +174,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -203,7 +204,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
         let prim = &prim.0;
         let nhat = nhat.components();
         // the Valencia spatial flux, shift-free here (the shift rides the GR flux kernel's fan):
@@ -237,7 +238,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
         let prim = &prim.0;
         let nhat = nhat.components();
         // the fast-magnetosonic bound c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2 through the
@@ -255,7 +256,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
         crate::rhd::rhd_speeds_from_vn_gr(cms_sq, vn, vsq, gamma_nn, self.alpha)
     }
 
-    fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn effective_inertia(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         let prim = &prim.0;
         // rho h W^2 + B^2 with metric contractions (the flat form's euclidean dots
         // replaced by gamma) — the momentum-density scale of the magnetized fluid.

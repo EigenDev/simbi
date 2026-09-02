@@ -30,7 +30,8 @@
 
 use crate::quantity::{Density, Pressure};
 use crate::c2p_result::{C2pResult, ErrorCode};
-use crate::eos::Eos;
+use crate::energy::Adiabatic;
+use crate::eos::{EosFor};
 use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::regime::Regime;
 use crate::state::Cons;
@@ -48,7 +49,7 @@ pub struct NewtonianMhd;
 /// host-side `to_primitive` wraps this with the diagnostic ErrorCode.
 #[inline]
 pub fn nmhd_recover<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     cons: &MhdCons<S, D>,
 ) -> MhdPrim<S, D> {
     let half = S::HALF;
@@ -70,7 +71,7 @@ pub fn nmhd_recover<S: Scalar, const D: usize>(
 /// `mhd_state::fast_magnetosonic_from`.
 #[inline]
 fn fast_magnetosonic<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim: &MhdPrim<S, D>,
     nhat: &Tensor<S, D>,
 ) -> S {
@@ -89,7 +90,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     type Energy = crate::energy::Adiabatic;
 
     #[inline]
-    fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
+    fn to_conserved(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> Self::Cons {
         // hydro conserved (nrg = p/(g-1) + 1/2 rho v^2) plus magnetic energy 1/2 |B|^2.
         let half = S::HALF;
         let bsq = prim.mag.dot(&prim.mag);
@@ -106,7 +107,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -135,7 +136,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
         let nhat = nhat.components();
         let half = S::HALF;
         let vn = prim.vel.dot(nhat);
@@ -156,7 +157,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
         let nhat = nhat.components();
         let vn = prim.vel.dot(nhat);
         let cf = fast_magnetosonic(eos, prim, nhat);
@@ -164,7 +165,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     }
 
     #[inline]
-    fn effective_inertia(&self, _eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn effective_inertia(&self, _eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         prim.rho
     }
 }

@@ -1977,7 +1977,7 @@ fn run_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
 where
     R: Regime<f64, D>,
     M: Metric<f64, D> + Copy + Send + Sync,
-    E: Eos<f64> + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<D, DOF, Mem, f64>,
@@ -4724,7 +4724,7 @@ fn run_refined_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem
 where
     R: Regime<f64, D> + Copy,
     M: Metric<f64, D> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<D, DOF, Mem, f64>,

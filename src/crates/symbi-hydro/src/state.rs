@@ -18,7 +18,7 @@
 
 use crate::quantity::{Density, Pressure, StoredQuantity, VelocitySquared};
 use crate::energy::{Adiabatic, DyeModel, EnergyModel, EnergySlot, IsoModel, Undyed};
-use crate::eos::Eos;
+use crate::eos::EosFor;
 use std::ops::{Add, Mul, Neg, Sub};
 use symbi_algebra::{FieldElement, Tensor};
 use symbi_carrier::Scalar;
@@ -248,17 +248,18 @@ impl<S: Scalar, const D: usize, E: EnergyModel> ConsG<S, D, E> {
 
 impl<S: Scalar, const D: usize> Prim<S, D> {
     /// convert primitive to conservative variables.
-    /// delegates the nrg slot to `eos.conserved_quantity()`, stripping the
-    /// closure's stored-quantity claim at the storage boundary: a gamma-law
-    /// gas stores the total energy density, isothermal stores cs^2.
-    pub fn to_conserved(&self, eos: &impl Eos<S>) -> Cons<S, D> {
+    /// delegates the nrg slot to `eos.recovery_quantity()`, stripping the
+    /// closure's quantity claim at the storage boundary. this door is bound
+    /// to the energy-evolving pairing, so the slot always carries the total
+    /// energy density here.
+    pub fn to_conserved(&self, eos: &impl EosFor<S, Adiabatic>) -> Cons<S, D> {
         let rho = self.rho;
         let mom = self.vel.scale(rho);
         let v2 = self.vel.dot(&self.vel);
         // the storage boundary: the closure's stored quantity strips its
         // claim into the bare nrg slot.
         let nrg = eos
-            .conserved_quantity(Density(rho), VelocitySquared(v2), Pressure(self.pre))
+            .recovery_quantity(Density(rho), VelocitySquared(v2), Pressure(self.pre))
             .into_stored();
         Cons {
             chi: Default::default(),
@@ -273,14 +274,15 @@ impl<S: Scalar, const D: usize> Cons<S, D> {
     /// convert conservative to primitive variables.
     /// delegates pressure recovery to eos.recover_pressure().
     /// for ideal gas: inverts total energy to get e_int, then p.
-    /// for isothermal: reads cs^2 from nrg, p = cs^2 * rho.
-    pub fn to_primitive<E: Eos<S>>(&self, eos: &E) -> Prim<S, D> {
+    /// this adiabatic door accepts only energy-evolving closures; isothermal
+    /// recovery instead consumes its separately prescribed cs^2 field.
+    pub fn to_primitive<E: EosFor<S, Adiabatic>>(&self, eos: &E) -> Prim<S, D> {
         let rho = self.den;
         let vel = self.mom.map(|m| m / rho);
         let v2 = vel.dot(&vel);
         // the storage boundary: the bare nrg slot is interpreted under the
         // closure's own claim about what it stores.
-        let stored = <E::ConservedQuantity as StoredQuantity<S>>::from_stored(self.nrg);
+        let stored = <E::RecoveryQuantity as StoredQuantity<S>>::from_stored(self.nrg);
         let pre = eos.recover_pressure(Density(rho), VelocitySquared(v2), stored);
         Prim { rho, vel, pre }
     }
@@ -474,6 +476,7 @@ unsafe impl<const D: usize> FieldElement for PrimG<f32, D, IsoModel> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eos::Eos;
     use crate::energy::{EnergySlot, Zero};
     use crate::eos::IdealGas;
 
@@ -562,74 +565,48 @@ mod tests {
         assert!(approx(scaled.mom[1], 6.0));
     }
 
-    // ---- isothermal conversions ----
+    // ---- isothermal recovery-quantity claims (on the closure itself) ----
+    // the isothermal closure pairs with `IsoModel` states (the regime
+    // round-trips live in isothermal.rs); an adiabatic Prim/Cons cannot
+    // enter these doors (pinned by the compile_fail doctest on `EosFor`).
+    // the numeric claims the old adiabatic-layout round-trips carried move
+    // onto the closure's own recovery doors, value for value — the cs^2 is
+    // an externally prescribed temperature, carried by no conserved slot.
 
     #[test]
-    fn isothermal_cons_stores_cs_squared() {
+    fn isothermal_recovery_consumes_cs_squared() {
+        use crate::quantity::{Density, Pressure, SoundSpeedSquared, VelocitySquared};
         let eos = crate::eos::Isothermal { cs: 2.0 };
-        let prim = Prim {
-            rho: 3.0,
-            vel: Tensor::new([1.0]),
-            pre: 12.0,
-        }; // p = cs^2*rho = 4*3
-        let cons = prim.to_conserved(&eos);
-        assert!(approx(cons.den, 3.0));
-        assert!(approx(cons.mom[0], 3.0));
-        // nrg slot holds cs^2 = 4.0 in the isothermal model; it carries no total energy
-        assert!(approx(cons.nrg, 4.0));
+        let stored =
+            eos.recovery_quantity(Density(3.0), VelocitySquared(1.0), Pressure(12.0));
+        // the recovery quantity is cs^2 = 4.0; it carries no total energy.
+        assert!(approx(stored.0, 4.0));
+        assert_eq!(stored, SoundSpeedSquared(4.0));
     }
 
     #[test]
-    fn isothermal_roundtrip_1d() {
-        let eos = crate::eos::Isothermal { cs: 1.5 };
-        let prim = Prim {
-            rho: 2.0,
-            vel: Tensor::new([0.7]),
-            pre: 4.5,
-        }; // p = cs^2*rho = 2.25*2
-        let cons = prim.to_conserved(&eos);
-        let prim2 = cons.to_primitive(&eos);
-        assert!(approx(prim.rho, prim2.rho));
-        assert!(approx(prim.vel[0], prim2.vel[0]));
-        assert!(approx(prim.pre, prim2.pre));
-    }
-
-    #[test]
-    fn isothermal_roundtrip_3d() {
-        let eos = crate::eos::Isothermal { cs: 0.5 };
-        let rho = 4.0;
-        let pre = 0.25 * rho; // cs^2 * rho = 0.25 * 4 = 1.0
-        let prim = Prim {
-            rho,
-            vel: Tensor::new([1.0, -0.5, 0.3]),
-            pre,
-        };
-        let cons = prim.to_conserved(&eos);
-        let prim2 = cons.to_primitive(&eos);
-        assert!(approx(prim.rho, prim2.rho));
-        for dd in 0..3 {
-            assert!(approx(prim.vel[dd], prim2.vel[dd]));
+    fn isothermal_pressure_roundtrips_through_the_recovery_quantity() {
+        use crate::quantity::{Density, Pressure, VelocitySquared};
+        // p = cs^2 * rho on both sides of the recovery door.
+        for (cs, rho, v2) in [(1.5, 2.0, 0.49), (0.5, 4.0, 1.34)] {
+            let eos = crate::eos::Isothermal { cs };
+            let pre = cs * cs * rho;
+            let stored = eos.recovery_quantity(Density(rho), VelocitySquared(v2), Pressure(pre));
+            let back = eos.recover_pressure(Density(rho), VelocitySquared(v2), stored);
+            assert!(approx(back, pre));
         }
-        assert!(approx(prim.pre, prim2.pre));
     }
 
     #[test]
     fn locally_isothermal_recover() {
-        // simulate locally isothermal: different cs^2 per cell stored in nrg.
-        // use a "dummy" global eos — recover_pressure reads cs^2 from nrg.
-        let eos = crate::eos::Isothermal { cs: 0.0 }; // global cs irrelevant
-        let local_cs_sq = 9.0; // local sound speed squared
-        let cons = Cons {
-            chi: Default::default(),
-            den: 2.0,
-            mom: Tensor::new([1.0]),
-            nrg: local_cs_sq,
-        };
-        let prim = cons.to_primitive(&eos);
-        assert!(approx(prim.rho, 2.0));
-        assert!(approx(prim.vel[0], 0.5));
-        // p = nrg * rho = 9.0 * 2.0 = 18.0
-        assert!(approx(prim.pre, 18.0));
+        use crate::quantity::{Density, SoundSpeedSquared, VelocitySquared};
+        // locally isothermal: recovery consumes the per-cell prescribed
+        // cs^2; the global cs of the closure is irrelevant.
+        let eos = crate::eos::Isothermal { cs: 0.0 };
+        let local = SoundSpeedSquared(9.0);
+        let pre = eos.recover_pressure(Density(2.0), VelocitySquared(0.25), local);
+        // p = cs^2 * rho = 9.0 * 2.0 = 18.0
+        assert!(approx(pre, 18.0));
     }
 
     #[test]

@@ -263,7 +263,7 @@ impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
 where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -3034,9 +3034,9 @@ where
 impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
     Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>
 where
-    R: Regime<f64, NDIM> + Regime<f64, DOF> + Copy,
+    R: Regime<f64, NDIM, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF> + Copy,
     M: Metric<f64, NDIM> + Metric<f64, DOF> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -3625,7 +3625,7 @@ fn uniform_cartesian<R, const NDIM: usize, const DOF: usize, M, E, S, Mem>(
 where
     R: Regime<f64, NDIM>,
     M: Metric<f64, NDIM>,
-    E: Eos<f64>,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
@@ -3643,7 +3643,7 @@ fn save_prim_old<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
 ) where
     R: Regime<f64, NDIM>,
     M: Metric<f64, NDIM> + Copy,
-    E: Eos<f64>,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -3749,7 +3749,7 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
 ) where
     R: Regime<f64, D>,
     M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
@@ -3832,7 +3832,7 @@ pub fn seed_decomposed_fine_from_coarse<
 where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -3863,7 +3863,7 @@ pub fn fine_subgrid<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
 where
     R: Regime<f64, NDIM>,
     M: Metric<f64, NDIM> + Copy,
-    E: Eos<f64>,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -3912,7 +3912,7 @@ pub fn seed_decomposed_hierarchy_tracers<R, const NDIM: usize, const DOF: usize,
 ) where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -3968,7 +3968,7 @@ pub fn gather_decomposed_hierarchy_tracers<
 ) where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -4039,7 +4039,7 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
 ) where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -4069,7 +4069,7 @@ fn migrate_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K
 ) where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -4153,7 +4153,7 @@ fn spawn_decomposed_injections<R, const NDIM: usize, const DOF: usize, M, E, S, 
 ) where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -4194,7 +4194,7 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
 ) where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -4345,7 +4345,7 @@ fn decomposed_root_attempt<R, const NDIM: usize, const DOF: usize, M, E, S, Mem,
 where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -4529,7 +4529,7 @@ fn decomposed_root_post<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
 where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
@@ -4610,7 +4610,7 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
 ) where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,

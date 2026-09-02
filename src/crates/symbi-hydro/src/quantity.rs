@@ -66,9 +66,10 @@ pub struct EnergyDensity<S>(pub S);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VelocitySquared<S>(pub S);
 
-/// squared sound speed `c_s^2` — what an isothermal closure stores in the
-/// conserved `nrg` slot in place of an energy density. keeping it a distinct
-/// type means an isothermal stored value cannot enter a gamma-law recovery —
+/// squared sound speed `c_s^2` — the externally prescribed temperature an
+/// isothermal recovery consumes (the isothermal state carries no energy
+/// slot). keeping it a distinct type means an isothermal cs^2 cannot enter a
+/// gamma-law recovery —
 ///
 /// ```compile_fail
 /// use symbi_hydro::eos::{Eos, IdealGas};
@@ -86,15 +87,17 @@ pub struct VelocitySquared<S>(pub S);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SoundSpeedSquared<S>(pub S);
 
-/// the state-storage boundary door: the conserved `nrg` slot holds a bare
-/// scalar, and the equation of state is the authority on what that scalar
-/// means (`Eos::ConservedQuantity`). crossing the slot goes through these two
-/// named operations — reading interprets the stored value under the closure's
-/// claim, writing strips the claim into the slot.
+/// the bare-slot boundary door: a storage or field slot holds a bare scalar,
+/// and the closure is the authority on what that scalar means
+/// (`Eos::RecoveryQuantity` — the evolved energy slot for an energy-evolving
+/// gas, a prescribed temperature field for an isothermal one). crossing a
+/// slot goes through these two named operations — reading interprets the
+/// bare value under the closure's claim, writing strips the claim into the
+/// slot.
 pub trait StoredQuantity<S> {
-    /// interpret a value read from the conserved storage slot.
+    /// interpret a bare value read from a slot.
     fn from_stored(raw: S) -> Self;
-    /// the bare value written into the conserved storage slot.
+    /// the bare value written into a slot.
     fn into_stored(self) -> S;
 }
 

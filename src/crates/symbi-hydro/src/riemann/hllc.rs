@@ -19,7 +19,8 @@
 use crate::quantity::{Density, Pressure};
 use super::hlle::hlle;
 use crate::dissipation::{ShockwaveLimiter, mach_scale, shear_weight};
-use crate::eos::Eos;
+use crate::energy::Adiabatic;
+use crate::eos::{EosFor};
 use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::newtonian::Newtonian;
 use crate::newtonian_mhd::NewtonianMhd;
@@ -187,7 +188,7 @@ pub struct HllcPlusSensors<S> {
 /// own boundary the moving side sets the scaling and the imposed side cannot lower it.
 #[allow(clippy::too_many_arguments)]
 pub fn hllc<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -204,7 +205,7 @@ pub fn hllc<S: Scalar, const D: usize>(
 #[inline]
 #[allow(clippy::too_many_arguments)]
 fn hllc_newtonian_body<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -449,7 +450,7 @@ fn rhd_star_state<S: Scalar, const D: usize>(
 /// from the pressure-jump dissipation in the relativistic flux is a distinct derivation, and the
 /// defect it corrects is a subsonic one. `None` is classical HLLC exactly.
 pub fn hllc_rhd<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -462,7 +463,7 @@ pub fn hllc_rhd<S: Scalar, const D: usize>(
 /// the RHD HLLC body, split out so the outer function can wrap it without re-emitting it.
 #[inline]
 fn hllc_rhd_body<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -573,7 +574,7 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
 /// from the hydro half of the MHD primitive (`prim_l.hydro.pre`).
 pub fn hllc_rmhd<S: Scalar, const D: usize>(
     regime: &Rmhd,
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -588,7 +589,7 @@ pub fn hllc_rmhd<S: Scalar, const D: usize>(
 /// the RMHD HLLC body, split out so the outer function can wrap it without re-emitting it.
 fn hllc_rmhd_body<S: Scalar, const D: usize>(
     regime: &Rmhd,
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -737,7 +738,7 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
 
 /// the Newtonian ideal-MHD HLLC flux.
 pub fn hllc_newtonian<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -750,7 +751,7 @@ pub fn hllc_newtonian<S: Scalar, const D: usize>(
 }
 
 fn hllc_nmhd_body<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, Adiabatic>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &Normalized<Physical<S, D>>,
@@ -884,6 +885,7 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eos::Eos;
     use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
 

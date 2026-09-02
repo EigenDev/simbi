@@ -19,11 +19,11 @@ use symbi_carrier::Scalar;
 /// equation of state: thermodynamic closure for the euler equations.
 /// maps between (rho, p) and (rho, e_int) and provides the sound speed.
 ///
-/// the associated `ConservedQuantity` states what the `nrg` slot of `Cons`
-/// means, and the `conserved_quantity` / `recover_pressure` pair converts
-/// across it: for a gamma-law gas the slot stores the total `EnergyDensity`
-/// (ke + rho*e_int); for isothermal it stores `SoundSpeedSquared` — the
-/// energy equation is absent there.
+/// the associated `ClosureKind` names the pairing law and `RecoveryQuantity`
+/// what recovery consumes: a gamma-law gas evolves the total `EnergyDensity`
+/// in the conserved `nrg` slot (ke + rho*e_int) and recovers from it; an
+/// isothermal gas evolves no energy and recovers from an externally
+/// prescribed `SoundSpeedSquared` (the temperature field).
 pub trait Eos<S: Scalar>: Copy {
     /// adiabatic sound speed: a = sqrt(dp/drho|_s)
     fn sound_speed(&self, rho: Density<S>, pre: Pressure<S>) -> S;
@@ -44,27 +44,34 @@ pub trait Eos<S: Scalar>: Copy {
     /// pressure from density and specific internal energy
     fn pressure(&self, rho: Density<S>, e_int: SpecificInternalEnergy<S>) -> S;
 
-    /// what this closure stores in the conserved `nrg` slot: the total
-    /// `EnergyDensity` for a gamma-law gas, `SoundSpeedSquared` for an
-    /// isothermal one. the type is the claim, so a stored value carries its
-    /// meaning across the storage boundary and an isothermal cs^2 cannot
-    /// enter a gamma-law recovery.
-    type ConservedQuantity: Copy + StoredQuantity<S>;
+    /// this closure's kind — `EnergyEvolving` or `IsothermalClosure`. the
+    /// [`EosFor`] pairing law compares kinds, so a state's energy model
+    /// admits exactly the closures whose recovery consumes what that model
+    /// supplies (the evolved energy slot, or the prescribed temperature).
+    type ClosureKind;
 
-    /// produce the quantity the conserved `nrg` slot stores, from primitives.
-    fn conserved_quantity(
+    /// the quantity recovery consumes: the total `EnergyDensity` read from
+    /// the conserved `nrg` slot for an energy-evolving gas, the externally
+    /// prescribed `SoundSpeedSquared` for an isothermal one. the type is the
+    /// claim, so an isothermal cs^2 cannot enter a gamma-law recovery.
+    type RecoveryQuantity: Copy + StoredQuantity<S>;
+
+    /// produce the recovery quantity from primitives: the value the `nrg`
+    /// slot stores for an energy-evolving gas, the closure's own cs^2 for an
+    /// isothermal one (whose state carries no energy slot).
+    fn recovery_quantity(
         &self,
         rho: Density<S>,
         v_sq: VelocitySquared<S>,
         pre: Pressure<S>,
-    ) -> Self::ConservedQuantity;
+    ) -> Self::RecoveryQuantity;
 
-    /// recover pressure from the stored conserved quantity.
+    /// recover pressure from the recovery quantity.
     fn recover_pressure(
         &self,
         rho: Density<S>,
         v_sq: VelocitySquared<S>,
-        stored: Self::ConservedQuantity,
+        stored: Self::RecoveryQuantity,
     ) -> S;
 
     /// adiabatic index as generic scalar.
@@ -87,6 +94,46 @@ pub trait Eos<S: Scalar>: Copy {
     fn substrate_param(&self) -> f64 {
         self.gamma_for_ops() // ideal gas: gamma; isothermal overrides to cs (below)
     }
+}
+
+/// the thermodynamic closure kind of an energy-evolving gas: the conserved
+/// `nrg` slot stores the total energy density, and recovery consumes it.
+#[derive(Clone, Copy, Debug)]
+pub enum EnergyEvolving {}
+
+/// the thermodynamic closure kind of an isothermal gas: the state carries no
+/// energy slot, and recovery consumes an externally prescribed sound speed
+/// squared (the temperature field).
+#[derive(Clone, Copy, Debug)]
+pub enum IsothermalClosure {}
+
+/// the equations of state lawful for energy model `E`: exactly those of the
+/// same closure kind. the kind is the law — an energy-evolving state pairs
+/// with a closure whose recovery consumes the evolved energy, an isothermal
+/// state with one that consumes the prescribed temperature — so pairing an
+/// adiabatic state with an isothermal closure (or the reverse) fails to
+/// compile —
+///
+/// ```compile_fail
+/// use symbi_hydro::eos::Isothermal;
+/// use symbi_hydro::state::Prim;
+/// fn probe(prim: &Prim<f64, 2>, iso: &Isothermal<f64>) {
+///     // Prim is the adiabatic state: its nrg slot stores an energy
+///     // density, which an isothermal closure does not produce.
+///     let _ = prim.to_conserved(iso);
+/// }
+/// ```
+pub trait EosFor<S: Scalar, E: crate::energy::EnergyModel>:
+    Eos<S, ClosureKind = E::ClosureKind>
+{
+}
+
+impl<S, E, T> EosFor<S, E> for T
+where
+    S: Scalar,
+    E: crate::energy::EnergyModel,
+    T: Eos<S, ClosureKind = E::ClosureKind>,
+{
 }
 
 /// the gamma-law total energy density `0.5 rho v^2 + rho e_int` — the stored
@@ -123,10 +170,11 @@ pub struct IdealGas<S: Scalar> {
 }
 
 impl<S: Scalar> Eos<S> for IdealGas<S> {
-    type ConservedQuantity = EnergyDensity<S>;
+    type ClosureKind = EnergyEvolving;
+    type RecoveryQuantity = EnergyDensity<S>;
 
     #[inline]
-    fn conserved_quantity(
+    fn recovery_quantity(
         &self,
         rho: Density<S>,
         v_sq: VelocitySquared<S>,
@@ -210,13 +258,14 @@ impl<S: Scalar> Eos<S> for Isothermal<S> {
         self.cs * self.cs * rho
     }
 
-    /// the nrg slot stores cs^2 — a sound speed squared, distinct in type
-    /// from an energy density. for globally isothermal this is self.cs^2;
-    /// for locally isothermal, the user sets nrg = cs^2(x) per cell.
-    type ConservedQuantity = SoundSpeedSquared<S>;
+    /// isothermal recovery consumes an externally prescribed sound speed
+    /// squared (the temperature field; globally isothermal supplies the
+    /// closure's own cs^2). the isothermal state carries no energy slot.
+    type ClosureKind = IsothermalClosure;
+    type RecoveryQuantity = SoundSpeedSquared<S>;
 
     #[inline]
-    fn conserved_quantity(
+    fn recovery_quantity(
         &self,
         _rho: Density<S>,
         _v_sq: VelocitySquared<S>,
@@ -271,10 +320,11 @@ impl<S: Scalar> Eos<S> for Isothermal<S> {
 pub struct TaubMathews;
 
 impl<S: Scalar> Eos<S> for TaubMathews {
-    type ConservedQuantity = EnergyDensity<S>;
+    type ClosureKind = EnergyEvolving;
+    type RecoveryQuantity = EnergyDensity<S>;
 
     #[inline]
-    fn conserved_quantity(
+    fn recovery_quantity(
         &self,
         rho: Density<S>,
         v_sq: VelocitySquared<S>,
@@ -394,18 +444,19 @@ impl<S: Scalar> Eos<S> for EosSelect<S> {
     }
     // both arms are energy-evolving gamma-law closures, so the select stores
     // the total energy density like its members.
-    type ConservedQuantity = EnergyDensity<S>;
+    type ClosureKind = EnergyEvolving;
+    type RecoveryQuantity = EnergyDensity<S>;
 
     #[inline]
-    fn conserved_quantity(
+    fn recovery_quantity(
         &self,
         rho: Density<S>,
         v_sq: VelocitySquared<S>,
         pre: Pressure<S>,
     ) -> EnergyDensity<S> {
         match self {
-            EosSelect::Ideal(e) => e.conserved_quantity(rho, v_sq, pre),
-            EosSelect::Tm(e) => e.conserved_quantity(rho, v_sq, pre),
+            EosSelect::Ideal(e) => e.recovery_quantity(rho, v_sq, pre),
+            EosSelect::Tm(e) => e.recovery_quantity(rho, v_sq, pre),
         }
     }
     #[inline]

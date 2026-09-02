@@ -132,10 +132,20 @@ impl<S: Scalar> EnergySlot<S> for Zero<S> {
 // ---- energy model marker types ----
 
 /// compile-time marker for energy model. determines the type of the
-/// energy/pressure slot in conservative/primitive state types.
+/// energy/pressure slot in conservative/primitive state types, and names the
+/// thermodynamic closure kind a lawful equation of state must share.
 pub trait EnergyModel: Copy + 'static {
     /// the storage type for energy/pressure. S for adiabatic, Zero<S> for isothermal.
     type Slot<S: Scalar>: EnergySlot<S>;
+
+    /// the thermodynamic closure kind this model supplies: `EnergyEvolving`
+    /// when the conserved `nrg` slot carries the total energy density,
+    /// `IsothermalClosure` when the state carries no energy slot and
+    /// recovery consumes an externally prescribed temperature. an equation
+    /// of state pairs with a state of this model only when its
+    /// `Eos::ClosureKind` matches (the [`crate::eos::EosFor`] bound), so an
+    /// adiabatic state cannot round-trip through an isothermal closure.
+    type ClosureKind;
 
     /// whether fields should allocate energy storage.
     const HAS_ENERGY: bool;
@@ -147,6 +157,7 @@ pub struct Adiabatic;
 
 impl EnergyModel for Adiabatic {
     type Slot<S: Scalar> = S;
+    type ClosureKind = crate::eos::EnergyEvolving;
     const HAS_ENERGY: bool = true;
 }
 
@@ -156,6 +167,7 @@ pub struct IsoModel;
 
 impl EnergyModel for IsoModel {
     type Slot<S: Scalar> = Zero<S>;
+    type ClosureKind = crate::eos::IsothermalClosure;
     const HAS_ENERGY: bool = false;
 }
 

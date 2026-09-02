@@ -22,7 +22,7 @@
 use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
 use crate::c2p_result::C2pResult;
 use crate::energy::{IsoModel, Zero};
-use crate::eos::Eos;
+use crate::eos::{EosFor};
 use crate::regime::Regime;
 use crate::state::{ConsG, PrimG};
 use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical};
@@ -48,7 +48,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     type Energy = IsoModel;
 
     #[inline]
-    fn to_conserved(&self, _eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
+    fn to_conserved(&self, _eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> Self::Cons {
         ConsG {
             chi: Default::default(),
             den: prim.rho,
@@ -58,7 +58,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     }
 
     #[inline]
-    fn to_primitive(&self, _eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(&self, _eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -75,7 +75,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
         let nhat = nhat.components();
         let vn = prim.vel.dot(nhat);
         let pre = eos.pressure(Density(prim.rho), SpecificInternalEnergy(S::ZERO));
@@ -88,7 +88,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
         let nhat = nhat.components();
         let cs = eos.sound_speed(Density(prim.rho), Pressure(S::ZERO));
         let vn = prim.vel.dot(nhat);
@@ -96,13 +96,13 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     }
 
     #[inline]
-    fn max_wave_speed(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn max_wave_speed(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         let cs = eos.sound_speed(Density(prim.rho), Pressure(S::ZERO));
         prim.vel.map(|v| v.abs() + cs).component_max()
     }
 
     #[inline]
-    fn effective_inertia(&self, _eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn effective_inertia(&self, _eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         prim.rho
     }
 

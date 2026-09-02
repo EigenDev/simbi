@@ -24,7 +24,7 @@
 
 use crate::c2p_result::C2pResult;
 use crate::energy::EnergyModel;
-use crate::eos::Eos;
+use crate::eos::{EosFor};
 use crate::regime_spec::RegimeSpec;
 use std::ops::{Add, Mul, Neg, Sub};
 use symbi_algebra::{FaceNormal, OrderedNumeric, Tensor};
@@ -90,7 +90,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
         + Selectable<S>;
 
     /// convert primitive to conservative.
-    fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons;
+    fn to_conserved(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> Self::Cons;
 
     /// convert primitive to conservative on a curved spacetime. the default ignores the metric and
     /// delegates to `to_conserved` (the flat / orthonormal storage), so every non-relativistic
@@ -102,7 +102,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// relativistic-hydro state carries.
     fn to_conserved_covariant(
         &self,
-        eos: &impl Eos<S>,
+        eos: &impl EosFor<S, Self::Energy>,
         prim: &Self::Prim,
         _gamma: &crate::spatial_metric::SpatialMetric<S, D>,
         _alpha: S,
@@ -121,19 +121,19 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// emit path uses `Cons::to_primitive` (algebraic, no diagnostics) or the
     /// carrier-generic `rhd_recover` / `rmhd_recover` directly, never this
     /// method. callers requesting `regime.to_primitive::<Gv>` fail to compile.
-    fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where
         S: OrderedNumeric;
 
     /// physical flux along direction nhat.
     /// nhat is a unit vector — dot(vel, nhat) gives the normal velocity.
     /// one implementation handles all directions.
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons;
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons;
 
     /// wave speeds along nhat: (lambda_minus, lambda_plus).
     /// newtonian: vn +/- cs.
     /// rhd: relativistic davis formula.
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S);
+    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S);
 
     /// characteristic wave speeds along grid axis `axis` (the CFL projection):
     /// `(lambda_minus, lambda_plus)`. the timestep needs the speed normal to each grid face,
@@ -142,7 +142,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// unit-vector dot, so a CFL kernel traced from this reads only the velocity components it
     /// actually uses (the cyl r-z swirl reads only v_r and v_z, leaving the folded v_phi untouched). the default
     /// is the dot form, correct for every regime.
-    fn wave_speeds_axis(&self, eos: &impl Eos<S>, prim: &Self::Prim, axis: usize) -> (S, S) {
+    fn wave_speeds_axis(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, axis: usize) -> (S, S) {
         self.wave_speeds(eos, prim, &Self::Normal::axis(axis))
     }
 
@@ -158,7 +158,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// per-regime difference, so it is expressed as a single const.
     fn extremal_speeds(
         &self,
-        eos: &impl Eos<S>,
+        eos: &impl EosFor<S, Self::Energy>,
         prim_l: &Self::Prim,
         prim_r: &Self::Prim,
         nhat: &Self::Normal,
@@ -178,7 +178,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// `wave_speeds_axis`. correct for every regime; regimes with a cheaper closed form
     /// (newtonian/iso: `max_k(|v_k| + c)`) override this. mirrors the wave_speeds_axis
     /// "default correct, override for efficiency" pattern.
-    fn max_wave_speed(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn max_wave_speed(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         let mut smax = S::ZERO;
         for dd in 0..D {
             let (sl, sr) = self.wave_speeds_axis(eos, prim, dd);
@@ -191,7 +191,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// newtonian: rho. rhd: rho * h * W^2.
     /// the geometric source terms in curvilinear coordinates have the same
     /// structure for all regimes — only this effective density changes.
-    fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S;
+    fn effective_inertia(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S;
 
     /// whether this regime is relativistic (needs rho*h*W^2 for source terms).
     /// derives from `SPEC` — no override needed per impl.

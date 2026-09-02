@@ -74,7 +74,7 @@ fn two_level<R, E, K>(
 ) -> Hier<R, E, K>
 where
     R: Regime<f64, 3> + Copy,
-    E: Eos<f64> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, 3>>::Energy> + Copy + Send + Sync,
     K: KernelSet<3, 3, HostMemory, f64>,
 {
     let dx = 1.0 / N as f64;

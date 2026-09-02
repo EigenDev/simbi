@@ -14,7 +14,7 @@
 // =============================================================================
 
 use crate::c2p_result::C2pResult;
-use crate::eos::Eos;
+use crate::eos::{EosFor};
 use crate::regime::Regime;
 use crate::state::{Cons, Prim};
 use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical, Tensor};
@@ -49,7 +49,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     type Energy = crate::energy::Adiabatic;
 
     #[inline]
-    fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
+    fn to_conserved(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> Self::Cons {
         let v_sq = prim.vel.dot(&prim.vel);
         let ww = lorentz_factor(v_sq);
         let hh = enthalpy(eos, prim.rho, prim.pre);
@@ -68,7 +68,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     #[inline]
     fn to_conserved_covariant(
         &self,
-        eos: &impl Eos<S>,
+        eos: &impl EosFor<S, Self::Energy>,
         prim: &Self::Prim,
         gamma: &crate::spatial_metric::SpatialMetric<S, D>,
         alpha: S,
@@ -91,7 +91,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -99,7 +99,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
         let nhat = nhat.components();
         let cons = self.to_conserved(eos, prim);
         let vn = prim.vel.dot(nhat);
@@ -114,13 +114,13 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
         let nhat = nhat.components();
         rhd_speeds_from_vn(sound_speed_sq(eos, prim.rho, prim.pre), prim.vel.dot(nhat))
     }
 
     #[inline]
-    fn wave_speeds_axis(&self, eos: &impl Eos<S>, prim: &Self::Prim, axis: usize) -> (S, S) {
+    fn wave_speeds_axis(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, axis: usize) -> (S, S) {
         // the 1D characteristic estimate depends only on the normal velocity (transverse
         // velocity does not enter) -> read vel[axis] directly, no unit-vector dot.
         rhd_speeds_from_vn(sound_speed_sq(eos, prim.rho, prim.pre), prim.vel[axis])
@@ -132,7 +132,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     // is_relativistic derives from SPEC.
 
     #[inline]
-    fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn effective_inertia(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         // rho * h * W^2: the relativistic inertial density.
         enthalpy_density(eos, prim.rho, prim.pre, prim.vel.dot(&prim.vel))
     }

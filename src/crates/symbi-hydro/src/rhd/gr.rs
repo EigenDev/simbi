@@ -27,11 +27,12 @@
 // identity gamma).
 // =============================================================================
 
+use crate::energy::Adiabatic;
 use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Covariant, Tensor};
 use symbi_carrier::Scalar;
 
 use crate::c2p_result::C2pResult;
-use crate::eos::Eos;
+use crate::eos::{EosFor};
 use crate::regime::Regime;
 use crate::regime_spec::RegimeSpec;
 use crate::spatial_metric::SpatialMetric;
@@ -74,7 +75,7 @@ impl<S: Scalar, const D: usize> RhdGr<S, D> {
     /// v^j` (v^i CONTRAVARIANT) and `S_i = rho h W^2 gamma_ij v^j` is lowered; identity gamma gives
     /// the euclidean norm and the orthonormal `S = rho h W^2 v`.
     #[inline]
-    fn valencia_parts(&self, eos: &impl Eos<S>, prim: &Prim<S, D>) -> ValenciaParts<S, D> {
+    fn valencia_parts(&self, eos: &impl EosFor<S, Adiabatic>, prim: &Prim<S, D>) -> ValenciaParts<S, D> {
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let ww = lorentz_factor(v_sq);
         let rho_h = prim.rho * enthalpy(eos, prim.rho, prim.pre);
@@ -102,7 +103,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     const CLAMP_EXTREMAL_TO_ZERO: bool = true;
 
     #[inline]
-    fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
+    fn to_conserved(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> Self::Cons {
         let prim = &prim.0;
         // U = sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)], spelled in ADM variables as
         // sqrt(gamma)[D, S_i, alpha tau + (alpha-1) D - beta^i S_i].
@@ -117,7 +118,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -165,7 +166,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
         let prim = &prim.0;
         let nhat = nhat.components();
         // F^n = sqrt(-g)[rho u^n, T^n_i, -(T^n_t + rho u^n)]. in ADM variables, with the transport
@@ -195,7 +196,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
         let prim = &prim.0;
         let nhat = nhat.components();
         // Banyuls-Font coordinate speed (Font 2008 eq 37). the two velocities are distinct and must
@@ -216,7 +217,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     }
 
     #[inline]
-    fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn effective_inertia(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         let prim = &prim.0;
         // rho h W^2 with the metric Lorentz factor |v|^2 = gamma_ij v^i v^j.
         crate::rhd::enthalpy_density(

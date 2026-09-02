@@ -26,7 +26,7 @@ fn regime_normal_doors_take_the_witness() {
     );
     for door in [
         "fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal",
-        "fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal",
+        "fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal",
     ] {
         assert!(regime.contains(door), "witness door lost: {door}");
     }

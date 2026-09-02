@@ -26,6 +26,7 @@ use symbi_discretize::{
     rhd_hllc_flux_gv, rhd_wave_speed_map_gv, rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv,
     rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv,
 };
+use symbi_hydro::quantity::SoundSpeedSquared;
 use symbi_hydro::dissipation::ShockwaveLimiter;
 use symbi_hydro::energy::Zero;
 use symbi_hydro::eos::{IdealGas, Isothermal};
@@ -133,17 +134,26 @@ fn adiabatic_c2p_matches_native_carrier() {
 }
 
 // =============================================================================
-// iso c2p — the locally-isothermal recovery: `Cons::to_primitive` with the `Isothermal`
-// eos, which reads cs^2 from the nrg slot (the gv builder feeds the prescribed per-cell
-// `cs2` field through that slot). recovery is `rho = den`, `vel = mom/den`, `pre = cs2*rho`.
-// the kernel reads `cons_den` / `cons_mom_{k}` / `cs2`; the closure enters entirely through
-// the per-cell cs2 field.
+// iso c2p — the locally-isothermal recovery: rho = den, vel = mom/den, and the
+// pressure through the isothermal closure's recovery door on the externally
+// prescribed per-cell `cs2` field (the temperature; the isothermal state
+// carries no energy slot). the kernel reads `cons_den` / `cons_mom_{k}` /
+// `cs2`; the closure enters entirely through the per-cell cs2 field.
 // round-trip: a known prim -> (den, mom, cs2=pre/rho) -> the gv kernel -> the input prim.
 // =============================================================================
 
 const ISO_NCOMP: usize = 2;
-// the iso eos's `cs` is irrelevant — `recover_pressure` reads cs^2 from nrg.
+// the iso eos's `cs` is irrelevant — recovery consumes the prescribed per-cell cs^2.
 const ISO_EOS: Isothermal<f64> = Isothermal { cs: 0.0 };
+
+// the iso c2p kernel's input lane: density, momentum, and the prescribed
+// per-cell temperature as the typed quantity it is. the isothermal state has
+// no energy slot, so no conserved struct carries the cs^2.
+struct IsoC2pInput<S, const D: usize> {
+    den: S,
+    mom: Tensor<S, D>,
+    cs2: SoundSpeedSquared<S>,
+}
 
 // a smooth family of admissible iso primitives + their prescribed per-cell sound speed.
 fn iso_prim_at(i: usize) -> (Prim<f64, ISO_NCOMP>, f64) {
@@ -163,14 +173,28 @@ fn iso_prim_at(i: usize) -> (Prim<f64, ISO_NCOMP>, f64) {
     )
 }
 
-// the conserved iso state carrying cs2 in the nrg slot — built by the native f64 physics.
-fn iso_cons_at(i: usize) -> Cons<f64, ISO_NCOMP> {
-    let (p, _cs2) = iso_prim_at(i);
-    // `Isothermal::conserved_quantity` derives nrg from self.cs (=0), so nrg is set directly to
-    // the prescribed per-cell cs^2, exactly as the gv builder feeds the locally-isothermal field.
-    let mut c = p.to_conserved(&ISO_EOS);
-    c.nrg = iso_prim_at(i).1; // the prescribed per-cell cs^2 field
-    c
+// the kernel input at cell i: density and momentum from the primitives, the
+// prescribed per-cell cs^2 alongside as its own typed lane.
+fn iso_input_at(i: usize) -> IsoC2pInput<f64, ISO_NCOMP> {
+    let (p, cs2) = iso_prim_at(i);
+    IsoC2pInput {
+        den: p.rho,
+        mom: p.vel.map(|v| v * p.rho),
+        cs2: SoundSpeedSquared(cs2),
+    }
+}
+
+// the native locally-isothermal recovery: rho = den, vel = mom/rho, pressure
+// through the closure's recovery-quantity door on the prescribed cs^2 — the
+// same single physics source the gv builder traces.
+fn iso_recover(input: &IsoC2pInput<f64, ISO_NCOMP>) -> Prim<f64, ISO_NCOMP> {
+    use symbi_hydro::eos::Eos as _;
+    use symbi_hydro::quantity::{Density, VelocitySquared};
+    let rho = input.den;
+    let vel = input.mom.map(|m| m / rho);
+    let v2 = vel.dot(&vel);
+    let pre = ISO_EOS.recover_pressure(Density(rho), VelocitySquared(v2), input.cs2);
+    Prim { rho, vel, pre }
 }
 
 #[test]
@@ -179,10 +203,12 @@ fn iso_c2p_round_trips_against_native_physics() {
     // traces the native `Cons::to_primitive(&Isothermal)` itself, so this closes with zero algebra.
     let out = KernelRun::new(iso_c2p_gv::<ISO_NCOMP>())
         .grid([N])
-        .field_with("cons_den", |c| iso_cons_at(c[0]).den)
-        .field_with("cons_mom_0", |c| iso_cons_at(c[0]).mom[0])
-        .field_with("cons_mom_1", |c| iso_cons_at(c[0]).mom[1])
-        .field_with("cs2", |c| iso_cons_at(c[0]).nrg)
+        .field_with("cons_den", |c| iso_input_at(c[0]).den)
+        .field_with("cons_mom_0", |c| iso_input_at(c[0]).mom[0])
+        .field_with("cons_mom_1", |c| iso_input_at(c[0]).mom[1])
+        // the typed quantity strips to its bare value only at the kernel
+        // field boundary.
+        .field_with("cs2", |c| iso_input_at(c[0]).cs2.0)
         .run();
 
     for i in 0..N {
@@ -202,31 +228,31 @@ fn iso_c2p_round_trips_against_native_physics() {
 
 #[test]
 fn iso_c2p_matches_native_carrier() {
-    // reference = native f64 `Cons::to_primitive(&Isothermal)` of an arbitrary admissible cons
-    // (cs2 in the nrg slot); impl = the Gv kernel. direct equivalence — the physics fn itself.
-    fn cons_raw(i: usize) -> Cons<f64, ISO_NCOMP> {
+    // reference = the native f64 locally-isothermal recovery of an arbitrary
+    // admissible input (den, mom, prescribed cs2); impl = the Gv kernel.
+    // direct equivalence — the physics fn itself.
+    fn input_raw(i: usize) -> IsoC2pInput<f64, ISO_NCOMP> {
         let x = i as f64;
         let mut mom = Tensor::zeros();
         mom[0] = 0.3 + 0.1 * x;
         mom[1] = -0.12 + 0.04 * x;
-        Cons {
-            chi: Default::default(),
+        IsoC2pInput {
             den: 1.2 + 0.2 * x,
             mom,
-            nrg: 0.5 + 0.05 * x,
-        } // nrg = the prescribed cs^2
+            cs2: SoundSpeedSquared(0.5 + 0.05 * x),
+        }
     }
 
     let out = KernelRun::new(iso_c2p_gv::<ISO_NCOMP>())
         .grid([N])
-        .field_with("cons_den", |c| cons_raw(c[0]).den)
-        .field_with("cons_mom_0", |c| cons_raw(c[0]).mom[0])
-        .field_with("cons_mom_1", |c| cons_raw(c[0]).mom[1])
-        .field_with("cs2", |c| cons_raw(c[0]).nrg)
+        .field_with("cons_den", |c| input_raw(c[0]).den)
+        .field_with("cons_mom_0", |c| input_raw(c[0]).mom[0])
+        .field_with("cons_mom_1", |c| input_raw(c[0]).mom[1])
+        .field_with("cs2", |c| input_raw(c[0]).cs2.0)
         .run();
 
     for i in 0..N {
-        let want = cons_raw(i).to_primitive(&ISO_EOS); // recover_pressure reads cs^2 from nrg
+        let want = iso_recover(&input_raw(i)); // recovery consumes the prescribed cs^2
         out.expect(
             [i],
             &[

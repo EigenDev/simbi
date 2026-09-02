@@ -29,7 +29,8 @@
 use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
 use crate::c2p_result::C2pResult;
 use crate::energy::Zero;
-use crate::eos::Eos;
+use crate::energy::IsoModel;
+use crate::eos::{EosFor};
 use crate::mhd_state::{IsoMhdCons, IsoMhdPrim};
 use crate::regime::Regime;
 use crate::state::{ConsG, PrimG};
@@ -45,7 +46,7 @@ pub struct IsothermalMhd;
 /// v = mom/den (no pressure slot). the single source the Gv c2p builder traces.
 #[inline]
 pub fn imhd_recover<S: Scalar, const D: usize>(
-    _eos: &impl Eos<S>,
+    _eos: &impl EosFor<S, IsoModel>,
     cons: &IsoMhdCons<S, D>,
 ) -> IsoMhdPrim<S, D> {
     // mul-by-reciprocal to match the kernel form bit-for-bit (CPU == GPU). IEEE
@@ -66,7 +67,7 @@ pub fn imhd_recover<S: Scalar, const D: usize>(
 /// text in `mhd_state::fast_magnetosonic_from`.
 #[inline]
 fn fast_magnetosonic<S: Scalar, const D: usize>(
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, IsoModel>,
     prim: &IsoMhdPrim<S, D>,
     nhat: &Tensor<S, D>,
 ) -> S {
@@ -85,7 +86,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     type Energy = crate::energy::IsoModel;
 
     #[inline]
-    fn to_conserved(&self, _eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
+    fn to_conserved(&self, _eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> Self::Cons {
         IsoMhdCons {
             hydro: ConsG {
                 chi: Default::default(),
@@ -98,7 +99,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -108,7 +109,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
         let nhat = nhat.components();
         let half = S::HALF;
         let vn = prim.vel.dot(nhat);
@@ -129,7 +130,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
         let nhat = nhat.components();
         let vn = prim.vel.dot(nhat);
         let cf = fast_magnetosonic(eos, prim, nhat);
@@ -137,7 +138,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     }
 
     #[inline]
-    fn effective_inertia(&self, _eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn effective_inertia(&self, _eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         prim.rho
     }
 }

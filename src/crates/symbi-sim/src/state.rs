@@ -1053,7 +1053,7 @@ impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
 where
     R: Regime<Sc, D>,
     M: Metric<Sc, D>,
-    E: Eos<Sc>,
+    E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, D>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
@@ -1302,7 +1302,7 @@ impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
 where
     R: Regime<Sc, D> + Regime<Sc, DOF>,
     M: Metric<Sc, D> + Metric<Sc, DOF>,
-    E: Eos<Sc>,
+    E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, DOF>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
@@ -1367,9 +1367,9 @@ where
 impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
     SimBuilder<R, D, DOF, M, E, S, Mem, Sc, NeedsCells>
 where
-    R: Regime<Sc, D> + Regime<Sc, DOF>,
+    R: Regime<Sc, D, Energy = <R as Regime<Sc, DOF>>::Energy> + Regime<Sc, DOF>,
     M: Metric<Sc, D>,
-    E: Eos<Sc>,
+    E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, DOF>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
@@ -2210,7 +2210,7 @@ impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
 where
     R: Regime<Sc, D> + Regime<Sc, DOF>,
     M: Metric<Sc, D> + Metric<Sc, DOF>,
-    E: Eos<Sc>,
+    E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, DOF>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
@@ -2404,7 +2404,7 @@ impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
 where
     R: Regime<Sc, D>,
     M: Metric<Sc, D>,
-    E: Eos<Sc>,
+    E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, D>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,

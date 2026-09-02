@@ -10,6 +10,8 @@ use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
+use symbi_hydro::quantity::{Density, SoundSpeedSquared, VelocitySquared};
+use symbi_hydro::eos::Eos as _;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_ir::{KernelWrite, KernelWrites};
 
@@ -85,18 +87,23 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
             .collect();
         let cs2 = cx.field("cs2", "cs2");
 
-        // the single-source physics: symbi-hydro's locally-isothermal recovery (state.rs
-        // `locally_isothermal_recover`) — `Cons::to_primitive` with the Isothermal eos reads
-        // cs^2 from the nrg slot: rho = den, vel = mom/rho, p = recover_pressure = cs2 * rho.
-        // the cs2 is the separate prescribed field, fed through the compute struct's nrg slot.
+        // the single-source physics: symbi-hydro's locally-isothermal recovery —
+        // rho = den, vel = mom/rho (the `Cons::to_primitive` operation order), and the
+        // pressure through the isothermal closure's recovery-quantity door,
+        // p = recover_pressure(SoundSpeedSquared(cs2)) = cs2 * rho. the cs2 is the
+        // separate prescribed field, entering as the sound-speed-squared quantity it is
+        // (an adiabatic Cons cannot carry it: its nrg slot stores an energy density).
         let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
-        let cons = Cons::<Gv, D> {
-            chi: Default::default(),
-            den,
-            mom: Tensor::new(mom_arr),
-            nrg: cs2,
-        };
-        let prim = cons.to_primitive(&Isothermal { cs: Gv::ONE }); // cs unused: recover reads nrg
+        let mom_t = Tensor::new(mom_arr);
+        let rho = den;
+        let vel = mom_t.map(|m| m / rho);
+        let v2 = vel.dot(&vel);
+        let pre = Isothermal { cs: Gv::ONE }.recover_pressure(
+            Density(rho),
+            VelocitySquared(v2),
+            SoundSpeedSquared(cs2),
+        ); // cs unused: recovery consumes the prescribed cs2
+        let prim = Prim { rho, vel, pre };
 
         let mut writes = vec![KernelWrite::new(
             "prim_rho",

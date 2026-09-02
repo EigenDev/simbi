@@ -18,7 +18,7 @@
 // =============================================================================
 
 use crate::c2p_result::C2pResult;
-use crate::eos::Eos;
+use crate::eos::{EosFor};
 use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::regime::Regime;
 use crate::rhd;
@@ -58,7 +58,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     type Energy = crate::energy::Adiabatic;
 
     #[inline]
-    fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
+    fn to_conserved(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> Self::Cons {
         // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR
         // metric threads in once the flux path carries it.
         let metric = SpatialMetric::flat();
@@ -101,7 +101,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     #[inline]
     fn to_conserved_covariant(
         &self,
-        eos: &impl Eos<S>,
+        eos: &impl EosFor<S, Self::Energy>,
         prim: &Self::Prim,
         gamma: &SpatialMetric<S, D>,
         alpha: S,
@@ -130,7 +130,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -138,7 +138,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
         let nhat = nhat.components();
         let cons = self.to_conserved(eos, prim);
         let metric = SpatialMetric::flat();
@@ -166,7 +166,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
         let nhat = nhat.components();
         rmhd_wave_speeds(eos, prim, nhat)
     }
@@ -174,7 +174,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     // extremal_speeds (clamped) + max_wave_speed (axis fold) are the Regime defaults; rmhd
     // sets CLAMP_EXTREMAL_TO_ZERO = true and reuses them — no per-regime copy.
 
-    fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+    fn effective_inertia(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim) -> S {
         // rho*h*W^2 + b^2 for geometric source terms
         let vsq = prim.vel.dot(&prim.vel);
         let w_sq = rhd::lorentz_factor_sq(vsq);

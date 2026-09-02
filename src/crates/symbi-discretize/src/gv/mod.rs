@@ -714,7 +714,7 @@ mod tests {
     #[test]
     fn iso_c2p_traces_the_real_physics_to_a_kernel() {
         // symbi-hydro's locally-isothermal recovery (`Cons::to_primitive` + Isothermal eos,
-        // reading cs^2 from the nrg slot) at S = Gv: rho = den, vel = mom/den, pre = cs2*rho.
+        // consuming the prescribed cs^2 field) at S = Gv: rho = den, vel = mom/den, pre = cs2*rho.
         // cs2 is a per-cell field (the prescribed temperature), which is what makes the run
         // locally isothermal (cs varies per cell). a global run supplies a uniform cs2.
         let (k, writes) = iso_c2p_gv::<1>();

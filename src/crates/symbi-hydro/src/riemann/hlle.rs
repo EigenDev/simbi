@@ -10,7 +10,7 @@
 //   let flux = hlle(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
 // =============================================================================
 
-use crate::eos::Eos;
+use crate::eos::EosFor;
 use crate::regime::Regime;
 use symbi_carrier::Scalar;
 
@@ -24,7 +24,7 @@ use symbi_carrier::Scalar;
 /// expensive wave-speed recomputation.
 pub fn hlle<S: Scalar, const D: usize, R: Regime<S, D>>(
     regime: &R,
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, R::Energy>,
     prim_l: &R::Prim,
     prim_r: &R::Prim,
     nhat: &R::Normal,
@@ -49,7 +49,7 @@ pub fn hlle<S: Scalar, const D: usize, R: Regime<S, D>>(
 /// where the closed form is 0/0; the upwind states coincide there.
 pub fn hlle_with_speeds<S: Scalar, const D: usize, R: Regime<S, D>>(
     regime: &R,
-    eos: &impl Eos<S>,
+    eos: &impl EosFor<S, R::Energy>,
     prim_l: &R::Prim,
     prim_r: &R::Prim,
     nhat: &R::Normal,

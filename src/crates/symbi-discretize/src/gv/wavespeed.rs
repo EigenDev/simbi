@@ -195,7 +195,13 @@ pub fn euler_wave_speed_map_gv<R>(
     eos_arm: EosArm,
 ) -> (GvKernel, KernelWrites)
 where
-    R: for<'t> Regime<Gv<'t>, 3, Prim = Prim<Gv<'t>, 3>, Cons = Cons<Gv<'t>, 3>>,
+    R: for<'t> Regime<
+        Gv<'t>,
+        3,
+        Prim = Prim<Gv<'t>, 3>,
+        Cons = Cons<Gv<'t>, 3>,
+        Energy = symbi_hydro::energy::Adiabatic,
+    >,
 {
     trace(|cx| {
     let rho = cx.field("prim_rho", FieldRef::PrimRho);
