@@ -25,13 +25,38 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// the file's production region: everything ahead of the first `#[cfg(test)]`
-/// marker. test modules in this crate sit at file tails behind that marker.
-fn production_region(text: &str) -> &str {
-    match text.find("#[cfg(test)]") {
-        Some(cut) => &text[..cut],
-        None => text,
+/// the file's production lines: every line outside `#[cfg(test)]` items.
+/// a `#[cfg(test)]` attribute removes the item that follows it — a braced
+/// module (skipped to its matching close brace) or a single semicolon item —
+/// so production code positioned after a test module stays in the scan.
+fn production_lines(text: &str) -> Vec<(usize, &str)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut kept = Vec::new();
+    let mut ii = 0;
+    while ii < lines.len() {
+        if lines[ii].trim_start().starts_with("#[cfg(test)]") {
+            // skip attribute lines through the item head, then the item body:
+            // brace-matched for a module/fn, through the semicolon for a
+            // `use` or other terse item.
+            let mut depth: i64 = 0;
+            let mut entered = false;
+            while ii < lines.len() {
+                let line = lines[ii];
+                depth += line.matches('{').count() as i64;
+                depth -= line.matches('}').count() as i64;
+                entered |= line.contains('{');
+                let terse_end = !entered && line.trim_end().ends_with(';');
+                ii += 1;
+                if (entered && depth <= 0) || terse_end {
+                    break;
+                }
+            }
+        } else {
+            kept.push((ii + 1, lines[ii]));
+            ii += 1;
+        }
     }
+    kept
 }
 
 #[test]
@@ -67,7 +92,7 @@ fn physics_holds_no_graph_construction() {
     );
     for path in files {
         let text = std::fs::read_to_string(&path).expect("source file must be readable");
-        for (number, line) in production_region(&text).lines().enumerate() {
+        for (number, line) in production_lines(&text) {
             if line.trim_start().starts_with("//") {
                 continue;
             }
@@ -76,10 +101,26 @@ fn physics_holds_no_graph_construction() {
                     !line.contains(spelling),
                     "graph-representation reference `{spelling}` in production physics: {}:{}: {}",
                     path.display(),
-                    number + 1,
+                    number,
                     line.trim()
                 );
             }
         }
     }
+}
+
+/// the skipper keeps production code that sits after a test module in view.
+#[test]
+fn scan_covers_production_after_a_test_module() {
+    let fixture = "fn early() {}\n#[cfg(test)]\nmod tests {\n    fn inner() { let x = 1; }\n}\nfn late_production() { /* NodeId would live here */ }\n";
+    let kept: Vec<&str> = production_lines(fixture).iter().map(|(_, l)| *l).collect();
+    assert!(kept.iter().any(|l| l.contains("fn early")));
+    assert!(
+        kept.iter().any(|l| l.contains("fn late_production")),
+        "production items after a test module must stay in the scan"
+    );
+    assert!(
+        !kept.iter().any(|l| l.contains("fn inner")),
+        "test-module bodies stay out of the scan"
+    );
 }
