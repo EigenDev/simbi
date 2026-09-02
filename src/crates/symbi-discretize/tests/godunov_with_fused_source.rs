@@ -46,7 +46,7 @@ fn u_n_fields(rho: f64, mom: [f64; 3], nrg: f64) -> Vec<(&'static str, f64)> {
         ("u_n_nrg", nrg),
     ]
 }
-use symbi_hydro::source_spec::uniform_acceleration_sources;
+use symbi_source_compile::source_spec::uniform_acceleration_sources;
 
 #[test]
 fn user_source_none_matches_writes_of_plain_godunov() {
@@ -326,7 +326,7 @@ fn multi_source_fuses_mom_and_nrg_overlays_in_one_kernel() {
     );
     assert_eq!(specs[0].target_field, "mom");
     assert_eq!(specs[1].target_field, "nrg");
-    let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
+    let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = specs.iter().collect();
 
     let kernel = godunov_stage_gv_with_fused_sources(
         coords,
@@ -426,7 +426,7 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
     let axes = vec![0, 1, 2];
 
     let specs = uniform_acceleration_sources(D, true);
-    let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
+    let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = specs.iter().collect();
     let (kernel, _writes) = godunov_stage_gv_with_fused_sources(
         coords,
         Spacetime::Minkowski,
@@ -536,17 +536,17 @@ fn unsupported_target_field_panics_loudly() {
 
     // hand-built spec with an unknown target_field; the panic fires on the
     // dispatch match, ahead of both splicing and any call to build_source.
-    fn empty_builder(_d: usize) -> symbi_hydro::source_spec::SourceProgram {
+    fn empty_builder(_d: usize) -> symbi_source_compile::source_spec::SourceProgram {
         // 1 output, bound to rho; the dispatch panic fires first, so this
         // graph stands unevaluated.
         symbi_ir::SourceProgram::trace(|cx| vec![cx.scalar("rho")])
     }
-    let bad_spec = symbi_hydro::source_spec::SourceSpec {
-        kind: symbi_hydro::source_spec::SourceKind::UserDefined,
+    let bad_spec = symbi_source_compile::source_spec::SourceSpec {
+        kind: symbi_source_compile::source_spec::SourceKind::UserDefined,
         target_field: "bogus_target", // outside the godunov vocabulary (den/mom/nrg/bcell)
         build_source: empty_builder,
     };
-    let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = vec![&bad_spec];
+    let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = vec![&bad_spec];
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = godunov_stage_gv_with_fused_sources(
@@ -574,7 +574,7 @@ fn source_apply_pass_adds_dt_times_source() {
     // the driver passes dt = ac*dt, so this is the additive half of the fused stage.
     const D: usize = 3;
     let specs = uniform_acceleration_sources(D, true); // [mom, nrg]
-    let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
+    let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = specs.iter().collect();
     let kernel = source_apply_gv(
         Coords::Cartesian,
         &[Spacing::Uniform; D],
@@ -640,7 +640,7 @@ fn fused_stage_equals_plain_plus_additive_pass() {
     // uniform state + uniform fluxes => div == 0 (the flux is identical in both paths anyway).
     const D: usize = 3;
     let specs = uniform_acceleration_sources(D, true);
-    let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
+    let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = specs.iter().collect();
     let coords = Coords::Cartesian;
     let sp = [Spacing::Uniform; D];
     let axes = [0usize, 1, 2];

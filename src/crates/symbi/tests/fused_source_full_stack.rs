@@ -39,7 +39,8 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{FusedSourceFamily, NEWTONIAN_SPEC, SimulationLaws};
+use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_source_compile::{FusedSourceFamily, SimulationLaws};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;

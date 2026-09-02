@@ -13,10 +13,11 @@
 use symbi::prelude::*;
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Isothermal;
-use symbi_hydro::expr_bridge::build_user_source;
+use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::state::PrimG;
-use symbi_hydro::{ISO_NEWTONIAN_SPEC, SourceConfig};
+use symbi_hydro::ISO_NEWTONIAN_SPEC;
+use symbi_source_compile::SourceConfig;
 
 type Sim = SimCpu<IsoNewtonian, 2, Cartesian, Isothermal<f64>>;
 

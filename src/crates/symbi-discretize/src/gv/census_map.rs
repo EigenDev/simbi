@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 
 use symbi_algebra::algebra::Numeric;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::graph::NodeId;
 use symbi_ir::{
     FieldRef, Gv, GvKernel, KernelWrite, KernelWrites, trace,
@@ -43,7 +43,7 @@ pub fn census_map_gv<A: CensusAxis>(
     axes: &[usize],
     ndim: u8,
     dof: usize,
-    built: &symbi_hydro::source_spec::SourceProgram,
+    built: &symbi_source_compile::source_spec::SourceProgram,
     bin_axes: &[A],
     n_values: usize,
     n_segments: usize,

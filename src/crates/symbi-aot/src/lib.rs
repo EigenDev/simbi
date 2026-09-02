@@ -204,7 +204,7 @@ impl<'a, T> KernelInvocation<'a, T> {
 // ordering. f64/f32 both impl OrderedNumeric; the carrier-generic Gv path uses
 // the GpuRenderer (CUDA C codegen) for its rendering.
 pub use symbi_algebra::OrderedNumeric;
-pub use symbi_ir::algebra::Scalar;
+pub use symbi_carrier::Scalar;
 
 /// the structured CPU-kernel ABI as a fn pointer: `(inputs, outputs, grid, dom_lo,
 /// ints, scalars)`. every generated `pub fn k<S: Scalar + OrderedNumeric>(..)` has

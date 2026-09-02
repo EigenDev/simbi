@@ -21,7 +21,7 @@
 
 use symbi_algebra::OrderedNumeric;
 use symbi_grid::Field;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
 use symbi_xpu::MemorySpace;
 

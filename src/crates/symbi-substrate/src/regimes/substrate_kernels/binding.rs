@@ -10,7 +10,7 @@
 
 use symbi_algebra::OrderedNumeric;
 use symbi_grid::Field;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::{FieldBind, FieldRef};
 use symbi_xpu::MemorySpace;
 

@@ -423,7 +423,7 @@ fn lower_configured_censuses(
     census_jsons
         .iter()
         .map(|census| {
-            let config = symbi_hydro::CensusConfig::from_json(&census.json)
+            let config = symbi_source_compile::CensusConfig::from_json(&census.json)
                 .map_err(|error| format!("{} parse: {error}", census.origin))?;
             if !seen.insert(config.name.clone()) {
                 return Err(format!(
@@ -463,7 +463,7 @@ fn get_source_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
 trait AttachRuntimeSource: Sized {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
+        built: Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
         params: Vec<f64>,
     ) -> Result<Self, String>;
 }
@@ -473,7 +473,7 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
+        built: Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         // fused by default: the user source (and any immersed body) rides inside the godunov stage on
@@ -487,7 +487,7 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
+        built: Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         // fused by default on a flat host+f64 run; GR / device / non-f64 fall back to the two-pass.
@@ -500,7 +500,7 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
+        built: Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         // fused by default on host + f64 (iso has no energy, so the body stays its own pass — the
@@ -521,7 +521,7 @@ where
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
+        built: Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         Ok(self.with_runtime_source(built, params))
@@ -637,7 +637,7 @@ fn lower_configured_sources(
     law: Option<&symbi_hydro::state_law::StateLaw>,
 ) -> Result<
     (
-        Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
+        Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
         Vec<f64>,
     ),
     String,
@@ -645,15 +645,15 @@ fn lower_configured_sources(
     let configs = source_jsons
         .iter()
         .map(|source| {
-            let config = symbi_hydro::SourceConfig::from_json(&source.json)
+            let config = symbi_source_compile::SourceConfig::from_json(&source.json)
                 .map_err(|error| format!("{} parse: {error}", source.origin))?;
-            symbi_hydro::expr_bridge::build_user_source_with_law(&config, spec, law)
+            symbi_source_compile::expr_bridge::build_user_source_with_law(&config, spec, law)
                 .map_err(|error| format!("{} lower: {error}", source.origin))?;
             Ok(config)
         })
         .collect::<Result<Vec<_>, String>>()?;
     let (built, params) =
-        symbi_hydro::expr_bridge::build_user_sources_with_law(&configs, spec, law)
+        symbi_source_compile::expr_bridge::build_user_sources_with_law(&configs, spec, law)
             .map_err(|error| format!("source expression lower: {error}"))?;
     Ok((built, params))
 }
@@ -3936,7 +3936,7 @@ where
     sim.motion = motion_state(cfg);
     if let Some(ref mj) = cfg.motion_json {
         let t0 = sim.time;
-        let law = symbi_hydro::motion_law::MotionLaw::from_json(mj, t0, cfg.t_final)
+        let law = symbi_source_compile::motion_law::MotionLaw::from_json(mj, t0, cfg.t_final)
             .map_err(|e| format!("mesh motion: {e}"))?;
         sim.motion = symbi_geometry::MotionState::homologous(law.a_at(t0), law.adot_at(t0));
         sim.motion_law = Some(law);
@@ -4141,7 +4141,7 @@ macro_rules! into_hierarchy {
         // evaluates a(t) exactly each (sub)stage.
         if let Some(ref mj) = $cfg.motion_json {
             let t0 = sim.time;
-            let law = symbi_hydro::motion_law::MotionLaw::from_json(mj, t0, $cfg.t_final)
+            let law = symbi_source_compile::motion_law::MotionLaw::from_json(mj, t0, $cfg.t_final)
                 .map_err(|e| format!("mesh motion: {e}"))?;
             sim.motion = symbi_geometry::MotionState::homologous(law.a_at(t0), law.adot_at(t0));
             sim.motion_law = Some(law);
@@ -4378,9 +4378,9 @@ macro_rules! build_and_run_hydro {
         // this: no local ghost rule can represent the state beyond a wedge wall.
         let mut sub = sub;
         for json in &cfg.driven_exprs {
-            let bcfg = symbi_hydro::SourceConfig::from_json(json)
+            let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                 .map_err(|e| format!("boundary expression parse: {e}"))?;
-            let built = symbi_hydro::expr_bridge::build_boundary_dag(
+            let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                 &bcfg,
                 <$regime_ty as Regime<f64, $dof>>::SPEC,
             )
@@ -4427,9 +4427,9 @@ macro_rules! build_and_run_hydro {
             // already validated at the base registration.
             let mut ks = ks;
             for json in &cfg.driven_exprs {
-                let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                     .expect("fine-level boundary parse");
-                let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                     &bcfg,
                     <$regime_ty as Regime<f64, $dof>>::SPEC,
                 )
@@ -4476,7 +4476,7 @@ macro_rules! build_and_run_hydro {
         // because the imbalance is read off a real stage, and a gravitational body's source is
         // half of the balance being measured.
         if let Some(ref target) = cfg.equilibrium_json {
-            let declared = symbi_hydro::EquilibriumConfig::from_json(target)
+            let declared = symbi_source_compile::EquilibriumConfig::from_json(target)
                 .map_err(|e| format!("stationary target parse: {e}"))?;
             hier = hier
                 .with_equilibrium_expression(&declared)
@@ -4494,7 +4494,7 @@ macro_rules! build_and_run_hydro {
         // restart, where the checkpoint restore replaces the state wholesale.
         if cfg.restart_path.is_none() {
             if let Some(ref declared) = cfg.perturbation_json {
-                let cfg_p = symbi_hydro::EquilibriumConfig::from_json(declared)
+                let cfg_p = symbi_source_compile::EquilibriumConfig::from_json(declared)
                     .map_err(|e| format!("perturbation parse: {e}"))?;
                 let expression = cfg_p
                     .to_expression()
@@ -4948,9 +4948,9 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 let register = |mut ks: <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet|
                     -> <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet {
                     for json in &cfg.driven_exprs {
-                        let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                             .expect("tile boundary parse");
-                        let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                        let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                             &bcfg,
                             <$regime_ty as Regime<f64, $d>>::SPEC,
                         )
@@ -5277,9 +5277,9 @@ macro_rules! build_and_run_hydro_decomposed {
                 let sub = {
                     let mut sub = sub;
                     for json in &cfg.driven_exprs {
-                        let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                             .map_err(|e| format!("boundary expression parse: {e}"))?;
-                        let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                        let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                             &bcfg,
                             <$regime_ty as Regime<f64, $dof>>::SPEC,
                         )
@@ -5764,9 +5764,9 @@ macro_rules! build_and_run_mhd {
         // toroidal: in-plane B = 0, out-of-plane B_phi injected). single-grid only.
         let mut sub = sub;
         for json in &cfg.driven_exprs {
-            let bcfg = symbi_hydro::SourceConfig::from_json(json)
+            let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                 .map_err(|e| format!("boundary expression parse: {e}"))?;
-            let built = symbi_hydro::expr_bridge::build_boundary_dag(
+            let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                 &bcfg,
                 <$regime_ty as Regime<f64, $d>>::SPEC,
             )
@@ -5791,8 +5791,8 @@ macro_rules! build_and_run_mhd {
                 .with_resistivity(cfg.resistivity);
             for json in &cfg.driven_exprs {
                 let bcfg =
-                    symbi_hydro::SourceConfig::from_json(json).expect("fine-level boundary parse");
-                let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                    symbi_source_compile::SourceConfig::from_json(json).expect("fine-level boundary parse");
+                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                     &bcfg,
                     <$regime_ty as Regime<f64, $d>>::SPEC,
                 )
@@ -5917,9 +5917,9 @@ macro_rules! build_and_run_imhd {
         // injection: in-plane B = 0, out-of-plane B_phi injected (div-free by axisymmetry).
         let mut sub = sub;
         for json in &cfg.driven_exprs {
-            let bcfg = symbi_hydro::SourceConfig::from_json(json)
+            let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                 .map_err(|e| format!("boundary expression parse: {e}"))?;
-            let built = symbi_hydro::expr_bridge::build_boundary_dag(
+            let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                 &bcfg,
                 <IsothermalMhd as Regime<f64, $d>>::SPEC,
             )
@@ -5944,8 +5944,8 @@ macro_rules! build_and_run_imhd {
                 .with_resistivity(cfg.resistivity);
             for json in &cfg.driven_exprs {
                 let bcfg =
-                    symbi_hydro::SourceConfig::from_json(json).expect("fine-level boundary parse");
-                let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                    symbi_source_compile::SourceConfig::from_json(json).expect("fine-level boundary parse");
+                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                     &bcfg,
                     <IsothermalMhd as Regime<f64, $d>>::SPEC,
                 )
@@ -6093,9 +6093,9 @@ macro_rules! build_and_run_mhd_decomposed {
                 let sub = {
                     let mut sub = sub;
                     for json in &cfg.driven_exprs {
-                        let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                             .map_err(|e| format!("boundary expression parse: {e}"))?;
-                        let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                        let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                             &bcfg,
                             <$regime_ty as Regime<f64, $d>>::SPEC,
                         )
@@ -6290,9 +6290,9 @@ macro_rules! build_and_run_imhd_decomposed {
                 let sub = {
                     let mut sub = sub;
                     for json in &cfg.driven_exprs {
-                        let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                             .map_err(|e| format!("boundary expression parse: {e}"))?;
-                        let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                        let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                             &bcfg,
                             <IsothermalMhd as Regime<f64, $d>>::SPEC,
                         )
@@ -6647,9 +6647,9 @@ macro_rules! build_and_run_iso_decomposed {
                 let sub = {
                     let mut sub = sub;
                     for json in &cfg.driven_exprs {
-                        let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                             .map_err(|e| format!("boundary expression parse: {e}"))?;
-                        let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                        let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                             &bcfg,
                             <IsoNewtonian as Regime<f64, $d>>::SPEC,
                         )
@@ -6826,9 +6826,9 @@ macro_rules! build_and_run_iso {
         let sub = {
             let mut sub = sub;
             for json in &cfg.driven_exprs {
-                let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                     .map_err(|e| format!("boundary expression parse: {e}"))?;
-                let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                     &bcfg,
                     <IsoNewtonian as Regime<f64, $d>>::SPEC,
                 )
@@ -6892,9 +6892,9 @@ macro_rules! build_and_run_iso {
             // prolonged + clamp-extended). already validated at the base registration.
             let mut ks = ks;
             for json in &cfg.driven_exprs {
-                let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                     .expect("fine-level boundary parse");
-                let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                     &bcfg,
                     <IsoNewtonian as Regime<f64, $d>>::SPEC,
                 )
@@ -6972,7 +6972,7 @@ macro_rules! build_and_run_iso {
         // balance being measured, and the per-cell cs^2(x) on the fine levels, which sets the
         // sound speed the interface flux carries.
         if let Some(ref target) = cfg.equilibrium_json {
-            let declared = symbi_hydro::EquilibriumConfig::from_json(target)
+            let declared = symbi_source_compile::EquilibriumConfig::from_json(target)
                 .map_err(|e| format!("stationary target parse: {e}"))?;
             hier = hier
                 .with_equilibrium_expression(&declared)
@@ -6989,7 +6989,7 @@ macro_rules! build_and_run_iso {
         // component contract reads one entry shorter here.
         if cfg.restart_path.is_none() {
             if let Some(ref declared) = cfg.perturbation_json {
-                let cfg_p = symbi_hydro::EquilibriumConfig::from_json(declared)
+                let cfg_p = symbi_source_compile::EquilibriumConfig::from_json(declared)
                     .map_err(|e| format!("perturbation parse: {e}"))?;
                 let expression = cfg_p
                     .to_expression()
@@ -7189,9 +7189,9 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         // that face written by nobody, which reads downstream as clean inflow rather than as a
         // missing boundary condition. require the extra output instead.
         for (id, json) in cfg.driven_exprs.iter().enumerate() {
-            let bcfg = symbi_hydro::SourceConfig::from_json(json)
+            let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                 .map_err(|e| format!("driven boundary {id}: expression parse: {e}"))?;
-            let want = symbi_hydro::expr_bridge::boundary_prim_arity(
+            let want = symbi_source_compile::expr_bridge::boundary_prim_arity(
                 &symbi_hydro::regime_spec::NEWTONIAN_SPEC,
                 bcfg.dim,
             ) + 1;
@@ -8349,7 +8349,7 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
         }
     }
     for source in &cfg.source_jsons {
-        let parsed = symbi_hydro::SourceConfig::from_json(&source.json)
+        let parsed = symbi_source_compile::SourceConfig::from_json(&source.json)
             .map_err(|err| format!("{} parse: {err}", source.origin))?;
         if parsed.kind == "rotating_frame" && cfg.coord_system != "cartesian" {
             return Err(format!(
@@ -8372,11 +8372,11 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
         Some(&state_law_of(cfg, preflight_spec)),
     )?;
     for (ii, json) in cfg.driven_exprs.iter().enumerate() {
-        symbi_hydro::SourceConfig::from_json(json)
+        symbi_source_compile::SourceConfig::from_json(json)
             .map_err(|err| format!("driven boundary {ii} parse: {err}"))?;
     }
     if let Some(json) = &cfg.motion_json {
-        symbi_hydro::motion_law::MotionLaw::from_json(json, cfg.start_time, cfg.t_final)
+        symbi_source_compile::motion_law::MotionLaw::from_json(json, cfg.start_time, cfg.t_final)
             .map_err(|err| format!("mesh motion parse: {err}"))?;
     }
     // compile every registered census here so an unlowerable expression, a malformed

@@ -21,10 +21,11 @@ use symbi::symbi_grid::Field;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
-use symbi_hydro::expr_bridge::build_boundary_dag;
+use symbi_source_compile::expr_bridge::build_boundary_dag;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
+use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_source_compile::SourceConfig;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;

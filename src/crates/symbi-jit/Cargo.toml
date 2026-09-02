@@ -11,6 +11,7 @@ edition.workspace = true
 # =============================================================================
 
 [dependencies]
+symbi-carrier = { path = "../symbi-carrier" }
 symbi-ir = { path = "../symbi-ir" }
 symbi-algebra = { path = "../symbi-algebra" }
 cranelift-jit = "0.116"

@@ -42,7 +42,7 @@ use std::collections::HashSet;
 
 use symbi_ir::SourceProgram;
 
-use crate::regime_spec::RegimeSpec;
+use symbi_hydro::regime_spec::RegimeSpec;
 use crate::source_spec::{SourceKind, SourceSpec};
 
 /// **fused-source family**: a runtime declaration of a
@@ -483,7 +483,7 @@ pub enum CompositionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
+    use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
     use crate::source_spec::{
         point_mass_gravity_sources, rigid_body_penalty_sources, spherical_geometric_sources,
     };
@@ -717,7 +717,7 @@ mod tests {
         // when only one overlay targets the field, the combined graph
         // computes the same value as the source's own builder. proves
         // the splice operation reproduces the source's algebra exactly.
-        use crate::regime_spec::law_params;
+        use symbi_hydro::regime_spec::law_params;
         use crate::source_spec::source_params;
         let sim =
             SimulationLaws::new(&NEWTONIAN_SPEC).with_geometric(spherical_geometric_sources(2));
@@ -765,7 +765,7 @@ mod tests {
         // gravity, both targeting `mom`. the combined total must equal the
         // elementwise sum of the individual contributions. proves the
         // additive-composition contract end-to-end.
-        use crate::regime_spec::law_params;
+        use symbi_hydro::regime_spec::law_params;
         use crate::source_spec::{gravity_params, source_params};
 
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
@@ -825,7 +825,7 @@ mod tests {
         // **the triple-source test** — three momentum sources composed:
         // spherical geometric + gravity + rigid penalty. the additive
         // composition contract scales beyond pairs.
-        use crate::regime_spec::law_params;
+        use symbi_hydro::regime_spec::law_params;
         use crate::source_spec::{gravity_params, ib_params, source_params};
 
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)

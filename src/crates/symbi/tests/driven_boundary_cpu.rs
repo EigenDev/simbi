@@ -12,8 +12,9 @@
 
 use symbi::prelude::*;
 use symbi::sim::evolve::KernelSet;
-use symbi_hydro::expr_bridge::build_boundary_dag;
-use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
+use symbi_source_compile::expr_bridge::build_boundary_dag;
+use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_source_compile::SourceConfig;
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
 

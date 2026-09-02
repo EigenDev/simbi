@@ -13,8 +13,9 @@
 // =============================================================================
 
 use symbi::prelude::*;
-use symbi_hydro::expr_bridge::build_user_source;
-use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
+use symbi_source_compile::expr_bridge::build_user_source;
+use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_source_compile::SourceConfig;
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
 

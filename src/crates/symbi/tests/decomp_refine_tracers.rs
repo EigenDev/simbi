@@ -14,8 +14,9 @@ use symbi::sim::refinement::{
     Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
     seed_decomposed_hierarchy_tracers,
 };
-use symbi_hydro::expr_bridge::{build_boundary_dag, build_user_source};
-use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
+use symbi_source_compile::expr_bridge::{build_boundary_dag, build_user_source};
+use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_source_compile::SourceConfig;
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;

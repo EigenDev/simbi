@@ -9,7 +9,7 @@
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 use symbi_aot::kernel_by_name;
 

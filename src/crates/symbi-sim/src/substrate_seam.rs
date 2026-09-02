@@ -25,7 +25,7 @@
 
 use symbi_algebra::OrderedNumeric;
 use symbi_hydro::regime::Regime;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 use crate::state::FieldStore;

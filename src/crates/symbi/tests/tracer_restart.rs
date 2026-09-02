@@ -9,8 +9,9 @@
 use symbi::prelude::*;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::checkpoint::{load_checkpoint, write_checkpoint};
-use symbi_hydro::expr_bridge::build_user_source;
-use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
+use symbi_source_compile::expr_bridge::build_user_source;
+use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_source_compile::SourceConfig;
 use symbi_io::Metadata;
 use symbi_sim::mass_transport::ItoOrder;
 use symbi_sim::tracers::{ContinuousTracerRecord, ContinuousTracerSet, seed_mass_weighted};

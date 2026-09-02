@@ -12,12 +12,14 @@ edition = "2024"
 [dependencies]
 # the Gv carrier + trace live alongside Op + Graph in symbi-ir. discretize
 # traces carrier-generic physics into the tensor IR through this single dep.
+symbi-carrier = { path = "../symbi-carrier" }
 symbi-ir      = { path = "../symbi-ir" }
 # the Gv carrier impls symbi_algebra::Scalar to trace physics into the tensor IR.
 symbi-algebra = { path = "../symbi-algebra" }
 # discretize instantiates the carrier-generic symbi-hydro physics at S=Gv to
 # build kernels — one physics source.
 symbi-hydro   = { path = "../symbi-hydro" }
+symbi-source-compile = { path = "../symbi-source-compile" }
 # the property-algebra layer: SdfExpr + penalize_cell traced at S=Gv.
 symbi-ib      = { path = "../symbi-ib" }
 # the single-source geometric christoffel source: discretize traces `Metric<Gv, D>` at S=Gv

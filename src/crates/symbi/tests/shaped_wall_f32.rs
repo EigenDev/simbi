@@ -19,7 +19,7 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_ib::sdf::SdfExpr;
 use symbi_ib::{Body, BodyCollection, SurfaceSpec};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const N: usize = 48;

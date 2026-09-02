@@ -92,7 +92,7 @@ impl<S: crate::algebra::Numeric, const N: usize> Tensor<S, N> {
 }
 
 // the production `Selectable<S> for Tensor<S, N>` lives in `symbi_ir` so it can
-// refer to `symbi_ir::algebra::Selectable` while keeping `Tensor` here.
+// refer to `symbi_carrier::Selectable` while keeping `Tensor` here.
 
 // ============================================================
 // indexing

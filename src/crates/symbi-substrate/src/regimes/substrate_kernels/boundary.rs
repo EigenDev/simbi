@@ -9,9 +9,9 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_hydro::source_spec::SourceProgram;
+use symbi_source_compile::source_spec::SourceProgram;
 use symbi_ir::ScalarRef;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::sync::Arc;

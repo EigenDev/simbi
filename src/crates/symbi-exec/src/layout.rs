@@ -13,7 +13,7 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 // per-axis allocated lo / extent + volume — where every cell-centered buffer lives.
 pub fn alloc_layout<const D: usize>(allocated: &Domain<D>) -> ([i32; D], [u32; D], usize) {

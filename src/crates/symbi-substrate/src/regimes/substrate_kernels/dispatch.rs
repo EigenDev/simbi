@@ -12,7 +12,7 @@
 use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_grid::Field;
 use symbi_ir::ScalarRef;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::collections::HashMap;
@@ -3189,7 +3189,7 @@ impl FusedSourceBinding {
     }
 
     /// construct from the `(source_id, scalar_pairs)` tuple
-    /// `symbi_hydro::SimulationLaws::derive_fused_binding()` returns. closes the
+    /// `symbi_source_compile::SimulationLaws::derive_fused_binding()` returns. closes the
     /// data-driven loop: a `SimulationLaws` declaration becomes a substrate-ready
     /// binding without the caller hand-spelling param names.
     pub fn from_pair((source_id, pairs): (&'static str, Vec<(String, f64)>)) -> Self {

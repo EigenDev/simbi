@@ -46,7 +46,7 @@ use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::Prim;
 use symbi_hydro::{MhdPrim, RhdGr, RmhdGr};
 use symbi_ib::excise::ks_excised;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
 use symbi_ir::{FieldRef, Gv, GvKernel, TraceCx, trace};
 

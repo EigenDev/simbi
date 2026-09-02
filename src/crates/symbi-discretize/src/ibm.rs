@@ -20,7 +20,7 @@
 //     non-expansive with no CFL condition on the sink (the property that retired the KMK04 min-gate).
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 #[inline]
 fn sq<S: Scalar>(a: S) -> S {

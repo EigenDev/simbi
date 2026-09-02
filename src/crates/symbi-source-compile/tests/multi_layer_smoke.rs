@@ -29,12 +29,13 @@
 use symbi_algebra::Tensor;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, law_params};
-use symbi_hydro::source_spec::{
+use symbi_source_compile::source_spec::{
     gravity_params, point_mass_gravity_sources, source_params, uniform_acceleration_sources,
     user_params,
 };
 use symbi_hydro::state::{Cons, Prim};
-use symbi_hydro::{IsoNewtonian, Newtonian, SimulationLaws, SourceEvaluator};
+use symbi_hydro::{IsoNewtonian, Newtonian};
+use symbi_source_compile::{SimulationLaws, SourceEvaluator};
 
 // =============================================================================
 // section 1 — uniform external acceleration on uniform fluid.

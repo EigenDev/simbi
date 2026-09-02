@@ -552,7 +552,7 @@ const REGIMES: &[RegimeBuild] = &[
 ];
 
 /// build-time identity of a fused-source family — one variant per AOT slug.
-/// mirrors the runtime `symbi_hydro::FusedSourceFamily` as a bare enum, carrying
+/// mirrors the runtime `symbi_source_compile::FusedSourceFamily` as a bare enum, carrying
 /// zero runtime params: `source_specs(d, has_energy)` materializes the spec list
 /// build.rs needs from the symbi-hydro factory functions, parameterized by
 /// ndim + the regime's energy flag.
@@ -570,13 +570,13 @@ impl FamilyKind {
         }
     }
 
-    fn source_specs(self, d: usize, has_energy: bool) -> Vec<symbi_hydro::source_spec::SourceSpec> {
+    fn source_specs(self, d: usize, has_energy: bool) -> Vec<symbi_source_compile::source_spec::SourceSpec> {
         match self {
             Self::UniformAccel => {
-                symbi_hydro::source_spec::uniform_acceleration_sources(d, has_energy)
+                symbi_source_compile::source_spec::uniform_acceleration_sources(d, has_energy)
             }
             Self::PointMassGrav => {
-                symbi_hydro::source_spec::point_mass_gravity_sources(d, has_energy)
+                symbi_source_compile::source_spec::point_mass_gravity_sources(d, has_energy)
             }
         }
     }
@@ -806,7 +806,7 @@ fn gen_godunov_stage(
     prefix: &str,
     has_energy: bool,
     geom: Geom,
-    fused: Option<(&str, &[&symbi_hydro::source_spec::SourceSpec])>,
+    fused: Option<(&str, &[&symbi_source_compile::source_spec::SourceSpec])>,
 ) {
     let suffix_with = fused
         .map(|(slug, _)| format!("_with_{slug}"))
@@ -825,8 +825,8 @@ fn gen_godunov_stage(
         geo_slug,
         geom.spacetime_suffix()
     );
-    let no_sources: [&symbi_hydro::source_spec::SourceSpec; 0] = [];
-    let sources: &[&symbi_hydro::source_spec::SourceSpec] = match fused {
+    let no_sources: [&symbi_source_compile::source_spec::SourceSpec; 0] = [];
+    let sources: &[&symbi_source_compile::source_spec::SourceSpec] = match fused {
         Some((_, s)) => s,
         None => &no_sources,
     };
@@ -859,7 +859,7 @@ fn gen_godunov_with_body_source(
         "{prefix}_godunov_stage_with_body_source{}_{ndim}d",
         geom.suffix()
     );
-    let refs: [(&str, &symbi_hydro::source_spec::SourceProgram); 0] = [];
+    let refs: [(&str, &symbi_source_compile::source_spec::SourceProgram); 0] = [];
     let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         geom.coords,
         symbi_discretize::Spacetime::Minkowski,
@@ -887,7 +887,7 @@ fn gen_source_apply(
     has_energy: bool,
     geom: Geom,
     slug: &str,
-    sources: &[&symbi_hydro::source_spec::SourceSpec],
+    sources: &[&symbi_source_compile::source_spec::SourceSpec],
 ) {
     let name = format!("{prefix}_source_with_{slug}{}_{ndim}d", geom.suffix());
     let (k, writes) = symbi_discretize::gv::source_apply_gv(
@@ -3438,7 +3438,7 @@ fn main() {
         for regime in REGIMES {
             for family in FUSED_FAMILIES {
                 let specs = family.source_specs(ndim as usize, regime.has_energy);
-                let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
+                let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = specs.iter().collect();
                 // the fused variant — source folded into the godunov stage (one launch).
                 gen_godunov_stage(
                     &out_dir,

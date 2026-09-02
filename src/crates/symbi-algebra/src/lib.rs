@@ -7,7 +7,7 @@
 //
 // usage:
 //   use symbi_algebra::{Domain, Tensor, FieldElement, domain, index};
-//   // production `Scalar` / `Selectable` live in `symbi_ir::algebra`.
+//   // production `Scalar` / `Selectable` live in `symbi_carrier`.
 // =============================================================================
 
 pub mod algebra;

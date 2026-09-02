@@ -6,6 +6,7 @@ members = [
     "crates/symbi-carrier",
     "crates/symbi-geometry",
     "crates/symbi-hydro",
+    "crates/symbi-source-compile",
     "crates/symbi-grid",
     "crates/symbi-abi",
     "crates/symbi-ir",

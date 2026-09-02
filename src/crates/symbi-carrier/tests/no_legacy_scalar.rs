@@ -1,7 +1,7 @@
 // =============================================================================
 // no_legacy_scalar.rs
 //
-// the carrier-generic surface has exactly one home: `symbi_ir::algebra`
+// the carrier-generic surface has exactly one home: `symbi_carrier`
 // (`Scalar`, `Selectable`, `Mask`). this test bans a second source by greping
 // every `.rs` file in the workspace's `crates/` tree for
 // `symbi_algebra::Scalar` / `symbi_algebra::Selectable` and failing the build
@@ -91,7 +91,7 @@ fn no_legacy_scalar_imports_in_workspace() {
         assert!(
             false,
             "no-legacy-scalar gate failed — {count} violation(s). use \
-             `symbi_ir::algebra::{{Scalar, Selectable}}` instead.\n\n{report}",
+             `symbi_carrier::{{Scalar, Selectable}}` instead.\n\n{report}",
         );
     }
 }

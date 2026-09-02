@@ -17,8 +17,9 @@
 use symbi::prelude::*;
 use symbi_algebra::Domain;
 use symbi_grid::Field;
-use symbi_hydro::expr_bridge::build_user_source;
-use symbi_hydro::{RHD_SPEC, SourceConfig};
+use symbi_source_compile::expr_bridge::build_user_source;
+use symbi_hydro::RHD_SPEC;
+use symbi_source_compile::SourceConfig;
 use symbi_xpu::HostMemory;
 
 fn assert_cons_bit_identical<const D: usize>(

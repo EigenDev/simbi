@@ -27,7 +27,7 @@ use symbi_hydro::energy::{EnergyModel, EnergySlot};
 use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::state::{Cons, ConsG, Prim, PrimG, SeedableCons};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_xpu::{DefaultMemory, DefaultSpace, ExecutionSpace, Executor, MemorySpace};
 
 // =============================================================================
@@ -1943,7 +1943,7 @@ pub struct FieldStore<
     pub motion: MotionState<f64>,
     // traced scale-factor law a(t)/a_dot(t); when present the time loop evaluates it exactly each
     // (sub)stage. None = static / linear.
-    pub motion_law: Option<symbi_hydro::motion_law::MotionLaw>,
+    pub motion_law: Option<symbi_source_compile::motion_law::MotionLaw>,
 
     // ---- immersed bodies (optional side-car) ----
     pub immersed: Option<ImmersedBodies<NDIM>>,

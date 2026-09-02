@@ -26,7 +26,7 @@ use crate::driver::{prof, stage_tag};
 use crate::state::FieldStore;
 use crate::substrate_seam::KernelSet;
 use symbi_algebra::OrderedNumeric;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 /// arms `workspace.stage_writes` for one stage and disarms it on drop, so the audit is scoped to

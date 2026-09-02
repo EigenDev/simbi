@@ -787,23 +787,26 @@ Success means `symbi-hydro` contains no production references to `Graph`,
 
 ### Phase 4: invert the carrier dependency
 
-Implementation status: foundation landed; hydro remains. The carrier
-constitution (`Scalar`, `Mask`, `Selectable`, the algebraic laws, `SourceLoc`,
-and the `Dual` derivative carrier, with the zero-panic contract and the
-executable carrier-law suite) lives in `symbi-carrier`, which depends only on
-`symbi-algebra`; `symbi-ir` depends on the foundation and supplies the tracing
-interpretation (`Scalar for Gv`), re-exporting the constitution at its old
-paths for compiler-side code. `symbi-geometry` depends on the foundation
-alone, and `symbi-ib`'s compiler dependency is dev-only (one test traces an
-SDF); the `physics_independence` gate pins both dependency graphs.
-`symbi-hydro`'s pure physics imports the foundation directly; its remaining
-production compiler surface is exactly the program-construction and
-program-evaluation machinery — `source_spec` / `expr_bridge` /
-`simulation_laws` / `state_law` (tracing and splicing `SourceProgram`s) and
-`source_evaluator` / `motion_law` (host evaluation of lowered programs) —
-which interprets physics into programs and therefore belongs below the
-physics layer. Re-homing that machinery is the remaining step; when it moves,
-`symbi-hydro` drops its `symbi-ir` dependency and joins the gate.
+Implementation status: complete. The carrier constitution (`Scalar`, `Mask`,
+`Selectable`, the algebraic laws, `SourceLoc`, and the `Dual` derivative
+carrier, with the zero-panic contract and the executable carrier-law suite)
+lives in `symbi-carrier`, which depends only on `symbi-algebra`; `symbi-ir`
+depends on the foundation and supplies the tracing interpretation
+(`Scalar for Gv`). The compiler re-export facade is deleted: every crate
+imports the constitution from `symbi-carrier` directly, and the
+`physics_independence` gate scans for the old spellings so the facade cannot
+return. Physics is compiler-free in the dependency graph: `symbi-geometry`,
+`symbi-ib`, and `symbi-hydro` depend on the foundation alone (compiler crates
+appear only under dev-dependencies, for tests that inspect traced artifacts).
+The program-construction and program-evaluation machinery moved out of hydro
+into `symbi-source-compile` — expression interpretation, `SourceProgram`
+tracing/splicing and overlay composition, the traced `StateLaw` conversion
+(the `StateLawGv` extension over the physical descriptor), host evaluation of
+lowered programs, and the GPU source emission/launch wiring — sitting between
+`symbi-hydro` (what a physical source means) and `symbi-ir` (generic
+representation and lowering), beside `symbi-discretize` (where continuous
+laws acquire mesh locality). `RenderPolicy` was deleted rather than
+relocated: it had no consumer.
 
 1. Extract `Scalar`, predicates, and their structural laws into a foundation
    crate.

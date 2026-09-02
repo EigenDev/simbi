@@ -23,7 +23,7 @@
 use symbi_algebra::OrderedNumeric;
 use symbi_grid::Field;
 use symbi_ir::ScalarRef;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};

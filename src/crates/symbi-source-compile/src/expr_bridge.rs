@@ -354,7 +354,7 @@ pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<Source
 /// a reference state means knowing which conserved state the regime stores.
 pub fn build_user_source(
     cfg: &symbi_expr::SourceConfig,
-    spec: &crate::regime_spec::RegimeSpec,
+    spec: &symbi_hydro::regime_spec::RegimeSpec,
 ) -> Result<Vec<(String, SourceProgram)>, String> {
     build_user_source_with_law(cfg, spec, None)
 }
@@ -364,8 +364,8 @@ pub fn build_user_source(
 /// kinds ignore it.
 pub fn build_user_source_with_law(
     cfg: &symbi_expr::SourceConfig,
-    spec: &crate::regime_spec::RegimeSpec,
-    law: Option<&crate::state_law::StateLaw>,
+    spec: &symbi_hydro::regime_spec::RegimeSpec,
+    law: Option<&symbi_hydro::state_law::StateLaw>,
 ) -> Result<Vec<(String, SourceProgram)>, String> {
     // a law and a spec describe the same regime from two directions, and a source that
     // relaxes toward a conserved state built under one while the evolution stores the
@@ -628,7 +628,7 @@ pub fn build_user_source_with_law(
 /// lower an ordered collection without a state law; see `build_user_source`.
 pub fn build_user_sources(
     configs: &[symbi_expr::SourceConfig],
-    spec: &crate::regime_spec::RegimeSpec,
+    spec: &symbi_hydro::regime_spec::RegimeSpec,
 ) -> Result<(Vec<(String, SourceProgram)>, Vec<f64>), String> {
     build_user_sources_with_law(configs, spec, None)
 }
@@ -636,8 +636,8 @@ pub fn build_user_sources(
 /// lower an ordered collection against `law`; see `build_user_source_with_law`.
 pub fn build_user_sources_with_law(
     configs: &[symbi_expr::SourceConfig],
-    spec: &crate::regime_spec::RegimeSpec,
-    law: Option<&crate::state_law::StateLaw>,
+    spec: &symbi_hydro::regime_spec::RegimeSpec,
+    law: Option<&symbi_hydro::state_law::StateLaw>,
 ) -> Result<(Vec<(String, SourceProgram)>, Vec<f64>), String> {
     let mut parameter_offset = 0usize;
     let mut params = Vec::new();
@@ -738,13 +738,13 @@ fn strip_and_mask(
 ///
 /// the single definition of that count: `build_boundary_dag` validates against it, and the config
 /// layer sizes its dye requirement from it.
-pub fn boundary_prim_arity(spec: &crate::regime_spec::RegimeSpec, d: usize) -> usize {
+pub fn boundary_prim_arity(spec: &symbi_hydro::regime_spec::RegimeSpec, d: usize) -> usize {
     1 + d + usize::from(spec.has_energy) + if spec.is_mhd { d } else { 0 }
 }
 
 pub fn build_boundary_dag(
     cfg: &symbi_expr::SourceConfig,
-    spec: &crate::regime_spec::RegimeSpec,
+    spec: &symbi_hydro::regime_spec::RegimeSpec,
 ) -> Result<Vec<(String, SourceProgram)>, String> {
     let nodes = symbi_expr::nodes_from_descs(&cfg.nodes).map_err(|e| format!("dag load: {e}"))?;
     let (nodes, reduced_outputs) = symbi_expr::strength_reduce(&nodes, &cfg.outputs);
@@ -807,7 +807,7 @@ pub fn build_boundary_dag(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, RHD_SPEC, RMHD_SPEC};
+    use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, RHD_SPEC, RMHD_SPEC};
     use symbi_expr::dag::Dag;
     use symbi_ir::backends::interp::{Backend, Cpu};
     use symbi_ir::NodeId;
@@ -825,16 +825,16 @@ mod tests {
     /// the ideal-gas law the fixtures below lower against. a sponge relaxes toward a
     /// reference state expressed in primitives, so lowering one needs the conversion its
     /// regime uses; every other source kind ignores the law and lowers identically with it.
-    fn fixture_law() -> crate::state_law::StateLaw {
-        crate::state_law::StateLaw::newtonian(1.4)
+    fn fixture_law() -> symbi_hydro::state_law::StateLaw {
+        symbi_hydro::state_law::StateLaw::newtonian(1.4)
     }
 
     /// the law matching `spec`'s regime. lowering rejects a law and a spec that disagree
     /// about relativity, so a fixture that means to exercise some other rejection has to
     /// hand over the law belonging to the regime it names.
-    fn law_for(spec: &crate::regime_spec::RegimeSpec) -> crate::state_law::StateLaw {
+    fn law_for(spec: &symbi_hydro::regime_spec::RegimeSpec) -> symbi_hydro::state_law::StateLaw {
         if spec.is_relativistic {
-            crate::state_law::StateLaw::relativistic(1.4, crate::state_law::Background::Minkowski)
+            symbi_hydro::state_law::StateLaw::relativistic(1.4, symbi_hydro::state_law::Background::Minkowski)
         } else {
             fixture_law()
         }
@@ -842,12 +842,12 @@ mod tests {
 
     fn lower(
         cfg: &symbi_expr::SourceConfig,
-        spec: &crate::regime_spec::RegimeSpec,
+        spec: &symbi_hydro::regime_spec::RegimeSpec,
     ) -> Result<Vec<(String, SourceProgram)>, String> {
         build_user_source_with_law(cfg, spec, Some(&law_for(spec)))
     }
 
-    fn expect_err(cfg: &symbi_expr::SourceConfig, spec: &crate::regime_spec::RegimeSpec) -> String {
+    fn expect_err(cfg: &symbi_expr::SourceConfig, spec: &symbi_hydro::regime_spec::RegimeSpec) -> String {
         match lower(cfg, spec) {
             Err(e) => e,
             Ok(_) => panic!("expected the config to be rejected"),
@@ -1468,7 +1468,7 @@ mod tests {
                            {"op":"CONSTANT","value":0.5}, {"op":"CONSTANT","value":0.0},
                            {"op":"CONSTANT","value":3.95} ] }"#,
         );
-        let law = crate::state_law::StateLaw::newtonian(1.4);
+        let law = symbi_hydro::state_law::StateLaw::newtonian(1.4);
         let built = build_user_source_with_law(&cfg, &NEWTONIAN_SPEC, Some(&law))
             .expect("sponge newtonian");
         assert_eq!(
@@ -1514,7 +1514,7 @@ mod tests {
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
-        let law = crate::state_law::StateLaw::newtonian(5.0 / 3.0);
+        let law = symbi_hydro::state_law::StateLaw::newtonian(5.0 / 3.0);
         let built =
             build_user_source_with_law(&cfg, &ISO_NEWTONIAN_SPEC, Some(&law)).expect("sponge iso");
         assert_eq!(
@@ -1545,9 +1545,9 @@ mod tests {
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":1.0} ] }"#,
         );
-        let law = crate::state_law::StateLaw::relativistic(
+        let law = symbi_hydro::state_law::StateLaw::relativistic(
             4.0 / 3.0,
-            crate::state_law::Background::Minkowski,
+            symbi_hydro::state_law::Background::Minkowski,
         );
         let built = build_user_source_with_law(&cfg, &RHD_SPEC, Some(&law))
             .expect("relativistic sponge lowers");
@@ -1587,10 +1587,10 @@ mod tests {
         ];
         let mut channels = Vec::new();
         for background in [
-            crate::state_law::Background::Minkowski,
-            crate::state_law::Background::SchwarzschildKsCartesian { mass: 0.0 },
+            symbi_hydro::state_law::Background::Minkowski,
+            symbi_hydro::state_law::Background::SchwarzschildKsCartesian { mass: 0.0 },
         ] {
-            let law = crate::state_law::StateLaw::relativistic(4.0 / 3.0, background);
+            let law = symbi_hydro::state_law::StateLaw::relativistic(4.0 / 3.0, background);
             let built = build_user_source_with_law(&cfg, &RHD_SPEC, Some(&law))
                 .expect("sponge lowers on both backgrounds");
             channels.push(
@@ -1630,9 +1630,9 @@ mod tests {
         // giving the hole mass has to move the answer, or the agreement above would hold
         // for a curved arm that never reached the metric at all. at r = 5 the spatial
         // volume element is sqrt(1 + 2M/r) = 1.183 for M = 1.
-        let massive = crate::state_law::StateLaw::relativistic(
+        let massive = symbi_hydro::state_law::StateLaw::relativistic(
             4.0 / 3.0,
-            crate::state_law::Background::SchwarzschildKsCartesian { mass: 1.0 },
+            symbi_hydro::state_law::Background::SchwarzschildKsCartesian { mass: 1.0 },
         );
         let built = build_user_source_with_law(&cfg, &RHD_SPEC, Some(&massive))
             .expect("sponge lowers on a massive hole");
@@ -1772,7 +1772,7 @@ mod tests {
 
     fn expect_boundary_err(
         cfg: &symbi_expr::SourceConfig,
-        spec: &crate::regime_spec::RegimeSpec,
+        spec: &symbi_hydro::regime_spec::RegimeSpec,
     ) -> String {
         match build_boundary_dag(cfg, spec) {
             Err(e) => e,
@@ -1953,7 +1953,7 @@ mod tests {
 #[cfg(test)]
 mod state_law_seam_tests {
     use super::*;
-    use crate::state_law::{Background, StateLaw};
+    use symbi_hydro::state_law::{Background, StateLaw};
 
     fn force_cfg() -> symbi_expr::SourceConfig {
         symbi_expr::SourceConfig::from_json(
@@ -1970,7 +1970,7 @@ mod state_law_seam_tests {
         // evolution stores `rho v` — a wrong answer no output reveals, so it is caught
         // where the mismatch is made rather than carried into the graph.
         let law = StateLaw::relativistic(4.0 / 3.0, Background::Minkowski);
-        let err = match build_user_source_with_law(&force_cfg(), &crate::NEWTONIAN_SPEC, Some(&law))
+        let err = match build_user_source_with_law(&force_cfg(), &symbi_hydro::NEWTONIAN_SPEC, Some(&law))
         {
             Err(e) => e,
             Ok(_) => panic!("a relativistic law on a newtonian regime must be refused"),
@@ -1984,10 +1984,10 @@ mod state_law_seam_tests {
         // threading the law changes nothing for the kinds that do not read it, so every
         // existing source keeps its graph. the sponge is what will consume it.
         let law = StateLaw::newtonian(5.0 / 3.0);
-        let with = build_user_source_with_law(&force_cfg(), &crate::NEWTONIAN_SPEC, Some(&law))
+        let with = build_user_source_with_law(&force_cfg(), &symbi_hydro::NEWTONIAN_SPEC, Some(&law))
             .expect("lowers with a law");
         let without =
-            build_user_source(&force_cfg(), &crate::NEWTONIAN_SPEC).expect("lowers without one");
+            build_user_source(&force_cfg(), &symbi_hydro::NEWTONIAN_SPEC).expect("lowers without one");
         assert_eq!(with.len(), without.len());
         for ((ta, a), (tb, b)) in with.iter().zip(&without) {
             assert_eq!(ta, tb, "target moved");

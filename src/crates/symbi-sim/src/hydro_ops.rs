@@ -10,7 +10,7 @@
 use crate::state::*;
 use symbi_algebra::Domain;
 use symbi_algebra::OrderedNumeric;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 /// drain the device queue before a host read of device-accessible fields.

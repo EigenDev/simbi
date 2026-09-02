@@ -26,7 +26,7 @@
 // =============================================================================
 
 use symbi_algebra::algebra::Numeric;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::graph::{ConstValue, ElementWiseOp, NodeId};
 use symbi_ir::{Gv, GvKernel, KernelWrite, KernelWrites, TraceCx, trace};
 

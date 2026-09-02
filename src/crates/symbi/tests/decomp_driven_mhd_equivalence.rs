@@ -19,11 +19,12 @@ use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
-use symbi_hydro::expr_bridge::build_boundary_dag;
+use symbi_source_compile::expr_bridge::build_boundary_dag;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{RMHD_SPEC, SourceConfig};
+use symbi_hydro::RMHD_SPEC;
+use symbi_source_compile::SourceConfig;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 5.0 / 3.0;

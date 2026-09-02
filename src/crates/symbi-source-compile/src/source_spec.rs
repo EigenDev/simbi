@@ -14,7 +14,7 @@
 //      this because `Numeric` and `OrderedNumeric` are distinct bounds.
 //   - provenance preserved through composition — each `SourceSpec` carries a
 //      `NodeAnnotation`; the homomorphism (A7) requires every target preserve
-//      it under `RenderPolicy::Audit`.
+//      it in the audit render mode.
 //   - geometric sources are derived from the metric — `Spherical` produces its
 //      momentum source automatically from its scale factors / Christoffels;
 //      every regime carries its centrifugal term by construction.
@@ -38,8 +38,9 @@ use symbi_ir::{Gv, TraceCx};
 // `source_spec::SourceProgram` stays the domain-facing path.
 pub use symbi_ir::SourceProgram;
 
-use crate::regime_spec::law_params;
-use crate::source_term::{PointMassGravity, UniformAccel};
+use crate::state_law_gv::StateLawGv;
+use symbi_hydro::regime_spec::law_params;
+use symbi_hydro::source_term::{PointMassGravity, UniformAccel};
 
 /// the origin of a source — drives diagnostics, audit-mode comments, and
 /// composability rules. callers extend this enum as new overlays land
@@ -659,7 +660,7 @@ pub fn user_force_momentum_source(accel: &SourceProgram, d: usize) -> SourceProg
     SourceProgram::trace(|cx| {
         let rho = cx.scalar(law_params::RHO);
         let a = cx.splice_source_as_scalars(accel);
-        crate::source_term::force_momentum(rho, &a)
+        symbi_hydro::source_term::force_momentum(rho, &a)
     })
 }
 
@@ -678,7 +679,7 @@ pub fn user_force_energy_source(accel: &SourceProgram, d: usize) -> SourceProgra
         let rho = cx.scalar(law_params::RHO);
         let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
         let a = cx.splice_source_as_scalars(accel);
-        vec![crate::source_term::force_energy(rho, &vel, &a)]
+        vec![symbi_hydro::source_term::force_energy(rho, &vel, &a)]
     })
 }
 
@@ -692,10 +693,10 @@ pub fn user_rotating_frame_momentum_source(field: &SourceProgram, d: usize) -> S
         let position: Vec<Gv> = (0..d).map(|kk| cx.scalar(&format!("x_{kk}"))).collect();
         let vel: Vec<Gv> = (0..d).map(|kk| cx.scalar(&law_params::vel(kk))).collect();
         let values = cx.splice_source_as_scalars(field);
-        let accel = crate::source_term::rotating_frame_acceleration(
+        let accel = symbi_hydro::source_term::rotating_frame_acceleration(
             &position, &vel, values[0], values[1], values[2],
         );
-        crate::source_term::force_momentum(rho, &accel)
+        symbi_hydro::source_term::force_momentum(rho, &accel)
     })
 }
 
@@ -708,10 +709,10 @@ pub fn user_rotating_frame_energy_source(field: &SourceProgram, d: usize) -> Sou
         let position: Vec<Gv> = (0..d).map(|kk| cx.scalar(&format!("x_{kk}"))).collect();
         let vel: Vec<Gv> = (0..d).map(|kk| cx.scalar(&law_params::vel(kk))).collect();
         let values = cx.splice_source_as_scalars(field);
-        let accel = crate::source_term::rotating_frame_acceleration(
+        let accel = symbi_hydro::source_term::rotating_frame_acceleration(
             &position, &vel, values[0], values[1], values[2],
         );
-        vec![crate::source_term::force_energy(rho, &vel, &accel)]
+        vec![symbi_hydro::source_term::force_energy(rho, &vel, &accel)]
     })
 }
 
@@ -726,7 +727,7 @@ pub fn user_cooling_source(rate: &SourceProgram, _d: usize) -> SourceProgram {
     );
     SourceProgram::trace(|cx| {
         let lambda = cx.splice_source_as_scalars(rate);
-        vec![crate::source_term::cooling(lambda[0])]
+        vec![symbi_hydro::source_term::cooling(lambda[0])]
     })
 }
 
@@ -749,7 +750,7 @@ pub fn user_relax_momentum_source(field: &SourceProgram, d: usize) -> SourceProg
         let rho = cx.scalar(law_params::RHO);
         let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
         let f = cx.splice_source_as_scalars(field);
-        crate::source_term::relax_momentum(rho, &vel, f[0], &f[1..1 + d])
+        symbi_hydro::source_term::relax_momentum(rho, &vel, f[0], &f[1..1 + d])
     })
 }
 
@@ -769,7 +770,7 @@ pub fn user_relax_energy_source(field: &SourceProgram, d: usize) -> SourceProgra
         let rho = cx.scalar(law_params::RHO);
         let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
         let f = cx.splice_source_as_scalars(field);
-        vec![crate::source_term::relax_energy(
+        vec![symbi_hydro::source_term::relax_energy(
             rho,
             &vel,
             f[0],
@@ -799,7 +800,7 @@ pub fn user_relax_energy_source(field: &SourceProgram, d: usize) -> SourceProgra
 pub fn user_sponge_sources(
     field: &SourceProgram,
     d: usize,
-    law: &crate::state_law::StateLaw,
+    law: &symbi_hydro::state_law::StateLaw,
     has_energy: bool,
 ) -> Result<Vec<(String, SourceProgram)>, String> {
     let want = if has_energy { 3 + d } else { 2 + d };
@@ -818,7 +819,7 @@ pub fn user_sponge_sources(
         let mut err: Option<String> = None;
         let built = SourceProgram::trace(|cx| {
             let f = cx.splice_source_as_scalars(field);
-            let kappa = crate::source_term::clamp_rate(f[0]);
+            let kappa = symbi_hydro::source_term::clamp_rate(f[0]);
             let cur_rho = cx.scalar(law_params::RHO);
             let cur_vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
             let cur_pre = if has_energy {

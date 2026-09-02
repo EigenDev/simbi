@@ -17,9 +17,11 @@ hdf5 = []  # placeholder for symbi-py compat
 symbi-algebra = { path = "../symbi-algebra" }
 symbi-geometry = { path = "../symbi-geometry" }
 symbi-hydro = { path = "../symbi-hydro" }
+symbi-source-compile = { path = "../symbi-source-compile" }
 symbi-xpu = { path = "../symbi-xpu" }
 symbi-grid = { path = "../symbi-grid" }
 symbi-ib = { path = "../symbi-ib" }
+symbi-carrier = { path = "../symbi-carrier" }
 symbi-ir = { path = "../symbi-ir" }
 symbi-aot = { path = "../symbi-aot" }
 symbi-exec = { path = "../symbi-exec" }

@@ -13,8 +13,9 @@ use symbi::sim::decomp::{LocalCopy, evolve_decomposed};
 use symbi_algebra::Domain;
 use symbi_geometry::MotionState;
 use symbi_grid::Field;
-use symbi_hydro::expr_bridge::build_user_sources;
-use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
+use symbi_source_compile::expr_bridge::build_user_sources;
+use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_source_compile::SourceConfig;
 use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_sim::tracers::seed_mass_weighted;
 

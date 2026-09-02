@@ -24,7 +24,7 @@ use symbi_geometry::{CylindricalRPhi, DiagonalMetric, Metric, Spherical};
 use symbi_hydro::viscous::{
     viscous_mom_update_2d, viscous_mom_update_3d, viscous_mom_update_orthogonal_2d,
 };
-use symbi_ir::algebra::Scalar as _;
+use symbi_carrier::Scalar as _;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
 use symbi_ir::{FieldRef, Gv, GvKernel, TraceCx, trace};
 

@@ -11,7 +11,7 @@ use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
-use symbi_ir::dual::Dual;
+use symbi_carrier::Dual;
 use symbi_ir::{KernelWrite, KernelWrites};
 
 /// trace the newtonian-MHD CFL wave-speed map — `NewtonianMhd::wave_speeds` (the

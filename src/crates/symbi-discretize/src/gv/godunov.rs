@@ -11,7 +11,7 @@ use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
-use symbi_ir::dual::Dual;
+use symbi_carrier::Dual;
 use symbi_ir::gv::GvMask;
 use symbi_ir::{KernelWrite, KernelWrites};
 
@@ -550,7 +550,7 @@ fn splice_fused_sources_to_contribs<'t>(
     state: Option<(Gv<'t>, &[Gv<'t>])>,
     // (target_field, built) pairs — the SourceProgram values, so this serves both the AOT path
     // (SourceSpec.build_source(ndim)) and the runtime path (build_user_source's loaded values).
-    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
+    sources: &[(&str, &symbi_source_compile::source_spec::SourceProgram)],
 ) -> FusedContribs {
     use std::collections::HashMap;
 
@@ -725,17 +725,17 @@ pub fn godunov_stage_gv_with_fused_sources(
     ncomp: usize,
     has_energy: bool,
     source: GeoSource,
-    user_sources: &[&symbi_hydro::source_spec::SourceSpec],
+    user_sources: &[&symbi_source_compile::source_spec::SourceSpec],
     // when this stage is fused with the cell-B predictor, the magnetic geo source reads cell-B
     // via the predictor's `bc_k` key so try_fuse merges the two reads onto one binding.
     // the plain (unfused) stage passes false -> reads `prim.mag[k]`.
     mag_from_bcell: bool,
 ) -> (GvKernel, KernelWrites) {
-    let builts: Vec<(&str, symbi_hydro::source_spec::SourceProgram)> = user_sources
+    let builts: Vec<(&str, symbi_source_compile::source_spec::SourceProgram)> = user_sources
         .iter()
         .map(|s| (s.target_field, (s.build_source)(ndim as usize)))
         .collect();
-    let src_refs: Vec<(&str, &symbi_hydro::source_spec::SourceProgram)> =
+    let src_refs: Vec<(&str, &symbi_source_compile::source_spec::SourceProgram)> =
         builts.iter().map(|(t, b)| (*t, b)).collect();
     // spec-overlay fusion (AOT `_with_{slug}` bakes) runs body-free; the immersed body belongs to
     // the runtime-source path (build_fused_cpu_kernel threads the real count).
@@ -770,7 +770,7 @@ pub fn godunov_stage_gv_with_fused_built(
     ncomp: usize,
     has_energy: bool,
     source: GeoSource,
-    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
+    sources: &[(&str, &symbi_source_compile::source_spec::SourceProgram)],
     mag_from_bcell: bool,
     // immersed-body count. > 0 wraps the post-combine cons with `body_evolved_gv` (gravity +
     // accretion drain) at weight `ac*dt`, so the single fused sweep equals `plain godunov +
@@ -809,7 +809,7 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     ncomp: usize,
     has_energy: bool,
     source: GeoSource,
-    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
+    sources: &[(&str, &symbi_source_compile::source_spec::SourceProgram)],
     mag_from_bcell: bool,
     n_bodies: usize,
     weighted_geo_source: bool,
@@ -1423,7 +1423,7 @@ fn apply_dag_core_gv(
     ncomp: usize,
     has_energy: bool,
     state: StateEnv,
-    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
+    sources: &[(&str, &symbi_source_compile::source_spec::SourceProgram)],
     mode: WriteMode,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
@@ -1578,13 +1578,13 @@ pub fn source_apply_gv(
     ndim: u8,
     ncomp: usize,
     has_energy: bool,
-    user_sources: &[&symbi_hydro::source_spec::SourceSpec],
+    user_sources: &[&symbi_source_compile::source_spec::SourceSpec],
 ) -> (GvKernel, KernelWrites) {
-    let builts: Vec<(&str, symbi_hydro::source_spec::SourceProgram)> = user_sources
+    let builts: Vec<(&str, symbi_source_compile::source_spec::SourceProgram)> = user_sources
         .iter()
         .map(|s| (s.target_field, (s.build_source)(ndim as usize)))
         .collect();
-    let src_refs: Vec<(&str, &symbi_hydro::source_spec::SourceProgram)> =
+    let src_refs: Vec<(&str, &symbi_source_compile::source_spec::SourceProgram)> =
         builts.iter().map(|(t, b)| (*t, b)).collect();
     apply_dag_core_gv(
         coords,
@@ -1609,7 +1609,7 @@ pub fn source_apply_from_built_gv(
     ndim: u8,
     ncomp: usize,
     has_energy: bool,
-    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
+    sources: &[(&str, &symbi_source_compile::source_spec::SourceProgram)],
 ) -> (GvKernel, KernelWrites) {
     apply_dag_core_gv(
         coords,
@@ -1635,7 +1635,7 @@ pub fn boundary_fill_from_built_gv(
     ndim: u8,
     ncomp: usize,
     has_energy: bool,
-    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
+    sources: &[(&str, &symbi_source_compile::source_spec::SourceProgram)],
 ) -> (GvKernel, KernelWrites) {
     apply_dag_core_gv(
         coords,

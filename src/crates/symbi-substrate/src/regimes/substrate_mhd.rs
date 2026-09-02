@@ -32,7 +32,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_grid::Field;
 use symbi_hydro::regime::Regime;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::{FieldRef, ScalarRef};
 use symbi_xpu::MemorySpace;
 
@@ -44,7 +44,7 @@ use crate::regimes::substrate_kernels::{
     dispatch_named, dispatch_runtime_source, geom_scalar, kernel_bindings, kernel_geom,
     mhd_flux_suffix, mhd_geom_suffix, motion_scalar, scalars_for, spacetime_slug,
 };
-use symbi_hydro::source_spec::SourceProgram;
+use symbi_source_compile::source_spec::SourceProgram;
 use symbi_sim::state::CtMethod;
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::KernelSet;

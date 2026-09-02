@@ -171,7 +171,7 @@ impl GpuSourceKernel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
+    use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
     use crate::source_spec::{
         cylindrical_geometric_sources, point_mass_gravity_sources, rigid_body_penalty_sources,
     };

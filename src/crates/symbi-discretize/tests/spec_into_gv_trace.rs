@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 
 use symbi_hydro::regime_spec::law_params;
-use symbi_hydro::source_spec::{
+use symbi_source_compile::source_spec::{
     gravity_params, point_mass_gravity_sources, source_params,
 };
 use symbi_ir::graph::NodeId;

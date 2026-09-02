@@ -1,7 +1,7 @@
 // =============================================================================
 // gv_carrier_equivalence.rs
 //
-// carrier-equivalence acceptance for the `symbi_ir::algebra::Scalar` impl on
+// carrier-equivalence acceptance for the `symbi_carrier::Scalar` impl on
 // `Gv`. proves the homomorphism law end-to-end, against the same physics
 // templated over `S: Scalar` and run two ways:
 //
@@ -19,7 +19,7 @@
 // every op is f64 in both paths.
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::passes::scalarize::{LoweredFn, scalarize_kernel};
 use symbi_ir::{Backend, Cpu, Gv, TraceCx, trace};
 

@@ -21,6 +21,7 @@ hip = ["gpu", "symbi/hip"]
 symbi = { path = "../symbi" }
 symbi-sim = { path = "../symbi-sim" }
 symbi-hydro = { path = "../symbi-hydro" }
+symbi-source-compile = { path = "../symbi-source-compile" }
 symbi-geometry = { path = "../symbi-geometry" }
 symbi-algebra = { path = "../symbi-algebra" }
 symbi-io = { path = "../symbi-io" }

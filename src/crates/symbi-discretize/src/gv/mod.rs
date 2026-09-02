@@ -38,7 +38,7 @@ use symbi_hydro::rmhd::{
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::{Cons, ConsG, Prim, PrimG};
 use symbi_ir::Symbol;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::graph::{ConstValue, ElementWiseOp, NodeId};
 use symbi_ir::{FieldBind, FieldRef};
 
@@ -2004,8 +2004,8 @@ mod tests {
         use symbi_ir::emit::{Precision, Target, TargetConfig};
         use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
 
-        let specs = symbi_hydro::source_spec::point_mass_gravity_sources(2, true);
-        let spec_refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
+        let specs = symbi_source_compile::source_spec::point_mass_gravity_sources(2, true);
+        let spec_refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = specs.iter().collect();
         let (coords, spacing, axes) = (Coords::Cartesian, [Spacing::Uniform; 2], [0usize, 1]);
         let geo = GeoSource::Hydro { inertial: false };
 
@@ -2024,11 +2024,11 @@ mod tests {
         );
 
         // the runtime SourceProgram-value path (what `RuntimeSource` feeds).
-        let builts: Vec<(&str, symbi_hydro::source_spec::SourceProgram)> = specs
+        let builts: Vec<(&str, symbi_source_compile::source_spec::SourceProgram)> = specs
             .iter()
             .map(|s| (s.target_field, (s.build_source)(2)))
             .collect();
-        let src_refs: Vec<(&str, &symbi_hydro::source_spec::SourceProgram)> =
+        let src_refs: Vec<(&str, &symbi_source_compile::source_spec::SourceProgram)> =
             builts.iter().map(|(t, b)| (*t, b)).collect();
         let (k_built, w_built) = godunov_stage_gv_with_fused_built(
             coords,

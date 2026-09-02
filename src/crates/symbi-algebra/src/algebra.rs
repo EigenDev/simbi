@@ -3,15 +3,15 @@
 //
 // minimal structural numeric primitives needed by `Tensor` / `Matrix` /
 // `Indexed` impls inside this crate. the production `Scalar` (and
-// `Selectable`) live in `symbi_ir::algebra`; this is the structural subset.
+// `Selectable`) live in `symbi_carrier`; this is the structural subset.
 // this trait is `pub(crate)`-equivalent: its audience is `symbi-algebra`
 // itself. its role is to provide arithmetic / sqrt / min / max / abs /
 // zero / one / from_f64 so dot / norm / det / inv etc. compile within this
 // crate alone (a `symbi-ir` dependency would close a cycle — `symbi-ir` already
 // depends on `symbi-algebra` for `Tensor`, `FieldElement`, `Domain`).
 //
-// the production `Scalar` in `symbi_ir::algebra` carries this structural surface
-// as part of its trait bag, so a workspace-wide `S: symbi_ir::algebra::Scalar`
+// the production `Scalar` in `symbi_carrier` carries this structural surface
+// as part of its trait bag, so a workspace-wide `S: symbi_carrier::Scalar`
 // automatically satisfies `S: symbi_algebra::Numeric` and the matrix/tensor
 // methods work over that carrier.
 // =============================================================================
@@ -19,7 +19,7 @@
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 /// structural numeric bag: what the in-crate `Tensor` / `Matrix` / `Indexed`
-/// methods need from a scalar. `symbi_ir::algebra::Scalar` is the production
+/// methods need from a scalar. `symbi_carrier::Scalar` is the production
 /// carrier-generic surface; this is the minimal subset that keeps the
 /// `symbi-algebra` <-> `symbi-ir` dep graph acyclic.
 ///

@@ -11,7 +11,7 @@
 
 use symbi_algebra::{BlockGrid, Domain, OrderedNumeric};
 use symbi_grid::Field;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 use symbi_aot::{Buf, BufHandle, KernelInvocation};

@@ -20,7 +20,7 @@ use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_amr::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi_geometry::Cartesian;
-use symbi_hydro::CensusConfig;
+use symbi_source_compile::CensusConfig;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;

@@ -28,8 +28,8 @@
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
-use symbi_hydro::Overlay;
-use symbi_ir::algebra::Scalar;
+use symbi_source_compile::Overlay;
+use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 use crate::regimes::substrate::IsoSubstrateKernelSet;
@@ -107,7 +107,7 @@ pub fn configure_source_with<K: ConfigureSource>(
 mod tests {
     use super::*;
     use symbi_algebra::{Domain, Space};
-    use symbi_hydro::{Overlay, point_mass, uniform_accel};
+    use symbi_source_compile::{Overlay, point_mass, uniform_accel};
     use symbi_xpu::HostMemory;
 
     fn iso_set() -> IsoSubstrateKernelSet<HostMemory, f64, 2> {

@@ -26,10 +26,11 @@ use symbi::prelude::*;
 use symbi_algebra::Domain;
 use symbi_grid::Field;
 use symbi_hydro::energy::IsoModel;
-use symbi_hydro::expr_bridge::build_user_source;
+use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::state::PrimG;
-use symbi_hydro::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, SourceConfig};
+use symbi_hydro::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
+use symbi_source_compile::SourceConfig;
 use symbi_xpu::HostMemory;
 
 // assert two conserved fields are bit-for-bit equal over the interior.

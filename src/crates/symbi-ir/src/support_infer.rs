@@ -401,7 +401,7 @@ pub fn derive_output_support(
 mod tests {
     use super::*;
     use crate::FieldRef;
-    use crate::algebra::Scalar;
+    use symbi_carrier::Scalar;
     use crate::gv::{Gv, KernelWrite, KernelWrites, TraceCx, trace};
     use symbi_algebra::algebra::Numeric;
 

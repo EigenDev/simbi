@@ -14,6 +14,7 @@ symbi-algebra = { path = "../symbi-algebra" }
 symbi-geometry = { path = "../symbi-geometry" }
 symbi-discretize = { path = "../symbi-discretize" }
 symbi-hydro = { path = "../symbi-hydro" }
+symbi-source-compile = { path = "../symbi-source-compile" }
 symbi-grid = { path = "../symbi-grid" }
 symbi-ir = { path = "../symbi-ir" }
 symbi-ib = { path = "../symbi-ib" }

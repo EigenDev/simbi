@@ -16,7 +16,7 @@ mod harness;
 use harness::KernelRun;
 use symbi_discretize::coords::{Coords, Spacing};
 use symbi_discretize::gv::census_map::{CensusAxis, census_map_gv};
-use symbi_hydro::CensusConfig;
+use symbi_source_compile::CensusConfig;
 
 const N: usize = 16;
 const R_LO: f64 = 1.0;
@@ -81,7 +81,7 @@ fn the_traced_map_reproduces_the_host_evaluation_cell_for_cell() {
     let bin_axes = vec![Axis(edges.clone())];
     let n_segments = edges.len() - 1;
 
-    let built = symbi_hydro::expr_bridge::build_census_expressions(&cfg).expect("census lowers");
+    let built = symbi_source_compile::expr_bridge::build_census_expressions(&cfg).expect("census lowers");
     let out = KernelRun::new(census_map_gv(
         Coords::Spherical,
         &[Spacing::Uniform],

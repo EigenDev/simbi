@@ -3424,7 +3424,7 @@ where
     /// and are evaluated at each cell center at time zero, because the target is stationary.
     pub fn with_equilibrium_expression(
         self,
-        config: &symbi_hydro::EquilibriumConfig,
+        config: &symbi_source_compile::EquilibriumConfig,
     ) -> symbi_xpu::Result<Self>
     where
         <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,

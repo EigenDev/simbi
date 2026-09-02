@@ -25,7 +25,7 @@
 //  let segment = spec.segment(&[log_r_at_cell]);
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::emit::ReductionOp;
 
 /// how far past the last bucket the excluded marker sits — a cell outside the reduction's scope
@@ -280,7 +280,7 @@ impl CensusSpec {
     /// build a spec from the serialized wire form the python front door emits. the expression
     /// dags themselves are lowered separately (`expr_bridge::build_census_expressions`); this
     /// takes the binning and the reduce, which are what the spec is responsible for.
-    pub fn from_config(cfg: &symbi_hydro::CensusConfig) -> Result<Self, String> {
+    pub fn from_config(cfg: &symbi_source_compile::CensusConfig) -> Result<Self, String> {
         let op = match cfg.op.as_str() {
             "add" => ReductionOp::Add,
             "min" => ReductionOp::Min,
@@ -422,13 +422,13 @@ pub fn segment_marker_generic<S: Scalar>(axes: &[BinAxis], coords: &[S], n_segme
 /// with the size of that graph, independent of how many accumulators are registered.
 pub struct CensusEvaluator {
     spec: CensusSpec,
-    eval: symbi_hydro::SourceEvaluator,
+    eval: symbi_source_compile::SourceEvaluator,
     /// the registration, retained so a compiled path can lower the same expressions the
     /// interpreter walks. the config is held in place of the lowered `SourceProgram`, which carries
     /// a `proc_macro2::Span` and so lacks `Sync`; a store holding one would be unshareable with
     /// the rayon closures every parallel pass takes over it. lowering from the config on demand
     /// keeps both paths sourced from one registration and the store `Sync`.
-    cfg: symbi_hydro::CensusConfig,
+    cfg: symbi_source_compile::CensusConfig,
     /// the config's tunable parameter values, indexed by `PARAMETER` node index.
     params: Vec<f64>,
     n_nodes: usize,
@@ -463,11 +463,11 @@ impl std::fmt::Debug for CensusEvaluator {
 
 impl CensusEvaluator {
     /// lower and compile a serialized census.
-    pub fn new(cfg: &symbi_hydro::CensusConfig) -> Result<Self, String> {
+    pub fn new(cfg: &symbi_source_compile::CensusConfig) -> Result<Self, String> {
         let spec = CensusSpec::from_config(cfg)?;
-        let built = symbi_hydro::expr_bridge::build_census_expressions(cfg)?;
+        let built = symbi_source_compile::expr_bridge::build_census_expressions(cfg)?;
         let n_nodes = built.graph().len();
-        let eval = symbi_hydro::SourceEvaluator::from_built(&[(CENSUS_FIELD.to_string(), built)]);
+        let eval = symbi_source_compile::SourceEvaluator::from_built(&[(CENSUS_FIELD.to_string(), built)]);
         Ok(CensusEvaluator {
             spec,
             eval,
@@ -510,8 +510,8 @@ impl CensusEvaluator {
     /// lower the registration again, for a caller tracing the same expressions into a kernel.
     /// the same `CensusConfig` the interpreter was built from, so the two cannot describe
     /// different censuses.
-    pub fn lower(&self) -> Result<symbi_hydro::source_spec::SourceProgram, String> {
-        symbi_hydro::expr_bridge::build_census_expressions(&self.cfg)
+    pub fn lower(&self) -> Result<symbi_source_compile::source_spec::SourceProgram, String> {
+        symbi_source_compile::expr_bridge::build_census_expressions(&self.cfg)
     }
 
     /// the registration's tunable parameter values, indexed by `PARAMETER` node index.
@@ -1099,7 +1099,7 @@ mod tests {
     #[test]
     fn geometry_only_axes_are_cacheable_but_state_and_time_axes_are_not() {
         let evaluator = |axis_node: &str| {
-            let cfg = symbi_hydro::CensusConfig::from_json(&format!(
+            let cfg = symbi_source_compile::CensusConfig::from_json(&format!(
                 r#"{{
                     "name":"cacheability", "op":"add",
                     "axes":[{{"name":"a", "expr":0, "edges":[0.0,1.0]}}],

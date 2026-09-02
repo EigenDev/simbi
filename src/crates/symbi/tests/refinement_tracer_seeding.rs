@@ -10,9 +10,10 @@ use symbi::prelude::*;
 use symbi::regimes::substrate_kernels::GradientBc;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
-use symbi_hydro::expr_bridge::{build_boundary_dag, build_user_source};
+use symbi_source_compile::expr_bridge::{build_boundary_dag, build_user_source};
 use symbi_hydro::state::Prim;
-use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
+use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_source_compile::SourceConfig;
 use symbi_sim::tracers::cell_container_address;
 
 const GAMMA: f64 = 1.4;

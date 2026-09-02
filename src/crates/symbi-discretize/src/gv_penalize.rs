@@ -32,7 +32,7 @@ use symbi_hydro::energy::{Adiabatic, Dyed, EnergyModel, EnergySlot, IsoModel};
 use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
 use symbi_ir::{Gv, GvKernel, ParamExpr, TraceCx};
 

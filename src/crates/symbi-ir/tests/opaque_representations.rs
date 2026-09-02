@@ -11,7 +11,7 @@ fn kernel_and_source_representations_are_not_public_records() {
     assert!(!gv.contains("pub graph: Graph"));
     assert!(!gv.contains("pub field_inputs: Vec<(InputKey, FieldBind)>"));
 
-    let sources = source("crates/symbi-hydro/src/source_spec.rs");
+    let sources = source("crates/symbi-ir/src/source_program.rs");
     assert!(!sources.contains("pub graph: Graph"));
     assert!(!sources.contains("pub params: Vec<String>"));
     assert!(!sources.contains("pub outputs: Vec<NodeId>"));

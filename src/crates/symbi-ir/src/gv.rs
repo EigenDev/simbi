@@ -1190,14 +1190,14 @@ impl<'t> DivAssign for Gv<'t> {
 
 impl<'t> std::iter::Sum for Gv<'t> {
     fn sum<I: Iterator<Item = Gv<'t>>>(iter: I) -> Gv<'t> {
-        // direct construction; zero comes from `<Gv as crate::algebra::Scalar>::ZERO`
+        // direct construction; zero comes from `<Gv as symbi_carrier::Scalar>::ZERO`
         // but qualifying inline keeps this independent of import scope.
         iter.fold(Gv::lit(0.0), |a, b| a + b)
     }
 }
 
 impl<'t> Default for Gv<'t> {
-    // direct construction (matches `<Gv as crate::algebra::Scalar>::ZERO`); kept as
+    // direct construction (matches `<Gv as symbi_carrier::Scalar>::ZERO`); kept as
     // a direct expression to stay independent of the trait import scope.
     fn default() -> Gv<'t> {
         Gv::lit(0.0)
@@ -1247,7 +1247,7 @@ impl<'t> symbi_algebra::algebra::Numeric for Gv<'t> {
 }
 
 // =============================================================================
-// GvMask + impl `crate::algebra::Scalar for Gv` — the production carrier interface.
+// GvMask + impl `symbi_carrier::Scalar for Gv` — the production carrier interface.
 //
 // Mask discipline: `GvMask` is a newtype around `Gv` that wraps a Bool-typed
 // graph node. construction is `pub(crate)`, so `Scalar::cmp_*` is the sole
@@ -1299,9 +1299,9 @@ impl<'t> std::ops::Not for GvMask<'t> {
     }
 }
 
-impl<'t> crate::algebra::Mask for GvMask<'t> {}
+impl<'t> symbi_carrier::Mask for GvMask<'t> {}
 
-impl<'t> crate::algebra::Scalar for Gv<'t> {
+impl<'t> symbi_carrier::Scalar for Gv<'t> {
     type Mask = GvMask<'t>;
 
     // zero / one inherited from `Numeric for Gv`.
@@ -1318,7 +1318,7 @@ impl<'t> crate::algebra::Scalar for Gv<'t> {
     fn to_f64(self) -> f64 {
         match self.0 {
             GvVal::Lit(v) => v,
-            // host-boundary escape — see `crate::algebra::Scalar::to_f64` doc.
+            // host-boundary escape — see `symbi_carrier::Scalar::to_f64` doc.
             // a `Gv` on a traced node is a graph handle; extracting a concrete
             // value inside carrier-generic physics breaks the homomorphism.
             GvVal::Node(..) => panic!(
@@ -1580,7 +1580,7 @@ impl<'t> crate::algebra::Scalar for Gv<'t> {
     ) -> Gv<'t> {
         // carrier equivalence: the traced kernel returns the value the host loop
         // returns, for every input. freeze on convergence — see the freeze law
-        // in `crate::algebra::Scalar::iterate` doc. `conv` also rides as the IR's
+        // in `symbi_carrier::Scalar::iterate` doc. `conv` also rides as the IR's
         // `break_when`, so the loop exits once convergence fires and skips the
         // remaining `max_steps` worth of dead body (the freeze nulls the writes
         // while the cone's arithmetic would otherwise run every iteration — the
@@ -1589,7 +1589,7 @@ impl<'t> crate::algebra::Scalar for Gv<'t> {
         let cur = Gv::of(acc);
         let next = body(cur);
         let conv = converged(cur, next);
-        let step = <Self as crate::algebra::Scalar>::select(conv, cur, next).node();
+        let step = <Self as symbi_carrier::Scalar>::select(conv, cur, next).node();
         let break_when = Some(conv.0.node());
         let init = self.node();
         Gv::of(with_trace(|t| {
@@ -1611,7 +1611,7 @@ impl<'t> crate::algebra::Scalar for Gv<'t> {
         let next = body(acc_gv);
         let conv = converged(acc_gv, next);
         let steps: [Gv; N] = std::array::from_fn(|j| {
-            <Self as crate::algebra::Scalar>::select(conv, acc_gv[j], next[j])
+            <Self as symbi_carrier::Scalar>::select(conv, acc_gv[j], next[j])
         });
         let break_when = Some(conv.0.node());
         let inits_n: Vec<NodeId> = init.iter().map(|g| g.node()).collect();
@@ -2198,7 +2198,7 @@ mod scope_op_contract {
         let (scope_kernel, scope_root_node) = trace(|cx: TraceCx| {
             let x = cx.scalar("x");
             let y = cx.scalar("y");
-            let scope_root = <Gv as crate::algebra::Scalar>::scope(|| {
+            let scope_root = <Gv as symbi_carrier::Scalar>::scope(|| {
                 let s = x + y;
                 s * s
             });
@@ -2273,9 +2273,9 @@ mod scope_op_contract {
     fn gv_scope_nests_with_inner_op_scope() {
         let (kernel, outer_root_node) = trace(|cx: TraceCx| {
             let x = cx.scalar("x");
-            let outer_root = <Gv as crate::algebra::Scalar>::scope(|| {
-                let a = <Gv as crate::algebra::Scalar>::scope(|| x + Gv::from_f64(1.0));
-                let b = <Gv as crate::algebra::Scalar>::scope(|| x * Gv::from_f64(2.0));
+            let outer_root = <Gv as symbi_carrier::Scalar>::scope(|| {
+                let a = <Gv as symbi_carrier::Scalar>::scope(|| x + Gv::from_f64(1.0));
+                let b = <Gv as symbi_carrier::Scalar>::scope(|| x * Gv::from_f64(2.0));
                 a + b
             });
             outer_root.node()
@@ -2312,7 +2312,7 @@ mod scope_op_contract {
             let x = cx.scalar("x");
             let before = cx.with_trace(|t| t.graph.len());
             // closure result is `x` itself, so the closure pushes nothing.
-            let r = <Gv as crate::algebra::Scalar>::scope(|| x);
+            let r = <Gv as symbi_carrier::Scalar>::scope(|| x);
             let after = cx.with_trace(|t| t.graph.len());
             (before, after, r.node(), x.node())
         });
@@ -2349,7 +2349,7 @@ mod powi_carrier_equiv {
         for n in [0_i32, 1, 2, 3, 4, 5, -2, -3] {
             let (kernel, root) = trace(|cx: TraceCx| {
                 let x = cx.scalar("x");
-                <Gv as crate::algebra::Scalar>::powi(x, n).node()
+                <Gv as symbi_carrier::Scalar>::powi(x, n).node()
             });
             let graph = kernel.graph;
 
@@ -2382,7 +2382,7 @@ mod powi_carrier_equiv {
     // unguarded sqrt(neg) would carry a NaN.
     #[test]
     fn safe_sqrt_and_clamp_trace_and_match_f64() {
-        use crate::algebra::Scalar;
+        use symbi_carrier::Scalar;
         // safe_sqrt
         let (kernel, root) = trace(|cx: TraceCx| {
             let x = cx.scalar("x");

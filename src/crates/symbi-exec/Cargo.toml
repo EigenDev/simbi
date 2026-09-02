@@ -13,6 +13,7 @@ hip = ["gpu", "symbi-xpu/hip"]
 symbi-algebra = { path = "../symbi-algebra" }
 symbi-grid = { path = "../symbi-grid" }
 symbi-aot = { path = "../symbi-aot" }
+symbi-carrier = { path = "../symbi-carrier" }
 symbi-ir = { path = "../symbi-ir" }
 symbi-xpu = { path = "../symbi-xpu" }
 rayon = "1"

@@ -22,8 +22,8 @@
 #![cfg(feature = "gpu")]
 
 use symbi_hydro::regime_spec::{NEWTONIAN_SPEC, law_params};
-use symbi_hydro::source_spec::{gravity_params, point_mass_gravity_sources, source_params};
-use symbi_hydro::{GpuSourceKernel, SimulationLaws, SourceEvaluator, launch_source_kernel};
+use symbi_source_compile::source_spec::{gravity_params, point_mass_gravity_sources, source_params};
+use symbi_source_compile::{GpuSourceKernel, SimulationLaws, SourceEvaluator, launch_source_kernel};
 
 /// helper: build a small grid of per-cell field values for one named
 /// parameter (e.g., "rho", "vel_0", "xm_0", "gm"). uniform-across-cells
@@ -127,7 +127,7 @@ fn gpu_launch_ib_localization_holds_on_real_hardware() {
     // through NVRTC compilation. cells outside the body must produce
     // exactly 0.0 — proves the branchless conditional discipline holds
     // all the way from spec data to compiled GPU machine code.
-    use symbi_hydro::source_spec::{ib_params, rigid_body_penalty_sources};
+    use symbi_source_compile::source_spec::{ib_params, rigid_body_penalty_sources};
 
     const N: usize = 8;
     let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_ib(rigid_body_penalty_sources(3));
@@ -179,7 +179,7 @@ fn gpu_launch_composed_overlays_sums_additively_on_hardware() {
     // matches the CPU evaluator's per-cell sum to ULP-bounded drift.
     // proves the additive-composition contract survives all the way to
     // the GPU machine code.
-    use symbi_hydro::source_spec::spherical_geometric_sources;
+    use symbi_source_compile::source_spec::spherical_geometric_sources;
 
     const N: usize = 8;
     let sim = SimulationLaws::new(&NEWTONIAN_SPEC)

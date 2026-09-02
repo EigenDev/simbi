@@ -8,7 +8,7 @@
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::{BodyScalar, ScalarRef};
 // the typed scalar binding (`Ref` closed vocab | `Spec` open knob) now lives in symbi-ir next to
 // `ScalarRef`/`FieldBind`, so the serialized IR scalar manifest is born typed. the dispatch

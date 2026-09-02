@@ -18,7 +18,7 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
 
 use symbi_geometry::Metric;

@@ -236,7 +236,7 @@ impl SourceEvaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, law_params};
+    use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, law_params};
     use crate::source_spec::{
         cylindrical_geometric_sources, gravity_params, ib_params, point_mass_gravity_sources,
         rigid_body_penalty_sources, source_params,

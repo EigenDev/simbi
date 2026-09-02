@@ -10,9 +10,8 @@
 // here — this crate does not shell a toolchain.
 //
 // organization:
-//   algebra              — codegen substrate's mathematical contract
-//                          (Op signature + Mask + Scalar + SourceLoc + RenderPolicy)
-//   gv                   — the Gv carrier (Scalar impl that traces into the IR)
+//   gv                   — the Gv carrier (the symbi-carrier Scalar impl that
+//                          traces into the IR)
 //   {element, symbol,    — IR data structures the closed signature operates on
 //    dim, ty,              (rank-0/rank-N types, dimensions, hash-cons keys)
 //    error, graph}
@@ -21,9 +20,9 @@
 //   emit                 — high-level emit entry (Target enum, render_from_ir)
 // =============================================================================
 
-// codegen substrate constitution + carrier
-pub mod algebra;
-pub mod dual;
+// the carrier constitution (Scalar / Mask / Selectable / Dual) lives in the
+// foundation crate `symbi-carrier`; this crate supplies its tracing
+// interpretation (`Scalar for Gv`).
 pub mod gv;
 
 // IR data structures (the closed signature operates over these)

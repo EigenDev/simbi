@@ -619,7 +619,7 @@ fn a_target_declared_as_an_expression_matches_the_closure() {
     // refinement level can evaluate it on cells created after the run began. what that costs is a
     // second way to say the same thing, so the two
     // have to be held to producing bit-identical state, with similarity ruled out as a pass.
-    let config = symbi_hydro::EquilibriumConfig::from_json(&hydrostatic_expression_json())
+    let config = symbi_source_compile::EquilibriumConfig::from_json(&hydrostatic_expression_json())
         .expect("the target expression parses");
 
     let from_expr = build(&nested(2))

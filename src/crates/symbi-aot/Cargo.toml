@@ -12,6 +12,7 @@ edition = "2024"
 
 [dependencies]
 symbi-algebra    = { path = "../symbi-algebra" }
+symbi-carrier    = { path = "../symbi-carrier" }
 symbi-ir         = { path = "../symbi-ir" }
 # the AOT CPU kernels emitted by the rust renderer parallelize the
 # outer cell loop via `rayon::iter::IntoParallelIterator`. one threading
@@ -37,6 +38,7 @@ symbi-ib         = { path = "../symbi-ib" }
 # symbi-hydro owns the SourceSpec library (uniform_acceleration, point_mass_grav,
 # etc.); the build needs it to enumerate the (regime, dim, source) instances.
 symbi-hydro      = { path = "../symbi-hydro" }
+symbi-source-compile = { path = "../symbi-source-compile" }
 
 [dev-dependencies]
 # the penalize kernel's f64 reference chain uses SdfExpr + penalize_cell.

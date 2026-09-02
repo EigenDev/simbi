@@ -15,7 +15,7 @@
 //   cargo run -p symbi-ir --example one_text_three_carriers
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::{
     Backend, Cpu, ScalarExpr, ScalarStmt, TraceCx, emit_cpu, emit_cuda, scalarize, trace,
 };

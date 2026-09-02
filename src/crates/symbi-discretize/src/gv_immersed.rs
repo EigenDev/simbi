@@ -19,7 +19,7 @@
 // =============================================================================
 
 use symbi_algebra::algebra::Numeric;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 use symbi_ir::{FieldRef, KernelWrite, KernelWrites};
 
 use super::coords::{Coords, Spacing};

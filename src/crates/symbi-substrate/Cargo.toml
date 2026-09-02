@@ -13,7 +13,9 @@ hip = ["gpu", "symbi-xpu/hip", "symbi-grid/hip", "symbi-exec/hip", "symbi-sim/hi
 symbi-algebra = { path = "../symbi-algebra" }
 symbi-geometry = { path = "../symbi-geometry" }
 symbi-hydro = { path = "../symbi-hydro" }
+symbi-source-compile = { path = "../symbi-source-compile" }
 symbi-grid = { path = "../symbi-grid" }
+symbi-carrier = { path = "../symbi-carrier" }
 symbi-ir = { path = "../symbi-ir" }
 symbi-ib = { path = "../symbi-ib" }
 symbi-aot = { path = "../symbi-aot" }

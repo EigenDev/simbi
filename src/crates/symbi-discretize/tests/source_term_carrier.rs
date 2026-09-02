@@ -103,7 +103,7 @@ fn user_expression_codegens_through_the_source_path() {
     // evaluates on the CPU interp). proves a user expression compiles through the same path a
     // built-in source uses, so the per-cell work is compiled kernel arithmetic.
     use symbi_expr::dag::Dag;
-    use symbi_hydro::expr_bridge::lower_dag_to_program;
+    use symbi_source_compile::expr_bridge::lower_dag_to_program;
 
     let mut dag = Dag::new();
     let x0 = dag.var_x1();
@@ -131,8 +131,8 @@ fn user_force_source_cannot_desync_energy_from_work() {
     // the framework owns S_nrg and derives it from the force, so the two stay in step. proven two
     // ways below: analytically, and structurally — S_nrg == S_mom . v from the rendered outputs.
     use symbi_expr::dag::Dag;
-    use symbi_hydro::expr_bridge::lower_dag_to_program;
-    use symbi_hydro::source_spec::{user_force_energy_source, user_force_momentum_source};
+    use symbi_source_compile::expr_bridge::lower_dag_to_program;
+    use symbi_source_compile::source_spec::{user_force_energy_source, user_force_momentum_source};
 
     let mut dag = Dag::new();
     let x0 = dag.var_x1();
@@ -188,8 +188,8 @@ fn user_cooling_source_is_energy_sink_only() {
     // a user cooling rate Lambda(x) = p0 * x_0^2. the framework wraps it as S_nrg = -Lambda,
     // reaching the energy slot alone — the write set of a cooling kind is exactly {energy}.
     use symbi_expr::dag::Dag;
-    use symbi_hydro::expr_bridge::lower_dag_to_program;
-    use symbi_hydro::source_spec::user_cooling_source;
+    use symbi_source_compile::expr_bridge::lower_dag_to_program;
+    use symbi_source_compile::source_spec::user_cooling_source;
 
     let mut dag = Dag::new();
     let x0 = dag.var_x1();
@@ -216,7 +216,7 @@ fn front_door_json_force_config_renders_axiomatic_source() {
     // driven entirely from the serialized config (python -> json -> rust -> kernel, at runtime).
     use symbi_expr::SourceConfig;
     use symbi_hydro::NEWTONIAN_SPEC;
-    use symbi_hydro::expr_bridge::build_user_source;
+    use symbi_source_compile::expr_bridge::build_user_source;
 
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [2, 3], "params": [],
