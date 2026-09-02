@@ -24,6 +24,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -61,10 +62,12 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|[x, y]| Prim {
-            rho: 1.0 + bump(x, y),
-            vel: Tensor::new([VX, VY]),
-            pre: 1.0,
+        .set_initial(|[x, y]| {
+            Prim::adiabatic(
+                Density(1.0 + bump(x, y)),
+                Tensor::new([VX, VY]),
+                Pressure(1.0),
+            )
         })
         .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
@@ -146,8 +149,8 @@ fn global_den(tiles: &[(Sim, Kern)], partition: &Partition<2>) -> Vec<f64> {
 
 fn assert_matches(cuts: [Vec<usize>; 2]) {
     let split = Partition::explicit([N, N], cuts).expect("interior cuts lie inside the grid");
-    let whole =
-        Partition::explicit([N, N], [Vec::new(), Vec::new()]).expect("the uncut partition is one tile");
+    let whole = Partition::explicit([N, N], [Vec::new(), Vec::new()])
+        .expect("the uncut partition is one tile");
 
     let mut one = partition_tiles(&whole);
     let ic = global_den(&one, &whole);
@@ -172,7 +175,10 @@ fn assert_matches(cuts: [Vec<usize>; 2]) {
 
     let mut worst = 0.0f64;
     for (i, (a, b)) in decomposed.iter().zip(mono.iter()).enumerate() {
-        assert!(a.is_finite(), "uncovered global cell {i}: the scatter missed it");
+        assert!(
+            a.is_finite(),
+            "uncovered global cell {i}: the scatter missed it"
+        );
         worst = worst.max((a - b).abs());
     }
     assert!(

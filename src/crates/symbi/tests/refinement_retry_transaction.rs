@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::sim::decomp::LocalCopy;
 use symbi::sim::refinement::{
@@ -94,11 +95,7 @@ fn rejected_second_fine_substep_does_not_double_book_horizon_receipts() {
         .cfl(0.4)
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::zeros(),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
         .build();
     let mut hierarchy = Hierarchy::with_refinement(
         coarse,
@@ -170,11 +167,7 @@ fn decomposed_rejection_rolls_every_tile_back_collectively() {
             .cfl(0.4)
             .allocate()
             .unwrap()
-            .set_initial(|_| Prim {
-                rho: 1.0,
-                vel: Tensor::zeros(),
-                pre: 1.0,
-            })
+            .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
             .build();
         let root_kernel = RejectOnce {
             calls: calls.clone(),

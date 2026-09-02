@@ -14,6 +14,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -33,10 +34,12 @@ fn penalize_drains_the_mask_and_conserves_gas_plus_body() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|[x, y]| Prim {
-            rho: 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos(),
-            vel: Tensor::new([0.15, -0.1]),
-            pre: 1.0,
+        .set_initial(|[x, y]| {
+            Prim::adiabatic(
+                Density(1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos()),
+                Tensor::new([0.15, -0.1]),
+                Pressure(1.0),
+            )
         })
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
@@ -132,10 +135,12 @@ fn ledger_equals_gas_loss_through_the_rk_loop() {
         .boundaries(Boundaries::uniform(BoundaryType::Periodic))
         .allocate()
         .expect("sim")
-        .set_initial(|[x, y]| Prim {
-            rho: 1.0 + 0.1 * (3.0 * x).sin() * (2.0 * y).cos(),
-            vel: Tensor::new([0.05, -0.03]),
-            pre: 1.0,
+        .set_initial(|[x, y]| {
+            Prim::adiabatic(
+                Density(1.0 + 0.1 * (3.0 * x).sin() * (2.0 * y).cos()),
+                Tensor::new([0.05, -0.03]),
+                Pressure(1.0),
+            )
         })
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
@@ -217,10 +222,8 @@ fn iso_dispatch_drains_directly() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| PrimG::<f64, 2, IsoModel> {
-            rho: 1.5,
-            vel: Tensor::new([0.1, -0.05]),
-            pre: Default::default(),
+        .set_initial(|_| {
+            PrimG::<f64, 2, IsoModel>::isothermal(Density(1.5), Tensor::new([0.1, -0.05]))
         })
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
@@ -260,11 +263,13 @@ fn torque_receipt_equals_the_moment_of_the_momentum_loss() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|[x, y]| Prim {
-            rho: 1.0 + 0.1 * (3.0 * x).cos() * (2.0 * y).sin(),
+        .set_initial(|[x, y]| {
             // rigid rotation about the body center: v = w_z z-hat x r.
-            vel: Tensor::new([-w_z * (y - center[1]), w_z * (x - center[0])]),
-            pre: 1.0,
+            Prim::adiabatic(
+                Density(1.0 + 0.1 * (3.0 * x).cos() * (2.0 * y).sin()),
+                Tensor::new([-w_z * (y - center[1]), w_z * (x - center[0])]),
+                Pressure(1.0),
+            )
         })
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
@@ -342,10 +347,12 @@ fn porous_surface_endpoints_hold_through_the_dispatch() {
             .boundaries(Boundaries::uniform(BoundaryType::Outflow))
             .allocate()
             .expect("sim")
-            .set_initial(|[x, y]| Prim {
-                rho: 1.0 + 0.1 * (2.0 * x).sin() * (1.5 * y).cos(),
-                vel: Tensor::new([0.2, -0.15]),
-                pre: 1.0,
+            .set_initial(|[x, y]| {
+                Prim::adiabatic(
+                    Density(1.0 + 0.1 * (2.0 * x).sin() * (1.5 * y).cos()),
+                    Tensor::new([0.2, -0.15]),
+                    Pressure(1.0),
+                )
             })
             .build()
             .with_bodies(
@@ -413,11 +420,7 @@ fn porous_absorption_converges_under_grid_refinement() {
             .boundaries(Boundaries::uniform(BoundaryType::Outflow))
             .allocate()
             .expect("sim")
-            .set_initial(|_| Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.2, -0.1]),
-                pre: 1.0,
-            })
+            .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.2, -0.1]), Pressure(1.0)))
             .build()
             .with_bodies(
                 BodyCollection::new().add(
@@ -487,10 +490,12 @@ fn rigid_wall_non_accreting_penalizes_without_draining() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|[x, y]| Prim {
-            rho: 1.0 + 0.1 * (2.0 * x).sin() * (1.5 * y).cos(),
-            vel: Tensor::new([0.2, -0.15]),
-            pre: 1.0,
+        .set_initial(|[x, y]| {
+            Prim::adiabatic(
+                Density(1.0 + 0.1 * (2.0 * x).sin() * (1.5 * y).cos()),
+                Tensor::new([0.2, -0.15]),
+                Pressure(1.0),
+            )
         })
         .build()
         .with_bodies(
@@ -554,10 +559,12 @@ fn shaped_box_rigid_wall_penalizes_via_runtime_jit() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|[x, y]| Prim {
-            rho: 1.0 + 0.1 * (2.0 * x).sin() * (1.5 * y).cos(),
-            vel: Tensor::new([0.25, -0.15]),
-            pre: 1.0,
+        .set_initial(|[x, y]| {
+            Prim::adiabatic(
+                Density(1.0 + 0.1 * (2.0 * x).sin() * (1.5 * y).cos()),
+                Tensor::new([0.25, -0.15]),
+                Pressure(1.0),
+            )
         })
         .build()
         .with_bodies(
@@ -618,10 +625,8 @@ fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| PrimG::<f64, 2, IsoModel> {
-            rho: 1.5,
-            vel: Tensor::new([0.2, -0.1]),
-            pre: Default::default(),
+        .set_initial(|_| {
+            PrimG::<f64, 2, IsoModel>::isothermal(Density(1.5), Tensor::new([0.2, -0.1]))
         })
         .build()
         .with_bodies(
@@ -679,11 +684,7 @@ fn two_way_spin_is_dragged_to_a_stop() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(
             BodyCollection::new().add(
@@ -729,11 +730,7 @@ fn two_way_body_is_pushed_downstream_by_the_flow() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.3, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.3, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(
             BodyCollection::new().add(
@@ -788,11 +785,7 @@ fn spinning_box_about_x_axis_imparts_torque_3d() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("3d sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(
             BodyCollection::new().add(
@@ -850,11 +843,7 @@ fn shaped_box_rigid_wall_cylindrical_penalizes() {
         ]))
         .allocate()
         .expect("cyl sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.2, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.2, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(
             BodyCollection::new().add(
@@ -908,11 +897,7 @@ fn spinning_box_wall_imparts_torque_to_still_fluid() {
             .boundaries(Boundaries::uniform(BoundaryType::Outflow))
             .allocate()
             .expect("sim")
-            .set_initial(|_| Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0]),
-                pre: 1.0,
-            })
+            .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
             .build()
             .with_bodies(
                 BodyCollection::new().add(
@@ -989,11 +974,7 @@ fn rz_on_axis_sink_drains_conserves_and_books_axis_torque() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("rz sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.3, 0.1]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.3, 0.1]), Pressure(1.0)))
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
             0,
@@ -1095,11 +1076,7 @@ fn rz_off_axis_body_fails_loud() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("rz sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
             0,

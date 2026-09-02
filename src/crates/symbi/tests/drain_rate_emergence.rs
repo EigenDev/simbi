@@ -38,6 +38,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -138,10 +139,8 @@ fn build() -> (Sim, Kset) {
         .cfl(CFL)
         .allocate()
         .expect("sim allocation")
-        .set_initial(|_x: [f64; 2]| Prim {
-            rho: RHO_0,
-            vel: Tensor::zeros(),
-            pre: PRE_0,
+        .set_initial(|_x: [f64; 2]| {
+            Prim::adiabatic(Density(RHO_0), Tensor::zeros(), Pressure(PRE_0))
         })
         .build()
         .with_bodies(sink());

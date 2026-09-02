@@ -34,14 +34,14 @@ fn make(timestepping: Timestepping) -> (Sim, Kern) {
         .set_initial(|[x, y]| {
             let radius2 = (x - 0.5).powi(2) + (y - 0.5).powi(2);
             let bump = 0.2 * (-(radius2 / 0.01)).exp();
-            MhdPrim {
-                hydro: Prim {
-                    rho: 1.0 + bump,
-                    vel: Tensor::new([0.0, 0.0, 0.0]),
-                    pre: 1.0 + bump,
-                },
-                mag: Tensor::new(B0),
-            }
+            MhdPrim::new(
+                Prim::adiabatic(
+                    Density(1.0 + bump),
+                    Tensor::new([0.0, 0.0, 0.0]),
+                    Pressure(1.0 + bump),
+                ),
+                Tensor::new(B0),
+            )
         })
         .seed_faces_uniform([B0[0], B0[1]])
         .build();

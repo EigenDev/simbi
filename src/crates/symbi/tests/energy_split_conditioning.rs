@@ -22,6 +22,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -40,11 +41,7 @@ fn uniform_newtonian(v: f64, p: f64) -> SimNewt {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([v]),
-            pre: p,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([v]), Pressure(p)))
         .build()
 }
 
@@ -133,11 +130,7 @@ fn the_ratio_is_absent_where_the_subtraction_does_not_happen() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.5]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.5]), Pressure(1.0)))
         .build();
     let diag = sim.conservation_diag().expect("host-accessible fields");
     assert!(

@@ -26,6 +26,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
 use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -78,11 +79,11 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
     // temperature is therefore also the regression guard on that rate.
     .set_initial(|x| {
         let r = (x[0] * x[0] + x[1] * x[1]).sqrt().max(1.0e-12);
-        Prim {
-            rho: 1.0,
-            vel: Tensor::new([-V_INFALL * x[0] / r, -V_INFALL * x[1] / r]),
-            pre: 1.0e-6,
-        }
+        Prim::adiabatic(
+            Density(1.0),
+            Tensor::new([-V_INFALL * x[0] / r, -V_INFALL * x[1] / r]),
+            Pressure(1.0e-6),
+        )
     })
     .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_excision(R_EXC, 1.0, 1.0);

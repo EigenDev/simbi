@@ -31,6 +31,7 @@ use symbi::sim::state::*;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -58,11 +59,11 @@ fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
     let a = (GAMMA - 1.0) / (GAMMA * K0);
     let c = 1.0 / a - GM / (1.0 + G_OFFSET);
     let rho = (a * (GM / r + c)).powf(1.0 / (GAMMA - 1.0));
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
-    }
+    Prim::adiabatic(
+        Density(rho),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(K0 * rho.powf(GAMMA)),
+    )
 }
 
 /// nested patches, each half the previous, centred on the domain: `levels - 1` of them.
@@ -182,7 +183,7 @@ fn the_equilibrium_residual_localizes_at_the_coarse_fine_interface() {
         let dx = 1.0 / N as f64;
         for region in nested(levels) {
             let edge = region.x_lo[0];
-            let flank = hydrostatic([edge - 2.0 * dx]).rho / hydrostatic([edge + 2.0 * dx]).rho;
+            let flank = hydrostatic([edge - 2.0 * dx]).rho() / hydrostatic([edge + 2.0 * dx]).rho();
             assert!(
                 flank > 1.02,
                 "the density is flat across the patch edge at x = {edge} (ratio {flank:.4}); the \
@@ -345,8 +346,8 @@ fn the_hydrostatic_profile_satisfies_the_continuum_balance() {
             .iter()
             .map(|&x| {
                 let r = x + G_OFFSET;
-                let dp = (hydrostatic([x + h]).pre - hydrostatic([x - h]).pre) / (2.0 * h);
-                let rho = hydrostatic([x]).rho;
+                let dp = (hydrostatic([x + h]).pre() - hydrostatic([x - h]).pre()) / (2.0 * h);
+                let rho = hydrostatic([x]).rho();
                 let gravity = -rho * GM / (r * r);
                 // relative to the size of the two terms being cancelled, so this measures the
                 // cancellation rather than the magnitude of either side.

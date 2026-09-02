@@ -38,11 +38,7 @@ fn make(timestepping: Timestepping) -> (Sim, Kern) {
     .timestepping(timestepping)
     .allocate()
     .expect("kerr-schild simulation construction")
-    .set_initial(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 0.1,
-    })
+    .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(0.1)))
     .build()
     .with_bodies(BodyCollection::new().add(Body::horizon(0, R_EXC, R_DIAG)));
     let kernels = Kern::new(GAMMA, 0.3, &sim.geom.allocated).with_excision(R_EXC, 1.0, 1.0);

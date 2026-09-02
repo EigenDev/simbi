@@ -21,6 +21,7 @@ use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::{EosSelect, IdealGas, TaubMathews};
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -58,11 +59,7 @@ fn sod_density(
         .expect("rhd sim construction failed")
         .set_initial(|x| {
             let (rho, pre) = if x[0] < 0.5 { left } else { right };
-            Prim {
-                rho,
-                vel: Tensor::new([0.0]),
-                pre,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([0.0]), Pressure(pre))
         })
         .build();
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(gamma, 0.4, &sim.geom.allocated)
@@ -168,11 +165,7 @@ fn taub_mathews_runs_the_spherical_blast_chart() {
             } else {
                 (1.0, 0.01)
             };
-            Prim {
-                rho,
-                vel: Tensor::new([0.0]),
-                pre,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([0.0]), Pressure(pre))
         })
         .build();
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(5.0 / 3.0, 0.4, &sim.geom.allocated)
@@ -211,11 +204,7 @@ fn uniform_roundtrip(host: EosSelect<f64>, arm: EosArm, seed: (f64, f64, f64)) -
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("rhd sim construction failed")
-        .set_initial(|_| Prim {
-            rho,
-            vel: Tensor::new([vel]),
-            pre,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(rho), Tensor::new([vel]), Pressure(pre)))
         .build();
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(5.0 / 3.0, 0.4, &sim.geom.allocated)
         .with_eos(arm);
@@ -304,11 +293,7 @@ fn taub_mathews_refuses_a_curved_spacetime() {
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
     .allocate()
     .expect("rhd sim construction failed")
-    .set_initial(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 0.1,
-    })
+    .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(0.1)))
     .build();
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(5.0 / 3.0, 0.3, &sim.geom.allocated)
         .with_eos(EosArm::TaubMathews);

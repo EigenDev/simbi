@@ -12,9 +12,9 @@
 
 use symbi::prelude::*;
 use symbi::sim::evolve::KernelSet;
-use symbi_source_compile::expr_bridge::build_boundary_dag;
 use symbi_hydro::NEWTONIAN_SPEC;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_boundary_dag;
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
 
@@ -33,11 +33,7 @@ fn driven_inflow_prescribes_the_ghost_state() {
         .unwrap();
     // interior at rest, density 1 — deliberately different from the inflow, so the test proves the
     // ghost state comes from the DAG; had it been copied from the interior it would carry density 1.
-    sim.seed_cells(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 1.0,
-    });
+    sim.seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)));
 
     // prescribe [rho=2, vel_0=1, vel_1=0, pre=3] (constants).
     let json = r#"{
@@ -103,11 +99,7 @@ fn all_driven_faces_fill_the_corner_ghosts() {
         .boundaries(boundaries)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 1.0,
-    });
+    sim.seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)));
 
     let json = r#"{
         "kind": "dirichlet", "dim": 2, "outputs": [0, 1, 2, 3], "params": [],
@@ -176,13 +168,11 @@ fn iso_mhd_driven_inflow_prescribes_the_ghost_state() {
         .boundaries(boundaries)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| MhdPrimG {
-        hydro: PrimG {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: Default::default(),
-        },
-        mag: Tensor::new([0.0, 0.0, 0.0]),
+    sim.seed_cells(|_| {
+        MhdPrimG::new(
+            PrimG::isothermal(Density(1.0), Tensor::new([0.0, 0.0, 0.0])),
+            Tensor::new([0.0, 0.0, 0.0]),
+        )
     });
 
     // [rho, v1, v2, v3, B1, B2, B3] = [2, 1, 0, 0, 0, 0, 0.5].
@@ -246,11 +236,7 @@ fn driven_inflow_prescribes_the_injected_dye() {
         .unwrap()
         .with_passive_scalar()
         .expect("chi alloc");
-    sim.seed_cells(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 1.0,
-    });
+    sim.seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)));
     let chi_f = sim.fields.prim.chi_field().expect("prim chi");
     // interior undyed; everything outside it poisoned.
     for c in sim.geom.allocated.iter() {

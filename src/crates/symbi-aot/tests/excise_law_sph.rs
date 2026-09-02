@@ -27,6 +27,7 @@ use symbi_aot::{CpuField, CpuFieldMut, kernel_by_name};
 use symbi_geometry::{KerrKS, Metric};
 use symbi_hydro::RhdGr;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::Prim;
@@ -107,7 +108,10 @@ fn to_conserved_at(r: f64, prim: &Prim<f64, 3>) -> symbi_hydro::state::Cons<f64,
         shift: m.shift(x),
         sqrt_gamma: m.volume_factor(x),
     }
-    .to_conserved(&IdealGas { gamma: GAMMA }, &symbi_hydro::state::Valencia(*prim))
+    .to_conserved(
+        &IdealGas { gamma: GAMMA },
+        &symbi_hydro::state::Valencia(*prim),
+    )
     .0
 }
 
@@ -242,15 +246,15 @@ fn run_reference(g: &mut Row, axis: Axis) {
     for ii in 0..N {
         let r = axis.midpoint(ii);
         if r < R_EXC {
-            let prim = Prim::<f64, 3> {
-                rho: g.rho[ii],
-                vel: Tensor::new([g.v0[ii], 0.0, 0.0]),
-                pre: g.pre[ii],
-            };
+            let prim = Prim::<f64, 3>::adiabatic(
+                Density(g.rho[ii]),
+                Tensor::new([g.v0[ii], 0.0, 0.0]),
+                Pressure(g.pre[ii]),
+            );
             let cons = to_conserved_at(r, &prim);
-            g.den[ii] = cons.den;
-            g.m0[ii] = cons.mom[0];
-            g.nrg[ii] = cons.nrg;
+            g.den[ii] = cons.den();
+            g.m0[ii] = cons.mom()[0];
+            g.nrg[ii] = cons.nrg();
         }
     }
 }

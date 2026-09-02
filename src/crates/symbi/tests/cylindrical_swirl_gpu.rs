@@ -25,6 +25,7 @@ use symbi_geometry::Cylindrical;
 use symbi_grid::Field;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
@@ -80,11 +81,7 @@ fn build_swirl<S: ExecutionSpace, Mem: MemorySpace>()
         let rho = 1.0 + 0.3 * g;
         let pre = 1.0 + 0.5 * g;
         let (vr, vphi, vz) = (0.02, V0 * (1.0 + 0.1 * g), 0.01);
-        Prim {
-            rho,
-            vel: Tensor::new([vr, vphi, vz]),
-            pre,
-        }
+        Prim::adiabatic(Density(rho), Tensor::new([vr, vphi, vz]), Pressure(pre))
     })
     .build()
 }

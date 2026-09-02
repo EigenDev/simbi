@@ -15,6 +15,7 @@ use symbi_geometry::Spherical;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -36,13 +37,11 @@ fn resistive_cfl_uses_the_physical_cell_width() {
         .cfl(CFL)
         .allocate()
         .expect("3d spherical sim")
-        .set_initial(|_| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new([0.0, 0.0, 0.0]),
+        .set_initial(|_| {
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+                Tensor::new([0.0, 0.0, 0.0]),
+            )
         })
         .seed_faces(|_, _| 0.0)
         .build();

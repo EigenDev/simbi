@@ -31,6 +31,7 @@ use symbi::sim::state::*;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -86,11 +87,7 @@ fn build(gm: f64, balanced: bool, declared: bool) -> Hier {
         } else {
             pre_parent
         };
-        Prim {
-            rho,
-            vel: symbi_algebra::Tensor::zeros(),
-            pre,
-        }
+        Prim::adiabatic(Density(rho), symbi_algebra::Tensor::zeros(), Pressure(pre))
     };
     let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N, N, N])
@@ -160,11 +157,7 @@ fn seam_response(gm: f64, amp: f64, balanced: bool, declared: bool) -> (f64, f64
             let profile = 0.5 * (1.0 + (std::f64::consts::PI * depth).cos());
             pre *= (amp * profile).exp();
         }
-        Prim {
-            rho,
-            vel: symbi_algebra::Tensor::zeros(),
-            pre,
-        }
+        Prim::adiabatic(Density(rho), symbi_algebra::Tensor::zeros(), Pressure(pre))
     });
 
     // the production ghost refill on the perturbed state; the coarse level is

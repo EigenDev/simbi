@@ -16,6 +16,7 @@
 // =============================================================================
 
 use std::path::PathBuf;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::prelude::Solver;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
@@ -127,17 +128,9 @@ fn plm_sod_1d_bit_identity() {
         .expect("sim construction failed")
         .set_initial(|[x]| {
             if x < 0.5 {
-                Prim {
-                    rho: 1.0,
-                    vel: Tensor::new([0.0]),
-                    pre: 1.0,
-                }
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0))
             } else {
-                Prim {
-                    rho: 0.125,
-                    vel: Tensor::new([0.0]),
-                    pre: 0.1,
-                }
+                Prim::adiabatic(Density(0.125), Tensor::new([0.0]), Pressure(0.1))
             }
         })
         .build();
@@ -172,14 +165,14 @@ fn hllc_plus_low_mach_vortex_bit_identity() {
         .set_initial(|[x, y]| {
             let tau = std::f64::consts::TAU;
             // taylor-green cell: solenoidal, smooth, periodic; cs = 1 at this state
-            Prim {
-                rho: 1.0,
-                vel: Tensor::new([
+            Prim::adiabatic(
+                Density(1.0),
+                Tensor::new([
                     -MACH * (tau * y).sin() * (tau * x).cos(),
                     MACH * (tau * x).sin() * (tau * y).cos(),
                 ]),
-                pre: 1.0 / GAMMA,
-            }
+                Pressure(1.0 / GAMMA),
+            )
         })
         .build();
     let sub =
@@ -206,10 +199,14 @@ fn plm_bump_2d_bit_identity() {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|[x, y]| Prim {
-            rho: 1.0 + 0.2 * (-(((x - 0.5) / 0.1).powi(2) + ((y - 0.5) / 0.1).powi(2))).exp(),
-            vel: Tensor::new([1.0, 0.5]),
-            pre: 1.0,
+        .set_initial(|[x, y]| {
+            Prim::adiabatic(
+                Density(
+                    1.0 + 0.2 * (-(((x - 0.5) / 0.1).powi(2) + ((y - 0.5) / 0.1).powi(2))).exp(),
+                ),
+                Tensor::new([1.0, 0.5]),
+                Pressure(1.0),
+            )
         })
         .build();
     let sub =

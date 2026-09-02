@@ -29,6 +29,7 @@ use symbi::sim::state::*;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -103,11 +104,7 @@ fn build(n: usize) -> Hier {
         // the ripple rides the fine lattice alone; the coarse level takes the
         // class density and receives the fine mean through the restriction.
         let rho = if fine { rho * ripple(x, h_fine) } else { rho };
-        Prim {
-            rho,
-            vel: symbi_algebra::Tensor::zeros(),
-            pre,
-        }
+        Prim::adiabatic(Density(rho), symbi_algebra::Tensor::zeros(), Pressure(pre))
     };
     let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([n, n, n])

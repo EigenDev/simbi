@@ -17,6 +17,7 @@ use symbi_aot::{CpuField, CpuFieldMut, kernel_by_name};
 use symbi_geometry::{KerrKSCartesian, Metric};
 use symbi_hydro::RhdGr;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::Prim;
@@ -73,7 +74,10 @@ fn to_conserved_at(xx: f64, yy: f64, prim: &Prim<f64, 2>) -> symbi_hydro::state:
         shift: m.shift(x),
         sqrt_gamma: m.volume_factor(x),
     }
-    .to_conserved(&IdealGas { gamma: GAMMA }, &symbi_hydro::state::Valencia(*prim))
+    .to_conserved(
+        &IdealGas { gamma: GAMMA },
+        &symbi_hydro::state::Valencia(*prim),
+    )
     .0
 }
 
@@ -275,16 +279,16 @@ fn run_reference(g: &mut Grid) {
             let (x, y) = (xc(ii), xc(jj));
             if (x * x + y * y).sqrt() < R_EXC {
                 let c = ii + jj * N;
-                let prim = Prim::<f64, 2> {
-                    rho: g.rho[c],
-                    vel: Tensor::new([g.v0[c], g.v1[c]]),
-                    pre: g.pre[c],
-                };
+                let prim = Prim::<f64, 2>::adiabatic(
+                    Density(g.rho[c]),
+                    Tensor::new([g.v0[c], g.v1[c]]),
+                    Pressure(g.pre[c]),
+                );
                 let cons = to_conserved_at(x, y, &prim);
-                g.den[c] = cons.den;
-                g.m0[c] = cons.mom[0];
-                g.m1[c] = cons.mom[1];
-                g.nrg[c] = cons.nrg;
+                g.den[c] = cons.den();
+                g.m0[c] = cons.mom()[0];
+                g.m1[c] = cons.mom()[1];
+                g.nrg[c] = cons.nrg();
             }
         }
     }
@@ -352,23 +356,19 @@ fn uniform_state_round_trips_bitwise() {
     // through the whole sequence as the bitwise identity, while every excised cell is overwritten
     // with the cold vacuum floor + its covariant conserved rebuild (the one-way absorbing horizon).
     let mut g = smooth_grid();
-    let uni = Prim::<f64, 2> {
-        rho: 1.2,
-        vel: Tensor::new([0.1, -0.05]),
-        pre: 0.03,
-    };
+    let uni = Prim::<f64, 2>::adiabatic(Density(1.2), Tensor::new([0.1, -0.05]), Pressure(0.03));
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            g.rho[c] = uni.rho;
-            g.v0[c] = uni.vel[0];
-            g.v1[c] = uni.vel[1];
-            g.pre[c] = uni.pre;
+            g.rho[c] = uni.rho();
+            g.v0[c] = uni.vel()[0];
+            g.v1[c] = uni.vel()[1];
+            g.pre[c] = uni.pre();
             let cons = to_conserved_at(xc(ii), xc(jj), &uni);
-            g.den[c] = cons.den;
-            g.m0[c] = cons.mom[0];
-            g.m1[c] = cons.mom[1];
-            g.nrg[c] = cons.nrg;
+            g.den[c] = cons.den();
+            g.m0[c] = cons.mom()[0];
+            g.m1[c] = cons.mom()[1];
+            g.nrg[c] = cons.nrg();
         }
     }
     let before = Grid {
@@ -390,20 +390,20 @@ fn uniform_state_round_trips_bitwise() {
             if x * x + y * y < R_EXC * R_EXC {
                 // excised: the cold vacuum floor + its covariant conserved rebuild.
                 n_excised += 1;
-                let vac = Prim::<f64, 2> {
-                    rho: RHO_VAC,
-                    vel: Tensor::new([0.0, 0.0]),
-                    pre: PRE_VAC,
-                };
+                let vac = Prim::<f64, 2>::adiabatic(
+                    Density(RHO_VAC),
+                    Tensor::new([0.0, 0.0]),
+                    Pressure(PRE_VAC),
+                );
                 let cons = to_conserved_at(x, y, &vac);
                 assert_eq!(g.rho[c].to_bits(), RHO_VAC.to_bits(), "rho vacuum at {c}");
                 assert_eq!(g.v0[c].to_bits(), 0.0_f64.to_bits(), "v0 vacuum at {c}");
                 assert_eq!(g.v1[c].to_bits(), 0.0_f64.to_bits(), "v1 vacuum at {c}");
                 assert_eq!(g.pre[c].to_bits(), PRE_VAC.to_bits(), "pre vacuum at {c}");
-                assert_eq!(g.den[c].to_bits(), cons.den.to_bits(), "den at {c}");
-                assert_eq!(g.m0[c].to_bits(), cons.mom[0].to_bits(), "m0 at {c}");
-                assert_eq!(g.m1[c].to_bits(), cons.mom[1].to_bits(), "m1 at {c}");
-                assert_eq!(g.nrg[c].to_bits(), cons.nrg.to_bits(), "nrg at {c}");
+                assert_eq!(g.den[c].to_bits(), cons.den().to_bits(), "den at {c}");
+                assert_eq!(g.m0[c].to_bits(), cons.mom()[0].to_bits(), "m0 at {c}");
+                assert_eq!(g.m1[c].to_bits(), cons.mom()[1].to_bits(), "m1 at {c}");
+                assert_eq!(g.nrg[c].to_bits(), cons.nrg().to_bits(), "nrg at {c}");
             } else {
                 // live: the whole sequence is the bitwise identity.
                 assert_eq!(g.rho[c].to_bits(), before.rho[c].to_bits(), "rho at {c}");

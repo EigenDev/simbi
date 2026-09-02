@@ -26,6 +26,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -58,14 +59,16 @@ fn ramp_hierarchy(amp: f64) -> Hier {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(move |x: [f64; 3]| Prim {
-            rho: 1.0,
-            vel: Tensor::new([
-                amp * (kx * x[0]).sin(),
-                amp * (kx * x[1] + 1.0).sin(),
-                amp * (kx * x[2] + 2.0).sin(),
-            ]),
-            pre: PRE,
+        .set_initial(move |x: [f64; 3]| {
+            Prim::adiabatic(
+                Density(1.0),
+                Tensor::new([
+                    amp * (kx * x[0]).sin(),
+                    amp * (kx * x[1] + 1.0).sin(),
+                    amp * (kx * x[2] + 2.0).sin(),
+                ]),
+                Pressure(PRE),
+            )
         })
         .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated);

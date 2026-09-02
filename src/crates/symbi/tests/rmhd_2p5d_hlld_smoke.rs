@@ -26,13 +26,11 @@ fn build_sim() -> Sim {
         .unwrap();
     sim.seed_face(0, 0.2);
     sim.seed_face(1, 0.2);
-    sim.seed_cells(|_| MhdPrim {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.1, 0.0, 0.0]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([0.2, 0.2, 0.0]),
+    sim.seed_cells(|_| {
+        MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.1, 0.0, 0.0]), Pressure(1.0)),
+            Tensor::new([0.2, 0.2, 0.0]),
+        )
     });
     sim
 }
@@ -49,14 +47,14 @@ fn rmhd_2p5d_runs_with_hlld() {
     for c in sim.geom.interior.iter() {
         let p = sim.prim_at(c);
         assert!(
-            p.rho.is_finite() && p.rho > 0.0,
+            p.rho().is_finite() && p.rho() > 0.0,
             "HLLD cell {c:?}: rho={}",
-            p.rho
+            p.rho()
         );
         assert!(
-            p.pre.is_finite() && p.pre > 0.0,
+            p.pre().is_finite() && p.pre() > 0.0,
             "HLLD cell {c:?}: p={}",
-            p.pre
+            p.pre()
         );
     }
 }

@@ -20,11 +20,12 @@ use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_amr::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi_geometry::Cartesian;
-use symbi_source_compile::CensusConfig;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::census::{CensusEvaluator, RegisteredCensus};
+use symbi_source_compile::CensusConfig;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim = SimStateGeneric<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -94,11 +95,11 @@ fn refined_with(cfg: &CensusConfig) -> Hier {
 /// smooth, strongly structured density so the refined region holds a substantial and easily
 /// identified share of the mass — a flat profile would make an undercount look like roundoff.
 fn ic(x: [f64; 1]) -> Prim<f64, 1> {
-    Prim {
-        rho: 1.0 + 3.0 * (-((x[0] - 0.5) * (x[0] - 0.5)) / 0.005).exp(),
-        vel: Tensor::new([0.0]),
-        pre: 1.0,
-    }
+    Prim::adiabatic(
+        Density(1.0 + 3.0 * (-((x[0] - 0.5) * (x[0] - 0.5)) / 0.005).exp()),
+        Tensor::new([0.0]),
+        Pressure(1.0),
+    )
 }
 
 fn coarse_sim() -> Sim {

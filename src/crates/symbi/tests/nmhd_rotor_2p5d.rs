@@ -19,6 +19,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
 use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 use symbi_hydro::state::{Cons, Prim};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -62,14 +63,10 @@ fn make_sim() -> Sim {
         .expect("rotor sim")
         .set_initial(|[x, y]| {
             let (rho, vx, vy) = rotor_state(x, y);
-            MhdPrim {
-                hydro: Prim {
-                    rho,
-                    vel: Tensor::new([vx, vy, 0.0]),
-                    pre: 1.0,
-                },
-                mag: Tensor::new([bx, 0.0, 0.0]),
-            }
+            MhdPrim::new(
+                Prim::adiabatic(Density(rho), Tensor::new([vx, vy, 0.0]), Pressure(1.0)),
+                Tensor::new([bx, 0.0, 0.0]),
+            )
         })
         .seed_faces_uniform([bx, 0.0])
         .build()
@@ -125,33 +122,32 @@ fn nmhd_rotor_2p5d_preserves_divb_winds_field_stays_physical() {
     let cnrg = sim.fields.cons.nrg_field().unwrap();
     let mut max_by = 0.0_f64;
     for c in sim.geom.interior.iter() {
-        let cons = MhdCons::<f64, 3> {
-            hydro: Cons {
-                chi: Default::default(),
-                den: *sim.fields.cons.den.view().at(c),
-                mom: Tensor::new([
+        let cons = MhdCons::<f64, 3>::new(
+            Cons::adiabatic(
+                Density(*sim.fields.cons.den.view().at(c)),
+                Tensor::new([
                     *sim.fields.cons.mom[0].view().at(c),
                     *sim.fields.cons.mom[1].view().at(c),
                     *sim.fields.cons.mom[2].view().at(c),
                 ]),
-                nrg: *cnrg.view().at(c),
-            },
-            mag: Tensor::new([
+                EnergyDensity(*cnrg.view().at(c)),
+            ),
+            Tensor::new([
                 *mhd.bcell[0].view().at(c),
                 *mhd.bcell[1].view().at(c),
                 *mhd.bcell[2].view().at(c),
             ]),
-        };
+        );
         let prim = nmhd_recover(&eos, &cons);
         assert!(
-            prim.rho.is_finite() && prim.rho > 0.0,
+            prim.rho().is_finite() && prim.rho() > 0.0,
             "cell {c:?}: rho={}",
-            prim.rho
+            prim.rho()
         );
         assert!(
-            prim.pre.is_finite() && prim.pre > 0.0,
+            prim.pre().is_finite() && prim.pre() > 0.0,
             "cell {c:?}: p={}",
-            prim.pre
+            prim.pre()
         );
         max_by = max_by.max(mhd.bcell[1].view().at(c).abs());
     }

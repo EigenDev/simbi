@@ -22,6 +22,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, SurfaceSpec};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -44,11 +45,7 @@ fn build() -> Sim {
         .cfl(0.3)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(
             BodyCollection::new().add(
@@ -144,6 +141,8 @@ mod isothermal {
     use symbi::sim::state::*;
     use symbi_algebra::Tensor;
     use symbi_geometry::Cartesian;
+    use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::quantity::Density;
     use symbi_hydro::state::PrimG;
     use symbi_hydro::{IsoNewtonian, Isothermal};
     use symbi_ib::{Body, BodyCollection, SurfaceSpec};
@@ -168,10 +167,8 @@ mod isothermal {
             .cfl(0.3)
             .allocate()
             .expect("sim")
-            .set_initial(|_| PrimG {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0]),
-                pre: Default::default(),
+            .set_initial(|_| {
+                PrimG::<f64, 2, IsoModel>::isothermal(Density(1.0), Tensor::new([0.0, 0.0]))
             })
             .build()
             .with_bodies(

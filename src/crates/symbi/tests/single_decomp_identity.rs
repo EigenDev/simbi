@@ -13,11 +13,11 @@ use symbi::sim::decomp::{LocalCopy, evolve_decomposed};
 use symbi_algebra::Domain;
 use symbi_geometry::MotionState;
 use symbi_grid::Field;
-use symbi_source_compile::expr_bridge::build_user_sources;
 use symbi_hydro::NEWTONIAN_SPEC;
-use symbi_source_compile::SourceConfig;
 use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_sim::tracers::seed_mass_weighted;
+use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_user_sources;
 
 const GAMMA: f64 = 1.4;
 const T_FINAL: f64 = 0.03;
@@ -36,11 +36,11 @@ fn make(timestepping: Timestepping) -> (Sim, Kern) {
         .expect("simulation construction");
     sim.seed_cells(|x| {
         let phase = 2.0 * std::f64::consts::PI * x[0];
-        Prim {
-            rho: 1.0 + 0.1 * phase.sin(),
-            vel: Tensor::new([0.15, -0.08]),
-            pre: 0.8 + 0.05 * phase.cos(),
-        }
+        Prim::adiabatic(
+            Density(1.0 + 0.1 * phase.sin()),
+            Tensor::new([0.15, -0.08]),
+            Pressure(0.8 + 0.05 * phase.cos()),
+        )
     });
     let kernels = sim.substrate();
     (sim, kernels)

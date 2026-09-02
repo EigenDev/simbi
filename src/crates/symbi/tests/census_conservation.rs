@@ -24,6 +24,7 @@ use symbi_geometry::Spherical;
 use symbi_grid::Field;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ir::emit::ReductionOp;
 use symbi_sim::census::{BinAxis, CensusSpec};
@@ -57,11 +58,7 @@ fn build_sim() -> SimSph {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("spherical sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
 
     let cnrg = sim.fields.cons.nrg_field().expect("Newtonian cons.nrg");

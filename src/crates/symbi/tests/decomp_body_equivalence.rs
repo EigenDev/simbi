@@ -27,6 +27,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{BinaryParams, Body, BodyCollection, BodyKind, ReferenceFrame};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -131,11 +132,7 @@ fn make(
         .timestepping(ts)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 2.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(2.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(bodies());
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);

@@ -27,19 +27,15 @@ fn hydro_builder_reaches_ready_and_builds() {
         .boundaries(Boundaries::uniform(BoundaryType::Periodic))
         .allocate()
         .expect("valid grid config allocates")
-        .set_initial(|_x| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_x| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build();
 
     assert_eq!(sim.geom.interior.volume(), 16 * 16);
     // seeded: every interior cell recovers the prim it was set to.
     for c in sim.geom.interior.iter() {
         let p = sim.prim_at(c);
-        assert!((p.rho - 1.0).abs() < 1e-14, "cell {c:?}: rho={}", p.rho);
-        assert!((p.pre - 1.0).abs() < 1e-14, "cell {c:?}: p={}", p.pre);
+        assert!((p.rho() - 1.0).abs() < 1e-14, "cell {c:?}: rho={}", p.rho());
+        assert!((p.pre() - 1.0).abs() < 1e-14, "cell {c:?}: p={}", p.pre());
     }
 }
 
@@ -52,13 +48,11 @@ fn mhd_builder_requires_faces_then_builds() {
         .boundaries(BoundaryType::Periodic)
         .allocate()
         .expect("valid grid config allocates")
-        .set_initial(|_x| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.1, 0.0, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new([0.2, 0.2, 0.0]),
+        .set_initial(|_x| {
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.1, 0.0, 0.0]), Pressure(1.0)),
+                Tensor::new([0.2, 0.2, 0.0]),
+            )
         })
         .seed_faces_uniform([0.2, 0.2])
         .build();
@@ -74,9 +68,9 @@ fn mhd_builder_requires_faces_then_builds() {
     for c in sim.geom.interior.iter() {
         let p = sim.prim_at(c);
         assert!(
-            p.rho.is_finite() && p.rho > 0.0,
+            p.rho().is_finite() && p.rho() > 0.0,
             "cell {c:?}: rho={}",
-            p.rho
+            p.rho()
         );
     }
 }

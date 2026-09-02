@@ -24,6 +24,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -70,11 +71,7 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Times
         .expect("root sim construction failed")
         .set_initial(|[x, y]| {
             let b = bump(x, y);
-            Prim {
-                rho: 1.0 + b,
-                vel: Tensor::new([0.0, 0.0]),
-                pre: 1.0 + b,
-            }
+            Prim::adiabatic(Density(1.0 + b), Tensor::new([0.0, 0.0]), Pressure(1.0 + b))
         })
         .build()
 }

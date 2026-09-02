@@ -18,6 +18,7 @@ use symbi::sim::state::*;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 
@@ -39,11 +40,11 @@ fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
     let a = (GAMMA - 1.0) / (GAMMA * K0);
     let c = 1.0 / a - GM / (1.0 + G_OFFSET);
     let rho = (a * (GM / r + c)).powf(1.0 / (GAMMA - 1.0));
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
-    }
+    Prim::adiabatic(
+        Density(rho),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(K0 * rho.powf(GAMMA)),
+    )
 }
 
 type Sim = SimState<Newtonian, 1, Cartesian, IdealGas<f64>, CudaSpace, UnifiedMemory>;

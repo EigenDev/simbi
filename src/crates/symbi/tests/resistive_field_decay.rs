@@ -9,6 +9,7 @@
 // =============================================================================
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve_with_callback;
@@ -44,10 +45,7 @@ fn make_sim() -> Sim {
         .cfl(0.3)
         .allocate()
         .expect("resistive decay sim construction failed")
-        .set_initial(|[_x, y]| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
-            mag: Tensor::new([B0 * (K * y).sin(), 0.0, 0.0]),
-        })
+        .set_initial(|[_x, y]| MhdPrim::new(Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)), Tensor::new([B0 * (K * y).sin(), 0.0, 0.0])))
         .seed_faces(|axis, [_x, y]| if axis == 0 { B0 * (K * y).sin() } else { 0.0 })
         .build()
 }
@@ -107,13 +105,11 @@ fn make_sim_3d() -> Sim3 {
     .cfl(0.3)
     .allocate()
     .expect("3d resistive sim construction failed")
-    .set_initial(|[_x, y, _z]| MhdPrim {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([B0 * (K * y).sin(), 0.0, 0.0]),
+    .set_initial(|[_x, y, _z]| {
+        MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+            Tensor::new([B0 * (K * y).sin(), 0.0, 0.0]),
+        )
     })
     .seed_faces(|axis, x| {
         if axis == 0 {

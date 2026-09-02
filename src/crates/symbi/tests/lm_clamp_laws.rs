@@ -20,6 +20,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -42,14 +43,14 @@ fn kinetic_energy_after(solver: Solver, t_end: f64) -> f64 {
         .expect("sim construction failed")
         .set_initial(|[x, y]| {
             let tau = std::f64::consts::TAU;
-            Prim {
-                rho: 1.0,
-                vel: Tensor::new([
+            Prim::adiabatic(
+                Density(1.0),
+                Tensor::new([
                     -MACH * (tau * y).sin() * (tau * x).cos(),
                     MACH * (tau * x).sin() * (tau * y).cos(),
                 ]),
-                pre: 1.0 / GAMMA,
-            }
+                Pressure(1.0 / GAMMA),
+            )
         })
         .build();
     let sub =

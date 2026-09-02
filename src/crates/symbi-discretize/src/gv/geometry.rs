@@ -16,7 +16,12 @@ use symbi_ir::{KernelWrite, KernelWrites, TraceCx, trace};
 /// `sum_i (F_i[coord+e_i] - F_i[coord]) / dx_i`. `base` names the per-direction flux field
 /// (`{base}_{i}`, runtime `{base}[{i}]`) — `mass_flux` / `mom_flux_{k}` / `nrg_flux`. the lo
 /// read is the direct cell read, the hi a `+e_i` field_shifted (LoadAt); dt is the caller's.
-fn gv_divergence_cartesian<'t>(cx: TraceCx<'t>, base: &str, ndim: u8, spacing: &[Spacing]) -> Gv<'t> {
+fn gv_divergence_cartesian<'t>(
+    cx: TraceCx<'t>,
+    base: &str,
+    ndim: u8,
+    spacing: &[Spacing],
+) -> Gv<'t> {
     let mut acc: Option<Gv> = None;
     for ii in 0..ndim {
         let key = format!("{base}_{ii}");
@@ -192,7 +197,11 @@ pub(crate) fn gv_lapse_weight<'t>(
 /// reads the midpoint. on a spherical radial axis the two differ by `dr^2/(6r)`, which offsets a
 /// pointwise connection source from the flux difference it must balance at exactly the order of
 /// the truncation error.
-pub(crate) fn gv_cell_midpoints<'t>(cx: TraceCx<'t>, spacing: &[Spacing], ndim: usize) -> Vec<Gv<'t>> {
+pub(crate) fn gv_cell_midpoints<'t>(
+    cx: TraceCx<'t>,
+    spacing: &[Spacing],
+    ndim: usize,
+) -> Vec<Gv<'t>> {
     let (lo, hi, _) = gv_faces(cx, spacing, ndim);
     let half = Gv::from_f64(0.5);
     (0..ndim).map(|d| (lo[d] + hi[d]) * half).collect()
@@ -391,7 +400,12 @@ pub(crate) fn is_cartesian_uniform(coords: Coords, spacing: &[Spacing]) -> bool 
 /// the face at `coord + offset` along axis `ax` as a physical position (offset 0 = lo face,
 /// 1 = hi face). `x_lo_{ax}` + `dx_{ax}` are the grid scalars (dx = width for Uniform, the
 /// log-slope for Log). the integer coord promotes to f64 against the scalars at lowering.
-pub(crate) fn gv_axis_face_at<'t>(cx: TraceCx<'t>, ax: usize, spacing: Spacing, offset: i64) -> Gv<'t> {
+pub(crate) fn gv_axis_face_at<'t>(
+    cx: TraceCx<'t>,
+    ax: usize,
+    spacing: Spacing,
+    offset: i64,
+) -> Gv<'t> {
     let coord = cx.coord(ax as u8);
     let i = if offset == 0 {
         coord
@@ -475,7 +489,12 @@ pub(crate) fn gv_axis_face_at_index<'t>(
 /// `map_kind` is per-launch-uniform, so every lane takes one arm; on a uniform or
 /// geometric map the selected arm is the arithmetic midpoint, value-identical to the
 /// unconditional spelling.
-pub(crate) fn gv_axis_center_between<'t>(cx: TraceCx<'t>, ax: usize, lo: Gv<'t>, hi: Gv<'t>) -> Gv<'t> {
+pub(crate) fn gv_axis_center_between<'t>(
+    cx: TraceCx<'t>,
+    ax: usize,
+    lo: Gv<'t>,
+    hi: Gv<'t>,
+) -> Gv<'t> {
     let map_kind = cx.scalar(&format!("map_kind_{ax}"));
     let is_log = map_kind.cmp_gt(Gv::from_f64(0.5)) & map_kind.cmp_lt(Gv::from_f64(1.5));
     Gv::cond(

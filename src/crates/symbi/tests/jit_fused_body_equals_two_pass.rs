@@ -17,10 +17,10 @@
 use symbi::prelude::*;
 use symbi_algebra::Domain;
 use symbi_grid::Field;
-use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_hydro::NEWTONIAN_SPEC;
-use symbi_source_compile::SourceConfig;
 use symbi_ib::{Body, BodyCollection};
+use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_xpu::HostMemory;
 
 fn assert_cons_bit_identical<const D: usize>(
@@ -84,11 +84,7 @@ fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
             let (x, y) = (p[0], p[1]);
             let rho =
                 1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
-            Prim {
-                rho,
-                vel: Tensor::new([0.1, -0.05]),
-                pre: 1.0,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([0.1, -0.05]), Pressure(1.0))
         });
         if with_body {
             sim.with_bodies(central_black_hole())
@@ -184,11 +180,7 @@ fn adiabatic_body_only_fused_equals_two_pass_rk2() {
             let (x, y) = (p[0], p[1]);
             let rho =
                 1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
-            Prim {
-                rho,
-                vel: Tensor::new([0.1, -0.05]),
-                pre: 1.0,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([0.1, -0.05]), Pressure(1.0))
         });
         sim.with_bodies(central_black_hole())
     };

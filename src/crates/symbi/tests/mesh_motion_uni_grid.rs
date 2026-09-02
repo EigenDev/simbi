@@ -34,6 +34,7 @@ use symbi_geometry::{Cartesian, MotionState, Spherical};
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::Prim;
@@ -66,11 +67,11 @@ fn build(motion: MotionState<f64>, cfl: f64, fill: impl Fn(&Sim)) -> (Sim, Kset)
 fn set_prim(sim: &Sim, c: [isize; 3], prim: &Prim<f64, 3>) {
     let cnrg = sim.fields.cons.nrg_field().unwrap();
     let cons = Regime::to_conserved(&sim.physics.regime, &sim.physics.eos, prim);
-    sim.fields.cons.den.view_mut().set(c, cons.den);
+    sim.fields.cons.den.view_mut().set(c, cons.den());
     for dd in 0..3 {
-        sim.fields.cons.mom[dd].view_mut().set(c, cons.mom[dd]);
+        sim.fields.cons.mom[dd].view_mut().set(c, cons.mom()[dd]);
     }
-    cnrg.view_mut().set(c, cons.nrg);
+    cnrg.view_mut().set(c, cons.nrg());
 }
 
 /// a smooth non-trivial state (off-center gaussian pulse in a shear) so the
@@ -79,11 +80,11 @@ fn fill_pulse(sim: &Sim) {
     for c in sim.geom.interior.iter() {
         let x = sim.geom.centroid(c);
         let r2 = (x[0] - 0.1).powi(2) + x[1] * x[1] + x[2] * x[2];
-        let prim = Prim {
-            rho: 1.0 + 0.5 * (-r2 / 0.02).exp(),
-            vel: Tensor::new([0.3 * x[1], -0.2, 0.1]),
-            pre: 1.0 + 0.2 * (-r2 / 0.02).exp(),
-        };
+        let prim = Prim::adiabatic(
+            Density(1.0 + 0.5 * (-r2 / 0.02).exp()),
+            Tensor::new([0.3 * x[1], -0.2, 0.1]),
+            Pressure(1.0 + 0.2 * (-r2 / 0.02).exp()),
+        );
         set_prim(sim, c, &prim);
     }
 }
@@ -126,11 +127,11 @@ fn free_expansion_errors(cfl: f64) -> (f64, f64, f64) {
     let (mut sim, k) = build(MotionState::homologous(1.0, adot), cfl, |s| {
         for c in s.geom.interior.iter() {
             let x = s.geom.centroid(c);
-            let prim = Prim {
-                rho: rho0,
-                vel: Tensor::new([adot * x[0], adot * x[1], adot * x[2]]),
-                pre: p0,
-            };
+            let prim = Prim::adiabatic(
+                Density(rho0),
+                Tensor::new([adot * x[0], adot * x[1], adot * x[2]]),
+                Pressure(p0),
+            );
             set_prim(s, c, &prim);
         }
     });
@@ -244,17 +245,17 @@ fn rhd_free_expansion_stays_self_similar() {
         let cnrg = sim.fields.cons.nrg_field().unwrap();
         for c in sim.geom.interior.iter() {
             let x = sim.geom.centroid(c);
-            let prim = Prim {
-                rho: rho0,
-                vel: Tensor::new([adot * x[0], adot * x[1], adot * x[2]]),
-                pre: p0,
-            };
+            let prim = Prim::adiabatic(
+                Density(rho0),
+                Tensor::new([adot * x[0], adot * x[1], adot * x[2]]),
+                Pressure(p0),
+            );
             let cons = Regime::to_conserved(&sim.physics.regime, &sim.physics.eos, &prim);
-            sim.fields.cons.den.view_mut().set(c, cons.den);
+            sim.fields.cons.den.view_mut().set(c, cons.den());
             for dd in 0..3 {
-                sim.fields.cons.mom[dd].view_mut().set(c, cons.mom[dd]);
+                sim.fields.cons.mom[dd].view_mut().set(c, cons.mom()[dd]);
             }
-            cnrg.view_mut().set(c, cons.nrg);
+            cnrg.view_mut().set(c, cons.nrg());
         }
     }
     let k = RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, &sim.geom.allocated);
@@ -309,11 +310,11 @@ fn translated_contact_is_preserved_exactly_on_the_comoving_grid() {
         for c in s.geom.interior.iter() {
             let x = s.geom.centroid(c);
             let r2 = x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
-            let prim = Prim {
-                rho: 1.0 + 0.5 * (-r2 / 0.02).exp(),
-                vel: Tensor::new([vtrans, 0.0, 0.0]),
-                pre: 1.0,
-            };
+            let prim = Prim::adiabatic(
+                Density(1.0 + 0.5 * (-r2 / 0.02).exp()),
+                Tensor::new([vtrans, 0.0, 0.0]),
+                Pressure(1.0),
+            );
             set_prim(s, c, &prim);
         }
     };
@@ -417,10 +418,8 @@ fn spherical_homologous_free_expansion_stays_self_similar() {
         .finish()
         .unwrap();
     sim.motion = MotionState::homologous(1.0, adot);
-    sim.seed_cells(|x| Prim {
-        rho: rho0,
-        vel: Tensor::new([adot * x[0], 0.0]),
-        pre: p0,
+    sim.seed_cells(|x| {
+        Prim::adiabatic(Density(rho0), Tensor::new([adot * x[0], 0.0]), Pressure(p0))
     });
     let k = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, &sim.geom.allocated);
     evolve(&mut sim, &k, t_final).unwrap();
@@ -499,11 +498,11 @@ fn homologous_mesh_tracers_follow_accepted_geometry() {
             set_prim(
                 sim,
                 coord,
-                &Prim {
-                    rho: 1.0,
-                    vel: Tensor::new(std::array::from_fn(|dd| adot * x[dd])),
-                    pre: 1.0e-3,
-                },
+                &Prim::adiabatic(
+                    Density(1.0),
+                    Tensor::new(std::array::from_fn(|dd| adot * x[dd])),
+                    Pressure(1.0e-3),
+                ),
             );
         }
     });
@@ -559,11 +558,7 @@ fn translating_mesh_tracers_follow_accepted_ale_mass_flux() {
             set_prim(
                 sim,
                 coord,
-                &Prim {
-                    rho: 1.0,
-                    vel: Tensor::zeros(),
-                    pre: 1.0,
-                },
+                &Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)),
             );
         }
     });

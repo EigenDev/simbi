@@ -28,13 +28,14 @@
 
 use symbi_algebra::Tensor;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, law_params};
+use symbi_hydro::state::{Cons, Prim};
+use symbi_hydro::{IsoNewtonian, Newtonian};
 use symbi_source_compile::source_spec::{
     gravity_params, point_mass_gravity_sources, source_params, uniform_acceleration_sources,
     user_params,
 };
-use symbi_hydro::state::{Cons, Prim};
-use symbi_hydro::{IsoNewtonian, Newtonian};
 use symbi_source_compile::{SimulationLaws, SourceEvaluator};
 
 // =============================================================================
@@ -65,11 +66,8 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
     let evaluator = SourceEvaluator::new(&sim, 3).expect("composes");
 
     // ----- initial state: uniform at rest -----
-    let prim_0 = Prim::<f64, 3> {
-        rho: RHO_0,
-        vel: Tensor::new([0.0, 0.0, 0.0]),
-        pre: 1.0,
-    };
+    let prim_0 =
+        Prim::<f64, 3>::adiabatic(Density(RHO_0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0));
     let eos = IdealGas { gamma: GAMMA };
     let mut cons = prim_0.to_conserved(&eos);
 
@@ -85,10 +83,10 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
             .eval(
                 "mom",
                 &[
-                    (law_params::RHO, prim.rho),
-                    (law_params::vel(0).as_str(), prim.vel[0]),
-                    (law_params::vel(1).as_str(), prim.vel[1]),
-                    (law_params::vel(2).as_str(), prim.vel[2]),
+                    (law_params::RHO, prim.rho()),
+                    (law_params::vel(0).as_str(), prim.vel()[0]),
+                    (law_params::vel(1).as_str(), prim.vel()[1]),
+                    (law_params::vel(2).as_str(), prim.vel()[2]),
                     (user_params::g_ext(0).as_str(), g_ext[0]),
                     (user_params::g_ext(1).as_str(), g_ext[1]),
                     (user_params::g_ext(2).as_str(), g_ext[2]),
@@ -101,10 +99,10 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
             .eval(
                 "nrg",
                 &[
-                    (law_params::RHO, prim.rho),
-                    (law_params::vel(0).as_str(), prim.vel[0]),
-                    (law_params::vel(1).as_str(), prim.vel[1]),
-                    (law_params::vel(2).as_str(), prim.vel[2]),
+                    (law_params::RHO, prim.rho()),
+                    (law_params::vel(0).as_str(), prim.vel()[0]),
+                    (law_params::vel(1).as_str(), prim.vel()[1]),
+                    (law_params::vel(2).as_str(), prim.vel()[2]),
                     (user_params::g_ext(0).as_str(), g_ext[0]),
                     (user_params::g_ext(1).as_str(), g_ext[1]),
                     (user_params::g_ext(2).as_str(), g_ext[2]),
@@ -114,9 +112,9 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
 
         // Euler update.
         for k in 0..3 {
-            cons.mom[k] += DT * s_mom[k];
+            cons.mom_mut()[k] += DT * s_mom[k];
         }
-        cons.nrg += DT * s_nrg[0];
+        cons = cons.with_nrg(cons.nrg() + DT * s_nrg[0]);
         // density: no source on mass for uniform-acceleration; conservation holds.
     }
 
@@ -126,20 +124,20 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
     let final_prim = prim_from_cons(&cons, GAMMA);
 
     assert!(
-        (final_prim.rho - RHO_0).abs() < 1e-12,
+        (final_prim.rho() - RHO_0).abs() < 1e-12,
         "density must be preserved exactly (no mass source); got {}",
-        final_prim.rho,
+        final_prim.rho(),
     );
 
     for k in 0..3 {
         let v_expected = g_ext[k] * t_final;
-        let v_actual = final_prim.vel[k];
+        let v_actual = final_prim.vel()[k];
         assert!(
             (v_actual - v_expected).abs() < 1e-12,
             "component {k}: v({t_final}) = {v_actual} != g*t = {v_expected}",
         );
         let mom_expected = RHO_0 * g_ext[k] * t_final;
-        let mom_actual = cons.mom[k];
+        let mom_actual = cons.mom()[k];
         assert!(
             (mom_actual - mom_expected).abs() < 1e-12,
             "component {k}: momentum density {mom_actual} != rho*g*t = {mom_expected}",
@@ -294,11 +292,16 @@ fn iso_regime_with_momentum_only_overlay_evolves_correctly() {
 /// recover (rho, vel, pre) from conserved (den, mom, nrg) under the ideal
 /// gas EOS. used to thread state through evaluator calls per step.
 fn prim_from_cons(cons: &Cons<f64, 3>, gamma: f64) -> Prim<f64, 3> {
-    let rho = cons.den;
-    let vel = Tensor::new([cons.mom[0] / rho, cons.mom[1] / rho, cons.mom[2] / rho]);
-    let kinetic = 0.5 * (cons.mom[0].powi(2) + cons.mom[1].powi(2) + cons.mom[2].powi(2)) / rho;
-    let pre = (gamma - 1.0) * (cons.nrg - kinetic);
-    Prim { rho, vel, pre }
+    let rho = cons.den();
+    let vel = Tensor::new([
+        cons.mom()[0] / rho,
+        cons.mom()[1] / rho,
+        cons.mom()[2] / rho,
+    ]);
+    let kinetic =
+        0.5 * (cons.mom()[0].powi(2) + cons.mom()[1].powi(2) + cons.mom()[2].powi(2)) / rho;
+    let pre = (gamma - 1.0) * (cons.nrg() - kinetic);
+    Prim::adiabatic(Density(rho), vel, Pressure(pre))
 }
 
 /// uniform-cell evolution: no spatial gradients -> no flux divergence,
@@ -311,11 +314,7 @@ fn evolve_uniform(
     dt: f64,
     mut source_fn: impl FnMut(&Prim<f64, 3>) -> Vec<f64>,
 ) -> [f64; 3] {
-    let prim_0 = Prim::<f64, 3> {
-        rho: rho_0,
-        vel: Tensor::new([0.0; 3]),
-        pre: 1.0,
-    };
+    let prim_0 = Prim::<f64, 3>::adiabatic(Density(rho_0), Tensor::new([0.0; 3]), Pressure(1.0));
     let eos = IdealGas { gamma };
     let mut cons = prim_0.to_conserved(&eos);
 
@@ -323,11 +322,11 @@ fn evolve_uniform(
         let prim = prim_from_cons(&cons, gamma);
         let s = source_fn(&prim);
         for k in 0..3 {
-            cons.mom[k] += dt * s[k];
+            cons.mom_mut()[k] += dt * s[k];
         }
     }
 
-    [cons.mom[0], cons.mom[1], cons.mom[2]]
+    [cons.mom()[0], cons.mom()[1], cons.mom()[2]]
 }
 
 fn uniform_accel_vals<'a>(prim: &'a Prim<f64, 3>, g_ext: [f64; 3]) -> Vec<(&'a str, f64)> {
@@ -339,10 +338,10 @@ fn uniform_accel_vals<'a>(prim: &'a Prim<f64, 3>, g_ext: [f64; 3]) -> Vec<(&'a s
     static G1: &str = "g_ext_1";
     static G2: &str = "g_ext_2";
     vec![
-        (RHO, prim.rho),
-        (V0, prim.vel[0]),
-        (V1, prim.vel[1]),
-        (V2, prim.vel[2]),
+        (RHO, prim.rho()),
+        (V0, prim.vel()[0]),
+        (V1, prim.vel()[1]),
+        (V2, prim.vel()[2]),
         (G0, g_ext[0]),
         (G1, g_ext[1]),
         (G2, g_ext[2]),
@@ -368,10 +367,10 @@ fn gravity_vals<'a>(
     static GM: &str = "gm";
     static EPS: &str = "eps";
     vec![
-        (RHO, prim.rho),
-        (V0, prim.vel[0]),
-        (V1, prim.vel[1]),
-        (V2, prim.vel[2]),
+        (RHO, prim.rho()),
+        (V0, prim.vel()[0]),
+        (V1, prim.vel()[1]),
+        (V2, prim.vel()[2]),
         (X0, x[0]),
         (X1, x[1]),
         (X2, x[2]),

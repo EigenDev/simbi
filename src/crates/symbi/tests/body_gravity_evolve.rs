@@ -20,6 +20,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -60,10 +61,13 @@ fn fofc_redo_preserves_body_gravity() {
     // two streams moving apart across x = 0.4 (a double rarefaction): a near-vacuum opens there, so
     // the high-order c2p goes negative and FOFC fires along the strip (the redo restores + re-fluxes).
     // gravity is velocity-independent, so the body impulse D = mom_B - mom_A is unaffected by the flow.
-    let ic = |[x, _y]: [f64; 2]| Prim {
-        rho: 1.0,
-        vel: Tensor::new([if x > 0.4 { 6.0 } else { -6.0 }, 0.0]),
-        pre: 1e-8, // near-zero internal energy -> the diverging flux over-removes it -> p < 0 -> FOFC
+    // near-zero internal energy: the diverging flux over-removes it -> p < 0 -> FOFC.
+    let ic = |[x, _y]: [f64; 2]| {
+        Prim::adiabatic(
+            Density(1.0),
+            Tensor::new([if x > 0.4 { 6.0 } else { -6.0 }, 0.0]),
+            Pressure(1e-8),
+        )
     };
     let redo_body = || {
         BodyCollection::new().add(Body::gravitational(
@@ -191,11 +195,7 @@ fn fofc_freeze_preserves_body_gravity() {
             .boundaries(Boundaries::uniform(BoundaryType::Outflow))
             .allocate()
             .expect("sim")
-            .set_initial(|_| Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0]),
-                pre: 1.0,
-            })
+            .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
             .build()
             .with_bodies(central_mass());
         let us = &s.workspace.u_stage;
@@ -315,10 +315,8 @@ fn fofc_freeze_preserves_body_gravity_iso() {
             .boundaries(Boundaries::uniform(BoundaryType::Outflow))
             .allocate()
             .expect("sim")
-            .set_initial(|_| PrimG::<f64, 2, IsoModel> {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0]),
-                pre: Default::default(),
+            .set_initial(|_| {
+                PrimG::<f64, 2, IsoModel>::isothermal(Density(1.0), Tensor::new([0.0, 0.0]))
             })
             .build()
             .with_bodies(central_mass());
@@ -412,11 +410,7 @@ fn central_gravity_pulls_fluid_inward_through_evolve() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(central_mass());
     assert!(
@@ -507,11 +501,7 @@ fn body_gravity_gpu_matches_cpu() {
             let nrg = 2.0 + g;
             let (vx, vy) = (mx / rho, my / rho);
             let pre = (GAMMA - 1.0) * (nrg - 0.5 * rho * (vx * vx + vy * vy));
-            Prim {
-                rho,
-                vel: Tensor::new([vx, vy]),
-                pre,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([vx, vy]), Pressure(pre))
         })
         .build()
         // a black hole (gravity + Bondi-Hoyle accretion) so the GPU diff covers both effects.
@@ -599,11 +589,7 @@ fn black_hole_records_accretion_without_changing_mass() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 2.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(2.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
             0,
@@ -705,11 +691,7 @@ fn body_feedback_gpu_matches_cpu() {
             let nrg = 2.0 + g;
             let (vx, vy) = (mx / rho, my / rho);
             let pre = (GAMMA - 1.0) * (nrg - 0.5 * rho * (vx * vx + vy * vy));
-            Prim {
-                rho,
-                vel: Tensor::new([vx, vy]),
-                pre,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([vx, vy]), Pressure(pre))
         })
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
@@ -795,11 +777,7 @@ fn curvilinear_central_gravity_is_radial() {
         ]))
         .allocate()
         .expect("cylindrical sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(BodyCollection::new().add(Body::gravitational(
             0,
@@ -874,11 +852,7 @@ fn curvilinear_body_source_gpu_matches_cpu() {
             let rho = 1.0 + 0.2 * ir / 16.0;
             let (vr, vphi) = (0.05 / rho, -0.03 / rho);
             let pre = (GAMMA - 1.0) * (2.0 - 0.5 * rho * (vr * vr + vphi * vphi));
-            Prim {
-                rho,
-                vel: Tensor::new([vr, vphi]),
-                pre,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([vr, vphi]), Pressure(pre))
         })
         .build()
         // off-origin BH so gravity has a non-trivial phi component + accretion exercises the sink.
@@ -954,11 +928,7 @@ fn spherical_central_gravity_is_radial() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("spherical sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(BodyCollection::new().add(Body::gravitational(
             0,
@@ -1026,11 +996,7 @@ fn spherical_3d_body_gpu_matches_cpu() {
             let rho = 1.0 + 0.1 * ir / 8.0;
             let (vr, vth, vph) = (0.04 / rho, -0.02 / rho, 0.01 / rho);
             let pre = (GAMMA - 1.0) * (2.0 - 0.5 * rho * (vr * vr + vth * vth + vph * vph));
-            Prim {
-                rho,
-                vel: Tensor::new([vr, vth, vph]),
-                pre,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([vr, vth, vph]), Pressure(pre))
         })
         .build()
         // off-origin BH: gravity has theta/phi components + accretion + a 3D torque in feedback.

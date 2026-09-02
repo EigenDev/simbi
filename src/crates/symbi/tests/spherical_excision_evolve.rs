@@ -21,6 +21,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKS;
 use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -83,10 +84,8 @@ fn run_on(excision_radius: f64, log_radial: bool) -> ((Vec<f64>, Vec<f64>), Vec<
         .cfl(CFL)
         .allocate()
         .expect("spherical KS sim")
-        .set_initial(|_r| Prim {
-            rho: RHO_AMBIENT,
-            vel: Tensor::zeros(),
-            pre: P_AMBIENT,
+        .set_initial(|_r| {
+            Prim::adiabatic(Density(RHO_AMBIENT), Tensor::zeros(), Pressure(P_AMBIENT))
         })
         .build();
 

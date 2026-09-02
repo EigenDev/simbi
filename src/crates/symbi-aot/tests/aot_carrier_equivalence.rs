@@ -18,6 +18,7 @@
 
 use symbi_algebra::FaceNormal;
 use symbi_aot::NamedKernel;
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 
 // shims binding the emitted kernels by field name (NamedKernel) — order-
 // independent, loud + named on manifest drift. every buffer is 1D (lo = 0); the
@@ -315,12 +316,7 @@ fn rhd_c2p_kernel_equals_host_at_baked_count() {
         // host: the same rhd_recover source at S = f64, at the kernel's baked count.
         let host = rhd_recover::<f64, 1>(
             &eos,
-            &Cons {
-                chi: Default::default(),
-                den: d,
-                mom: Tensor::new([s]),
-                nrg: tau,
-            },
+            &Cons::adiabatic(Density(d), Tensor::new([s]), EnergyDensity(tau)),
             &SpatialMetric::flat(),
             RHD_ITERS,
         );
@@ -347,22 +343,22 @@ fn rhd_c2p_kernel_equals_host_at_baked_count() {
 
         let ctx = format!("(rho={rho}, v={v}, p={p})");
         assert!(
-            agree(kr[0], host.rho),
+            agree(kr[0], host.rho()),
             "{ctx} rho carrier divergence: kernel {} vs host {}",
             kr[0],
-            host.rho
+            host.rho()
         );
         assert!(
-            agree(kv[0], host.vel[0]),
+            agree(kv[0], host.vel()[0]),
             "{ctx} vel carrier divergence: kernel {} vs host {}",
             kv[0],
-            host.vel[0]
+            host.vel()[0]
         );
         assert!(
-            agree(kp[0], host.pre),
+            agree(kp[0], host.pre()),
             "{ctx} pre carrier divergence: kernel {} vs host {}",
             kp[0],
-            host.pre
+            host.pre()
         );
     }
 }
@@ -402,15 +398,10 @@ fn rmhd_c2p_kernel_equals_host_at_baked_count() {
         let (d, s, tau, bb) = rmhd_p2c(rho, v, p, b);
 
         // host: rmhd_recover at S = f64, at the kernel's baked count.
-        let cons = MhdCons::<f64, 3> {
-            hydro: Cons {
-                chi: Default::default(),
-                den: d,
-                mom: Tensor::new(s),
-                nrg: tau,
-            },
-            mag: Tensor::new(bb),
-        };
+        let cons = MhdCons::<f64, 3>::new(
+            Cons::adiabatic(Density(d), Tensor::new(s), EnergyDensity(tau)),
+            Tensor::new(bb),
+        );
         let host = rmhd_recover::<f64, 3>(&eos, &cons, &SpatialMetric::flat(), RMHD_ITERS);
 
         // kernel: rmhd_recover traced at S = Gv, compiled (bakes RMHD_ITERS).
@@ -450,24 +441,24 @@ fn rmhd_c2p_kernel_equals_host_at_baked_count() {
 
         let ctx = format!("(rho={rho}, v={v:?}, p={p}, B={b:?})");
         assert!(
-            agree(kr[0], host.hydro.rho),
+            agree(kr[0], host.hydro().rho()),
             "{ctx} rho carrier divergence: kernel {} vs host {}",
             kr[0],
-            host.hydro.rho
+            host.hydro().rho()
         );
         assert!(
-            agree(kp[0], host.hydro.pre),
+            agree(kp[0], host.hydro().pre()),
             "{ctx} pre carrier divergence: kernel {} vs host {}",
             kp[0],
-            host.hydro.pre
+            host.hydro().pre()
         );
         let kv = [kv0[0], kv1[0], kv2[0]];
         for k in 0..3 {
             assert!(
-                agree(kv[k], host.hydro.vel[k]),
+                agree(kv[k], host.hydro().vel()[k]),
                 "{ctx} vel[{k}] carrier divergence: kernel {} vs host {}",
                 kv[k],
-                host.hydro.vel[k]
+                host.hydro().vel()[k]
             );
         }
     }
@@ -495,11 +486,7 @@ fn flux_kernel_equals_host_hlle_on_uniform_field() {
     ];
 
     for &(rho, v, p) in cases {
-        let prim = Prim {
-            rho,
-            vel: Tensor::new([v]),
-            pre: p,
-        };
+        let prim = Prim::adiabatic(Density(rho), Tensor::new([v]), Pressure(p));
         let (den, v0, pre) = (vec![rho; n], vec![v; n], vec![p; n]);
 
         // adiabatic (Newtonian Euler)
@@ -511,22 +498,22 @@ fn flux_kernel_equals_host_hlle_on_uniform_field() {
         let ctx = format!("adiabatic flux (rho={rho}, v={v}, p={p})");
         for i in 2..6 {
             assert!(
-                agree(fden[i], host.den),
+                agree(fden[i], host.den()),
                 "{ctx} F_den: kernel {} vs host {}",
                 fden[i],
-                host.den
+                host.den()
             );
             assert!(
-                agree(fmom[i], host.mom[0]),
+                agree(fmom[i], host.mom()[0]),
                 "{ctx} F_mom: kernel {} vs host {}",
                 fmom[i],
-                host.mom[0]
+                host.mom()[0]
             );
             assert!(
-                agree(fnrg[i], host.nrg),
+                agree(fnrg[i], host.nrg()),
                 "{ctx} F_nrg: kernel {} vs host {}",
                 fnrg[i],
-                host.nrg
+                host.nrg()
             );
         }
 
@@ -539,22 +526,22 @@ fn flux_kernel_equals_host_hlle_on_uniform_field() {
         let ctx = format!("rhd flux (rho={rho}, v={v}, p={p})");
         for i in 2..6 {
             assert!(
-                agree(fden[i], host.den),
+                agree(fden[i], host.den()),
                 "{ctx} F_den: kernel {} vs host {}",
                 fden[i],
-                host.den
+                host.den()
             );
             assert!(
-                agree(fmom[i], host.mom[0]),
+                agree(fmom[i], host.mom()[0]),
                 "{ctx} F_mom: kernel {} vs host {}",
                 fmom[i],
-                host.mom[0]
+                host.mom()[0]
             );
             assert!(
-                agree(fnrg[i], host.nrg),
+                agree(fnrg[i], host.nrg()),
                 "{ctx} F_nrg: kernel {} vs host {}",
                 fnrg[i],
-                host.nrg
+                host.nrg()
             );
         }
     }
@@ -580,11 +567,7 @@ fn wave_speed_map_kernel_equals_host() {
 
     for &(rho, v, p) in cases {
         // host prim mirrors the kernel's internal Prim<.,3> (v[0] gridded, v[1..2] zero).
-        let prim = Prim::<f64, 3> {
-            rho,
-            vel: Tensor::new([v, 0.0, 0.0]),
-            pre: p,
-        };
+        let prim = Prim::<f64, 3>::adiabatic(Density(rho), Tensor::new([v, 0.0, 0.0]), Pressure(p));
         let (rho_b, v0_b, pre_b) = (vec![rho; n], vec![v; n], vec![p; n]);
 
         // adiabatic / Newtonian map (iso_wave_speed_map = the Newtonian CFL map).

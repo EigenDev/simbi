@@ -10,8 +10,8 @@ use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
-use symbi_hydro::quantity::{Density, SoundSpeedSquared, VelocitySquared};
 use symbi_hydro::eos::Eos as _;
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure, SoundSpeedSquared, VelocitySquared};
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_ir::{KernelWrite, KernelWrites};
 
@@ -33,31 +33,26 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
 
         // the single-source physics, instantiated at the tracing carrier.
         let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
-        let cons = Cons::<Gv, D> {
-            chi: Default::default(),
-            den,
-            mom: Tensor::new(mom_arr),
-            nrg,
-        };
+        let cons = Cons::<Gv, D>::adiabatic(Density(den), Tensor::new(mom_arr), EnergyDensity(nrg));
         let prim: Prim<Gv, D> = cons.to_primitive(&IdealGas { gamma });
 
         // decompose the recovered primitive into field writes.
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
             FieldRef::PrimRho,
-            prim.rho.node(),
+            prim.rho().node(),
         )];
         for k in 0..D {
             writes.push(KernelWrite::new(
                 format!("prim_vel_{k}"),
                 FieldRef::PrimVel(k as u8),
-                prim.vel[k].node(),
+                prim.vel()[k].node(),
             ));
         }
         writes.push(KernelWrite::new(
             "prim_pre",
             FieldRef::PrimPre,
-            prim.pre.node(),
+            prim.pre().node(),
         ));
 
         writes
@@ -103,24 +98,24 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
             VelocitySquared(v2),
             SoundSpeedSquared(cs2),
         ); // cs unused: recovery consumes the prescribed cs2
-        let prim = Prim { rho, vel, pre };
+        let prim = Prim::adiabatic(Density(rho), vel, Pressure(pre));
 
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
             FieldRef::PrimRho,
-            prim.rho.node(),
+            prim.rho().node(),
         )];
         for k in 0..D {
             writes.push(KernelWrite::new(
                 format!("prim_vel_{k}"),
                 FieldRef::PrimVel(k as u8),
-                prim.vel[k].node(),
+                prim.vel()[k].node(),
             ));
         }
         writes.push(KernelWrite::new(
             "prim_pre",
             FieldRef::PrimPre,
-            prim.pre.node(),
+            prim.pre().node(),
         ));
 
         writes
@@ -166,12 +161,7 @@ pub fn rhd_c2p_gv<const D: usize>(max_iters: usize, eos_arm: EosArm) -> (GvKerne
 
         // the single-source physics, instantiated at the tracing carrier.
         let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
-        let cons = Cons::<Gv, D> {
-            chi: Default::default(),
-            den,
-            mom: Tensor::new(mom_arr),
-            nrg,
-        };
+        let cons = Cons::<Gv, D>::adiabatic(Density(den), Tensor::new(mom_arr), EnergyDensity(nrg));
         // flat-frame spatial metric = identity (constant-folds to the euclidean norm, so the
         // traced/compiled kernel is bit-identical). the GR metric threads in here. the newton
         // is eos-generic — the closure arm selects gamma-law or taub-mathews at trace time
@@ -186,19 +176,19 @@ pub fn rhd_c2p_gv<const D: usize>(max_iters: usize, eos_arm: EosArm) -> (GvKerne
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
             FieldRef::PrimRho,
-            prim.rho.node(),
+            prim.rho().node(),
         )];
         for k in 0..D {
             writes.push(KernelWrite::new(
                 format!("prim_vel_{k}"),
                 FieldRef::PrimVel(k as u8),
-                prim.vel[k].node(),
+                prim.vel()[k].node(),
             ));
         }
         writes.push(KernelWrite::new(
             "prim_pre",
             FieldRef::PrimPre,
-            prim.pre.node(),
+            prim.pre().node(),
         ));
 
         writes
@@ -289,30 +279,25 @@ where
         let nrg = nrg * inv_dens;
         let mom_t = Tensor::new(mom).scale(inv_dens);
         let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
-        let cons = Cons::<Gv, D> {
-            chi: Default::default(),
-            den,
-            mom: mom_t,
-            nrg: tau,
-        };
+        let cons = Cons::<Gv, D>::adiabatic(Density(den), mom_t, EnergyDensity(tau));
         let prim = rhd_recover(&IdealGas { gamma }, &cons, &metric, max_iters);
 
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
             FieldRef::PrimRho,
-            prim.rho.node(),
+            prim.rho().node(),
         )];
         for k in 0..D {
             writes.push(KernelWrite::new(
                 format!("prim_vel_{k}"),
                 FieldRef::PrimVel(k as u8),
-                prim.vel[k].node(),
+                prim.vel()[k].node(),
             ));
         }
         writes.push(KernelWrite::new(
             "prim_pre",
             FieldRef::PrimPre,
-            prim.pre.node(),
+            prim.pre().node(),
         ));
         writes
     })
@@ -341,15 +326,10 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, KernelWrites) {
         let gamma = cx.scalar("gamma");
 
         // the single-source physics at the tracing carrier (3-component RMHD state).
-        let cons = MhdCons::<Gv, 3> {
-            hydro: Cons {
-                chi: Default::default(),
-                den,
-                mom: Tensor::new(mom),
-                nrg,
-            },
-            mag: Tensor::new(mag),
-        };
+        let cons = MhdCons::<Gv, 3>::new(
+            Cons::adiabatic(Density(den), Tensor::new(mom), EnergyDensity(nrg)),
+            Tensor::new(mag),
+        );
         let prim = rmhd_recover(
             &IdealGas { gamma },
             &cons,
@@ -360,19 +340,19 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, KernelWrites) {
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
             FieldRef::PrimRho,
-            prim.rho.node(),
+            prim.rho().node(),
         )];
         for k in 0..3 {
             writes.push(KernelWrite::new(
                 format!("prim_vel_{k}"),
                 FieldRef::PrimVel(k as u8),
-                prim.vel[k].node(),
+                prim.vel()[k].node(),
             ));
         }
         writes.push(KernelWrite::new(
             "prim_pre",
             FieldRef::PrimPre,
-            prim.pre.node(),
+            prim.pre().node(),
         ));
 
         writes
@@ -442,33 +422,28 @@ pub fn rmhd_c2p_gr_gv(
 
         let mom_t = Tensor::new(mom);
         let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
-        let cons = MhdCons::<Gv, 3> {
-            hydro: Cons {
-                chi: Default::default(),
-                den,
-                mom: mom_t,
-                nrg: tau,
-            },
-            mag: Tensor::new(mag),
-        };
+        let cons = MhdCons::<Gv, 3>::new(
+            Cons::adiabatic(Density(den), mom_t, EnergyDensity(tau)),
+            Tensor::new(mag),
+        );
         let prim = rmhd_recover(&IdealGas { gamma: gamma_eos }, &cons, &metric, max_iters);
 
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
             FieldRef::PrimRho,
-            prim.rho.node(),
+            prim.rho().node(),
         )];
         for k in 0..3 {
             writes.push(KernelWrite::new(
                 format!("prim_vel_{k}"),
                 FieldRef::PrimVel(k as u8),
-                prim.vel[k].node(),
+                prim.vel()[k].node(),
             ));
         }
         writes.push(KernelWrite::new(
             "prim_pre",
             FieldRef::PrimPre,
-            prim.pre.node(),
+            prim.pre().node(),
         ));
 
         writes
@@ -500,33 +475,28 @@ pub fn nmhd_c2p_gv() -> (GvKernel, KernelWrites) {
             std::array::from_fn(|k| cx.field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
         let gamma = cx.scalar("gamma");
 
-        let cons = MhdCons::<Gv, 3> {
-            hydro: Cons {
-                chi: Default::default(),
-                den,
-                mom: Tensor::new(mom),
-                nrg,
-            },
-            mag: Tensor::new(mag),
-        };
+        let cons = MhdCons::<Gv, 3>::new(
+            Cons::adiabatic(Density(den), Tensor::new(mom), EnergyDensity(nrg)),
+            Tensor::new(mag),
+        );
         let prim = nmhd_recover(&IdealGas { gamma }, &cons);
 
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
             FieldRef::PrimRho,
-            prim.rho.node(),
+            prim.rho().node(),
         )];
         for k in 0..3 {
             writes.push(KernelWrite::new(
                 format!("prim_vel_{k}"),
                 FieldRef::PrimVel(k as u8),
-                prim.vel[k].node(),
+                prim.vel()[k].node(),
             ));
         }
         writes.push(KernelWrite::new(
             "prim_pre",
             FieldRef::PrimPre,
-            prim.pre.node(),
+            prim.pre().node(),
         ));
 
         writes
@@ -552,15 +522,10 @@ pub fn imhd_c2p_gv() -> (GvKernel, KernelWrites) {
         let mag: [Gv; 3] =
             std::array::from_fn(|k| cx.field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
 
-        let cons = IsoMhdCons::<Gv, 3> {
-            hydro: ConsG {
-                chi: Default::default(),
-                den,
-                mom: Tensor::new(mom),
-                nrg: Zero::default(),
-            },
-            mag: Tensor::new(mag),
-        };
+        let cons = IsoMhdCons::<Gv, 3>::new(
+            ConsG::isothermal(Density(den), Tensor::new(mom)),
+            Tensor::new(mag),
+        );
         // imhd_recover is pure kinematics, so the EOS argument is inert; Gv::zero keeps `cs`
         // out of the manifest.
         let prim = imhd_recover(&Isothermal { cs: Gv::ZERO }, &cons);
@@ -568,13 +533,13 @@ pub fn imhd_c2p_gv() -> (GvKernel, KernelWrites) {
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
             FieldRef::PrimRho,
-            prim.rho.node(),
+            prim.rho().node(),
         )];
         for k in 0..3 {
             writes.push(KernelWrite::new(
                 format!("prim_vel_{k}"),
                 FieldRef::PrimVel(k as u8),
-                prim.vel[k].node(),
+                prim.vel()[k].node(),
             ));
         }
         // the writes stop at vel — the isothermal closure sets the pressure from rho.

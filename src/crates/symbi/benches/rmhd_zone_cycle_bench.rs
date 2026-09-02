@@ -16,6 +16,7 @@
 
 use std::f64::consts::PI;
 use std::time::Instant;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet3D;
 use symbi::sim::evolve::evolve_with_callback;
@@ -61,14 +62,10 @@ fn make_sim(n: usize) -> Sim {
             let vy = V0 * (2.0 * PI * x).sin();
             let bx_c = -B0 * (2.0 * PI * y).sin();
             let by_c = B0 * (4.0 * PI * x).sin();
-            MhdPrim {
-                hydro: Prim {
-                    rho: rho0,
-                    vel: Tensor::new([vx, vy, 0.0]),
-                    pre: p0,
-                },
-                mag: Tensor::new([bx_c, by_c, 0.0]),
-            }
+            MhdPrim::new(
+                Prim::adiabatic(Density(rho0), Tensor::new([vx, vy, 0.0]), Pressure(p0)),
+                Tensor::new([bx_c, by_c, 0.0]),
+            )
         })
         .seed_faces(|axis, [x, y, _z]| match axis {
             0 => -B0 * (2.0 * PI * y).sin(),

@@ -21,6 +21,7 @@ use symbi_geometry::{Cylindrical, Spherical};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_substrate::regimes::mhd_substrate::{apply_resistive_emf, ct_curl};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -162,14 +163,10 @@ fn assert_adjoint(fs: &Store, chart: Chart, label: &str) {
 }
 
 fn still_gas() -> MhdPrim<f64, 3> {
-    MhdPrim {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([0.0, 0.0, 0.0]),
-    }
+    MhdPrim::new(
+        Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+        Tensor::new([0.0, 0.0, 0.0]),
+    )
 }
 
 #[test]

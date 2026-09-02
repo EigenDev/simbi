@@ -20,6 +20,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
@@ -56,14 +57,7 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
             B0 * (4.0 * PI * x).sin(),
             BZ0 * (2.0 * PI * x).cos(),
         ]);
-        MhdPrim {
-            hydro: Prim {
-                rho: rho0,
-                vel,
-                pre: p0,
-            },
-            mag,
-        }
+        MhdPrim::new(Prim::adiabatic(Density(rho0), vel, Pressure(p0)), mag)
     })
     // face-normal B: bface[0] = -B0*sin(2*pi*y) (uses the face's y), bface[1] = B0*sin(4*pi*x).
     .seed_faces(|axis, x| match axis {

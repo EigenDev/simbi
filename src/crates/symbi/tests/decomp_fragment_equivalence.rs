@@ -24,6 +24,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, Bond, BondMaterial, FragmentPhysics, SurfaceSpec};
 use symbi_xpu::{CpuSpace, HostMemory, with_device};
@@ -91,11 +92,7 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
         .timestepping(ts)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([WIND, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([WIND, 0.0]), Pressure(1.0)))
         .build();
     let sim = attach_fragments(sim);
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);

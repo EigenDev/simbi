@@ -23,6 +23,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -43,17 +44,13 @@ fn fill(sim: &Sim) {
         let x = sim.geom.centroid(c);
         let in_blob = (0..3).all(|ax| x[ax].abs() < 1.0 / N as f64);
         let pre = if fine && in_blob { 200.0 } else { 1.0 };
-        let prim = Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre,
-        };
+        let prim = Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(pre));
         let cons = Regime::to_conserved(&sim.physics.regime, &sim.physics.eos, &prim);
-        sim.fields.cons.den.view_mut().set(c, cons.den);
+        sim.fields.cons.den.view_mut().set(c, cons.den());
         for dd in 0..3 {
-            sim.fields.cons.mom[dd].view_mut().set(c, cons.mom[dd]);
+            sim.fields.cons.mom[dd].view_mut().set(c, cons.mom()[dd]);
         }
-        cnrg.view_mut().set(c, cons.nrg);
+        cnrg.view_mut().set(c, cons.nrg());
     }
 }
 
@@ -69,10 +66,8 @@ fn root_step_respects_the_fine_level_cfl() {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|_x: [f64; 3]| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 1.0,
+        .set_initial(|_x: [f64; 3]| {
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(1.0))
         })
         .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
@@ -112,11 +107,7 @@ fn inactive_covered_core_does_not_constrain_the_composite_cfl() {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::zeros(),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
         .build();
     let kernels = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
     let mut hierarchy = Hierarchy::with_refinement(

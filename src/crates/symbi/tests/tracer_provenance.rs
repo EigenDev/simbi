@@ -15,6 +15,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
 use symbi_sim::tracers::{body_accretion_reservoir, is_accretion_reservoir, seed_mass_weighted};
@@ -37,11 +38,7 @@ fn accretion_reservoir_matches_the_sink_ledger() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 0.1,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(0.1)))
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
             0,

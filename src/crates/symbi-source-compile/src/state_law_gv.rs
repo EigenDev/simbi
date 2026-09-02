@@ -18,6 +18,7 @@ use symbi_algebra::algebra::Numeric;
 use symbi_geometry::metric::{KerrKSCartesian, Metric, SchwarzschildKSCartesian};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::rhd::{Rhd, RhdGr};
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
@@ -55,9 +56,9 @@ fn curved<'t, const D: usize, M: Metric<Gv<'t>, D>>(
     // the sponge reference enters the valencia door with its frame stated:
     // on a curved background the stored velocity components are v^i.
     let cons = regime.to_conserved(eos, &Valencia(*prim));
-    let mut out = vec![cons.0.den];
-    out.extend((0..D).map(|k| cons.0.mom[k]));
-    out.push(cons.0.nrg);
+    let mut out = vec![cons.0.den()];
+    out.extend((0..D).map(|k| cons.0.mom()[k]));
+    out.push(cons.0.nrg());
     out
 }
 
@@ -74,9 +75,9 @@ fn flat<'t, const D: usize>(
     } else {
         Newtonian.to_conserved(&eos, &prim)
     };
-    let mut out = vec![cons.den];
-    out.extend((0..D).map(|k| cons.mom[k]));
-    out.push(cons.nrg);
+    let mut out = vec![cons.den()];
+    out.extend((0..D).map(|k| cons.mom()[k]));
+    out.push(cons.nrg());
     out
 }
 
@@ -88,13 +89,13 @@ fn inputs<'t, const D: usize>(
     pre: Gv<'t>,
 ) -> (Prim<Gv<'t>, D>, IdealGas<Gv<'t>>) {
     (
-        Prim::<Gv, D> {
-            rho,
-            vel: Tensor::new(std::array::from_fn(|k| {
+        Prim::<Gv, D>::adiabatic(
+            Density(rho),
+            Tensor::new(std::array::from_fn(|k| {
                 vel.get(k).copied().unwrap_or(Gv::ZERO)
             })),
-            pre,
-        },
+            Pressure(pre),
+        ),
         IdealGas {
             gamma: Gv::from_f64(law.gamma),
         },

@@ -23,6 +23,7 @@ use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ib::{Body, BodyCollection, SurfaceSpec, apply_body_deltas};
@@ -49,11 +50,7 @@ fn build_twoway<S: ExecutionSpace, Mem: MemorySpace>() -> TwSim<S, Mem> {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(
             BodyCollection::new().add(
@@ -150,10 +147,8 @@ fn build_iso<S: ExecutionSpace, Mem: MemorySpace>() -> IsoSim<S, Mem> {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| PrimG::<f64, 2, IsoModel> {
-            rho: 1.5,
-            vel: Tensor::new([0.2, -0.1]),
-            pre: Default::default(),
+        .set_initial(|_| {
+            PrimG::<f64, 2, IsoModel>::isothermal(Density(1.5), Tensor::new([0.2, -0.1]))
         })
         .build()
         .with_bodies(

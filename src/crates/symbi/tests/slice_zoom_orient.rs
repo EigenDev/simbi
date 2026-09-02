@@ -16,6 +16,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -33,11 +34,7 @@ fn build() -> Sim {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(1.0)))
         .build();
     // exact integer index codes (f32-representable): rho = 10000 ix + 100 iy + iz + 1,
     // so every sample's source cell is decodable exactly.

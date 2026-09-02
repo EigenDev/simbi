@@ -18,9 +18,11 @@ use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
 use symbi_algebra::{Domain, Tensor};
 use symbi_geometry::Cartesian;
+use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -70,11 +72,7 @@ fn adiabatic_2d_runs_and_stays_xy_symmetric() {
         .set_initial(|x| {
             let r2 = (x[0] - 0.5).powi(2) + (x[1] - 0.5).powi(2);
             let pre = 1.0 + 3.0 * (-r2 / 0.01).exp();
-            Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0]),
-                pre,
-            }
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(pre))
         })
         .build();
 
@@ -156,11 +154,7 @@ fn adiabatic_3d_runs_and_stays_symmetric() {
         .set_initial(|x| {
             let r2: f64 = (0..3).map(|kk| (x[kk] - 0.5).powi(2)).sum();
             let pre = 1.0 + 3.0 * (-r2 / 0.02).exp();
-            Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0; 3]),
-                pre,
-            }
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(pre))
         })
         .build();
 
@@ -215,11 +209,10 @@ fn iso_3d_runs_and_stays_symmetric() {
         .expect("3D iso sim construction failed")
         .set_initial(|x| {
             let r2: f64 = (0..3).map(|kk| (x[kk] - 0.5).powi(2)).sum();
-            PrimG {
-                rho: 1.0 + 0.5 * (-r2 / 0.02).exp(),
-                vel: Tensor::new([0.0; 3]),
-                pre: Default::default(),
-            }
+            PrimG::<f64, 3, IsoModel>::isothermal(
+                Density(1.0 + 0.5 * (-r2 / 0.02).exp()),
+                Tensor::new([0.0; 3]),
+            )
         })
         .build();
 
@@ -291,11 +284,7 @@ fn rhd_3d_runs_and_stays_symmetric() {
         .set_initial(|x| {
             let r2: f64 = (0..3).map(|kk| (x[kk] - 0.5).powi(2)).sum();
             let pre = 1.0 + 2.0 * (-r2 / 0.02).exp();
-            Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0; 3]),
-                pre,
-            }
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(pre))
         })
         .build();
 
@@ -357,11 +346,7 @@ fn rhd_2d_runs_and_stays_xy_symmetric() {
         .set_initial(|x| {
             let r2 = (x[0] - 0.5).powi(2) + (x[1] - 0.5).powi(2);
             let pre = 1.0 + 2.0 * (-r2 / 0.01).exp();
-            Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0]),
-                pre,
-            }
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(pre))
         })
         .build();
 

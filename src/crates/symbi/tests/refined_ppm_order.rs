@@ -26,6 +26,7 @@ use symbi_discretize::Recon;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -49,10 +50,8 @@ fn rho_exact_avg(x: f64, h: f64) -> f64 {
 /// composite L1 density error after one period at root resolution `n`.
 fn l1_refined(n: usize, recon: Recon, prolong: ProlongOrder, ng: usize, cfl: f64) -> f64 {
     let dx = 1.0 / n as f64;
-    let ic_root = move |[x]: [f64; 1]| Prim {
-        rho: rho_exact_avg(x, dx),
-        vel: Tensor::new([V]),
-        pre: P,
+    let ic_root = move |[x]: [f64; 1]| {
+        Prim::adiabatic(Density(rho_exact_avg(x, dx)), Tensor::new([V]), Pressure(P))
     };
     let root = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([n])
@@ -79,10 +78,12 @@ fn l1_refined(n: usize, recon: Recon, prolong: ProlongOrder, ng: usize, cfl: f64
     let mut hier = Hierarchy::with_refinement(root, ck, &regions, prolong, kern)
         .expect("hierarchy construction failed");
     let dxf = dx / RATIO as f64;
-    hier.levels[1].state.seed_cells(move |[x]: [f64; 1]| Prim {
-        rho: rho_exact_avg(x, dxf),
-        vel: Tensor::new([V]),
-        pre: P,
+    hier.levels[1].state.seed_cells(move |[x]: [f64; 1]| {
+        Prim::adiabatic(
+            Density(rho_exact_avg(x, dxf)),
+            Tensor::new([V]),
+            Pressure(P),
+        )
     });
     hier.evolve(1.0).expect("refined evolve failed");
 

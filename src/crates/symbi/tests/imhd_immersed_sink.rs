@@ -17,6 +17,7 @@ use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Isothermal;
 use symbi_hydro::isothermal_mhd::IsothermalMhd;
 use symbi_hydro::mhd_state::MhdPrimG;
+use symbi_hydro::quantity::Density;
 use symbi_hydro::state::PrimG;
 use symbi_ib::sdf::SdfExpr;
 use symbi_ib::{Body, BodyCollection, SurfaceSpec};
@@ -39,13 +40,11 @@ fn make_sim(b0: f64) -> Sim {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("iso-mhd sim construction failed")
-        .set_initial(move |_| MhdPrimG::<f64, 3, IsoModel> {
-            hydro: PrimG {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0, 0.0]),
-                pre: Default::default(),
-            },
-            mag: Tensor::new([b0, 0.0, 0.0]),
+        .set_initial(move |_| {
+            MhdPrimG::<f64, 3, IsoModel>::new(
+                PrimG::isothermal(Density(1.0), Tensor::new([0.0, 0.0, 0.0])),
+                Tensor::new([b0, 0.0, 0.0]),
+            )
         })
         .seed_faces(move |axis, _| if axis == 0 { b0 } else { 0.0 })
         .build()

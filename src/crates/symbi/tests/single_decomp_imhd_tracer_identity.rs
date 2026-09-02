@@ -30,13 +30,11 @@ fn make() -> (Sim, Kern) {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("isothermal mhd simulation construction")
-        .set_initial(|_| MhdPrimG::<f64, 3, IsoModel> {
-            hydro: PrimG {
-                rho: 1.0,
-                vel: Tensor::new([0.4, 0.0, 0.0]),
-                pre: Default::default(),
-            },
-            mag: Tensor::new([0.2, 0.0, 0.1]),
+        .set_initial(|_| {
+            MhdPrimG::<f64, 3, IsoModel>::new(
+                PrimG::isothermal(Density(1.0), Tensor::new([0.4, 0.0, 0.0])),
+                Tensor::new([0.2, 0.0, 0.1]),
+            )
         })
         .seed_faces_uniform([0.2, 0.0])
         .build();

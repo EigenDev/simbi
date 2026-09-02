@@ -44,6 +44,7 @@ use symbi_hydro::isothermal_mhd::IsothermalMhd;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::{Cons, Prim};
@@ -167,17 +168,17 @@ fn newtonian_shear_tangent_to_cf_faces_stays_bounded() {
         |s| {
             let cnrg = s.fields.cons.nrg_field().unwrap();
             for c in s.geom.interior.iter() {
-                let prim = Prim {
-                    rho: 1.0,
-                    vel: Tensor::new([vx(s.geom.centroid(c)[1]), 0.0, 0.0]),
-                    pre: CS * CS / GAMMA,
-                };
+                let prim = Prim::adiabatic(
+                    Density(1.0),
+                    Tensor::new([vx(s.geom.centroid(c)[1]), 0.0, 0.0]),
+                    Pressure(CS * CS / GAMMA),
+                );
                 let cons = Regime::to_conserved(&s.physics.regime, &s.physics.eos, &prim);
-                s.fields.cons.den.view_mut().set(c, cons.den);
+                s.fields.cons.den.view_mut().set(c, cons.den());
                 for dd in 0..3 {
-                    s.fields.cons.mom[dd].view_mut().set(c, cons.mom[dd]);
+                    s.fields.cons.mom[dd].view_mut().set(c, cons.mom()[dd]);
                 }
-                cnrg.view_mut().set(c, cons.nrg);
+                cnrg.view_mut().set(c, cons.nrg());
             }
         },
     );
@@ -224,23 +225,18 @@ fn nmhd_shear_tangent_to_cf_faces_stays_bounded() {
         |s| {
             fill_uniform_bx(s, b0);
             for c in s.geom.interior.iter() {
-                let prim = MhdPrim {
-                    hydro: Prim {
-                        rho: 1.0,
-                        vel: Tensor::new([vx(s.geom.centroid(c)[1]), 0.0, 0.0]),
-                        pre: CS * CS / GAMMA,
-                    },
-                    mag: Tensor::new([b0, 0.0, 0.0]),
-                };
+                let prim = MhdPrim::new(
+                    Prim::adiabatic(
+                        Density(1.0),
+                        Tensor::new([vx(s.geom.centroid(c)[1]), 0.0, 0.0]),
+                        Pressure(CS * CS / GAMMA),
+                    ),
+                    Tensor::new([b0, 0.0, 0.0]),
+                );
                 let cons = s.physics.regime.to_conserved(&s.physics.eos, &prim);
                 s.fields.cons.scatter(
                     c,
-                    Cons {
-                        chi: Default::default(),
-                        den: cons.den,
-                        mom: cons.mom,
-                        nrg: cons.nrg,
-                    },
+                    Cons::adiabatic(Density(cons.den()), *cons.mom(), EnergyDensity(cons.nrg())),
                 );
             }
         },
@@ -294,23 +290,18 @@ fn rmhd_shear_tangent_to_cf_faces_stays_bounded() {
             fill_uniform_bx(s, b0);
             for c in s.geom.interior.iter() {
                 let y = s.geom.centroid(c)[1];
-                let prim = MhdPrim {
-                    hydro: Prim {
-                        rho: 1.0,
-                        vel: Tensor::new([v0 * (TAU * y).sin(), 0.0, 0.0]),
-                        pre: p0,
-                    },
-                    mag: Tensor::new([b0, 0.0, 0.0]),
-                };
+                let prim = MhdPrim::new(
+                    Prim::adiabatic(
+                        Density(1.0),
+                        Tensor::new([v0 * (TAU * y).sin(), 0.0, 0.0]),
+                        Pressure(p0),
+                    ),
+                    Tensor::new([b0, 0.0, 0.0]),
+                );
                 let cons = s.physics.regime.to_conserved(&s.physics.eos, &prim);
                 s.fields.cons.scatter(
                     c,
-                    Cons {
-                        chi: Default::default(),
-                        den: cons.den,
-                        mom: cons.mom,
-                        nrg: cons.nrg,
-                    },
+                    Cons::adiabatic(Density(cons.den()), *cons.mom(), EnergyDensity(cons.nrg())),
                 );
             }
         },

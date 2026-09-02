@@ -24,6 +24,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::sdf::SdfExpr;
 use symbi_ib::{Body, BodyCollection, SurfaceSpec};
@@ -46,14 +47,14 @@ type Kern = NewtonianMhdSubstrateKernelSet<HostMemory, f64, 2>;
 fn ic(x: f64, y: f64) -> MhdPrim<f64, 3> {
     let r2 = (x - 0.75).powi(2) + (y - 0.5).powi(2);
     let dip = 0.9 * (-(r2 / 0.01)).exp();
-    MhdPrim {
-        hydro: Prim {
-            rho: 1.0 - dip,
-            vel: Tensor::new([V_INF, 0.0, 0.0]),
-            pre: 1.0,
-        },
-        mag: Tensor::new(B0),
-    }
+    MhdPrim::new(
+        Prim::adiabatic(
+            Density(1.0 - dip),
+            Tensor::new([V_INF, 0.0, 0.0]),
+            Pressure(1.0),
+        ),
+        Tensor::new(B0),
+    )
 }
 
 fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {

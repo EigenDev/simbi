@@ -23,6 +23,7 @@ mod afterglow;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::prelude::*;
 use symbi::sim::decomp::{Partition, Topology};
@@ -1700,9 +1701,7 @@ fn boundaries_nd<const D: usize>(bcs: &[BoundaryType]) -> Boundaries<D> {
 /// more than one tile. an uncut periodic axis wraps its single tile onto itself, which spans
 /// the whole domain, so it stays an ordinary periodic boundary.
 fn axis_wraps<const D: usize>(phys: &Boundaries<D>, counts: [usize; D], ax: usize) -> bool {
-    phys.lo(ax) == BoundaryType::Periodic
-        && phys.hi(ax) == BoundaryType::Periodic
-        && counts[ax] > 1
+    phys.lo(ax) == BoundaryType::Periodic && phys.hi(ax) == BoundaryType::Periodic && counts[ax] > 1
 }
 
 /// the boundaries one tile of a decomposed grid carries. a face between two tiles is a cut; a
@@ -1749,11 +1748,13 @@ fn wrap_capability<const D: usize>(
         return Ok(());
     }
     if wb_reconstruction && has_bodies {
-        return Err("a periodic axis with an immersed body cannot use the balance-aware \
+        return Err(
+            "a periodic axis with an immersed body cannot use the balance-aware \
                     reconstruction: the periodic images sit at different body potentials, so \
                     the isentrope carried across the seam is a real state change. use outflow \
                     or reflect walls, or run the plain reconstruction."
-            .to_string());
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -4277,11 +4278,7 @@ macro_rules! build_and_run_hydro {
                 let row = &prims[lin];
                 // the generator row is (rho, v_0 .. v_{DOF-1}, pre) — DOF velocities, so the
                 // pressure sits at index 1 + DOF (== 1 + $d except for the swirl lift).
-                Prim {
-                    rho: row[0],
-                    vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                    pre: row[1 + $dof],
-                }
+                Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $dof]))
             })
             .build();
 
@@ -4514,16 +4511,16 @@ macro_rules! build_and_run_hydro {
                     let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
                     let d = expression.eval(at(0), at(1), at(2), 0.0);
                     let mut p = p;
-                    p.rho += d[0];
+                    p = p.with_rho(Density(p.rho() + d[0]));
                     for ax in 0..$dof {
-                        p.vel[ax] += d[1 + ax];
+                        p.vel_mut()[ax] += d[1 + ax];
                     }
                     // an energy-free regime's slot discards whatever it is handed, so the
                     // pressure delta needs no branch: it is a no-op there by construction.
                     {
                         use symbi_hydro::energy::EnergySlot;
                         let dp = d.get(1 + $dof).copied().unwrap_or(0.0);
-                        p.pre = p.pre.add(EnergySlot::from_scalar(dp));
+                        p = p.with_pre(p.pre().add(EnergySlot::from_scalar(dp)));
                     }
                     p
                 });
@@ -4738,10 +4735,12 @@ where
     // refined patch reaching a cut periodic seam would leave those fine ghosts unfilled.
     let phys = boundaries_nd::<D>(&cfg.boundaries);
     if (0..D).any(|ax| wrap_topology(&phys, counts).is_periodic(ax)) {
-        return Err("a refined decomposed run cannot close a periodic axis yet: the fine-level \
+        return Err(
+            "a refined decomposed run cannot close a periodic axis yet: the fine-level \
                     halo schedule carries no wrap legs. run it on one device, or drop the \
                     refinement."
-            .to_string());
+                .to_string(),
+        );
     }
 
     let ntiles = tiles.len();
@@ -4917,11 +4916,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                             stride *= n[ax];
                         }
                         let row = &prims[lin];
-                        Prim {
-                            rho: row[0],
-                            vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                            pre: row[1 + $d],
-                        }
+                        Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
                     })
                     .build();
                 // the tile set carries the same non-ideal + excision knobs as the
@@ -5064,11 +5059,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         stride *= n[ax];
                     }
                     let row = &prims[lin];
-                    Prim {
-                        rho: row[0],
-                        vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                        pre: row[1 + $d],
-                    }
+                    Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
                 })
                 .build();
             let gsub = groot
@@ -5196,11 +5187,7 @@ macro_rules! build_and_run_hydro_decomposed {
                             stride *= n[ax];
                         }
                         let row = &prims[lin];
-                        Prim {
-                            rho: row[0],
-                            vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                            pre: row[1 + $dof],
-                        }
+                        Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $dof]))
                     })
                     .build();
                 // seed the passive scalar (dye) on this tile: cons.chi = rho*chi, prim.chi = chi
@@ -5315,11 +5302,7 @@ macro_rules! build_and_run_hydro_decomposed {
                     stride *= n[ax];
                 }
                 let row = &prims[lin];
-                Prim {
-                    rho: row[0],
-                    vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                    pre: row[1 + $dof],
-                }
+                Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $dof]))
             })
             .build();
         // the gather copies each tile's dye into this output view (data_fields includes chi), so
@@ -5701,14 +5684,14 @@ macro_rules! build_and_run_mhd {
                         bufs[k][lin]
                     }
                 });
-                MhdPrim {
-                    hydro: Prim {
-                        rho: row[0],
-                        vel: Tensor::new([row[1], row[2], row[3]]),
-                        pre: row[4],
-                    },
-                    mag: Tensor::new(mag_arr),
-                }
+                MhdPrim::new(
+                    Prim::adiabatic(
+                        Density(row[0]),
+                        Tensor::new([row[1], row[2], row[3]]),
+                        Pressure(row[4]),
+                    ),
+                    Tensor::new(mag_arr),
+                )
             })
             .seed_faces_indexed(&bufs[0..$d])
             .build();
@@ -5790,8 +5773,8 @@ macro_rules! build_and_run_mhd {
                 .with_viscosity(cfg.viscosity)
                 .with_resistivity(cfg.resistivity);
             for json in &cfg.driven_exprs {
-                let bcfg =
-                    symbi_source_compile::SourceConfig::from_json(json).expect("fine-level boundary parse");
+                let bcfg = symbi_source_compile::SourceConfig::from_json(json)
+                    .expect("fine-level boundary parse");
                 let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                     &bcfg,
                     <$regime_ty as Regime<f64, $d>>::SPEC,
@@ -5859,14 +5842,10 @@ macro_rules! build_and_run_imhd {
                         bufs[k][lin]
                     }
                 });
-                MhdPrimG::<f64, 3, IsoModel> {
-                    hydro: PrimG {
-                        rho: row[0],
-                        vel: Tensor::new([row[1], row[2], row[3]]),
-                        pre: Default::default(),
-                    },
-                    mag: Tensor::new(mag_arr),
-                }
+                MhdPrimG::<f64, 3, IsoModel>::new(
+                    PrimG::isothermal(Density(row[0]), Tensor::new([row[1], row[2], row[3]])),
+                    Tensor::new(mag_arr),
+                )
             })
             .seed_faces_indexed(&bufs[0..$d])
             .build();
@@ -5943,8 +5922,8 @@ macro_rules! build_and_run_imhd {
                 .with_viscosity(cfg.viscosity)
                 .with_resistivity(cfg.resistivity);
             for json in &cfg.driven_exprs {
-                let bcfg =
-                    symbi_source_compile::SourceConfig::from_json(json).expect("fine-level boundary parse");
+                let bcfg = symbi_source_compile::SourceConfig::from_json(json)
+                    .expect("fine-level boundary parse");
                 let built = symbi_source_compile::expr_bridge::build_boundary_dag(
                     &bcfg,
                     <IsothermalMhd as Regime<f64, $d>>::SPEC,
@@ -6041,14 +6020,7 @@ macro_rules! build_and_run_mhd_decomposed {
                         let mag_arr: [f64; 3] = std::array::from_fn(|k| {
                             if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, gidx, n) } else { bufs[k][lin] }
                         });
-                        MhdPrim {
-                            hydro: Prim {
-                                rho: row[0],
-                                vel: Tensor::new([row[1], row[2], row[3]]),
-                                pre: row[4],
-                            },
-                            mag: Tensor::new(mag_arr),
-                        }
+                        MhdPrim::new(Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])), Tensor::new(mag_arr))
                     })
                     .seed_faces_indexed(&tile_faces)
                     .build();
@@ -6133,14 +6105,7 @@ macro_rules! build_and_run_mhd_decomposed {
                 let mag_arr: [f64; 3] = std::array::from_fn(|k| {
                     if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
                 });
-                MhdPrim {
-                    hydro: Prim {
-                        rho: row[0],
-                        vel: Tensor::new([row[1], row[2], row[3]]),
-                        pre: row[4],
-                    },
-                    mag: Tensor::new(mag_arr),
-                }
+                MhdPrim::new(Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])), Tensor::new(mag_arr))
             })
             .seed_faces_indexed(&bufs[0..$d])
             .build();
@@ -6240,14 +6205,7 @@ macro_rules! build_and_run_imhd_decomposed {
                         let mag_arr: [f64; 3] = std::array::from_fn(|k| {
                             if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, gidx, n) } else { bufs[k][lin] }
                         });
-                        MhdPrimG::<f64, 3, IsoModel> {
-                            hydro: PrimG {
-                                rho: row[0],
-                                vel: Tensor::new([row[1], row[2], row[3]]),
-                                pre: Default::default(),
-                            },
-                            mag: Tensor::new(mag_arr),
-                        }
+                        MhdPrimG::<f64, 3, IsoModel>::new(PrimG::isothermal(Density(row[0]), Tensor::new([row[1], row[2], row[3]])), Tensor::new(mag_arr))
                     })
                     .seed_faces_indexed(&tile_faces)
                     .build();
@@ -6327,14 +6285,7 @@ macro_rules! build_and_run_imhd_decomposed {
                 let mag_arr: [f64; 3] = std::array::from_fn(|k| {
                     if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
                 });
-                MhdPrimG::<f64, 3, IsoModel> {
-                    hydro: PrimG {
-                        rho: row[0],
-                        vel: Tensor::new([row[1], row[2], row[3]]),
-                        pre: Default::default(),
-                    },
-                    mag: Tensor::new(mag_arr),
-                }
+                MhdPrimG::<f64, 3, IsoModel>::new(PrimG::isothermal(Density(row[0]), Tensor::new([row[1], row[2], row[3]])), Tensor::new(mag_arr))
             })
             .seed_faces_indexed(&bufs[0..$d])
             .build();
@@ -6604,11 +6555,7 @@ macro_rules! build_and_run_iso_decomposed {
                             stride *= n[ax];
                         }
                         let row = &prims[lin];
-                        PrimG::<f64, $d, IsoModel> {
-                            rho: row[0],
-                            vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                            pre: Default::default(),
-                        }
+                        PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
                     })
                     .build();
                 // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
@@ -6681,11 +6628,7 @@ macro_rules! build_and_run_iso_decomposed {
                     stride *= n[ax];
                 }
                 let row = &prims[lin];
-                PrimG::<f64, $d, IsoModel> {
-                    rho: row[0],
-                    vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                    pre: Default::default(),
-                }
+                PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
             })
             .build();
 
@@ -6759,11 +6702,7 @@ macro_rules! build_and_run_iso {
             .set_initial_indexed(|idx, _x| {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
-                PrimG::<f64, $d, IsoModel> {
-                    rho: row[0],
-                    vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                    pre: Default::default(),
-                }
+                PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
             })
             .build();
 
@@ -7008,9 +6947,9 @@ macro_rules! build_and_run_iso {
                     let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
                     let d = expression.eval(at(0), at(1), at(2), 0.0);
                     let mut p = p;
-                    p.rho += d[0];
+                    p = p.with_rho(Density(p.rho() + d[0]));
                     for ax in 0..$d {
-                        p.vel[ax] += d[1 + ax];
+                        p.vel_mut()[ax] += d[1 + ax];
                     }
                     p
                 });
@@ -8708,7 +8647,12 @@ mod tests {
     use symbi::sim::decomp::Topology;
     use symbi::sim::state::{Boundaries, BoundaryType};
 
-    fn phys2(lo0: BoundaryType, hi0: BoundaryType, lo1: BoundaryType, hi1: BoundaryType) -> Boundaries<2> {
+    fn phys2(
+        lo0: BoundaryType,
+        hi0: BoundaryType,
+        lo1: BoundaryType,
+        hi1: BoundaryType,
+    ) -> Boundaries<2> {
         Boundaries([[lo0, hi0], [lo1, hi1]])
     }
 
@@ -8728,7 +8672,11 @@ mod tests {
 
         let last = tile_boundaries(&phys, [1, 0], counts);
         assert_eq!(last.lo(0), CoarseFine);
-        assert_eq!(last.hi(0), CoarseFine, "the far domain seam is exchanged too");
+        assert_eq!(
+            last.hi(0),
+            CoarseFine,
+            "the far domain seam is exchanged too"
+        );
 
         assert!(wrap_topology(&phys, counts).is_periodic(0));
         assert!(!wrap_topology(&phys, counts).is_periodic(1));
@@ -8786,8 +8734,14 @@ mod tests {
     fn a_wrapping_decomposition_refuses_what_it_cannot_carry() {
         let ring = Topology::<2>::wrapping([true, false]);
         assert!(wrap_capability(&ring, false, false).is_ok());
-        assert!(wrap_capability(&ring, true, false).is_ok(), "balancing alone is fine");
-        assert!(wrap_capability(&ring, false, true).is_ok(), "a body alone is fine");
+        assert!(
+            wrap_capability(&ring, true, false).is_ok(),
+            "balancing alone is fine"
+        );
+        assert!(
+            wrap_capability(&ring, false, true).is_ok(),
+            "a body alone is fine"
+        );
 
         let bodies = wrap_capability(&ring, true, true).unwrap_err();
         assert!(bodies.contains("body potentials"), "{bodies}");

@@ -13,6 +13,7 @@
 // =============================================================================
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::Density;
 
 use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet3D;
 use symbi::regimes::substrate_kernels::Solver;
@@ -59,14 +60,10 @@ fn make_sim() -> Sim {
             let vx = -V0 * (2.0 * PI * y).sin();
             let vy = V0 * (2.0 * PI * x).sin();
             let mag = Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), 0.0]);
-            MhdPrimG::<f64, 3, IsoModel> {
-                hydro: PrimG {
-                    rho: RHO0,
-                    vel: Tensor::new([vx, vy, 0.0]),
-                    pre: Default::default(),
-                },
+            MhdPrimG::<f64, 3, IsoModel>::new(
+                PrimG::isothermal(Density(RHO0), Tensor::new([vx, vy, 0.0])),
                 mag,
-            }
+            )
         })
         .seed_faces(|axis, [x, y, _z]| match axis {
             0 => -B0 * (2.0 * PI * y).sin(),

@@ -18,14 +18,15 @@
 // run: cargo test -p symbi-hydro --test covariant_energy_conditioning -- --nocapture
 // =============================================================================
 
-use symbi_hydro::state::Valencia;
 use symbi_algebra::Matrix;
 use symbi_algebra::Tensor;
 use symbi_hydro::RhdGr;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::Prim;
+use symbi_hydro::state::Valencia;
 
 const GAMMA: f64 = 4.0 / 3.0;
 
@@ -51,14 +52,10 @@ fn ks_regime(r: f64) -> RhdGr<f64, 1> {
 fn round_trip_pressure_error(r: f64, rho: f64, pre: f64, vel: f64) -> f64 {
     let eos = IdealGas { gamma: GAMMA };
     let gr = ks_regime(r);
-    let prim = Prim {
-        rho,
-        vel: Tensor::new([vel]),
-        pre,
-    };
+    let prim = Prim::adiabatic(Density(rho), Tensor::new([vel]), Pressure(pre));
     let cons = gr.to_conserved(&eos, &Valencia(prim));
     let back = gr.to_primitive(&eos, &cons).unwrap();
-    (back.0.pre - pre).abs() / pre
+    (back.0.pre() - pre).abs() / pre
 }
 
 #[test]
@@ -118,14 +115,10 @@ fn flat_round_trip_pressure_error(rho: f64, pre: f64, vel: f64) -> f64 {
         shift: Tensor::zeros(),
         sqrt_gamma: 1.0,
     };
-    let prim = Prim {
-        rho,
-        vel: Tensor::new([vel]),
-        pre,
-    };
+    let prim = Prim::adiabatic(Density(rho), Tensor::new([vel]), Pressure(pre));
     let cons = gr.to_conserved(&eos, &Valencia(prim));
     let back = gr.to_primitive(&eos, &cons).unwrap();
-    (back.0.pre - pre).abs() / pre
+    (back.0.pre() - pre).abs() / pre
 }
 
 #[test]

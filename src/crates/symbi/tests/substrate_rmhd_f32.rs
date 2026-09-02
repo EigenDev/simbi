@@ -20,6 +20,7 @@ use symbi_geometry::Cartesian;
 use symbi_grid::Field;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -52,14 +53,10 @@ fn make_sim() -> Sim {
             let vy = 0.1 * (2.0 * pi * z).sin();
             let vz = 0.05 * (2.0 * pi * x).cos();
             let p = 1.0 + amp * (2.0 * pi * y).sin();
-            MhdPrim {
-                hydro: Prim {
-                    rho,
-                    vel: Tensor::new([vx, vy, vz]),
-                    pre: p,
-                },
-                mag: Tensor::new(B0),
-            }
+            MhdPrim::new(
+                Prim::adiabatic(Density(rho), Tensor::new([vx, vy, vz]), Pressure(p)),
+                Tensor::new(B0),
+            )
         })
         .seed_faces_uniform(B0)
         .build()

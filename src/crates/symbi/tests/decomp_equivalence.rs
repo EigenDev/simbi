@@ -50,6 +50,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory, with_device};
 #[cfg(feature = "gpu")]
@@ -111,7 +112,7 @@ macro_rules! decomp_harness {
                     .expect("sim construction failed")
                     .set_initial(|x| {
                         let b = bump(x[0]);
-                        Prim { rho: 1.0 + b, vel: Tensor::new([0.0; $d]), pre: 1.0 + b }
+                        Prim::adiabatic(Density(1.0 + b), Tensor::new([0.0; $d]), Pressure(1.0 + b))
                     })
                     .build();
                 let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);

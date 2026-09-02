@@ -11,17 +11,17 @@
 // is evolved by the induction equation (constrained transport), independent of the
 // conservation-law update. B is the same physical field in both representations.
 //
-// MhdPrimG derefs to PrimG, MhdConsG derefs to ConsG — all hydro field accesses
-// (.rho, .vel, .pre, .den, .mom, .nrg) work transparently. arithmetic delegates
-// to the inner hydro type + mag component.
+// MhdPrimG derefs to PrimG, MhdConsG derefs to ConsG — the hydro accessors
+// (.rho(), .vel(), .pre(), .den(), .mom(), .nrg()) work transparently.
+// arithmetic delegates to the inner hydro type + mag component.
 //
-// `MhdPrim`/`MhdCons` (no E) are the Adiabatic aliases — the existing NMHD/RMHD
-// call sites are unchanged. `IsoMhdPrim`/`IsoMhdCons` are the IsoModel aliases.
+// `MhdPrim`/`MhdCons` (no E) are the Adiabatic aliases; `IsoMhdPrim`/
+// `IsoMhdCons` are the IsoModel aliases.
 //
 // usage:
-//   let prim = MhdPrim { hydro: Prim { rho: 1.0, vel: v, pre: 1.0 }, mag: b };
-//   prim.rho  // works via Deref
-//   prim.mag  // direct field
+//   let prim = MhdPrim::new(Prim::adiabatic(Density(1.0), v, Pressure(1.0)), b);
+//   prim.rho()  // works via Deref
+//   prim.mag()  // the magnetic accessor
 // =============================================================================
 
 use crate::energy::{Adiabatic, EnergyModel, IsoModel};
@@ -35,16 +35,77 @@ use symbi_carrier::Scalar;
 /// (PartialEq is intentionally not derived — E::Slot is not PartialEq generically.)
 #[derive(Clone, Copy, Debug)]
 pub struct MhdPrimG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
-    pub hydro: PrimG<S, D, E>,
-    pub mag: Tensor<S, D>,
+    pub(crate) hydro: PrimG<S, D, E>,
+    pub(crate) mag: Tensor<S, D>,
+}
+
+impl<S: Scalar, const D: usize, E: EnergyModel> MhdPrimG<S, D, E> {
+    /// an MHD primitive state: the gas state plus the cell magnetic field.
+    pub fn new(hydro: PrimG<S, D, E>, mag: Tensor<S, D>) -> Self {
+        Self { hydro, mag }
+    }
+    pub fn into_parts(self) -> (PrimG<S, D, E>, Tensor<S, D>) {
+        (self.hydro, self.mag)
+    }
+    pub fn hydro(&self) -> &PrimG<S, D, E> {
+        &self.hydro
+    }
+    pub fn mag(&self) -> &Tensor<S, D> {
+        &self.mag
+    }
+    /// functional update: the same state with the hydro part replaced.
+    pub fn with_hydro(self, hydro: PrimG<S, D, E>) -> Self {
+        Self { hydro, ..self }
+    }
+    /// functional update: the same state with the magnetic field replaced.
+    pub fn with_mag(self, mag: Tensor<S, D>) -> Self {
+        Self { mag, ..self }
+    }
+    pub fn hydro_mut(&mut self) -> &mut PrimG<S, D, E> {
+        &mut self.hydro
+    }
+    pub fn mag_mut(&mut self) -> &mut Tensor<S, D> {
+        &mut self.mag
+    }
 }
 
 /// MHD conservative variables: hydro conservatives + magnetic field.
 /// nrg (Adiabatic) = total energy; mag = B (evolved by induction; the conservation-law flux never updates it).
 #[derive(Clone, Copy, Debug)]
 pub struct MhdConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
-    pub hydro: ConsG<S, D, E>,
-    pub mag: Tensor<S, D>,
+    pub(crate) hydro: ConsG<S, D, E>,
+    pub(crate) mag: Tensor<S, D>,
+}
+
+impl<S: Scalar, const D: usize, E: EnergyModel> MhdConsG<S, D, E> {
+    /// an MHD conserved state: the gas conserved state plus the cell magnetic
+    /// field (evolved by induction; the conservation-law flux never updates it).
+    pub fn new(hydro: ConsG<S, D, E>, mag: Tensor<S, D>) -> Self {
+        Self { hydro, mag }
+    }
+    pub fn into_parts(self) -> (ConsG<S, D, E>, Tensor<S, D>) {
+        (self.hydro, self.mag)
+    }
+    pub fn hydro(&self) -> &ConsG<S, D, E> {
+        &self.hydro
+    }
+    pub fn mag(&self) -> &Tensor<S, D> {
+        &self.mag
+    }
+    /// functional update: the same state with the hydro part replaced.
+    pub fn with_hydro(self, hydro: ConsG<S, D, E>) -> Self {
+        Self { hydro, ..self }
+    }
+    /// functional update: the same state with the magnetic field replaced.
+    pub fn with_mag(self, mag: Tensor<S, D>) -> Self {
+        Self { mag, ..self }
+    }
+    pub fn hydro_mut(&mut self) -> &mut ConsG<S, D, E> {
+        &mut self.hydro
+    }
+    pub fn mag_mut(&mut self) -> &mut Tensor<S, D> {
+        &mut self.mag
+    }
 }
 
 // every MHD conserved state is Magnetic (disjoint from NonMagnetic by concrete type).
@@ -225,33 +286,27 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Mul<S> for MhdConsG<S, D, E> {
 
 // ---- Selectable impls ----
 
-impl<S: Scalar, const D: usize, E: EnergyModel> symbi_carrier::Selectable<S>
-    for MhdConsG<S, D, E>
+impl<S: Scalar, const D: usize, E: EnergyModel> symbi_carrier::Selectable<S> for MhdConsG<S, D, E>
 where
     S::Mask: Copy,
 {
     #[inline]
     fn select(m: S::Mask, yes: Self, no: Self) -> Self {
         MhdConsG {
-            hydro: <ConsG<S, D, E> as symbi_carrier::Selectable<S>>::select(
-                m, yes.hydro, no.hydro,
-            ),
+            hydro: <ConsG<S, D, E> as symbi_carrier::Selectable<S>>::select(m, yes.hydro, no.hydro),
             mag: <Tensor<S, D> as symbi_carrier::Selectable<S>>::select(m, yes.mag, no.mag),
         }
     }
 }
 
-impl<S: Scalar, const D: usize, E: EnergyModel> symbi_carrier::Selectable<S>
-    for MhdPrimG<S, D, E>
+impl<S: Scalar, const D: usize, E: EnergyModel> symbi_carrier::Selectable<S> for MhdPrimG<S, D, E>
 where
     S::Mask: Copy,
 {
     #[inline]
     fn select(m: S::Mask, yes: Self, no: Self) -> Self {
         MhdPrimG {
-            hydro: <PrimG<S, D, E> as symbi_carrier::Selectable<S>>::select(
-                m, yes.hydro, no.hydro,
-            ),
+            hydro: <PrimG<S, D, E> as symbi_carrier::Selectable<S>>::select(m, yes.hydro, no.hydro),
             mag: <Tensor<S, D> as symbi_carrier::Selectable<S>>::select(m, yes.mag, no.mag),
         }
     }

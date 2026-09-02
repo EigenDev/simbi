@@ -27,9 +27,11 @@ use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{Cylindrical, Spherical};
+use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -136,11 +138,7 @@ fn well_balanced_spherical_1d_adiabatic() {
     .boundaries(Boundaries::uniform(BoundaryType::Reflect))
     .allocate()
     .expect("spherical sim construction failed")
-    .set_initial(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0]),
-        pre: 1.0,
-    })
+    .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
     .build();
     seed_uniform_newton(&mut sph, 1.0, 1.0);
     assert_eq!(
@@ -190,11 +188,7 @@ fn well_balanced_spherical_1d_iso() {
         .boundaries(Boundaries::uniform(BoundaryType::Reflect))
         .allocate()
         .expect("iso spherical sim")
-        .set_initial(|_| PrimG {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: Default::default(),
-        })
+        .set_initial(|_| PrimG::<f64, 1, IsoModel>::isothermal(Density(1.0), Tensor::new([0.0])))
         .build();
     seed_uniform_iso(&mut sph, 1.0);
 
@@ -235,11 +229,7 @@ fn well_balanced_spherical_1d_rhd() {
     .boundaries(Boundaries::uniform(BoundaryType::Reflect))
     .allocate()
     .expect("rhd spherical sim")
-    .set_initial(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0]),
-        pre: 1.0,
-    })
+    .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
     .build();
     seed_uniform_rhd(&mut sph, 1.0, 1.0);
 
@@ -286,11 +276,7 @@ fn well_balanced_cylindrical_1d_adiabatic() {
         .boundaries(Boundaries::uniform(BoundaryType::Reflect))
         .allocate()
         .expect("cylindrical sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
     seed_uniform_newton(&mut cyl, 1.0, 1.0);
     assert_eq!(

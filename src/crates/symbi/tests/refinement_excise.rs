@@ -25,6 +25,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
 use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -56,11 +57,7 @@ fn build_hier(
     .timestepping(Timestepping::Rk2)
     .allocate()
     .unwrap()
-    .set_initial(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0; 2]),
-        pre: 0.1,
-    })
+    .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0; 2]), Pressure(0.1)))
     .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated).with_excision(r_exc, 1.0, 1.0);
     // the fine patch sits in the far-field corner quadrant, clear of the excised

@@ -23,6 +23,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
 use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::substrate_seam::WithExcision;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
@@ -95,10 +96,12 @@ fn snapshot<S: ExecutionSpace, Mem: MemorySpace>(sim: &Sim<S, Mem>) -> Vec<[f64;
 
 #[test]
 fn excise_dispatch_matches_cpu_on_device() {
-    let init = |[x, y]: [f64; 2]| Prim {
-        rho: 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos(),
-        vel: Tensor::new([0.08 * (x + y).cos(), -0.06 * (x - y).sin()]),
-        pre: 0.05 + 0.01 * (x * y).cos(),
+    let init = |[x, y]: [f64; 2]| {
+        Prim::adiabatic(
+            Density(1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos()),
+            Tensor::new([0.08 * (x + y).cos(), -0.06 * (x - y).sin()]),
+            Pressure(0.05 + 0.01 * (x * y).cos()),
+        )
     };
     let h = build::<CpuSpace, HostMemory>(init);
     let d = build::<CudaSpace, UnifiedMemory>(init);
@@ -153,10 +156,12 @@ fn excise_source_cfl_dt_matches_cpu_on_device() {
     // sphere, keeping the horizon cells clear of the timestep bound — a past device failure mode.
     // a device mask that left the excised rate live would collapse dt on device and diverge from
     // the host dt. this is the one gate that exercises the source-cfl kernel on device.
-    let init = |[x, y]: [f64; 2]| Prim {
-        rho: 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos(),
-        vel: Tensor::new([0.08 * (x + y).cos(), -0.06 * (x - y).sin()]),
-        pre: 0.05 + 0.01 * (x * y).cos(),
+    let init = |[x, y]: [f64; 2]| {
+        Prim::adiabatic(
+            Density(1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos()),
+            Tensor::new([0.08 * (x + y).cos(), -0.06 * (x - y).sin()]),
+            Pressure(0.05 + 0.01 * (x * y).cos()),
+        )
     };
     let h = build::<CpuSpace, HostMemory>(init);
     let d = build::<CudaSpace, UnifiedMemory>(init);
@@ -189,11 +194,8 @@ fn excise_source_cfl_dt_matches_cpu_on_device() {
 fn excise_uniform_state_matches_cpu_on_device() {
     // a uniform primitive state: the fill sweeps are the identity on prims; the conserved
     // rebuild recomputes the same arithmetic on both backends. host and device must agree.
-    let init = |_: [f64; 2]| Prim {
-        rho: 1.3,
-        vel: Tensor::new([0.05, -0.04]),
-        pre: 0.02,
-    };
+    let init =
+        |_: [f64; 2]| Prim::adiabatic(Density(1.3), Tensor::new([0.05, -0.04]), Pressure(0.02));
     let h = build::<CpuSpace, HostMemory>(init);
     let d = build::<CudaSpace, UnifiedMemory>(init);
     dispatch_excise(&h, GAMMA, R_EXC, 1e-10, 1e-12);

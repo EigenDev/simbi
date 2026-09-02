@@ -11,9 +11,9 @@
 // =============================================================================
 
 use symbi::prelude::*;
-use symbi_source_compile::expr_bridge::{build_user_source, build_user_sources};
 use symbi_hydro::NEWTONIAN_SPEC;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::{build_user_source, build_user_sources};
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
 
@@ -41,11 +41,7 @@ fn runtime_loaded_force_accelerates_gas() {
         .boundaries(BoundaryType::Periodic)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 1.0,
-    });
+    sim.seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)));
 
     // attach the runtime-loaded source — no recompile, no AOT-baked kernel.
     let sub = sim
@@ -107,11 +103,7 @@ fn runtime_source_collection_sums_independent_parameters() {
         .boundaries(BoundaryType::Periodic)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 1.0,
-    });
+    sim.seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)));
     let sub = sim.substrate().with_runtime_source(built, params);
 
     let t_final = 0.05;

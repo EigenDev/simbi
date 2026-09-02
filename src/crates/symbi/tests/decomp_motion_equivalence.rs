@@ -21,6 +21,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::{Cartesian, MotionState};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -55,11 +56,7 @@ fn make(
         .expect("sim construction failed")
         .set_initial(|[x, y]| {
             let b = bump(x, y);
-            Prim {
-                rho: 1.0 + b,
-                vel: Tensor::new([0.0, 0.0]),
-                pre: 1.0 + b,
-            }
+            Prim::adiabatic(Density(1.0 + b), Tensor::new([0.0, 0.0]), Pressure(1.0 + b))
         })
         .build();
     sim.motion = motion;
@@ -148,7 +145,7 @@ fn assert_motion_matches(counts: [usize; 2], motion: MotionState<f64>) {
         Boundaries::uniform(BoundaryType::Outflow),
         motion,
     );
-        let partition = symbi::sim::decomp::Partition::uniform(
+    let partition = symbi::sim::decomp::Partition::uniform(
         std::array::from_fn(|a| mono.geom.interior.spaces[a].size()),
         counts,
     )

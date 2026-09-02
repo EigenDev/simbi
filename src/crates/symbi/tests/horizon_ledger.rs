@@ -25,6 +25,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
 use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -56,11 +57,7 @@ fn build() -> (Sim, Kern) {
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
     .allocate()
     .expect("sim")
-    .set_initial(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 0.1,
-    })
+    .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(0.1)))
     .build()
     .with_bodies(BodyCollection::new().add(Body::horizon(0, R_EXC, R_DIAG)));
     let k = Kern::new(GAMMA, 0.3, &sim.geom.allocated).with_excision(R_EXC, 1.0, 1.0);

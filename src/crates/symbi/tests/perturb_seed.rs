@@ -25,6 +25,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -107,10 +108,8 @@ fn perturbed_hierarchy() -> Hier {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(move |_x: [f64; 3]| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 1.0,
+        .set_initial(move |_x: [f64; 3]| {
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(1.0))
         })
         .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
@@ -127,7 +126,7 @@ fn perturbed_hierarchy() -> Hier {
         let dv = seed_velocity(x);
         let mut p = p;
         for ax in 0..3 {
-            p.vel[ax] += dv[ax];
+            p.vel_mut()[ax] += dv[ax];
         }
         p
     });
@@ -147,7 +146,7 @@ fn every_level_carries_its_own_resolvable_content() {
         let p = fine.prim_at(c);
         let dv = seed_velocity(x);
         for ax in 0..3 {
-            worst = worst.max((p.vel[ax] - dv[ax]).abs());
+            worst = worst.max((p.vel()[ax] - dv[ax]).abs());
         }
     }
     assert!(
@@ -187,7 +186,7 @@ fn curl_construction_is_divergence_free_under_the_grid_difference() {
     let dx = fine.geom.dx;
     let vel_at = |c: [isize; 3]| -> [f64; 3] {
         let p = fine.prim_at(c);
-        [p.vel[0], p.vel[1], p.vel[2]]
+        [p.vel()[0], p.vel()[1], p.vel()[2]]
     };
     let mut div2 = 0.0f64;
     let mut curl2 = 0.0f64;

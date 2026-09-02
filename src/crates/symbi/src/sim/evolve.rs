@@ -742,6 +742,7 @@ fn emit_trace_line<R, const D: usize, const DOF: usize, M, E, S, Mem>(
 
 #[cfg(test)]
 mod tests {
+
     #[test]
     fn nan_locator_pinpoints_the_poisoned_cell() {
         use crate::prelude::*;
@@ -754,11 +755,7 @@ mod tests {
         .bounds([0.0], [1.0])
         .finish()
         .unwrap();
-        sim.seed_cells(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        });
+        sim.seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)));
         // a clean conserved field has no non-finite cell.
         assert_eq!(super::report_first_nonfinite_cell(&sim), None);
         // poison one interior cell's conserved density; the locator returns exactly it.

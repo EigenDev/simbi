@@ -18,8 +18,8 @@
 
 use symbi_algebra::Tensor;
 use symbi_algebra::algebra::Numeric;
+use symbi_carrier::Scalar;
 use symbi_hydro::ShockwaveLimiter;
-use symbi_hydro::energy::Zero;
 use symbi_hydro::eos::{IdealGas, Isothermal, TaubMathews};
 use symbi_hydro::isothermal_mhd::{IsothermalMhd, imhd_recover};
 use symbi_hydro::mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdPrim};
@@ -38,7 +38,6 @@ use symbi_hydro::rmhd::{
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::{Cons, ConsG, Prim, PrimG};
 use symbi_ir::Symbol;
-use symbi_carrier::Scalar;
 use symbi_ir::graph::{ConstValue, ElementWiseOp, NodeId};
 use symbi_ir::{FieldBind, FieldRef};
 
@@ -442,7 +441,13 @@ fn gv_register_field(cx: TraceCx, key: &str, runtime: &str) {
 /// load field `key` at `coord + offsets` (per-axis integer offset; all-zero = the cell coord) —
 /// the gv multi-axis offset stencil (the CT staggered gather). registers the field (deduped),
 /// builds the integer coord arithmetic + `load_at`. like `field_shifted` but a full offset vector.
-pub(crate) fn gv_field_at<'t>(cx: TraceCx<'t>, key: &str, runtime: &str, ndim: usize, offsets: &[i32]) -> Gv<'t> {
+pub(crate) fn gv_field_at<'t>(
+    cx: TraceCx<'t>,
+    key: &str,
+    runtime: &str,
+    ndim: usize,
+    offsets: &[i32],
+) -> Gv<'t> {
     cx.gv(cx.with_trace(|t| {
         t.register_field(key, runtime);
         let comps: Vec<NodeId> = (0..ndim)
@@ -595,9 +600,7 @@ mod tests {
         // emit prim.mag[k] writes alongside rho/vel/pre. a purely toroidal injection sets the
         // in-plane B (mag[0],mag[1]) to 0 and the out-of-plane B_phi (mag[2]) to a value.
         let mk = |vals: &[f64]| {
-            symbi_ir::SourceProgram::trace(|cx| {
-                vals.iter().map(|&v| cx.lit(v)).collect()
-            })
+            symbi_ir::SourceProgram::trace(|cx| vals.iter().map(|&v| cx.lit(v)).collect())
         };
         let den = mk(&[1.0]);
         let mom = mk(&[0.1, 0.0, 0.0]);
@@ -1094,7 +1097,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("prim_rho".to_string(), FieldRef::PrimRho.name())],
         );
-        assert_eq!(k.coord_components(), vec![0], "axis 0's _coord recorded once");
+        assert_eq!(
+            k.coord_components(),
+            vec![0],
+            "axis 0's _coord recorded once"
+        );
     }
 
     #[test]
@@ -1581,7 +1588,11 @@ mod tests {
                 "mesh_vtrans_1".to_string(),
             ]
         );
-        let keys: Vec<&str> = k.field_inputs().iter().map(|(key, _)| key.as_str()).collect();
+        let keys: Vec<&str> = k
+            .field_inputs()
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect();
         assert_eq!(
             keys,
             vec!["prim_rho", "prim_v0", "prim_v1", "prim_pre"],
@@ -1654,7 +1665,10 @@ mod tests {
                 )
             })
         };
-        assert!(!has_sin(kc.graph()), "cartesian has no angular scale factor");
+        assert!(
+            !has_sin(kc.graph()),
+            "cartesian has no angular scale factor"
+        );
 
         let (ks, ()) = trace(|cx| {
             let inv = cell_inv_phys_widths_gv(
@@ -1708,7 +1722,11 @@ mod tests {
                 "inv_dx_2".to_string(),
             ]
         );
-        let keys: Vec<&str> = k.field_inputs().iter().map(|(key, _)| key.as_str()).collect();
+        let keys: Vec<&str> = k
+            .field_inputs()
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect();
         assert_eq!(
             keys,
             vec![
@@ -1787,7 +1805,11 @@ mod tests {
             ]
         );
         assert_eq!(k.scalar_params(), vec!["gamma".to_string()]);
-        let keys: Vec<&str> = k.field_inputs().iter().map(|(key, _)| key.as_str()).collect();
+        let keys: Vec<&str> = k
+            .field_inputs()
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect();
         assert_eq!(
             keys,
             vec![
@@ -1856,7 +1878,9 @@ mod tests {
             EosArm::IdealGamma,
         );
         assert!(
-            k_gr.scalar_params().iter().any(|s| s == "schwarzschild_mass"),
+            k_gr.scalar_params()
+                .iter()
+                .any(|s| s == "schwarzschild_mass"),
             "Schwarzschild wave-speed map must carry the lapse mass scalar; got {:?}",
             k_gr.scalar_params(),
         );
@@ -1894,7 +1918,9 @@ mod tests {
             GeoSource::Hydro { inertial: false },
         );
         assert!(
-            k_gr.scalar_params().iter().any(|s| s == "schwarzschild_mass"),
+            k_gr.scalar_params()
+                .iter()
+                .any(|s| s == "schwarzschild_mass"),
             "Schwarzschild stage must carry the lapse mass scalar; got {:?}",
             k_gr.scalar_params(),
         );
@@ -2048,15 +2074,18 @@ mod tests {
         // sequence — building the SourceProgram values outside the trace leaves the node allocation
         // untouched).
         assert_eq!(
-            k_spec.field_inputs(), k_built.field_inputs(),
+            k_spec.field_inputs(),
+            k_built.field_inputs(),
             "field_inputs drift"
         );
         assert_eq!(
-            k_spec.scalar_params(), k_built.scalar_params(),
+            k_spec.scalar_params(),
+            k_built.scalar_params(),
             "scalar_params drift"
         );
         assert_eq!(
-            k_spec.coord_components(), k_built.coord_components(),
+            k_spec.coord_components(),
+            k_built.coord_components(),
             "coord_components drift"
         );
         assert_eq!(w_spec, w_built, "writes drift");

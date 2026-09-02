@@ -26,12 +26,13 @@ use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, gather_interiors
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
-use symbi_hydro::eos::IdealGas;
-use symbi_source_compile::expr_bridge::build_user_sources;
-use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::state::Prim;
 use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_hydro::eos::IdealGas;
+use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
+use symbi_hydro::state::Prim;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_user_sources;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -112,11 +113,7 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
         .expect("sim construction failed")
         .set_initial(|x| {
             let b = bump(x[0]);
-            Prim {
-                rho: 1.0 + b,
-                vel: Tensor::new([0.0; 2]),
-                pre: 1.0 + b,
-            }
+            Prim::adiabatic(Density(1.0 + b), Tensor::new([0.0; 2]), Pressure(1.0 + b))
         })
         .build();
     let table = r#"{

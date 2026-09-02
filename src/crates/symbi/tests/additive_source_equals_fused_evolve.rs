@@ -34,6 +34,7 @@ use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::Density;
 use symbi_hydro::state::PrimG;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -244,11 +245,10 @@ fn iso_point_mass_additive_equals_fused_rk2() {
             let r = (x * x + y * y).sqrt().max(0.3);
             let sigma = 1.0 + 0.5 * (-(r - 1.0).powi(2) / 0.2).exp();
             let v_kep = (gm / r).sqrt();
-            PrimG::<f64, 2, IsoModel> {
-                rho: sigma,
-                vel: Tensor::new([-v_kep * (y / r), v_kep * (x / r)]),
-                pre: Default::default(),
-            }
+            PrimG::<f64, 2, IsoModel>::isothermal(
+                Density(sigma),
+                Tensor::new([-v_kep * (y / r), v_kep * (x / r)]),
+            )
         });
         sim
     };

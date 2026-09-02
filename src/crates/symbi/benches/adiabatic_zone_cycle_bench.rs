@@ -24,6 +24,7 @@
 
 use std::f64::consts::PI;
 use std::time::Instant;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::prelude::Solver;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
@@ -78,11 +79,7 @@ fn make_sim(n: usize) -> Sim {
             let vx = -0.5 + inside; // -0.5 outside, +0.5 inside
             let rho = 1.0 + inside; // 1 outside, 2 inside
             let vy = 0.01 * (4.0 * PI * x).sin();
-            Prim {
-                rho,
-                vel: Tensor::new([vx, vy]),
-                pre: 2.5,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([vx, vy]), Pressure(2.5))
         })
         .build()
 }

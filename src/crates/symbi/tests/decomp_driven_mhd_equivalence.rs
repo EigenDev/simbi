@@ -18,13 +18,14 @@ use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
+use symbi_hydro::RMHD_SPEC;
 use symbi_hydro::eos::IdealGas;
-use symbi_source_compile::expr_bridge::build_boundary_dag;
 use symbi_hydro::mhd_state::MhdPrim;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::Prim;
-use symbi_hydro::RMHD_SPEC;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_boundary_dag;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 5.0 / 3.0;
@@ -63,13 +64,11 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("mhd sim construction failed")
-        .set_initial(|_| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new([0.0, 0.0, BZ0]),
+        .set_initial(|_| {
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+                Tensor::new([0.0, 0.0, BZ0]),
+            )
         })
         .seed_faces_uniform([0.0, 0.0])
         .build();
@@ -290,13 +289,11 @@ fn iso_mhd_driven_inflow_decomposed_matches_monolithic() {
             .timestepping(Timestepping::Rk2)
             .allocate()
             .expect("imhd sim construction failed")
-            .set_initial(|_| MhdPrimG {
-                hydro: PrimG {
-                    rho: 1.0,
-                    vel: Tensor::new([0.0, 0.0, 0.0]),
-                    pre: Default::default(),
-                },
-                mag: Tensor::new([0.0, 0.0, BZ0]),
+            .set_initial(|_| {
+                MhdPrimG::new(
+                    PrimG::isothermal(Density(1.0), Tensor::new([0.0, 0.0, 0.0])),
+                    Tensor::new([0.0, 0.0, BZ0]),
+                )
             })
             .seed_faces_uniform([0.0, 0.0])
             .build();

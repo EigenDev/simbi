@@ -20,6 +20,7 @@ use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -42,10 +43,8 @@ fn uniform_gas_stays_uniform_across_the_level_seam_adiabatic() {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|_x: [f64; 3]| Prim {
-            rho: RHO0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 1.0,
+        .set_initial(|_x: [f64; 3]| {
+            Prim::adiabatic(Density(RHO0), Tensor::new([0.0; 3]), Pressure(1.0))
         })
         .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
@@ -108,10 +107,8 @@ fn uniform_gas_stays_uniform_across_the_level_seam_iso() {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|_x: [f64; 3]| PrimG::<f64, 3, IsoModel> {
-            rho: RHO0,
-            vel: Tensor::new([0.0; 3]),
-            pre: Default::default(),
+        .set_initial(|_x: [f64; 3]| {
+            PrimG::<f64, 3, IsoModel>::isothermal(Density(RHO0), Tensor::new([0.0; 3]))
         })
         .build();
     let ck = IKset::new(cs, CFL, &coarse.geom.allocated);

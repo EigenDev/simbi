@@ -18,6 +18,7 @@
 // =============================================================================
 
 use std::sync::atomic::Ordering;
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet3D;
 use symbi::sim::evolve::{KernelSet, evolve};
@@ -74,23 +75,14 @@ where
         let r = R_LO + (c[0] as f64 + 0.5) * DR;
         let bc = B0 / (r * r);
         let pre = 1.0 + 0.3 * (-((r - 1.4) / 0.2).powi(2)).exp();
-        let prim = MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0, 0.0]),
-                pre,
-            },
-            mag: Tensor::new([bc, 0.0, 0.0]),
-        };
+        let prim = MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(pre)),
+            Tensor::new([bc, 0.0, 0.0]),
+        );
         let cons = sim.physics.regime.to_conserved(&sim.physics.eos, &prim);
         sim.fields.cons.scatter(
             c,
-            Cons {
-                chi: Default::default(),
-                den: cons.den,
-                mom: cons.mom,
-                nrg: cons.nrg,
-            },
+            Cons::adiabatic(Density(cons.den()), *cons.mom(), EnergyDensity(cons.nrg())),
         );
     }
 }

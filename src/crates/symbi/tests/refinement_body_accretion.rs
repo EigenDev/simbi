@@ -24,6 +24,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::sdf::SdfExpr;
 use symbi_ib::{Body, BodyCollection, BodyKind, SurfaceSpec};
@@ -65,10 +66,8 @@ fn two_level(x0: f64, bodies: BodyCollection<f64, 3>) -> Hier {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|_x: [f64; 3]| Prim {
-            rho: 2.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 1.0,
+        .set_initial(|_x: [f64; 3]| {
+            Prim::adiabatic(Density(2.0), Tensor::new([0.0; 3]), Pressure(1.0))
         })
         .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
@@ -456,10 +455,8 @@ fn central_bh_accretes_on_the_finest_level_iso() {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|_x: [f64; 3]| PrimG::<f64, 3, IsoModel> {
-            rho: 2.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: Default::default(),
+        .set_initial(|_x: [f64; 3]| {
+            PrimG::<f64, 3, IsoModel>::isothermal(Density(2.0), Tensor::new([0.0; 3]))
         })
         .build();
     let ck = IKset::new(cs, CFL, &coarse.geom.allocated);

@@ -24,6 +24,7 @@ use symbi_geometry::{Cylindrical, Spherical};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
 use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 use symbi_hydro::state::{Cons, Prim};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -51,25 +52,24 @@ where
 {
     let mhd = sim.fields.mhd.as_ref().unwrap();
     let cnrg = sim.fields.cons.nrg_field().unwrap();
-    let cons = MhdCons::<f64, 3> {
-        hydro: Cons {
-            chi: Default::default(),
-            den: *sim.fields.cons.den.view().at(c),
-            mom: Tensor::new([
+    let cons = MhdCons::<f64, 3>::new(
+        Cons::adiabatic(
+            Density(*sim.fields.cons.den.view().at(c)),
+            Tensor::new([
                 *sim.fields.cons.mom[0].view().at(c),
                 *sim.fields.cons.mom[1].view().at(c),
                 *sim.fields.cons.mom[2].view().at(c),
             ]),
-            nrg: *cnrg.view().at(c),
-        },
-        mag: Tensor::new([
+            EnergyDensity(*cnrg.view().at(c)),
+        ),
+        Tensor::new([
             *mhd.bcell[0].view().at(c),
             *mhd.bcell[1].view().at(c),
             *mhd.bcell[2].view().at(c),
         ]),
-    };
+    );
     let prim = nmhd_recover(&IdealGas { gamma: GAMMA }, &cons);
-    (prim.rho, prim.pre)
+    (prim.rho(), prim.pre())
 }
 
 // drive one curvilinear 1.5D MHD shell (spherical or cylindrical) and assert stability, the normal
@@ -159,14 +159,10 @@ where
     .set_initial(|[r]| {
         let br = radial_bfield(spherical, r);
         let pre = 1.0 + 0.4 * (-((r - (R_LO + 0.5 * N as f64 * DR)) / (4.0 * DR)).powi(2)).exp();
-        MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0, 0.0]),
-                pre,
-            },
-            mag: Tensor::new([br, 0.0, BPHI0]),
-        }
+        MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(pre)),
+            Tensor::new([br, 0.0, BPHI0]),
+        )
     })
     .seed_faces(|axis, [r]| {
         if axis == 0 {

@@ -18,6 +18,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -41,10 +42,7 @@ fn make() -> Sim {
         .allocate()
         .expect("2.5d mhd sim")
         // a purely out-of-plane velocity shear v_z = V sin(k y); tiny uniform in-plane B (div-free).
-        .set_initial(|[_x, y]| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, V0 * (k * y).sin()]), pre: 1.0 },
-            mag: Tensor::new([1e-3, 0.0, 0.0]),
-        })
+        .set_initial(|[_x, y]| MhdPrim::new(Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, V0 * (k * y).sin()]), Pressure(1.0)), Tensor::new([1e-3, 0.0, 0.0])))
         .seed_faces(|axis, _| if axis == 0 { 1e-3 } else { 0.0 })
         .build()
 }

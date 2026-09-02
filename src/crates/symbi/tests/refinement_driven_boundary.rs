@@ -20,12 +20,13 @@ use symbi::sim::state::*;
 use symbi::symbi_grid::Field;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
-use symbi_hydro::eos::IdealGas;
-use symbi_source_compile::expr_bridge::build_boundary_dag;
-use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::state::Prim;
 use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_hydro::eos::IdealGas;
+use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
+use symbi_hydro::state::Prim;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_boundary_dag;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -112,10 +113,8 @@ fn uniform_gas_stays_uniform_with_all_faces_driven() {
         x_lo: [0.25; 2],
         x_hi: [0.75; 2],
     };
-    let mut hier = build_hier(boundaries, region, const_dag(rho0, 0.0, pre0), |_| Prim {
-        rho: rho0,
-        vel: Tensor::new([0.0; 2]),
-        pre: pre0,
+    let mut hier = build_hier(boundaries, region, const_dag(rho0, 0.0, pre0), |_| {
+        Prim::adiabatic(Density(rho0), Tensor::new([0.0; 2]), Pressure(pre0))
     });
     seed_fine(&hier, rho0, pre0);
     hier.evolve_steps(STEPS).unwrap();
@@ -146,11 +145,7 @@ fn fine_level_flush_against_a_driven_face_holds_the_prescription() {
         x_hi: [0.5, 0.75],
     };
     let mut hier = build_hier(boundaries, region, const_dag(rho_in, vx_in, pre_in), |_| {
-        Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 2]),
-            pre: 1.0,
-        }
+        Prim::adiabatic(Density(1.0), Tensor::new([0.0; 2]), Pressure(1.0))
     });
     seed_fine(&hier, 1.0, 1.0);
     hier.evolve_steps(STEPS).unwrap();
@@ -203,10 +198,8 @@ fn covered_restriction_sync_survives_a_driven_inflow() {
         x_lo: [0.25; 2],
         x_hi: [0.75; 2],
     };
-    let mut hier = build_hier(boundaries, region, const_dag(2.0, 0.5, 3.0), |_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0; 2]),
-        pre: 1.0,
+    let mut hier = build_hier(boundaries, region, const_dag(2.0, 0.5, 3.0), |_| {
+        Prim::adiabatic(Density(1.0), Tensor::new([0.0; 2]), Pressure(1.0))
     });
     seed_fine(&hier, 1.0, 1.0);
     hier.evolve_steps(2 * STEPS).unwrap();

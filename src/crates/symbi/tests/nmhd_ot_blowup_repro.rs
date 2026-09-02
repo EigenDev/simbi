@@ -4,6 +4,7 @@
 // step, or to secular growth.
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_kernels::Solver;
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet3D;
@@ -55,14 +56,10 @@ fn make_sim() -> Sim {
             let vy = V0 * (2.0 * PI * x).sin();
             let bx = -b0 * (2.0 * PI * y).sin();
             let by = b0 * (4.0 * PI * x).sin();
-            MhdPrim {
-                hydro: Prim {
-                    rho: rho0,
-                    vel: Tensor::new([vx, vy, 0.0]),
-                    pre: p0,
-                },
-                mag: Tensor::new([bx, by, 0.0]),
-            }
+            MhdPrim::new(
+                Prim::adiabatic(Density(rho0), Tensor::new([vx, vy, 0.0]), Pressure(p0)),
+                Tensor::new([bx, by, 0.0]),
+            )
         })
         .seed_faces(|axis, [x, y, _z]| match axis {
             0 => -b0 * (2.0 * PI * y).sin(),

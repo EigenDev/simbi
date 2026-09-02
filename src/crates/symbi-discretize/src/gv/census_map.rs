@@ -23,9 +23,7 @@ use std::collections::HashMap;
 use symbi_algebra::algebra::Numeric;
 use symbi_carrier::Scalar;
 use symbi_ir::graph::NodeId;
-use symbi_ir::{
-    FieldRef, Gv, GvKernel, KernelWrite, KernelWrites, trace,
-};
+use symbi_ir::{FieldRef, Gv, GvKernel, KernelWrite, KernelWrites, trace};
 
 use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
@@ -49,65 +47,64 @@ pub fn census_map_gv<A: CensusAxis>(
     n_segments: usize,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
+        // the live primitives: a census bins the state at the time it is sampled, which is the tail
+        // of an accepted step, after the recovery (the stage input holds the step's starting state).
+        let mut env: HashMap<String, NodeId> = HashMap::new();
+        env.insert("rho".into(), cx.field("rho", FieldRef::PrimRho).node());
+        env.insert("pre".into(), cx.field("pre", FieldRef::PrimPre).node());
+        env.insert("t".into(), cx.scalar("t").node());
+        for k in 0..dof {
+            env.insert(
+                format!("vel_{k}"),
+                cx.field(&format!("vel_{k}"), FieldRef::PrimVel(k as u8))
+                    .node(),
+            );
+        }
 
-    // the live primitives: a census bins the state at the time it is sampled, which is the tail
-    // of an accepted step, after the recovery (the stage input holds the step's starting state).
-    let mut env: HashMap<String, NodeId> = HashMap::new();
-    env.insert("rho".into(), cx.field("rho", FieldRef::PrimRho).node());
-    env.insert("pre".into(), cx.field("pre", FieldRef::PrimPre).node());
-    env.insert("t".into(), cx.scalar("t").node());
-    for k in 0..dof {
-        env.insert(
-            format!("vel_{k}"),
-            cx.field(&format!("vel_{k}"), FieldRef::PrimVel(k as u8)).node(),
-        );
-    }
+        // the cell measure and the centroid come from one geometry evaluation. `dv` is what makes an
+        // accumulator extensive, and it is the chart's own volume, so a spherical shell's mass is its
+        // actual mass.
+        let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim as usize);
+        env.insert("dv".into(), (Gv::ONE / geo.inv_volume).node());
+        for (d, c) in geo.centroid.iter().enumerate() {
+            env.insert(format!("x_{d}"), c.node());
+        }
 
-    // the cell measure and the centroid come from one geometry evaluation. `dv` is what makes an
-    // accumulator extensive, and it is the chart's own volume, so a spherical shell's mass is its
-    // actual mass.
-    let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim as usize);
-    env.insert("dv".into(), (Gv::ONE / geo.inv_volume).node());
-    for (d, c) in geo.centroid.iter().enumerate() {
-        env.insert(format!("x_{d}"), c.node());
-    }
+        // the config's tunables, bound lazily by the names the graph actually reads: a census that
+        // declares parameters is the one emitting scalar slots.
+        for pname in built.params() {
+            env.entry(pname.clone())
+                .or_insert_with(|| cx.scalar(pname).node());
+        }
 
-    // the config's tunables, bound lazily by the names the graph actually reads: a census that
-    // declares parameters is the one emitting scalar slots.
-    for pname in built.params() {
-        env.entry(pname.clone())
-            .or_insert_with(|| cx.scalar(pname).node());
-    }
-
-    let out =
-        cx.with_trace(|t| built.splice_into(t.graph(), &env));
-    let n_axes = bin_axes.len();
-    assert_eq!(
-        out.len(),
-        n_axes + n_values,
-        "census map: the lowered graph emits {} output(s), expected {n_axes} axis coordinate(s) \
+        let out = cx.with_trace(|t| built.splice_into(t.graph(), &env));
+        let n_axes = bin_axes.len();
+        assert_eq!(
+            out.len(),
+            n_axes + n_values,
+            "census map: the lowered graph emits {} output(s), expected {n_axes} axis coordinate(s) \
          + {n_values} accumulator(s)",
-        out.len()
-    );
+            out.len()
+        );
 
-    // the bucket, from the same expression the host evaluates.
-    let coords_gv: Vec<Gv> = out[..n_axes].iter().map(|&n| cx.gv(n)).collect();
-    let segment = segment_marker_traced(bin_axes, &coords_gv, n_segments);
+        // the bucket, from the same expression the host evaluates.
+        let coords_gv: Vec<Gv> = out[..n_axes].iter().map(|&n| cx.gv(n)).collect();
+        let segment = segment_marker_traced(bin_axes, &coords_gv, n_segments);
 
-    let mut writes = KernelWrites::with_capacity(n_values + 1);
-    for v in 0..n_values {
+        let mut writes = KernelWrites::with_capacity(n_values + 1);
+        for v in 0..n_values {
+            writes.push(KernelWrite::new(
+                format!("census_value_{v}"),
+                format!("census_value_{v}"),
+                out[n_axes + v],
+            ));
+        }
         writes.push(KernelWrite::new(
-            format!("census_value_{v}"),
-            format!("census_value_{v}"),
-            out[n_axes + v],
+            "census_segment",
+            "census_segment",
+            segment.node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "census_segment",
-        "census_segment",
-        segment.node(),
-    ));
-    writes
+        writes
     })
 }
 

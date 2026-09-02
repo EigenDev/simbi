@@ -18,12 +18,13 @@ use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Spherical;
-use symbi_source_compile::CensusConfig;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_io::IoBackend;
 use symbi_sim::census::{CensusEvaluator, RegisteredCensus};
+use symbi_source_compile::CensusConfig;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type SimSph = SimState<Newtonian, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -47,11 +48,7 @@ fn build_sim() -> SimSph {
         .expect("spherical sim construction failed")
         .set_initial(|x| {
             let (rho, pre) = if x[0] < 1.0 { (1.0, 1.0) } else { (0.125, 0.1) };
-            Prim {
-                rho,
-                vel: Tensor::new([0.0]),
-                pre,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([0.0]), Pressure(pre))
         })
         .build()
 }

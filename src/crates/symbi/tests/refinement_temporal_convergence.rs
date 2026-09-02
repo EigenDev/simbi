@@ -19,6 +19,7 @@
 // =============================================================================
 
 use std::f64::consts::TAU;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
@@ -43,17 +44,17 @@ fn fill(sim: &Sim) {
     let cnrg = sim.fields.cons.nrg_field().unwrap();
     for c in sim.geom.interior.iter() {
         let x = sim.geom.centroid(c);
-        let prim = Prim {
-            rho: 1.0 + 0.2 * (TAU * (x[0] + x[1])).sin(),
-            vel: Tensor::new([1.0, 0.5]),
-            pre: 1.0,
-        };
+        let prim = Prim::adiabatic(
+            Density(1.0 + 0.2 * (TAU * (x[0] + x[1])).sin()),
+            Tensor::new([1.0, 0.5]),
+            Pressure(1.0),
+        );
         let cons = Regime::to_conserved(&sim.physics.regime, &sim.physics.eos, &prim);
-        sim.fields.cons.den.view_mut().set(c, cons.den);
+        sim.fields.cons.den.view_mut().set(c, cons.den());
         for dd in 0..2 {
-            sim.fields.cons.mom[dd].view_mut().set(c, cons.mom[dd]);
+            sim.fields.cons.mom[dd].view_mut().set(c, cons.mom()[dd]);
         }
-        cnrg.view_mut().set(c, cons.nrg);
+        cnrg.view_mut().set(c, cons.nrg());
     }
 }
 
@@ -67,10 +68,12 @@ fn evolved(cfl: f64) -> Hier {
         .cfl(cfl)
         .allocate()
         .unwrap()
-        .set_initial(|x: [f64; 2]| Prim {
-            rho: 1.0 + 0.2 * (TAU * (x[0] + x[1])).sin(),
-            vel: Tensor::new([1.0, 0.5]),
-            pre: 1.0,
+        .set_initial(|x: [f64; 2]| {
+            Prim::adiabatic(
+                Density(1.0 + 0.2 * (TAU * (x[0] + x[1])).sin()),
+                Tensor::new([1.0, 0.5]),
+                Pressure(1.0),
+            )
         })
         .build();
     let ck = Kset::new(GAMMA, cfl, &coarse.geom.allocated);

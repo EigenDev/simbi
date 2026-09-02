@@ -20,6 +20,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -82,11 +83,11 @@ fn uniform_dye_stays_uniform_through_a_shock() {
     const C: f64 = 0.7;
     let mut sim = build(BoundaryType::Outflow, |[x, y]| {
         let r2 = x * x + y * y;
-        Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: if r2 < 0.1 { 10.0 } else { 0.1 },
-        }
+        Prim::adiabatic(
+            Density(1.0),
+            Tensor::new([0.0, 0.0]),
+            Pressure(if r2 < 0.1 { 10.0 } else { 0.1 }),
+        )
     });
     seed_chi(&sim, |_, _| C);
     let sub =
@@ -101,10 +102,12 @@ fn uniform_dye_stays_uniform_through_a_shock() {
 
 #[test]
 fn dye_mass_is_conserved_on_a_periodic_domain() {
-    let mut sim = build(BoundaryType::Periodic, |[x, y]| Prim {
-        rho: 1.0 + 0.3 * (2.0 * std::f64::consts::PI * x / L).sin().abs(),
-        vel: Tensor::new([0.4, -0.25 * (std::f64::consts::PI * y / L).cos()]),
-        pre: 1.0,
+    let mut sim = build(BoundaryType::Periodic, |[x, y]| {
+        Prim::adiabatic(
+            Density(1.0 + 0.3 * (2.0 * std::f64::consts::PI * x / L).sin().abs()),
+            Tensor::new([0.4, -0.25 * (std::f64::consts::PI * y / L).cos()]),
+            Pressure(1.0),
+        )
     });
     seed_chi(&sim, |x, y| if x * x + y * y < 0.25 { 1.0 } else { 0.0 });
     let (_, _, total0) = chi_stats(&sim);
@@ -128,10 +131,8 @@ fn dye_front_advects_at_the_flow_speed() {
     // uniform flow +x at v = 0.5; a dye front at x = -0.5 must arrive near
     // x = -0.5 + v t (donor-cell smears it; the mid-level crossing tracks).
     const V: f64 = 0.5;
-    let mut sim = build(BoundaryType::Periodic, |_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([V, 0.0]),
-        pre: 1.0,
+    let mut sim = build(BoundaryType::Periodic, |_| {
+        Prim::adiabatic(Density(1.0), Tensor::new([V, 0.0]), Pressure(1.0))
     });
     seed_chi(
         &sim,
@@ -173,10 +174,8 @@ fn dye_front_advects_at_the_flow_speed() {
 fn dye_advects_under_the_hierarchy_driver() {
     use symbi::sim::refinement::Hierarchy;
     const V: f64 = 0.5;
-    let sim = build(BoundaryType::Periodic, |_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([V, 0.0]),
-        pre: 1.0,
+    let sim = build(BoundaryType::Periodic, |_| {
+        Prim::adiabatic(Density(1.0), Tensor::new([V, 0.0]), Pressure(1.0))
     });
     seed_chi(
         &sim,
@@ -216,11 +215,7 @@ fn undyed_run_carries_no_scalar() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build();
     assert!(!sim.has_passive_scalar());
     assert!(sim.fields.cons.chi_field().is_none());

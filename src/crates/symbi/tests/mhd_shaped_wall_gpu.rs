@@ -19,6 +19,7 @@
 #![cfg(feature = "cuda")]
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_kernels::dispatch_penalize;
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
@@ -63,14 +64,7 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>() -> MSim<S, Mem> {
                 B0 * (4.0 * PI * x).sin(),
                 BZ0 * (2.0 * PI * x).cos(),
             ]);
-            MhdPrim {
-                hydro: Prim {
-                    rho: rho0,
-                    vel,
-                    pre: p0,
-                },
-                mag,
-            }
+            MhdPrim::new(Prim::adiabatic(Density(rho0), vel, Pressure(p0)), mag)
         })
         .seed_faces(|axis, x| match axis {
             0 => -B0 * (2.0 * PI * x[1]).sin(),

@@ -5,6 +5,7 @@
 //! the composite leaf norm, a fixed-physical-width seam norm, Fourier phase, and conservation.
 
 use std::f64::consts::TAU;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
@@ -28,11 +29,11 @@ type Hier = Hierarchy<Newtonian, 2, 2, Cartesian, IdealGas<f64>, CpuSpace, HostM
 
 fn primitive(x: [f64; 2], time: f64) -> Prim<f64, 2> {
     let phase = TAU * (x[0] + x[1] - (VELOCITY[0] + VELOCITY[1]) * time);
-    Prim {
-        rho: 1.0 + 0.1 * phase.sin(),
-        vel: Tensor::new(VELOCITY),
-        pre: 1.0,
-    }
+    Prim::adiabatic(
+        Density(1.0 + 0.1 * phase.sin()),
+        Tensor::new(VELOCITY),
+        Pressure(1.0),
+    )
 }
 
 fn seed(sim: &Sim) {
@@ -43,11 +44,11 @@ fn seed(sim: &Sim) {
             &sim.physics.eos,
             &primitive(sim.geom.centroid(cell), 0.0),
         );
-        sim.fields.cons.den.view_mut().set(cell, cons.den);
+        sim.fields.cons.den.view_mut().set(cell, cons.den());
         for dd in 0..2 {
-            sim.fields.cons.mom[dd].view_mut().set(cell, cons.mom[dd]);
+            sim.fields.cons.mom[dd].view_mut().set(cell, cons.mom()[dd]);
         }
-        nrg.view_mut().set(cell, cons.nrg);
+        nrg.view_mut().set(cell, cons.nrg());
     }
 }
 
@@ -103,7 +104,7 @@ fn errors(hierarchy: &Hier) -> Error {
             }
             let x = level.state.geom.centroid(cell);
             let rho = *level.state.fields.cons.den.view().at(cell);
-            let exact = primitive(x, T_FINAL).rho;
+            let exact = primitive(x, T_FINAL).rho();
             let point_error = (rho - exact).abs();
             global += point_error * volume;
             global_volume += volume;

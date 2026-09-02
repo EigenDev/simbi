@@ -22,12 +22,13 @@ use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Spherical;
-use symbi_source_compile::CensusConfig;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::census::{CensusEvaluator, SEGMENT_EXCLUDED_OFFSET};
 use symbi_sim::substrate_seam::KernelSet;
+use symbi_source_compile::CensusConfig;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type SimSph = SimState<Newtonian, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -57,10 +58,12 @@ fn build_sim() -> SimSph {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("spherical sim construction failed")
-        .set_initial(|x| Prim {
-            rho: density_at(x[0]),
-            vel: Tensor::new([0.0]),
-            pre: pressure_at(x[0]),
+        .set_initial(|x| {
+            Prim::adiabatic(
+                Density(density_at(x[0])),
+                Tensor::new([0.0]),
+                Pressure(pressure_at(x[0])),
+            )
         })
         .build();
     // seeding writes the conserved state; the primitives a census reads are produced by
@@ -310,10 +313,12 @@ fn a_census_sampled_before_the_recovery_fails_loudly() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("spherical sim construction failed")
-        .set_initial(|x| Prim {
-            rho: density_at(x[0]),
-            vel: Tensor::new([0.0]),
-            pre: pressure_at(x[0]),
+        .set_initial(|x| {
+            Prim::adiabatic(
+                Density(density_at(x[0])),
+                Tensor::new([0.0]),
+                Pressure(pressure_at(x[0])),
+            )
         })
         .build();
     assert!(
@@ -384,10 +389,8 @@ fn a_census_reading_pressure_is_refused_on_a_regime_without_one() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("iso sim construction failed")
-        .set_initial(|x| PrimG::<f64, 1, IsoModel> {
-            rho: density_at(x[0]),
-            vel: Tensor::new([0.0]),
-            pre: Default::default(),
+        .set_initial(|x| {
+            PrimG::<f64, 1, IsoModel>::isothermal(Density(density_at(x[0])), Tensor::new([0.0]))
         })
         .build();
 

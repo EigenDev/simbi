@@ -15,6 +15,7 @@
 // =============================================================================
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve_with_callback;
@@ -85,10 +86,7 @@ fn make_sim() -> Sim {
     .cfl(0.3)
     .allocate()
     .expect("cyl r-z adjoint sim construction failed")
-    .set_initial(|_| MhdPrim {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
-        mag: Tensor::new([0.0, 0.0, 0.0]),
-    })
+    .set_initial(|_| MhdPrim::new(Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)), Tensor::new([0.0, 0.0, 0.0])))
     .seed_faces(|_, _| 0.0)
     .build()
 }
@@ -197,10 +195,7 @@ fn make_decay_sim() -> Sim {
     .cfl(0.3)
     .allocate()
     .expect("cyl r-z decay sim construction failed")
-    .set_initial(|[r, _z]| MhdPrim {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
-        mag: Tensor::new([0.0, 0.0, B0 * (k * (r - R_MIN)).sin()]),
-    })
+    .set_initial(|[r, _z]| MhdPrim::new(Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)), Tensor::new([0.0, 0.0, B0 * (k * (r - R_MIN)).sin()])))
     .seed_faces(|axis, [r, _z]| if axis == 1 { B0 * (k * (r - R_MIN)).sin() } else { 0.0 })
     .build()
 }

@@ -10,6 +10,7 @@
 // =============================================================================
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet;
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
@@ -126,14 +127,7 @@ fn imhd_2p5d_smoke() {
     .expect("imhd 2.5d construction")
     .set_initial(|[x, y]| {
         let (vel, mag) = ot_vectors(x, y);
-        MhdPrimG::<f64, 3, IsoModel> {
-            hydro: PrimG {
-                rho: rho0,
-                vel,
-                pre: Default::default(),
-            },
-            mag,
-        }
+        MhdPrimG::<f64, 3, IsoModel>::new(PrimG::isothermal(Density(rho0), vel), mag)
     })
     .seed_faces(ot_bface)
     .build();
@@ -179,14 +173,7 @@ fn rmhd_2p5d_smoke() {
         .expect("rmhd 2.5d construction")
         .set_initial(|[x, y]| {
             let (vel, mag) = ot_vectors(x, y);
-            MhdPrim {
-                hydro: Prim {
-                    rho: rho0,
-                    vel,
-                    pre: p0,
-                },
-                mag,
-            }
+            MhdPrim::new(Prim::adiabatic(Density(rho0), vel, Pressure(p0)), mag)
         })
         .seed_faces(ot_bface)
         .build();

@@ -29,6 +29,7 @@ use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -67,11 +68,7 @@ fn rhd_sod_conserves_mass_energy_and_respects_cfl() {
         .expect("rhd sim construction failed")
         .set_initial(|x| {
             let (rho, pre) = if x[0] < 0.5 { (1.0, 1.0) } else { (0.125, 0.1) };
-            Prim {
-                rho,
-                vel: Tensor::new([0.0]),
-                pre,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([0.0]), Pressure(pre))
         })
         .build();
 

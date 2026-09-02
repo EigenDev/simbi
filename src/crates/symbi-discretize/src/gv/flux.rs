@@ -12,10 +12,11 @@ use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
-use symbi_hydro::state::Valencia;
 use symbi_hydro::RmhdGr;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
+use symbi_hydro::state::Valencia;
 use symbi_ir::{KernelWrite, KernelWrites};
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
@@ -85,13 +86,11 @@ fn nmhd_reconstruct<'t>(
     let bn_face = cx.field_shifted("bface_n", "bface_n", ndim, dir, 0);
     bl[coord_n] = bn_face;
     br[coord_n] = bn_face;
-    let mk = |rho, v: &[_], p, b: &[_]| MhdPrim::<Gv, 3> {
-        hydro: Prim {
-            rho,
-            vel: Tensor::new([v[0], v[1], v[2]]),
-            pre: p,
-        },
-        mag: Tensor::new([b[0], b[1], b[2]]),
+    let mk = |rho, v: &[_], p, b: &[_]| {
+        MhdPrim::<Gv, 3>::new(
+            Prim::adiabatic(Density(rho), Tensor::new([v[0], v[1], v[2]]), Pressure(p)),
+            Tensor::new([b[0], b[1], b[2]]),
+        )
     };
     let left = mk(rho_l, &vl, pre_l, &bl);
     let right = mk(rho_r, &vr, pre_r, &br);
@@ -104,25 +103,25 @@ fn nmhd_flux_writes<'t>(flux: &MhdCons<Gv<'t>, 3>) -> KernelWrites {
     let mut writes = vec![KernelWrite::new(
         "flux_den",
         FieldRef::flux_den(),
-        flux.den.node(),
+        flux.den().node(),
     )];
     for k in 0..3 {
         writes.push(KernelWrite::new(
             format!("flux_mom_{k}"),
             FieldRef::flux_mom(k as u8),
-            flux.mom[k].node(),
+            flux.mom()[k].node(),
         ));
     }
     writes.push(KernelWrite::new(
         "flux_nrg",
         FieldRef::flux_nrg(),
-        flux.nrg.node(),
+        flux.nrg().node(),
     ));
     for k in 0..3 {
         writes.push(KernelWrite::new(
             format!("flux_mag_{k}"),
             format!("flux.mag_{k}"),
-            flux.mag[k].node(),
+            flux.mag()[k].node(),
         ));
     }
     writes
@@ -215,13 +214,11 @@ fn imhd_reconstruct<'t>(
     let bn_face = cx.field_shifted("bface_n", "bface_n", ndim, dir, 0);
     bl[coord_n] = bn_face;
     br[coord_n] = bn_face;
-    let mk = |rho, v: &[_], b: &[_]| IsoMhdPrim::<Gv, 3> {
-        hydro: PrimG {
-            rho,
-            vel: Tensor::new([v[0], v[1], v[2]]),
-            pre: Zero::default(),
-        },
-        mag: Tensor::new([b[0], b[1], b[2]]),
+    let mk = |rho, v: &[_], b: &[_]| {
+        IsoMhdPrim::<Gv, 3>::new(
+            PrimG::isothermal(Density(rho), Tensor::new([v[0], v[1], v[2]])),
+            Tensor::new([b[0], b[1], b[2]]),
+        )
     };
     let left = mk(rho_l, &vl, &bl);
     let right = mk(rho_r, &vr, &br);
@@ -234,20 +231,20 @@ fn imhd_flux_writes<'t>(flux: &IsoMhdCons<Gv<'t>, 3>) -> KernelWrites {
     let mut writes = vec![KernelWrite::new(
         "flux_den",
         FieldRef::flux_den(),
-        flux.den.node(),
+        flux.den().node(),
     )];
     for k in 0..3 {
         writes.push(KernelWrite::new(
             format!("flux_mom_{k}"),
             FieldRef::flux_mom(k as u8),
-            flux.mom[k].node(),
+            flux.mom()[k].node(),
         ));
     }
     for k in 0..3 {
         writes.push(KernelWrite::new(
             format!("flux_mag_{k}"),
             format!("flux.mag_{k}"),
-            flux.mag[k].node(),
+            flux.mag()[k].node(),
         ));
     }
     writes
@@ -324,7 +321,12 @@ fn euler_reconstruct<'t, const D: usize>(
     coord_n: usize,
     recon: Recon,
     balanced: Option<Balanced<'_>>,
-) -> (Prim<Gv<'t>, D>, Prim<Gv<'t>, D>, Normalized<Physical<Gv<'t>, D>>, Gv<'t>) {
+) -> (
+    Prim<Gv<'t>, D>,
+    Prim<Gv<'t>, D>,
+    Normalized<Physical<Gv<'t>, D>>,
+    Gv<'t>,
+) {
     // theta comes second in the manifest order [gamma, theta]: the caller registers gamma
     // inside the same trace before calling here (the eos construction lives with the
     // caller so the closure can be gamma-law or taub-mathews), and theta is registered
@@ -481,16 +483,9 @@ fn euler_reconstruct<'t, const D: usize>(
     let (vl, vr): (Vec<Gv>, Vec<Gv>) = vel_lr.into_iter().unzip();
     let vl_arr: [Gv; D] = vl.try_into().expect("D velocity components");
     let vr_arr: [Gv; D] = vr.try_into().expect("D velocity components");
-    let left = Prim::<Gv, D> {
-        rho: rho_lr.0,
-        vel: Tensor::new(vl_arr),
-        pre: pre_lr.0,
-    };
-    let right = Prim::<Gv, D> {
-        rho: rho_lr.1,
-        vel: Tensor::new(vr_arr),
-        pre: pre_lr.1,
-    };
+    let left = Prim::<Gv, D>::adiabatic(Density(rho_lr.0), Tensor::new(vl_arr), Pressure(pre_lr.0));
+    let right =
+        Prim::<Gv, D>::adiabatic(Density(rho_lr.1), Tensor::new(vr_arr), Pressure(pre_lr.1));
     let nhat = Normalized::axis(coord_n);
     let vface = mesh_face_velocity_gv(cx, dir);
     (left, right, nhat, vface)
@@ -501,19 +496,19 @@ fn euler_flux_writes<'t, const D: usize>(flux: &Cons<Gv<'t>, D>) -> KernelWrites
     let mut writes = vec![KernelWrite::new(
         "flux_den",
         FieldRef::flux_den(),
-        flux.den.node(),
+        flux.den().node(),
     )];
     for k in 0..D {
         writes.push(KernelWrite::new(
             format!("flux_mom_{k}"),
             FieldRef::flux_mom(k as u8),
-            flux.mom[k].node(),
+            flux.mom()[k].node(),
         ));
     }
     writes.push(KernelWrite::new(
         "flux_nrg",
         FieldRef::flux_nrg(),
-        flux.nrg.node(),
+        flux.nrg().node(),
     ));
     writes
 }
@@ -539,13 +534,13 @@ fn euler_hlle_flux_gv<const D: usize, R>(
 ) -> (GvKernel, KernelWrites)
 where
     R: for<'t> Regime<
-        Gv<'t>,
-        D,
-        Prim = Prim<Gv<'t>, D>,
-        Cons = Cons<Gv<'t>, D>,
-        Normal = Normalized<Physical<Gv<'t>, D>>,
-        Energy = symbi_hydro::energy::Adiabatic,
-    >,
+            Gv<'t>,
+            D,
+            Prim = Prim<Gv<'t>, D>,
+            Cons = Cons<Gv<'t>, D>,
+            Normal = Normalized<Physical<Gv<'t>, D>>,
+            Energy = symbi_hydro::energy::Adiabatic,
+        >,
 {
     trace(|cx| {
         // gamma comes first in the manifest on every arm (under the taub-mathews closure it is
@@ -729,8 +724,10 @@ where
             let q_face = gamma[(0, 2)] / gamma[(2, 2)];
             let mut lv = left;
             let mut rv = right;
-            lv.vel[2] = w_l - q_face * lv.vel[0];
-            rv.vel[2] = w_r - q_face * rv.vel[0];
+            let w_face_l = w_l - q_face * lv.vel()[0];
+            let w_face_r = w_r - q_face * rv.vel()[0];
+            lv.vel_mut()[2] = w_face_l;
+            rv.vel_mut()[2] = w_face_r;
             (lv, rv)
         } else {
             (left, right)
@@ -946,13 +943,11 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrite
 
         // the single-source physics: reconstructed L/R MHD primitives -> canonical HLLE.
         let eos = IdealGas { gamma };
-        let mk = |rho, v: &[_], p, b: &[_]| MhdPrim::<Gv, 3> {
-            hydro: Prim {
-                rho,
-                vel: Tensor::new([v[0], v[1], v[2]]),
-                pre: p,
-            },
-            mag: Tensor::new([b[0], b[1], b[2]]),
+        let mk = |rho, v: &[_], p, b: &[_]| {
+            MhdPrim::<Gv, 3>::new(
+                Prim::adiabatic(Density(rho), Tensor::new([v[0], v[1], v[2]]), Pressure(p)),
+                Tensor::new([b[0], b[1], b[2]]),
+            )
         };
         // normal B from the staggered face field (gardiner-stone CT coupling) — reconstructed
         // bcell gives bn_l != bn_r, breaking the constant-Bn assumption. see nmhd_reconstruct.
@@ -984,25 +979,25 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrite
         let mut writes = vec![KernelWrite::new(
             "flux_den",
             FieldRef::flux_den(),
-            flux.den.node(),
+            flux.den().node(),
         )];
         for k in 0..3 {
             writes.push(KernelWrite::new(
                 format!("flux_mom_{k}"),
                 FieldRef::flux_mom(k as u8),
-                flux.mom[k].node(),
+                flux.mom()[k].node(),
             ));
         }
         writes.push(KernelWrite::new(
             "flux_nrg",
             FieldRef::flux_nrg(),
-            flux.nrg.node(),
+            flux.nrg().node(),
         ));
         for k in 0..3 {
             writes.push(KernelWrite::new(
                 format!("flux_mag_{k}"),
                 format!("flux.mag_{k}"),
-                flux.mag[k].node(),
+                flux.mag()[k].node(),
             ));
         }
 
@@ -1089,13 +1084,11 @@ pub fn rmhd_flux_gr_gv(
         bl[coord_n] = bn_face;
         br[coord_n] = bn_face;
         let eos = IdealGas { gamma: gamma_eos };
-        let mk = |rho, v: &[_], p, b: &[_]| MhdPrim::<Gv, 3> {
-            hydro: Prim {
-                rho,
-                vel: Tensor::new([v[0], v[1], v[2]]),
-                pre: p,
-            },
-            mag: Tensor::new([b[0], b[1], b[2]]),
+        let mk = |rho, v: &[_], p, b: &[_]| {
+            MhdPrim::<Gv, 3>::new(
+                Prim::adiabatic(Density(rho), Tensor::new([v[0], v[1], v[2]]), Pressure(p)),
+                Tensor::new([b[0], b[1], b[2]]),
+            )
         };
         let left = mk(rho_l, &vl, pre_l, &bl);
         let right = mk(rho_r, &vr, pre_r, &br);
@@ -1199,8 +1192,10 @@ pub fn rmhd_flux_gr_gv(
             let q_face = gamma[(0, 2)] / gamma[(2, 2)];
             let mut lv = left;
             let mut rv = right;
-            lv.hydro.vel[2] = w_l - q_face * lv.hydro.vel[0];
-            rv.hydro.vel[2] = w_r - q_face * rv.hydro.vel[0];
+            let w_face_l = w_l - q_face * lv.hydro().vel()[0];
+            let w_face_r = w_r - q_face * rv.hydro().vel()[0];
+            lv.hydro_mut().vel_mut()[2] = w_face_l;
+            rv.hydro_mut().vel_mut()[2] = w_face_r;
             (lv, rv)
         } else {
             (left, right)
@@ -1227,7 +1222,7 @@ pub fn rmhd_flux_gr_gv(
         // valencia flux in the shifted-G "godunov re-applies alpha" convention
         // (F_X = F_X* - (beta^n/alpha) X*). alpha=1, beta=0 -> F_tau (the flat valencia energy flux).
         let covariant_nrg = |f: &symbi_hydro::MhdCons<_, 3>| {
-            alpha * f.nrg + (alpha - Gv::ONE) * f.den - beta.dot(&f.mom)
+            alpha * f.nrg() + (alpha - Gv::ONE) * f.den() - beta.dot(f.mom())
         };
         if hlld && !rusanov {
             let w = if has_shift {
@@ -1237,31 +1232,33 @@ pub fn rmhd_flux_gr_gv(
             };
             let mut flux = hlld_rmhd_gr_ortho(&eos, &left, &right, coord_n, w, &regime.metric);
             if has_shift {
-                flux.mag = flux.mag + beta.scale(bn_face / alpha);
+                let mag_shifted = *flux.mag() + beta.scale(bn_face / alpha);
+                flux = flux.with_mag(mag_shifted);
             }
-            flux.hydro.nrg = covariant_nrg(&flux);
+            let nrg_cov = covariant_nrg(&flux);
+            flux = flux.with_hydro(flux.hydro().with_nrg(nrg_cov));
             let mut writes = vec![KernelWrite::new(
                 "flux_den",
                 FieldRef::flux_den(),
-                flux.den.node(),
+                flux.den().node(),
             )];
             for k in 0..3 {
                 writes.push(KernelWrite::new(
                     format!("flux_mom_{k}"),
                     FieldRef::flux_mom(k as u8),
-                    flux.mom[k].node(),
+                    flux.mom()[k].node(),
                 ));
             }
             writes.push(KernelWrite::new(
                 "flux_nrg",
                 FieldRef::flux_nrg(),
-                flux.nrg.node(),
+                flux.nrg().node(),
             ));
             for k in 0..3 {
                 writes.push(KernelWrite::new(
                     format!("flux_mag_{k}"),
                     format!("flux.mag_{k}"),
-                    flux.mag[k].node(),
+                    flux.mag()[k].node(),
                 ));
             }
             return writes;
@@ -1304,8 +1301,10 @@ pub fn rmhd_flux_gr_gv(
             let mut g_l = f_l - u_l * w;
             let mut g_r = f_r - u_r * w;
             let transpose = beta.scale(bn_face / alpha);
-            g_l.0.mag = g_l.0.mag + transpose;
-            g_r.0.mag = g_r.0.mag + transpose;
+            let gl_mag = *g_l.0.mag() + transpose;
+            let gr_mag = *g_r.0.mag() + transpose;
+            g_l.0 = g_l.0.with_mag(gl_mag);
+            g_r.0 = g_r.0.with_mag(gr_mag);
             let sh_l = s_l - beta_n;
             let sh_r = s_r - beta_n;
             Gv::branch(
@@ -1337,30 +1336,31 @@ pub fn rmhd_flux_gr_gv(
         // the fan is done with the witnessed algebra; the write boundary
         // extracts bare components into the flux buffers.
         let mut flux = flux.0;
-        flux.hydro.nrg = covariant_nrg(&flux);
+        let nrg_cov = covariant_nrg(&flux);
+        flux = flux.with_hydro(flux.hydro().with_nrg(nrg_cov));
 
         let mut writes = vec![KernelWrite::new(
             "flux_den",
             FieldRef::flux_den(),
-            flux.den.node(),
+            flux.den().node(),
         )];
         for k in 0..3 {
             writes.push(KernelWrite::new(
                 format!("flux_mom_{k}"),
                 FieldRef::flux_mom(k as u8),
-                flux.mom[k].node(),
+                flux.mom()[k].node(),
             ));
         }
         writes.push(KernelWrite::new(
             "flux_nrg",
             FieldRef::flux_nrg(),
-            flux.nrg.node(),
+            flux.nrg().node(),
         ));
         for k in 0..3 {
             writes.push(KernelWrite::new(
                 format!("flux_mag_{k}"),
                 format!("flux.mag_{k}"),
-                flux.mag[k].node(),
+                flux.mag()[k].node(),
             ));
         }
         writes

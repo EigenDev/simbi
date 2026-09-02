@@ -27,6 +27,7 @@ use symbi::sim::state::*;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -54,11 +55,11 @@ fn kset(s: &Sim) -> Kset {
 fn isentropic_bump(x: [f64; 1]) -> Prim<f64, 1> {
     let d = x[0] - 0.5;
     let rho = 1.0 + AMP * (-(d * d) / (WIDTH * WIDTH)).exp();
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
-    }
+    Prim::adiabatic(
+        Density(rho),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(K0 * rho.powf(GAMMA)),
+    )
 }
 
 fn build(
@@ -175,7 +176,7 @@ fn crossing_a_refinement_boundary_does_not_destroy_entropy() {
     assert!(hier.levels.len() > 1, "the refined case is unrefined");
     let dx = 1.0 / N as f64;
     let flank =
-        isentropic_bump([PATCH[0] + 2.0 * dx]).rho / isentropic_bump([PATCH[0] - 2.0 * dx]).rho;
+        isentropic_bump([PATCH[0] + 2.0 * dx]).rho() / isentropic_bump([PATCH[0] - 2.0 * dx]).rho();
     assert!(
         flank > 1.02,
         "the density is flat across the patch edge (ratio {flank:.4}); the transfer would \
@@ -286,11 +287,11 @@ fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
     let a = (GAMMA - 1.0) / (GAMMA * K0);
     let c = 1.0 / a - GM / (1.0 + G_OFFSET);
     let rho = (a * (GM / r + c)).powf(1.0 / (GAMMA - 1.0));
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
-    }
+    Prim::adiabatic(
+        Density(rho),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(K0 * rho.powf(GAMMA)),
+    )
 }
 
 fn build_gravity_ord(
@@ -364,14 +365,14 @@ fn hydrostatic_avg(ii: usize, n: usize) -> Prim<f64, 1> {
     ];
     for (xi, w) in nodes {
         let p = hydrostatic([xc + 0.5 * dx * xi]);
-        rho += 0.5 * w * p.rho;
-        pre += 0.5 * w * p.pre;
+        rho += 0.5 * w * p.rho();
+        pre += 0.5 * w * p.pre();
     }
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre,
-    }
+    Prim::adiabatic(
+        Density(rho),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(pre),
+    )
 }
 
 /// the 2-level hydrostatic seam with the reconstruction balance and the seeding
@@ -444,11 +445,11 @@ fn class_root_column(ncells: usize) -> Vec<(f64, f64)> {
     let center = |k: usize| (k as f64 + 0.5) * h;
     let face = |k: usize| k as f64 * h;
     let mut col = vec![(0.0_f64, 0.0_f64); ncells];
-    let rho_out = hydrostatic([center(ncells - 1)]).rho;
+    let rho_out = hydrostatic([center(ncells - 1)]).rho();
     col[ncells - 1] = (rho_out, K0 * rho_out.powf(GAMMA));
     for k in (0..ncells - 1).rev() {
-        let ra = hydrostatic([center(k)]).rho;
-        let rb = hydrostatic([center(k + 1)]).rho;
+        let ra = hydrostatic([center(k)]).rho();
+        let rb = hydrostatic([center(k + 1)]).rho();
         let pre = col[k + 1].1
             + rb * (phi(center(k + 1)) - phi(face(k + 1)))
             + ra * (phi(face(k + 1)) - phi(center(k)));
@@ -477,11 +478,11 @@ fn class_seed(col: &[(f64, f64)], ncells: usize, x: f64, fine: bool) -> Prim<f64
     } else {
         pre_parent
     };
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre,
-    }
+    Prim::adiabatic(
+        Density(rho),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(pre),
+    )
 }
 
 /// the 2-level hydrostatic seam seeded on the class column — the balanced gate's
@@ -555,7 +556,7 @@ fn worst_entropy_ratio_vs_class(
             }
             let x = st.geom.centroid([c[0] as isize])[0];
             let seed = class_seed(col, ncells, x, lvl > 0);
-            let k_seed = seed.pre / seed.rho.powf(GAMMA);
+            let k_seed = seed.pre() / seed.rho().powf(GAMMA);
             let k = *pre.at(c) / r.powf(GAMMA) / k_seed;
             if k < worst {
                 worst = k;
@@ -699,7 +700,7 @@ fn diagnose_cf_dipole_locality_arm() {
         // the local scale height H = cs^2 / (gamma g) of the isentrope at the edge.
         let r = lo + G_OFFSET;
         let prim = hydrostatic([lo]);
-        let h = GAMMA * prim.pre / prim.rho / (GAMMA * GM / (r * r));
+        let h = GAMMA * prim.pre() / prim.rho() / (GAMMA * GM / (r * r));
         println!(
             "edge at {lo:4.2} (dx/H = {:.3}): deficit {:.4e} at x = {x:.4} (level {lvl})",
             (1.0 / N as f64) / h,

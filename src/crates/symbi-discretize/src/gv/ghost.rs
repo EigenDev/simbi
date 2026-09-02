@@ -15,28 +15,28 @@ use symbi_ir::{KernelWrite, KernelWrites};
 /// iso/newton/rhd ghost fill share.
 pub fn iso_ghost_fill_gv(ndim: usize, ncomp: usize, axes: &[usize]) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let src = gv_lattice_source(cx, ndim);
-    let vel_sign: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
-        .collect();
-    let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
-    let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
-    for k in 0..ncomp {
-        let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src);
-        // grade-1 wall flip on the grid axis whose coordinate is k; ungridded keeps its sign.
-        let v = match axes.iter().position(|&c| c == k) {
-            Some(ax) => v * vel_sign[ax],
-            None => v,
-        };
-        writes.push(KernelWrite::new(
-            format!("prim_v{k}"),
-            FieldRef::PrimVel(k as u8),
-            v.node(),
-        ));
-    }
-    let pre = gv_load_at(cx, "prim_pre", "prim.pre", &src);
-    writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
-    writes
+        let src = gv_lattice_source(cx, ndim);
+        let vel_sign: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
+            .collect();
+        let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
+        let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
+        for k in 0..ncomp {
+            let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src);
+            // grade-1 wall flip on the grid axis whose coordinate is k; ungridded keeps its sign.
+            let v = match axes.iter().position(|&c| c == k) {
+                Some(ax) => v * vel_sign[ax],
+                None => v,
+            };
+            writes.push(KernelWrite::new(
+                format!("prim_v{k}"),
+                FieldRef::PrimVel(k as u8),
+                v.node(),
+            ));
+        }
+        let pre = gv_load_at(cx, "prim_pre", "prim.pre", &src);
+        writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
+        writes
     })
 }
 
@@ -78,28 +78,27 @@ pub fn neumann_ghost_fill_gv(
     spacing: &[Spacing],
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let src = gv_lattice_source(cx, ndim);
-    let dist = gv_outward_dist(cx, ndim, spacing, &src);
-    let neumann =
-        |u, q: &str| symbi_hydro::boundary_term::neumann_ghost(u, cx.scalar(q), dist);
-    let rho = neumann(gv_load_at(cx, "prim_rho", "prim.rho", &src), "neu_q_rho");
-    let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
-    for k in 0..ncomp {
-        let v = neumann(
-            gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src),
-            &format!("neu_q_v{k}"),
-        );
-        writes.push(KernelWrite::new(
-            format!("prim_v{k}"),
-            FieldRef::PrimVel(k as u8),
-            v.node(),
-        ));
-    }
-    if has_energy {
-        let pre = neumann(gv_load_at(cx, "prim_pre", "prim.pre", &src), "neu_q_pre");
-        writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
-    }
-    writes
+        let src = gv_lattice_source(cx, ndim);
+        let dist = gv_outward_dist(cx, ndim, spacing, &src);
+        let neumann = |u, q: &str| symbi_hydro::boundary_term::neumann_ghost(u, cx.scalar(q), dist);
+        let rho = neumann(gv_load_at(cx, "prim_rho", "prim.rho", &src), "neu_q_rho");
+        let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
+        for k in 0..ncomp {
+            let v = neumann(
+                gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src),
+                &format!("neu_q_v{k}"),
+            );
+            writes.push(KernelWrite::new(
+                format!("prim_v{k}"),
+                FieldRef::PrimVel(k as u8),
+                v.node(),
+            ));
+        }
+        if has_energy {
+            let pre = neumann(gv_load_at(cx, "prim_pre", "prim.pre", &src), "neu_q_pre");
+            writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
+        }
+        writes
     })
 }
 
@@ -114,41 +113,41 @@ pub fn robin_ghost_fill_gv(
     spacing: &[Spacing],
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let src = gv_lattice_source(cx, ndim);
-    let h = gv_outward_dist(cx, ndim, spacing, &src);
-    let robin = |u, a: &str, b: &str, c: &str| {
-        symbi_hydro::boundary_term::robin_ghost(u, cx.scalar(a), cx.scalar(b), cx.scalar(c), h)
-    };
-    let rho = robin(
-        gv_load_at(cx, "prim_rho", "prim.rho", &src),
-        "rob_a_rho",
-        "rob_b_rho",
-        "rob_c_rho",
-    );
-    let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
-    for k in 0..ncomp {
-        let v = robin(
-            gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src),
-            &format!("rob_a_v{k}"),
-            &format!("rob_b_v{k}"),
-            &format!("rob_c_v{k}"),
+        let src = gv_lattice_source(cx, ndim);
+        let h = gv_outward_dist(cx, ndim, spacing, &src);
+        let robin = |u, a: &str, b: &str, c: &str| {
+            symbi_hydro::boundary_term::robin_ghost(u, cx.scalar(a), cx.scalar(b), cx.scalar(c), h)
+        };
+        let rho = robin(
+            gv_load_at(cx, "prim_rho", "prim.rho", &src),
+            "rob_a_rho",
+            "rob_b_rho",
+            "rob_c_rho",
         );
-        writes.push(KernelWrite::new(
-            format!("prim_v{k}"),
-            FieldRef::PrimVel(k as u8),
-            v.node(),
-        ));
-    }
-    if has_energy {
-        let pre = robin(
-            gv_load_at(cx, "prim_pre", "prim.pre", &src),
-            "rob_a_pre",
-            "rob_b_pre",
-            "rob_c_pre",
-        );
-        writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
-    }
-    writes
+        let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
+        for k in 0..ncomp {
+            let v = robin(
+                gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src),
+                &format!("rob_a_v{k}"),
+                &format!("rob_b_v{k}"),
+                &format!("rob_c_v{k}"),
+            );
+            writes.push(KernelWrite::new(
+                format!("prim_v{k}"),
+                FieldRef::PrimVel(k as u8),
+                v.node(),
+            ));
+        }
+        if has_energy {
+            let pre = robin(
+                gv_load_at(cx, "prim_pre", "prim.pre", &src),
+                "rob_a_pre",
+                "rob_b_pre",
+                "rob_c_pre",
+            );
+            writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
+        }
+        writes
     })
 }
 
@@ -160,11 +159,11 @@ pub fn robin_ghost_fill_gv(
 /// the same kernel serves any cell- or face-anchored scalar.
 pub fn scalar_ghost_fill_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let src = gv_lattice_source(cx, ndim);
-    let sign = cx.scalar("sign");
-    let v = gv_load_at(cx, "f", "f", &src) * sign;
-    let writes = vec![KernelWrite::new("f", "f", v.node())];
-    writes
+        let src = gv_lattice_source(cx, ndim);
+        let sign = cx.scalar("sign");
+        let v = gv_load_at(cx, "f", "f", &src) * sign;
+        let writes = vec![KernelWrite::new("f", "f", v.node())];
+        writes
     })
 }
 
@@ -183,33 +182,33 @@ fn gv_ghost_sign<'t>(k: usize, ndim: usize, vel_sign: &[Gv<'t>]) -> Gv<'t> {
 /// (the lattice source + reflect signs), `ncomp` = vector components (DOF).
 pub fn rmhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let src = gv_lattice_source(cx, ndim);
-    let vel_sign: Vec<Gv> = (0..ndim)
-        .map(|k| cx.scalar(&format!("vel_sign_{k}")))
-        .collect();
-    let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
-    let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
-    for k in 0..ncomp {
-        let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src)
-            * gv_ghost_sign(k, ndim, &vel_sign);
-        writes.push(KernelWrite::new(
-            format!("prim_v{k}"),
-            FieldRef::PrimVel(k as u8),
-            v.node(),
-        ));
-    }
-    let pre = gv_load_at(cx, "prim_pre", "prim.pre", &src);
-    writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
-    for k in 0..ncomp {
-        let b = gv_load_at(cx, &format!("bcell_{k}"), &format!("mhd.bcell[{k}]"), &src)
-            * gv_ghost_sign(k, ndim, &vel_sign);
-        writes.push(KernelWrite::new(
-            format!("bcell_{k}"),
-            format!("mhd.bcell[{k}]"),
-            b.node(),
-        ));
-    }
-    writes
+        let src = gv_lattice_source(cx, ndim);
+        let vel_sign: Vec<Gv> = (0..ndim)
+            .map(|k| cx.scalar(&format!("vel_sign_{k}")))
+            .collect();
+        let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
+        let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
+        for k in 0..ncomp {
+            let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src)
+                * gv_ghost_sign(k, ndim, &vel_sign);
+            writes.push(KernelWrite::new(
+                format!("prim_v{k}"),
+                FieldRef::PrimVel(k as u8),
+                v.node(),
+            ));
+        }
+        let pre = gv_load_at(cx, "prim_pre", "prim.pre", &src);
+        writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
+        for k in 0..ncomp {
+            let b = gv_load_at(cx, &format!("bcell_{k}"), &format!("mhd.bcell[{k}]"), &src)
+                * gv_ghost_sign(k, ndim, &vel_sign);
+            writes.push(KernelWrite::new(
+                format!("bcell_{k}"),
+                format!("mhd.bcell[{k}]"),
+                b.node(),
+            ));
+        }
+        writes
     })
 }
 
@@ -217,31 +216,31 @@ pub fn rmhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites)
 /// isothermal state: rho + vel + bcell, the pressure coming from the closure.
 pub fn imhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let src = gv_lattice_source(cx, ndim);
-    let vel_sign: Vec<Gv> = (0..ndim)
-        .map(|k| cx.scalar(&format!("vel_sign_{k}")))
-        .collect();
-    let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
-    let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
-    for k in 0..ncomp {
-        let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src)
-            * gv_ghost_sign(k, ndim, &vel_sign);
-        writes.push(KernelWrite::new(
-            format!("prim_v{k}"),
-            FieldRef::PrimVel(k as u8),
-            v.node(),
-        ));
-    }
-    for k in 0..ncomp {
-        let b = gv_load_at(cx, &format!("bcell_{k}"), &format!("mhd.bcell[{k}]"), &src)
-            * gv_ghost_sign(k, ndim, &vel_sign);
-        writes.push(KernelWrite::new(
-            format!("bcell_{k}"),
-            format!("mhd.bcell[{k}]"),
-            b.node(),
-        ));
-    }
-    writes
+        let src = gv_lattice_source(cx, ndim);
+        let vel_sign: Vec<Gv> = (0..ndim)
+            .map(|k| cx.scalar(&format!("vel_sign_{k}")))
+            .collect();
+        let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
+        let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
+        for k in 0..ncomp {
+            let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src)
+                * gv_ghost_sign(k, ndim, &vel_sign);
+            writes.push(KernelWrite::new(
+                format!("prim_v{k}"),
+                FieldRef::PrimVel(k as u8),
+                v.node(),
+            ));
+        }
+        for k in 0..ncomp {
+            let b = gv_load_at(cx, &format!("bcell_{k}"), &format!("mhd.bcell[{k}]"), &src)
+                * gv_ghost_sign(k, ndim, &vel_sign);
+            writes.push(KernelWrite::new(
+                format!("bcell_{k}"),
+                format!("mhd.bcell[{k}]"),
+                b.node(),
+            ));
+        }
+        writes
     })
 }
 
@@ -261,57 +260,57 @@ pub fn imhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites)
 pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
     use symbi_geometry::{KerrKS, Metric};
     trace(|cx| {
-    let ndim = 2usize;
-    let src = gv_lattice_source(cx, ndim);
-    let vel_sign: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
-        .collect();
-    let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
-    let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
-    let v0_src = gv_load_at(cx, "prim_v0", FieldRef::PrimVel(0), &src);
-    let v0 = v0_src * vel_sign[0];
-    writes.push(KernelWrite::new("prim_v0", FieldRef::PrimVel(0), v0.node()));
-    let v1 = gv_load_at(cx, "prim_v1", FieldRef::PrimVel(1), &src) * vel_sign[1];
-    writes.push(KernelWrite::new("prim_v1", FieldRef::PrimVel(1), v1.node()));
-    // q at the volume-weighted centroid of the cell at integer indices (i, j):
-    // r_c = 0.75 (rh^4 - rl^4)/(rh^3 - rl^3), theta_c = [sin - t cos]_{tl}^{th}/(cos tl - cos th).
-    let mass = cx.scalar("schwarzschild_mass");
-    let spin = cx.scalar("kerr_spin");
-    let q_at = |i, j| {
-        let rl = gv_axis_face_at_index(cx, 0, spacing[0], i);
-        let rh = gv_axis_face_at_index(cx, 0, spacing[0], i + Gv::ONE);
-        // the volume-weighted centroid, the same text `cell_geometry_gv` evaluates:
-        // the c2p inverted the metric at that centroid, and the zero-angular-momentum
-        // cancellation transfers to the stencil when the coefficient is evaluated at
-        // that bit-identical position.
-        let r_c = symbi_geometry::volume_weighted_centroid(
-            symbi_geometry::Geometry::Spherical,
-            0,
-            rl,
-            rh,
-        );
-        let tl = gv_axis_face_at_index(cx, 1, spacing[1], j);
-        let th = gv_axis_face_at_index(cx, 1, spacing[1], j + Gv::ONE);
-        let th_c = symbi_geometry::volume_weighted_centroid(
-            symbi_geometry::Geometry::Spherical,
-            1,
-            tl,
-            th,
-        );
-        let m = KerrKS { mass, spin };
-        let gm = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
-            &m,
-            Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
-        );
-        gm[(0, 2)] / gm[(2, 2)]
-    };
-    let v2_src = gv_load_at(cx, "prim_v2", FieldRef::PrimVel(2), &src);
-    let w_src = v2_src + q_at(cx.gv(src[0]), cx.gv(src[1])) * v0_src;
-    let v2 = w_src - q_at(cx.coord(0), cx.coord(1)) * v0;
-    writes.push(KernelWrite::new("prim_v2", FieldRef::PrimVel(2), v2.node()));
-    let pre = gv_load_at(cx, "prim_pre", "prim.pre", &src);
-    writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
-    writes
+        let ndim = 2usize;
+        let src = gv_lattice_source(cx, ndim);
+        let vel_sign: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
+            .collect();
+        let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
+        let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
+        let v0_src = gv_load_at(cx, "prim_v0", FieldRef::PrimVel(0), &src);
+        let v0 = v0_src * vel_sign[0];
+        writes.push(KernelWrite::new("prim_v0", FieldRef::PrimVel(0), v0.node()));
+        let v1 = gv_load_at(cx, "prim_v1", FieldRef::PrimVel(1), &src) * vel_sign[1];
+        writes.push(KernelWrite::new("prim_v1", FieldRef::PrimVel(1), v1.node()));
+        // q at the volume-weighted centroid of the cell at integer indices (i, j):
+        // r_c = 0.75 (rh^4 - rl^4)/(rh^3 - rl^3), theta_c = [sin - t cos]_{tl}^{th}/(cos tl - cos th).
+        let mass = cx.scalar("schwarzschild_mass");
+        let spin = cx.scalar("kerr_spin");
+        let q_at = |i, j| {
+            let rl = gv_axis_face_at_index(cx, 0, spacing[0], i);
+            let rh = gv_axis_face_at_index(cx, 0, spacing[0], i + Gv::ONE);
+            // the volume-weighted centroid, the same text `cell_geometry_gv` evaluates:
+            // the c2p inverted the metric at that centroid, and the zero-angular-momentum
+            // cancellation transfers to the stencil when the coefficient is evaluated at
+            // that bit-identical position.
+            let r_c = symbi_geometry::volume_weighted_centroid(
+                symbi_geometry::Geometry::Spherical,
+                0,
+                rl,
+                rh,
+            );
+            let tl = gv_axis_face_at_index(cx, 1, spacing[1], j);
+            let th = gv_axis_face_at_index(cx, 1, spacing[1], j + Gv::ONE);
+            let th_c = symbi_geometry::volume_weighted_centroid(
+                symbi_geometry::Geometry::Spherical,
+                1,
+                tl,
+                th,
+            );
+            let m = KerrKS { mass, spin };
+            let gm = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
+                &m,
+                Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
+            );
+            gm[(0, 2)] / gm[(2, 2)]
+        };
+        let v2_src = gv_load_at(cx, "prim_v2", FieldRef::PrimVel(2), &src);
+        let w_src = v2_src + q_at(cx.gv(src[0]), cx.gv(src[1])) * v0_src;
+        let v2 = w_src - q_at(cx.coord(0), cx.coord(1)) * v0;
+        writes.push(KernelWrite::new("prim_v2", FieldRef::PrimVel(2), v2.node()));
+        let pre = gv_load_at(cx, "prim_pre", "prim.pre", &src);
+        writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
+        writes
     })
 }
 
@@ -330,66 +329,66 @@ pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
 pub fn rmhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
     use symbi_geometry::{KerrKS, Metric};
     trace(|cx| {
-    let ndim = 2usize;
-    let src = gv_lattice_source(cx, ndim);
-    let vel_sign: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
-        .collect();
-    let mass = cx.scalar("schwarzschild_mass");
-    let spin = cx.scalar("kerr_spin");
-    let q_at = |i, j| {
-        let rl = gv_axis_face_at_index(cx, 0, spacing[0], i);
-        let rh = gv_axis_face_at_index(cx, 0, spacing[0], i + Gv::ONE);
-        // the volume-weighted centroid, the same text `cell_geometry_gv` evaluates:
-        // the c2p inverted the metric at that centroid, and the zero-angular-momentum
-        // cancellation transfers to the stencil when the coefficient is evaluated at
-        // that bit-identical position.
-        let r_c = symbi_geometry::volume_weighted_centroid(
-            symbi_geometry::Geometry::Spherical,
-            0,
-            rl,
-            rh,
-        );
-        let tl = gv_axis_face_at_index(cx, 1, spacing[1], j);
-        let th = gv_axis_face_at_index(cx, 1, spacing[1], j + Gv::ONE);
-        let th_c = symbi_geometry::volume_weighted_centroid(
-            symbi_geometry::Geometry::Spherical,
-            1,
-            tl,
-            th,
-        );
-        let gm = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
-            &KerrKS { mass, spin },
-            Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
-        );
-        gm[(0, 2)] / gm[(2, 2)]
-    };
-    let q_src = q_at(cx.gv(src[0]), cx.gv(src[1]));
-    let q_gh = q_at(cx.coord(0), cx.coord(1));
+        let ndim = 2usize;
+        let src = gv_lattice_source(cx, ndim);
+        let vel_sign: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
+            .collect();
+        let mass = cx.scalar("schwarzschild_mass");
+        let spin = cx.scalar("kerr_spin");
+        let q_at = |i, j| {
+            let rl = gv_axis_face_at_index(cx, 0, spacing[0], i);
+            let rh = gv_axis_face_at_index(cx, 0, spacing[0], i + Gv::ONE);
+            // the volume-weighted centroid, the same text `cell_geometry_gv` evaluates:
+            // the c2p inverted the metric at that centroid, and the zero-angular-momentum
+            // cancellation transfers to the stencil when the coefficient is evaluated at
+            // that bit-identical position.
+            let r_c = symbi_geometry::volume_weighted_centroid(
+                symbi_geometry::Geometry::Spherical,
+                0,
+                rl,
+                rh,
+            );
+            let tl = gv_axis_face_at_index(cx, 1, spacing[1], j);
+            let th = gv_axis_face_at_index(cx, 1, spacing[1], j + Gv::ONE);
+            let th_c = symbi_geometry::volume_weighted_centroid(
+                symbi_geometry::Geometry::Spherical,
+                1,
+                tl,
+                th,
+            );
+            let gm = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
+                &KerrKS { mass, spin },
+                Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
+            );
+            gm[(0, 2)] / gm[(2, 2)]
+        };
+        let q_src = q_at(cx.gv(src[0]), cx.gv(src[1]));
+        let q_gh = q_at(cx.coord(0), cx.coord(1));
 
-    let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
-    let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
-    // velocity: v^r/v^theta reflect, v^phi via the angular-momentum variable w = v^phi + q v^r.
-    let v0_src = gv_load_at(cx, "prim_v0", FieldRef::PrimVel(0), &src);
-    let v0 = v0_src * vel_sign[0];
-    writes.push(KernelWrite::new("prim_v0", FieldRef::PrimVel(0), v0.node()));
-    let v1 = gv_load_at(cx, "prim_v1", FieldRef::PrimVel(1), &src) * vel_sign[1];
-    writes.push(KernelWrite::new("prim_v1", FieldRef::PrimVel(1), v1.node()));
-    let v2_src = gv_load_at(cx, "prim_v2", FieldRef::PrimVel(2), &src);
-    let v2 = (v2_src + q_src * v0_src) - q_gh * v0;
-    writes.push(KernelWrite::new("prim_v2", FieldRef::PrimVel(2), v2.node()));
-    let pre = gv_load_at(cx, "prim_pre", "prim.pre", &src);
-    writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
-    // cell B: B^r/B^theta reflect, B^phi via w_B = B^phi + q B^r (the magnetic dragging manifold).
-    let b0_src = gv_load_at(cx, "bcell_0", "mhd.bcell[0]", &src);
-    let b0 = b0_src * vel_sign[0];
-    writes.push(KernelWrite::new("bcell_0", "mhd.bcell[0]", b0.node()));
-    let b1 = gv_load_at(cx, "bcell_1", "mhd.bcell[1]", &src) * vel_sign[1];
-    writes.push(KernelWrite::new("bcell_1", "mhd.bcell[1]", b1.node()));
-    let b2_src = gv_load_at(cx, "bcell_2", "mhd.bcell[2]", &src);
-    let b2 = (b2_src + q_src * b0_src) - q_gh * b0;
-    writes.push(KernelWrite::new("bcell_2", "mhd.bcell[2]", b2.node()));
-    writes
+        let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
+        let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
+        // velocity: v^r/v^theta reflect, v^phi via the angular-momentum variable w = v^phi + q v^r.
+        let v0_src = gv_load_at(cx, "prim_v0", FieldRef::PrimVel(0), &src);
+        let v0 = v0_src * vel_sign[0];
+        writes.push(KernelWrite::new("prim_v0", FieldRef::PrimVel(0), v0.node()));
+        let v1 = gv_load_at(cx, "prim_v1", FieldRef::PrimVel(1), &src) * vel_sign[1];
+        writes.push(KernelWrite::new("prim_v1", FieldRef::PrimVel(1), v1.node()));
+        let v2_src = gv_load_at(cx, "prim_v2", FieldRef::PrimVel(2), &src);
+        let v2 = (v2_src + q_src * v0_src) - q_gh * v0;
+        writes.push(KernelWrite::new("prim_v2", FieldRef::PrimVel(2), v2.node()));
+        let pre = gv_load_at(cx, "prim_pre", "prim.pre", &src);
+        writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
+        // cell B: B^r/B^theta reflect, B^phi via w_B = B^phi + q B^r (the magnetic dragging manifold).
+        let b0_src = gv_load_at(cx, "bcell_0", "mhd.bcell[0]", &src);
+        let b0 = b0_src * vel_sign[0];
+        writes.push(KernelWrite::new("bcell_0", "mhd.bcell[0]", b0.node()));
+        let b1 = gv_load_at(cx, "bcell_1", "mhd.bcell[1]", &src) * vel_sign[1];
+        writes.push(KernelWrite::new("bcell_1", "mhd.bcell[1]", b1.node()));
+        let b2_src = gv_load_at(cx, "bcell_2", "mhd.bcell[2]", &src);
+        let b2 = (b2_src + q_src * b0_src) - q_gh * b0;
+        writes.push(KernelWrite::new("bcell_2", "mhd.bcell[2]", b2.node()));
+        writes
     })
 }
 
@@ -424,125 +423,126 @@ pub fn wb_ghost_fill_gv(
 ) -> (GvKernel, KernelWrites) {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
     trace(|cx| {
-    let src = gv_lattice_source(cx, ndim);
-    let vel_sign: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
-        .collect();
-    // the bake-time spacing enum is vestigial: face positions and the cell center both come
-    // from the runtime per-axis map (`map_kind_{ax}`), so this one kernel serves every
-    // grading. the center is the map's own (geometric mean on a log axis, arithmetic midpoint
-    // otherwise) — the same position `set_initial` seeds at and the balanced reconstruction's
-    // potential ladder anchors on, which is what makes the wall-face extension exact on the
-    // seeded column.
-    let spacing = vec![Spacing::Uniform; ndim];
-    let centroid = |ax: usize, i| {
-        let lo = gv_axis_face_at_index(cx, ax, spacing[ax], i);
-        let hi = gv_axis_face_at_index(cx, ax, spacing[ax], i + Gv::ONE);
-        crate::gv::gv_axis_center_between(cx, ax, lo, hi)
-    };
-    let (phi_src, phi_ghost) = match coords {
-        Coords::Cartesian => {
-            // cartesian: grid axis positions are the cartesian coordinates; ungridded components 0.
-            let mut ghost_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
-            let mut src_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
-            for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
-                if coord_idx < 3 {
-                    ghost_pos[coord_idx] = centroid(g, cx.coord(g as u8));
-                    src_pos[coord_idx] = centroid(g, cx.gv(src[g]));
-                }
-            }
-            let phi_at = |pos: &[_; 3]| {
-                (0..n_bodies)
-                    .map(|b| {
-                        let mut bpos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
-                        for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
-                            if coord_idx < 3 {
-                                bpos[coord_idx] = cx.scalar(&format!("body_{b}_pos_{g}"));
-                            }
-                        }
-                        let rvec: [Gv; 3] = std::array::from_fn(|i| pos[i] - bpos[i]);
-                        crate::ibm::body_potential(
-                            rvec,
-                            cx.scalar(&format!("body_{b}_mass")),
-                            cx.scalar(&format!("body_{b}_soft")),
-                            cx.scalar(&format!("body_{b}_softkind")),
-                        )
-                    })
-                    .sum::<Gv>()
-            };
-            let phi_src = phi_at(&src_pos);
-            let phi_ghost = phi_at(&ghost_pos);
-            (phi_src, phi_ghost)
-        }
-        // curvilinear: the per-axis midpoints are chart coordinates (r, theta, ...); the
-        // potential is evaluated at their cartesian embedding, against body positions on
-        // the chart's grid-plane cartesian axes — the same convention the balanced
-        // reconstruction's potential ladder and the wb body source use, so the wall face
-        // the extension constructs is the one the interior scheme balances against.
-        _ => {
-            let cart_axes = crate::gv_immersed::body_cart_axes(coords, ndim, axes);
-            let mut ghost_c3 = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
-            let mut src_c3 = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
-            for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
-                if coord_idx < 3 {
-                    ghost_c3[coord_idx] = centroid(g, cx.coord(g as u8));
-                    src_c3[coord_idx] = centroid(g, cx.gv(src[g]));
-                }
-            }
-            let phi_at = |coord3: &[_; 3]| {
-                let pos = crate::gv_immersed::to_cartesian_gv(coords, coord3);
-                (0..n_bodies)
-                    .map(|b| {
-                        let bpos = crate::gv_immersed::body_vec3(cx, b, ndim, &cart_axes, "pos");
-                        let rvec: [Gv; 3] = std::array::from_fn(|i| pos[i] - bpos[i]);
-                        crate::ibm::body_potential(
-                            rvec,
-                            cx.scalar(&format!("body_{b}_mass")),
-                            cx.scalar(&format!("body_{b}_soft")),
-                            cx.scalar(&format!("body_{b}_softkind")),
-                        )
-                    })
-                    .sum::<Gv>()
-            };
-            (phi_at(&src_c3), phi_at(&ghost_c3))
-        }
-    };
-
-    let rho_src = gv_load_at(cx, "prim_rho", "prim.rho", &src);
-    let pre_src = gv_load_at(cx, "prim_pre", "prim.pre", &src);
-    // the mechanical extension: the ghost inherits the source cell's density (the
-    // equilibrium density is piecewise constant) and its pressure follows the one
-    // segment `p_src + rho_src (phi_src - phi_ghost)`. the extension spans one known
-    // excursion, so the validity weight comes from that excursion itself: a ghost
-    // sitting above the source by more of the segment's positive domain than it
-    // carries is placed by a faded profile, and at zero weight the fill is the plain
-    // pullback of the source state — the continuation an unstratified column has.
-    let rise = symbi_hydro::hydrostatic::potential_rise(phi_src, phi_ghost, phi_ghost);
-    let eq = LocalEquilibrium::faded(rho_src, pre_src, phi_src, rise);
-    let (rho_g, pre_g) = eq.state_at(phi_ghost);
-
-    let mut writes = vec![KernelWrite::new(
-        "prim_rho",
-        FieldRef::PrimRho,
-        rho_g.node(),
-    )];
-    for k in 0..ncomp {
-        let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src);
-        let v = match axes.iter().position(|&c| c == k) {
-            Some(ax) => v * vel_sign[ax],
-            None => v,
+        let src = gv_lattice_source(cx, ndim);
+        let vel_sign: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
+            .collect();
+        // the bake-time spacing enum is vestigial: face positions and the cell center both come
+        // from the runtime per-axis map (`map_kind_{ax}`), so this one kernel serves every
+        // grading. the center is the map's own (geometric mean on a log axis, arithmetic midpoint
+        // otherwise) — the same position `set_initial` seeds at and the balanced reconstruction's
+        // potential ladder anchors on, which is what makes the wall-face extension exact on the
+        // seeded column.
+        let spacing = vec![Spacing::Uniform; ndim];
+        let centroid = |ax: usize, i| {
+            let lo = gv_axis_face_at_index(cx, ax, spacing[ax], i);
+            let hi = gv_axis_face_at_index(cx, ax, spacing[ax], i + Gv::ONE);
+            crate::gv::gv_axis_center_between(cx, ax, lo, hi)
         };
+        let (phi_src, phi_ghost) = match coords {
+            Coords::Cartesian => {
+                // cartesian: grid axis positions are the cartesian coordinates; ungridded components 0.
+                let mut ghost_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+                let mut src_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+                for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
+                    if coord_idx < 3 {
+                        ghost_pos[coord_idx] = centroid(g, cx.coord(g as u8));
+                        src_pos[coord_idx] = centroid(g, cx.gv(src[g]));
+                    }
+                }
+                let phi_at = |pos: &[_; 3]| {
+                    (0..n_bodies)
+                        .map(|b| {
+                            let mut bpos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+                            for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
+                                if coord_idx < 3 {
+                                    bpos[coord_idx] = cx.scalar(&format!("body_{b}_pos_{g}"));
+                                }
+                            }
+                            let rvec: [Gv; 3] = std::array::from_fn(|i| pos[i] - bpos[i]);
+                            crate::ibm::body_potential(
+                                rvec,
+                                cx.scalar(&format!("body_{b}_mass")),
+                                cx.scalar(&format!("body_{b}_soft")),
+                                cx.scalar(&format!("body_{b}_softkind")),
+                            )
+                        })
+                        .sum::<Gv>()
+                };
+                let phi_src = phi_at(&src_pos);
+                let phi_ghost = phi_at(&ghost_pos);
+                (phi_src, phi_ghost)
+            }
+            // curvilinear: the per-axis midpoints are chart coordinates (r, theta, ...); the
+            // potential is evaluated at their cartesian embedding, against body positions on
+            // the chart's grid-plane cartesian axes — the same convention the balanced
+            // reconstruction's potential ladder and the wb body source use, so the wall face
+            // the extension constructs is the one the interior scheme balances against.
+            _ => {
+                let cart_axes = crate::gv_immersed::body_cart_axes(coords, ndim, axes);
+                let mut ghost_c3 = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+                let mut src_c3 = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+                for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
+                    if coord_idx < 3 {
+                        ghost_c3[coord_idx] = centroid(g, cx.coord(g as u8));
+                        src_c3[coord_idx] = centroid(g, cx.gv(src[g]));
+                    }
+                }
+                let phi_at = |coord3: &[_; 3]| {
+                    let pos = crate::gv_immersed::to_cartesian_gv(coords, coord3);
+                    (0..n_bodies)
+                        .map(|b| {
+                            let bpos =
+                                crate::gv_immersed::body_vec3(cx, b, ndim, &cart_axes, "pos");
+                            let rvec: [Gv; 3] = std::array::from_fn(|i| pos[i] - bpos[i]);
+                            crate::ibm::body_potential(
+                                rvec,
+                                cx.scalar(&format!("body_{b}_mass")),
+                                cx.scalar(&format!("body_{b}_soft")),
+                                cx.scalar(&format!("body_{b}_softkind")),
+                            )
+                        })
+                        .sum::<Gv>()
+                };
+                (phi_at(&src_c3), phi_at(&ghost_c3))
+            }
+        };
+
+        let rho_src = gv_load_at(cx, "prim_rho", "prim.rho", &src);
+        let pre_src = gv_load_at(cx, "prim_pre", "prim.pre", &src);
+        // the mechanical extension: the ghost inherits the source cell's density (the
+        // equilibrium density is piecewise constant) and its pressure follows the one
+        // segment `p_src + rho_src (phi_src - phi_ghost)`. the extension spans one known
+        // excursion, so the validity weight comes from that excursion itself: a ghost
+        // sitting above the source by more of the segment's positive domain than it
+        // carries is placed by a faded profile, and at zero weight the fill is the plain
+        // pullback of the source state — the continuation an unstratified column has.
+        let rise = symbi_hydro::hydrostatic::potential_rise(phi_src, phi_ghost, phi_ghost);
+        let eq = LocalEquilibrium::faded(rho_src, pre_src, phi_src, rise);
+        let (rho_g, pre_g) = eq.state_at(phi_ghost);
+
+        let mut writes = vec![KernelWrite::new(
+            "prim_rho",
+            FieldRef::PrimRho,
+            rho_g.node(),
+        )];
+        for k in 0..ncomp {
+            let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src);
+            let v = match axes.iter().position(|&c| c == k) {
+                Some(ax) => v * vel_sign[ax],
+                None => v,
+            };
+            writes.push(KernelWrite::new(
+                format!("prim_v{k}"),
+                FieldRef::PrimVel(k as u8),
+                v.node(),
+            ));
+        }
         writes.push(KernelWrite::new(
-            format!("prim_v{k}"),
-            FieldRef::PrimVel(k as u8),
-            v.node(),
+            "prim_pre",
+            FieldRef::PrimPre,
+            pre_g.node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "prim_pre",
-        FieldRef::PrimPre,
-        pre_g.node(),
-    ));
-    writes
+        writes
     })
 }

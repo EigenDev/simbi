@@ -14,6 +14,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
 use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -49,10 +50,10 @@ fn build_sim(init: impl Fn([f64; 2]) -> Prim<f64, 2>) -> Sim {
         let x = sim.geom.x_lo[0] + ((c[0] - lo) as f64 + 0.5) * dx;
         let y = sim.geom.x_lo[1] + ((c[1] - lo) as f64 + 0.5) * dx;
         let p = init([x, y]);
-        sim.fields.prim.rho.set(c, p.rho);
-        sim.fields.prim.vel[0].set(c, p.vel[0]);
-        sim.fields.prim.vel[1].set(c, p.vel[1]);
-        sim.fields.prim.pre_field().unwrap().set(c, p.pre);
+        sim.fields.prim.rho.set(c, p.rho());
+        sim.fields.prim.vel[0].set(c, p.vel()[0]);
+        sim.fields.prim.vel[1].set(c, p.vel()[1]);
+        sim.fields.prim.pre_field().unwrap().set(c, p.pre());
     }
     sim
 }
@@ -78,10 +79,12 @@ fn snapshot(sim: &Sim) -> Vec<[f64; 8]> {
 
 #[test]
 fn excision_fills_the_sphere_and_leaves_the_far_field_bit_untouched() {
-    let sim = build_sim(|[x, y]| Prim {
-        rho: 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos(),
-        vel: Tensor::new([0.08 * (x + y).cos(), -0.06 * (x - y).sin()]),
-        pre: 0.05 + 0.01 * (x * y).cos(),
+    let sim = build_sim(|[x, y]| {
+        Prim::adiabatic(
+            Density(1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos()),
+            Tensor::new([0.08 * (x + y).cos(), -0.06 * (x - y).sin()]),
+            Pressure(0.05 + 0.01 * (x * y).cos()),
+        )
     });
     let before = snapshot(&sim);
 
@@ -136,11 +139,8 @@ fn excision_freezes_the_vacuum_floor_and_is_idempotent() {
     // and must change nothing anywhere.
     const RHO_FLOOR: f64 = 1e-10;
     const P_FLOOR: f64 = 1e-12;
-    let sim = build_sim(|_| Prim {
-        rho: 1.3,
-        vel: Tensor::new([0.05, -0.04]),
-        pre: 0.02,
-    });
+    let sim =
+        build_sim(|_| Prim::adiabatic(Density(1.3), Tensor::new([0.05, -0.04]), Pressure(0.02)));
     let before = snapshot(&sim);
     dispatch_excise(&sim, GAMMA, R_EXC, RHO_FLOOR, P_FLOOR);
     let once = snapshot(&sim);

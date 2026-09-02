@@ -27,6 +27,7 @@ use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -66,11 +67,7 @@ fn cyl_1d_radial_outflow_rarefies_1_over_r() {
         .cfl(0.3)
         .allocate()
         .expect("cyl 1D sim construction failed")
-        .set_initial(|_x| Prim {
-            rho: rho0,
-            vel: Tensor::new([v0]),
-            pre: 1.0,
-        })
+        .set_initial(|_x| Prim::adiabatic(Density(rho0), Tensor::new([v0]), Pressure(1.0)))
         .build();
 
     let sub =
@@ -135,11 +132,7 @@ fn cyl_3d_swirl_centrifugal_outflow() {
         .cfl(0.3)
         .allocate()
         .expect("cyl 3D sim construction failed")
-        .set_initial(|_x| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, v0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_x| Prim::adiabatic(Density(1.0), Tensor::new([0.0, v0, 0.0]), Pressure(1.0)))
         .build();
 
     let sub =
@@ -202,11 +195,7 @@ fn cyl_iso_runs_all_dims() {
             .expect("iso cyl 1D ctor")
             .set_initial(|[r]| {
                 let rho = 1.0 + 0.3 * (-((r - 1.5) / 0.2).powi(2)).exp();
-                PrimG::<f64, 1, IsoModel> {
-                    rho,
-                    vel: Tensor::new([0.05]),
-                    pre: Default::default(),
-                }
+                PrimG::<f64, 1, IsoModel>::isothermal(Density(rho), Tensor::new([0.05]))
             })
             .build();
         let sub = IsoSubstrateKernelSet::<HostMemory, f64, 1>::new(cs, 0.3, &sim.geom.allocated);
@@ -230,11 +219,10 @@ fn cyl_iso_runs_all_dims() {
             .set_initial(|[r, _phi]| {
                 let rho = 1.0 + 0.2 * (-((r - 1.0) / 0.2).powi(2)).exp();
                 // mild rotation v_phi = cs / sqrt(r).
-                PrimG::<f64, 2, IsoModel> {
-                    rho,
-                    vel: Tensor::new([0.0, cs / r.sqrt()]),
-                    pre: Default::default(),
-                }
+                PrimG::<f64, 2, IsoModel>::isothermal(
+                    Density(rho),
+                    Tensor::new([0.0, cs / r.sqrt()]),
+                )
             })
             .build();
         let sub = IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(cs, 0.3, &sim.geom.allocated);
@@ -257,11 +245,7 @@ fn cyl_iso_runs_all_dims() {
             .expect("iso cyl 3D ctor")
             .set_initial(|[r, _phi, _z]| {
                 let rho = 1.0 + 0.2 * (-((r - 1.5) / 0.3).powi(2)).exp();
-                PrimG::<f64, 3, IsoModel> {
-                    rho,
-                    vel: Tensor::new([0.0, 0.3, 0.0]),
-                    pre: Default::default(),
-                }
+                PrimG::<f64, 3, IsoModel>::isothermal(Density(rho), Tensor::new([0.0, 0.3, 0.0]))
             })
             .build();
         let sub = IsoSubstrateKernelSet::<HostMemory, f64, 3>::new(cs, 0.3, &sim.geom.allocated);
@@ -289,11 +273,7 @@ fn cyl_rhd_runs_all_dims() {
             .expect("rhd cyl 1D ctor")
             .set_initial(|[r]| {
                 let rho = 1.0 + 0.3 * (-((r - 1.5) / 0.2).powi(2)).exp();
-                Prim {
-                    rho,
-                    vel: Tensor::new([0.0]),
-                    pre: 1.0,
-                }
+                Prim::adiabatic(Density(rho), Tensor::new([0.0]), Pressure(1.0))
             })
             .build();
         let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.3, &sim.geom.allocated);
@@ -316,11 +296,7 @@ fn cyl_rhd_runs_all_dims() {
             .expect("rhd cyl 2D ctor")
             .set_initial(|[r, _phi]| {
                 let rho = 1.0 + 0.2 * (-((r - 1.0) / 0.2).powi(2)).exp();
-                Prim {
-                    rho,
-                    vel: Tensor::new([0.0, 0.0]),
-                    pre: 1.0,
-                }
+                Prim::adiabatic(Density(rho), Tensor::new([0.0, 0.0]), Pressure(1.0))
             })
             .build();
         let sub = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, &sim.geom.allocated);
@@ -343,11 +319,7 @@ fn cyl_rhd_runs_all_dims() {
             .expect("rhd cyl 3D ctor")
             .set_initial(|[r, _phi, _z]| {
                 let rho = 1.0 + 0.2 * (-((r - 1.5) / 0.3).powi(2)).exp();
-                Prim {
-                    rho,
-                    vel: Tensor::new([0.0, 0.0, 0.0]),
-                    pre: 1.0,
-                }
+                Prim::adiabatic(Density(rho), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0))
             })
             .build();
         let sub = RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, &sim.geom.allocated);

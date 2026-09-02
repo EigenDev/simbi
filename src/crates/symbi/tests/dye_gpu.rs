@@ -22,13 +22,14 @@ use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
-use symbi_hydro::eos::IdealGas;
-use symbi_source_compile::expr_bridge::build_boundary_dag;
-use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::state::Prim;
 use symbi_hydro::NEWTONIAN_SPEC;
-use symbi_source_compile::SourceConfig;
+use symbi_hydro::eos::IdealGas;
+use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
+use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, SurfaceSpec};
+use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_boundary_dag;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 
 type DevSim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CudaSpace, UnifiedMemory>;
@@ -53,11 +54,7 @@ fn a_driven_face_prescribes_the_injected_dye_on_gpu() {
         .unwrap()
         .with_passive_scalar()
         .expect("chi alloc");
-    sim.seed_cells(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 1.0,
-    });
+    sim.seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)));
     let chi_f = sim.fields.prim.chi_field().expect("prim chi");
     for c in sim.geom.allocated.iter() {
         let v = if sim.geom.interior.contains(c) {
@@ -126,11 +123,7 @@ fn a_sink_carries_the_dye_with_the_mass_on_gpu() {
         .cfl(0.3)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build()
         .with_bodies(
             BodyCollection::new().add(

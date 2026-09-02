@@ -23,6 +23,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::{Cartesian, MotionState};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -47,10 +48,12 @@ fn build(motion: MotionState<f64>) -> (Sim, Kset) {
         .expect("sim")
         // cold gas coasting homologously: v = a_dot x, so the gas rides the mesh and the only
         // thing acting on the dye is the expansion itself.
-        .set_initial(|[x, y]| Prim {
-            rho: 1.0,
-            vel: Tensor::new([ADOT * x, ADOT * y]),
-            pre: 1e-6,
+        .set_initial(|[x, y]| {
+            Prim::adiabatic(
+                Density(1.0),
+                Tensor::new([ADOT * x, ADOT * y]),
+                Pressure(1e-6),
+            )
         })
         .build()
         .with_passive_scalar()

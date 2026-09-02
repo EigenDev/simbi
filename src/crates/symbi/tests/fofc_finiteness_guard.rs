@@ -23,6 +23,7 @@ use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -46,11 +47,7 @@ fn fofc_select_freezes_nonfinite_momentum_adiabatic() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build();
     let us = &s.workspace.u_stage;
     let us_nrg = us.nrg_field().expect("u_stage nrg");
@@ -116,10 +113,8 @@ fn fofc_select_freezes_nonfinite_momentum_iso() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| PrimG::<f64, 2, IsoModel> {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: Default::default(),
+        .set_initial(|_| {
+            PrimG::<f64, 2, IsoModel>::isothermal(Density(1.0), Tensor::new([0.0, 0.0]))
         })
         .build();
     let us = &s.workspace.u_stage;

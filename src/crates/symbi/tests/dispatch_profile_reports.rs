@@ -22,6 +22,7 @@ use symbi::symbi_exec::policy::report_dispatch_profile;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -48,11 +49,11 @@ fn the_dispatch_profiler_reports_numbers_when_enabled() {
     // that skips it.
     let ic = |x: [f64; 1]| {
         let (rho, pre) = if x[0] < 0.5 { (1.0, 1.0) } else { (0.125, 0.1) };
-        Prim {
-            rho,
-            vel: symbi_algebra::Tensor::new([0.0]),
-            pre,
-        }
+        Prim::adiabatic(
+            Density(rho),
+            symbi_algebra::Tensor::new([0.0]),
+            Pressure(pre),
+        )
     };
     let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N])

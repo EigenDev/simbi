@@ -32,6 +32,7 @@ use symbi::sim::refinement::Hierarchy;
 use symbi::sim::state::*;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -122,11 +123,7 @@ macro_rules! sealed_radial_gate {
                             let i = (((x[0] - R_IN) / dx - 0.5).round() as usize)
                                 .min(col.len() - 1);
                             let (rho, pre) = col[i];
-                            Prim {
-                                rho,
-                                vel: symbi_algebra::Tensor::new([0.0]),
-                                pre,
-                            }
+                            Prim::adiabatic(Density(rho), symbi_algebra::Tensor::new([0.0]), Pressure(pre))
                         }
                     })
                     .build();

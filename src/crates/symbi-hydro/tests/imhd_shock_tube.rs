@@ -12,12 +12,12 @@
 // the paper's B already absorbed sqrt(4pi), so the table's (Hx,Hy,Hz) are B.
 // =============================================================================
 
-use symbi_algebra::{FaceNormal, Normalized};
 use symbi_algebra::Tensor;
-use symbi_hydro::energy::Zero;
+use symbi_algebra::{FaceNormal, Normalized};
 use symbi_hydro::eos::Isothermal;
 use symbi_hydro::isothermal_mhd::{IsothermalMhd, imhd_recover};
 use symbi_hydro::mhd_state::{IsoMhdCons, IsoMhdPrim};
+use symbi_hydro::quantity::Density;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::riemann::{hlld_isothermal, hlle};
 use symbi_hydro::state::PrimG;
@@ -34,14 +34,10 @@ type P = IsoMhdPrim<f64, 3>;
 type C = IsoMhdCons<f64, 3>;
 
 fn prim(rho: f64, v: [f64; 3], b: [f64; 3]) -> P {
-    IsoMhdPrim {
-        hydro: PrimG {
-            rho,
-            vel: Tensor::new(v),
-            pre: Zero::default(),
-        },
-        mag: Tensor::new(b),
-    }
+    IsoMhdPrim::new(
+        PrimG::isothermal(Density(rho), Tensor::new(v)),
+        Tensor::new(b),
+    )
 }
 
 // Mignone Table 1, test 1: L = (rho=1, By=5), R = (rho=0.1, By=2), Bx = 3.
@@ -70,16 +66,16 @@ fn recon(pm: &P, p0: &P, pp: &P) -> (P, P) {
         let s = minmod(mid - lo, hi - mid);
         (mid - 0.5 * s, mid + 0.5 * s)
     };
-    let (rl, rr) = comp(pm.rho, p0.rho, pp.rho);
+    let (rl, rr) = comp(pm.rho(), p0.rho(), pp.rho());
     let mut vl = [0.0; 3];
     let mut vr = [0.0; 3];
     let mut bl = [0.0; 3];
     let mut br = [0.0; 3];
     for k in 0..3 {
-        let (a, b) = comp(pm.vel[k], p0.vel[k], pp.vel[k]);
+        let (a, b) = comp(pm.vel()[k], p0.vel()[k], pp.vel()[k]);
         vl[k] = a;
         vr[k] = b;
-        let (a, b) = comp(pm.mag[k], p0.mag[k], pp.mag[k]);
+        let (a, b) = comp(pm.mag()[k], p0.mag()[k], pp.mag()[k]);
         bl[k] = a;
         br[k] = b;
     }
@@ -141,23 +137,27 @@ fn imhd_hlld_is_clean_shock_capturing() {
 
     let interior =
         |p: &[P], f: fn(&P) -> f64| -> Vec<f64> { p[NG..NG + N].iter().map(f).collect() };
-    let rho_e = interior(&p_hlle, |p| p.rho);
-    let rho_d = interior(&p_hlld, |p| p.rho);
-    let by_e = interior(&p_hlle, |p| p.mag[1]);
-    let by_d = interior(&p_hlld, |p| p.mag[1]);
+    let rho_e = interior(&p_hlle, |p| p.rho());
+    let rho_d = interior(&p_hlld, |p| p.rho());
+    let by_e = interior(&p_hlle, |p| p.mag()[1]);
+    let by_d = interior(&p_hlld, |p| p.mag()[1]);
 
     // - physical everywhere (isothermal density = HLL average -> stays positive).
     for (i, pi) in p_hlld[NG..NG + N].iter().enumerate() {
         assert!(
-            pi.rho.is_finite() && pi.rho > 0.0,
+            pi.rho().is_finite() && pi.rho() > 0.0,
             "hlld cell {i}: rho={}",
-            pi.rho
+            pi.rho()
         );
     }
 
     // - Bx (normal field) stays exactly constant (F(Bx)=0 in 1D).
     for pi in &p_hlld[NG..NG + N] {
-        assert!((pi.mag[0] - 3.0).abs() < 1e-12, "Bx drifted: {}", pi.mag[0]);
+        assert!(
+            (pi.mag()[0] - 3.0).abs() < 1e-12,
+            "Bx drifted: {}",
+            pi.mag()[0]
+        );
     }
 
     // - non-oscillatory: TV(hlld) <~ TV(hlle) (the monotone baseline).

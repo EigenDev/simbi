@@ -27,12 +27,13 @@ use symbi::sim::refinement::Hierarchy;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
-use symbi_hydro::eos::IdealGas;
-use symbi_source_compile::expr_bridge::build_user_source;
-use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::state::Prim;
 use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_hydro::eos::IdealGas;
+use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
+use symbi_hydro::state::Prim;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -62,17 +63,9 @@ fn sod(left_pressure: f64) -> Sim {
         .expect("sim")
         .set_initial(move |[x]| {
             if x < 0.5 {
-                Prim {
-                    rho: 1.0,
-                    vel: Tensor::new([0.0]),
-                    pre: left_pressure,
-                }
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(left_pressure))
             } else {
-                Prim {
-                    rho: 0.125,
-                    vel: Tensor::new([0.0]),
-                    pre: 0.1,
-                }
+                Prim::adiabatic(Density(0.125), Tensor::new([0.0]), Pressure(0.1))
             }
         })
         .build()
@@ -133,10 +126,12 @@ fn colliding_streams_conserve_with_zero_freezes() {
     .boundaries(Boundaries::uniform(BoundaryType::Periodic))
     .allocate()
     .expect("sim")
-    .set_initial(|[x]| Prim {
-        rho: 1.0,
-        vel: Tensor::new([if x <= 0.5 { 0.99 } else { -0.96 }]),
-        pre: 1e-3,
+    .set_initial(|[x]| {
+        Prim::adiabatic(
+            Density(1.0),
+            Tensor::new([if x <= 0.5 { 0.99 } else { -0.96 }]),
+            Pressure(1e-3),
+        )
     })
     .build();
     let interior = sim.geom.interior.clone();

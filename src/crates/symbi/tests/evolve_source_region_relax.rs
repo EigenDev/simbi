@@ -13,9 +13,9 @@
 // =============================================================================
 
 use symbi::prelude::*;
-use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_hydro::NEWTONIAN_SPEC;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_user_source;
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
 
@@ -26,11 +26,7 @@ fn build_box() -> Sim {
         .boundaries(BoundaryType::Periodic)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 1.0,
-    });
+    sim.seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)));
     sim
 }
 
@@ -105,11 +101,7 @@ fn relax_sponge_damps_uniform_flow() {
         .finish()
         .unwrap();
     // uniform rightward flow v_x = 1 (the perturbation the sponge absorbs).
-    sim.seed_cells(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([1.0, 0.0]),
-        pre: 1.0,
-    });
+    sim.seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([1.0, 0.0]), Pressure(1.0)));
 
     let mom0: f64 = sim
         .geom

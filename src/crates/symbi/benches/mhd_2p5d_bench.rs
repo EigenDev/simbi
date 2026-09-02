@@ -13,6 +13,7 @@
 
 use std::f64::consts::PI;
 use std::time::Instant;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_kernels::Solver;
 use symbi::regimes::substrate_newtonian_mhd::{
@@ -65,14 +66,7 @@ fn bench_2p5d(nx: usize, t_final: f64) -> (f64, u64) {
         .expect("2.5d sim")
         .set_initial(|[x, y]| {
             let (vel, mag) = ot_vectors(x, y, b0);
-            MhdPrim {
-                hydro: Prim {
-                    rho: rho0,
-                    vel,
-                    pre: p0,
-                },
-                mag,
-            }
+            MhdPrim::new(Prim::adiabatic(Density(rho0), vel, Pressure(p0)), mag)
         })
         .seed_faces(|axis, [x, y]| match axis {
             0 => -b0 * (2.0 * PI * y).sin(),
@@ -110,14 +104,7 @@ fn bench_3d_nz1(nx: usize, t_final: f64) -> (f64, u64) {
     .expect("3d sim")
     .set_initial(|[x, y, _z]| {
         let (vel, mag) = ot_vectors(x, y, b0);
-        MhdPrim {
-            hydro: Prim {
-                rho: rho0,
-                vel,
-                pre: p0,
-            },
-            mag,
-        }
+        MhdPrim::new(Prim::adiabatic(Density(rho0), vel, Pressure(p0)), mag)
     })
     .seed_faces(|axis, [x, y, _z]| match axis {
         0 => -b0 * (2.0 * PI * y).sin(),

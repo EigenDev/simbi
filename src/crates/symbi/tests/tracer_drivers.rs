@@ -18,6 +18,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::mass_transport::ItoOrder;
 use symbi_sim::tracers::{ContinuousTracerSet, seed_mass_weighted};
@@ -43,11 +44,11 @@ fn build() -> Sim {
         .expect("sim")
         .set_initial(|[_, y]: [f64; 2]| {
             let band = y.abs() < 0.4;
-            Prim {
-                rho: if band { 3.0 } else { 1.0 },
-                vel: Tensor::new([if band { 0.4 } else { -0.4 }, 0.0]),
-                pre: 1.0,
-            }
+            Prim::adiabatic(
+                Density(if band { 3.0 } else { 1.0 }),
+                Tensor::new([if band { 0.4 } else { -0.4 }, 0.0]),
+                Pressure(1.0),
+            )
         })
         .build()
 }

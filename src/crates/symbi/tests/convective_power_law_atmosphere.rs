@@ -53,6 +53,7 @@
 
 use std::ops::ControlFlow;
 use std::time::Instant;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::prelude::Solver;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
@@ -215,11 +216,7 @@ fn build_column(s: f64, cells: usize, balanced: bool, solver: Solver, in_class: 
                     Some(col) => col[(((r - R_IN) / h - 0.5).round() as usize).min(col.len() - 1)],
                     None => column(s, r),
                 };
-                Prim {
-                    rho,
-                    vel: Tensor::new([0.0]),
-                    pre,
-                }
+                Prim::adiabatic(Density(rho), Tensor::new([0.0]), Pressure(pre))
             }
         })
         .build();
@@ -526,11 +523,11 @@ fn build_wedge(s: f64, nr: usize, nt: usize, aspect: f64) -> Hier2 {
         // starts from pure velocity; its density perturbation carries a factor s and is
         // zero there in any case.
         let displacement = if rate > 0.0 { v_r / rate } else { 0.0 };
-        Prim {
-            rho: rho * (1.0 - displacement * s / (GAMMA * r)),
-            vel: Tensor::new([v_r, v_t]),
-            pre,
-        }
+        Prim::adiabatic(
+            Density(rho * (1.0 - displacement * s / (GAMMA * r))),
+            Tensor::new([v_r, v_t]),
+            Pressure(pre),
+        )
     };
     let sim = Sim2::build(Newtonian, IdealGas { gamma: GAMMA }, Spherical)
         .cells([nr, nt])

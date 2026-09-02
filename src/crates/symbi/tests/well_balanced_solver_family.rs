@@ -35,6 +35,7 @@ use symbi::sim::refinement::Hierarchy;
 use symbi::sim::state::*;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -66,11 +67,11 @@ fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
     let a = (GAMMA - 1.0) / (GAMMA * K0);
     let c = 1.0 / a - GM / (1.0 + G_OFFSET);
     let rho = (a * (GM / r + c)).powf(1.0 / (GAMMA - 1.0));
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
-    }
+    Prim::adiabatic(
+        Density(rho),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(K0 * rho.powf(GAMMA)),
+    )
 }
 
 fn build(solver: Solver) -> Hier {

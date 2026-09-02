@@ -34,6 +34,7 @@ use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
@@ -110,11 +111,7 @@ where
         let vel: [f64; D] = std::array::from_fn(|k| 0.02 * (k as f64 + 1.0) / rho);
         let vsq: f64 = (0..D).map(|k| vel[k] * vel[k]).sum();
         let pre = (GAMMA - 1.0) * (nrg - 0.5 * rho * vsq);
-        Prim {
-            rho,
-            vel: Tensor::new(vel),
-            pre,
-        }
+        Prim::adiabatic(Density(rho), Tensor::new(vel), Pressure(pre))
     })
     .build()
 }
@@ -253,11 +250,7 @@ where
         let r2: f64 = (0..D).map(|k| (x[k] - 0.5).powi(2)).sum();
         let rho = 1.0 + 0.4 * (-r2 / 0.05).exp();
         let vel: [f64; D] = std::array::from_fn(|k| 0.02 * (k as f64 + 1.0) / rho);
-        PrimG::<f64, D, IsoModel> {
-            rho,
-            vel: Tensor::new(vel),
-            pre: Default::default(),
-        }
+        PrimG::<f64, D, IsoModel>::isothermal(Density(rho), Tensor::new(vel))
     })
     .build()
 }
@@ -389,11 +382,7 @@ where
         let r2: f64 = (0..D).map(|k| (x[k] - 0.5).powi(2)).sum();
         let rho = 1.0 + 0.3 * (-r2 / 0.05).exp();
         let pre = 1.0 + 2.0 * (-r2 / 0.02).exp();
-        Prim {
-            rho,
-            vel: Tensor::new([0.0; D]),
-            pre,
-        }
+        Prim::adiabatic(Density(rho), Tensor::new([0.0; D]), Pressure(pre))
     })
     .build()
 }

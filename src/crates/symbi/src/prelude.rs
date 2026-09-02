@@ -68,6 +68,7 @@ pub use crate::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
 // --- primitive / conserved value types (for IC closures + field read-back) ---
 pub use symbi_algebra::Tensor;
 pub use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
+pub use symbi_hydro::quantity::{Density, EnergyDensity, Pressure, SoundSpeedSquared};
 pub use symbi_hydro::state::{Cons, Prim};
 
 // --- convenience type aliases: pin the CPU / host-memory / f64 backend so a sim is just

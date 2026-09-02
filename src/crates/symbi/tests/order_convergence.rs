@@ -26,6 +26,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -52,11 +53,7 @@ fn l1_after_one_period(n: usize, solver: Solver) -> f64 {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|[x]| Prim {
-            rho: rho_exact(x),
-            vel: Tensor::new([V]),
-            pre: P,
-        })
+        .set_initial(|[x]| Prim::adiabatic(Density(rho_exact(x)), Tensor::new([V]), Pressure(P)))
         .build();
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated)
@@ -133,10 +130,8 @@ fn l1_ppm_at_cfl(n: usize, solver: Solver, cfl: f64) -> f64 {
         .timestepping(Timestepping::Rk3)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|[x]| Prim {
-            rho: rho_exact_avg(x, dx),
-            vel: Tensor::new([V]),
-            pre: P,
+        .set_initial(|[x]| {
+            Prim::adiabatic(Density(rho_exact_avg(x, dx)), Tensor::new([V]), Pressure(P))
         })
         .build();
     let sub =
@@ -207,10 +202,8 @@ fn l1_after_one_period_rhd(n: usize, solver: Solver) -> f64 {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("rhd sim construction failed")
-        .set_initial(|[x]| Prim {
-            rho: rho_exact(x),
-            vel: Tensor::new([V_REL]),
-            pre: P,
+        .set_initial(|[x]| {
+            Prim::adiabatic(Density(rho_exact(x)), Tensor::new([V_REL]), Pressure(P))
         })
         .build();
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated)

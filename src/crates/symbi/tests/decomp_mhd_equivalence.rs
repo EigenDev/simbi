@@ -18,8 +18,8 @@
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
 use symbi::sim::decomp::{
-    LocalCopy, Schedule, evolve_decomposed, exchange_grid, flatten, gather_faces,
-    gather_interiors, unflatten,
+    LocalCopy, Schedule, evolve_decomposed, exchange_grid, flatten, gather_faces, gather_interiors,
+    unflatten,
 };
 use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
@@ -27,6 +27,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -47,14 +48,14 @@ type Kern = RmhdSubstrateKernelSet<HostMemory, f64, 2>;
 fn ic(x: f64, y: f64) -> MhdPrim<f64, 3> {
     let r2 = (x - 0.5).powi(2) + (y - 0.5).powi(2);
     let b = 0.2 * (-(r2 / 0.01)).exp();
-    MhdPrim {
-        hydro: Prim {
-            rho: 1.0 + b,
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: 1.0 + b,
-        },
-        mag: Tensor::new(B0),
-    }
+    MhdPrim::new(
+        Prim::adiabatic(
+            Density(1.0 + b),
+            Tensor::new([0.0, 0.0, 0.0]),
+            Pressure(1.0 + b),
+        ),
+        Tensor::new(B0),
+    )
 }
 
 fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {

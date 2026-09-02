@@ -26,6 +26,7 @@
 // =============================================================================
 
 use std::collections::HashMap;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_kernels::dispatch_godunov_with_sources;
 use symbi::sim::state::*;
@@ -56,11 +57,7 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_x| Prim {
-            rho: 1.0,
-            vel: Tensor::zeros(),
-            pre: 1.0,
-        })
+        .set_initial(|_x| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
         .build();
 
     // uniform interior state — gauge readings the source is supposed to update.
@@ -168,11 +165,7 @@ fn substrate_routes_to_iso_fused_uniform_accel() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("iso sim construction failed")
-        .set_initial(|_x| PrimG::<f64, 1, IsoModel> {
-            rho: 1.0,
-            vel: Tensor::zeros(),
-            pre: Default::default(),
-        })
+        .set_initial(|_x| PrimG::<f64, 1, IsoModel>::isothermal(Density(1.0), Tensor::zeros()))
         .build();
 
     let rho_v = 1.5_f64;
@@ -239,11 +232,7 @@ fn missing_source_scalar_panics_loudly() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_x| Prim {
-            rho: 1.0,
-            vel: Tensor::zeros(),
-            pre: 1.0,
-        })
+        .set_initial(|_x| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
         .build();
     let pre = sim.fields.prim.pre_field().expect("prim.pre").clone();
     // intentionally empty — missing g_ext_0 should surface as a panic.

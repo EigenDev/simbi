@@ -35,6 +35,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -64,11 +65,7 @@ fn adiabatic_evolve_with_fused_uniform_accel_actually_accelerates_gas() {
         .timestepping(Timestepping::Euler)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_x| Prim {
-            rho: 1.0,
-            vel: Tensor::zeros(),
-            pre: 1.0,
-        })
+        .set_initial(|_x| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
         .build();
 
     // a uniform_accel SourceSpec mapping `g_ext_0 = 0.5`.
@@ -144,11 +141,7 @@ fn adiabatic_evolve_without_binding_stays_at_rest() {
         .timestepping(Timestepping::Euler)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_x| Prim {
-            rho: 1.0,
-            vel: Tensor::zeros(),
-            pre: 1.0,
-        })
+        .set_initial(|_x| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
         .build();
 
     // no `with_fused_source` — the kernel-set has `fused_source: None`, so

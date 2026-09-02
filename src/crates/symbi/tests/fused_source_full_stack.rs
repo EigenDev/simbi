@@ -36,10 +36,11 @@ use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_aot::kernel_by_name;
 use symbi_geometry::Cartesian;
+use symbi_hydro::NEWTONIAN_SPEC;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
-use symbi_hydro::NEWTONIAN_SPEC;
 use symbi_source_compile::{FusedSourceFamily, SimulationLaws};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -64,11 +65,7 @@ fn simulation_laws_drives_2d_evolve_via_uniform_accel_family() {
         .timestepping(Timestepping::Euler)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_x| Prim {
-            rho: 1.0,
-            vel: Tensor::zeros(),
-            pre: 1.0,
-        })
+        .set_initial(|_x| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
         .build();
 
     // declare the family, derive the binding from the data layer.

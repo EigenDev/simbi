@@ -10,11 +10,11 @@ use symbi::prelude::*;
 use symbi::regimes::substrate_kernels::GradientBc;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
-use symbi_source_compile::expr_bridge::{build_boundary_dag, build_user_source};
-use symbi_hydro::state::Prim;
 use symbi_hydro::NEWTONIAN_SPEC;
-use symbi_source_compile::SourceConfig;
+use symbi_hydro::state::Prim;
 use symbi_sim::tracers::cell_container_address;
+use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::{build_boundary_dag, build_user_source};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -30,11 +30,7 @@ fn composite_seed_uses_uncovered_coarse_and_covered_fine_mass_once() {
         .bounds([0.0], [1.0])
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
     let kernels = Kern::new(GAMMA, CFL, &coarse.geom.allocated);
     let mut hierarchy = Hierarchy::with_refinement(
@@ -111,11 +107,7 @@ fn translating_flow_crosses_refinement_interfaces_without_losing_tracers() {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.4]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.4]), Pressure(1.0)))
         .build();
     let kernels = Kern::new(GAMMA, CFL, &coarse.geom.allocated);
     let mut hierarchy = Hierarchy::with_refinement(
@@ -200,11 +192,7 @@ fn refined_density_source_spawns_only_the_composite_added_mass() {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
     let kernels = make_kernels(&coarse);
     let mut hierarchy = Hierarchy::with_refinement(
@@ -292,11 +280,7 @@ fn refined_driven_inflow_spawns_only_the_composite_entering_mass() {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
     let kernels = make_kernels(&coarse);
     let mut hierarchy = Hierarchy::with_refinement(
@@ -364,11 +348,7 @@ fn refined_neumann_inflow_spawns_only_the_accepted_entering_mass() {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
     let kernels = make_kernels(&coarse);
     let mut hierarchy = Hierarchy::with_refinement(

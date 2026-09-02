@@ -44,9 +44,10 @@
 // =============================================================================
 
 use symbi_algebra::Tensor;
-use symbi_hydro::energy::{DyeModel, EnergyModel, EnergySlot};
-use symbi_hydro::state::ConsG;
 use symbi_carrier::Scalar;
+use symbi_hydro::energy::{DyeModel, EnergyModel, EnergySlot};
+use symbi_hydro::quantity::Density;
+use symbi_hydro::state::ConsG;
 
 use crate::body_delta::BodyDelta;
 
@@ -270,13 +271,13 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
     let g_t = S::ONE - b_t;
     let g_e = S::ONE - (-(relax.lambda_e * dt)).exp();
 
-    let inv_den = S::ONE / cons.den;
-    let u = cons.mom.scale(inv_den);
-    let mom_sq = cons.mom.dot(&cons.mom);
+    let inv_den = S::ONE / cons.den();
+    let u = cons.mom().scale(inv_den);
+    let mom_sq = cons.mom().dot(&cons.mom());
     // the isothermal slot values to zero here; every consumer of e_int below
     // is scaled into the energy slot and discarded again, so the junk stays
     // confined to that dead slot (and the trace DCEs it).
-    let e_int = (cons.nrg.value() - half * mom_sq * inv_den) * inv_den;
+    let e_int = (cons.nrg().value() - half * mom_sq * inv_den) * inv_den;
 
     // velocity channel: du split along the body normal; each component decays
     // at its own rate. u' - u = -(du_n g_n + du_t g_t) is exactly +-0 when
@@ -286,8 +287,8 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
     let du_t = du - du_n;
     let u_delta = -(du_n.scale(g_n) + du_t.scale(g_t));
 
-    let den_new = cons.den * f_rho;
-    let mom_new = cons.mom.scale(f_rho) + u_delta.scale(den_new);
+    let den_new = cons.den() * f_rho;
+    let mom_new = cons.mom().scale(f_rho) + u_delta.scale(den_new);
     // energy conservation. the gas total energy the wall exchanges with the body is the work done on
     // the wall — the transferred momentum times the local wall velocity `u_solid` (= v_com + omega x
     // r, baked per cell) — so summed, `energy_delta` equals the body's mechanical work
@@ -305,31 +306,31 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
     // exactly +-0 when the thermal channel is off.
     let e_delta = (relax.e_target - (e_int + friction_heat)) * g_e;
     let nrg_new = cons
-        .nrg
+        .nrg()
         .scale(f_rho)
         .add(E::Slot::from_scalar(den_new * (e_delta + wall_work)));
 
-    let updated = ConsG {
-        den: den_new,
-        mom: mom_new,
-        nrg: nrg_new,
-        // the sink removes gas together with the dye dissolved in it, so the conserved dye takes
-        // the same factor the density does and the concentration of the surviving gas is
-        // unchanged. the wall channels move momentum and heat alone, leaving the dye to ride with
-        // the mass, so `absorbed` books the accreted dye alongside the accreted mass.
-        chi: cons.chi.scale(f_rho),
-    };
+    // the sink removes gas together with the dye dissolved in it, so the conserved dye takes
+    // the same factor the density does and the concentration of the surviving gas is
+    // unchanged. the wall channels move momentum and heat alone, leaving the dye to ride with
+    // the mass, so `absorbed` books the accreted dye alongside the accreted mass.
+    let updated = cons
+        .with_den(Density(den_new))
+        .with_mom(mom_new)
+        .with_nrg(nrg_new)
+        .with_chi(cons.chi().scale(f_rho));
     let absorbed = *cons - updated;
     let mut delta = BodyDelta::new(idx);
-    delta.mass_delta = absorbed.den * volume;
-    delta.force_delta = absorbed.mom.scale(volume / dt);
-    delta.energy_delta = absorbed.nrg.value() * volume;
+    delta.mass_delta = absorbed.den() * volume;
+    delta.force_delta = absorbed.mom().scale(volume / dt);
+    delta.energy_delta = absorbed.nrg().value() * volume;
     (updated, delta)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_hydro::quantity::{Density, EnergyDensity};
 
     /// an adiabatic wall drives the gas entropy upward.
     ///
@@ -352,8 +353,8 @@ mod tests {
     fn an_adiabatic_wall_does_not_destroy_entropy() {
         const GAMMA: f64 = 5.0 / 3.0;
         let entropy = |c: &Cons3| {
-            let e_int = (c.nrg.value() - 0.5 * c.mom.dot(&c.mom) / c.den) / c.den;
-            (GAMMA - 1.0) * e_int * c.den / c.den.powf(GAMMA)
+            let e_int = (c.nrg().value() - 0.5 * c.mom().dot(&c.mom()) / c.den()) / c.den();
+            (GAMMA - 1.0) * e_int * c.den() / c.den().powf(GAMMA)
         };
 
         let mut checked = 0usize;
@@ -377,12 +378,11 @@ mod tests {
                             (3.0, 1.0e3, 1.0e3),
                         ] {
                             for dt in [1.0e-4, 1.0e-2] {
-                                let cons = Cons3 {
-                                    chi: Default::default(),
-                                    den,
-                                    mom: u.scale(den),
-                                    nrg: (den * (e_int + 0.5 * u.dot(&u))).into(),
-                                };
+                                let cons = Cons3::adiabatic(
+                                    Density(den),
+                                    u.scale(den),
+                                    EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
+                                );
                                 let relax = Relax {
                                     lambda_rho: l_rho,
                                     lambda_un: l_un,
@@ -401,10 +401,10 @@ mod tests {
 
                                 let (k_in, k_out) = (entropy(&cons), entropy(&out));
                                 assert!(
-                                    k_out.is_finite() && out.den > 0.0,
+                                    k_out.is_finite() && out.den() > 0.0,
                                     "penalization produced a non-finite state: den {} nrg {}",
-                                    out.den,
-                                    out.nrg.value()
+                                    out.den(),
+                                    out.nrg().value()
                                 );
                                 assert!(
                                     k_out >= k_in * (1.0 - 1.0e-12),
@@ -444,12 +444,7 @@ mod tests {
         let v = Tensor::new([0.3, -0.2, 0.1]);
         let e_int = 1.7;
         let nrg = den * (e_int + 0.5 * v.dot(&v));
-        ConsG {
-            chi: Default::default(),
-            den,
-            mom: v.scale(den),
-            nrg,
-        }
+        Cons3::adiabatic(Density(den), v.scale(den), EnergyDensity(nrg))
     }
 
     fn kin() -> BodyKin<f64, 3> {
@@ -466,9 +461,9 @@ mod tests {
     }
 
     fn primitives(c: &Cons3) -> (f64, Tensor<f64, 3>, f64) {
-        let u = c.mom.scale(1.0 / c.den);
-        let e = (c.nrg - 0.5 * c.mom.dot(&c.mom) / c.den) / c.den;
-        (c.den, u, e)
+        let u = c.mom().scale(1.0 / c.den());
+        let e = (c.nrg() - 0.5 * c.mom().dot(&c.mom()) / c.den()) / c.den();
+        (c.den(), u, e)
     }
 
     // the single-property (p = 1) case: the [Drain]-only stack reduces bit-for-bit
@@ -483,11 +478,11 @@ mod tests {
         Property::Drain { inv_tau: 1.0 / tau }.contribute(chi, &kin(), &mut acc);
         let (pen, pen_delta) = penalize_cell(&cons, &acc, normal(), dt, vol, 0);
         let (dr, dr_delta) = drain_cell(&cons, chi, tau, dt, vol, 0);
-        assert_eq!(pen.den.to_bits(), dr.den.to_bits());
+        assert_eq!(pen.den().to_bits(), dr.den().to_bits());
         for a in 0..3 {
-            assert_eq!(pen.mom[a].to_bits(), dr.mom[a].to_bits());
+            assert_eq!(pen.mom()[a].to_bits(), dr.mom()[a].to_bits());
         }
-        assert_eq!(pen.nrg.to_bits(), dr.nrg.to_bits());
+        assert_eq!(pen.nrg().to_bits(), dr.nrg().to_bits());
         assert_eq!(
             pen_delta.mass_delta.to_bits(),
             dr_delta.mass_delta.to_bits()
@@ -588,11 +583,11 @@ mod tests {
         let first = run(&orders[0]);
         for order in &orders[1..] {
             let out = run(order);
-            assert_eq!(out.den.to_bits(), first.den.to_bits());
+            assert_eq!(out.den().to_bits(), first.den().to_bits());
             for a in 0..3 {
-                assert_eq!(out.mom[a].to_bits(), first.mom[a].to_bits());
+                assert_eq!(out.mom()[a].to_bits(), first.mom()[a].to_bits());
             }
-            assert_eq!(out.nrg.to_bits(), first.nrg.to_bits());
+            assert_eq!(out.nrg().to_bits(), first.nrg().to_bits());
         }
     }
 
@@ -621,7 +616,7 @@ mod tests {
         // saturates back to the wall temperature e_wall.
         assert!((e1 - k.e_wall).abs() < 1e-12);
         // the drain channel was off: density untouched, bit-exact.
-        assert_eq!(out.den.to_bits(), cons.den.to_bits());
+        assert_eq!(out.den().to_bits(), cons.den().to_bits());
     }
 
     // the returned body delta is the gas's loss — conservation is a
@@ -641,17 +636,17 @@ mod tests {
         let (out, delta) = penalize_cell(&cons, &acc, normal(), dt, vol, 0);
         assert_eq!(
             delta.mass_delta.to_bits(),
-            ((cons.den - out.den) * vol).to_bits()
+            ((cons.den() - out.den()) * vol).to_bits()
         );
         for a in 0..3 {
             assert_eq!(
                 delta.force_delta[a].to_bits(),
-                ((cons.mom[a] - out.mom[a]) * (vol / dt)).to_bits(),
+                ((cons.mom()[a] - out.mom()[a]) * (vol / dt)).to_bits(),
             );
         }
         assert_eq!(
             delta.energy_delta.to_bits(),
-            ((cons.nrg - out.nrg) * vol).to_bits()
+            ((cons.nrg() - out.nrg()) * vol).to_bits()
         );
     }
 
@@ -672,12 +667,11 @@ mod tests {
         let u = Tensor::new([0.0, v_orb]); // azimuthal: u perpendicular to r
         let den = 3.0;
         let e_int = 1.1;
-        let cons: Cons2 = ConsG {
-            chi: Default::default(),
-            den,
-            mom: u.scale(den),
-            nrg: den * (e_int + 0.5 * u.dot(&u)),
-        };
+        let cons: Cons2 = Cons2::adiabatic(
+            Density(den),
+            u.scale(den),
+            EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
+        );
         let (tau, dt, vol) = (0.05, 0.01, 2.0);
         let (_, delta) = drain_cell(&cons, 1.0, tau, dt, vol, 0); // chi = 1: inside the mask
 
@@ -697,12 +691,11 @@ mod tests {
         // purely radial inflow (u along -r) carries no angular momentum: zero
         // torque even for the standard sink -- the booked torque is physical.
         let u_rad = Tensor::new([-0.5, 0.0]);
-        let cons_r: Cons2 = ConsG {
-            chi: Default::default(),
-            den,
-            mom: u_rad.scale(den),
-            nrg: den * (e_int + 0.5 * u_rad.dot(&u_rad)),
-        };
+        let cons_r: Cons2 = Cons2::adiabatic(
+            Density(den),
+            u_rad.scale(den),
+            EnergyDensity(den * (e_int + 0.5 * u_rad.dot(&u_rad))),
+        );
         let (_, delta_r) = drain_cell(&cons_r, 1.0, tau, dt, vol, 0);
         assert_eq!(moment(&r, &delta_r.force_delta)[2], 0.0);
     }
@@ -720,12 +713,11 @@ mod tests {
         let u = Tensor::new([0.3, 0.8]); // mixed radial + azimuthal flow
         let den = 3.0;
         let e_int = 1.1;
-        let cons: Cons2 = ConsG {
-            chi: Default::default(),
-            den,
-            mom: u.scale(den),
-            nrg: den * (e_int + 0.5 * u.dot(&u)),
-        };
+        let cons: Cons2 = Cons2::adiabatic(
+            Density(den),
+            u.scale(den),
+            EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
+        );
         let (inv_tau, dt, vol, chi) = (5.0, 0.02, 2.0, 1.0);
         // u_solid = 0, so du = u; du_t is the component perpendicular to n.
         let du_t = u - n.scale(u.dot(&n));
@@ -768,24 +760,26 @@ mod tests {
         let u = Tensor::new([0.3, 0.7]); // radial 0.3 (drains) + azimuthal 0.7 (retained)
         let den = 4.0;
         let e_int = 1.0;
-        let cons: Cons2 = ConsG {
-            chi: Default::default(),
-            den,
-            mom: u.scale(den),
-            nrg: den * (e_int + 0.5 * u.dot(&u)),
-        };
+        let cons: Cons2 = Cons2::adiabatic(
+            Density(den),
+            u.scale(den),
+            EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
+        );
 
         // (1) lambda_rho dt = 30 -> f_rho ~ 9e-14, finite. cap = infinity (raw).
         let mut acc = Relax::<f64, 2>::none();
         acc.lambda_rho = 30.0;
         acc.lambda_ut = -30.0; // xi = 1, uncapped
         let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
-        assert!(out.den < 1e-10 * den, "mass nearly fully drained");
+        assert!(out.den() < 1e-10 * den, "mass nearly fully drained");
         assert!(
-            (out.mom[1] - cons.mom[1]).abs() < 1e-6,
+            (out.mom()[1] - cons.mom()[1]).abs() < 1e-6,
             "tangential momentum retained (bounded)"
         );
-        assert!(out.mom[1] / out.den > 1e10, "primitive velocity diverges");
+        assert!(
+            out.mom()[1] / out.den() > 1e10,
+            "primitive velocity diverges"
+        );
 
         // (2) lambda_rho dt = 1000 -> f_rho underflows to 0 -> 0 * inf = NaN.
         let mut acc = Relax::<f64, 2>::none();
@@ -793,7 +787,7 @@ mod tests {
         acc.lambda_ut = -1e3;
         let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
         assert!(
-            !out.mom[1].is_finite(),
+            !out.mom()[1].is_finite(),
             "uncapped conserved momentum is NaN at underflow"
         );
     }
@@ -817,12 +811,11 @@ mod tests {
         // bounds the tangential factor at 1/f_floor, so `den' (du_t g_t)` is
         // `0 * finite = 0`, avoiding the `0 * inf = NaN` pathology.
         let u = Tensor::new([0.3, 0.7]);
-        let cons: Cons2 = ConsG {
-            chi: Default::default(),
-            den,
-            mom: u.scale(den),
-            nrg: den * (e_int + 0.5 * u.dot(&u)),
-        };
+        let cons: Cons2 = Cons2::adiabatic(
+            Density(den),
+            u.scale(den),
+            EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
+        );
         let mut acc = Relax::none();
         Property::TorqueFreeAccretor {
             inv_tau: 1e3,
@@ -831,22 +824,21 @@ mod tests {
         .contribute(1.0, &kin0, &mut acc);
         let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
         assert!(
-            out.den.is_finite()
-                && out.mom[0].is_finite()
-                && out.mom[1].is_finite()
-                && out.nrg.value().is_finite(),
+            out.den().is_finite()
+                && out.mom()[0].is_finite()
+                && out.mom()[1].is_finite()
+                && out.nrg().value().is_finite(),
             "saturated conserved state is finite at underflow"
         );
 
         // (2) physical regime: lambda_rho dt = 0.5 -> f_rho = 0.607, growth factor
         // 1.65 << the 1e4 cap (inert) -> torque-free is exact.
         let u2 = Tensor::new([0.3, 0.8]);
-        let cons2: Cons2 = ConsG {
-            chi: Default::default(),
-            den,
-            mom: u2.scale(den),
-            nrg: den * (e_int + 0.5 * u2.dot(&u2)),
-        };
+        let cons2: Cons2 = Cons2::adiabatic(
+            Density(den),
+            u2.scale(den),
+            EnergyDensity(den * (e_int + 0.5 * u2.dot(&u2))),
+        );
         let mut acc2 = Relax::none();
         Property::TorqueFreeAccretor {
             inv_tau: 0.5,
@@ -873,12 +865,11 @@ mod tests {
         let r = Tensor::new([2.0, 0.0]);
         let u = Tensor::new([0.1, 0.6]); // radial + azimuthal
         let (den, e_int, dt) = (3.0, 1.0, 1.0);
-        let cons: Cons2 = ConsG {
-            chi: Default::default(),
-            den,
-            mom: u.scale(den),
-            nrg: den * (e_int + 0.5 * u.dot(&u)),
-        };
+        let cons: Cons2 = Cons2::adiabatic(
+            Density(den),
+            u.scale(den),
+            EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
+        );
         let kin0 = BodyKin::<f64, 2> {
             u_solid: Tensor::zeros(),
             omega: Tensor::zeros(),
@@ -993,10 +984,10 @@ mod tests {
         };
         let direct = run(&k);
         let via_at = run(&k.at(&x_rel));
-        assert_eq!(direct.den.to_bits(), via_at.den.to_bits());
-        assert_eq!(direct.nrg.to_bits(), via_at.nrg.to_bits());
+        assert_eq!(direct.den().to_bits(), via_at.den().to_bits());
+        assert_eq!(direct.nrg().to_bits(), via_at.nrg().to_bits());
         for a in 0..3 {
-            assert_eq!(direct.mom[a].to_bits(), via_at.mom[a].to_bits());
+            assert_eq!(direct.mom()[a].to_bits(), via_at.mom()[a].to_bits());
         }
     }
 
@@ -1017,12 +1008,11 @@ mod tests {
         let den = 2.0;
         let u = base.u_solid + omega_cross(&base.omega, &x_rel);
         let e_int = 1.3;
-        let cons: Cons3 = ConsG {
-            chi: Default::default(),
-            den,
-            mom: u.scale(den),
-            nrg: den * (e_int + 0.5 * u.dot(&u)),
-        };
+        let cons: Cons3 = Cons3::adiabatic(
+            Density(den),
+            u.scale(den),
+            EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
+        );
         let mut acc = Relax::none();
         Property::Wall {
             inv_eta_n: 1e12,
@@ -1030,10 +1020,10 @@ mod tests {
         }
         .contribute(1.0, &k, &mut acc);
         let (out, delta) = penalize_cell(&cons, &acc, normal(), 10.0, 1.0, 0);
-        assert_eq!(out.den.to_bits(), cons.den.to_bits());
-        assert_eq!(out.nrg.to_bits(), cons.nrg.to_bits());
+        assert_eq!(out.den().to_bits(), cons.den().to_bits());
+        assert_eq!(out.nrg().to_bits(), cons.nrg().to_bits());
         for a in 0..3 {
-            assert_eq!(out.mom[a].to_bits(), cons.mom[a].to_bits());
+            assert_eq!(out.mom()[a].to_bits(), cons.mom()[a].to_bits());
             assert_eq!(delta.force_delta[a], 0.0);
         }
     }
@@ -1049,12 +1039,11 @@ mod tests {
         let den = 4.0;
         let u = Tensor::new([0.3, -0.2, 0.1]);
         let e_int = 1.7;
-        let cons: Cons3 = ConsG {
-            chi: Default::default(),
-            den,
-            mom: u.scale(den),
-            nrg: den * (e_int + 0.5 * u.dot(&u)),
-        };
+        let cons: Cons3 = Cons3::adiabatic(
+            Density(den),
+            u.scale(den),
+            EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
+        );
         let n = Tensor::new([1.0, 0.0, 0.0]);
         let k = BodyKin::<f64, 3> {
             u_solid: Tensor::zeros(),
@@ -1070,7 +1059,7 @@ mod tests {
         }
         .contribute(1.0, &k, &mut acc);
         let (out, _) = penalize_cell(&cons, &acc, n, 10.0, 1.0, 0);
-        let u1 = out.mom.scale(1.0 / out.den);
+        let u1 = out.mom().scale(1.0 / out.den());
         // normal component driven to the (zero) target, tangential exact.
         assert!(u1[0].abs() < 1e-12);
         assert_eq!(u1[1].to_bits(), u[1].to_bits());
@@ -1099,8 +1088,8 @@ mod tests {
         Property::Drain { inv_tau: 6.0 }.contribute(chi, &k, &mut drain);
         let (a, _) = penalize_cell(&cons, &porous, n, dt, 1.0, 0);
         let (b, _) = penalize_cell(&cons, &drain, n, dt, 1.0, 0);
-        assert_eq!(a.den.to_bits(), b.den.to_bits());
-        assert_eq!(a.nrg.to_bits(), b.nrg.to_bits());
+        assert_eq!(a.den().to_bits(), b.den().to_bits());
+        assert_eq!(a.nrg().to_bits(), b.nrg().to_bits());
 
         let mut sealed = Relax::none();
         Property::PorousAccretor {
@@ -1111,7 +1100,7 @@ mod tests {
         }
         .contribute(chi, &k, &mut sealed);
         let (c, delta) = penalize_cell(&cons, &sealed, n, dt, 1.0, 0);
-        assert_eq!(c.den.to_bits(), cons.den.to_bits());
+        assert_eq!(c.den().to_bits(), cons.den().to_bits());
         assert_eq!(delta.mass_delta, 0.0);
     }
 
@@ -1119,12 +1108,8 @@ mod tests {
     // the thermal property is structurally inert (the slot discards it).
     #[test]
     fn iso_regime_has_no_energy_channel() {
-        let cons: ConsG<f64, 2, IsoModel> = ConsG {
-            chi: Default::default(),
-            den: 1.4,
-            mom: Tensor::new([0.7, -0.3]),
-            nrg: Default::default(),
-        };
+        let cons: ConsG<f64, 2, IsoModel> =
+            ConsG::<f64, 2, IsoModel>::isothermal(Density(1.4), Tensor::new([0.7, -0.3]));
         let k = BodyKin {
             u_solid: Tensor::zeros(),
             omega: Tensor::zeros(),
@@ -1136,8 +1121,8 @@ mod tests {
         Property::IsothermalWall { inv_eta: 1e9 }.contribute(0.5, &k, &mut acc);
         let (out, delta) = penalize_cell(&cons, &acc, n, 0.1, 1.0, 0);
         let f = (-(acc.lambda_rho) * 0.1f64).exp();
-        assert!((out.den - 1.4 * f).abs() < 1e-15);
+        assert!((out.den() - 1.4 * f).abs() < 1e-15);
         assert_eq!(delta.energy_delta, 0.0);
-        assert!(out.mom[0].is_finite() && out.mom[1].is_finite());
+        assert!(out.mom()[0].is_finite() && out.mom()[1].is_finite());
     }
 }

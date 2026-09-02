@@ -25,22 +25,23 @@
 
 use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-#[cfg(feature = "gpu")]
-use symbi::sim::decomp::{PeerCopy, StagedCopy};
 use symbi::sim::decomp::{
     LocalCopy, MessageQueue, MessageTransport, Ownership, Partition, Phase, Schedule, Topology,
     exchange_grid, exchange_grid_phase, unflatten,
 };
+#[cfg(feature = "gpu")]
+use symbi::sim::decomp::{PeerCopy, StagedCopy};
 use symbi::sim::state::*;
 use symbi::sim::substrate_seam::KernelSet;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
+use symbi_xpu::{CpuSpace, HostMemory, with_device};
 #[cfg(feature = "gpu")]
 use symbi_xpu::{DeviceMemory, DeviceSpace};
-use symbi_xpu::{CpuSpace, HostMemory, with_device};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -84,10 +85,12 @@ macro_rules! message_seam_harness {
                     .timestepping(Timestepping::Rk2)
                     .allocate()
                     .expect("sim construction failed")
-                    .set_initial(|[x, y]| Prim {
-                        rho: seed(x, y),
-                        vel: Tensor::new([0.3 * seed(x, y), -0.2 * seed(y, x)]),
-                        pre: 0.5 + 0.25 * seed(y, x),
+                    .set_initial(|[x, y]| {
+                        Prim::adiabatic(
+                            Density(seed(x, y)),
+                            Tensor::new([0.3 * seed(x, y), -0.2 * seed(y, x)]),
+                            Pressure(0.5 + 0.25 * seed(y, x)),
+                        )
                     })
                     .build();
                 let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
@@ -246,11 +249,25 @@ macro_rules! message_seam_harness {
     };
 }
 
-message_seam_harness!(host, CpuSpace, HostMemory, LocalCopy, MessageQueue::new(), 1);
+message_seam_harness!(
+    host,
+    CpuSpace,
+    HostMemory,
+    LocalCopy,
+    MessageQueue::new(),
+    1
+);
 
 // the same host seam with the tiles spread over two logical contexts, so the device-binding
 // path around every pack, launch and drain is walked on a backend where the answer is known.
-message_seam_harness!(host_two_contexts, CpuSpace, HostMemory, LocalCopy, MessageQueue::new(), 2);
+message_seam_harness!(
+    host_two_contexts,
+    CpuSpace,
+    HostMemory,
+    LocalCopy,
+    MessageQueue::new(),
+    2
+);
 
 // the staged device transport as a message transport: the send gathers the strip into a
 // contiguous device buffer and the receive scatters it, both halves on one device.

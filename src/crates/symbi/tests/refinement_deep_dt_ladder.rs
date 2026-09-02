@@ -31,6 +31,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -63,11 +64,11 @@ fn sound_speed_sq(x: f64) -> f64 {
 
 fn prim_at(x: [f64; 1]) -> Prim<f64, 1> {
     // c^2 = gamma p / rho at rho = 1.
-    Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0]),
-        pre: sound_speed_sq(x[0]) / GAMMA,
-    }
+    Prim::adiabatic(
+        Density(1.0),
+        Tensor::new([0.0]),
+        Pressure(sound_speed_sq(x[0]) / GAMMA),
+    )
 }
 
 /// a hierarchy of `levels` levels, each covering the inner half of its parent about the origin.
@@ -182,7 +183,9 @@ fn the_root_step_is_set_by_the_finest_level_once_the_ladder_reaches_inside_the_b
     );
 
     // the ladder itself, reported: a cost estimate for a deep run is built on these numbers.
-    println!("[{LEVELS} levels, R_B = {R_B}] level : r_control/R_B : own dt : dt * 2^l : rung ratio");
+    println!(
+        "[{LEVELS} levels, R_B = {R_B}] level : r_control/R_B : own dt : dt * 2^l : rung ratio"
+    );
     for ll in 0..LEVELS {
         let ratio = if ll == 0 {
             f64::NAN
@@ -269,11 +272,8 @@ fn shallow_flat_ladder(
 ) -> Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
     // uniform pressure: the sound speed is identical everywhere, which is the flat limit of the
     // Bondi profile at r >> R_B without depending on how far out "far" has to be.
-    let flat = |_x: [f64; 1]| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0]),
-        pre: 1.0 / GAMMA,
-    };
+    let flat =
+        |_x: [f64; 1]| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0 / GAMMA));
     let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N])
         .origin([-L0])

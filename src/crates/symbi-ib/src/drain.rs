@@ -25,9 +25,9 @@
 //   let (drained, delta) = drain_cell(&cons, chi, tau, dt, volume, body_idx);
 // =============================================================================
 
+use symbi_carrier::Scalar;
 use symbi_hydro::energy::{EnergyModel, EnergySlot};
 use symbi_hydro::state::ConsG;
-use symbi_carrier::Scalar;
 
 use crate::body_delta::BodyDelta;
 
@@ -77,9 +77,9 @@ pub fn drain_cell<S: Scalar, const D: usize, E: EnergyModel>(
     // cell-integrated absorbed mass (dM), drag force (dP/dt), and total energy (dE). the
     // energy slot is zero for the isothermal regime, which carries no energy channel. together
     // these make gas+body conservation of mass, momentum, and energy exact to machine precision.
-    delta.mass_delta = absorbed.den * volume;
-    delta.force_delta = absorbed.mom.scale(volume / dt);
-    delta.energy_delta = absorbed.nrg.value() * volume;
+    delta.mass_delta = absorbed.den() * volume;
+    delta.force_delta = absorbed.mom().scale(volume / dt);
+    delta.energy_delta = absorbed.nrg().value() * volume;
     (drained, delta)
 }
 
@@ -126,6 +126,7 @@ mod tests {
     use super::*;
     use symbi_algebra::Tensor;
     use symbi_hydro::energy::Adiabatic;
+    use symbi_hydro::quantity::{Density, EnergyDensity};
 
     type Cons3 = ConsG<f64, 3, Adiabatic>;
 
@@ -135,12 +136,7 @@ mod tests {
         let v = Tensor::new([0.3, -0.2, 0.1]);
         let e_int = 1.7; // specific internal energy
         let nrg = den * (e_int + 0.5 * v.dot(&v));
-        ConsG {
-            chi: Default::default(),
-            den,
-            mom: v.scale(den),
-            nrg,
-        }
+        Cons3::adiabatic(Density(den), v.scale(den), EnergyDensity(nrg))
     }
 
     // the invariant the scheme rests on: uniform scaling leaves the intensive
@@ -151,8 +147,8 @@ mod tests {
         let (drained, _) = drain_cell(&cons, 0.8, 3.0, 0.4, 1.0, 0);
         // velocity v = mom / den: unchanged.
         for k in 0..3 {
-            let v0 = cons.mom[k] / cons.den;
-            let v1 = drained.mom[k] / drained.den;
+            let v0 = cons.mom()[k] / cons.den();
+            let v1 = drained.mom()[k] / drained.den();
             assert!(
                 (v0 - v1).abs() < 1e-14,
                 "velocity {k} changed: {v0} -> {v1}"
@@ -160,13 +156,13 @@ mod tests {
         }
         // specific internal energy e_int = nrg/den - 0.5|v|^2: unchanged.
         let vsq0 = (0..3)
-            .map(|k| (cons.mom[k] / cons.den).powi(2))
+            .map(|k| (cons.mom()[k] / cons.den()).powi(2))
             .sum::<f64>();
         let vsq1 = (0..3)
-            .map(|k| (drained.mom[k] / drained.den).powi(2))
+            .map(|k| (drained.mom()[k] / drained.den()).powi(2))
             .sum::<f64>();
-        let e0 = cons.nrg / cons.den - 0.5 * vsq0;
-        let e1 = drained.nrg / drained.den - 0.5 * vsq1;
+        let e0 = cons.nrg() / cons.den() - 0.5 * vsq0;
+        let e1 = drained.nrg() / drained.den() - 0.5 * vsq1;
         assert!(
             (e0 - e1).abs() < 1e-14,
             "specific internal energy changed: {e0} -> {e1}"
@@ -180,15 +176,15 @@ mod tests {
         let vol = 0.05;
         let (drained, delta) = drain_cell(&cons, 1.0, 2.0, 0.5, vol, 0);
         // mass: gas lost (den_old - den_new)*V equals the body's mass_delta.
-        let gas_mass_lost = (cons.den - drained.den) * vol;
+        let gas_mass_lost = (cons.den() - drained.den()) * vol;
         assert!((gas_mass_lost - delta.mass_delta).abs() < 1e-15);
         // momentum: gas lost (mom_old - mom_new)*V equals the body's absorbed momentum (= F*dt).
         for k in 0..3 {
-            let gas_mom_lost = (cons.mom[k] - drained.mom[k]) * vol;
+            let gas_mom_lost = (cons.mom()[k] - drained.mom()[k]) * vol;
             assert!((gas_mom_lost - delta.force_delta[k] * 0.5).abs() < 1e-15);
         }
         // energy: gas lost (nrg_old - nrg_new)*V equals the body's absorbed energy_delta.
-        let gas_nrg_lost = (cons.nrg - drained.nrg) * vol;
+        let gas_nrg_lost = (cons.nrg() - drained.nrg()) * vol;
         assert!((gas_nrg_lost - delta.energy_delta).abs() < 1e-15);
     }
 
@@ -202,11 +198,14 @@ mod tests {
         for &dt in &[0.1, 10.0, 1e6, 1e12] {
             let (drained, _) = drain_cell(&cons, 1.0, 1e-3, dt, 1.0, 0);
             assert!(
-                drained.den >= 0.0 && drained.den.is_finite(),
+                drained.den() >= 0.0 && drained.den().is_finite(),
                 "density non-physical at dt={dt}: {}",
-                drained.den
+                drained.den()
             );
-            assert!(drained.den <= cons.den, "drain must not increase density");
+            assert!(
+                drained.den() <= cons.den(),
+                "drain must not increase density"
+            );
         }
     }
 
@@ -215,8 +214,8 @@ mod tests {
     fn zero_mask_is_exact_noop() {
         let cons = sample_cons();
         let (drained, delta) = drain_cell(&cons, 0.0, 1.0, 0.5, 1.0, 0);
-        assert_eq!(drained.den, cons.den);
-        assert_eq!(drained.nrg, cons.nrg);
+        assert_eq!(drained.den(), cons.den());
+        assert_eq!(drained.nrg(), cons.nrg());
         assert_eq!(delta.mass_delta, 0.0);
     }
 
@@ -272,15 +271,14 @@ mod tests {
             for i in 0..10 {
                 let dist = 2.0 * i as f64;
                 let rho = scale * (1.0 + 1.0 / (1.0 + dist));
-                let cons = ConsG::<f64, 3, Adiabatic> {
-                    chi: Default::default(),
-                    den: rho,
-                    mom: Tensor::new([0.1 * rho, 0.0, 0.0]),
-                    nrg: 2.0 * rho,
-                };
+                let cons = ConsG::<f64, 3, Adiabatic>::adiabatic(
+                    Density(rho),
+                    Tensor::new([0.1 * rho, 0.0, 0.0]),
+                    EnergyDensity(2.0 * rho),
+                );
                 let (drained, delta) =
                     drain_body_cell(&cons, dist, r_mask, w, dx, c_s, c_drain, dt, vol, 0);
-                let removed = (cons.den - drained.den) * vol;
+                let removed = (cons.den() - drained.den()) * vol;
                 gas_lost += removed;
                 if i == 0 {
                     inner_removed = removed;

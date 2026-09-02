@@ -27,12 +27,12 @@
 
 use symbi_algebra::algebra::Numeric;
 use symbi_algebra::{Embedded, Physical, Tensor};
+use symbi_carrier::Scalar;
 use symbi_geometry::{Cylindrical, CylindricalRPhi, DiagonalMetric, Metric, Spherical};
 use symbi_hydro::energy::{Adiabatic, Dyed, EnergyModel, EnergySlot, IsoModel};
 use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
-use symbi_carrier::Scalar;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
 use symbi_ir::{Gv, GvKernel, ParamExpr, TraceCx};
 
@@ -428,7 +428,13 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, KernelWrites) {
 
         // the geometry scaffold yields the cell centroid; the E_z corner is half a cell below it on each
         // in-plane axis. sample the body mask at that corner so the dissipation registers with the edge.
-        let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let geo = cell_geometry_gv(
+            cx,
+            coords,
+            &vec![Spacing::Uniform; ndim],
+            &axes[..ndim],
+            ndim,
+        );
         let half = Gv::from_f64(0.5);
         let corner = vec![geo.centroid[0] - half * dx0, geo.centroid[1] - half * dx1];
         let x_cart = centroid_to_cartesian(coords, ndim, axes, &corner);
@@ -483,7 +489,13 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Ke
         // (p1, p2) and centered along dir. sample the body mask at that edge so the dissipation registers
         // with the edge EMF.
         let dx: Vec<Gv> = (0..ndim).map(|a| cx.scalar(&format!("dx_{a}"))).collect();
-        let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let geo = cell_geometry_gv(
+            cx,
+            coords,
+            &vec![Spacing::Uniform; ndim],
+            &axes[..ndim],
+            ndim,
+        );
         let half = Gv::from_f64(0.5);
         let corner: Vec<Gv> = (0..ndim)
             .map(|a| {
@@ -571,17 +583,22 @@ fn penalize_drain_impl<E: EnergyModel>(
             .map(|c| cx.field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
             .collect();
         let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
-            <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(cx.field(
-                "nrg",
-                symbi_ir::FieldRef::cons_nrg(),
-            ))
+            <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(
+                cx.field("nrg", symbi_ir::FieldRef::cons_nrg()),
+            )
         } else {
             <E::Slot<Gv> as EnergySlot<Gv>>::zero()
         };
 
         // the cell centroid + volume from the shared geometry scaffold — the coordinate
         // map every other body kernel of this chart evaluates.
-        let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let geo = cell_geometry_gv(
+            cx,
+            coords,
+            &vec![Spacing::Uniform; ndim],
+            &axes[..ndim],
+            ndim,
+        );
         let dv = Gv::ONE / geo.inv_volume;
         let mut min_w = gv_axis_width(cx, 0, Spacing::Uniform);
         for ax in 1..ndim {
@@ -618,20 +635,17 @@ fn penalize_drain_impl<E: EnergyModel>(
         };
         let mut acc = Relax::<Gv, 3>::none();
         Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
-        let cons = ConsG::<Gv, 3, E, Dyed> {
-            // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
-            // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
-            chi: if has_dye {
-                cx.field("chi", symbi_ir::FieldRef::cons_chi())
-            } else {
-                Gv::ZERO
-            },
-            den,
-            mom: Tensor::new(std::array::from_fn(
-                |a| if a < dof { mom[a] } else { Gv::ZERO },
-            )),
-            nrg,
+        // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
+        // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
+        let chi_val = if has_dye {
+            cx.field("chi", symbi_ir::FieldRef::cons_chi())
+        } else {
+            Gv::ZERO
         };
+        let mut slots: Vec<Gv> = vec![den];
+        slots.extend((0..3).map(|a| if a < dof { mom[a] } else { Gv::ZERO }));
+        slots.push(nrg.value());
+        let cons = ConsG::<Gv, 3, E, Dyed>::from_slots(&slots).with_chi(chi_val);
         let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
         // a bare drain has no wall surface -> a zero normal -> zero form drag (all force is accretion).
         let n_cart: Vec<Gv> = vec![Gv::ZERO; ndim];
@@ -679,20 +693,20 @@ fn penalize_writes<'t, E: EnergyModel>(
     writes.push(KernelWrite::new(
         "den_out",
         symbi_ir::FieldRef::cons_den(),
-        out.den.node(),
+        out.den().node(),
     ));
     for a in 0..dof {
         writes.push(KernelWrite::new(
             format!("mom_out_{a}"),
             symbi_ir::FieldRef::cons_mom(a as u8),
-            out.mom[a].node(),
+            out.mom()[a].node(),
         ));
     }
     if E::HAS_ENERGY {
         writes.push(KernelWrite::new(
             "nrg_out",
             symbi_ir::FieldRef::cons_nrg(),
-            out.nrg.value().node(),
+            out.nrg().value().node(),
         ));
     }
     // the sink swallows gas and the dye dissolved in it together; `penalize_cell` applied the
@@ -702,7 +716,7 @@ fn penalize_writes<'t, E: EnergyModel>(
         writes.push(KernelWrite::new(
             "chi_out",
             symbi_ir::FieldRef::cons_chi(),
-            out.chi.node(),
+            out.chi().node(),
         ));
     }
     writes.push(KernelWrite::new(
@@ -887,15 +901,20 @@ fn penalize_porous_impl<E: EnergyModel>(
             .map(|c| cx.field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
             .collect();
         let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
-            <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(cx.field(
-                "nrg",
-                symbi_ir::FieldRef::cons_nrg(),
-            ))
+            <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(
+                cx.field("nrg", symbi_ir::FieldRef::cons_nrg()),
+            )
         } else {
             <E::Slot<Gv> as EnergySlot<Gv>>::zero()
         };
 
-        let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let geo = cell_geometry_gv(
+            cx,
+            coords,
+            &vec![Spacing::Uniform; ndim],
+            &axes[..ndim],
+            ndim,
+        );
         let dv = Gv::ONE / geo.inv_volume;
         let mut min_w = gv_axis_width(cx, 0, Spacing::Uniform);
         for ax in 1..ndim {
@@ -913,7 +932,11 @@ fn penalize_porous_impl<E: EnergyModel>(
         let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
         let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
         let sdf = if spin {
-            body_mask_sdf_spinning(cx, center, shape.expect("a spinning wall must have a shape"))
+            body_mask_sdf_spinning(
+                cx,
+                center,
+                shape.expect("a spinning wall must have a shape"),
+            )
         } else {
             body_mask_sdf_shaped(cx, center, shape)
         };
@@ -1015,20 +1038,17 @@ fn penalize_porous_impl<E: EnergyModel>(
             inv_eta_t: k_eta_t * rate_scale,
         }
         .contribute(chi, &kin, &mut acc);
-        let cons = ConsG::<Gv, 3, E, Dyed> {
-            // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
-            // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
-            chi: if has_dye {
-                cx.field("chi", symbi_ir::FieldRef::cons_chi())
-            } else {
-                Gv::ZERO
-            },
-            den,
-            mom: Tensor::new(std::array::from_fn(
-                |a| if a < dof { mom[a] } else { Gv::ZERO },
-            )),
-            nrg,
+        // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
+        // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
+        let chi_val = if has_dye {
+            cx.field("chi", symbi_ir::FieldRef::cons_chi())
+        } else {
+            Gv::ZERO
         };
+        let mut slots: Vec<Gv> = vec![den];
+        slots.extend((0..3).map(|a| if a < dof { mom[a] } else { Gv::ZERO }));
+        slots.push(nrg.value());
+        let cons = ConsG::<Gv, 3, E, Dyed>::from_slots(&slots).with_chi(chi_val);
         let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
         let (f_cart, torque) = cartesian_receipt(
             coords,
@@ -1104,15 +1124,20 @@ fn penalize_torque_free_impl<E: EnergyModel>(
             .map(|c| cx.field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
             .collect();
         let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
-            <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(cx.field(
-                "nrg",
-                symbi_ir::FieldRef::cons_nrg(),
-            ))
+            <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(
+                cx.field("nrg", symbi_ir::FieldRef::cons_nrg()),
+            )
         } else {
             <E::Slot<Gv> as EnergySlot<Gv>>::zero()
         };
 
-        let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let geo = cell_geometry_gv(
+            cx,
+            coords,
+            &vec![Spacing::Uniform; ndim],
+            &axes[..ndim],
+            ndim,
+        );
         let dv = Gv::ONE / geo.inv_volume;
         let mut min_w = gv_axis_width(cx, 0, Spacing::Uniform);
         for ax in 1..ndim {
@@ -1169,20 +1194,17 @@ fn penalize_torque_free_impl<E: EnergyModel>(
         };
         let mut acc = Relax::<Gv, 3>::none();
         Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
-        let cons = ConsG::<Gv, 3, E, Dyed> {
-            // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
-            // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
-            chi: if has_dye {
-                cx.field("chi", symbi_ir::FieldRef::cons_chi())
-            } else {
-                Gv::ZERO
-            },
-            den,
-            mom: Tensor::new(std::array::from_fn(
-                |a| if a < dof { mom[a] } else { Gv::ZERO },
-            )),
-            nrg,
+        // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
+        // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
+        let chi_val = if has_dye {
+            cx.field("chi", symbi_ir::FieldRef::cons_chi())
+        } else {
+            Gv::ZERO
         };
+        let mut slots: Vec<Gv> = vec![den];
+        slots.extend((0..3).map(|a| if a < dof { mom[a] } else { Gv::ZERO }));
+        slots.push(nrg.value());
+        let cons = ConsG::<Gv, 3, E, Dyed>::from_slots(&slots).with_chi(chi_val);
         let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
         let (f_cart, torque) = cartesian_receipt(
             coords,

@@ -14,6 +14,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::{CylindricalRPhi, Spherical};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -46,11 +47,7 @@ fn spherical_sim() -> SimState<Newtonian, 2, Spherical, IdealGas<f64>, CpuSpace,
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::zeros(),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
         .build()
 }
 
@@ -136,11 +133,7 @@ fn quadrant_wedge_gets_a_tight_square_box() {
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
     .allocate()
     .expect("sim")
-    .set_initial(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::zeros(),
-        pre: 1.0,
-    })
+    .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
     .build();
     seed_rho(&sim, |_, _| 5.5);
     let fd = sim.field_slice(120, 0).expect("slice");
@@ -182,11 +175,7 @@ fn cylindrical_rphi_slice_is_a_disk_with_wraparound() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::zeros(),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
         .build()
         // the 2d cylindrical default is the (R, z) plane; the disk view needs (R, phi).
         .with_cyl_plane(CylPlane::RPhi);
@@ -225,11 +214,7 @@ fn thin_shell_on_a_fine_grid_renders_as_a_continuous_arc() {
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
     .allocate()
     .expect("sim")
-    .set_initial(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::zeros(),
-        pre: 1.0,
-    })
+    .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
     .build();
     // the shell: radial cells [510, 512) at 10x ambient, at every angle.
     let dr = 4.0 / nr as f64;
@@ -292,11 +277,7 @@ fn cartesian_slice_is_unchanged_by_the_polar_path() {
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
     .allocate()
     .expect("sim")
-    .set_initial(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::zeros(),
-        pre: 1.0,
-    })
+    .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
     .build();
     seed_rho(&sim, |_, _| 2.0);
     let fd = sim.field_slice(120, 0).expect("slice");

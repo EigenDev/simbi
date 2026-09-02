@@ -17,6 +17,7 @@
 // =============================================================================
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
@@ -55,10 +56,12 @@ fn rz_swirl_rigid_rotation_nulls_and_shear_acts() {
             .cfl(CFL)
             .allocate()
             .expect("rz sim")
-            .set_initial(|x| Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, vphi(x[0]), 0.0]),
-                pre: 1.0,
+            .set_initial(|x| {
+                Prim::adiabatic(
+                    Density(1.0),
+                    Tensor::new([0.0, vphi(x[0]), 0.0]),
+                    Pressure(1.0),
+                )
             })
             .build();
         let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(NU);
@@ -135,10 +138,12 @@ fn spherical_meridian_rigid_rotation_nulls() {
         .cfl(CFL)
         .allocate()
         .expect("sph sim")
-        .set_initial(|x| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0, omega * x[0] * x[1].sin()]),
-            pre: 1.0,
+        .set_initial(|x| {
+            Prim::adiabatic(
+                Density(1.0),
+                Tensor::new([0.0, 0.0, omega * x[0] * x[1].sin()]),
+                Pressure(1.0),
+            )
         })
         .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(NU);
@@ -198,10 +203,12 @@ fn cylindrical_3d_rigid_rotation_nulls() {
         .cfl(CFL)
         .allocate()
         .expect("cyl3 sim")
-        .set_initial(|x| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, omega * x[0], 0.0]),
-            pre: 1.0,
+        .set_initial(|x| {
+            Prim::adiabatic(
+                Density(1.0),
+                Tensor::new([0.0, omega * x[0], 0.0]),
+                Pressure(1.0),
+            )
         })
         .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(NU);
@@ -258,13 +265,15 @@ fn mhd_rphi_disk_viscosity_diffuses_gas_and_leaves_b_untouched() {
         .cfl(CFL)
         .allocate()
         .expect("mhd disk")
-        .set_initial(|x| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.5 / x[0], 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new([0.0, 0.0, 0.1]),
+        .set_initial(|x| {
+            MhdPrim::new(
+                Prim::adiabatic(
+                    Density(1.0),
+                    Tensor::new([0.0, 0.5 / x[0], 0.0]),
+                    Pressure(1.0),
+                ),
+                Tensor::new([0.0, 0.0, 0.1]),
+            )
         })
         .seed_faces(|axis, _| if axis == 2 { 0.1 } else { 0.0 })
         .build();

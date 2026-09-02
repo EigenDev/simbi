@@ -75,14 +75,10 @@ fn make_sim() -> Sim {
     // B = (B_r, B_phi, B_z) = (0, B0, 0).
     sim.seed_cells(|[r, phi]| {
         let (rho, vr, vphi) = rotor_state(r, phi);
-        MhdPrim {
-            hydro: Prim {
-                rho,
-                vel: Tensor::new([vr, vphi, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new([0.0, B0, 0.0]),
-        }
+        MhdPrim::new(
+            Prim::adiabatic(Density(rho), Tensor::new([vr, vphi, 0.0]), Pressure(1.0)),
+            Tensor::new([0.0, B0, 0.0]),
+        )
     });
     sim
 }
@@ -147,14 +143,14 @@ fn nmhd_rotor_cyl_rphi_preserves_divb_winds_field_stays_physical() {
     for c in sim.geom.interior.iter() {
         let prim = sim.prim_at(c); // c2p recover — no hand-built MhdCons
         assert!(
-            prim.rho.is_finite() && prim.rho > 0.0,
+            prim.rho().is_finite() && prim.rho() > 0.0,
             "cell {c:?}: rho={}",
-            prim.rho
+            prim.rho()
         );
         assert!(
-            prim.pre.is_finite() && prim.pre > 0.0,
+            prim.pre().is_finite() && prim.pre() > 0.0,
             "cell {c:?}: p={}",
-            prim.pre
+            prim.pre()
         );
         max_br = max_br.max(mhd.bcell[0].view().at(c).abs());
     }

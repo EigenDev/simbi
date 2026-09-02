@@ -9,12 +9,12 @@
 use symbi::prelude::*;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::checkpoint::{load_checkpoint, write_checkpoint};
-use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_hydro::NEWTONIAN_SPEC;
-use symbi_source_compile::SourceConfig;
 use symbi_io::Metadata;
 use symbi_sim::mass_transport::ItoOrder;
 use symbi_sim::tracers::{ContinuousTracerRecord, ContinuousTracerSet, seed_mass_weighted};
+use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_user_source;
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -41,11 +41,7 @@ fn make() -> (Sim, Kern) {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
     let tracers = seed_mass_weighted(&sim, 1000);
     sim.continuous_tracers =

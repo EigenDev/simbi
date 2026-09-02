@@ -16,6 +16,7 @@
 // =============================================================================
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet3D;
 use symbi::regimes::substrate_kernels::Solver;
@@ -73,22 +74,22 @@ where
 // z-independent (periodic z at any extent). div(B) = 0 analytically: B_x(y),
 // B_y(x), B_z(x) each vanish under their own derivative.
 fn swirl_prim(x: f64, y: f64, v0: f64, rho0: f64, p0: f64) -> MhdPrim<f64, 3> {
-    MhdPrim {
-        hydro: Prim {
-            rho: rho0,
-            vel: Tensor::new([
+    MhdPrim::new(
+        Prim::adiabatic(
+            Density(rho0),
+            Tensor::new([
                 -v0 * (2.0 * PI * y).sin(),
                 v0 * (2.0 * PI * x).sin(),
                 0.5 * v0 * (2.0 * PI * y).sin(),
             ]),
-            pre: p0,
-        },
-        mag: Tensor::new([
+            Pressure(p0),
+        ),
+        Tensor::new([
             -B0 * (2.0 * PI * y).sin(),
             B0 * (4.0 * PI * x).sin(),
             0.5 * B0 * (2.0 * PI * x).sin(),
         ]),
-    }
+    )
 }
 
 fn swirl_face(axis: usize, x: f64, y: f64) -> f64 {
@@ -187,14 +188,14 @@ fn rmhd_uct_hlld_3d_preserves_divb() {
 fn z_invariant_uct_hlld_3d_matches_2p5d_columns() {
     const T: f64 = 0.1;
     let inplane_prim = |x: f64, y: f64| -> MhdPrim<f64, 3> {
-        MhdPrim {
-            hydro: Prim {
-                rho: GAMMA * GAMMA,
-                vel: Tensor::new([-0.5 * (2.0 * PI * y).sin(), 0.5 * (2.0 * PI * x).sin(), 0.0]),
-                pre: GAMMA,
-            },
-            mag: Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), 0.0]),
-        }
+        MhdPrim::new(
+            Prim::adiabatic(
+                Density(GAMMA * GAMMA),
+                Tensor::new([-0.5 * (2.0 * PI * y).sin(), 0.5 * (2.0 * PI * x).sin(), 0.0]),
+                Pressure(GAMMA),
+            ),
+            Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), 0.0]),
+        )
     };
     let inplane_face = |axis: usize, x: f64, y: f64| -> f64 {
         match axis {

@@ -11,6 +11,7 @@
 use symbi_algebra::Tensor;
 use symbi_aot::{CpuField, CpuFieldMut, kernel_by_name};
 use symbi_hydro::energy::Adiabatic;
+use symbi_hydro::quantity::{Density, EnergyDensity};
 use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
 use symbi_ib::sdf::{SdfExpr, chi};
@@ -209,12 +210,11 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            let cons = ConsG::<f64, 2, Adiabatic> {
-                chi: Default::default(),
-                den: host_in.0[c],
-                mom: Tensor::new([host_in.1[c], host_in.2[c]]),
-                nrg: host_in.3[c],
-            };
+            let cons = ConsG::<f64, 2, Adiabatic>::adiabatic(
+                Density(host_in.0[c]),
+                Tensor::new([host_in.1[c], host_in.2[c]]),
+                EnergyDensity(host_in.3[c]),
+            );
             // the kernel's centroid is the arithmetic mid of the face
             // positions; the algebraically equal x_lo + (i+0.5)dx differs in the last
             // bit, so mirror the face-mid form.
@@ -232,10 +232,18 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
 
-            assert_eq!(den[c].to_bits(), out.den.to_bits(), "den at ({ii},{jj})");
-            assert_eq!(mx[c].to_bits(), out.mom[0].to_bits(), "mom0 at ({ii},{jj})");
-            assert_eq!(my[c].to_bits(), out.mom[1].to_bits(), "mom1 at ({ii},{jj})");
-            assert_eq!(nrg[c].to_bits(), out.nrg.to_bits(), "nrg at ({ii},{jj})");
+            assert_eq!(den[c].to_bits(), out.den().to_bits(), "den at ({ii},{jj})");
+            assert_eq!(
+                mx[c].to_bits(),
+                out.mom()[0].to_bits(),
+                "mom0 at ({ii},{jj})"
+            );
+            assert_eq!(
+                my[c].to_bits(),
+                out.mom()[1].to_bits(),
+                "mom1 at ({ii},{jj})"
+            );
+            assert_eq!(nrg[c].to_bits(), out.nrg().to_bits(), "nrg at ({ii},{jj})");
             assert_eq!(
                 pm[c].to_bits(),
                 delta.mass_delta.to_bits(),
@@ -370,12 +378,10 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            let cons = ConsG::<f64, 2, IsoModel> {
-                chi: Default::default(),
-                den: host_in.0[c],
-                mom: Tensor::new([host_in.1[c], host_in.2[c]]),
-                nrg: Default::default(),
-            };
+            let cons = ConsG::<f64, 2, IsoModel>::isothermal(
+                Density(host_in.0[c]),
+                Tensor::new([host_in.1[c], host_in.2[c]]),
+            );
             let mid = |i: usize| ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5;
             let ch = chi(sphere.dist([mid(ii), mid(jj)]), DX);
             let inv_tau = drain_rate(RACC);
@@ -388,9 +394,17 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (width(ii) * width(jj)));
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
-            assert_eq!(den[c].to_bits(), out.den.to_bits(), "den at ({ii},{jj})");
-            assert_eq!(mx[c].to_bits(), out.mom[0].to_bits(), "mom0 at ({ii},{jj})");
-            assert_eq!(my[c].to_bits(), out.mom[1].to_bits(), "mom1 at ({ii},{jj})");
+            assert_eq!(den[c].to_bits(), out.den().to_bits(), "den at ({ii},{jj})");
+            assert_eq!(
+                mx[c].to_bits(),
+                out.mom()[0].to_bits(),
+                "mom0 at ({ii},{jj})"
+            );
+            assert_eq!(
+                my[c].to_bits(),
+                out.mom()[1].to_bits(),
+                "mom1 at ({ii},{jj})"
+            );
             assert_eq!(
                 pm[c].to_bits(),
                 delta.mass_delta.to_bits(),
@@ -532,12 +546,10 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            let cons = ConsG::<f64, 2, IsoModel> {
-                chi: Default::default(),
-                den: host_in.0[c],
-                mom: Tensor::new([host_in.1[c], host_in.2[c]]),
-                nrg: Default::default(),
-            };
+            let cons = ConsG::<f64, 2, IsoModel>::isothermal(
+                Density(host_in.0[c]),
+                Tensor::new([host_in.1[c], host_in.2[c]]),
+            );
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
             let inv_tau = drain_rate(RACC_C);
@@ -550,9 +562,17 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (ir2(ii) * iphi(jj) * 1.0));
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
-            assert_eq!(den[c].to_bits(), out.den.to_bits(), "den at ({ii},{jj})");
-            assert_eq!(mx[c].to_bits(), out.mom[0].to_bits(), "mom0 at ({ii},{jj})");
-            assert_eq!(my[c].to_bits(), out.mom[1].to_bits(), "mom1 at ({ii},{jj})");
+            assert_eq!(den[c].to_bits(), out.den().to_bits(), "den at ({ii},{jj})");
+            assert_eq!(
+                mx[c].to_bits(),
+                out.mom()[0].to_bits(),
+                "mom0 at ({ii},{jj})"
+            );
+            assert_eq!(
+                my[c].to_bits(),
+                out.mom()[1].to_bits(),
+                "mom1 at ({ii},{jj})"
+            );
             assert_eq!(
                 pm[c].to_bits(),
                 delta.mass_delta.to_bits(),
@@ -638,7 +658,7 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
                 "dt" => DT,
                 "cs" => CS,
                 "c_drain" => C_DRAIN,
-            "k_drain" => K_DRAIN,
+                "k_drain" => K_DRAIN,
                 "xi" => xi_val,
                 "x_lo_0" => R_LO,
                 "x_lo_1" => PHI_LO,
@@ -717,12 +737,10 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            let cons = ConsG::<f64, 2, IsoModel> {
-                chi: Default::default(),
-                den: den0[c],
-                mom: Tensor::new([mx0[c], my0[c]]),
-                nrg: Default::default(),
-            };
+            let cons = ConsG::<f64, 2, IsoModel>::isothermal(
+                Density(den0[c]),
+                Tensor::new([mx0[c], my0[c]]),
+            );
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
             let inv_tau = drain_rate(RACC_C);
@@ -753,17 +771,17 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
             let (expect, delta) = penalize_cell(&cons, &acc, normal, DT, dv, 0);
             assert_eq!(
                 out.0[c].to_bits(),
-                expect.den.to_bits(),
+                expect.den().to_bits(),
                 "den at ({ii},{jj})"
             );
             assert_eq!(
                 out.1[c].to_bits(),
-                expect.mom[0].to_bits(),
+                expect.mom()[0].to_bits(),
                 "mom0 at ({ii},{jj})"
             );
             assert_eq!(
                 out.2[c].to_bits(),
-                expect.mom[1].to_bits(),
+                expect.mom()[1].to_bits(),
                 "mom1 at ({ii},{jj})"
             );
             assert_eq!(
@@ -850,7 +868,7 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
                 "dt" => DT,
                 "cs" => CS,
                 "c_drain" => C_DRAIN,
-            "k_drain" => K_DRAIN,
+                "k_drain" => K_DRAIN,
                 "xi" => xi_val,
                 "x_lo_0" | "x_lo_1" => X_LO,
                 "dx_0" | "dx_1" => DX,
@@ -920,12 +938,10 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            let cons = ConsG::<f64, 2, IsoModel> {
-                chi: Default::default(),
-                den: den0[c],
-                mom: Tensor::new([mx0[c], my0[c]]),
-                nrg: Default::default(),
-            };
+            let cons = ConsG::<f64, 2, IsoModel>::isothermal(
+                Density(den0[c]),
+                Tensor::new([mx0[c], my0[c]]),
+            );
             let x = [mid(ii), mid(jj)];
             let ch = chi(sphere.dist(x), DX);
             let inv_tau = drain_rate(RACC);
@@ -943,17 +959,17 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
             let (expect, delta) = penalize_cell(&cons, &acc, normal, DT, dv, 0);
             assert_eq!(
                 out.0[c].to_bits(),
-                expect.den.to_bits(),
+                expect.den().to_bits(),
                 "den at ({ii},{jj})"
             );
             assert_eq!(
                 out.1[c].to_bits(),
-                expect.mom[0].to_bits(),
+                expect.mom()[0].to_bits(),
                 "mom0 at ({ii},{jj})"
             );
             assert_eq!(
                 out.2[c].to_bits(),
-                expect.mom[1].to_bits(),
+                expect.mom()[1].to_bits(),
                 "mom1 at ({ii},{jj})"
             );
             assert_eq!(
@@ -1043,7 +1059,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
                 "dt" => DT,
                 "gamma" => GAMMA,
                 "c_drain" => C_DRAIN,
-            "k_drain" => K_DRAIN,
+                "k_drain" => K_DRAIN,
                 "porosity" => p_val,
                 "k_eta_n" => K_ETA_N,
                 "k_eta_t" => K_ETA_T,
@@ -1127,17 +1143,16 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            let cons = ConsG::<f64, 2, Adiabatic> {
-                chi: Default::default(),
-                den: host_in.0[c],
-                mom: Tensor::new([host_in.1[c], host_in.2[c]]),
-                nrg: host_in.3[c],
-            };
+            let cons = ConsG::<f64, 2, Adiabatic>::adiabatic(
+                Density(host_in.0[c]),
+                Tensor::new([host_in.1[c], host_in.2[c]]),
+                EnergyDensity(host_in.3[c]),
+            );
             let x = [mid(ii), mid(jj)];
             let dv = 1.0 / (1.0 / (width(ii) * width(jj)));
             let ch = chi(sphere.dist(x), DX);
-            let mom_sq = cons.mom.dot(&cons.mom);
-            let cs = symbi_ib::drain::sound_speed_from_cons(cons.den, mom_sq, cons.nrg, GAMMA);
+            let mom_sq = cons.mom().dot(&cons.mom());
+            let cs = symbi_ib::drain::sound_speed_from_cons(cons.den(), mom_sq, cons.nrg(), GAMMA);
             let inv_tau = drain_rate(RACC);
             let rate_scale = cs / DX;
             let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
@@ -1160,22 +1175,22 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
 
             assert_eq!(
                 out.0[c].to_bits(),
-                expect.den.to_bits(),
+                expect.den().to_bits(),
                 "den at ({ii},{jj})"
             );
             assert_eq!(
                 out.1[c].to_bits(),
-                expect.mom[0].to_bits(),
+                expect.mom()[0].to_bits(),
                 "mom0 at ({ii},{jj})"
             );
             assert_eq!(
                 out.2[c].to_bits(),
-                expect.mom[1].to_bits(),
+                expect.mom()[1].to_bits(),
                 "mom1 at ({ii},{jj})"
             );
             assert_eq!(
                 out.3[c].to_bits(),
-                expect.nrg.to_bits(),
+                expect.nrg().to_bits(),
                 "nrg at ({ii},{jj})"
             );
             assert_eq!(
@@ -1208,7 +1223,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
             // drain scaling's (u unchanged) — pin the tangential component of
             // u against the pre-state where the drain leaves u invariant.
             if ch > 0.5 && r > 1e-12 {
-                let u0 = cons.mom.scale(1.0 / cons.den);
+                let u0 = cons.mom().scale(1.0 / cons.den());
                 let u1 = Tensor::new([out.1[c], out.2[c]]).scale(1.0 / out.0[c]);
                 let t = Tensor::new([-normal[1], normal[0]]);
                 let (du0, du1) = ((u0 - kin.u_solid).dot(&t), (u1 - kin.u_solid).dot(&t));
@@ -1436,12 +1451,8 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            let cons = ConsG::<f64, 2, IsoModel> {
-                chi: Default::default(),
-                den: den[c],
-                mom: Tensor::new([mx[c], my[c]]),
-                nrg: Default::default(),
-            };
+            let cons =
+                ConsG::<f64, 2, IsoModel>::isothermal(Density(den[c]), Tensor::new([mx[c], my[c]]));
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
             let inv_tau = drain_rate(RACC_C);
@@ -1454,7 +1465,7 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (ir2(ii) * iphi(jj) * 1.0));
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
-            assert_eq!(o[0][c].to_bits(), out.den.to_bits(), "den at ({ii},{jj})");
+            assert_eq!(o[0][c].to_bits(), out.den().to_bits(), "den at ({ii},{jj})");
             assert_eq!(
                 o[3][c].to_bits(),
                 delta.mass_delta.to_bits(),
@@ -1506,12 +1517,7 @@ fn the_drained_fraction_reads_no_cell_state() {
         let den = vec![rho; n2];
         let mom = vec![0.0; n2];
         let nrg = vec![pre / (GAMMA - 1.0); n2];
-        let outs = run_pen(
-            kernel,
-            ir,
-            &[&den, &mom, &mom.clone(), &nrg],
-            scalar,
-        );
+        let outs = run_pen(kernel, ir, &[&den, &mom, &mom.clone(), &nrg], scalar);
         outs[0].iter().map(|d| d / rho).collect()
     };
     let thick = run(1.0, 1.0);

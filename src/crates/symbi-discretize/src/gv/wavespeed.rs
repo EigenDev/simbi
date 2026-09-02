@@ -7,12 +7,13 @@
 use super::*;
 use symbi_algebra::Matrix;
 use symbi_algebra::{FaceNormal, Normalized};
+use symbi_carrier::Dual;
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
-use symbi_carrier::Dual;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_ir::{KernelWrite, KernelWrites};
 
 /// trace the newtonian-MHD CFL wave-speed map — `NewtonianMhd::wave_speeds` (the
@@ -26,31 +27,27 @@ pub fn nmhd_wave_speed_map_gv(
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let vel: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = cx.field("prim_pre", FieldRef::PrimPre);
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = cx.scalar("gamma");
-    let eos = IdealGas { gamma };
-    let prim = MhdPrim::<Gv, 3> {
-        hydro: Prim {
-            rho,
-            vel: Tensor::new(vel),
-            pre,
-        },
-        mag: Tensor::new(mag),
-    };
-    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
-    let mut lambda = Gv::ZERO;
-    for d in 0..ndim {
-        let nhat = Normalized::axis(axes[d]);
-        let (sl, sr) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
-        lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
-    }
-    let writes = wave_speed_map_writes(lambda.node());
-    writes
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let vel: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        let pre = cx.field("prim_pre", FieldRef::PrimPre);
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+        let gamma = cx.scalar("gamma");
+        let eos = IdealGas { gamma };
+        let prim = MhdPrim::<Gv, 3>::new(
+            Prim::adiabatic(Density(rho), Tensor::new(vel), Pressure(pre)),
+            Tensor::new(mag),
+        );
+        let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
+        let mut lambda = Gv::ZERO;
+        for d in 0..ndim {
+            let nhat = Normalized::axis(axes[d]);
+            let (sl, sr) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
+            lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
+        }
+        let writes = wave_speed_map_writes(lambda.node());
+        writes
     })
 }
 
@@ -63,30 +60,26 @@ pub fn imhd_wave_speed_map_gv(
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let vel: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let cs = cx.scalar("cs");
-    let eos = Isothermal { cs };
-    let prim = IsoMhdPrim::<Gv, 3> {
-        hydro: PrimG {
-            rho,
-            vel: Tensor::new(vel),
-            pre: Zero::default(),
-        },
-        mag: Tensor::new(mag),
-    };
-    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
-    let mut lambda = Gv::ZERO;
-    for d in 0..ndim {
-        let nhat = Normalized::axis(axes[d]);
-        let (sl, sr) = IsothermalMhd.wave_speeds(&eos, &prim, &nhat);
-        lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
-    }
-    let writes = wave_speed_map_writes(lambda.node());
-    writes
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let vel: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+        let cs = cx.scalar("cs");
+        let eos = Isothermal { cs };
+        let prim = IsoMhdPrim::<Gv, 3>::new(
+            PrimG::isothermal(Density(rho), Tensor::new(vel)),
+            Tensor::new(mag),
+        );
+        let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
+        let mut lambda = Gv::ZERO;
+        for d in 0..ndim {
+            let nhat = Normalized::axis(axes[d]);
+            let (sl, sr) = IsothermalMhd.wave_speeds(&eos, &prim, &nhat);
+            lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
+        }
+        let writes = wave_speed_map_writes(lambda.node());
+        writes
     })
 }
 
@@ -196,134 +189,130 @@ pub fn euler_wave_speed_map_gv<R>(
 ) -> (GvKernel, KernelWrites)
 where
     R: for<'t> Regime<
-        Gv<'t>,
-        3,
-        Prim = Prim<Gv<'t>, 3>,
-        Cons = Cons<Gv<'t>, 3>,
-        Energy = symbi_hydro::energy::Adiabatic,
-    >,
+            Gv<'t>,
+            3,
+            Prim = Prim<Gv<'t>, 3>,
+            Cons = Cons<Gv<'t>, 3>,
+            Energy = symbi_hydro::energy::Adiabatic,
+        >,
 {
     trace(|cx| {
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    // the gridded normal velocities only; the non-gridded slots (cyl r-z's v_phi) stay at zero and
-    // dead in the graph — `wave_speeds_axis` reads the normal velocity `vel[axes[d]]` alone.
-    // the cell-center coordinate on the grid axis carrying coordinate `target` (radial = 0, polar =
-    // 1), for the physical-velocity scale factors below. spacing-aware (log grids evaluate the metric
-    // scale factors at the geometric-mean radius). `Some(center)` for a gridded `target`, `None`
-    // otherwise.
-    let coord_at = |target: usize| {
-        axes.iter()
-            .position(|&c| c == target)
-            .map(|d| gv_cell_center(cx, d, spacing))
-    };
-    let mut vel = [Gv::ZERO; 3];
-    for d in 0..ndim {
-        let c = axes[d];
-        let raw = cx.field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8));
-        // valencia storage: `prim.vel` is the contravariant v^i; the SR characteristic speed is a
-        // function of the physical velocity V^c = h_c v^c, with the metric scale factor h_c =
-        // sqrt(gamma_cc). spherical GR: h_r = sqrt(gamma_rr) = 1/alpha (det-g-flat), h_theta = r,
-        // h_phi = r sin(theta). the per-axis coordinate factor (alpha^2 radial / alpha angular) applied
-        // below completes the banyuls-font coordinate speed. flat -> h = 1 (untouched, bit-identical).
-        vel[c] = if matches!(spacetime, Spacetime::Minkowski) {
-            raw
-        } else {
-            let r = coord_at(0).expect("GR wave-speed map needs a radial axis");
-            match c {
-                0 => raw / gv_metric_lapse_at(cx, spacetime, r, None),
-                1 => raw * r,
-                2 => {
-                    raw * r
-                        * coord_at(1)
-                            .expect("phi scale factor needs a polar axis")
-                            .sin()
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        // the gridded normal velocities only; the non-gridded slots (cyl r-z's v_phi) stay at zero and
+        // dead in the graph — `wave_speeds_axis` reads the normal velocity `vel[axes[d]]` alone.
+        // the cell-center coordinate on the grid axis carrying coordinate `target` (radial = 0, polar =
+        // 1), for the physical-velocity scale factors below. spacing-aware (log grids evaluate the metric
+        // scale factors at the geometric-mean radius). `Some(center)` for a gridded `target`, `None`
+        // otherwise.
+        let coord_at = |target: usize| {
+            axes.iter()
+                .position(|&c| c == target)
+                .map(|d| gv_cell_center(cx, d, spacing))
+        };
+        let mut vel = [Gv::ZERO; 3];
+        for d in 0..ndim {
+            let c = axes[d];
+            let raw = cx.field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8));
+            // valencia storage: `prim.vel` is the contravariant v^i; the SR characteristic speed is a
+            // function of the physical velocity V^c = h_c v^c, with the metric scale factor h_c =
+            // sqrt(gamma_cc). spherical GR: h_r = sqrt(gamma_rr) = 1/alpha (det-g-flat), h_theta = r,
+            // h_phi = r sin(theta). the per-axis coordinate factor (alpha^2 radial / alpha angular) applied
+            // below completes the banyuls-font coordinate speed. flat -> h = 1 (untouched, bit-identical).
+            vel[c] = if matches!(spacetime, Spacetime::Minkowski) {
+                raw
+            } else {
+                let r = coord_at(0).expect("GR wave-speed map needs a radial axis");
+                match c {
+                    0 => raw / gv_metric_lapse_at(cx, spacetime, r, None),
+                    1 => raw * r,
+                    2 => {
+                        raw * r
+                            * coord_at(1)
+                                .expect("phi scale factor needs a polar axis")
+                                .sin()
+                    }
+                    _ => raw,
                 }
-                _ => raw,
+            };
+        }
+        let pre = cx.field("prim_pre", FieldRef::PrimPre);
+        let gamma = cx.scalar("gamma");
+        let eos = super::gv_eos(eos_arm, gamma);
+        let prim = Prim::<Gv, 3>::adiabatic(Density(rho), Tensor::new(vel), Pressure(pre));
+        let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
+        // mesh motion: the cfl signal speed is relative to the grid, `|s -+ v_g|`
+        // with per-axis `v_g = mesh_adot_d * x_centroid + mesh_vtrans_d`, the centroid taken from
+        // the axis map so a graded axis is evaluated at its own cell centers (the dispatch binds the
+        // homologous hubble rate on expanding axes, the translation rate on axis 0, zero
+        // otherwise — the static binding makes v_g exactly zero, and `s - 0` /
+        // `|s|` are bit-identical).
+        // GR coordinate CFL: the banyuls-font coordinate signal speed
+        //   lambda_coord^c = alpha sqrt(gamma^{cc}) lambda^{SR} - beta^c.
+        // for the det-g-flat family (schwarzschild, kerr-schild) the radial factor alpha sqrt(gamma^{rr})
+        // = alpha^2 (schwarzschild f = 1-2M/r; kerr-schild 1/(1+2M/r)), the angular factor = alpha. a
+        // zero-shift background keeps the multiplicative form `base * factor` (bit-identical to the
+        // pre-genericization kernel); a shifted background (kerr-schild beta^r != 0) subtracts beta^r per
+        // characteristic root before the max|.|, an ordering the per-root form carries. the lapse /
+        // shift are radial-only, evaluated at the uniform-centroid cell radius (coord slot 0); flat ->
+        // None -> the SR CFL untouched (bit-identical). the factors come from the `Metric` trait (the
+        // single ADM seam).
+        let gr_radius: Option<Gv> = match spacetime {
+            Spacetime::Minkowski => None,
+            _ => {
+                let d_r = axes
+                    .iter()
+                    .position(|&c| c == 0)
+                    .expect("GR wave-speed map needs a radial axis");
+                // spacing-aware: the lapse/shift are evaluated at the geometric-mean radius on a log grid.
+                // the arithmetic `x_lo + (i+1/2) dx` sits at ~r_min there — a silent CFL violation.
+                Some(gv_cell_center(cx, d_r, spacing))
             }
         };
-    }
-    let pre = cx.field("prim_pre", FieldRef::PrimPre);
-    let gamma = cx.scalar("gamma");
-    let eos = super::gv_eos(eos_arm, gamma);
-    let prim = Prim::<Gv, 3> {
-        rho,
-        vel: Tensor::new(vel),
-        pre,
-    };
-    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
-    // mesh motion: the cfl signal speed is relative to the grid, `|s -+ v_g|`
-    // with per-axis `v_g = mesh_adot_d * x_centroid + mesh_vtrans_d`, the centroid taken from
-    // the axis map so a graded axis is evaluated at its own cell centers (the dispatch binds the
-    // homologous hubble rate on expanding axes, the translation rate on axis 0, zero
-    // otherwise — the static binding makes v_g exactly zero, and `s - 0` /
-    // `|s|` are bit-identical).
-    // GR coordinate CFL: the banyuls-font coordinate signal speed
-    //   lambda_coord^c = alpha sqrt(gamma^{cc}) lambda^{SR} - beta^c.
-    // for the det-g-flat family (schwarzschild, kerr-schild) the radial factor alpha sqrt(gamma^{rr})
-    // = alpha^2 (schwarzschild f = 1-2M/r; kerr-schild 1/(1+2M/r)), the angular factor = alpha. a
-    // zero-shift background keeps the multiplicative form `base * factor` (bit-identical to the
-    // pre-genericization kernel); a shifted background (kerr-schild beta^r != 0) subtracts beta^r per
-    // characteristic root before the max|.|, an ordering the per-root form carries. the lapse /
-    // shift are radial-only, evaluated at the uniform-centroid cell radius (coord slot 0); flat ->
-    // None -> the SR CFL untouched (bit-identical). the factors come from the `Metric` trait (the
-    // single ADM seam).
-    let gr_radius: Option<Gv> = match spacetime {
-        Spacetime::Minkowski => None,
-        _ => {
-            let d_r = axes
-                .iter()
-                .position(|&c| c == 0)
-                .expect("GR wave-speed map needs a radial axis");
-            // spacing-aware: the lapse/shift are evaluated at the geometric-mean radius on a log grid.
-            // the arithmetic `x_lo + (i+1/2) dx` sits at ~r_min there — a silent CFL violation.
-            Some(gv_cell_center(cx, d_r, spacing))
-        }
-    };
-    let mut lambda = Gv::ZERO;
-    for d in 0..ndim {
-        let (sl, sr) = regime.wave_speeds_axis(&eos, &prim, axes[d]);
-        // the moving grid's local velocity `a_dot x_c + v_trans` has to be evaluated at the cell's
-        // own center. a graded axis places that center where its map does, so the linear form
-        // `x_lo + (i + 1/2) dx` assigns each cell the velocity of a cell somewhere else, an error
-        // that grows outward with the grading and is a CFL violation well past an inaccuracy.
-        let xc = gv_cell_center(cx, d, spacing);
-        let vg = cx.scalar(&MeshScalar::Adot(d as u8).name()) * xc
-            + cx.scalar(&MeshScalar::Vtrans(d as u8).name());
-        let base = (sl - vg).abs().max((sr - vg).abs()) * inv_w[d];
-        let contrib = match gr_radius {
-            // flat: the SR CFL |s - vg| * inv_phys_width, untouched -> bit-identical.
-            None => base,
-            Some(r) => {
-                let is_radial = axes[d] == 0;
-                // radial factor = alpha^2 = alpha sqrt(gamma^{rr}); angular factor = alpha.
-                let factor = if is_radial {
-                    gv_metric_lapse_sq_at(cx, spacetime, r, None)
-                } else {
-                    gv_metric_lapse_at(cx, spacetime, r, None)
-                };
-                // the radial shift beta^r (kerr-schild only); zero-shift backgrounds -> None.
-                match if is_radial {
-                    gv_metric_shift_r_at(cx, spacetime, r, None)
-                } else {
-                    None
-                } {
-                    // zero shift (schwarzschild + every angular axis): `base * factor` -> bit-identical.
-                    None => base * factor,
-                    // shifted (kerr-schild radial): lambda_coord = factor*(s - vg) - beta^r, carried
-                    // per characteristic root through the abs/max (the shift breaks the multiplicative
-                    // factoring). both roots < 0 at r <= 2M -> domain of dependence entirely interior.
-                    Some(beta) => {
-                        let ll = factor * (sl - vg) - beta;
-                        let lr = factor * (sr - vg) - beta;
-                        ll.abs().max(lr.abs()) * inv_w[d]
+        let mut lambda = Gv::ZERO;
+        for d in 0..ndim {
+            let (sl, sr) = regime.wave_speeds_axis(&eos, &prim, axes[d]);
+            // the moving grid's local velocity `a_dot x_c + v_trans` has to be evaluated at the cell's
+            // own center. a graded axis places that center where its map does, so the linear form
+            // `x_lo + (i + 1/2) dx` assigns each cell the velocity of a cell somewhere else, an error
+            // that grows outward with the grading and is a CFL violation well past an inaccuracy.
+            let xc = gv_cell_center(cx, d, spacing);
+            let vg = cx.scalar(&MeshScalar::Adot(d as u8).name()) * xc
+                + cx.scalar(&MeshScalar::Vtrans(d as u8).name());
+            let base = (sl - vg).abs().max((sr - vg).abs()) * inv_w[d];
+            let contrib = match gr_radius {
+                // flat: the SR CFL |s - vg| * inv_phys_width, untouched -> bit-identical.
+                None => base,
+                Some(r) => {
+                    let is_radial = axes[d] == 0;
+                    // radial factor = alpha^2 = alpha sqrt(gamma^{rr}); angular factor = alpha.
+                    let factor = if is_radial {
+                        gv_metric_lapse_sq_at(cx, spacetime, r, None)
+                    } else {
+                        gv_metric_lapse_at(cx, spacetime, r, None)
+                    };
+                    // the radial shift beta^r (kerr-schild only); zero-shift backgrounds -> None.
+                    match if is_radial {
+                        gv_metric_shift_r_at(cx, spacetime, r, None)
+                    } else {
+                        None
+                    } {
+                        // zero shift (schwarzschild + every angular axis): `base * factor` -> bit-identical.
+                        None => base * factor,
+                        // shifted (kerr-schild radial): lambda_coord = factor*(s - vg) - beta^r, carried
+                        // per characteristic root through the abs/max (the shift breaks the multiplicative
+                        // factoring). both roots < 0 at r <= 2M -> domain of dependence entirely interior.
+                        Some(beta) => {
+                            let ll = factor * (sl - vg) - beta;
+                            let lr = factor * (sr - vg) - beta;
+                            ll.abs().max(lr.abs()) * inv_w[d]
+                        }
                     }
                 }
-            }
-        };
-        lambda = lambda.max(contrib);
-    }
-    let writes = wave_speed_map_writes(lambda.node());
-    writes
+            };
+            lambda = lambda.max(contrib);
+        }
+        let writes = wave_speed_map_writes(lambda.node());
+        writes
     })
 }
 
@@ -345,44 +334,44 @@ pub fn gr_light_cone_wave_speed_map_gv(
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
-    // gridded cell-center positions, spacing-aware (log = geometric mean of faces, uniform = midpoint)
-    // via the shared `gv_cell_center`; ungridded slots take the exact equatorial/azimuthal constant.
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => gv_cell_center(cx, d, spacing),
-            None => gv_ungridded_slot(coords, c),
+        let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
+        // gridded cell-center positions, spacing-aware (log = geometric mean of faces, uniform = midpoint)
+        // via the shared `gv_cell_center`; ungridded slots take the exact equatorial/azimuthal constant.
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => gv_cell_center(cx, d, spacing),
+                None => gv_ungridded_slot(coords, c),
+            }
+        }));
+        // the light-cone speed alpha sqrt(gamma^{dd}) + |beta^d| at the full position, dispatched by
+        // (spacetime, chart): the kerr-schild spacetime is expressed in spherical, cartesian, or
+        // cylindrical coordinates — the metric computes r = |x| (cartesian) / sqrt(R^2 + z^2)
+        // (cylindrical) internally, so each chart gets the metric that reads its own coordinates. the
+        // spherical form reads x[0] as the radius and serves the spherical chart alone.
+        // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+        let (alpha, gi, beta) = {
+            fn adm<'t, M: Metric<Gv<'t>, 3>>(
+                m: &M,
+                x: Tensor<Gv<'t>, 3>,
+            ) -> (Gv<'t>, Matrix<Gv<'t>, 3>, Tensor<Gv<'t>, 3>) {
+                (m.lapse(x), m.spatial_metric_inv(x), m.shift(x))
+            }
+            with_ks_metric!(cx, spacetime, coords, "the light-cone map", |m| adm(&m, x))
+        };
+        // per gridded axis: coordinate light-cone speed times the coordinate inverse width — the
+        // flat physical inv width times the flat scale factor h_d at the cell center.
+        let pos: Vec<Gv> = (0..3).map(|c| x[c]).collect();
+        let mut lambda = Gv::ZERO;
+        for d in 0..ndim {
+            let c = axes[d];
+            let lam_c = alpha * gi[(c, c)].sqrt() + beta[c].abs();
+            let h_flat = gv_scale_factor(coords, c, &pos);
+            lambda = lambda.max(lam_c * h_flat * inv_w[d]);
         }
-    }));
-    // the light-cone speed alpha sqrt(gamma^{dd}) + |beta^d| at the full position, dispatched by
-    // (spacetime, chart): the kerr-schild spacetime is expressed in spherical, cartesian, or
-    // cylindrical coordinates — the metric computes r = |x| (cartesian) / sqrt(R^2 + z^2)
-    // (cylindrical) internally, so each chart gets the metric that reads its own coordinates. the
-    // spherical form reads x[0] as the radius and serves the spherical chart alone.
-    // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
-    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-    let (alpha, gi, beta) = {
-        fn adm<'t, M: Metric<Gv<'t>, 3>>(
-            m: &M,
-            x: Tensor<Gv<'t>, 3>,
-        ) -> (Gv<'t>, Matrix<Gv<'t>, 3>, Tensor<Gv<'t>, 3>) {
-            (m.lapse(x), m.spatial_metric_inv(x), m.shift(x))
-        }
-        with_ks_metric!(cx, spacetime, coords, "the light-cone map", |m| adm(&m, x))
-    };
-    // per gridded axis: coordinate light-cone speed times the coordinate inverse width — the
-    // flat physical inv width times the flat scale factor h_d at the cell center.
-    let pos: Vec<Gv> = (0..3).map(|c| x[c]).collect();
-    let mut lambda = Gv::ZERO;
-    for d in 0..ndim {
-        let c = axes[d];
-        let lam_c = alpha * gi[(c, c)].sqrt() + beta[c].abs();
-        let h_flat = gv_scale_factor(coords, c, &pos);
-        lambda = lambda.max(lam_c * h_flat * inv_w[d]);
-    }
-    let lambda = gv_state_finite_guard(cx, lambda);
-    let writes = wave_speed_map_writes(lambda.node());
-    writes
+        let lambda = gv_state_finite_guard(cx, lambda);
+        let writes = wave_speed_map_writes(lambda.node());
+        writes
     })
 }
 
@@ -411,13 +400,23 @@ fn gr_metric_fields_gv<'t>(
     spacetime: Spacetime,
     coords: Coords,
     x: Tensor<Gv<'t>, 3>,
-) -> (Matrix<Gv<'t>, 3>, Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
+) -> (
+    Matrix<Gv<'t>, 3>,
+    Matrix<Gv<'t>, 3>,
+    Gv<'t>,
+    Tensor<Gv<'t>, 3>,
+) {
     // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
     // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
     fn adm<'t, M: Metric<Gv<'t>, 3>>(
         m: &M,
         x: Tensor<Gv<'t>, 3>,
-    ) -> (Matrix<Gv<'t>, 3>, Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
+    ) -> (
+        Matrix<Gv<'t>, 3>,
+        Matrix<Gv<'t>, 3>,
+        Gv<'t>,
+        Tensor<Gv<'t>, 3>,
+    ) {
         (
             m.spatial_metric(x),
             m.spatial_metric_inv(x),
@@ -425,9 +424,13 @@ fn gr_metric_fields_gv<'t>(
             m.shift(x),
         )
     }
-    with_ks_metric!(cx, spacetime, coords, "the GR metric-fields trace", |m| adm(
-        &m, x
-    ))
+    with_ks_metric!(
+        cx,
+        spacetime,
+        coords,
+        "the GR metric-fields trace",
+        |m| adm(&m, x)
+    )
 }
 
 /// the state-dependent curved-background RMHD CFL wave-speed map — the coordinate-frame
@@ -450,44 +453,41 @@ pub fn rmhd_magnetosonic_cfl_map_gr_gv(
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let vel: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = cx.field("prim_pre", FieldRef::PrimPre);
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = cx.scalar("gamma");
-    let eos = IdealGas { gamma };
-    let prim = MhdPrim::<Gv, 3> {
-        hydro: Prim {
-            rho,
-            vel: Tensor::new(vel),
-            pre,
-        },
-        mag: Tensor::new(mag),
-    };
-    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => gv_cell_center(cx, d, spacing),
-            None => gv_ungridded_slot(coords, c),
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let vel: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        let pre = cx.field("prim_pre", FieldRef::PrimPre);
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+        let gamma = cx.scalar("gamma");
+        let eos = IdealGas { gamma };
+        let prim = MhdPrim::<Gv, 3>::new(
+            Prim::adiabatic(Density(rho), Tensor::new(vel), Pressure(pre)),
+            Tensor::new(mag),
+        );
+        let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => gv_cell_center(cx, d, spacing),
+                None => gv_ungridded_slot(coords, c),
+            }
+        }));
+        let (gm, gm_inv, alpha, beta) = gr_metric_fields_gv(cx, spacetime, coords, x);
+        let metric = SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv));
+        let pos: Vec<Gv> = (0..3).map(|c| x[c]).collect();
+        let mut lambda = Gv::ZERO;
+        for d in 0..ndim {
+            let c = axes[d];
+            let nhat = Tensor::<Gv, 3>::unit(c);
+            let (sl, sr) = symbi_hydro::rmhd::rmhd_magnetosonic_cfl_speeds_gr(
+                &eos, &prim, &nhat, &metric, alpha,
+            );
+            let lam_c = (sl - beta[c]).abs().max((sr - beta[c]).abs());
+            let h_flat = gv_scale_factor(coords, c, &pos);
+            lambda = lambda.max(lam_c * h_flat * inv_w[d]);
         }
-    }));
-    let (gm, gm_inv, alpha, beta) = gr_metric_fields_gv(cx, spacetime, coords, x);
-    let metric = SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv));
-    let pos: Vec<Gv> = (0..3).map(|c| x[c]).collect();
-    let mut lambda = Gv::ZERO;
-    for d in 0..ndim {
-        let c = axes[d];
-        let nhat = Tensor::<Gv, 3>::unit(c);
-        let (sl, sr) =
-            symbi_hydro::rmhd::rmhd_magnetosonic_cfl_speeds_gr(&eos, &prim, &nhat, &metric, alpha);
-        let lam_c = (sl - beta[c]).abs().max((sr - beta[c]).abs());
-        let h_flat = gv_scale_factor(coords, c, &pos);
-        lambda = lambda.max(lam_c * h_flat * inv_w[d]);
-    }
-    let writes = wave_speed_map_writes(lambda.node());
-    writes
+        let writes = wave_speed_map_writes(lambda.node());
+        writes
     })
 }
 
@@ -510,28 +510,28 @@ pub fn kerr_wave_speed_map_gv(
         "the kerr wave-speed map is the (r, theta) swirl instance"
     );
     trace(|cx| {
-    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
-    // spacing-aware cell centers: the radial axis may be log (kerr log-radial is baked), so the
-    // metric (lapse, shift, gamma^{cc}) must evaluate at the geometric-mean radius. theta is
-    // uniform -> its center is the plain arithmetic midpoint.
-    let r = gv_cell_center(cx, 0, spacing);
-    let th = gv_cell_center(cx, 1, spacing);
-    let mass = cx.scalar("schwarzschild_mass");
-    let spin = cx.scalar("kerr_spin");
-    let g = KerrKS { mass, spin };
-    let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
-    let alpha = g.lapse(x);
-    let gi = g.spatial_metric_inv(x);
-    let beta_r = g.shift(x)[0];
-    // radial: (alpha sqrt(gamma^rr) + beta^r) / dr; the physical inv width for the flat radial
-    // scale factor h_r = 1 equals the coordinate 1/dr.
-    let lam_r = (alpha * gi[(0, 0)].sqrt() + beta_r) * inv_w[0];
-    // polar: alpha sqrt(gamma^{theta theta}) = alpha/sqrt(Sigma) over the coordinate dtheta; the
-    // physical inv width carries the flat h_theta = r, so multiply the ratio r/sqrt(Sigma) back.
-    let lam_t = alpha * gi[(1, 1)].sqrt() * r * inv_w[1];
-    let lambda = gv_state_finite_guard(cx, lam_r.max(lam_t));
-    let writes = wave_speed_map_writes(lambda.node());
-    writes
+        let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
+        // spacing-aware cell centers: the radial axis may be log (kerr log-radial is baked), so the
+        // metric (lapse, shift, gamma^{cc}) must evaluate at the geometric-mean radius. theta is
+        // uniform -> its center is the plain arithmetic midpoint.
+        let r = gv_cell_center(cx, 0, spacing);
+        let th = gv_cell_center(cx, 1, spacing);
+        let mass = cx.scalar("schwarzschild_mass");
+        let spin = cx.scalar("kerr_spin");
+        let g = KerrKS { mass, spin };
+        let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
+        let alpha = g.lapse(x);
+        let gi = g.spatial_metric_inv(x);
+        let beta_r = g.shift(x)[0];
+        // radial: (alpha sqrt(gamma^rr) + beta^r) / dr; the physical inv width for the flat radial
+        // scale factor h_r = 1 equals the coordinate 1/dr.
+        let lam_r = (alpha * gi[(0, 0)].sqrt() + beta_r) * inv_w[0];
+        // polar: alpha sqrt(gamma^{theta theta}) = alpha/sqrt(Sigma) over the coordinate dtheta; the
+        // physical inv width carries the flat h_theta = r, so multiply the ratio r/sqrt(Sigma) back.
+        let lam_t = alpha * gi[(1, 1)].sqrt() * r * inv_w[1];
+        let lambda = gv_state_finite_guard(cx, lam_r.max(lam_t));
+        let writes = wave_speed_map_writes(lambda.node());
+        writes
     })
 }
 
@@ -584,31 +584,27 @@ pub fn rmhd_wave_speed_map_gv(
     ndim: usize,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let vel: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = cx.field("prim_pre", FieldRef::PrimPre);
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = cx.scalar("gamma");
-    let eos = IdealGas { gamma };
-    let prim = MhdPrim::<Gv, 3> {
-        hydro: Prim {
-            rho,
-            vel: Tensor::new(vel),
-            pre,
-        },
-        mag: Tensor::new(mag),
-    };
-    let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
-    let mut lambda = Gv::ZERO;
-    for d in 0..ndim {
-        let nhat = Tensor::<Gv, 3>::unit(axes[d]);
-        let (sl, sr) = rmhd_magnetosonic_cfl_speeds(&eos, &prim, &nhat);
-        lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
-    }
-    let writes = wave_speed_map_writes(lambda.node());
-    writes
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let vel: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        let pre = cx.field("prim_pre", FieldRef::PrimPre);
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+        let gamma = cx.scalar("gamma");
+        let eos = IdealGas { gamma };
+        let prim = MhdPrim::<Gv, 3>::new(
+            Prim::adiabatic(Density(rho), Tensor::new(vel), Pressure(pre)),
+            Tensor::new(mag),
+        );
+        let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
+        let mut lambda = Gv::ZERO;
+        for d in 0..ndim {
+            let nhat = Tensor::<Gv, 3>::unit(axes[d]);
+            let (sl, sr) = rmhd_magnetosonic_cfl_speeds(&eos, &prim, &nhat);
+            lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
+        }
+        let writes = wave_speed_map_writes(lambda.node());
+        writes
     })
 }
 
@@ -639,63 +635,59 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let ndim = axes.len();
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let vel: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = cx.field("prim_pre", FieldRef::PrimPre);
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = cx.scalar("gamma");
-    let eos = IdealGas { gamma };
-    let prim = MhdPrim::<Gv, 3> {
-        hydro: Prim {
-            rho,
-            vel: Tensor::new(vel),
-            pre,
-        },
-        mag: Tensor::new(mag),
-    };
-    let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => geo.centroid[d],
-            None => gv_ungridded_slot(coords, c),
-        }
-    }));
-    let (gm, gm_inv, alpha, beta) = gr_metric_fields_gv(cx, spacetime, coords, x);
-    let regime = RmhdGr {
-        metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)),
-        alpha,
-    };
-    let mut writes = Vec::with_capacity(2 * ndim);
-    for d in 0..ndim {
-        // the exact quartic roots through the local orthonormal frame -- the same solve the flat
-        // chain performs, so these buffers hold the same quantity on every chart. the fast
-        // magnetosonic bound the cheap CFL rate uses is a valid HLL estimate but a different
-        // number, and the UCT edge EMF reads these directly: filling them with a bound made every
-        // curved-spacetime EMF more diffusive than its flat counterpart on identical physics.
-        // the shift is subtracted here; alpha is already folded in by the tetrad map.
-        let (sl, sr) = symbi_hydro::rmhd::rmhd_gr_wave_speeds_axis(
-            &eos,
-            &prim,
-            &regime.metric,
-            alpha,
-            axes[d],
+        let ndim = axes.len();
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let vel: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        let pre = cx.field("prim_pre", FieldRef::PrimPre);
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+        let gamma = cx.scalar("gamma");
+        let eos = IdealGas { gamma };
+        let prim = MhdPrim::<Gv, 3>::new(
+            Prim::adiabatic(Density(rho), Tensor::new(vel), Pressure(pre)),
+            Tensor::new(mag),
         );
-        let bd = beta[axes[d]];
-        writes.push(KernelWrite::new(
-            format!("ws_l_{d}"),
-            format!("wave_speed_l[{d}]"),
-            (sl - bd).node(),
-        ));
-        writes.push(KernelWrite::new(
-            format!("ws_r_{d}"),
-            format!("wave_speed_r[{d}]"),
-            (sr - bd).node(),
-        ));
-    }
-    writes
+        let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => geo.centroid[d],
+                None => gv_ungridded_slot(coords, c),
+            }
+        }));
+        let (gm, gm_inv, alpha, beta) = gr_metric_fields_gv(cx, spacetime, coords, x);
+        let regime = RmhdGr {
+            metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)),
+            alpha,
+        };
+        let mut writes = Vec::with_capacity(2 * ndim);
+        for d in 0..ndim {
+            // the exact quartic roots through the local orthonormal frame -- the same solve the flat
+            // chain performs, so these buffers hold the same quantity on every chart. the fast
+            // magnetosonic bound the cheap CFL rate uses is a valid HLL estimate but a different
+            // number, and the UCT edge EMF reads these directly: filling them with a bound made every
+            // curved-spacetime EMF more diffusive than its flat counterpart on identical physics.
+            // the shift is subtracted here; alpha is already folded in by the tetrad map.
+            let (sl, sr) = symbi_hydro::rmhd::rmhd_gr_wave_speeds_axis(
+                &eos,
+                &prim,
+                &regime.metric,
+                alpha,
+                axes[d],
+            );
+            let bd = beta[axes[d]];
+            writes.push(KernelWrite::new(
+                format!("ws_l_{d}"),
+                format!("wave_speed_l[{d}]"),
+                (sl - bd).node(),
+            ));
+            writes.push(KernelWrite::new(
+                format!("ws_r_{d}"),
+                format!("wave_speed_r[{d}]"),
+                (sr - bd).node(),
+            ));
+        }
+        writes
     })
 }
 
@@ -720,267 +712,291 @@ pub fn rmhd_source_cfl_gr_gv(
     mag_from_bcell: bool,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let ndim = axes.len();
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let vel: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = cx.field("prim_pre", FieldRef::PrimPre);
-    let v = Tensor::<Gv, 3>::new(vel);
-    let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => geo.centroid[d],
-            None => gv_ungridded_slot(coords, c),
-        }
-    }));
-    // the metric-free rest enthalpy density rho_h = rho + Gamma/(Gamma-1) p (the source builds W
-    // and b^mu from the harvested gamma internally); the cell magnetic field under the same key
-    // convention as the fused godunov source.
-    let gamma_eos = cx.scalar("gamma");
-    let rho_h = rho + gamma_eos / (gamma_eos - Gv::ONE) * pre;
-    let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
-        if mag_from_bcell {
-            cx.field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
-        } else {
-            cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8))
-        }
-    }));
-    let mass_gv = cx.scalar("schwarzschild_mass");
-    let mass = Dual::constant(mass_gv);
-    // the inverse spatial metric (raises the covariant momentum for the admissible-cone norm) and
-    // the covariant source (autodiff Dual metric), dispatched by (spacetime, chart). the momentum
-    // source at p = 0, the energy source at the full p.
-    // also harvest the lapse + shift: the evolved energy slot is the covariant ehat, so the eulerian
-    // admissibility energy E = tau + D is recovered as E = (ehat + D + beta^i S_i) / alpha.
-    let (gm, gm_inv, alpha, beta, s_mom, _s_tau): (
-        Matrix<Gv, 3>,
-        Matrix<Gv, 3>,
-        Gv,
-        Tensor<Gv, 3>,
-        Tensor<Gv, 3>,
-        Gv,
-    ) = match (spacetime, coords) {
-        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-            let mg = SchwarzschildKSCartesian { mass: mass_gv };
-            let (sm, _) = grmhd_covariant_source(
-                &SchwarzschildKSCartesian { mass },
-                x,
-                rho_h,
-                v,
-                Gv::ZERO,
-                b,
-            );
-            let (_, st) =
-                grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, pre, b);
-            (
-                mg.spatial_metric(x),
-                mg.spatial_metric_inv(x),
-                mg.lapse(x),
-                mg.shift(x),
-                sm,
-                st,
-            )
-        }
-        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-            let mg = SchwarzschildKSCylindrical { mass: mass_gv };
-            let (sm, _) = grmhd_covariant_source(
-                &SchwarzschildKSCylindrical { mass },
-                x,
-                rho_h,
-                v,
-                Gv::ZERO,
-                b,
-            );
-            let (_, st) =
-                grmhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, rho_h, v, pre, b);
-            (
-                mg.spatial_metric(x),
-                mg.spatial_metric_inv(x),
-                mg.lapse(x),
-                mg.shift(x),
-                sm,
-                st,
-            )
-        }
-        (Spacetime::SchwarzschildKS, _) => {
-            let mg = SchwarzschildKS { mass: mass_gv };
-            let (sm, _) =
-                grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, Gv::ZERO, b);
-            let (_, st) = grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pre, b);
-            (
-                mg.spatial_metric(x),
-                mg.spatial_metric_inv(x),
-                mg.lapse(x),
-                mg.shift(x),
-                sm,
-                st,
-            )
-        }
-        // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
-        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::KerrKS, Coords::Cartesian) => {
-            let spin_gv = cx.scalar("kerr_spin");
-            let mg = KerrKSCartesian {
-                mass: mass_gv,
-                spin: spin_gv,
-            };
-            let spin = Dual::constant(spin_gv);
-            let (sm, _) =
-                grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, Gv::ZERO, b);
-            let (_, st) =
-                grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pre, b);
-            (
-                mg.spatial_metric(x),
-                mg.spatial_metric_inv(x),
-                mg.lapse(x),
-                mg.shift(x),
-                sm,
-                st,
-            )
-        }
-        (Spacetime::KerrKS, Coords::Cylindrical) => {
-            let spin_gv = cx.scalar("kerr_spin");
-            let mg = KerrKSCylindrical {
-                mass: mass_gv,
-                spin: spin_gv,
-            };
-            let spin = Dual::constant(spin_gv);
-            let (sm, _) =
-                grmhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, rho_h, v, Gv::ZERO, b);
-            let (_, st) =
-                grmhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, rho_h, v, pre, b);
-            (
-                mg.spatial_metric(x),
-                mg.spatial_metric_inv(x),
-                mg.lapse(x),
-                mg.shift(x),
-                sm,
-                st,
-            )
-        }
-        (Spacetime::KerrKS, _) => {
-            let spin_gv = cx.scalar("kerr_spin");
-            let mg = KerrKS {
-                mass: mass_gv,
-                spin: spin_gv,
-            };
-            let spin = Dual::constant(spin_gv);
-            let (sm, _) = grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, Gv::ZERO, b);
-            let (_, st) = grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, pre, b);
-            (
-                mg.spatial_metric(x),
-                mg.spatial_metric_inv(x),
-                mg.lapse(x),
-                mg.shift(x),
-                sm,
-                st,
-            )
-        }
-        (Spacetime::Minkowski, _) => {
-            unreachable!("the source-admissibility CFL is baked only for a curved spacetime")
-        }
-    };
-    // the admissible cone at the current cell: E = tau + D, |S|^2 = gamma^{ij} S_i S_j. the stored
-    // energy is the covariant ehat, so E = (ehat + D + beta^i S_i) / alpha (metric-free b^2 blocks a
-    // direct e - p reconstruction; the invert is exact).
-    let d_cons = cx.field("cons_den", FieldRef::cons_den());
-    let mom: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
-    let ehat = cx.field("cons_nrg", FieldRef::cons_nrg());
-    let beta_s = (0..3).fold(Gv::ZERO, |acc, k| acc + beta[k] * mom[k]);
-    let e_cons = (ehat + d_cons + beta_s) / alpha;
-    let gamma_norm = |a: &[_; 3]| {
-        let mut acc = Gv::ZERO;
-        for ii in 0..3 {
-            for jj in 0..3 {
-                acc = acc + gm_inv[(ii, jj)] * a[ii] * a[jj];
+        let ndim = axes.len();
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let vel: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        let pre = cx.field("prim_pre", FieldRef::PrimPre);
+        let v = Tensor::<Gv, 3>::new(vel);
+        let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => geo.centroid[d],
+                None => gv_ungridded_slot(coords, c),
             }
-        }
-        acc
-    };
-    let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
-    let sm_norm = gamma_norm(&sm_arr).sqrt();
-    let state_scale = symbi_hydro::admissible::rmhd_state_scale(
-        d_cons,
-        &Tensor::new(mom),
-        e_cons,
-        &b,
-        &gm_inv,
-        &gm,
-    );
-    // follow the actual geometric-source ray through the full RMHD admissible set. the evolved
-    // killing-energy slot is source-free on a stationary metric, while the momentum update
-    // is dS/dt = alpha Smom. therefore dE/dt = beta.Smom after differentiating
-    // E = (ehat + D + beta.S)/alpha. the local state/source ratio supplies a dimensionally natural
-    // trial time. if its endpoint is admissible, convexity proves the whole segment safe; otherwise
-    // fixed-count bisection returns the largest known-safe fraction. the lipschitz |source|/q bound
-    // collapses dt whenever a previous projection leaves q near its strict floor; following the ray
-    // keeps the full step for an inward or tangent source.
-    let (source_mom, e_dot) =
-        symbi_hydro::admissible::stationary_killing_source_ray(alpha, &beta, Tensor::new(sm_arr));
-    let source_scale = e_dot.abs().max(alpha * sm_norm);
-    // the rate is the reciprocal of an admissible-ray time. the fractional-change ratio
-    // `source_scale / state_scale` measures how fast the source moves the state and leaves the
-    // admissible boundary unlocated, so it permits a step that carries a cell straight
-    // out of G. this is the one guard the explicit update places on the geometric source: the
-    // first-order flux correction rebuilds a cell from its neighbors' fluxes, and the source
-    // limiter scales a source already being integrated over an admissible-length step. bisecting
-    // the actual ray is what makes `U + dt S` provably admissible for every cell.
-    let eps_d = Gv::from_f64(1e-12) * state_scale;
-    let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
-    let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
-        * state_scale
-        * state_scale.sqrt();
-    let safe_time = symbi_hydro::admissible::rmhd_source_admissible_time(
-        d_cons,
-        Tensor::new(mom),
-        e_cons,
-        source_mom,
-        e_dot,
-        &b,
-        &gm_inv,
-        &gm,
-        state_scale,
-        source_scale,
-        eps_d,
-        eps_q,
-        eps_psi,
-        16,
-    );
-    let lam_s = Gv::ONE / safe_time;
-    // the global timestep belongs to the cells outside the event horizon. the outer horizon
-    // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: the
-    // interior stays causally sealed from the exterior, so an interior cell's admissibility rate is
-    // irrelevant to exterior stability. infalling gas drives the interior pressure toward zero,
-    // which sends the cone margin q = E - sqrt(D^2 + |S|^2) to zero and the source rate lambda_S to
-    // infinity with it, so this mask is what hands dt back to the exterior — measured on the
-    // spinning magnetized torus, 24 cells lying between the excision surface and r_+ held lambda_S at
-    // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
-    //
-    // the threshold is the larger of r_+ and the excision surface, so a run that excises further out
-    // keeps masking everything it excises. an excised cell is additionally numerical padding: its
-    // state is frozen at the vacuum floor and can sit near the cone boundary indefinitely, the
-    // clamped-core metric driving enormous geodesic sources over it. gating cell centers matches how
-    // interior guard activations are counted. excision is a cartesian-chart facility, so the mask
-    // applies there.
-    let lam_s = if coords == Coords::Cartesian
-        && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
-    {
-        let spin = if spacetime == Spacetime::KerrKS {
-            cx.scalar("kerr_spin")
-        } else {
-            Gv::ZERO
+        }));
+        // the metric-free rest enthalpy density rho_h = rho + Gamma/(Gamma-1) p (the source builds W
+        // and b^mu from the harvested gamma internally); the cell magnetic field under the same key
+        // convention as the fused godunov source.
+        let gamma_eos = cx.scalar("gamma");
+        let rho_h = rho + gamma_eos / (gamma_eos - Gv::ONE) * pre;
+        let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
+            if mag_from_bcell {
+                cx.field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
+            } else {
+                cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8))
+            }
+        }));
+        let mass_gv = cx.scalar("schwarzschild_mass");
+        let mass = Dual::constant(mass_gv);
+        // the inverse spatial metric (raises the covariant momentum for the admissible-cone norm) and
+        // the covariant source (autodiff Dual metric), dispatched by (spacetime, chart). the momentum
+        // source at p = 0, the energy source at the full p.
+        // also harvest the lapse + shift: the evolved energy slot is the covariant ehat, so the eulerian
+        // admissibility energy E = tau + D is recovered as E = (ehat + D + beta^i S_i) / alpha.
+        let (gm, gm_inv, alpha, beta, s_mom, _s_tau): (
+            Matrix<Gv, 3>,
+            Matrix<Gv, 3>,
+            Gv,
+            Tensor<Gv, 3>,
+            Tensor<Gv, 3>,
+            Gv,
+        ) = match (spacetime, coords) {
+            (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
+                let mg = SchwarzschildKSCartesian { mass: mass_gv };
+                let (sm, _) = grmhd_covariant_source(
+                    &SchwarzschildKSCartesian { mass },
+                    x,
+                    rho_h,
+                    v,
+                    Gv::ZERO,
+                    b,
+                );
+                let (_, st) =
+                    grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, pre, b);
+                (
+                    mg.spatial_metric(x),
+                    mg.spatial_metric_inv(x),
+                    mg.lapse(x),
+                    mg.shift(x),
+                    sm,
+                    st,
+                )
+            }
+            (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
+                let mg = SchwarzschildKSCylindrical { mass: mass_gv };
+                let (sm, _) = grmhd_covariant_source(
+                    &SchwarzschildKSCylindrical { mass },
+                    x,
+                    rho_h,
+                    v,
+                    Gv::ZERO,
+                    b,
+                );
+                let (_, st) = grmhd_covariant_source(
+                    &SchwarzschildKSCylindrical { mass },
+                    x,
+                    rho_h,
+                    v,
+                    pre,
+                    b,
+                );
+                (
+                    mg.spatial_metric(x),
+                    mg.spatial_metric_inv(x),
+                    mg.lapse(x),
+                    mg.shift(x),
+                    sm,
+                    st,
+                )
+            }
+            (Spacetime::SchwarzschildKS, _) => {
+                let mg = SchwarzschildKS { mass: mass_gv };
+                let (sm, _) =
+                    grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, Gv::ZERO, b);
+                let (_, st) =
+                    grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pre, b);
+                (
+                    mg.spatial_metric(x),
+                    mg.spatial_metric_inv(x),
+                    mg.lapse(x),
+                    mg.shift(x),
+                    sm,
+                    st,
+                )
+            }
+            // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
+            // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+            (Spacetime::KerrKS, Coords::Cartesian) => {
+                let spin_gv = cx.scalar("kerr_spin");
+                let mg = KerrKSCartesian {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                };
+                let spin = Dual::constant(spin_gv);
+                let (sm, _) = grmhd_covariant_source(
+                    &KerrKSCartesian { mass, spin },
+                    x,
+                    rho_h,
+                    v,
+                    Gv::ZERO,
+                    b,
+                );
+                let (_, st) =
+                    grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pre, b);
+                (
+                    mg.spatial_metric(x),
+                    mg.spatial_metric_inv(x),
+                    mg.lapse(x),
+                    mg.shift(x),
+                    sm,
+                    st,
+                )
+            }
+            (Spacetime::KerrKS, Coords::Cylindrical) => {
+                let spin_gv = cx.scalar("kerr_spin");
+                let mg = KerrKSCylindrical {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                };
+                let spin = Dual::constant(spin_gv);
+                let (sm, _) = grmhd_covariant_source(
+                    &KerrKSCylindrical { mass, spin },
+                    x,
+                    rho_h,
+                    v,
+                    Gv::ZERO,
+                    b,
+                );
+                let (_, st) =
+                    grmhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, rho_h, v, pre, b);
+                (
+                    mg.spatial_metric(x),
+                    mg.spatial_metric_inv(x),
+                    mg.lapse(x),
+                    mg.shift(x),
+                    sm,
+                    st,
+                )
+            }
+            (Spacetime::KerrKS, _) => {
+                let spin_gv = cx.scalar("kerr_spin");
+                let mg = KerrKS {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                };
+                let spin = Dual::constant(spin_gv);
+                let (sm, _) =
+                    grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, Gv::ZERO, b);
+                let (_, st) = grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, pre, b);
+                (
+                    mg.spatial_metric(x),
+                    mg.spatial_metric_inv(x),
+                    mg.lapse(x),
+                    mg.shift(x),
+                    sm,
+                    st,
+                )
+            }
+            (Spacetime::Minkowski, _) => {
+                unreachable!("the source-admissibility CFL is baked only for a curved spacetime")
+            }
         };
-        let xc: [Gv; 3] = std::array::from_fn(|c| x[c]);
-        let r_plus = mass_gv + (mass_gv * mass_gv - spin * spin).max(Gv::ZERO).sqrt();
-        let r_mask = r_plus.max(cx.scalar("excision_radius"));
-        let excised = symbi_ib::excise::ks_excised(&xc, spin, r_mask);
-        Gv::select(excised, Gv::ZERO, lam_s)
-    } else {
-        lam_s
-    };
-    let lam_flux = cx.field("lambda", FieldRef::Scratch);
-    let total = lam_flux + lam_s;
+        // the admissible cone at the current cell: E = tau + D, |S|^2 = gamma^{ij} S_i S_j. the stored
+        // energy is the covariant ehat, so E = (ehat + D + beta^i S_i) / alpha (metric-free b^2 blocks a
+        // direct e - p reconstruction; the invert is exact).
+        let d_cons = cx.field("cons_den", FieldRef::cons_den());
+        let mom: [Gv; 3] = std::array::from_fn(|k| {
+            cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
+        });
+        let ehat = cx.field("cons_nrg", FieldRef::cons_nrg());
+        let beta_s = (0..3).fold(Gv::ZERO, |acc, k| acc + beta[k] * mom[k]);
+        let e_cons = (ehat + d_cons + beta_s) / alpha;
+        let gamma_norm = |a: &[_; 3]| {
+            let mut acc = Gv::ZERO;
+            for ii in 0..3 {
+                for jj in 0..3 {
+                    acc = acc + gm_inv[(ii, jj)] * a[ii] * a[jj];
+                }
+            }
+            acc
+        };
+        let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
+        let sm_norm = gamma_norm(&sm_arr).sqrt();
+        let state_scale = symbi_hydro::admissible::rmhd_state_scale(
+            d_cons,
+            &Tensor::new(mom),
+            e_cons,
+            &b,
+            &gm_inv,
+            &gm,
+        );
+        // follow the actual geometric-source ray through the full RMHD admissible set. the evolved
+        // killing-energy slot is source-free on a stationary metric, while the momentum update
+        // is dS/dt = alpha Smom. therefore dE/dt = beta.Smom after differentiating
+        // E = (ehat + D + beta.S)/alpha. the local state/source ratio supplies a dimensionally natural
+        // trial time. if its endpoint is admissible, convexity proves the whole segment safe; otherwise
+        // fixed-count bisection returns the largest known-safe fraction. the lipschitz |source|/q bound
+        // collapses dt whenever a previous projection leaves q near its strict floor; following the ray
+        // keeps the full step for an inward or tangent source.
+        let (source_mom, e_dot) = symbi_hydro::admissible::stationary_killing_source_ray(
+            alpha,
+            &beta,
+            Tensor::new(sm_arr),
+        );
+        let source_scale = e_dot.abs().max(alpha * sm_norm);
+        // the rate is the reciprocal of an admissible-ray time. the fractional-change ratio
+        // `source_scale / state_scale` measures how fast the source moves the state and leaves the
+        // admissible boundary unlocated, so it permits a step that carries a cell straight
+        // out of G. this is the one guard the explicit update places on the geometric source: the
+        // first-order flux correction rebuilds a cell from its neighbors' fluxes, and the source
+        // limiter scales a source already being integrated over an admissible-length step. bisecting
+        // the actual ray is what makes `U + dt S` provably admissible for every cell.
+        let eps_d = Gv::from_f64(1e-12) * state_scale;
+        let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
+        let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
+            * state_scale
+            * state_scale.sqrt();
+        let safe_time = symbi_hydro::admissible::rmhd_source_admissible_time(
+            d_cons,
+            Tensor::new(mom),
+            e_cons,
+            source_mom,
+            e_dot,
+            &b,
+            &gm_inv,
+            &gm,
+            state_scale,
+            source_scale,
+            eps_d,
+            eps_q,
+            eps_psi,
+            16,
+        );
+        let lam_s = Gv::ONE / safe_time;
+        // the global timestep belongs to the cells outside the event horizon. the outer horizon
+        // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: the
+        // interior stays causally sealed from the exterior, so an interior cell's admissibility rate is
+        // irrelevant to exterior stability. infalling gas drives the interior pressure toward zero,
+        // which sends the cone margin q = E - sqrt(D^2 + |S|^2) to zero and the source rate lambda_S to
+        // infinity with it, so this mask is what hands dt back to the exterior — measured on the
+        // spinning magnetized torus, 24 cells lying between the excision surface and r_+ held lambda_S at
+        // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
+        //
+        // the threshold is the larger of r_+ and the excision surface, so a run that excises further out
+        // keeps masking everything it excises. an excised cell is additionally numerical padding: its
+        // state is frozen at the vacuum floor and can sit near the cone boundary indefinitely, the
+        // clamped-core metric driving enormous geodesic sources over it. gating cell centers matches how
+        // interior guard activations are counted. excision is a cartesian-chart facility, so the mask
+        // applies there.
+        let lam_s = if coords == Coords::Cartesian
+            && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
+        {
+            let spin = if spacetime == Spacetime::KerrKS {
+                cx.scalar("kerr_spin")
+            } else {
+                Gv::ZERO
+            };
+            let xc: [Gv; 3] = std::array::from_fn(|c| x[c]);
+            let r_plus = mass_gv + (mass_gv * mass_gv - spin * spin).max(Gv::ZERO).sqrt();
+            let r_mask = r_plus.max(cx.scalar("excision_radius"));
+            let excised = symbi_ib::excise::ks_excised(&xc, spin, r_mask);
+            Gv::select(excised, Gv::ZERO, lam_s)
+        } else {
+            lam_s
+        };
+        let lam_flux = cx.field("lambda", FieldRef::Scratch);
+        let total = lam_flux + lam_s;
         vec![KernelWrite::new("lambda", FieldRef::Scratch, total.node())]
     })
 }
@@ -1005,256 +1021,261 @@ pub fn rhd_source_cfl_gr_gv(
     ncomp: usize,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let ndim = axes.len();
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let vel: [Gv; 3] = std::array::from_fn(|k| {
-        if k < ncomp {
-            cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8))
-        } else {
-            Gv::ZERO
-        }
-    });
-    let pre = cx.field("prim_pre", FieldRef::PrimPre);
-    let v = Tensor::<Gv, 3>::new(vel);
-    // the densitized law samples its metric coefficients at the cell's arithmetic midpoint, the
-    // same point the c2p undensitizes at, so the cone reads the state the recovery produced.
-    let mid = gv_cell_midpoints(cx, spacing, ndim);
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => mid[d],
-            None => gv_ungridded_slot(coords, c),
-        }
-    }));
-    // the admissible cone is a statement about the physical state, so the densitized conserveds
-    // are divided by the full-chart measure sqrt(det gamma) before entering it. the densitized
-    // update adds `dt sqrt(-g) S` to `sqrt(det gamma) U`, so the undensitized source rate the cone
-    // sees is `alpha S` — the lapse is applied to the connection source below.
-    let inv_dens = Gv::ONE / gv_metric_volume_factor_at(cx, spacetime, coords, x);
-    let d_cons = cx.field("cons_den", FieldRef::cons_den()) * inv_dens;
-    // the effective inertia e = rho h W^2 = h D^2 / rho_prim (W = D/rho_prim), reconstructed
-    // metric-free and independent of the energy variable: the RHD nrg slot stores the killing
-    // energy, and only the valencia tau would make `rho + tau + pre` name rho h W^2. the eulerian
-    // energy for the admissibility cone follows as E = e - p = rho h W^2 - p = tau + D (below).
-    let gamma_eos = cx.scalar("gamma");
-    let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * pre / rho;
-    let e = h_enth * d_cons * d_cons / rho;
-    let mass_gv = cx.scalar("schwarzschild_mass");
-    let mass = Dual::constant(mass_gv);
-    let (gm_inv, s_mom, _s_tau, alpha, beta): (
-        Matrix<Gv, 3>,
-        Tensor<Gv, 3>,
-        Gv,
-        Gv,
-        Tensor<Gv, 3>,
-    ) = match (spacetime, coords) {
-        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-            let gi = SchwarzschildKSCartesian { mass: mass_gv }.spatial_metric_inv(x);
-            let al = SchwarzschildKSCartesian { mass: mass_gv }.lapse(x);
-            let bt = SchwarzschildKSCartesian { mass: mass_gv }.shift(x);
-            let (sm, _) =
-                grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, Gv::ZERO);
-            let (_, st) = grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pre);
-            (gi, sm, st, al, bt)
-        }
-        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-            let gi = SchwarzschildKSCylindrical { mass: mass_gv }.spatial_metric_inv(x);
-            let al = SchwarzschildKSCylindrical { mass: mass_gv }.lapse(x);
-            let bt = SchwarzschildKSCylindrical { mass: mass_gv }.shift(x);
-            let (sm, _) =
-                grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, Gv::ZERO);
-            let (_, st) = grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, pre);
-            (gi, sm, st, al, bt)
-        }
-        (Spacetime::SchwarzschildKS, _) => {
-            let gi = SchwarzschildKS { mass: mass_gv }.spatial_metric_inv(x);
-            let al = SchwarzschildKS { mass: mass_gv }.lapse(x);
-            let bt = SchwarzschildKS { mass: mass_gv }.shift(x);
-            let (sm, _) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, Gv::ZERO);
-            let (_, st) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pre);
-            (gi, sm, st, al, bt)
-        }
-        // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
-        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::KerrKS, Coords::Cartesian) => {
-            let spin_gv = cx.scalar("kerr_spin");
-            let gi = KerrKSCartesian {
-                mass: mass_gv,
-                spin: spin_gv,
+        let ndim = axes.len();
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let vel: [Gv; 3] = std::array::from_fn(|k| {
+            if k < ncomp {
+                cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8))
+            } else {
+                Gv::ZERO
             }
-            .spatial_metric_inv(x);
-            let al = KerrKSCartesian {
-                mass: mass_gv,
-                spin: spin_gv,
+        });
+        let pre = cx.field("prim_pre", FieldRef::PrimPre);
+        let v = Tensor::<Gv, 3>::new(vel);
+        // the densitized law samples its metric coefficients at the cell's arithmetic midpoint, the
+        // same point the c2p undensitizes at, so the cone reads the state the recovery produced.
+        let mid = gv_cell_midpoints(cx, spacing, ndim);
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => mid[d],
+                None => gv_ungridded_slot(coords, c),
             }
-            .lapse(x);
-            let bt = KerrKSCartesian {
-                mass: mass_gv,
-                spin: spin_gv,
+        }));
+        // the admissible cone is a statement about the physical state, so the densitized conserveds
+        // are divided by the full-chart measure sqrt(det gamma) before entering it. the densitized
+        // update adds `dt sqrt(-g) S` to `sqrt(det gamma) U`, so the undensitized source rate the cone
+        // sees is `alpha S` — the lapse is applied to the connection source below.
+        let inv_dens = Gv::ONE / gv_metric_volume_factor_at(cx, spacetime, coords, x);
+        let d_cons = cx.field("cons_den", FieldRef::cons_den()) * inv_dens;
+        // the effective inertia e = rho h W^2 = h D^2 / rho_prim (W = D/rho_prim), reconstructed
+        // metric-free and independent of the energy variable: the RHD nrg slot stores the killing
+        // energy, and only the valencia tau would make `rho + tau + pre` name rho h W^2. the eulerian
+        // energy for the admissibility cone follows as E = e - p = rho h W^2 - p = tau + D (below).
+        let gamma_eos = cx.scalar("gamma");
+        let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * pre / rho;
+        let e = h_enth * d_cons * d_cons / rho;
+        let mass_gv = cx.scalar("schwarzschild_mass");
+        let mass = Dual::constant(mass_gv);
+        let (gm_inv, s_mom, _s_tau, alpha, beta): (
+            Matrix<Gv, 3>,
+            Tensor<Gv, 3>,
+            Gv,
+            Gv,
+            Tensor<Gv, 3>,
+        ) = match (spacetime, coords) {
+            (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
+                let gi = SchwarzschildKSCartesian { mass: mass_gv }.spatial_metric_inv(x);
+                let al = SchwarzschildKSCartesian { mass: mass_gv }.lapse(x);
+                let bt = SchwarzschildKSCartesian { mass: mass_gv }.shift(x);
+                let (sm, _) =
+                    grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, Gv::ZERO);
+                let (_, st) =
+                    grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pre);
+                (gi, sm, st, al, bt)
             }
-            .shift(x);
-            let spin = Dual::constant(spin_gv);
-            let (sm, _) = grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, Gv::ZERO);
-            let (_, st) = grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, pre);
-            (gi, sm, st, al, bt)
-        }
-        (Spacetime::KerrKS, Coords::Cylindrical) => {
-            let spin_gv = cx.scalar("kerr_spin");
-            let gi = KerrKSCylindrical {
-                mass: mass_gv,
-                spin: spin_gv,
+            (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
+                let gi = SchwarzschildKSCylindrical { mass: mass_gv }.spatial_metric_inv(x);
+                let al = SchwarzschildKSCylindrical { mass: mass_gv }.lapse(x);
+                let bt = SchwarzschildKSCylindrical { mass: mass_gv }.shift(x);
+                let (sm, _) =
+                    grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, Gv::ZERO);
+                let (_, st) =
+                    grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, pre);
+                (gi, sm, st, al, bt)
             }
-            .spatial_metric_inv(x);
-            let al = KerrKSCylindrical {
-                mass: mass_gv,
-                spin: spin_gv,
+            (Spacetime::SchwarzschildKS, _) => {
+                let gi = SchwarzschildKS { mass: mass_gv }.spatial_metric_inv(x);
+                let al = SchwarzschildKS { mass: mass_gv }.lapse(x);
+                let bt = SchwarzschildKS { mass: mass_gv }.shift(x);
+                let (sm, _) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, Gv::ZERO);
+                let (_, st) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pre);
+                (gi, sm, st, al, bt)
             }
-            .lapse(x);
-            let bt = KerrKSCylindrical {
-                mass: mass_gv,
-                spin: spin_gv,
+            // spinning kerr on the cartesian chart: the rank-1 kerr-schild update with the
+            // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+            (Spacetime::KerrKS, Coords::Cartesian) => {
+                let spin_gv = cx.scalar("kerr_spin");
+                let gi = KerrKSCartesian {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                }
+                .spatial_metric_inv(x);
+                let al = KerrKSCartesian {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                }
+                .lapse(x);
+                let bt = KerrKSCartesian {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                }
+                .shift(x);
+                let spin = Dual::constant(spin_gv);
+                let (sm, _) =
+                    grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, Gv::ZERO);
+                let (_, st) = grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, pre);
+                (gi, sm, st, al, bt)
             }
-            .shift(x);
-            let spin = Dual::constant(spin_gv);
-            let (sm, _) =
-                grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, Gv::ZERO);
-            let (_, st) = grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, pre);
-            (gi, sm, st, al, bt)
-        }
-        (Spacetime::KerrKS, _) => {
-            let spin_gv = cx.scalar("kerr_spin");
-            let gi = KerrKS {
-                mass: mass_gv,
-                spin: spin_gv,
+            (Spacetime::KerrKS, Coords::Cylindrical) => {
+                let spin_gv = cx.scalar("kerr_spin");
+                let gi = KerrKSCylindrical {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                }
+                .spatial_metric_inv(x);
+                let al = KerrKSCylindrical {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                }
+                .lapse(x);
+                let bt = KerrKSCylindrical {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                }
+                .shift(x);
+                let spin = Dual::constant(spin_gv);
+                let (sm, _) =
+                    grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, Gv::ZERO);
+                let (_, st) =
+                    grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, pre);
+                (gi, sm, st, al, bt)
             }
-            .spatial_metric_inv(x);
-            let al = KerrKS {
-                mass: mass_gv,
-                spin: spin_gv,
+            (Spacetime::KerrKS, _) => {
+                let spin_gv = cx.scalar("kerr_spin");
+                let gi = KerrKS {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                }
+                .spatial_metric_inv(x);
+                let al = KerrKS {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                }
+                .lapse(x);
+                let bt = KerrKS {
+                    mass: mass_gv,
+                    spin: spin_gv,
+                }
+                .shift(x);
+                let spin = Dual::constant(spin_gv);
+                let (sm, _) = grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, Gv::ZERO);
+                let (_, st) = grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pre);
+                (gi, sm, st, al, bt)
             }
-            .lapse(x);
-            let bt = KerrKS {
-                mass: mass_gv,
-                spin: spin_gv,
+            (Spacetime::Minkowski, _) => {
+                unreachable!("the source-admissibility CFL is baked only for a curved spacetime")
             }
-            .shift(x);
-            let spin = Dual::constant(spin_gv);
-            let (sm, _) = grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, Gv::ZERO);
-            let (_, st) = grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pre);
-            (gi, sm, st, al, bt)
-        }
-        (Spacetime::Minkowski, _) => {
-            unreachable!("the source-admissibility CFL is baked only for a curved spacetime")
-        }
-    };
-    let mom: [Gv; 3] = std::array::from_fn(|k| {
-        if k < ncomp {
-            cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)) * inv_dens
-        } else {
-            Gv::ZERO
-        }
-    });
-    // the connection source is densitized by sqrt(-g) while the state carries only
-    // sqrt(det gamma), so the undensitized state actually moves at rate alpha S — a lapse the rate
-    // below deliberately omits. alpha <= 1, so charging the full |S| bounds the true
-    // margin consumption from above and the admissible step from below; folding the lapse in
-    // sharpens the bound, and a sharpening has to be justified against the cone it protects.
-    // the eulerian total energy E = tau + D = rho h W^2 - p = e - p (metric-free; no killing-energy
-    // inversion needed for the admissibility cone).
-    let e_cons = e - pre;
-    let gamma_norm = |a: &[_; 3]| {
-        let mut acc = Gv::ZERO;
-        for ii in 0..3 {
-            for jj in 0..3 {
-                acc = acc + gm_inv[(ii, jj)] * a[ii] * a[jj];
-            }
-        }
-        acc
-    };
-    let root = (d_cons * d_cons + gamma_norm(&mom)).sqrt();
-    let q0 = e_cons - root;
-    let state_scale =
-        symbi_hydro::admissible::rhd_state_scale(d_cons, &Tensor::new(mom), e_cons, &gm_inv);
-    let q_safe = q0.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale);
-    // the rate at which the geometric source consumes the admissibility margin
-    // q0 = E - sqrt(D^2 + |S|^2), evaluated for the covariant (killing) energy variable.
-    // over a source step the mass and the killing energy are both source-free
-    // (the killing energy's source is identically zero on a stationary metric), so the momentum
-    // source alone moves the state. writing the eulerian energy in the stored variables,
-    //   E = (ehat + D + beta^i S_i) / alpha,
-    // and differentiating along S -> S + dt Smom,
-    //   dq0/dt = (beta^i Smom_i)/alpha - (gamma^{ij} S_i Smom_j)/sqrt(D^2 + |S|^2).
-    // the second term carries the factor |S|/sqrt(D^2 + |S|^2) and vanishes at rest, so
-    // cold gas at rest on a shift-free chart consumes zero margin at first order: the
-    // gravitational work rides inside the conserved killing energy, which absorbs it in
-    // place of the vanishing internal energy. charging the valencia form
-    // (|S_tau| + |Smom|)/q0 instead makes the admissible dt scale like the pressure and
-    // drives dt to zero on cold atmospheres; the killing-energy variable admits the full
-    // step there. the update carries the momentum source alone, and so does this rate.
-    let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
-    let beta_dot_sm = {
-        let mut acc = Gv::ZERO;
-        for ii in 0..3 {
-            acc = acc + beta[ii] * sm_arr[ii];
-        }
-        acc
-    };
-    let s_dot_sm = {
-        let mut acc = Gv::ZERO;
-        for ii in 0..3 {
-            for jj in 0..3 {
-                acc = acc + gm_inv[(ii, jj)] * mom[ii] * sm_arr[jj];
-            }
-        }
-        acc
-    };
-    // the first-order rate above degenerates exactly where cold gas sits: at rest S -> 0
-    // kills the second term, and a shift-free chart kills the first, leaving that rate at
-    // zero. the margin is still consumed at second order, because |S| grows like
-    // dt |Smom| and
-    //   sqrt(D^2 + |S|^2) ~ root + (dt |Smom|)^2 / (2 root),
-    // so admissibility needs dt < sqrt(2 root q0) / |Smom|. carried as the rate
-    // |Smom| / sqrt(2 root q0), it makes the cold-gas limit scale like sqrt(p) where the
-    // valencia form scales like p — far weaker, and still binding. it is what holds a
-    // stationary rotating equilibrium on a zero-shift chart to its admissible step.
-    let root_safe =
-        root.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale);
-    let sm_norm = gamma_norm(&sm_arr).sqrt();
-    let lam_first = ((beta_dot_sm / alpha).abs() + (s_dot_sm / root_safe).abs()) / q_safe;
-    let lam_second = sm_norm / (Gv::from_f64(2.0) * root_safe * q_safe).sqrt();
-    let lam_s = lam_first + lam_second;
-    // the global timestep belongs to the cells outside the event horizon. the outer horizon
-    // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: the
-    // interior stays causally sealed from the exterior, so an interior cell's admissibility rate is
-    // irrelevant to exterior stability. infalling gas drives the interior pressure toward zero,
-    // which sends the cone margin q = E - sqrt(D^2 + |S|^2) to zero and the source rate lambda_S to
-    // infinity with it, so this mask is what hands dt back to the exterior — measured on the
-    // spinning magnetized torus, 24 cells lying between the excision surface and r_+ held lambda_S at
-    // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
-    //
-    // the threshold is the larger of r_+ and the excision surface, so a run that excises further out
-    // keeps masking everything it excises. an excised cell is additionally numerical padding: its
-    // state is frozen at the vacuum floor and can sit near the cone boundary indefinitely, the
-    // clamped-core metric driving enormous geodesic sources over it. gating cell centers matches how
-    // interior guard activations are counted. excision is a cartesian-chart facility, so the mask
-    // applies there.
-    let lam_s = if coords == Coords::Cartesian
-        && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
-    {
-        let spin = if spacetime == Spacetime::KerrKS {
-            cx.scalar("kerr_spin")
-        } else {
-            Gv::ZERO
         };
-        let xc: [Gv; 3] = std::array::from_fn(|c| x[c]);
-        let r_plus = mass_gv + (mass_gv * mass_gv - spin * spin).max(Gv::ZERO).sqrt();
-        let r_mask = r_plus.max(cx.scalar("excision_radius"));
-        let excised = symbi_ib::excise::ks_excised(&xc, spin, r_mask);
-        Gv::select(excised, Gv::ZERO, lam_s)
-    } else {
-        lam_s
-    };
-    let lam_flux = cx.field("lambda", FieldRef::Scratch);
-    let total = lam_flux + lam_s;
+        let mom: [Gv; 3] = std::array::from_fn(|k| {
+            if k < ncomp {
+                cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)) * inv_dens
+            } else {
+                Gv::ZERO
+            }
+        });
+        // the connection source is densitized by sqrt(-g) while the state carries only
+        // sqrt(det gamma), so the undensitized state actually moves at rate alpha S — a lapse the rate
+        // below deliberately omits. alpha <= 1, so charging the full |S| bounds the true
+        // margin consumption from above and the admissible step from below; folding the lapse in
+        // sharpens the bound, and a sharpening has to be justified against the cone it protects.
+        // the eulerian total energy E = tau + D = rho h W^2 - p = e - p (metric-free; no killing-energy
+        // inversion needed for the admissibility cone).
+        let e_cons = e - pre;
+        let gamma_norm = |a: &[_; 3]| {
+            let mut acc = Gv::ZERO;
+            for ii in 0..3 {
+                for jj in 0..3 {
+                    acc = acc + gm_inv[(ii, jj)] * a[ii] * a[jj];
+                }
+            }
+            acc
+        };
+        let root = (d_cons * d_cons + gamma_norm(&mom)).sqrt();
+        let q0 = e_cons - root;
+        let state_scale =
+            symbi_hydro::admissible::rhd_state_scale(d_cons, &Tensor::new(mom), e_cons, &gm_inv);
+        let q_safe =
+            q0.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale);
+        // the rate at which the geometric source consumes the admissibility margin
+        // q0 = E - sqrt(D^2 + |S|^2), evaluated for the covariant (killing) energy variable.
+        // over a source step the mass and the killing energy are both source-free
+        // (the killing energy's source is identically zero on a stationary metric), so the momentum
+        // source alone moves the state. writing the eulerian energy in the stored variables,
+        //   E = (ehat + D + beta^i S_i) / alpha,
+        // and differentiating along S -> S + dt Smom,
+        //   dq0/dt = (beta^i Smom_i)/alpha - (gamma^{ij} S_i Smom_j)/sqrt(D^2 + |S|^2).
+        // the second term carries the factor |S|/sqrt(D^2 + |S|^2) and vanishes at rest, so
+        // cold gas at rest on a shift-free chart consumes zero margin at first order: the
+        // gravitational work rides inside the conserved killing energy, which absorbs it in
+        // place of the vanishing internal energy. charging the valencia form
+        // (|S_tau| + |Smom|)/q0 instead makes the admissible dt scale like the pressure and
+        // drives dt to zero on cold atmospheres; the killing-energy variable admits the full
+        // step there. the update carries the momentum source alone, and so does this rate.
+        let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
+        let beta_dot_sm = {
+            let mut acc = Gv::ZERO;
+            for ii in 0..3 {
+                acc = acc + beta[ii] * sm_arr[ii];
+            }
+            acc
+        };
+        let s_dot_sm = {
+            let mut acc = Gv::ZERO;
+            for ii in 0..3 {
+                for jj in 0..3 {
+                    acc = acc + gm_inv[(ii, jj)] * mom[ii] * sm_arr[jj];
+                }
+            }
+            acc
+        };
+        // the first-order rate above degenerates exactly where cold gas sits: at rest S -> 0
+        // kills the second term, and a shift-free chart kills the first, leaving that rate at
+        // zero. the margin is still consumed at second order, because |S| grows like
+        // dt |Smom| and
+        //   sqrt(D^2 + |S|^2) ~ root + (dt |Smom|)^2 / (2 root),
+        // so admissibility needs dt < sqrt(2 root q0) / |Smom|. carried as the rate
+        // |Smom| / sqrt(2 root q0), it makes the cold-gas limit scale like sqrt(p) where the
+        // valencia form scales like p — far weaker, and still binding. it is what holds a
+        // stationary rotating equilibrium on a zero-shift chart to its admissible step.
+        let root_safe =
+            root.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale);
+        let sm_norm = gamma_norm(&sm_arr).sqrt();
+        let lam_first = ((beta_dot_sm / alpha).abs() + (s_dot_sm / root_safe).abs()) / q_safe;
+        let lam_second = sm_norm / (Gv::from_f64(2.0) * root_safe * q_safe).sqrt();
+        let lam_s = lam_first + lam_second;
+        // the global timestep belongs to the cells outside the event horizon. the outer horizon
+        // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: the
+        // interior stays causally sealed from the exterior, so an interior cell's admissibility rate is
+        // irrelevant to exterior stability. infalling gas drives the interior pressure toward zero,
+        // which sends the cone margin q = E - sqrt(D^2 + |S|^2) to zero and the source rate lambda_S to
+        // infinity with it, so this mask is what hands dt back to the exterior — measured on the
+        // spinning magnetized torus, 24 cells lying between the excision surface and r_+ held lambda_S at
+        // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
+        //
+        // the threshold is the larger of r_+ and the excision surface, so a run that excises further out
+        // keeps masking everything it excises. an excised cell is additionally numerical padding: its
+        // state is frozen at the vacuum floor and can sit near the cone boundary indefinitely, the
+        // clamped-core metric driving enormous geodesic sources over it. gating cell centers matches how
+        // interior guard activations are counted. excision is a cartesian-chart facility, so the mask
+        // applies there.
+        let lam_s = if coords == Coords::Cartesian
+            && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
+        {
+            let spin = if spacetime == Spacetime::KerrKS {
+                cx.scalar("kerr_spin")
+            } else {
+                Gv::ZERO
+            };
+            let xc: [Gv; 3] = std::array::from_fn(|c| x[c]);
+            let r_plus = mass_gv + (mass_gv * mass_gv - spin * spin).max(Gv::ZERO).sqrt();
+            let r_mask = r_plus.max(cx.scalar("excision_radius"));
+            let excised = symbi_ib::excise::ks_excised(&xc, spin, r_mask);
+            Gv::select(excised, Gv::ZERO, lam_s)
+        } else {
+            lam_s
+        };
+        let lam_flux = cx.field("lambda", FieldRef::Scratch);
+        let total = lam_flux + lam_s;
         vec![KernelWrite::new("lambda", FieldRef::Scratch, total.node())]
     })
 }
@@ -1262,42 +1283,38 @@ pub fn rhd_source_cfl_gr_gv(
 /// RMHD is fixed 3D. reads the full 3-velocity + 3-magnetic-field prim + gamma.
 pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let vel: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = cx.field("prim_pre", FieldRef::PrimPre);
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = cx.scalar("gamma");
-    let eos = IdealGas { gamma };
-    let prim = MhdPrim::<Gv, 3> {
-        hydro: Prim {
-            rho,
-            vel: Tensor::new(vel),
-            pre,
-        },
-        mag: Tensor::new(mag),
-    };
-    // one (lmin,lmax) pair per spatial sweep direction (ndim of them); the B is always
-    // a 3-vector but the grid varies along ndim axes only.
-    let mut writes = Vec::with_capacity(2 * ndim);
-    for d in 0..ndim {
-        let nhat = Normalized::axis(d);
-        // raw quartic min/max as the solver returns them; the flux clamps the fan, and the
-        // zero-clamped form lives there as `extremal_speeds`.
-        let (lmin, lmax) = Rmhd.wave_speeds(&eos, &prim, &nhat);
-        writes.push(KernelWrite::new(
-            format!("ws_l_{d}"),
-            format!("wave_speed_l[{d}]"),
-            lmin.node(),
-        ));
-        writes.push(KernelWrite::new(
-            format!("ws_r_{d}"),
-            format!("wave_speed_r[{d}]"),
-            lmax.node(),
-        ));
-    }
-    writes
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let vel: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        let pre = cx.field("prim_pre", FieldRef::PrimPre);
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+        let gamma = cx.scalar("gamma");
+        let eos = IdealGas { gamma };
+        let prim = MhdPrim::<Gv, 3>::new(
+            Prim::adiabatic(Density(rho), Tensor::new(vel), Pressure(pre)),
+            Tensor::new(mag),
+        );
+        // one (lmin,lmax) pair per spatial sweep direction (ndim of them); the B is always
+        // a 3-vector but the grid varies along ndim axes only.
+        let mut writes = Vec::with_capacity(2 * ndim);
+        for d in 0..ndim {
+            let nhat = Normalized::axis(d);
+            // raw quartic min/max as the solver returns them; the flux clamps the fan, and the
+            // zero-clamped form lives there as `extremal_speeds`.
+            let (lmin, lmax) = Rmhd.wave_speeds(&eos, &prim, &nhat);
+            writes.push(KernelWrite::new(
+                format!("ws_l_{d}"),
+                format!("wave_speed_l[{d}]"),
+                lmin.node(),
+            ));
+            writes.push(KernelWrite::new(
+                format!("ws_r_{d}"),
+                format!("wave_speed_r[{d}]"),
+                lmax.node(),
+            ));
+        }
+        writes
     })
 }
 
@@ -1335,121 +1352,126 @@ pub fn fofc_project_gr_mhd_gv(
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let ndim = axes.len();
-    let mid = gv_cell_midpoints(cx, spacing, ndim);
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => mid[d],
-            None => gv_ungridded_slot(coords, c),
-        }
-    }));
-    let (gm_inv, gm, alpha, beta) = {
-        fn adm<'t, M: Metric<Gv<'t>, 3>>(
-            m: &M,
-            x: Tensor<Gv<'t>, 3>,
-        ) -> (Matrix<Gv<'t>, 3>, Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
-            (
-                m.spatial_metric_inv(x),
-                m.spatial_metric(x),
-                m.lapse(x),
-                m.shift(x),
-            )
-        }
-        with_ks_metric!(cx, spacetime, coords, "the GRMHD FOFC projection", |m| adm(
-            &m, x
-        ))
-    };
-    let read = |k: &str| cx.field(k, k);
-    let x_den = read("x_den");
-    let x_nrg = read("x_nrg");
-    // RMHD momentum is always a 3-vector (the physics is 3D; grid symmetry handles 1D/2D).
-    let x_mom: Vec<Gv> = (0..3).map(|k| read(&format!("x_mom_{k}"))).collect();
-    let s_c = Tensor::<Gv, 3>::new(std::array::from_fn(|k| x_mom[k]));
-    let beta_dot = |s: &Tensor<_, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
-    let inv_alpha = Gv::ONE / alpha;
-    let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
-    // the magnetic field is held fixed at the candidate's cell-centered value: it is
-    // constrained-transport-evolved on the staggered faces and shared between neighbors, so blending
-    // it per cell would desynchronize the shared face value and break div(B) = 0.
-    let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
-        cx.field(&format!("bcell_{k}"), &format!("mhd.bcell[{k}]"))
-    }));
-    // the stage-input primitives still occupy the primitive fields here: FOFC restored u_stage and
-    // ran c2p before constructing the first-order flux, and the candidate c2p runs later.
-    // combine that known-physical gas state with candidate B and convert it through the same GRMHD
-    // physics used by initialization. this makes the anchor admissible in the candidate magnetic
-    // slice by construction.
-    let anchor_gas = Prim {
-        rho: cx.field("prim_rho", FieldRef::PrimRho),
-        vel: Tensor::new(std::array::from_fn(|kk| {
-            cx.field(&format!("prim_vel_{kk}"), FieldRef::PrimVel(kk as u8))
-        })),
-        pre: cx.field("prim_pre", FieldRef::PrimPre),
-    };
-    let anchor_regime = RmhdGr {
-        metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)),
-        alpha,
-    };
-    let anchor = anchor_regime.admissible_anchor(
-        &IdealGas {
-            gamma: cx.scalar("gamma"),
-        },
-        anchor_gas,
-        b,
-    );
-    let a_den = anchor.den;
-    let s_a = anchor.mom;
-    let e_anchor = anchor.nrg + a_den;
-    // strict-interior floors use one shared local conserved-state scale. D, |S|, E, and |B|^2
-    // carry one power of energy; psi carries three halves. including magnetic energy prevents a
-    // magnetically dominated atmosphere from defining its numerical margin using gas energy alone.
-    let state_scale =
-        symbi_hydro::admissible::rmhd_state_scale(a_den, &s_a, e_anchor, &b, &gm_inv, &gm);
-    let eps_d = Gv::from_f64(1e-12) * state_scale;
-    let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
-    let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
-        * state_scale
-        * state_scale.sqrt();
-    let e_a = symbi_hydro::admissible::rmhd_anchor_energy_with_margin(
-        a_den,
-        &s_a,
-        e_anchor,
-        &b,
-        &gm_inv,
-        &gm,
-        state_scale,
-        eps_q,
-        eps_psi,
-        20,
-    );
-    let a_nrg = alpha * e_a - a_den - beta_dot(&s_a);
-    // 20 halvings resolve theta to ~1e-6. every iteration unrolls into the traced expression graph,
-    // and a truncated bisection returns a smaller, more conservative blend that stays admissible,
-    // so the count trades kernel size against how sharply the projection hugs the boundary.
-    let theta = symbi_hydro::admissible::rmhd_admissible_theta(
-        x_den, s_c, e_c, a_den, s_a, e_a, &b, &gm_inv, &gm, eps_d, eps_q, eps_psi, 20,
-    );
-    let proj = |xc, ua| ua + theta * (xc - ua);
-    let mut writes = KernelWrites::new();
-    writes.push(KernelWrite::new(
-        "x_den",
-        "x_den",
-        proj(x_den, a_den).node(),
-    ));
-    for k in 0..3 {
-        let key = format!("x_mom_{k}");
+        let ndim = axes.len();
+        let mid = gv_cell_midpoints(cx, spacing, ndim);
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => mid[d],
+                None => gv_ungridded_slot(coords, c),
+            }
+        }));
+        let (gm_inv, gm, alpha, beta) = {
+            fn adm<'t, M: Metric<Gv<'t>, 3>>(
+                m: &M,
+                x: Tensor<Gv<'t>, 3>,
+            ) -> (
+                Matrix<Gv<'t>, 3>,
+                Matrix<Gv<'t>, 3>,
+                Gv<'t>,
+                Tensor<Gv<'t>, 3>,
+            ) {
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            with_ks_metric!(cx, spacetime, coords, "the GRMHD FOFC projection", |m| adm(
+                &m, x
+            ))
+        };
+        let read = |k: &str| cx.field(k, k);
+        let x_den = read("x_den");
+        let x_nrg = read("x_nrg");
+        // RMHD momentum is always a 3-vector (the physics is 3D; grid symmetry handles 1D/2D).
+        let x_mom: Vec<Gv> = (0..3).map(|k| read(&format!("x_mom_{k}"))).collect();
+        let s_c = Tensor::<Gv, 3>::new(std::array::from_fn(|k| x_mom[k]));
+        let beta_dot = |s: &Tensor<_, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
+        let inv_alpha = Gv::ONE / alpha;
+        let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
+        // the magnetic field is held fixed at the candidate's cell-centered value: it is
+        // constrained-transport-evolved on the staggered faces and shared between neighbors, so blending
+        // it per cell would desynchronize the shared face value and break div(B) = 0.
+        let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
+            cx.field(&format!("bcell_{k}"), &format!("mhd.bcell[{k}]"))
+        }));
+        // the stage-input primitives still occupy the primitive fields here: FOFC restored u_stage and
+        // ran c2p before constructing the first-order flux, and the candidate c2p runs later.
+        // combine that known-physical gas state with candidate B and convert it through the same GRMHD
+        // physics used by initialization. this makes the anchor admissible in the candidate magnetic
+        // slice by construction.
+        let anchor_gas = Prim::adiabatic(
+            Density(cx.field("prim_rho", FieldRef::PrimRho)),
+            Tensor::new(std::array::from_fn(|kk| {
+                cx.field(&format!("prim_vel_{kk}"), FieldRef::PrimVel(kk as u8))
+            })),
+            Pressure(cx.field("prim_pre", FieldRef::PrimPre)),
+        );
+        let anchor_regime = RmhdGr {
+            metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)),
+            alpha,
+        };
+        let anchor = anchor_regime.admissible_anchor(
+            &IdealGas {
+                gamma: cx.scalar("gamma"),
+            },
+            anchor_gas,
+            b,
+        );
+        let a_den = anchor.den();
+        let s_a = *anchor.mom();
+        let e_anchor = anchor.nrg() + a_den;
+        // strict-interior floors use one shared local conserved-state scale. D, |S|, E, and |B|^2
+        // carry one power of energy; psi carries three halves. including magnetic energy prevents a
+        // magnetically dominated atmosphere from defining its numerical margin using gas energy alone.
+        let state_scale =
+            symbi_hydro::admissible::rmhd_state_scale(a_den, &s_a, e_anchor, &b, &gm_inv, &gm);
+        let eps_d = Gv::from_f64(1e-12) * state_scale;
+        let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
+        let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
+            * state_scale
+            * state_scale.sqrt();
+        let e_a = symbi_hydro::admissible::rmhd_anchor_energy_with_margin(
+            a_den,
+            &s_a,
+            e_anchor,
+            &b,
+            &gm_inv,
+            &gm,
+            state_scale,
+            eps_q,
+            eps_psi,
+            20,
+        );
+        let a_nrg = alpha * e_a - a_den - beta_dot(&s_a);
+        // 20 halvings resolve theta to ~1e-6. every iteration unrolls into the traced expression graph,
+        // and a truncated bisection returns a smaller, more conservative blend that stays admissible,
+        // so the count trades kernel size against how sharply the projection hugs the boundary.
+        let theta = symbi_hydro::admissible::rmhd_admissible_theta(
+            x_den, s_c, e_c, a_den, s_a, e_a, &b, &gm_inv, &gm, eps_d, eps_q, eps_psi, 20,
+        );
+        let proj = |xc, ua| ua + theta * (xc - ua);
+        let mut writes = KernelWrites::new();
         writes.push(KernelWrite::new(
-            key.clone(),
-            key,
-            proj(x_mom[k], s_a[k]).node(),
+            "x_den",
+            "x_den",
+            proj(x_den, a_den).node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "x_nrg",
-        "x_nrg",
-        proj(x_nrg, a_nrg).node(),
-    ));
-    writes
+        for k in 0..3 {
+            let key = format!("x_mom_{k}");
+            writes.push(KernelWrite::new(
+                key.clone(),
+                key,
+                proj(x_mom[k], s_a[k]).node(),
+            ));
+        }
+        writes.push(KernelWrite::new(
+            "x_nrg",
+            "x_nrg",
+            proj(x_nrg, a_nrg).node(),
+        ));
+        writes
     })
 }
 
@@ -1499,172 +1521,173 @@ pub fn constraint_projection_gv(
         WuTangAdmissibility, constraint_thetas, joint_theta,
     };
     trace(|cx| {
-    let ndim = axes.len();
-    let mid = gv_cell_midpoints(cx, spacing, ndim);
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => mid[d],
-            None => gv_ungridded_slot(coords, c),
-        }
-    }));
-    let mass = cx.scalar("schwarzschild_mass");
-    let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
-        match (spacetime, coords) {
-            (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-                let m = SchwarzschildKSCartesian { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
+        let ndim = axes.len();
+        let mid = gv_cell_midpoints(cx, spacing, ndim);
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => mid[d],
+                None => gv_ungridded_slot(coords, c),
             }
-            (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-                let m = SchwarzschildKSCylindrical { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
+        }));
+        let mass = cx.scalar("schwarzschild_mass");
+        let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
+            match (spacetime, coords) {
+                (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
+                    let m = SchwarzschildKSCartesian { mass };
+                    (
+                        m.spatial_metric_inv(x),
+                        m.spatial_metric(x),
+                        m.lapse(x),
+                        m.shift(x),
+                    )
+                }
+                (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
+                    let m = SchwarzschildKSCylindrical { mass };
+                    (
+                        m.spatial_metric_inv(x),
+                        m.spatial_metric(x),
+                        m.lapse(x),
+                        m.shift(x),
+                    )
+                }
+                (Spacetime::SchwarzschildKS, _) => {
+                    let m = SchwarzschildKS { mass };
+                    (
+                        m.spatial_metric_inv(x),
+                        m.spatial_metric(x),
+                        m.lapse(x),
+                        m.shift(x),
+                    )
+                }
+                (Spacetime::KerrKS, Coords::Cartesian) => {
+                    let m = KerrKSCartesian {
+                        mass,
+                        spin: cx.scalar("kerr_spin"),
+                    };
+                    (
+                        m.spatial_metric_inv(x),
+                        m.spatial_metric(x),
+                        m.lapse(x),
+                        m.shift(x),
+                    )
+                }
+                (Spacetime::KerrKS, Coords::Cylindrical) => {
+                    let m = KerrKSCylindrical {
+                        mass,
+                        spin: cx.scalar("kerr_spin"),
+                    };
+                    (
+                        m.spatial_metric_inv(x),
+                        m.spatial_metric(x),
+                        m.lapse(x),
+                        m.shift(x),
+                    )
+                }
+                (Spacetime::KerrKS, _) => {
+                    let m = KerrKS {
+                        mass,
+                        spin: cx.scalar("kerr_spin"),
+                    };
+                    (
+                        m.spatial_metric_inv(x),
+                        m.spatial_metric(x),
+                        m.lapse(x),
+                        m.shift(x),
+                    )
+                }
+                (Spacetime::Minkowski, _) => (
+                    Matrix::identity(),
+                    Matrix::identity(),
+                    Gv::ONE,
+                    Tensor::zeros(),
+                ),
+            };
+
+        let read = |key: &str| cx.field(key, key);
+        // `a_` is the anchor (the admissible stage input), `x_` the candidate (projected in place).
+        let a_den = read("a_den");
+        let a_nrg = read("a_nrg");
+        let a_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("a_mom_{k}"))));
+        let x_den = read("x_den");
+        let x_nrg = read("x_nrg");
+        let x_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("x_mom_{k}"))));
+        let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("bc_{k}"))));
+
+        // the blended stored state, mapped to the eulerian slots the admissible set is defined on.
+        let blend_slots = |t| {
+            let den = a_den + t * (x_den - a_den);
+            let mom = Tensor::new(std::array::from_fn(|k| {
+                a_mom[k] + t * (x_mom[k] - a_mom[k])
+            }));
+            let ehat = a_nrg + t * (x_nrg - a_nrg);
+            (den, mom, ehat)
+        };
+        let blend = |t| {
+            let (den, mom, ehat) = blend_slots(t);
+            let beta_s = (0..3).fold(Gv::ZERO, |acc, k| acc + beta[k] * mom[k]);
+            ConstraintState {
+                den,
+                mom,
+                nrg: Some((ehat + den + beta_s) / alpha),
+                mag: Some(b),
+                gm: &gm,
+                gm_inv: &gm_inv,
             }
-            (Spacetime::SchwarzschildKS, _) => {
-                let m = SchwarzschildKS { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::KerrKS, Coords::Cartesian) => {
-                let m = KerrKSCartesian {
-                    mass,
-                    spin: cx.scalar("kerr_spin"),
-                };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::KerrKS, Coords::Cylindrical) => {
-                let m = KerrKSCylindrical {
-                    mass,
-                    spin: cx.scalar("kerr_spin"),
-                };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::KerrKS, _) => {
-                let m = KerrKS {
-                    mass,
-                    spin: cx.scalar("kerr_spin"),
-                };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::Minkowski, _) => (
-                Matrix::identity(),
-                Matrix::identity(),
-                Gv::ONE,
-                Tensor::zeros(),
-            ),
         };
 
-    let read = |key: &str| cx.field(key, key);
-    // `a_` is the anchor (the admissible stage input), `x_` the candidate (projected in place).
-    let a_den = read("a_den");
-    let a_nrg = read("a_nrg");
-    let a_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("a_mom_{k}"))));
-    let x_den = read("x_den");
-    let x_nrg = read("x_nrg");
-    let x_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("x_mom_{k}"))));
-    let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("bc_{k}"))));
+        // the admissibility margins come from the anchor's own state scale — the same derivation the
+        // source-admissibility rate uses, so one definition of the scale serves both.
+        let anchor = blend(Gv::ZERO);
+        let e_anchor = anchor.nrg.expect("the projection targets an energy regime");
+        let state_scale =
+            symbi_hydro::admissible::rmhd_state_scale(a_den, &a_mom, e_anchor, &b, &gm_inv, &gm);
+        let rel = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR);
+        let g = WuTangAdmissibility {
+            eps_d: Gv::from_f64(1e-12) * state_scale,
+            eps_q: rel * state_scale,
+            eps_psi: rel * state_scale * state_scale.sqrt(),
+        };
+        let temperature = TemperatureFloor {
+            f_min: cx.scalar("floor_temperature"),
+        };
+        let magnetization = MagnetizationCeiling {
+            sigma_max: cx.scalar("ceiling_magnetization"),
+        };
+        let density = DensityFloor {
+            den_min: cx.scalar("floor_density"),
+        };
+        let family: Vec<&dyn StateConstraint<Gv>> =
+            vec![&g, &temperature, &magnetization, &density];
 
-    // the blended stored state, mapped to the eulerian slots the admissible set is defined on.
-    let blend_slots = |t| {
-        let den = a_den + t * (x_den - a_den);
-        let mom = Tensor::new(std::array::from_fn(|k| {
-            a_mom[k] + t * (x_mom[k] - a_mom[k])
-        }));
-        let ehat = a_nrg + t * (x_nrg - a_nrg);
-        (den, mom, ehat)
-    };
-    let blend = |t| {
-        let (den, mom, ehat) = blend_slots(t);
-        let beta_s = (0..3).fold(Gv::ZERO, |acc, k| acc + beta[k] * mom[k]);
-        ConstraintState {
-            den,
-            mom,
-            nrg: Some((ehat + den + beta_s) / alpha),
-            mag: Some(b),
-            gm: &gm,
-            gm_inv: &gm_inv,
+        let thetas = constraint_thetas(&family, &blend, 20);
+        let theta = joint_theta(&thetas);
+        // the binding member, for the ledger. -1 when nothing bound, which is distinct from "member 0
+        // bound at theta = 1" and is what lets the budget separate a quiet substage from a charged one.
+        let mut binding = Gv::from_f64(-1.0);
+        let mut best = Gv::ONE;
+        for (index, candidate) in thetas.iter().enumerate() {
+            if let Some(tk) = candidate {
+                let tighter = tk.cmp_lt(best);
+                binding = Gv::select(tighter, Gv::from_f64(index as f64), binding);
+                best = Gv::select(tighter, *tk, best);
+            }
         }
-    };
 
-    // the admissibility margins come from the anchor's own state scale — the same derivation the
-    // source-admissibility rate uses, so one definition of the scale serves both.
-    let anchor = blend(Gv::ZERO);
-    let e_anchor = anchor.nrg.expect("the projection targets an energy regime");
-    let state_scale =
-        symbi_hydro::admissible::rmhd_state_scale(a_den, &a_mom, e_anchor, &b, &gm_inv, &gm);
-    let rel = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR);
-    let g = WuTangAdmissibility {
-        eps_d: Gv::from_f64(1e-12) * state_scale,
-        eps_q: rel * state_scale,
-        eps_psi: rel * state_scale * state_scale.sqrt(),
-    };
-    let temperature = TemperatureFloor {
-        f_min: cx.scalar("floor_temperature"),
-    };
-    let magnetization = MagnetizationCeiling {
-        sigma_max: cx.scalar("ceiling_magnetization"),
-    };
-    let density = DensityFloor {
-        den_min: cx.scalar("floor_density"),
-    };
-    let family: Vec<&dyn StateConstraint<Gv>> = vec![&g, &temperature, &magnetization, &density];
-
-    let thetas = constraint_thetas(&family, &blend, 20);
-    let theta = joint_theta(&thetas);
-    // the binding member, for the ledger. -1 when nothing bound, which is distinct from "member 0
-    // bound at theta = 1" and is what lets the budget separate a quiet substage from a charged one.
-    let mut binding = Gv::from_f64(-1.0);
-    let mut best = Gv::ONE;
-    for (index, candidate) in thetas.iter().enumerate() {
-        if let Some(tk) = candidate {
-            let tighter = tk.cmp_lt(best);
-            binding = Gv::select(tighter, Gv::from_f64(index as f64), binding);
-            best = Gv::select(tighter, *tk, best);
+        let (den, mom, ehat) = blend_slots(theta);
+        let mut writes = vec![
+            KernelWrite::new("x_den", "x_den", den.node()),
+            KernelWrite::new("x_nrg", "x_nrg", ehat.node()),
+            KernelWrite::new("theta", "theta", theta.node()),
+            KernelWrite::new("binding", "binding", binding.node()),
+        ];
+        for k in 0..3 {
+            writes.push(KernelWrite::new(
+                format!("x_mom_{k}"),
+                format!("x_mom_{k}"),
+                mom[k].node(),
+            ));
         }
-    }
-
-    let (den, mom, ehat) = blend_slots(theta);
-    let mut writes = vec![
-        KernelWrite::new("x_den", "x_den", den.node()),
-        KernelWrite::new("x_nrg", "x_nrg", ehat.node()),
-        KernelWrite::new("theta", "theta", theta.node()),
-        KernelWrite::new("binding", "binding", binding.node()),
-    ];
-    for k in 0..3 {
-        writes.push(KernelWrite::new(
-            format!("x_mom_{k}"),
-            format!("x_mom_{k}"),
-            mom[k].node(),
-        ));
-    }
-    writes
+        writes
     })
 }
 
@@ -1680,66 +1703,71 @@ pub fn fofc_source_theta_gr_mhd_gv(
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let ndim = axes.len();
-    let mid = gv_cell_midpoints(cx, spacing, ndim);
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => mid[d],
-            None => gv_ungridded_slot(coords, c),
-        }
-    }));
-    let (gm_inv, gm, alpha, beta) = {
-        fn adm<'t, M: Metric<Gv<'t>, 3>>(
-            m: &M,
-            x: Tensor<Gv<'t>, 3>,
-        ) -> (Matrix<Gv<'t>, 3>, Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
-            (
-                m.spatial_metric_inv(x),
-                m.spatial_metric(x),
-                m.lapse(x),
-                m.shift(x),
-            )
-        }
-        with_ks_metric!(cx, spacetime, coords, "the grmhd source limiter", |m| adm(
-            &m, x
-        ))
-    };
-    let read = |key: &str| cx.field(key, key);
-    let a_den = read("a_den");
-    let a_nrg = read("a_nrg");
-    let x_nrg = read("x_nrg");
-    let a_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("a_mom_{kk}"))));
-    let x_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("x_mom_{kk}"))));
-    let b = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("bc_{kk}"))));
-    let beta_dot = |s: &Tensor<_, 3>| (0..3).fold(Gv::ZERO, |sum, kk| sum + beta[kk] * s[kk]);
-    let e_anchor = (a_nrg + a_den + beta_dot(&a_mom)) / alpha;
-    // a geometric source acts on momentum and energy alone, so both endpoints share the anchor
-    // density by construction. reading the anchor density alone into the graph makes that
-    // invariant structural.
-    let e_candidate = (x_nrg + a_den + beta_dot(&x_mom)) / alpha;
-    let delta_s = Tensor::new(std::array::from_fn(|kk| x_mom[kk] - a_mom[kk]));
-    let scale =
-        symbi_hydro::admissible::rmhd_state_scale(a_den, &a_mom, e_anchor, &b, &gm_inv, &gm);
-    let eps_d = Gv::from_f64(1e-12) * scale;
-    let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * scale;
-    let eps_psi =
-        Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * scale * scale.sqrt();
-    let (theta, _, _) = symbi_hydro::admissible::rmhd_limit_source_increment(
-        a_den,
-        a_mom,
-        e_anchor,
-        delta_s,
-        e_candidate - e_anchor,
-        &b,
-        &gm_inv,
-        &gm,
-        eps_d,
-        eps_q,
-        eps_psi,
-        20,
-    );
-    let writes = vec![KernelWrite::new("theta", "theta", theta.node())];
-    writes
+        let ndim = axes.len();
+        let mid = gv_cell_midpoints(cx, spacing, ndim);
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => mid[d],
+                None => gv_ungridded_slot(coords, c),
+            }
+        }));
+        let (gm_inv, gm, alpha, beta) = {
+            fn adm<'t, M: Metric<Gv<'t>, 3>>(
+                m: &M,
+                x: Tensor<Gv<'t>, 3>,
+            ) -> (
+                Matrix<Gv<'t>, 3>,
+                Matrix<Gv<'t>, 3>,
+                Gv<'t>,
+                Tensor<Gv<'t>, 3>,
+            ) {
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            with_ks_metric!(cx, spacetime, coords, "the grmhd source limiter", |m| adm(
+                &m, x
+            ))
+        };
+        let read = |key: &str| cx.field(key, key);
+        let a_den = read("a_den");
+        let a_nrg = read("a_nrg");
+        let x_nrg = read("x_nrg");
+        let a_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("a_mom_{kk}"))));
+        let x_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("x_mom_{kk}"))));
+        let b = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("bc_{kk}"))));
+        let beta_dot = |s: &Tensor<_, 3>| (0..3).fold(Gv::ZERO, |sum, kk| sum + beta[kk] * s[kk]);
+        let e_anchor = (a_nrg + a_den + beta_dot(&a_mom)) / alpha;
+        // a geometric source acts on momentum and energy alone, so both endpoints share the anchor
+        // density by construction. reading the anchor density alone into the graph makes that
+        // invariant structural.
+        let e_candidate = (x_nrg + a_den + beta_dot(&x_mom)) / alpha;
+        let delta_s = Tensor::new(std::array::from_fn(|kk| x_mom[kk] - a_mom[kk]));
+        let scale =
+            symbi_hydro::admissible::rmhd_state_scale(a_den, &a_mom, e_anchor, &b, &gm_inv, &gm);
+        let eps_d = Gv::from_f64(1e-12) * scale;
+        let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * scale;
+        let eps_psi =
+            Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * scale * scale.sqrt();
+        let (theta, _, _) = symbi_hydro::admissible::rmhd_limit_source_increment(
+            a_den,
+            a_mom,
+            e_anchor,
+            delta_s,
+            e_candidate - e_anchor,
+            &b,
+            &gm_inv,
+            &gm,
+            eps_d,
+            eps_q,
+            eps_psi,
+            20,
+        );
+        let writes = vec![KernelWrite::new("theta", "theta", theta.node())];
+        writes
     })
 }
 
@@ -1762,73 +1790,73 @@ pub fn fofc_project_gr_gv(
     ncomp: usize,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let ndim = axes.len();
-    let mid = gv_cell_midpoints(cx, spacing, ndim);
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => mid[d],
-            None => gv_ungridded_slot(coords, c),
-        }
-    }));
-    let (gm_inv, alpha, beta) = {
-        fn adm<'t, M: Metric<Gv<'t>, 3>>(
-            m: &M,
-            x: Tensor<Gv<'t>, 3>,
-        ) -> (Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
-            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
-        }
-        with_ks_metric!(cx, spacetime, coords, "the FOFC projection", |m| adm(&m, x))
-    };
-    let read = |k: &str| cx.field(k, k);
-    let x_den = read("x_den");
-    let x_nrg = read("x_nrg");
-    let us_den = read("us_den");
-    let us_nrg = read("us_nrg");
-    let x_mom: Vec<Gv> = (0..ncomp).map(|k| read(&format!("x_mom_{k}"))).collect();
-    let us_mom: Vec<Gv> = (0..ncomp).map(|k| read(&format!("us_mom_{k}"))).collect();
-    // pad the momentum to the metric's 3 slots (suppressed axes carry zero).
-    let pad = |m: &[_]| {
-        Tensor::<Gv, 3>::new(std::array::from_fn(
-            |k| if k < ncomp { m[k] } else { Gv::ZERO },
-        ))
-    };
-    let s_c = pad(&x_mom);
-    let s_a = pad(&us_mom);
-    // E = (ehat + D + beta^i S_i)/alpha; beta^i contravariant, S_i covariant.
-    let beta_dot = |s: &Tensor<_, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
-    let inv_alpha = Gv::ONE / alpha;
-    let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
-    let e_a = (us_nrg + us_den + beta_dot(&s_a)) * inv_alpha;
-    // strict-interior floors share the anchor's local one-power energy scale. the density threshold
-    // carries one power and the quadratic cone residual carries two.
-    let state_scale = symbi_hydro::admissible::rhd_state_scale(us_den, &s_a, e_a, &gm_inv);
-    let eps_d = Gv::from_f64(1e-12) * state_scale;
-    let eps_f =
-        Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale * state_scale;
-    let theta = symbi_hydro::admissible::admissible_theta(
-        x_den, s_c, e_c, us_den, s_a, e_a, &gm_inv, eps_d, eps_f,
-    );
-    let proj = |xc, ua| ua + theta * (xc - ua);
-    let mut writes = KernelWrites::new();
-    writes.push(KernelWrite::new(
-        "x_den",
-        "x_den",
-        proj(x_den, us_den).node(),
-    ));
-    for k in 0..ncomp {
-        let key = format!("x_mom_{k}");
+        let ndim = axes.len();
+        let mid = gv_cell_midpoints(cx, spacing, ndim);
+        let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => mid[d],
+                None => gv_ungridded_slot(coords, c),
+            }
+        }));
+        let (gm_inv, alpha, beta) = {
+            fn adm<'t, M: Metric<Gv<'t>, 3>>(
+                m: &M,
+                x: Tensor<Gv<'t>, 3>,
+            ) -> (Matrix<Gv<'t>, 3>, Gv<'t>, Tensor<Gv<'t>, 3>) {
+                (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            }
+            with_ks_metric!(cx, spacetime, coords, "the FOFC projection", |m| adm(&m, x))
+        };
+        let read = |k: &str| cx.field(k, k);
+        let x_den = read("x_den");
+        let x_nrg = read("x_nrg");
+        let us_den = read("us_den");
+        let us_nrg = read("us_nrg");
+        let x_mom: Vec<Gv> = (0..ncomp).map(|k| read(&format!("x_mom_{k}"))).collect();
+        let us_mom: Vec<Gv> = (0..ncomp).map(|k| read(&format!("us_mom_{k}"))).collect();
+        // pad the momentum to the metric's 3 slots (suppressed axes carry zero).
+        let pad = |m: &[_]| {
+            Tensor::<Gv, 3>::new(std::array::from_fn(
+                |k| if k < ncomp { m[k] } else { Gv::ZERO },
+            ))
+        };
+        let s_c = pad(&x_mom);
+        let s_a = pad(&us_mom);
+        // E = (ehat + D + beta^i S_i)/alpha; beta^i contravariant, S_i covariant.
+        let beta_dot = |s: &Tensor<_, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
+        let inv_alpha = Gv::ONE / alpha;
+        let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
+        let e_a = (us_nrg + us_den + beta_dot(&s_a)) * inv_alpha;
+        // strict-interior floors share the anchor's local one-power energy scale. the density threshold
+        // carries one power and the quadratic cone residual carries two.
+        let state_scale = symbi_hydro::admissible::rhd_state_scale(us_den, &s_a, e_a, &gm_inv);
+        let eps_d = Gv::from_f64(1e-12) * state_scale;
+        let eps_f =
+            Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale * state_scale;
+        let theta = symbi_hydro::admissible::admissible_theta(
+            x_den, s_c, e_c, us_den, s_a, e_a, &gm_inv, eps_d, eps_f,
+        );
+        let proj = |xc, ua| ua + theta * (xc - ua);
+        let mut writes = KernelWrites::new();
         writes.push(KernelWrite::new(
-            key.clone(),
-            key,
-            proj(x_mom[k], us_mom[k]).node(),
+            "x_den",
+            "x_den",
+            proj(x_den, us_den).node(),
         ));
-    }
-    writes.push(KernelWrite::new(
-        "x_nrg",
-        "x_nrg",
-        proj(x_nrg, us_nrg).node(),
-    ));
-    writes
+        for k in 0..ncomp {
+            let key = format!("x_mom_{k}");
+            writes.push(KernelWrite::new(
+                key.clone(),
+                key,
+                proj(x_mom[k], us_mom[k]).node(),
+            ));
+        }
+        writes.push(KernelWrite::new(
+            "x_nrg",
+            "x_nrg",
+            proj(x_nrg, us_nrg).node(),
+        ));
+        writes
     })
 }
 
@@ -1839,38 +1867,34 @@ pub fn fofc_project_gr_gv(
 /// `rmhd_wave_speeds_cell_gv`.
 pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let vel: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let pre = cx.field("prim_pre", FieldRef::PrimPre);
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let gamma = cx.scalar("gamma");
-    let eos = IdealGas { gamma };
-    let prim = MhdPrim::<Gv, 3> {
-        hydro: Prim {
-            rho,
-            vel: Tensor::new(vel),
-            pre,
-        },
-        mag: Tensor::new(mag),
-    };
-    let mut writes = Vec::with_capacity(2 * ndim);
-    for d in 0..ndim {
-        let nhat = Normalized::axis(d);
-        let (lmin, lmax) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
-        writes.push(KernelWrite::new(
-            format!("ws_l_{d}"),
-            format!("wave_speed_l[{d}]"),
-            lmin.node(),
-        ));
-        writes.push(KernelWrite::new(
-            format!("ws_r_{d}"),
-            format!("wave_speed_r[{d}]"),
-            lmax.node(),
-        ));
-    }
-    writes
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let vel: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        let pre = cx.field("prim_pre", FieldRef::PrimPre);
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+        let gamma = cx.scalar("gamma");
+        let eos = IdealGas { gamma };
+        let prim = MhdPrim::<Gv, 3>::new(
+            Prim::adiabatic(Density(rho), Tensor::new(vel), Pressure(pre)),
+            Tensor::new(mag),
+        );
+        let mut writes = Vec::with_capacity(2 * ndim);
+        for d in 0..ndim {
+            let nhat = Normalized::axis(d);
+            let (lmin, lmax) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
+            writes.push(KernelWrite::new(
+                format!("ws_l_{d}"),
+                format!("wave_speed_l[{d}]"),
+                lmin.node(),
+            ));
+            writes.push(KernelWrite::new(
+                format!("ws_r_{d}"),
+                format!("wave_speed_r[{d}]"),
+                lmax.node(),
+            ));
+        }
+        writes
     })
 }
 
@@ -1881,37 +1905,33 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
 /// back to Contact when those buffers are empty.
 pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let vel: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
-    let mag: [Gv; 3] =
-        std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-    let cs = cx.scalar("cs");
-    let eos = Isothermal { cs };
-    let prim = IsoMhdPrim::<Gv, 3> {
-        hydro: PrimG {
-            rho,
-            vel: Tensor::new(vel),
-            pre: Zero::default(),
-        },
-        mag: Tensor::new(mag),
-    };
-    let mut writes = Vec::with_capacity(2 * ndim);
-    for d in 0..ndim {
-        let nhat = Normalized::axis(d);
-        let (lmin, lmax) = IsothermalMhd.wave_speeds(&eos, &prim, &nhat);
-        writes.push(KernelWrite::new(
-            format!("ws_l_{d}"),
-            format!("wave_speed_l[{d}]"),
-            lmin.node(),
-        ));
-        writes.push(KernelWrite::new(
-            format!("ws_r_{d}"),
-            format!("wave_speed_r[{d}]"),
-            lmax.node(),
-        ));
-    }
-    writes
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let vel: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+        let mag: [Gv; 3] =
+            std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+        let cs = cx.scalar("cs");
+        let eos = Isothermal { cs };
+        let prim = IsoMhdPrim::<Gv, 3>::new(
+            PrimG::isothermal(Density(rho), Tensor::new(vel)),
+            Tensor::new(mag),
+        );
+        let mut writes = Vec::with_capacity(2 * ndim);
+        for d in 0..ndim {
+            let nhat = Normalized::axis(d);
+            let (lmin, lmax) = IsothermalMhd.wave_speeds(&eos, &prim, &nhat);
+            writes.push(KernelWrite::new(
+                format!("ws_l_{d}"),
+                format!("wave_speed_l[{d}]"),
+                lmin.node(),
+            ));
+            writes.push(KernelWrite::new(
+                format!("ws_r_{d}"),
+                format!("wave_speed_r[{d}]"),
+                lmax.node(),
+            ));
+        }
+        writes
     })
 }
 

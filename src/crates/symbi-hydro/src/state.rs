@@ -12,13 +12,13 @@
 // zst; arithmetic with f64 on that slot does not compile.
 //
 // usage:
-//   let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
+//   let prim = Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0));
 //   let cons = prim.to_conserved(&eos);  // newtonian convenience
 // =============================================================================
 
-use crate::quantity::{Density, Pressure, StoredQuantity, VelocitySquared};
 use crate::energy::{Adiabatic, DyeModel, EnergyModel, EnergySlot, IsoModel, Undyed};
 use crate::eos::EosFor;
+use crate::quantity::{Density, EnergyDensity, Pressure, StoredQuantity, VelocitySquared};
 use std::ops::{Add, Mul, Neg, Sub};
 use symbi_algebra::{FieldElement, Tensor};
 use symbi_carrier::Scalar;
@@ -29,7 +29,7 @@ use symbi_carrier::Scalar;
 /// adiabatic: nrg is S (real energy). isothermal: nrg is Zero<S> (zst).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic, X: DyeModel = Undyed> {
-    pub den: S,
+    pub(crate) den: S,
     /// momentum density. invariant: physical (orthonormal-frame) components, `rho*V_a` with
     /// `V_a = h_a v^a` — the frame the conservation form is written in. it is left
     /// a bare `Tensor` on purpose (no `symbi_algebra::Physical` wrapper): the interior physics is
@@ -37,25 +37,25 @@ pub struct ConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic, X: DyeMo
     /// and never mix frames), so typing it would be a ~500-site tax that catches zero bugs. frames
     /// are crossed only at boundaries, through the typed `Metric` morphisms (`to_physical` /
     /// `vector_to_cartesian`); a `.raw()` there is the audited escape hatch.
-    pub mom: Tensor<S, D>,
-    pub nrg: E::Slot<S>,
+    pub(crate) mom: Tensor<S, D>,
+    pub(crate) nrg: E::Slot<S>,
     /// the conserved passive scalar `D_chi = rho chi`. zero-sized unless the run carries a dye, so
     /// an undyed state is byte-identical to one without the slot. it lives here, in the conserved
     /// vector, so that any operation rebuilding a conserved state has to say what happens to the
     /// dye — a mass drain that forgets it would otherwise raise the concentration of the gas it
     /// leaves behind, silently and only on whichever code path did the forgetting.
-    pub chi: X::Slot<S>,
+    pub(crate) chi: X::Slot<S>,
 }
 
 /// primitive variables parameterized by energy model.
 /// adiabatic: pre is S (real pressure). isothermal: pre is Zero<S> (zst).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PrimG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
-    pub rho: S,
+    pub(crate) rho: S,
     /// velocity. invariant: physical (orthonormal-frame) components `V_a` (= `Physical` in
     /// `symbi_algebra`); these orthonormal-frame values are distinct from the coordinate `v^i` — see `ConsG::mom` for why it stays a bare `Tensor`.
-    pub vel: Tensor<S, D>,
-    pub pre: E::Slot<S>,
+    pub(crate) vel: Tensor<S, D>,
+    pub(crate) pre: E::Slot<S>,
 }
 
 /// the valencia-frame witness: the wrapped state carries coordinate-frame
@@ -137,6 +137,188 @@ impl<S: Scalar, T: symbi_carrier::Selectable<S>> symbi_carrier::Selectable<S> fo
     }
 }
 
+// ---- semantic construction and access ----
+//
+// construction states what each slot is: densities, pressures, and energy
+// densities enter as their quantity types; the velocity/momentum tensor stays
+// bare (its frame is witnessed at the regime boundary — orthonormal for the
+// flat regimes, valencia coordinate components under the `Valencia` wrapper).
+// the constructor names the closure family, so the adiabatic and isothermal
+// arities are distinct methods rather than an overload. formula interiors
+// inside this crate keep direct field access; external consumers read through
+// the field-named accessors. the enforcement pins live as compile-fail
+// doctests on the constructors.
+
+impl<S: Scalar, const D: usize> PrimG<S, D, Adiabatic> {
+    /// an adiabatic primitive state from its semantic parts.
+    ///
+    /// every scalar carries its quantity type; a bare pressure is rejected —
+    ///
+    /// ```compile_fail
+    /// use symbi_algebra::Tensor;
+    /// use symbi_hydro::quantity::Density;
+    /// use symbi_hydro::state::Prim;
+    /// let _ = Prim::adiabatic(Density(1.0), Tensor::new([0.5]), 1.0);
+    /// ```
+    ///
+    /// fields are crate-private, so an external literal cannot mint a state —
+    ///
+    /// ```compile_fail
+    /// use symbi_algebra::Tensor;
+    /// use symbi_hydro::state::Prim;
+    /// let _ = Prim {
+    ///     rho: 1.0,
+    ///     vel: Tensor::new([0.5]),
+    ///     pre: 1.0,
+    /// };
+    /// ```
+    ///
+    /// and no model-generic public assembly door exists: generic code
+    /// rebuilds a state from an existing one (`with_*`, `into_parts`) or
+    /// crosses the untyped-wire door (`from_slots`) by name —
+    ///
+    /// ```compile_fail
+    /// use symbi_algebra::Tensor;
+    /// use symbi_hydro::quantity::Density;
+    /// use symbi_hydro::state::Prim;
+    /// let _ = Prim::<f64, 1>::from_parts(Density(1.0), Tensor::new([0.5]), 1.0);
+    /// ```
+    pub fn adiabatic(rho: Density<S>, vel: Tensor<S, D>, pre: Pressure<S>) -> Self {
+        Self {
+            rho: rho.0,
+            vel,
+            pre: pre.0,
+        }
+    }
+}
+
+impl<S: Scalar, const D: usize> PrimG<S, D, IsoModel> {
+    /// an isothermal primitive state: density and velocity; the pressure
+    /// slot is absent (p = cs^2 rho is the closure's business), so a
+    /// fabricated pressure has nowhere to enter —
+    ///
+    /// ```compile_fail
+    /// use symbi_algebra::Tensor;
+    /// use symbi_hydro::energy::IsoModel;
+    /// use symbi_hydro::quantity::{Density, Pressure};
+    /// use symbi_hydro::state::PrimG;
+    /// let _ = PrimG::<f64, 1, IsoModel>::isothermal(
+    ///     Density(1.0),
+    ///     Tensor::new([0.5]),
+    ///     Pressure(1.0),
+    /// );
+    /// ```
+    pub fn isothermal(rho: Density<S>, vel: Tensor<S, D>) -> Self {
+        Self {
+            rho: rho.0,
+            vel,
+            pre: Default::default(),
+        }
+    }
+}
+
+impl<S: Scalar, const D: usize, E: EnergyModel> PrimG<S, D, E> {
+    pub fn into_parts(self) -> (Density<S>, Tensor<S, D>, E::Slot<S>) {
+        (Density(self.rho), self.vel, self.pre)
+    }
+    /// functional update: the same state with the density replaced.
+    pub fn with_rho(self, rho: Density<S>) -> Self {
+        Self { rho: rho.0, ..self }
+    }
+    /// functional update: the same state with the velocity replaced.
+    pub fn with_vel(self, vel: Tensor<S, D>) -> Self {
+        Self { vel, ..self }
+    }
+    /// functional update: the same state with the pressure slot replaced by
+    /// another state's slot value.
+    pub fn with_pre(self, pre: E::Slot<S>) -> Self {
+        Self { pre, ..self }
+    }
+    pub fn rho(&self) -> S {
+        self.rho
+    }
+    pub fn vel(&self) -> &Tensor<S, D> {
+        &self.vel
+    }
+    pub fn pre(&self) -> E::Slot<S> {
+        self.pre
+    }
+    pub fn vel_mut(&mut self) -> &mut Tensor<S, D> {
+        &mut self.vel
+    }
+}
+
+impl<S: Scalar, const D: usize> ConsG<S, D, Adiabatic, Undyed> {
+    /// an adiabatic conserved state from its semantic parts: the nrg slot
+    /// stores the total energy density, and a bare energy is rejected —
+    ///
+    /// ```compile_fail
+    /// use symbi_algebra::Tensor;
+    /// use symbi_hydro::quantity::Density;
+    /// use symbi_hydro::state::Cons;
+    /// let _ = Cons::adiabatic(Density(1.0), Tensor::new([0.5]), 2.0);
+    /// ```
+    pub fn adiabatic(den: Density<S>, mom: Tensor<S, D>, nrg: EnergyDensity<S>) -> Self {
+        Self {
+            den: den.0,
+            mom,
+            nrg: nrg.0,
+            chi: Default::default(),
+        }
+    }
+}
+
+impl<S: Scalar, const D: usize> ConsG<S, D, IsoModel, Undyed> {
+    /// an isothermal conserved state: density and momentum; the energy slot
+    /// is absent.
+    pub fn isothermal(den: Density<S>, mom: Tensor<S, D>) -> Self {
+        Self {
+            den: den.0,
+            mom,
+            nrg: Default::default(),
+            chi: Default::default(),
+        }
+    }
+}
+
+impl<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel> ConsG<S, D, E, X> {
+    pub fn into_parts(self) -> (Density<S>, Tensor<S, D>, E::Slot<S>, X::Slot<S>) {
+        (Density(self.den), self.mom, self.nrg, self.chi)
+    }
+    /// functional update: the same state with the density replaced.
+    pub fn with_den(self, den: Density<S>) -> Self {
+        Self { den: den.0, ..self }
+    }
+    /// functional update: the same state with the momentum replaced.
+    pub fn with_mom(self, mom: Tensor<S, D>) -> Self {
+        Self { mom, ..self }
+    }
+    /// functional update: the same state with the energy slot replaced by
+    /// another state's slot value.
+    pub fn with_nrg(self, nrg: E::Slot<S>) -> Self {
+        Self { nrg, ..self }
+    }
+    /// functional update: the same state with the dye slot replaced.
+    pub fn with_chi(self, chi: X::Slot<S>) -> Self {
+        Self { chi, ..self }
+    }
+    pub fn den(&self) -> S {
+        self.den
+    }
+    pub fn mom(&self) -> &Tensor<S, D> {
+        &self.mom
+    }
+    pub fn nrg(&self) -> E::Slot<S> {
+        self.nrg
+    }
+    pub fn chi(&self) -> X::Slot<S> {
+        self.chi
+    }
+    pub fn mom_mut(&mut self) -> &mut Tensor<S, D> {
+        &mut self.mom
+    }
+}
+
 // ---- uniform conserved-state decomposition for IC seeding ----
 
 /// decompose a regime's conserved state into the hydro `ConsG` (mass / momentum /
@@ -209,6 +391,35 @@ impl<S: Scalar, const D: usize, E: EnergyModel> PrimFromSlots<S, D> for PrimG<S,
             // an energy-free regime supplies no pressure and its slot discards whatever it is
             // handed, so the missing entry and a present one are the same state.
             pre: E::Slot::<S>::from_scalar(slots.get(1 + D).copied().unwrap_or(S::ZERO)),
+        }
+    }
+}
+
+impl<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel> ConsG<S, D, E, X> {
+    /// build a conserved state from its components laid out flat as
+    /// `[den, mom_0 .. mom_{D-1}, nrg]`, with the energy entry present exactly
+    /// when the energy model carries one.
+    ///
+    /// this is the untyped-wire door — SoA field storage gathered into a
+    /// state, trace leaves assembled for a kernel — for code generic over the
+    /// energy model. the named constructors are the front door for stating a
+    /// physical state, and the dye slot starts at its default (`with_chi`
+    /// carries a gathered concentration in).
+    #[inline]
+    pub fn from_slots(slots: &[S]) -> Self {
+        assert!(
+            slots.len() >= 1 + D,
+            "a {D}-dimensional conserved state needs at least a density and {D} momentum \
+             component(s), got {}",
+            slots.len()
+        );
+        ConsG {
+            den: slots[0],
+            mom: Tensor::new(std::array::from_fn(|k| slots[1 + k])),
+            // an energy-free regime supplies no energy and its slot discards whatever it is
+            // handed, so the missing entry and a present one are the same state.
+            nrg: E::Slot::<S>::from_scalar(slots.get(1 + D).copied().unwrap_or(S::ZERO)),
+            chi: Default::default(),
         }
     }
 }
@@ -476,8 +687,8 @@ unsafe impl<const D: usize> FieldElement for PrimG<f32, D, IsoModel> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eos::Eos;
     use crate::energy::{EnergySlot, Zero};
+    use crate::eos::Eos;
     use crate::eos::IdealGas;
 
     fn approx(a: f64, b: f64) -> bool {
@@ -577,8 +788,7 @@ mod tests {
     fn isothermal_recovery_consumes_cs_squared() {
         use crate::quantity::{Density, Pressure, SoundSpeedSquared, VelocitySquared};
         let eos = crate::eos::Isothermal { cs: 2.0 };
-        let stored =
-            eos.recovery_quantity(Density(3.0), VelocitySquared(1.0), Pressure(12.0));
+        let stored = eos.recovery_quantity(Density(3.0), VelocitySquared(1.0), Pressure(12.0));
         // the recovery quantity is cs^2 = 4.0; it carries no total energy.
         assert!(approx(stored.0, 4.0));
         assert_eq!(stored, SoundSpeedSquared(4.0));

@@ -19,6 +19,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Spherical;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
@@ -52,14 +53,10 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
     .set_initial(|[r, _th, _ph]| {
         let bc = B0 / (r * r);
         let pre = 1.0 + 0.3 * (-((r - 1.4) / 0.2).powi(2)).exp();
-        MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0, 0.0]),
-                pre,
-            },
-            mag: Tensor::new([bc, 0.0, 0.0]),
-        }
+        MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(pre)),
+            Tensor::new([bc, 0.0, 0.0]),
+        )
     })
     // div-free staggered B_r = B0/r^2 on the r-faces (area weighting makes it exactly div-free);
     // B_theta / B_phi faces stay zero.

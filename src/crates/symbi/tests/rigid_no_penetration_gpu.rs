@@ -22,6 +22,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::sdf::SdfExpr;
 use symbi_ib::{Body, BodyCollection, SurfaceSpec};
@@ -48,11 +49,7 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>() -> Sim<S, Mem> {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([V_INF, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([V_INF, 0.0]), Pressure(1.0)))
         .build();
     let mut sim = sim.with_bodies(
         BodyCollection::new().add(

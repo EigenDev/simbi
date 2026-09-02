@@ -31,12 +31,13 @@ use symbi::sim::state::*;
 use symbi_algebra::{Domain, Tensor};
 use symbi_geometry::{Cartesian, Metric};
 use symbi_grid::Field;
-use symbi_hydro::eos::IdealGas;
-use symbi_source_compile::expr_bridge::build_user_source;
-use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::state::Prim;
 use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_hydro::eos::IdealGas;
+use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
+use symbi_hydro::state::Prim;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
 
@@ -91,11 +92,7 @@ where
         let vel: [f64; D] = std::array::from_fn(|k| 0.02 * (k as f64 + 1.0) / rho);
         let vsq: f64 = (0..D).map(|k| vel[k] * vel[k]).sum();
         let pre = (GAMMA - 1.0) * (nrg - 0.5 * rho * vsq);
-        Prim {
-            rho,
-            vel: Tensor::new(vel),
-            pre,
-        }
+        Prim::adiabatic(Density(rho), Tensor::new(vel), Pressure(pre))
     })
     .build()
 }

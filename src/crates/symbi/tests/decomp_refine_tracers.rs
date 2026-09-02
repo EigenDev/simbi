@@ -14,9 +14,10 @@ use symbi::sim::refinement::{
     Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
     seed_decomposed_hierarchy_tracers,
 };
-use symbi_source_compile::expr_bridge::{build_boundary_dag, build_user_source};
 use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::{build_boundary_dag, build_user_source};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -83,11 +84,7 @@ fn root(cells: usize, origin: f64, boundaries: Boundaries<1>) -> Sim {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.4]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.4]), Pressure(1.0)))
         .build()
 }
 
@@ -101,11 +98,7 @@ fn resting_root(cells: usize, origin: f64, boundaries: Boundaries<1>) -> Sim {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build()
 }
 

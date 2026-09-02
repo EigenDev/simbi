@@ -26,13 +26,12 @@ use symbi_discretize::{
     rhd_hllc_flux_gv, rhd_wave_speed_map_gv, rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv,
     rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv,
 };
-use symbi_hydro::quantity::SoundSpeedSquared;
 use symbi_hydro::dissipation::ShockwaveLimiter;
-use symbi_hydro::energy::Zero;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal_mhd::IsothermalMhd;
 use symbi_hydro::mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdPrim};
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure, SoundSpeedSquared};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::riemann::{hllc, hllc_rhd, hllc_rmhd, hlld_rmhd, hlle};
@@ -53,11 +52,7 @@ fn prim_at(i: usize) -> Prim<f64, NCOMP> {
     let mut vel = Tensor::zeros();
     vel[0] = 0.1 + 0.05 * x;
     vel[1] = -0.2 + 0.03 * x;
-    Prim {
-        rho: 1.0 + 0.1 * x,
-        vel,
-        pre: 0.5 + 0.15 * x,
-    }
+    Prim::adiabatic(Density(1.0 + 0.1 * x), vel, Pressure(0.5 + 0.15 * x))
 }
 
 // the conserved state that prim_at(i) maps to, via the native f64 physics (the single source).
@@ -70,10 +65,10 @@ fn adiabatic_c2p_round_trips_against_native_physics() {
     // reference = the input prim; impl = native p2c then the Gv c2p kernel. zero expected algebra.
     let out = KernelRun::new(adiabatic_c2p_gv::<NCOMP>())
         .grid([N])
-        .field_with("cons_den", |c| cons_at(c[0]).den)
-        .field_with("cons_mom_0", |c| cons_at(c[0]).mom[0])
-        .field_with("cons_mom_1", |c| cons_at(c[0]).mom[1])
-        .field_with("cons_nrg", |c| cons_at(c[0]).nrg)
+        .field_with("cons_den", |c| cons_at(c[0]).den())
+        .field_with("cons_mom_0", |c| cons_at(c[0]).mom()[0])
+        .field_with("cons_mom_1", |c| cons_at(c[0]).mom()[1])
+        .field_with("cons_nrg", |c| cons_at(c[0]).nrg())
         .scalars(&[("gamma", GAMMA)])
         .run();
 
@@ -82,10 +77,10 @@ fn adiabatic_c2p_round_trips_against_native_physics() {
         out.expect(
             [i],
             &[
-                ("prim_rho", p.rho),
-                ("prim_vel_0", p.vel[0]),
-                ("prim_vel_1", p.vel[1]),
-                ("prim_pre", p.pre),
+                ("prim_rho", p.rho()),
+                ("prim_vel_0", p.vel()[0]),
+                ("prim_vel_1", p.vel()[1]),
+                ("prim_pre", p.pre()),
             ],
             1e-12,
         );
@@ -101,20 +96,15 @@ fn adiabatic_c2p_matches_native_carrier() {
         let mut mom = Tensor::zeros();
         mom[0] = 0.3 + 0.1 * x;
         mom[1] = -0.15 + 0.05 * x;
-        Cons {
-            chi: Default::default(),
-            den: 1.2 + 0.2 * x,
-            mom,
-            nrg: 2.0 + 0.3 * x,
-        }
+        Cons::adiabatic(Density(1.2 + 0.2 * x), mom, EnergyDensity(2.0 + 0.3 * x))
     }
 
     let out = KernelRun::new(adiabatic_c2p_gv::<NCOMP>())
         .grid([N])
-        .field_with("cons_den", |c| cons_raw(c[0]).den)
-        .field_with("cons_mom_0", |c| cons_raw(c[0]).mom[0])
-        .field_with("cons_mom_1", |c| cons_raw(c[0]).mom[1])
-        .field_with("cons_nrg", |c| cons_raw(c[0]).nrg)
+        .field_with("cons_den", |c| cons_raw(c[0]).den())
+        .field_with("cons_mom_0", |c| cons_raw(c[0]).mom()[0])
+        .field_with("cons_mom_1", |c| cons_raw(c[0]).mom()[1])
+        .field_with("cons_nrg", |c| cons_raw(c[0]).nrg())
         .scalars(&[("gamma", GAMMA)])
         .run();
 
@@ -123,10 +113,10 @@ fn adiabatic_c2p_matches_native_carrier() {
         out.expect(
             [i],
             &[
-                ("prim_rho", want.rho),
-                ("prim_vel_0", want.vel[0]),
-                ("prim_vel_1", want.vel[1]),
-                ("prim_pre", want.pre),
+                ("prim_rho", want.rho()),
+                ("prim_vel_0", want.vel()[0]),
+                ("prim_vel_1", want.vel()[1]),
+                ("prim_pre", want.pre()),
             ],
             1e-12,
         );
@@ -163,14 +153,7 @@ fn iso_prim_at(i: usize) -> (Prim<f64, ISO_NCOMP>, f64) {
     vel[1] = -0.1 + 0.02 * x;
     let rho = 1.0 + 0.1 * x;
     let cs2 = 0.6 + 0.05 * x; // the local temperature (sound-speed-squared)
-    (
-        Prim {
-            rho,
-            vel,
-            pre: cs2 * rho,
-        },
-        cs2,
-    )
+    (Prim::adiabatic(Density(rho), vel, Pressure(cs2 * rho)), cs2)
 }
 
 // the kernel input at cell i: density and momentum from the primitives, the
@@ -178,8 +161,8 @@ fn iso_prim_at(i: usize) -> (Prim<f64, ISO_NCOMP>, f64) {
 fn iso_input_at(i: usize) -> IsoC2pInput<f64, ISO_NCOMP> {
     let (p, cs2) = iso_prim_at(i);
     IsoC2pInput {
-        den: p.rho,
-        mom: p.vel.map(|v| v * p.rho),
+        den: p.rho(),
+        mom: p.vel().map(|v| v * p.rho()),
         cs2: SoundSpeedSquared(cs2),
     }
 }
@@ -194,7 +177,7 @@ fn iso_recover(input: &IsoC2pInput<f64, ISO_NCOMP>) -> Prim<f64, ISO_NCOMP> {
     let vel = input.mom.map(|m| m / rho);
     let v2 = vel.dot(&vel);
     let pre = ISO_EOS.recover_pressure(Density(rho), VelocitySquared(v2), input.cs2);
-    Prim { rho, vel, pre }
+    Prim::adiabatic(Density(rho), vel, Pressure(pre))
 }
 
 #[test]
@@ -216,10 +199,10 @@ fn iso_c2p_round_trips_against_native_physics() {
         out.expect(
             [i],
             &[
-                ("prim_rho", p.rho),
-                ("prim_vel_0", p.vel[0]),
-                ("prim_vel_1", p.vel[1]),
-                ("prim_pre", p.pre),
+                ("prim_rho", p.rho()),
+                ("prim_vel_0", p.vel()[0]),
+                ("prim_vel_1", p.vel()[1]),
+                ("prim_pre", p.pre()),
             ],
             1e-12,
         );
@@ -256,10 +239,10 @@ fn iso_c2p_matches_native_carrier() {
         out.expect(
             [i],
             &[
-                ("prim_rho", want.rho),
-                ("prim_vel_0", want.vel[0]),
-                ("prim_vel_1", want.vel[1]),
-                ("prim_pre", want.pre),
+                ("prim_rho", want.rho()),
+                ("prim_vel_0", want.vel()[0]),
+                ("prim_vel_1", want.vel()[1]),
+                ("prim_pre", want.pre()),
             ],
             1e-12,
         );
@@ -286,11 +269,7 @@ fn rhd_prim_at(i: usize) -> Prim<f64, 3> {
     vel[0] = 0.2 + 0.05 * x; // |v| stays well below 1 across the grid
     vel[1] = -0.15 + 0.02 * x;
     vel[2] = 0.1;
-    Prim {
-        rho: 1.0 + 0.1 * x,
-        vel,
-        pre: 0.5 + 0.15 * x,
-    }
+    Prim::adiabatic(Density(1.0 + 0.1 * x), vel, Pressure(0.5 + 0.15 * x))
 }
 
 fn rhd_cons_at(i: usize) -> Cons<f64, 3> {
@@ -301,11 +280,11 @@ fn rhd_cons_at(i: usize) -> Cons<f64, 3> {
 fn rhd_c2p_round_trips_against_native_physics() {
     let out = KernelRun::new(rhd_c2p_gv::<3>(RHD_ITERS, EosArm::IdealGamma))
         .grid([N])
-        .field_with("cons_den", |c| rhd_cons_at(c[0]).den)
-        .field_with("cons_mom_0", |c| rhd_cons_at(c[0]).mom[0])
-        .field_with("cons_mom_1", |c| rhd_cons_at(c[0]).mom[1])
-        .field_with("cons_mom_2", |c| rhd_cons_at(c[0]).mom[2])
-        .field_with("cons_nrg", |c| rhd_cons_at(c[0]).nrg)
+        .field_with("cons_den", |c| rhd_cons_at(c[0]).den())
+        .field_with("cons_mom_0", |c| rhd_cons_at(c[0]).mom()[0])
+        .field_with("cons_mom_1", |c| rhd_cons_at(c[0]).mom()[1])
+        .field_with("cons_mom_2", |c| rhd_cons_at(c[0]).mom()[2])
+        .field_with("cons_nrg", |c| rhd_cons_at(c[0]).nrg())
         .scalars(&[("gamma", RHD_GAMMA)])
         .run();
 
@@ -314,11 +293,11 @@ fn rhd_c2p_round_trips_against_native_physics() {
         out.expect(
             [i],
             &[
-                ("prim_rho", p.rho),
-                ("prim_vel_0", p.vel[0]),
-                ("prim_vel_1", p.vel[1]),
-                ("prim_vel_2", p.vel[2]),
-                ("prim_pre", p.pre),
+                ("prim_rho", p.rho()),
+                ("prim_vel_0", p.vel()[0]),
+                ("prim_vel_1", p.vel()[1]),
+                ("prim_vel_2", p.vel()[2]),
+                ("prim_pre", p.pre()),
             ],
             1e-9,
         );
@@ -348,14 +327,10 @@ fn rmhd_prim_at(i: usize) -> MhdPrim<f64, 3> {
     mag[0] = 0.2;
     mag[1] = 0.3 + 0.02 * x;
     mag[2] = -0.1;
-    MhdPrim {
-        hydro: Prim {
-            rho: 1.0 + 0.1 * x,
-            vel,
-            pre: 0.5 + 0.1 * x,
-        },
+    MhdPrim::new(
+        Prim::adiabatic(Density(1.0 + 0.1 * x), vel, Pressure(0.5 + 0.1 * x)),
         mag,
-    }
+    )
 }
 
 fn rmhd_cons_at(i: usize) -> MhdCons<f64, 3> {
@@ -366,14 +341,14 @@ fn rmhd_cons_at(i: usize) -> MhdCons<f64, 3> {
 fn rmhd_c2p_round_trips_against_native_physics() {
     let out = KernelRun::new(rmhd_c2p_gv(RMHD_ITERS))
         .grid([N])
-        .field_with("cons_den", |c| rmhd_cons_at(c[0]).den)
-        .field_with("cons_mom_0", |c| rmhd_cons_at(c[0]).mom[0])
-        .field_with("cons_mom_1", |c| rmhd_cons_at(c[0]).mom[1])
-        .field_with("cons_mom_2", |c| rmhd_cons_at(c[0]).mom[2])
-        .field_with("cons_nrg", |c| rmhd_cons_at(c[0]).nrg)
-        .field_with("cons_mag_0", |c| rmhd_cons_at(c[0]).mag[0])
-        .field_with("cons_mag_1", |c| rmhd_cons_at(c[0]).mag[1])
-        .field_with("cons_mag_2", |c| rmhd_cons_at(c[0]).mag[2])
+        .field_with("cons_den", |c| rmhd_cons_at(c[0]).den())
+        .field_with("cons_mom_0", |c| rmhd_cons_at(c[0]).mom()[0])
+        .field_with("cons_mom_1", |c| rmhd_cons_at(c[0]).mom()[1])
+        .field_with("cons_mom_2", |c| rmhd_cons_at(c[0]).mom()[2])
+        .field_with("cons_nrg", |c| rmhd_cons_at(c[0]).nrg())
+        .field_with("cons_mag_0", |c| rmhd_cons_at(c[0]).mag()[0])
+        .field_with("cons_mag_1", |c| rmhd_cons_at(c[0]).mag()[1])
+        .field_with("cons_mag_2", |c| rmhd_cons_at(c[0]).mag()[2])
         .scalars(&[("gamma", RMHD_GAMMA)])
         .run();
 
@@ -382,11 +357,11 @@ fn rmhd_c2p_round_trips_against_native_physics() {
         out.expect(
             [i],
             &[
-                ("prim_rho", p.rho),
-                ("prim_vel_0", p.vel[0]),
-                ("prim_vel_1", p.vel[1]),
-                ("prim_vel_2", p.vel[2]),
-                ("prim_pre", p.pre),
+                ("prim_rho", p.rho()),
+                ("prim_vel_0", p.vel()[0]),
+                ("prim_vel_1", p.vel()[1]),
+                ("prim_vel_2", p.vel()[2]),
+                ("prim_pre", p.pre()),
             ],
             1e-9,
         );
@@ -433,10 +408,10 @@ fn run_uniform_euler_flux<const D: usize>(
     gamma: f64,
     dir: usize,
 ) -> Out {
-    let mut fields: Vec<(&str, f64)> = vec![("prim_rho", prim.rho), ("prim_pre", prim.pre)];
+    let mut fields: Vec<(&str, f64)> = vec![("prim_rho", prim.rho()), ("prim_pre", prim.pre())];
     let vkeys: Vec<String> = (0..D).map(|k| format!("prim_v{k}")).collect();
     for k in 0..D {
-        fields.push((vkeys[k].as_str(), prim.vel[k]));
+        fields.push((vkeys[k].as_str(), prim.vel()[k]));
     }
     let (lo, size) = flux_window::<D>(dir);
     // static-mesh binding: the flux's grid velocity is
@@ -469,21 +444,18 @@ fn run_uniform_euler_flux<const D: usize>(
 fn adiabatic_flux_matches_native_physics() {
     // reference = `Newtonian::to_flux::<f64>(prim, unit(0), IdealGas)`; impl = the Gv flux kernel
     // on a uniform state. at L==R the HLLE reduces to the physical flux — the single source.
-    let prim = Prim::<f64, 2> {
-        rho: 1.3,
-        vel: Tensor::new([0.4, -0.2]),
-        pre: 0.7,
-    };
+    let prim = Prim::<f64, 2>::adiabatic(Density(1.3), Tensor::new([0.4, -0.2]), Pressure(0.7));
     let eos = IdealGas { gamma: GAMMA };
-    let f = symbi_hydro::newtonian::Newtonian.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
+    let f =
+        symbi_hydro::newtonian::Newtonian.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let out = run_uniform_euler_flux::<2>(adiabatic_flux_gv::<2>(0, Recon::Plm), &prim, GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[
-            ("flux_den", f.den),
-            ("flux_mom_0", f.mom[0]),
-            ("flux_mom_1", f.mom[1]),
-            ("flux_nrg", f.nrg),
+            ("flux_den", f.den()),
+            ("flux_mom_0", f.mom()[0]),
+            ("flux_mom_1", f.mom()[1]),
+            ("flux_nrg", f.nrg()),
         ],
         1e-12,
     );
@@ -499,21 +471,19 @@ fn iso_flux_matches_native_physics() {
     let iso_gamma = 1.0;
     let cs2 = 0.6;
     let rho = 1.3;
-    let prim = Prim::<f64, 2> {
-        rho,
-        vel: Tensor::new([0.4, -0.2]),
-        pre: cs2 * rho,
-    };
+    let prim =
+        Prim::<f64, 2>::adiabatic(Density(rho), Tensor::new([0.4, -0.2]), Pressure(cs2 * rho));
     let eos = IdealGas { gamma: iso_gamma };
-    let f = symbi_hydro::newtonian::Newtonian.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
+    let f =
+        symbi_hydro::newtonian::Newtonian.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let out = run_uniform_euler_flux::<2>(iso_flux_gv::<2>(0), &prim, iso_gamma, 0);
     // no flux_nrg write for iso.
     out.expect(
         flux_cell::<2>(0),
         &[
-            ("flux_den", f.den),
-            ("flux_mom_0", f.mom[0]),
-            ("flux_mom_1", f.mom[1]),
+            ("flux_den", f.den()),
+            ("flux_mom_0", f.mom()[0]),
+            ("flux_mom_1", f.mom()[1]),
         ],
         1e-12,
     );
@@ -523,11 +493,7 @@ fn iso_flux_matches_native_physics() {
 fn rhd_flux_matches_native_physics() {
     // reference = `Rhd::to_flux::<f64>(prim, unit(0), IdealGas)`. the RHD to_flux is algebraic
     // (closed-form) given a prim, so the uniform-state HLLE reproduces it to ~1e-12.
-    let prim = Prim::<f64, 2> {
-        rho: 1.0,
-        vel: Tensor::new([0.3, -0.1]),
-        pre: 1.0,
-    };
+    let prim = Prim::<f64, 2>::adiabatic(Density(1.0), Tensor::new([0.3, -0.1]), Pressure(1.0));
     let eos = IdealGas { gamma: RHD_GAMMA };
     let f = Rhd.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let out =
@@ -535,10 +501,10 @@ fn rhd_flux_matches_native_physics() {
     out.expect(
         flux_cell::<2>(0),
         &[
-            ("flux_den", f.den),
-            ("flux_mom_0", f.mom[0]),
-            ("flux_mom_1", f.mom[1]),
-            ("flux_nrg", f.nrg),
+            ("flux_den", f.den()),
+            ("flux_mom_0", f.mom()[0]),
+            ("flux_mom_1", f.mom()[1]),
+            ("flux_nrg", f.nrg()),
         ],
         1e-12,
     );
@@ -549,14 +515,10 @@ fn rmhd_flux_matches_native_physics() {
     // reference = `Rmhd::to_flux::<f64>(prim, unit(0), IdealGas)` — algebraic given a prim (the
     // HLLE's wave speeds come from the quartic; to_flux itself is closed-form). impl = the
     // Gv rmhd flux on a uniform 3-component state. writes 8 fluxes (D, S_{0,1,2}, tau, B_{0,1,2}).
-    let prim = MhdPrim::<f64, 3> {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.2, -0.1, 0.05]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([0.3, 0.2, -0.1]),
-    };
+    let prim = MhdPrim::<f64, 3>::new(
+        Prim::adiabatic(Density(1.0), Tensor::new([0.2, -0.1, 0.05]), Pressure(1.0)),
+        Tensor::new([0.3, 0.2, -0.1]),
+    );
     let eos = IdealGas { gamma: RMHD_GAMMA };
     let f = Rmhd.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     // rmhd_flux_gv reads the materialized per-cell davis speeds (ws_l/ws_r), produced in the
@@ -565,15 +527,15 @@ fn rmhd_flux_matches_native_physics() {
     // so binding the exact quartic speeds uniformly reproduces `to_flux`.
     let (sl, sr) = Rmhd.wave_speeds(&eos, &prim, &symbi_algebra::Normalized::axis(0));
     let fields: Vec<(&str, f64)> = vec![
-        ("prim_rho", prim.rho),
-        ("prim_v0", prim.vel[0]),
-        ("prim_v1", prim.vel[1]),
-        ("prim_v2", prim.vel[2]),
-        ("prim_pre", prim.pre),
-        ("prim_b0", prim.mag[0]),
-        ("prim_b1", prim.mag[1]),
-        ("prim_b2", prim.mag[2]),
-        ("bface_n", prim.mag[0]),
+        ("prim_rho", prim.rho()),
+        ("prim_v0", prim.vel()[0]),
+        ("prim_v1", prim.vel()[1]),
+        ("prim_v2", prim.vel()[2]),
+        ("prim_pre", prim.pre()),
+        ("prim_b0", prim.mag()[0]),
+        ("prim_b1", prim.mag()[1]),
+        ("prim_b2", prim.mag()[2]),
+        ("bface_n", prim.mag()[0]),
         ("ws_l", sl),
         ("ws_r", sr),
     ];
@@ -586,14 +548,14 @@ fn rmhd_flux_matches_native_physics() {
     out.expect(
         [FCELL],
         &[
-            ("flux_den", f.den),
-            ("flux_mom_0", f.mom[0]),
-            ("flux_mom_1", f.mom[1]),
-            ("flux_mom_2", f.mom[2]),
-            ("flux_nrg", f.nrg),
-            ("flux_mag_0", f.mag[0]),
-            ("flux_mag_1", f.mag[1]),
-            ("flux_mag_2", f.mag[2]),
+            ("flux_den", f.den()),
+            ("flux_mom_0", f.mom()[0]),
+            ("flux_mom_1", f.mom()[1]),
+            ("flux_mom_2", f.mom()[2]),
+            ("flux_nrg", f.nrg()),
+            ("flux_mag_0", f.mag()[0]),
+            ("flux_mag_1", f.mag()[1]),
+            ("flux_mag_2", f.mag()[2]),
         ],
         1e-12,
     );
@@ -621,11 +583,7 @@ fn iso_wave_speed_map_matches_native_physics() {
     // at gamma=1; it is exercised carrier-generically against the newtonian f64 reference.)
     let (rho, v0, pre) = (1.3_f64, 0.4_f64, 0.7_f64);
     let eos = IdealGas { gamma: GAMMA };
-    let prim = Prim::<f64, 3> {
-        rho,
-        vel: Tensor::new([v0, 0.0, 0.0]),
-        pre,
-    };
+    let prim = Prim::<f64, 3>::adiabatic(Density(rho), Tensor::new([v0, 0.0, 0.0]), Pressure(pre));
     let (sl, sr) = symbi_hydro::newtonian::Newtonian.wave_speeds_axis(&eos, &prim, 0);
     let want = sl.abs().max(sr.abs()); // inv_dx_0 = 1
     // static mesh: per-axis grid velocity v_g = mesh_adot_0*xc + mesh_vtrans_0
@@ -659,11 +617,7 @@ fn rhd_wave_speed_map_matches_native_physics() {
     // map to `max(|sl|,|sr|)`, over the same core the RHD flux's HLLE consumes.
     let (rho, v0, pre) = (1.0_f64, 0.3_f64, 1.0_f64);
     let eos = IdealGas { gamma: RHD_GAMMA };
-    let prim = Prim::<f64, 3> {
-        rho,
-        vel: Tensor::new([v0, 0.0, 0.0]),
-        pre,
-    };
+    let prim = Prim::<f64, 3>::adiabatic(Density(rho), Tensor::new([v0, 0.0, 0.0]), Pressure(pre));
     let (sl, sr) = Rhd.wave_speeds_axis(&eos, &prim, 0);
     let want = sl.abs().max(sr.abs());
     // static mesh: zero grid velocity (see iso_wave_speed_map test above).
@@ -697,14 +651,10 @@ fn rmhd_wave_speed_map_matches_native_physics() {
     // path only. so the reference is that same magnetosonic bound at native f64; the
     // `wave_speeds_axis` characteristic over-tightens to the exact value and disagrees by ~2%.
     // dx=1 reduces the map to `max(|sl|,|sr|)`; the bound reads the full 3-velocity + 3-B-field.
-    let prim = MhdPrim::<f64, 3> {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.2, -0.1, 0.05]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([0.3, 0.2, -0.1]),
-    };
+    let prim = MhdPrim::<f64, 3>::new(
+        Prim::adiabatic(Density(1.0), Tensor::new([0.2, -0.1, 0.05]), Pressure(1.0)),
+        Tensor::new([0.3, 0.2, -0.1]),
+    );
     let eos = IdealGas { gamma: RMHD_GAMMA };
     let nhat = Tensor::<f64, 3>::unit(0);
     let (sl, sr) = rmhd_magnetosonic_cfl_speeds(&eos, &prim, &nhat);
@@ -717,14 +667,14 @@ fn rmhd_wave_speed_map_matches_native_physics() {
     ))
     .grid([N])
     .fields(&[
-        ("prim_rho", prim.rho),
-        ("prim_v0", prim.vel[0]),
-        ("prim_v1", prim.vel[1]),
-        ("prim_v2", prim.vel[2]),
-        ("prim_pre", prim.pre),
-        ("prim_b0", prim.mag[0]),
-        ("prim_b1", prim.mag[1]),
-        ("prim_b2", prim.mag[2]),
+        ("prim_rho", prim.rho()),
+        ("prim_v0", prim.vel()[0]),
+        ("prim_v1", prim.vel()[1]),
+        ("prim_v2", prim.vel()[2]),
+        ("prim_pre", prim.pre()),
+        ("prim_b0", prim.mag()[0]),
+        ("prim_b1", prim.mag()[1]),
+        ("prim_b2", prim.mag()[2]),
     ])
     .scalars(&[("gamma", RMHD_GAMMA), ("inv_dx_0", 1.0), ("dx_0", 1.0)])
     .run();
@@ -756,14 +706,10 @@ fn nmhd_prim_at(i: usize) -> MhdPrim<f64, 3> {
     mag[0] = 0.2;
     mag[1] = 0.3 + 0.02 * x;
     mag[2] = -0.1;
-    MhdPrim {
-        hydro: Prim {
-            rho: 1.0 + 0.1 * x,
-            vel,
-            pre: 0.5 + 0.1 * x,
-        },
+    MhdPrim::new(
+        Prim::adiabatic(Density(1.0 + 0.1 * x), vel, Pressure(0.5 + 0.1 * x)),
         mag,
-    }
+    )
 }
 
 fn nmhd_cons_at(i: usize) -> MhdCons<f64, 3> {
@@ -775,14 +721,14 @@ fn nmhd_c2p_round_trips_against_native_physics() {
     // algebraic recovery (nmhd_recover) -> ULP-tight round-trip. B passes through.
     let out = KernelRun::new(nmhd_c2p_gv())
         .grid([N])
-        .field_with("cons_den", |c| nmhd_cons_at(c[0]).den)
-        .field_with("cons_mom_0", |c| nmhd_cons_at(c[0]).mom[0])
-        .field_with("cons_mom_1", |c| nmhd_cons_at(c[0]).mom[1])
-        .field_with("cons_mom_2", |c| nmhd_cons_at(c[0]).mom[2])
-        .field_with("cons_nrg", |c| nmhd_cons_at(c[0]).nrg)
-        .field_with("cons_mag_0", |c| nmhd_cons_at(c[0]).mag[0])
-        .field_with("cons_mag_1", |c| nmhd_cons_at(c[0]).mag[1])
-        .field_with("cons_mag_2", |c| nmhd_cons_at(c[0]).mag[2])
+        .field_with("cons_den", |c| nmhd_cons_at(c[0]).den())
+        .field_with("cons_mom_0", |c| nmhd_cons_at(c[0]).mom()[0])
+        .field_with("cons_mom_1", |c| nmhd_cons_at(c[0]).mom()[1])
+        .field_with("cons_mom_2", |c| nmhd_cons_at(c[0]).mom()[2])
+        .field_with("cons_nrg", |c| nmhd_cons_at(c[0]).nrg())
+        .field_with("cons_mag_0", |c| nmhd_cons_at(c[0]).mag()[0])
+        .field_with("cons_mag_1", |c| nmhd_cons_at(c[0]).mag()[1])
+        .field_with("cons_mag_2", |c| nmhd_cons_at(c[0]).mag()[2])
         .scalars(&[("gamma", NMHD_GAMMA)])
         .run();
 
@@ -791,11 +737,11 @@ fn nmhd_c2p_round_trips_against_native_physics() {
         out.expect(
             [i],
             &[
-                ("prim_rho", p.rho),
-                ("prim_vel_0", p.vel[0]),
-                ("prim_vel_1", p.vel[1]),
-                ("prim_vel_2", p.vel[2]),
-                ("prim_pre", p.pre),
+                ("prim_rho", p.rho()),
+                ("prim_vel_0", p.vel()[0]),
+                ("prim_vel_1", p.vel()[1]),
+                ("prim_vel_2", p.vel()[2]),
+                ("prim_pre", p.pre()),
             ],
             1e-12,
         );
@@ -807,26 +753,22 @@ fn nmhd_flux_matches_native_physics() {
     // reference = `NewtonianMhd::to_flux::<f64>(prim, unit(0), IdealGas)` — algebraic given a
     // prim. impl = the Gv nmhd flux on a uniform 3-component state (at L==R the HLLE returns the
     // physical flux). writes 8 fluxes (D, S_{0,1,2}, nrg, B_{0,1,2}).
-    let prim = MhdPrim::<f64, 3> {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.2, -0.1, 0.05]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([0.3, 0.2, -0.1]),
-    };
+    let prim = MhdPrim::<f64, 3>::new(
+        Prim::adiabatic(Density(1.0), Tensor::new([0.2, -0.1, 0.05]), Pressure(1.0)),
+        Tensor::new([0.3, 0.2, -0.1]),
+    );
     let eos = IdealGas { gamma: NMHD_GAMMA };
     let f = NewtonianMhd.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let fields: Vec<(&str, f64)> = vec![
-        ("prim_rho", prim.rho),
-        ("prim_v0", prim.vel[0]),
-        ("prim_v1", prim.vel[1]),
-        ("prim_v2", prim.vel[2]),
-        ("prim_pre", prim.pre),
-        ("prim_b0", prim.mag[0]),
-        ("prim_b1", prim.mag[1]),
-        ("prim_b2", prim.mag[2]),
-        ("bface_n", prim.mag[0]),
+        ("prim_rho", prim.rho()),
+        ("prim_v0", prim.vel()[0]),
+        ("prim_v1", prim.vel()[1]),
+        ("prim_v2", prim.vel()[2]),
+        ("prim_pre", prim.pre()),
+        ("prim_b0", prim.mag()[0]),
+        ("prim_b1", prim.mag()[1]),
+        ("prim_b2", prim.mag()[2]),
+        ("bface_n", prim.mag()[0]),
     ];
     let out = KernelRun::new(nmhd_flux_gv(1, 0, 0))
         .grid([NSWEEP])
@@ -837,14 +779,14 @@ fn nmhd_flux_matches_native_physics() {
     out.expect(
         [FCELL],
         &[
-            ("flux_den", f.den),
-            ("flux_mom_0", f.mom[0]),
-            ("flux_mom_1", f.mom[1]),
-            ("flux_mom_2", f.mom[2]),
-            ("flux_nrg", f.nrg),
-            ("flux_mag_0", f.mag[0]),
-            ("flux_mag_1", f.mag[1]),
-            ("flux_mag_2", f.mag[2]),
+            ("flux_den", f.den()),
+            ("flux_mom_0", f.mom()[0]),
+            ("flux_mom_1", f.mom()[1]),
+            ("flux_mom_2", f.mom()[2]),
+            ("flux_nrg", f.nrg()),
+            ("flux_mag_0", f.mag()[0]),
+            ("flux_mag_1", f.mag()[1]),
+            ("flux_mag_2", f.mag()[2]),
         ],
         1e-12,
     );
@@ -855,14 +797,10 @@ fn nmhd_wave_speed_map_matches_native_physics() {
     // the CFL map traces the exact closed-form magnetosonic `NewtonianMhd::wave_speeds`, cheap
     // enough to enter the CFL directly where RMHD takes an upper bound. dx=1 reduces the map to
     // `max(|sl|,|sr|)`.
-    let prim = MhdPrim::<f64, 3> {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.2, -0.1, 0.05]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([0.3, 0.2, -0.1]),
-    };
+    let prim = MhdPrim::<f64, 3>::new(
+        Prim::adiabatic(Density(1.0), Tensor::new([0.2, -0.1, 0.05]), Pressure(1.0)),
+        Tensor::new([0.3, 0.2, -0.1]),
+    );
     let eos = IdealGas { gamma: NMHD_GAMMA };
     let nhat = symbi_algebra::Normalized::axis(0);
     let (sl, sr) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
@@ -875,14 +813,14 @@ fn nmhd_wave_speed_map_matches_native_physics() {
     ))
     .grid([N])
     .fields(&[
-        ("prim_rho", prim.rho),
-        ("prim_v0", prim.vel[0]),
-        ("prim_v1", prim.vel[1]),
-        ("prim_v2", prim.vel[2]),
-        ("prim_pre", prim.pre),
-        ("prim_b0", prim.mag[0]),
-        ("prim_b1", prim.mag[1]),
-        ("prim_b2", prim.mag[2]),
+        ("prim_rho", prim.rho()),
+        ("prim_v0", prim.vel()[0]),
+        ("prim_v1", prim.vel()[1]),
+        ("prim_v2", prim.vel()[2]),
+        ("prim_pre", prim.pre()),
+        ("prim_b0", prim.mag()[0]),
+        ("prim_b1", prim.mag()[1]),
+        ("prim_b2", prim.mag()[2]),
     ])
     .scalars(&[("gamma", NMHD_GAMMA), ("inv_dx_0", 1.0), ("dx_0", 1.0)])
     .run();
@@ -919,36 +857,32 @@ fn nmhd_hllc_hlld_flux_match_native_physics_on_uniform_state() {
     // consistency: for a uniform state the HLLC / HLLD flux collapses to F(U) = to_flux,
     // exactly like HLLE. validates that the select-heavy solvers trace + lower + interp
     // and bit-match the native f64 physics through the Gv carrier.
-    let prim = MhdPrim::<f64, 3> {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.2, -0.1, 0.05]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([0.3, 0.2, -0.1]),
-    };
+    let prim = MhdPrim::<f64, 3>::new(
+        Prim::adiabatic(Density(1.0), Tensor::new([0.2, -0.1, 0.05]), Pressure(1.0)),
+        Tensor::new([0.3, 0.2, -0.1]),
+    );
     let eos = IdealGas { gamma: NMHD_GAMMA };
     let f = NewtonianMhd.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let fields: Vec<(&str, f64)> = vec![
-        ("prim_rho", prim.rho),
-        ("prim_v0", prim.vel[0]),
-        ("prim_v1", prim.vel[1]),
-        ("prim_v2", prim.vel[2]),
-        ("prim_pre", prim.pre),
-        ("prim_b0", prim.mag[0]),
-        ("prim_b1", prim.mag[1]),
-        ("prim_b2", prim.mag[2]),
-        ("bface_n", prim.mag[0]),
+        ("prim_rho", prim.rho()),
+        ("prim_v0", prim.vel()[0]),
+        ("prim_v1", prim.vel()[1]),
+        ("prim_v2", prim.vel()[2]),
+        ("prim_pre", prim.pre()),
+        ("prim_b0", prim.mag()[0]),
+        ("prim_b1", prim.mag()[1]),
+        ("prim_b2", prim.mag()[2]),
+        ("bface_n", prim.mag()[0]),
     ];
     let want = &[
-        ("flux_den", f.den),
-        ("flux_mom_0", f.mom[0]),
-        ("flux_mom_1", f.mom[1]),
-        ("flux_mom_2", f.mom[2]),
-        ("flux_nrg", f.nrg),
-        ("flux_mag_0", f.mag[0]),
-        ("flux_mag_1", f.mag[1]),
-        ("flux_mag_2", f.mag[2]),
+        ("flux_den", f.den()),
+        ("flux_mom_0", f.mom()[0]),
+        ("flux_mom_1", f.mom()[1]),
+        ("flux_mom_2", f.mom()[2]),
+        ("flux_nrg", f.nrg()),
+        ("flux_mag_0", f.mag()[0]),
+        ("flux_mag_1", f.mag()[1]),
+        ("flux_mag_2", f.mag()[2]),
     ];
     for (label, kernel) in [
         ("hllc", nmhd_hllc_flux_gv(1, 0, 0)),
@@ -983,14 +917,7 @@ fn imhd_prim_at(i: usize) -> IsoMhdPrim<f64, 3> {
     mag[0] = 0.2;
     mag[1] = 0.3 + 0.02 * x;
     mag[2] = -0.1;
-    IsoMhdPrim {
-        hydro: PrimG {
-            rho: 1.0 + 0.1 * x,
-            vel,
-            pre: Zero::default(),
-        },
-        mag,
-    }
+    IsoMhdPrim::new(PrimG::isothermal(Density(1.0 + 0.1 * x), vel), mag)
 }
 
 fn imhd_cons_at(i: usize) -> IsoMhdCons<f64, 3> {
@@ -1003,23 +930,23 @@ fn imhd_c2p_round_trips_against_native_physics() {
     // closure leaves (rho, v) as the whole output.
     let out = KernelRun::new(imhd_c2p_gv())
         .grid([N])
-        .field_with("cons_den", |c| imhd_cons_at(c[0]).den)
-        .field_with("cons_mom_0", |c| imhd_cons_at(c[0]).mom[0])
-        .field_with("cons_mom_1", |c| imhd_cons_at(c[0]).mom[1])
-        .field_with("cons_mom_2", |c| imhd_cons_at(c[0]).mom[2])
-        .field_with("cons_mag_0", |c| imhd_cons_at(c[0]).mag[0])
-        .field_with("cons_mag_1", |c| imhd_cons_at(c[0]).mag[1])
-        .field_with("cons_mag_2", |c| imhd_cons_at(c[0]).mag[2])
+        .field_with("cons_den", |c| imhd_cons_at(c[0]).den())
+        .field_with("cons_mom_0", |c| imhd_cons_at(c[0]).mom()[0])
+        .field_with("cons_mom_1", |c| imhd_cons_at(c[0]).mom()[1])
+        .field_with("cons_mom_2", |c| imhd_cons_at(c[0]).mom()[2])
+        .field_with("cons_mag_0", |c| imhd_cons_at(c[0]).mag()[0])
+        .field_with("cons_mag_1", |c| imhd_cons_at(c[0]).mag()[1])
+        .field_with("cons_mag_2", |c| imhd_cons_at(c[0]).mag()[2])
         .run();
     for i in 0..N {
         let p = imhd_prim_at(i);
         out.expect(
             [i],
             &[
-                ("prim_rho", p.rho),
-                ("prim_vel_0", p.vel[0]),
-                ("prim_vel_1", p.vel[1]),
-                ("prim_vel_2", p.vel[2]),
+                ("prim_rho", p.rho()),
+                ("prim_vel_0", p.vel()[0]),
+                ("prim_vel_1", p.vel()[1]),
+                ("prim_vel_2", p.vel()[2]),
             ],
             1e-12,
         );
@@ -1030,34 +957,30 @@ fn imhd_c2p_round_trips_against_native_physics() {
 fn imhd_flux_and_hlld_match_native_physics_on_uniform_state() {
     // uniform state: HLLE / the 3-state HLLD collapse to F(U) = to_flux, bit-matching native
     // f64 physics through the Gv carrier. bface_n = the normal mag (the staggered coupling).
-    let prim = IsoMhdPrim::<f64, 3> {
-        hydro: PrimG {
-            rho: 1.0,
-            vel: Tensor::new([0.2, -0.1, 0.05]),
-            pre: Zero::default(),
-        },
-        mag: Tensor::new([0.3, 0.2, -0.1]),
-    };
+    let prim = IsoMhdPrim::<f64, 3>::new(
+        PrimG::isothermal(Density(1.0), Tensor::new([0.2, -0.1, 0.05])),
+        Tensor::new([0.3, 0.2, -0.1]),
+    );
     let eos = Isothermal { cs: IMHD_CS };
     let f = IsothermalMhd.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let fields: Vec<(&str, f64)> = vec![
-        ("prim_rho", prim.rho),
-        ("prim_v0", prim.vel[0]),
-        ("prim_v1", prim.vel[1]),
-        ("prim_v2", prim.vel[2]),
-        ("prim_b0", prim.mag[0]),
-        ("prim_b1", prim.mag[1]),
-        ("prim_b2", prim.mag[2]),
-        ("bface_n", prim.mag[0]),
+        ("prim_rho", prim.rho()),
+        ("prim_v0", prim.vel()[0]),
+        ("prim_v1", prim.vel()[1]),
+        ("prim_v2", prim.vel()[2]),
+        ("prim_b0", prim.mag()[0]),
+        ("prim_b1", prim.mag()[1]),
+        ("prim_b2", prim.mag()[2]),
+        ("bface_n", prim.mag()[0]),
     ];
     let want = &[
-        ("flux_den", f.den),
-        ("flux_mom_0", f.mom[0]),
-        ("flux_mom_1", f.mom[1]),
-        ("flux_mom_2", f.mom[2]),
-        ("flux_mag_0", f.mag[0]),
-        ("flux_mag_1", f.mag[1]),
-        ("flux_mag_2", f.mag[2]),
+        ("flux_den", f.den()),
+        ("flux_mom_0", f.mom()[0]),
+        ("flux_mom_1", f.mom()[1]),
+        ("flux_mom_2", f.mom()[2]),
+        ("flux_mag_0", f.mag()[0]),
+        ("flux_mag_1", f.mag()[1]),
+        ("flux_mag_2", f.mag()[2]),
     ];
     for (label, kernel) in [
         ("hlle", imhd_flux_gv(1, 0, 0)),
@@ -1108,11 +1031,7 @@ fn imhd_builders_render_to_cpu_and_cuda() {
 #[test]
 fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
     // uniform state: hllc(L == R) collapses to F(U), bit-matching the native hllc at f64.
-    let prim = Prim::<f64, 2> {
-        rho: 1.3,
-        vel: Tensor::new([0.4, -0.2]),
-        pre: 0.7,
-    };
+    let prim = Prim::<f64, 2>::adiabatic(Density(1.3), Tensor::new([0.4, -0.2]), Pressure(0.7));
     let eos = IdealGas { gamma: GAMMA };
     let f = hllc(
         &eos,
@@ -1128,10 +1047,10 @@ fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
     out.expect(
         flux_cell::<2>(0),
         &[
-            ("flux_den", f.den),
-            ("flux_mom_0", f.mom[0]),
-            ("flux_mom_1", f.mom[1]),
-            ("flux_nrg", f.nrg),
+            ("flux_den", f.den()),
+            ("flux_mom_0", f.mom()[0]),
+            ("flux_mom_1", f.mom()[1]),
+            ("flux_nrg", f.nrg()),
         ],
         1e-12,
     );
@@ -1141,13 +1060,16 @@ fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
 fn rhd_hllc_flux_matches_native_physics_on_uniform_state() {
     // a grazing v^2 -> 1 state stresses the relativistic lorentz factor + mignone-bodo
     // contact quadratic (the select-heavy region) at both carriers.
-    let prim = Prim::<f64, 2> {
-        rho: 1.0,
-        vel: Tensor::new([0.9, -0.2]),
-        pre: 1.0,
-    };
+    let prim = Prim::<f64, 2>::adiabatic(Density(1.0), Tensor::new([0.9, -0.2]), Pressure(1.0));
     let eos = IdealGas { gamma: RHD_GAMMA };
-    let f = hllc_rhd(&eos, &prim, &prim, &symbi_algebra::Normalized::axis(0), 0.0, None);
+    let f = hllc_rhd(
+        &eos,
+        &prim,
+        &prim,
+        &symbi_algebra::Normalized::axis(0),
+        0.0,
+        None,
+    );
     let out = run_uniform_euler_flux::<2>(
         rhd_hllc_flux_gv::<2>(0, EosArm::IdealGamma),
         &prim,
@@ -1157,10 +1079,10 @@ fn rhd_hllc_flux_matches_native_physics_on_uniform_state() {
     out.expect(
         flux_cell::<2>(0),
         &[
-            ("flux_den", f.den),
-            ("flux_mom_0", f.mom[0]),
-            ("flux_mom_1", f.mom[1]),
-            ("flux_nrg", f.nrg),
+            ("flux_den", f.den()),
+            ("flux_mom_0", f.mom()[0]),
+            ("flux_mom_1", f.mom()[1]),
+            ("flux_nrg", f.nrg()),
         ],
         1e-12,
     );
@@ -1170,28 +1092,28 @@ fn rhd_hllc_flux_matches_native_physics_on_uniform_state() {
 // bound uniformly. shared by the rmhd HLLC + HLLD uniform oracles.
 fn rmhd_uniform_flux_fields(prim: &MhdPrim<f64, 3>) -> Vec<(&'static str, f64)> {
     vec![
-        ("prim_rho", prim.rho),
-        ("prim_v0", prim.vel[0]),
-        ("prim_v1", prim.vel[1]),
-        ("prim_v2", prim.vel[2]),
-        ("prim_pre", prim.pre),
-        ("prim_b0", prim.mag[0]),
-        ("prim_b1", prim.mag[1]),
-        ("prim_b2", prim.mag[2]),
-        ("bface_n", prim.mag[0]),
+        ("prim_rho", prim.rho()),
+        ("prim_v0", prim.vel()[0]),
+        ("prim_v1", prim.vel()[1]),
+        ("prim_v2", prim.vel()[2]),
+        ("prim_pre", prim.pre()),
+        ("prim_b0", prim.mag()[0]),
+        ("prim_b1", prim.mag()[1]),
+        ("prim_b2", prim.mag()[2]),
+        ("bface_n", prim.mag()[0]),
     ]
 }
 
 fn rmhd_flux_want(f: &MhdCons<f64, 3>) -> [(&'static str, f64); 8] {
     [
-        ("flux_den", f.den),
-        ("flux_mom_0", f.mom[0]),
-        ("flux_mom_1", f.mom[1]),
-        ("flux_mom_2", f.mom[2]),
-        ("flux_nrg", f.nrg),
-        ("flux_mag_0", f.mag[0]),
-        ("flux_mag_1", f.mag[1]),
-        ("flux_mag_2", f.mag[2]),
+        ("flux_den", f.den()),
+        ("flux_mom_0", f.mom()[0]),
+        ("flux_mom_1", f.mom()[1]),
+        ("flux_mom_2", f.mom()[2]),
+        ("flux_nrg", f.nrg()),
+        ("flux_mag_0", f.mag()[0]),
+        ("flux_mag_1", f.mag()[1]),
+        ("flux_mag_2", f.mag()[2]),
     ]
 }
 
@@ -1199,14 +1121,10 @@ fn rmhd_flux_want(f: &MhdCons<f64, 3>) -> [(&'static str, f64); 8] {
 fn rmhd_hllc_flux_matches_native_physics_on_uniform_state() {
     // strongly magnetized, relativistic uniform state: hllc_rmhd(L == R) -> F(U), bit-matching
     // the native hllc_rmhd at f64 (the null vs non-null normal-B branch is taken identically).
-    let prim = MhdPrim::<f64, 3> {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.4, -0.2, 0.1]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([0.6, 0.3, -0.2]),
-    };
+    let prim = MhdPrim::<f64, 3>::new(
+        Prim::adiabatic(Density(1.0), Tensor::new([0.4, -0.2, 0.1]), Pressure(1.0)),
+        Tensor::new([0.6, 0.3, -0.2]),
+    );
     let eos = IdealGas { gamma: RMHD_GAMMA };
     let f = hllc_rmhd(
         &Rmhd,
@@ -1231,14 +1149,10 @@ fn rmhd_hlld_flux_matches_native_physics_on_uniform_state() {
     // the 5-wave HLLD — the most select-heavy / NaN-prone kernel (15-step secant on p*,
     // eager HLLE fallback, success-mask select). uniform state: hlld_rmhd(L == R) collapses
     // to F(U), bit-matching the native hlld_rmhd at f64 through the Gv carrier.
-    let prim = MhdPrim::<f64, 3> {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.3, -0.15, 0.05]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([0.5, 0.3, -0.2]),
-    };
+    let prim = MhdPrim::<f64, 3>::new(
+        Prim::adiabatic(Density(1.0), Tensor::new([0.3, -0.15, 0.05]), Pressure(1.0)),
+        Tensor::new([0.5, 0.3, -0.2]),
+    );
     let eos = IdealGas { gamma: RMHD_GAMMA };
     let f = hlld_rmhd(
         &Rmhd,
@@ -1348,16 +1262,10 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
         pre_r, pre[FCELL],
         "pre right slope must clamp to 0 (sign-mixed local extremum)"
     );
-    let left = Prim::<f64, 2> {
-        rho: rho_l,
-        vel: Tensor::new([v0_l, v1_l]),
-        pre: pre_l,
-    };
-    let right = Prim::<f64, 2> {
-        rho: rho_r,
-        vel: Tensor::new([v0_r, v1_r]),
-        pre: pre_r,
-    };
+    let left =
+        Prim::<f64, 2>::adiabatic(Density(rho_l), Tensor::new([v0_l, v1_l]), Pressure(pre_l));
+    let right =
+        Prim::<f64, 2>::adiabatic(Density(rho_r), Tensor::new([v0_r, v1_r]), Pressure(pre_r));
     let f = hlle::<f64, 2, _>(
         &symbi_hydro::newtonian::Newtonian,
         &eos,
@@ -1389,10 +1297,10 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
     out.expect(
         [FCELL, 0],
         &[
-            ("flux_den", f.den),
-            ("flux_mom_0", f.mom[0]),
-            ("flux_mom_1", f.mom[1]),
-            ("flux_nrg", f.nrg),
+            ("flux_den", f.den()),
+            ("flux_mom_0", f.mom()[0]),
+            ("flux_mom_1", f.mom()[1]),
+            ("flux_nrg", f.nrg()),
         ],
         1e-12,
     );

@@ -19,6 +19,7 @@
 #![cfg(feature = "cuda")]
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_kernels::dispatch_penalize;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
@@ -49,11 +50,11 @@ const BODY_Y: f64 = 2.0;
 
 // a uniform cartesian x-directed stream in the local physical basis.
 fn stream_prim(phi: f64, v: f64) -> Prim<f64, 2> {
-    Prim {
-        rho: 1.0,
-        vel: Tensor::new([v * phi.cos(), -v * phi.sin()]),
-        pre: 1.0,
-    }
+    Prim::adiabatic(
+        Density(1.0),
+        Tensor::new([v * phi.cos(), -v * phi.sin()]),
+        Pressure(1.0),
+    )
 }
 
 // build the shaped-wall cylindrical sim on any (space, memory) — the host and device

@@ -22,6 +22,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, MagneticSpec, SurfaceSpec};
 use symbi_substrate::regimes::mhd_substrate::{body_resistive_emf, ct_curl};
@@ -83,13 +84,11 @@ fn make_sim(magnetic: MagneticSpec) -> Sim {
     .cfl(0.3)
     .allocate()
     .expect("resistive body sim construction failed")
-    .set_initial(|_| MhdPrim {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([0.0, 0.0, 0.0]),
+    .set_initial(|_| {
+        MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+            Tensor::new([0.0, 0.0, 0.0]),
+        )
     })
     .seed_faces(|_, _| 0.0)
     .build();
@@ -253,13 +252,11 @@ fn make_evolve_sim(magnetic: MagneticSpec) -> Sim {
     .cfl(0.3)
     .allocate()
     .expect("evolve sim construction failed")
-    .set_initial(move |[_x, y]| MhdPrim {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([b0 * (k * y).sin(), 0.0, 0.0]),
+    .set_initial(move |[_x, y]| {
+        MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+            Tensor::new([b0 * (k * y).sin(), 0.0, 0.0]),
+        )
     })
     .seed_faces(move |axis, [_x, y]| if axis == 0 { b0 * (k * y).sin() } else { 0.0 })
     .build();
@@ -360,13 +357,11 @@ fn make_sim3(magnetic: MagneticSpec) -> Sim3 {
         .cfl(0.3)
         .allocate()
         .expect("3D resistive body sim construction failed")
-        .set_initial(|_| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new([0.0, 0.0, 0.0]),
+        .set_initial(|_| {
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+                Tensor::new([0.0, 0.0, 0.0]),
+            )
         })
         .seed_faces(|_, _| 0.0)
         .build();
@@ -509,13 +504,11 @@ fn drain_sink_in_2p5d_mhd_is_local_and_stable() {
     .cfl(0.3)
     .allocate()
     .unwrap()
-    .set_initial(move |[_x, y]| MhdPrim {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: 1.0,
-        },
-        mag: Tensor::new([b0 * (k * y).sin(), 0.0, 0.0]),
+    .set_initial(move |[_x, y]| {
+        MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+            Tensor::new([b0 * (k * y).sin(), 0.0, 0.0]),
+        )
     })
     .seed_faces(move |axis, [_x, y]| if axis == 0 { b0 * (k * y).sin() } else { 0.0 })
     .build()

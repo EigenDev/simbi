@@ -17,6 +17,7 @@
 
 use std::f64::consts::PI;
 use std::sync::atomic::Ordering;
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet3D;
@@ -57,11 +58,7 @@ fn hydro_hier<S: ExecutionSpace, Mem: MemorySpace + Sync>() -> Hierarchy<
     let ic = |x: [f64; 3]| {
         let r2 = x.iter().map(|&q| (q - 0.5) * (q - 0.5)).sum::<f64>();
         let pre = if r2 < 0.01 { 10.0 } else { 0.1 };
-        Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre,
-        }
+        Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(pre))
     };
     let coarse = HydroSim::<S, Mem>::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N; 3])
@@ -201,23 +198,18 @@ fn fill_ot<S: ExecutionSpace, Mem: MemorySpace>(sim: &MhdSim<S, Mem>) {
     for c in sim.geom.interior.iter() {
         let xc = sim.geom.centroid(c);
         let (x, y) = (xc[0], xc[1]);
-        let prim = MhdPrim {
-            hydro: Prim {
-                rho: G * G,
-                vel: Tensor::new([-V0 * (2.0 * PI * y).sin(), V0 * (2.0 * PI * x).sin(), 0.0]),
-                pre: G,
-            },
-            mag: Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), 0.0]),
-        };
+        let prim = MhdPrim::new(
+            Prim::adiabatic(
+                Density(G * G),
+                Tensor::new([-V0 * (2.0 * PI * y).sin(), V0 * (2.0 * PI * x).sin(), 0.0]),
+                Pressure(G),
+            ),
+            Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), 0.0]),
+        );
         let cons = sim.physics.regime.to_conserved(&sim.physics.eos, &prim);
         sim.fields.cons.scatter(
             c,
-            Cons {
-                chi: Default::default(),
-                den: cons.den,
-                mom: cons.mom,
-                nrg: cons.nrg,
-            },
+            Cons::adiabatic(Density(cons.den), cons.mom, EnergyDensity(cons.nrg)),
         );
         mhd.bcell[0].view_mut().set(c, prim.mag[0]);
         mhd.bcell[1].view_mut().set(c, prim.mag[1]);
@@ -241,13 +233,11 @@ fn gpu_two_level_mhd_preserves_divb() {
             .cfl(0.3)
             .allocate()
             .unwrap()
-            .set_initial(|_| MhdPrim {
-                hydro: Prim {
-                    rho: 1.0,
-                    vel: Tensor::new([0.0; 3]),
-                    pre: 1.0,
-                },
-                mag: Tensor::new([0.0; 3]),
+            .set_initial(|_| {
+                MhdPrim::new(
+                    Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(1.0)),
+                    Tensor::new([0.0; 3]),
+                )
             })
             .seed_faces_uniform([0.0; 3])
             .build();

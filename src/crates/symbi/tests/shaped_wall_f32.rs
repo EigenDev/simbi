@@ -13,13 +13,14 @@
 use symbi::regimes::substrate_kernels::dispatch_penalize;
 use symbi::sim::state::*;
 use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_carrier::Scalar;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::sdf::SdfExpr;
 use symbi_ib::{Body, BodyCollection, SurfaceSpec};
-use symbi_carrier::Scalar;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const N: usize = 48;
@@ -45,10 +46,12 @@ fn build<Sc: Scalar + OrderedNumeric>()
         .cfl(0.3)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: s(1.0),
-            vel: Tensor::new([s(V_INF), s(0.0)]),
-            pre: s(1.0),
+        .set_initial(|_| {
+            Prim::adiabatic(
+                Density(s(1.0)),
+                Tensor::new([s(V_INF), s(0.0)]),
+                Pressure(s(1.0)),
+            )
         })
         .build()
         .with_bodies(

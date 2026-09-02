@@ -11,13 +11,13 @@
 // =============================================================================
 
 use symbi::prelude::*;
+use symbi_hydro::ISO_NEWTONIAN_SPEC;
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Isothermal;
-use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::state::PrimG;
-use symbi_hydro::ISO_NEWTONIAN_SPEC;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_user_source;
 
 type Sim = SimCpu<IsoNewtonian, 2, Cartesian, Isothermal<f64>>;
 
@@ -52,10 +52,8 @@ fn runtime_loaded_force_accelerates_iso_gas() {
         .boundaries(BoundaryType::Periodic)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| PrimG::<f64, 2, IsoModel> {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: Default::default(),
+    sim.seed_cells(|_| {
+        PrimG::<f64, 2, IsoModel>::isothermal(Density(1.0), Tensor::new([0.0, 0.0]))
     });
 
     let sub = sim

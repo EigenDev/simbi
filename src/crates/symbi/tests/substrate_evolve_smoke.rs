@@ -6,8 +6,10 @@ use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
+use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Isothermal;
 use symbi_hydro::isothermal::IsoNewtonian;
+use symbi_hydro::quantity::Density;
 use symbi_hydro::state::PrimG;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -29,11 +31,10 @@ fn full_substrate_isothermal_euler_evolution() {
         .unwrap()
         .set_initial(|x| {
             let s = (2.0 * pi * x[0]).sin();
-            PrimG {
-                rho: 1.0 + amp * s,
-                vel: Tensor::new([amp * CS * s]),
-                pre: Default::default(),
-            }
+            PrimG::<f64, 1, IsoModel>::isothermal(
+                Density(1.0 + amp * s),
+                Tensor::new([amp * CS * s]),
+            )
         })
         .build();
 
@@ -92,10 +93,8 @@ fn locally_isothermal_cs2_derived_from_ic_and_held() {
         .boundaries(Boundaries::uniform(BoundaryType::Periodic))
         .allocate()
         .unwrap()
-        .set_initial(|x| PrimG {
-            rho: rho_of(x[0]),
-            vel: Tensor::new([0.0]),
-            pre: Default::default(),
+        .set_initial(|x| {
+            PrimG::<f64, 1, IsoModel>::isothermal(Density(rho_of(x[0])), Tensor::new([0.0]))
         })
         .build();
 
@@ -154,10 +153,11 @@ fn locally_isothermal_ghost_temperature_is_the_clamped_interior_value() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .unwrap()
-        .set_initial(|x| PrimG {
-            rho: rho_of(x[0], x[1]),
-            vel: Tensor::new([0.0, 0.0]),
-            pre: Default::default(),
+        .set_initial(|x| {
+            PrimG::<f64, 2, IsoModel>::isothermal(
+                Density(rho_of(x[0], x[1])),
+                Tensor::new([0.0, 0.0]),
+            )
         })
         .build();
 

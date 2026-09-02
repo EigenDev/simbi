@@ -21,6 +21,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -42,13 +43,15 @@ fn make() -> Sim {
         .cfl(0.3)
         .allocate()
         .expect("3d mhd sim")
-        .set_initial(|[_x, y, _z]| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([V0 * (k * y).sin(), 0.0, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new([B0 * (k * y).sin(), 0.0, 0.0]),
+        .set_initial(|[_x, y, _z]| {
+            MhdPrim::new(
+                Prim::adiabatic(
+                    Density(1.0),
+                    Tensor::new([V0 * (k * y).sin(), 0.0, 0.0]),
+                    Pressure(1.0),
+                ),
+                Tensor::new([B0 * (k * y).sin(), 0.0, 0.0]),
+            )
         })
         .seed_faces(|axis, x| {
             if axis == 0 {

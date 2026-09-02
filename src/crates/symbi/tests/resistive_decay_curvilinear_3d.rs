@@ -20,6 +20,7 @@
 // =============================================================================
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve_with_callback;
@@ -141,26 +142,17 @@ fn seed<M>(
             cp[k] += 1;
             0.5 * (*m.bface[k].at(c) + *m.bface[k].at(cp))
         });
-        let prim = MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new(mag),
-        };
+        let prim = MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+            Tensor::new(mag),
+        );
         for k in 0..3 {
             m.bcell[k].set(c, mag[k]);
         }
         let cons = sim.physics.regime.to_conserved(&sim.physics.eos, &prim);
         sim.fields.cons.scatter(
             c,
-            Cons {
-                chi: Default::default(),
-                den: cons.den,
-                mom: cons.mom,
-                nrg: cons.nrg,
-            },
+            Cons::adiabatic(Density(cons.den()), *cons.mom(), EnergyDensity(cons.nrg())),
         );
     }
 }
@@ -254,13 +246,11 @@ fn make_sph() -> SimSph {
         .cfl(CFL)
         .allocate()
         .expect("3d spherical sim")
-        .set_initial(|_| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new([0.0, 0.0, 0.0]),
+        .set_initial(|_| {
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+                Tensor::new([0.0, 0.0, 0.0]),
+            )
         })
         .seed_faces(|_, _| 0.0)
         .build();
@@ -276,13 +266,11 @@ fn make_cyl() -> SimCyl {
         .cfl(CFL)
         .allocate()
         .expect("3d cylindrical sim")
-        .set_initial(|_| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0, 0.0, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new([0.0, 0.0, 0.0]),
+        .set_initial(|_| {
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+                Tensor::new([0.0, 0.0, 0.0]),
+            )
         })
         .seed_faces(|_, _| 0.0)
         .build();

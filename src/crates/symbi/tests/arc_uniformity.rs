@@ -6,6 +6,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Spherical;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -25,11 +26,7 @@ fn thermal_bomb_shape_renders_an_angularly_uniform_arc() {
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
     .allocate()
     .expect("sim")
-    .set_initial(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::zeros(),
-        pre: 1.0,
-    })
+    .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
     .build();
     // sedov-like radial profile, theta-independent: evacuated interior, thin
     // bright shell (2 cells) at r = 0.25, ambient outside.

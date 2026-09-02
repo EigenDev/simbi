@@ -6,12 +6,12 @@
 
 use super::*;
 use symbi_algebra::Tensor;
+use symbi_carrier::Dual;
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
-use symbi_carrier::Dual;
 use symbi_ir::gv::GvMask;
 use symbi_ir::{KernelWrite, KernelWrites};
 
@@ -20,23 +20,23 @@ use symbi_ir::{KernelWrite, KernelWrites};
 /// read field node (a direct buffer copy).
 pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let den = cx.field("cons_den", FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..ncomp)
-        .map(|k| cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
-        .collect();
-    let nrg = has_energy.then(|| cx.field("cons_nrg", FieldRef::cons_nrg()));
-    let mut writes = vec![KernelWrite::new("u_n_den", FieldRef::un_den(), den.node())];
-    for (k, m) in mom.iter().enumerate() {
-        writes.push(KernelWrite::new(
-            format!("u_n_mom_{k}"),
-            FieldRef::un_mom(k as u8),
-            m.node(),
-        ));
-    }
-    if let Some(n) = nrg {
-        writes.push(KernelWrite::new("u_n_nrg", FieldRef::un_nrg(), n.node()));
-    }
-    writes
+        let den = cx.field("cons_den", FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..ncomp)
+            .map(|k| cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
+            .collect();
+        let nrg = has_energy.then(|| cx.field("cons_nrg", FieldRef::cons_nrg()));
+        let mut writes = vec![KernelWrite::new("u_n_den", FieldRef::un_den(), den.node())];
+        for (k, m) in mom.iter().enumerate() {
+            writes.push(KernelWrite::new(
+                format!("u_n_mom_{k}"),
+                FieldRef::un_mom(k as u8),
+                m.node(),
+            ));
+        }
+        if let Some(n) = nrg {
+            writes.push(KernelWrite::new("u_n_nrg", FieldRef::un_nrg(), n.node()));
+        }
+        writes
     })
 }
 
@@ -47,23 +47,23 @@ pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
 /// (dest).
 pub fn fofc_copy_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let mut writes = KernelWrites::new();
-    let mut cp = |name: &str| {
-        let v = cx.field(&format!("s_{name}"), &format!("s_{name}"));
-        writes.push(KernelWrite::new(
-            format!("d_{name}"),
-            format!("d_{name}"),
-            v.node(),
-        ));
-    };
-    cp("den");
-    for k in 0..ncomp {
-        cp(&format!("mom_{k}"));
-    }
-    if has_energy {
-        cp("nrg");
-    }
-    writes
+        let mut writes = KernelWrites::new();
+        let mut cp = |name: &str| {
+            let v = cx.field(&format!("s_{name}"), &format!("s_{name}"));
+            writes.push(KernelWrite::new(
+                format!("d_{name}"),
+                format!("d_{name}"),
+                v.node(),
+            ));
+        };
+        cp("den");
+        for k in 0..ncomp {
+            cp(&format!("mom_{k}"));
+        }
+        if has_energy {
+            cp("nrg");
+        }
+        writes
     })
 }
 
@@ -96,19 +96,16 @@ fn primitive_physical_gv<'t>(cx: TraceCx<'t>, ncomp: usize, has_energy: bool) ->
     // iso, whose only other guard is the density, so a NaN momentum would otherwise ride through the
     // FOFC gate until the next flux divergence poisons the density one step later.
     for k in 0..ncomp {
-        physical = physical
-            & finite(cx.field(
-                &format!("prim_vel_{k}"),
-                FieldRef::PrimVel(k as u8),
-            ));
+        physical =
+            physical & finite(cx.field(&format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8)));
     }
     physical
 }
 
 pub fn fofc_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let physical = primitive_physical_gv(cx, ncomp, has_energy);
-    let flag = Gv::select(physical, Gv::ZERO, Gv::ONE);
+        let physical = primitive_physical_gv(cx, ncomp, has_energy);
+        let flag = Gv::select(physical, Gv::ZERO, Gv::ONE);
         vec![KernelWrite::new("flag", FieldRef::Scratch, flag.node())]
     })
 }
@@ -129,29 +126,29 @@ pub fn fofc_exterior_flag_gv(
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let ndim = axes.len();
-    let centroid = cell_geometry_gv(cx, coords, spacing, axes, ndim).centroid;
-    let mut position = [Gv::ZERO; 3];
-    for (grid_axis, &coordinate) in axes.iter().enumerate() {
-        position[coordinate] = centroid[grid_axis];
-    }
-    let bad = cx.field("bad", "bad");
-    let exterior = if coords == Coords::Cartesian
-        && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
-    {
-        let spin = if spacetime == Spacetime::KerrKS {
-            cx.scalar("kerr_spin")
+        let ndim = axes.len();
+        let centroid = cell_geometry_gv(cx, coords, spacing, axes, ndim).centroid;
+        let mut position = [Gv::ZERO; 3];
+        for (grid_axis, &coordinate) in axes.iter().enumerate() {
+            position[coordinate] = centroid[grid_axis];
+        }
+        let bad = cx.field("bad", "bad");
+        let exterior = if coords == Coords::Cartesian
+            && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
+        {
+            let spin = if spacetime == Spacetime::KerrKS {
+                cx.scalar("kerr_spin")
+            } else {
+                Gv::ZERO
+            };
+            let mass = cx.scalar("schwarzschild_mass");
+            let r_plus = mass + (mass * mass - spin * spin).max(Gv::ZERO).sqrt();
+            let r_mask = r_plus.max(cx.scalar("excision_radius"));
+            let excised = symbi_ib::excise::ks_excised(&position, spin, r_mask);
+            Gv::select(excised, Gv::ZERO, bad)
         } else {
-            Gv::ZERO
+            bad
         };
-        let mass = cx.scalar("schwarzschild_mass");
-        let r_plus = mass + (mass * mass - spin * spin).max(Gv::ZERO).sqrt();
-        let r_mask = r_plus.max(cx.scalar("excision_radius"));
-        let excised = symbi_ib::excise::ks_excised(&position, spin, r_mask);
-        Gv::select(excised, Gv::ZERO, bad)
-    } else {
-        bad
-    };
         vec![KernelWrite::new("exterior", "exterior", exterior.node())]
     })
 }
@@ -163,11 +160,11 @@ pub fn fofc_exterior_flag_gv(
 /// pressure-zero and finiteness semantics agree by construction.
 pub fn c2p_status_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let status = Gv::select(
-        primitive_physical_gv(cx, ncomp, has_energy),
-        Gv::ZERO,
-        Gv::from_f64(symbi_hydro::c2p_result::ErrorCode::INVALID_PRIMITIVE.0 as f64),
-    );
+        let status = Gv::select(
+            primitive_physical_gv(cx, ncomp, has_energy),
+            Gv::ZERO,
+            Gv::from_f64(symbi_hydro::c2p_result::ErrorCode::INVALID_PRIMITIVE.0 as f64),
+        );
         vec![KernelWrite::new("status", FieldRef::Scratch, status.node())]
     })
 }
@@ -181,8 +178,8 @@ pub fn c2p_status_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites)
 /// a poison in any primitive reaches the density within one c2p / flux divergence.
 pub fn state_finite_probe_gv() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let flag = Gv::select((rho - rho).cmp_eq(Gv::ZERO), Gv::ZERO, Gv::ONE);
+        let rho = cx.field("prim_rho", FieldRef::PrimRho);
+        let flag = Gv::select((rho - rho).cmp_eq(Gv::ZERO), Gv::ZERO, Gv::ONE);
         vec![KernelWrite::new("flag", FieldRef::Scratch, flag.node())]
     })
 }
@@ -196,26 +193,26 @@ pub fn state_finite_probe_gv() -> (GvKernel, KernelWrites) {
 /// finiteness.
 pub fn fofc_freeze_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    // finiteness probes as named-brand fns: a local closure cannot name the trace
-    // brand, and annotating the elided lifetime mints regions invariance rejects.
-    fn finite<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
-        (v - v).cmp_eq(Gv::ZERO)
-    }
-    fn finite_pos<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
-        finite(v) & v.cmp_gt(Gv::ZERO)
-    }
-    let x_rho = cx.field("x_rho", "x_rho");
-    let mut physical = if has_energy {
-        let x_pre = cx.field("x_pre", "x_pre");
-        finite_pos(x_rho) & finite_pos(x_pre)
-    } else {
-        finite_pos(x_rho)
-    };
-    for k in 0..ncomp {
-        let path = format!("x_vel_{k}");
-        physical = physical & finite(cx.field(&path, &path));
-    }
-    let frozen = Gv::select(physical, Gv::ZERO, Gv::ONE);
+        // finiteness probes as named-brand fns: a local closure cannot name the trace
+        // brand, and annotating the elided lifetime mints regions invariance rejects.
+        fn finite<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
+            (v - v).cmp_eq(Gv::ZERO)
+        }
+        fn finite_pos<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
+            finite(v) & v.cmp_gt(Gv::ZERO)
+        }
+        let x_rho = cx.field("x_rho", "x_rho");
+        let mut physical = if has_energy {
+            let x_pre = cx.field("x_pre", "x_pre");
+            finite_pos(x_rho) & finite_pos(x_pre)
+        } else {
+            finite_pos(x_rho)
+        };
+        for k in 0..ncomp {
+            let path = format!("x_vel_{k}");
+            physical = physical & finite(cx.field(&path, &path));
+        }
+        let frozen = Gv::select(physical, Gv::ZERO, Gv::ONE);
         vec![KernelWrite::new("freeze", "freeze", frozen.node())]
     })
 }
@@ -230,53 +227,53 @@ pub fn fofc_freeze_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Kernel
 /// fail-loud. only the conserved is chosen; the primitive is re-derived by the c2p that follows.
 pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    // finite and positive: (v - v) is 0 for a finite value and NaN for NaN or +-inf (inf - inf =
-    // NaN), so cmp_eq(0) rejects every non-finite value; the > 0 rejects a vacuum/negative one. a
-    // "physical" cell is one whose density (and pressure, when modeled) passes both.
-    // finiteness probes as named-brand fns: a local closure cannot name the trace
-    // brand, and annotating the elided lifetime mints regions invariance rejects.
-    fn finite<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
-        (v - v).cmp_eq(Gv::ZERO)
-    }
-    fn finite_pos<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
-        finite(v) & v.cmp_gt(Gv::ZERO)
-    }
-    let x_rho = cx.field("x_rho", "x_rho");
-    let mut physical = if has_energy {
-        let x_pre = cx.field("x_pre", "x_pre");
-        finite_pos(x_rho) & finite_pos(x_pre)
-    } else {
-        finite_pos(x_rho)
-    };
-    // the full state vector: each spliced velocity is tested for finiteness (its sign is physical),
-    // so a non-finite momentum riding an otherwise finite density/pressure freezes to the
-    // admissible stage input.
-    for k in 0..ncomp {
-        let p = format!("x_vel_{k}");
-        physical = physical & finite(cx.field(&p, &p));
-    }
-    let mut writes = KernelWrites::new();
-    // the live cons (`x_*`) is read+write in place: it holds the spliced first-order result and is
-    // overwritten with the chosen tier. one slot per component (read path == write path) so the IR
-    // dedups it to a single in-place binding (the CT-`b` pattern), keeping input and output on a
-    // single binding.
-    let mut sel_inplace = |comp: &str, us| {
-        let path = format!("x_{comp}");
-        let x = cx.field(&path, &path);
-        let chosen = Gv::select(physical, x, us);
-        writes.push(KernelWrite::new(path.clone(), path, chosen.node()));
-    };
-    sel_inplace("den", cx.field("us_den", "us_den"));
-    for k in 0..ncomp {
-        sel_inplace(
-            &format!("mom_{k}"),
-            cx.field(&format!("us_mom_{k}"), &format!("us_mom_{k}")),
-        );
-    }
-    if has_energy {
-        sel_inplace("nrg", cx.field("us_nrg", "us_nrg"));
-    }
-    writes
+        // finite and positive: (v - v) is 0 for a finite value and NaN for NaN or +-inf (inf - inf =
+        // NaN), so cmp_eq(0) rejects every non-finite value; the > 0 rejects a vacuum/negative one. a
+        // "physical" cell is one whose density (and pressure, when modeled) passes both.
+        // finiteness probes as named-brand fns: a local closure cannot name the trace
+        // brand, and annotating the elided lifetime mints regions invariance rejects.
+        fn finite<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
+            (v - v).cmp_eq(Gv::ZERO)
+        }
+        fn finite_pos<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
+            finite(v) & v.cmp_gt(Gv::ZERO)
+        }
+        let x_rho = cx.field("x_rho", "x_rho");
+        let mut physical = if has_energy {
+            let x_pre = cx.field("x_pre", "x_pre");
+            finite_pos(x_rho) & finite_pos(x_pre)
+        } else {
+            finite_pos(x_rho)
+        };
+        // the full state vector: each spliced velocity is tested for finiteness (its sign is physical),
+        // so a non-finite momentum riding an otherwise finite density/pressure freezes to the
+        // admissible stage input.
+        for k in 0..ncomp {
+            let p = format!("x_vel_{k}");
+            physical = physical & finite(cx.field(&p, &p));
+        }
+        let mut writes = KernelWrites::new();
+        // the live cons (`x_*`) is read+write in place: it holds the spliced first-order result and is
+        // overwritten with the chosen tier. one slot per component (read path == write path) so the IR
+        // dedups it to a single in-place binding (the CT-`b` pattern), keeping input and output on a
+        // single binding.
+        let mut sel_inplace = |comp: &str, us| {
+            let path = format!("x_{comp}");
+            let x = cx.field(&path, &path);
+            let chosen = Gv::select(physical, x, us);
+            writes.push(KernelWrite::new(path.clone(), path, chosen.node()));
+        };
+        sel_inplace("den", cx.field("us_den", "us_den"));
+        for k in 0..ncomp {
+            sel_inplace(
+                &format!("mom_{k}"),
+                cx.field(&format!("us_mom_{k}"), &format!("us_mom_{k}")),
+            );
+        }
+        if has_energy {
+            sel_inplace("nrg", cx.field("us_nrg", "us_nrg"));
+        }
+        writes
     })
 }
 
@@ -299,79 +296,79 @@ pub fn fofc_select_with_body_gv(
     has_energy: bool,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    // finiteness probes as named-brand fns: a local closure cannot name the trace
-    // brand, and annotating the elided lifetime mints regions invariance rejects.
-    fn finite<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
-        (v - v).cmp_eq(Gv::ZERO)
-    }
-    fn finite_pos<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
-        finite(v) & v.cmp_gt(Gv::ZERO)
-    }
-    // the spliced first-order result's physicality, identical to `fofc_select_gv`: density always,
-    // pressure only when the energy is modeled (iso keeps p in a separate cs^2 buffer, so its
-    // select gates on the density alone), plus finiteness of every velocity component.
-    let x_rho = cx.field("x_rho", "x_rho");
-    let mut physical_fo = if has_energy {
-        finite_pos(x_rho) & finite_pos(cx.field("x_pre", "x_pre"))
-    } else {
-        finite_pos(x_rho)
-    };
-    for k in 0..ncomp {
-        let p = format!("x_vel_{k}");
-        physical_fo = physical_fo & finite(cx.field(&p, &p));
-    }
-    // the stage input evolved by the body source, inline in registers within this kernel.
-    let dt = cx.scalar("dt");
-    let us_den = cx.field("us_den", "us_den");
-    let us_mom: Vec<Gv> = (0..ncomp)
-        .map(|k| cx.field(&format!("us_mom_{k}"), &format!("us_mom_{k}")))
-        .collect();
-    // the body-evolved conserved parachute + its physicality, energy-aware. `us_nrg` is bound only in
-    // the adiabatic form so the isothermal kernel manifest carries the density and momentum alone.
-    let (b_den, b_mom, b_nrg, usb_ok) = if has_energy {
-        let gamma = cx.scalar("gamma");
-        let us_nrg = cx.field("us_nrg", "us_nrg");
-        let (b_den, b_mom, b_nrg, _drain) = crate::gv_immersed::body_evolved_gv(
-            cx, us_den, &us_mom, us_nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
-        );
-        // guard: the parachute must itself be physical. rho = den (newtonian, W = 1); the adiabatic
-        // pressure p = (gamma-1)(nrg - 0.5|mom|^2/den) is a closed form of the evolved cons.
-        let mut ke = Gv::ZERO;
-        for m in &b_mom {
-            ke = ke + *m * *m;
+        // finiteness probes as named-brand fns: a local closure cannot name the trace
+        // brand, and annotating the elided lifetime mints regions invariance rejects.
+        fn finite<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
+            (v - v).cmp_eq(Gv::ZERO)
         }
-        let b_pre = (gamma - Gv::ONE) * (b_nrg - Gv::from_f64(0.5) * ke / b_den);
-        let usb_ok = finite_pos(b_den) & finite_pos(b_pre);
-        (b_den, b_mom, Some((us_nrg, b_nrg)), usb_ok)
-    } else {
-        // isothermal EOS: p = cs^2 * rho, so the stage-input pressure is a closed form of us_den; the
-        // pressure stays positive wherever the density does, hence only the density guard.
-        let cs = cx.scalar("cs");
-        let us_pre = cs * cs * us_den;
-        let (b_den, b_mom) = crate::gv_immersed::body_evolved_iso_gv(
-            cx, us_den, &us_mom, us_pre, dt, n_bodies, coords, ndim, ncomp, axes,
-        );
-        let usb_ok = finite_pos(b_den);
-        (b_den, b_mom, None, usb_ok)
-    };
-    let parachute = |ub, us| Gv::select(usb_ok, ub, us);
-    // main select in place: `x_*` (the spliced first-order cons) is kept where physical, else frozen
-    // to the guarded body-evolved stage input.
-    let mut writes = KernelWrites::new();
-    let mut sel = |comp: &str, par| {
-        let path = format!("x_{comp}");
-        let x = cx.field(&path, &path);
-        let chosen = Gv::select(physical_fo, x, par);
-        writes.push(KernelWrite::new(path.clone(), path, chosen.node()));
-    };
-    sel("den", parachute(b_den, us_den));
-    for k in 0..ncomp {
-        sel(&format!("mom_{k}"), parachute(b_mom[k], us_mom[k]));
-    }
-    if let Some((us_nrg, b_nrg)) = b_nrg {
-        sel("nrg", parachute(b_nrg, us_nrg));
-    }
-    writes
+        fn finite_pos<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
+            finite(v) & v.cmp_gt(Gv::ZERO)
+        }
+        // the spliced first-order result's physicality, identical to `fofc_select_gv`: density always,
+        // pressure only when the energy is modeled (iso keeps p in a separate cs^2 buffer, so its
+        // select gates on the density alone), plus finiteness of every velocity component.
+        let x_rho = cx.field("x_rho", "x_rho");
+        let mut physical_fo = if has_energy {
+            finite_pos(x_rho) & finite_pos(cx.field("x_pre", "x_pre"))
+        } else {
+            finite_pos(x_rho)
+        };
+        for k in 0..ncomp {
+            let p = format!("x_vel_{k}");
+            physical_fo = physical_fo & finite(cx.field(&p, &p));
+        }
+        // the stage input evolved by the body source, inline in registers within this kernel.
+        let dt = cx.scalar("dt");
+        let us_den = cx.field("us_den", "us_den");
+        let us_mom: Vec<Gv> = (0..ncomp)
+            .map(|k| cx.field(&format!("us_mom_{k}"), &format!("us_mom_{k}")))
+            .collect();
+        // the body-evolved conserved parachute + its physicality, energy-aware. `us_nrg` is bound only in
+        // the adiabatic form so the isothermal kernel manifest carries the density and momentum alone.
+        let (b_den, b_mom, b_nrg, usb_ok) = if has_energy {
+            let gamma = cx.scalar("gamma");
+            let us_nrg = cx.field("us_nrg", "us_nrg");
+            let (b_den, b_mom, b_nrg, _drain) = crate::gv_immersed::body_evolved_gv(
+                cx, us_den, &us_mom, us_nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
+            );
+            // guard: the parachute must itself be physical. rho = den (newtonian, W = 1); the adiabatic
+            // pressure p = (gamma-1)(nrg - 0.5|mom|^2/den) is a closed form of the evolved cons.
+            let mut ke = Gv::ZERO;
+            for m in &b_mom {
+                ke = ke + *m * *m;
+            }
+            let b_pre = (gamma - Gv::ONE) * (b_nrg - Gv::from_f64(0.5) * ke / b_den);
+            let usb_ok = finite_pos(b_den) & finite_pos(b_pre);
+            (b_den, b_mom, Some((us_nrg, b_nrg)), usb_ok)
+        } else {
+            // isothermal EOS: p = cs^2 * rho, so the stage-input pressure is a closed form of us_den; the
+            // pressure stays positive wherever the density does, hence only the density guard.
+            let cs = cx.scalar("cs");
+            let us_pre = cs * cs * us_den;
+            let (b_den, b_mom) = crate::gv_immersed::body_evolved_iso_gv(
+                cx, us_den, &us_mom, us_pre, dt, n_bodies, coords, ndim, ncomp, axes,
+            );
+            let usb_ok = finite_pos(b_den);
+            (b_den, b_mom, None, usb_ok)
+        };
+        let parachute = |ub, us| Gv::select(usb_ok, ub, us);
+        // main select in place: `x_*` (the spliced first-order cons) is kept where physical, else frozen
+        // to the guarded body-evolved stage input.
+        let mut writes = KernelWrites::new();
+        let mut sel = |comp: &str, par| {
+            let path = format!("x_{comp}");
+            let x = cx.field(&path, &path);
+            let chosen = Gv::select(physical_fo, x, par);
+            writes.push(KernelWrite::new(path.clone(), path, chosen.node()));
+        };
+        sel("den", parachute(b_den, us_den));
+        for k in 0..ncomp {
+            sel(&format!("mom_{k}"), parachute(b_mom[k], us_mom[k]));
+        }
+        if let Some((us_nrg, b_nrg)) = b_nrg {
+            sel("nrg", parachute(b_nrg, us_nrg));
+        }
+        writes
     })
 }
 
@@ -391,27 +388,27 @@ pub fn fofc_splice_gv(
     has_energy: bool,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let nd = ndim as u8;
-    let d = dir as u8;
-    let flag_c = cx.field("flag", "flag");
-    let flag_lo = cx.field_shifted("flag", "flag", nd, d, -1);
-    let face_fo = flag_c.cmp_gt(Gv::ZERO) | flag_lo.cmp_gt(Gv::ZERO);
-    let mut writes = KernelWrites::new();
-    let mut splice = |comp: &str| {
-        let fo_name = format!("fo_{comp}");
-        let fo = cx.field(&fo_name, &fo_name);
-        let ho = cx.field(&format!("ho_{comp}"), &format!("ho_{comp}"));
-        let chosen = Gv::select(face_fo, fo, ho);
-        writes.push(KernelWrite::new(fo_name.clone(), fo_name, chosen.node()));
-    };
-    splice("den");
-    for k in 0..ncomp {
-        splice(&format!("mom_{k}"));
-    }
-    if has_energy {
-        splice("nrg");
-    }
-    writes
+        let nd = ndim as u8;
+        let d = dir as u8;
+        let flag_c = cx.field("flag", "flag");
+        let flag_lo = cx.field_shifted("flag", "flag", nd, d, -1);
+        let face_fo = flag_c.cmp_gt(Gv::ZERO) | flag_lo.cmp_gt(Gv::ZERO);
+        let mut writes = KernelWrites::new();
+        let mut splice = |comp: &str| {
+            let fo_name = format!("fo_{comp}");
+            let fo = cx.field(&fo_name, &fo_name);
+            let ho = cx.field(&format!("ho_{comp}"), &format!("ho_{comp}"));
+            let chosen = Gv::select(face_fo, fo, ho);
+            writes.push(KernelWrite::new(fo_name.clone(), fo_name, chosen.node()));
+        };
+        splice("den");
+        for k in 0..ncomp {
+            splice(&format!("mom_{k}"));
+        }
+        if has_energy {
+            splice("nrg");
+        }
+        writes
     })
 }
 
@@ -425,20 +422,20 @@ pub fn fofc_splice_gv(
 /// off the fallback region, FO on it) and the Contact FO edge EMF.
 pub fn fofc_bflux_splice_gv(ndim: usize, dir: usize, ncomp: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let nd = ndim as u8;
-    let d = dir as u8;
-    let flag_c = cx.field("flag", "flag");
-    let flag_lo = cx.field_shifted("flag", "flag", nd, d, -1);
-    let face_fo = flag_c.cmp_gt(Gv::ZERO) | flag_lo.cmp_gt(Gv::ZERO);
-    let mut writes = KernelWrites::new();
-    for c in 0..ncomp {
-        let fo_name = format!("fo_bflux_{c}");
-        let fo = cx.field(&fo_name, &fo_name);
-        let ho = cx.field(&format!("ho_bflux_{c}"), &format!("ho_bflux_{c}"));
-        let chosen = Gv::select(face_fo, fo, ho);
-        writes.push(KernelWrite::new(fo_name.clone(), fo_name, chosen.node()));
-    }
-    writes
+        let nd = ndim as u8;
+        let d = dir as u8;
+        let flag_c = cx.field("flag", "flag");
+        let flag_lo = cx.field_shifted("flag", "flag", nd, d, -1);
+        let face_fo = flag_c.cmp_gt(Gv::ZERO) | flag_lo.cmp_gt(Gv::ZERO);
+        let mut writes = KernelWrites::new();
+        for c in 0..ncomp {
+            let fo_name = format!("fo_bflux_{c}");
+            let fo = cx.field(&fo_name, &fo_name);
+            let ho = cx.field(&format!("ho_bflux_{c}"), &format!("ho_bflux_{c}"));
+            let chosen = Gv::select(face_fo, fo, ho);
+            writes.push(KernelWrite::new(fo_name.clone(), fo_name, chosen.node()));
+        }
+        writes
     })
 }
 
@@ -452,13 +449,13 @@ pub fn godunov_mass_gv(
     ndim: u8,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let geo = (!is_cartesian_uniform(coords, spacing))
-        .then(|| cell_geometry_gv(cx, coords, spacing, axes, ndim as usize));
-    let rho = cx.field("rho", FieldRef::cons_den());
-    let rho_new = rho - dt * gv_divergence(cx, "mass_flux", ndim, &geo, spacing);
-    let writes = vec![KernelWrite::new("rho_new", "cons.den_new", rho_new.node())];
-    writes
+        let dt = cx.scalar("dt");
+        let geo = (!is_cartesian_uniform(coords, spacing))
+            .then(|| cell_geometry_gv(cx, coords, spacing, axes, ndim as usize));
+        let rho = cx.field("rho", FieldRef::cons_den());
+        let rho_new = rho - dt * gv_divergence(cx, "mass_flux", ndim, &geo, spacing);
+        let writes = vec![KernelWrite::new("rho_new", "cons.den_new", rho_new.node())];
+        writes
     })
 }
 
@@ -584,10 +581,7 @@ fn splice_fused_sources_to_contribs<'t>(
             .iter()
             .any(|(_, b)| b.params().iter().any(|p| p == "pre"));
         if has_energy && needs_pre {
-            shared_params.insert(
-                "pre".to_string(),
-                cx.field("pre", FieldRef::PrimPre).node(),
-            );
+            shared_params.insert("pre".to_string(), cx.field("pre", FieldRef::PrimPre).node());
         }
     }
     // lazy centroid binding. `x_k` <-> cell centroid for specs
@@ -633,9 +627,7 @@ fn splice_fused_sources_to_contribs<'t>(
                 .or_insert_with(|| cx.scalar(pname).node());
             name_to_node.insert(pname.clone(), nid);
         }
-        let spliced = cx.with_trace(|t| {
-            built.splice_into(t.graph(), &name_to_node)
-        });
+        let spliced = cx.with_trace(|t| built.splice_into(t.graph(), &name_to_node));
         match *target_field {
             "den" => {
                 assert_eq!(
@@ -815,554 +807,567 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     weighted_geo_source: bool,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let a0 = cx.scalar("a0");
-    let ac = cx.scalar("ac");
-    // the SSP source weight. computed as `ac*dt` so it is bit-identical to the standalone
-    // `source_apply_gv` pass's `dt` scalar (the driver fills that with `ac*sim.dt` — the same IEEE
-    // f64 product). this is what makes `fused == plain godunov + source_apply` bit-exact: the
-    // user source rides as a separate post-combine term at this weight; folding it into the
-    // `ac*fe` multiply would distribute the rounding differently.
-    let ac_dt = ac * dt;
-    // flat spacetime: the physical (orthonormal) finite-volume geometry. curved (GR): the
-    // covariant geometry — coordinate-form angular face weights (the alpha sqrt(gamma) measure),
-    // matching the covariant momentum S_i and the contravariant fluxes v^i; the orthonormal
-    // angular weights would leave every theta-direction force on S_theta short by a factor r.
-    // radial faces and the volume coincide, so 1D radial GR is bit-identical.
-    // a curved spacetime always needs the geometry (the metric position + the alpha sqrt(gamma)
-    // densitization measure), even on a cartesian-uniform grid where flat hydro skips it.
-    let geo =
-        (!is_cartesian_uniform(coords, spacing) || spacetime != Spacetime::Minkowski).then(|| {
-            match spacetime {
-                Spacetime::Minkowski => cell_geometry_gv(cx, coords, spacing, axes, ndim as usize),
-                // spinning kerr: the densitized measure is Sigma sin(theta) — the spin rides the
-                // `kerr_spin` kernel scalar into the face/volume moments.
-                Spacetime::KerrKS => cell_geometry_covariant_gv(
-                    cx,
-                    coords,
-                    spacing,
-                    axes,
-                    ndim as usize,
-                    Some(cx.scalar("kerr_spin")),
-                ),
-                _ => cell_geometry_covariant_gv(cx, coords, spacing, axes, ndim as usize, None),
-            }
-        });
-    // GR hydro evolves the fully densitized state (gammie et al. 2003; stone et al. 2024 eq. 20):
-    // U = sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] with the flux carrying the same measure, so
-    // the divergence is plain coordinate differencing with the lapse absorbed into the measure on
-    // both sides, the geometry arrives through the pointwise connection source
-    // (1/2) sqrt(-g) (d_i g_ab) T^ab, and the energy source is identically zero because the metric
-    // is stationary. GR MHD keeps the area-weighted valencia path (its induction and CT seam carry
-    // the area-weighted form).
-    let densitized = spacetime != Spacetime::Minkowski && matches!(source, GeoSource::Hydro { .. });
-    assert!(
-        !densitized || (sources.is_empty() && n_bodies == 0),
-        "a densitized GR state cannot take undensitized user-source or immersed-body rates"
-    );
-    let rho = cx.field("rho", FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..ncomp)
-        .map(|k| cx.field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8)))
-        .collect();
-    // on a curved background the covariant momentum S_i takes its inertial blocks from the
-    // covariant stress-energy contraction below (the flat velocity-quadratic inertial treats the
-    // components as flat), so the hydro geometric source keeps only its
-    // discrete well-balanced pressure form `p (A_hi - A_lo) / V` — which cancels the pressure flux
-    // divergence bit-exactly at a uniform-p hydrostatic state, while the analytic pressure block
-    // `p d_j ln(alpha sqrt(gamma))` of the contraction cancels only to truncation order.
-    // the ideal-MHD stress moves to the covariant contraction on the GR path too — the flat
-    // Rmhd curvilinear source would double-count the inertia/tension with the flat contraction
-    // for covariant S_i; only the gas-pressure discrete block stays.
-    let source_discrete = match (spacetime, source) {
-        (Spacetime::Minkowski, s) => s,
-        (_, GeoSource::Hydro { .. }) | (_, GeoSource::Rmhd) => GeoSource::Hydro { inertial: false },
-        (_, s) => s,
-    };
-    // under densitization the whole geometric momentum contribution — pressure block included —
-    // arrives through the connection source below, so the discrete area-weighted form is retired.
-    let src = (!densitized).then(|| geo.as_ref()).flatten().map(|g| {
-        gv_geometric_source(
-            cx,
-            coords,
-            axes,
-            ndim as usize,
-            ncomp,
-            g,
-            source_discrete,
-            &mom,
-            mag_from_bcell,
-        )
-    });
-
-    let contribs = splice_fused_sources_to_contribs(
-        cx,
-        coords,
-        spacing,
-        axes,
-        ndim,
-        ncomp,
-        has_energy,
-        &geo,
-        Some((rho, &mom)),
-        sources,
-    );
-
-    // the plain forward-euler stage carries the flux divergence + the (well-balanced)
-    // geometric source; the user sources ride outside it, added after the combine.
-    // `cons_new = a0*u_n + ac*fe`, identical to `godunov_stage_gv`. the homologous-mesh
-    // dilution `-mesh_hdil * u` (with `mesh_hdil = ndim * a_dot / a`, the comoving
-    // volume-growth rate) rides every conserved law; the static binding mesh_hdil = 0
-    // subtracts an exact zero.
-    let h_dil = cx.scalar("mesh_hdil");
-    // GR densitization (valencia 3+1, static diagonal background): the spatial RHS — the flux
-    // divergence + the geometric momentum source — is weighted by the lapse `alpha(x)`. the `u`
-    // snapshot and the mesh-dilution term stay unweighted: they are the time / comoving parts.
-    // flat spacetime -> `None` -> untouched, bit-identical (see `gv_lapse_weight`).
-    // the coordinate-indexed cell centroid (r at slot 0) for the lapse alpha(x); only the
-    // curvilinear path carries one (cartesian-uniform geo = None is always minkowski -> unused).
-    let coord_centroid: Vec<Gv> = match &geo {
-        Some(g) => {
-            // the densitized law's cell average is over the plain coordinate volume, so its metric
-            // sampling point is the arithmetic midpoint; the area-weighted law's average carries
-            // the chart's volume element and reads the volume-weighted centroid.
-            let mid = densitized.then(|| gv_cell_midpoints(cx, spacing, ndim as usize));
-            let mut c = vec![Gv::ZERO; 3];
-            for d in 0..(ndim as usize) {
-                c[axes[d]] = match &mid {
-                    Some(m) => m[d],
-                    None => g.centroid[d],
-                };
-            }
-            c
-        }
-        None => Vec::new(),
-    };
-    assert!(
-        spacetime == Spacetime::Minkowski
-            || matches!(source, GeoSource::Rmhd | GeoSource::Hydro { .. }),
-        "the GR godunov source carries the perfect-fluid or ideal-MHD stress only"
-    );
-    // the cell lapse. on the valencia path it weights the spatial RHS; under densitization it is
-    // one factor of the measure sqrt(-g) = alpha sqrt(det gamma), and the RHS weight is identically
-    // 1 (sqrt(-g) sits on both the state and the flux, so the whole lapse is already placed).
-    let cell_lapse = gv_lapse_weight(cx, coords, spacetime, &coord_centroid);
-    let lapse = if densitized { None } else { cell_lapse };
-    // coordinate-indexed metric position: each gridded coordinate at its centroid, each ungridded
-    // coordinate at its chart symmetry default (spherical polar -> pi/2, else 0). a flat spacetime
-    // leaves this `None`: its metric is constant, and a cartesian-uniform grid's centroid nodes are
-    // absent from the trace.
-    let x_cell: Option<Tensor<Gv, 3>> = (spacetime != Spacetime::Minkowski).then(|| {
-        Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-            if axes.contains(&c) {
-                coord_centroid[c]
-            } else {
-                gv_ungridded_slot(coords, c)
-            }
-        }))
-    });
-    // the cell measure, evaluated at the metric's full spatial dimension so a reduced grid keeps
-    // the suppressed directions' volume element. the state carries sqrt(det gamma), the flux and
-    // the connection source carry sqrt(-g) = alpha sqrt(det gamma).
-    let sqrt_gamma_cell = densitized.then(|| {
-        gv_metric_volume_factor_at(
-            cx,
-            spacetime,
-            coords,
-            x_cell.expect("a curved spacetime has a metric position"),
-        )
-    });
-    let sqrt_neg_g =
-        sqrt_gamma_cell.map(|g| cell_lapse.expect("a curved spacetime has a lapse") * g);
-    // the GR geodesic sources from the full covariant contraction `grhd_covariant_source`: the
-    // per-coordinate momentum source S_j = (1/2) T^{mu nu} d_j g_{mu nu} and the energy source
-    // S_tau, one forward-autodiff pass per axis at the metric's full spherical D = 3 (the metric
-    // supplies its ADM line element and autodiff supplies every derivative).
-    //
-    // on the valencia path the momentum call takes p = 0 (the E-part only: gravity + covariant
-    // centrifugal), because the pressure block `p d_j ln(alpha sqrt(gamma))` rides the discrete
-    // well-balanced form in gv_geometric_source above, and the energy call takes the full p.
-    // under densitization the connection source is the whole geometric contribution, so one pass
-    // at the full pressure serves the momentum and the energy source is structurally zero.
-    // GRMHD-ready: the EM stress just changes T^{mu nu}.
-    let geodesic: Option<(Tensor<Gv, 3>, Gv)> = match spacetime {
-        Spacetime::Minkowski => None,
-        _ => {
-            let mass = Dual::constant(cx.scalar("schwarzschild_mass")); // constant w.r.t. position
-            let x = x_cell.expect("a curved spacetime has a metric position");
-            // the effective inertia e = rho h W^2 for the covariant stress. reconstructed metric-free
-            // as h D^2 / rho_prim (W = D/rho_prim) — independent of the energy variable, so it holds
-            // whether the nrg slot stores the valencia tau (RMHD) or the killing energy (RHD, whose
-            // stored value differs from D + tau + p). the mass slot is densitized on the GR
-            // hydro path, so the baryon density D is recovered as cons_den / sqrt(det gamma).
-            let p = cx.field("pre", FieldRef::PrimPre);
-            let e = {
-                let prim_rho = cx.field("prim_rho", FieldRef::PrimRho);
-                let gamma_eos = cx.scalar("gamma");
-                let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * p / prim_rho;
-                let d_baryon = match sqrt_gamma_cell {
-                    Some(g) => rho / g,
-                    None => rho,
-                };
-                h_enth * d_baryon * d_baryon / prim_rho
-            };
-            // the contravariant velocity in coordinate slots (the metric-aware c2p output);
-            // spherical GR momentum slots are coordinate-ordered, so slot k == coordinate k.
-            // a coordinate beyond the momentum slots carries zero.
-            let v = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-                if c < ncomp {
-                    cx.field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8))
-                } else {
-                    Gv::ZERO
+        let dt = cx.scalar("dt");
+        let a0 = cx.scalar("a0");
+        let ac = cx.scalar("ac");
+        // the SSP source weight. computed as `ac*dt` so it is bit-identical to the standalone
+        // `source_apply_gv` pass's `dt` scalar (the driver fills that with `ac*sim.dt` — the same IEEE
+        // f64 product). this is what makes `fused == plain godunov + source_apply` bit-exact: the
+        // user source rides as a separate post-combine term at this weight; folding it into the
+        // `ac*fe` multiply would distribute the rounding differently.
+        let ac_dt = ac * dt;
+        // flat spacetime: the physical (orthonormal) finite-volume geometry. curved (GR): the
+        // covariant geometry — coordinate-form angular face weights (the alpha sqrt(gamma) measure),
+        // matching the covariant momentum S_i and the contravariant fluxes v^i; the orthonormal
+        // angular weights would leave every theta-direction force on S_theta short by a factor r.
+        // radial faces and the volume coincide, so 1D radial GR is bit-identical.
+        // a curved spacetime always needs the geometry (the metric position + the alpha sqrt(gamma)
+        // densitization measure), even on a cartesian-uniform grid where flat hydro skips it.
+        let geo = (!is_cartesian_uniform(coords, spacing) || spacetime != Spacetime::Minkowski)
+            .then(|| {
+                match spacetime {
+                    Spacetime::Minkowski => {
+                        cell_geometry_gv(cx, coords, spacing, axes, ndim as usize)
+                    }
+                    // spinning kerr: the densitized measure is Sigma sin(theta) — the spin rides the
+                    // `kerr_spin` kernel scalar into the face/volume moments.
+                    Spacetime::KerrKS => cell_geometry_covariant_gv(
+                        cx,
+                        coords,
+                        spacing,
+                        axes,
+                        ndim as usize,
+                        Some(cx.scalar("kerr_spin")),
+                    ),
+                    _ => cell_geometry_covariant_gv(cx, coords, spacing, axes, ndim as usize, None),
                 }
-            }));
-            if matches!(source, GeoSource::Rmhd) {
-                // GRMHD: the ideal-MHD stress in the same contraction. the source takes the
-                // metric-free rest enthalpy density rho_h = rho + Gamma/(Gamma-1) p (it builds
-                // W and b^mu from the harvested gamma internally); B reads the cell field under
-                // the same key convention as the discrete magnetic geo source. the momentum call
-                // takes p = 0 (the gas-pressure block rides the discrete well-balanced form) but
-                // keeps the full magnetic stress — the b^2/2 isotropic block is analytic; the
-                // one-step-residual instrument adjudicates its balance. this path applies on a
-                // static background: the dragging-consistent reconstruction extends to the gas alone.
-                let gamma_eos = cx.scalar("gamma");
-                let prim_rho = cx.field("prim_rho", FieldRef::PrimRho);
-                let rho_h = prim_rho + gamma_eos / (gamma_eos - Gv::ONE) * p;
-                let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
-                    if mag_from_bcell {
-                        cx.field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
+            });
+        // GR hydro evolves the fully densitized state (gammie et al. 2003; stone et al. 2024 eq. 20):
+        // U = sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] with the flux carrying the same measure, so
+        // the divergence is plain coordinate differencing with the lapse absorbed into the measure on
+        // both sides, the geometry arrives through the pointwise connection source
+        // (1/2) sqrt(-g) (d_i g_ab) T^ab, and the energy source is identically zero because the metric
+        // is stationary. GR MHD keeps the area-weighted valencia path (its induction and CT seam carry
+        // the area-weighted form).
+        let densitized =
+            spacetime != Spacetime::Minkowski && matches!(source, GeoSource::Hydro { .. });
+        assert!(
+            !densitized || (sources.is_empty() && n_bodies == 0),
+            "a densitized GR state cannot take undensitized user-source or immersed-body rates"
+        );
+        let rho = cx.field("rho", FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..ncomp)
+            .map(|k| cx.field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8)))
+            .collect();
+        // on a curved background the covariant momentum S_i takes its inertial blocks from the
+        // covariant stress-energy contraction below (the flat velocity-quadratic inertial treats the
+        // components as flat), so the hydro geometric source keeps only its
+        // discrete well-balanced pressure form `p (A_hi - A_lo) / V` — which cancels the pressure flux
+        // divergence bit-exactly at a uniform-p hydrostatic state, while the analytic pressure block
+        // `p d_j ln(alpha sqrt(gamma))` of the contraction cancels only to truncation order.
+        // the ideal-MHD stress moves to the covariant contraction on the GR path too — the flat
+        // Rmhd curvilinear source would double-count the inertia/tension with the flat contraction
+        // for covariant S_i; only the gas-pressure discrete block stays.
+        let source_discrete = match (spacetime, source) {
+            (Spacetime::Minkowski, s) => s,
+            (_, GeoSource::Hydro { .. }) | (_, GeoSource::Rmhd) => {
+                GeoSource::Hydro { inertial: false }
+            }
+            (_, s) => s,
+        };
+        // under densitization the whole geometric momentum contribution — pressure block included —
+        // arrives through the connection source below, so the discrete area-weighted form is retired.
+        let src = (!densitized).then(|| geo.as_ref()).flatten().map(|g| {
+            gv_geometric_source(
+                cx,
+                coords,
+                axes,
+                ndim as usize,
+                ncomp,
+                g,
+                source_discrete,
+                &mom,
+                mag_from_bcell,
+            )
+        });
+
+        let contribs = splice_fused_sources_to_contribs(
+            cx,
+            coords,
+            spacing,
+            axes,
+            ndim,
+            ncomp,
+            has_energy,
+            &geo,
+            Some((rho, &mom)),
+            sources,
+        );
+
+        // the plain forward-euler stage carries the flux divergence + the (well-balanced)
+        // geometric source; the user sources ride outside it, added after the combine.
+        // `cons_new = a0*u_n + ac*fe`, identical to `godunov_stage_gv`. the homologous-mesh
+        // dilution `-mesh_hdil * u` (with `mesh_hdil = ndim * a_dot / a`, the comoving
+        // volume-growth rate) rides every conserved law; the static binding mesh_hdil = 0
+        // subtracts an exact zero.
+        let h_dil = cx.scalar("mesh_hdil");
+        // GR densitization (valencia 3+1, static diagonal background): the spatial RHS — the flux
+        // divergence + the geometric momentum source — is weighted by the lapse `alpha(x)`. the `u`
+        // snapshot and the mesh-dilution term stay unweighted: they are the time / comoving parts.
+        // flat spacetime -> `None` -> untouched, bit-identical (see `gv_lapse_weight`).
+        // the coordinate-indexed cell centroid (r at slot 0) for the lapse alpha(x); only the
+        // curvilinear path carries one (cartesian-uniform geo = None is always minkowski -> unused).
+        let coord_centroid: Vec<Gv> = match &geo {
+            Some(g) => {
+                // the densitized law's cell average is over the plain coordinate volume, so its metric
+                // sampling point is the arithmetic midpoint; the area-weighted law's average carries
+                // the chart's volume element and reads the volume-weighted centroid.
+                let mid = densitized.then(|| gv_cell_midpoints(cx, spacing, ndim as usize));
+                let mut c = vec![Gv::ZERO; 3];
+                for d in 0..(ndim as usize) {
+                    c[axes[d]] = match &mid {
+                        Some(m) => m[d],
+                        None => g.centroid[d],
+                    };
+                }
+                c
+            }
+            None => Vec::new(),
+        };
+        assert!(
+            spacetime == Spacetime::Minkowski
+                || matches!(source, GeoSource::Rmhd | GeoSource::Hydro { .. }),
+            "the GR godunov source carries the perfect-fluid or ideal-MHD stress only"
+        );
+        // the cell lapse. on the valencia path it weights the spatial RHS; under densitization it is
+        // one factor of the measure sqrt(-g) = alpha sqrt(det gamma), and the RHS weight is identically
+        // 1 (sqrt(-g) sits on both the state and the flux, so the whole lapse is already placed).
+        let cell_lapse = gv_lapse_weight(cx, coords, spacetime, &coord_centroid);
+        let lapse = if densitized { None } else { cell_lapse };
+        // coordinate-indexed metric position: each gridded coordinate at its centroid, each ungridded
+        // coordinate at its chart symmetry default (spherical polar -> pi/2, else 0). a flat spacetime
+        // leaves this `None`: its metric is constant, and a cartesian-uniform grid's centroid nodes are
+        // absent from the trace.
+        let x_cell: Option<Tensor<Gv, 3>> = (spacetime != Spacetime::Minkowski).then(|| {
+            Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+                if axes.contains(&c) {
+                    coord_centroid[c]
+                } else {
+                    gv_ungridded_slot(coords, c)
+                }
+            }))
+        });
+        // the cell measure, evaluated at the metric's full spatial dimension so a reduced grid keeps
+        // the suppressed directions' volume element. the state carries sqrt(det gamma), the flux and
+        // the connection source carry sqrt(-g) = alpha sqrt(det gamma).
+        let sqrt_gamma_cell = densitized.then(|| {
+            gv_metric_volume_factor_at(
+                cx,
+                spacetime,
+                coords,
+                x_cell.expect("a curved spacetime has a metric position"),
+            )
+        });
+        let sqrt_neg_g =
+            sqrt_gamma_cell.map(|g| cell_lapse.expect("a curved spacetime has a lapse") * g);
+        // the GR geodesic sources from the full covariant contraction `grhd_covariant_source`: the
+        // per-coordinate momentum source S_j = (1/2) T^{mu nu} d_j g_{mu nu} and the energy source
+        // S_tau, one forward-autodiff pass per axis at the metric's full spherical D = 3 (the metric
+        // supplies its ADM line element and autodiff supplies every derivative).
+        //
+        // on the valencia path the momentum call takes p = 0 (the E-part only: gravity + covariant
+        // centrifugal), because the pressure block `p d_j ln(alpha sqrt(gamma))` rides the discrete
+        // well-balanced form in gv_geometric_source above, and the energy call takes the full p.
+        // under densitization the connection source is the whole geometric contribution, so one pass
+        // at the full pressure serves the momentum and the energy source is structurally zero.
+        // GRMHD-ready: the EM stress just changes T^{mu nu}.
+        let geodesic: Option<(Tensor<Gv, 3>, Gv)> = match spacetime {
+            Spacetime::Minkowski => None,
+            _ => {
+                let mass = Dual::constant(cx.scalar("schwarzschild_mass")); // constant w.r.t. position
+                let x = x_cell.expect("a curved spacetime has a metric position");
+                // the effective inertia e = rho h W^2 for the covariant stress. reconstructed metric-free
+                // as h D^2 / rho_prim (W = D/rho_prim) — independent of the energy variable, so it holds
+                // whether the nrg slot stores the valencia tau (RMHD) or the killing energy (RHD, whose
+                // stored value differs from D + tau + p). the mass slot is densitized on the GR
+                // hydro path, so the baryon density D is recovered as cons_den / sqrt(det gamma).
+                let p = cx.field("pre", FieldRef::PrimPre);
+                let e = {
+                    let prim_rho = cx.field("prim_rho", FieldRef::PrimRho);
+                    let gamma_eos = cx.scalar("gamma");
+                    let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * p / prim_rho;
+                    let d_baryon = match sqrt_gamma_cell {
+                        Some(g) => rho / g,
+                        None => rho,
+                    };
+                    h_enth * d_baryon * d_baryon / prim_rho
+                };
+                // the contravariant velocity in coordinate slots (the metric-aware c2p output);
+                // spherical GR momentum slots are coordinate-ordered, so slot k == coordinate k.
+                // a coordinate beyond the momentum slots carries zero.
+                let v = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+                    if c < ncomp {
+                        cx.field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8))
                     } else {
-                        cx.field(&format!("prim_b{k}"), &format!("prim.mag[{k}]"))
+                        Gv::ZERO
                     }
                 }));
-                let src_at = |pp| match spacetime {
-                    Spacetime::SchwarzschildKS if coords == Coords::Cartesian => {
-                        grmhd_covariant_source(
-                            &SchwarzschildKSCartesian { mass },
-                            x,
-                            rho_h,
-                            v,
-                            pp,
-                            b,
-                        )
-                    }
-                    Spacetime::SchwarzschildKS if coords == Coords::Cylindrical => {
-                        grmhd_covariant_source(
-                            &SchwarzschildKSCylindrical { mass },
-                            x,
-                            rho_h,
-                            v,
-                            pp,
-                            b,
-                        )
-                    }
-                    Spacetime::SchwarzschildKS => {
-                        grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pp, b)
-                    }
-                    Spacetime::KerrKS if coords == Coords::Cartesian => {
-                        // cartesian spinning kerr: the rank-1 kerr-schild metric at the full
-                        // cartesian position; derivatives ride the same autodiff Dual pass.
-                        let spin = Dual::constant(cx.scalar("kerr_spin"));
-                        grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pp, b)
-                    }
-                    Spacetime::KerrKS if coords == Coords::Cylindrical => {
-                        // cylindrical spinning kerr: the rank-1 update on the diag(1, R^2, 1)
-                        // base at the full (R, phi, z) position; same autodiff Dual pass.
-                        let spin = Dual::constant(cx.scalar("kerr_spin"));
-                        grmhd_covariant_source(
-                            &KerrKSCylindrical { mass, spin },
-                            x,
-                            rho_h,
-                            v,
-                            pp,
-                            b,
-                        )
-                    }
-                    Spacetime::KerrKS => {
-                        // the generic covariant stress contraction S_j = (1/2) T^{mu nu} d_j g_{mu nu}
-                        // with the EM stress; the non-diagonal kerr metric enters through the
-                        // autodiff Dual pass alone, which keeps the contraction generic.
-                        let spin = Dual::constant(cx.scalar("kerr_spin"));
-                        grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, pp, b)
-                    }
-                    Spacetime::Minkowski => unreachable!("flat handled above"),
-                };
-                let (s_mom, _) = src_at(Gv::ZERO);
-                let (_, s_tau) = src_at(p);
-                Some((s_mom, s_tau))
-            } else {
-                let src_at = |pp| match spacetime {
-                    Spacetime::SchwarzschildKS if coords == Coords::Cartesian => {
-                        grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pp)
-                    }
-                    Spacetime::SchwarzschildKS if coords == Coords::Cylindrical => {
-                        grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, pp)
-                    }
-                    Spacetime::SchwarzschildKS => {
-                        grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pp)
-                    }
-                    Spacetime::KerrKS if coords == Coords::Cartesian => {
-                        let spin = Dual::constant(cx.scalar("kerr_spin"));
-                        grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, pp)
-                    }
-                    Spacetime::KerrKS if coords == Coords::Cylindrical => {
-                        let spin = Dual::constant(cx.scalar("kerr_spin"));
-                        grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, pp)
-                    }
-                    Spacetime::KerrKS => {
-                        let spin = Dual::constant(cx.scalar("kerr_spin"));
-                        grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pp)
-                    }
-                    Spacetime::Minkowski => unreachable!("flat handled above"),
-                };
-                if densitized {
-                    // the momentum call takes p = 0: the pressure block rides the discrete
-                    // well-balanced form below, exactly as it does on the flat curvilinear path.
-                    // the free-index-down energy source vanishes on a stationary metric.
-                    let (s_mom, _) = src_at(Gv::ZERO);
-                    Some((s_mom, Gv::ZERO))
-                } else {
+                if matches!(source, GeoSource::Rmhd) {
+                    // GRMHD: the ideal-MHD stress in the same contraction. the source takes the
+                    // metric-free rest enthalpy density rho_h = rho + Gamma/(Gamma-1) p (it builds
+                    // W and b^mu from the harvested gamma internally); B reads the cell field under
+                    // the same key convention as the discrete magnetic geo source. the momentum call
+                    // takes p = 0 (the gas-pressure block rides the discrete well-balanced form) but
+                    // keeps the full magnetic stress — the b^2/2 isotropic block is analytic; the
+                    // one-step-residual instrument adjudicates its balance. this path applies on a
+                    // static background: the dragging-consistent reconstruction extends to the gas alone.
+                    let gamma_eos = cx.scalar("gamma");
+                    let prim_rho = cx.field("prim_rho", FieldRef::PrimRho);
+                    let rho_h = prim_rho + gamma_eos / (gamma_eos - Gv::ONE) * p;
+                    let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
+                        if mag_from_bcell {
+                            cx.field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
+                        } else {
+                            cx.field(&format!("prim_b{k}"), &format!("prim.mag[{k}]"))
+                        }
+                    }));
+                    let src_at = |pp| match spacetime {
+                        Spacetime::SchwarzschildKS if coords == Coords::Cartesian => {
+                            grmhd_covariant_source(
+                                &SchwarzschildKSCartesian { mass },
+                                x,
+                                rho_h,
+                                v,
+                                pp,
+                                b,
+                            )
+                        }
+                        Spacetime::SchwarzschildKS if coords == Coords::Cylindrical => {
+                            grmhd_covariant_source(
+                                &SchwarzschildKSCylindrical { mass },
+                                x,
+                                rho_h,
+                                v,
+                                pp,
+                                b,
+                            )
+                        }
+                        Spacetime::SchwarzschildKS => {
+                            grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pp, b)
+                        }
+                        Spacetime::KerrKS if coords == Coords::Cartesian => {
+                            // cartesian spinning kerr: the rank-1 kerr-schild metric at the full
+                            // cartesian position; derivatives ride the same autodiff Dual pass.
+                            let spin = Dual::constant(cx.scalar("kerr_spin"));
+                            grmhd_covariant_source(
+                                &KerrKSCartesian { mass, spin },
+                                x,
+                                rho_h,
+                                v,
+                                pp,
+                                b,
+                            )
+                        }
+                        Spacetime::KerrKS if coords == Coords::Cylindrical => {
+                            // cylindrical spinning kerr: the rank-1 update on the diag(1, R^2, 1)
+                            // base at the full (R, phi, z) position; same autodiff Dual pass.
+                            let spin = Dual::constant(cx.scalar("kerr_spin"));
+                            grmhd_covariant_source(
+                                &KerrKSCylindrical { mass, spin },
+                                x,
+                                rho_h,
+                                v,
+                                pp,
+                                b,
+                            )
+                        }
+                        Spacetime::KerrKS => {
+                            // the generic covariant stress contraction S_j = (1/2) T^{mu nu} d_j g_{mu nu}
+                            // with the EM stress; the non-diagonal kerr metric enters through the
+                            // autodiff Dual pass alone, which keeps the contraction generic.
+                            let spin = Dual::constant(cx.scalar("kerr_spin"));
+                            grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, pp, b)
+                        }
+                        Spacetime::Minkowski => unreachable!("flat handled above"),
+                    };
                     let (s_mom, _) = src_at(Gv::ZERO);
                     let (_, s_tau) = src_at(p);
                     Some((s_mom, s_tau))
+                } else {
+                    let src_at = |pp| match spacetime {
+                        Spacetime::SchwarzschildKS if coords == Coords::Cartesian => {
+                            grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pp)
+                        }
+                        Spacetime::SchwarzschildKS if coords == Coords::Cylindrical => {
+                            grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, pp)
+                        }
+                        Spacetime::SchwarzschildKS => {
+                            grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pp)
+                        }
+                        Spacetime::KerrKS if coords == Coords::Cartesian => {
+                            let spin = Dual::constant(cx.scalar("kerr_spin"));
+                            grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, pp)
+                        }
+                        Spacetime::KerrKS if coords == Coords::Cylindrical => {
+                            let spin = Dual::constant(cx.scalar("kerr_spin"));
+                            grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, pp)
+                        }
+                        Spacetime::KerrKS => {
+                            let spin = Dual::constant(cx.scalar("kerr_spin"));
+                            grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pp)
+                        }
+                        Spacetime::Minkowski => unreachable!("flat handled above"),
+                    };
+                    if densitized {
+                        // the momentum call takes p = 0: the pressure block rides the discrete
+                        // well-balanced form below, exactly as it does on the flat curvilinear path.
+                        // the free-index-down energy source vanishes on a stationary metric.
+                        let (s_mom, _) = src_at(Gv::ZERO);
+                        Some((s_mom, Gv::ZERO))
+                    } else {
+                        let (s_mom, _) = src_at(Gv::ZERO);
+                        let (_, s_tau) = src_at(p);
+                        Some((s_mom, s_tau))
+                    }
                 }
             }
-        }
-    };
-    // the connection source is the right side of d_t U + d_j F^j = sqrt(-g)(1/2)(d_i g_ab) T^ab, so
-    // it takes the same measure the state and the flux carry.
-    let geodesic = match (geodesic, sqrt_neg_g) {
-        (Some((s_mom, s_tau)), Some(m)) => Some((s_mom.scale(m), s_tau)),
-        (g, _) => g,
-    };
-    // the well-balanced pressure block of the densitized momentum source.
-    //
-    // the momentum flux carries sqrt(-g) p delta^j_i, so its divergence contributes
-    // p d_i sqrt(-g) + sqrt(-g) d_i p, while the connection source's pressure part is
-    // (1/2) sqrt(-g) p g^{ab} d_i g_ab = p d_i sqrt(-g). the two p d_i sqrt(-g) terms cancel
-    // analytically, leaving sqrt(-g) d_i p — identically zero at uniform pressure. discrete
-    // cancellation requires both sides to use one operator: differencing sqrt(-g) p across the
-    // faces on the flux side while taking a pointwise derivative at the center on the source side
-    // leaves an O(dx^2) mismatch, the same order as the truncation error, landing on exactly the
-    // momentum components.
-    //
-    // so the pressure block is discretized with the same operator the divergence uses — a face
-    // difference of the measure over the coordinate width — and a uniform-p state then cancels the
-    // pressure flux divergence bit-exactly. only a gridded coordinate has a pressure gradient.
-    let mom_pressure: Option<Vec<Gv>> = densitized.then(|| {
-        let p = cx.field("pre", FieldRef::PrimPre);
-        // the measure at a face of this cell: the swept coordinate at the face, every other slot
-        // where the flux kernel puts it — gridded slots at the cell midpoint, ungridded slots at
-        // the chart's symmetry default. taking the raw centroid vector instead would leave an
-        // ungridded spherical polar slot at theta = 0, where sin(theta) zeroes the measure and the
-        // whole block with it.
-        let base = x_cell.expect("a curved spacetime has a metric position");
-        let measure_at = |slot: usize, offset: i64| {
-            let d = axes
-                .iter()
-                .position(|&a| a == slot)
-                .expect("a gridded coordinate");
-            let face = gv_axis_face_at(cx, d, spacing[d], offset);
-            let xf: Vec<Gv> = (0..3)
-                .map(|c| if c == slot { face } else { base[c] })
-                .collect();
-            let lapse_f =
-                gv_lapse_weight(cx, coords, spacetime, &xf).expect("a curved spacetime has a lapse");
-            let xt = Tensor::<Gv, 3>::new(std::array::from_fn(|c| xf[c]));
-            lapse_f * gv_metric_volume_factor_at(cx, spacetime, coords, xt)
         };
-        (0..ncomp)
-            .map(|coord| match axes.iter().position(|&c| c == coord) {
-                Some(d) => {
-                    let width =
-                        gv_axis_face_at(cx, d, spacing[d], 1) - gv_axis_face_at(cx, d, spacing[d], 0);
-                    p * (measure_at(coord, 1) - measure_at(coord, 0)) / width
-                }
-                None => Gv::ZERO,
-            })
-            .collect()
-    });
-    let mom_gravity: Option<Tensor<Gv, 3>> = geodesic.map(|(s_mom, _)| s_mom);
-    // the GR geodesic energy source S_tau — the second output of the contraction (gravity's rate
-    // of work on the infalling gas). zero on a flat background.
-    let nrg_gravity: Option<Gv> = geodesic.map(|(_, s_tau)| s_tau);
-    let geo_weight = weighted_geo_source.then(|| cx.field("geo_source_weight", FieldRef::Scratch));
-    let fe = |u, div, geo_src: Option<_>| {
-        let div = match lapse {
-            Some(a) => a * div,
-            None => div,
+        // the connection source is the right side of d_t U + d_j F^j = sqrt(-g)(1/2)(d_i g_ab) T^ab, so
+        // it takes the same measure the state and the flux carry.
+        let geodesic = match (geodesic, sqrt_neg_g) {
+            (Some((s_mom, s_tau)), Some(m)) => Some((s_mom.scale(m), s_tau)),
+            (g, _) => g,
         };
-        let mut r = u - dt * div - dt * (h_dil * u);
-        if let Some(s) = geo_src {
-            let s = geo_weight.map_or(s, |w| w * s);
-            let s = match lapse {
-                Some(a) => a * s,
-                None => s,
+        // the well-balanced pressure block of the densitized momentum source.
+        //
+        // the momentum flux carries sqrt(-g) p delta^j_i, so its divergence contributes
+        // p d_i sqrt(-g) + sqrt(-g) d_i p, while the connection source's pressure part is
+        // (1/2) sqrt(-g) p g^{ab} d_i g_ab = p d_i sqrt(-g). the two p d_i sqrt(-g) terms cancel
+        // analytically, leaving sqrt(-g) d_i p — identically zero at uniform pressure. discrete
+        // cancellation requires both sides to use one operator: differencing sqrt(-g) p across the
+        // faces on the flux side while taking a pointwise derivative at the center on the source side
+        // leaves an O(dx^2) mismatch, the same order as the truncation error, landing on exactly the
+        // momentum components.
+        //
+        // so the pressure block is discretized with the same operator the divergence uses — a face
+        // difference of the measure over the coordinate width — and a uniform-p state then cancels the
+        // pressure flux divergence bit-exactly. only a gridded coordinate has a pressure gradient.
+        let mom_pressure: Option<Vec<Gv>> = densitized.then(|| {
+            let p = cx.field("pre", FieldRef::PrimPre);
+            // the measure at a face of this cell: the swept coordinate at the face, every other slot
+            // where the flux kernel puts it — gridded slots at the cell midpoint, ungridded slots at
+            // the chart's symmetry default. taking the raw centroid vector instead would leave an
+            // ungridded spherical polar slot at theta = 0, where sin(theta) zeroes the measure and the
+            // whole block with it.
+            let base = x_cell.expect("a curved spacetime has a metric position");
+            let measure_at = |slot: usize, offset: i64| {
+                let d = axes
+                    .iter()
+                    .position(|&a| a == slot)
+                    .expect("a gridded coordinate");
+                let face = gv_axis_face_at(cx, d, spacing[d], offset);
+                let xf: Vec<Gv> = (0..3)
+                    .map(|c| if c == slot { face } else { base[c] })
+                    .collect();
+                let lapse_f = gv_lapse_weight(cx, coords, spacetime, &xf)
+                    .expect("a curved spacetime has a lapse");
+                let xt = Tensor::<Gv, 3>::new(std::array::from_fn(|c| xf[c]));
+                lapse_f * gv_metric_volume_factor_at(cx, spacetime, coords, xt)
             };
-            r = r + dt * s;
-        }
-        r
-    };
-    // the densitized law differences the face fluxes in plain coordinates — sqrt(-g) already
-    // carries the geometry, so every chart differences with unit weights.
-    let divergence = |base: &str| {
-        if densitized {
-            gv_divergence_coord(cx, base, ndim, spacing)
-        } else {
-            gv_divergence(cx, base, ndim, &geo, spacing)
-        }
-    };
-    let combine = |un, fe| a0 * un + ac * fe;
-    // the user sources ride as a separate additive term after the combine: `+ \sum ac*dt*contrib`,
-    // accumulated exactly as `source_apply_gv` accumulates it (start from the combine result,
-    // `+= ac_dt*contrib` per spec). so the fused kernel equals `plain godunov + the additive pass`,
-    // bit-for-bit, fused into one launch (proven by the fused-equivalence test).
-    let with_sources = |base, srcs: &[NodeId]| {
-        let mut r = base;
-        for c in srcs {
-            r = r + ac_dt * cx.gv(*c);
-        }
-        r
-    };
-
-    let u_n_rho = cx.field("u_n_rho", FieldRef::un_den());
-    let rho_g = with_sources(
-        combine(u_n_rho, fe(rho, divergence("mass_flux"), None)),
-        &contribs.den,
-    );
-    let mut mom_g: Vec<Gv> = Vec::with_capacity(ncomp);
-    for k in 0..ncomp {
-        let u_n_mom = cx.field(&format!("u_n_mom_{k}"), FieldRef::un_mom(k as u8));
-        let div = divergence(&format!("mom_flux_{k}"));
-        let geo_src = src.as_ref().map(|s| s[k]);
-        // every momentum slot carries its covariant geodesic block (gravity + covariant
-        // centrifugal, coordinate k of the contraction) on top of the discrete pressure form in
-        // geo_src; a suppressed axisymmetric slot's block is identically zero (the metric is
-        // independent of phi, so its autodiff tangent vanishes — angular-momentum conservation).
-        let mom_src = match mom_gravity {
-            Some(g) => Some(geo_src.map_or(g[k], |s| s + g[k])),
-            None => geo_src,
+            (0..ncomp)
+                .map(|coord| match axes.iter().position(|&c| c == coord) {
+                    Some(d) => {
+                        let width = gv_axis_face_at(cx, d, spacing[d], 1)
+                            - gv_axis_face_at(cx, d, spacing[d], 0);
+                        p * (measure_at(coord, 1) - measure_at(coord, 0)) / width
+                    }
+                    None => Gv::ZERO,
+                })
+                .collect()
+        });
+        let mom_gravity: Option<Tensor<Gv, 3>> = geodesic.map(|(s_mom, _)| s_mom);
+        // the GR geodesic energy source S_tau — the second output of the contraction (gravity's rate
+        // of work on the infalling gas). zero on a flat background.
+        let nrg_gravity: Option<Gv> = geodesic.map(|(_, s_tau)| s_tau);
+        let geo_weight =
+            weighted_geo_source.then(|| cx.field("geo_source_weight", FieldRef::Scratch));
+        let fe = |u, div, geo_src: Option<_>| {
+            let div = match lapse {
+                Some(a) => a * div,
+                None => div,
+            };
+            let mut r = u - dt * div - dt * (h_dil * u);
+            if let Some(s) = geo_src {
+                let s = geo_weight.map_or(s, |w| w * s);
+                let s = match lapse {
+                    Some(a) => a * s,
+                    None => s,
+                };
+                r = r + dt * s;
+            }
+            r
         };
-        // the densitized path's pressure block, in the divergence's own face-difference form.
-        let mom_src = match &mom_pressure {
-            Some(pb) => Some(mom_src.map_or(pb[k], |s| s + pb[k])),
-            None => mom_src,
+        // the densitized law differences the face fluxes in plain coordinates — sqrt(-g) already
+        // carries the geometry, so every chart differences with unit weights.
+        let divergence = |base: &str| {
+            if densitized {
+                gv_divergence_coord(cx, base, ndim, spacing)
+            } else {
+                gv_divergence(cx, base, ndim, &geo, spacing)
+            }
         };
-        // valencia covariant storage: the conserved momentum is the covariant S_i = rho h W^2
-        // gamma_ij v^j (the metric-aware c2p + flux), and the geodesic source is written for that
-        // covariant S_i, so d_t S_i = -alpha div(F) + alpha S — a single, uniform lapse on every
-        // conserved law, supplied by the `fe` weight. the lapse enters at one power, matching the
-        // contravariant v^n the flux kernel carries (the orthonormal V_rhat would bring an alpha^2
-        // asymmetry), and the metric coefficient gamma_ij rides inside S_i, above the densitization.
-        mom_g.push(with_sources(
-            combine(u_n_mom, fe(mom[k], div, mom_src)),
-            &contribs.mom[k],
-        ));
-    }
-    // relativistic hydro and MHD on a curved background evolve the covariant (killing) energy ehat,
-    // whose flux is the free-index-down `-sqrt(-g)(T^t_t + rho u^t)` current and whose source vanishes
-    // on a stationary metric (HARM/AthenaK; docs/covariant_energy.md). RHD builds f_ehat in the regime;
-    // RMHD builds it as a linear re-split of the valencia numerical fluxes in the flux kernel (keeping
-    // the valencia-native HLLD / CT machinery). both feed the same pure-conservation energy law here.
-    let is_covariant_energy = spacetime != Spacetime::Minkowski
-        && matches!(source, GeoSource::Hydro { .. } | GeoSource::Rmhd);
-    let nrg_g = has_energy.then(|| {
-        let nrg = cx.field("nrg", FieldRef::cons_nrg());
-        let u_n_nrg = cx.field("u_n_nrg", FieldRef::un_nrg());
-        let div = divergence("nrg_flux");
-        let stage = if is_covariant_energy {
-            // conservation of the killing energy, d_t(sqrt(gm) ehat) + d_n(sqrt(gm) f_ehat) = 0,
-            // reduced to the code's flat coordinate measure (sqrt(gm) = sqrt(gm_flat)/alpha, static):
-            // d_t ehat + alpha_cell * div_flat(f_ehat/alpha_face) = 0. the flux kernel stores
-            // f_ehat/alpha at the face; the cell lapse rides here through `fe` — the same uniform
-            // lapse every other conserved law takes. the geodesic energy source is identically zero
-            // for the killing energy on a stationary metric (the normal-observer tau carries one),
-            // so this law is pure conservation.
-            fe(nrg, div, None)
-        } else {
-            fe(nrg, div, nrg_gravity)
+        let combine = |un, fe| a0 * un + ac * fe;
+        // the user sources ride as a separate additive term after the combine: `+ \sum ac*dt*contrib`,
+        // accumulated exactly as `source_apply_gv` accumulates it (start from the combine result,
+        // `+= ac_dt*contrib` per spec). so the fused kernel equals `plain godunov + the additive pass`,
+        // bit-for-bit, fused into one launch (proven by the fused-equivalence test).
+        let with_sources = |base, srcs: &[NodeId]| {
+            let mut r = base;
+            for c in srcs {
+                r = r + ac_dt * cx.gv(*c);
+            }
+            r
         };
-        with_sources(combine(u_n_nrg, stage), &contribs.nrg)
-    });
 
-    // immersed-body wrap: `(cons_g + ac_dt*S_grav(cons))*f` with `f = exp(-drain*ac_dt)`. the body
-    // contribution is evaluated at the stage input — `rho`/`mom`/`nrg`, which is what this kernel
-    // reads `cons` as — and applied to the flux-combined `cons_g`. an explicit scheme evaluates
-    // the flux divergence and every source at one state and sums them into one convex update;
-    // evaluating the body at the combined state instead would compose two operators sequentially,
-    // which is first order in dt at any Runge-Kutta order and leaks internal energy one-signed
-    // every stage.
-    //
-    // that is exactly the two-pass execution order (godunov -> source_apply -> body_source, every
-    // stage at weight ac*dt), so the fused sweep stays bit-identical to plain godunov followed by
-    // the standalone `body_source` pass: storing cons_g to an f64 buffer and reading it back is
-    // exact, so the register-resident cons_g the body reads here equals the memory value the
-    // two-pass body reads. gravity is additive and the accretion drain multiplicative, so the body
-    // wraps the final nodes, outside the additive `contribs` accumulation.
-    // adiabatic (energy) only; the iso body (`body_source_iso_gv`, cs from prim.pre) is a follow-on.
-    let (rho_final, mom_final, nrg_final) = if n_bodies > 0 {
-        if let Some(nrg_in) = nrg_g {
-            let gamma = cx.scalar("gamma");
-            // the stage input, re-bound: these hash-cons to the same nodes the flux read.
-            let us_nrg = cx.field("nrg", FieldRef::cons_nrg());
-            let (den_b, mom_b, nrg_b, _drain) = crate::gv_immersed::body_applied_gv(
-                cx,
-                rho_g,
-                &mom_g,
-                nrg_in,
-                rho,
-                &mom,
-                us_nrg,
-                ac_dt,
-                gamma,
-                n_bodies,
-                coords,
-                ndim as usize,
-                ncomp,
-                axes,
-            );
-            (den_b, mom_b, Some(nrg_b))
-        } else {
-            let pre = cx.field("prim_pre", FieldRef::PrimPre);
-            let (den_b, mom_b) = crate::gv_immersed::body_applied_iso_gv(
-                cx,
-                rho_g,
-                &mom_g,
-                rho,
-                &mom,
-                pre,
-                ac_dt,
-                n_bodies,
-                coords,
-                ndim as usize,
-                ncomp,
-                axes,
-            );
-            (den_b, mom_b, None)
+        let u_n_rho = cx.field("u_n_rho", FieldRef::un_den());
+        let rho_g = with_sources(
+            combine(u_n_rho, fe(rho, divergence("mass_flux"), None)),
+            &contribs.den,
+        );
+        let mut mom_g: Vec<Gv> = Vec::with_capacity(ncomp);
+        for k in 0..ncomp {
+            let u_n_mom = cx.field(&format!("u_n_mom_{k}"), FieldRef::un_mom(k as u8));
+            let div = divergence(&format!("mom_flux_{k}"));
+            let geo_src = src.as_ref().map(|s| s[k]);
+            // every momentum slot carries its covariant geodesic block (gravity + covariant
+            // centrifugal, coordinate k of the contraction) on top of the discrete pressure form in
+            // geo_src; a suppressed axisymmetric slot's block is identically zero (the metric is
+            // independent of phi, so its autodiff tangent vanishes — angular-momentum conservation).
+            let mom_src = match mom_gravity {
+                Some(g) => Some(geo_src.map_or(g[k], |s| s + g[k])),
+                None => geo_src,
+            };
+            // the densitized path's pressure block, in the divergence's own face-difference form.
+            let mom_src = match &mom_pressure {
+                Some(pb) => Some(mom_src.map_or(pb[k], |s| s + pb[k])),
+                None => mom_src,
+            };
+            // valencia covariant storage: the conserved momentum is the covariant S_i = rho h W^2
+            // gamma_ij v^j (the metric-aware c2p + flux), and the geodesic source is written for that
+            // covariant S_i, so d_t S_i = -alpha div(F) + alpha S — a single, uniform lapse on every
+            // conserved law, supplied by the `fe` weight. the lapse enters at one power, matching the
+            // contravariant v^n the flux kernel carries (the orthonormal V_rhat would bring an alpha^2
+            // asymmetry), and the metric coefficient gamma_ij rides inside S_i, above the densitization.
+            mom_g.push(with_sources(
+                combine(u_n_mom, fe(mom[k], div, mom_src)),
+                &contribs.mom[k],
+            ));
         }
-    } else {
-        (rho_g, mom_g, nrg_g)
-    };
+        // relativistic hydro and MHD on a curved background evolve the covariant (killing) energy ehat,
+        // whose flux is the free-index-down `-sqrt(-g)(T^t_t + rho u^t)` current and whose source vanishes
+        // on a stationary metric (HARM/AthenaK; docs/covariant_energy.md). RHD builds f_ehat in the regime;
+        // RMHD builds it as a linear re-split of the valencia numerical fluxes in the flux kernel (keeping
+        // the valencia-native HLLD / CT machinery). both feed the same pure-conservation energy law here.
+        let is_covariant_energy = spacetime != Spacetime::Minkowski
+            && matches!(source, GeoSource::Hydro { .. } | GeoSource::Rmhd);
+        let nrg_g = has_energy.then(|| {
+            let nrg = cx.field("nrg", FieldRef::cons_nrg());
+            let u_n_nrg = cx.field("u_n_nrg", FieldRef::un_nrg());
+            let div = divergence("nrg_flux");
+            let stage = if is_covariant_energy {
+                // conservation of the killing energy, d_t(sqrt(gm) ehat) + d_n(sqrt(gm) f_ehat) = 0,
+                // reduced to the code's flat coordinate measure (sqrt(gm) = sqrt(gm_flat)/alpha, static):
+                // d_t ehat + alpha_cell * div_flat(f_ehat/alpha_face) = 0. the flux kernel stores
+                // f_ehat/alpha at the face; the cell lapse rides here through `fe` — the same uniform
+                // lapse every other conserved law takes. the geodesic energy source is identically zero
+                // for the killing energy on a stationary metric (the normal-observer tau carries one),
+                // so this law is pure conservation.
+                fe(nrg, div, None)
+            } else {
+                fe(nrg, div, nrg_gravity)
+            };
+            with_sources(combine(u_n_nrg, stage), &contribs.nrg)
+        });
 
-    let mut writes = vec![KernelWrite::new(
-        "rho",
-        FieldRef::cons_den(),
-        rho_final.node(),
-    )];
-    for (k, m) in mom_final.iter().enumerate() {
-        writes.push(KernelWrite::new(
-            format!("mom_{k}"),
-            FieldRef::cons_mom(k as u8),
-            m.node(),
-        ));
-    }
-    if let Some(nrg_new) = nrg_final {
-        writes.push(KernelWrite::new(
-            "nrg",
-            FieldRef::cons_nrg(),
-            nrg_new.node(),
-        ));
-    }
-    writes
+        // immersed-body wrap: `(cons_g + ac_dt*S_grav(cons))*f` with `f = exp(-drain*ac_dt)`. the body
+        // contribution is evaluated at the stage input — `rho`/`mom`/`nrg`, which is what this kernel
+        // reads `cons` as — and applied to the flux-combined `cons_g`. an explicit scheme evaluates
+        // the flux divergence and every source at one state and sums them into one convex update;
+        // evaluating the body at the combined state instead would compose two operators sequentially,
+        // which is first order in dt at any Runge-Kutta order and leaks internal energy one-signed
+        // every stage.
+        //
+        // that is exactly the two-pass execution order (godunov -> source_apply -> body_source, every
+        // stage at weight ac*dt), so the fused sweep stays bit-identical to plain godunov followed by
+        // the standalone `body_source` pass: storing cons_g to an f64 buffer and reading it back is
+        // exact, so the register-resident cons_g the body reads here equals the memory value the
+        // two-pass body reads. gravity is additive and the accretion drain multiplicative, so the body
+        // wraps the final nodes, outside the additive `contribs` accumulation.
+        // adiabatic (energy) only; the iso body (`body_source_iso_gv`, cs from prim.pre) is a follow-on.
+        let (rho_final, mom_final, nrg_final) = if n_bodies > 0 {
+            if let Some(nrg_in) = nrg_g {
+                let gamma = cx.scalar("gamma");
+                // the stage input, re-bound: these hash-cons to the same nodes the flux read.
+                let us_nrg = cx.field("nrg", FieldRef::cons_nrg());
+                let (den_b, mom_b, nrg_b, _drain) = crate::gv_immersed::body_applied_gv(
+                    cx,
+                    rho_g,
+                    &mom_g,
+                    nrg_in,
+                    rho,
+                    &mom,
+                    us_nrg,
+                    ac_dt,
+                    gamma,
+                    n_bodies,
+                    coords,
+                    ndim as usize,
+                    ncomp,
+                    axes,
+                );
+                (den_b, mom_b, Some(nrg_b))
+            } else {
+                let pre = cx.field("prim_pre", FieldRef::PrimPre);
+                let (den_b, mom_b) = crate::gv_immersed::body_applied_iso_gv(
+                    cx,
+                    rho_g,
+                    &mom_g,
+                    rho,
+                    &mom,
+                    pre,
+                    ac_dt,
+                    n_bodies,
+                    coords,
+                    ndim as usize,
+                    ncomp,
+                    axes,
+                );
+                (den_b, mom_b, None)
+            }
+        } else {
+            (rho_g, mom_g, nrg_g)
+        };
+
+        let mut writes = vec![KernelWrite::new(
+            "rho",
+            FieldRef::cons_den(),
+            rho_final.node(),
+        )];
+        for (k, m) in mom_final.iter().enumerate() {
+            writes.push(KernelWrite::new(
+                format!("mom_{k}"),
+                FieldRef::cons_mom(k as u8),
+                m.node(),
+            ));
+        }
+        if let Some(nrg_new) = nrg_final {
+            writes.push(KernelWrite::new(
+                "nrg",
+                FieldRef::cons_nrg(),
+                nrg_new.node(),
+            ));
+        }
+        writes
     })
 }
 
@@ -1427,144 +1432,144 @@ fn apply_dag_core_gv(
     mode: WriteMode,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let geo = (!is_cartesian_uniform(coords, spacing))
-        .then(|| cell_geometry_gv(cx, coords, spacing, axes, ndim as usize));
+        let geo = (!is_cartesian_uniform(coords, spacing))
+            .then(|| cell_geometry_gv(cx, coords, spacing, axes, ndim as usize));
 
-    // bind the state vocabulary the DAG reads from. `Stage` reads the stage-input snapshot `u_stage`
-    // in place of the post-godunov `cons`: the fused stage evaluates at its stage input, so this
-    // standalone pass matches it, giving `plain + this == fused` bit-for-bit. `Coord` reads
-    // coordinates alone.
-    let state_vocab: Option<(Gv, Vec<Gv>)> = match state {
-        StateEnv::Stage => {
-            let rho = cx.field("rho", FieldRef::ustage_den());
-            let mom = (0..ncomp)
-                .map(|k| cx.field(&format!("mom_{k}"), FieldRef::ustage_mom(k as u8)))
-                .collect();
-            Some((rho, mom))
-        }
-        StateEnv::Coord => None,
-    };
-    let state_ref = state_vocab.as_ref().map(|(r, m)| (*r, m.as_slice()));
-
-    let contribs = splice_fused_sources_to_contribs(
-        cx, coords, spacing, axes, ndim, ncomp, has_energy, &geo, state_ref, sources,
-    );
-
-    let writes = match mode {
-        WriteMode::Accumulate => {
-            // RHS in place: `cons_slot = cons_slot + \sum dt*contrib`, accumulated exactly as the fused
-            // stage's `with_sources` — so fused and (plain godunov + this pass) agree bit-for-bit.
-            let dt = cx.scalar("dt"); // the driver fills this with ac*dt (the SSP stage weight)
-            let cons_den = cx.field("cons_den", FieldRef::cons_den());
-            let mut rho_new = cons_den;
-            for c in &contribs.den {
-                rho_new = rho_new + dt * cx.gv(*c);
+        // bind the state vocabulary the DAG reads from. `Stage` reads the stage-input snapshot `u_stage`
+        // in place of the post-godunov `cons`: the fused stage evaluates at its stage input, so this
+        // standalone pass matches it, giving `plain + this == fused` bit-for-bit. `Coord` reads
+        // coordinates alone.
+        let state_vocab: Option<(Gv, Vec<Gv>)> = match state {
+            StateEnv::Stage => {
+                let rho = cx.field("rho", FieldRef::ustage_den());
+                let mom = (0..ncomp)
+                    .map(|k| cx.field(&format!("mom_{k}"), FieldRef::ustage_mom(k as u8)))
+                    .collect();
+                Some((rho, mom))
             }
-            let mut writes = vec![KernelWrite::new(
-                "rho",
-                FieldRef::cons_den(),
-                rho_new.node(),
-            )];
-            for k in 0..ncomp {
-                let cons_mom = cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8));
-                let mut mom_new = cons_mom;
-                for c in &contribs.mom[k] {
-                    mom_new = mom_new + dt * cx.gv(*c);
+            StateEnv::Coord => None,
+        };
+        let state_ref = state_vocab.as_ref().map(|(r, m)| (*r, m.as_slice()));
+
+        let contribs = splice_fused_sources_to_contribs(
+            cx, coords, spacing, axes, ndim, ncomp, has_energy, &geo, state_ref, sources,
+        );
+
+        let writes = match mode {
+            WriteMode::Accumulate => {
+                // RHS in place: `cons_slot = cons_slot + \sum dt*contrib`, accumulated exactly as the fused
+                // stage's `with_sources` — so fused and (plain godunov + this pass) agree bit-for-bit.
+                let dt = cx.scalar("dt"); // the driver fills this with ac*dt (the SSP stage weight)
+                let cons_den = cx.field("cons_den", FieldRef::cons_den());
+                let mut rho_new = cons_den;
+                for c in &contribs.den {
+                    rho_new = rho_new + dt * cx.gv(*c);
                 }
-                writes.push(KernelWrite::new(
-                    format!("mom_{k}"),
-                    FieldRef::cons_mom(k as u8),
-                    mom_new.node(),
-                ));
-            }
-            if has_energy {
-                let cons_nrg = cx.field("cons_nrg", FieldRef::cons_nrg());
-                let mut nrg_new = cons_nrg;
-                for c in &contribs.nrg {
-                    nrg_new = nrg_new + dt * cx.gv(*c);
-                }
-                writes.push(KernelWrite::new(
-                    "nrg",
-                    FieldRef::cons_nrg(),
-                    nrg_new.node(),
-                ));
-            }
-            // the godunov-source (accumulate) path targets den/mom/nrg alone — the safe
-            // conservation-law lifts touch those slots, and `raw` is gated to them. a bcell contrib
-            // here means a mis-routed source; fail loud so it surfaces at once.
-            debug_assert!(
-                contribs.mag.iter().all(|m| m.is_empty()),
-                "accumulate (godunov source) path does not support a `bcell` target",
-            );
-            // the dye is advected by the mass flux alone, so a chi contrib here is a mis-routed
-            // prescription. fail loud so it surfaces at once.
-            debug_assert!(
-                contribs.chi.is_empty(),
-                "accumulate (godunov source) path does not support a `chi` target",
-            );
-            writes
-        }
-        WriteMode::Assign => {
-            // prescription: `prim_slot = expr` (write-only; the expression is the whole value). a
-            // prescription is a complete state — a single DAG per slot, taken whole.
-            assert_eq!(
-                contribs.den.len(),
-                1,
-                "Assign: prim.rho needs exactly one source DAG"
-            );
-            let mut writes = vec![KernelWrite::new("rho", FieldRef::PrimRho, contribs.den[0])];
-            for k in 0..ncomp {
-                assert_eq!(
-                    contribs.mom[k].len(),
-                    1,
-                    "Assign: prim.vel_{k} needs exactly one source DAG"
-                );
-                writes.push(KernelWrite::new(
-                    format!("vel_{k}"),
-                    FieldRef::PrimVel(k as u8),
-                    contribs.mom[k][0],
-                ));
-            }
-            if has_energy {
-                assert_eq!(
-                    contribs.nrg.len(),
-                    1,
-                    "Assign: prim.pre needs exactly one source DAG"
-                );
-                writes.push(KernelWrite::new("pre", FieldRef::PrimPre, contribs.nrg[0]));
-            }
-            // MHD driven boundary: prescribe the cell-B vector (prim.mag). out-of-plane B_phi
-            // (cell-centered, flux-evolved) is the safe toroidal case; in-plane components are
-            // the user's responsibility to keep div-compatible (=0 for a purely toroidal field).
-            // absent for a hydro prescription (no bcell slot -> empty mag buckets).
-            if contribs.mag.iter().any(|m| !m.is_empty()) {
+                let mut writes = vec![KernelWrite::new(
+                    "rho",
+                    FieldRef::cons_den(),
+                    rho_new.node(),
+                )];
                 for k in 0..ncomp {
-                    assert_eq!(
-                        contribs.mag[k].len(),
-                        1,
-                        "Assign: prim.mag_{k} needs exactly one source DAG"
-                    );
+                    let cons_mom = cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8));
+                    let mut mom_new = cons_mom;
+                    for c in &contribs.mom[k] {
+                        mom_new = mom_new + dt * cx.gv(*c);
+                    }
                     writes.push(KernelWrite::new(
-                        format!("mag_{k}"),
-                        FieldRef::PrimMag(k as u8),
-                        contribs.mag[k][0],
+                        format!("mom_{k}"),
+                        FieldRef::cons_mom(k as u8),
+                        mom_new.node(),
                     ));
                 }
-            }
-            // the dye of injected fluid. absent for an undyed prescription (no chi slot -> empty
-            // bucket), in which case the face's dye ghosts stay whatever the scalar pullback left.
-            if !contribs.chi.is_empty() {
-                assert_eq!(
-                    contribs.chi.len(),
-                    1,
-                    "Assign: prim.chi needs exactly one source DAG"
+                if has_energy {
+                    let cons_nrg = cx.field("cons_nrg", FieldRef::cons_nrg());
+                    let mut nrg_new = cons_nrg;
+                    for c in &contribs.nrg {
+                        nrg_new = nrg_new + dt * cx.gv(*c);
+                    }
+                    writes.push(KernelWrite::new(
+                        "nrg",
+                        FieldRef::cons_nrg(),
+                        nrg_new.node(),
+                    ));
+                }
+                // the godunov-source (accumulate) path targets den/mom/nrg alone — the safe
+                // conservation-law lifts touch those slots, and `raw` is gated to them. a bcell contrib
+                // here means a mis-routed source; fail loud so it surfaces at once.
+                debug_assert!(
+                    contribs.mag.iter().all(|m| m.is_empty()),
+                    "accumulate (godunov source) path does not support a `bcell` target",
                 );
-                writes.push(KernelWrite::new("chi", FieldRef::PrimChi, contribs.chi[0]));
+                // the dye is advected by the mass flux alone, so a chi contrib here is a mis-routed
+                // prescription. fail loud so it surfaces at once.
+                debug_assert!(
+                    contribs.chi.is_empty(),
+                    "accumulate (godunov source) path does not support a `chi` target",
+                );
+                writes
             }
-            writes
-        }
-    };
-    writes
+            WriteMode::Assign => {
+                // prescription: `prim_slot = expr` (write-only; the expression is the whole value). a
+                // prescription is a complete state — a single DAG per slot, taken whole.
+                assert_eq!(
+                    contribs.den.len(),
+                    1,
+                    "Assign: prim.rho needs exactly one source DAG"
+                );
+                let mut writes = vec![KernelWrite::new("rho", FieldRef::PrimRho, contribs.den[0])];
+                for k in 0..ncomp {
+                    assert_eq!(
+                        contribs.mom[k].len(),
+                        1,
+                        "Assign: prim.vel_{k} needs exactly one source DAG"
+                    );
+                    writes.push(KernelWrite::new(
+                        format!("vel_{k}"),
+                        FieldRef::PrimVel(k as u8),
+                        contribs.mom[k][0],
+                    ));
+                }
+                if has_energy {
+                    assert_eq!(
+                        contribs.nrg.len(),
+                        1,
+                        "Assign: prim.pre needs exactly one source DAG"
+                    );
+                    writes.push(KernelWrite::new("pre", FieldRef::PrimPre, contribs.nrg[0]));
+                }
+                // MHD driven boundary: prescribe the cell-B vector (prim.mag). out-of-plane B_phi
+                // (cell-centered, flux-evolved) is the safe toroidal case; in-plane components are
+                // the user's responsibility to keep div-compatible (=0 for a purely toroidal field).
+                // absent for a hydro prescription (no bcell slot -> empty mag buckets).
+                if contribs.mag.iter().any(|m| !m.is_empty()) {
+                    for k in 0..ncomp {
+                        assert_eq!(
+                            contribs.mag[k].len(),
+                            1,
+                            "Assign: prim.mag_{k} needs exactly one source DAG"
+                        );
+                        writes.push(KernelWrite::new(
+                            format!("mag_{k}"),
+                            FieldRef::PrimMag(k as u8),
+                            contribs.mag[k][0],
+                        ));
+                    }
+                }
+                // the dye of injected fluid. absent for an undyed prescription (no chi slot -> empty
+                // bucket), in which case the face's dye ghosts stay whatever the scalar pullback left.
+                if !contribs.chi.is_empty() {
+                    assert_eq!(
+                        contribs.chi.len(),
+                        1,
+                        "Assign: prim.chi needs exactly one source DAG"
+                    );
+                    writes.push(KernelWrite::new("chi", FieldRef::PrimChi, contribs.chi[0]));
+                }
+                writes
+            }
+        };
+        writes
     })
 }
 
@@ -1690,7 +1695,12 @@ fn bcell_flux_div_gv<'t>(
 /// the plain (metric-free) cell-B induction-flux divergence `sum_d (bf_d_c[+e_d] - bf_d_c)/width_d`
 /// with the per-axis coordinate width read in-kernel (gv_axis_face_at). used for the out-of-plane
 /// B component whose curl carries unit lame factors — see `metric_free_oop_component`.
-fn bcell_flux_div_plain_gv<'t>(cx: TraceCx<'t>, c: usize, ndim: usize, spacing: &[Spacing]) -> Gv<'t> {
+fn bcell_flux_div_plain_gv<'t>(
+    cx: TraceCx<'t>,
+    c: usize,
+    ndim: usize,
+    spacing: &[Spacing],
+) -> Gv<'t> {
     let off = |d: usize| -> Vec<i32> {
         let mut o = vec![0i32; ndim];
         o[d] = 1;
@@ -1746,9 +1756,10 @@ fn flat_oop_divergence<'t>(
 ) -> Option<(usize, OopDiv<'t>)> {
     match (coords, axes) {
         (Coords::Cylindrical, [0, 2]) if ncomp > 1 => Some((1, OopDiv::Plain)),
-        (Coords::Spherical, [0, 1]) if ncomp > 2 => {
-            Some((2, OopDiv::Curl(oop_curl_geometry_sph_rtheta_gv(cx, spacing))))
-        }
+        (Coords::Spherical, [0, 1]) if ncomp > 2 => Some((
+            2,
+            OopDiv::Curl(oop_curl_geometry_sph_rtheta_gv(cx, spacing)),
+        )),
         _ => None,
     }
 }
@@ -1838,28 +1849,28 @@ pub fn rmhd_bcell_godunov_euler_gv(
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let oop = oop_components(ncomp, axes);
-    let bc: Vec<Gv> = oop
-        .iter()
-        .map(|&c| cx.field(&format!("bc_{c}"), FieldRef::BCell(c as u8)))
-        .collect();
-    // pin the ndim*|oop| induction-flux inputs in d-outer/c-inner order (the positional dispatch
-    // order [bf_0_c, bf_1_c, ..]) before bcell_flux_div_gv reads them (it loops d).
-    for d in 0..ndim {
-        for &c in &oop {
-            gv_register_field(cx, &format!("bf_{d}_{c}"), &format!("bf_{d}_{c}"));
+        let oop = oop_components(ncomp, axes);
+        let bc: Vec<Gv> = oop
+            .iter()
+            .map(|&c| cx.field(&format!("bc_{c}"), FieldRef::BCell(c as u8)))
+            .collect();
+        // pin the ndim*|oop| induction-flux inputs in d-outer/c-inner order (the positional dispatch
+        // order [bf_0_c, bf_1_c, ..]) before bcell_flux_div_gv reads them (it loops d).
+        for d in 0..ndim {
+            for &c in &oop {
+                gv_register_field(cx, &format!("bf_{d}_{c}"), &format!("bf_{d}_{c}"));
+            }
         }
-    }
-    let dt = cx.scalar("dt");
-    let divs = bcell_flux_divs_gv(cx, coords, spacetime, spacing, ndim, &oop, ncomp, axes);
-    let writes = (0..oop.len())
-        .map(|i| {
-            let c = oop[i];
-            let bnew = bc[i] - dt * divs[i];
-            KernelWrite::new(format!("bc_{c}_new"), format!("bc_{c}"), bnew.node())
-        })
-        .collect();
-    writes
+        let dt = cx.scalar("dt");
+        let divs = bcell_flux_divs_gv(cx, coords, spacetime, spacing, ndim, &oop, ncomp, axes);
+        let writes = (0..oop.len())
+            .map(|i| {
+                let c = oop[i];
+                let bnew = bc[i] - dt * divs[i];
+                KernelWrite::new(format!("bc_{c}_new"), format!("bc_{c}"), bnew.node())
+            })
+            .collect();
+        writes
     })
 }
 
@@ -1875,32 +1886,32 @@ pub fn rmhd_bcell_godunov_rk2_gv(
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let oop = oop_components(ncomp, axes);
-    let bcn: Vec<Gv> = oop
-        .iter()
-        .map(|&c| cx.field(&format!("bcn_{c}"), FieldRef::BCellN(c as u8)))
-        .collect();
-    let bc: Vec<Gv> = oop
-        .iter()
-        .map(|&c| cx.field(&format!("bc_{c}"), FieldRef::BCell(c as u8)))
-        .collect();
-    for d in 0..ndim {
-        for &c in &oop {
-            gv_register_field(cx, &format!("bf_{d}_{c}"), &format!("bf_{d}_{c}"));
+        let oop = oop_components(ncomp, axes);
+        let bcn: Vec<Gv> = oop
+            .iter()
+            .map(|&c| cx.field(&format!("bcn_{c}"), FieldRef::BCellN(c as u8)))
+            .collect();
+        let bc: Vec<Gv> = oop
+            .iter()
+            .map(|&c| cx.field(&format!("bc_{c}"), FieldRef::BCell(c as u8)))
+            .collect();
+        for d in 0..ndim {
+            for &c in &oop {
+                gv_register_field(cx, &format!("bf_{d}_{c}"), &format!("bf_{d}_{c}"));
+            }
         }
-    }
-    let dt = cx.scalar("dt");
-    let half = Gv::from_f64(0.5);
-    let divs = bcell_flux_divs_gv(cx, coords, spacetime, spacing, ndim, &oop, ncomp, axes);
-    let writes = (0..oop.len())
-        .map(|i| {
-            let c = oop[i];
-            let bc_star = bc[i] - dt * divs[i];
-            let bnew = half * (bcn[i] + bc_star);
-            KernelWrite::new(format!("bc_{c}_new"), format!("bc_{c}"), bnew.node())
-        })
-        .collect();
-    writes
+        let dt = cx.scalar("dt");
+        let half = Gv::from_f64(0.5);
+        let divs = bcell_flux_divs_gv(cx, coords, spacetime, spacing, ndim, &oop, ncomp, axes);
+        let writes = (0..oop.len())
+            .map(|i| {
+                let c = oop[i];
+                let bc_star = bc[i] - dt * divs[i];
+                let bnew = half * (bcn[i] + bc_star);
+                KernelWrite::new(format!("bc_{c}_new"), format!("bc_{c}"), bnew.node())
+            })
+            .collect();
+        writes
     })
 }
 
@@ -1921,7 +1932,9 @@ fn bcell_godunov_geom<'t>(
             None,
             // per-cell widths: an unmapped axis reduces to its `dx_d` scalar, a graded one
             // differences its own faces.
-            (0..ndim).map(|d| gv_axis_width(cx, d, spacing[d])).collect(),
+            (0..ndim)
+                .map(|d| gv_axis_width(cx, d, spacing[d]))
+                .collect(),
         )
     } else {
         // axes maps grid axis -> coordinate (identity for sph/3d-cyl; [0,2] for cyl r-z) so the
@@ -1991,23 +2004,23 @@ fn chi_flux_div_gv<'t>(cx: TraceCx<'t>, ndim: usize, spacing: &[Spacing]) -> Gv<
 /// correction alone underdetermines it.
 pub fn chi_flux_gv(ndim: usize, dir: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let zero_off = vec![0i32; ndim];
-    let mut minus = zero_off.clone();
-    minus[dir] = -1;
-    let zero = Gv::from_f64(0.0);
-    let mf_key = format!("mass_flux_{dir}");
-    let mf_path = FieldRef::MassFlux(dir as u8).name();
-    let chi_path = FieldRef::PrimChi.name();
-    let f = gv_field_at(cx, &mf_key, &mf_path, ndim, &zero_off);
-    let chi_m = gv_field_at(cx, "prim_chi", &chi_path, ndim, &minus);
-    let chi_0 = gv_field_at(cx, "prim_chi", &chi_path, ndim, &zero_off);
-    let upwind = Gv::select(f.cmp_ge(zero), chi_m, chi_0);
-    let writes = vec![KernelWrite::new(
-        format!("chi_flux_{dir}_new"),
-        FieldRef::ChiFlux(dir as u8),
-        (f * upwind).node(),
-    )];
-    writes
+        let zero_off = vec![0i32; ndim];
+        let mut minus = zero_off.clone();
+        minus[dir] = -1;
+        let zero = Gv::from_f64(0.0);
+        let mf_key = format!("mass_flux_{dir}");
+        let mf_path = FieldRef::MassFlux(dir as u8).name();
+        let chi_path = FieldRef::PrimChi.name();
+        let f = gv_field_at(cx, &mf_key, &mf_path, ndim, &zero_off);
+        let chi_m = gv_field_at(cx, "prim_chi", &chi_path, ndim, &minus);
+        let chi_0 = gv_field_at(cx, "prim_chi", &chi_path, ndim, &zero_off);
+        let upwind = Gv::select(f.cmp_ge(zero), chi_m, chi_0);
+        let writes = vec![KernelWrite::new(
+            format!("chi_flux_{dir}_new"),
+            FieldRef::ChiFlux(dir as u8),
+            (f * upwind).node(),
+        )];
+        writes
     })
 }
 
@@ -2017,26 +2030,26 @@ pub fn chi_flux_gv(ndim: usize, dir: usize) -> (GvKernel, KernelWrites) {
 /// one kernel serves every explicit SSP scheme.
 pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let chin = cx.field("un_chi", FieldRef::un_chi());
-    let dchi = cx.field("cons_chi", FieldRef::cons_chi());
-    let dt = cx.scalar("dt");
-    let a0 = cx.scalar("a0");
-    let ac = cx.scalar("ac");
-    // the homologous-mesh dilution `-mesh_hdil * D_chi` rides every conserved law, and the dye is
-    // one: expansion dilutes `D_chi = rho chi` exactly as it dilutes `rho`, leaving the
-    // concentration invariant. the static binding `mesh_hdil = 0` subtracts an exact zero.
-    let h_dil = cx.scalar("mesh_hdil");
-    // face positions are selected at runtime by `map_kind_d`, so the widths come out per-cell on
-    // any mesh, whatever the bake-time spacing tag says.
-    let spacing = vec![Spacing::Uniform; ndim];
-    let new =
-        a0 * chin + ac * (dchi - dt * chi_flux_div_gv(cx, ndim, &spacing) - dt * (h_dil * dchi));
-    let writes = vec![KernelWrite::new(
-        "chi_new",
-        FieldRef::cons_chi(),
-        new.node(),
-    )];
-    writes
+        let chin = cx.field("un_chi", FieldRef::un_chi());
+        let dchi = cx.field("cons_chi", FieldRef::cons_chi());
+        let dt = cx.scalar("dt");
+        let a0 = cx.scalar("a0");
+        let ac = cx.scalar("ac");
+        // the homologous-mesh dilution `-mesh_hdil * D_chi` rides every conserved law, and the dye is
+        // one: expansion dilutes `D_chi = rho chi` exactly as it dilutes `rho`, leaving the
+        // concentration invariant. the static binding `mesh_hdil = 0` subtracts an exact zero.
+        let h_dil = cx.scalar("mesh_hdil");
+        // face positions are selected at runtime by `map_kind_d`, so the widths come out per-cell on
+        // any mesh, whatever the bake-time spacing tag says.
+        let spacing = vec![Spacing::Uniform; ndim];
+        let new = a0 * chin
+            + ac * (dchi - dt * chi_flux_div_gv(cx, ndim, &spacing) - dt * (h_dil * dchi));
+        let writes = vec![KernelWrite::new(
+            "chi_new",
+            FieldRef::cons_chi(),
+            new.node(),
+        )];
+        writes
     })
 }
 
@@ -2045,27 +2058,27 @@ pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, KernelWrites) {
 /// consistent with the same-instant mass.
 pub fn chi_c2p_gv() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let dchi = cx.field("cons_chi", FieldRef::cons_chi());
-    let den = cx.field("cons_den", FieldRef::cons_den());
-    let writes = vec![KernelWrite::new(
-        "prim_chi_new",
-        FieldRef::PrimChi,
-        (dchi / den).node(),
-    )];
-    writes
+        let dchi = cx.field("cons_chi", FieldRef::cons_chi());
+        let den = cx.field("cons_den", FieldRef::cons_den());
+        let writes = vec![KernelWrite::new(
+            "prim_chi_new",
+            FieldRef::PrimChi,
+            (dchi / den).node(),
+        )];
+        writes
     })
 }
 
 /// the dye step snapshot: `u_n.chi <- cons.chi`, the rk2 combine's step-start state.
 pub fn chi_snapshot_gv() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let dchi = cx.field("cons_chi", FieldRef::cons_chi());
-    let writes = vec![KernelWrite::new(
-        "un_chi_new",
-        FieldRef::un_chi(),
-        dchi.node(),
-    )];
-    writes
+        let dchi = cx.field("cons_chi", FieldRef::cons_chi());
+        let writes = vec![KernelWrite::new(
+            "un_chi_new",
+            FieldRef::un_chi(),
+            dchi.node(),
+        )];
+        writes
     })
 }
 

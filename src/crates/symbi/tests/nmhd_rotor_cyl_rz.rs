@@ -26,6 +26,7 @@ use symbi_geometry::Cylindrical;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
 use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 use symbi_hydro::state::{Cons, Prim};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -80,14 +81,10 @@ fn make_sim() -> Sim {
         .set_initial(|[r, z]| {
             let (rho, vr, vz) = rotor_state(r, z);
             // velocity is coordinate-indexed (0 = r, 1 = phi, 2 = z); B = (B_r, B_phi, B_z) = (0, 0, B0).
-            MhdPrim {
-                hydro: Prim {
-                    rho,
-                    vel: Tensor::new([vr, 0.0, vz]),
-                    pre: 1.0,
-                },
-                mag: Tensor::new([0.0, 0.0, B0]),
-            }
+            MhdPrim::new(
+                Prim::adiabatic(Density(rho), Tensor::new([vr, 0.0, vz]), Pressure(1.0)),
+                Tensor::new([0.0, 0.0, B0]),
+            )
         })
         // uniform vertical B_z on the z-faces (bface[1]); B_r on the r-faces (bface[0]) stays
         // zero — the staggered CT ground truth (cyl div(B) = 0 since r_hi*0 - r_lo*0 = 0).
@@ -157,33 +154,32 @@ fn nmhd_rotor_cyl_rz_preserves_divb_winds_field_stays_physical() {
     let cnrg = sim.fields.cons.nrg_field().unwrap();
     let mut max_br = 0.0_f64;
     for c in sim.geom.interior.iter() {
-        let cons = MhdCons::<f64, 3> {
-            hydro: Cons {
-                chi: Default::default(),
-                den: *sim.fields.cons.den.view().at(c),
-                mom: Tensor::new([
+        let cons = MhdCons::<f64, 3>::new(
+            Cons::adiabatic(
+                Density(*sim.fields.cons.den.view().at(c)),
+                Tensor::new([
                     *sim.fields.cons.mom[0].view().at(c),
                     *sim.fields.cons.mom[1].view().at(c),
                     *sim.fields.cons.mom[2].view().at(c),
                 ]),
-                nrg: *cnrg.view().at(c),
-            },
-            mag: Tensor::new([
+                EnergyDensity(*cnrg.view().at(c)),
+            ),
+            Tensor::new([
                 *mhd.bcell[0].view().at(c),
                 *mhd.bcell[1].view().at(c),
                 *mhd.bcell[2].view().at(c),
             ]),
-        };
+        );
         let prim = nmhd_recover(&eos, &cons);
         assert!(
-            prim.rho.is_finite() && prim.rho > 0.0,
+            prim.rho().is_finite() && prim.rho() > 0.0,
             "cell {c:?}: rho={}",
-            prim.rho
+            prim.rho()
         );
         assert!(
-            prim.pre.is_finite() && prim.pre > 0.0,
+            prim.pre().is_finite() && prim.pre() > 0.0,
             "cell {c:?}: p={}",
-            prim.pre
+            prim.pre()
         );
         max_br = max_br.max(mhd.bcell[0].view().at(c).abs());
     }

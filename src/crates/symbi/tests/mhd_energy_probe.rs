@@ -16,6 +16,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::Prim;
 use symbi_sim::substrate_seam::Solver;
@@ -45,13 +46,15 @@ fn run_case(nx: usize, solver: Solver) -> (f64, u64, u64, u64) {
         .cfl(0.1)
         .allocate()
         .expect("sim")
-        .set_initial(|[x, _y]| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([if x <= 0.5 { 0.95 } else { -0.94 }, 0.0, 0.0]),
-                pre: 1e-4,
-            },
-            mag: Tensor::new([0.0, B0Y, 0.0]),
+        .set_initial(|[x, _y]| {
+            MhdPrim::new(
+                Prim::adiabatic(
+                    Density(1.0),
+                    Tensor::new([if x <= 0.5 { 0.95 } else { -0.94 }, 0.0, 0.0]),
+                    Pressure(1e-4),
+                ),
+                Tensor::new([0.0, B0Y, 0.0]),
+            )
         })
         .seed_faces_uniform([0.0, B0Y])
         .build();

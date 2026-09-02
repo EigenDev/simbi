@@ -27,9 +27,9 @@ use std::sync::atomic::Ordering;
 use symbi::prelude::*;
 use symbi_algebra::Domain;
 use symbi_grid::Field;
-use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_hydro::NEWTONIAN_SPEC;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_user_source;
 use symbi_xpu::HostMemory;
 
 fn assert_cons_bit_identical<const D: usize>(
@@ -77,11 +77,7 @@ fn stage0_un_alias_matches_the_snapshot_stage_copy() {
             let (x, y) = (p[0], p[1]);
             let rho =
                 1.0 + 0.3 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
-            Prim {
-                rho,
-                vel: Tensor::new([0.15, -0.08]),
-                pre: 1.0,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([0.15, -0.08]), Pressure(1.0))
         });
         sim
     };

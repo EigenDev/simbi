@@ -15,12 +15,13 @@
 //   TV(hlld) <~ TV(hlle)  and  ||rho_hlld - rho_hlle||_1 small  ==>  HLLD is clean.
 // =============================================================================
 
-use symbi_algebra::{FaceNormal, Normalized};
 use symbi_algebra::Tensor;
+use symbi_algebra::{FaceNormal, Normalized};
 use symbi_hydro::ShockwaveLimiter;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
 use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::riemann::{hllc_newtonian, hlld_newtonian, hlle};
 use symbi_hydro::state::Prim;
@@ -37,14 +38,10 @@ type P = MhdPrim<f64, 3>;
 type C = MhdCons<f64, 3>;
 
 fn prim(rho: f64, v: [f64; 3], p: f64, b: [f64; 3]) -> P {
-    MhdPrim {
-        hydro: Prim {
-            rho,
-            vel: Tensor::new(v),
-            pre: p,
-        },
-        mag: Tensor::new(b),
-    }
+    MhdPrim::new(
+        Prim::adiabatic(Density(rho), Tensor::new(v), Pressure(p)),
+        Tensor::new(b),
+    )
 }
 
 // classic Brio-Wu: L = (1, 0, 1, By=1), R = (0.125, 0, 0.1, By=-1), Bx = 0.75.
@@ -74,20 +71,20 @@ fn recon(pm: &P, p0: &P, pp: &P) -> (P, P) {
         let s = minmod(mid - lo, hi - mid);
         (mid - 0.5 * s, mid + 0.5 * s)
     };
-    let (rl, rr) = comp(pm.rho, p0.rho, pp.rho);
+    let (rl, rr) = comp(pm.rho(), p0.rho(), pp.rho());
     let mut vl = [0.0; 3];
     let mut vr = [0.0; 3];
     let mut bl = [0.0; 3];
     let mut br = [0.0; 3];
     for k in 0..3 {
-        let (a, b) = comp(pm.vel[k], p0.vel[k], pp.vel[k]);
+        let (a, b) = comp(pm.vel()[k], p0.vel()[k], pp.vel()[k]);
         vl[k] = a;
         vr[k] = b;
-        let (a, b) = comp(pm.mag[k], p0.mag[k], pp.mag[k]);
+        let (a, b) = comp(pm.mag()[k], p0.mag()[k], pp.mag()[k]);
         bl[k] = a;
         br[k] = b;
     }
-    let (pl, pr) = comp(pm.pre, p0.pre, pp.pre);
+    let (pl, pr) = comp(pm.pre(), p0.pre(), pp.pre());
     (prim(rl, vl, pl, bl), prim(rr, vr, pr, br))
 }
 
@@ -152,24 +149,24 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
 
     let interior =
         |p: &[P], f: fn(&P) -> f64| -> Vec<f64> { p[NG..NG + N].iter().map(f).collect() };
-    let rho_e = interior(&p_hlle, |p| p.rho);
-    let rho_c = interior(&p_hllc, |p| p.rho);
-    let rho_d = interior(&p_hlld, |p| p.rho);
-    let by_e = interior(&p_hlle, |p| p.mag[1]);
-    let by_d = interior(&p_hlld, |p| p.mag[1]);
+    let rho_e = interior(&p_hlle, |p| p.rho());
+    let rho_c = interior(&p_hllc, |p| p.rho());
+    let rho_d = interior(&p_hlld, |p| p.rho());
+    let by_e = interior(&p_hlle, |p| p.mag()[1]);
+    let by_d = interior(&p_hlld, |p| p.mag()[1]);
 
     // - physical everywhere (the algebraic c2p must recover rho,p > 0).
     for (label, ps) in [("hllc", &p_hllc), ("hlld", &p_hlld)] {
         for (i, pi) in ps[NG..NG + N].iter().enumerate() {
             assert!(
-                pi.rho.is_finite() && pi.rho > 0.0,
+                pi.rho().is_finite() && pi.rho() > 0.0,
                 "{label} cell {i}: rho={}",
-                pi.rho
+                pi.rho()
             );
             assert!(
-                pi.pre.is_finite() && pi.pre > 0.0,
+                pi.pre().is_finite() && pi.pre() > 0.0,
                 "{label} cell {i}: p={}",
-                pi.pre
+                pi.pre()
             );
         }
     }
@@ -177,9 +174,9 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
     // - Bx (normal field) stays exactly constant (induction F(Bx)=0 in 1D).
     for pi in &p_hlld[NG..NG + N] {
         assert!(
-            (pi.mag[0] - 0.75).abs() < 1e-12,
+            (pi.mag()[0] - 0.75).abs() < 1e-12,
             "Bx drifted: {}",
-            pi.mag[0]
+            pi.mag()[0]
         );
     }
 

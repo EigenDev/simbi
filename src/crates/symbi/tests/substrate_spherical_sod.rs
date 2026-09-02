@@ -25,9 +25,11 @@ use symbi_algebra::Tensor;
 use symbi_geometry::{Cartesian, Spherical};
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
+use symbi_hydro::isothermal::IsoPrim;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::Rhd;
-use symbi_hydro::state::{Prim, PrimG};
+use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type SimSph = SimState<Newtonian, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -98,11 +100,7 @@ fn full_substrate_spherical_adiabatic_sod() {
             .boundaries(Boundaries::uniform(BoundaryType::Outflow))
             .allocate()
             .expect("sizing sim")
-            .set_initial(|_| Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0]),
-                pre: 1.0,
-            })
+            .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
             .build();
         tmp.geom.allocated.clone()
     });
@@ -115,11 +113,7 @@ fn full_substrate_spherical_adiabatic_sod() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("spherical sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
     set_sod_ic(&mut sph);
     // the spherical SimState reports its coordinate system through the metric.
@@ -154,11 +148,7 @@ fn full_substrate_spherical_adiabatic_sod() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("cartesian sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
     set_sod_ic(&mut cart);
     evolve(&mut cart, &sub, T_FINAL).expect("cartesian evolution failed");
@@ -195,11 +185,7 @@ fn full_substrate_spherical_iso() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("iso spherical sim")
-        .set_initial(|_| PrimG {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: Default::default(),
-        })
+        .set_initial(|_| IsoPrim::isothermal(Density(1.0), Tensor::new([0.0])))
         .build();
     set_iso_ic(&mut sph);
     let sub = IsoSubstrateKernelSet::<HostMemory, f64, 1>::new(cs, 0.4, &sph.geom.allocated);
@@ -220,11 +206,7 @@ fn full_substrate_spherical_iso() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("iso cartesian sim")
-        .set_initial(|_| PrimG {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: Default::default(),
-        })
+        .set_initial(|_| IsoPrim::isothermal(Density(1.0), Tensor::new([0.0])))
         .build();
     set_iso_ic(&mut cart);
     evolve(&mut cart, &sub, T_FINAL).expect("iso cartesian evolution failed");
@@ -257,11 +239,7 @@ fn full_substrate_spherical_rhd() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("rhd spherical sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
     set_rhd_ic(&mut sph);
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sph.geom.allocated);
@@ -285,11 +263,7 @@ fn full_substrate_spherical_rhd() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("rhd cartesian sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0)))
         .build();
     set_rhd_ic(&mut cart);
     evolve(&mut cart, &sub, T_FINAL).expect("rhd cartesian evolution failed");
@@ -384,11 +358,7 @@ fn full_substrate_spherical_2d_adiabatic() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sph 2d")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build();
     set_grad_newton(&mut sph, r_lo, dr);
     let sub =
@@ -423,11 +393,7 @@ fn full_substrate_spherical_2d_adiabatic() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("cart 2d")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build();
     set_grad_newton(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.03).expect("2d cartesian evolve failed");
@@ -474,11 +440,7 @@ fn full_substrate_spherical_3d_adiabatic() {
         .boundaries(bcs)
         .allocate()
         .expect("sph 3d")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(1.0)))
         .build();
     set_grad_newton(&mut sph, r_lo, dr);
     let sub =
@@ -504,11 +466,7 @@ fn full_substrate_spherical_3d_adiabatic() {
         .boundaries(bcs)
         .allocate()
         .expect("cart 3d")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(1.0)))
         .build();
     set_grad_newton(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.02).expect("3d cart adiabatic evolve failed");
@@ -543,11 +501,7 @@ fn full_substrate_spherical_2d_iso() {
         .boundaries(bcs)
         .allocate()
         .expect("sph 2d iso")
-        .set_initial(|_| PrimG {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: Default::default(),
-        })
+        .set_initial(|_| IsoPrim::isothermal(Density(1.0), Tensor::new([0.0, 0.0])))
         .build();
     set_grad_iso(&mut sph, r_lo, dr);
     let sub = IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(cs, 0.4, &sph.geom.allocated);
@@ -567,11 +521,7 @@ fn full_substrate_spherical_2d_iso() {
         .boundaries(bcs)
         .allocate()
         .expect("cart 2d iso")
-        .set_initial(|_| PrimG {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: Default::default(),
-        })
+        .set_initial(|_| IsoPrim::isothermal(Density(1.0), Tensor::new([0.0, 0.0])))
         .build();
     set_grad_iso(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.03).expect("2d cart iso evolve failed");
@@ -606,11 +556,7 @@ fn full_substrate_spherical_3d_iso() {
         .boundaries(bcs)
         .allocate()
         .expect("sph 3d iso")
-        .set_initial(|_| PrimG {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: Default::default(),
-        })
+        .set_initial(|_| IsoPrim::isothermal(Density(1.0), Tensor::new([0.0; 3])))
         .build();
     set_grad_iso(&mut sph, r_lo, dr);
     let sub = IsoSubstrateKernelSet::<HostMemory, f64, 3>::new(cs, 0.4, &sph.geom.allocated);
@@ -630,11 +576,7 @@ fn full_substrate_spherical_3d_iso() {
         .boundaries(bcs)
         .allocate()
         .expect("cart 3d iso")
-        .set_initial(|_| PrimG {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: Default::default(),
-        })
+        .set_initial(|_| IsoPrim::isothermal(Density(1.0), Tensor::new([0.0; 3])))
         .build();
     set_grad_iso(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.02).expect("3d cart iso evolve failed");
@@ -669,11 +611,7 @@ fn full_substrate_spherical_2d_rhd() {
         .boundaries(bcs)
         .allocate()
         .expect("sph 2d rhd")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build();
     set_grad_rhd(&mut sph, r_lo, dr);
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sph.geom.allocated);
@@ -702,11 +640,7 @@ fn full_substrate_spherical_2d_rhd() {
         .boundaries(bcs)
         .allocate()
         .expect("cart 2d rhd")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build();
     set_grad_rhd(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.03).expect("2d cart rhd evolve failed");
@@ -740,11 +674,7 @@ fn full_substrate_spherical_3d_rhd() {
         .boundaries(bcs)
         .allocate()
         .expect("sph 3d rhd")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(1.0)))
         .build();
     set_grad_rhd(&mut sph, r_lo, dr);
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &sph.geom.allocated);
@@ -774,11 +704,7 @@ fn full_substrate_spherical_3d_rhd() {
         .boundaries(bcs)
         .allocate()
         .expect("cart 3d rhd")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(1.0)))
         .build();
     set_grad_rhd(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.02).expect("3d cart rhd evolve failed");

@@ -25,6 +25,7 @@ use symbi_amr::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -62,11 +63,7 @@ fn coarse_sim() -> Sim {
         .cfl(CFL)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([V]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([V]), Pressure(1.0)))
         .build()
         .with_passive_scalar()
         .expect("chi alloc")
@@ -135,11 +132,9 @@ fn refined() -> Hier {
         Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, kset).expect("refine");
     seed_chi(&hier.levels[0].state, 1.0 / N as f64, 0.0);
     // a fine level is built empty; give it the same uniform gas the root carries.
-    hier.levels[1].state.seed_cells(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([V]),
-        pre: 1.0,
-    });
+    hier.levels[1]
+        .state
+        .seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([V]), Pressure(1.0)));
     let fine = &hier.levels[1].state;
     let dx_f = fine.geom.dx[0];
     let x0 = fine.geom.x_lo[0];

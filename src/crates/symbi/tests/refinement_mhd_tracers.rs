@@ -48,13 +48,11 @@ fn translating_nmhd_flow_crosses_refinement_interfaces_without_tracer_loss() {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .unwrap()
-        .set_initial(|_| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.4, 0.0, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new(B0),
+        .set_initial(|_| {
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.4, 0.0, 0.0]), Pressure(1.0)),
+                Tensor::new(B0),
+            )
         })
         .seed_faces_uniform(B0)
         .build();
@@ -128,13 +126,11 @@ fn continuous_tracer_record_moves_to_finest_active_level_without_state_loss() {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .unwrap()
-        .set_initial(|_| MhdPrim {
-            hydro: Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.4, 0.0, 0.0]),
-                pre: 1.0,
-            },
-            mag: Tensor::new(B0),
+        .set_initial(|_| {
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.4, 0.0, 0.0]), Pressure(1.0)),
+                Tensor::new(B0),
+            )
         })
         .seed_faces_uniform(B0)
         .build();

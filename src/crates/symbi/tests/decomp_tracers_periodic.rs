@@ -23,6 +23,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -61,10 +62,12 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|[x, y]| Prim {
-            rho: 1.0 + blob(x, y),
-            vel: Tensor::new([VX, VY]),
-            pre: 1.0,
+        .set_initial(|[x, y]| {
+            Prim::adiabatic(
+                Density(1.0 + blob(x, y)),
+                Tensor::new([VX, VY]),
+                Pressure(1.0),
+            )
         })
         .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
@@ -110,7 +113,11 @@ fn partition_tiles(partition: &Partition<2>) -> Vec<(Sim, Kern)> {
 /// seed the population once from a whole-domain reference and split it by position,
 /// so both arms start from the identical particles.
 fn seed(tiles: &mut [(Sim, Kern)], partition: &Partition<2>) {
-    let (reference, _) = make([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Periodic));
+    let (reference, _) = make(
+        [N, N],
+        [0.0, 0.0],
+        Boundaries::uniform(BoundaryType::Periodic),
+    );
     let sets = seed_and_partition(&reference, N_TRACERS, partition);
     for ((sim, _), set) in tiles.iter_mut().zip(sets) {
         sim.tracers = Some(set);
@@ -144,7 +151,10 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2]) {
 fn gather(tiles: &[(Sim, Kern)]) -> Vec<Option<(u64, [f64; 2])>> {
     let mut out = vec![None; N_TRACERS];
     for (sim, _) in tiles {
-        let t = sim.tracers.as_ref().expect("every tile carries a tracer set");
+        let t = sim
+            .tracers
+            .as_ref()
+            .expect("every tile carries a tracer set");
         for ii in 0..t.id.len() {
             out[t.id[ii] as usize] = Some((t.owner[ii].0, t.x[ii]));
         }
@@ -224,8 +234,7 @@ fn assert_matches(cuts: [Vec<usize>; 2]) {
     let mut diverged = Vec::new();
     for ii in 0..N_TRACERS {
         let m = mono[ii].unwrap_or_else(|| panic!("tracer {ii} was lost by the single-tile run"));
-        let d =
-            decomposed[ii].unwrap_or_else(|| panic!("tracer {ii} was lost in tile migration"));
+        let d = decomposed[ii].unwrap_or_else(|| panic!("tracer {ii} was lost in tile migration"));
         if m != d {
             diverged.push((ii, m, d));
         }

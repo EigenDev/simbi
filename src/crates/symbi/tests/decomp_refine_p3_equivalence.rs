@@ -25,6 +25,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -67,11 +68,7 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Times
         .expect("root sim construction failed")
         .set_initial(|[x, y]| {
             let b = bump(x, y);
-            Prim {
-                rho: 1.0 + b,
-                vel: Tensor::new([0.0, 0.0]),
-                pre: 1.0 + b,
-            }
+            Prim::adiabatic(Density(1.0 + b), Tensor::new([0.0, 0.0]), Pressure(1.0 + b))
         })
         .build()
 }
@@ -237,8 +234,8 @@ fn assert_p3_matches(counts: [usize; 2], ts: Timestepping) {
 
 fn assert_p3_matches_partition(partition: &Partition<2>, ts: Timestepping) {
     let counts = partition.counts();
-    let whole =
-        Partition::explicit([N, N], [Vec::new(), Vec::new()]).expect("the uncut partition is one tile");
+    let whole = Partition::explicit([N, N], [Vec::new(), Vec::new()])
+        .expect("the uncut partition is one tile");
     let mut mono = build_mono(ts);
     // construction gate, before either side evolves: the seeded composites must already agree.
     // this is what localizes a future regression to seeding rather than to the driver -- the
@@ -358,4 +355,3 @@ fn refine_p3_rk2_ragged_x_cut() {
     assert!(!ragged.is_uniform(), "the gate must exercise unequal tiles");
     assert_p3_matches_partition(&ragged, Timestepping::Rk2);
 }
-

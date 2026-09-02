@@ -17,6 +17,7 @@
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::state::*;
 use symbi::sim::substrate_seam::{KernelSet, WithViscosity};
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -49,10 +50,8 @@ fn build() -> Sim {
         // uniform (rho, p) — the one constant local cs^2 — with a linear shear
         // v_x(y), so the stress has one dominant component and the heating is
         // strictly positive where the gradient lives.
-        .set_initial(|x| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.3 * x[1], 0.0]),
-            pre: 1.0,
+        .set_initial(|x| {
+            Prim::adiabatic(Density(1.0), Tensor::new([0.3 * x[1], 0.0]), Pressure(1.0))
         })
         .build()
         .with_bodies(BodyCollection::new().add(Body::gravitational(

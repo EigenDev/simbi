@@ -27,6 +27,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -43,11 +44,11 @@ const L0: f64 = 1.0;
 /// profile would make injection indistinguishable from any other initialization.
 fn ic(x: [f64; 1]) -> Prim<f64, 1> {
     let g = (-(x[0] * x[0]) / 0.02).exp();
-    Prim {
-        rho: 1.0 + 3.0 * g,
-        vel: Tensor::new([0.3 * x[0]]),
-        pre: 1.0 + 2.0 * g,
-    }
+    Prim::adiabatic(
+        Density(1.0 + 3.0 * g),
+        Tensor::new([0.3 * x[0]]),
+        Pressure(1.0 + 2.0 * g),
+    )
 }
 
 /// the region schedule: level `l` covers the inner half of its parent about the origin. fixed
@@ -519,10 +520,12 @@ type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemor
 fn an_anisotropic_grid_verifies_against_its_own_axes() {
     let (nx, ny) = (32usize, 8usize);
     let (lx, ly) = (1.0f64, 0.25f64);
-    let ic2 = |x: [f64; 2]| Prim {
-        rho: 1.0 + 0.3 * (x[0] + x[1]),
-        vel: Tensor::new([0.1, -0.2]),
-        pre: 1.0,
+    let ic2 = |x: [f64; 2]| {
+        Prim::adiabatic(
+            Density(1.0 + 0.3 * (x[0] + x[1])),
+            Tensor::new([0.1, -0.2]),
+            Pressure(1.0),
+        )
     };
     let sim = Sim2::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([nx, ny])

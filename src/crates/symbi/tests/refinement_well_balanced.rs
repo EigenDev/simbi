@@ -29,6 +29,7 @@ use symbi::sim::state::*;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -59,11 +60,11 @@ fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
     let a = (GAMMA - 1.0) / (GAMMA * K0);
     let c = 1.0 / a - GM / (1.0 + G_OFFSET);
     let rho = (a * (GM / r + c)).powf(1.0 / (GAMMA - 1.0));
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
-    }
+    Prim::adiabatic(
+        Density(rho),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(K0 * rho.powf(GAMMA)),
+    )
 }
 
 /// nested patches, each half the previous, centred on the domain: `levels - 1` of them.
@@ -435,11 +436,11 @@ fn the_correction_tracks_the_distance_from_the_target() {
             let speed = MACH * (GAMMA * pre / rho).sqrt();
             st.seed_cell(
                 c,
-                &Prim {
-                    rho,
-                    vel: symbi_algebra::Tensor::new([speed]),
-                    pre,
-                },
+                &Prim::adiabatic(
+                    Density(rho),
+                    symbi_algebra::Tensor::new([speed]),
+                    Pressure(pre),
+                ),
             );
         }
     }
@@ -483,11 +484,11 @@ fn hydrostatic_wrong_gravity(x: [f64; 1]) -> Prim<f64, 1> {
     let half = 0.5 * GM;
     let c = 1.0 / a - half / (1.0 + G_OFFSET);
     let rho = (a * (half / r + c)).powf(1.0 / (GAMMA - 1.0));
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
-    }
+    Prim::adiabatic(
+        Density(rho),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(K0 * rho.powf(GAMMA)),
+    )
 }
 
 #[test]
@@ -936,11 +937,11 @@ fn cusped_atmosphere(x: [f64; 1]) -> Prim<f64, 1> {
     let scale = GAMMA * K0 / (GAMMA - 1.0);
     let invariant = scale * 1.0f64.powf(GAMMA - 1.0) + cusp_potential([0.0]);
     let rho = ((invariant - cusp_potential(x)) / scale).powf(1.0 / (GAMMA - 1.0));
-    Prim {
-        rho,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: K0 * rho.powf(GAMMA),
-    }
+    Prim::adiabatic(
+        Density(rho),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(K0 * rho.powf(GAMMA)),
+    )
 }
 
 fn build_cusped(levels: usize) -> Hier {
@@ -976,7 +977,8 @@ fn build_cusped(levels: usize) -> Hier {
 fn a_steady_target_with_an_unresolved_cusp_is_accepted() {
     // non-vacuity: the cusp has to be genuinely unresolved, or this is the smooth case again.
     let dx = 1.0 / N as f64;
-    let across = cusped_atmosphere([0.5 + 0.5 * dx]).rho / cusped_atmosphere([0.5 + 1.5 * dx]).rho;
+    let across =
+        cusped_atmosphere([0.5 + 0.5 * dx]).rho() / cusped_atmosphere([0.5 + 1.5 * dx]).rho();
     println!("\ndensity ratio across one coarse cell at the cusp: {across:.2}x");
     assert!(
         across > 1.5,
@@ -1056,11 +1058,11 @@ fn a_correct_target_is_never_refused_however_steep() {
         let across = dens(0.5 + 0.5 * dx) / dens(0.5 + 1.5 * dx);
         let target = move |x: [f64; 1]| {
             let r = dens(x[0]);
-            Prim {
-                rho: r,
-                vel: symbi_algebra::Tensor::new([0.0]),
-                pre: K0 * r.powf(GAMMA),
-            }
+            Prim::adiabatic(
+                Density(r),
+                symbi_algebra::Tensor::new([0.0]),
+                Pressure(K0 * r.powf(GAMMA)),
+            )
         };
         let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
             .cells([N])

@@ -20,14 +20,15 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric, Space, Tensor};
+use symbi_carrier::Scalar;
 use symbi_geometry::{Metric, MotionState};
 use symbi_grid::Field;
 use symbi_grid::centering::Cell;
 use symbi_hydro::energy::{EnergyModel, EnergySlot};
 use symbi_hydro::eos::Eos;
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 use symbi_hydro::regime::Regime;
-use symbi_hydro::state::{Cons, ConsG, Prim, PrimG, SeedableCons};
-use symbi_carrier::Scalar;
+use symbi_hydro::state::{Cons, ConsG, Prim, PrimFromSlots, PrimG, SeedableCons};
 use symbi_xpu::{DefaultMemory, DefaultSpace, ExecutionSpace, Executor, MemorySpace};
 
 // =============================================================================
@@ -234,24 +235,23 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// returns nrg=0.0 when energy field is absent (isothermal).
     #[inline]
     pub fn gather(&self, coord: [isize; NDIM]) -> Cons<Sc, DOF> {
-        Cons {
-            chi: Default::default(),
-            den: *self.den.view().at(coord),
-            mom: Tensor::new(std::array::from_fn(|dd| *self.mom[dd].view().at(coord))),
-            nrg: self.nrg.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord)),
-        }
+        Cons::adiabatic(
+            Density(*self.den.view().at(coord)),
+            Tensor::new(std::array::from_fn(|dd| *self.mom[dd].view().at(coord))),
+            EnergyDensity(self.nrg.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord))),
+        )
     }
 
     /// scatter AoS to SoA at a coordinate.
     /// skips nrg write when energy field is absent (isothermal).
     #[inline]
     pub fn scatter(&self, coord: [isize; NDIM], val: Cons<Sc, DOF>) {
-        self.den.view_mut().set(coord, val.den);
+        self.den.view_mut().set(coord, val.den());
         for dd in 0..DOF {
-            self.mom[dd].view_mut().set(coord, val.mom[dd]);
+            self.mom[dd].view_mut().set(coord, val.mom()[dd]);
         }
         if let Some(ref nrg) = self.nrg {
-            nrg.view_mut().set(coord, val.nrg);
+            nrg.view_mut().set(coord, val.nrg());
         }
     }
 
@@ -259,26 +259,25 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// isothermal: nrg slot becomes Zero<f64> (zst). adiabatic: nrg slot is f64.
     #[inline]
     pub fn gather_as<E: EnergyModel>(&self, coord: [isize; NDIM]) -> ConsG<Sc, DOF, E> {
-        ConsG {
-            chi: Default::default(),
-            den: *self.den.view().at(coord),
-            mom: Tensor::new(std::array::from_fn(|dd| *self.mom[dd].view().at(coord))),
-            nrg: E::Slot::<Sc>::from_scalar(
-                self.nrg.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord)),
-            ),
+        let mut slots = Vec::with_capacity(2 + DOF);
+        slots.push(*self.den.view().at(coord));
+        for dd in 0..DOF {
+            slots.push(*self.mom[dd].view().at(coord));
         }
+        slots.push(self.nrg.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord)));
+        ConsG::from_slots(&slots)
     }
 
     /// scatter AoS to SoA with a specific energy model.
     /// isothermal: writes 0.0 for nrg (via Zero::value()). adiabatic: writes real nrg.
     #[inline]
     pub fn scatter_from<E: EnergyModel>(&self, coord: [isize; NDIM], val: ConsG<Sc, DOF, E>) {
-        self.den.view_mut().set(coord, val.den);
+        self.den.view_mut().set(coord, val.den());
         for dd in 0..DOF {
-            self.mom[dd].view_mut().set(coord, val.mom[dd]);
+            self.mom[dd].view_mut().set(coord, val.mom()[dd]);
         }
         if let Some(ref nrg) = self.nrg {
-            nrg.view_mut().set(coord, val.nrg.value());
+            nrg.view_mut().set(coord, val.nrg().value());
         }
     }
 }
@@ -387,21 +386,21 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
 
     #[inline]
     pub fn gather(&self, coord: [isize; NDIM]) -> Prim<Sc, DOF> {
-        Prim {
-            rho: *self.rho.view().at(coord),
-            vel: Tensor::new(std::array::from_fn(|dd| *self.vel[dd].view().at(coord))),
-            pre: self.pre.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord)),
-        }
+        Prim::adiabatic(
+            Density(*self.rho.view().at(coord)),
+            Tensor::new(std::array::from_fn(|dd| *self.vel[dd].view().at(coord))),
+            Pressure(self.pre.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord))),
+        )
     }
 
     #[inline]
     pub fn scatter(&self, coord: [isize; NDIM], val: Prim<Sc, DOF>) {
-        self.rho.view_mut().set(coord, val.rho);
+        self.rho.view_mut().set(coord, val.rho());
         for dd in 0..DOF {
-            self.vel[dd].view_mut().set(coord, val.vel[dd]);
+            self.vel[dd].view_mut().set(coord, val.vel()[dd]);
         }
         if let Some(ref pre) = self.pre {
-            pre.view_mut().set(coord, val.pre);
+            pre.view_mut().set(coord, val.pre());
         }
     }
 
@@ -409,25 +408,25 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// isothermal: pre slot becomes Zero<f64> (zst). adiabatic: pre slot is f64.
     #[inline]
     pub fn gather_as<E: EnergyModel>(&self, coord: [isize; NDIM]) -> PrimG<Sc, DOF, E> {
-        PrimG {
-            rho: *self.rho.view().at(coord),
-            vel: Tensor::new(std::array::from_fn(|dd| *self.vel[dd].view().at(coord))),
-            pre: E::Slot::<Sc>::from_scalar(
-                self.pre.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord)),
-            ),
+        let mut slots = Vec::with_capacity(2 + DOF);
+        slots.push(*self.rho.view().at(coord));
+        for dd in 0..DOF {
+            slots.push(*self.vel[dd].view().at(coord));
         }
+        slots.push(self.pre.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord)));
+        PrimG::from_slots(&slots)
     }
 
     /// scatter AoS to SoA with a specific energy model.
     /// isothermal: writes 0.0 for pre (via Zero::value()). adiabatic: writes real pre.
     #[inline]
     pub fn scatter_from<E: EnergyModel>(&self, coord: [isize; NDIM], val: PrimG<Sc, DOF, E>) {
-        self.rho.view_mut().set(coord, val.rho);
+        self.rho.view_mut().set(coord, val.rho());
         for dd in 0..DOF {
-            self.vel[dd].view_mut().set(coord, val.vel[dd]);
+            self.vel[dd].view_mut().set(coord, val.vel()[dd]);
         }
         if let Some(ref pre) = self.pre {
-            pre.view_mut().set(coord, val.pre.value());
+            pre.view_mut().set(coord, val.pre().value());
         }
     }
 }
@@ -3603,20 +3602,15 @@ mod tests {
         )
         .unwrap();
 
-        let val = Cons {
-            chi: Default::default(),
-            den: 1.5,
-            mom: Tensor::new([0.3, -0.2]),
-            nrg: 2.5,
-        };
+        let val = Cons::adiabatic(Density(1.5), Tensor::new([0.3, -0.2]), EnergyDensity(2.5));
 
         sim.fields.cons.scatter([3, 4], val);
         let got = sim.fields.cons.gather([3, 4]);
 
-        assert_eq!(got.den, 1.5);
-        assert_eq!(got.mom[0], 0.3);
-        assert_eq!(got.mom[1], -0.2);
-        assert_eq!(got.nrg, 2.5);
+        assert_eq!(got.den(), 1.5);
+        assert_eq!(got.mom()[0], 0.3);
+        assert_eq!(got.mom()[1], -0.2);
+        assert_eq!(got.nrg(), 2.5);
     }
 
     #[test]
@@ -3636,19 +3630,15 @@ mod tests {
         )
         .unwrap();
 
-        let val = Prim {
-            rho: 2.0,
-            vel: Tensor::new([0.5, -0.3]),
-            pre: 1.0,
-        };
+        let val = Prim::adiabatic(Density(2.0), Tensor::new([0.5, -0.3]), Pressure(1.0));
 
         sim.fields.prim.scatter([5, 5], val);
         let got = sim.fields.prim.gather([5, 5]);
 
-        assert_eq!(got.rho, 2.0);
-        assert_eq!(got.vel[0], 0.5);
-        assert_eq!(got.vel[1], -0.3);
-        assert_eq!(got.pre, 1.0);
+        assert_eq!(got.rho(), 2.0);
+        assert_eq!(got.vel()[0], 0.5);
+        assert_eq!(got.vel()[1], -0.3);
+        assert_eq!(got.pre(), 1.0);
     }
 
     #[test]

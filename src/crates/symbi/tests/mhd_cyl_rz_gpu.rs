@@ -23,6 +23,7 @@ use symbi_geometry::Cylindrical;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
@@ -75,14 +76,10 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
     .set_initial(|[r, z]| {
         let (rho, vr, vz) = rotor_state(r, z);
         // velocity is coordinate-indexed (0=r, 1=phi, 2=z); B = (B_r, B_phi, B_z) = (0, 0, B0).
-        MhdPrim {
-            hydro: Prim {
-                rho,
-                vel: Tensor::new([vr, 0.0, vz]),
-                pre: 1.0,
-            },
-            mag: Tensor::new([0.0, 0.0, B0]),
-        }
+        MhdPrim::new(
+            Prim::adiabatic(Density(rho), Tensor::new([vr, 0.0, vz]), Pressure(1.0)),
+            Tensor::new([0.0, 0.0, B0]),
+        )
     })
     // uniform vertical B_z on the z-faces (bface[1]); B_r (bface[0]) stays zero.
     .seed_faces_uniform([0.0, B0])

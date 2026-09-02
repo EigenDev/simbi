@@ -23,6 +23,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -52,7 +53,11 @@ fn cell_at<const D: usize>(x: [f64; D], dx: [f64; D]) -> [usize; D] {
 /// a density that varies along every axis, so the mass-weighted seeding spreads
 /// tracers over the whole grid instead of concentrating them on one slab.
 fn ramp<const D: usize>(x: [f64; D]) -> f64 {
-    1.0 + x.iter().enumerate().map(|(dd, v)| (dd + 1) as f64 * v).sum::<f64>()
+    1.0 + x
+        .iter()
+        .enumerate()
+        .map(|(dd, v)| (dd + 1) as f64 * v)
+        .sum::<f64>()
 }
 
 #[test]
@@ -67,11 +72,7 @@ fn a_seeded_tracer_in_2d_is_addressed_to_the_cell_it_sits_in() {
         .timestepping(Timestepping::Euler)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|x| Prim {
-            rho: ramp(x),
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|x| Prim::adiabatic(Density(ramp(x)), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build();
     let _k = Kern2::new(GAMMA, 0.4, &sim.geom.allocated);
 
@@ -129,10 +130,12 @@ fn a_seeded_tracer_in_3d_is_addressed_to_the_cell_it_sits_in() {
         .timestepping(Timestepping::Euler)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|x| Prim {
-            rho: ramp(x),
-            vel: Tensor::new([0.0, 0.0, 0.0]),
-            pre: 1.0,
+        .set_initial(|x| {
+            Prim::adiabatic(
+                Density(ramp(x)),
+                Tensor::new([0.0, 0.0, 0.0]),
+                Pressure(1.0),
+            )
         })
         .build();
     let _k = Kern3::new(GAMMA, 0.4, &sim.geom.allocated);

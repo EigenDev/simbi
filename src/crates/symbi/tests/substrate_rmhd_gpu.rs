@@ -22,6 +22,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
@@ -51,17 +52,19 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
     .boundaries(Boundaries::uniform(BoundaryType::Periodic))
     .allocate()
     .expect("sim construction failed")
-    .set_initial(|[x, y, z]| MhdPrim {
-        hydro: Prim {
-            rho: 1.0 + amp * (2.0 * pi * x).sin(),
-            vel: Tensor::new([
-                0.1 * (2.0 * pi * y).cos(),
-                0.1 * (2.0 * pi * z).sin(),
-                0.05 * (2.0 * pi * x).cos(),
-            ]),
-            pre: 1.0 + amp * (2.0 * pi * y).sin(),
-        },
-        mag: Tensor::new(B0),
+    .set_initial(|[x, y, z]| {
+        MhdPrim::new(
+            Prim::adiabatic(
+                Density(1.0 + amp * (2.0 * pi * x).sin()),
+                Tensor::new([
+                    0.1 * (2.0 * pi * y).cos(),
+                    0.1 * (2.0 * pi * z).sin(),
+                    0.05 * (2.0 * pi * x).cos(),
+                ]),
+                Pressure(1.0 + amp * (2.0 * pi * y).sin()),
+            ),
+            Tensor::new(B0),
+        )
     })
     // uniform staggered B on each face (div-free, trivially staggered) — the CT path reads bface.
     .seed_faces_uniform(B0)

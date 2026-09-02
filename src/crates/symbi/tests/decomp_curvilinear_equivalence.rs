@@ -33,6 +33,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::{AxisMap, Cylindrical, Spherical};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory, with_device};
 
@@ -149,11 +150,11 @@ macro_rules! curvilinear_harness {
                         // x[0] is the physical radius of this cell (origin + i*dr), identical
                         // for the monolithic grid and the tile that owns the cell.
                         let b = pulse(x[0]);
-                        Prim {
-                            rho: 1.0 + b,
-                            vel: Tensor::new([0.0, 0.0]),
-                            pre: 1.0 + b,
-                        }
+                        Prim::adiabatic(
+                            Density(1.0 + b),
+                            Tensor::new([0.0, 0.0]),
+                            Pressure(1.0 + b),
+                        )
                     })
                     .build();
                 let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
@@ -249,8 +250,8 @@ macro_rules! curvilinear_harness {
             // density grids agree to round-off -- the whole point on a curvilinear chart, where
             // each tile carries its own r-range and metric.
             pub fn assert_matches(counts: [usize; 2], ts: Timestepping) {
-                let partition = Partition::uniform([NR, NT], counts)
-                    .expect("even tile counts divide the grid");
+                let partition =
+                    Partition::uniform([NR, NT], counts).expect("even tile counts divide the grid");
                 assert_matches_partition(&partition, ts);
             }
 
@@ -438,11 +439,11 @@ mod swirl {
             .set_initial(|x| {
                 let b = pulse(x[0]);
                 // vel = (v_r, v_phi, v_z); the swirl rides slot 1.
-                Prim {
-                    rho: 1.0 + b,
-                    vel: Tensor::new([0.0, vphi(x[0]), 0.0]),
-                    pre: 1.0 + b,
-                }
+                Prim::adiabatic(
+                    Density(1.0 + b),
+                    Tensor::new([0.0, vphi(x[0]), 0.0]),
+                    Pressure(1.0 + b),
+                )
             })
             .build();
         let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);

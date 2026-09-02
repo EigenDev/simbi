@@ -15,12 +15,13 @@
 // =============================================================================
 
 use std::sync::atomic::{AtomicU32, Ordering};
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::prelude::Solver;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::refinement::Hierarchy;
-use symbi::sim::state::*;
 use symbi::sim::state::FieldStore;
+use symbi::sim::state::*;
 use symbi::sim::substrate_seam::KernelSet;
 use symbi_algebra::Tensor;
 use symbi_discretize::Recon;
@@ -70,13 +71,10 @@ impl KernelSet<3, 3, HostMemory, f64> for PanicOnThirdStage {
     }
 }
 
-fn build() -> Hierarchy<Newtonian, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, PanicOnThirdStage>
-{
-    let uniform = |_x: [f64; 3]| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0; 3]),
-        pre: 1.0,
-    };
+fn build()
+-> Hierarchy<Newtonian, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, PanicOnThirdStage> {
+    let uniform =
+        |_x: [f64; 3]| Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(1.0));
     let dx = 1.0 / N as f64;
     let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N, N, N])

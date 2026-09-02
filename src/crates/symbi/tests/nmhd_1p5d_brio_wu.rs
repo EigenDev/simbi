@@ -25,6 +25,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
 use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 use symbi_hydro::state::{Cons, Prim};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -53,14 +54,10 @@ fn make_sim() -> Sim {
             } else {
                 (0.125, 0.1, -1.0)
             };
-            MhdPrim {
-                hydro: Prim {
-                    rho,
-                    vel: Tensor::new([0.0, 0.0, 0.0]),
-                    pre: p,
-                },
-                mag: Tensor::new([BX, by, 0.0]),
-            }
+            MhdPrim::new(
+                Prim::adiabatic(Density(rho), Tensor::new([0.0, 0.0, 0.0]), Pressure(p)),
+                Tensor::new([BX, by, 0.0]),
+            )
         })
         .seed_faces_uniform([BX])
         .build()
@@ -69,25 +66,24 @@ fn make_sim() -> Sim {
 fn recover(sim: &Sim, c: [isize; 1]) -> (f64, f64) {
     let mhd = sim.fields.mhd.as_ref().unwrap();
     let cnrg = sim.fields.cons.nrg_field().unwrap();
-    let cons = MhdCons::<f64, 3> {
-        hydro: Cons {
-            chi: Default::default(),
-            den: *sim.fields.cons.den.view().at(c),
-            mom: Tensor::new([
+    let cons = MhdCons::<f64, 3>::new(
+        Cons::adiabatic(
+            Density(*sim.fields.cons.den.view().at(c)),
+            Tensor::new([
                 *sim.fields.cons.mom[0].view().at(c),
                 *sim.fields.cons.mom[1].view().at(c),
                 *sim.fields.cons.mom[2].view().at(c),
             ]),
-            nrg: *cnrg.view().at(c),
-        },
-        mag: Tensor::new([
+            EnergyDensity(*cnrg.view().at(c)),
+        ),
+        Tensor::new([
             *mhd.bcell[0].view().at(c),
             *mhd.bcell[1].view().at(c),
             *mhd.bcell[2].view().at(c),
         ]),
-    };
+    );
     let prim = nmhd_recover(&IdealGas { gamma: GAMMA }, &cons);
-    (prim.rho, prim.pre)
+    (prim.rho(), prim.pre())
 }
 
 #[test]

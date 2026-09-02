@@ -18,6 +18,7 @@
 
 use std::f64::consts::PI;
 use std::sync::atomic::Ordering;
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet3D;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
@@ -83,23 +84,14 @@ fn fill_ot(sim: &Sim) {
         let vy = V0 * (2.0 * PI * x).sin();
         let bx_c = -B0 * (2.0 * PI * y).sin();
         let by_c = B0 * (4.0 * PI * x).sin();
-        let prim = MhdPrim {
-            hydro: Prim {
-                rho: rho0,
-                vel: Tensor::new([vx, vy, 0.0]),
-                pre: p0,
-            },
-            mag: Tensor::new([bx_c, by_c, 0.0]),
-        };
+        let prim = MhdPrim::new(
+            Prim::adiabatic(Density(rho0), Tensor::new([vx, vy, 0.0]), Pressure(p0)),
+            Tensor::new([bx_c, by_c, 0.0]),
+        );
         let cons = sim.physics.regime.to_conserved(&sim.physics.eos, &prim);
         sim.fields.cons.scatter(
             c,
-            Cons {
-                chi: Default::default(),
-                den: cons.den,
-                mom: cons.mom,
-                nrg: cons.nrg,
-            },
+            Cons::adiabatic(Density(cons.den()), *cons.mom(), EnergyDensity(cons.nrg())),
         );
         mhd.bcell[0].view_mut().set(c, bx_c);
         mhd.bcell[1].view_mut().set(c, by_c);

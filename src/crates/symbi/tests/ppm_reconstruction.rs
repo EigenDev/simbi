@@ -20,6 +20,7 @@ use symbi_discretize::Recon;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -42,17 +43,9 @@ fn sod_sim(ng: usize) -> Sim1 {
         .expect("sim construction failed")
         .set_initial(|[x]| {
             if x < 0.5 {
-                Prim {
-                    rho: 1.0,
-                    vel: Tensor::new([0.0]),
-                    pre: 1.0,
-                }
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0))
             } else {
-                Prim {
-                    rho: 0.125,
-                    vel: Tensor::new([0.0]),
-                    pre: 0.1,
-                }
+                Prim::adiabatic(Density(0.125), Tensor::new([0.0]), Pressure(0.1))
             }
         })
         .build()
@@ -128,17 +121,9 @@ fn ppm_refuses_a_refined_hierarchy() {
     let mut hier = Hierarchy::with_refinement(sim, ck, &regions, ProlongOrder::Ppm, kern).unwrap();
     hier.levels[1].state.seed_cells(|[x]| {
         if x < 0.5 {
-            Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0]),
-                pre: 1.0,
-            }
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(1.0))
         } else {
-            Prim {
-                rho: 0.125,
-                vel: Tensor::new([0.0]),
-                pre: 0.1,
-            }
+            Prim::adiabatic(Density(0.125), Tensor::new([0.0]), Pressure(0.1))
         }
     });
     hier.evolve(0.01).unwrap();
@@ -163,10 +148,12 @@ fn ppm_square_wave_admits_no_new_extrema() {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|[x]| Prim {
-            rho: if (0.25..0.75).contains(&x) { 2.0 } else { 1.0 },
-            vel: Tensor::new([1.0]),
-            pre: 1.0,
+        .set_initial(|[x]| {
+            Prim::adiabatic(
+                Density(if (0.25..0.75).contains(&x) { 2.0 } else { 1.0 }),
+                Tensor::new([1.0]),
+                Pressure(1.0),
+            )
         })
         .build();
     let sub =
@@ -207,17 +194,9 @@ fn ppm_strong_shock_stays_inside_the_wave_fan_band() {
         .expect("sim construction failed")
         .set_initial(|[x]| {
             if x < 0.5 {
-                Prim {
-                    rho: 1.0,
-                    vel: Tensor::new([0.0]),
-                    pre: 100.0,
-                }
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0]), Pressure(100.0))
             } else {
-                Prim {
-                    rho: 0.125,
-                    vel: Tensor::new([0.0]),
-                    pre: 0.01,
-                }
+                Prim::adiabatic(Density(0.125), Tensor::new([0.0]), Pressure(0.01))
             }
         })
         .build();
@@ -294,11 +273,7 @@ fn sealed_wall_infall_probe(
         .timestepping(ts)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 0.6, // cs = 1 at gamma = 5/3
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(0.6))) // cs = 1 at gamma = 5/3
         .build()
         .with_bodies(BodyCollection::new().add(if walled {
             // a black-hole-kind body carries the mask radius the penalize step keys on;

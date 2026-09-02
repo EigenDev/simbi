@@ -41,6 +41,7 @@ use symbi::sim::state::*;
 use symbi_geometry::{AxisMap, Cartesian, Metric, Spherical};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -95,11 +96,11 @@ impl Grading {
 }
 
 fn uniform_state(_x: [f64; 1]) -> Prim<f64, 1> {
-    Prim {
-        rho: RHO0,
-        vel: symbi_algebra::Tensor::new([0.0]),
-        pre: PRE0,
-    }
+    Prim::adiabatic(
+        Density(RHO0),
+        symbi_algebra::Tensor::new([0.0]),
+        Pressure(PRE0),
+    )
 }
 
 /// the same 1d probe on whichever chart is passed; `coords` is the only thing that differs

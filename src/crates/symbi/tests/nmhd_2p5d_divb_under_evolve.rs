@@ -18,6 +18,7 @@
 // =============================================================================
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve_with_callback;
@@ -66,14 +67,7 @@ fn make_sim() -> Sim {
                 B0 * (4.0 * PI * x).sin(),
                 BZ0 * (2.0 * PI * x).cos(),
             ]);
-            MhdPrim {
-                hydro: Prim {
-                    rho: rho0,
-                    vel,
-                    pre: p0,
-                },
-                mag,
-            }
+            MhdPrim::new(Prim::adiabatic(Density(rho0), vel, Pressure(p0)), mag)
         })
         .seed_faces(|axis, [x, y]| match axis {
             0 => -B0 * (2.0 * PI * y).sin(),
@@ -177,33 +171,32 @@ fn nmhd_2p5d_orszag_tang_preserves_divb_evolves_bz() {
     let mhd = sim.fields.mhd.as_ref().expect("mhd");
     for c in sim.geom.interior.iter() {
         let cnrg = sim.fields.cons.nrg_field().expect("cons.nrg");
-        let cons = symbi_hydro::mhd_state::MhdCons::<f64, 3> {
-            hydro: Cons {
-                chi: Default::default(),
-                den: *sim.fields.cons.den.view().at(c),
-                mom: Tensor::new([
+        let cons = symbi_hydro::mhd_state::MhdCons::<f64, 3>::new(
+            Cons::adiabatic(
+                Density(*sim.fields.cons.den.view().at(c)),
+                Tensor::new([
                     *sim.fields.cons.mom[0].view().at(c),
                     *sim.fields.cons.mom[1].view().at(c),
                     *sim.fields.cons.mom[2].view().at(c),
                 ]),
-                nrg: *cnrg.view().at(c),
-            },
-            mag: Tensor::new([
+                EnergyDensity(*cnrg.view().at(c)),
+            ),
+            Tensor::new([
                 *mhd.bcell[0].view().at(c),
                 *mhd.bcell[1].view().at(c),
                 *mhd.bcell[2].view().at(c),
             ]),
-        };
+        );
         let prim = nmhd_recover(&eos, &cons);
         assert!(
-            prim.rho.is_finite() && prim.rho > 0.0,
+            prim.rho().is_finite() && prim.rho() > 0.0,
             "cell {c:?}: rho = {}",
-            prim.rho
+            prim.rho()
         );
         assert!(
-            prim.pre.is_finite() && prim.pre > 0.0,
+            prim.pre().is_finite() && prim.pre() > 0.0,
             "cell {c:?}: p = {}",
-            prim.pre
+            prim.pre()
         );
     }
 

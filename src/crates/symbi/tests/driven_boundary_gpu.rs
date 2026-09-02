@@ -16,12 +16,13 @@ use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
-use symbi_hydro::eos::IdealGas;
-use symbi_source_compile::expr_bridge::build_boundary_dag;
-use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::state::Prim;
 use symbi_hydro::NEWTONIAN_SPEC;
+use symbi_hydro::eos::IdealGas;
+use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
+use symbi_hydro::state::Prim;
 use symbi_source_compile::SourceConfig;
+use symbi_source_compile::expr_bridge::build_boundary_dag;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 
 type DevSim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CudaSpace, UnifiedMemory>;
@@ -38,11 +39,7 @@ fn driven_inflow_prescribes_ghost_state_on_gpu() {
         .boundaries(boundaries)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 1.0,
-    });
+    sim.seed_cells(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)));
 
     let json = r#"{
         "kind": "dirichlet", "dim": 2, "outputs": [0, 1, 2, 3], "params": [],

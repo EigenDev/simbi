@@ -19,11 +19,12 @@ use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_amr::refinement::Hierarchy;
 use symbi_geometry::Spherical;
-use symbi_source_compile::CensusConfig;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::census::{CensusEvaluator, RegisteredCensus};
+use symbi_source_compile::CensusConfig;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim = SimStateGeneric<Newtonian, 1, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -61,10 +62,12 @@ fn run(interval: Option<f64>) -> (usize, u64, Vec<f64>) {
         .cfl(0.4)
         .allocate()
         .expect("sim")
-        .set_initial(|x| Prim {
-            rho: 1.0 + 0.2 * x[0].sin(),
-            vel: Tensor::new([0.0]),
-            pre: 0.5,
+        .set_initial(|x| {
+            Prim::adiabatic(
+                Density(1.0 + 0.2 * x[0].sin()),
+                Tensor::new([0.0]),
+                Pressure(0.5),
+            )
         })
         .build();
     sim.store.censuses.push(RegisteredCensus::new(

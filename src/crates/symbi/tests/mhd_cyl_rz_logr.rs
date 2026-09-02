@@ -25,6 +25,7 @@ use symbi_geometry::{AxisMap, Cylindrical};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
 use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
+use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 use symbi_hydro::state::{Cons, Prim};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -71,14 +72,10 @@ fn make_sim() -> Sim {
             // v = 0; a smooth radial pressure bump drives a radial flow through the log cells.
             // B = (B_r, B_phi, B_z) = (0, 0, B0): uniform vertical field, div-free.
             let pre = 1.0 + 0.5 * (-((r - 3.0) / 0.8).powi(2)).exp();
-            MhdPrim {
-                hydro: Prim {
-                    rho: 1.0,
-                    vel: Tensor::new([0.0, 0.0, 0.0]),
-                    pre,
-                },
-                mag: Tensor::new([0.0, 0.0, B0]),
-            }
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(pre)),
+                Tensor::new([0.0, 0.0, B0]),
+            )
         })
         // staggered faces: B_r = 0 on the r-faces (bface[0]), B_z = B0 on the z-faces (bface[1]).
         .seed_faces_uniform([0.0, B0])
@@ -110,25 +107,24 @@ fn max_divb_and_b(sim: &Sim, dz: f64) -> (f64, f64) {
 fn recover(sim: &Sim, c: [isize; 2]) -> (f64, f64) {
     let mhd = sim.fields.mhd.as_ref().unwrap();
     let cnrg = sim.fields.cons.nrg_field().unwrap();
-    let cons = MhdCons::<f64, 3> {
-        hydro: Cons {
-            den: *sim.fields.cons.den.view().at(c),
-            mom: Tensor::new([
+    let cons = MhdCons::<f64, 3>::new(
+        Cons::adiabatic(
+            Density(*sim.fields.cons.den.view().at(c)),
+            Tensor::new([
                 *sim.fields.cons.mom[0].view().at(c),
                 *sim.fields.cons.mom[1].view().at(c),
                 *sim.fields.cons.mom[2].view().at(c),
             ]),
-            nrg: *cnrg.view().at(c),
-            chi: Default::default(),
-        },
-        mag: Tensor::new([
+            EnergyDensity(*cnrg.view().at(c)),
+        ),
+        Tensor::new([
             *mhd.bcell[0].view().at(c),
             *mhd.bcell[1].view().at(c),
             *mhd.bcell[2].view().at(c),
         ]),
-    };
+    );
     let prim = nmhd_recover(&IdealGas { gamma: GAMMA }, &cons);
-    (prim.rho, prim.pre)
+    (prim.rho(), prim.pre())
 }
 
 #[test]

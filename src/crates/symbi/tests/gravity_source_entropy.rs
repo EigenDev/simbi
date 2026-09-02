@@ -39,6 +39,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -70,11 +71,7 @@ fn uniform_medium(with_gravity: bool) -> Sim {
         .cfl(CFL)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim {
-            rho: RHO0,
-            vel: Tensor::new([0.0]),
-            pre: P0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(RHO0), Tensor::new([0.0]), Pressure(P0)))
         .build();
     if with_gravity {
         sim.with_bodies(BodyCollection::new().add(Body::gravitational(
@@ -204,11 +201,11 @@ fn hydrostatic_atmosphere_full(
 ) -> Sim {
     let ic = move |x: [f64; 1]| {
         let rho = hydrostatic_density(x[0] + R_OFFSET, gm);
-        Prim {
-            rho,
-            vel: Tensor::new([0.0]),
-            pre: k0() * rho.powf(GAMMA),
-        }
+        Prim::adiabatic(
+            Density(rho),
+            Tensor::new([0.0]),
+            Pressure(k0() * rho.powf(GAMMA)),
+        )
     };
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([cells])
@@ -289,11 +286,7 @@ fn class_seeded_atmosphere(gm: f64, cells: usize, cfl: f64, ts: Timestepping) ->
         .set_initial(move |x: [f64; 1]| {
             let i = ((x[0] / h - 0.5).round() as usize).min(col.len() - 1);
             let (rho, pre) = col[i];
-            Prim {
-                rho,
-                vel: Tensor::new([0.0]),
-                pre,
-            }
+            Prim::adiabatic(Density(rho), Tensor::new([0.0]), Pressure(pre))
         })
         .build();
     sim.with_bodies(BodyCollection::new().add(Body::gravitational(

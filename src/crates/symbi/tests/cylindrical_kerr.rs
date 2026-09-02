@@ -21,6 +21,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::{KerrKSCylindrical, SchwarzschildKSCylindrical};
 use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -60,11 +61,7 @@ macro_rules! build_run {
             .timestepping(Timestepping::Rk2)
             .allocate()
             .expect("sim")
-            .set_initial(|_| Prim {
-                rho: 1.0,
-                vel: Tensor::new([0.0; 3]),
-                pre: 0.1,
-            })
+            .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(0.1)))
             .build();
         let kern =
             RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, &sim.geom.allocated);

@@ -27,6 +27,7 @@
 // =============================================================================
 
 use std::time::Instant;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi_algebra::Tensor;
 use symbi_aot::{Buf, BufHandle, KernelInvocation, rmhd_wave_speed_map_3d};
@@ -121,14 +122,14 @@ fn main() {
             .enumerate()
             .with_min_len(16)
             .for_each(|(ii, lam)| {
-                let prim: MhdPrim<f64, 3> = MhdPrim {
-                    hydro: Prim {
-                        rho: rho[ii],
-                        vel: Tensor::new([v0[ii], v1[ii], v2[ii]]),
-                        pre: pre[ii],
-                    },
-                    mag: Tensor::new([b0[ii], b1[ii], b2[ii]]),
-                };
+                let prim: MhdPrim<f64, 3> = MhdPrim::new(
+                    Prim::adiabatic(
+                        Density(rho[ii]),
+                        Tensor::new([v0[ii], v1[ii], v2[ii]]),
+                        Pressure(pre[ii]),
+                    ),
+                    Tensor::new([b0[ii], b1[ii], b2[ii]]),
+                );
                 let mut lambda = 0.0_f64;
                 for dd in 0..3 {
                     let nhat = Tensor::<f64, 3>::unit(dd);

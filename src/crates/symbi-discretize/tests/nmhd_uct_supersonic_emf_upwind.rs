@@ -27,8 +27,9 @@
 // =============================================================================
 
 mod harness;
-use symbi_algebra::FaceNormal;
 use harness::KernelRun;
+use symbi_algebra::FaceNormal;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi_algebra::Tensor;
 use symbi_discretize::{nmhd_edge_emf_uct_hlld_gv, rmhd_ct_curl_2d_dir_gv};
@@ -194,14 +195,14 @@ impl Sim {
         for i in NG..NG + NX {
             for j in NG..NG + NY {
                 let (bxc, byc) = self.bcell(i, j);
-                let p = MhdPrim {
-                    hydro: Prim {
-                        rho: RHO0,
-                        vel: Tensor::new([self.vx, self.vy, 0.0]),
-                        pre: PRE0,
-                    },
-                    mag: Tensor::new([bxc, byc, 0.0]),
-                };
+                let p = MhdPrim::new(
+                    Prim::adiabatic(
+                        Density(RHO0),
+                        Tensor::new([self.vx, self.vy, 0.0]),
+                        Pressure(PRE0),
+                    ),
+                    Tensor::new([bxc, byc, 0.0]),
+                );
                 for ax in 0..2 {
                     let (sl, sr) = wave_speeds_axis(&p, ax);
                     s = s.max(sl.abs().max(sr.abs()));
@@ -277,14 +278,14 @@ fn build_emf_inputs(sim: &Sim) -> EmfInputs {
             e.bp1[f] = bxc;
             e.bp2[f] = byc;
             e.bout[f] = 0.0;
-            let p = MhdPrim {
-                hydro: Prim {
-                    rho: RHO0,
-                    vel: Tensor::new([sim.vx, sim.vy, 0.0]),
-                    pre: PRE0,
-                },
-                mag: Tensor::new([bxc, byc, 0.0]),
-            };
+            let p = MhdPrim::new(
+                Prim::adiabatic(
+                    Density(RHO0),
+                    Tensor::new([sim.vx, sim.vy, 0.0]),
+                    Pressure(PRE0),
+                ),
+                Tensor::new([bxc, byc, 0.0]),
+            );
             let (sl1, sr1) = wave_speeds_axis(&p, 0);
             let (sl2, sr2) = wave_speeds_axis(&p, 1);
             e.wsl1[f] = sl1;

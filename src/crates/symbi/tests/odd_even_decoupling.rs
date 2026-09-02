@@ -33,6 +33,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -83,11 +84,7 @@ fn shocked_duct() -> Sim {
         .expect("sim construction failed")
         .set_initial_indexed(|idx, x| {
             if x[0] < 0.1 {
-                Prim {
-                    rho: rho_p,
-                    vel: Tensor::new([u_p, 0.0]),
-                    pre: p_p,
-                }
+                Prim::adiabatic(Density(rho_p), Tensor::new([u_p, 0.0]), Pressure(p_p))
             } else {
                 // the ambient the shock runs into, carrying the row-alternating seed
                 let zig = if idx[1] % 2 == 0 {
@@ -95,11 +92,7 @@ fn shocked_duct() -> Sim {
                 } else {
                     1.0 - SEED
                 };
-                Prim {
-                    rho: zig,
-                    vel: Tensor::new([0.0, 0.0]),
-                    pre: 1.0,
-                }
+                Prim::adiabatic(Density(zig), Tensor::new([0.0, 0.0]), Pressure(1.0))
             }
         })
         .build()

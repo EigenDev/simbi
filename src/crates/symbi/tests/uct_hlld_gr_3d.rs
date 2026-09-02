@@ -18,6 +18,7 @@
 // =============================================================================
 
 use std::f64::consts::PI;
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::regimes::substrate_kernels::Solver;
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet3D;
@@ -96,18 +97,18 @@ where
 // edge EMF carries nonzero curved-metric physics.
 fn swirl_prim(x: f64, y: f64, z: f64) -> MhdPrim<f64, 3> {
     let s = 2.0 * PI;
-    MhdPrim {
-        hydro: Prim {
-            rho: 1.0,
-            vel: Tensor::new([
+    MhdPrim::new(
+        Prim::adiabatic(
+            Density(1.0),
+            Tensor::new([
                 0.1 * (s * y).sin(),
                 0.1 * (s * z).sin(),
                 0.1 * (s * x).sin(),
             ]),
-            pre: 0.5,
-        },
-        mag: Tensor::new([B0, 0.0, 0.0]),
-    }
+            Pressure(0.5),
+        ),
+        Tensor::new([B0, 0.0, 0.0]),
+    )
 }
 
 macro_rules! gr_divb_gate {

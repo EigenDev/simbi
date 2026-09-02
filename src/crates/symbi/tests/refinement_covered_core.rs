@@ -19,6 +19,7 @@ use symbi_discretize::Recon;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, SurfaceSpec};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -34,11 +35,7 @@ type Sim = SimState<Newtonian, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory
 type Kset = AdiabaticSubstrateKernelSet<HostMemory, f64, 3>;
 
 fn uniform(_: [f64; 3]) -> Prim<f64, 3> {
-    Prim {
-        rho: 1.0,
-        vel: Tensor::zeros(),
-        pre: 0.6,
-    }
+    Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(0.6))
 }
 
 #[test]

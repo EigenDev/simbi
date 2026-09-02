@@ -22,6 +22,7 @@
 // =============================================================================
 
 use std::sync::{Arc, Mutex};
+use symbi_hydro::quantity::{Density, Pressure};
 
 use symbi::sim::evolve::{KernelSet, evolve};
 use symbi::sim::refinement::Hierarchy;
@@ -147,11 +148,7 @@ fn tiny_sim(with_chi: bool) -> Sim {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build();
     if with_chi {
         sim.with_passive_scalar().expect("chi alloc")

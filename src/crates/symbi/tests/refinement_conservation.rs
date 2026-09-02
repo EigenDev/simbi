@@ -20,6 +20,7 @@ use symbi::sim::state::*;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -148,11 +149,11 @@ fn sod_1d_two_level_conserves_composite_totals() {
     let dx = 1.0 / n as f64;
     let ic = |x: [f64; 1]| {
         let (rho, pre) = if x[0] < 0.5 { (1.0, 1.0) } else { (0.125, 0.1) };
-        Prim {
-            rho,
-            vel: symbi_algebra::Tensor::new([0.0]),
-            pre,
-        }
+        Prim::adiabatic(
+            Density(rho),
+            symbi_algebra::Tensor::new([0.0]),
+            Pressure(pre),
+        )
     };
     let coarse = Sim::<1>::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([n])
@@ -220,11 +221,11 @@ fn smooth_pulse_two_level_matches_uniform_fine() {
     let dx = 1.0 / n as f64;
     let ic = |x: [f64; 1]| {
         let g = (-((x[0] - 0.5) / 0.06).powi(2)).exp();
-        Prim {
-            rho: 1.0 + 0.01 * g,
-            vel: symbi_algebra::Tensor::new([0.0]),
-            pre: 1.0 + 0.014 * g,
-        }
+        Prim::adiabatic(
+            Density(1.0 + 0.01 * g),
+            symbi_algebra::Tensor::new([0.0]),
+            Pressure(1.0 + 0.014 * g),
+        )
     };
     let t_final = 0.04;
 
@@ -293,11 +294,11 @@ fn blast_3d_two_level_conserves_composite_totals() {
     let ic = |x: [f64; 3]| {
         let r2 = x.iter().map(|&q| (q - 0.5) * (q - 0.5)).sum::<f64>();
         let pre = if r2 < 0.01 { 10.0 } else { 0.1 };
-        Prim {
-            rho: 1.0,
-            vel: symbi_algebra::Tensor::new([0.0; 3]),
-            pre,
-        }
+        Prim::adiabatic(
+            Density(1.0),
+            symbi_algebra::Tensor::new([0.0; 3]),
+            Pressure(pre),
+        )
     };
     let coarse = Sim::<3>::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([n; 3])

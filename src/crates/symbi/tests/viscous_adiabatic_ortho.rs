@@ -31,6 +31,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::CylindricalRPhi;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -78,10 +79,12 @@ fn rigid_null_residual(nr: usize) -> f64 {
         .cfl(CFL)
         .allocate()
         .expect("sim")
-        .set_initial(|x| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, omega * x[0]]),
-            pre: 1.0,
+        .set_initial(|x| {
+            Prim::adiabatic(
+                Density(1.0),
+                Tensor::new([0.0, omega * x[0]]),
+                Pressure(1.0),
+            )
         })
         .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(0.05);
@@ -135,10 +138,8 @@ fn build(vphi: impl Fn(f64) -> f64, with_body: bool) -> Sim {
         .cfl(CFL)
         .allocate()
         .expect("sim")
-        .set_initial(|x| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, vphi(x[0])]),
-            pre: 1.0,
+        .set_initial(|x| {
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, vphi(x[0])]), Pressure(1.0))
         })
         .build();
     if !with_body {
@@ -268,11 +269,7 @@ fn isolation_probe_rigid_null_with_hand_set_prims() {
         .cfl(CFL)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
         .build();
     let ilo = sim.geom.interior.spaces[0].lo;
     let pre = sim.fields.prim.pre_field().expect("pre");

@@ -23,6 +23,7 @@ use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -73,10 +74,12 @@ fn covered_coarse_cells_are_the_restriction_adiabatic() {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|[x, y]: [f64; 2]| Prim {
-            rho: bump(x, y),
-            vel: Tensor::new(rot(x, y)),
-            pre: bump(x, y),
+        .set_initial(|[x, y]: [f64; 2]| {
+            Prim::adiabatic(
+                Density(bump(x, y)),
+                Tensor::new(rot(x, y)),
+                Pressure(bump(x, y)),
+            )
         })
         .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
@@ -135,10 +138,8 @@ fn covered_coarse_cells_are_the_restriction_iso() {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|[x, y]: [f64; 2]| PrimG::<f64, 2, IsoModel> {
-            rho: bump(x, y),
-            vel: Tensor::new(rot(x, y)),
-            pre: Default::default(),
+        .set_initial(|[x, y]: [f64; 2]| {
+            PrimG::<f64, 2, IsoModel>::isothermal(Density(bump(x, y)), Tensor::new(rot(x, y)))
         })
         .build();
     let ck = IKset::new(cs, CFL, &coarse.geom.allocated);

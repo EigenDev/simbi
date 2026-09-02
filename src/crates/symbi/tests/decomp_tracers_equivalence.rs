@@ -29,6 +29,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory, with_device};
 
@@ -71,10 +72,12 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
         .timestepping(ts)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|x| Prim {
-            rho: 1.0 + blob(x),
-            vel: Tensor::new([DRIFT, DRIFT]),
-            pre: 1.0 + blob(x),
+        .set_initial(|x| {
+            Prim::adiabatic(
+                Density(1.0 + blob(x)),
+                Tensor::new([DRIFT, DRIFT]),
+                Pressure(1.0 + blob(x)),
+            )
         })
         .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
@@ -231,7 +234,8 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         .filter(|(a, b)| a != b)
         .count();
     assert_eq!(
-        differing, 0,
+        differing,
+        0,
         "decomposition {counts:?} ({ts:?}) changed the density field in {differing} of {} \
          cells; the tracer comparison below assumes an identical fluid state",
         N * N

@@ -25,6 +25,7 @@ use symbi::sim::state::*;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -99,11 +100,7 @@ fn build(balanced: bool) -> Hier {
         } else {
             pre_parent
         };
-        Prim {
-            rho,
-            vel: symbi_algebra::Tensor::zeros(),
-            pre,
-        }
+        Prim::adiabatic(Density(rho), symbi_algebra::Tensor::zeros(), Pressure(pre))
     };
     let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N, N, N])
@@ -222,11 +219,7 @@ fn a_deep_balanced_ladder_keeps_every_seam_region_inside_its_lattice() {
         let col = class_line(ROOT, h, x[1], x[2]);
         let j = ((x[0] / h) as usize).min(ROOT - 1);
         let (rho, pre) = col[j];
-        Prim {
-            rho,
-            vel: symbi_algebra::Tensor::zeros(),
-            pre,
-        }
+        Prim::adiabatic(Density(rho), symbi_algebra::Tensor::zeros(), Pressure(pre))
     };
     // telescoping boxes: each rung halves the previous one about the domain centre,
     // the same ladder the production config builds.

@@ -18,6 +18,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -50,11 +51,7 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
         .expect("sim construction failed")
         .set_initial(|x| {
             let b = bump(x[0]);
-            Prim {
-                rho: 1.0 + b,
-                vel: Tensor::new([0.0; 2]),
-                pre: 1.0 + b,
-            }
+            Prim::adiabatic(Density(1.0 + b), Tensor::new([0.0; 2]), Pressure(1.0 + b))
         })
         .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
@@ -147,7 +144,10 @@ fn a_ragged_partition_reproduces_the_monolithic_run_exactly() {
 
     let mut worst = 0.0f64;
     for (i, (a, b)) in decomposed.iter().zip(reference.iter()).enumerate() {
-        assert!(a.is_finite(), "uncovered global cell {i}: the scatter missed it");
+        assert!(
+            a.is_finite(),
+            "uncovered global cell {i}: the scatter missed it"
+        );
         worst = worst.max((a - b).abs());
         assert!(
             a.to_bits() == b.to_bits(),

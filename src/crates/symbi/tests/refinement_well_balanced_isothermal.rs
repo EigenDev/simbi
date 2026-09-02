@@ -25,6 +25,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Isothermal;
 use symbi_hydro::isothermal::IsoNewtonian;
+use symbi_hydro::quantity::Density;
 use symbi_hydro::state::PrimG;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -49,11 +50,10 @@ fn isothermal_atmosphere(x: [f64; 1]) -> PrimG<f64, 1, IsoModel> {
     let r = x[0] + G_OFFSET;
     let phi = -GM / r;
     let phi_reference = -GM / (1.0 + G_OFFSET);
-    PrimG {
-        rho: ((phi_reference - phi) / (CS * CS)).exp(),
-        vel: Tensor::new([0.0]),
-        pre: Default::default(),
-    }
+    PrimG::<f64, 1, IsoModel>::isothermal(
+        Density(((phi_reference - phi) / (CS * CS)).exp()),
+        Tensor::new([0.0]),
+    )
 }
 
 fn nested(levels: usize) -> Vec<RefinementRegion<1>> {
@@ -130,7 +130,7 @@ fn composite_mass(hier: &Hier) -> f64 {
 fn an_energy_free_regime_holds_its_declared_target() {
     // non-vacuity of the setup itself: an isothermal atmosphere shallow enough to be nearly
     // uniform would be interpolated exactly by the transfer and would exercise nothing.
-    let contrast = isothermal_atmosphere([0.0]).rho / isothermal_atmosphere([1.0]).rho;
+    let contrast = isothermal_atmosphere([0.0]).rho() / isothermal_atmosphere([1.0]).rho();
     println!("\nisothermal atmosphere, density contrast across the domain: {contrast:.2}x");
     assert!(
         contrast > 5.0,

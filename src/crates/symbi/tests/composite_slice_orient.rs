@@ -16,6 +16,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -36,11 +37,7 @@ fn composite_reads_fine_data_through_the_y_orientation() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0; 3]),
-            pre: 1.0,
-        })
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(1.0)))
         .build();
     let ck = Kset::new(GAMMA, 0.3, &coarse.geom.allocated);
     // the refined box covers the y mid-plane in its center octant.

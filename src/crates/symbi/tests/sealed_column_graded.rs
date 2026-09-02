@@ -38,6 +38,7 @@ use symbi::sim::state::*;
 use symbi_geometry::AxisMap;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -133,11 +134,7 @@ macro_rules! sealed_graded_gate {
                                 }
                             }
                             let (rho, pre) = col[best];
-                            Prim {
-                                rho,
-                                vel: symbi_algebra::Tensor::new([0.0]),
-                                pre,
-                            }
+                            Prim::adiabatic(Density(rho), symbi_algebra::Tensor::new([0.0]), Pressure(pre))
                         }
                     })
                     .build();

@@ -27,6 +27,7 @@ use symbi_geometry::Cylindrical;
 use symbi_grid::Field;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
@@ -84,11 +85,7 @@ fn build_disk<S: ExecutionSpace, Mem: MemorySpace>()
         let pre = 1.0 + 0.3 * g;
         let vphi = (1.0_f64 / r).sqrt() * (1.0 + 0.05 * g); // sheared near-keplerian
         let vr = 0.03 * g;
-        Prim {
-            rho,
-            vel: Tensor::new([vr, vphi]),
-            pre,
-        }
+        Prim::adiabatic(Density(rho), Tensor::new([vr, vphi]), Pressure(pre))
     })
     .build()
 }
