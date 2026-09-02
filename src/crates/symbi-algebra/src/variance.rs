@@ -61,6 +61,40 @@ pub enum Cart {}
 // indexed vector: tensor with compile-time variance tag
 // ============================================================
 
+/// a tensor carrying its (variance x frame) marker. the four inhabited
+/// markers keep coordinate-frame variance and the two Euclidean frames apart
+/// at compile time:
+///
+/// cross-variance arithmetic is rejected —
+///
+/// ```compile_fail
+/// use symbi_algebra::{Contravariant, Covariant, vec3};
+/// let v = Contravariant::<f64, 3>::new(vec3(1.0, 0.0, 0.0));
+/// let w = Covariant::<f64, 3>::new(vec3(1.0, 2.0, 3.0));
+/// let _ = v + w; // Upper + Lower has no impl
+/// ```
+///
+/// as is mixing the orthonormal and embedded Euclidean frames —
+///
+/// ```compile_fail
+/// use symbi_algebra::{Embedded, Physical, vec3};
+/// let a = Physical::<f64, 3>::new(vec3(1.0, 0.0, 0.0));
+/// let b = Embedded::<f64, 3>::new(vec3(0.0, 1.0, 0.0));
+/// let _ = a + b; // Ortho + Cart has no impl
+/// ```
+///
+/// and the natural pairing is variance-directed: contracting two
+/// contravariant vectors needs a metric to lower one side first —
+///
+/// ```compile_fail
+/// use symbi_algebra::{Contravariant, vec3};
+/// let v = Contravariant::<f64, 3>::new(vec3(1.0, 0.0, 0.0));
+/// let u = Contravariant::<f64, 3>::new(vec3(0.0, 1.0, 0.0));
+/// let _ = v.contract(&u); // contract takes &Covariant
+/// ```
+///
+/// a frame claim is explicit: a bare `Tensor` enters a marker through
+/// `Indexed::new` / `from_array` at the site that owns the claim.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(transparent)]
 pub struct Indexed<V, S, const D: usize> {

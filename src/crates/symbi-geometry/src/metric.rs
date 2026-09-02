@@ -197,6 +197,30 @@ pub trait Metric<S: Scalar, const D: usize> {
     /// non-cartesian (the rotation by the orthonormal basis directions). typed so the review's
     /// `vector_to_cartesian(lower(v))` is now a compile error — `lower` yields `Covariant`
     /// (coordinate basis), this wants `Physical` (orthonormal).
+    /// the frame morphisms are typed one-way doors; a coordinate-frame value
+    /// cannot enter the Euclidean-frame door without first passing through
+    /// `to_physical`:
+    ///
+    /// ```compile_fail
+    /// use symbi_algebra::{Covariant, Tensor};
+    /// use symbi_carrier::Scalar;
+    /// use symbi_geometry::metric::Metric;
+    /// fn probe<S: Scalar, M: Metric<S, 3>>(m: &M, x: Tensor<S, 3>, w: Covariant<S, 3>) {
+    ///     let _ = m.vector_to_cartesian(x, w); // expects Physical
+    /// }
+    /// ```
+    ///
+    /// and an orthonormal value cannot stand in for the coordinate
+    /// contravariant components a raising/lowering door consumes:
+    ///
+    /// ```compile_fail
+    /// use symbi_algebra::{Physical, Tensor};
+    /// use symbi_carrier::Scalar;
+    /// use symbi_geometry::metric::Metric;
+    /// fn probe<S: Scalar, M: Metric<S, 3>>(m: &M, x: Tensor<S, 3>, v: Physical<S, 3>) {
+    ///     let _ = m.lower(x, &v); // expects &Contravariant
+    /// }
+    /// ```
     fn vector_to_cartesian(&self, x: Tensor<S, D>, v: Physical<S, D>) -> Embedded<S, D>
     where
         Self: DiagonalMetric<S, D>,

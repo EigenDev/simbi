@@ -818,6 +818,33 @@ Success means compiler independence is visible in the crate dependency graph.
 
 ### Phase 5: enforce physical structure
 
+Implementation status: in progress — the category-erasure audit is complete
+and the existing frame/variance laws are pinned by compile-fail doctests
+(`Indexed` in symbi-algebra: cross-variance arithmetic, orthonormal/embedded
+mixing, metric-free double-contravariant contraction; `Metric` in
+symbi-geometry: coordinate values at the Euclidean door, orthonormal values
+at the raising/lowering doors). The audit extends the existing structures —
+`PrimG`/`ConsG`, the `Indexed` frame family, the `Metric` morphisms — and
+honors the recorded interior-stays-bare decision on `ConsG::mom`: frames are
+typed at crossings, and formula interiors remain carrier arithmetic.
+
+| Boundary | Current erased type | Error permitted | Enforced replacement |
+| --- | --- | --- | --- |
+| regime velocity/momentum frame | bare `Tensor<S, D>` in `PrimG::vel` / `ConsG::mom`; orthonormal `V_a` for flat regimes, Valencia contravariant `v^i` for GR, distinguished in prose only | a flat-regime state reaches a GR conversion (or the reverse) with its components silently reinterpreted | regime-level frame witness at the conversion and flux boundaries; interiors stay bare |
+| face normal in `to_flux` / wave speeds | `nhat: &Tensor<S, D>`, unit length and covariant role by convention | a non-unit or wrong-frame vector projects fluxes | `Normalized` covariant normal at the regime flux interface |
+| EOS scalar arguments | positional bare `S`: `sound_speed(rho, pre)`, `pressure(rho, e_int)` — two different second-argument meanings on one trait | swapped or confused arguments compile | `Density` / `Pressure` / `EnergyDensity` newtypes at the `Eos` trait |
+| frame minting | `From<Tensor>` / `From<[S; D]>` on `Indexed` coerce a bare tensor into any frame implicitly | `.into()` claims a frame nobody stated | delete the `From` impls; `Indexed::new` at the claiming site |
+| immersed-body chart bridges | duplicated per-file `[Gv; 3]` cartesian/chart converters in the penalize and immersed builders, outside the `Metric` morphisms | chart-local components pass as cartesian; the two copies drift | one typed bridge over `Physical`/`Embedded` |
+| MHD centering | cell B is `FieldRef::PrimMag`; face B and edge EMF are scratch string keys (`bface_a`, `emf`), centering by naming convention | a face field consumed as a cell field, an EMF as a cell scalar, cross-axis face mixing | `CellCentered` / `FaceCentered` / `EdgeCentered` handles at the CT builder boundaries |
+| recovered-state validity | `C2pResult { value, error }` carries a value even when recovery failed; floors regularize without a phase | `.value` read without consulting `.error` | `Admissible` / `Regularized` phases behind honest constructors |
+| sweep-normal axis | integer axis convention (`vel[axes[d]]`, `dir: usize`) in kernel builders | off-axis component reads compile | typed axis where the centering work already introduces one |
+| `Prim` / `Cons` aliases | second spelling of `PrimG` / `ConsG`, whose energy parameter already defaults | one type under two names (~114 alias sites) | delete the aliases |
+
+Recorded no-action rows: the chart point `x: Tensor<S, D>` (a position/vector
+confusion has no observed site), density versus deposited amount (the source
+bridge already rejects the cell-volume leaf at build time), and coordinate
+versus proper time (naming suffices at the current usage sites).
+
 1. Add semantic types at primitive/conserved and centering boundaries.
 2. Make frame and variance explicit in geometric interfaces.
 3. Add dimensional and interval verification carriers where useful.
