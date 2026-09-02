@@ -77,6 +77,7 @@ fn davis_wave_speeds_reference<S: Scalar, const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::regime::Regime;
     use crate::rhd::Rhd;
@@ -94,7 +95,7 @@ mod tests {
             vel: Tensor::new([0.0]),
             pre: 1.0,
         };
-        let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
+        let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Normalized::axis(0));
         assert!(approx(sl, -sr));
         assert!(sr > 0.0);
         assert!(sr < 1.0); // subluminal
@@ -111,7 +112,7 @@ mod tests {
                     vel: Tensor::new([v]),
                     pre,
                 };
-                let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
+                let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Normalized::axis(0));
                 assert!(sl > -1.0, "sl={} at v={}, p={}", sl, v, pre);
                 assert!(sr < 1.0, "sr={} at v={}, p={}", sr, v, pre);
                 assert!(sl < sr, "sl={} >= sr={} at v={}, p={}", sl, sr, v, pre);
@@ -139,7 +140,7 @@ mod tests {
                         vel: Tensor::new([v]),
                         pre,
                     };
-                    let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
+                    let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Normalized::axis(0));
                     let (ll, lr) = (alpha_sq * sl - beta_r, alpha_sq * sr - beta_r);
                     assert!(
                         ll < 0.0 && lr < 0.0,
@@ -159,7 +160,7 @@ mod tests {
             vel: Tensor::new([0.0]),
             pre: 1.0,
         };
-        let (sl_mb, sr_mb) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
+        let (sl_mb, sr_mb) = Rhd.wave_speeds(&eos, &prim, &Normalized::axis(0));
         // davis formula gives same result at v=0
         let cs_sq: f64 = sound_speed_sq(&eos, 1.0, 1.0);
         let cs = cs_sq.sqrt();
@@ -185,7 +186,7 @@ mod tests {
             vel: Tensor::new([0.9]),
             pre: 1.0,
         };
-        let (sl, sr) = regime.extremal_speeds(&eos, &left, &right, &Tensor::unit(0));
+        let (sl, sr) = regime.extremal_speeds(&eos, &left, &right, &Normalized::axis(0));
         assert!(sl <= 0.0, "sl={} should be <= 0", sl);
         assert!(sr >= 0.0, "sr={} should be >= 0", sr);
     }

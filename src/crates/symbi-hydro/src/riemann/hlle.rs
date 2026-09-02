@@ -6,13 +6,12 @@
 // `extremal_speeds`; HLLE combines them. pure math, GPU-callable (S::branch).
 //
 // usage:
-//   let nhat = Tensor::unit(0);
+//   let nhat = Normalized::axis(0);
 //   let flux = hlle(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
 // =============================================================================
 
 use crate::eos::Eos;
 use crate::regime::Regime;
-use symbi_algebra::Tensor;
 use symbi_carrier::Scalar;
 
 /// HLLE approximate riemann solver. two-wave solver, any regime.
@@ -28,7 +27,7 @@ pub fn hlle<S: Scalar, const D: usize, R: Regime<S, D>>(
     eos: &impl Eos<S>,
     prim_l: &R::Prim,
     prim_r: &R::Prim,
-    nhat: &Tensor<S, D>,
+    nhat: &R::Normal,
     vface: S,
 ) -> R::Cons {
     let (s_l, s_r) = regime.extremal_speeds(eos, prim_l, prim_r, nhat);
@@ -53,7 +52,7 @@ pub fn hlle_with_speeds<S: Scalar, const D: usize, R: Regime<S, D>>(
     eos: &impl Eos<S>,
     prim_l: &R::Prim,
     prim_r: &R::Prim,
-    nhat: &Tensor<S, D>,
+    nhat: &R::Normal,
     vface: S,
     s_l: S,
     s_r: S,
@@ -85,6 +84,7 @@ mod tests {
     use crate::eos::IdealGas;
     use crate::newtonian::Newtonian;
     use crate::state::Prim;
+    use symbi_algebra::{FaceNormal, Normalized, Tensor};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-10 * a.abs().max(b.abs()).max(1.0)
@@ -99,7 +99,7 @@ mod tests {
             vel: Tensor::new([0.5]),
             pre: 1.0,
         };
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let flux = hlle(&regime, &eos, &prim, &prim, &nhat, 0.0);
         let exact = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, exact.den));
@@ -116,7 +116,7 @@ mod tests {
     fn hlle_fan_reduces_to_upwind() {
         let regime = Newtonian;
         let eos = IdealGas { gamma: 1.4 };
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let l = Prim {
             rho: 1.0,
             vel: Tensor::new([3.0]),
@@ -170,7 +170,7 @@ mod tests {
     fn hlle_equals_hlle_with_speeds() {
         let regime = Newtonian;
         let eos = IdealGas { gamma: 1.4 };
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let cases = [
             // (L, R): subsonic contact, left-supersonic, right-supersonic
             ((1.0, 0.2, 1.0), (0.5, -0.3, 0.6)),

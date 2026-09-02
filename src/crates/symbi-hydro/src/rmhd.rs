@@ -24,7 +24,7 @@ use crate::regime::Regime;
 use crate::rhd;
 use crate::spatial_metric::SpatialMetric;
 use crate::state::Cons;
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical, Tensor};
 use symbi_carrier::Scalar;
 
 mod algebra;
@@ -50,6 +50,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     // relativistic: clamp the HLLE fan to include the stationary state.
     const CLAMP_EXTREMAL_TO_ZERO: bool = true;
     type Prim = MhdPrim<S, D>;
+
+    // the solver operates in the locally-flat orthonormal frame, so its
+    // face normal is the physical-frame witness.
+    type Normal = Normalized<Physical<S, D>>;
     type Cons = MhdCons<S, D>;
     type Energy = crate::energy::Adiabatic;
 
@@ -134,7 +138,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+        let nhat = nhat.components();
         let cons = self.to_conserved(eos, prim);
         let metric = SpatialMetric::flat();
         let vn = metric.contract_contra(&prim.vel, nhat);
@@ -161,7 +166,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+        let nhat = nhat.components();
         rmhd_wave_speeds(eos, prim, nhat)
     }
 
@@ -183,6 +189,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::state::Prim;
 
@@ -257,7 +264,7 @@ mod tests {
             },
             mag: Tensor::new([1.0, 0.0, 0.0]),
         };
-        let nhat = Tensor::new([1.0, 0.0, 0.0]);
+        let nhat = Normalized::axis(0);
         let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
         assert!(sl > -1.0, "sl={} superluminal", sl);
         assert!(sr < 1.0, "sr={} superluminal", sr);

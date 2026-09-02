@@ -27,6 +27,7 @@
 // =============================================================================
 
 mod harness;
+use symbi_algebra::FaceNormal;
 use harness::KernelRun;
 
 use symbi_algebra::Tensor;
@@ -111,7 +112,7 @@ fn az_corner(i: usize, j: usize) -> f64 {
 // axis `ax`, via the production host physics at S = f64 (one physics source).
 fn wave_speeds_axis(prim: &MhdPrim<f64, 3>, ax: usize) -> (f64, f64) {
     let eos = IdealGas { gamma: GAMMA };
-    let nhat = Tensor::<f64, 3>::unit(ax);
+    let nhat = symbi_algebra::Normalized::axis(ax);
     NewtonianMhd.wave_speeds(&eos, prim, &nhat)
 }
 

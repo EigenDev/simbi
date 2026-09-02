@@ -20,7 +20,7 @@ use crate::riemann::hlle;
 use crate::rmhd::Rmhd;
 use crate::spatial_metric::SpatialMetric;
 use crate::state::{Cons, ConsG, Prim};
-use symbi_algebra::Tensor;
+use symbi_algebra::{FaceNormal, Normalized, Physical, Tensor};
 use symbi_carrier::{Scalar, Selectable};
 
 /// physical-consistency tolerance for the intermediate-state checks.
@@ -344,7 +344,7 @@ pub fn hlld_rmhd_gr_ortho<S: Scalar, const D: usize>(
     vface: S,
     metric: &SpatialMetric<S, D>,
 ) -> MhdCons<S, D> {
-    let nhat = Tensor::<S, D>::unit(dir);
+    let nhat: Normalized<Physical<S, D>> = Normalized::axis(dir);
     let e = metric.orthonormal_basis(dir);
     let e_t = e.transpose();
     let e_dd = e[(dir, dir)];
@@ -396,7 +396,7 @@ pub fn hlld_rmhd_states_gr_ortho<S: Scalar, const D: usize>(
     dir: usize,
     metric: &SpatialMetric<S, D>,
 ) -> HlldStates<S, D> {
-    let nhat = Tensor::<S, D>::unit(dir);
+    let nhat: Normalized<Physical<S, D>> = Normalized::axis(dir);
     let e = metric.orthonormal_basis(dir);
     let e_t = e.transpose();
     let e_dd = e[(dir, dir)];
@@ -436,13 +436,14 @@ pub fn hlld_rmhd<S: Scalar, const D: usize, R>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &R::Normal,
     vface: S,
     metric: &SpatialMetric<S, D>,
 ) -> MhdCons<S, D>
 where
     R: Regime<S, D, Prim = MhdPrim<S, D>, Cons = MhdCons<S, D>>,
 {
+    let nhc = nhat.components();
     let zero = S::ZERO;
     let one = S::ONE;
     let half = S::HALF;
@@ -470,7 +471,7 @@ where
     let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
     let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
-    let bn = hll_state.mag.dot(nhat); // B.n (contravariant)
+    let bn = hll_state.mag.dot(nhc); // B.n (contravariant)
 
     // r-vectors for prim_l and prim_r (Eq. 12).
     let r_l = u_l * a_l - f_l;
@@ -501,8 +502,8 @@ where
 
     let et_hll = hll_state.nrg + hll_state.den;
     let fet_hll = hll_flux.nrg + hll_flux.den;
-    let mn_hll = hll_state.mom.dot(nhat);
-    let fmn_hll = hll_flux.mom.dot(nhat);
+    let mn_hll = hll_state.mom.dot(nhc);
+    let fmn_hll = hll_flux.mom.dot(nhc);
     let bb_q = et_hll - fmn_hll;
     let cc_q = fet_hll * mn_hll - et_hll * fmn_hll;
     let disc = (bb_q * bb_q - S::FOUR * cc_q).max(zero);
@@ -513,7 +514,7 @@ where
 
     // secant pressure iteration -> converged intermediate state (shared with the UCT-HLLD edge-EMF
     // star-state extraction). `success` is a 0/1 scalar; the flux falls back to HLLE when it is 0.
-    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat, metric);
+    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhc, metric);
     let p_final = conv.p_final;
     let v = conv.v;
     let vc = v.vc;
@@ -524,7 +525,7 @@ where
     let success = conv.success.cmp_gt(half) & dwave_ok;
 
     // pick fast-wave side via the contact-vs-vface test, branchless.
-    let vnc = vc.dot(nhat); // v_c.n (contravariant)
+    let vnc = vc.dot(nhc); // v_c.n (contravariant)
     let on_left = vface.cmp_lt(vnc);
 
     // ---- fast-wave intermediate state (Section 3.1) ----
@@ -536,7 +537,7 @@ where
                      ba: Tensor<S, D>|
      -> (MhdCons<S, D>, MhdCons<S, D>) {
         let vdba = metric.contract_contra(&va, &ba); // v.B (contravariant)
-        let vna = va.dot(nhat); // v.n (contravariant)
+        let vna = va.dot(nhc); // v.n (contravariant)
         let denominator = lc - vna;
         let denominator_ok = denominator
             .abs()
@@ -575,7 +576,7 @@ where
 
     // ---- contact-wave state (Section 3.3) ----
     let vdbc = metric.contract_contra(&vc, &bc); // v_c.B_c (contravariant)
-    let vna_used = S::select(on_left, vv_iso[0].dot(nhat), vv_iso[1].dot(nhat));
+    let vna_used = S::select(on_left, vv_iso[0].dot(nhc), vv_iso[1].dot(nhc));
     // `la - vnc` is analytically zero when bn -> 0 (the alfven waves collapse onto the
     // contact), so this comparison decides on pure roundoff there; it therefore gates
     // exactly one thing, the closed contact wedge, where both arms of the select carry the
@@ -586,7 +587,7 @@ where
         .cmp_gt(S::from_f64(REL_EPS) * la.abs().max(vnc.abs()));
     let inv_la_vnc = one / S::select(contact_ok, contact_denominator, one);
     let dc = ua.den * (la - vna_used) * inv_la_vnc;
-    let man = ua.mom.dot(nhat);
+    let man = ua.mom.dot(nhc);
     let ec = (ua.nrg + ua.den) * la;
     let ec = (ec - man + p_final * vnc - vdbc * bn) * inv_la_vnc;
     let mc = vc.scale(ec + p_final) - bc.scale(vdbc);
@@ -613,14 +614,14 @@ where
     let flux_supersonic_l = f_l - u_l * vface;
     let flux_supersonic_r = f_r - u_r * vface;
 
-    let fast_den_l = a_l - vv_iso[0].dot(nhat);
-    let fast_den_r = a_r - vv_iso[1].dot(nhat);
+    let fast_den_l = a_l - vv_iso[0].dot(nhc);
+    let fast_den_r = a_r - vv_iso[1].dot(nhc);
     let fast_ok_l = fast_den_l
         .abs()
-        .cmp_gt(S::from_f64(REL_EPS) * a_l.abs().max(vv_iso[0].dot(nhat).abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * a_l.abs().max(vv_iso[0].dot(nhc).abs()));
     let fast_ok_r = fast_den_r
         .abs()
-        .cmp_gt(S::from_f64(REL_EPS) * a_r.abs().max(vv_iso[1].dot(nhat).abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * a_r.abs().max(vv_iso[1].dot(nhc).abs()));
     let fast_ok = S::Mask::select_mask(on_left, fast_ok_l, fast_ok_r);
     let flux_inner = MhdCons::select(success & fast_ok, flux_hlld, hlle_flux);
     let flux_choose_r = MhdCons::select(supersonic_r, flux_supersonic_r, flux_inner);
@@ -651,12 +652,13 @@ pub fn hlld_rmhd_states<S: Scalar, const D: usize, R>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &R::Normal,
     metric: &SpatialMetric<S, D>,
 ) -> HlldStates<S, D>
 where
     R: Regime<S, D, Prim = MhdPrim<S, D>, Cons = MhdCons<S, D>>,
 {
+    let nhc = nhat.components();
     let zero = S::ZERO;
     let one = S::ONE;
     let half = S::HALF;
@@ -677,7 +679,7 @@ where
     let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
     let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
-    let bn = hll_state.mag.dot(nhat); // B.n (contravariant)
+    let bn = hll_state.mag.dot(nhc); // B.n (contravariant)
     let r_l = u_l * a_l - f_l;
     let r_r = u_r * a_r - f_r;
     let r_pair = [&r_l, &r_r];
@@ -694,8 +696,8 @@ where
     let lowb_mask = (bn * bn / p_hll).cmp_lt(lowb_thresh);
     let et_hll = hll_state.nrg + hll_state.den;
     let fet_hll = hll_flux.nrg + hll_flux.den;
-    let mn_hll = hll_state.mom.dot(nhat);
-    let fmn_hll = hll_flux.mom.dot(nhat);
+    let mn_hll = hll_state.mom.dot(nhc);
+    let fmn_hll = hll_flux.mom.dot(nhc);
     let bb_q = et_hll - fmn_hll;
     let cc_q = fet_hll * mn_hll - et_hll * fmn_hll;
     let disc = (bb_q * bb_q - S::FOUR * cc_q).max(zero);
@@ -703,12 +705,12 @@ where
     let p_lowb = S::select(p_lowb_raw.cmp_le(zero), p_floor_val, p_lowb_raw);
     let p_init = S::select(lowb_mask, p_lowb, p_hll);
 
-    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat, metric);
+    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhc, metric);
     let v = conv.v;
     HlldStates {
         lam: [a_l, a_r],
         alf: v.alf,
-        lstar: v.vc.dot(nhat), // v_c.n (contravariant)
+        lstar: v.vc.dot(nhc), // v_c.n (contravariant)
         bstar: v.bv,
         bc: v.bc,
         vc: v.vc,
@@ -747,9 +749,10 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
     vface: S,
 ) -> MhdCons<S, D> {
+    let nhc = nhat.components();
     let zero = S::ZERO;
     let one = S::ONE;
     let half = S::HALF;
@@ -762,12 +765,12 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     // transverse decomposition `B - n(B.n)` (-> corrupt star B -> negative pressure, a
     // failure Orszag-Tang exposes and constant-Bx Brio-Wu hides). enforcing a single normal
     // field on both states (the L/R average) also drives the normal-B flux F(Bn) to zero.
-    let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
+    let bn = (prim_l.mag.dot(nhc) + prim_r.mag.dot(nhc)) * half;
     let bn_sq = bn * bn;
     let with_bn = |p: &MhdPrim<S, D>| -> MhdPrim<S, D> {
         MhdPrim {
             hydro: p.hydro,
-            mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)),
+            mag: p.mag + nhc.scale(bn - p.mag.dot(nhc)),
         }
     };
     let pl = with_bn(prim_l);
@@ -787,8 +790,8 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     let s_l = sll.min(srl);
     let s_r = slr.max(srr);
 
-    let un_l = prim_l.vel.dot(nhat);
-    let un_r = prim_r.vel.dot(nhat);
+    let un_l = prim_l.vel.dot(nhc);
+    let un_r = prim_r.vel.dot(nhc);
     let rho_l = prim_l.rho;
     let rho_r = prim_r.rho;
     let pt_l = prim_l.pre + half * prim_l.mag.dot(&prim_l.mag);
@@ -806,7 +809,7 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     let pt_star = (cr * pt_l - cl * pt_r + cl * cr * (un_r - un_l)) / dm_s;
 
     // tangential part of a vector (subtract its normal projection).
-    let tang = |v: &Tensor<S, D>, vn: S| -> Tensor<S, D> { *v - nhat.scale(vn) };
+    let tang = |v: &Tensor<S, D>, vn: S| -> Tensor<S, D> { *v - nhc.scale(vn) };
 
     // per-side single-star (*) state (eqs 43-48). the Alfven-resonant denominator
     // selects to the single-state limit (transverse fields unchanged).
@@ -843,8 +846,8 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
             one,
             (rho_k * (s_k - un_k) * (s_k - un_k) - bn_sq) / den_s,
         );
-        let v_star = nhat.scale(s_m) + (v_tang - b_tang.scale(fac_v));
-        let b_star = nhat.scale(bn) + b_tang.scale(fac_b);
+        let v_star = nhc.scale(s_m) + (v_tang - b_tang.scale(fac_v));
+        let b_star = nhc.scale(bn) + b_tang.scale(fac_b);
         let e_k = u_k.nrg; // newtonian total energy: kinetic + internal + magnetic in one scalar
         let vdb_k = prim_k.vel.dot(&prim_k.mag);
         let vdb_s = v_star.dot(&b_star);
@@ -889,8 +892,8 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
         + bsl_t.scale(sqrt_rr)
         + (vsr_t - vsl_t).scale(sgn * sqrt_rl * sqrt_rr))
     .scale(inv_sden);
-    let v_ss = nhat.scale(s_m) + vss_t;
-    let b_ss = nhat.scale(bn) + bss_t;
+    let v_ss = nhc.scale(s_m) + vss_t;
+    let b_ss = nhc.scale(bn) + bss_t;
     let vdb_ss = v_ss.dot(&b_ss);
     let e_ss_l = us_l.nrg - sqrt_rl * (vs_l.dot(&bs_l) - vdb_ss) * sgn;
     let e_ss_r = us_r.nrg + sqrt_rr * (vs_r.dot(&bs_r) - vdb_ss) * sgn;
@@ -965,8 +968,9 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
 ) -> (S, S, S) {
+    let nhc = nhat.components();
     let zero = S::ZERO;
     let one = S::ONE;
     let two = S::TWO;
@@ -976,11 +980,11 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     let regime = NewtonianMhd;
 
     // single continuous normal field (div B = 0), identical to `hlld_newtonian`.
-    let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
+    let bn = (prim_l.mag.dot(nhc) + prim_r.mag.dot(nhc)) * half;
     let with_bn = |p: &MhdPrim<S, D>| -> MhdPrim<S, D> {
         MhdPrim {
             hydro: p.hydro,
-            mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)),
+            mag: p.mag + nhc.scale(bn - p.mag.dot(nhc)),
         }
     };
     let pl = with_bn(prim_l);
@@ -993,8 +997,8 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     let s_l = sll.min(srl); // lambda^L
     let s_r = slr.max(srr); // lambda^R
 
-    let un_l = prim_l.vel.dot(nhat);
-    let un_r = prim_r.vel.dot(nhat);
+    let un_l = prim_l.vel.dot(nhc);
+    let un_r = prim_r.vel.dot(nhc);
     let pt_l = prim_l.pre + half * prim_l.mag.dot(&prim_l.mag);
     let pt_r = prim_r.pre + half * prim_r.mag.dot(&prim_r.mag);
 
@@ -1090,8 +1094,9 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &IsoMhdPrim<S, D>,
     prim_r: &IsoMhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
 ) -> (S, S, S) {
+    let nhc = nhat.components();
     let regime = IsothermalMhd;
     let zero = S::ZERO;
     let one = S::ONE;
@@ -1101,12 +1106,12 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     let eps_deg = S::from_f64(ALFVEN_SEPARATION_TOL);
 
     // single continuous normal field (div B = 0), identical to the isothermal flux.
-    let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
+    let bn = (prim_l.mag.dot(nhc) + prim_r.mag.dot(nhc)) * half;
     let bn_abs = bn.abs();
     let with_bn = |p: &IsoMhdPrim<S, D>| -> IsoMhdPrim<S, D> {
         IsoMhdPrim {
             hydro: p.hydro,
-            mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)),
+            mag: p.mag + nhc.scale(bn - p.mag.dot(nhc)),
         }
     };
     let pl = with_bn(prim_l);
@@ -1122,8 +1127,8 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     let (srl, srr) = regime.wave_speeds(eos, prim_r, nhat);
     let s_l = sll.min(srl); // lambda^L
     let s_r = slr.max(srr); // lambda^R
-    let un_l = prim_l.vel.dot(nhat);
-    let un_r = prim_r.vel.dot(nhat);
+    let un_l = prim_l.vel.dot(nhc);
+    let un_r = prim_r.vel.dot(nhc);
 
     // HLL central state: rho* = rho^hll, u* = F_rho^hll/rho^hll (Appendix A; same as the iso flux).
     let dwave = s_r - s_l;
@@ -1202,9 +1207,10 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &IsoMhdPrim<S, D>,
     prim_r: &IsoMhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
     vface: S,
 ) -> IsoMhdCons<S, D> {
+    let nhc = nhat.components();
     let regime = IsothermalMhd;
     let zero = S::ZERO;
     let one = S::ONE;
@@ -1212,16 +1218,16 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     let neg = S::from_f64(-1.0);
 
     // transverse projection (any nhat): v - n (v.n).
-    let tang = |v: &Tensor<S, D>, vn: S| -> Tensor<S, D> { *v - nhat.scale(vn) };
+    let tang = |v: &Tensor<S, D>, vn: S| -> Tensor<S, D> { *v - nhc.scale(vn) };
 
     // single normal field (continuous across the fan; Mignone assumes Bx const).
-    let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
+    let bn = (prim_l.mag.dot(nhc) + prim_r.mag.dot(nhc)) * half;
     let bn_sq = bn * bn;
     let bn_abs = bn_sq.safe_sqrt();
     let with_bn = |p: &IsoMhdPrim<S, D>| -> IsoMhdPrim<S, D> {
         IsoMhdPrim {
             hydro: p.hydro,
-            mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)),
+            mag: p.mag + nhc.scale(bn - p.mag.dot(nhc)),
         }
     };
     let pl = with_bn(prim_l);
@@ -1241,8 +1247,8 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     let s_l = sll.min(srl);
     let s_r = slr.max(srr);
 
-    let un_l = prim_l.vel.dot(nhat);
-    let un_r = prim_r.vel.dot(nhat);
+    let un_l = prim_l.vel.dot(nhc);
+    let un_r = prim_r.vel.dot(nhc);
     let rho_l = prim_l.rho;
     let rho_r = prim_r.rho;
 
@@ -1260,7 +1266,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     let rho_s = u_hll.den;
     let rho_ok = rho_s.cmp_gt(zero);
     let rho_s_safe = S::select(rho_ok, rho_s, one);
-    let mx_hll = u_hll.mom.dot(nhat);
+    let mx_hll = u_hll.mom.dot(nhc);
     let u_star = f_hll.den / rho_s_safe;
 
     // Alfven speeds (eq 29): S_L* = u* - |Bx|/sqrt(rho*), S_R* = u* + |Bx|/sqrt(rho*).
@@ -1322,10 +1328,10 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
             hydro: ConsG {
                 chi: Default::default(),
                 den: rho_s,
-                mom: nhat.scale(mx_hll) + mv,
+                mom: nhc.scale(mx_hll) + mv,
                 nrg: Zero::default(),
             },
-            mag: nhat.scale(bn) + bs,
+            mag: nhc.scale(bn) + bs,
         }
     };
     let us_l = mk_cons(mv_l, bs_l);
@@ -1367,6 +1373,8 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::Covariant;
+    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::{IdealGas, Isothermal};
     use crate::rmhd::{Rmhd, RmhdGr};
     use crate::spatial_metric::{Gamma, GammaInv};
@@ -1388,7 +1396,7 @@ mod tests {
             },
             mag: Tensor::new([0.5, 1.0, 0.0]),
         };
-        let nhat = Tensor::unit(0);
+        let nhat: Normalized<Physical<f64, 3>> = Normalized::axis(0);
         let flux = hlld_rmhd(
             &regime,
             &eos,
@@ -1442,7 +1450,7 @@ mod tests {
             },
             mag: Tensor::new([0.5, -1.0, 0.0]),
         };
-        let nhat = Tensor::unit(0);
+        let nhat: Normalized<Physical<f64, 3>> = Normalized::axis(0);
         let flux = hlld_rmhd(
             &regime,
             &eos,
@@ -1484,7 +1492,7 @@ mod tests {
             },
             mag: Tensor::new([0.5, -0.6, 0.3]),
         };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat: Normalized<Physical<f64, 3>> = Normalized::axis(0);
         let s = hlld_rmhd_states(
             &regime,
             &eos,
@@ -1580,7 +1588,7 @@ mod tests {
             },
             mag: Tensor::new([0.5, -0.6, 0.3]),
         };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat: Normalized<Physical<f64, 3>> = Normalized::axis(0);
         let s = hlld_rmhd_states(
             &regime,
             &eos,
@@ -1645,7 +1653,7 @@ mod tests {
             },
             mag: Tensor::new([0.5, -0.6, 0.3]),
         };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat: Normalized<Physical<f64, 3>> = Normalized::axis(0);
         let s = hlld_rmhd_states(
             &regime,
             &eos,
@@ -1859,7 +1867,7 @@ mod tests {
             mag: Tensor::new([0.3, -0.4, 0.15]),
         };
         for d in 0..3usize {
-            let nhat = Tensor::<f64, 3>::unit(d);
+            let nhat: Normalized<Physical<f64, 3>> = Normalized::axis(d);
             let ortho = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, d, 0.0, &flat);
             let flat_flux = hlld_rmhd(&Rmhd, &eos, &prim_l, &prim_r, &nhat, 0.0, &flat);
             assert_eq!(
@@ -1906,7 +1914,7 @@ mod tests {
             mag: Tensor::new([0.5, 0.6, 0.3]),
         };
         for d in 0..2 {
-            let nhat = Tensor::<f64, 3>::unit(d);
+            let nhat: Normalized<Covariant<f64, 3>> = Normalized::axis(d);
             let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, 0.0, &m);
             let exact = gr.to_flux(&prim, &nhat, &eos);
             assert!(
@@ -1958,7 +1966,7 @@ mod tests {
             mag: Tensor::new([0.5, 0.6, 0.3]),
         };
         for d in 0..3 {
-            let nhat = Tensor::<f64, 3>::unit(d);
+            let nhat: Normalized<Covariant<f64, 3>> = Normalized::axis(d);
             let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, 0.0, &m);
             let exact = gr.to_flux(&prim, &nhat, &eos);
             assert!(
@@ -2012,7 +2020,7 @@ mod tests {
         };
         let vface = 0.2;
         for d in 0..3 {
-            let nhat = Tensor::<f64, 3>::unit(d);
+            let nhat: Normalized<Covariant<f64, 3>> = Normalized::axis(d);
             let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, vface, &m);
             let f = gr.to_flux(&prim, &nhat, &eos);
             let u = gr.to_conserved(&eos, &prim);
@@ -2149,7 +2157,7 @@ mod tests {
             },
             mag: Tensor::new([0.0, -0.5, 0.3]),
         };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat: Normalized<Physical<f64, 3>> = Normalized::axis(0);
         let s = hlld_rmhd_states(
             &regime,
             &eos,
@@ -2222,7 +2230,7 @@ mod tests {
     fn hlld_newtonian_uniform_is_physical_flux() {
         // consistency: F(U, U) == F(U) exactly (all star states collapse to U).
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let cases = [
             nm_prim(1.0, [0.0, 0.0, 0.0], 1.0, [0.5, 1.0, 0.0]), // static, oblique B
             nm_prim(0.7, [0.3, -0.2, 0.1], 0.9, [0.4, 0.2, -0.6]), // moving, full 3D B
@@ -2238,7 +2246,7 @@ mod tests {
     #[test]
     fn hlld_newtonian_is_homogeneous_under_state_rescaling() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let left = nm_prim(1.1, [0.35, -0.12, 0.08], 0.8, [0.45, 0.3, -0.2]);
         let right = nm_prim(0.7, [-0.18, 0.09, -0.04], 0.5, [0.45, -0.15, 0.25]);
         let reference = hlld_newtonian(&eos, &left, &right, &nhat, 0.0);
@@ -2271,7 +2279,7 @@ mod tests {
     #[test]
     fn hlld_newtonian_b_zero_matches_hydro_flux() {
         let eos = IdealGas { gamma: 1.4 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let prim = nm_prim(1.3, [0.4, -0.2, 0.1], 0.7, [0.0, 0.0, 0.0]);
         let flux = hlld_newtonian(&eos, &prim, &prim, &nhat, 0.0);
         let exact = NewtonianMhd.to_flux(&prim, &nhat, &eos);
@@ -2283,7 +2291,7 @@ mod tests {
         // vn >> fast speed on each side -> S_L > 0 -> the whole fan is right-going,
         // so the interface flux at vface=0 is the left physical flux F(U_L).
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let prim_l = nm_prim(1.0, [5.0, 0.2, 0.0], 1.0, [0.3, 0.5, 0.0]);
         let prim_r = nm_prim(0.5, [5.0, -0.1, 0.2], 0.4, [0.3, -0.4, 0.1]);
         let flux = hlld_newtonian(&eos, &prim_l, &prim_r, &nhat, 0.0);
@@ -2295,7 +2303,7 @@ mod tests {
     fn hlld_newtonian_supersonic_left_upwinds_right() {
         // vn << -fast speed -> S_R < 0 -> the interface flux is the right flux F(U_R).
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let prim_l = nm_prim(1.0, [-5.0, 0.2, 0.0], 1.0, [0.3, 0.5, 0.0]);
         let prim_r = nm_prim(0.5, [-5.0, -0.1, 0.2], 0.4, [0.3, -0.4, 0.1]);
         let flux = hlld_newtonian(&eos, &prim_l, &prim_r, &nhat, 0.0);
@@ -2308,7 +2316,7 @@ mod tests {
         // a Brio-Wu-like subsonic discontinuity: the HLLD flux stays finite and its
         // mass flux lies within the L/R physical-flux bracket (consistency).
         let eos = IdealGas { gamma: 2.0 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let prim_l = nm_prim(1.0, [0.0, 0.0, 0.0], 1.0, [0.75, 1.0, 0.0]);
         let prim_r = nm_prim(0.125, [0.0, 0.0, 0.0], 0.1, [0.75, -1.0, 0.0]);
         let flux = hlld_newtonian(&eos, &prim_l, &prim_r, &nhat, 0.0);
@@ -2371,7 +2379,7 @@ mod tests {
         // consistency: F(U, U) == F(U). all star factors collapse (u* = u_n, fac_v = 0,
         // fac_b = 1), so the star state is U and the sampled flux is the exact physical flux.
         let eos = Isothermal { cs: 0.7 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let cases = [
             im_prim(1.0, [0.0, 0.0, 0.0], [0.3, 1.0, 0.0]), // static, weak normal B (off resonance)
             im_prim(0.8, [0.2, -0.1, 0.15], [0.2, 0.4, -0.5]), // moving, full 3D B
@@ -2389,7 +2397,7 @@ mod tests {
         // |v_n| >> fast speed -> the whole fan is one-sided, so the vface=0 flux is the
         // upwind physical flux. both directions.
         let eos = Isothermal { cs: 0.5 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let pl = im_prim(1.0, [5.0, 0.2, 0.0], [0.3, 0.5, 0.0]);
         let pr = im_prim(0.5, [5.0, -0.1, 0.2], [0.3, -0.4, 0.1]);
         let flux_r = hlld_isothermal(&eos, &pl, &pr, &nhat, 0.0);
@@ -2413,7 +2421,7 @@ mod tests {
     fn hlld_isothermal_normal_b_flux_vanishes() {
         // Bn made single-valued across the fan -> induction F(Bn) = 0 exactly.
         let eos = Isothermal { cs: 0.6 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let pl = im_prim(1.0, [0.1, 0.2, 0.0], [0.5, 0.6, 0.0]);
         let pr = im_prim(0.7, [-0.2, 0.1, 0.1], [0.5, -0.3, 0.2]);
         let flux = hlld_isothermal(&eos, &pl, &pr, &nhat, 0.0);
@@ -2438,7 +2446,7 @@ mod tests {
         // no-rotation limit and matches the newtonian guard over the identical den structure,
         // and these assertions pin the resulting finite, O(1) behavior.
         let eos = Isothermal { cs: 0.5 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         for k in 0..12 {
             let by = 0.5 * 0.5_f64.powi(k); // 0.5, 0.25, ... ~1.2e-4 (crosses the guard band)
             let pl = im_prim(1.0, [0.3, 0.1, 0.0], [1.0, by, 0.0]);

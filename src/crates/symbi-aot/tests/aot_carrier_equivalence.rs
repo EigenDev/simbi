@@ -16,6 +16,7 @@
 // identical result.
 // =============================================================================
 
+use symbi_algebra::FaceNormal;
 use symbi_aot::NamedKernel;
 
 // shims binding the emitted kernels by field name (NamedKernel) — order-
@@ -481,7 +482,7 @@ fn flux_kernel_equals_host_hlle_on_uniform_field() {
     // anti-pattern; the c2p tests already cover the iterative carrier-divergence class,
     // and HLLE for L == R collapses to F(U) in every wave-speed regime.)
     let eos = IdealGas { gamma: GAMMA };
-    let nhat = Tensor::new([1.0_f64]); // +x face, dir = 0
+    let nhat = symbi_algebra::Normalized::axis(0); // +x face, dir = 0
     let theta = 1.0_f64; // plain minmod
     let n = 8usize; // interior 2..6 so the PLM stencil stays in-bounds
 

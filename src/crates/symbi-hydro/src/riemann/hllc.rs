@@ -26,7 +26,7 @@ use crate::regime::Regime;
 use crate::rmhd::Rmhd;
 use crate::spatial_metric::SpatialMetric;
 use crate::state::{Cons, Prim};
-use symbi_algebra::Tensor;
+use symbi_algebra::{FaceNormal, Normalized, Physical, Tensor};
 use symbi_carrier::{Scalar, Selectable};
 
 // =============================================================================
@@ -189,7 +189,7 @@ pub fn hllc<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
     vface: S,
     shock_smoother: ShockwaveLimiter,
     shear: Option<HllcPlusSensors<S>>,
@@ -206,11 +206,12 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
     vface: S,
     shock_smoother: ShockwaveLimiter,
     shear: Option<HllcPlusSensors<S>>,
 ) -> Cons<S, D> {
+    let nhc = nhat.components();
     let regime = Newtonian;
     let u_l = prim_l.to_conserved(eos);
     let u_r = prim_r.to_conserved(eos);
@@ -220,8 +221,8 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
     let cs_l = eos.sound_speed(prim_l.rho, prim_l.pre);
     let cs_r = eos.sound_speed(prim_r.rho, prim_r.pre);
 
-    let vn_l = prim_l.vel.dot(nhat);
-    let vn_r = prim_r.vel.dot(nhat);
+    let vn_l = prim_l.vel.dot(nhc);
+    let vn_r = prim_r.vel.dot(nhc);
 
     let gamma = eos.gamma();
     let (s_l, s_r, s_star) = wave_properties(
@@ -246,11 +247,11 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
                         S::branch(
                             s_star.cmp_ge(vface),
                             || {
-                                let us = star_state(prim_l, &u_l, s_l, s_star, chi_l, nhat);
+                                let us = star_state(prim_l, &u_l, s_l, s_star, chi_l, nhc);
                                 f_l + (us - u_l) * s_l - us * vface
                             },
                             || {
-                                let us = star_state(prim_r, &u_r, s_r, s_star, chi_r, nhat);
+                                let us = star_state(prim_r, &u_r, s_r, s_star, chi_r, nhc);
                                 f_r + (us - u_r) * s_r - us * vface
                             },
                         )
@@ -286,11 +287,11 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
                         let hllc = S::branch(
                             s_star.cmp_ge(vface),
                             || {
-                                let us = star_state(prim_l, &u_l, s_l, s_star, chi_l, nhat);
+                                let us = star_state(prim_l, &u_l, s_l, s_star, chi_l, nhc);
                                 f_l + (us - u_l) * s_l - us * vface
                             },
                             || {
-                                let us = star_state(prim_r, &u_r, s_r, s_star, chi_r, nhat);
+                                let us = star_state(prim_r, &u_r, s_r, s_star, chi_r, nhc);
                                 f_r + (us - u_r) * s_r - us * vface
                             },
                         );
@@ -315,7 +316,7 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
                             + Cons {
                                 chi: Default::default(),
                                 den: S::ZERO,
-                                mom: nhat.scale(p_d * scale),
+                                mom: nhc.scale(p_d * scale),
                                 nrg: p_d * scale * s_star,
                             };
                         // the transverse shear viscosity that carries shock stability (Chen,
@@ -339,7 +340,7 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
                                 let s_k = S::select(s_star.cmp_ge(vface), s_l, s_r);
                                 let upwind = s_k / (s_k - s_star);
                                 let dv = prim_r.vel - prim_l.vel;
-                                let dv_perp = dv - nhat.scale(dv.dot(nhat));
+                                let dv_perp = dv - nhc.scale(dv.dot(nhc));
                                 // the same restraint, in the opposite polarity: the transverse
                                 // viscosity exists for the front and is absent everywhere else.
                                 let weight = impedance
@@ -450,7 +451,7 @@ pub fn hllc_rhd<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
     vface: S,
     shear: Option<HllcPlusSensors<S>>,
 ) -> Cons<S, D> {
@@ -463,10 +464,11 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
     vface: S,
     shear: Option<HllcPlusSensors<S>>,
 ) -> Cons<S, D> {
+    let nhc = nhat.components();
     let regime = crate::rhd::Rhd;
     // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); this parameter
     // is the seam a GR face metric enters through.
@@ -486,17 +488,17 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                 || f_r - u_r * vface,
                 || {
                     let (a_star, p_star) =
-                        rhd_contact_props(&u_l, &u_r, &f_l, &f_r, nhat, a_l, a_r);
+                        rhd_contact_props(&u_l, &u_r, &f_l, &f_r, nhc, a_l, a_r);
                     let classical = S::branch(
                         a_star.cmp_ge(vface),
                         || {
                             let us =
-                                rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
+                                rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhc, &metric);
                             f_l + (us - u_l) * a_l - us * vface
                         },
                         || {
                             let us =
-                                rhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat, &metric);
+                                rhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhc, &metric);
                             f_r + (us - u_r) * a_r - us * vface
                         },
                     );
@@ -521,8 +523,8 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                             let inertia = |cons: &Cons<S, D>, prim: &Prim<S, D>, a: S, vn: S| {
                                 (cons.nrg + cons.den + prim.pre) * (a - vn)
                             };
-                            let vn_l = prim_l.vel.dot(nhat);
-                            let vn_r = prim_r.vel.dot(nhat);
+                            let vn_l = prim_l.vel.dot(nhc);
+                            let vn_r = prim_r.vel.dot(nhc);
                             let chi_l = inertia(&u_l, prim_l, a_l, vn_l);
                             let chi_r = inertia(&u_r, prim_r, a_r, vn_r);
                             let cs_l =
@@ -537,7 +539,7 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                             let a_k = S::select(a_star.cmp_ge(vface), a_l, a_r);
                             let upwind = a_k / (a_k - a_star);
                             let dv = prim_r.vel - prim_l.vel;
-                            let dv_perp = dv - nhat.scale(dv.dot(nhat));
+                            let dv_perp = dv - nhc.scale(dv.dot(nhc));
                             let weight = chi_l * chi_r / (chi_r - chi_l)
                                 * upwind
                                 * sensors.shocked
@@ -573,7 +575,7 @@ pub fn hllc_rmhd<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
     vface: S,
     // taken for signature uniformity with the hydro solvers; the magnetized HLLC ships a
     // single flavor, so the selector is inert here.
@@ -588,9 +590,10 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
     vface: S,
 ) -> MhdCons<S, D> {
+    let nhc = nhat.components();
     // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); this parameter
     // is the seam a GR face metric enters through.
     let metric = SpatialMetric::flat();
@@ -615,16 +618,16 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                     let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv;
 
                     // normal B from HLL state (continuous across the interface). B is contravariant B^i.
-                    let bn = metric.contract_contra(&hll_state.mag, nhat);
-                    let bt_hll = metric.project_transverse(&hll_state.mag, nhat);
+                    let bn = metric.contract_contra(&hll_state.mag, nhc);
+                    let bt_hll = metric.project_transverse(&hll_state.mag, nhc);
 
                     let uhlld = hll_state.den;
-                    let uhllm = hll_state.mom.dot(nhat); // conserved-momentum (covariant S_i . n^i) -> metric-free
+                    let uhllm = hll_state.mom.dot(nhc); // conserved-momentum (covariant S_i . n^i) -> metric-free
                     let uhlle = hll_state.nrg + uhlld;
 
-                    let fhllm = hll_flux.mom.dot(nhat); // momentum-flux . n -> metric-free (variance settled by C1)
+                    let fhllm = hll_flux.mom.dot(nhc); // momentum-flux . n -> metric-free (variance settled by C1)
                     let fhlle = hll_flux.nrg + hll_flux.den;
-                    let ft_hll = metric.project_transverse(&hll_flux.mag, nhat); // transverse magnetic flux (contravariant)
+                    let ft_hll = metric.project_transverse(&hll_flux.mag, nhc); // transverse magnetic flux (contravariant)
 
                     // contact-wave quadratic: compute null-B and non-null-B
                     // coefficients in parallel, select via mask.
@@ -662,13 +665,13 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                                      ws: S|
                      -> MhdCons<S, D> {
                         // momentum-class (conserved S_i / flux-of-momentum . n^i) -> metric-free (C1/Tier-2).
-                        let mn = u.mom.dot(nhat);
-                        let umtrans = u.mom - nhat.scale(mn);
-                        let fmtrans = f.mom - nhat.scale(f.mom.dot(nhat));
+                        let mn = u.mom.dot(nhc);
+                        let umtrans = u.mom - nhc.scale(mn);
+                        let fmtrans = f.mom - nhc.scale(f.mom.dot(nhc));
                         let etot = u.nrg + u.den;
                         let cfac = S::ONE / (ws - a_star);
 
-                        let vn = metric.contract_contra(&prim_side.vel, nhat);
+                        let vn = metric.contract_contra(&prim_side.vel, nhc);
                         let vs = (ws - vn) / (ws - a_star);
                         let ds = vs * u.den;
 
@@ -676,15 +679,15 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                         let p_null = -a_star * fhlle + fhllm;
                         let es_null = cfac * (ws * etot - mn + p_null * a_star);
                         let mn_null = (es_null + p_null) * a_star;
-                        let btrans_side = metric.project_transverse(&prim_side.mag, nhat);
+                        let btrans_side = metric.project_transverse(&prim_side.mag, nhc);
                         let us_null = MhdCons {
                             hydro: Cons {
                                 chi: Default::default(),
                                 den: ds,
-                                mom: nhat.scale(mn_null) + umtrans.scale(vs),
+                                mom: nhc.scale(mn_null) + umtrans.scale(vs),
                                 nrg: es_null - ds,
                             },
-                            mag: nhat.scale(bn) + btrans_side.scale(vs),
+                            mag: nhc.scale(bn) + btrans_side.scale(vs),
                         };
 
                         // non-null-B star state (safe_bn guards division).
@@ -703,10 +706,10 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                             hydro: Cons {
                                 chi: Default::default(),
                                 den: ds,
-                                mom: nhat.scale(mn_nn) + mtrans,
+                                mom: nhc.scale(mn_nn) + mtrans,
                                 nrg: es_nn - ds,
                             },
-                            mag: nhat.scale(safe_bn) + bt_hll,
+                            mag: nhc.scale(safe_bn) + bt_hll,
                         };
 
                         let us =
@@ -736,7 +739,7 @@ pub fn hllc_newtonian<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
     vface: S,
     // taken for signature uniformity with the hydro solvers; the magnetized HLLC ships a
     // single flavor, so the selector is inert here.
@@ -749,9 +752,10 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    nhat: &Normalized<Physical<S, D>>,
     vface: S,
 ) -> MhdCons<S, D> {
+    let nhc = nhat.components();
     let zero = S::ZERO;
     let one = S::ONE;
     let half = S::HALF;
@@ -768,9 +772,9 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
     let s_l = sll.min(srl);
     let s_r = slr.max(srr);
 
-    let un_l = prim_l.vel.dot(nhat);
-    let un_r = prim_r.vel.dot(nhat);
-    let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
+    let un_l = prim_l.vel.dot(nhc);
+    let un_r = prim_r.vel.dot(nhc);
+    let bn = (prim_l.mag.dot(nhc) + prim_r.mag.dot(nhc)) * half;
     let rho_l = prim_l.rho;
     let rho_r = prim_r.rho;
     let pt_l = prim_l.pre + half * prim_l.mag.dot(&prim_l.mag);
@@ -793,9 +797,9 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
         .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_r.abs().max(s_l.abs()));
     let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let u_hll = (u_r * s_r - u_l * s_l - (f_r - f_l)) * inv_dwave;
-    let tang = |v: &Tensor<S, D>, vn: S| -> Tensor<S, D> { *v - nhat.scale(vn) };
-    let bt_star = tang(&u_hll.mag, u_hll.mag.dot(nhat));
-    let b_star = nhat.scale(bn) + bt_star;
+    let tang = |v: &Tensor<S, D>, vn: S| -> Tensor<S, D> { *v - nhc.scale(vn) };
+    let bt_star = tang(&u_hll.mag, u_hll.mag.dot(nhc));
+    let b_star = nhc.scale(bn) + bt_star;
 
     // per-side single-star (*) state: normal velocity S_M, transverse v from the
     // transverse-momentum jump with the continuous B*, energy from the energy jump.
@@ -821,7 +825,7 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
         let vt_k = tang(&prim_k.vel, un_k);
         let bt_k = tang(&prim_k.mag, bn);
         let vt_star = vt_k - (bt_star - bt_k).scale(bn / c_safe);
-        let v_star = nhat.scale(s_m) + vt_star;
+        let v_star = nhc.scale(s_m) + vt_star;
         let e_k = u_k.nrg;
         let vdb_k = prim_k.vel.dot(&prim_k.mag);
         let vdb_s = v_star.dot(&b_star);
@@ -879,6 +883,7 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
 
     fn approx(a: f64, b: f64) -> bool {
@@ -893,7 +898,7 @@ mod tests {
             vel: Tensor::new([0.5]),
             pre: 1.0,
         };
-        let nhat = Tensor::unit(0);
+        let nhat: Normalized<Physical<f64, 1>> = Normalized::axis(0);
         let flux = hllc(
             &eos,
             &prim,
@@ -919,7 +924,7 @@ mod tests {
             pre: 2.5,
         };
 
-        let nhat_x = Tensor::unit(0);
+        let nhat_x = Normalized::axis(0);
         let flux_x = hllc(
             &eos,
             &prim,
@@ -936,7 +941,7 @@ mod tests {
         assert!(approx(flux_x.mom[1], exact_x.mom[1]));
         assert!(approx(flux_x.nrg, exact_x.nrg));
 
-        let nhat_y = Tensor::unit(1);
+        let nhat_y = Normalized::axis(1);
         let flux_y = hllc(
             &eos,
             &prim,
@@ -966,7 +971,7 @@ mod tests {
             vel: Tensor::new([0.0]),
             pre: 0.1,
         };
-        let nhat = Tensor::unit(0);
+        let nhat: Normalized<Physical<f64, 1>> = Normalized::axis(0);
 
         let flux = hllc(
             &eos,
@@ -1001,7 +1006,7 @@ mod tests {
             &eos,
             &prim_l_x,
             &prim_r_x,
-            &Tensor::unit(0),
+            &Normalized::axis(0),
             0.0,
             ShockwaveLimiter::Standard,
             None,
@@ -1021,7 +1026,7 @@ mod tests {
             &eos,
             &prim_l_y,
             &prim_r_y,
-            &Tensor::unit(1),
+            &Normalized::axis(1),
             0.0,
             ShockwaveLimiter::Standard,
             None,
@@ -1041,7 +1046,7 @@ mod tests {
             vel: Tensor::new([0.3]),
             pre: 1.0,
         };
-        let nhat = Tensor::unit(0);
+        let nhat: Normalized<Physical<f64, 1>> = Normalized::axis(0);
         let flux = hllc_rhd(&eos, &prim, &prim, &nhat, 0.0, None);
         let exact = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, exact.den));
@@ -1061,7 +1066,7 @@ mod tests {
             },
             mag: Tensor::new([0.5, 1.0, 0.0]),
         };
-        let nhat = Tensor::unit(0);
+        let nhat: Normalized<Physical<f64, 3>> = Normalized::axis(0);
         let flux = hllc_rmhd(
             &regime,
             &eos,
@@ -1115,7 +1120,7 @@ mod tests {
             },
             mag: Tensor::new([0.5, -1.0, 0.0]),
         };
-        let nhat = Tensor::unit(0);
+        let nhat: Normalized<Physical<f64, 3>> = Normalized::axis(0);
         let flux = hllc_rmhd(
             &regime,
             &eos,
@@ -1177,7 +1182,7 @@ mod tests {
     #[test]
     fn hllc_newtonian_uniform_is_physical_flux() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let cases = [
             nm_prim(1.0, [0.0, 0.0, 0.0], 1.0, [0.5, 1.0, 0.0]),
             nm_prim(0.7, [0.3, -0.2, 0.1], 0.9, [0.4, 0.2, -0.6]),
@@ -1193,7 +1198,7 @@ mod tests {
     #[test]
     fn hllc_newtonian_b_zero_matches_hydro_flux() {
         let eos = IdealGas { gamma: 1.4 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let prim = nm_prim(1.3, [0.4, -0.2, 0.1], 0.7, [0.0, 0.0, 0.0]);
         let flux = hllc_newtonian(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard);
         let exact = NewtonianMhd.to_flux(&prim, &nhat, &eos);
@@ -1203,7 +1208,7 @@ mod tests {
     #[test]
     fn hllc_newtonian_supersonic_upwinds() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let pl = nm_prim(1.0, [5.0, 0.2, 0.0], 1.0, [0.3, 0.5, 0.0]);
         let pr = nm_prim(0.5, [5.0, -0.1, 0.2], 0.4, [0.3, -0.4, 0.1]);
         let f = hllc_newtonian(&eos, &pl, &pr, &nhat, 0.0, ShockwaveLimiter::Standard);
@@ -1226,7 +1231,7 @@ mod tests {
     #[test]
     fn hllc_newtonian_brio_wu_finite_and_divb_clean() {
         let eos = IdealGas { gamma: 2.0 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Normalized::axis(0);
         let pl = nm_prim(1.0, [0.0, 0.0, 0.0], 1.0, [0.75, 1.0, 0.0]);
         let pr = nm_prim(0.125, [0.0, 0.0, 0.0], 0.1, [0.75, -1.0, 0.0]);
         let f = hllc_newtonian(&eos, &pl, &pr, &nhat, 0.0, ShockwaveLimiter::Standard);
@@ -1364,7 +1369,7 @@ mod tests {
         let eos = IdealGas {
             gamma: 4.0 / 3.0f64,
         };
-        let n = Tensor::new([1.0, 0.0]);
+        let n = Normalized::axis(0);
         let regime = crate::rhd::Rhd;
         let metric = SpatialMetric::flat();
         let cases = [
@@ -1420,9 +1425,9 @@ mod tests {
                 "{name}: the fan must straddle the face for the intermediate flux to be the answer \
                  at all (a_L = {a_l}, a_R = {a_r})"
             );
-            let (a_star, p_star) = rhd_contact_props(&u_l, &u_r, &f_l, &f_r, &n, a_l, a_r);
-            let usl = rhd_star_state(&l, &u_l, a_l, a_star, p_star, &n, &metric);
-            let usr = rhd_star_state(&r, &u_r, a_r, a_star, p_star, &n, &metric);
+            let (a_star, p_star) = rhd_contact_props(&u_l, &u_r, &f_l, &f_r, n.components(), a_l, a_r);
+            let usl = rhd_star_state(&l, &u_l, a_l, a_star, p_star, n.components(), &metric);
+            let usr = rhd_star_state(&r, &u_r, a_r, a_star, p_star, n.components(), &metric);
 
             let from_left = f_l + (usl - u_l) * a_l;
             let from_right = f_r + (usr - u_r) * a_r + (usl - usr) * a_star;
@@ -1482,7 +1487,7 @@ mod tests {
             pre,
         };
         let (a_l, a_r) =
-            crate::rhd::Rhd.extremal_speeds(&eos, &at_rest, &at_rest, &Tensor::new([1.0, 0.0]));
+            crate::rhd::Rhd.extremal_speeds(&eos, &at_rest, &at_rest, &Normalized::axis(0));
         assert!(
             (a_r - relativistic).abs() < 1.0e-12 && (a_l + relativistic).abs() < 1.0e-12,
             "a state at rest must have acoustic speeds +/- cs_rel = +/-{relativistic}, got \
@@ -1503,7 +1508,7 @@ mod tests {
         // `(e + p)/rho = h W^2`, which carries the whole departure.
         let gamma = 5.0f64 / 3.0;
         let eos = IdealGas { gamma };
-        let nhat = Tensor::new([1.0, 0.0]);
+        let nhat: Normalized<Physical<f64, 2>> = Normalized::axis(0);
         let mut previous = f64::INFINITY;
         // colder and slower at each step: the two knobs that carry `h` and `W` to one.
         for (speed, theta) in [
@@ -1547,7 +1552,7 @@ mod tests {
         let eos = IdealGas {
             gamma: 4.0f64 / 3.0,
         };
-        let nhat = Tensor::new([1.0, 0.0]);
+        let nhat: Normalized<Physical<f64, 2>> = Normalized::axis(0);
         // a strong relativistic shock, with the transverse component equal on both sides.
         for shared_vt in [0.0f64, 0.2, -0.35] {
             let l = Prim {
@@ -1593,7 +1598,7 @@ mod tests {
         let eos = IdealGas {
             gamma: 4.0f64 / 3.0,
         };
-        let nhat = Tensor::new([1.0, 0.0]);
+        let nhat: Normalized<Physical<f64, 2>> = Normalized::axis(0);
         let sensors = HllcPlusSensors {
             pressure_ratio: 0.05,
             shocked: 1.0,
@@ -1636,7 +1641,7 @@ mod tests {
         // instead attenuates that dissipation on the same face, which is what leaves a
         // hydrostatic truncation residual undamped.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let nhat = Tensor::new([1.0, 0.0]);
+        let nhat: Normalized<Physical<f64, 2>> = Normalized::axis(0);
         // a strong stratification: a factor of two in density and pressure across one face,
         // both sides drifting at a common deeply subsonic velocity so the correction's mach
         // scaling is far from saturation and its absence is attributable to the jump alone.
@@ -1683,7 +1688,7 @@ mod tests {
         // with the mach number and the difference between the two fluxes approaches the whole
         // classical term.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let nhat = Tensor::new([1.0]);
+        let nhat: Normalized<Physical<f64, 1>> = Normalized::axis(0);
         let cs = eos.sound_speed(1.0, 1.0);
         let mut previous = f64::INFINITY;
         for mach in [0.2f64, 0.1, 0.05, 0.025] {

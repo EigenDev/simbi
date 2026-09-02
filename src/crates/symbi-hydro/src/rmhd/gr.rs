@@ -20,7 +20,7 @@
 // more diffusive than the exact quartic.
 // =============================================================================
 
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Covariant, Tensor};
 use symbi_carrier::Scalar;
 
 use crate::c2p_result::C2pResult;
@@ -132,6 +132,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     // relativistic: clamp the HLLE fan to include the stationary state (as `Rmhd`).
     const CLAMP_EXTREMAL_TO_ZERO: bool = true;
     type Prim = MhdPrim<S, D>;
+
+    // the valencia flux contracts the normal against contravariant velocity
+    // and shift, so its face normal is the coordinate-frame covariant witness.
+    type Normal = Normalized<Covariant<S, D>>;
     type Cons = MhdCons<S, D>;
     type Energy = crate::energy::Adiabatic;
 
@@ -196,7 +200,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+        let nhat = nhat.components();
         // the Valencia spatial flux, shift-free here (the shift rides the GR flux kernel's fan):
         //   F_D     = D v^n
         //   F_{S_j} = S_j v^n + p_tot n_j - b_j B^n / W      (b_j lowered four-vector)
@@ -228,7 +233,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+        let nhat = nhat.components();
         // the fast-magnetosonic bound c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2 through the
         // Banyuls-Font two-velocity transform (vn = contravariant v^n; v_sq = the physical
         // norm; gamma^{nn} the inverse-metric normal) — the RHD fan with c_ms for c_s.
@@ -257,6 +263,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::spatial_metric::{Gamma, GammaInv};
     use symbi_algebra::Matrix;
@@ -291,7 +298,8 @@ mod tests {
             metric: SpatialMetric::flat(),
             alpha: 1.0,
         };
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
+        let nhat_gr = Normalized::axis(0);
         for &(v, b) in &[
             ([0.0, 0.0, 0.0], [0.5, 0.0, 0.0]),
             ([0.3, -0.1, 0.2], [0.4, 0.7, -0.2]),
@@ -315,7 +323,7 @@ mod tests {
             );
             let (ff, fg) = (
                 flat.to_flux(&prim, &nhat, &eos),
-                gr.to_flux(&prim, &nhat, &eos),
+                gr.to_flux(&prim, &nhat_gr, &eos),
             );
             for k in 0..3 {
                 assert!(approx(ff.mom[k], fg.mom[k]), "flux mom{k} v={v:?}");
@@ -446,7 +454,8 @@ mod tests {
             metric: SpatialMetric::flat(),
             alpha: 1.0,
         };
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
+        let nhat_gr = Normalized::axis(0);
         for &(v, b) in &[
             ([0.3, -0.1, 0.2], [0.4, 0.7, -0.2]),
             ([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]),
@@ -461,7 +470,7 @@ mod tests {
                 mag: Tensor::new(b),
             };
             let (fl, fr) = flat.wave_speeds(&eos, &prim, &nhat);
-            let (gl, gr_) = gr.wave_speeds(&eos, &prim, &nhat);
+            let (gl, gr_) = gr.wave_speeds(&eos, &prim, &nhat_gr);
             assert!(
                 gl <= fl + 1e-14 && gr_ >= fr - 1e-14,
                 "bound contains fan: ({gl},{gr_}) vs ({fl},{fr})"

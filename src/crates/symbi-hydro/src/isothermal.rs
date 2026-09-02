@@ -24,7 +24,7 @@ use crate::energy::{IsoModel, Zero};
 use crate::eos::Eos;
 use crate::regime::Regime;
 use crate::state::{ConsG, PrimG};
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical};
 use symbi_carrier::Scalar;
 
 /// type aliases for isothermal state types.
@@ -39,6 +39,10 @@ pub struct IsoNewtonian;
 impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     const SPEC: &'static crate::regime_spec::RegimeSpec = &crate::regime_spec::ISO_NEWTONIAN_SPEC;
     type Prim = PrimG<S, D, IsoModel>;
+
+    // the solver operates in the locally-flat orthonormal frame, so its
+    // face normal is the physical-frame witness.
+    type Normal = Normalized<Physical<S, D>>;
     type Cons = ConsG<S, D, IsoModel>;
     type Energy = IsoModel;
 
@@ -70,7 +74,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+        let nhat = nhat.components();
         let vn = prim.vel.dot(nhat);
         let pre = eos.pressure(prim.rho, S::ZERO);
         ConsG {
@@ -82,7 +87,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+        let nhat = nhat.components();
         let cs = eos.sound_speed(prim.rho, S::ZERO);
         let vn = prim.vel.dot(nhat);
         (vn - cs, vn + cs)
@@ -109,6 +115,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::{FaceNormal, Normalized};
+    use symbi_algebra::Tensor;
     use crate::energy::EnergySlot;
     use crate::eos::Isothermal;
 
@@ -240,7 +248,7 @@ mod tests {
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 1.0 };
         let prim = iso_prim_2d(1.0, Tensor::new([2.0, 0.0]));
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let flux = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, 2.0));
         assert!(approx(flux.mom[0], 5.0)); // rho*vx*vx + p = 1*4 + 1 = 5
@@ -253,7 +261,7 @@ mod tests {
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 2.0 };
         let prim = iso_prim_2d(1.0, Tensor::new([2.0, 3.0]));
-        let nhat = Tensor::unit(1);
+        let nhat = Normalized::axis(1);
         let flux = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, 3.0));
         assert!(approx(flux.mom[0], 6.0));
@@ -267,7 +275,7 @@ mod tests {
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 2.0 };
         let prim = iso_prim_2d(1.0, Tensor::new([0.0, 0.0]));
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
         assert!(approx(sl, -2.0));
         assert!(approx(sr, 2.0));
@@ -278,7 +286,7 @@ mod tests {
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 1.0 };
         let prim = iso_prim(1.0, Tensor::new([1.5]));
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
         assert!(approx(sl, 0.5));
         assert!(approx(sr, 2.5));
@@ -301,7 +309,7 @@ mod tests {
         let eos = Isothermal { cs: 1.0 };
         let left = iso_prim(1.0, Tensor::new([0.0]));
         let right = iso_prim(1.0, Tensor::new([0.0]));
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let flux = crate::riemann::hlle(&regime, &eos, &left, &right, &nhat, 0.0);
         assert!(approx(flux.den, 0.0));
         // momentum flux = pressure = cs^2 * rho = 1.0
@@ -314,7 +322,7 @@ mod tests {
         let eos = Isothermal { cs: 1.0 };
         let left = iso_prim(2.0, Tensor::new([0.0]));
         let right = iso_prim(1.0, Tensor::new([0.0]));
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let flux = crate::riemann::hlle(&regime, &eos, &left, &right, &nhat, 0.0);
         assert!(flux.den > 0.0);
     }

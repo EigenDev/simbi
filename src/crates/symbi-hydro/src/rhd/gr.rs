@@ -27,7 +27,7 @@
 // identity gamma).
 // =============================================================================
 
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Covariant, Tensor};
 use symbi_carrier::Scalar;
 
 use crate::c2p_result::C2pResult;
@@ -93,6 +93,10 @@ impl<S: Scalar, const D: usize> RhdGr<S, D> {
 impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     const SPEC: &'static RegimeSpec = <Rhd as Regime<S, D>>::SPEC;
     type Prim = Prim<S, D>;
+
+    // the valencia flux contracts the normal against contravariant velocity
+    // and shift, so its face normal is the coordinate-frame covariant witness.
+    type Normal = Normalized<Covariant<S, D>>;
     type Cons = Cons<S, D>;
     type Energy = crate::energy::Adiabatic;
     const CLAMP_EXTREMAL_TO_ZERO: bool = true;
@@ -159,7 +163,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+        let nhat = nhat.components();
         // F^n = sqrt(-g)[rho u^n, T^n_i, -(T^n_t + rho u^n)]. in ADM variables, with the transport
         // speed vt^n = alpha v^n - beta^n and the coordinate-unit normal n_i:
         //   sqrt(-g) rho u^n = sqrt(gamma) D vt^n
@@ -187,7 +192,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+        let nhat = nhat.components();
         // Banyuls-Font coordinate speed (Font 2008 eq 37). the two velocities are distinct and must
         // not be conflated: `vn` = the contravariant normal v^n = v^i n_i (the transport term + inside
         // the radical), `v_sq` = gamma_ij v^i v^j = the physical speed squared (the `1 - v^2` factors).
@@ -220,6 +226,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::spatial_metric::{Gamma, GammaInv};
     use symbi_algebra::Matrix;
@@ -240,7 +247,10 @@ mod tests {
             shift: Tensor::zeros(),
             sqrt_gamma: 1.0,
         };
-        let nhat = Tensor::unit(0);
+        // one axis, two lawful witnesses: the flat solver's orthonormal
+        // normal and the valencia flux's coordinate-covariant normal.
+        let nhat = Normalized::axis(0);
+        let nhat_gr = Normalized::axis(0);
         for &v in &[0.0_f64, 0.3, -0.5, 0.85] {
             let prim = Prim {
                 rho: 1.3,
@@ -254,7 +264,7 @@ mod tests {
             );
             let (ff, fg) = (
                 flat.to_flux(&prim, &nhat, &eos),
-                gr.to_flux(&prim, &nhat, &eos),
+                gr.to_flux(&prim, &nhat_gr, &eos),
             );
             assert!(
                 approx(ff.den, fg.den) && approx(ff.mom[0], fg.mom[0]) && approx(ff.nrg, fg.nrg),
@@ -262,7 +272,7 @@ mod tests {
             );
             let ((slf, srf), (slg, srg)) = (
                 flat.wave_speeds(&eos, &prim, &nhat),
-                gr.wave_speeds(&eos, &prim, &nhat),
+                gr.wave_speeds(&eos, &prim, &nhat_gr),
             );
             assert!(approx(slf, slg) && approx(srf, srg), "speeds v={v}");
         }
@@ -310,7 +320,7 @@ mod tests {
         );
         // the radial fluxes carry the same measure and the lapse: sqrt(-g) rho u^r =
         // sqrt(gamma) D alpha v^r, sqrt(-g) T^r_r = sqrt(gamma)(S_r alpha v^r + alpha p).
-        let fx = gr.to_flux(&prim, &Tensor::unit(0), &eos);
+        let fx = gr.to_flux(&prim, &Normalized::axis(0), &eos);
         assert!(
             approx(fx.den, sqrt_gamma * w * alpha * vr),
             "mass flux = sqrt(gamma) D alpha v^r"
@@ -364,7 +374,7 @@ mod tests {
             pre: 0.4,
         };
         let c = gr.to_conserved(&eos, &prim);
-        let fx = gr.to_flux(&prim, &Tensor::unit(0), &eos);
+        let fx = gr.to_flux(&prim, &Normalized::axis(0), &eos);
         let hh = 1.0 + (4.0 / 3.0) / (1.0 / 3.0) * 0.4 / 1.3;
         let (e_ref, f_ref): (f64, Tensor<f64, 3>) = coord_energy_cons_flux(
             &SchwarzschildKS {
@@ -395,14 +405,14 @@ mod tests {
         );
         // the shift enters the fan as the coordinate speed lambda - beta^r; both characteristics
         // shift by the same amount, so their separation is unchanged.
-        let (s_l, s_r) = gr.wave_speeds(&eos, &prim, &Tensor::unit(0));
+        let (s_l, s_r) = gr.wave_speeds(&eos, &prim, &Normalized::axis(0));
         let unshifted = RhdGr {
             metric,
             alpha,
             shift: Tensor::new([0.0]),
             sqrt_gamma,
         };
-        let (u_l, u_r) = unshifted.wave_speeds(&eos, &prim, &Tensor::unit(0));
+        let (u_l, u_r) = unshifted.wave_speeds(&eos, &prim, &Normalized::axis(0));
         assert!(
             approx(s_l, u_l - beta) && approx(s_r, u_r - beta),
             "fan carries -beta^r"

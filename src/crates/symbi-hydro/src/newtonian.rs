@@ -18,7 +18,7 @@ use crate::c2p_result::{C2pResult, ErrorCode};
 use crate::eos::Eos;
 use crate::regime::Regime;
 use crate::state::{Cons, Prim};
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical};
 use symbi_carrier::Scalar;
 
 /// newtonian (non-relativistic) hydrodynamics.
@@ -28,6 +28,10 @@ pub struct Newtonian;
 impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     const SPEC: &'static crate::regime_spec::RegimeSpec = &crate::regime_spec::NEWTONIAN_SPEC;
     type Prim = Prim<S, D>;
+
+    // the solver operates in the locally-flat orthonormal frame, so its
+    // face normal is the physical-frame witness.
+    type Normal = Normalized<Physical<S, D>>;
     type Cons = Cons<S, D>;
     type Energy = crate::energy::Adiabatic;
 
@@ -67,7 +71,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+        let nhat = nhat.components();
         let vn = prim.vel.dot(nhat); // normal velocity
         let cons = prim.to_conserved(eos);
         Cons {
@@ -79,7 +84,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+        let nhat = nhat.components();
         let a = eos.sound_speed(prim.rho, prim.pre);
         let vn = prim.vel.dot(nhat);
         (vn - a, vn + a)
@@ -108,8 +114,9 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eos::IdealGas;
+    use symbi_algebra::{FaceNormal, Normalized};
     use symbi_algebra::Tensor;
+    use crate::eos::IdealGas;
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-13 * a.abs().max(b.abs()).max(1.0)
@@ -158,7 +165,7 @@ mod tests {
             vel: Tensor::new([2.0, 0.0]),
             pre: 1.0,
         };
-        let nhat = Tensor::unit(0); // x-direction
+        let nhat = Normalized::axis(0); // x-direction
         let flux = regime.to_flux(&prim, &nhat, &eos);
 
         // f_den = rho * vn = 1.0 * 2.0 = 2.0
@@ -178,7 +185,7 @@ mod tests {
             vel: Tensor::new([2.0, 3.0]),
             pre: 1.0,
         };
-        let nhat = Tensor::unit(1); // y-direction
+        let nhat = Normalized::axis(1); // y-direction
         let flux = regime.to_flux(&prim, &nhat, &eos);
 
         // vn = dot(vel, nhat) = 3.0
@@ -199,7 +206,7 @@ mod tests {
             vel: Tensor::new([0.0, 0.0]),
             pre: 1.0,
         };
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
         let cs = (1.4f64 * 1.0 / 1.0).sqrt();
         assert!(approx(sl, -cs));
@@ -215,7 +222,7 @@ mod tests {
             vel: Tensor::new([1.0, 0.0]),
             pre: 1.0,
         };
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
         let cs = (1.4f64).sqrt();
         assert!(approx(sl, 1.0 - cs));

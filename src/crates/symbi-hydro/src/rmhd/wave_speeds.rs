@@ -390,6 +390,7 @@ fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::regime::Regime;
     use crate::rmhd::Rmhd;
@@ -420,7 +421,7 @@ mod tests {
                 },
                 mag: Tensor::new(mag),
             };
-            let nhat = Tensor::<Gv, 3>::unit(0);
+            let nhat = Tensor::unit(0);
             let (sl, sr) = rmhd_wave_speeds(&eos, &prim, &nhat);
             [sl.node(), sr.node()]
         });
@@ -500,7 +501,7 @@ mod tests {
                             mag: Tensor::new(*b),
                         };
                         for axis in 0..3 {
-                            let nhat = Tensor::<f64, 3>::unit(axis);
+                            let nhat = Tensor::unit(axis);
                             let (slq, srq) = rmhd_wave_speeds(&eos, &prim, &nhat);
                             let (slu, sru) = rmhd_magnetosonic_cfl_speeds(&eos, &prim, &nhat);
                             let exact = slq.abs().max(srq.abs());
@@ -525,7 +526,7 @@ mod tests {
     #[test]
     fn quartic_wave_speeds_are_invariant_to_state_units() {
         let eos = IdealGas { gamma: 4.0 / 3.0 };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat = Tensor::unit(0);
         let reference = MhdPrim {
             hydro: Prim {
                 rho: 1.3,
@@ -595,7 +596,7 @@ mod tests {
             },
         ];
         for (i, prim) in cases.iter().enumerate() {
-            let nhat = Tensor::<f64, 3>::unit(0);
+            let nhat = Tensor::unit(0);
             let (sl, sr) = rmhd_magnetosonic_cfl_speeds(&eos, prim, &nhat);
             assert!(
                 !(sl.abs().max(sr.abs())).is_finite(),
@@ -852,9 +853,7 @@ mod tests {
                 },
                 mag: Tensor::new(*mag),
             };
-            let mut nh = [0.0; 3];
-            nh[*dir] = 1.0;
-            let (sl, sr) = Rmhd.wave_speeds(&eos, &prim, &Tensor::new(nh));
+            let (sl, sr) = Rmhd.wave_speeds(&eos, &prim, &Normalized::axis(*dir));
             let (wl, wr) = ref_wave_speeds(rho, *vel, p, *mag, 5.0 / 3.0, *dir);
             assert!(
                 (sl - wl).abs() <= 1e-9 * (1.0 + wl.abs()),

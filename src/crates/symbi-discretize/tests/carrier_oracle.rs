@@ -16,6 +16,7 @@
 mod harness;
 use harness::{KernelRun, Out};
 
+use symbi_algebra::FaceNormal;
 use symbi_algebra::Tensor;
 use symbi_discretize::{
     Coords, EosArm, GvKernel, Recon, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
@@ -448,7 +449,7 @@ fn adiabatic_flux_matches_native_physics() {
         pre: 0.7,
     };
     let eos = IdealGas { gamma: GAMMA };
-    let f = symbi_hydro::newtonian::Newtonian.to_flux(&prim, &Tensor::unit(0), &eos);
+    let f = symbi_hydro::newtonian::Newtonian.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let out = run_uniform_euler_flux::<2>(adiabatic_flux_gv::<2>(0, Recon::Plm), &prim, GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
@@ -478,7 +479,7 @@ fn iso_flux_matches_native_physics() {
         pre: cs2 * rho,
     };
     let eos = IdealGas { gamma: iso_gamma };
-    let f = symbi_hydro::newtonian::Newtonian.to_flux(&prim, &Tensor::unit(0), &eos);
+    let f = symbi_hydro::newtonian::Newtonian.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let out = run_uniform_euler_flux::<2>(iso_flux_gv::<2>(0), &prim, iso_gamma, 0);
     // no flux_nrg write for iso.
     out.expect(
@@ -502,7 +503,7 @@ fn rhd_flux_matches_native_physics() {
         pre: 1.0,
     };
     let eos = IdealGas { gamma: RHD_GAMMA };
-    let f = Rhd.to_flux(&prim, &Tensor::unit(0), &eos);
+    let f = Rhd.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let out =
         run_uniform_euler_flux::<2>(rhd_flux_gv::<2>(0, EosArm::IdealGamma), &prim, RHD_GAMMA, 0);
     out.expect(
@@ -531,12 +532,12 @@ fn rmhd_flux_matches_native_physics() {
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = IdealGas { gamma: RMHD_GAMMA };
-    let f = Rmhd.to_flux(&prim, &Tensor::unit(0), &eos);
+    let f = Rmhd.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     // rmhd_flux_gv reads the materialized per-cell davis speeds (ws_l/ws_r), produced in the
     // live solver by rmhd_wave_speeds_cell_gv = `Rmhd::wave_speeds`. for a uniform state HLLE
     // returns the physical flux for any s_l < 0 < s_r (the diffusive U_R - U_L term vanishes),
     // so binding the exact quartic speeds uniformly reproduces `to_flux`.
-    let (sl, sr) = Rmhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
+    let (sl, sr) = Rmhd.wave_speeds(&eos, &prim, &symbi_algebra::Normalized::axis(0));
     let fields: Vec<(&str, f64)> = vec![
         ("prim_rho", prim.rho),
         ("prim_v0", prim.vel[0]),
@@ -789,7 +790,7 @@ fn nmhd_flux_matches_native_physics() {
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = IdealGas { gamma: NMHD_GAMMA };
-    let f = NewtonianMhd.to_flux(&prim, &Tensor::unit(0), &eos);
+    let f = NewtonianMhd.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let fields: Vec<(&str, f64)> = vec![
         ("prim_rho", prim.rho),
         ("prim_v0", prim.vel[0]),
@@ -837,7 +838,7 @@ fn nmhd_wave_speed_map_matches_native_physics() {
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = IdealGas { gamma: NMHD_GAMMA };
-    let nhat = Tensor::<f64, 3>::unit(0);
+    let nhat = symbi_algebra::Normalized::axis(0);
     let (sl, sr) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
     let want = sl.abs().max(sr.abs());
     let out = KernelRun::new(nmhd_wave_speed_map_gv(
@@ -901,7 +902,7 @@ fn nmhd_hllc_hlld_flux_match_native_physics_on_uniform_state() {
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = IdealGas { gamma: NMHD_GAMMA };
-    let f = NewtonianMhd.to_flux(&prim, &Tensor::unit(0), &eos);
+    let f = NewtonianMhd.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let fields: Vec<(&str, f64)> = vec![
         ("prim_rho", prim.rho),
         ("prim_v0", prim.vel[0]),
@@ -1012,7 +1013,7 @@ fn imhd_flux_and_hlld_match_native_physics_on_uniform_state() {
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = Isothermal { cs: IMHD_CS };
-    let f = IsothermalMhd.to_flux(&prim, &Tensor::unit(0), &eos);
+    let f = IsothermalMhd.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
     let fields: Vec<(&str, f64)> = vec![
         ("prim_rho", prim.rho),
         ("prim_v0", prim.vel[0]),
@@ -1091,7 +1092,7 @@ fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
         &eos,
         &prim,
         &prim,
-        &Tensor::unit(0),
+        &symbi_algebra::Normalized::axis(0),
         0.0,
         ShockwaveLimiter::Standard,
         None,
@@ -1120,7 +1121,7 @@ fn rhd_hllc_flux_matches_native_physics_on_uniform_state() {
         pre: 1.0,
     };
     let eos = IdealGas { gamma: RHD_GAMMA };
-    let f = hllc_rhd(&eos, &prim, &prim, &Tensor::unit(0), 0.0, None);
+    let f = hllc_rhd(&eos, &prim, &prim, &symbi_algebra::Normalized::axis(0), 0.0, None);
     let out = run_uniform_euler_flux::<2>(
         rhd_hllc_flux_gv::<2>(0, EosArm::IdealGamma),
         &prim,
@@ -1186,7 +1187,7 @@ fn rmhd_hllc_flux_matches_native_physics_on_uniform_state() {
         &eos,
         &prim,
         &prim,
-        &Tensor::unit(0),
+        &symbi_algebra::Normalized::axis(0),
         0.0,
         ShockwaveLimiter::Standard,
     );
@@ -1218,7 +1219,7 @@ fn rmhd_hlld_flux_matches_native_physics_on_uniform_state() {
         &eos,
         &prim,
         &prim,
-        &Tensor::unit(0),
+        &symbi_algebra::Normalized::axis(0),
         0.0,
         &symbi_hydro::spatial_metric::SpatialMetric::flat(),
     );
@@ -1336,7 +1337,7 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
         &eos,
         &left,
         &right,
-        &Tensor::unit(0),
+        &symbi_algebra::Normalized::axis(0),
         0.0,
     );
 

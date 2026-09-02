@@ -93,9 +93,13 @@ pub enum Cart {}
 /// let _ = v.contract(&u); // contract takes &Covariant
 /// ```
 ///
-/// once the legacy `From<Tensor>` / `From<[S; D]>` conversions are removed,
-/// a frame claim will be explicit: a bare tensor enters a marker through
-/// `Indexed::new` / `from_array` at the site that owns the claim.
+/// a frame claim is explicit: a bare tensor enters a marker through
+/// `Indexed::new` / `from_array` at the site that owns the claim —
+///
+/// ```compile_fail
+/// use symbi_algebra::{Covariant, Tensor, vec3};
+/// let w: Covariant<f64, 3> = vec3(1.0, 2.0, 3.0).into(); // no implicit frame mint
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(transparent)]
 pub struct Indexed<V, S, const D: usize> {
@@ -298,18 +302,6 @@ impl<S: Copy + fmt::Display, const D: usize> fmt::Display for Covariant<S, D> {
 // conversions
 // ============================================================
 
-impl<V, S: Copy, const D: usize> From<Tensor<S, D>> for Indexed<V, S, D> {
-    fn from(t: Tensor<S, D>) -> Self {
-        Self::new(t)
-    }
-}
-
-impl<V, S: Copy, const D: usize> From<[S; D]> for Indexed<V, S, D> {
-    fn from(data: [S; D]) -> Self {
-        Self::from_array(data)
-    }
-}
-
 impl<V, S: Copy + Default, const D: usize> Default for Indexed<V, S, D> {
     fn default() -> Self {
         Self::new(Tensor::default())
@@ -503,18 +495,20 @@ mod tests {
         assert_eq!(format!("{}", w), "_(3, 4)");
     }
 
-    // ---- from conversions ----
+    // ---- explicit frame claims ----
+    // implicit minting via From is deliberately absent (pinned by the
+    // compile_fail doctest on `Indexed`); construction states the frame.
 
     #[test]
-    fn test_from_tensor() {
+    fn test_explicit_claim_from_tensor() {
         let t = vec3(1.0, 2.0, 3.0);
-        let v: Con3 = t.into();
+        let v = Con3::new(t);
         assert_eq!(v[0], 1.0);
     }
 
     #[test]
-    fn test_from_array() {
-        let v: Cov3 = [1.0, 2.0, 3.0].into();
+    fn test_explicit_claim_from_array() {
+        let v = Cov3::from_array([1.0, 2.0, 3.0]);
         assert_eq!(v[0], 1.0);
     }
 

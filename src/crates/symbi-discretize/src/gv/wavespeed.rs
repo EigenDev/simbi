@@ -6,6 +6,7 @@
 
 use super::*;
 use symbi_algebra::Matrix;
+use symbi_algebra::{FaceNormal, Normalized};
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
@@ -44,7 +45,7 @@ pub fn nmhd_wave_speed_map_gv(
     let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
     let mut lambda = Gv::ZERO;
     for d in 0..ndim {
-        let nhat = Tensor::<Gv, 3>::unit(axes[d]);
+        let nhat = Normalized::axis(axes[d]);
         let (sl, sr) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
         lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
     }
@@ -80,7 +81,7 @@ pub fn imhd_wave_speed_map_gv(
     let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
     let mut lambda = Gv::ZERO;
     for d in 0..ndim {
-        let nhat = Tensor::<Gv, 3>::unit(axes[d]);
+        let nhat = Normalized::axis(axes[d]);
         let (sl, sr) = IsothermalMhd.wave_speeds(&eos, &prim, &nhat);
         lambda = lambda.max(sl.abs().max(sr.abs()) * inv_w[d]);
     }
@@ -1275,7 +1276,7 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     // a 3-vector but the grid varies along ndim axes only.
     let mut writes = Vec::with_capacity(2 * ndim);
     for d in 0..ndim {
-        let nhat = Tensor::<Gv, 3>::unit(d);
+        let nhat = Normalized::axis(d);
         // raw quartic min/max as the solver returns them; the flux clamps the fan, and the
         // zero-clamped form lives there as `extremal_speeds`.
         let (lmin, lmax) = Rmhd.wave_speeds(&eos, &prim, &nhat);
@@ -1850,7 +1851,7 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     };
     let mut writes = Vec::with_capacity(2 * ndim);
     for d in 0..ndim {
-        let nhat = Tensor::<Gv, 3>::unit(d);
+        let nhat = Normalized::axis(d);
         let (lmin, lmax) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
         writes.push(KernelWrite::new(
             format!("ws_l_{d}"),
@@ -1891,7 +1892,7 @@ pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     };
     let mut writes = Vec::with_capacity(2 * ndim);
     for d in 0..ndim {
-        let nhat = Tensor::<Gv, 3>::unit(d);
+        let nhat = Normalized::axis(d);
         let (lmin, lmax) = IsothermalMhd.wave_speeds(&eos, &prim, &nhat);
         writes.push(KernelWrite::new(
             format!("ws_l_{d}"),

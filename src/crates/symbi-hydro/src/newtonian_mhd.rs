@@ -33,7 +33,7 @@ use crate::eos::Eos;
 use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::regime::Regime;
 use crate::state::Cons;
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical, Tensor};
 use symbi_carrier::Scalar;
 
 /// newtonian (non-relativistic) ideal magnetohydrodynamics.
@@ -80,6 +80,10 @@ fn fast_magnetosonic<S: Scalar, const D: usize>(
 impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     const SPEC: &'static crate::regime_spec::RegimeSpec = &crate::regime_spec::NEWTONIAN_MHD_SPEC;
     type Prim = MhdPrim<S, D>;
+
+    // the solver operates in the locally-flat orthonormal frame, so its
+    // face normal is the physical-frame witness.
+    type Normal = Normalized<Physical<S, D>>;
     type Cons = MhdCons<S, D>;
     type Energy = crate::energy::Adiabatic;
 
@@ -130,7 +134,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+        let nhat = nhat.components();
         let half = S::HALF;
         let vn = prim.vel.dot(nhat);
         let bn = prim.mag.dot(nhat);
@@ -150,7 +155,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+        let nhat = nhat.components();
         let vn = prim.vel.dot(nhat);
         let cf = fast_magnetosonic(eos, prim, nhat);
         (vn - cf, vn + cf)
@@ -165,6 +171,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::state::Prim;
     use symbi_algebra::Tensor;
@@ -217,7 +224,7 @@ mod tests {
         let regime = NewtonianMhd;
         let eos = IdealGas { gamma: 1.4 };
         let prim = prim3(1.0, [2.0, 0.0, 0.0], 1.0, [0.0, 0.0, 0.0]);
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let flux = regime.to_flux(&prim, &nhat, &eos);
         // f_den = rho vn = 2.0
         assert!(approx(flux.den, 2.0));
@@ -237,7 +244,7 @@ mod tests {
         let regime = NewtonianMhd;
         let eos = IdealGas { gamma: 1.4 };
         let prim = prim3(1.0, [3.0, 0.0, 0.0], 1.0, [2.0, 0.0, 0.0]);
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let flux = regime.to_flux(&prim, &nhat, &eos);
         // rho vx vn + p - 1/2 Bx^2 = 1*3*3 + 1 - 0.5*4 = 9 + 1 - 2 = 8.0
         assert!(approx(flux.mom[0], 8.0));
@@ -249,7 +256,7 @@ mod tests {
         let regime = NewtonianMhd;
         let eos = IdealGas { gamma: 1.4 };
         let prim = prim3(1.0, [0.0, 0.0, 0.0], 1.0, [0.0, 0.0, 0.0]);
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
         let a = (1.4f64).sqrt();
         assert!(approx(sl, -a));
@@ -263,7 +270,7 @@ mod tests {
         let eos = IdealGas { gamma: 1.0 }; // a^2 = p/rho = 1.0
         // rho=1, p=1 -> a^2 = 1.0; Bx=3 -> cA^2 = 9.0 -> cf = 3.0 (alfven dominates).
         let prim = prim3(1.0, [0.0, 0.0, 0.0], 1.0, [3.0, 0.0, 0.0]);
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
         assert!(approx(sr, 3.0));
         assert!(approx(sl, -3.0));
@@ -276,7 +283,7 @@ mod tests {
         let eos = IdealGas { gamma: 1.0 }; // a^2 = p/rho
         // rho=1, p=1 -> a^2=1; B=(0,2,0), nhat=x -> cAn=0, cA^2 = 4 -> cf = sqrt(5).
         let prim = prim3(1.0, [0.0, 0.0, 0.0], 1.0, [0.0, 2.0, 0.0]);
-        let nhat = Tensor::unit(0);
+        let nhat = Normalized::axis(0);
         let (_sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
         assert!(approx(sr, 5.0f64.sqrt()));
     }

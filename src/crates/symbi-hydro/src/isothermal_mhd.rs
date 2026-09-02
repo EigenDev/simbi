@@ -32,7 +32,7 @@ use crate::eos::Eos;
 use crate::mhd_state::{IsoMhdCons, IsoMhdPrim};
 use crate::regime::Regime;
 use crate::state::{ConsG, PrimG};
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical, Tensor};
 use symbi_carrier::Scalar;
 
 /// isothermal ideal magnetohydrodynamics. no energy equation; p = a^2 rho.
@@ -76,6 +76,10 @@ fn fast_magnetosonic<S: Scalar, const D: usize>(
 impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     const SPEC: &'static crate::regime_spec::RegimeSpec = &crate::regime_spec::ISO_MHD_SPEC;
     type Prim = IsoMhdPrim<S, D>;
+
+    // the solver operates in the locally-flat orthonormal frame, so its
+    // face normal is the physical-frame witness.
+    type Normal = Normalized<Physical<S, D>>;
     type Cons = IsoMhdCons<S, D>;
     type Energy = crate::energy::IsoModel;
 
@@ -103,7 +107,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+        let nhat = nhat.components();
         let half = S::HALF;
         let vn = prim.vel.dot(nhat);
         let bn = prim.mag.dot(nhat);
@@ -123,7 +128,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+        let nhat = nhat.components();
         let vn = prim.vel.dot(nhat);
         let cf = fast_magnetosonic(eos, prim, nhat);
         (vn - cf, vn + cf)
@@ -138,6 +144,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::Isothermal;
     use symbi_algebra::Tensor;
 
@@ -179,7 +186,7 @@ mod tests {
         let cs = 1.3_f64;
         let eos = Isothermal { cs };
         let prim = prim3(2.0, [0.5, 0.0, 0.0], [0.0, 0.0, 0.0]);
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let nhat: Normalized<symbi_algebra::Physical<f64, 3>> = Normalized::axis(0);
         let f = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(f.den, 2.0 * 0.5));
         assert!(approx(f.mom[0], 2.0 * 0.5 * 0.5 + cs * cs * 2.0));
@@ -192,8 +199,8 @@ mod tests {
     fn fast_speed_exceeds_sound_and_alfven() {
         let eos = Isothermal { cs: 1.0 };
         let prim = prim3(1.0, [0.0; 3], [0.6, 0.8, 0.0]);
-        let nhat = Tensor::<f64, 3>::unit(0);
-        let cf = fast_magnetosonic(&eos, &prim, &nhat);
+        let nhat: Normalized<symbi_algebra::Physical<f64, 3>> = Normalized::axis(0);
+        let cf = fast_magnetosonic(&eos, &prim, nhat.components());
         let ca = (0.6_f64 * 0.6 / 1.0).sqrt(); // |bx|/sqrt(rho)
         assert!(cf >= 1.0 - 1e-12 && cf >= ca - 1e-12);
     }

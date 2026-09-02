@@ -17,7 +17,7 @@ use crate::c2p_result::C2pResult;
 use crate::eos::Eos;
 use crate::regime::Regime;
 use crate::state::{Cons, Prim};
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical, Tensor};
 use symbi_carrier::Scalar;
 
 mod algebra;
@@ -41,6 +41,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     // relativistic: clamp the HLLE fan to include the stationary state.
     const CLAMP_EXTREMAL_TO_ZERO: bool = true;
     type Prim = Prim<S, D>;
+
+    // the solver operates in the locally-flat orthonormal frame, so its
+    // face normal is the physical-frame witness.
+    type Normal = Normalized<Physical<S, D>>;
     type Cons = Cons<S, D>;
     type Energy = crate::energy::Adiabatic;
 
@@ -91,7 +95,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+        let nhat = nhat.components();
         let cons = self.to_conserved(eos, prim);
         let vn = prim.vel.dot(nhat);
         let mn = cons.mom.dot(nhat); // normal momentum
@@ -105,7 +110,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
+    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+        let nhat = nhat.components();
         rhd_speeds_from_vn(sound_speed_sq(eos, prim.rho, prim.pre), prim.vel.dot(nhat))
     }
 
@@ -131,6 +137,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::newtonian::Newtonian;
 
@@ -204,7 +211,7 @@ mod tests {
             vel: Tensor::new([0.0]),
             pre: 2.0,
         };
-        let ff = regime.to_flux(&prim, &Tensor::unit(0), &eos);
+        let ff = regime.to_flux(&prim, &Normalized::axis(0), &eos);
         assert!(approx(ff.den, 0.0));
         assert!(approx(ff.mom[0], 2.0)); // pressure only
         assert!(approx(ff.nrg, 0.0));
@@ -220,8 +227,8 @@ mod tests {
             vel: Tensor::new([0.3]),
             pre: 1.0,
         };
-        let ff = regime.to_flux(&prim, &Tensor::unit(0), &eos);
-        let flux_hlle = crate::riemann::hlle(&regime, &eos, &prim, &prim, &Tensor::unit(0), 0.0);
+        let ff = regime.to_flux(&prim, &Normalized::axis(0), &eos);
+        let flux_hlle = crate::riemann::hlle(&regime, &eos, &prim, &prim, &Normalized::axis(0), 0.0);
         assert!(approx(ff.den, flux_hlle.den));
         assert!(approx(ff.mom[0], flux_hlle.mom[0]));
         assert!(approx(ff.nrg, flux_hlle.nrg));
@@ -237,8 +244,8 @@ mod tests {
             vel: Tensor::new([v]),
             pre: 1.0,
         };
-        let flux_rhd = Rhd.to_flux(&prim, &Tensor::unit(0), &eos);
-        let flux_newt = Newtonian.to_flux(&prim, &Tensor::unit(0), &eos);
+        let flux_rhd = Rhd.to_flux(&prim, &Normalized::axis(0), &eos);
+        let flux_newt = Newtonian.to_flux(&prim, &Normalized::axis(0), &eos);
         // density flux: rho*v for both
         assert!(approx_rel(flux_rhd.den, flux_newt.den, 1e-3));
         // momentum flux: rho*v^2 + p for both

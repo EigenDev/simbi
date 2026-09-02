@@ -15,6 +15,7 @@
 //   TV(hlld) <~ TV(hlle)  and  ||rho_hlld - rho_hlle||_1 small  ==>  HLLD is clean.
 // =============================================================================
 
+use symbi_algebra::{FaceNormal, Normalized};
 use symbi_algebra::Tensor;
 use symbi_hydro::ShockwaveLimiter;
 use symbi_hydro::eos::IdealGas;
@@ -93,7 +94,7 @@ fn recon(pm: &P, p0: &P, pp: &P) -> (P, P) {
 // evolve the Brio-Wu tube with the given face-flux solver; return final primitives.
 fn run<F: Fn(&P, &P) -> C>(flux: F) -> Vec<P> {
     let eos = IdealGas { gamma: GAMMA };
-    let nhat = Tensor::<f64, 3>::unit(0);
+    let nhat = Normalized::axis(0);
     let dx = 1.0 / N as f64;
 
     let mut cons: Vec<C> = (0..TOT)
@@ -143,7 +144,7 @@ fn l1_diff(a: &[f64], b: &[f64]) -> f64 {
 #[test]
 fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
     let eos = IdealGas { gamma: GAMMA };
-    let n = Tensor::<f64, 3>::unit(0);
+    let n = Normalized::axis(0);
 
     let p_hlle = run(|l, r| hlle(&NewtonianMhd, &eos, l, r, &n, 0.0));
     let p_hllc = run(|l, r| hllc_newtonian(&eos, l, r, &n, 0.0, ShockwaveLimiter::Standard));

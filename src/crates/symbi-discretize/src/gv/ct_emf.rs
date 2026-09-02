@@ -5,6 +5,7 @@
 // =============================================================================
 
 use super::*;
+use symbi_algebra::{FaceNormal, Normalized, Physical};
 use symbi_hydro::energy::{Adiabatic, EnergyModel, EnergySlot, IsoModel};
 use symbi_hydro::mhd_state::MhdPrimG;
 use symbi_ir::{KernelWrite, KernelWrites};
@@ -1575,7 +1576,7 @@ trait UctHlldFan: EnergyModel + Sized {
         eos_scalar: Gv<'t>,
         prim_l: &MhdPrimG<Gv<'t>, 3, Self>,
         prim_r: &MhdPrimG<Gv<'t>, 3, Self>,
-        nhat: &Tensor<Gv<'t>, 3>,
+        nhat: &Normalized<Physical<Gv<'t>, 3>>,
     ) -> (Gv<'t>, Gv<'t>, Gv<'t>);
 }
 
@@ -1585,7 +1586,7 @@ impl UctHlldFan for Adiabatic {
         eos_scalar: Gv<'t>,
         prim_l: &MhdPrimG<Gv<'t>, 3, Self>,
         prim_r: &MhdPrimG<Gv<'t>, 3, Self>,
-        nhat: &Tensor<Gv<'t>, 3>,
+        nhat: &Normalized<Physical<Gv<'t>, 3>>,
     ) -> (Gv<'t>, Gv<'t>, Gv<'t>) {
         hlld_newtonian_coeffs(&IdealGas { gamma: eos_scalar }, prim_l, prim_r, nhat)
     }
@@ -1597,7 +1598,7 @@ impl UctHlldFan for IsoModel {
         eos_scalar: Gv<'t>,
         prim_l: &MhdPrimG<Gv<'t>, 3, Self>,
         prim_r: &MhdPrimG<Gv<'t>, 3, Self>,
-        nhat: &Tensor<Gv<'t>, 3>,
+        nhat: &Normalized<Physical<Gv<'t>, 3>>,
     ) -> (Gv<'t>, Gv<'t>, Gv<'t>) {
         hlld_isothermal_coeffs(&Isothermal { cs: eos_scalar }, prim_l, prim_r, nhat)
     }
@@ -1672,8 +1673,8 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
                 mag: Tensor::new(mag),
             }
         };
-    let nhat_x = Tensor::<Gv, 3>::unit(0);
-    let nhat_y = Tensor::<Gv, 3>::unit(1);
+    let nhat_x = Normalized::axis(0);
+    let nhat_y = Normalized::axis(1);
     // per-face UCT-HLLD coefficients (a^L, d^L, d^R) from the reconstructed L/R states
     // (eq:UCT_HLLD_ad via the regime's fan) — the EMF fan is identical to the gas flux's at
     // the same reconstructed face state, which is the CT-consistency mignone & del zanna require.
@@ -2050,7 +2051,7 @@ impl WaveSumChart for FlatWaveSum {
             eos,
             l,
             r,
-            &Tensor::<Gv, 3>::unit(n),
+            &Normalized::axis(n),
             &SpatialMetric::flat(),
         )
     }

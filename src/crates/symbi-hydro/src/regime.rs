@@ -27,7 +27,7 @@ use crate::energy::EnergyModel;
 use crate::eos::Eos;
 use crate::regime_spec::RegimeSpec;
 use std::ops::{Add, Mul, Neg, Sub};
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::{FaceNormal, OrderedNumeric, Tensor};
 use symbi_carrier::{Scalar, Selectable};
 
 /// physics regime. bundles state types with the conversions, flux, and
@@ -49,6 +49,30 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
 
     /// primitive state type (e.g., rho, vel, pre for newtonian).
     type Prim: Copy;
+
+    /// the face-normal witness this regime's flux and wave-speed evaluations
+    /// are lawful against. a witness carries its frame, so an orthonormal
+    /// normal cannot enter a coordinate-frame (valencia) flux door —
+    ///
+    /// ```compile_fail
+    /// use symbi_algebra::{FaceNormal, Normalized, Physical};
+    /// use symbi_hydro::eos::IdealGas;
+    /// use symbi_hydro::regime::Regime;
+    /// use symbi_hydro::rhd::RhdGr;
+    /// use symbi_hydro::state::Prim;
+    /// fn probe(gr: &RhdGr<f64, 3>, prim: &Prim<f64, 3>, eos: &IdealGas<f64>) {
+    ///     let n: Normalized<Physical<f64, 3>> = Normalized::axis(0);
+    ///     let _ = gr.to_flux(prim, &n, eos); // expects Normalized<Covariant>
+    /// }
+    /// ```
+    ///
+    /// frame notes: `Normalized<Physical<S, D>>` for a locally-flat
+    /// solver operating on orthonormal components, `Normalized<Covariant<S, D>>`
+    /// for a coordinate-frame (valencia) flux that contracts against
+    /// contravariant velocity and shift. construction goes through
+    /// `FaceNormal::axis`, so a normal is one-hot and exactly unit by
+    /// construction, and the frame claim rides in the type.
+    type Normal: FaceNormal<S, D>;
 
     /// the energy model: `Adiabatic` (energy equation evolved) or `IsoModel`
     /// (none). this is the regime's `Prim`/`Cons` energy `Slot` parameter, surfaced as an associated
@@ -104,12 +128,12 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// physical flux along direction nhat.
     /// nhat is a unit vector — dot(vel, nhat) gives the normal velocity.
     /// one implementation handles all directions.
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons;
+    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons;
 
     /// wave speeds along nhat: (lambda_minus, lambda_plus).
     /// newtonian: vn +/- cs.
     /// rhd: relativistic davis formula.
-    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S);
+    fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S);
 
     /// characteristic wave speeds along grid axis `axis` (the CFL projection):
     /// `(lambda_minus, lambda_plus)`. the timestep needs the speed normal to each grid face,
@@ -119,7 +143,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// actually uses (the cyl r-z swirl reads only v_r and v_z, leaving the folded v_phi untouched). the default
     /// is the dot form, correct for every regime.
     fn wave_speeds_axis(&self, eos: &impl Eos<S>, prim: &Self::Prim, axis: usize) -> (S, S) {
-        self.wave_speeds(eos, prim, &Tensor::<S, D>::unit(axis))
+        self.wave_speeds(eos, prim, &Self::Normal::axis(axis))
     }
 
     /// whether `extremal_speeds` clamps the HLL fan to include the stationary state
@@ -137,7 +161,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
         eos: &impl Eos<S>,
         prim_l: &Self::Prim,
         prim_r: &Self::Prim,
-        nhat: &Tensor<S, D>,
+        nhat: &Self::Normal,
     ) -> (S, S) {
         let (sl_l, sr_l) = self.wave_speeds(eos, prim_l, nhat);
         let (sl_r, sr_r) = self.wave_speeds(eos, prim_r, nhat);

@@ -12,6 +12,7 @@
 // the paper's B already absorbed sqrt(4pi), so the table's (Hx,Hy,Hz) are B.
 // =============================================================================
 
+use symbi_algebra::{FaceNormal, Normalized};
 use symbi_algebra::Tensor;
 use symbi_hydro::energy::Zero;
 use symbi_hydro::eos::Isothermal;
@@ -88,7 +89,7 @@ fn recon(pm: &P, p0: &P, pp: &P) -> (P, P) {
 fn run<F: Fn(&P, &P) -> C>(flux: F) -> Vec<P> {
     let eos = Isothermal { cs: CS };
     let regime = IsothermalMhd;
-    let nhat = Tensor::<f64, 3>::unit(0);
+    let nhat = Normalized::axis(0);
     let dx = 1.0 / N as f64;
 
     let mut cons: Vec<C> = (0..TOT)
@@ -133,7 +134,7 @@ fn l1_diff(a: &[f64], b: &[f64]) -> f64 {
 #[test]
 fn imhd_hlld_is_clean_shock_capturing() {
     let eos = Isothermal { cs: CS };
-    let n = Tensor::<f64, 3>::unit(0);
+    let n = Normalized::axis(0);
 
     let p_hlle = run(|l, r| hlle(&IsothermalMhd, &eos, l, r, &n, 0.0));
     let p_hlld = run(|l, r| hlld_isothermal(&eos, l, r, &n, 0.0));

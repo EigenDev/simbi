@@ -7,6 +7,7 @@
 use super::*;
 use crate::coords::Balance;
 use symbi_algebra::Matrix;
+use symbi_algebra::{FaceNormal, Normalized, Physical};
 use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
@@ -40,7 +41,7 @@ fn nmhd_reconstruct<'t>(
     IdealGas<Gv<'t>>,
     MhdPrim<Gv<'t>, 3>,
     MhdPrim<Gv<'t>, 3>,
-    Tensor<Gv<'t>, 3>,
+    Normalized<Physical<Gv<'t>, 3>>,
 ) {
     let gamma = cx.scalar("gamma");
     let theta = cx.scalar("theta");
@@ -93,7 +94,7 @@ fn nmhd_reconstruct<'t>(
     };
     let left = mk(rho_l, &vl, pre_l, &bl);
     let right = mk(rho_r, &vr, pre_r, &br);
-    let nhat = Tensor::<Gv, 3>::unit(coord_n);
+    let nhat = Normalized::axis(coord_n);
     (IdealGas { gamma }, left, right, nhat)
 }
 
@@ -175,7 +176,7 @@ fn imhd_reconstruct<'t>(
     Isothermal<Gv<'t>>,
     IsoMhdPrim<Gv<'t>, 3>,
     IsoMhdPrim<Gv<'t>, 3>,
-    Tensor<Gv<'t>, 3>,
+    Normalized<Physical<Gv<'t>, 3>>,
 ) {
     let cs = cx.scalar("cs");
     let theta = cx.scalar("theta");
@@ -223,7 +224,7 @@ fn imhd_reconstruct<'t>(
     };
     let left = mk(rho_l, &vl, &bl);
     let right = mk(rho_r, &vr, &br);
-    let nhat = Tensor::<Gv, 3>::unit(coord_n);
+    let nhat = Normalized::axis(coord_n);
     (Isothermal { cs }, left, right, nhat)
 }
 
@@ -322,7 +323,7 @@ fn euler_reconstruct<'t, const D: usize>(
     coord_n: usize,
     recon: Recon,
     balanced: Option<Balanced<'_>>,
-) -> (Prim<Gv<'t>, D>, Prim<Gv<'t>, D>, Tensor<Gv<'t>, D>, Gv<'t>) {
+) -> (Prim<Gv<'t>, D>, Prim<Gv<'t>, D>, Normalized<Physical<Gv<'t>, D>>, Gv<'t>) {
     // theta comes second in the manifest order [gamma, theta]: the caller registers gamma
     // inside the same trace before calling here (the eos construction lives with the
     // caller so the closure can be gamma-law or taub-mathews), and theta is registered
@@ -489,7 +490,7 @@ fn euler_reconstruct<'t, const D: usize>(
         vel: Tensor::new(vr_arr),
         pre: pre_lr.1,
     };
-    let nhat = Tensor::<Gv, D>::unit(coord_n);
+    let nhat = Normalized::axis(coord_n);
     let vface = mesh_face_velocity_gv(cx, dir);
     (left, right, nhat, vface)
 }
@@ -536,7 +537,13 @@ fn euler_hlle_flux_gv<const D: usize, R>(
     eos_arm: EosArm,
 ) -> (GvKernel, KernelWrites)
 where
-    R: for<'t> Regime<Gv<'t>, D, Prim = Prim<Gv<'t>, D>, Cons = Cons<Gv<'t>, D>>,
+    R: for<'t> Regime<
+        Gv<'t>,
+        D,
+        Prim = Prim<Gv<'t>, D>,
+        Cons = Cons<Gv<'t>, D>,
+        Normal = Normalized<Physical<Gv<'t>, D>>,
+    >,
 {
     trace(|cx| {
         // gamma comes first in the manifest on every arm (under the taub-mathews closure it is
@@ -614,7 +621,7 @@ where
         let eos = IdealGas {
             gamma: cx.scalar("gamma"),
         };
-        let (left, right, nhat, vface) =
+        let (left, right, _nhat, vface) =
             euler_reconstruct::<D>(cx, ndim as u8, dir, axes[dir as usize], Recon::Plm, None);
         // the in-kernel spatial metric + lapse at the swept-axis face, transverse gridded coordinates at
         // the cell centroid — the correct face-metric position for a `dir` sweep. the spherical metrics
@@ -738,19 +745,22 @@ where
         // coordinate form, matching the shift the flux carries. every fluid characteristic lies inside
         // the light cone, so the bound holds from above right up to the boundary of the physical set;
         // the low-order update keeps the conserved state inside the physical cone.
+        // the valencia regime contracts its normal against contravariant
+        // velocity and shift: the same axis, witnessed in the coordinate frame.
+        let nhat_gr = Normalized::axis(coord_n);
         let (s_l, s_r) = if rusanov {
             let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
             let beta_n = beta[coord_n];
             (Gv::ZERO - lam - beta_n, lam - beta_n)
         } else {
-            regime.extremal_speeds(&eos, &left, &right, &nhat)
+            regime.extremal_speeds(&eos, &left, &right, &nhat_gr)
         };
         // one HLL fan on the densitized pair (U, F^n): both sides carry the one measure sqrt(-g), the
         // shift rides inside F^n, and the signal speeds are the coordinate speeds lambda^n - beta^n,
         // so the fan is complete in coordinate form — every component keeps that single sqrt(-g)
         // weight, and the chart enters through the densitized pair alone. in the bake, mesh motion
         // (vface) pairs with flat spacetime alone.
-        let flux = hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r);
+        let flux = hlle_with_speeds(&regime, &eos, &left, &right, &nhat_gr, vface, s_l, s_r);
         let writes = euler_flux_writes(&flux);
         writes
     })
@@ -946,7 +956,7 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrite
         br[coord_n] = bn_face;
         let left = mk(rho_l, &vl, pre_l, &bl);
         let right = mk(rho_r, &vr, pre_r, &br);
-        let nhat = Tensor::<Gv, 3>::unit(coord_n);
+        let nhat = Normalized::axis(coord_n);
 
         // the wave speeds are materialized once per cell by rmhd_wave_speeds_cell_gv into
         // wave_speed_l[dir]/wave_speed_r[dir] (the exact quartic) and read here.
@@ -1084,7 +1094,7 @@ pub fn rmhd_flux_gr_gv(
         };
         let left = mk(rho_l, &vl, pre_l, &bl);
         let right = mk(rho_r, &vr, pre_r, &br);
-        let nhat = Tensor::<Gv, 3>::unit(coord_n);
+        let nhat = Normalized::axis(coord_n);
 
         // the metric at the swept-axis face, transverse gridded slots at the cell centroid; the
         // ungridded polar slot is the exact equatorial pi/2, the azimuthal slot zero.
