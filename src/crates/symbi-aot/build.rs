@@ -23,6 +23,7 @@
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
+use symbi_ir::SweepAxis;
 
 // collects (cpu_include_file, kernel_name) for every kernel emitted this run, so
 // main() writes one registry module, sparing this crate from
@@ -570,7 +571,11 @@ impl FamilyKind {
         }
     }
 
-    fn source_specs(self, d: usize, has_energy: bool) -> Vec<symbi_source_compile::source_spec::SourceSpec> {
+    fn source_specs(
+        self,
+        d: usize,
+        has_energy: bool,
+    ) -> Vec<symbi_source_compile::source_spec::SourceSpec> {
         match self {
             Self::UniformAccel => {
                 symbi_source_compile::source_spec::uniform_acceleration_sources(d, has_energy)
@@ -1433,7 +1438,7 @@ fn gen_rmhd_hlld_face_flux(out_dir: &str, ndim: u8, dir: u8) {
 fn gen_rmhd_ct_curl(out_dir: &str) {
     // per-component 2.5D in-plane curl (dir=0 -> bx, dir=1 -> by), each from the corner Ez.
     for dir in 0..2 {
-        let (k, writes) = rmhd_ct_curl_2d_dir_gv(dir);
+        let (k, writes) = rmhd_ct_curl_2d_dir_gv(SweepAxis::new(dir, 2));
         emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}"), 2, &k, &writes);
     }
     // the Cartesian Ohmic resistive edge EMF: adds eta * J_z to Ez before the curl consumes it.
@@ -1447,7 +1452,7 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
     // the 3D Cartesian resistive edge EMF, one kernel per edge direction (eta * J_dir added to the
     // dir-edge's EMF); the dispatch loops the three edges.
     for dir in 0..3 {
-        let (k, writes) = rmhd_resistive_emf_3d_dir_gv(dir);
+        let (k, writes) = rmhd_resistive_emf_3d_dir_gv(SweepAxis::new(dir, 3));
         emit_gv(
             out_dir,
             &format!("rmhd_resistive_emf_3d_{dir}"),
@@ -1995,7 +2000,7 @@ fn gen_rmhd_ct_curl_3d_dir(out_dir: &str, dir: u8, geom: Geom) {
 // (0 -> B_r, 1 -> B_z), from the single out-of-plane corner EMF E_phi. dir=1 carries the
 // (1/r) d_r(r E_phi) metric; dir=0 is flat. name matches the geom_suffix dispatch "_cyl_rz".
 fn gen_rmhd_ct_curl_cyl_rz(out_dir: &str, dir: u8, geom: &Geom) {
-    let (k, writes) = rmhd_ct_curl_cyl_rz_gv(dir as usize, &geom.spacing);
+    let (k, writes) = rmhd_ct_curl_cyl_rz_gv(SweepAxis::new(dir as usize, 2), &geom.spacing);
     // the radial spacing is a runtime `map_kind` scalar; a log-radial grid
     // selects the geometric-mean curl (true face radii) in-kernel, matching the runtime ct_curl.
     emit_gv(
@@ -2036,7 +2041,7 @@ fn gen_rmhd_resistive_emf_ortho(out_dir: &str, coords: Coords, suffix: &str, geo
 // (1/(r sin th)) d_th(sin th .) area metric; dir=1 the (1/r) d_r(r .) metric. name matches the
 // geom_suffix dispatch "_sph".
 fn gen_rmhd_ct_curl_2d_sph(out_dir: &str, dir: u8, geom: &Geom) {
-    let (k, writes) = rmhd_ct_curl_2d_sph_gv(dir as usize, &geom.spacing);
+    let (k, writes) = rmhd_ct_curl_2d_sph_gv(SweepAxis::new(dir as usize, 2), &geom.spacing);
     // the radial spacing is a runtime `map_kind` scalar; a log-radial grid
     // selects the geometric-mean curl (true face radii) in-kernel, matching the runtime ct_curl.
     emit_gv(
@@ -2202,7 +2207,7 @@ fn gen_rmhd_gr_uct_3d(out_dir: &str, geom: &Geom) {
             &w,
         );
         let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_hlld_gr_3d_gv(
-            dir,
+            SweepAxis::new(dir, 3),
             geom.spacetime,
             geom.coords,
             &geom.spacing,
@@ -2257,7 +2262,7 @@ fn gen_rmhd_ct_gr(out_dir: &str, geom: &Geom) {
 // 1 -> B_phi), from the single out-of-plane corner EMF E_z. dir=0 carries the (1/r) d_phi metric
 // (mirror of r-z's dir=1); dir=1 is flat. name matches the geom_suffix dispatch "_cyl_rphi".
 fn gen_rmhd_ct_curl_cyl_rphi(out_dir: &str, dir: u8, geom: &Geom) {
-    let (k, writes) = rmhd_ct_curl_cyl_rphi_gv(dir as usize, &geom.spacing);
+    let (k, writes) = rmhd_ct_curl_cyl_rphi_gv(SweepAxis::new(dir as usize, 2), &geom.spacing);
     // the radial spacing is a runtime `map_kind` scalar; a log-radial grid
     // selects the geometric-mean curl (true face radii) in-kernel, matching the runtime ct_curl.
     emit_gv(
@@ -3438,7 +3443,8 @@ fn main() {
         for regime in REGIMES {
             for family in FUSED_FAMILIES {
                 let specs = family.source_specs(ndim as usize, regime.has_energy);
-                let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = specs.iter().collect();
+                let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> =
+                    specs.iter().collect();
                 // the fused variant — source folded into the godunov stage (one launch).
                 gen_godunov_stage(
                     &out_dir,

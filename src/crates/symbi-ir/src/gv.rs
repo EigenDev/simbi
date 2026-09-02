@@ -401,7 +401,10 @@ pub fn trace_for_domain<const D: usize, R>(
 
 /// the underlying open-run-close. exposed for callers that already hold a
 /// [`LaunchGrade`]; most go through [`trace`] or [`trace_for_domain`].
-pub fn trace_with<R>(grade: LaunchGrade, f: impl for<'t> FnOnce(TraceCx<'t>) -> R) -> (GvKernel, R) {
+pub fn trace_with<R>(
+    grade: LaunchGrade,
+    f: impl for<'t> FnOnce(TraceCx<'t>) -> R,
+) -> (GvKernel, R) {
     let previous = GV_TRACE.with(|slot| slot.borrow_mut().take());
     let scope = TraceScope { previous };
     GV_TRACE.with(|slot| *slot.borrow_mut() = Some(fresh_trace()));
@@ -606,10 +609,8 @@ impl<'t> TraceCx<'t> {
     ) {
         let node = v.node();
         with_trace(|t| {
-            t.node_supports.insert(
-                node,
-                crate::support_infer::SupportBall { center, radius },
-            );
+            t.node_supports
+                .insert(node, crate::support_infer::SupportBall { center, radius });
         });
     }
 }
@@ -1534,11 +1535,7 @@ impl<'t> symbi_carrier::Scalar for Gv<'t> {
             }
         }
         let pos = acc.expect("n != 0 implies acc is set");
-        if n < 0 {
-            Gv::lit(1.0) / pos
-        } else {
-            pos
-        }
+        if n < 0 { Gv::lit(1.0) / pos } else { pos }
     }
     fn powf(self, e: Gv<'t>) -> Gv<'t> {
         self.binop(e, ElementWiseOp::Pow)

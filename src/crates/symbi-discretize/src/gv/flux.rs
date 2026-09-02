@@ -83,7 +83,7 @@ fn nmhd_reconstruct<'t>(
     // bn_l != bn_r, breaking the riemann solver's constant-Bn assumption (OT noise/blow-up).
     // the face field is read along grid axis `dir`; the overridden component is the physical
     // normal `coord_n` (they coincide for cartesian; differ for the cyl r-z swirl/axisym).
-    let bn_face = cx.field_shifted("bface_n", "bface_n", ndim, dir, 0);
+    let bn_face = cx.field_shifted("bface_n", FieldRef::BFaceNormal, ndim, dir, 0);
     bl[coord_n] = bn_face;
     br[coord_n] = bn_face;
     let mk = |rho, v: &[_], p, b: &[_]| {
@@ -211,7 +211,7 @@ fn imhd_reconstruct<'t>(
     }
     // staggered div-free normal face field (gardiner-stone CT coupling): read along grid `dir`,
     // override the physical normal component `coord_n` (= axes[dir]). see nmhd_reconstruct.
-    let bn_face = cx.field_shifted("bface_n", "bface_n", ndim, dir, 0);
+    let bn_face = cx.field_shifted("bface_n", FieldRef::BFaceNormal, ndim, dir, 0);
     bl[coord_n] = bn_face;
     br[coord_n] = bn_face;
     let mk = |rho, v: &[_], b: &[_]| {
@@ -951,7 +951,7 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrite
         };
         // normal B from the staggered face field (gardiner-stone CT coupling) — reconstructed
         // bcell gives bn_l != bn_r, breaking the constant-Bn assumption. see nmhd_reconstruct.
-        let bn_face = cx.field_shifted("bface_n", "bface_n", ndim, dir, 0);
+        let bn_face = cx.field_shifted("bface_n", FieldRef::BFaceNormal, ndim, dir, 0);
         bl[coord_n] = bn_face;
         br[coord_n] = bn_face;
         let left = mk(rho_l, &vl, pre_l, &bl);
@@ -1080,7 +1080,7 @@ pub fn rmhd_flux_gr_gv(
             br.push(r);
         }
         // normal B from the staggered face field (gardiner-stone CT coupling) — shared by both sides.
-        let bn_face = cx.field_shifted("bface_n", "bface_n", ndim as u8, dir, 0);
+        let bn_face = cx.field_shifted("bface_n", FieldRef::BFaceNormal, ndim as u8, dir, 0);
         bl[coord_n] = bn_face;
         br[coord_n] = bn_face;
         let eos = IdealGas { gamma: gamma_eos };

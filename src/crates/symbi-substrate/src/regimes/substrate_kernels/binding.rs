@@ -9,8 +9,8 @@
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
-use symbi_grid::Field;
 use symbi_carrier::Scalar;
+use symbi_grid::Field;
 use symbi_ir::{FieldBind, FieldRef};
 use symbi_xpu::MemorySpace;
 
@@ -72,8 +72,9 @@ pub(crate) fn parse_manifest(ctx: &str, raw: Vec<(FieldBind, bool)>) -> Vec<(Fie
     raw.into_iter()
         .map(|(bind, is_out)| match bind {
             FieldBind::Ref(fref) => (fref, is_out),
-            FieldBind::Scratch(s) | FieldBind::User(s) => panic!(
-                "{ctx}: typed dispatch got non-FieldRef path '{s}' — hand-built kernels bind positionally and must not route through the typed path"
+            other => panic!(
+                "{ctx}: typed dispatch got non-FieldRef path '{}' — hand-built kernels bind positionally and must not route through the typed path",
+                other.name()
             ),
         })
         .collect()

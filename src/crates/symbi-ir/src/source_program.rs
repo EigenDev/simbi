@@ -99,7 +99,12 @@ impl SourceProgram {
     /// given entry name: one input pointer per param, one output pointer per
     /// output, elementwise over `n_cells`.
     pub fn cuda_source_kernel(&self, entry_name: &str) -> String {
-        crate::backends::cuda::emit_source_kernel(&self.graph, &self.params, &self.outputs, entry_name)
+        crate::backends::cuda::emit_source_kernel(
+            &self.graph,
+            &self.params,
+            &self.outputs,
+            entry_name,
+        )
     }
 }
 
@@ -117,8 +122,7 @@ impl<'t> TraceCx<'t> {
             .iter()
             .map(|(name, gv)| (name.clone(), gv.node()))
             .collect();
-        let outs =
-            self.with_trace(|t| program.splice_into(t.graph(), &nodes));
+        let outs = self.with_trace(|t| program.splice_into(t.graph(), &nodes));
         outs.into_iter().map(|n| self.gv(n)).collect()
     }
 

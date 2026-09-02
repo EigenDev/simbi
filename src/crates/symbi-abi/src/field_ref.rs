@@ -415,7 +415,7 @@ fn parse_idx(s: &str) -> Option<u8> {
 #[derive(Clone, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum FieldBind {
     Ref(FieldRef),
-    Scratch(Box<str>),
+    Scratch(crate::ct_scratch::ScratchKey),
     User(Box<str>),
 }
 
@@ -430,7 +430,7 @@ impl FieldBind {
             .unwrap_or_else(|| FieldBind::Scratch(s.into()))
     }
 
-    pub fn scratch(name: impl Into<Box<str>>) -> Self {
+    pub fn scratch(name: impl Into<crate::ct_scratch::ScratchKey>) -> Self {
         Self::Scratch(name.into())
     }
 
@@ -443,7 +443,8 @@ impl FieldBind {
     pub fn name(&self) -> String {
         match self {
             FieldBind::Ref(f) => f.name(),
-            FieldBind::Scratch(s) | FieldBind::User(s) => s.to_string(),
+            FieldBind::Scratch(s) => s.name(),
+            FieldBind::User(s) => s.to_string(),
         }
     }
 }
@@ -452,6 +453,29 @@ impl FieldBind {
 impl From<FieldRef> for FieldBind {
     fn from(r: FieldRef) -> Self {
         FieldBind::Ref(r)
+    }
+}
+
+// the typed CT scratch vocabulary binds through the scratch arm at its
+// canonical spelling; explicitly spelled ports come in as a complete key.
+impl From<crate::ct_scratch::CtScratchKey> for FieldBind {
+    fn from(k: crate::ct_scratch::CtScratchKey) -> Self {
+        FieldBind::Scratch(k.into())
+    }
+}
+impl From<crate::ct_scratch::CtFaceCt> for FieldBind {
+    fn from(f: crate::ct_scratch::CtFaceCt) -> Self {
+        FieldBind::Scratch(crate::ct_scratch::CtScratchKey::from(f).into())
+    }
+}
+impl From<crate::ct_scratch::CtCellCt> for FieldBind {
+    fn from(c: crate::ct_scratch::CtCellCt) -> Self {
+        FieldBind::Scratch(crate::ct_scratch::CtScratchKey::from(c).into())
+    }
+}
+impl From<crate::ct_scratch::CtEdgeCt> for FieldBind {
+    fn from(e: crate::ct_scratch::CtEdgeCt) -> Self {
+        FieldBind::Scratch(crate::ct_scratch::CtScratchKey::from(e).into())
     }
 }
 
@@ -621,5 +645,34 @@ mod tests {
         let bind = FieldBind::user("tracer.custom");
         assert_eq!(bind, FieldBind::User("tracer.custom".into()));
         assert_eq!(bind.name(), "tracer.custom");
+    }
+
+    /// the golden serialization pin: a `Scratch` bind serializes as the bare
+    /// string payload — `{"Scratch":"<wire>"}` — for the whole reserved CT
+    /// vocabulary and for free scratch alike, byte-for-byte the form the arm
+    /// carried when its payload was a plain string. deserialization
+    /// re-classifies into the typed arm and round-trips.
+    #[test]
+    fn scratch_bind_serializes_as_the_bare_string() {
+        let mut names: Vec<String> = crate::ct_scratch::CtWireName::all()
+            .into_iter()
+            .map(|w| w.render())
+            .collect();
+        names.push("area_hi_0".into());
+        names.push("buf0".into());
+        for name in names {
+            let bind = FieldBind::from_path(&name);
+            if matches!(bind, FieldBind::Ref(_)) {
+                continue; // closed-vocabulary spellings never reach the scratch arm
+            }
+            let json = serde_json::to_string(&bind).unwrap();
+            assert_eq!(
+                json,
+                format!("{{\"Scratch\":\"{name}\"}}"),
+                "serialized form of '{name}' drifted from the bare-string manifest arm"
+            );
+            let back: FieldBind = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, bind, "round-trip of '{name}'");
+        }
     }
 }

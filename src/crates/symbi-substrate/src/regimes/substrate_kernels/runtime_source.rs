@@ -9,12 +9,12 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
+use symbi_carrier::Scalar;
 use symbi_geometry::Geometry;
 use symbi_grid::Field;
+use symbi_ir::{FieldBind, FieldRef, ScalarRef};
 use symbi_source_compile::SourceEvaluator;
 use symbi_source_compile::source_spec::SourceProgram;
-use symbi_carrier::Scalar;
-use symbi_ir::{FieldBind, FieldRef, ScalarRef};
 use symbi_xpu::MemorySpace;
 
 use std::sync::{Arc, OnceLock};
@@ -159,7 +159,11 @@ impl RuntimeSource {
     /// build from spec-validated `(target, SourceProgram)` pairs. `has_energy` comes from the
     /// attaching kernel-set's `RegimeSpec` (e.g., `NEWTONIAN_SPEC.has_energy` /
     /// `ISO_NEWTONIAN_SPEC.has_energy`) — the set is the regime.
-    pub fn new(built: Vec<(String, SourceProgram)>, params: Vec<f64>, has_energy: bool) -> Arc<Self> {
+    pub fn new(
+        built: Vec<(String, SourceProgram)>,
+        params: Vec<f64>,
+        has_energy: bool,
+    ) -> Arc<Self> {
         let eval = SourceEvaluator::from_built(&built);
         Arc::new(Self {
             eval,
@@ -337,7 +341,8 @@ fn build_fused_cpu_kernel<const D: usize>(
     built: &[(String, SourceProgram)],
     n_bodies: usize,
 ) -> Option<FusedCpuKernel> {
-    let src_refs: Vec<(&str, &SourceProgram)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
+    let src_refs: Vec<(&str, &SourceProgram)> =
+        built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (gvk, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         // runtime GR sources would thread the real spacetime here; only flat (Minkowski) is wired.
         // n_bodies > 0 folds the immersed-body source (gravity + accretion drain) into this stage,
@@ -361,8 +366,11 @@ fn build_fused_cpu_kernel<const D: usize>(
     // wiring bug (these kernels are closed-vocabulary), so demand `Ref` loudly.
     let bind_ref = |b: &FieldBind| match b {
         FieldBind::Ref(f) => *f,
-        FieldBind::Scratch(s) | FieldBind::User(s) => {
-            panic!("fused runtime source: manifest path '{s}' is not a known FieldRef")
+        other => {
+            panic!(
+                "fused runtime source: manifest path '{}' is not a known FieldRef",
+                other.name()
+            )
         }
     };
     Some(FusedCpuKernel {
@@ -394,15 +402,19 @@ fn build_source_only_cpu_kernel<const D: usize>(
     has_energy: bool,
     built: &[(String, SourceProgram)],
 ) -> Option<FusedCpuKernel> {
-    let src_refs: Vec<(&str, &SourceProgram)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
+    let src_refs: Vec<(&str, &SourceProgram)> =
+        built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (gvk, writes) = symbi_discretize::gv::source_apply_from_built_gv(
         coords, spacing, axes, D as u8, ncomp, has_energy, &src_refs,
     );
     let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, D).ok()?;
     let bind_ref = |b: &FieldBind| match b {
         FieldBind::Ref(f) => *f,
-        FieldBind::Scratch(s) | FieldBind::User(s) => {
-            panic!("compiled runtime source: manifest path '{s}' is not a known FieldRef")
+        other => {
+            panic!(
+                "compiled runtime source: manifest path '{}' is not a known FieldRef",
+                other.name()
+            )
         }
     };
     Some(FusedCpuKernel {
@@ -868,7 +880,8 @@ where
     Mem: MemorySpace,
 {
     let (coords, spacing, axes) = sim_gv_geom(sim);
-    let src_refs: Vec<(&str, &SourceProgram)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
+    let src_refs: Vec<(&str, &SourceProgram)> =
+        built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (gvk, writes) = symbi_discretize::source_apply_from_built_gv(
         coords, &spacing, &axes, D as u8, DOF, has_energy, &src_refs,
     );

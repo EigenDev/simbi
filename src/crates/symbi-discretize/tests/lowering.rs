@@ -18,6 +18,7 @@
 
 mod harness;
 use harness::KernelRun;
+use symbi_ir::SweepAxis;
 
 use symbi_discretize::gv::{
     adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, iso_flux_gv, rhd_flux_gv, rmhd_flux_gv,
@@ -339,7 +340,7 @@ fn ct_kernels_lower() {
     // 2D in-plane curl from the out-of-plane edge EMF (built at ndim=2); the combined 2d curl was
     // split per in-plane direction (dir=0 -> B_x, dir=1 -> B_y, both from the corner E_z).
     for dir in 0..2 {
-        KernelRun::new(rmhd_ct_curl_2d_dir_gv(dir))
+        KernelRun::new(rmhd_ct_curl_2d_dir_gv(SweepAxis::new(dir, 2)))
             .grid([8, 8])
             .assert_lowers();
     }

@@ -30,6 +30,7 @@ mod harness;
 use harness::KernelRun;
 use symbi_algebra::FaceNormal;
 use symbi_hydro::quantity::{Density, Pressure};
+use symbi_ir::SweepAxis;
 
 use symbi_algebra::Tensor;
 use symbi_discretize::{nmhd_edge_emf_uct_hlld_gv, rmhd_ct_curl_2d_dir_gv};
@@ -345,7 +346,7 @@ fn ct_induction(sim: &Sim, ez: &[f64], dt: f64) -> (Vec<f64>, Vec<f64>) {
     let by_in = sim.by.clone();
     let pull = |buf: Vec<f64>| move |c: &[usize]| buf[idx(c[0], c[1])];
     // dir=0: B_x_new = B_x - dt*idy*(Ez[i,j+1]-Ez[i,j]).
-    let bx_out = KernelRun::new(rmhd_ct_curl_2d_dir_gv(0))
+    let bx_out = KernelRun::new(rmhd_ct_curl_2d_dir_gv(SweepAxis::new(0, 2)))
         .grid([BX, BY])
         .compute_window([NG as i32, NG as i32], [NX, NY])
         .field_with("b", pull(bx_in))
@@ -355,7 +356,7 @@ fn ct_induction(sim: &Sim, ez: &[f64], dt: f64) -> (Vec<f64>, Vec<f64>) {
         .values("b_new")
         .to_vec();
     // dir=1: B_y_new = B_y + dt*idx*(Ez[i+1,j]-Ez[i,j]).
-    let by_out = KernelRun::new(rmhd_ct_curl_2d_dir_gv(1))
+    let by_out = KernelRun::new(rmhd_ct_curl_2d_dir_gv(SweepAxis::new(1, 2)))
         .grid([BX, BY])
         .compute_window([NG as i32, NG as i32], [NX, NY])
         .field_with("b", pull(by_in))

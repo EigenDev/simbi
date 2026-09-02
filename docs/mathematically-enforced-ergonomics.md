@@ -846,6 +846,40 @@ confusion has no observed site), density versus deposited amount (the source
 bridge already rejects the cell-volume leaf at build time), and coordinate
 versus proper time (naming suffices at the current usage sites).
 
+The resolved CT/UCT scratch inventory — every wire name whose string equality
+carries identity across the discretize/substrate seam, classified by the buffer
+the dispatch binder actually attaches (not by the name's suggestion). the
+relative roles (`A`/`B` transverse grid axes, `P1`/`P2`/`Out` physical
+components) resolve to absolute indices only through the validated `CtEdge`
+descriptor (`g1`/`g2` grid axes, `p1`/`p2`/`name_k` physical components). this
+table is the source for the typed scratch vocabulary and the structural gate.
+
+| Wire name | Semantic role | Centering | Relative axis/component | Bound buffer |
+| --- | --- | --- | --- | --- |
+| `bface_a` / `bface_b` | staggered face B, transverse | Face | normal = A / B | `mhd.bface[g1]` / `[g2]` |
+| `bface_n` | staggered face B, sweep-normal | Face | sweep axis (out-of-band `dir`) | `mhd.bface[dir]` (already `FieldRef::BFaceNormal`) |
+| `b`, `bx`/`by`, `br`/`bz`, `b0`/`b1` | curl-written / chart-spelled face B | Face | write = sweep; chart pairs = axes 0/1 | `mhd.bface[dir]`, `mhd.bface[0..1]` |
+| `bcell_p1` / `bcell_p2` / `bcell_out` | cell B, in-plane / out-of-plane | Cell | P1 / P2 / Out | `mhd.bcell[p1/p2/p_out]` |
+| `vel_p1` / `vel_p2` / `vel_out` | cell velocity | Cell | P1 / P2 / Out | `prim.vel[p1/p2/p_out]` |
+| `rho`, `pre` | cell primitives | Cell | -- | `prim.rho`, `prim.pre` |
+| `flag` | FOFC troubled-cell flag | Cell | -- | the FOFC flag field |
+| `fden_p1` / `fden_p2` | gas mass flux through transverse faces | Face | normal = A / B | `fields.flux[g1].den` / `[g2].den` |
+| `bflux_a` / `bflux_b` | induction flux through transverse faces | Face | normal = A / B (comp p2 / p1) | `mhd.bflux[g1][p2]` / `[g2][p1]` |
+| `bf_{c}` | staggered face B addressed by its own component (the face-to-cell interpolation) | Face | comp c, normal = c's grid axis | `mhd.bface[c]` |
+| `fo_bflux_{c}` / `ho_bflux_{c}` | FOFC induction-flux splice: live first-order / saved high-order | Face | comp c, normal = sweep | `mhd.bflux[dir][c]` / `bflux_ho[dir][c]` |
+| `bc_{c}`, `nrg` | cell B write of the interpolation; a defensive conserved-energy arm | Cell | comp c | `mhd.bcell[c]` (via `FieldRef::BCell`); `cons.nrg` |
+| `wsl_p1` `wsr_p1` / `wsl_p2` `wsr_p2` | left/right signal speeds at transverse faces | Face | normal = A / B | `mhd.wave_speed_l/r[g1]` / `[g2]` |
+| `emf`, `ez`, `e`, `ephi` | the edge EMF (one identity, four ABI spellings) | Edge | dual comp `name_k` | `mhd.efield[edge.slot]` (2D charts: `[0]`) |
+| `e_p1` / `e_p2` | incident edge EMFs read by a face curl | Edge | incident edge A / B | `mhd.efield[edge_slots[0/1]]` |
+| `e_fo` / `e_ho` | FOFC splice: live first-order EMF / saved high-order EMF | Edge | dual comp | `mhd.efield[slot]` / `mhd.efield_ho[slot]` |
+| `e_n` | RK2 edge-EMF stage snapshot | Edge | dual comp | `mhd.efield_n[slot]` |
+
+`idx`/`idy`/`id_p1`/`id_p2`/`eta` are `ScalarBind` entries (inverse widths, the
+resistivity), outside field identity. `cons_mag_{k}`, `prim.mag[{k}]`, and
+`bcell_{k}` are cell-centered B spellings already in the closed `FieldRef`
+vocabulary. the derived `edge_*`/`h_*`/`e_*`-prefixed spellings are trace-local
+SSA keys; identity lives in the wire path alone.
+
 1. Add semantic types at primitive/conserved and centering boundaries.
 2. Make frame and variance explicit in geometric interfaces.
 3. Add dimensional and interval verification carriers where useful.

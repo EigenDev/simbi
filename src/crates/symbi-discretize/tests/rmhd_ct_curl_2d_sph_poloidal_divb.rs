@@ -27,6 +27,7 @@
 
 mod harness;
 use harness::KernelRun;
+use symbi_ir::SweepAxis;
 
 use symbi_discretize::{Spacing, rmhd_ct_curl_2d_sph_gv};
 
@@ -81,19 +82,22 @@ fn run_curl(b_in: &[Vec<f64>; 2], ez: &[f64], dt: f64) -> [Vec<f64>; 2] {
     let mut new_b: [Vec<f64>; 2] = [vec![0.0; f], vec![0.0; f]];
     for dir in 0..2usize {
         let (bvec, ezv) = (b_in[dir].clone(), ez.to_vec());
-        let out = KernelRun::new(rmhd_ct_curl_2d_sph_gv(dir, &[Spacing::Uniform; 2]))
-            .grid([M, M])
-            .compute_window([0, 0], [M - 1, M - 1])
-            .field_with("b", move |c| bvec[idx2(c[0], c[1])])
-            .field_with("ez", move |c| ezv[idx2(c[0], c[1])])
-            .scalars(&[
-                ("dt", dt),
-                ("x_lo_0", R0),
-                ("dx_0", DR),
-                ("x_lo_1", T0),
-                ("dx_1", DTH),
-            ])
-            .run();
+        let out = KernelRun::new(rmhd_ct_curl_2d_sph_gv(
+            SweepAxis::new(dir, 2),
+            &[Spacing::Uniform; 2],
+        ))
+        .grid([M, M])
+        .compute_window([0, 0], [M - 1, M - 1])
+        .field_with("b", move |c| bvec[idx2(c[0], c[1])])
+        .field_with("ez", move |c| ezv[idx2(c[0], c[1])])
+        .scalars(&[
+            ("dt", dt),
+            ("x_lo_0", R0),
+            ("dx_0", DR),
+            ("x_lo_1", T0),
+            ("dx_1", DTH),
+        ])
+        .run();
         new_b[dir] = out.values("b_new").to_vec();
     }
     new_b

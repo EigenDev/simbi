@@ -61,7 +61,9 @@ pub mod support_infer;
 // use the `symbi_ir::FieldRef` / `symbi_ir::ScalarBind` paths.
 pub use kernel_id::{KernelId, ProlongTag};
 pub use symbi_abi::{
-    BodyScalar, FieldBind, FieldRef, MeshScalar, ScalarBind, ScalarRef, StateComp, StateSlot,
+    BodyScalar, CtCellCt, CtEdgeCt, CtFaceCt, CtScratch, CtScratchKey, CtWireName, FieldBind,
+    FieldRef, GridAxis, MeshScalar, PhysComp, PlaneComp, ScalarBind, ScalarRef, ScratchKey,
+    StateComp, StateSlot, SweepAxis, Transverse,
 };
 
 // carrier-side surface

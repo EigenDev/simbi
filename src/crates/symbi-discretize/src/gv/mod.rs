@@ -434,7 +434,28 @@ pub(crate) fn gv_load_at<'t>(
 
 /// register a field in the manifest as a bare entry, emitting no node, to pin the buffer order
 /// (the staggered runtime dispatch is positional) ahead of the stencil reads that follow.
-fn gv_register_field(cx: TraceCx, key: &str, runtime: &str) {
+/// a CT field read whose trace key is its wire spelling: the key is derived
+/// from the typed identity, so the reserved string exists only at the ABI
+/// renderer.
+pub(crate) fn ct_field<'t>(cx: TraceCx<'t>, k: impl Into<symbi_ir::CtScratchKey>) -> Gv<'t> {
+    let k = k.into();
+    let key = k.render();
+    cx.field(&key, k)
+}
+
+/// the offset-stencil form of [`ct_field`].
+pub(crate) fn ct_field_at<'t>(
+    cx: TraceCx<'t>,
+    k: impl Into<symbi_ir::CtScratchKey>,
+    ndim: usize,
+    offsets: &[i32],
+) -> Gv<'t> {
+    let k = k.into();
+    let key = k.render();
+    gv_field_at(cx, &key, k, ndim, offsets)
+}
+
+fn gv_register_field(cx: TraceCx, key: &str, runtime: impl Into<symbi_ir::FieldBind>) {
     cx.with_trace(|t| t.register_field(key, runtime));
 }
 
@@ -444,12 +465,13 @@ fn gv_register_field(cx: TraceCx, key: &str, runtime: &str) {
 pub(crate) fn gv_field_at<'t>(
     cx: TraceCx<'t>,
     key: &str,
-    runtime: &str,
+    runtime: impl Into<symbi_ir::FieldBind>,
     ndim: usize,
     offsets: &[i32],
 ) -> Gv<'t> {
+    let runtime = runtime.into();
     cx.gv(cx.with_trace(|t| {
-        t.register_field(key, runtime);
+        t.register_field(key, runtime.clone());
         let comps: Vec<NodeId> = (0..ndim)
             .map(|ax| {
                 let c = t.coord(ax as u8);

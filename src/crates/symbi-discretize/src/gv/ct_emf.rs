@@ -10,6 +10,10 @@ use symbi_hydro::energy::{Adiabatic, EnergyModel, IsoModel};
 use symbi_hydro::mhd_state::MhdPrimG;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::PrimFromSlots;
+use symbi_ir::{
+    CtCellCt, CtEdgeCt, CtFaceCt, CtScratchKey, CtWireName, PhysComp, PlaneComp, SweepAxis,
+    Transverse,
+};
 use symbi_ir::{KernelWrite, KernelWrites};
 
 /// chart-generic ADM data (lapse alpha, sqrt(det gamma), full shift beta) at a world position, for
@@ -191,21 +195,36 @@ fn ct_curl_metric_gv<'t>(
 /// the high boundary face is covered. dir=0: dBx/dt = -dEz/dy -> b -= dt*idy*(Ez[j+1]-Ez);
 /// dir=1: dBy/dt = +dEz/dx -> b += dt*idx*(Ez[i+1]-Ez). div(B)=0 preserved.
 /// (the out-of-plane Bz rides the induction-flux divergence.)
-pub fn rmhd_ct_curl_2d_dir_gv(dir: usize) -> (GvKernel, KernelWrites) {
+pub fn rmhd_ct_curl_2d_dir_gv(dir: SweepAxis) -> (GvKernel, KernelWrites) {
+    let dir = dir.index();
     trace(|cx| {
-        let b = cx.field("b", "b");
-        let ez = cx.field("ez", "ez");
+        let b = ct_field(cx, CtFaceCt::BFaceSweep);
+        let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez));
         let dt = cx.scalar("dt");
         let b_new = if dir == 0 {
             let idy = cx.scalar("idy");
-            let ez_jp = gv_field_at(cx, "ez", "ez", 2, &[0, 1]);
+            let ez_jp = ct_field_at(
+                cx,
+                CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+                2,
+                &[0, 1],
+            );
             b - dt * idy * (ez_jp - ez)
         } else {
             let idx = cx.scalar("idx");
-            let ez_ip = gv_field_at(cx, "ez", "ez", 2, &[1, 0]);
+            let ez_ip = ct_field_at(
+                cx,
+                CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+                2,
+                &[1, 0],
+            );
             b + dt * idx * (ez_ip - ez)
         };
-        vec![KernelWrite::new("b_new", "b", b_new.node())]
+        vec![KernelWrite::new(
+            "b_new",
+            CtFaceCt::BFaceSweep,
+            b_new.node(),
+        )]
     })
 }
 
@@ -219,17 +238,37 @@ pub fn rmhd_ct_curl_2d_dir_gv(dir: usize) -> (GvKernel, KernelWrites) {
 /// (`div(curl) = 0` — the symbolic proof covers it). `eta = 0` is an exact no-op.
 pub fn rmhd_resistive_emf_2d_gv() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-        let ez = cx.field("ez", "ez");
+        let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez));
         let eta = cx.scalar("eta");
         let idx = cx.scalar("idx");
         let idy = cx.scalar("idy");
-        let bx = cx.field("bx", "bx");
-        let by = cx.field("by", "by");
-        let bx_jm = gv_field_at(cx, "bx", "bx", 2, &[0, -1]); // B_x at the neighbor below in y
-        let by_im = gv_field_at(cx, "by", "by", 2, &[-1, 0]); // B_y at the neighbor behind in x
+        let bx = ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::Bx),
+        );
+        let by = ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::By),
+        );
+        let bx_jm = ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::Bx),
+            2,
+            &[0, -1],
+        ); // B_x at the neighbor below in y
+        let by_im = ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::By),
+            2,
+            &[-1, 0],
+        ); // B_y at the neighbor behind in x
         let jz = idx * (by - by_im) - idy * (bx - bx_jm);
         let ez_new = ez + eta * jz;
-        vec![KernelWrite::new("ez_new", "ez", ez_new.node())]
+        vec![KernelWrite::new(
+            "ez_new",
+            CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+            ez_new.node(),
+        )]
     })
 }
 
@@ -240,26 +279,43 @@ pub fn rmhd_resistive_emf_2d_gv() -> (GvKernel, KernelWrites) {
 /// curl `rmhd_ct_curl_3d_dir_gv` (whose `+1` reads they mirror), so the composed
 /// `curl(eta * curl(B))` is the negative-definite discrete laplacian and the field diffuses.
 /// the same div-B-clean 3D curl consumes the augmented EMF. `eta = 0` is a no-op.
-pub fn rmhd_resistive_emf_3d_dir_gv(dir: usize) -> (GvKernel, KernelWrites) {
+pub fn rmhd_resistive_emf_3d_dir_gv(dir: SweepAxis) -> (GvKernel, KernelWrites) {
+    let dir = dir.index();
     trace(|cx| {
         let p1 = (dir + 1) % 3;
         let p2 = (dir + 2) % 3;
-        let emf = cx.field("emf", "emf");
+        let emf = ct_field(cx, CtEdgeCt::Emf);
         let eta = cx.scalar("eta");
         let id_p1 = cx.scalar("id_p1");
         let id_p2 = cx.scalar("id_p2");
-        let b_p1 = cx.field("b_p1", "b_p1");
-        let b_p2 = cx.field("b_p2", "b_p2");
+        let b_p1 = ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::BP1),
+        );
+        let b_p2 = ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::BP2),
+        );
         let back = |ax: usize| -> [i32; 3] {
             let mut o = [0, 0, 0];
             o[ax] = -1;
             o
         };
-        let b_p1_m = gv_field_at(cx, "b_p1", "b_p1", 3, &back(p2)); // dB_p1/dx_p2, backward
-        let b_p2_m = gv_field_at(cx, "b_p2", "b_p2", 3, &back(p1)); // dB_p2/dx_p1, backward
+        let b_p1_m = ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::BP1),
+            3,
+            &back(p2),
+        ); // dB_p1/dx_p2, backward
+        let b_p2_m = ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::BP2),
+            3,
+            &back(p1),
+        ); // dB_p2/dx_p1, backward
         let j = id_p1 * (b_p2 - b_p2_m) - id_p2 * (b_p1 - b_p1_m);
         let emf_new = emf + eta * j;
-        vec![KernelWrite::new("emf_new", "emf", emf_new.node())]
+        vec![KernelWrite::new("emf_new", CtEdgeCt::Emf, emf_new.node())]
     })
 }
 
@@ -270,10 +326,11 @@ pub fn rmhd_resistive_emf_3d_dir_gv(dir: usize) -> (GvKernel, KernelWrites) {
 ///   dir=1 (B_z, z-face):  dB_z/dt = -(1/r) d_r(r E_phi)   (r = grid axis 0; cylindrical metric)
 /// r is computed per-cell from gv_axis_face_at(cx, 0, ..) (the geom scalars x_lo_0/dx_0). E_phi is
 /// the corner field at offsets [0,0]/[+grid]. div(B)=0 preserved by the discrete d-of-d.
-pub fn rmhd_ct_curl_cyl_rz_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+pub fn rmhd_ct_curl_cyl_rz_gv(dir: SweepAxis, spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+    let dir = dir.index();
     trace(|cx| {
-        let b = cx.field("b", "b");
-        let ez = cx.field("ez", "ez"); // the out-of-plane corner EMF E_phi
+        let b = ct_field(cx, CtFaceCt::BFaceSweep);
+        let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez)); // the out-of-plane corner EMF E_phi
         let dt = cx.scalar("dt");
         // positional scalar ABI: the runtime curl dispatch pushes `[dt] ++ push_curvilinear_geom`
         // = [dt, x_lo_0, dx_0, x_lo_1, dx_1] (all grid axes, every dir). scalar_params is fixed at
@@ -288,7 +345,12 @@ pub fn rmhd_ct_curl_cyl_rz_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Ker
             // dB_r/dt = +d_z E_phi : finite difference along grid axis 1 (z). no metric (h_z = 1).
             let inv_dz = Gv::ONE
                 / (gv_axis_face_at(cx, 1, spacing[1], 1) - gv_axis_face_at(cx, 1, spacing[1], 0));
-            let ez_zp = gv_field_at(cx, "ez", "ez", 2, &[0, 1]);
+            let ez_zp = ct_field_at(
+                cx,
+                CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+                2,
+                &[0, 1],
+            );
             b + dt * inv_dz * (ez_zp - ez)
         } else {
             // dB_z/dt = -(1/r_c) d_r(r E_phi) : the cylindrical metric on the radial derivative.
@@ -301,10 +363,19 @@ pub fn rmhd_ct_curl_cyl_rz_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Ker
             let r_lo = gv_axis_face_at(cx, 0, spacing[0], 0);
             let r_hi = gv_axis_face_at(cx, 0, spacing[0], 1);
             let r_c = (r_lo + r_hi) * Gv::from_f64(0.5);
-            let ez_rp = gv_field_at(cx, "ez", "ez", 2, &[1, 0]);
+            let ez_rp = ct_field_at(
+                cx,
+                CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+                2,
+                &[1, 0],
+            );
             b - dt * (Gv::ONE / r_c) * inv_dr * (r_hi * ez_rp - r_lo * ez)
         };
-        vec![KernelWrite::new("b_new", "b", b_new.node())]
+        vec![KernelWrite::new(
+            "b_new",
+            CtFaceCt::BFaceSweep,
+            b_new.node(),
+        )]
     })
 }
 
@@ -317,7 +388,7 @@ pub fn rmhd_ct_curl_cyl_rz_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Ker
 /// `B_z` = bface[1]. `eta = 0` is an exact no-op.
 pub fn rmhd_resistive_emf_cyl_rz_gv(spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-        let ephi = cx.field("ephi", "ephi");
+        let ephi = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ephi));
         let eta = cx.scalar("eta");
         // register the geom scalars in the canonical order (both r and z faces), matching the curl ABI.
         for ax in 0..2 {
@@ -328,16 +399,36 @@ pub fn rmhd_resistive_emf_cyl_rz_gv(spacing: &[Spacing]) -> (GvKernel, KernelWri
             / (gv_axis_face_at(cx, 0, spacing[0], 1) - gv_axis_face_at(cx, 0, spacing[0], 0));
         let inv_dz = Gv::ONE
             / (gv_axis_face_at(cx, 1, spacing[1], 1) - gv_axis_face_at(cx, 1, spacing[1], 0));
-        let br = cx.field("br", "br");
-        let bz = cx.field("bz", "bz");
-        let br_zm = gv_field_at(cx, "br", "br", 2, &[0, -1]); // B_r at the neighbor below in z (axis 1)
-        let bz_rm = gv_field_at(cx, "bz", "bz", 2, &[-1, 0]); // B_z at the neighbor behind in r (axis 0)
+        let br = ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::Br),
+        );
+        let bz = ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::Bz),
+        );
+        let br_zm = ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::Br),
+            2,
+            &[0, -1],
+        ); // B_r at the neighbor below in z (axis 1)
+        let bz_rm = ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::Bz),
+            2,
+            &[-1, 0],
+        ); // B_z at the neighbor behind in r (axis 0)
         // J_phi = (curl B)_phi = dB_r/dz - dB_z/dr (backward differences). this sign makes -curl(eta J) a
         // negative-definite laplacian (magnetic energy decays); the flipped sign would grow it. matches
         // the cartesian resistive convention J = +(curl B).
         let jphi = inv_dz * (br - br_zm) - inv_dr * (bz - bz_rm);
         let ephi_new = ephi + eta * jphi;
-        vec![KernelWrite::new("ephi_new", "ephi", ephi_new.node())]
+        vec![KernelWrite::new(
+            "ephi_new",
+            CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ephi),
+            ephi_new.node(),
+        )]
     })
 }
 
@@ -355,7 +446,7 @@ pub fn rmhd_resistive_emf_ortho_gv(
     spacing: &[Spacing],
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-        let e = cx.field("e", "e"); // the out-of-plane corner EMF
+        let e = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::E)); // the out-of-plane corner EMF
         let eta = cx.scalar("eta");
         // pin the geom scalars in canonical order (both axes' faces), matching the curl ABI.
         for ax in 0..2 {
@@ -366,10 +457,26 @@ pub fn rmhd_resistive_emf_ortho_gv(
         let dx1 = gv_axis_face_at(cx, 1, spacing[1], 1) - gv_axis_face_at(cx, 1, spacing[1], 0);
         let inv_dx0 = Gv::ONE / dx0;
         let inv_dx1 = Gv::ONE / dx1;
-        let b0 = cx.field("b0", "b0"); // bface[0], normal to in-plane axis 0
-        let b1 = cx.field("b1", "b1"); // bface[1], normal to in-plane axis 1
-        let b0_jm = gv_field_at(cx, "b0", "b0", 2, &[0, -1]); // B_0 one cell back in axis 1
-        let b1_im = gv_field_at(cx, "b1", "b1", 2, &[-1, 0]); // B_1 one cell back in axis 0
+        let b0 = ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::B0),
+        ); // bface[0], normal to in-plane axis 0
+        let b1 = ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::B1),
+        ); // bface[1], normal to in-plane axis 1
+        let b0_jm = ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::B0),
+            2,
+            &[0, -1],
+        ); // B_0 one cell back in axis 1
+        let b1_im = ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::B1),
+            2,
+            &[-1, 0],
+        ); // B_1 one cell back in axis 0
         // the coordinate centroid; the corner (edge) sits half a cell below it on each axis, and the
         // staggered face positions are fixed coordinate offsets from it (scale factors read there).
         let geo = cell_geometry_gv(cx, coords, spacing, &[0usize, 1usize], 2);
@@ -393,7 +500,11 @@ pub fn rmhd_resistive_emf_ortho_gv(
         // left-handed and uses its own oppositely-signed kernel.) sign-pinned to make -curl(eta J)
         // negative-definite so the magnetic energy decays.
         let e_new = e + eta * jout;
-        vec![KernelWrite::new("e_new", "e", e_new.node())]
+        vec![KernelWrite::new(
+            "e_new",
+            CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::E),
+            e_new.node(),
+        )]
     })
 }
 
@@ -404,10 +515,11 @@ pub fn rmhd_resistive_emf_ortho_gv(
 ///   dir=1 (B_phi, phi-face): dB_phi/dt = +d_r E_z         (r = grid axis 0; flat, metric-free — mirror of r-z)
 /// r is the r-face radius (where B_r lives) via gv_axis_face_at(cx, 0, .., 0). E_z is the corner field
 /// at offsets [0,0]/[+grid]. div(B)=0 preserved by the discrete d-of-d (mixed partials cancel).
-pub fn rmhd_ct_curl_cyl_rphi_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+pub fn rmhd_ct_curl_cyl_rphi_gv(dir: SweepAxis, spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+    let dir = dir.index();
     trace(|cx| {
-        let b = cx.field("b", "b");
-        let ez = cx.field("ez", "ez"); // the out-of-plane corner EMF E_z
+        let b = ct_field(cx, CtFaceCt::BFaceSweep);
+        let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez)); // the out-of-plane corner EMF E_z
         let dt = cx.scalar("dt");
         // positional scalar ABI: the runtime curl dispatch pushes [dt, x_lo_0, dx_0, x_lo_1, dx_1]
         // every dir (see rmhd_ct_curl_cyl_rz_gv). pin the full geom set in canonical order up front.
@@ -421,17 +533,31 @@ pub fn rmhd_ct_curl_cyl_rphi_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, K
             let r_face = gv_axis_face_at(cx, 0, spacing[0], 0);
             let inv_dphi = Gv::ONE
                 / (gv_axis_face_at(cx, 1, spacing[1], 1) - gv_axis_face_at(cx, 1, spacing[1], 0));
-            let ez_phip = gv_field_at(cx, "ez", "ez", 2, &[0, 1]);
+            let ez_phip = ct_field_at(
+                cx,
+                CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+                2,
+                &[0, 1],
+            );
             b - dt * (Gv::ONE / r_face) * inv_dphi * (ez_phip - ez)
         } else {
             // dB_phi/dt = +d_r E_z : finite difference along grid axis 0 (r). the phi-component of the
             // cyl curl is metric-free, and the discrete d-of-d still cancels (proven).
             let inv_dr = Gv::ONE
                 / (gv_axis_face_at(cx, 0, spacing[0], 1) - gv_axis_face_at(cx, 0, spacing[0], 0));
-            let ez_rp = gv_field_at(cx, "ez", "ez", 2, &[1, 0]);
+            let ez_rp = ct_field_at(
+                cx,
+                CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+                2,
+                &[1, 0],
+            );
             b + dt * inv_dr * (ez_rp - ez)
         };
-        vec![KernelWrite::new("b_new", "b", b_new.node())]
+        vec![KernelWrite::new(
+            "b_new",
+            CtFaceCt::BFaceSweep,
+            b_new.node(),
+        )]
     })
 }
 
@@ -445,10 +571,11 @@ pub fn rmhd_ct_curl_cyl_rphi_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, K
 /// opposite B_theta sign vs the cylinder's B_z). div(B)=0 preservation for a nontrivial poloidal
 /// (B_r, B_theta) field is pinned by tests/rmhd_ct_curl_2d_sph_poloidal_divb.rs: B = curl(A_phi)
 /// through this kernel, area-weighted div machine-zero both before and after a curl(E_phi) step.
-pub fn rmhd_ct_curl_2d_sph_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+pub fn rmhd_ct_curl_2d_sph_gv(dir: SweepAxis, spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+    let dir = dir.index();
     trace(|cx| {
-        let b = cx.field("b", "b");
-        let ez = cx.field("ez", "ez"); // the out-of-plane corner EMF E_phi
+        let b = ct_field(cx, CtFaceCt::BFaceSweep);
+        let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez)); // the out-of-plane corner EMF E_phi
         let dt = cx.scalar("dt");
         // positional scalar ABI: the runtime curl dispatch pushes [dt, x_lo_0, dx_0, x_lo_1, dx_1]
         // every dir (see rmhd_ct_curl_cyl_rz_gv). pin the full geom set in canonical order up front.
@@ -465,7 +592,12 @@ pub fn rmhd_ct_curl_2d_sph_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Ker
             let th_hi = gv_axis_face_at(cx, 1, spacing[1], 1);
             let th_c = (th_lo + th_hi) * half;
             let inv_dth = Gv::ONE / (th_hi - th_lo);
-            let ez_thp = gv_field_at(cx, "ez", "ez", 2, &[0, 1]);
+            let ez_thp = ct_field_at(
+                cx,
+                CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+                2,
+                &[0, 1],
+            );
             b - dt
                 * (Gv::ONE / (r_f * th_c.sin()))
                 * inv_dth
@@ -477,10 +609,19 @@ pub fn rmhd_ct_curl_2d_sph_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Ker
             let r_hi = gv_axis_face_at(cx, 0, spacing[0], 1);
             let r_c = (r_lo + r_hi) * half;
             let inv_dr = Gv::ONE / (r_hi - r_lo);
-            let ez_rp = gv_field_at(cx, "ez", "ez", 2, &[1, 0]);
+            let ez_rp = ct_field_at(
+                cx,
+                CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+                2,
+                &[1, 0],
+            );
             b + dt * (Gv::ONE / r_c) * inv_dr * (r_hi * ez_rp - r_lo * ez)
         };
-        vec![KernelWrite::new("b_new", "b", b_new.node())]
+        vec![KernelWrite::new(
+            "b_new",
+            CtFaceCt::BFaceSweep,
+            b_new.node(),
+        )]
     })
 }
 
@@ -505,8 +646,8 @@ pub fn rmhd_ct_curl_2d_sph_gr_gv(
     axes: &[usize],
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-        let b = cx.field("b", "b");
-        let ez = cx.field("ez", "ez"); // the out-of-plane densitized corner EMF Etilde
+        let b = ct_field(cx, CtFaceCt::BFaceSweep);
+        let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez)); // the out-of-plane densitized corner EMF Etilde
         let dt = cx.scalar("dt");
         // positional scalar ABI mirror of the flat curl: pin [x_lo_0, dx_0, x_lo_1, dx_1] up front.
         for ax in 0..2 {
@@ -522,7 +663,12 @@ pub fn rmhd_ct_curl_2d_sph_gr_gv(
             let a1_hi = gv_axis_face_at(cx, 1, spacing[1], 1);
             let a1_c = (a1_lo + a1_hi) * half;
             let w = sqrtg(a0_f, a1_c) * (a1_hi - a1_lo);
-            let ez_a1p = gv_field_at(cx, "ez", "ez", 2, &[0, 1]);
+            let ez_a1p = ct_field_at(
+                cx,
+                CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+                2,
+                &[0, 1],
+            );
             b - dt * (ez_a1p - ez) / w
         } else {
             // B_a1 lives on the low a1-face; a0_lo/a0_hi are the bounding corners of the a0 axis.
@@ -531,10 +677,19 @@ pub fn rmhd_ct_curl_2d_sph_gr_gv(
             let a1_f = gv_axis_face_at(cx, 1, spacing[1], 0);
             let a0_c = (a0_lo + a0_hi) * half;
             let w = sqrtg(a0_c, a1_f) * (a0_hi - a0_lo);
-            let ez_a0p = gv_field_at(cx, "ez", "ez", 2, &[1, 0]);
+            let ez_a0p = ct_field_at(
+                cx,
+                CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+                2,
+                &[1, 0],
+            );
             b + dt * (ez_a0p - ez) / w
         };
-        vec![KernelWrite::new("b_new", "b", b_new.node())]
+        vec![KernelWrite::new(
+            "b_new",
+            CtFaceCt::BFaceSweep,
+            b_new.node(),
+        )]
     })
 }
 
@@ -551,7 +706,7 @@ pub fn rmhd_ct_curl_3d_dir_gv(
         let p1 = (dir + 1) % 3;
         let p2 = (dir + 2) % 3;
         let cartesian = coords == Coords::Cartesian;
-        let b = cx.field("b", "b");
+        let b = ct_field(cx, CtFaceCt::BFaceSweep);
         let dt = cx.scalar("dt");
         let ids = cartesian.then(|| (cx.scalar("id_p1"), cx.scalar("id_p2")));
         let metric = (!cartesian).then(|| ct_curl_metric_gv(cx, coords, spacing, dir));
@@ -563,27 +718,55 @@ pub fn rmhd_ct_curl_3d_dir_gv(
         };
         let curl = if let Some(m) = metric {
             // (1/(h_p1c h_p2c)) [ d(h_p1 E_p1)/dx_p2 - d(h_p2 E_p2)/dx_p1 ], h-weighted edge EMFs.
-            let de = |key: &str, runtime: &str, ax: usize, w_here, w_plus, inv_dx| {
+            let de = |key: &str, runtime: CtEdgeCt, ax: usize, w_here, w_plus, inv_dx| {
                 let e_h = gv_field_at(cx, key, runtime, 3, &[0, 0, 0]);
                 let e_p = gv_field_at(cx, key, runtime, 3, &off(ax));
                 (w_plus * e_p - w_here * e_h) * inv_dx
             };
-            let de1 = de("e_p1", "e_p1", p2, m.h1_here, m.h1_p2, m.inv_dx_p2);
-            let de2 = de("e_p2", "e_p2", p1, m.h2_here, m.h2_p1, m.inv_dx_p1);
+            let de1 = de(
+                &CtWireName::EP1.render(),
+                CtEdgeCt::EmfIncident(Transverse::A),
+                p2,
+                m.h1_here,
+                m.h1_p2,
+                m.inv_dx_p2,
+            );
+            let de2 = de(
+                &CtWireName::EP2.render(),
+                CtEdgeCt::EmfIncident(Transverse::B),
+                p1,
+                m.h2_here,
+                m.h2_p1,
+                m.inv_dx_p1,
+            );
             m.inv_pref * (de1 - de2)
         } else {
             let (id_p1, id_p2) = ids.expect("cartesian CT curl needs id scalars");
-            let ddx = |key: &str, runtime: &str, ax: usize, inv| {
+            let ddx = |key: &str, runtime: CtEdgeCt, ax: usize, inv| {
                 let h = gv_field_at(cx, key, runtime, 3, &[0, 0, 0]);
                 let p = gv_field_at(cx, key, runtime, 3, &off(ax));
                 inv * (p - h)
             };
-            let de1 = ddx("e_p1", "e_p1", p2, id_p2);
-            let de2 = ddx("e_p2", "e_p2", p1, id_p1);
+            let de1 = ddx(
+                &CtWireName::EP1.render(),
+                CtEdgeCt::EmfIncident(Transverse::A),
+                p2,
+                id_p2,
+            );
+            let de2 = ddx(
+                &CtWireName::EP2.render(),
+                CtEdgeCt::EmfIncident(Transverse::B),
+                p1,
+                id_p1,
+            );
             de1 - de2
         };
         let b_new = b + dt * curl;
-        vec![KernelWrite::new("b_new", "b", b_new.node())]
+        vec![KernelWrite::new(
+            "b_new",
+            CtFaceCt::BFaceSweep,
+            b_new.node(),
+        )]
     })
 }
 
@@ -601,14 +784,24 @@ pub fn imhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, KernelWrites) {
         // interpolate the ndim in-plane (face-staggered) components; out-of-plane components
         // (if any) are carried cell-centered and untouched here (2.5D / 1.5D).
         let bf: Vec<Gv> = (0..ndim)
-            .map(|c| cx.field(&format!("bf_{c}"), &format!("bf_{c}")))
+            .map(|c| cx.field(&format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c))))
             .collect();
         let writes = (0..ndim)
             .map(|c| {
                 let bcc_n = (bf[c]
-                    + gv_field_at(cx, &format!("bf_{c}"), &format!("bf_{c}"), ndim, &off(c)))
+                    + gv_field_at(
+                        cx,
+                        &format!("bf_{c}"),
+                        CtFaceCt::BFaceComp(PhysComp::new(c)),
+                        ndim,
+                        &off(c),
+                    ))
                     * half;
-                KernelWrite::new(format!("bc_{c}_new"), format!("bc_{c}"), bcc_n.node())
+                KernelWrite::new(
+                    format!("bc_{c}_new"),
+                    FieldRef::BCell(c as u8),
+                    bcc_n.node(),
+                )
             })
             .collect();
         writes
@@ -630,18 +823,31 @@ pub fn rmhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, KernelWrites) {
             o
         };
         let bf: Vec<Gv> = (0..ndim)
-            .map(|c| cx.field(&format!("bf_{c}"), &format!("bf_{c}")))
+            .map(|c| cx.field(&format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c))))
             .collect();
         // interpolate the ndim in-plane components from their faces; out-of-plane components
         // (Bz in 2.5D) are untouched here.
         let bc_n: Vec<Gv> = (0..ndim)
             .map(|c| {
-                (bf[c] + gv_field_at(cx, &format!("bf_{c}"), &format!("bf_{c}"), ndim, &off(c)))
+                (bf[c]
+                    + gv_field_at(
+                        cx,
+                        &format!("bf_{c}"),
+                        CtFaceCt::BFaceComp(PhysComp::new(c)),
+                        ndim,
+                        &off(c),
+                    ))
                     * half
             })
             .collect();
         let writes: KernelWrites = (0..ndim)
-            .map(|c| KernelWrite::new(format!("bc_{c}_new"), format!("bc_{c}"), bc_n[c].node()))
+            .map(|c| {
+                KernelWrite::new(
+                    format!("bc_{c}_new"),
+                    FieldRef::BCell(c as u8),
+                    bc_n[c].node(),
+                )
+            })
             .collect();
         writes
     })
@@ -660,14 +866,14 @@ pub fn rmhd_edge_emf_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelW
         // {r=0, z=2}. the kernel is component-agnostic — only the gather offsets are geometric.
         // pin the 8 inputs in the dispatch's order (vel_p1/p2, bcell_p1/p2, bflux_a/b, fden_p1/p2);
         // the actual values are read at the gather offsets below (gv_field_at, deduped).
-        gv_register_field(cx, "edge_vp1", "vel_p1");
-        gv_register_field(cx, "edge_vp2", "vel_p2");
-        gv_register_field(cx, "edge_bp1", "bcell_p1");
-        gv_register_field(cx, "edge_bp2", "bcell_p2");
-        gv_register_field(cx, "edge_bflux_a", "bflux_a");
-        gv_register_field(cx, "edge_bflux_b", "bflux_b");
-        gv_register_field(cx, "edge_fden_p1", "fden_p1");
-        gv_register_field(cx, "edge_fden_p2", "fden_p2");
+        gv_register_field(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1));
+        gv_register_field(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2));
+        gv_register_field(cx, "edge_bp1", CtCellCt::BCell(PlaneComp::P1));
+        gv_register_field(cx, "edge_bp2", CtCellCt::BCell(PlaneComp::P2));
+        gv_register_field(cx, "edge_bflux_a", CtFaceCt::BFlux(Transverse::A));
+        gv_register_field(cx, "edge_bflux_b", CtFaceCt::BFlux(Transverse::B));
+        gv_register_field(cx, "edge_fden_p1", CtFaceCt::FDen(Transverse::A));
+        gv_register_field(cx, "edge_fden_p2", CtFaceCt::FDen(Transverse::B));
         // -1 on the listed grid axes (ndim-length offset; the 2.5D corner walks grid axes 0/1).
         let cm = |axes: &[usize]| -> Vec<i32> {
             let mut o = vec![0i32; ndim];
@@ -679,10 +885,10 @@ pub fn rmhd_edge_emf_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelW
         let zero = vec![0i32; ndim];
         // cell edge-EMF E_dir = v_p2*b_p1 - v_p1*b_p2 at the given offset.
         let cell = |o: &[i32]| {
-            let vp1 = gv_field_at(cx, "edge_vp1", "vel_p1", ndim, o);
-            let vp2 = gv_field_at(cx, "edge_vp2", "vel_p2", ndim, o);
-            let bp1 = gv_field_at(cx, "edge_bp1", "bcell_p1", ndim, o);
-            let bp2 = gv_field_at(cx, "edge_bp2", "bcell_p2", ndim, o);
+            let vp1 = gv_field_at(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1), ndim, o);
+            let vp2 = gv_field_at(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2), ndim, o);
+            let bp1 = gv_field_at(cx, "edge_bp1", CtCellCt::BCell(PlaneComp::P1), ndim, o);
+            let bp2 = gv_field_at(cx, "edge_bp2", CtCellCt::BCell(PlaneComp::P2), ndim, o);
             vp2 * bp1 - vp1 * bp2
         };
         let ene = cell(&zero);
@@ -690,17 +896,71 @@ pub fn rmhd_edge_emf_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelW
         let ese = cell(&cm(&[g2]));
         let esw = cell(&cm(&[g1, g2]));
         // face EMFs: en=-bflux_a[coord], es=-bflux_a[-e_g2], ee=+bflux_b[coord], ew=+bflux_b[-e_g1].
-        let en = Gv::ZERO - gv_field_at(cx, "edge_bflux_a", "bflux_a", ndim, &zero);
-        let es = Gv::ZERO - gv_field_at(cx, "edge_bflux_a", "bflux_a", ndim, &cm(&[g2]));
-        let ee = gv_field_at(cx, "edge_bflux_b", "bflux_b", ndim, &zero);
-        let ew = gv_field_at(cx, "edge_bflux_b", "bflux_b", ndim, &cm(&[g1]));
+        let en = Gv::ZERO
+            - gv_field_at(
+                cx,
+                "edge_bflux_a",
+                CtFaceCt::BFlux(Transverse::A),
+                ndim,
+                &zero,
+            );
+        let es = Gv::ZERO
+            - gv_field_at(
+                cx,
+                "edge_bflux_a",
+                CtFaceCt::BFlux(Transverse::A),
+                ndim,
+                &cm(&[g2]),
+            );
+        let ee = gv_field_at(
+            cx,
+            "edge_bflux_b",
+            CtFaceCt::BFlux(Transverse::B),
+            ndim,
+            &zero,
+        );
+        let ew = gv_field_at(
+            cx,
+            "edge_bflux_b",
+            CtFaceCt::BFlux(Transverse::B),
+            ndim,
+            &cm(&[g1]),
+        );
         // density fluxes: fn/fs = fden_p1 at coord / -e_g2; fe/fw = fden_p2 at coord / -e_g1.
-        let fnf = gv_field_at(cx, "edge_fden_p1", "fden_p1", ndim, &zero);
-        let fs = gv_field_at(cx, "edge_fden_p1", "fden_p1", ndim, &cm(&[g2]));
-        let fe = gv_field_at(cx, "edge_fden_p2", "fden_p2", ndim, &zero);
-        let fw = gv_field_at(cx, "edge_fden_p2", "fden_p2", ndim, &cm(&[g1]));
+        let fnf = gv_field_at(
+            cx,
+            "edge_fden_p1",
+            CtFaceCt::FDen(Transverse::A),
+            ndim,
+            &zero,
+        );
+        let fs = gv_field_at(
+            cx,
+            "edge_fden_p1",
+            CtFaceCt::FDen(Transverse::A),
+            ndim,
+            &cm(&[g2]),
+        );
+        let fe = gv_field_at(
+            cx,
+            "edge_fden_p2",
+            CtFaceCt::FDen(Transverse::B),
+            ndim,
+            &zero,
+        );
+        let fw = gv_field_at(
+            cx,
+            "edge_fden_p2",
+            CtFaceCt::FDen(Transverse::B),
+            ndim,
+            &cm(&[g1]),
+        );
         let emf = ct_contact_emf_gv([en, es, ee, ew], [ene, enw, ese, esw], [fnf, fs, fe, fw]);
-        vec![KernelWrite::new("emf", "emf", emf.node())]
+        vec![KernelWrite::new(
+            CtWireName::Emf.render(),
+            CtEdgeCt::Emf,
+            emf.node(),
+        )]
     })
 }
 
@@ -725,14 +985,14 @@ pub fn rmhd_edge_emf_gr_gv(
     trace(|cx| {
         let ndim = 2usize;
         let (pc1, pc2, g1, g2) = gr_ct_plane(axes);
-        gv_register_field(cx, "edge_vp1", "vel_p1");
-        gv_register_field(cx, "edge_vp2", "vel_p2");
-        gv_register_field(cx, "edge_bp1", "bcell_p1");
-        gv_register_field(cx, "edge_bp2", "bcell_p2");
-        gv_register_field(cx, "edge_bflux_a", "bflux_a");
-        gv_register_field(cx, "edge_bflux_b", "bflux_b");
-        gv_register_field(cx, "edge_fden_p1", "fden_p1");
-        gv_register_field(cx, "edge_fden_p2", "fden_p2");
+        gv_register_field(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1));
+        gv_register_field(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2));
+        gv_register_field(cx, "edge_bp1", CtCellCt::BCell(PlaneComp::P1));
+        gv_register_field(cx, "edge_bp2", CtCellCt::BCell(PlaneComp::P2));
+        gv_register_field(cx, "edge_bflux_a", CtFaceCt::BFlux(Transverse::A));
+        gv_register_field(cx, "edge_bflux_b", CtFaceCt::BFlux(Transverse::B));
+        gv_register_field(cx, "edge_fden_p1", CtFaceCt::FDen(Transverse::A));
+        gv_register_field(cx, "edge_fden_p2", CtFaceCt::FDen(Transverse::B));
         let cm = |axes: &[usize]| -> Vec<i32> {
             let mut o = vec![0i32; ndim];
             for &ax in axes {
@@ -767,10 +1027,10 @@ pub fn rmhd_edge_emf_gr_gv(
         // sqrt(gamma) [ (alpha v_p2 - beta_p2) B_p1 - (alpha v_p1 - beta_p1) B_p2 ].
         let cell = |o: &[i32]| {
             let (alpha, sqrtg, beta_p1, beta_p2) = adm(a0_c(o[0] as i64), a1_c(o[1] as i64));
-            let vp1 = gv_field_at(cx, "edge_vp1", "vel_p1", ndim, o);
-            let vp2 = gv_field_at(cx, "edge_vp2", "vel_p2", ndim, o);
-            let bp1 = gv_field_at(cx, "edge_bp1", "bcell_p1", ndim, o);
-            let bp2 = gv_field_at(cx, "edge_bp2", "bcell_p2", ndim, o);
+            let vp1 = gv_field_at(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1), ndim, o);
+            let vp2 = gv_field_at(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2), ndim, o);
+            let bp1 = gv_field_at(cx, "edge_bp1", CtCellCt::BCell(PlaneComp::P1), ndim, o);
+            let bp2 = gv_field_at(cx, "edge_bp2", CtCellCt::BCell(PlaneComp::P2), ndim, o);
             sqrtg * ((alpha * vp2 - beta_p2) * bp1 - (alpha * vp1 - beta_p1) * bp2)
         };
         let ene = cell(&zero);
@@ -783,18 +1043,74 @@ pub fn rmhd_edge_emf_gr_gv(
             let (alpha, sqrtg, ..) = adm(p0, p1);
             alpha * sqrtg
         };
-        let en =
-            Gv::ZERO - asg(a0_f, a1_c(0)) * gv_field_at(cx, "edge_bflux_a", "bflux_a", ndim, &zero);
+        let en = Gv::ZERO
+            - asg(a0_f, a1_c(0))
+                * gv_field_at(
+                    cx,
+                    "edge_bflux_a",
+                    CtFaceCt::BFlux(Transverse::A),
+                    ndim,
+                    &zero,
+                );
         let es = Gv::ZERO
-            - asg(a0_f, a1_c(-1)) * gv_field_at(cx, "edge_bflux_a", "bflux_a", ndim, &cm(&[g2]));
-        let ee = asg(a0_c(0), a1_f) * gv_field_at(cx, "edge_bflux_b", "bflux_b", ndim, &zero);
-        let ew = asg(a0_c(-1), a1_f) * gv_field_at(cx, "edge_bflux_b", "bflux_b", ndim, &cm(&[g1]));
-        let fnf = gv_field_at(cx, "edge_fden_p1", "fden_p1", ndim, &zero);
-        let fs = gv_field_at(cx, "edge_fden_p1", "fden_p1", ndim, &cm(&[g2]));
-        let fe = gv_field_at(cx, "edge_fden_p2", "fden_p2", ndim, &zero);
-        let fw = gv_field_at(cx, "edge_fden_p2", "fden_p2", ndim, &cm(&[g1]));
+            - asg(a0_f, a1_c(-1))
+                * gv_field_at(
+                    cx,
+                    "edge_bflux_a",
+                    CtFaceCt::BFlux(Transverse::A),
+                    ndim,
+                    &cm(&[g2]),
+                );
+        let ee = asg(a0_c(0), a1_f)
+            * gv_field_at(
+                cx,
+                "edge_bflux_b",
+                CtFaceCt::BFlux(Transverse::B),
+                ndim,
+                &zero,
+            );
+        let ew = asg(a0_c(-1), a1_f)
+            * gv_field_at(
+                cx,
+                "edge_bflux_b",
+                CtFaceCt::BFlux(Transverse::B),
+                ndim,
+                &cm(&[g1]),
+            );
+        let fnf = gv_field_at(
+            cx,
+            "edge_fden_p1",
+            CtFaceCt::FDen(Transverse::A),
+            ndim,
+            &zero,
+        );
+        let fs = gv_field_at(
+            cx,
+            "edge_fden_p1",
+            CtFaceCt::FDen(Transverse::A),
+            ndim,
+            &cm(&[g2]),
+        );
+        let fe = gv_field_at(
+            cx,
+            "edge_fden_p2",
+            CtFaceCt::FDen(Transverse::B),
+            ndim,
+            &zero,
+        );
+        let fw = gv_field_at(
+            cx,
+            "edge_fden_p2",
+            CtFaceCt::FDen(Transverse::B),
+            ndim,
+            &cm(&[g1]),
+        );
         let emf = ct_contact_emf_gv([en, es, ee, ew], [ene, enw, ese, esw], [fnf, fs, fe, fw]);
-        vec![KernelWrite::new("emf", "emf", emf.node())]
+        vec![KernelWrite::new(
+            CtWireName::Emf.render(),
+            CtEdgeCt::Emf,
+            emf.node(),
+        )]
     })
 }
 
@@ -820,7 +1136,7 @@ pub fn rmhd_bcell_from_bface_gr_gv(
             o
         };
         let bf: Vec<Gv> = (0..ndim)
-            .map(|c| cx.field(&format!("bf_{c}"), &format!("bf_{c}")))
+            .map(|c| cx.field(&format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c))))
             .collect();
         // interpolate each in-plane cell component from its two bounding faces (arithmetic average;
         // metric-free — the cell field is a derived reconstruction / c2p quantity holding no conserved
@@ -944,14 +1260,14 @@ fn uct_hllc_coeffs<'t>(
 /// component-agnostic: only the gather offsets are geometric (g1/g2 = the perpendicular grid plane).
 pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-        gv_register_field(cx, "edge_vp1", "vel_p1");
-        gv_register_field(cx, "edge_vp2", "vel_p2");
-        gv_register_field(cx, "edge_bface_a", "bface_a");
-        gv_register_field(cx, "edge_bface_b", "bface_b");
-        gv_register_field(cx, "edge_wsr1", "wsr_p1");
-        gv_register_field(cx, "edge_wsl1", "wsl_p1");
-        gv_register_field(cx, "edge_wsr2", "wsr_p2");
-        gv_register_field(cx, "edge_wsl2", "wsl_p2");
+        gv_register_field(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1));
+        gv_register_field(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2));
+        gv_register_field(cx, "edge_bface_a", CtFaceCt::BFace(Transverse::A));
+        gv_register_field(cx, "edge_bface_b", CtFaceCt::BFace(Transverse::B));
+        gv_register_field(cx, "edge_wsr1", CtFaceCt::WaveR(Transverse::A));
+        gv_register_field(cx, "edge_wsl1", CtFaceCt::WaveL(Transverse::A));
+        gv_register_field(cx, "edge_wsr2", CtFaceCt::WaveR(Transverse::B));
+        gv_register_field(cx, "edge_wsl2", CtFaceCt::WaveL(Transverse::B));
         let cm = |axes: &[usize]| -> Vec<i32> {
             let mut o = vec![0i32; ndim];
             for &ax in axes {
@@ -964,31 +1280,31 @@ pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Ker
         let zero_g = Gv::ZERO;
         // cell velocity gathers. corners about the edge (lower-left of cell NE): NE=0, NW=-g1, SE=-g2,
         // SW=-g1-g2. the side velocities are the 2-cell averages straddling the edge.
-        let vp1 = |o: &[i32]| gv_field_at(cx, "edge_vp1", "vel_p1", ndim, o);
-        let vp2 = |o: &[i32]| gv_field_at(cx, "edge_vp2", "vel_p2", ndim, o);
+        let vp1 = |o: &[i32]| gv_field_at(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1), ndim, o);
+        let vp2 = |o: &[i32]| gv_field_at(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2), ndim, o);
         let vx_e = (vp1(&zero) + vp1(&cm(&[g2]))) * half; // East cells (NE, SE)
         let vx_w = (vp1(&cm(&[g1])) + vp1(&cm(&[g1, g2]))) * half; // West (NW, SW)
         let vy_n = (vp2(&zero) + vp2(&cm(&[g1]))) * half; // North (NE, NW)
         let vy_s = (vp2(&cm(&[g2])) + vp2(&cm(&[g1, g2]))) * half; // South (SE, SW)
         // edge signal speeds: max over the 4 surrounding cells (maximal-diffusion edge reconstruction).
-        let max4 = |key: &str, path: &str| {
+        let max4 = |key: &str, path: CtFaceCt| {
             let v0 = gv_field_at(cx, key, path, ndim, &zero);
             let v1 = gv_field_at(cx, key, path, ndim, &cm(&[g1]));
             let v2 = gv_field_at(cx, key, path, ndim, &cm(&[g2]));
             let v3 = gv_field_at(cx, key, path, ndim, &cm(&[g1, g2]));
             v0.max(v1).max(v2).max(v3)
         };
-        let neg_min4 = |key: &str, path: &str| {
+        let neg_min4 = |key: &str, path: CtFaceCt| {
             let v0 = zero_g - gv_field_at(cx, key, path, ndim, &zero);
             let v1 = zero_g - gv_field_at(cx, key, path, ndim, &cm(&[g1]));
             let v2 = zero_g - gv_field_at(cx, key, path, ndim, &cm(&[g2]));
             let v3 = zero_g - gv_field_at(cx, key, path, ndim, &cm(&[g1, g2]));
             v0.max(v1).max(v2).max(v3)
         };
-        let apx = zero_g.max(max4("edge_wsr1", "wsr_p1"));
-        let amx = zero_g.max(neg_min4("edge_wsl1", "wsl_p1"));
-        let apy = zero_g.max(max4("edge_wsr2", "wsr_p2"));
-        let amy = zero_g.max(neg_min4("edge_wsl2", "wsl_p2"));
+        let apx = zero_g.max(max4("edge_wsr1", CtFaceCt::WaveR(Transverse::A)));
+        let amx = zero_g.max(neg_min4("edge_wsl1", CtFaceCt::WaveL(Transverse::A)));
+        let apy = zero_g.max(max4("edge_wsr2", CtFaceCt::WaveR(Transverse::B)));
+        let amy = zero_g.max(neg_min4("edge_wsl2", CtFaceCt::WaveL(Transverse::B)));
         // the solver-specific coefficients; HLL here, and the only piece an hllc/hlld variant replaces.
         let ux = uct_hll_coeffs(apx, amx);
         let uy = uct_hll_coeffs(apy, amy);
@@ -1003,7 +1319,7 @@ pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Ker
         // one-sided minmod-theta extrapolation: +1/2 toward the edge from the lower face, -1/2 from the
         // upper. needs the 2nd transverse neighbor -> bface allocated with +-2 transverse halo.
         let theta = cx.scalar("theta");
-        let recon = |key: &str, rt: &str, base: &[i32], axis: usize, sign: f64| {
+        let recon = |key: &str, rt: CtFaceCt, base: &[i32], axis: usize, sign: f64| {
             let off = |d: i32| -> Vec<i32> {
                 let mut o = base.to_vec();
                 o[axis] += d;
@@ -1015,12 +1331,40 @@ pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Ker
             let slope = minmod3((q0 - qm) * theta, half * (qp - qm), (qp - q0) * theta);
             q0 + Gv::from_f64(0.5 * sign) * slope
         };
-        let by_e = recon("edge_bface_b", "bface_b", &zero, g1, -1.0); // B_y[i,j],   recon -1/2 in x
-        let by_w = recon("edge_bface_b", "bface_b", &cm(&[g1]), g1, 1.0); // B_y[i-1,j], recon +1/2 in x
-        let bx_n = recon("edge_bface_a", "bface_a", &zero, g2, -1.0); // B_x[i,j],   recon -1/2 in y
-        let bx_s = recon("edge_bface_a", "bface_a", &cm(&[g2]), g2, 1.0); // B_x[i,j-1], recon +1/2 in y
+        let by_e = recon(
+            "edge_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &zero,
+            g1,
+            -1.0,
+        ); // B_y[i,j],   recon -1/2 in x
+        let by_w = recon(
+            "edge_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &cm(&[g1]),
+            g1,
+            1.0,
+        ); // B_y[i-1,j], recon +1/2 in x
+        let bx_n = recon(
+            "edge_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &zero,
+            g2,
+            -1.0,
+        ); // B_x[i,j],   recon -1/2 in y
+        let bx_s = recon(
+            "edge_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &cm(&[g2]),
+            g2,
+            1.0,
+        ); // B_x[i,j-1], recon +1/2 in y
         let emf = uct_master_emf(&ux, &uy, vbar_x, vbar_y, by_e, by_w, bx_n, bx_s);
-        vec![KernelWrite::new("emf", "emf", emf.node())]
+        vec![KernelWrite::new(
+            CtWireName::Emf.render(),
+            CtEdgeCt::Emf,
+            emf.node(),
+        )]
     })
 }
 
@@ -1044,14 +1388,14 @@ pub fn rmhd_edge_emf_uct_gr_gv(
     trace(|cx| {
         let ndim = 2usize;
         let (pc1, pc2, g1, g2) = gr_ct_plane(axes);
-        gv_register_field(cx, "edge_vp1", "vel_p1");
-        gv_register_field(cx, "edge_vp2", "vel_p2");
-        gv_register_field(cx, "edge_bface_a", "bface_a");
-        gv_register_field(cx, "edge_bface_b", "bface_b");
-        gv_register_field(cx, "edge_wsr1", "wsr_p1");
-        gv_register_field(cx, "edge_wsl1", "wsl_p1");
-        gv_register_field(cx, "edge_wsr2", "wsr_p2");
-        gv_register_field(cx, "edge_wsl2", "wsl_p2");
+        gv_register_field(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1));
+        gv_register_field(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2));
+        gv_register_field(cx, "edge_bface_a", CtFaceCt::BFace(Transverse::A));
+        gv_register_field(cx, "edge_bface_b", CtFaceCt::BFace(Transverse::B));
+        gv_register_field(cx, "edge_wsr1", CtFaceCt::WaveR(Transverse::A));
+        gv_register_field(cx, "edge_wsl1", CtFaceCt::WaveL(Transverse::A));
+        gv_register_field(cx, "edge_wsr2", CtFaceCt::WaveR(Transverse::B));
+        gv_register_field(cx, "edge_wsl2", CtFaceCt::WaveL(Transverse::B));
         let cm = |axes: &[usize]| -> Vec<i32> {
             let mut o = vec![0i32; ndim];
             for &ax in axes {
@@ -1062,30 +1406,30 @@ pub fn rmhd_edge_emf_uct_gr_gv(
         let zero = vec![0i32; ndim];
         let half = Gv::from_f64(0.5);
         let zero_g = Gv::ZERO;
-        let vp1 = |o: &[i32]| gv_field_at(cx, "edge_vp1", "vel_p1", ndim, o);
-        let vp2 = |o: &[i32]| gv_field_at(cx, "edge_vp2", "vel_p2", ndim, o);
+        let vp1 = |o: &[i32]| gv_field_at(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1), ndim, o);
+        let vp2 = |o: &[i32]| gv_field_at(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2), ndim, o);
         let vx_e = (vp1(&zero) + vp1(&cm(&[g2]))) * half;
         let vx_w = (vp1(&cm(&[g1])) + vp1(&cm(&[g1, g2]))) * half;
         let vy_n = (vp2(&zero) + vp2(&cm(&[g1]))) * half;
         let vy_s = (vp2(&cm(&[g2])) + vp2(&cm(&[g1, g2]))) * half;
-        let max4 = |key: &str, path: &str| {
+        let max4 = |key: &str, path: CtFaceCt| {
             let v0 = gv_field_at(cx, key, path, ndim, &zero);
             let v1 = gv_field_at(cx, key, path, ndim, &cm(&[g1]));
             let v2 = gv_field_at(cx, key, path, ndim, &cm(&[g2]));
             let v3 = gv_field_at(cx, key, path, ndim, &cm(&[g1, g2]));
             v0.max(v1).max(v2).max(v3)
         };
-        let neg_min4 = |key: &str, path: &str| {
+        let neg_min4 = |key: &str, path: CtFaceCt| {
             let v0 = zero_g - gv_field_at(cx, key, path, ndim, &zero);
             let v1 = zero_g - gv_field_at(cx, key, path, ndim, &cm(&[g1]));
             let v2 = zero_g - gv_field_at(cx, key, path, ndim, &cm(&[g2]));
             let v3 = zero_g - gv_field_at(cx, key, path, ndim, &cm(&[g1, g2]));
             v0.max(v1).max(v2).max(v3)
         };
-        let apx = zero_g.max(max4("edge_wsr1", "wsr_p1"));
-        let amx = zero_g.max(neg_min4("edge_wsl1", "wsl_p1"));
-        let apy = zero_g.max(max4("edge_wsr2", "wsr_p2"));
-        let amy = zero_g.max(neg_min4("edge_wsl2", "wsl_p2"));
+        let apx = zero_g.max(max4("edge_wsr1", CtFaceCt::WaveR(Transverse::A)));
+        let amx = zero_g.max(neg_min4("edge_wsl1", CtFaceCt::WaveL(Transverse::A)));
+        let apy = zero_g.max(max4("edge_wsr2", CtFaceCt::WaveR(Transverse::B)));
+        let amy = zero_g.max(neg_min4("edge_wsl2", CtFaceCt::WaveL(Transverse::B)));
         let ux = uct_hll_coeffs(apx, amx);
         let uy = uct_hll_coeffs(apy, amy);
         let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
@@ -1104,7 +1448,7 @@ pub fn rmhd_edge_emf_uct_gr_gv(
         let vtilde_r = alpha_c * vbar_x - beta_c[pc1];
         let vtilde_th = alpha_c * vbar_y - beta_c[pc2];
         let theta = cx.scalar("theta");
-        let recon = |key: &str, rt: &str, base: &[i32], axis: usize, sign: f64| {
+        let recon = |key: &str, rt: CtFaceCt, base: &[i32], axis: usize, sign: f64| {
             let off = |d: i32| -> Vec<i32> {
                 let mut o = base.to_vec();
                 o[axis] += d;
@@ -1116,14 +1460,42 @@ pub fn rmhd_edge_emf_uct_gr_gv(
             let slope = minmod3((q0 - qm) * theta, half * (qp - qm), (qp - q0) * theta);
             q0 + Gv::from_f64(0.5 * sign) * slope
         };
-        let by_e = recon("edge_bface_b", "bface_b", &zero, g1, -1.0);
-        let by_w = recon("edge_bface_b", "bface_b", &cm(&[g1]), g1, 1.0);
-        let bx_n = recon("edge_bface_a", "bface_a", &zero, g2, -1.0);
-        let bx_s = recon("edge_bface_a", "bface_a", &cm(&[g2]), g2, 1.0);
+        let by_e = recon(
+            "edge_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &zero,
+            g1,
+            -1.0,
+        );
+        let by_w = recon(
+            "edge_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &cm(&[g1]),
+            g1,
+            1.0,
+        );
+        let bx_n = recon(
+            "edge_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &zero,
+            g2,
+            -1.0,
+        );
+        let bx_s = recon(
+            "edge_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &cm(&[g2]),
+            g2,
+            1.0,
+        );
         // the physical master EMF with transport velocities, densitized at the corner -> Etilde_phi.
         let emf_phys = uct_master_emf(&ux, &uy, vtilde_r, vtilde_th, by_e, by_w, bx_n, bx_s);
         let emf = sqrtg_c * emf_phys;
-        vec![KernelWrite::new("emf", "emf", emf.node())]
+        vec![KernelWrite::new(
+            CtWireName::Emf.render(),
+            CtEdgeCt::Emf,
+            emf.node(),
+        )]
     })
 }
 
@@ -1148,14 +1520,14 @@ pub fn rmhd_edge_emf_uct_gr_3d_gv(
         let ndim = 3usize;
         let g1 = (dir + 1) % 3;
         let g2 = (dir + 2) % 3;
-        gv_register_field(cx, "edge_vp1", "vel_p1");
-        gv_register_field(cx, "edge_vp2", "vel_p2");
-        gv_register_field(cx, "edge_bface_a", "bface_a");
-        gv_register_field(cx, "edge_bface_b", "bface_b");
-        gv_register_field(cx, "edge_wsr1", "wsr_p1");
-        gv_register_field(cx, "edge_wsl1", "wsl_p1");
-        gv_register_field(cx, "edge_wsr2", "wsr_p2");
-        gv_register_field(cx, "edge_wsl2", "wsl_p2");
+        gv_register_field(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1));
+        gv_register_field(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2));
+        gv_register_field(cx, "edge_bface_a", CtFaceCt::BFace(Transverse::A));
+        gv_register_field(cx, "edge_bface_b", CtFaceCt::BFace(Transverse::B));
+        gv_register_field(cx, "edge_wsr1", CtFaceCt::WaveR(Transverse::A));
+        gv_register_field(cx, "edge_wsl1", CtFaceCt::WaveL(Transverse::A));
+        gv_register_field(cx, "edge_wsr2", CtFaceCt::WaveR(Transverse::B));
+        gv_register_field(cx, "edge_wsl2", CtFaceCt::WaveL(Transverse::B));
         let cm = |axes: &[usize]| -> Vec<i32> {
             let mut o = vec![0i32; ndim];
             for &ax in axes {
@@ -1166,30 +1538,30 @@ pub fn rmhd_edge_emf_uct_gr_3d_gv(
         let zero = vec![0i32; ndim];
         let half = Gv::from_f64(0.5);
         let zero_g = Gv::ZERO;
-        let vp1 = |o: &[i32]| gv_field_at(cx, "edge_vp1", "vel_p1", ndim, o);
-        let vp2 = |o: &[i32]| gv_field_at(cx, "edge_vp2", "vel_p2", ndim, o);
+        let vp1 = |o: &[i32]| gv_field_at(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1), ndim, o);
+        let vp2 = |o: &[i32]| gv_field_at(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2), ndim, o);
         let vx_e = (vp1(&zero) + vp1(&cm(&[g2]))) * half;
         let vx_w = (vp1(&cm(&[g1])) + vp1(&cm(&[g1, g2]))) * half;
         let vy_n = (vp2(&zero) + vp2(&cm(&[g1]))) * half;
         let vy_s = (vp2(&cm(&[g2])) + vp2(&cm(&[g1, g2]))) * half;
-        let max4 = |key: &str, path: &str| {
+        let max4 = |key: &str, path: CtFaceCt| {
             let v0 = gv_field_at(cx, key, path, ndim, &zero);
             let v1 = gv_field_at(cx, key, path, ndim, &cm(&[g1]));
             let v2 = gv_field_at(cx, key, path, ndim, &cm(&[g2]));
             let v3 = gv_field_at(cx, key, path, ndim, &cm(&[g1, g2]));
             v0.max(v1).max(v2).max(v3)
         };
-        let neg_min4 = |key: &str, path: &str| {
+        let neg_min4 = |key: &str, path: CtFaceCt| {
             let v0 = zero_g - gv_field_at(cx, key, path, ndim, &zero);
             let v1 = zero_g - gv_field_at(cx, key, path, ndim, &cm(&[g1]));
             let v2 = zero_g - gv_field_at(cx, key, path, ndim, &cm(&[g2]));
             let v3 = zero_g - gv_field_at(cx, key, path, ndim, &cm(&[g1, g2]));
             v0.max(v1).max(v2).max(v3)
         };
-        let apx = zero_g.max(max4("edge_wsr1", "wsr_p1"));
-        let amx = zero_g.max(neg_min4("edge_wsl1", "wsl_p1"));
-        let apy = zero_g.max(max4("edge_wsr2", "wsr_p2"));
-        let amy = zero_g.max(neg_min4("edge_wsl2", "wsl_p2"));
+        let apx = zero_g.max(max4("edge_wsr1", CtFaceCt::WaveR(Transverse::A)));
+        let amx = zero_g.max(neg_min4("edge_wsl1", CtFaceCt::WaveL(Transverse::A)));
+        let apy = zero_g.max(max4("edge_wsr2", CtFaceCt::WaveR(Transverse::B)));
+        let amy = zero_g.max(neg_min4("edge_wsl2", CtFaceCt::WaveL(Transverse::B)));
         let ux = uct_hll_coeffs(apx, amx);
         let uy = uct_hll_coeffs(apy, amy);
         let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
@@ -1207,31 +1579,53 @@ pub fn rmhd_edge_emf_uct_gr_3d_gv(
         let vtilde_r = alpha_c * vbar_x - beta_c[g1];
         let vtilde_th = alpha_c * vbar_y - beta_c[g2];
         let theta = cx.scalar("theta");
-        let by_e = recon_face_to_edge(cx, ndim, theta, "edge_bface_b", "bface_b", &zero, g1, -1.0);
+        let by_e = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "edge_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &zero,
+            g1,
+            -1.0,
+        );
         let by_w = recon_face_to_edge(
             cx,
             ndim,
             theta,
             "edge_bface_b",
-            "bface_b",
+            CtFaceCt::BFace(Transverse::B),
             &cm(&[g1]),
             g1,
             1.0,
         );
-        let bx_n = recon_face_to_edge(cx, ndim, theta, "edge_bface_a", "bface_a", &zero, g2, -1.0);
+        let bx_n = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "edge_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &zero,
+            g2,
+            -1.0,
+        );
         let bx_s = recon_face_to_edge(
             cx,
             ndim,
             theta,
             "edge_bface_a",
-            "bface_a",
+            CtFaceCt::BFace(Transverse::A),
             &cm(&[g2]),
             g2,
             1.0,
         );
         let emf_phys = uct_master_emf(&ux, &uy, vtilde_r, vtilde_th, by_e, by_w, bx_n, bx_s);
         let emf = sqrtg_c * emf_phys;
-        vec![KernelWrite::new("emf", "emf", emf.node())]
+        vec![KernelWrite::new(
+            CtWireName::Emf.render(),
+            CtEdgeCt::Emf,
+            emf.node(),
+        )]
     })
 }
 
@@ -1246,7 +1640,7 @@ fn recon_face_to_edge<'t>(
     ndim: usize,
     theta: Gv<'t>,
     key: &str,
-    rt: &str,
+    rt: CtFaceCt,
     base: &[i32],
     axis: usize,
     sign: f64,
@@ -1278,7 +1672,7 @@ fn recon_cell_to_face<'t>(
     ndim: usize,
     theta: Gv<'t>,
     key: &str,
-    rt: &str,
+    rt: CtCellCt,
     base: &[i32],
     naxis: usize,
     sign: f64,
@@ -1384,7 +1778,11 @@ pub fn uct_master_emf_proof_kernel(swap: bool) -> (GvKernel, KernelWrites) {
         } else {
             uct_master_emf(&ux, &uy, vbar_x, vbar_y, by_e, by_w, bx_n, bx_s)
         };
-        vec![KernelWrite::new("emf", "emf", emf.node())]
+        vec![KernelWrite::new(
+            CtWireName::Emf.render(),
+            CtEdgeCt::Emf,
+            emf.node(),
+        )]
     })
 }
 
@@ -1455,19 +1853,19 @@ pub fn hlld_wave_sum_proof_kernel(swap: bool) -> (GvKernel, KernelWrites) {
 /// / 2-cell-average reconstruction. (IMHD: p = cs^2*rho; RMHD: relativistic conserved/flux.)
 pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-        gv_register_field(cx, "e_rho", "rho");
-        gv_register_field(cx, "e_vp1", "vel_p1");
-        gv_register_field(cx, "e_vp2", "vel_p2");
-        gv_register_field(cx, "e_pre", "pre");
-        gv_register_field(cx, "e_bp1", "bcell_p1");
-        gv_register_field(cx, "e_bp2", "bcell_p2");
-        gv_register_field(cx, "e_bout", "bcell_out");
-        gv_register_field(cx, "e_bface_a", "bface_a");
-        gv_register_field(cx, "e_bface_b", "bface_b");
-        gv_register_field(cx, "e_wsr1", "wsr_p1");
-        gv_register_field(cx, "e_wsl1", "wsl_p1");
-        gv_register_field(cx, "e_wsr2", "wsr_p2");
-        gv_register_field(cx, "e_wsl2", "wsl_p2");
+        gv_register_field(cx, "e_rho", CtCellCt::Rho);
+        gv_register_field(cx, "e_vp1", CtCellCt::Vel(PlaneComp::P1));
+        gv_register_field(cx, "e_vp2", CtCellCt::Vel(PlaneComp::P2));
+        gv_register_field(cx, "e_pre", CtCellCt::Pre);
+        gv_register_field(cx, "e_bp1", CtCellCt::BCell(PlaneComp::P1));
+        gv_register_field(cx, "e_bp2", CtCellCt::BCell(PlaneComp::P2));
+        gv_register_field(cx, "e_bout", CtCellCt::BCell(PlaneComp::Out));
+        gv_register_field(cx, "e_bface_a", CtFaceCt::BFace(Transverse::A));
+        gv_register_field(cx, "e_bface_b", CtFaceCt::BFace(Transverse::B));
+        gv_register_field(cx, "e_wsr1", CtFaceCt::WaveR(Transverse::A));
+        gv_register_field(cx, "e_wsl1", CtFaceCt::WaveL(Transverse::A));
+        gv_register_field(cx, "e_wsr2", CtFaceCt::WaveR(Transverse::B));
+        gv_register_field(cx, "e_wsl2", CtFaceCt::WaveL(Transverse::B));
         let cm = |axes: &[usize]| -> Vec<i32> {
             let mut o = vec![0i32; ndim];
             for &ax in axes {
@@ -1478,13 +1876,13 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
         let zero = vec![0i32; ndim];
         let half = Gv::from_f64(0.5);
         let zero_g = Gv::ZERO;
-        let rho = |o: &[i32]| gv_field_at(cx, "e_rho", "rho", ndim, o);
-        let vp1 = |o: &[i32]| gv_field_at(cx, "e_vp1", "vel_p1", ndim, o);
-        let vp2 = |o: &[i32]| gv_field_at(cx, "e_vp2", "vel_p2", ndim, o);
-        let pre = |o: &[i32]| gv_field_at(cx, "e_pre", "pre", ndim, o);
-        let bp1 = |o: &[i32]| gv_field_at(cx, "e_bp1", "bcell_p1", ndim, o);
-        let bp2 = |o: &[i32]| gv_field_at(cx, "e_bp2", "bcell_p2", ndim, o);
-        let bout = |o: &[i32]| gv_field_at(cx, "e_bout", "bcell_out", ndim, o);
+        let rho = |o: &[i32]| gv_field_at(cx, "e_rho", CtCellCt::Rho, ndim, o);
+        let vp1 = |o: &[i32]| gv_field_at(cx, "e_vp1", CtCellCt::Vel(PlaneComp::P1), ndim, o);
+        let vp2 = |o: &[i32]| gv_field_at(cx, "e_vp2", CtCellCt::Vel(PlaneComp::P2), ndim, o);
+        let pre = |o: &[i32]| gv_field_at(cx, "e_pre", CtCellCt::Pre, ndim, o);
+        let bp1 = |o: &[i32]| gv_field_at(cx, "e_bp1", CtCellCt::BCell(PlaneComp::P1), ndim, o);
+        let bp2 = |o: &[i32]| gv_field_at(cx, "e_bp2", CtCellCt::BCell(PlaneComp::P2), ndim, o);
+        let bout = |o: &[i32]| gv_field_at(cx, "e_bout", CtCellCt::BCell(PlaneComp::Out), ndim, o);
         let bsq = |o: &[i32]| {
             let a = bp1(o);
             let b = bp2(o);
@@ -1498,24 +1896,24 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
         let se = cm(&[g2]);
         let sw = cm(&[g1, g2]);
         // edge signal speeds: max over the 4 cells.
-        let max4 = |key: &str, path: &str| {
+        let max4 = |key: &str, path: CtFaceCt| {
             let v0 = gv_field_at(cx, key, path, ndim, &ne);
             let v1 = gv_field_at(cx, key, path, ndim, &nw);
             let v2 = gv_field_at(cx, key, path, ndim, &se);
             let v3 = gv_field_at(cx, key, path, ndim, &sw);
             v0.max(v1).max(v2).max(v3)
         };
-        let neg_min4 = |key: &str, path: &str| {
+        let neg_min4 = |key: &str, path: CtFaceCt| {
             let v0 = zero_g - gv_field_at(cx, key, path, ndim, &ne);
             let v1 = zero_g - gv_field_at(cx, key, path, ndim, &nw);
             let v2 = zero_g - gv_field_at(cx, key, path, ndim, &se);
             let v3 = zero_g - gv_field_at(cx, key, path, ndim, &sw);
             v0.max(v1).max(v2).max(v3)
         };
-        let apx = zero_g.max(max4("e_wsr1", "wsr_p1"));
-        let amx = zero_g.max(neg_min4("e_wsl1", "wsl_p1"));
-        let apy = zero_g.max(max4("e_wsr2", "wsr_p2"));
-        let amy = zero_g.max(neg_min4("e_wsl2", "wsl_p2"));
+        let apx = zero_g.max(max4("e_wsr1", CtFaceCt::WaveR(Transverse::A)));
+        let amx = zero_g.max(neg_min4("e_wsl1", CtFaceCt::WaveL(Transverse::A)));
+        let apy = zero_g.max(max4("e_wsr2", CtFaceCt::WaveR(Transverse::B)));
+        let amy = zero_g.max(neg_min4("e_wsl2", CtFaceCt::WaveL(Transverse::B)));
         // per-face HLLC coefficients: each face uses its own two cells (first-order L/R) + davis face
         // speeds (s_r = max(0, ws_r^L, ws_r^R), s_l = min(0, ws_l^L, ws_l^R)) so lstar = m_n^hll/rho^hll
         // is consistent (the contact stays inside the fan -> no degeneracy blow-up). then the diffusion
@@ -1523,12 +1921,12 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
         // velocity / normal cell-B; wsr/wsl are the direction's per-cell speed fields.
         let face_d = |l: &[i32],
                       r: &[i32],
-                      vn: (&str, &str),
-                      bn: (&str, &str),
+                      vn: (&str, CtCellCt),
+                      bn: (&str, CtCellCt),
                       wsr_k: &str,
-                      wsr_p: &str,
+                      wsr_p: CtFaceCt,
                       wsl_k: &str,
-                      wsl_p: &str| {
+                      wsl_p: CtFaceCt| {
             let (rl, rr) = (rho(l), rho(r));
             let (vl, vr) = (
                 gv_field_at(cx, vn.0, vn.1, ndim, l),
@@ -1565,10 +1963,28 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
             (c.dl, c.dr)
         };
         // x-faces (normal p1): North NW->NE, South SW->SE; max-combine d to the edge.
-        let vn1 = ("e_vp1", "vel_p1");
-        let bn1 = ("e_bp1", "bcell_p1");
-        let (dln, drn) = face_d(&nw, &ne, vn1, bn1, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
-        let (dls, drs) = face_d(&sw, &se, vn1, bn1, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
+        let vn1 = ("e_vp1", CtCellCt::Vel(PlaneComp::P1));
+        let bn1 = ("e_bp1", CtCellCt::BCell(PlaneComp::P1));
+        let (dln, drn) = face_d(
+            &nw,
+            &ne,
+            vn1,
+            bn1,
+            "e_wsr1",
+            CtFaceCt::WaveR(Transverse::A),
+            "e_wsl1",
+            CtFaceCt::WaveL(Transverse::A),
+        );
+        let (dls, drs) = face_d(
+            &sw,
+            &se,
+            vn1,
+            bn1,
+            "e_wsr1",
+            CtFaceCt::WaveR(Transverse::A),
+            "e_wsl1",
+            CtFaceCt::WaveL(Transverse::A),
+        );
         let ux = UctDir {
             al: half,
             ar: half,
@@ -1576,10 +1992,28 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
             dr: avg2(drn, drs),
         };
         // y-faces (normal p2): West SW->NW, East SE->NE.
-        let vn2 = ("e_vp2", "vel_p2");
-        let bn2 = ("e_bp2", "bcell_p2");
-        let (dlw, drw) = face_d(&sw, &nw, vn2, bn2, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
-        let (dle, dre) = face_d(&se, &ne, vn2, bn2, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
+        let vn2 = ("e_vp2", CtCellCt::Vel(PlaneComp::P2));
+        let bn2 = ("e_bp2", CtCellCt::BCell(PlaneComp::P2));
+        let (dlw, drw) = face_d(
+            &sw,
+            &nw,
+            vn2,
+            bn2,
+            "e_wsr2",
+            CtFaceCt::WaveR(Transverse::B),
+            "e_wsl2",
+            CtFaceCt::WaveL(Transverse::B),
+        );
+        let (dle, dre) = face_d(
+            &se,
+            &ne,
+            vn2,
+            bn2,
+            "e_wsr2",
+            CtFaceCt::WaveR(Transverse::B),
+            "e_wsl2",
+            CtFaceCt::WaveL(Transverse::B),
+        );
         let uy = UctDir {
             al: half,
             ar: half,
@@ -1595,12 +2029,52 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
         let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
         // staggered face B PLM-reconstructed a half-cell to the edge (M&DZ transverse reconstruction).
         let theta = cx.scalar("theta");
-        let by_e = recon_face_to_edge(cx, ndim, theta, "e_bface_b", "bface_b", &zero, g1, -1.0);
-        let by_w = recon_face_to_edge(cx, ndim, theta, "e_bface_b", "bface_b", &nw, g1, 1.0);
-        let bx_n = recon_face_to_edge(cx, ndim, theta, "e_bface_a", "bface_a", &zero, g2, -1.0);
-        let bx_s = recon_face_to_edge(cx, ndim, theta, "e_bface_a", "bface_a", &se, g2, 1.0);
+        let by_e = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "e_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &zero,
+            g1,
+            -1.0,
+        );
+        let by_w = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "e_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &nw,
+            g1,
+            1.0,
+        );
+        let bx_n = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "e_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &zero,
+            g2,
+            -1.0,
+        );
+        let bx_s = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "e_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &se,
+            g2,
+            1.0,
+        );
         let emf = uct_master_emf(&ux, &uy, vbar_x, vbar_y, by_e, by_w, bx_n, bx_s);
-        vec![KernelWrite::new("emf", "emf", emf.node())]
+        vec![KernelWrite::new(
+            CtWireName::Emf.render(),
+            CtEdgeCt::Emf,
+            emf.node(),
+        )]
     })
 }
 
@@ -1656,21 +2130,21 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
     g2: usize,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-        gv_register_field(cx, "h_rho", "rho");
+        gv_register_field(cx, "h_rho", CtCellCt::Rho);
         if E::HAS_ENERGY {
-            gv_register_field(cx, "h_pre", "pre");
+            gv_register_field(cx, "h_pre", CtCellCt::Pre);
         }
-        gv_register_field(cx, "h_vp1", "vel_p1");
-        gv_register_field(cx, "h_vp2", "vel_p2");
-        gv_register_field(cx, "h_bp1", "bcell_p1");
-        gv_register_field(cx, "h_bp2", "bcell_p2");
-        gv_register_field(cx, "h_bout", "bcell_out");
-        gv_register_field(cx, "h_bface_a", "bface_a");
-        gv_register_field(cx, "h_bface_b", "bface_b");
-        gv_register_field(cx, "h_wsr1", "wsr_p1");
-        gv_register_field(cx, "h_wsl1", "wsl_p1");
-        gv_register_field(cx, "h_wsr2", "wsr_p2");
-        gv_register_field(cx, "h_wsl2", "wsl_p2");
+        gv_register_field(cx, "h_vp1", CtCellCt::Vel(PlaneComp::P1));
+        gv_register_field(cx, "h_vp2", CtCellCt::Vel(PlaneComp::P2));
+        gv_register_field(cx, "h_bp1", CtCellCt::BCell(PlaneComp::P1));
+        gv_register_field(cx, "h_bp2", CtCellCt::BCell(PlaneComp::P2));
+        gv_register_field(cx, "h_bout", CtCellCt::BCell(PlaneComp::Out));
+        gv_register_field(cx, "h_bface_a", CtFaceCt::BFace(Transverse::A));
+        gv_register_field(cx, "h_bface_b", CtFaceCt::BFace(Transverse::B));
+        gv_register_field(cx, "h_wsr1", CtFaceCt::WaveR(Transverse::A));
+        gv_register_field(cx, "h_wsl1", CtFaceCt::WaveL(Transverse::A));
+        gv_register_field(cx, "h_wsr2", CtFaceCt::WaveR(Transverse::B));
+        gv_register_field(cx, "h_wsl2", CtFaceCt::WaveL(Transverse::B));
         let half = Gv::from_f64(0.5);
         let one = Gv::ONE;
         let zero_g = Gv::ZERO;
@@ -1679,7 +2153,7 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
         // make the EMF fan inconsistent with the flux at sharp reconstruction (the OT/field-loop
         // checkerboard).
         let theta = cx.scalar("theta");
-        let recon_cell = |key: &str, rt: &str, base: &[i32], naxis: usize, sign: f64| {
+        let recon_cell = |key: &str, rt: CtCellCt, base: &[i32], naxis: usize, sign: f64| {
             recon_cell_to_face(cx, ndim, theta, key, rt, base, naxis, sign)
         };
         // reconstruct the 8-component MHD prim to one side of a face; override the normal B with the
@@ -1690,21 +2164,21 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
         let eos_scalar = cx.scalar(E::EOS_SCALAR);
         let face_prim = |base: &[i32], naxis: usize, nidx: usize, sign: f64, bn_face| {
             let mut mag = [
-                recon_cell("h_bp1", "bcell_p1", base, naxis, sign),
-                recon_cell("h_bp2", "bcell_p2", base, naxis, sign),
-                recon_cell("h_bout", "bcell_out", base, naxis, sign),
+                recon_cell("h_bp1", CtCellCt::BCell(PlaneComp::P1), base, naxis, sign),
+                recon_cell("h_bp2", CtCellCt::BCell(PlaneComp::P2), base, naxis, sign),
+                recon_cell("h_bout", CtCellCt::BCell(PlaneComp::Out), base, naxis, sign),
             ];
             mag[nidx] = bn_face;
-            let rho = recon_cell("h_rho", "rho", base, naxis, sign);
+            let rho = recon_cell("h_rho", CtCellCt::Rho, base, naxis, sign);
             let vel = Tensor::new([
-                recon_cell("h_vp1", "vel_p1", base, naxis, sign),
-                recon_cell("h_vp2", "vel_p2", base, naxis, sign),
+                recon_cell("h_vp1", CtCellCt::Vel(PlaneComp::P1), base, naxis, sign),
+                recon_cell("h_vp2", CtCellCt::Vel(PlaneComp::P2), base, naxis, sign),
                 Gv::ZERO,
             ]);
             let mut slots: Vec<Gv> = vec![rho];
             slots.extend((0..3).map(|k| vel[k]));
             if E::HAS_ENERGY {
-                slots.push(recon_cell("h_pre", "pre", base, naxis, sign));
+                slots.push(recon_cell("h_pre", CtCellCt::Pre, base, naxis, sign));
             }
             MhdPrimG::<Gv, 3, E>::new(PrimG::from_slots(&slots), Tensor::new(mag))
         };
@@ -1726,42 +2200,78 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
         // shared with UCT-HLL. note: the literal W/E-distinct + PLM-reconstructed velocity form (Eq:UCT_HLL2
         // + line 59) was implemented and made OT noisier — the single-vbar x-upwinding supplies smoothing
         // the bare master form lacks. reverted to the validated form; the velocity stays a deviation (D2/D7).
-        let vp1 = |o: &[i32]| gv_field_at(cx, "h_vp1", "vel_p1", ndim, o);
-        let vp2 = |o: &[i32]| gv_field_at(cx, "h_vp2", "vel_p2", ndim, o);
+        let vp1 = |o: &[i32]| gv_field_at(cx, "h_vp1", CtCellCt::Vel(PlaneComp::P1), ndim, o);
+        let vp2 = |o: &[i32]| gv_field_at(cx, "h_vp2", CtCellCt::Vel(PlaneComp::P2), ndim, o);
         let vx_e = (vp1(&ne) + vp1(&se)) * half;
         let vx_w = (vp1(&nw) + vp1(&sw)) * half;
         let vy_n = (vp2(&ne) + vp2(&nw)) * half;
         let vy_s = (vp2(&se) + vp2(&sw)) * half;
-        let max4 = |key: &str, path: &str| {
+        let max4 = |key: &str, path: CtFaceCt| {
             gv_field_at(cx, key, path, ndim, &ne)
                 .max(gv_field_at(cx, key, path, ndim, &nw))
                 .max(gv_field_at(cx, key, path, ndim, &se))
                 .max(gv_field_at(cx, key, path, ndim, &sw))
         };
-        let neg_min4 = |key: &str, path: &str| {
+        let neg_min4 = |key: &str, path: CtFaceCt| {
             (zero_g - gv_field_at(cx, key, path, ndim, &ne))
                 .max(zero_g - gv_field_at(cx, key, path, ndim, &nw))
                 .max(zero_g - gv_field_at(cx, key, path, ndim, &se))
                 .max(zero_g - gv_field_at(cx, key, path, ndim, &sw))
         };
-        let apx = zero_g.max(max4("h_wsr1", "wsr_p1"));
-        let amx = zero_g.max(neg_min4("h_wsl1", "wsl_p1"));
-        let apy = zero_g.max(max4("h_wsr2", "wsr_p2"));
-        let amy = zero_g.max(neg_min4("h_wsl2", "wsl_p2"));
+        let apx = zero_g.max(max4("h_wsr1", CtFaceCt::WaveR(Transverse::A)));
+        let amx = zero_g.max(neg_min4("h_wsl1", CtFaceCt::WaveL(Transverse::A)));
+        let apy = zero_g.max(max4("h_wsr2", CtFaceCt::WaveR(Transverse::B)));
+        let amy = zero_g.max(neg_min4("h_wsl2", CtFaceCt::WaveL(Transverse::B)));
         // upwind transverse velocity (eq:vt): alpha^+ carries the West/South state.
         let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
         let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
         // staggered face B reconstructed to the edge (R+/-; theta=0 => identity = zeroth order). these are the
         // dissipated transverse fields in the master composition (Eq. 16).
-        let by_e = recon_face_to_edge(cx, ndim, theta, "h_bface_b", "bface_b", &ne, g1, -1.0);
-        let by_w = recon_face_to_edge(cx, ndim, theta, "h_bface_b", "bface_b", &nw, g1, 1.0);
-        let bx_n = recon_face_to_edge(cx, ndim, theta, "h_bface_a", "bface_a", &ne, g2, -1.0);
-        let bx_s = recon_face_to_edge(cx, ndim, theta, "h_bface_a", "bface_a", &se, g2, 1.0);
+        let by_e = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "h_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &ne,
+            g1,
+            -1.0,
+        );
+        let by_w = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "h_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &nw,
+            g1,
+            1.0,
+        );
+        let bx_n = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "h_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &ne,
+            g2,
+            -1.0,
+        );
+        let bx_s = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "h_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &se,
+            g2,
+            1.0,
+        );
         // per-face coefficients at the 4 faces, combined to the edge: average on a (eq:dEW), max on d
         // (paper-sanctioned "maximizing the diffusion terms"). the fan's normal B is the staggered face
         // value (guideline 2, the un-reconstructed face field). x-faces (normal g1, prim comp 0).
-        let bn_n = gv_field_at(cx, "h_bface_a", "bface_a", ndim, &ne);
-        let bn_s = gv_field_at(cx, "h_bface_a", "bface_a", ndim, &se);
+        let bn_n = gv_field_at(cx, "h_bface_a", CtFaceCt::BFace(Transverse::A), ndim, &ne);
+        let bn_s = gv_field_at(cx, "h_bface_a", CtFaceCt::BFace(Transverse::A), ndim, &se);
         let (aln, dln, drn) = hlld_face(&nw, &ne, g1, 0, bn_n, &nhat_x);
         let (als, dls, drs) = hlld_face(&sw, &se, g1, 0, bn_s, &nhat_x);
         let ax_l = (aln + als) * half;
@@ -1772,8 +2282,8 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
             dr: drn.max(drs),
         };
         // y-faces (normal g2, prim comp 1): West SW->NW, East SE->NE.
-        let bn_w = gv_field_at(cx, "h_bface_b", "bface_b", ndim, &nw);
-        let bn_e = gv_field_at(cx, "h_bface_b", "bface_b", ndim, &ne);
+        let bn_w = gv_field_at(cx, "h_bface_b", CtFaceCt::BFace(Transverse::B), ndim, &nw);
+        let bn_e = gv_field_at(cx, "h_bface_b", CtFaceCt::BFace(Transverse::B), ndim, &ne);
         let (alw, dlw, drw) = hlld_face(&sw, &nw, g2, 1, bn_w, &nhat_y);
         let (ale, dle, dre) = hlld_face(&se, &ne, g2, 1, bn_e, &nhat_y);
         let ay_l = (alw + ale) * half;
@@ -1785,7 +2295,11 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
         };
         // master composition (eq:emf2D), identical to UCT-HLL.
         let emf = uct_master_emf(&ux, &uy, vbar_x, vbar_y, by_e, by_w, bx_n, bx_s);
-        vec![KernelWrite::new("emf", "emf", emf.node())]
+        vec![KernelWrite::new(
+            CtWireName::Emf.render(),
+            CtEdgeCt::Emf,
+            emf.node(),
+        )]
     })
 }
 
@@ -1891,16 +2405,16 @@ fn rmhd_edge_emf_uct_hlld_impl(chart: &mut impl WaveSumChart) -> (GvKernel, Kern
     trace(|cx| {
         let ndim = chart.ndim();
         let (g1, g2, pc1, pc2, out) = chart.plane();
-        gv_register_field(cx, "e_rho", "rho");
-        gv_register_field(cx, "e_vp1", "vel_p1");
-        gv_register_field(cx, "e_vp2", "vel_p2");
-        gv_register_field(cx, "e_vout", "vel_out");
-        gv_register_field(cx, "e_pre", "pre");
-        gv_register_field(cx, "e_bp1", "bcell_p1");
-        gv_register_field(cx, "e_bp2", "bcell_p2");
-        gv_register_field(cx, "e_bout", "bcell_out");
-        gv_register_field(cx, "e_bface_a", "bface_a");
-        gv_register_field(cx, "e_bface_b", "bface_b");
+        gv_register_field(cx, "e_rho", CtCellCt::Rho);
+        gv_register_field(cx, "e_vp1", CtCellCt::Vel(PlaneComp::P1));
+        gv_register_field(cx, "e_vp2", CtCellCt::Vel(PlaneComp::P2));
+        gv_register_field(cx, "e_vout", CtCellCt::Vel(PlaneComp::Out));
+        gv_register_field(cx, "e_pre", CtCellCt::Pre);
+        gv_register_field(cx, "e_bp1", CtCellCt::BCell(PlaneComp::P1));
+        gv_register_field(cx, "e_bp2", CtCellCt::BCell(PlaneComp::P2));
+        gv_register_field(cx, "e_bout", CtCellCt::BCell(PlaneComp::Out));
+        gv_register_field(cx, "e_bface_a", CtFaceCt::BFace(Transverse::A));
+        gv_register_field(cx, "e_bface_b", CtFaceCt::BFace(Transverse::B));
         let half = Gv::from_f64(0.5);
         let zero_g = Gv::ZERO;
         let gamma = cx.scalar("gamma");
@@ -1919,19 +2433,19 @@ fn rmhd_edge_emf_uct_hlld_impl(chart: &mut impl WaveSumChart) -> (GvKernel, Kern
         // gets dissipated). L uses sign +1 (toward the +naxis face), R uses -1.
         let prim_face =
             |base: &[i32], naxis: usize, sign: f64, n_phys: usize, bn, t_phys: usize, bt| {
-                let r = |key: &str, rt: &str| {
+                let r = |key: &str, rt: CtCellCt| {
                     recon_cell_to_face(cx, ndim, theta, key, rt, base, naxis, sign)
                 };
-                let rho = r("e_rho", "rho");
-                let pre = r("e_pre", "pre");
+                let rho = r("e_rho", CtCellCt::Rho);
+                let pre = r("e_pre", CtCellCt::Pre);
                 let mut v = [Gv::ZERO; 3];
-                v[pc1] = r("e_vp1", "vel_p1");
-                v[pc2] = r("e_vp2", "vel_p2");
-                v[out] = r("e_vout", "vel_out");
+                v[pc1] = r("e_vp1", CtCellCt::Vel(PlaneComp::P1));
+                v[pc2] = r("e_vp2", CtCellCt::Vel(PlaneComp::P2));
+                v[out] = r("e_vout", CtCellCt::Vel(PlaneComp::Out));
                 let mut b = [Gv::ZERO; 3];
-                b[pc1] = r("e_bp1", "bcell_p1");
-                b[pc2] = r("e_bp2", "bcell_p2");
-                b[out] = r("e_bout", "bcell_out");
+                b[pc1] = r("e_bp1", CtCellCt::BCell(PlaneComp::P1));
+                b[pc2] = r("e_bp2", CtCellCt::BCell(PlaneComp::P2));
+                b[out] = r("e_bout", CtCellCt::BCell(PlaneComp::Out));
                 b[n_phys] = bn;
                 b[t_phys] = bt;
                 MhdPrim::<Gv, 3>::new(
@@ -1940,15 +2454,51 @@ fn rmhd_edge_emf_uct_hlld_impl(chart: &mut impl WaveSumChart) -> (GvKernel, Kern
                 )
             };
         // staggered face B reconstructed to the edge — the dissipated transverse fields in the wave-sum.
-        let bx_n = recon_face_to_edge(cx, ndim, theta, "e_bface_a", "bface_a", &ne, g2, -1.0);
-        let bx_s = recon_face_to_edge(cx, ndim, theta, "e_bface_a", "bface_a", &se, g2, 1.0);
-        let by_w = recon_face_to_edge(cx, ndim, theta, "e_bface_b", "bface_b", &nw, g1, 1.0);
-        let by_e = recon_face_to_edge(cx, ndim, theta, "e_bface_b", "bface_b", &ne, g1, -1.0);
+        let bx_n = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "e_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &ne,
+            g2,
+            -1.0,
+        );
+        let bx_s = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "e_bface_a",
+            CtFaceCt::BFace(Transverse::A),
+            &se,
+            g2,
+            1.0,
+        );
+        let by_w = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "e_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &nw,
+            g1,
+            1.0,
+        );
+        let by_e = recon_face_to_edge(
+            cx,
+            ndim,
+            theta,
+            "e_bface_b",
+            CtFaceCt::BFace(Transverse::B),
+            &ne,
+            g1,
+            -1.0,
+        );
         // the single div-free normal B at each face (the un-reconstructed staggered face value).
-        let bx_n_face = gv_field_at(cx, "e_bface_a", "bface_a", ndim, &ne);
-        let bx_s_face = gv_field_at(cx, "e_bface_a", "bface_a", ndim, &se);
-        let by_w_face = gv_field_at(cx, "e_bface_b", "bface_b", ndim, &nw);
-        let by_e_face = gv_field_at(cx, "e_bface_b", "bface_b", ndim, &ne);
+        let bx_n_face = gv_field_at(cx, "e_bface_a", CtFaceCt::BFace(Transverse::A), ndim, &ne);
+        let bx_s_face = gv_field_at(cx, "e_bface_a", CtFaceCt::BFace(Transverse::A), ndim, &se);
+        let by_w_face = gv_field_at(cx, "e_bface_b", CtFaceCt::BFace(Transverse::B), ndim, &nw);
+        let by_e_face = gv_field_at(cx, "e_bface_b", CtFaceCt::BFace(Transverse::B), ndim, &ne);
         // the wave-sum dissipative flux Phi (M&DZ Eq. 39) for a riemann whose transverse component is
         // `t`, with staggered endpoints `bt_l`,`bt_r` and the single-/double-star fields from `st`.
         // gated on `success` -> HLL dissipation (NaN-safe true select; the HLL branch uses only the
@@ -2024,8 +2574,8 @@ fn rmhd_edge_emf_uct_hlld_impl(chart: &mut impl WaveSumChart) -> (GvKernel, Kern
         // upgrades them to the transport velocity vtilde = alpha v - beta on each in-plane axis, and
         // densitizes the coordinate EMF to Etilde = sqrt(gamma)(corner) * E.
         let tp = chart.transport(cx);
-        let vp1 = |o: &[i32]| gv_field_at(cx, "e_vp1", "vel_p1", ndim, o);
-        let vp2 = |o: &[i32]| gv_field_at(cx, "e_vp2", "vel_p2", ndim, o);
+        let vp1 = |o: &[i32]| gv_field_at(cx, "e_vp1", CtCellCt::Vel(PlaneComp::P1), ndim, o);
+        let vp2 = |o: &[i32]| gv_field_at(cx, "e_vp2", CtCellCt::Vel(PlaneComp::P2), ndim, o);
         let (vx_w, vx_e, vy_s, vy_n) = match tp {
             Some((alpha_c, _, beta_x_c, beta_y_c)) => (
                 alpha_c * avg2(vp1(&nw), vp1(&sw)) - beta_x_c,
@@ -2049,7 +2599,11 @@ fn rmhd_edge_emf_uct_hlld_impl(chart: &mut impl WaveSumChart) -> (GvKernel, Kern
             Some((_, sqrtg_c, _, _)) => sqrtg_c * ez,
             None => ez,
         };
-        vec![KernelWrite::new("emf", "emf", emf.node())]
+        vec![KernelWrite::new(
+            CtWireName::Emf.render(),
+            CtEdgeCt::Emf,
+            emf.node(),
+        )]
     })
 }
 
@@ -2329,7 +2883,7 @@ impl WaveSumChart for Gr3dWaveSum<'_> {
 /// only (physical component == grid axis): the edge is cell-centered along `dir` and cornered on
 /// the transverse pair (g1, g2) = (dir+1, dir+2) mod 3; the out-of-plane prim component is `dir`.
 pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
-    dir: usize,
+    dir: SweepAxis,
     spacetime: Spacetime,
     coords: Coords,
     spacing: &[Spacing],
@@ -2338,6 +2892,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
         coords == Coords::Cartesian,
         "the 3d GR UCT-HLLD EMF is baked for the cartesian charts"
     );
+    let dir = dir.index();
     rmhd_edge_emf_uct_hlld_impl(&mut Gr3dWaveSum {
         dir,
         spacetime,
@@ -2354,8 +2909,12 @@ pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
 /// reuses for the bcell^n snapshot). write root == the read field node.
 pub fn rmhd_save_efield_gv() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-        let e = cx.field("e", "e");
-        vec![KernelWrite::new("e_n", "e_n", e.node())]
+        let e = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::E));
+        vec![KernelWrite::new(
+            CtWireName::EN.render(),
+            CtEdgeCt::EmfSaved,
+            e.node(),
+        )]
     })
 }
 
@@ -2363,10 +2922,14 @@ pub fn rmhd_save_efield_gv() -> (GvKernel, KernelWrites) {
 /// `rmhd::rmhd_average_efield`.
 pub fn rmhd_average_efield_gv() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-        let e = cx.field("e", "e");
-        let en = cx.field("e_n", "e_n");
+        let e = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::E));
+        let en = ct_field(cx, CtEdgeCt::EmfSaved);
         let e_new = Gv::from_f64(0.5) * (e + en);
-        vec![KernelWrite::new("e_new", "e", e_new.node())]
+        vec![KernelWrite::new(
+            "e_new",
+            CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::E),
+            e_new.node(),
+        )]
     })
 }
 
@@ -2389,15 +2952,20 @@ pub fn fofc_emf_splice_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Kerne
             }
             o
         };
-        let flag_gt0 = |o: &[i32]| gv_field_at(cx, "flag", "flag", ndim, o).cmp_gt(Gv::ZERO);
+        let flag_gt0 =
+            |o: &[i32]| gv_field_at(cx, "flag", CtCellCt::FofcFlag, ndim, o).cmp_gt(Gv::ZERO);
         let edge_fo = flag_gt0(&zero)
             | flag_gt0(&cm(&[g1]))
             | flag_gt0(&cm(&[g2]))
             | flag_gt0(&cm(&[g1, g2]));
-        let e_fo = cx.field("e_fo", "e_fo");
-        let e_ho = cx.field("e_ho", "e_ho");
+        let e_fo = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::EFo));
+        let e_ho = ct_field(cx, CtEdgeCt::EmfHighOrder);
         let chosen = Gv::select(edge_fo, e_fo, e_ho);
-        vec![KernelWrite::new("e_fo", "e_fo", chosen.node())]
+        vec![KernelWrite::new(
+            CtWireName::EFo.render(),
+            CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::EFo),
+            chosen.node(),
+        )]
     })
 }
 
@@ -2421,14 +2989,14 @@ pub fn rmhd_edge_emf_gr_3d_gv(
         let ndim = 3usize;
         let g1 = (dir + 1) % 3;
         let g2 = (dir + 2) % 3;
-        gv_register_field(cx, "edge_vp1", "vel_p1");
-        gv_register_field(cx, "edge_vp2", "vel_p2");
-        gv_register_field(cx, "edge_bp1", "bcell_p1");
-        gv_register_field(cx, "edge_bp2", "bcell_p2");
-        gv_register_field(cx, "edge_bflux_a", "bflux_a");
-        gv_register_field(cx, "edge_bflux_b", "bflux_b");
-        gv_register_field(cx, "edge_fden_p1", "fden_p1");
-        gv_register_field(cx, "edge_fden_p2", "fden_p2");
+        gv_register_field(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1));
+        gv_register_field(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2));
+        gv_register_field(cx, "edge_bp1", CtCellCt::BCell(PlaneComp::P1));
+        gv_register_field(cx, "edge_bp2", CtCellCt::BCell(PlaneComp::P2));
+        gv_register_field(cx, "edge_bflux_a", CtFaceCt::BFlux(Transverse::A));
+        gv_register_field(cx, "edge_bflux_b", CtFaceCt::BFlux(Transverse::B));
+        gv_register_field(cx, "edge_fden_p1", CtFaceCt::FDen(Transverse::A));
+        gv_register_field(cx, "edge_fden_p2", CtFaceCt::FDen(Transverse::B));
         let cm = |axes: &[usize]| -> Vec<i32> {
             let mut o = vec![0i32; ndim];
             for &ax in axes {
@@ -2457,10 +3025,10 @@ pub fn rmhd_edge_emf_gr_3d_gv(
         let cell = |o: &[i32]| {
             let (alpha, sqrtg, beta_p1, beta_p2) =
                 adm(a_c(g1, o[g1] as i64), a_c(g2, o[g2] as i64));
-            let vp1 = gv_field_at(cx, "edge_vp1", "vel_p1", ndim, o);
-            let vp2 = gv_field_at(cx, "edge_vp2", "vel_p2", ndim, o);
-            let bp1 = gv_field_at(cx, "edge_bp1", "bcell_p1", ndim, o);
-            let bp2 = gv_field_at(cx, "edge_bp2", "bcell_p2", ndim, o);
+            let vp1 = gv_field_at(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1), ndim, o);
+            let vp2 = gv_field_at(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2), ndim, o);
+            let bp1 = gv_field_at(cx, "edge_bp1", CtCellCt::BCell(PlaneComp::P1), ndim, o);
+            let bp2 = gv_field_at(cx, "edge_bp2", CtCellCt::BCell(PlaneComp::P2), ndim, o);
             sqrtg * ((alpha * vp2 - beta_p2) * bp1 - (alpha * vp1 - beta_p1) * bp2)
         };
         let ene = cell(&zero);
@@ -2473,20 +3041,73 @@ pub fn rmhd_edge_emf_gr_3d_gv(
             alpha * sqrtg
         };
         let en = Gv::ZERO
-            - asg(a_f(g1, 0), a_c(g2, 0)) * gv_field_at(cx, "edge_bflux_a", "bflux_a", ndim, &zero);
+            - asg(a_f(g1, 0), a_c(g2, 0))
+                * gv_field_at(
+                    cx,
+                    "edge_bflux_a",
+                    CtFaceCt::BFlux(Transverse::A),
+                    ndim,
+                    &zero,
+                );
         let es = Gv::ZERO
             - asg(a_f(g1, 0), a_c(g2, -1))
-                * gv_field_at(cx, "edge_bflux_a", "bflux_a", ndim, &cm(&[g2]));
-        let ee =
-            asg(a_c(g1, 0), a_f(g2, 0)) * gv_field_at(cx, "edge_bflux_b", "bflux_b", ndim, &zero);
+                * gv_field_at(
+                    cx,
+                    "edge_bflux_a",
+                    CtFaceCt::BFlux(Transverse::A),
+                    ndim,
+                    &cm(&[g2]),
+                );
+        let ee = asg(a_c(g1, 0), a_f(g2, 0))
+            * gv_field_at(
+                cx,
+                "edge_bflux_b",
+                CtFaceCt::BFlux(Transverse::B),
+                ndim,
+                &zero,
+            );
         let ew = asg(a_c(g1, -1), a_f(g2, 0))
-            * gv_field_at(cx, "edge_bflux_b", "bflux_b", ndim, &cm(&[g1]));
-        let fnf = gv_field_at(cx, "edge_fden_p1", "fden_p1", ndim, &zero);
-        let fs = gv_field_at(cx, "edge_fden_p1", "fden_p1", ndim, &cm(&[g2]));
-        let fe = gv_field_at(cx, "edge_fden_p2", "fden_p2", ndim, &zero);
-        let fw = gv_field_at(cx, "edge_fden_p2", "fden_p2", ndim, &cm(&[g1]));
+            * gv_field_at(
+                cx,
+                "edge_bflux_b",
+                CtFaceCt::BFlux(Transverse::B),
+                ndim,
+                &cm(&[g1]),
+            );
+        let fnf = gv_field_at(
+            cx,
+            "edge_fden_p1",
+            CtFaceCt::FDen(Transverse::A),
+            ndim,
+            &zero,
+        );
+        let fs = gv_field_at(
+            cx,
+            "edge_fden_p1",
+            CtFaceCt::FDen(Transverse::A),
+            ndim,
+            &cm(&[g2]),
+        );
+        let fe = gv_field_at(
+            cx,
+            "edge_fden_p2",
+            CtFaceCt::FDen(Transverse::B),
+            ndim,
+            &zero,
+        );
+        let fw = gv_field_at(
+            cx,
+            "edge_fden_p2",
+            CtFaceCt::FDen(Transverse::B),
+            ndim,
+            &cm(&[g1]),
+        );
         let emf = ct_contact_emf_gv([en, es, ee, ew], [ene, enw, ese, esw], [fnf, fs, fe, fw]);
-        vec![KernelWrite::new("emf", "emf", emf.node())]
+        vec![KernelWrite::new(
+            CtWireName::Emf.render(),
+            CtEdgeCt::Emf,
+            emf.node(),
+        )]
     })
 }
 
@@ -2504,7 +3125,7 @@ pub fn rmhd_ct_curl_3d_gr_dir_gv(
     trace(|cx| {
         let p1 = (dir + 1) % 3;
         let p2 = (dir + 2) % 3;
-        let b = cx.field("b", "b");
+        let b = ct_field(cx, CtFaceCt::BFaceSweep);
         let dt = cx.scalar("dt");
         // positional scalar ABI: pin every axis's face coords up front (the runtime pushes the
         // full geom set in axis order, and the binding holds only while every slot is registered).
@@ -2530,14 +3151,26 @@ pub fn rmhd_ct_curl_3d_gr_dir_gv(
             o
         };
         let inv_dx = |ax: usize| Gv::ONE / (a_f(ax, 1) - a_f(ax, 0));
-        let de = |key: &str, runtime: &str, ax: usize| {
+        let de = |key: &str, runtime: CtEdgeCt, ax: usize| {
             let e_h = gv_field_at(cx, key, runtime, 3, &[0, 0, 0]);
             let e_p = gv_field_at(cx, key, runtime, 3, &off(ax));
             (e_p - e_h) * inv_dx(ax)
         };
-        let de1 = de("e_p1", "e_p1", p2);
-        let de2 = de("e_p2", "e_p2", p1);
+        let de1 = de(
+            &CtWireName::EP1.render(),
+            CtEdgeCt::EmfIncident(Transverse::A),
+            p2,
+        );
+        let de2 = de(
+            &CtWireName::EP2.render(),
+            CtEdgeCt::EmfIncident(Transverse::B),
+            p1,
+        );
         let b_new = b + dt * (de1 - de2) / sqrtg;
-        vec![KernelWrite::new("b_new", "b", b_new.node())]
+        vec![KernelWrite::new(
+            "b_new",
+            CtFaceCt::BFaceSweep,
+            b_new.node(),
+        )]
     })
 }

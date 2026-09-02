@@ -11,3 +11,8 @@ serde = { version = "1", features = ["derive"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# the golden manifest pin asserts the serialized FieldBind bytes; serde_json is the
+# manifest wire format (symbi-ir's `Prepared`).
+serde_json = "1"

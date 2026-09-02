@@ -34,6 +34,7 @@ use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
+use symbi_ir::{CtEdgeCt, CtFaceCt, CtScratchKey, CtWireName, Transverse};
 use symbi_ir::{Gv, GvKernel, ParamExpr, TraceCx};
 
 /// the wall/drain relaxation signal speed: the fast magnetosonic speed `sqrt(c_s^2 + c_a^2)`,
@@ -45,7 +46,6 @@ fn signal_speed<'t>(cx: TraceCx<'t>, cs: Gv<'t>) -> Gv<'t> {
 }
 
 use crate::coords::{Coords, Spacing};
-use crate::gv::gv_field_at;
 use crate::gv::{cell_geometry_gv, gv_axis_width};
 use symbi_ir::trace;
 
@@ -416,12 +416,28 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, KernelWrites) {
     let ndim = 2usize;
     let axes: &[usize] = &[0, 1, 2][..ndim];
     let (kernel, writes) = trace(|cx| {
-        let ez = cx.field("ez", "ez");
+        let ez = crate::gv::ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez));
         let eta = cx.scalar("eta");
-        let bx = cx.field("bx", "bx");
-        let by = cx.field("by", "by");
-        let bx_jm = gv_field_at(cx, "bx", "bx", 2, &[0, -1]); // B_x at the neighbor below in y
-        let by_im = gv_field_at(cx, "by", "by", 2, &[-1, 0]); // B_y at the neighbor behind in x
+        let bx = crate::gv::ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::Bx),
+        );
+        let by = crate::gv::ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::By),
+        );
+        let bx_jm = crate::gv::ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::Bx),
+            2,
+            &[0, -1],
+        ); // B_x at the neighbor below in y
+        let by_im = crate::gv::ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::By),
+            2,
+            &[-1, 0],
+        ); // B_y at the neighbor behind in x
         let dx0 = cx.scalar("dx_0");
         let dx1 = cx.scalar("dx_1");
         let jz = (Gv::ONE / dx0) * (by - by_im) - (Gv::ONE / dx1) * (bx - bx_jm);
@@ -452,7 +468,11 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, KernelWrites) {
         tag_body_mask(cx, &chi, coords, ndim, axes, None, false);
 
         let ez_new = ez + eta * chi * jz;
-        vec![KernelWrite::new("ez_new", "ez", ez_new.node())]
+        vec![KernelWrite::new(
+            "ez_new",
+            CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez),
+            ez_new.node(),
+        )]
     });
     let kernel = kernel.with_derived_support(&writes);
     (kernel, writes)
@@ -470,17 +490,33 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Ke
     let p1 = (dir + 1) % 3;
     let p2 = (dir + 2) % 3;
     let (kernel, writes) = trace(|cx| {
-        let emf = cx.field("emf", "emf");
+        let emf = crate::gv::ct_field(cx, CtEdgeCt::Emf);
         let eta = cx.scalar("eta");
-        let b_p1 = cx.field("b_p1", "b_p1");
-        let b_p2 = cx.field("b_p2", "b_p2");
+        let b_p1 = crate::gv::ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::BP1),
+        );
+        let b_p2 = crate::gv::ct_field(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::BP2),
+        );
         let back = |ax: usize| -> [i32; 3] {
             let mut o = [0, 0, 0];
             o[ax] = -1;
             o
         };
-        let b_p1_m = gv_field_at(cx, "b_p1", "b_p1", 3, &back(p2)); // dB_p1/dx_p2, backward
-        let b_p2_m = gv_field_at(cx, "b_p2", "b_p2", 3, &back(p1)); // dB_p2/dx_p1, backward
+        let b_p1_m = crate::gv::ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::A), CtWireName::BP1),
+            3,
+            &back(p2),
+        ); // dB_p1/dx_p2, backward
+        let b_p2_m = crate::gv::ct_field_at(
+            cx,
+            CtScratchKey::face(CtFaceCt::BFace(Transverse::B), CtWireName::BP2),
+            3,
+            &back(p1),
+        ); // dB_p2/dx_p1, backward
         let dxp1 = cx.scalar(&format!("dx_{p1}"));
         let dxp2 = cx.scalar(&format!("dx_{p2}"));
         let j = (Gv::ONE / dxp1) * (b_p2 - b_p2_m) - (Gv::ONE / dxp2) * (b_p1 - b_p1_m);
@@ -521,7 +557,7 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Ke
         tag_body_mask(cx, &chi, coords, ndim, axes, None, false);
 
         let emf_new = emf + eta * chi * j;
-        vec![KernelWrite::new("emf_new", "emf", emf_new.node())]
+        vec![KernelWrite::new("emf_new", CtEdgeCt::Emf, emf_new.node())]
     });
     let kernel = kernel.with_derived_support(&writes);
     (kernel, writes)

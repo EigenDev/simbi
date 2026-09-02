@@ -13,6 +13,7 @@ use symbi_geometry::{
     SchwarzschildKSCylindrical,
 };
 use symbi_ir::gv::GvMask;
+use symbi_ir::{CtCellCt, CtFaceCt, PhysComp};
 use symbi_ir::{KernelWrite, KernelWrites};
 
 /// snapshot `u_n = cons` — a pure pointwise copy (the RK2 stage-0 hold), geometry-independent
@@ -390,8 +391,8 @@ pub fn fofc_splice_gv(
     trace(|cx| {
         let nd = ndim as u8;
         let d = dir as u8;
-        let flag_c = cx.field("flag", "flag");
-        let flag_lo = cx.field_shifted("flag", "flag", nd, d, -1);
+        let flag_c = cx.field("flag", CtCellCt::FofcFlag);
+        let flag_lo = cx.field_shifted("flag", CtCellCt::FofcFlag, nd, d, -1);
         let face_fo = flag_c.cmp_gt(Gv::ZERO) | flag_lo.cmp_gt(Gv::ZERO);
         let mut writes = KernelWrites::new();
         let mut splice = |comp: &str| {
@@ -424,16 +425,23 @@ pub fn fofc_bflux_splice_gv(ndim: usize, dir: usize, ncomp: usize) -> (GvKernel,
     trace(|cx| {
         let nd = ndim as u8;
         let d = dir as u8;
-        let flag_c = cx.field("flag", "flag");
-        let flag_lo = cx.field_shifted("flag", "flag", nd, d, -1);
+        let flag_c = cx.field("flag", CtCellCt::FofcFlag);
+        let flag_lo = cx.field_shifted("flag", CtCellCt::FofcFlag, nd, d, -1);
         let face_fo = flag_c.cmp_gt(Gv::ZERO) | flag_lo.cmp_gt(Gv::ZERO);
         let mut writes = KernelWrites::new();
         for c in 0..ncomp {
             let fo_name = format!("fo_bflux_{c}");
-            let fo = cx.field(&fo_name, &fo_name);
-            let ho = cx.field(&format!("ho_bflux_{c}"), &format!("ho_bflux_{c}"));
+            let fo = cx.field(&fo_name, CtFaceCt::BFluxFirstOrder(PhysComp::new(c)));
+            let ho = cx.field(
+                &format!("ho_bflux_{c}"),
+                CtFaceCt::BFluxHighOrder(PhysComp::new(c)),
+            );
             let chosen = Gv::select(face_fo, fo, ho);
-            writes.push(KernelWrite::new(fo_name.clone(), fo_name, chosen.node()));
+            writes.push(KernelWrite::new(
+                fo_name,
+                CtFaceCt::BFluxFirstOrder(PhysComp::new(c)),
+                chosen.node(),
+            ));
         }
         writes
     })

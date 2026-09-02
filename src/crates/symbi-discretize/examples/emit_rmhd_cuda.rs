@@ -13,6 +13,7 @@
 // =============================================================================
 
 use std::fs;
+use symbi_ir::SweepAxis;
 
 use symbi_discretize::GvKernel;
 use symbi_discretize::Spacing;
@@ -78,7 +79,7 @@ fn main() {
     // is split per in-plane direction (dir=0 -> B_x, dir=1 -> B_y, both from the corner E_z).
     // emit both.
     for dir in 0..2 {
-        let (ct_k, ct_w) = rmhd_ct_curl_2d_dir_gv(dir);
+        let (ct_k, ct_w) = rmhd_ct_curl_2d_dir_gv(SweepAxis::new(dir, 2));
         emit_gv(&out_dir, &format!("rmhd_ct_curl_2d_{dir}"), 2, ct_k, ct_w);
     }
 
@@ -87,7 +88,7 @@ fn main() {
     let (res_k, res_w) = rmhd_resistive_emf_2d_gv();
     emit_gv(&out_dir, "rmhd_resistive_emf_2d", 2, res_k, res_w);
     for dir in 0..3 {
-        let (r3_k, r3_w) = rmhd_resistive_emf_3d_dir_gv(dir);
+        let (r3_k, r3_w) = rmhd_resistive_emf_3d_dir_gv(SweepAxis::new(dir, 3));
         emit_gv(
             &out_dir,
             &format!("rmhd_resistive_emf_3d_{dir}"),

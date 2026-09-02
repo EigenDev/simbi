@@ -250,8 +250,11 @@ fn build_entry(
             .iter()
             .map(|(_, bind)| match bind {
                 symbi_ir::FieldBind::Ref(f) => *f,
-                symbi_ir::FieldBind::Scratch(s) | symbi_ir::FieldBind::User(s) => {
-                    panic!("census map: input '{s}' is not a known FieldRef")
+                other => {
+                    panic!(
+                        "census map: input '{}' is not a known FieldRef",
+                        other.name()
+                    )
                 }
             })
             .collect(),

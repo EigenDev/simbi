@@ -16,6 +16,7 @@
 // =============================================================================
 
 use symbi_discretize::{Spacing, rmhd_ct_curl_cyl_rphi_gv};
+use symbi_ir::SweepAxis;
 use symbi_ir::proof::{LinFormR, Poly, RatFun};
 
 const FIELDS: &[&str] = &["ez", "b"];
@@ -51,7 +52,7 @@ fn dx(ax: usize) -> Poly {
 }
 
 fn curl(dir: usize) -> LinFormR {
-    let (kernel, writes) = rmhd_ct_curl_cyl_rphi_gv(dir, &[Spacing::Uniform; 2]);
+    let (kernel, writes) = rmhd_ct_curl_cyl_rphi_gv(SweepAxis::new(dir, 2), &[Spacing::Uniform; 2]);
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
     let lf = curl_only(LinFormR::extract_rat(
         kernel.graph(),

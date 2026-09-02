@@ -20,10 +20,22 @@
 //  mhd_substrate::post_godunov(sim, has_energy, dt, stage);
 // =============================================================================
 
+use symbi_ir::{CtCellCt, CtEdgeCt, CtFaceCt, CtScratch, FieldBind, Transverse};
+
+/// the typed CT role of a manifest bind, when it names reserved CT scratch.
+/// the dispatch binders match roles, so a producer spelling change cannot
+/// silently re-route a buffer.
+fn ct_role(b: &FieldBind) -> Option<CtScratch> {
+    match b {
+        FieldBind::Scratch(k) => k.ct_role(),
+        _ => None,
+    }
+}
+
 use symbi_algebra::OrderedNumeric;
+use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_ir::ScalarRef;
-use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
@@ -909,21 +921,18 @@ pub(crate) fn fofc_splice_induction<const D: usize, const DOF: usize, Mem, Sc>(
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     for dir in 0..D {
         let name = format!("{prefix}_fofc_bflux_splice_{D}d_{dir}");
-        let slot = |s: &str| -> &Field<Sc, D, Mem> {
-            if s == "flag" {
-                flag
-            } else if let Some(c) = s.strip_prefix("fo_bflux_") {
-                &mhd.bflux[dir][c.parse::<usize>().expect("fo_bflux idx")]
-            } else if let Some(c) = s.strip_prefix("ho_bflux_") {
-                &mhd.bflux_ho[dir][c.parse::<usize>().expect("ho_bflux idx")]
-            } else {
-                panic!("fofc_splice_induction: unknown slot '{s}'")
+        let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+            match ct_role(b) {
+                Some(CtScratch::Cell(CtCellCt::FofcFlag)) => flag,
+                Some(CtScratch::Face(CtFaceCt::BFluxFirstOrder(c))) => &mhd.bflux[dir][c.index()],
+                Some(CtScratch::Face(CtFaceCt::BFluxHighOrder(c))) => &mhd.bflux_ho[dir][c.index()],
+                _ => panic!("fofc_splice_induction: unknown slot '{}'", b.name()),
             }
         };
         let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         for (bind, is_out) in kernel_field_binds(&name).iter() {
-            let fld = slot(&bind.name());
+            let fld = slot(bind);
             if *is_out {
                 outputs.push(fld);
             } else {
@@ -952,20 +961,20 @@ pub(crate) fn fofc_emf_splice<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-    for edge in ct_edges(&sim.geom.axes) {
-        let name = format!("fofc_emf_splice_{D}d_{}", edge.name_k);
-        let slot = |s: &str| -> &Field<Sc, D, Mem> {
-            match s {
-                "flag" => flag,
-                "e_fo" => &mhd.efield[edge.slot],
-                "e_ho" => &mhd.efield_ho[edge.slot],
-                o => panic!("fofc_emf_splice: unknown slot '{o}'"),
+    for edge in ct_edges::<D>(&sim.geom.axes) {
+        let name = format!("fofc_emf_splice_{D}d_{}", edge.name_k.index());
+        let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+            match ct_role(b) {
+                Some(CtScratch::Cell(CtCellCt::FofcFlag)) => flag,
+                Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
+                Some(CtScratch::Edge(CtEdgeCt::EmfHighOrder)) => &mhd.efield_ho[edge.slot],
+                _ => panic!("fofc_emf_splice: unknown slot '{}'", b.name()),
             }
         };
         let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         for (bind, is_out) in kernel_field_binds(&name).iter() {
-            let fld = slot(&bind.name());
+            let fld = slot(bind);
             if *is_out {
                 outputs.push(fld);
             } else {
@@ -1010,17 +1019,54 @@ pub(crate) fn fofc_emf_splice<const D: usize, const DOF: usize, Mem, Sc>(
 // `with_cyl_plane`. read directly off the sim — no recomputation here.
 
 #[derive(Clone, Copy)]
-struct CtEdge {
+struct CtEdgeMap<const D: usize> {
     /// efield storage slot (enumeration position).
     slot: usize,
     /// dual physical component -> kernel suffix `rmhd_edge_emf_{D}d_{name_k}`.
-    name_k: usize,
+    name_k: symbi_ir::PhysComp,
     /// in-plane physical components (cyclic order — fixes the EMF sign): vel/bcell index.
-    p1: usize,
-    p2: usize,
+    p1: symbi_ir::PhysComp,
+    p2: symbi_ir::PhysComp,
     /// grid axes carrying p1/p2 (= axes.position) — flux/bflux-outer/face index.
-    g1: usize,
-    g2: usize,
+    g1: symbi_ir::GridAxis<D>,
+    g2: symbi_ir::GridAxis<D>,
+}
+
+impl<const D: usize> CtEdgeMap<D> {
+    /// the validated role-resolution boundary: the one constructor that maps an
+    /// edge's dual component `k` and the runtime axis map to typed in-plane
+    /// physical components and their carrying grid axes. rejects an out-of-space
+    /// dual component, a plane component absent from the axis map, an
+    /// out-of-bounds grid position, and coincident carrying axes — before any
+    /// field of the descriptor exists.
+    fn try_new(slot: usize, k: usize, axes: &[usize]) -> Result<Self, String> {
+        let name_k = symbi_ir::PhysComp::try_new(k)
+            .ok_or_else(|| format!("edge dual component {k} out of the 3-vector space"))?;
+        let (p1c, p2c) = ((k + 1) % 3, (k + 2) % 3);
+        let pos = |c: usize| -> Result<symbi_ir::GridAxis<D>, String> {
+            let p = axes
+                .iter()
+                .position(|&a| a == c)
+                .ok_or_else(|| format!("plane component {c} is not a grid axis in {axes:?}"))?;
+            symbi_ir::GridAxis::<D>::try_new(p)
+                .ok_or_else(|| format!("grid position {p} out of the {D}-dimensional mesh"))
+        };
+        let g1 = pos(p1c)?;
+        let g2 = pos(p2c)?;
+        if g1 == g2 {
+            return Err(format!(
+                "edge {k}: plane components {p1c}/{p2c} map to one grid axis in {axes:?}"
+            ));
+        }
+        Ok(Self {
+            slot,
+            name_k,
+            p1: symbi_ir::PhysComp::new(p1c),
+            p2: symbi_ir::PhysComp::new(p2c),
+            g1,
+            g2,
+        })
+    }
 }
 
 // edge dual-k is present iff its two plane physical components are both in-plane (grid axes).
@@ -1032,24 +1078,13 @@ fn ct_edge_present(k: usize, axes: &[usize]) -> bool {
 // the CT edges (E 1-forms) over the axis-set, in dual-component order. 0 / 1 / 3 edges for
 // D = 1/2/3. each edge separates its physical-component plane (p1,p2 — for the EMF sign)
 // from the grid axes (g1,g2 — for offsets / flux indexing); identical when axes is identity.
-fn ct_edges(axes: &[usize]) -> Vec<CtEdge> {
-    let pos = |c: usize| {
-        axes.iter()
-            .position(|&a| a == c)
-            .expect("plane component must be a grid axis")
-    };
+fn ct_edges<const D: usize>(axes: &[usize]) -> Vec<CtEdgeMap<D>> {
     let mut out = Vec::new();
     for k in 0..3 {
         if ct_edge_present(k, axes) {
-            let (p1, p2) = ((k + 1) % 3, (k + 2) % 3);
-            out.push(CtEdge {
-                slot: out.len(),
-                name_k: k,
-                p1,
-                p2,
-                g1: pos(p1),
-                g2: pos(p2),
-            });
+            let edge =
+                CtEdgeMap::try_new(out.len(), k, axes).unwrap_or_else(|e| panic!("ct_edges: {e}"));
+            out.push(edge);
         }
     }
     out
@@ -1058,13 +1093,18 @@ fn ct_edges(axes: &[usize]) -> Vec<CtEdge> {
 // for grid face `dir` (carrying physical component `axes[dir]`): the incident edge slots
 // (curl inputs) + the transverse id-axes (cartesian inverse-width scalars), from the
 // component's cyclic plane, filtered by edge presence. order matches the curl kernel ABI.
-fn ct_face_curl(dir: usize, axes: &[usize]) -> (Vec<usize>, Vec<usize>) {
+fn ct_face_curl<const D: usize>(dir: usize, axes: &[usize]) -> (Vec<usize>, Vec<usize>) {
     let c = axes[dir];
     let plane = [(c + 1) % 3, (c + 2) % 3];
-    let edges = ct_edges(axes);
+    let edges = ct_edges::<D>(axes);
     let slots = plane
         .iter()
-        .filter_map(|&pk| edges.iter().find(|e| e.name_k == pk).map(|e| e.slot))
+        .filter_map(|&pk| {
+            edges
+                .iter()
+                .find(|e| e.name_k.index() == pk)
+                .map(|e| e.slot)
+        })
         .collect();
     // the transverse grid axes whose inverse-widths the cartesian curl reads (in-plane comps).
     let id_axes = plane
@@ -1132,10 +1172,15 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let axes = sim.geom.axes;
 
-    for edge in ct_edges(&axes) {
+    for edge in ct_edges::<D>(&axes) {
         // p1/p2 = in-plane physical components (vel/bcell, cyclic for sign);
         // g1/g2 = the grid axes carrying them (flux / bflux-outer / stencil offsets).
-        let (p1, p2, g1, g2) = (edge.p1, edge.p2, edge.g1, edge.g2);
+        let (p1, p2, g1, g2) = (
+            edge.p1.index(),
+            edge.p2.index(),
+            edge.g1.index(),
+            edge.g2.index(),
+        );
         // out-of-plane B component (the third of {0,1,2}), for the HLLC |B|^2 momentum flux.
         let p_out = 3 - p1 - p2;
         // UCT swaps the contact's mass-flux soft-sign blend for the master-formula edge EMF; the
@@ -1147,25 +1192,34 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
             // MUB09 wave-sum EMF (the sharp Alfven-resolving one, telescopes to the coordinate B_t
             // flux); everything else -> the regime-generic HLL corner EMF.
             CtMethod::Uct if !st.is_empty() && matches!(solver, Solver::Hlld) => {
-                format!("rmhd_edge_emf_uct_hlld{sfx}{st}_{D}d_{}", edge.name_k)
+                format!(
+                    "rmhd_edge_emf_uct_hlld{sfx}{st}_{D}d_{}",
+                    edge.name_k.index()
+                )
             }
             CtMethod::Uct if !st.is_empty() => {
-                format!("rmhd_edge_emf_uct{sfx}{st}_{D}d_{}", edge.name_k)
+                format!("rmhd_edge_emf_uct{sfx}{st}_{D}d_{}", edge.name_k.index())
             }
             CtMethod::Contact if !st.is_empty() => {
-                format!("rmhd_edge_emf{sfx}{st}_{D}d_{}", edge.name_k)
+                format!("rmhd_edge_emf{sfx}{st}_{D}d_{}", edge.name_k.index())
             }
-            CtMethod::Contact => format!("rmhd_edge_emf_{D}d_{}", edge.name_k),
+            CtMethod::Contact => format!("rmhd_edge_emf_{D}d_{}", edge.name_k.index()),
             // UCT EMF family follows the gas solver: HLLD gas -> the five-wave HLLD EMF (the genuine
             // less-diffusive one, classical NMHD only); everything else -> the regime-generic HLL
             // EMF (which is the EMF's HLLC for B_x != 0 — the contact doesn't resolve B_t, p.11).
             CtMethod::Uct => match (solver, prefix) {
-                (Solver::Hlld, "nmhd") => format!("nmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),
+                (Solver::Hlld, "nmhd") => {
+                    format!("nmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k.index())
+                }
                 // isothermal HLLD: M&DZ Appendix A (no contact mode; chi~ from the HLL central state).
-                (Solver::Hlld, "imhd") => format!("imhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),
+                (Solver::Hlld, "imhd") => {
+                    format!("imhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k.index())
+                }
                 // relativistic HLLD: the MUB09 five-wave fan (the genuine less-diffusive RMHD EMF).
-                (Solver::Hlld, "rmhd") => format!("rmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),
-                _ => format!("rmhd_edge_emf_uct_{D}d_{}", edge.name_k),
+                (Solver::Hlld, "rmhd") => {
+                    format!("rmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k.index())
+                }
+                _ => format!("rmhd_edge_emf_uct_{D}d_{}", edge.name_k.index()),
             },
         };
         // bind by manifest: the kernel declares component-agnostic generic slots (`vel_p1`,
@@ -1174,43 +1228,44 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
         // missing/extra slot panics). per-buffer layout (`dispatch_fields_each` -> `Field::domain()`)
         // binds the staggered `efield` output and the cell inputs each in its own domain; the exec
         // window is the edge field's own domain.
-        let slot = |s: &str| -> &Field<Sc, D, Mem> {
-            match s {
-                "vel_p1" => &sim.fields.prim.vel[p1],
-                "vel_p2" => &sim.fields.prim.vel[p2],
+        let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+            use symbi_ir::PlaneComp as Pc;
+            match ct_role(b) {
+                Some(CtScratch::Cell(CtCellCt::Vel(Pc::P1))) => &sim.fields.prim.vel[p1],
+                Some(CtScratch::Cell(CtCellCt::Vel(Pc::P2))) => &sim.fields.prim.vel[p2],
                 // out-of-plane velocity (rmhd-hlld: the full relativistic prim for the MUB09 fan).
-                "vel_out" => &sim.fields.prim.vel[p_out],
-                "bcell_p1" => &mhd.bcell[p1],
-                "bcell_p2" => &mhd.bcell[p2],
-                "bflux_a" => &mhd.bflux[g1][p2],
-                "bflux_b" => &mhd.bflux[g2][p1],
-                "fden_p1" => &sim.fields.flux[g1].den,
-                "fden_p2" => &sim.fields.flux[g2].den,
-                // UCT-only slots: the staggered face B (for the resistive jumps) and the per-cell
+                Some(CtScratch::Cell(CtCellCt::Vel(Pc::Out))) => &sim.fields.prim.vel[p_out],
+                Some(CtScratch::Cell(CtCellCt::BCell(Pc::P1))) => &mhd.bcell[p1],
+                Some(CtScratch::Cell(CtCellCt::BCell(Pc::P2))) => &mhd.bcell[p2],
+                Some(CtScratch::Face(CtFaceCt::BFlux(Transverse::A))) => &mhd.bflux[g1][p2],
+                Some(CtScratch::Face(CtFaceCt::BFlux(Transverse::B))) => &mhd.bflux[g2][p1],
+                Some(CtScratch::Face(CtFaceCt::FDen(Transverse::A))) => &sim.fields.flux[g1].den,
+                Some(CtScratch::Face(CtFaceCt::FDen(Transverse::B))) => &sim.fields.flux[g2].den,
+                // UCT-only slots: the staggered face B (for the resistive jumps) and the per-face
                 // Riemann wave speeds in both transverse grid directions (for the HLL weights).
-                "bface_a" => &mhd.bface[g1],
-                "bface_b" => &mhd.bface[g2],
-                "wsr_p1" => &mhd.wave_speed_r[g1],
-                "wsl_p1" => &mhd.wave_speed_l[g1],
-                "wsr_p2" => &mhd.wave_speed_r[g2],
-                "wsl_p2" => &mhd.wave_speed_l[g2],
+                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
+                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
+                Some(CtScratch::Face(CtFaceCt::WaveR(Transverse::A))) => &mhd.wave_speed_r[g1],
+                Some(CtScratch::Face(CtFaceCt::WaveL(Transverse::A))) => &mhd.wave_speed_l[g1],
+                Some(CtScratch::Face(CtFaceCt::WaveR(Transverse::B))) => &mhd.wave_speed_r[g2],
+                Some(CtScratch::Face(CtFaceCt::WaveL(Transverse::B))) => &mhd.wave_speed_l[g2],
                 // uct-hllc-only slots: the full cell prim (rho/pre + the out-of-plane B) for the
                 // in-kernel classical contact speed lambda* = m_n^hll/rho^hll.
-                "rho" => &sim.fields.prim.rho,
-                "pre" => sim
+                Some(CtScratch::Cell(CtCellCt::Rho)) => &sim.fields.prim.rho,
+                Some(CtScratch::Cell(CtCellCt::Pre)) => sim
                     .fields
                     .prim
                     .pre_field()
                     .expect("UCT-HLLC needs prim.pre (ideal gas)"),
-                "bcell_out" => &mhd.bcell[p_out],
-                "emf" => &mhd.efield[edge.slot],
-                o => panic!("rmhd_edge_emf: unknown manifest slot '{o}'"),
+                Some(CtScratch::Cell(CtCellCt::BCell(Pc::Out))) => &mhd.bcell[p_out],
+                Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
+                _ => panic!("rmhd_edge_emf: unknown manifest slot '{}'", b.name()),
             }
         };
         let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         for (bind, is_out) in kernel_field_binds(&name).iter() {
-            let fld = slot(&bind.name());
+            let fld = slot(bind);
             if *is_out {
                 outputs.push(fld);
             } else {
@@ -1245,7 +1300,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let axes = sim.geom.axes;
-    let edges = ct_edges(&axes);
+    let edges = ct_edges::<D>(&axes);
 
     // RK2 stage 1/2: save / time-average each edge's E. device uses the pointwise GPU copy
     // (the 3d-named kernel is a same-cell copy; D!=3 device support needs a _{D}d copy —
@@ -1432,18 +1487,18 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
         ),
         o => panic!("resistive_emf_ortho: unexpected scalar {o:?}"),
     });
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        match s {
-            "e" => &mhd.efield[0],
-            "b0" => &mhd.bface[0],
-            "b1" => &mhd.bface[1],
-            o => panic!("resistive_emf_ortho: unknown manifest slot '{o}'"),
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        match ct_role(b) {
+            Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[0],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[0],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[1],
+            _ => panic!("resistive_emf_ortho: unknown manifest slot '{}'", b.name()),
         }
     };
     let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(&name).iter() {
-        let fld = slot(&bind.name());
+        let fld = slot(bind);
         if *is_out {
             outputs.push(fld);
         } else {
@@ -1513,10 +1568,10 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
         let edges: Vec<(usize, usize, usize, String)> = if D == 2 {
             vec![(0, 0, 1, "body_resistive_emf_2d".to_string())]
         } else {
-            ct_edges(&sim.geom.axes)
+            ct_edges::<D>(&sim.geom.axes)
                 .into_iter()
                 .map(|edge| {
-                    let dir = edge.name_k;
+                    let dir = edge.name_k.index();
                     (
                         edge.slot,
                         (dir + 1) % 3,
@@ -1530,18 +1585,18 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
             let scalars = scalars_for(&name, &resolve);
             // slot names differ by dim: the 2.5D kernel binds (ez, bx, by); the 3D kernels bind
             // (emf, b_p1, b_p2) for the edge's two transverse faces.
-            let slot = |s: &str| -> &Field<Sc, D, Mem> {
-                match s {
-                    "ez" | "emf" => &mhd.efield[eslot],
-                    "bx" | "b_p1" => &mhd.bface[p1],
-                    "by" | "b_p2" => &mhd.bface[p2],
-                    o => panic!("body_resistive_emf: unknown manifest slot '{o}'"),
+            let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+                match ct_role(b) {
+                    Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[eslot],
+                    Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[p1],
+                    Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[p2],
+                    _ => panic!("body_resistive_emf: unknown manifest slot '{}'", b.name()),
                 }
             };
             let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
             let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
             for (bind, is_out) in kernel_field_binds(&name).iter() {
-                let fld = slot(&bind.name());
+                let fld = slot(bind);
                 if *is_out {
                     outputs.push(fld);
                 } else {
@@ -1582,18 +1637,18 @@ fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
             o => panic!("resistive_emf_2d: unexpected scalar {o:?}"),
         })
     });
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        match s {
-            "ez" => &mhd.efield[0],
-            "bx" => &mhd.bface[0],
-            "by" => &mhd.bface[1],
-            o => panic!("resistive_emf_2d: unknown manifest slot '{o}'"),
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        match ct_role(b) {
+            Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[0],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[0],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[1],
+            _ => panic!("resistive_emf_2d: unknown manifest slot '{}'", b.name()),
         }
     };
     let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(name).iter() {
-        let fld = slot(&bind.name());
+        let fld = slot(bind);
         if *is_out {
             outputs.push(fld);
         } else {
@@ -1622,8 +1677,8 @@ fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let id: Vec<f64> = (0..D).map(|d| 1.0 / sim.geom.dx[d]).collect();
-    for edge in ct_edges(&sim.geom.axes) {
-        let dir = edge.name_k;
+    for edge in ct_edges::<D>(&sim.geom.axes) {
+        let dir = edge.name_k.index();
         let (p1, p2) = ((dir + 1) % 3, (dir + 2) % 3);
         let name = format!("rmhd_resistive_emf_3d_{dir}");
         let scalars = scalars_for(&name, |bind| {
@@ -1634,18 +1689,18 @@ fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
                 o => panic!("resistive_emf_3d: unexpected scalar {o:?}"),
             })
         });
-        let slot = |s: &str| -> &Field<Sc, D, Mem> {
-            match s {
-                "emf" => &mhd.efield[edge.slot],
-                "b_p1" => &mhd.bface[p1],
-                "b_p2" => &mhd.bface[p2],
-                o => panic!("resistive_emf_3d: unknown manifest slot '{o}'"),
+        let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+            match ct_role(b) {
+                Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
+                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[p1],
+                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[p2],
+                _ => panic!("resistive_emf_3d: unknown manifest slot '{}'", b.name()),
             }
         };
         let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         for (bind, is_out) in kernel_field_binds(&name).iter() {
-            let fld = slot(&bind.name());
+            let fld = slot(bind);
             if *is_out {
                 outputs.push(fld);
             } else {
@@ -1692,18 +1747,18 @@ fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
         ),
         o => panic!("resistive_emf_cyl_rz: unexpected scalar {o:?}"),
     });
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        match s {
-            "ephi" => &mhd.efield[0],
-            "br" => &mhd.bface[0],
-            "bz" => &mhd.bface[1],
-            o => panic!("resistive_emf_cyl_rz: unknown manifest slot '{o}'"),
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        match ct_role(b) {
+            Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[0],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[0],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[1],
+            _ => panic!("resistive_emf_cyl_rz: unknown manifest slot '{}'", b.name()),
         }
     };
     let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(name).iter() {
-        let fld = slot(&bind.name());
+        let fld = slot(bind);
         if *is_out {
             outputs.push(fld);
         } else {
@@ -1748,7 +1803,7 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
     );
     let id: Vec<f64> = (0..D).map(|d| 1.0 / sim.geom.dx[d]).collect();
     for dir in 0..D {
-        let (edge_slots, id_axes) = ct_face_curl(dir, &axes);
+        let (edge_slots, id_axes) = ct_face_curl::<D>(dir, &axes);
         if edge_slots.is_empty() {
             continue;
         }
@@ -1800,19 +1855,23 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
         };
         // bind by manifest: slot `b` (the in-place bface) + the incident edges (`e_p1`/`e_p2` in
         // 3D, `ez` in 2.5D) -> this face's actual fields, ordered by the recorded manifest.
-        let slot = |s: &str| -> &Field<Sc, D, Mem> {
-            match s {
-                "b" => &mhd.bface[dir],
-                "e_p1" => &mhd.efield[edge_slots[0]],
-                "e_p2" => &mhd.efield[edge_slots[1]],
-                "ez" => &mhd.efield[edge_slots[0]],
-                o => panic!("rmhd_ct_curl: unknown manifest slot '{o}'"),
+        let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+            match ct_role(b) {
+                Some(CtScratch::Face(CtFaceCt::BFaceSweep)) => &mhd.bface[dir],
+                Some(CtScratch::Edge(CtEdgeCt::EmfIncident(Transverse::A))) => {
+                    &mhd.efield[edge_slots[0]]
+                }
+                Some(CtScratch::Edge(CtEdgeCt::EmfIncident(Transverse::B))) => {
+                    &mhd.efield[edge_slots[1]]
+                }
+                Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge_slots[0]],
+                _ => panic!("rmhd_ct_curl: unknown manifest slot '{}'", b.name()),
             }
         };
         let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         for (bind, is_out) in kernel_field_binds(&ct_name).iter() {
-            let fld = slot(&bind.name());
+            let fld = slot(bind);
             if *is_out {
                 outputs.push(fld);
             } else {
@@ -1870,27 +1929,26 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     } else {
         format!("imhd_bcell_from_bface_{D}d")
     };
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        if let Some(c) = s.strip_prefix("bf_") {
-            return &mhd.bface[c
-                .parse::<usize>()
-                .expect("bcell_from_bface: bad bf_ slot index")];
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        if let Some(CtScratch::Face(CtFaceCt::BFaceComp(c))) = ct_role(b) {
+            return &mhd.bface[c.index()];
         }
-        if let Some(c) = s.strip_prefix("bc_") {
-            let c = c
-                .parse::<usize>()
-                .expect("bcell_from_bface: bad bc_ slot index");
+        if let FieldBind::Ref(symbi_ir::FieldRef::BCell(c)) = b {
+            let c = *c as usize;
             return &mhd.bcell[if gr { c } else { axes[c] }];
         }
-        if s == "nrg" {
+        if b.name() == "nrg" {
             return cnrg.expect("cons.nrg");
         }
-        panic!("rmhd_bcell_from_bface: unknown manifest slot '{s}'");
+        panic!(
+            "rmhd_bcell_from_bface: unknown manifest slot '{}'",
+            b.name()
+        );
     };
     let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(&bname).iter() {
-        let fld = slot(&bind.name());
+        let fld = slot(bind);
         if *is_out {
             outputs.push(fld);
         } else {

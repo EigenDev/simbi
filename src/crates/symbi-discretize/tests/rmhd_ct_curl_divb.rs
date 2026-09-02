@@ -15,6 +15,7 @@
 
 mod harness;
 use harness::KernelRun;
+use symbi_ir::SweepAxis;
 
 use symbi_discretize::rmhd_ct_curl_2d_dir_gv;
 
@@ -71,12 +72,12 @@ fn ct_curl_preserves_div_b() {
     // dir=1 updates B_y from d_x(Ez). run both per-dir kernels (the generic `b` field bound to
     // bx for dir=0, by for dir=1) to advance the full in-plane field one step. out-of-place
     // writes b_new so the before/after div comparison reads the originals.
-    let bx_built = rmhd_ct_curl_2d_dir_gv(0);
+    let bx_built = rmhd_ct_curl_2d_dir_gv(SweepAxis::new(0, 2));
     assert_eq!(
         bx_built.0.scalar_params(),
         vec!["dt".to_string(), "idy".to_string()]
     );
-    let by_built = rmhd_ct_curl_2d_dir_gv(1);
+    let by_built = rmhd_ct_curl_2d_dir_gv(SweepAxis::new(1, 2));
     assert_eq!(
         by_built.0.scalar_params(),
         vec!["dt".to_string(), "idx".to_string()]
