@@ -3170,7 +3170,7 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
 ///
 /// the `source_id` slug must match an AOT-emitted variant from `symbi-aot/build.rs::
 /// gen_godunov_euler_fused` for this regime/ndim (e.g., `"uniform_accel"`). `scalars`
-/// covers every spec-declared scalar param the spec's `BuiltSource` declares
+/// covers every spec-declared scalar param the spec's `SourceProgram` declares
 /// (`g_ext_k`, `gm`, `xm_k`, `body_radius`, ...) — a missing one surfaces as a panic at
 /// `dispatch_godunov_with_sources`'s resolver, in place of a silent zero-fill.
 #[derive(Clone, Debug)]

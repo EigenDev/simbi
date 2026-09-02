@@ -23,7 +23,7 @@
 
 use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_grid::Field;
-use symbi_hydro::source_spec::BuiltSource;
+use symbi_hydro::source_spec::SourceProgram;
 use symbi_ir::ScalarRef;
 use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
@@ -95,7 +95,7 @@ pub struct AdiabaticSubstrateKernelSet<
     pub additive_source: Option<FusedSourceBinding>,
     /// a runtime-loaded user source (python -> json -> `build_user_source` ->
     /// `SourceEvaluator::from_built`). `Some` => `source_apply` runs a per-cell CPU pass that
-    /// interprets the user `BuiltSource`(s) and adds `weight*S` to cons — no recompile, no
+    /// interprets the user `SourceProgram`(s) and adds `weight*S` to cons — no recompile, no
     /// AOT-baked kernel. CPU-only (host memory); the gpu path is runtime NVRTC (future).
     pub runtime_source: Option<Arc<RuntimeSource>>,
     /// when true and a `runtime_source` is attached, the runtime user source is
@@ -181,7 +181,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         }
     }
 
-    /// attach a runtime-loaded user source from already-lowered `(target, BuiltSource)`
+    /// attach a runtime-loaded user source from already-lowered `(target, SourceProgram)`
     /// pairs (the `build_user_source` output of a python -> json `SourceConfig`). one source of
     /// truth: the substrate derives both the CPU per-cell interpreter (`SourceEvaluator::from_built`)
     /// and — lazily, on first device dispatch — the GPU IR (the same `source_apply_from_built_gv`
@@ -191,7 +191,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// `let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());`
     pub fn with_runtime_source(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> Self {
         // has_energy = true is the authority here (Newtonian's RegimeSpec) —
@@ -208,7 +208,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// to the two-pass.
     pub fn with_fused_runtime_source(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
@@ -243,7 +243,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// `let sub = sim.substrate().with_driven_boundary(built, cfg.params.clone()).0;`
     pub fn with_driven_boundary(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;

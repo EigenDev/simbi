@@ -859,7 +859,7 @@ fn gen_godunov_with_body_source(
         "{prefix}_godunov_stage_with_body_source{}_{ndim}d",
         geom.suffix()
     );
-    let refs: [(&str, &symbi_hydro::source_spec::BuiltSource); 0] = [];
+    let refs: [(&str, &symbi_hydro::source_spec::SourceProgram); 0] = [];
     let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         geom.coords,
         symbi_discretize::Spacetime::Minkowski,

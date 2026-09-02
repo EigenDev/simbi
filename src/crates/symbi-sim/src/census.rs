@@ -424,7 +424,7 @@ pub struct CensusEvaluator {
     spec: CensusSpec,
     eval: symbi_hydro::SourceEvaluator,
     /// the registration, retained so a compiled path can lower the same expressions the
-    /// interpreter walks. the config is held in place of the lowered `BuiltSource`, which carries
+    /// interpreter walks. the config is held in place of the lowered `SourceProgram`, which carries
     /// a `proc_macro2::Span` and so lacks `Sync`; a store holding one would be unshareable with
     /// the rayon closures every parallel pass takes over it. lowering from the config on demand
     /// keeps both paths sourced from one registration and the store `Sync`.
@@ -510,7 +510,7 @@ impl CensusEvaluator {
     /// lower the registration again, for a caller tracing the same expressions into a kernel.
     /// the same `CensusConfig` the interpreter was built from, so the two cannot describe
     /// different censuses.
-    pub fn lower(&self) -> Result<symbi_hydro::source_spec::BuiltSource, String> {
+    pub fn lower(&self) -> Result<symbi_hydro::source_spec::SourceProgram, String> {
         symbi_hydro::expr_bridge::build_census_expressions(&self.cfg)
     }
 

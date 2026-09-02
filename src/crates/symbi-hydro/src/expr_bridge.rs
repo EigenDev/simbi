@@ -1,37 +1,35 @@
 // =============================================================================
 // expr_bridge.rs
 //
-// the bridge: lower a `symbi-expr` DAG (a parsed user script) into the `symbi-ir`
-// Graph — the single typed IR the physics is built on. a user expression becomes a
-// `BuiltSource` (graph + named params + output NodeIds), structurally identical to a
-// built-in `SourceSpec`'s output, so it rides the existing splice/fuse path unchanged:
-// `splice_built_source_into` fuses it into a godunov / ghost-fill kernel, which then
-// codegens (CPU + CUDA) or interprets. this collapses the two parallel expression
-// engines (`symbi-expr`'s register-VM and `symbi-ir`'s codegen substrate) into one IR
-// that codegens directly, so every cell runs compiled code.
+// the bridge: interpret a `symbi-expr` DAG (a parsed user script) in the
+// carrier algebra. tracing the interpretation produces a `SourceProgram`
+// (traced expression + named params + outputs), structurally identical to a
+// built-in `SourceSpec`'s output, so it rides the existing splice/fuse path
+// unchanged: `TraceCx::splice_source` fuses it into a godunov / ghost-fill
+// kernel, which then codegens (CPU + CUDA) or interprets. this collapses the
+// two parallel expression engines (`symbi-expr`'s register-VM and the codegen
+// substrate) into one path that codegens directly, so every cell runs
+// compiled code.
 //
 // the leaf convention matches the source vocabulary so a user expression fuses like any
 // other source: VariableX{1,2,3} -> `x_0/x_1/x_2` (the cell position, bound to the
 // centroid at splice), VariableT -> `t` (time), Parameter(i) -> `p{i}` (runtime scalar).
 //
-// the typed IR enforces carrier-traceability: a user `IF_THEN_ELSE` lowers to `Select` (the
-// carrier dialect's branch), comparisons produce a Bool consumed only by a conditional, and
-// ops outside the carrier-traceable set (`Sgn`, `Mod`) are rejected at bridge time, so every
-// accepted graph compiles faithfully.
+// the carrier algebra enforces traceability: a user `IF_THEN_ELSE` becomes a
+// mask-guided `select`, comparisons produce a mask consumed by conditionals
+// and logicals, and ops outside the carrier set (`Sgn`, `Mod`) are rejected
+// at bridge time, so every accepted expression compiles faithfully.
 //
 // usage:
 //   let nodes = dag.nodes().to_vec();
-//   let built = lower_dag_to_builtsource(&nodes, &[root])?;   // -> BuiltSource
+//   let built = lower_dag_to_program(&nodes, &[root])?;   // -> SourceProgram
 // =============================================================================
-
-use std::collections::HashMap;
 
 use symbi_expr::dag::{Node, Payload};
 use symbi_expr::op::Op;
-use symbi_ir::ElementTy;
-use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId};
-
-use crate::source_spec::BuiltSource;
+use symbi_ir::algebra::Scalar as _;
+use symbi_ir::{Gv, GvMask, SourceProgram, TraceCx};
+use symbi_algebra::algebra::Numeric as _;
 
 /// a `symbi-expr` op falls outside the `symbi-ir` vocabulary, or the DAG is malformed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,62 +42,9 @@ pub enum BridgeError {
     BadChild { node: usize, child: usize },
     /// payload shape disagrees with the op's arity (malformed input).
     BadPayload { node: usize, op: Op },
-}
-
-/// how a `symbi-expr` op maps onto the `symbi-ir` algebra. leaves + `IfThenElse` are
-/// handled directly in the walk; this covers the arithmetic / transcendental interior.
-/// one wrapper, one graph tag: the arithmetic and transcendental interiors land on the
-/// same `ElementWiseOp` family.
-enum Mapped {
-    Elem(ElementWiseOp),
-}
-
-fn map_op(op: Op) -> Option<Mapped> {
-    use Op::*;
-    Some(match op {
-        // arithmetic + comparison + logical + min/max/abs/sqrt/floor/ceil -> ElementWise.
-        Add => Mapped::Elem(ElementWiseOp::Add),
-        Sub => Mapped::Elem(ElementWiseOp::Sub),
-        Mul => Mapped::Elem(ElementWiseOp::Mul),
-        Div => Mapped::Elem(ElementWiseOp::Div),
-        Pow => Mapped::Elem(ElementWiseOp::Pow),
-        Neg => Mapped::Elem(ElementWiseOp::Neg),
-        Abs => Mapped::Elem(ElementWiseOp::Abs),
-        Sqrt => Mapped::Elem(ElementWiseOp::Sqrt),
-        Ceil => Mapped::Elem(ElementWiseOp::Ceil),
-        Floor => Mapped::Elem(ElementWiseOp::Floor),
-        Min => Mapped::Elem(ElementWiseOp::Min),
-        Max => Mapped::Elem(ElementWiseOp::Max),
-        Lt => Mapped::Elem(ElementWiseOp::Lt),
-        Gt => Mapped::Elem(ElementWiseOp::Gt),
-        Eq => Mapped::Elem(ElementWiseOp::Eq),
-        Le => Mapped::Elem(ElementWiseOp::Le),
-        Ge => Mapped::Elem(ElementWiseOp::Ge),
-        And => Mapped::Elem(ElementWiseOp::BitAnd),
-        Or => Mapped::Elem(ElementWiseOp::BitOr),
-        Not => Mapped::Elem(ElementWiseOp::BitNot),
-        // math functions -> the transcendental members of ElementWiseOp (the complete set).
-        Log => Mapped::Elem(ElementWiseOp::Log),
-        Log10 => Mapped::Elem(ElementWiseOp::Log10),
-        Exp => Mapped::Elem(ElementWiseOp::Exp),
-        Sin => Mapped::Elem(ElementWiseOp::Sin),
-        Cos => Mapped::Elem(ElementWiseOp::Cos),
-        Tan => Mapped::Elem(ElementWiseOp::Tan),
-        Asin => Mapped::Elem(ElementWiseOp::Asin),
-        Acos => Mapped::Elem(ElementWiseOp::Acos),
-        Atan => Mapped::Elem(ElementWiseOp::Atan),
-        Atan2 => Mapped::Elem(ElementWiseOp::Atan2),
-        Sinh => Mapped::Elem(ElementWiseOp::Sinh),
-        Cosh => Mapped::Elem(ElementWiseOp::Cosh),
-        Tanh => Mapped::Elem(ElementWiseOp::Tanh),
-        Asinh => Mapped::Elem(ElementWiseOp::Asinh),
-        Acosh => Mapped::Elem(ElementWiseOp::Acosh),
-        Atanh => Mapped::Elem(ElementWiseOp::Atanh),
-        // leaves / ternary handled in the walk; Sgn + Mod fall outside the carrier primitives.
-        Constant | VariableX1 | VariableX2 | VariableX3 | VariableT | Parameter | VariableRho
-        | VariableVel1 | VariableVel2 | VariableVel3 | VariablePressure | VariableCellVolume
-        | IfThenElse | Sgn | Mod => return None,
-    })
+    /// an operand's kind disagrees with the op: arithmetic consumes scalars,
+    /// logicals consume masks, and a conditional selects scalars on a mask.
+    TypeMismatch { node: usize, op: Op },
 }
 
 /// the leaf-param name for a `symbi-expr` variable op, matching the source vocabulary
@@ -125,132 +70,219 @@ fn variable_name(op: Op) -> Option<&'static str> {
     }
 }
 
-/// get-or-declare a named scalar param leaf, recording first-seen order in `params` so
-/// repeated uses (e.g., `x_0` twice) share one leaf — the runtime fills one scalar.
-fn declare_param(
-    g: &mut Graph,
-    name: &str,
-    cache: &mut HashMap<String, NodeId>,
-    params: &mut Vec<String>,
-) -> NodeId {
-    if let Some(&id) = cache.get(name) {
-        return id;
+/// a walked expression value: a scalar carrier value, or the mask a
+/// comparison / logical produces. the split is what makes ill-typed user
+/// expressions (arithmetic on a comparison, a logical on a scalar) loud
+/// bridge-time errors instead of malformed kernels.
+enum ExprValue<'t> {
+    Scalar(Gv<'t>),
+    Mask(GvMask<'t>),
+}
+
+impl<'t> ExprValue<'t> {
+    fn scalar(&self, node: usize, op: Op) -> Result<Gv<'t>, BridgeError> {
+        match self {
+            ExprValue::Scalar(v) => Ok(*v),
+            ExprValue::Mask(_) => Err(BridgeError::TypeMismatch { node, op }),
+        }
     }
-    let id = g.add_scalar_param(name, ElementTy::F64);
-    cache.insert(name.to_string(), id);
-    params.push(name.to_string());
-    id
+    fn mask(&self, node: usize, op: Op) -> Result<GvMask<'t>, BridgeError> {
+        match self {
+            ExprValue::Mask(m) => Ok(*m),
+            ExprValue::Scalar(_) => Err(BridgeError::TypeMismatch { node, op }),
+        }
+    }
+    /// the numeric reading of a value at an output slot: a scalar passes
+    /// through; a mask materializes as its 0/1 indicator (the region-mask
+    /// convention — chi multiplies the masked outputs).
+    fn materialize(&self) -> Gv<'t> {
+        match self {
+            ExprValue::Scalar(v) => *v,
+            ExprValue::Mask(m) => Gv::select(*m, Gv::from_f64(1.0), Gv::from_f64(0.0)),
+        }
+    }
 }
 
-/// translate a child index through the partially-built node map, rejecting forward refs.
-fn child(map: &[NodeId], node: usize, c: usize) -> Result<NodeId, BridgeError> {
-    map.get(c)
-        .copied()
-        .ok_or(BridgeError::BadChild { node, child: c })
+/// fetch a child value by DAG index, rejecting forward refs.
+fn child<'a, 't>(
+    map: &'a [ExprValue<'t>],
+    node: usize,
+    c: usize,
+) -> Result<&'a ExprValue<'t>, BridgeError> {
+    map.get(c).ok_or(BridgeError::BadChild { node, child: c })
 }
 
-/// lower a `symbi-expr` DAG (`nodes`, in topological order) with the given `outputs`
-/// into a `BuiltSource` over the `symbi-ir` Graph. returns the params in first-seen
-/// declaration order (the splice/runtime binding order).
-pub fn lower_dag_to_builtsource(
-    nodes: &[Node],
-    outputs: &[usize],
-) -> Result<BuiltSource, BridgeError> {
-    let mut g = Graph::new();
-    let mut node_map: Vec<NodeId> = Vec::with_capacity(nodes.len());
-    let mut param_cache: HashMap<String, NodeId> = HashMap::new();
-    let mut params: Vec<String> = Vec::new();
-
+/// interpret the DAG in the carrier algebra, one value per node in order.
+/// leaves become scalar-param leaves of the active trace (deduped by name,
+/// first-seen order — the params contract).
+fn eval_dag<'t>(cx: TraceCx<'t>, nodes: &[Node]) -> Result<Vec<ExprValue<'t>>, BridgeError> {
+    use Op::*;
+    let mut map: Vec<ExprValue<'t>> = Vec::with_capacity(nodes.len());
     for (i, node) in nodes.iter().enumerate() {
-        let id = match node.op {
-            Op::Constant => match node.payload {
-                Payload::Value(v) => g.add_const(ConstValue::F64(v), None),
-                _ => {
-                    return Err(BridgeError::BadPayload {
-                        node: i,
-                        op: node.op,
-                    });
-                }
-            },
-            Op::VariableX1
-            | Op::VariableX2
-            | Op::VariableX3
-            | Op::VariableT
-            | Op::VariableRho
-            | Op::VariableVel1
-            | Op::VariableVel2
-            | Op::VariableVel3
-            | Op::VariablePressure
-            | Op::VariableCellVolume => {
-                let name = variable_name(node.op).expect("variable op has a name");
-                declare_param(&mut g, name, &mut param_cache, &mut params)
-            }
-            Op::Parameter => match node.payload {
-                Payload::ParamIdx(idx) => {
-                    declare_param(&mut g, &format!("p{idx}"), &mut param_cache, &mut params)
-                }
-                _ => {
-                    return Err(BridgeError::BadPayload {
-                        node: i,
-                        op: node.op,
-                    });
-                }
-            },
-            Op::IfThenElse => match node.payload {
-                Payload::Ternary(c, t, e) => g.select(
-                    child(&node_map, i, c)?,
-                    child(&node_map, i, t)?,
-                    child(&node_map, i, e)?,
-                    None,
-                ),
-                _ => {
-                    return Err(BridgeError::BadPayload {
-                        node: i,
-                        op: node.op,
-                    });
-                }
-            },
-            other => {
-                let mapped = map_op(other).ok_or(BridgeError::UnsupportedOp(other))?;
-                let args: Vec<NodeId> = match node.payload {
-                    Payload::Unary(c) => vec![child(&node_map, i, c)?],
-                    Payload::Binary(l, r) => {
-                        vec![child(&node_map, i, l)?, child(&node_map, i, r)?]
-                    }
-                    _ => {
-                        return Err(BridgeError::BadPayload {
-                            node: i,
-                            op: node.op,
-                        });
-                    }
-                };
-                match mapped {
-                    Mapped::Elem(op) => g.element_wise(op, args, None),
-                }
+        let op = node.op;
+        let bad = || BridgeError::BadPayload { node: i, op };
+        let unary = |map: &[ExprValue<'t>]| -> Result<Gv<'t>, BridgeError> {
+            match node.payload {
+                Payload::Unary(c) => child(map, i, c)?.scalar(i, op),
+                _ => Err(bad()),
             }
         };
-        node_map.push(id);
+        let binary = |map: &[ExprValue<'t>]| -> Result<(Gv<'t>, Gv<'t>), BridgeError> {
+            match node.payload {
+                Payload::Binary(l, r) => Ok((
+                    child(map, i, l)?.scalar(i, op)?,
+                    child(map, i, r)?.scalar(i, op)?,
+                )),
+                _ => Err(bad()),
+            }
+        };
+        let value = match op {
+            Constant => match node.payload {
+                Payload::Value(v) => ExprValue::Scalar(cx.lit(v)),
+                _ => return Err(bad()),
+            },
+            VariableX1 | VariableX2 | VariableX3 | VariableT | VariableRho | VariableVel1
+            | VariableVel2 | VariableVel3 | VariablePressure | VariableCellVolume => {
+                let name = variable_name(op).expect("variable op has a name");
+                ExprValue::Scalar(cx.scalar(name))
+            }
+            Parameter => match node.payload {
+                Payload::ParamIdx(idx) => ExprValue::Scalar(cx.scalar(&format!("p{idx}"))),
+                _ => return Err(bad()),
+            },
+            IfThenElse => match node.payload {
+                Payload::Ternary(c, t, e) => {
+                    let m = child(&map, i, c)?.mask(i, op)?;
+                    let t = child(&map, i, t)?.scalar(i, op)?;
+                    let e = child(&map, i, e)?.scalar(i, op)?;
+                    ExprValue::Scalar(Gv::select(m, t, e))
+                }
+                _ => return Err(bad()),
+            },
+            Add => { let (a, b) = binary(&map)?; ExprValue::Scalar(a + b) }
+            Sub => { let (a, b) = binary(&map)?; ExprValue::Scalar(a - b) }
+            Mul => { let (a, b) = binary(&map)?; ExprValue::Scalar(a * b) }
+            Div => { let (a, b) = binary(&map)?; ExprValue::Scalar(a / b) }
+            Pow => { let (a, b) = binary(&map)?; ExprValue::Scalar(a.powf(b)) }
+            Min => { let (a, b) = binary(&map)?; ExprValue::Scalar(a.min(b)) }
+            Max => { let (a, b) = binary(&map)?; ExprValue::Scalar(a.max(b)) }
+            Atan2 => { let (a, b) = binary(&map)?; ExprValue::Scalar(a.atan2(b)) }
+            Neg => ExprValue::Scalar(-unary(&map)?),
+            Abs => ExprValue::Scalar(unary(&map)?.abs()),
+            Sqrt => ExprValue::Scalar(unary(&map)?.sqrt()),
+            Ceil => ExprValue::Scalar(unary(&map)?.ceil()),
+            Floor => ExprValue::Scalar(unary(&map)?.floor()),
+            Log => ExprValue::Scalar(unary(&map)?.ln()),
+            Log10 => ExprValue::Scalar(unary(&map)?.log10()),
+            Exp => ExprValue::Scalar(unary(&map)?.exp()),
+            Sin => ExprValue::Scalar(unary(&map)?.sin()),
+            Cos => ExprValue::Scalar(unary(&map)?.cos()),
+            Tan => ExprValue::Scalar(unary(&map)?.tan()),
+            Asin => ExprValue::Scalar(unary(&map)?.asin()),
+            Acos => ExprValue::Scalar(unary(&map)?.acos()),
+            Atan => ExprValue::Scalar(unary(&map)?.atan()),
+            Sinh => ExprValue::Scalar(unary(&map)?.sinh()),
+            Cosh => ExprValue::Scalar(unary(&map)?.cosh()),
+            Tanh => ExprValue::Scalar(unary(&map)?.tanh()),
+            Asinh => ExprValue::Scalar(unary(&map)?.asinh()),
+            Acosh => ExprValue::Scalar(unary(&map)?.acosh()),
+            Atanh => ExprValue::Scalar(unary(&map)?.atanh()),
+            Lt => { let (a, b) = binary(&map)?; ExprValue::Mask(a.cmp_lt(b)) }
+            Gt => { let (a, b) = binary(&map)?; ExprValue::Mask(a.cmp_gt(b)) }
+            Le => { let (a, b) = binary(&map)?; ExprValue::Mask(a.cmp_le(b)) }
+            Ge => { let (a, b) = binary(&map)?; ExprValue::Mask(a.cmp_ge(b)) }
+            Eq => { let (a, b) = binary(&map)?; ExprValue::Mask(a.cmp_eq(b)) }
+            And | Or => match node.payload {
+                Payload::Binary(l, r) => {
+                    let a = child(&map, i, l)?.mask(i, op)?;
+                    let b = child(&map, i, r)?.mask(i, op)?;
+                    ExprValue::Mask(if matches!(op, And) { a & b } else { a | b })
+                }
+                _ => return Err(bad()),
+            },
+            Not => match node.payload {
+                Payload::Unary(c) => ExprValue::Mask(!child(&map, i, c)?.mask(i, op)?),
+                _ => return Err(bad()),
+            },
+            Sgn | Mod => return Err(BridgeError::UnsupportedOp(op)),
+        };
+        map.push(value);
     }
+    Ok(map)
+}
 
-    let out_nodes: Result<Vec<NodeId>, BridgeError> = outputs
-        .iter()
-        .map(|&o| {
-            node_map.get(o).copied().ok_or(BridgeError::BadChild {
+/// trace a `symbi-expr` DAG (`nodes`, in topological order) with the given
+/// `outputs` into a `SourceProgram`. params land in first-seen declaration
+/// order (the splice/runtime binding order).
+pub fn lower_dag_to_program(
+    nodes: &[Node],
+    outputs: &[usize],
+) -> Result<SourceProgram, BridgeError> {
+    lower_masked_dag_to_program(nodes, outputs, None, 0..0)
+}
+
+/// trace a DAG whose output list may end in a region mask `chi(x)`: `region`
+/// names the chi node, and the outputs indexed by `mask` are multiplied by
+/// chi inside the same trace (so chi shares the field's leaves). the
+/// conservation lifts are linear in these outputs, so masking the output
+/// masks the final conserved contribution.
+fn lower_masked_dag_to_program(
+    nodes: &[Node],
+    outputs: &[usize],
+    region: Option<usize>,
+    mask: std::ops::Range<usize>,
+) -> Result<SourceProgram, BridgeError> {
+    // the trace closure cannot carry a Result out (its outputs are branded),
+    // so a walk failure parks the error beside the trace and discards the
+    // empty program.
+    let mut error: Option<BridgeError> = None;
+    let program = SourceProgram::trace(|cx| {
+        let map = match eval_dag(cx, nodes) {
+            Ok(map) => map,
+            Err(e) => {
+                error = Some(e);
+                return Vec::new();
+            }
+        };
+        let fetch = |o: usize| -> Result<&ExprValue, BridgeError> {
+            map.get(o).ok_or(BridgeError::BadChild {
                 node: usize::MAX,
                 child: o,
             })
-        })
-        .collect();
-    Ok(BuiltSource {
-        graph: g,
-        params,
-        outputs: out_nodes?,
-    })
+        };
+        let chi = match region.map(fetch).transpose() {
+            Ok(chi) => chi.map(|v| v.materialize()),
+            Err(e) => {
+                error = Some(e);
+                return Vec::new();
+            }
+        };
+        let mut outs = Vec::with_capacity(outputs.len());
+        for &o in outputs {
+            match fetch(o) {
+                Ok(v) => outs.push(v.materialize()),
+                Err(e) => {
+                    error = Some(e);
+                    return Vec::new();
+                }
+            }
+        }
+        if let Some(chi) = chi {
+            for slot in outs[mask.clone()].iter_mut() {
+                *slot = *slot * chi;
+            }
+        }
+        outs
+    });
+    match error {
+        Some(e) => Err(e),
+        None => Ok(program),
+    }
 }
 
 /// the front door: turn a serialized `SourceConfig` (python -> json -> `SourceConfig::from_json`)
-/// into the axiomatic `BuiltSource`(s), wrapping the user's free field in the conservation law
-/// per `kind`. returns `(target_field, BuiltSource)` pairs ready to splice into the godunov source
+/// into the axiomatic `SourceProgram`(s), wrapping the user's free field in the conservation law
+/// per `kind`. returns `(target_field, SourceProgram)` pairs ready to splice into the godunov source
 /// dispatch — `"force"` yields momentum (+ energy, if the regime has it), `"cooling"` yields a
 /// lone energy sink, `"inject"` writes the full conserved vector [den, mom, (nrg)] additively from
 /// one config (mass+momentum+energy deposition), `"raw"` writes the outputs straight to a single
@@ -275,7 +307,7 @@ pub fn lower_dag_to_builtsource(
 /// contribution is multiplied by it. the conservation lifts are linear in the field, so masking the
 /// field (for `relax`: the rate `kappa` alone) equals masking the conserved contribution — the
 /// splice is unchanged, and CPU + GPU fall out of the existing path.
-/// lower a census's bin-axis and value expressions into one `BuiltSource`, whose outputs are
+/// lower a census's bin-axis and value expressions into one `SourceProgram`, whose outputs are
 /// the axis coordinates followed by the accumulator values (the order
 /// `CensusConfig::output_nodes` declares).
 ///
@@ -286,7 +318,7 @@ pub fn lower_dag_to_builtsource(
 ///
 /// `dv` is a legal leaf here, where a source term refuses it: the cell measure is the natural
 /// weight for an extensive quantity, and it is what keeps a sum correct on a curvilinear grid.
-pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<BuiltSource, String> {
+pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<SourceProgram, String> {
     if cfg.values.is_empty() {
         return Err(format!("census '{}': registers no values", cfg.name));
     }
@@ -313,7 +345,7 @@ pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<BuiltS
     // constant-power strength reduction: `r ** (-2.0)` becomes a multiply/divide chain,
     // replacing a per-cell libm pow in a kernel that runs over every leaf cell.
     let (nodes, outputs) = symbi_expr::strength_reduce(&nodes, &outputs);
-    lower_dag_to_builtsource(&nodes, &outputs)
+    lower_dag_to_program(&nodes, &outputs)
         .map_err(|e| format!("census '{}': bridge: {e:?}", cfg.name))
 }
 
@@ -323,7 +355,7 @@ pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<BuiltS
 pub fn build_user_source(
     cfg: &symbi_expr::SourceConfig,
     spec: &crate::regime_spec::RegimeSpec,
-) -> Result<Vec<(String, BuiltSource)>, String> {
+) -> Result<Vec<(String, SourceProgram)>, String> {
     build_user_source_with_law(cfg, spec, None)
 }
 
@@ -334,7 +366,7 @@ pub fn build_user_source_with_law(
     cfg: &symbi_expr::SourceConfig,
     spec: &crate::regime_spec::RegimeSpec,
     law: Option<&crate::state_law::StateLaw>,
-) -> Result<Vec<(String, BuiltSource)>, String> {
+) -> Result<Vec<(String, SourceProgram)>, String> {
     // a law and a spec describe the same regime from two directions, and a source that
     // relaxes toward a conserved state built under one while the evolution stores the
     // other would be wrong in a way no output reveals. the disagreement is a
@@ -368,18 +400,19 @@ pub fn build_user_source_with_law(
     // constant-power strength reduction (symbi_expr::strength): `x ** (-2.0)` in a
     // user config becomes a multiply/divide chain, replacing a per-cell libm pow.
     let (nodes, lower_outputs) = symbi_expr::strength_reduce(&nodes, &lower_outputs);
-    let mut field =
-        lower_dag_to_builtsource(&nodes, &lower_outputs).map_err(|e| format!("bridge: {e:?}"))?;
-    let region: Option<NodeId> = cfg
-        .region
-        .map(|_| field.outputs.pop().expect("region output"));
+    // lower once, with the region chi (when declared) as a trailing extra
+    // output sharing the field's leaves; each kind arm below strips it back
+    // off and multiplies its maskable output range by chi.
+    let field =
+        lower_dag_to_program(&nodes, &lower_outputs).map_err(|e| format!("bridge: {e:?}"))?;
+    let has_region = cfg.region.is_some();
     let n_out = cfg.outputs.len();
 
     // the cell-volume leaf is a reduction weight: a source is a density (per unit volume)
     // added to a conserved density, so multiplying it by the cell measure would make the
     // deposited amount depend on the grid. rejecting it here turns what the per-cell source
     // param resolver (which binds no `dv`) would raise mid-evolve into a build-time error.
-    if field.params.iter().any(|p| p == "dv") {
+    if field.params().iter().any(|p| p == "dv") {
         return Err(
             "cell volume is not a source-term input: a source is a per-unit-volume density, so \
              weighting it by the cell measure makes the deposited amount resolution-dependent. \
@@ -408,7 +441,7 @@ pub fn build_user_source_with_law(
                     cfg.dim,
                 ));
             }
-            mask_field(&mut field, region, 0..cfg.dim); // mask the whole acceleration vector
+            let field = strip_and_mask(&field, has_region, 0..cfg.dim); // mask the whole acceleration vector
             let mut out = vec![(
                 "mom".to_string(),
                 crate::source_spec::user_force_momentum_source(&field, cfg.dim),
@@ -434,7 +467,7 @@ pub fn build_user_source_with_law(
                     "'rotating_frame' needs [omega, origin_x, origin_y]: outputs.len() = {n_out}, expected 3",
                 ));
             }
-            if region.is_some() {
+            if has_region {
                 return Err(
                     "'rotating_frame' does not accept a region mask; make omega zero outside the region"
                         .to_string(),
@@ -465,7 +498,7 @@ pub fn build_user_source_with_law(
                     "'cooling' is a single rate: outputs.len() = {n_out}, expected 1"
                 ));
             }
-            mask_field(&mut field, region, 0..1);
+            let field = strip_and_mask(&field, has_region, 0..1);
             Ok(vec![(
                 "nrg".to_string(),
                 crate::source_spec::user_cooling_source(&field, cfg.dim),
@@ -482,7 +515,7 @@ pub fn build_user_source_with_law(
                 ));
             }
             // region masks the rate kappa (output 0) alone — masking v_ref would corrupt the target.
-            mask_field(&mut field, region, 0..1);
+            let field = strip_and_mask(&field, has_region, 0..1);
             let mut out = vec![(
                 "mom".to_string(),
                 crate::source_spec::user_relax_momentum_source(&field, cfg.dim),
@@ -522,7 +555,7 @@ pub fn build_user_source_with_law(
             // region masks the rate kappa (output 0) alone, which factors into every
             // channel; masking the reference state would corrupt the target the flow
             // relaxes toward rather than the region it relaxes in.
-            mask_field(&mut field, region, 0..1);
+            let field = strip_and_mask(&field, has_region, 0..1);
             crate::source_spec::user_sponge_sources(&field, cfg.dim, law, spec.has_energy)
         }
         "inject" => {
@@ -545,7 +578,7 @@ pub fn build_user_source_with_law(
                     if spec.has_energy { ", nrg" } else { "" },
                 ));
             }
-            mask_field(&mut field, region, 0..n_out); // region masks every conserved channel
+            let field = strip_and_mask(&field, has_region, 0..n_out); // region masks every conserved channel
             let mut out = vec![
                 (
                     "den".to_string(),
@@ -580,7 +613,7 @@ pub fn build_user_source_with_law(
                     spec.name,
                 ));
             }
-            mask_field(&mut field, region, 0..n_out); // mask every conserved component the user wrote
+            let field = strip_and_mask(&field, has_region, 0..n_out); // mask every conserved component the user wrote
             Ok(vec![(target, field)])
         }
         other => Err(format!(
@@ -596,7 +629,7 @@ pub fn build_user_source_with_law(
 pub fn build_user_sources(
     configs: &[symbi_expr::SourceConfig],
     spec: &crate::regime_spec::RegimeSpec,
-) -> Result<(Vec<(String, BuiltSource)>, Vec<f64>), String> {
+) -> Result<(Vec<(String, SourceProgram)>, Vec<f64>), String> {
     build_user_sources_with_law(configs, spec, None)
 }
 
@@ -605,7 +638,7 @@ pub fn build_user_sources_with_law(
     configs: &[symbi_expr::SourceConfig],
     spec: &crate::regime_spec::RegimeSpec,
     law: Option<&crate::state_law::StateLaw>,
-) -> Result<(Vec<(String, BuiltSource)>, Vec<f64>), String> {
+) -> Result<(Vec<(String, SourceProgram)>, Vec<f64>), String> {
     let mut parameter_offset = 0usize;
     let mut params = Vec::new();
     let mut lowered = Vec::new();
@@ -622,10 +655,10 @@ pub fn build_user_sources_with_law(
         lowered.extend(build_user_source_with_law(&config, spec, law)?);
     }
 
-    let mut composed: Vec<(String, BuiltSource)> = Vec::new();
+    let mut composed: Vec<(String, SourceProgram)> = Vec::new();
     for (target, built) in lowered {
         if let Some((_, existing)) = composed.iter_mut().find(|(name, _)| name == &target) {
-            *existing = sum_built_sources(existing, &built, &target)?;
+            *existing = sum_source_programs(existing, &built, &target)?;
         } else {
             composed.push((target, built));
         }
@@ -633,70 +666,55 @@ pub fn build_user_sources_with_law(
     Ok((composed, params))
 }
 
-fn sum_built_sources(
-    left: &BuiltSource,
-    right: &BuiltSource,
+fn sum_source_programs(
+    left: &SourceProgram,
+    right: &SourceProgram,
     target: &str,
-) -> Result<BuiltSource, String> {
-    if left.outputs.len() != right.outputs.len() {
+) -> Result<SourceProgram, String> {
+    if left.outputs().len() != right.outputs().len() {
         return Err(format!(
             "source target '{target}' has incompatible component counts: {} and {}",
-            left.outputs.len(),
-            right.outputs.len()
+            left.outputs().len(),
+            right.outputs().len()
         ));
     }
-
-    let mut graph = Graph::new();
-    let mut params = left.params.clone();
-    for name in &right.params {
-        if !params.contains(name) {
-            params.push(name.clone());
-        }
-    }
-    let leaves: HashMap<String, NodeId> = params
-        .iter()
-        .map(|name| {
-            let node = graph.add_scalar_param(name, ElementTy::F64);
-            (name.clone(), node)
-        })
-        .collect();
-    let resolve = |symbol: &symbi_ir::Symbol| leaves.get(symbol.as_str()).copied();
-    let outputs = left
-        .outputs
-        .iter()
-        .zip(&right.outputs)
-        .map(|(&left_root, &right_root)| {
-            let left_node = graph.import_subgraph(&left.graph, left_root, resolve);
-            let right_node = graph.import_subgraph(&right.graph, right_root, resolve);
-            graph.element_wise(ElementWiseOp::Add, vec![left_node, right_node], None)
-        })
-        .collect();
-
-    Ok(BuiltSource {
-        graph,
-        params,
-        outputs,
-    })
+    // splice both programs into one trace with params bound to same-named
+    // scalar leaves (a shared param lands on one leaf), then sum
+    // component-wise.
+    Ok(SourceProgram::trace(|cx| {
+        let l = cx.splice_source_as_scalars(left);
+        let r = cx.splice_source_as_scalars(right);
+        l.into_iter().zip(r).map(|(a, b)| a + b).collect()
+    }))
 }
 
-/// multiply the named `field` outputs by the region mask `chi` (in the field's own graph), if a
-/// region is present. the lifts are linear in these outputs, so this masks the final conserved
-/// contribution. `idxs` selects which outputs carry the maskable quantity (e.g., relax masks the
-/// rate `kappa` alone, leaving the reference velocity at full strength).
-fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Range<usize>) {
-    let Some(chi) = chi else { return };
-    for i in idxs {
-        let masked =
-            field
-                .graph
-                .element_wise(ElementWiseOp::Mul, vec![field.outputs[i], chi], None);
-        field.outputs[i] = masked;
+/// splice `field` into a fresh trace, strip the trailing region chi (when
+/// present), and multiply the outputs indexed by `idxs` by it. the lifts are
+/// linear in these outputs, so this masks the final conserved contribution.
+/// `idxs` selects which outputs carry the maskable quantity (e.g., relax
+/// masks the rate `kappa` alone, leaving the reference velocity at full
+/// strength). without a region the field passes through unchanged.
+fn strip_and_mask(
+    field: &SourceProgram,
+    has_region: bool,
+    idxs: std::ops::Range<usize>,
+) -> SourceProgram {
+    if !has_region {
+        return field.clone();
     }
+    SourceProgram::trace(|cx| {
+        let mut outs = cx.splice_source_as_scalars(field);
+        let chi = outs.pop().expect("region output");
+        for slot in outs[idxs.clone()].iter_mut() {
+            *slot = *slot * chi;
+        }
+        outs
+    })
 }
 
 /// the boundary front door: compile a `SourceConfig` into a driven-boundary
 /// prescription — a complete primitive state `[rho, vel_0..vel_{D-1}, pre]` the ghost cells are set
-/// to (Dirichlet), `combine = overwrite`. returns `(slot, BuiltSource)` in the structural-slot
+/// to (Dirichlet), `combine = overwrite`. returns `(slot, SourceProgram)` in the structural-slot
 /// convention `den`/`mom`/`nrg` that [`symbi_discretize::boundary_fill_from_built_gv`] writes to
 /// `prim.rho`/`prim.vel_k`/`prim.pre`. each slot is an independent lowering of the user DAG over its
 /// output subset, so the velocity vector lands as the `ncomp`-output `mom` slot.
@@ -727,7 +745,7 @@ pub fn boundary_prim_arity(spec: &crate::regime_spec::RegimeSpec, d: usize) -> u
 pub fn build_boundary_dag(
     cfg: &symbi_expr::SourceConfig,
     spec: &crate::regime_spec::RegimeSpec,
-) -> Result<Vec<(String, BuiltSource)>, String> {
+) -> Result<Vec<(String, SourceProgram)>, String> {
     let nodes = symbi_expr::nodes_from_descs(&cfg.nodes).map_err(|e| format!("dag load: {e}"))?;
     let (nodes, reduced_outputs) = symbi_expr::strength_reduce(&nodes, &cfg.outputs);
     let d = cfg.dim;
@@ -762,7 +780,7 @@ pub fn build_boundary_dag(
     // nrg <- pre, bcell <- the d-vector cell B. each is an independent lowering over its
     // output subset, building its own graph.
     let lower = |outs: &[usize]| {
-        lower_dag_to_builtsource(&nodes, outs).map_err(|e| format!("bridge: {e:?}"))
+        lower_dag_to_program(&nodes, outs).map_err(|e| format!("bridge: {e:?}"))
     };
     let mut out = vec![
         ("den".to_string(), lower(&reduced_outputs[0..1])?),
@@ -792,6 +810,7 @@ mod tests {
     use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, RHD_SPEC, RMHD_SPEC};
     use symbi_expr::dag::Dag;
     use symbi_ir::backends::interp::{Backend, Cpu};
+    use symbi_ir::NodeId;
     use symbi_ir::passes::scalarize::scalarize;
 
     // ---- the axiomatic validation gate (build_user_source vs RegimeSpec) -------------------
@@ -802,7 +821,7 @@ mod tests {
         symbi_expr::SourceConfig::from_json(json).expect("parse")
     }
 
-    // extract the error message (BuiltSource lacks Debug, so this stands in for `unwrap_err`).
+    // extract the error message (SourceProgram lacks Debug, so this stands in for `unwrap_err`).
     /// the ideal-gas law the fixtures below lower against. a sponge relaxes toward a
     /// reference state expressed in primitives, so lowering one needs the conversion its
     /// regime uses; every other source kind ignores the law and lowers identically with it.
@@ -824,7 +843,7 @@ mod tests {
     fn lower(
         cfg: &symbi_expr::SourceConfig,
         spec: &crate::regime_spec::RegimeSpec,
-    ) -> Result<Vec<(String, BuiltSource)>, String> {
+    ) -> Result<Vec<(String, SourceProgram)>, String> {
         build_user_source_with_law(cfg, spec, Some(&law_for(spec)))
     }
 
@@ -1061,14 +1080,14 @@ mod tests {
         ];
         // S_den = kappa*(rho_ref - rho) = 2*(1 - 1.5) = -1.
         let (_, den) = &built[0];
-        let s_den = eval_lowered(den, den.outputs[0], state);
+        let s_den = eval_lowered(den, den.outputs()[0], state);
         assert!(
             (s_den - (-1.0)).abs() < 1e-12,
             "python sponge den wrong: {s_den}"
         );
         // S_mom_0 = kappa*(rho_ref vel_ref_0 - rho vel_0) = 2*(1 - 4.5) = -7.
         let (_, mom) = &built[1];
-        let s_mom0 = eval_lowered(mom, mom.outputs[0], state);
+        let s_mom0 = eval_lowered(mom, mom.outputs()[0], state);
         assert!(
             (s_mom0 - (-7.0)).abs() < 1e-12,
             "python sponge mom_0 wrong: {s_mom0}"
@@ -1077,7 +1096,7 @@ mod tests {
         // the regime, so the reference kinetic term rho_ref |v_ref|^2/2 is carried rather
         // than dropped. S_nrg = 2*((10/0.4 + 0.5) - (2/0.4 + 6.75)) = 2*(25.5 - 11.75) = 27.5.
         let (_, nrg) = &built[2];
-        let s_nrg = eval_lowered(nrg, nrg.outputs[0], state);
+        let s_nrg = eval_lowered(nrg, nrg.outputs()[0], state);
         assert!(
             (s_nrg - 27.5).abs() < 1e-12,
             "python sponge nrg wrong: {s_nrg}"
@@ -1143,17 +1162,17 @@ mod tests {
         );
         // den: single output = 1.
         let (_, den) = &built[0];
-        assert_eq!(den.outputs.len(), 1);
-        assert!((eval_lowered(den, den.outputs[0], &[]) - 1.0).abs() < 1e-12);
+        assert_eq!(den.outputs().len(), 1);
+        assert!((eval_lowered(den, den.outputs()[0], &[]) - 1.0).abs() < 1e-12);
         // mom: D=2 outputs = [2, 3], in order.
         let (_, mom) = &built[1];
-        assert_eq!(mom.outputs.len(), 2);
-        assert!((eval_lowered(mom, mom.outputs[0], &[]) - 2.0).abs() < 1e-12);
-        assert!((eval_lowered(mom, mom.outputs[1], &[]) - 3.0).abs() < 1e-12);
+        assert_eq!(mom.outputs().len(), 2);
+        assert!((eval_lowered(mom, mom.outputs()[0], &[]) - 2.0).abs() < 1e-12);
+        assert!((eval_lowered(mom, mom.outputs()[1], &[]) - 3.0).abs() < 1e-12);
         // nrg: single output = 4.
         let (_, nrg) = &built[2];
-        assert_eq!(nrg.outputs.len(), 1);
-        assert!((eval_lowered(nrg, nrg.outputs[0], &[]) - 4.0).abs() < 1e-12);
+        assert_eq!(nrg.outputs().len(), 1);
+        assert!((eval_lowered(nrg, nrg.outputs()[0], &[]) - 4.0).abs() < 1e-12);
     }
 
     #[test]
@@ -1208,16 +1227,16 @@ mod tests {
         );
         // S_den = S_0/eta_0 = 10/100 = 0.1 (the divide channel).
         let (_, den) = &built[0];
-        assert_eq!(den.outputs.len(), 1);
-        assert!((eval_lowered(den, den.outputs[0], &[]) - 0.1).abs() < 1e-12);
+        assert_eq!(den.outputs().len(), 1);
+        assert!((eval_lowered(den, den.outputs()[0], &[]) - 0.1).abs() < 1e-12);
         // S_mom = [S_mom_r, S_mom_theta] = [9.998, 0]; the theta channel is exactly zero.
         let (_, mom) = &built[1];
-        assert_eq!(mom.outputs.len(), 2);
-        assert!((eval_lowered(mom, mom.outputs[0], &[]) - 9.998).abs() < 1e-12);
-        assert!(eval_lowered(mom, mom.outputs[1], &[]).abs() < 1e-12);
+        assert_eq!(mom.outputs().len(), 2);
+        assert!((eval_lowered(mom, mom.outputs()[0], &[]) - 9.998).abs() < 1e-12);
+        assert!(eval_lowered(mom, mom.outputs()[1], &[]).abs() < 1e-12);
         // S_nrg = S_0 = 10.
         let (_, nrg) = &built[2];
-        assert!((eval_lowered(nrg, nrg.outputs[0], &[]) - 10.0).abs() < 1e-12);
+        assert!((eval_lowered(nrg, nrg.outputs()[0], &[]) - 10.0).abs() < 1e-12);
     }
 
     #[test]
@@ -1237,15 +1256,15 @@ mod tests {
             ["den", "mom", "nrg"]
         );
         let (_, den) = &built[0];
-        assert!((eval_lowered(den, den.outputs[0], &[]) - 0.1).abs() < 1e-12);
+        assert!((eval_lowered(den, den.outputs()[0], &[]) - 0.1).abs() < 1e-12);
         // mom carries all three spatial components; only the radial one is nonzero.
         let (_, mom) = &built[1];
-        assert_eq!(mom.outputs.len(), 3);
-        assert!((eval_lowered(mom, mom.outputs[0], &[]) - 9.998).abs() < 1e-12);
-        assert!(eval_lowered(mom, mom.outputs[1], &[]).abs() < 1e-12);
-        assert!(eval_lowered(mom, mom.outputs[2], &[]).abs() < 1e-12);
+        assert_eq!(mom.outputs().len(), 3);
+        assert!((eval_lowered(mom, mom.outputs()[0], &[]) - 9.998).abs() < 1e-12);
+        assert!(eval_lowered(mom, mom.outputs()[1], &[]).abs() < 1e-12);
+        assert!(eval_lowered(mom, mom.outputs()[2], &[]).abs() < 1e-12);
         let (_, nrg) = &built[2];
-        assert!((eval_lowered(nrg, nrg.outputs[0], &[]) - 10.0).abs() < 1e-12);
+        assert!((eval_lowered(nrg, nrg.outputs()[0], &[]) - 10.0).abs() < 1e-12);
     }
 
     #[test]
@@ -1336,7 +1355,7 @@ mod tests {
         let s_at = |x0: f64| {
             eval_lowered(
                 mom,
-                mom.outputs[0],
+                mom.outputs()[0],
                 &[("rho", 2.0), ("p0", 0.5), ("x_0", x0)],
             )
         };
@@ -1377,7 +1396,7 @@ mod tests {
         // kappa=2, rho=1, v_ref_0=0, vel_0=3 -> 2*1*(0-3) = -6: the drag opposes the velocity.
         let s_mom0 = eval_lowered(
             mom,
-            mom.outputs[0],
+            mom.outputs()[0],
             &[
                 ("rho", 1.0),
                 ("vel_0", 3.0),
@@ -1394,7 +1413,7 @@ mod tests {
         let (_, nrg) = &built[1];
         let s_nrg = eval_lowered(
             nrg,
-            nrg.outputs[0],
+            nrg.outputs()[0],
             &[
                 ("rho", 1.0),
                 ("vel_0", 3.0),
@@ -1422,7 +1441,7 @@ mod tests {
         // kappa = -5 -> clamped to 0 -> S_mom_0 = 0 regardless of the velocity overshoot.
         let s = eval_lowered(
             mom,
-            mom.outputs[0],
+            mom.outputs()[0],
             &[("rho", 1.0), ("vel_0", 7.0), ("p0", -5.0), ("p1", 0.0)],
         );
         assert!(
@@ -1461,14 +1480,14 @@ mod tests {
         let state = [("rho", 1.5), ("vel_0", 3.0), ("vel_1", 0.0), ("pre", 2.0)];
         // S_den = kappa*(rho_ref - rho) = 2*(1 - 1.5) = -1.0 (density relaxes down toward the ref).
         let (_, den) = &built[0];
-        let s_den = eval_lowered(den, den.outputs[0], &state);
+        let s_den = eval_lowered(den, den.outputs()[0], &state);
         assert!(
             (s_den - (-1.0)).abs() < 1e-12,
             "sponge density wrong: {s_den}"
         );
         // S_mom_0 = kappa*(rho_ref vel_ref_0 - rho vel_0) = 2*(0.5 - 4.5) = -8.0 (opposes it).
         let (_, mom) = &built[1];
-        let s_mom0 = eval_lowered(mom, mom.outputs[0], &state);
+        let s_mom0 = eval_lowered(mom, mom.outputs()[0], &state);
         assert!(
             (s_mom0 - (-8.0)).abs() < 1e-12,
             "sponge mom_0 wrong: {s_mom0}"
@@ -1476,7 +1495,7 @@ mod tests {
         // S_nrg = kappa*(E_ref - E), E = pre/(gamma-1) + 0.5*rho*|v|^2 = 2*2.5 + 0.5*1.5*9 = 11.75;
         //   -> 2*(10 - 11.75) = -3.5 (total energy relaxes down toward the ref).
         let (_, nrg) = &built[2];
-        let s_nrg = eval_lowered(nrg, nrg.outputs[0], &state);
+        let s_nrg = eval_lowered(nrg, nrg.outputs()[0], &state);
         assert!((s_nrg - (-3.5)).abs() < 1e-12, "sponge nrg wrong: {s_nrg}");
     }
 
@@ -1507,7 +1526,7 @@ mod tests {
         // signature of every channel built from it; a large value here proves the density
         // channel emits the mass relaxation alone, with no momentum leaking into it.
         let (_, den) = &built[0];
-        let s_den = eval_lowered(den, den.outputs[0], &[("rho", 0.5), ("vel_0", 37.0)]);
+        let s_den = eval_lowered(den, den.outputs()[0], &[("rho", 0.5), ("vel_0", 37.0)]);
         assert!(
             (s_den - 1.5).abs() < 1e-12,
             "iso sponge density wrong: {s_den}"
@@ -1537,7 +1556,7 @@ mod tests {
         let (_, den) = &built[0];
         let s_den = eval_lowered(
             den,
-            den.outputs[0],
+            den.outputs()[0],
             &[("rho", 1.0), ("vel_0", 0.6), ("vel_1", 0.0), ("pre", 0.1)],
         );
         assert!(
@@ -1579,7 +1598,7 @@ mod tests {
                     .iter()
                     .map(|(target, source)| {
                         let values: Vec<f64> = source
-                            .outputs
+                            .outputs()
                             .iter()
                             .map(|out| eval_lowered(source, *out, state))
                             .collect();
@@ -1618,7 +1637,7 @@ mod tests {
         let built = build_user_source_with_law(&cfg, &RHD_SPEC, Some(&massive))
             .expect("sponge lowers on a massive hole");
         let (_, den) = &built[0];
-        let s_den = eval_lowered(den, den.outputs[0], state);
+        let s_den = eval_lowered(den, den.outputs()[0], state);
         let (_, flat_den) = &channels[0][0];
         assert!(
             (s_den - flat_den[0]).abs() > 1e-3,
@@ -1664,7 +1683,7 @@ mod tests {
         // S_nrg = -(C * rho * pre); C=0.25, rho=2, pre=3 -> -(0.25*2*3) = -1.5.
         let s = eval_lowered(
             nrg,
-            nrg.outputs[0],
+            nrg.outputs()[0],
             &[("p0", 0.25), ("rho", 2.0), ("pre", 3.0)],
         );
         assert!(
@@ -1674,7 +1693,7 @@ mod tests {
         // it genuinely depends on pressure: doubling pre doubles the rate.
         let s2 = eval_lowered(
             nrg,
-            nrg.outputs[0],
+            nrg.outputs()[0],
             &[("p0", 0.25), ("rho", 2.0), ("pre", 6.0)],
         );
         assert!(
@@ -1701,7 +1720,7 @@ mod tests {
         let (tgt, den) = &built[0];
         assert_eq!(tgt, "den");
         // S_den = p0 * rho; p0=0.5, rho=2 -> 1.
-        let s = eval_lowered(den, den.outputs[0], &[("p0", 0.5), ("rho", 2.0)]);
+        let s = eval_lowered(den, den.outputs()[0], &[("p0", 0.5), ("rho", 2.0)]);
         assert!(
             (s - 1.0).abs() < 1e-12,
             "raw den rate must be p0*rho: got {s}"
@@ -1773,7 +1792,7 @@ mod tests {
         let built = build_boundary_dag(&cfg, &NEWTONIAN_SPEC).expect("driven boundary");
         let slots: Vec<(&str, usize)> = built
             .iter()
-            .map(|(s, b)| (s.as_str(), b.outputs.len()))
+            .map(|(s, b)| (s.as_str(), b.outputs().len()))
             .collect();
         assert_eq!(slots, vec![("den", 1), ("mom", 2), ("nrg", 1)]);
     }
@@ -1819,7 +1838,7 @@ mod tests {
         let built = build_boundary_dag(&cfg, &RMHD_SPEC).expect("toroidal driven boundary");
         let slots: Vec<(&str, usize)> = built
             .iter()
-            .map(|(s, b)| (s.as_str(), b.outputs.len()))
+            .map(|(s, b)| (s.as_str(), b.outputs().len()))
             .collect();
         assert_eq!(
             slots,
@@ -1852,12 +1871,12 @@ mod tests {
         assert!(err.contains("full prim state"), "got: {err}");
     }
 
-    /// evaluate one output of a lowered BuiltSource on the CPU interpreter, binding params
+    /// evaluate one output of a lowered SourceProgram on the CPU interpreter, binding params
     /// by the declared (name -> value) map in manifest order.
-    fn eval_lowered(built: &BuiltSource, output: NodeId, values: &[(&str, f64)]) -> f64 {
-        let lowered = scalarize(&built.graph, output, "expr_bridge");
+    fn eval_lowered(built: &SourceProgram, output: NodeId, values: &[(&str, f64)]) -> f64 {
+        let lowered = scalarize(&built.graph(), output, "expr_bridge");
         let inputs: Vec<f64> = built
-            .params
+            .params()
             .iter()
             .map(|p| {
                 values
@@ -1892,7 +1911,7 @@ mod tests {
         let root = dag.if_then_else(cond, then_, else_);
 
         let nodes = dag.nodes().to_vec();
-        let built = lower_dag_to_builtsource(&nodes, &[root]).expect("bridge lowers");
+        let built = lower_dag_to_program(&nodes, &[root]).expect("bridge lowers");
 
         let mut expr = dag.compile(&[root]);
 
@@ -1902,7 +1921,7 @@ mod tests {
             let want = expr.eval(x1v, x2v, x3_unused(), tv)[0];
             let got = eval_lowered(
                 &built,
-                built.outputs[0],
+                built.outputs()[0],
                 &[("x_0", x1v), ("x_1", x2v), ("t", tv), ("p0", p0v)],
             );
             assert!(
@@ -1923,7 +1942,7 @@ mod tests {
         let x1 = dag.var_x1();
         let sgn = dag.unary(Op::Sgn, x1);
         let nodes = dag.nodes().to_vec();
-        let result = lower_dag_to_builtsource(&nodes, &[sgn]);
+        let result = lower_dag_to_program(&nodes, &[sgn]);
         assert!(
             matches!(result, Err(BridgeError::UnsupportedOp(Op::Sgn))),
             "Sgn must be rejected as unsupported",
@@ -1973,8 +1992,8 @@ mod state_law_seam_tests {
         for ((ta, a), (tb, b)) in with.iter().zip(&without) {
             assert_eq!(ta, tb, "target moved");
             assert_eq!(
-                a.outputs.len(),
-                b.outputs.len(),
+                a.outputs().len(),
+                b.outputs().len(),
                 "output count moved for {ta}"
             );
         }

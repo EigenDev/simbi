@@ -1489,6 +1489,9 @@ impl<'t> crate::algebra::Scalar for Gv<'t> {
     fn acos(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Acos)
     }
+    fn atan(self) -> Gv<'t> {
+        self.unop(ElementWiseOp::Atan)
+    }
     fn atan2(self, o: Gv<'t>) -> Gv<'t> {
         let (y, x) = (self.node(), o.node());
         Gv::of(with_trace(|t| {

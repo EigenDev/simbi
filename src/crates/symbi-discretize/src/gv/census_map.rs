@@ -43,7 +43,7 @@ pub fn census_map_gv<A: CensusAxis>(
     axes: &[usize],
     ndim: u8,
     dof: usize,
-    built: &symbi_hydro::source_spec::BuiltSource,
+    built: &symbi_hydro::source_spec::SourceProgram,
     bin_axes: &[A],
     n_values: usize,
     n_segments: usize,
@@ -80,7 +80,7 @@ pub fn census_map_gv<A: CensusAxis>(
     }
 
     let out =
-        cx.with_trace(|t| symbi_hydro::source_spec::splice_built_source_into(built, t.graph(), &env));
+        cx.with_trace(|t| built.splice_into(t.graph(), &env));
     let n_axes = bin_axes.len();
     assert_eq!(
         out.len(),

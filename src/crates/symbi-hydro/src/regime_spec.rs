@@ -192,24 +192,6 @@ pub struct LawSpec {
     pub kind: LawKind,
 }
 
-use symbi_ir::graph::{ElementWiseOp, Graph, NodeId};
-
-/// helper: build the dot product `sum_k a_k * b_k` as a graph subexpression.
-/// reused by `source_spec.rs` builders (gravity, etc.) to keep the algebra
-/// of "sum of products" in one place.
-pub(crate) fn build_dot(g: &mut Graph, a: &[NodeId], b: &[NodeId]) -> NodeId {
-    debug_assert_eq!(a.len(), b.len());
-    let mut acc: Option<NodeId> = None;
-    for (&ai, &bi) in a.iter().zip(b.iter()) {
-        let term = g.element_wise(ElementWiseOp::Mul, vec![ai, bi], None);
-        acc = Some(match acc {
-            None => term,
-            Some(prev) => g.element_wise(ElementWiseOp::Add, vec![prev, term], None),
-        });
-    }
-    acc.expect("build_dot: empty vectors")
-}
-
 // =============================================================================
 // section 1.6 — the per-regime law manifests (metadata only).
 //

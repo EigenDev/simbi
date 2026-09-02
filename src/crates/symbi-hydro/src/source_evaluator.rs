@@ -17,7 +17,7 @@
 //     data to runtime numbers.
 //   - isn'T: the GPU path. CUDA NVRTC compilation needs hardware (covered
 //     structurally by the emit tests). the CPU interpreter path
-//     here is the analogous workflow at `S = f64` — same `BuiltSource`
+//     here is the analogous workflow at `S = f64` — same `SourceProgram`
 //     graph, different lowering target.
 //   - isn'T: the substrate codegen-driver. AOT-baking spec compositions
 //     into the binary (extending `symbi-aot/build.rs`) is a separate
@@ -123,17 +123,17 @@ impl SourceEvaluator {
         for field_name in laws.fields_with_overlays() {
             if let Some(built) = laws.build_total_source(field_name, d) {
                 let components: Vec<LoweredFn> = built
-                    .outputs
+                    .outputs()
                     .iter()
                     .enumerate()
                     .map(|(k, &out)| {
                         let name = format!("{}_source_{k}", field_name);
-                        scalarize(&built.graph, out, &name)
+                        scalarize(&built.graph(), out, &name)
                     })
                     .collect();
                 field_kernels.insert(
                     field_name.to_string(),
-                    FieldKernel::build(built.params, components),
+                    FieldKernel::build(built.params().to_vec(), components),
                 );
             }
         }
@@ -141,25 +141,25 @@ impl SourceEvaluator {
         Ok(Self { field_kernels })
     }
 
-    /// build the evaluator directly from already-lowered `(target_field, BuiltSource)` pairs — the
+    /// build the evaluator directly from already-lowered `(target_field, SourceProgram)` pairs — the
     /// runtime path. unlike [`Self::new`] (which composes a `SimulationLaws` of compile-time
-    /// fn-builders, AOT), this takes `BuiltSource` values — e.g., `expr_bridge::build_user_source`'s
+    /// fn-builders, AOT), this takes `SourceProgram` values — e.g., `expr_bridge::build_user_source`'s
     /// output from a `SourceConfig` loaded at sim startup (python -> json, no recompile). each
-    /// field's `BuiltSource` is scalarized into per-component `LoweredFn`s, exactly as `new` does.
+    /// field's `SourceProgram` is scalarized into per-component `LoweredFn`s, exactly as `new` does.
     /// panics on a duplicate target field (the caller should pre-merge same-field sources).
-    pub fn from_built(sources: &[(String, crate::source_spec::BuiltSource)]) -> Self {
+    pub fn from_built(sources: &[(String, crate::source_spec::SourceProgram)]) -> Self {
         let mut field_kernels: HashMap<String, FieldKernel> = HashMap::new();
         for (field, built) in sources {
             let components: Vec<LoweredFn> = built
-                .outputs
+                .outputs()
                 .iter()
                 .enumerate()
-                .map(|(k, &out)| scalarize(&built.graph, out, &format!("{field}_source_{k}")))
+                .map(|(k, &out)| scalarize(&built.graph(), out, &format!("{field}_source_{k}")))
                 .collect();
             if field_kernels
                 .insert(
                     field.clone(),
-                    FieldKernel::build(built.params.clone(), components),
+                    FieldKernel::build(built.params().to_vec(), components),
                 )
                 .is_some()
             {

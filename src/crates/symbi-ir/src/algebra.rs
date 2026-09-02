@@ -253,6 +253,8 @@ pub trait Scalar:
     fn tan(self) -> Self;
     fn asin(self) -> Self;
     fn acos(self) -> Self;
+    /// principal arctangent, total on R with range (-pi/2, pi/2).
+    fn atan(self) -> Self;
     fn atan2(self, other: Self) -> Self;
 
     fn exp(self) -> Self;
@@ -664,6 +666,10 @@ impl Scalar for f64 {
         f64::acos(self)
     }
     #[inline(always)]
+    fn atan(self) -> f64 {
+        f64::atan(self)
+    }
+    #[inline(always)]
     fn atan2(self, b: f64) -> f64 {
         f64::atan2(self, b)
     }
@@ -851,6 +857,10 @@ impl Scalar for f32 {
     #[inline(always)]
     fn acos(self) -> f32 {
         f32::acos(self)
+    }
+    #[inline(always)]
+    fn atan(self) -> f32 {
+        f32::atan(self)
     }
     #[inline(always)]
     fn atan2(self, b: f32) -> f32 {

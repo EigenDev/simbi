@@ -536,10 +536,10 @@ fn unsupported_target_field_panics_loudly() {
 
     // hand-built spec with an unknown target_field; the panic fires on the
     // dispatch match, ahead of both splicing and any call to build_source.
-    fn empty_builder(_d: usize) -> symbi_hydro::source_spec::BuiltSource {
+    fn empty_builder(_d: usize) -> symbi_hydro::source_spec::SourceProgram {
         // 1 output, bound to rho; the dispatch panic fires first, so this
         // graph stands unevaluated.
-        symbi_hydro::source_spec::lift_to_built(|cx| vec![cx.scalar("rho")])
+        symbi_ir::SourceProgram::trace(|cx| vec![cx.scalar("rho")])
     }
     let bad_spec = symbi_hydro::source_spec::SourceSpec {
         kind: symbi_hydro::source_spec::SourceKind::UserDefined,

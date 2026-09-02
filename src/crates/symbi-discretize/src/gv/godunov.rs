@@ -548,9 +548,9 @@ fn splice_fused_sources_to_contribs<'t>(
     // prescription — a driven boundary, whose DAG outputs the state and reads coordinates alone.
     // `x_k` (centroid) + scalar params are bound regardless.
     state: Option<(Gv<'t>, &[Gv<'t>])>,
-    // (target_field, built) pairs — the BuiltSource values, so this serves both the AOT path
+    // (target_field, built) pairs — the SourceProgram values, so this serves both the AOT path
     // (SourceSpec.build_source(ndim)) and the runtime path (build_user_source's loaded values).
-    sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
+    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
 ) -> FusedContribs {
     use std::collections::HashMap;
 
@@ -634,7 +634,7 @@ fn splice_fused_sources_to_contribs<'t>(
             name_to_node.insert(pname.clone(), nid);
         }
         let spliced = cx.with_trace(|t| {
-            symbi_hydro::source_spec::splice_built_source_into(built, t.graph(), &name_to_node)
+            built.splice_into(t.graph(), &name_to_node)
         });
         match *target_field {
             "den" => {
@@ -712,9 +712,9 @@ fn splice_fused_sources_to_contribs<'t>(
 /// same convex coefficient that weights the flux divergence — which is exactly the SSP
 /// source treatment (`ac*dt*S` per stage). pass an empty slice for the no-overlay variant.
 ///
-/// this is the compile-time entry: it materializes each `SourceSpec`'s `BuiltSource`
+/// this is the compile-time entry: it materializes each `SourceSpec`'s `SourceProgram`
 /// (`build_source(ndim)`) then delegates to [`godunov_stage_gv_with_fused_built`], the core
-/// over `BuiltSource` values that the AOT bake and the runtime user-source path share. the
+/// over `SourceProgram` values that the AOT bake and the runtime user-source path share. the
 /// godunov+source trace lives once, in the core.
 pub fn godunov_stage_gv_with_fused_sources(
     coords: Coords,
@@ -731,11 +731,11 @@ pub fn godunov_stage_gv_with_fused_sources(
     // the plain (unfused) stage passes false -> reads `prim.mag[k]`.
     mag_from_bcell: bool,
 ) -> (GvKernel, KernelWrites) {
-    let builts: Vec<(&str, symbi_hydro::source_spec::BuiltSource)> = user_sources
+    let builts: Vec<(&str, symbi_hydro::source_spec::SourceProgram)> = user_sources
         .iter()
         .map(|s| (s.target_field, (s.build_source)(ndim as usize)))
         .collect();
-    let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
+    let src_refs: Vec<(&str, &symbi_hydro::source_spec::SourceProgram)> =
         builts.iter().map(|(t, b)| (*t, b)).collect();
     // spec-overlay fusion (AOT `_with_{slug}` bakes) runs body-free; the immersed body belongs to
     // the runtime-source path (build_fused_cpu_kernel threads the real count).
@@ -754,10 +754,10 @@ pub fn godunov_stage_gv_with_fused_sources(
     )
 }
 
-/// the SSP stage core over pre-built sources — `BuiltSource` values paired with their target
+/// the SSP stage core over pre-built sources — `SourceProgram` values paired with their target
 /// field, the shape `splice_fused_sources_to_contribs` consumes. the SourceSpec entry
 /// [`godunov_stage_gv_with_fused_sources`] feeds AOT specs (`build_source(ndim)`); the runtime
-/// user-source CPU fusion feeds `RuntimeSource`'s loaded `BuiltSource`s directly. one trace, both
+/// user-source CPU fusion feeds `RuntimeSource`'s loaded `SourceProgram`s directly. one trace, both
 /// paths — the godunov+source lowering lives in one place. `sources` is `(target_field, built)`
 /// pairs.
 #[allow(clippy::too_many_arguments)]
@@ -770,7 +770,7 @@ pub fn godunov_stage_gv_with_fused_built(
     ncomp: usize,
     has_energy: bool,
     source: GeoSource,
-    sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
+    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
     mag_from_bcell: bool,
     // immersed-body count. > 0 wraps the post-combine cons with `body_evolved_gv` (gravity +
     // accretion drain) at weight `ac*dt`, so the single fused sweep equals `plain godunov +
@@ -809,7 +809,7 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     ncomp: usize,
     has_energy: bool,
     source: GeoSource,
-    sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
+    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
     mag_from_bcell: bool,
     n_bodies: usize,
     weighted_geo_source: bool,
@@ -1410,7 +1410,7 @@ pub enum WriteMode {
     Assign,
 }
 
-/// the unified core: trace a kernel that evaluates each `(slot, BuiltSource)` DAG per cell and writes
+/// the unified core: trace a kernel that evaluates each `(slot, SourceProgram)` DAG per cell and writes
 /// it to the slot's field under `mode`. `slot` names the structural conserved slot (`"den"` mass /
 /// `"mom"` momentum-vector / `"nrg"` energy); `mode` + the slot pick the runtime path (Accumulate ->
 /// `cons.{den,mom_k,nrg}`; Assign -> `prim.{rho,vel_k,pre}`). shared: trace, geometry, the
@@ -1423,7 +1423,7 @@ fn apply_dag_core_gv(
     ncomp: usize,
     has_energy: bool,
     state: StateEnv,
-    sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
+    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
     mode: WriteMode,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
@@ -1580,11 +1580,11 @@ pub fn source_apply_gv(
     has_energy: bool,
     user_sources: &[&symbi_hydro::source_spec::SourceSpec],
 ) -> (GvKernel, KernelWrites) {
-    let builts: Vec<(&str, symbi_hydro::source_spec::BuiltSource)> = user_sources
+    let builts: Vec<(&str, symbi_hydro::source_spec::SourceProgram)> = user_sources
         .iter()
         .map(|s| (s.target_field, (s.build_source)(ndim as usize)))
         .collect();
-    let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
+    let src_refs: Vec<(&str, &symbi_hydro::source_spec::SourceProgram)> =
         builts.iter().map(|(t, b)| (*t, b)).collect();
     apply_dag_core_gv(
         coords,
@@ -1600,7 +1600,7 @@ pub fn source_apply_gv(
 }
 
 /// runtime entry (Path B): the same in-place source-apply kernel, but from already-lowered
-/// `(target_field, BuiltSource)` values — e.g., `expr_bridge::build_user_source`'s output from a
+/// `(target_field, SourceProgram)` values — e.g., `expr_bridge::build_user_source`'s output from a
 /// SourceConfig loaded at sim startup. the `(Stage, Accumulate)` instance of [`apply_dag_core_gv`].
 pub fn source_apply_from_built_gv(
     coords: Coords,
@@ -1609,7 +1609,7 @@ pub fn source_apply_from_built_gv(
     ndim: u8,
     ncomp: usize,
     has_energy: bool,
-    sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
+    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
 ) -> (GvKernel, KernelWrites) {
     apply_dag_core_gv(
         coords,
@@ -1625,7 +1625,7 @@ pub fn source_apply_from_built_gv(
 }
 
 /// driven-boundary entry: prescribe the primitive state from coordinate DAGs — the
-/// `(Coord, Assign)` instance of [`apply_dag_core_gv`]. `sources` are `(slot, BuiltSource)` with slot
+/// `(Coord, Assign)` instance of [`apply_dag_core_gv`]. `sources` are `(slot, SourceProgram)` with slot
 /// `"den"`/`"mom"`/`"nrg"` mapping to `prim.rho`/`prim.vel_k`/`prim.pre`; each DAG reads only
 /// `x_k`/`t`/`p_i` and outputs the prescribed value. dispatched over a face's ghost band.
 pub fn boundary_fill_from_built_gv(
@@ -1635,7 +1635,7 @@ pub fn boundary_fill_from_built_gv(
     ndim: u8,
     ncomp: usize,
     has_energy: bool,
-    sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
+    sources: &[(&str, &symbi_hydro::source_spec::SourceProgram)],
 ) -> (GvKernel, KernelWrites) {
     apply_dag_core_gv(
         coords,

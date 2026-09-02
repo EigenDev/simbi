@@ -103,7 +103,7 @@ fn user_expression_codegens_through_the_source_path() {
     // evaluates on the CPU interp). proves a user expression compiles through the same path a
     // built-in source uses, so the per-cell work is compiled kernel arithmetic.
     use symbi_expr::dag::Dag;
-    use symbi_hydro::expr_bridge::lower_dag_to_builtsource;
+    use symbi_hydro::expr_bridge::lower_dag_to_program;
 
     let mut dag = Dag::new();
     let x0 = dag.var_x1();
@@ -111,7 +111,7 @@ fn user_expression_codegens_through_the_source_path() {
     let sinx = dag.sin(x0);
     let root = dag.mul(p0, sinx);
     let nodes = dag.nodes().to_vec();
-    let built = lower_dag_to_builtsource(&nodes, &[root]).expect("bridge lowers");
+    let built = lower_dag_to_program(&nodes, &[root]).expect("bridge lowers");
 
     let (x0v, p0v) = (0.7_f64, 2.5_f64);
     let out = KernelRun::new(splice_user_source_gv(&built))
@@ -131,7 +131,7 @@ fn user_force_source_cannot_desync_energy_from_work() {
     // the framework owns S_nrg and derives it from the force, so the two stay in step. proven two
     // ways below: analytically, and structurally — S_nrg == S_mom . v from the rendered outputs.
     use symbi_expr::dag::Dag;
-    use symbi_hydro::expr_bridge::lower_dag_to_builtsource;
+    use symbi_hydro::expr_bridge::lower_dag_to_program;
     use symbi_hydro::source_spec::{user_force_energy_source, user_force_momentum_source};
 
     let mut dag = Dag::new();
@@ -141,7 +141,7 @@ fn user_force_source_cannot_desync_energy_from_work() {
     let a1 = dag.constant(0.4);
     let nodes = dag.nodes().to_vec();
     // one acceleration field, embedded into both wrappers — the structural reason they stay in step.
-    let accel = lower_dag_to_builtsource(&nodes, &[a0, a1]).expect("bridge lowers accel");
+    let accel = lower_dag_to_program(&nodes, &[a0, a1]).expect("bridge lowers accel");
     let mom = user_force_momentum_source(&accel, 2);
     let nrg = user_force_energy_source(&accel, 2);
 
@@ -188,7 +188,7 @@ fn user_cooling_source_is_energy_sink_only() {
     // a user cooling rate Lambda(x) = p0 * x_0^2. the framework wraps it as S_nrg = -Lambda,
     // reaching the energy slot alone — the write set of a cooling kind is exactly {energy}.
     use symbi_expr::dag::Dag;
-    use symbi_hydro::expr_bridge::lower_dag_to_builtsource;
+    use symbi_hydro::expr_bridge::lower_dag_to_program;
     use symbi_hydro::source_spec::user_cooling_source;
 
     let mut dag = Dag::new();
@@ -197,7 +197,7 @@ fn user_cooling_source_is_energy_sink_only() {
     let x0sq = dag.mul(x0, x0);
     let lam = dag.mul(p0, x0sq);
     let nodes = dag.nodes().to_vec();
-    let rate = lower_dag_to_builtsource(&nodes, &[lam]).expect("bridge lowers rate");
+    let rate = lower_dag_to_program(&nodes, &[lam]).expect("bridge lowers rate");
     let cool = user_cooling_source(&rate, 2);
 
     let (x0v, p0v) = (0.7_f64, 2.5_f64);
@@ -212,7 +212,7 @@ fn user_cooling_source_is_energy_sink_only() {
 fn front_door_json_force_config_renders_axiomatic_source() {
     // the full front door: a force SourceConfig — exactly what python `Dag.force_source` emits as
     // json — parsed, then `build_user_source` lowers + wraps it in the conservation law, and the
-    // mom + nrg BuiltSources render. accel = [p0*x_0, 0.4]; the coupling S_nrg == S_mom.v holds,
+    // mom + nrg SourcePrograms render. accel = [p0*x_0, 0.4]; the coupling S_nrg == S_mom.v holds,
     // driven entirely from the serialized config (python -> json -> rust -> kernel, at runtime).
     use symbi_expr::SourceConfig;
     use symbi_hydro::NEWTONIAN_SPEC;

@@ -338,6 +338,14 @@ impl<S: Scalar> Scalar for Dual<S> {
         }
     }
     #[inline]
+    fn atan(self) -> Self {
+        // d atan(x) = dx / (1 + x^2).
+        Self {
+            value: self.value.atan(),
+            tangent: self.tangent / (S::ONE + self.value * self.value),
+        }
+    }
+    #[inline]
     fn atan2(self, x: Self) -> Self {
         // d atan2(y, x) = (x dy - y dx) / (x^2 + y^2); self = y.
         let denom = x.value * x.value + self.value * self.value;

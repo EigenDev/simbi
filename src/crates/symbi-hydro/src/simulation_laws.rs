@@ -40,12 +40,10 @@
 
 use std::collections::HashSet;
 
-use std::collections::HashMap;
-use symbi_ir::graph::{ElementWiseOp, Graph, NodeId, Op as GOp};
-use symbi_ir::{Symbol, splice_graph};
+use symbi_ir::SourceProgram;
 
 use crate::regime_spec::RegimeSpec;
-use crate::source_spec::{BuiltSource, SourceKind, SourceSpec};
+use crate::source_spec::{SourceKind, SourceSpec};
 
 /// **fused-source family**: a runtime declaration of a
 /// family of `SourceSpec` overlays that has a single corresponding AOT-baked
@@ -355,74 +353,49 @@ impl<'a> SimulationLaws<'a> {
     /// **the additive composition contract** (A1's commutative + associative
     /// `Add` made structural):
     ///   - each source builder is invoked at dimension `d` to produce its
-    ///     standalone `BuiltSource`;
-    ///   - the resulting sub-graphs are spliced into a single shared
-    ///     `Graph`, with `Op::Param`s deduplicated by symbol (so two
-    ///     overlays declaring `rho` share one node, and the param ordering
-    ///     in the returned manifest is "order of first mention");
-    ///   - corresponding-component outputs are summed via `Op::Add`
-    ///     across sources;
+    ///     standalone `SourceProgram`;
+    ///   - every overlay is spliced into one shared trace, with params bound
+    ///     to same-named scalar leaves (so two overlays declaring `rho` share
+    ///     one leaf, and the param ordering in the returned manifest is
+    ///     "order of first mention");
+    ///   - corresponding-component outputs are summed across sources;
     ///   - the result's `outputs.len()` equals the field-component count
     ///     of the first overlay (every overlay targeting one field must
     ///     emit the same component count — the validator enforces this).
     ///
-    /// the splice supports the algebraic Op subset the source
-    /// builders use (`Const`, `Param`, `ElementWise`, `Transcendental`,
-    /// `Select`). it panics on tensor / higher-order Ops — by design: the
-    /// source layer lowers through the algebraic subset alone, and a source
+    /// the splice supports the algebraic Op subset the source builders emit
+    /// (constants, params, elementwise arithmetic, transcendentals, select);
+    /// the source layer lowers through that subset alone, and a source
     /// reaching beyond it would need the splice extended to match.
-    pub fn build_total_source(&self, field: &str, d: usize) -> Option<BuiltSource> {
+    pub fn build_total_source(&self, field: &str, d: usize) -> Option<SourceProgram> {
         let sources: Vec<&SourceSpec> = self.sources_for(field).collect();
         if sources.is_empty() {
             return None;
         }
+        let built: Vec<SourceProgram> =
+            sources.iter().map(|source| (source.build_source)(d)).collect();
 
-        let mut dest = Graph::new();
-        let mut params: Vec<String> = Vec::new();
-        let mut acc: Option<Vec<NodeId>> = None;
-
-        for source in sources {
-            let built = (source.build_source)(d);
-            // re-declare this source's params into dest (add_param dedups by symbol, so
-            // params shared across overlays map to one dest node), then splice via the
-            // canonical homomorphism (symbi_ir::splice_graph) — the walker lives in one place.
-            let subst = redeclare_params(&mut dest, &built.graph);
-            let translated = splice_graph(&mut dest, &built.graph, &built.outputs, &subst)
-                .expect("additive source splice");
-
-            // accumulate params in order of first mention (param dedup is
-            // automatic at the Graph level via `add_param`'s symbol cache).
-            for p in &built.params {
-                if !params.iter().any(|q| q == p) {
-                    params.push(p.clone());
-                }
+        Some(SourceProgram::trace(|cx| {
+            let mut acc: Option<Vec<_>> = None;
+            for program in &built {
+                let outs = cx.splice_source_as_scalars(program);
+                acc = Some(match acc {
+                    None => outs,
+                    Some(prev) => {
+                        assert_eq!(
+                            prev.len(),
+                            outs.len(),
+                            "build_total_source: overlays for field '{field}' must \
+                             emit the same component count (got {} vs {})",
+                            prev.len(),
+                            outs.len(),
+                        );
+                        prev.into_iter().zip(outs).map(|(a, b)| a + b).collect()
+                    }
+                });
             }
-
-            // sum into the accumulator component-wise.
-            acc = Some(match acc {
-                None => translated,
-                Some(prev) => {
-                    assert_eq!(
-                        prev.len(),
-                        translated.len(),
-                        "build_total_source: overlays for field '{field}' must \
-                         emit the same component count (got {} vs {})",
-                        prev.len(),
-                        translated.len(),
-                    );
-                    prev.into_iter()
-                        .zip(translated)
-                        .map(|(a, b)| dest.element_wise(ElementWiseOp::Add, vec![a, b], None))
-                        .collect()
-                }
-            });
-        }
-
-        Some(BuiltSource {
-            graph: dest,
-            params,
-            outputs: acc.expect("non-empty sources guaranteed above"),
-        })
+            acc.expect("non-empty sources guaranteed above")
+        }))
     }
 
     /// validate the composition against the 5 strictness clauses (those
@@ -474,22 +447,6 @@ impl<'a> SimulationLaws<'a> {
 
         Ok(())
     }
-}
-
-/// re-declare every `Op::Param` leaf of `src` into `dest` (add_param dedups by symbol, so a
-/// param shared across overlays maps to one dest node) and return the Symbol -> dest-NodeId
-/// substitution map. this is the additive-composition "params are fresh in dest" leaf policy;
-/// `splice_graph` then does the variant-complete graph copy with these substitutes.
-fn redeclare_params(dest: &mut Graph, src: &Graph) -> HashMap<Symbol, NodeId> {
-    let mut subst: HashMap<Symbol, NodeId> = HashMap::new();
-    for (_id, node, ty) in src.iter() {
-        if let GOp::Param(sym) = &node.op {
-            subst
-                .entry(sym.clone())
-                .or_insert_with(|| dest.add_param(sym.clone(), ty.clone(), node.span));
-        }
-    }
-    subst
 }
 
 /// failure modes the validator catches. each variant carries the diagnostic
@@ -679,13 +636,8 @@ mod tests {
 
     // a no-op builder satisfying the SourceSpec type for the rejection tests;
     // validate() catches the error ahead of any build_source call.
-    fn bogus_builder(_d: usize) -> crate::source_spec::BuiltSource {
-        let g = symbi_ir::graph::Graph::new();
-        crate::source_spec::BuiltSource {
-            graph: g,
-            params: Vec::new(),
-            outputs: Vec::new(),
-        }
+    fn bogus_builder(_d: usize) -> crate::source_spec::SourceProgram {
+        crate::source_spec::SourceProgram::trace(|_cx| Vec::new())
     }
 
     #[test]
@@ -730,14 +682,15 @@ mod tests {
 
     // ----- build_total_source: splice + additive composition --------------
 
-    /// helper: evaluate one output of a BuiltSource at f64 against a list
+    /// helper: evaluate one output of a SourceProgram at f64 against a list
     /// of (param_name, value) pairs.
-    fn eval_built(built: &BuiltSource, output: NodeId, values: &[(&str, f64)]) -> f64 {
+    fn eval_built(built: &SourceProgram, output: symbi_ir::NodeId, values: &[(&str, f64)]) -> f64 {
         use symbi_ir::backends::interp::{Backend, Cpu};
+    
         use symbi_ir::passes::scalarize::scalarize;
-        let lowered = scalarize(&built.graph, output, "total_source");
+        let lowered = scalarize(&built.graph(), output, "total_source");
         let inputs: Vec<f64> = built
-            .params
+            .params()
             .iter()
             .map(|pname| {
                 values
@@ -770,7 +723,7 @@ mod tests {
             SimulationLaws::new(&NEWTONIAN_SPEC).with_geometric(spherical_geometric_sources(2));
         let combined = sim.build_total_source("mom", 2).expect("one source");
         assert_eq!(
-            combined.outputs.len(),
+            combined.outputs().len(),
             2,
             "2D momentum source has 2 components"
         );
@@ -797,8 +750,8 @@ mod tests {
         // cross-validate against the individual spherical builder.
         let direct = (spherical_geometric_sources(2)[0].build_source)(2);
         for k in 0..2 {
-            let v_combined = eval_built(&combined, combined.outputs[k], &values);
-            let v_direct = eval_built(&direct, direct.outputs[k], &values);
+            let v_combined = eval_built(&combined, combined.outputs()[k], &values);
+            let v_direct = eval_built(&direct, direct.outputs()[k], &values);
             assert!(
                 (v_combined - v_direct).abs() < 1e-12,
                 "splice single-source component {k}: combined {v_combined} != direct {v_direct}",
@@ -820,7 +773,7 @@ mod tests {
             .with_gravity(point_mass_gravity_sources(2, true));
 
         let combined = sim.build_total_source("mom", 2).expect("two sources");
-        assert_eq!(combined.outputs.len(), 2);
+        assert_eq!(combined.outputs().len(), 2);
 
         // evaluate at a concrete state. note: gravity needs (xm, gm).
         let r = 2.0;
@@ -856,9 +809,9 @@ mod tests {
         let grav_built = (point_mass_gravity_sources(2, true)[0].build_source)(2);
 
         for k in 0..2 {
-            let s_combined = eval_built(&combined, combined.outputs[k], &values);
-            let s_geom = eval_built(&geom_built, geom_built.outputs[k], &values);
-            let s_grav = eval_built(&grav_built, grav_built.outputs[k], &values);
+            let s_combined = eval_built(&combined, combined.outputs()[k], &values);
+            let s_geom = eval_built(&geom_built, geom_built.outputs()[k], &values);
+            let s_grav = eval_built(&grav_built, grav_built.outputs()[k], &values);
             let s_expected = s_geom + s_grav;
             assert!(
                 (s_combined - s_expected).abs() < 1e-12,
@@ -881,7 +834,7 @@ mod tests {
             .with_ib(rigid_body_penalty_sources(2));
 
         let combined = sim.build_total_source("mom", 2).expect("three sources");
-        assert_eq!(combined.outputs.len(), 2);
+        assert_eq!(combined.outputs().len(), 2);
 
         let r = 2.0;
         let theta = 0.7;
@@ -931,10 +884,10 @@ mod tests {
         let rigid = (rigid_body_penalty_sources(2)[0].build_source)(2);
 
         for k in 0..2 {
-            let s_combined = eval_built(&combined, combined.outputs[k], &values);
-            let s_geom = eval_built(&geom, geom.outputs[k], &values);
-            let s_grav = eval_built(&grav, grav.outputs[k], &values);
-            let s_rigid = eval_built(&rigid, rigid.outputs[k], &values);
+            let s_combined = eval_built(&combined, combined.outputs()[k], &values);
+            let s_geom = eval_built(&geom, geom.outputs()[k], &values);
+            let s_grav = eval_built(&grav, grav.outputs()[k], &values);
+            let s_rigid = eval_built(&rigid, rigid.outputs()[k], &values);
             let s_expected = s_geom + s_grav + s_rigid;
             assert!(
                 (s_combined - s_expected).abs() < 1e-12,
@@ -958,7 +911,7 @@ mod tests {
         let combined = sim.build_total_source("mom", 2).expect("two sources");
 
         // each declared param appears exactly once.
-        let mut sorted = combined.params.clone();
+        let mut sorted = combined.params().to_vec();
         sorted.sort();
         let mut deduped = sorted.clone();
         deduped.dedup();
@@ -966,7 +919,7 @@ mod tests {
 
         // sanity: rho appears once (both sources declared it).
         let rho_count = combined
-            .params
+            .params()
             .iter()
             .filter(|p| p.as_str() == "rho")
             .count();
@@ -995,9 +948,9 @@ mod tests {
         // the source-ABI kernel from the graph: function-style sqrt, raw
         // literals, plain C constants — via scalarize + emit_source_kernel.
         let prim = symbi_ir::backends::cuda::emit_source_kernel(
-            &built.graph,
-            &built.params,
-            &built.outputs,
+            &built.graph(),
+            &built.params(),
+            &built.outputs(),
             "mom_source",
         );
         assert!(prim.contains("extern \"C\" __global__ void mom_source("));
@@ -1042,7 +995,7 @@ mod tests {
         // and build_total_source does merge them into one graph — proves
         // the user source flows through the same splice path as the rest.
         let combined = sim.build_total_source("mom", 3).expect("two sources");
-        assert_eq!(combined.outputs.len(), 3);
+        assert_eq!(combined.outputs().len(), 3);
     }
 
     #[test]

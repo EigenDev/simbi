@@ -2,8 +2,8 @@
 // spec_into_gv_trace.rs
 //
 // proves the mechanism for fusing spec-driven sources into
-// the active Gv trace. validates that `splice_built_source_into` correctly
-// recreates a `BuiltSource` graph inside the discretize crate's tracing
+// the active Gv trace. validates that `SourceProgram::splice_into` correctly
+// recreates a `SourceProgram` graph inside the discretize crate's tracing
 // session, with param leaves replaced by Gv-trace-native NodeIds.
 //
 // splicing is what lets a spec-driven source ride inside the godunov stage, so
@@ -11,11 +11,11 @@
 // register-resident state, under one round of CSE.
 //
 // asserted here:
-//   - inside an active Gv trace, calling `splice_built_source_into` with a
-//     `BuiltSource` (from `point_mass_gravity_sources` or similar) produces
+//   - inside an active Gv trace, calling `SourceProgram::splice_into` with a
+//     `SourceProgram` (from `point_mass_gravity_sources` or similar) produces
 //     Gv-trace NodeIds that are valid `cx.gv(node)` values;
 //   - the spliced outputs evaluate to the same f64 values as the standalone
-//     BuiltSource at the same parameter state, so the splice preserves
+//     SourceProgram at the same parameter state, so the splice preserves
 //     semantics on top of structural validity;
 //   - the trace closes cleanly into a well-formed kernel graph.
 //
@@ -26,7 +26,7 @@ use std::collections::HashMap;
 
 use symbi_hydro::regime_spec::law_params;
 use symbi_hydro::source_spec::{
-    gravity_params, point_mass_gravity_sources, source_params, splice_built_source_into,
+    gravity_params, point_mass_gravity_sources, source_params,
 };
 use symbi_ir::graph::NodeId;
 use symbi_ir::gv::{Gv, TraceCx, trace};
@@ -72,7 +72,7 @@ fn splice_produces_valid_gv_node_ids() {
         // build the spec source standalone, then splice into the active trace.
         let built = (point_mass_gravity_sources(3, false)[0].build_source)(3);
         let spliced: Vec<NodeId> =
-            cx.with_trace(|t| splice_built_source_into(&built, t.graph(), &leaves));
+            cx.with_trace(|t| built.splice_into(t.graph(), &leaves));
 
         // wrap as Gv values — this is the contract the godunov fusion needs.
         let s_mom: Vec<Gv> = spliced.iter().map(|&n| cx.gv(n)).collect();
@@ -97,7 +97,7 @@ fn splice_produces_valid_gv_node_ids() {
 fn spliced_outputs_match_standalone_at_same_param_state() {
     // **the load-bearing claim**: splicing preserves semantics — the evaluated
     // values match, beyond structural validity. for a known parameter state, the
-    // spliced source evaluated inside the trace equals the standalone BuiltSource
+    // spliced source evaluated inside the trace equals the standalone SourceProgram
     // evaluated via scalarize+interp directly. proves the spliced graph computes
     // the same function as the original.
     use symbi_ir::backends::interp::{Backend, Cpu};
@@ -123,7 +123,7 @@ fn spliced_outputs_match_standalone_at_same_param_state() {
         let leaves = declare_gravity_leaves(cx);
         let built2 = (point_mass_gravity_sources(3, false)[0].build_source)(3);
         let spliced: Vec<NodeId> =
-            cx.with_trace(|t| splice_built_source_into(&built2, t.graph(), &leaves));
+            cx.with_trace(|t| built2.splice_into(t.graph(), &leaves));
 
         // sample values for each declared leaf.
         let sample_vals: Vec<(String, f64)> = leaves
@@ -146,7 +146,7 @@ fn spliced_outputs_match_standalone_at_same_param_state() {
 
 #[test]
 fn splice_panics_loudly_on_missing_param_substitute() {
-    // the discipline at the splice site: a Param in BuiltSource that has no
+    // the discipline at the splice site: a Param in SourceProgram that has no
     // substitute in `name_to_node` is a programmer bug — surface it loudly
     // with a clear panic; silently continuing would compute a wrong value undetected.
     let (_kernel, ()) = trace(|cx| {
@@ -157,7 +157,7 @@ fn splice_panics_loudly_on_missing_param_substitute() {
 
         let built = (point_mass_gravity_sources(3, false)[0].build_source)(3);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            cx.with_trace(|t| splice_built_source_into(&built, t.graph(), &sparse_leaves))
+            cx.with_trace(|t| built.splice_into(t.graph(), &sparse_leaves))
         }));
         assert!(
             result.is_err(),

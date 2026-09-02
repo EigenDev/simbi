@@ -9,7 +9,7 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_hydro::source_spec::BuiltSource;
+use symbi_hydro::source_spec::SourceProgram;
 use symbi_ir::ScalarRef;
 use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
@@ -198,7 +198,7 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let (name, ir) = dag.gpu_ir.get_or_init(|| {
         let (coords, spacing, axes) = sim_gv_geom(sim);
-        let src_refs: Vec<(&str, &BuiltSource)> =
+        let src_refs: Vec<(&str, &SourceProgram)> =
             dag.built.iter().map(|(t, b)| (t.as_str(), b)).collect();
         let (gvk, writes) = symbi_discretize::boundary_fill_from_built_gv(
             coords,

@@ -54,7 +54,7 @@ pub use simulation_laws::{
 };
 pub use source_evaluator::SourceEvaluator;
 pub use source_spec::{
-    BuiltSource, SourceKind, SourceSpec, cartesian_geometric_sources,
+    SourceProgram, SourceKind, SourceSpec, cartesian_geometric_sources,
     cylindrical_geometric_sources, point_mass_gravity_sources, rigid_body_penalty_sources,
     spherical_geometric_sources, uniform_acceleration_sources, user_cooling_source,
     user_defined_source, user_force_energy_source, user_force_momentum_source,

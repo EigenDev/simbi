@@ -463,7 +463,7 @@ fn get_source_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
 trait AttachRuntimeSource: Sized {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        built: Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
         params: Vec<f64>,
     ) -> Result<Self, String>;
 }
@@ -473,7 +473,7 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        built: Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         // fused by default: the user source (and any immersed body) rides inside the godunov stage on
@@ -487,7 +487,7 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        built: Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         // fused by default on a flat host+f64 run; GR / device / non-f64 fall back to the two-pass.
@@ -500,7 +500,7 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        built: Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         // fused by default on host + f64 (iso has no energy, so the body stays its own pass — the
@@ -521,7 +521,7 @@ where
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        built: Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         Ok(self.with_runtime_source(built, params))
@@ -637,7 +637,7 @@ fn lower_configured_sources(
     law: Option<&symbi_hydro::state_law::StateLaw>,
 ) -> Result<
     (
-        Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        Vec<(String, symbi_hydro::source_spec::SourceProgram)>,
         Vec<f64>,
     ),
     String,

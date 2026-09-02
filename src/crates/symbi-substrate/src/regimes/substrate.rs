@@ -27,7 +27,7 @@ use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::sync::Arc;
-use symbi_hydro::source_spec::BuiltSource;
+use symbi_hydro::source_spec::SourceProgram;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
@@ -213,7 +213,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// `let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());`
     pub fn with_runtime_source(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> Self {
         // has_energy = false is the authority here (iso's RegimeSpec): no `nrg` write is emitted.
@@ -227,7 +227,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// else it falls back to the two-pass.
     pub fn with_fused_runtime_source(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, false));
@@ -283,7 +283,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// the ghost pressure as `cs2 * rho` after the fill).
     pub fn with_driven_boundary(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;

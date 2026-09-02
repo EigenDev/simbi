@@ -42,7 +42,7 @@ use crate::regimes::substrate_kernels::{
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Spacetime;
-use symbi_hydro::source_spec::BuiltSource;
+use symbi_hydro::source_spec::SourceProgram;
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::{KernelSet, WithExcision, WithViscosity};
 
@@ -163,7 +163,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// a complete prim prescription `[rho, vel.., pre]`.
     pub fn with_driven_boundary(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
@@ -181,12 +181,12 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         (self, id)
     }
 
-    /// attach a runtime user source from already-lowered `(target, BuiltSource)`
+    /// attach a runtime user source from already-lowered `(target, SourceProgram)`
     /// pairs (the `build_user_source` output of a `kind="raw"` RHD `SourceConfig`).
     /// applied two-pass in `source_apply` (plain godunov + `dispatch_runtime_source`).
     pub fn with_runtime_source(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> Self {
         // has_energy = true (RHD carries tau); validation happened at
@@ -200,7 +200,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// / GR). no immersed-body fold — RHD has no Newtonian body.
     pub fn with_fused_runtime_source(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
@@ -404,7 +404,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     fn source_apply(&self, sim: &FieldStore<D, DOF, Mem, Sc>, weight: f64) {
         // two-pass: plain godunov already ran; add the raw user source increment to
         // the conserved fields. dispatch_runtime_source is regime-agnostic (it adds
-        // the BuiltSource outputs to their target conserved slots), so no RHD-specific
+        // the SourceProgram outputs to their target conserved slots), so no RHD-specific
         // source code — the relativistic conservation law lives in the godunov stage.
         if let Some(rs) = &self.runtime_source {
             // when the fused stage rode the source inside godunov (same predicate godunov_stage used),

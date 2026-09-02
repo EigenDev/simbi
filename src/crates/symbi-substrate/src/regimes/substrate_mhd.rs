@@ -44,7 +44,7 @@ use crate::regimes::substrate_kernels::{
     dispatch_named, dispatch_runtime_source, geom_scalar, kernel_bindings, kernel_geom,
     mhd_flux_suffix, mhd_geom_suffix, motion_scalar, scalars_for, spacetime_slug,
 };
-use symbi_hydro::source_spec::BuiltSource;
+use symbi_hydro::source_spec::SourceProgram;
 use symbi_sim::state::CtMethod;
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::KernelSet;
@@ -289,7 +289,7 @@ where
     /// out-of-plane B_phi is the injected toroidal field (cell-centered, div-free by axisymmetry).
     pub fn with_driven_boundary(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
@@ -298,7 +298,7 @@ where
         (self, id)
     }
 
-    /// attach a runtime user source from already-lowered `(target, BuiltSource)` pairs
+    /// attach a runtime user source from already-lowered `(target, SourceProgram)` pairs
     /// (the `build_user_source` output of a `SourceConfig`). applied two-pass in
     /// `source_apply`. has_energy is read from the regime spec (rmhd/nmhd carry it,
     /// imhd does not), so the source pass writes only the slots the regime owns.
@@ -311,7 +311,7 @@ where
 
     pub fn with_runtime_source(
         mut self,
-        built: Vec<(String, BuiltSource)>,
+        built: Vec<(String, SourceProgram)>,
         params: Vec<f64>,
     ) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, R::SPEC.has_energy));

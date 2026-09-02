@@ -33,7 +33,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
         ).unwrap(),
         &symbi_hydro::NEWTONIAN_SPEC,
     ).unwrap();
-    let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
+    let src_refs: Vec<(&str, &symbi_hydro::source_spec::SourceProgram)> =
         force.iter().map(|(t, b)| (t.as_str(), b)).collect();
 
     let (gvk, writes) = godunov_stage_gv_with_fused_built(

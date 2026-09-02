@@ -13,7 +13,7 @@
 //  let a    = law.a_at(t);
 //  let adot = law.adot_at(t);
 // =============================================================================
-use crate::expr_bridge::lower_dag_to_builtsource;
+use crate::expr_bridge::lower_dag_to_program;
 use symbi_expr::load::{SourceConfig, nodes_from_descs};
 use symbi_ir::backends::interp::{Backend, Cpu};
 use symbi_ir::passes::scalarize::{LoweredFn, scalarize};
@@ -47,22 +47,22 @@ impl MotionLaw {
             ));
         }
         let nodes = nodes_from_descs(&cfg.nodes).map_err(|e| format!("motion nodes: {e}"))?;
-        let built = lower_dag_to_builtsource(&nodes, &cfg.outputs)
+        let built = lower_dag_to_program(&nodes, &cfg.outputs)
             .map_err(|e| format!("motion lower: {e:?}"))?;
         // a(t) is a function of time only: every declared param must be `t` (no spatial/field leaves).
-        for p in &built.params {
+        for p in built.params() {
             if p != "t" {
                 return Err(format!(
                     "scale factor a(t) may depend only on time `t`, found '{p}'"
                 ));
             }
         }
-        let a = scalarize(&built.graph, built.outputs[0], "motion_a");
-        let adot = scalarize(&built.graph, built.outputs[1], "motion_adot");
+        let a = scalarize(&built.graph(), built.outputs()[0], "motion_a");
+        let adot = scalarize(&built.graph(), built.outputs()[1], "motion_adot");
         let law = MotionLaw {
             a,
             adot,
-            n_params: built.params.len(),
+            n_params: built.params().len(),
         };
         law.fd_check(t0, t_end)?;
         Ok(law)

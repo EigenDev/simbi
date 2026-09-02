@@ -33,8 +33,10 @@
 // =============================================================================
 
 use symbi_algebra::algebra::Numeric;
-use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId};
-use symbi_ir::{ElementTy, Gv, TraceCx};
+use symbi_ir::{Gv, TraceCx};
+// the opaque program artifact lives with the compiler; re-exported here so
+// `source_spec::SourceProgram` stays the domain-facing path.
+pub use symbi_ir::SourceProgram;
 
 use crate::regime_spec::law_params;
 use crate::source_term::{PointMassGravity, UniformAccel};
@@ -55,40 +57,12 @@ pub enum SourceKind {
     UserDefined,
 }
 
-/// the built form of one `SourceSpec` at a chosen dimension. carries the
-/// graph + declared param names + per-component output NodeIds (1 for
-/// scalar-targeted sources, D for momentum-targeted sources).
-pub struct BuiltSource {
-    pub(crate) graph: Graph,
-    /// every scalar the trace touched, in the order it was first reached.
-    ///
-    /// this is a SUPERSET of what the outputs consume. a builder that evaluates a
-    /// whole conserved vector and publishes one component of it traces the other
-    /// components too, and their scalars stay in this list. the surplus is
-    /// deliberate: a caller supplies values positionally against a `LoweredFn`,
-    /// and `scalarize` lowers every node in the graph rather than only the live
-    /// ones, so the two lists line up entry for entry precisely because neither
-    /// is pruned. pruning either alone desynchronizes them and the arity assert
-    /// in the interpreter fires.
-    pub(crate) params: Vec<String>,
-    /// one output per component of the target field. routed into the
-    /// runtime additive-RHS accumulator at the corresponding offset.
-    pub(crate) outputs: Vec<NodeId>,
-}
-
-impl BuiltSource {
-    /// Compiler-facing view of a source artifact. Physical source laws should
-    /// construct through `lift_to_built`, never manipulate this graph directly.
-    pub fn graph(&self) -> &Graph {
-        &self.graph
-    }
-    pub fn params(&self) -> &[String] {
-        &self.params
-    }
-    pub fn outputs(&self) -> &[NodeId] {
-        &self.outputs
-    }
-}
+// the built form of one `SourceSpec` at a chosen dimension is the opaque
+// `symbi_ir::SourceProgram` (re-exported at this crate's root): a traced
+// expression, its scalar param names in first-seen order, and one output per
+// component of the target field. builders construct one with
+// `SourceProgram::trace` and compose programs inside a later trace via
+// `TraceCx::splice_source`; the graph representation stays with the compiler.
 
 /// declarative description of one additive RHS contribution. analogous to
 /// `LawSpec` but for the source half of the evolution equation.
@@ -111,7 +85,7 @@ pub struct SourceSpec {
     /// follows the `law_params` convention extended with `x_<k>` for
     /// position components — the source reads coordinates; the flux is a
     /// function of state alone.
-    pub build_source: fn(d: usize) -> BuiltSource,
+    pub build_source: fn(d: usize) -> SourceProgram,
 }
 
 impl PartialEq for SourceSpec {
@@ -136,64 +110,13 @@ pub mod source_params {
     }
 }
 
-// =============================================================================
-// section 1.5 — splicing into an external Graph.
-//
-// the source builders produce a self-contained `BuiltSource { graph, params,
-// outputs }`. a downstream codegen path (the substrate's godunov kernel
-// builders, traced at `S = Gv` in `symbi-discretize`) fuses the source's
-// expression into the active kernel's graph, so one pass carries both.
-// fusion at the IR level means the godunov RHS and the source contribution
-// share registers, share CSE, share one launch.
-//
-// the splice mechanism:
-//   - caller has an active graph `dest` (in the godunov case, the Gv trace's
-//      graph) and a map of `param_name -> NodeId` for the leaves they want
-//      the source to read from (e.g., `"rho" -> cons.den/W` for relativistic,
-//      `"vel_0" -> primitive vel etc.).
-//   - caller invokes `splice_built_source_into(&built, dest, name_to_node)`.
-//   - the function walks `built.graph` topologically:
-//        - Param("name") leaves are replaced by `name_to_node["name"]`
-//          (the caller's pre-existing node);
-//        - Const leaves are re-added to `dest` (fresh NodeId);
-//        - every other Op node is re-created in `dest` via the standard
-//          builder methods, with operand NodeIds translated through the
-//          built-node-id -> dest-node-id map.
-//   - returns `Vec<NodeId>` — the dest NodeIds corresponding to
-//      `built.outputs[k]`. callers wrap these as `cx.gv(node)` when working
-//      in a Gv trace.
-//
-// supports the same Op subset the `BuiltSource` builders use (Const,
-// Param, ElementWise, Transcendental, Select), which is the whole vocabulary
-// they emit. higher-order Ops (FieldLoad, IterateInline) and tensor
-// structural ops lie outside that subset.
-// =============================================================================
-
-/// splice the operations in `built.graph` into `dest`, substituting `built`'s
-/// Param leaves via `name_to_node`. returns the dest NodeIds for each of
-/// `built.outputs` in order.
-///
-/// **panics** if a Param leaf in `built` has a name absent from
-/// `name_to_node` (programmer error — every declared param needs a source-
-/// side substitute), or if the graph contains an Op variant outside the
-/// supported algebraic subset.
-pub fn splice_built_source_into(
-    built: &BuiltSource,
-    dest: &mut Graph,
-    name_to_node: &std::collections::HashMap<String, NodeId>,
-) -> Vec<NodeId> {
-    // delegate to the canonical graph homomorphism (symbi_ir::splice_graph), which remaps
-    // every Op variant via Op::try_map_inputs/dispatch_builder — the variant handling lives
-    // in one place and stays in sync. it keys param substitutes by Symbol, so intern the
-    // caller's name map. the
-    // panic-on-error contract (every declared param must be bound) is preserved.
-    let subst: std::collections::HashMap<symbi_ir::Symbol, NodeId> = name_to_node
-        .iter()
-        .map(|(name, &nid)| (symbi_ir::Symbol::intern(name), nid))
-        .collect();
-    symbi_ir::splice_graph(dest, &built.graph, &built.outputs, &subst)
-        .unwrap_or_else(|e| panic!("splice_built_source_into: {e}"))
-}
+// composition with a kernel trace goes through `TraceCx::splice_source` /
+// `SourceProgram::splice_into` (symbi-ir): the program's operations are copied
+// into the destination graph with its param leaves substituted, and the
+// outputs come back as branded carrier values. downstream codegen (the
+// substrate's godunov builders in symbi-discretize) fuses a source's
+// expression into the active kernel's graph through that door, so one pass
+// carries both.
 
 // =============================================================================
 // section 2 — spherical geometric sources.
@@ -215,51 +138,31 @@ pub fn splice_built_source_into(
 
 /// helper: declare a source builder's standard parameter set at dimension D.
 /// extends `law_params`'s primitive vocabulary with the position components.
-struct SourceCtx {
-    rho: NodeId,
-    vel: Vec<NodeId>, // D
-    pre: NodeId,
-    x: Vec<NodeId>, // D — position
+/// declaration order (rho, vel_k.., pre, x_k..) is the param-manifest order;
+/// leaves stay declared even where a formula reads a subset, keeping the
+/// manifest uniform across the geometric family.
+struct SourceLeaves<'t> {
+    rho: Gv<'t>,
+    vel: Vec<Gv<'t>>, // D
+    pre: Gv<'t>,
+    x: Vec<Gv<'t>>, // D — position
 }
 
-fn declare_source_ctx(g: &mut Graph, d: usize) -> (SourceCtx, Vec<String>) {
-    let mut params: Vec<String> = Vec::new();
-    let rho = g.add_scalar_param(law_params::RHO, ElementTy::F64);
-    params.push(law_params::RHO.to_string());
-    let vel: Vec<NodeId> = (0..d)
-        .map(|k| {
-            let name = law_params::vel(k);
-            let id = g.add_scalar_param(&name, ElementTy::F64);
-            params.push(name);
-            id
-        })
-        .collect();
-    let pre = g.add_scalar_param(law_params::PRE, ElementTy::F64);
-    params.push(law_params::PRE.to_string());
-    let x: Vec<NodeId> = (0..d)
-        .map(|k| {
-            let name = source_params::x(k);
-            let id = g.add_scalar_param(&name, ElementTy::F64);
-            params.push(name);
-            id
-        })
-        .collect();
-    (SourceCtx { rho, vel, pre, x }, params)
+fn declare_source_leaves<'t>(cx: TraceCx<'t>, d: usize) -> SourceLeaves<'t> {
+    let rho = cx.scalar(law_params::RHO);
+    let vel: Vec<Gv<'t>> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
+    let pre = cx.scalar(law_params::PRE);
+    let x: Vec<Gv<'t>> = (0..d).map(|k| cx.scalar(&source_params::x(k))).collect();
+    SourceLeaves { rho, vel, pre, x }
 }
 
 /// spherical 1D momentum source: S_r = 2 * p / r.
-fn spherical_1d_momentum_source(d: usize) -> BuiltSource {
+fn spherical_1d_momentum_source(d: usize) -> SourceProgram {
     debug_assert_eq!(d, 1, "spherical_1d_momentum_source requires D = 1");
-    let mut g = Graph::new();
-    let (ctx, params) = declare_source_ctx(&mut g, d);
-    let two = g.add_const(ConstValue::F64(2.0), None);
-    let two_p = g.element_wise(ElementWiseOp::Mul, vec![two, ctx.pre], None);
-    let s_r = g.element_wise(ElementWiseOp::Div, vec![two_p, ctx.x[0]], None);
-    BuiltSource {
-        graph: g,
-        params,
-        outputs: vec![s_r],
-    }
+    SourceProgram::trace(|cx| {
+        let leaves = declare_source_leaves(cx, d);
+        vec![cx.lit(2.0) * leaves.pre / leaves.x[0]]
+    })
 }
 
 /// spherical 2D momentum source:
@@ -268,42 +171,21 @@ fn spherical_1d_momentum_source(d: usize) -> BuiltSource {
 ///
 /// uses `Op::Cos` / `Op::Sin` for cot(theta) = cos(theta) / sin(theta) —
 /// exercises the transcendental half of the algebra::Op enumeration.
-fn spherical_2d_momentum_source(d: usize) -> BuiltSource {
+fn spherical_2d_momentum_source(d: usize) -> SourceProgram {
     debug_assert_eq!(d, 2, "spherical_2d_momentum_source requires D = 2");
-    let mut g = Graph::new();
-    let (ctx, params) = declare_source_ctx(&mut g, d);
+    SourceProgram::trace(|cx| {
+        use symbi_ir::algebra::Scalar;
+        let leaves = declare_source_leaves(cx, d);
+        let (r, theta) = (leaves.x[0], leaves.x[1]);
+        let (vr, vt) = (leaves.vel[0], leaves.vel[1]);
 
-    let r = ctx.x[0];
-    let theta = ctx.x[1];
-    let vr = ctx.vel[0];
-    let vt = ctx.vel[1];
+        let s_r = (leaves.rho * vt * vt + cx.lit(2.0) * leaves.pre) / r;
 
-    let two = g.add_const(ConstValue::F64(2.0), None);
-
-    // S_r = (rho * vt^2 + 2 * p) / r
-    let vt_sq = g.element_wise(ElementWiseOp::Mul, vec![vt, vt], None);
-    let rho_vt_sq = g.element_wise(ElementWiseOp::Mul, vec![ctx.rho, vt_sq], None);
-    let two_p = g.element_wise(ElementWiseOp::Mul, vec![two, ctx.pre], None);
-    let s_r_num = g.element_wise(ElementWiseOp::Add, vec![rho_vt_sq, two_p], None);
-    let s_r = g.element_wise(ElementWiseOp::Div, vec![s_r_num, r], None);
-
-    // cot(theta) = cos(theta) / sin(theta)
-    let cos_t = g.element_wise(ElementWiseOp::Cos, vec![theta], None);
-    let sin_t = g.element_wise(ElementWiseOp::Sin, vec![theta], None);
-    let cot = g.element_wise(ElementWiseOp::Div, vec![cos_t, sin_t], None);
-
-    // S_t = (p * cot - rho * vr * vt) / r
-    let p_cot = g.element_wise(ElementWiseOp::Mul, vec![ctx.pre, cot], None);
-    let rho_vr = g.element_wise(ElementWiseOp::Mul, vec![ctx.rho, vr], None);
-    let rho_vr_vt = g.element_wise(ElementWiseOp::Mul, vec![rho_vr, vt], None);
-    let s_t_num = g.element_wise(ElementWiseOp::Sub, vec![p_cot, rho_vr_vt], None);
-    let s_t = g.element_wise(ElementWiseOp::Div, vec![s_t_num, r], None);
-
-    BuiltSource {
-        graph: g,
-        params,
-        outputs: vec![s_r, s_t],
-    }
+        // cot(theta) = cos(theta) / sin(theta)
+        let cot = theta.cos() / theta.sin();
+        let s_t = (leaves.pre * cot - leaves.rho * vr * vt) / r;
+        vec![s_r, s_t]
+    })
 }
 
 /// spherical 3D momentum source (r, theta, phi):
@@ -314,56 +196,22 @@ fn spherical_2d_momentum_source(d: usize) -> BuiltSource {
 /// the most expression-dense of the three spherical cases — uses
 /// `Op::Cos`/`Op::Sin`/`Op::Div`/`Op::Sub`/`Op::Mul`/`Op::Neg` to encode
 /// the centrifugal + coriolis tensor in primitive variables.
-fn spherical_3d_momentum_source(d: usize) -> BuiltSource {
+fn spherical_3d_momentum_source(d: usize) -> SourceProgram {
     debug_assert_eq!(d, 3, "spherical_3d_momentum_source requires D = 3");
-    let mut g = Graph::new();
-    let (ctx, params) = declare_source_ctx(&mut g, d);
+    SourceProgram::trace(|cx| {
+        use symbi_ir::algebra::Scalar;
+        let leaves = declare_source_leaves(cx, d);
+        let (r, theta) = (leaves.x[0], leaves.x[1]);
+        let (vr, vt, vp) = (leaves.vel[0], leaves.vel[1], leaves.vel[2]);
 
-    let r = ctx.x[0];
-    let theta = ctx.x[1];
-    let vr = ctx.vel[0];
-    let vt = ctx.vel[1];
-    let vp = ctx.vel[2];
+        // cot(theta) — shared across S_t and S_p.
+        let cot = theta.cos() / theta.sin();
 
-    let two = g.add_const(ConstValue::F64(2.0), None);
-
-    // cot(theta) — shared across S_t and S_p.
-    let cos_t = g.element_wise(ElementWiseOp::Cos, vec![theta], None);
-    let sin_t = g.element_wise(ElementWiseOp::Sin, vec![theta], None);
-    let cot = g.element_wise(ElementWiseOp::Div, vec![cos_t, sin_t], None);
-
-    let vt_sq = g.element_wise(ElementWiseOp::Mul, vec![vt, vt], None);
-    let vp_sq = g.element_wise(ElementWiseOp::Mul, vec![vp, vp], None);
-
-    // S_r = (rho * (vt^2 + vp^2) + 2*p) / r
-    let v_perp_sq = g.element_wise(ElementWiseOp::Add, vec![vt_sq, vp_sq], None);
-    let rho_v_perp = g.element_wise(ElementWiseOp::Mul, vec![ctx.rho, v_perp_sq], None);
-    let two_p = g.element_wise(ElementWiseOp::Mul, vec![two, ctx.pre], None);
-    let s_r_num = g.element_wise(ElementWiseOp::Add, vec![rho_v_perp, two_p], None);
-    let s_r = g.element_wise(ElementWiseOp::Div, vec![s_r_num, r], None);
-
-    // S_t = ((rho * vp^2 + p) * cot - rho * vr * vt) / r
-    let rho_vp_sq = g.element_wise(ElementWiseOp::Mul, vec![ctx.rho, vp_sq], None);
-    let rho_vp_sq_p = g.element_wise(ElementWiseOp::Add, vec![rho_vp_sq, ctx.pre], None);
-    let term_cot = g.element_wise(ElementWiseOp::Mul, vec![rho_vp_sq_p, cot], None);
-    let rho_vr = g.element_wise(ElementWiseOp::Mul, vec![ctx.rho, vr], None);
-    let rho_vr_vt = g.element_wise(ElementWiseOp::Mul, vec![rho_vr, vt], None);
-    let s_t_num = g.element_wise(ElementWiseOp::Sub, vec![term_cot, rho_vr_vt], None);
-    let s_t = g.element_wise(ElementWiseOp::Div, vec![s_t_num, r], None);
-
-    // S_p = -rho * vp * (vr + vt * cot) / r
-    let vt_cot = g.element_wise(ElementWiseOp::Mul, vec![vt, cot], None);
-    let vr_plus = g.element_wise(ElementWiseOp::Add, vec![vr, vt_cot], None);
-    let rho_vp = g.element_wise(ElementWiseOp::Mul, vec![ctx.rho, vp], None);
-    let prod = g.element_wise(ElementWiseOp::Mul, vec![rho_vp, vr_plus], None);
-    let s_p_num = g.element_wise(ElementWiseOp::Neg, vec![prod], None);
-    let s_p = g.element_wise(ElementWiseOp::Div, vec![s_p_num, r], None);
-
-    BuiltSource {
-        graph: g,
-        params,
-        outputs: vec![s_r, s_t, s_p],
-    }
+        let s_r = (leaves.rho * (vt * vt + vp * vp) + cx.lit(2.0) * leaves.pre) / r;
+        let s_t = ((leaves.rho * vp * vp + leaves.pre) * cot - leaves.rho * vr * vt) / r;
+        let s_p = -(leaves.rho * vp * (vr + vt * cot)) / r;
+        vec![s_r, s_t, s_p]
+    })
 }
 
 /// the geometric sources `Spherical` contributes to a regime's momentum
@@ -404,62 +252,35 @@ pub fn spherical_geometric_sources(d: usize) -> Vec<SourceSpec> {
 //                     S_z = 0
 
 /// cylindrical 1D momentum source: S_r = p / r.
-fn cylindrical_1d_momentum_source(d: usize) -> BuiltSource {
+fn cylindrical_1d_momentum_source(d: usize) -> SourceProgram {
     debug_assert_eq!(d, 1, "cylindrical_1d_momentum_source requires D = 1");
-    let mut g = Graph::new();
-    let (ctx, params) = declare_source_ctx(&mut g, d);
-    let s_r = g.element_wise(ElementWiseOp::Div, vec![ctx.pre, ctx.x[0]], None);
-    BuiltSource {
-        graph: g,
-        params,
-        outputs: vec![s_r],
-    }
+    SourceProgram::trace(|cx| {
+        let leaves = declare_source_leaves(cx, d);
+        vec![leaves.pre / leaves.x[0]]
+    })
 }
 
 /// cylindrical 2D (r, z) momentum source: S_r = p / r, S_z = 0.
-fn cylindrical_2d_momentum_source(d: usize) -> BuiltSource {
+fn cylindrical_2d_momentum_source(d: usize) -> SourceProgram {
     debug_assert_eq!(d, 2, "cylindrical_2d_momentum_source requires D = 2");
-    let mut g = Graph::new();
-    let (ctx, params) = declare_source_ctx(&mut g, d);
-    let s_r = g.element_wise(ElementWiseOp::Div, vec![ctx.pre, ctx.x[0]], None);
-    let zero = g.add_const(ConstValue::F64(0.0), None);
-    BuiltSource {
-        graph: g,
-        params,
-        outputs: vec![s_r, zero],
-    }
+    SourceProgram::trace(|cx| {
+        let leaves = declare_source_leaves(cx, d);
+        vec![leaves.pre / leaves.x[0], cx.lit(0.0)]
+    })
 }
 
 /// cylindrical 3D (r, phi, z) momentum source.
-fn cylindrical_3d_momentum_source(d: usize) -> BuiltSource {
+fn cylindrical_3d_momentum_source(d: usize) -> SourceProgram {
     debug_assert_eq!(d, 3, "cylindrical_3d_momentum_source requires D = 3");
-    let mut g = Graph::new();
-    let (ctx, params) = declare_source_ctx(&mut g, d);
+    SourceProgram::trace(|cx| {
+        let leaves = declare_source_leaves(cx, d);
+        let r = leaves.x[0];
+        let (vr, vp) = (leaves.vel[0], leaves.vel[1]);
 
-    let r = ctx.x[0];
-    let vr = ctx.vel[0];
-    let vp = ctx.vel[1];
-
-    // S_r = (rho * vp^2 + p) / r
-    let vp_sq = g.element_wise(ElementWiseOp::Mul, vec![vp, vp], None);
-    let rho_vp_sq = g.element_wise(ElementWiseOp::Mul, vec![ctx.rho, vp_sq], None);
-    let s_r_num = g.element_wise(ElementWiseOp::Add, vec![rho_vp_sq, ctx.pre], None);
-    let s_r = g.element_wise(ElementWiseOp::Div, vec![s_r_num, r], None);
-
-    // S_p = -rho * vr * vp / r
-    let rho_vr = g.element_wise(ElementWiseOp::Mul, vec![ctx.rho, vr], None);
-    let rho_vr_vp = g.element_wise(ElementWiseOp::Mul, vec![rho_vr, vp], None);
-    let neg_prod = g.element_wise(ElementWiseOp::Neg, vec![rho_vr_vp], None);
-    let s_p = g.element_wise(ElementWiseOp::Div, vec![neg_prod, r], None);
-
-    // S_z = 0
-    let s_z = g.add_const(ConstValue::F64(0.0), None);
-
-    BuiltSource {
-        graph: g,
-        params,
-        outputs: vec![s_r, s_p, s_z],
-    }
+        let s_r = (leaves.rho * vp * vp + leaves.pre) / r;
+        let s_p = -(leaves.rho * vr * vp) / r;
+        vec![s_r, s_p, cx.lit(0.0)]
+    })
 }
 
 /// the geometric sources `Cylindrical` contributes to a regime's momentum
@@ -542,7 +363,7 @@ pub mod gravity_params {
 /// the in-kernel centroid at splice, a compile-time position); `xm`/`gm`/`eps` are runtime
 /// scalars. shared by the momentum + energy builders so the softened `accel` field is defined
 /// in one place — the `1/(|x-xm|^2 + eps^2)^{3/2}` scaffolding hash-conses across both when the
-/// fused family bakes them into one kernel. must be called inside an open trace ([`lift_to_built`]).
+/// fused family bakes them into one kernel. must be called inside an open trace ([`SourceProgram::trace`]).
 fn point_mass_gv<'t, const D: usize>(
     cx: TraceCx<'t>,
 ) -> (Gv<'t>, [Gv<'t>; D], [Gv<'t>; D], PointMassGravity<Gv<'t>, D>) {
@@ -559,8 +380,8 @@ fn point_mass_gv<'t, const D: usize>(
 /// the softened carrier field wrapped by the shared force lift. D outputs, one per axis. the
 /// dimension is resolved by compile-time dispatch (`D` unrolls the carrier physics); `eps = 0`
 /// recovers the bare `1/r^3` form.
-fn point_mass_momentum_source(d: usize) -> BuiltSource {
-    lift_to_built(|cx| match d {
+fn point_mass_momentum_source(d: usize) -> SourceProgram {
+    SourceProgram::trace(|cx| match d {
         1 => {
             let (rho, _v, x, src) = point_mass_gv::<1>(cx);
             src.momentum(rho, &x)
@@ -580,8 +401,8 @@ fn point_mass_momentum_source(d: usize) -> BuiltSource {
 /// point-mass gravity energy source `S_nrg = rho * (vel . a)` — the work the same softened
 /// field does, via the shared force-energy lift. 1 output. emitted by
 /// `point_mass_gravity_sources` when the parent regime has energy; isothermal regimes drop it.
-fn point_mass_energy_source(d: usize) -> BuiltSource {
-    lift_to_built(|cx| match d {
+fn point_mass_energy_source(d: usize) -> SourceProgram {
+    SourceProgram::trace(|cx| match d {
         1 => {
             let (rho, vel, x, src) = point_mass_gv::<1>(cx);
             vec![src.energy(rho, &vel, &x)]
@@ -649,120 +470,70 @@ pub mod ib_params {
     pub const SINK_RATE: &str = "sink_rate";
 }
 
-/// IB common context — the params shared between rigid-penalty and accretion
-/// builders. distinct from `GravityCtx` because IB sources need a body
+/// IB common leaves — the params shared between rigid-penalty and accretion
+/// builders. distinct from the gravity leaves because IB sources need a body
 /// radius (the mask threshold) and may need a body velocity (rigid penalty).
-struct IbCtx {
-    rho: NodeId,
-    vel: Vec<NodeId>,     // D — primitive velocity
-    x: Vec<NodeId>,       // D — field point
-    body_xm: Vec<NodeId>, // D — body center
-    body_radius: NodeId,  // mask radius
+struct IbLeaves<'t> {
+    rho: Gv<'t>,
+    vel: Vec<Gv<'t>>,     // D — primitive velocity
+    x: Vec<Gv<'t>>,       // D — field point
+    body_xm: Vec<Gv<'t>>, // D — body center
+    body_radius: Gv<'t>,  // mask radius
 }
 
-fn declare_ib_ctx(g: &mut Graph, d: usize) -> (IbCtx, Vec<String>) {
-    let mut params: Vec<String> = Vec::new();
-    let rho = g.add_scalar_param(law_params::RHO, ElementTy::F64);
-    params.push(law_params::RHO.to_string());
-    let vel: Vec<NodeId> = (0..d)
-        .map(|k| {
-            let name = law_params::vel(k);
-            let id = g.add_scalar_param(&name, ElementTy::F64);
-            params.push(name);
-            id
-        })
-        .collect();
-    let x: Vec<NodeId> = (0..d)
-        .map(|k| {
-            let name = source_params::x(k);
-            let id = g.add_scalar_param(&name, ElementTy::F64);
-            params.push(name);
-            id
-        })
-        .collect();
-    let body_xm: Vec<NodeId> = (0..d)
-        .map(|k| {
-            let name = ib_params::body_xm(k);
-            let id = g.add_scalar_param(&name, ElementTy::F64);
-            params.push(name);
-            id
-        })
-        .collect();
-    let body_radius = g.add_scalar_param(ib_params::BODY_RADIUS, ElementTy::F64);
-    params.push(ib_params::BODY_RADIUS.to_string());
-    (
-        IbCtx {
-            rho,
-            vel,
-            x,
-            body_xm,
-            body_radius,
-        },
-        params,
-    )
+fn declare_ib_leaves<'t>(cx: TraceCx<'t>, d: usize) -> IbLeaves<'t> {
+    let rho = cx.scalar(law_params::RHO);
+    let vel: Vec<Gv<'t>> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
+    let x: Vec<Gv<'t>> = (0..d).map(|k| cx.scalar(&source_params::x(k))).collect();
+    let body_xm: Vec<Gv<'t>> = (0..d).map(|k| cx.scalar(&ib_params::body_xm(k))).collect();
+    let body_radius = cx.scalar(ib_params::BODY_RADIUS);
+    IbLeaves {
+        rho,
+        vel,
+        x,
+        body_xm,
+        body_radius,
+    }
 }
 
-/// build the carrier-generic "inside body" mask:
-///   inside = (|x - body_xm|^2 < body_radius^2).
-/// returns the Bool-typed NodeId. callers compose it with `g.select(mask,
-/// full_source, zero)` to localize a source value.
-fn build_inside_body_mask(g: &mut Graph, ctx: &IbCtx) -> NodeId {
-    let d = ctx.x.len();
-    let dx: Vec<NodeId> = (0..d)
-        .map(|k| g.element_wise(ElementWiseOp::Sub, vec![ctx.x[k], ctx.body_xm[k]], None))
-        .collect();
-    let d_sq = crate::regime_spec::build_dot(g, &dx, &dx);
-    let r_sq = g.element_wise(
-        ElementWiseOp::Mul,
-        vec![ctx.body_radius, ctx.body_radius],
-        None,
-    );
-    g.element_wise(ElementWiseOp::Lt, vec![d_sq, r_sq], None)
+/// the "inside body" mask: inside = (|x - body_xm|^2 < body_radius^2).
+/// callers compose it with `Gv::select(mask, full_source, zero)` to localize
+/// a source value; hash-consing shares one comparison across every output.
+fn inside_body_mask<'t>(leaves: &IbLeaves<'t>) -> symbi_ir::GvMask<'t> {
+    use symbi_ir::algebra::Scalar;
+    let d_sq = leaves
+        .x
+        .iter()
+        .zip(&leaves.body_xm)
+        .map(|(&x, &xm)| (x - xm) * (x - xm))
+        .sum::<Gv>();
+    d_sq.cmp_lt(leaves.body_radius * leaves.body_radius)
 }
 
 /// rigid-body penalty momentum source — velocity relaxation inside the body.
 ///   S_mom_k = mask * (-penalty_strength * rho * (vel_k - vbody_k)).
 ///
 /// returns D outputs (one per momentum component). the mask is reused across
-/// all D outputs via the Graph's hash-consing — emitted once per kernel.
-fn rigid_body_penalty_source(d: usize) -> BuiltSource {
-    let mut g = Graph::new();
-    let (ctx, mut params) = declare_ib_ctx(&mut g, d);
+/// all D outputs via the trace's hash-consing — emitted once per kernel.
+fn rigid_body_penalty_source(d: usize) -> SourceProgram {
+    SourceProgram::trace(|cx| {
+        use symbi_ir::algebra::Scalar;
+        let leaves = declare_ib_leaves(cx, d);
 
-    // rigid penalty needs a body velocity — declare it alongside the base ctx.
-    let vbody: Vec<NodeId> = (0..d)
-        .map(|k| {
-            let name = ib_params::vbody(k);
-            let id = g.add_scalar_param(&name, ElementTy::F64);
-            params.push(name);
-            id
-        })
-        .collect();
-    let k_strength = g.add_scalar_param(ib_params::PENALTY_STRENGTH, ElementTy::F64);
-    params.push(ib_params::PENALTY_STRENGTH.to_string());
+        // rigid penalty needs a body velocity — declare it alongside the base leaves.
+        let vbody: Vec<Gv> = (0..d).map(|k| cx.scalar(&ib_params::vbody(k))).collect();
+        let k_strength = cx.scalar(ib_params::PENALTY_STRENGTH);
 
-    let inside = build_inside_body_mask(&mut g, &ctx);
-    let zero = g.add_const(ConstValue::F64(0.0), None);
+        let inside = inside_body_mask(&leaves);
+        let k_rho = k_strength * leaves.rho;
 
-    let k_rho = g.element_wise(ElementWiseOp::Mul, vec![k_strength, ctx.rho], None);
-
-    let outputs: Vec<NodeId> = (0..d)
-        .map(|i| {
-            // dv_i = vel_i - vbody_i
-            let dv = g.element_wise(ElementWiseOp::Sub, vec![ctx.vel[i], vbody[i]], None);
-            // full source: -k * rho * dv
-            let prod = g.element_wise(ElementWiseOp::Mul, vec![k_rho, dv], None);
-            let full = g.element_wise(ElementWiseOp::Neg, vec![prod], None);
-            // localized: mask ? full : 0
-            g.select(inside, full, zero, None)
-        })
-        .collect();
-
-    BuiltSource {
-        graph: g,
-        params,
-        outputs,
-    }
+        (0..d)
+            .map(|i| {
+                let dv = leaves.vel[i] - vbody[i];
+                Gv::select(inside, -(k_rho * dv), cx.lit(0.0))
+            })
+            .collect()
+    })
 }
 
 /// the rigid-body penalty source spec — a single localized momentum source.
@@ -781,7 +552,7 @@ pub fn rigid_body_penalty_sources(_d: usize) -> Vec<SourceSpec> {
 //
 // **the openness proof.** the abstraction is genuinely open along the
 // SourceKind axis: a user can add their own source physics by providing
-// nothing more than an `fn(d) -> BuiltSource` builder, and the 5 strictness
+// nothing more than an `fn(d) -> SourceProgram` builder, and the 5 strictness
 // clauses are the complete set of constraints the framework imposes:
 //
 //   clause 1 (carrier-uniform) — compile-enforced. the builder can only
@@ -821,20 +592,20 @@ pub mod user_params {
 }
 
 /// the universal user-source constructor — wrap any
-/// `fn(d) -> BuiltSource` builder into a `SourceSpec`. the only
+/// `fn(d) -> SourceProgram` builder into a `SourceSpec`. the only
 /// constraint is the type signature; the framework enforces the rest at
 /// compile time + via `SimulationLaws::validate`.
 ///
 /// usage:
 ///   ```ignore
-///   fn my_cooling_source(d: usize) -> BuiltSource { ... }
+///   fn my_cooling_source(d: usize) -> SourceProgram { ... }
 ///   let cooling = user_defined_source("nrg", my_cooling_source);
 ///   let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_user(vec![cooling]);
 ///   sim.validate()?;
 ///   ```
 pub fn user_defined_source(
     target_field: &'static str,
-    builder: fn(usize) -> BuiltSource,
+    builder: fn(usize) -> SourceProgram,
 ) -> SourceSpec {
     SourceSpec {
         kind: SourceKind::UserDefined,
@@ -849,7 +620,7 @@ pub fn user_defined_source(
 // `user_defined_source` lets a user write raw conservative components into a target field —
 // flexible, and it leaves the momentum-energy consistency to the user: raw components can
 // deposit energy that no force did work to supply. these constructors close that: the user
-// supplies a free field as a lowered `BuiltSource` — an acceleration `a(x,t)` or a cooling
+// supplies a free field as a lowered `SourceProgram` — an acceleration `a(x,t)` or a cooling
 // rate `Lambda(x,t)`, bridged from a serialized DAG via `expr_bridge` — and the framework wraps
 // it in the conservation law. the framework alone writes S_mom / S_nrg, so the work-energy
 // coupling `S_nrg = rho*(a.v)` is correct by construction; the consistent source is the only
@@ -861,66 +632,33 @@ pub fn user_defined_source(
 // supply `a` in Rust) and these user sources (which supply `a` as the spliced DAG). so the
 // law is f64==Gv by construction — the single lift is the sole author of the graph, so the
 // traced expression is the f64 reference, closing the bug class where a hand-built `Op` graph
-// computes something else. a force contributes to two fields, built as two `BuiltSource`s
+// computes something else. a force contributes to two fields, built as two `SourceProgram`s
 // (momentum + energy) tracing the same lift over the same field `a` — the structural reason the
 // energy source stays in step with the momentum source.
 // =============================================================================
 
-/// trace a carrier-generic conservation lift (a `source_term::*` function) into a standalone
-/// `BuiltSource`. the closure runs inside a fresh Gv trace: it declares its scalar leaves via
-/// `cx.scalar` (rho, vel_k, ...) and the spliced user field, and returns the lifted output
-/// `Gv`s. `cx.scalar` dedups by name in first-seen order, which is the `BuiltSource.params`
-/// contract — so the param manifest falls out of the trace. this is the same scoped-trace
-/// idiom the substrate kernels use; it builds IR once per source, at bake time.
-pub fn lift_to_built(build: impl for<'t> FnOnce(TraceCx<'t>) -> Vec<Gv<'t>>) -> BuiltSource {
-    // isolate the trace: these builders run both standalone (config-time, before any trace opens)
-    // and partway through the godunov trace (the AOT/substrate fused-source bake calls
-    // `build_source` mid-trace). `trace` saves/restores any open outer trace so it
-    // survives the inner build intact. node ids are collected inside the closure, while the inner
-    // trace is live.
-    let (kernel, outputs) =
-        symbi_ir::trace(|cx| build(cx).iter().map(|g| g.node()).collect::<Vec<NodeId>>());
-    BuiltSource {
-        graph: kernel.graph().clone(),
-        params: kernel
-            .scalar_params()
-            .iter()
-            .map(|param| param.as_str().to_string())
-            .collect(),
-        outputs,
-    }
-}
-
-/// splice a user field (its own lowered graph) into the active trace, binding each of its
-/// params to a same-named `cx.scalar` leaf, and return its outputs as `Gv`s the lift can
-/// consume. must be called inside an open trace ([`lift_to_built`]). a param shared with the
-/// lift (e.g., the field also reads `rho`) dedups onto the lift's leaf — same runtime scalar.
-fn splice_field_into_trace<'t>(cx: TraceCx<'t>, field: &BuiltSource) -> Vec<Gv<'t>> {
-    let name_to_node: std::collections::HashMap<String, NodeId> = field
-        .params
-        .iter()
-        .map(|p| (p.clone(), cx.scalar(p).node()))
-        .collect();
-    cx.with_trace(|t| splice_built_source_into(field, t.graph(), &name_to_node))
-        .into_iter()
-        .map(|node| cx.gv(node))
-        .collect()
-}
+// standalone source construction is `SourceProgram::trace` (the closure runs
+// inside a fresh isolated trace, so a builder works both at config time and
+// partway through the godunov trace); a spliced user field enters the active
+// trace through `cx.splice_source_as_scalars`, which binds each of the
+// field's params to a same-named scalar leaf — a param shared with the lift
+// (e.g., the field also reads `rho`) dedups onto the lift's leaf, the same
+// runtime scalar.
 
 /// the axiomatic force-momentum source: `S_mom_k = rho * a_k`, where `a` is the user's
 /// D-output acceleration field. target field `"mom"` (D outputs). pair with
 /// [`user_force_energy_source`] for the energy half — both trace the same lift over the same
 /// `a`, so the work-energy coupling holds identically.
-pub fn user_force_momentum_source(accel: &BuiltSource, d: usize) -> BuiltSource {
+pub fn user_force_momentum_source(accel: &SourceProgram, d: usize) -> SourceProgram {
     assert_eq!(
-        accel.outputs.len(),
+        accel.outputs().len(),
         d,
         "user_force_momentum_source: acceleration field must have D = {d} outputs, got {}",
-        accel.outputs.len(),
+        accel.outputs().len(),
     );
-    lift_to_built(|cx| {
+    SourceProgram::trace(|cx| {
         let rho = cx.scalar(law_params::RHO);
-        let a = splice_field_into_trace(cx, accel);
+        let a = cx.splice_source_as_scalars(accel);
         crate::source_term::force_momentum(rho, &a)
     })
 }
@@ -929,17 +667,17 @@ pub fn user_force_momentum_source(accel: &BuiltSource, d: usize) -> BuiltSource 
 /// derived from the same acceleration field `a` the momentum source uses. target field
 /// `"nrg"` (1 output). energy regimes only — an iso regime carries momentum alone, so the
 /// momentum source stands by itself there.
-pub fn user_force_energy_source(accel: &BuiltSource, d: usize) -> BuiltSource {
+pub fn user_force_energy_source(accel: &SourceProgram, d: usize) -> SourceProgram {
     assert_eq!(
-        accel.outputs.len(),
+        accel.outputs().len(),
         d,
         "user_force_energy_source: acceleration field must have D = {d} outputs, got {}",
-        accel.outputs.len(),
+        accel.outputs().len(),
     );
-    lift_to_built(|cx| {
+    SourceProgram::trace(|cx| {
         let rho = cx.scalar(law_params::RHO);
         let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
-        let a = splice_field_into_trace(cx, accel);
+        let a = cx.splice_source_as_scalars(accel);
         vec![crate::source_term::force_energy(rho, &vel, &a)]
     })
 }
@@ -947,13 +685,13 @@ pub fn user_force_energy_source(accel: &BuiltSource, d: usize) -> BuiltSource {
 /// rotating-frame momentum source for constant rotation about the z axis. the
 /// field is `[omega, origin_x, origin_y]`; position and velocity come from the
 /// evolving cell state, so this source composes with independent buffer sponges.
-pub fn user_rotating_frame_momentum_source(field: &BuiltSource, d: usize) -> BuiltSource {
-    assert_eq!(field.outputs.len(), 3);
-    lift_to_built(|cx| {
+pub fn user_rotating_frame_momentum_source(field: &SourceProgram, d: usize) -> SourceProgram {
+    assert_eq!(field.outputs().len(), 3);
+    SourceProgram::trace(|cx| {
         let rho = cx.scalar(law_params::RHO);
         let position: Vec<Gv> = (0..d).map(|kk| cx.scalar(&format!("x_{kk}"))).collect();
         let vel: Vec<Gv> = (0..d).map(|kk| cx.scalar(&law_params::vel(kk))).collect();
-        let values = splice_field_into_trace(cx, field);
+        let values = cx.splice_source_as_scalars(field);
         let accel = crate::source_term::rotating_frame_acceleration(
             &position, &vel, values[0], values[1], values[2],
         );
@@ -963,13 +701,13 @@ pub fn user_rotating_frame_momentum_source(field: &BuiltSource, d: usize) -> Bui
 
 /// rotating-frame work term derived from the same acceleration as the momentum
 /// source, so energy and momentum stay in step.
-pub fn user_rotating_frame_energy_source(field: &BuiltSource, d: usize) -> BuiltSource {
-    assert_eq!(field.outputs.len(), 3);
-    lift_to_built(|cx| {
+pub fn user_rotating_frame_energy_source(field: &SourceProgram, d: usize) -> SourceProgram {
+    assert_eq!(field.outputs().len(), 3);
+    SourceProgram::trace(|cx| {
         let rho = cx.scalar(law_params::RHO);
         let position: Vec<Gv> = (0..d).map(|kk| cx.scalar(&format!("x_{kk}"))).collect();
         let vel: Vec<Gv> = (0..d).map(|kk| cx.scalar(&law_params::vel(kk))).collect();
-        let values = splice_field_into_trace(cx, field);
+        let values = cx.splice_source_as_scalars(field);
         let accel = crate::source_term::rotating_frame_acceleration(
             &position, &vel, values[0], values[1], values[2],
         );
@@ -979,15 +717,15 @@ pub fn user_rotating_frame_energy_source(field: &BuiltSource, d: usize) -> Built
 
 /// the axiomatic cooling source: `S_nrg = -Lambda`, where `Lambda` is the user's 1-output
 /// rate field — an energy sink; momentum and mass pass through unchanged. target field `"nrg"`.
-pub fn user_cooling_source(rate: &BuiltSource, _d: usize) -> BuiltSource {
+pub fn user_cooling_source(rate: &SourceProgram, _d: usize) -> SourceProgram {
     assert_eq!(
-        rate.outputs.len(),
+        rate.outputs().len(),
         1,
         "user_cooling_source: cooling rate field must have 1 output, got {}",
-        rate.outputs.len(),
+        rate.outputs().len(),
     );
-    lift_to_built(|cx| {
-        let lambda = splice_field_into_trace(cx, rate);
+    SourceProgram::trace(|cx| {
+        let lambda = cx.splice_source_as_scalars(rate);
         vec![crate::source_term::cooling(lambda[0])]
     })
 }
@@ -999,18 +737,18 @@ pub fn user_cooling_source(rate: &BuiltSource, _d: usize) -> BuiltSource {
 /// invariant that `force`/`raw` leave to the caller. pair with [`user_relax_energy_source`] for
 /// the work term (energy regimes), which traces the same lift over the same field so the
 /// coupling stays in step.
-pub fn user_relax_momentum_source(field: &BuiltSource, d: usize) -> BuiltSource {
+pub fn user_relax_momentum_source(field: &SourceProgram, d: usize) -> SourceProgram {
     assert_eq!(
-        field.outputs.len(),
+        field.outputs().len(),
         1 + d,
         "user_relax_momentum_source: field must be [kappa, v_ref_0..v_ref_{}], got {} outputs",
         d - 1,
-        field.outputs.len(),
+        field.outputs().len(),
     );
-    lift_to_built(|cx| {
+    SourceProgram::trace(|cx| {
         let rho = cx.scalar(law_params::RHO);
         let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
-        let f = splice_field_into_trace(cx, field);
+        let f = cx.splice_source_as_scalars(field);
         crate::source_term::relax_momentum(rho, &vel, f[0], &f[1..1 + d])
     })
 }
@@ -1019,18 +757,18 @@ pub fn user_relax_momentum_source(field: &BuiltSource, d: usize) -> BuiltSource 
 /// relaxation drag does, derived from the same field the momentum source uses (so the energy
 /// bookkeeping stays in step). energy regimes only. with `kappa >= 0` the work term is
 /// sign-definite: the relaxation removes kinetic energy whenever `vel` departs from `v_ref`.
-pub fn user_relax_energy_source(field: &BuiltSource, d: usize) -> BuiltSource {
+pub fn user_relax_energy_source(field: &SourceProgram, d: usize) -> SourceProgram {
     assert_eq!(
-        field.outputs.len(),
+        field.outputs().len(),
         1 + d,
         "user_relax_energy_source: field must be [kappa, v_ref_0..v_ref_{}], got {} outputs",
         d - 1,
-        field.outputs.len(),
+        field.outputs().len(),
     );
-    lift_to_built(|cx| {
+    SourceProgram::trace(|cx| {
         let rho = cx.scalar(law_params::RHO);
         let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
-        let f = splice_field_into_trace(cx, field);
+        let f = cx.splice_source_as_scalars(field);
         vec![crate::source_term::relax_energy(
             rho,
             &vel,
@@ -1059,27 +797,27 @@ pub fn user_relax_energy_source(field: &BuiltSource, d: usize) -> BuiltSource {
 /// masking rides `kappa` alone, which factors into every channel; masking the reference
 /// would corrupt the state the flow relaxes toward rather than where it relaxes.
 pub fn user_sponge_sources(
-    field: &BuiltSource,
+    field: &SourceProgram,
     d: usize,
     law: &crate::state_law::StateLaw,
     has_energy: bool,
-) -> Result<Vec<(String, BuiltSource)>, String> {
+) -> Result<Vec<(String, SourceProgram)>, String> {
     let want = if has_energy { 3 + d } else { 2 + d };
-    if field.outputs.len() != want {
+    if field.outputs().len() != want {
         return Err(format!(
             "sponge needs [kappa, rho_ref, vel_ref_0..vel_ref_{}{}]: got {} outputs, expected {want}",
             d.saturating_sub(1),
             if has_energy { ", pre_ref" } else { "" },
-            field.outputs.len(),
+            field.outputs().len(),
         ));
     }
     // the conserved pair at one slot: the reference state and the cell's own, both through
     // the same conversion, so the difference is a genuine departure rather than a
     // comparison between two spellings of "conserved".
-    let slot = |pick: SpongeSlot| -> Result<BuiltSource, String> {
+    let slot = |pick: SpongeSlot| -> Result<SourceProgram, String> {
         let mut err: Option<String> = None;
-        let built = lift_to_built(|cx| {
-            let f = splice_field_into_trace(cx, field);
+        let built = SourceProgram::trace(|cx| {
+            let f = cx.splice_source_as_scalars(field);
             let kappa = crate::source_term::clamp_rate(f[0]);
             let cur_rho = cx.scalar(law_params::RHO);
             let cur_vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
@@ -1149,11 +887,11 @@ enum SpongeSlot {
 /// so a single config additively deposits mass, momentum, and energy at once. `outputs` selects
 /// which of `field`'s outputs feed this slot (den: `0..1`; mom: `1..1+D`; nrg: `1+D..2+D`).
 pub fn user_inject_slot_source(
-    field: &BuiltSource,
+    field: &SourceProgram,
     outputs: std::ops::Range<usize>,
-) -> BuiltSource {
-    lift_to_built(|cx| {
-        let f = splice_field_into_trace(cx, field);
+) -> SourceProgram {
+    SourceProgram::trace(|cx| {
+        let f = cx.splice_source_as_scalars(field);
         f[outputs].to_vec()
     })
 }
@@ -1167,15 +905,15 @@ pub fn user_inject_slot_source(
 // targets. used in tests as the "known analytical form" cross-check.
 
 /// declare the uniform-acceleration leaves (`g_ext_k`) at compile-time dimension `D` and build
-/// the carrier source [`UniformAccel`]. must be called inside an open trace ([`lift_to_built`]).
+/// the carrier source [`UniformAccel`]. must be called inside an open trace ([`SourceProgram::trace`]).
 fn uniform_accel_gv<'t, const D: usize>(cx: TraceCx<'t>) -> (Gv<'t>, UniformAccel<Gv<'t>, D>) {
     let rho = cx.scalar(law_params::RHO);
     let g_ext: [Gv; D] = std::array::from_fn(|k| cx.scalar(&user_params::g_ext(k)));
     (rho, UniformAccel { g_ext })
 }
 
-fn uniform_acceleration_momentum_source(d: usize) -> BuiltSource {
-    lift_to_built(|cx| match d {
+fn uniform_acceleration_momentum_source(d: usize) -> SourceProgram {
+    SourceProgram::trace(|cx| match d {
         1 => {
             let (rho, src) = uniform_accel_gv::<1>(cx);
             src.momentum(rho)
@@ -1192,8 +930,8 @@ fn uniform_acceleration_momentum_source(d: usize) -> BuiltSource {
     })
 }
 
-fn uniform_acceleration_energy_source(d: usize) -> BuiltSource {
-    lift_to_built(|cx| match d {
+fn uniform_acceleration_energy_source(d: usize) -> SourceProgram {
+    SourceProgram::trace(|cx| match d {
         1 => {
             let (rho, src) = uniform_accel_gv::<1>(cx);
             let v = uniform_vel::<1>(cx);
@@ -1270,12 +1008,13 @@ pub fn point_mass_gravity_sources(_d: usize, has_energy: bool) -> Vec<SourceSpec
 mod tests {
     use super::*;
     use symbi_ir::backends::interp::{Backend, Cpu};
+    use symbi_ir::NodeId;
     use symbi_ir::passes::scalarize::scalarize;
 
-    fn eval_source(built: &BuiltSource, output: NodeId, values: &[(&str, f64)]) -> f64 {
-        let lowered = scalarize(&built.graph, output, "source_term");
+    fn eval_source(built: &SourceProgram, output: NodeId, values: &[(&str, f64)]) -> f64 {
+        let lowered = scalarize(&built.graph(), output, "source_term");
         let inputs: Vec<f64> = built
-            .params
+            .params()
             .iter()
             .map(|pname| {
                 values
@@ -1327,13 +1066,13 @@ mod tests {
         assert_eq!(specs[0].target_field, "mom");
 
         let built = (specs[0].build_source)(1);
-        assert_eq!(built.outputs.len(), 1, "1D momentum source has 1 component");
+        assert_eq!(built.outputs().len(), 1, "1D momentum source has 1 component");
 
         let x0 = source_params::x(0);
         let v0 = law_params::vel(0);
         let s_data = eval_source(
             &built,
-            built.outputs[0],
+            built.outputs()[0],
             &[
                 (law_params::RHO, rho),
                 (v0.as_str(), vr),
@@ -1377,7 +1116,7 @@ mod tests {
 
         let built = (specs[0].build_source)(2);
         assert_eq!(
-            built.outputs.len(),
+            built.outputs().len(),
             2,
             "2D momentum source has 2 components"
         );
@@ -1400,7 +1139,7 @@ mod tests {
             metric.momentum_source(Tensor::new([r, theta]), rho, Tensor::new([vr, vt]), p);
 
         for k in 0..2 {
-            let s_data = eval_source(&built, built.outputs[k], &values_ref);
+            let s_data = eval_source(&built, built.outputs()[k], &values_ref);
             assert!(
                 (s_data - s_metric[k]).abs() < 1e-12,
                 "2D spherical momentum source component {k}: data {s_data} != metric {}",
@@ -1431,7 +1170,7 @@ mod tests {
         assert_eq!(specs.len(), 1);
         let built = (specs[0].build_source)(3);
         assert_eq!(
-            built.outputs.len(),
+            built.outputs().len(),
             3,
             "3D momentum source has 3 components"
         );
@@ -1462,7 +1201,7 @@ mod tests {
         );
 
         for k in 0..3 {
-            let s_data = eval_source(&built, built.outputs[k], &values_ref);
+            let s_data = eval_source(&built, built.outputs()[k], &values_ref);
             assert!(
                 (s_data - s_metric[k]).abs() < 1e-12,
                 "3D spherical momentum source component {k}: data {s_data} != metric {}",
@@ -1487,13 +1226,13 @@ mod tests {
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].target_field, "mom");
         let built = (specs[0].build_source)(1);
-        assert_eq!(built.outputs.len(), 1);
+        assert_eq!(built.outputs().len(), 1);
 
         let x0 = source_params::x(0);
         let v0 = law_params::vel(0);
         let s_data = eval_source(
             &built,
-            built.outputs[0],
+            built.outputs()[0],
             &[
                 (law_params::RHO, rho),
                 (v0.as_str(), vr),
@@ -1524,7 +1263,7 @@ mod tests {
 
         let specs = cylindrical_geometric_sources(2);
         let built = (specs[0].build_source)(2);
-        assert_eq!(built.outputs.len(), 2);
+        assert_eq!(built.outputs().len(), 2);
 
         let x0 = source_params::x(0);
         let x1 = source_params::x(1);
@@ -1543,7 +1282,7 @@ mod tests {
         let s_metric = metric.momentum_source(Tensor::new([r, z]), rho, Tensor::new([vr, vz]), p);
 
         for k in 0..2 {
-            let s_data = eval_source(&built, built.outputs[k], &values_ref);
+            let s_data = eval_source(&built, built.outputs()[k], &values_ref);
             assert!(
                 (s_data - s_metric[k]).abs() < 1e-12,
                 "2D cyl momentum source component {k}: data {s_data} != metric {}",
@@ -1552,7 +1291,7 @@ mod tests {
         }
         // explicit S_z = 0 guard.
         assert_eq!(
-            eval_source(&built, built.outputs[1], &values_ref),
+            eval_source(&built, built.outputs()[1], &values_ref),
             0.0,
             "2D cyl S_z must be exactly 0 (axisymmetric)",
         );
@@ -1574,7 +1313,7 @@ mod tests {
 
         let specs = cylindrical_geometric_sources(3);
         let built = (specs[0].build_source)(3);
-        assert_eq!(built.outputs.len(), 3);
+        assert_eq!(built.outputs().len(), 3);
 
         let x0 = source_params::x(0);
         let x1 = source_params::x(1);
@@ -1598,7 +1337,7 @@ mod tests {
             metric.momentum_source(Tensor::new([r, phi, z]), rho, Tensor::new([vr, vp, vz]), p);
 
         for k in 0..3 {
-            let s_data = eval_source(&built, built.outputs[k], &values_ref);
+            let s_data = eval_source(&built, built.outputs()[k], &values_ref);
             assert!(
                 (s_data - s_metric[k]).abs() < 1e-12,
                 "3D cyl momentum source component {k}: data {s_data} != metric {}",
@@ -1607,7 +1346,7 @@ mod tests {
         }
         // explicit S_z = 0 guard.
         assert_eq!(
-            eval_source(&built, built.outputs[2], &values_ref),
+            eval_source(&built, built.outputs()[2], &values_ref),
             0.0,
             "3D cyl S_z must be exactly 0"
         );
@@ -1679,7 +1418,7 @@ mod tests {
 
         let specs = point_mass_gravity_sources(3, true);
         let built = (specs[0].build_source)(3);
-        assert_eq!(built.outputs.len(), 3);
+        assert_eq!(built.outputs().len(), 3);
 
         let x0 = source_params::x(0);
         let x1 = source_params::x(1);
@@ -1708,7 +1447,7 @@ mod tests {
         let g_analytical = analytical_gravity_acceleration(&x, &xm, gm);
         // S_mom = rho * g — same formula, just multiplied by rho.
         for k in 0..3 {
-            let s_data = eval_source(&built, built.outputs[k], &values_ref);
+            let s_data = eval_source(&built, built.outputs()[k], &values_ref);
             let s_expected = rho * g_analytical[k];
             assert!(
                 (s_data - s_expected).abs() < 1e-12,
@@ -1727,7 +1466,7 @@ mod tests {
 
         let specs = point_mass_gravity_sources(3, true);
         let built = (specs[1].build_source)(3); // [1] = energy
-        assert_eq!(built.outputs.len(), 1);
+        assert_eq!(built.outputs().len(), 1);
 
         let x0 = source_params::x(0);
         let x1 = source_params::x(1);
@@ -1740,7 +1479,7 @@ mod tests {
         let xm2 = gravity_params::xm(2);
         let s_data = eval_source(
             &built,
-            built.outputs[0],
+            built.outputs()[0],
             &[
                 (law_params::RHO, rho),
                 (v0.as_str(), vel[0]),
@@ -1806,9 +1545,9 @@ mod tests {
         ];
 
         // S_mom_x = -rho * GM * 2 / 2^3 = -2/8 = -0.25.
-        let s_x = eval_source(&built, built.outputs[0], &vals);
-        let s_y = eval_source(&built, built.outputs[1], &vals);
-        let s_z = eval_source(&built, built.outputs[2], &vals);
+        let s_x = eval_source(&built, built.outputs()[0], &vals);
+        let s_y = eval_source(&built, built.outputs()[1], &vals);
+        let s_z = eval_source(&built, built.outputs()[2], &vals);
 
         assert!((s_x - (-0.25)).abs() < 1e-12, "S_mom_x: {s_x} != -0.25");
         assert!(s_y.abs() < 1e-14, "S_mom_y must be 0 (y=0 displacement)");
@@ -1849,8 +1588,8 @@ mod tests {
         // |x| = 5, r^3 = 125.
         // S_mom_x = -1 * 3 / 125 = -0.024
         // S_mom_y = -1 * 4 / 125 = -0.032
-        let s_x = eval_source(&built, built.outputs[0], &vals);
-        let s_y = eval_source(&built, built.outputs[1], &vals);
+        let s_x = eval_source(&built, built.outputs()[0], &vals);
+        let s_y = eval_source(&built, built.outputs()[1], &vals);
         assert!((s_x - (-3.0 / 125.0)).abs() < 1e-12);
         assert!((s_y - (-4.0 / 125.0)).abs() < 1e-12);
     }
@@ -1914,7 +1653,7 @@ mod tests {
         let vals = refs(&base);
 
         for k in 0..3 {
-            let s = eval_source(&built, built.outputs[k], &vals);
+            let s = eval_source(&built, built.outputs()[k], &vals);
             assert_eq!(
                 s, 0.0,
                 "outside body: rigid penalty component {k} must be EXACTLY 0.0, got {s}",
@@ -1945,7 +1684,7 @@ mod tests {
         let vals = refs(&base);
 
         for k in 0..3 {
-            let s = eval_source(&built, built.outputs[k], &vals);
+            let s = eval_source(&built, built.outputs()[k], &vals);
             let s_expected = -k_strength * rho * (vel[k] - vbody[k]);
             assert!(
                 (s - s_expected).abs() < 1e-12,
@@ -1976,7 +1715,7 @@ mod tests {
         base.push((ib_params::PENALTY_STRENGTH.to_string(), 1.0));
         let vals = refs(&base);
 
-        let s = eval_source(&built, built.outputs[0], &vals);
+        let s = eval_source(&built, built.outputs()[0], &vals);
         assert_eq!(s, 0.0, "at d == R the mask fires false (strict `<`)");
     }
 
@@ -2029,7 +1768,7 @@ mod tests {
 
         // co-moving cell inside body: relative velocity = 0 -> source = 0.
         for k in 0..2 {
-            let s = eval_source(&built, built.outputs[k], &vals);
+            let s = eval_source(&built, built.outputs()[k], &vals);
             assert!(
                 s.abs() < 1e-14,
                 "co-moving cell inside body: penalty must be 0 on component {k}, got {s}",
@@ -2052,7 +1791,7 @@ mod tests {
         let built = (specs[0].build_source)(3);
 
         let has_select = built
-            .graph
+            .graph()
             .iter()
             .any(|(_, node, _)| matches!(node.op, GOp::Select(..)));
         assert!(
@@ -2062,7 +1801,7 @@ mod tests {
         );
 
         let has_lt = built
-            .graph
+            .graph()
             .iter()
             .any(|(_, node, _)| matches!(&node.op, GOp::ElementWise(ElementWiseOp::Lt, _)));
         assert!(
@@ -2109,7 +1848,7 @@ mod tests {
         ];
 
         for k in 0..3 {
-            let s_data = eval_source(&built, built.outputs[k], &vals);
+            let s_data = eval_source(&built, built.outputs()[k], &vals);
             let s_expected = rho * g_ext[k];
             assert!(
                 (s_data - s_expected).abs() < 1e-12,
@@ -2138,7 +1877,7 @@ mod tests {
         let g2 = user_params::g_ext(2);
         let s_data = eval_source(
             &built,
-            built.outputs[0],
+            built.outputs()[0],
             &[
                 (law_params::RHO, rho),
                 (v0.as_str(), vel[0]),

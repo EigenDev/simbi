@@ -4,7 +4,7 @@
 // runtime user sources, regime-agnostic. one mechanism for every
 // regime: a spec-validated `RuntimeSource` (DAGs + params + has_energy) drives the CPU
 // per-cell interpreter, the lazily-JIT'd fused host kernel, and the device NVRTC kernel,
-// all from the same `BuiltSource`s. also the `dispatch_runtime_ir` device path for any
+// all from the same `SourceProgram`s. also the `dispatch_runtime_ir` device path for any
 // runtime-built IR (sources + driven boundaries) and the shared GvKernel->IR plumbing.
 // =============================================================================
 
@@ -12,7 +12,7 @@ use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_geometry::Geometry;
 use symbi_grid::Field;
 use symbi_hydro::SourceEvaluator;
-use symbi_hydro::source_spec::BuiltSource;
+use symbi_hydro::source_spec::SourceProgram;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::{FieldBind, FieldRef, ScalarRef};
 use symbi_xpu::MemorySpace;
@@ -122,7 +122,7 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
 /// `has_energy` is the attaching regime's authority (drives the `nrg` write).
 pub struct RuntimeSource {
     pub eval: SourceEvaluator,
-    pub(crate) built: Vec<(String, BuiltSource)>,
+    pub(crate) built: Vec<(String, SourceProgram)>,
     pub params: Vec<f64>,
     pub(crate) has_energy: bool,
     pub(crate) gpu_ir: OnceLock<(String, String)>,
@@ -156,10 +156,10 @@ pub(crate) struct FusedCpuKernel {
 }
 
 impl RuntimeSource {
-    /// build from spec-validated `(target, BuiltSource)` pairs. `has_energy` comes from the
+    /// build from spec-validated `(target, SourceProgram)` pairs. `has_energy` comes from the
     /// attaching kernel-set's `RegimeSpec` (e.g., `NEWTONIAN_SPEC.has_energy` /
     /// `ISO_NEWTONIAN_SPEC.has_energy`) — the set is the regime.
-    pub fn new(built: Vec<(String, BuiltSource)>, params: Vec<f64>, has_energy: bool) -> Arc<Self> {
+    pub fn new(built: Vec<(String, SourceProgram)>, params: Vec<f64>, has_energy: bool) -> Arc<Self> {
         let eval = SourceEvaluator::from_built(&built);
         Arc::new(Self {
             eval,
@@ -323,7 +323,7 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// build the fused godunov+source host kernel from a runtime user source: trace the combined
-/// `GvKernel` (the step-2 `godunov_stage_gv_with_fused_built` core, fed the loaded `BuiltSource`s)
+/// `GvKernel` (the step-2 `godunov_stage_gv_with_fused_built` core, fed the loaded `SourceProgram`s)
 /// and Cranelift-JIT it. `None` when a node falls outside the JIT subset -> the caller runs the
 /// two-pass. `geo` must match the AOT godunov the two-pass uses, so the fused and two-pass results
 /// stay bit-equivalent.
@@ -334,10 +334,10 @@ fn build_fused_cpu_kernel<const D: usize>(
     ncomp: usize,
     has_energy: bool,
     geo: symbi_discretize::gv::GeoSource,
-    built: &[(String, BuiltSource)],
+    built: &[(String, SourceProgram)],
     n_bodies: usize,
 ) -> Option<FusedCpuKernel> {
-    let src_refs: Vec<(&str, &BuiltSource)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
+    let src_refs: Vec<(&str, &SourceProgram)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (gvk, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         // runtime GR sources would thread the real spacetime here; only flat (Minkowski) is wired.
         // n_bodies > 0 folds the immersed-body source (gravity + accretion drain) into this stage,
@@ -392,9 +392,9 @@ fn build_source_only_cpu_kernel<const D: usize>(
     axes: &[usize],
     ncomp: usize,
     has_energy: bool,
-    built: &[(String, BuiltSource)],
+    built: &[(String, SourceProgram)],
 ) -> Option<FusedCpuKernel> {
-    let src_refs: Vec<(&str, &BuiltSource)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
+    let src_refs: Vec<(&str, &SourceProgram)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (gvk, writes) = symbi_discretize::gv::source_apply_from_built_gv(
         coords, spacing, axes, D as u8, ncomp, has_energy, &src_refs,
     );
@@ -812,7 +812,7 @@ pub(crate) fn resolve_runtime_param<const D: usize, const DOF: usize>(
 
 /// the GPU pass: JIT-build a substrate kernel from the loaded DAGs and launch it on-device. the
 /// kernel is `source_apply_from_built_gv` (the same builder build.rs AOT-bakes), invoked at runtime
-/// over the user `BuiltSource`s; the IR is built once (lazily; geometry known only at dispatch),
+/// over the user `SourceProgram`s; the IR is built once (lazily; geometry known only at dispatch),
 /// NVRTC-compiled + module-cached by a content-addressed name, then re-launched every stage with
 /// fresh `(dt=weight, t, p{i})` scalars. bit-identical-by-construction to the CPU interpreter pass.
 fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
@@ -852,7 +852,7 @@ fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
     });
 }
 
-/// lower the runtime `BuiltSource`s into the substrate source kernel and serialize its neutral IR,
+/// lower the runtime `SourceProgram`s into the substrate source kernel and serialize its neutral IR,
 /// reading the live sim geometry (coords / spacing / axis-roles) and the regime's `has_energy`.
 /// returns `(content-addressed kernel name, ir blob)`. the kernel name is baked into the IR
 /// (`run_gpu` asserts they agree), so it is content-derived: build a probe IR with a fixed name,
@@ -860,7 +860,7 @@ fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
 /// sources reuse one JIT module, distinct sources get distinct modules.
 fn build_runtime_source_ir<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
-    built: &[(String, BuiltSource)],
+    built: &[(String, SourceProgram)],
     has_energy: bool,
 ) -> (String, String)
 where
@@ -868,7 +868,7 @@ where
     Mem: MemorySpace,
 {
     let (coords, spacing, axes) = sim_gv_geom(sim);
-    let src_refs: Vec<(&str, &BuiltSource)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
+    let src_refs: Vec<(&str, &SourceProgram)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (gvk, writes) = symbi_discretize::source_apply_from_built_gv(
         coords, &spacing, &axes, D as u8, DOF, has_energy, &src_refs,
     );

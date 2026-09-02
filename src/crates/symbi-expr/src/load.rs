@@ -196,7 +196,7 @@ pub fn load_expression(
 /// build the topologically-ordered `Node` array from serialized descriptors — the shared
 /// front half of `load_expression`. `symbi-hydro::expr_bridge` lowers this same `Vec<Node>`
 /// into the IR Graph (for fused codegen), so json -> nodes -> {VM `Expression` | IR
-/// `BuiltSource`} is one parse. validates op names, arity, and child indices.
+/// `SourceProgram`} is one parse. validates op names, arity, and child indices.
 pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError> {
     let nn = node_descs.len();
     let mut nodes = Vec::with_capacity(nn);
@@ -288,7 +288,7 @@ pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError>
 /// a serialized user source — the python front door's wire format. a python builder emits this
 /// as json (`SourceConfig::from_json`); the rust side turns it into a VM `Expression`
 /// (`to_expression`) or hands the `nodes` + `outputs` to `symbi-hydro::expr_bridge` for a fused
-/// IR `BuiltSource`, then wraps it in the conservation law per `kind`.
+/// IR `SourceProgram`, then wraps it in the conservation law per `kind`.
 ///
 /// json shape (None node fields omitted):
 /// ```json

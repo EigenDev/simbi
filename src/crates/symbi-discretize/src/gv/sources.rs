@@ -318,15 +318,15 @@ pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, KernelWrites) {
     })
 }
 
-/// splice an externally-lowered user-expression `BuiltSource` (a parsed script, bridged into the
+/// splice an externally-lowered user-expression `SourceProgram` (a parsed script, bridged into the
 /// `symbi-ir` Graph via `symbi_hydro::expr_bridge`, optionally wrapped in a conservation law by
 /// `source_spec::user_force_*` / `user_cooling_source`) into a Gv trace — binding each declared
 /// param to a runtime Gv scalar of the same name — and write its outputs `s_k`. a user expression
-/// fuses into a kernel graph and renders (CPU + CUDA) through the exact same `splice_built_source_into`
+/// fuses into a kernel graph and renders (CPU + CUDA) through the exact same `SourceProgram::splice_into`
 /// path a built-in source uses: the user script becomes compiled kernel code.
 /// carrier-equivalence + the work-energy coupling are gated by `source_term_carrier.rs`.
 pub fn splice_user_source_gv(
-    built: &symbi_hydro::source_spec::BuiltSource,
+    built: &symbi_hydro::source_spec::SourceProgram,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
     // bind every declared param (x_k, t, p_i, ...) to a runtime Gv scalar of the same name;
@@ -336,7 +336,7 @@ pub fn splice_user_source_gv(
         name_to_node.insert(p.clone(), cx.scalar(p).node());
     }
     let outs = cx.with_trace(|t| {
-        symbi_hydro::source_spec::splice_built_source_into(built, t.graph(), &name_to_node)
+        built.splice_into(t.graph(), &name_to_node)
     });
     let writes = outs
         .iter()

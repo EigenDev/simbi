@@ -550,7 +550,7 @@ mod tests {
         // the same operator (apply_dag_core_gv) as the source pass, at the
         // (Coord, Assign) coordinate. proves the abstraction is general — two instances, one builder.
         // a prim prescription: rho=2, vel=0.5, pre=1 (consts; a real boundary reads x/t, same path).
-        let mk = |v: f64| symbi_hydro::source_spec::lift_to_built(|cx| vec![cx.lit(v)]);
+        let mk = |v: f64| symbi_ir::SourceProgram::trace(|cx| vec![cx.lit(v)]);
         let (rho, vel, pre) = (mk(2.0), mk(0.5), mk(1.0));
         let sources = [("den", &rho), ("mom", &vel), ("nrg", &pre)];
         let (k, writes) = boundary_fill_from_built_gv(
@@ -595,7 +595,7 @@ mod tests {
         // emit prim.mag[k] writes alongside rho/vel/pre. a purely toroidal injection sets the
         // in-plane B (mag[0],mag[1]) to 0 and the out-of-plane B_phi (mag[2]) to a value.
         let mk = |vals: &[f64]| {
-            symbi_hydro::source_spec::lift_to_built(|cx| {
+            symbi_ir::SourceProgram::trace(|cx| {
                 vals.iter().map(|&v| cx.lit(v)).collect()
             })
         };
@@ -1995,10 +1995,10 @@ mod tests {
 
     #[test]
     fn fused_built_core_matches_spec_adapter_trace() {
-        // the SourceSpec entry (`godunov_stage_gv_with_fused_sources`) and the BuiltSource core
+        // the SourceSpec entry (`godunov_stage_gv_with_fused_sources`) and the SourceProgram core
         // (`godunov_stage_gv_with_fused_built`) emit an identical godunov+source kernel — same
         // ABI manifest, same writes, same lowered source. the AOT spec path and the runtime
-        // BuiltSource path share a single trace, so they stay in lockstep. a family depending on
+        // SourceProgram path share a single trace, so they stay in lockstep. a family depending on
         // both position and energy (mom + nrg) exercises the centroid `x_k` binding and the energy
         // overlay, the parts most likely to diverge under a bad split.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -2023,12 +2023,12 @@ mod tests {
             false,
         );
 
-        // the runtime BuiltSource-value path (what `RuntimeSource` feeds).
-        let builts: Vec<(&str, symbi_hydro::source_spec::BuiltSource)> = specs
+        // the runtime SourceProgram-value path (what `RuntimeSource` feeds).
+        let builts: Vec<(&str, symbi_hydro::source_spec::SourceProgram)> = specs
             .iter()
             .map(|s| (s.target_field, (s.build_source)(2)))
             .collect();
-        let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
+        let src_refs: Vec<(&str, &symbi_hydro::source_spec::SourceProgram)> =
             builts.iter().map(|(t, b)| (*t, b)).collect();
         let (k_built, w_built) = godunov_stage_gv_with_fused_built(
             coords,
@@ -2045,7 +2045,7 @@ mod tests {
         );
 
         // the ABI manifest + writes are identical (NodeIds match because both trace the same op
-        // sequence — building the BuiltSource values outside the trace leaves the node allocation
+        // sequence — building the SourceProgram values outside the trace leaves the node allocation
         // untouched).
         assert_eq!(
             k_spec.field_inputs(), k_built.field_inputs(),

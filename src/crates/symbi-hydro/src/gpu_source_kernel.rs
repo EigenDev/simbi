@@ -14,7 +14,7 @@
 //   per-cell eval(values)  per-domain `__global__` launch
 //   f64 outputs            double* output buffers
 //
-// the IR is the same `BuiltSource.graph` for both paths. the difference is
+// the IR is the same `SourceProgram.graph()` for both paths. the difference is
 // the lowering target — A1 in action.
 //
 // **scope (what's structurally tested):**
@@ -91,12 +91,12 @@ impl GpuSourceKernel {
         for field_name in laws.fields_with_overlays() {
             if let Some(built) = laws.build_total_source(field_name, d) {
                 let entry_name = format!("{}_source", field_name);
-                let source = wrap_global(&built.graph, &built.params, &built.outputs, &entry_name);
+                let source = built.cuda_source_kernel(&entry_name);
                 field_kernels.insert(
                     field_name.to_string(),
                     FieldGpuKernel {
-                        params: built.params,
-                        n_outputs: built.outputs.len(),
+                        params: built.params().to_vec(),
+                        n_outputs: built.outputs().len(),
                         source,
                         entry_name,
                     },
@@ -163,15 +163,6 @@ impl GpuSourceKernel {
 // Transcendental(Cos,Sin) / Select — all of which scalarize + emit cleanly on
 // the primary path. there is no higher-order Op (LoadAt / IterateInline) on
 // this path, so the `UnsupportedOp` fallback has no live consumer.
-
-fn wrap_global(
-    graph: &symbi_ir::graph::Graph,
-    params: &[String],
-    outputs: &[symbi_ir::graph::NodeId],
-    entry_name: &str,
-) -> String {
-    symbi_ir::backends::cuda::emit_source_kernel(graph, params, outputs, entry_name)
-}
 
 // =============================================================================
 // tests — structural correctness of the wrapped CUDA source.

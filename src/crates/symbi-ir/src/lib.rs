@@ -52,6 +52,7 @@ pub mod proof;
 
 // typed kernel registry names for the amr-transfer / field-op family.
 pub mod kernel_id;
+pub mod source_program;
 pub mod support;
 pub mod support_infer;
 
@@ -69,6 +70,7 @@ pub use gv::{
     Gv, GvKernel, GvMask, GvTrace, KernelWrite, KernelWrites, NumericalPolicy, RewriteClass,
     TileSpec, TraceCx, trace, trace_for_domain, trace_with,
 };
+pub use source_program::SourceProgram;
 
 // IR data surface
 pub use dim::{DimExpr, Shape, broadcast_shape, broadcasts_to, shapes_equal};
