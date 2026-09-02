@@ -26,6 +26,7 @@ use symbi_carrier::Scalar;
 use crate::c2p_result::C2pResult;
 use crate::eos::Eos;
 use crate::mhd_state::{MhdCons, MhdPrim};
+use crate::state::Valencia;
 use crate::regime::Regime;
 use crate::regime_spec::RegimeSpec;
 use crate::rhd::{enthalpy, lorentz_factor, lorentz_factor_sq, sound_speed_sq};
@@ -119,11 +120,11 @@ impl<S: Scalar, const D: usize> RmhdGr<S, D> {
     ) -> MhdCons<S, D> {
         self.to_conserved(
             eos,
-            &MhdPrim {
+            &Valencia(MhdPrim {
                 hydro: stage_gas,
                 mag: candidate_mag,
-            },
-        )
+            }),
+        ).0
     }
 }
 
@@ -131,16 +132,17 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     const SPEC: &'static RegimeSpec = <Rmhd as Regime<S, D>>::SPEC;
     // relativistic: clamp the HLLE fan to include the stationary state (as `Rmhd`).
     const CLAMP_EXTREMAL_TO_ZERO: bool = true;
-    type Prim = MhdPrim<S, D>;
+    type Prim = Valencia<MhdPrim<S, D>>;
 
     // the valencia flux contracts the normal against contravariant velocity
     // and shift, so its face normal is the coordinate-frame covariant witness.
     type Normal = Normalized<Covariant<S, D>>;
-    type Cons = MhdCons<S, D>;
+    type Cons = Valencia<MhdCons<S, D>>;
     type Energy = crate::energy::Adiabatic;
 
     #[inline]
     fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
+        let prim = &prim.0;
         // Valencia: S_i = (rho h W^2 + B^2) v_i - (v.B) B_i with v_i/B_i lowered;
         // tau = rho h W^2 + B^2 - (p + b^2/2) - D. identity gamma -> lower = id, every
         // contraction euclidean: the flat `Rmhd::to_conserved` term-for-term.
@@ -159,7 +161,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
         let p_tot = prim.pre + half * b_mu_sq;
         let nrg = rhw2 + bsq - p_tot - den;
 
-        MhdCons {
+        Valencia(MhdCons {
             hydro: Cons {
                 chi: Default::default(),
                 den,
@@ -167,7 +169,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
                 nrg,
             },
             mag: prim.mag,
-        }
+        })
     }
 
     #[inline]
@@ -175,6 +177,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     where
         S: OrderedNumeric,
     {
+        let cons = &cons.0;
         let dd = cons.den;
         if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
             let floored = MhdPrim {
@@ -185,7 +188,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
                 },
                 mag: cons.mag,
             };
-            return C2pResult::err(floored, code);
+            return C2pResult::err(Valencia(floored), code);
         }
         // the metric-aware KKC recovery: the invariants r^2/B^2/r.B form with gamma, the
         // recovered v^i is contravariant. the SR->GR difference is the metric value.
@@ -193,14 +196,15 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
         if code.is_ok() {
-            C2pResult::ok(prim)
+            C2pResult::ok(Valencia(prim))
         } else {
-            C2pResult::err(prim, code)
+            C2pResult::err(Valencia(prim), code)
         }
     }
 
     #[inline]
     fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+        let prim = &prim.0;
         let nhat = nhat.components();
         // the Valencia spatial flux, shift-free here (the shift rides the GR flux kernel's fan):
         //   F_D     = D v^n
@@ -210,7 +214,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
         // v^n = v.nhat / B^n = B.nhat are coordinate components (coordinate-unit nhat).
         // identity gamma -> the flat `Rmhd::to_flux` (its tau flux `S.n - D v^n` equals
         // this form by the flat momentum identity).
-        let cons = self.to_conserved(eos, prim);
+        let cons = self.to_conserved(eos, &Valencia(*prim));
         let vn = prim.vel.dot(nhat);
         let bn = prim.mag.dot(nhat);
         let vsq = self.metric.norm_sq_contra(&prim.vel);
@@ -221,19 +225,20 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
             .lower(&magnetic_four_vector_spatial(prim, &self.metric));
         let p_tot = total_pressure(prim, &self.metric);
 
-        MhdCons {
+        Valencia(MhdCons {
             hydro: Cons {
                 chi: Default::default(),
-                den: cons.den * vn,
-                mom: cons.mom.scale(vn) + nhat.scale(p_tot) - b_lo.scale(bn / ww),
-                nrg: (cons.nrg + p_tot) * vn - vdb * bn,
+                den: cons.0.den * vn,
+                mom: cons.0.mom.scale(vn) + nhat.scale(p_tot) - b_lo.scale(bn / ww),
+                nrg: (cons.0.nrg + p_tot) * vn - vdb * bn,
             },
             mag: prim.mag.scale(vn) - prim.vel.scale(bn),
-        }
+        })
     }
 
     #[inline]
     fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+        let prim = &prim.0;
         let nhat = nhat.components();
         // the fast-magnetosonic bound c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2 through the
         // Banyuls-Font two-velocity transform (vn = contravariant v^n; v_sq = the physical
@@ -251,6 +256,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     }
 
     fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+        let prim = &prim.0;
         // rho h W^2 + B^2 with metric contractions (the flat form's euclidean dots
         // replaced by gamma) — the momentum-density scale of the magnetized fluid.
         let vsq = self.metric.norm_sq_contra(&prim.vel);
@@ -313,30 +319,30 @@ mod tests {
                 },
                 mag: Tensor::new(b),
             };
-            let (cf, cg) = (flat.to_conserved(&eos, &prim), gr.to_conserved(&eos, &prim));
+            let (cf, cg) = (flat.to_conserved(&eos, &prim), gr.to_conserved(&eos, &Valencia(prim)));
             for k in 0..3 {
-                assert!(approx(cf.mom[k], cg.mom[k]), "cons mom{k} v={v:?}");
+                assert!(approx(cf.mom[k], cg.0.mom[k]), "cons mom{k} v={v:?}");
             }
             assert!(
-                approx(cf.den, cg.den) && approx(cf.nrg, cg.nrg),
+                approx(cf.den, cg.0.den) && approx(cf.nrg, cg.0.nrg),
                 "cons v={v:?}"
             );
             let (ff, fg) = (
                 flat.to_flux(&prim, &nhat, &eos),
-                gr.to_flux(&prim, &nhat_gr, &eos),
+                gr.to_flux(&Valencia(prim), &nhat_gr, &eos),
             );
             for k in 0..3 {
-                assert!(approx(ff.mom[k], fg.mom[k]), "flux mom{k} v={v:?}");
-                assert!(approx(ff.mag[k], fg.mag[k]), "flux mag{k} v={v:?}");
+                assert!(approx(ff.mom[k], fg.0.mom[k]), "flux mom{k} v={v:?}");
+                assert!(approx(ff.mag[k], fg.0.mag[k]), "flux mag{k} v={v:?}");
             }
             assert!(
-                approx(ff.den, fg.den) && approx(ff.nrg, fg.nrg),
+                approx(ff.den, fg.0.den) && approx(ff.nrg, fg.0.nrg),
                 "flux v={v:?}"
             );
             let fp = flat.to_primitive(&eos, &cf).value;
             let gp = gr.to_primitive(&eos, &cg).value;
             assert!(
-                approx(fp.hydro.rho, gp.hydro.rho) && approx(fp.hydro.pre, gp.hydro.pre),
+                approx(fp.hydro.rho, gp.0.hydro.rho) && approx(fp.hydro.pre, gp.0.hydro.pre),
                 "c2p v={v:?}"
             );
         }
@@ -364,13 +370,13 @@ mod tests {
             },
             mag: old_field,
         };
-        let stale_anchor = regime.to_conserved(&eos, &stage_prim);
+        let stale_anchor = regime.to_conserved(&eos, &Valencia(stage_prim));
         let rebuilt = regime.admissible_anchor(&eos, stage_prim.hydro, candidate_field);
         let gm = Matrix::identity();
-        let stale_energy = stale_anchor.nrg + stale_anchor.den;
+        let stale_energy = stale_anchor.0.nrg + stale_anchor.0.den;
         let (_, stale_psi) = rmhd_admissible_residuals(
-            stale_anchor.den,
-            &stale_anchor.mom,
+            stale_anchor.0.den,
+            &stale_anchor.0.mom,
             stale_energy,
             &candidate_field,
             &gm,
@@ -470,7 +476,7 @@ mod tests {
                 mag: Tensor::new(b),
             };
             let (fl, fr) = flat.wave_speeds(&eos, &prim, &nhat);
-            let (gl, gr_) = gr.wave_speeds(&eos, &prim, &nhat_gr);
+            let (gl, gr_) = gr.wave_speeds(&eos, &Valencia(prim), &nhat_gr);
             assert!(
                 gl <= fl + 1e-14 && gr_ >= fr - 1e-14,
                 "bound contains fan: ({gl},{gr_}) vs ({fl},{fr})"
@@ -506,17 +512,17 @@ mod tests {
             };
             let vsq = m.norm_sq_contra(&prim.hydro.vel);
             assert!(vsq < 1.0, "test state must be subluminal: {vsq}");
-            let cons = gr.to_conserved(&eos, &prim);
+            let cons = gr.to_conserved(&eos, &Valencia(prim));
             let back = gr.to_primitive(&eos, &cons);
             assert!(back.is_ok(), "recovery must classify ok");
             let p = back.value;
-            assert!((p.hydro.rho - 1.0).abs() < 1e-10, "rho: {}", p.hydro.rho);
-            assert!((p.hydro.pre - 0.2).abs() < 1e-10, "pre: {}", p.hydro.pre);
+            assert!((p.0.hydro.rho - 1.0).abs() < 1e-10, "rho: {}", p.0.hydro.rho);
+            assert!((p.0.hydro.pre - 0.2).abs() < 1e-10, "pre: {}", p.0.hydro.pre);
             for k in 0..3 {
                 assert!(
-                    (p.hydro.vel[k] - v[k]).abs() < 1e-10,
+                    (p.0.hydro.vel[k] - v[k]).abs() < 1e-10,
                     "v{k}: {} vs {}",
-                    p.hydro.vel[k],
+                    p.0.hydro.vel[k],
                     v[k]
                 );
             }

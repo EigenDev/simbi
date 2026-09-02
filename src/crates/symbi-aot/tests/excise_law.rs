@@ -73,7 +73,8 @@ fn to_conserved_at(xx: f64, yy: f64, prim: &Prim<f64, 2>) -> symbi_hydro::state:
         shift: m.shift(x),
         sqrt_gamma: m.volume_factor(x),
     }
-    .to_conserved(&IdealGas { gamma: GAMMA }, prim)
+    .to_conserved(&IdealGas { gamma: GAMMA }, &symbi_hydro::state::Valencia(*prim))
+    .0
 }
 
 struct Grid {

@@ -1373,6 +1373,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::Valencia;
     use symbi_algebra::Covariant;
     use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::{IdealGas, Isothermal};
@@ -1916,32 +1917,32 @@ mod tests {
         for d in 0..2 {
             let nhat: Normalized<Covariant<f64, 3>> = Normalized::axis(d);
             let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, 0.0, &m);
-            let exact = gr.to_flux(&prim, &nhat, &eos);
+            let exact = gr.to_flux(&Valencia(prim), &nhat, &eos);
             assert!(
-                (flux.den - exact.den).abs() < 1e-12,
+                (flux.den - exact.0.den).abs() < 1e-12,
                 "d{d} den: {} vs {}",
                 flux.den,
-                exact.den
+                exact.0.den
             );
             for k in 0..3 {
                 assert!(
-                    (flux.mom[k] - exact.mom[k]).abs() < 1e-12,
+                    (flux.mom[k] - exact.0.mom[k]).abs() < 1e-12,
                     "d{d} mom{k}: {} vs {}",
                     flux.mom[k],
-                    exact.mom[k]
+                    exact.0.mom[k]
                 );
                 assert!(
-                    (flux.mag[k] - exact.mag[k]).abs() < 1e-12,
+                    (flux.mag[k] - exact.0.mag[k]).abs() < 1e-12,
                     "d{d} mag{k}: {} vs {}",
                     flux.mag[k],
-                    exact.mag[k]
+                    exact.0.mag[k]
                 );
             }
             assert!(
-                (flux.nrg - exact.nrg).abs() < 1e-12,
+                (flux.nrg - exact.0.nrg).abs() < 1e-12,
                 "d{d} nrg: {} vs {}",
                 flux.nrg,
-                exact.nrg
+                exact.0.nrg
             );
         }
     }
@@ -1968,32 +1969,32 @@ mod tests {
         for d in 0..3 {
             let nhat: Normalized<Covariant<f64, 3>> = Normalized::axis(d);
             let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, 0.0, &m);
-            let exact = gr.to_flux(&prim, &nhat, &eos);
+            let exact = gr.to_flux(&Valencia(prim), &nhat, &eos);
             assert!(
-                (flux.den - exact.den).abs() < 1e-11,
+                (flux.den - exact.0.den).abs() < 1e-11,
                 "d{d} den: {} vs {}",
                 flux.den,
-                exact.den
+                exact.0.den
             );
             for k in 0..3 {
                 assert!(
-                    (flux.mom[k] - exact.mom[k]).abs() < 1e-11,
+                    (flux.mom[k] - exact.0.mom[k]).abs() < 1e-11,
                     "d{d} mom{k}: {} vs {}",
                     flux.mom[k],
-                    exact.mom[k]
+                    exact.0.mom[k]
                 );
                 assert!(
-                    (flux.mag[k] - exact.mag[k]).abs() < 1e-11,
+                    (flux.mag[k] - exact.0.mag[k]).abs() < 1e-11,
                     "d{d} mag{k}: {} vs {}",
                     flux.mag[k],
-                    exact.mag[k]
+                    exact.0.mag[k]
                 );
             }
             assert!(
-                (flux.nrg - exact.nrg).abs() < 1e-11,
+                (flux.nrg - exact.0.nrg).abs() < 1e-11,
                 "d{d} nrg: {} vs {}",
                 flux.nrg,
-                exact.nrg
+                exact.0.nrg
             );
         }
     }
@@ -2022,24 +2023,24 @@ mod tests {
         for d in 0..3 {
             let nhat: Normalized<Covariant<f64, 3>> = Normalized::axis(d);
             let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, vface, &m);
-            let f = gr.to_flux(&prim, &nhat, &eos);
-            let u = gr.to_conserved(&eos, &prim);
+            let f = gr.to_flux(&Valencia(prim), &nhat, &eos);
+            let u = gr.to_conserved(&eos, &Valencia(prim));
             assert!(
-                (flux.den - (f.den - vface * u.den)).abs() < 1e-11,
+                (flux.den - (f.0.den - vface * u.0.den)).abs() < 1e-11,
                 "d{d} den"
             );
             for k in 0..3 {
                 assert!(
-                    (flux.mom[k] - (f.mom[k] - vface * u.mom[k])).abs() < 1e-11,
+                    (flux.mom[k] - (f.0.mom[k] - vface * u.0.mom[k])).abs() < 1e-11,
                     "d{d} mom{k}"
                 );
                 assert!(
-                    (flux.mag[k] - (f.mag[k] - vface * u.mag[k])).abs() < 1e-11,
+                    (flux.mag[k] - (f.0.mag[k] - vface * u.0.mag[k])).abs() < 1e-11,
                     "d{d} mag{k}"
                 );
             }
             assert!(
-                (flux.nrg - (f.nrg - vface * u.nrg)).abs() < 1e-11,
+                (flux.nrg - (f.0.nrg - vface * u.0.nrg)).abs() < 1e-11,
                 "d{d} nrg"
             );
         }

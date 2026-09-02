@@ -35,7 +35,7 @@ use crate::eos::Eos;
 use crate::regime::Regime;
 use crate::regime_spec::RegimeSpec;
 use crate::spatial_metric::SpatialMetric;
-use crate::state::{Cons, Prim};
+use crate::state::{Cons, Prim, Valencia};
 
 use super::cons::rhd_recover;
 use super::wave_speeds::rhd_speeds_from_vn_gr;
@@ -92,27 +92,28 @@ impl<S: Scalar, const D: usize> RhdGr<S, D> {
 
 impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     const SPEC: &'static RegimeSpec = <Rhd as Regime<S, D>>::SPEC;
-    type Prim = Prim<S, D>;
+    type Prim = Valencia<Prim<S, D>>;
 
     // the valencia flux contracts the normal against contravariant velocity
     // and shift, so its face normal is the coordinate-frame covariant witness.
     type Normal = Normalized<Covariant<S, D>>;
-    type Cons = Cons<S, D>;
+    type Cons = Valencia<Cons<S, D>>;
     type Energy = crate::energy::Adiabatic;
     const CLAMP_EXTREMAL_TO_ZERO: bool = true;
 
     #[inline]
     fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
+        let prim = &prim.0;
         // U = sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)], spelled in ADM variables as
         // sqrt(gamma)[D, S_i, alpha tau + (alpha-1) D - beta^i S_i].
         let p = self.valencia_parts(eos, prim);
         let ehat = self.alpha * p.tau + (self.alpha - S::ONE) * p.den - self.shift.dot(&p.mom);
-        Cons {
+        Valencia(Cons {
             chi: Default::default(),
             den: self.sqrt_gamma * p.den,
             mom: p.mom.scale(self.sqrt_gamma),
             nrg: self.sqrt_gamma * ehat,
-        }
+        })
     }
 
     #[inline]
@@ -122,6 +123,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     {
         // undensitize by the known measure sqrt(-g)(x) first — the metric is a fixed function of
         // position, so this is exact and the inversion below is the unchanged Valencia recovery.
+        let cons = &cons.0;
         let inv_dens = S::ONE / self.sqrt_gamma;
         let cons = Cons {
             chi: Default::default(),
@@ -137,7 +139,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
                 vel: Tensor::zeros(),
                 pre: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
             };
-            return C2pResult::err(floored, code);
+            return C2pResult::err(Valencia(floored), code);
         }
         // recover the Valencia tau from the covariant energy first (invert ehat = alpha tau +
         // (alpha-1) D - beta^i S_i): tau = (ehat + (1-alpha) D + beta^i S_i) / alpha. alpha=1,
@@ -156,14 +158,15 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
         if code.is_ok() {
-            C2pResult::ok(prim)
+            C2pResult::ok(Valencia(prim))
         } else {
-            C2pResult::err(prim, code)
+            C2pResult::err(Valencia(prim), code)
         }
     }
 
     #[inline]
     fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
+        let prim = &prim.0;
         let nhat = nhat.components();
         // F^n = sqrt(-g)[rho u^n, T^n_i, -(T^n_t + rho u^n)]. in ADM variables, with the transport
         // speed vt^n = alpha v^n - beta^n and the coordinate-unit normal n_i:
@@ -183,16 +186,17 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         let u_t = g_tt * ut + beta_low.dot(&u_sp);
         let un = u_sp.dot(nhat);
         let sqrt_neg_g = self.alpha * self.sqrt_gamma;
-        Cons {
+        Valencia(Cons {
             chi: Default::default(),
             den: self.sqrt_gamma * parts.den * vt,
             mom: (parts.mom.scale(vt) + nhat.scale(self.alpha * prim.pre)).scale(self.sqrt_gamma),
             nrg: S::ZERO - sqrt_neg_g * un * (parts.rho_h * u_t + prim.rho),
-        }
+        })
     }
 
     #[inline]
     fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+        let prim = &prim.0;
         let nhat = nhat.components();
         // Banyuls-Font coordinate speed (Font 2008 eq 37). the two velocities are distinct and must
         // not be conflated: `vn` = the contravariant normal v^n = v^i n_i (the transport term + inside
@@ -213,6 +217,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
 
     #[inline]
     fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
+        let prim = &prim.0;
         // rho h W^2 with the metric Lorentz factor |v|^2 = gamma_ij v^i v^j.
         crate::rhd::enthalpy_density(
             eos,
@@ -257,22 +262,22 @@ mod tests {
                 vel: Tensor::new([v]),
                 pre: 0.5,
             };
-            let (cf, cg) = (flat.to_conserved(&eos, &prim), gr.to_conserved(&eos, &prim));
+            let (cf, cg) = (flat.to_conserved(&eos, &prim), gr.to_conserved(&eos, &Valencia(prim)));
             assert!(
-                approx(cf.den, cg.den) && approx(cf.mom[0], cg.mom[0]) && approx(cf.nrg, cg.nrg),
+                approx(cf.den, cg.0.den) && approx(cf.mom[0], cg.0.mom[0]) && approx(cf.nrg, cg.0.nrg),
                 "cons v={v}"
             );
             let (ff, fg) = (
                 flat.to_flux(&prim, &nhat, &eos),
-                gr.to_flux(&prim, &nhat_gr, &eos),
+                gr.to_flux(&Valencia(prim), &nhat_gr, &eos),
             );
             assert!(
-                approx(ff.den, fg.den) && approx(ff.mom[0], fg.mom[0]) && approx(ff.nrg, fg.nrg),
+                approx(ff.den, fg.0.den) && approx(ff.mom[0], fg.0.mom[0]) && approx(ff.nrg, fg.0.nrg),
                 "flux v={v}"
             );
             let ((slf, srf), (slg, srg)) = (
                 flat.wave_speeds(&eos, &prim, &nhat),
-                gr.wave_speeds(&eos, &prim, &nhat_gr),
+                gr.wave_speeds(&eos, &Valencia(prim), &nhat_gr),
             );
             assert!(approx(slf, slg) && approx(srf, srg), "speeds v={v}");
         }
@@ -305,38 +310,38 @@ mod tests {
             vel: Tensor::new([vr]),
             pre: 0.1,
         };
-        let c = gr.to_conserved(&eos, &prim);
+        let c = gr.to_conserved(&eos, &Valencia(prim));
         let v_sq = grr * vr * vr;
         let w = 1.0 / (1.0 - v_sq).sqrt();
         let h = 1.0 + (4.0 / 3.0) / (4.0 / 3.0 - 1.0) * 0.1 / 1.0; // 1 + Gamma/(Gamma-1) p/rho
         let rhw2 = 1.0 * h * w * w;
         assert!(
-            approx(c.den, sqrt_gamma * w),
+            approx(c.0.den, sqrt_gamma * w),
             "mass slot = sqrt(gamma) rho W"
         );
         assert!(
-            approx(c.mom[0], sqrt_gamma * grr * vr * rhw2),
+            approx(c.0.mom[0], sqrt_gamma * grr * vr * rhw2),
             "momentum slot = sqrt(gamma) gamma_rr v^r rho h W^2"
         );
         // the radial fluxes carry the same measure and the lapse: sqrt(-g) rho u^r =
         // sqrt(gamma) D alpha v^r, sqrt(-g) T^r_r = sqrt(gamma)(S_r alpha v^r + alpha p).
-        let fx = gr.to_flux(&prim, &Normalized::axis(0), &eos);
+        let fx = gr.to_flux(&Valencia(prim), &Normalized::axis(0), &eos);
         assert!(
-            approx(fx.den, sqrt_gamma * w * alpha * vr),
+            approx(fx.0.den, sqrt_gamma * w * alpha * vr),
             "mass flux = sqrt(gamma) D alpha v^r"
         );
         assert!(
             approx(
-                fx.mom[0],
+                fx.0.mom[0],
                 sqrt_gamma * (grr * vr * rhw2 * alpha * vr + alpha * 0.1)
             ),
             "momentum flux = sqrt(gamma)(S_r alpha v^r + alpha p)"
         );
         // and the c2p undensitizes and round-trips back to the same contravariant v^r.
         let back = gr.to_primitive(&eos, &c).unwrap();
-        assert!(approx(back.vel[0], vr), "c2p recovers contravariant v^r");
+        assert!(approx(back.0.vel[0], vr), "c2p recovers contravariant v^r");
         assert!(
-            approx(back.rho, 1.0) && approx(back.pre, 0.1),
+            approx(back.0.rho, 1.0) && approx(back.0.pre, 0.1),
             "c2p recovers rho and p"
         );
     }
@@ -373,8 +378,8 @@ mod tests {
             vel: Tensor::new([vr]),
             pre: 0.4,
         };
-        let c = gr.to_conserved(&eos, &prim);
-        let fx = gr.to_flux(&prim, &Normalized::axis(0), &eos);
+        let c = gr.to_conserved(&eos, &Valencia(prim));
+        let fx = gr.to_flux(&Valencia(prim), &Normalized::axis(0), &eos);
         let hh = 1.0 + (4.0 / 3.0) / (1.0 / 3.0) * 0.4 / 1.3;
         let (e_ref, f_ref): (f64, Tensor<f64, 3>) = coord_energy_cons_flux(
             &SchwarzschildKS {
@@ -387,32 +392,32 @@ mod tests {
             0.4,
         );
         assert!(
-            (c.nrg - e_ref).abs() < 1e-9 * e_ref.abs().max(1.0),
+            (c.0.nrg - e_ref).abs() < 1e-9 * e_ref.abs().max(1.0),
             "energy slot {} vs -sqrt(-g)(T^t_t + rho u^t) {e_ref}",
-            c.nrg
+            c.0.nrg
         );
         assert!(
-            (fx.nrg - f_ref[0]).abs() < 1e-9 * f_ref[0].abs().max(1.0),
+            (fx.0.nrg - f_ref[0]).abs() < 1e-9 * f_ref[0].abs().max(1.0),
             "energy flux {} vs -sqrt(-g)(T^r_t + rho u^r) {}",
-            fx.nrg,
+            fx.0.nrg,
             f_ref[0]
         );
         // the densitized state inverts back to the primitive through the shared newton.
         let back = gr.to_primitive(&eos, &c).unwrap();
         assert!(
-            approx(back.rho, 1.3) && approx(back.vel[0], vr) && approx(back.pre, 0.4),
+            approx(back.0.rho, 1.3) && approx(back.0.vel[0], vr) && approx(back.0.pre, 0.4),
             "densitized c2p round-trips the primitive"
         );
         // the shift enters the fan as the coordinate speed lambda - beta^r; both characteristics
         // shift by the same amount, so their separation is unchanged.
-        let (s_l, s_r) = gr.wave_speeds(&eos, &prim, &Normalized::axis(0));
+        let (s_l, s_r) = gr.wave_speeds(&eos, &Valencia(prim), &Normalized::axis(0));
         let unshifted = RhdGr {
             metric,
             alpha,
             shift: Tensor::new([0.0]),
             sqrt_gamma,
         };
-        let (u_l, u_r) = unshifted.wave_speeds(&eos, &prim, &Normalized::axis(0));
+        let (u_l, u_r) = unshifted.wave_speeds(&eos, &Valencia(prim), &Normalized::axis(0));
         assert!(
             approx(s_l, u_l - beta) && approx(s_r, u_r - beta),
             "fan carries -beta^r"

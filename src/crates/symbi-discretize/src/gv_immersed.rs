@@ -18,6 +18,7 @@
 // Gv arithmetic + the transcendentals (exp) + `cell_geometry_gv` + `trace`.
 // =============================================================================
 
+use symbi_algebra::Embedded;
 use symbi_algebra::algebra::Numeric;
 use symbi_carrier::Scalar;
 use symbi_ir::{FieldRef, KernelWrite, KernelWrites};
@@ -38,7 +39,10 @@ fn sq<'t>(a: Gv<'t>) -> Gv<'t> {
 /// invariant (acoustically silent, positivity-preserving for any dt) and the accretion rate is
 /// emergent (the reduced `U(1 - exp(-rate*dt))`).
 struct BodyContributionGv<'t> {
-    g: [Gv<'t>; 3],
+    /// gravitational acceleration at the cell, in the global cartesian
+    /// (lab/embedding) frame; crosses into the grid's physical frame through
+    /// `vector_from_cartesian_gv`.
+    g: Embedded<Gv<'t>, 3>,
     drain_rate: Gv<'t>,
     rvec: [Gv<'t>; 3],
 }
@@ -115,7 +119,7 @@ fn basis_vec_gv<'t>(coords: Coords, coord: &[Gv<'t>; 3], comp: usize) -> [Gv<'t>
 fn vector_from_cartesian_gv<'t>(
     coords: Coords,
     coord: &[Gv<'t>; 3],
-    w: &[Gv<'t>; 3],
+    w: &Embedded<Gv<'t>, 3>,
     ncomp: usize,
 ) -> Vec<Gv<'t>> {
     (0..ncomp)
@@ -126,8 +130,13 @@ fn vector_from_cartesian_gv<'t>(
         .collect()
 }
 
-/// expand physical components `v` (coordinate frame) back to a cartesian vector `sum v[c] e_c`.
-fn vector_to_cartesian_gv<'t>(coords: Coords, coord: &[Gv<'t>; 3], v: &[Gv<'t>]) -> [Gv<'t>; 3] {
+/// expand grid-local physical (orthonormal-frame) components `v` back to a
+/// cartesian vector `sum v[c] e_c`.
+fn vector_to_cartesian_gv<'t>(
+    coords: Coords,
+    coord: &[Gv<'t>; 3],
+    v: &[Gv<'t>],
+) -> Embedded<Gv<'t>, 3> {
     let mut acc = [Gv::ZERO; 3];
     for (comp, &vc) in v.iter().enumerate() {
         let e = basis_vec_gv(coords, coord, comp);
@@ -135,7 +144,7 @@ fn vector_to_cartesian_gv<'t>(coords: Coords, coord: &[Gv<'t>; 3], v: &[Gv<'t>])
             acc[ax] = acc[ax] + vc * e[ax];
         }
     }
-    acc
+    Embedded::from_array(acc)
 }
 
 // ---- gas state + per-cell scaffolding + per-body contribution -------------------------------
@@ -187,7 +196,7 @@ fn cell_scaffold<'t>(
     den: Gv<'t>,
     mom: &[Gv<'t>],
     nrg: Gv<'t>,
-) -> ([Gv<'t>; 3], [Gv<'t>; 3], [Gv<'t>; 3], Gv<'t>, Gv<'t>, Gv<'t>) {
+) -> ([Gv<'t>; 3], [Gv<'t>; 3], Embedded<Gv<'t>, 3>, Gv<'t>, Gv<'t>, Gv<'t>) {
     let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], axes, ndim);
     // coord3 in natural coordinate order: gridded coords from the centroid, ungridded = 0.
     let mut coord3 = [Gv::ZERO; 3];
@@ -214,7 +223,7 @@ fn body_contribution<'t>(
     ndim: usize,
     cart_axes: &[usize],
     cell_cart: &[Gv<'t>; 3],
-    vel_cart: &[Gv<'t>; 3],
+    vel_cart: &Embedded<Gv<'t>, 3>,
     den: Gv<'t>,
     cs: Gv<'t>,
     min_w: Gv<'t>,
@@ -231,7 +240,7 @@ fn body_contribution<'t>(
 
     // the body's gravitational field, family selected by `softkind` — the carrier-generic form,
     // proven conservative (g = -grad phi) + bounded in the well-posedness suite (`ibm.rs`).
-    let g = crate::ibm::body_gravity(rvec, mass, soft, soft_kind);
+    let g = Embedded::from_array(crate::ibm::body_gravity(rvec, mass, soft, soft_kind));
 
     // the well-posed drain rate: chi * min(sink, cs/dx), the mollified mask chi =
     // 0.5(1 - tanh((r - r_mask)/w)) (w = one cell) times the sound-crossing-capped sink. `sink_rate`
@@ -751,7 +760,7 @@ fn cell_scaffold_iso<'t>(
     den: Gv<'t>,
     mom: &[Gv<'t>],
     pre: Gv<'t>,
-) -> ([Gv<'t>; 3], [Gv<'t>; 3], [Gv<'t>; 3], Gv<'t>, Gv<'t>) {
+) -> ([Gv<'t>; 3], [Gv<'t>; 3], Embedded<Gv<'t>, 3>, Gv<'t>, Gv<'t>) {
     let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], axes, ndim);
     let mut coord3 = [Gv::ZERO; 3];
     for (g, &coord_idx) in axes.iter().enumerate() {
@@ -1227,7 +1236,8 @@ pub fn body_source_wb_gv(
         let mass = cx.scalar(&format!("body_{bb}_mass"));
         let soft = cx.scalar(&format!("body_{bb}_soft"));
         let soft_kind = cx.scalar(&format!("body_{bb}_softkind"));
-        let gravity_cart = crate::ibm::body_gravity(rvec, mass, soft, soft_kind);
+        let gravity_cart =
+            Embedded::from_array(crate::ibm::body_gravity(rvec, mass, soft, soft_kind));
         let gravity = vector_from_cartesian_gv(coords, &coord3, &gravity_cart, ncomp);
         for comp in 0..ncomp {
             plain_force[comp] = plain_force[comp] + us_den * gravity[comp];

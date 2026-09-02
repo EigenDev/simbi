@@ -18,6 +18,7 @@
 // run: cargo test -p symbi-hydro --test covariant_energy_conditioning -- --nocapture
 // =============================================================================
 
+use symbi_hydro::state::Valencia;
 use symbi_algebra::Matrix;
 use symbi_algebra::Tensor;
 use symbi_hydro::RhdGr;
@@ -55,9 +56,9 @@ fn round_trip_pressure_error(r: f64, rho: f64, pre: f64, vel: f64) -> f64 {
         vel: Tensor::new([vel]),
         pre,
     };
-    let cons = gr.to_conserved(&eos, &prim);
+    let cons = gr.to_conserved(&eos, &Valencia(prim));
     let back = gr.to_primitive(&eos, &cons).unwrap();
-    (back.pre - pre).abs() / pre
+    (back.0.pre - pre).abs() / pre
 }
 
 #[test]
@@ -122,9 +123,9 @@ fn flat_round_trip_pressure_error(rho: f64, pre: f64, vel: f64) -> f64 {
         vel: Tensor::new([vel]),
         pre,
     };
-    let cons = gr.to_conserved(&eos, &prim);
+    let cons = gr.to_conserved(&eos, &Valencia(prim));
     let back = gr.to_primitive(&eos, &cons).unwrap();
-    (back.pre - pre).abs() / pre
+    (back.0.pre - pre).abs() / pre
 }
 
 #[test]

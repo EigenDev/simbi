@@ -12,6 +12,7 @@ use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
+use symbi_hydro::state::Valencia;
 use symbi_hydro::RmhdGr;
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
@@ -748,6 +749,9 @@ where
         // the valencia regime contracts its normal against contravariant
         // velocity and shift: the same axis, witnessed in the coordinate frame.
         let nhat_gr = Normalized::axis(coord_n);
+        // on a curved background the reconstructed velocity components are the
+        // stored valencia v^i; the wrap states that frame at the regime door.
+        let (left, right) = (Valencia(left), Valencia(right));
         let (s_l, s_r) = if rusanov {
             let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
             let beta_n = beta[coord_n];
@@ -761,7 +765,7 @@ where
         // weight, and the chart enters through the densitized pair alone. in the bake, mesh motion
         // (vface) pairs with flat spacetime alone.
         let flux = hlle_with_speeds(&regime, &eos, &left, &right, &nhat_gr, vface, s_l, s_r);
-        let writes = euler_flux_writes(&flux);
+        let writes = euler_flux_writes(&flux.0);
         writes
     })
 }
@@ -1288,19 +1292,19 @@ pub fn rmhd_flux_gr_gv(
                 (wsr_m1.max(wsr_0) + beta_n).max(Gv::ZERO),
             )
         };
-        let mut flux = if has_shift {
+        let flux = if has_shift {
             // the shifted-system HLL (the RHD GR fan) with the induction transpose add per side.
             let beta_n = beta[coord_n];
             let w = beta_n / alpha;
-            let u_l = regime.to_conserved(&eos, &left);
-            let u_r = regime.to_conserved(&eos, &right);
-            let f_l = regime.to_flux(&left, &nhat, &eos);
-            let f_r = regime.to_flux(&right, &nhat, &eos);
+            let u_l = regime.to_conserved(&eos, &Valencia(left));
+            let u_r = regime.to_conserved(&eos, &Valencia(right));
+            let f_l = regime.to_flux(&Valencia(left), &nhat, &eos);
+            let f_r = regime.to_flux(&Valencia(right), &nhat, &eos);
             let mut g_l = f_l - u_l * w;
             let mut g_r = f_r - u_r * w;
             let transpose = beta.scale(bn_face / alpha);
-            g_l.mag = g_l.mag + transpose;
-            g_r.mag = g_r.mag + transpose;
+            g_l.0.mag = g_l.0.mag + transpose;
+            g_r.0.mag = g_r.0.mag + transpose;
             let sh_l = s_l - beta_n;
             let sh_r = s_r - beta_n;
             Gv::branch(
@@ -1318,8 +1322,20 @@ pub fn rmhd_flux_gr_gv(
                 },
             )
         } else {
-            hlle_with_speeds(&regime, &eos, &left, &right, &nhat, Gv::ZERO, s_l, s_r)
+            hlle_with_speeds(
+                &regime,
+                &eos,
+                &Valencia(left),
+                &Valencia(right),
+                &nhat,
+                Gv::ZERO,
+                s_l,
+                s_r,
+            )
         };
+        // the fan is done with the witnessed algebra; the write boundary
+        // extracts bare components into the flux buffers.
+        let mut flux = flux.0;
         flux.hydro.nrg = covariant_nrg(&flux);
 
         let mut writes = vec![KernelWrite::new(

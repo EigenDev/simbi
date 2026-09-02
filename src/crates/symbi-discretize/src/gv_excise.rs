@@ -43,7 +43,7 @@ use symbi_geometry::{KerrKS, KerrKSCartesian, Metric};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
-use symbi_hydro::state::Prim;
+use symbi_hydro::state::{Prim, Valencia};
 use symbi_hydro::{MhdPrim, RhdGr, RmhdGr};
 use symbi_ib::excise::ks_excised;
 use symbi_carrier::Scalar;
@@ -230,7 +230,7 @@ pub fn excise_p2c_gv() -> (GvKernel, KernelWrites) {
         vel: Tensor::new(vel),
         pre,
     };
-    let cons = regime.to_conserved(&IdealGas { gamma }, &prim);
+    let cons = regime.to_conserved(&IdealGas { gamma }, &Valencia(prim)).0;
 
     let mut writes = KernelWrites::new();
     writes.push(KernelWrite::new(
@@ -370,7 +370,7 @@ fn excise_p2c_sph_ks_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites)
         })),
         pre,
     };
-    let cons = regime.to_conserved(&IdealGas { gamma }, &prim);
+    let cons = regime.to_conserved(&IdealGas { gamma }, &Valencia(prim)).0;
 
     let mut writes = vec![KernelWrite::new(
         "den_out",
@@ -482,7 +482,7 @@ pub fn excise_p2c_3d_gv() -> (GvKernel, KernelWrites) {
         vel: Tensor::new(vel),
         pre,
     };
-    let cons = regime.to_conserved(&IdealGas { gamma }, &prim);
+    let cons = regime.to_conserved(&IdealGas { gamma }, &Valencia(prim)).0;
 
     let mut writes = KernelWrites::new();
     writes.push(KernelWrite::new(
@@ -562,7 +562,7 @@ fn excise_p2c_mhd_dim_gv(ndim: usize) -> (GvKernel, KernelWrites) {
         },
         mag: Tensor::new(mag),
     };
-    let mut cons = regime.to_conserved(&IdealGas { gamma }, &prim);
+    let mut cons = regime.to_conserved(&IdealGas { gamma }, &Valencia(prim)).0;
     cons.hydro.nrg =
         alpha * cons.hydro.nrg + (alpha - Gv::ONE) * cons.hydro.den - beta.dot(&cons.hydro.mom);
 

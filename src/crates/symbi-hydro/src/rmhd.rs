@@ -116,16 +116,16 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
             metric: *gamma,
             alpha,
         }
-        .to_conserved(eos, prim);
-        let nrg = alpha * c.nrg + (alpha - S::ONE) * c.den - shift.dot(&c.mom);
+        .to_conserved(eos, &crate::state::Valencia(*prim));
+        let nrg = alpha * c.0.nrg + (alpha - S::ONE) * c.0.den - shift.dot(&c.0.mom);
         MhdCons {
             hydro: Cons {
                 chi: Default::default(),
-                den: c.den,
-                mom: c.mom,
+                den: c.0.den,
+                mom: c.0.mom,
                 nrg,
             },
-            mag: c.mag,
+            mag: c.0.mag,
         }
     }
 

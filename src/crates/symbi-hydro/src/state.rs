@@ -57,6 +57,85 @@ pub struct PrimG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
     pub pre: E::Slot<S>,
 }
 
+/// the valencia-frame witness: the wrapped state carries coordinate-frame
+/// components — a primitive's velocity is the contravariant `v^i`, a
+/// conserved state's momentum the covariant densitized `S_i` — the frame the
+/// GR regimes store, distinct from the orthonormal components the flat
+/// regimes store in the same field layout. wrapping is the claim, made where
+/// a state enters a GR conversion, recovery, or flux boundary, and both
+/// directions of the category error are closed: a flat primitive cannot
+/// enter a valencia conversion —
+///
+/// ```compile_fail
+/// use symbi_hydro::eos::IdealGas;
+/// use symbi_hydro::regime::Regime;
+/// use symbi_hydro::rhd::RhdGr;
+/// use symbi_hydro::state::Prim;
+/// fn probe(gr: &RhdGr<f64, 3>, prim: &Prim<f64, 3>, eos: &IdealGas<f64>) {
+///     let _ = gr.to_conserved(eos, prim); // expects &Valencia<Prim>
+/// }
+/// ```
+///
+/// a flat conserved state cannot enter valencia recovery —
+///
+/// ```compile_fail
+/// use symbi_hydro::eos::IdealGas;
+/// use symbi_hydro::regime::Regime;
+/// use symbi_hydro::rhd::RhdGr;
+/// use symbi_hydro::state::Cons;
+/// fn probe(gr: &RhdGr<f64, 3>, cons: &Cons<f64, 3>, eos: &IdealGas<f64>) {
+///     let _ = gr.to_primitive(eos, cons); // expects &Valencia<Cons>
+/// }
+/// ```
+///
+/// and a valencia conserved state cannot enter a flat recovery door —
+///
+/// ```compile_fail
+/// use symbi_hydro::eos::IdealGas;
+/// use symbi_hydro::regime::Regime;
+/// use symbi_hydro::rhd::Rhd;
+/// use symbi_hydro::state::{Cons, Valencia};
+/// fn probe(cons: &Valencia<Cons<f64, 3>>, eos: &IdealGas<f64>) {
+///     let _ = Rhd.to_primitive(eos, cons); // expects &Cons
+/// }
+/// ```
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Valencia<T>(pub T);
+
+// the witnessed conserved state supports the same lawful structural
+// operations the solver algebra needs — flux differencing, scaling, and
+// component-wise selection — each forwarding to the wrapped state.
+impl<T: std::ops::Add<Output = T>> std::ops::Add for Valencia<T> {
+    type Output = Valencia<T>;
+    fn add(self, rhs: Valencia<T>) -> Valencia<T> {
+        Valencia(self.0 + rhs.0)
+    }
+}
+impl<T: std::ops::Sub<Output = T>> std::ops::Sub for Valencia<T> {
+    type Output = Valencia<T>;
+    fn sub(self, rhs: Valencia<T>) -> Valencia<T> {
+        Valencia(self.0 - rhs.0)
+    }
+}
+impl<T: std::ops::Neg<Output = T>> std::ops::Neg for Valencia<T> {
+    type Output = Valencia<T>;
+    fn neg(self) -> Valencia<T> {
+        Valencia(-self.0)
+    }
+}
+impl<S, T: std::ops::Mul<S, Output = T>> std::ops::Mul<S> for Valencia<T> {
+    type Output = Valencia<T>;
+    fn mul(self, rhs: S) -> Valencia<T> {
+        Valencia(self.0 * rhs)
+    }
+}
+impl<S: Scalar, T: symbi_carrier::Selectable<S>> symbi_carrier::Selectable<S> for Valencia<T> {
+    fn select(m: S::Mask, t: Self, f: Self) -> Self {
+        Valencia(T::select(m, t.0, f.0))
+    }
+}
+
 // ---- uniform conserved-state decomposition for IC seeding ----
 
 /// decompose a regime's conserved state into the hydro `ConsG` (mass / momentum /

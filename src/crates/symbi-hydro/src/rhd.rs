@@ -77,13 +77,17 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     ) -> Self::Cons {
         // delegate to `RhdGr` at the cell's 3+1 block so the seeded state is the densitized
         // sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] the metric-aware c2p inverts.
+        // the valencia door hands back its witnessed state; the flat covariant
+        // door strips the witness explicitly — the caller stores these
+        // components in the shared bare-field layout of a curved run.
         RhdGr {
             metric: *gamma,
             alpha,
             shift,
             sqrt_gamma,
         }
-        .to_conserved(eos, prim)
+        .to_conserved(eos, &crate::state::Valencia(*prim))
+        .0
     }
 
     #[inline]

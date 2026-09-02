@@ -22,6 +22,7 @@ use symbi_hydro::regime::Regime;
 use symbi_hydro::rhd::{Rhd, RhdGr};
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::Prim;
+use symbi_hydro::state::Valencia;
 use symbi_hydro::state_law::{Background, StateLaw};
 use symbi_ir::{Gv, TraceCx};
 
@@ -51,10 +52,12 @@ fn curved<'t, const D: usize, M: Metric<Gv<'t>, D>>(
         shift: m.shift(x),
         sqrt_gamma: m.volume_factor(x),
     };
-    let cons = regime.to_conserved(eos, prim);
-    let mut out = vec![cons.den];
-    out.extend((0..D).map(|k| cons.mom[k]));
-    out.push(cons.nrg);
+    // the sponge reference enters the valencia door with its frame stated:
+    // on a curved background the stored velocity components are v^i.
+    let cons = regime.to_conserved(eos, &Valencia(*prim));
+    let mut out = vec![cons.0.den];
+    out.extend((0..D).map(|k| cons.0.mom[k]));
+    out.push(cons.0.nrg);
     out
 }
 
