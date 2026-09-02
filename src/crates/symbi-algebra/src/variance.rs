@@ -93,7 +93,8 @@ pub enum Cart {}
 /// let _ = v.contract(&u); // contract takes &Covariant
 /// ```
 ///
-/// a frame claim is explicit: a bare `Tensor` enters a marker through
+/// once the legacy `From<Tensor>` / `From<[S; D]>` conversions are removed,
+/// a frame claim will be explicit: a bare tensor enters a marker through
 /// `Indexed::new` / `from_array` at the site that owns the claim.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(transparent)]
