@@ -124,6 +124,139 @@ fn reserved_wire_names_appear_only_at_the_renderer() {
     );
 }
 
+/// resolution-syntax violations in a substrate binder source. comment text is
+/// stripped and each line is whitespace-normalized (so `%3` and `bface[ 0]`
+/// match), then a production line is flagged when it
+/// - spells a cyclic modulo (`% 3`) outside the braced body of a validated
+///   resolution function (`CtEdgeMap::try_new`, `CtEdgeMap::grid_ordered`,
+///   `ct_face_curl`),
+/// - subscripts a staggered field array with a literal index (`bface[0]`,
+///   `efield[1]`, ...), or
+/// - names a `Transverse::` role on a line that also carries a literal
+///   subscript or a modulo (the single-line restatement).
+/// the split-line evasion — the formula on one line, the role match on
+/// another — is caught by the first two rules, which need no role mention.
+/// the exemption tracks the function's actual braced extent: a `fn` line opens
+/// a body, brace balance closes it, and the exemption ends with it (format
+/// braces inside string literals come in balanced pairs, so the depth count
+/// survives them).
+fn ct_resolution_violations(text: &str) -> Vec<String> {
+    let allowed_fns = ["try_new", "grid_ordered", "ct_face_curl"];
+    let mut fn_name = String::new();
+    let mut in_fn = false;
+    let mut entered = false;
+    let mut depth: i64 = 0;
+    let mut hits = Vec::new();
+    for (number, raw) in production_lines(text) {
+        let line = raw.split("//").next().unwrap_or("");
+        let flat: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+        if !in_fn {
+            if let Some(pos) = line.find("fn ") {
+                fn_name = line[pos + 3..]
+                    .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                in_fn = true;
+                entered = false;
+                depth = 0;
+            }
+        }
+        if in_fn {
+            depth += line.matches('{').count() as i64;
+            depth -= line.matches('}').count() as i64;
+            entered |= line.contains('{');
+        }
+        let in_allowed = in_fn && allowed_fns.contains(&fn_name.as_str());
+        let literal_stagger = ["bface[", "efield["].iter().any(|f| {
+            flat.split(f)
+                .skip(1)
+                .any(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+        });
+        let stray_modulo = flat.contains("%3") && !in_allowed;
+        let inline_role = flat.contains("Transverse::")
+            && (flat.contains("%3") || ["[0", "[1", "[2"].iter().any(|p| flat.contains(p)));
+        if literal_stagger || stray_modulo || inline_role {
+            hits.push(format!("{number}: {}", raw.trim()));
+        }
+        if in_fn && entered && depth <= 0 {
+            in_fn = false;
+            fn_name.clear();
+        }
+    }
+    hits
+}
+
+#[test]
+fn transverse_roles_resolve_through_the_validated_edge_maps() {
+    // the substrate binder file: role -> absolute-index resolution lives in the
+    // validated maps (the edge descriptor's constructors and the incident-edge
+    // accessors), so a binder arm reads a resolved local and the file carries
+    // no stray cyclic modulo and no literal staggered-field subscript.
+    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = here
+        .parent()
+        .unwrap()
+        .join("symbi-substrate/src/regimes/mhd_substrate.rs");
+    let text = std::fs::read_to_string(&path).expect("mhd_substrate.rs");
+    let seen = production_lines(&text)
+        .iter()
+        .filter(|(_, l)| l.contains("Transverse::"))
+        .count();
+    assert!(
+        seen >= 10,
+        "the scan saw only {seen} transverse-role lines; the gate is not seeing the binder seam"
+    );
+    let hits = ct_resolution_violations(&text);
+    assert!(
+        hits.is_empty(),
+        "inline transverse-role resolution in mhd_substrate.rs (resolution belongs \
+         to the validated edge maps):\n{}",
+        hits.join("\n")
+    );
+}
+
+#[test]
+fn resolution_gate_flags_split_line_formulas() {
+    // the formula on one line and the role match on another is still flagged:
+    // the modulo rule fires without a role mention on the same line.
+    let split = "fn binder() {\n    let p1 = (dir + 1) % 3;\n    match role {\n        \
+                 Transverse::A => &mhd.bface[p1],\n        Transverse::B => &mhd.bface[p2],\n    }\n}\n";
+    let hits = ct_resolution_violations(split);
+    assert_eq!(hits.len(), 1, "split-line modulo is flagged: {hits:?}");
+
+    let literal = "fn binder() { let f = &mhd.efield[0]; }\n";
+    assert_eq!(ct_resolution_violations(literal).len(), 1);
+
+    let lawful = "fn binder() {\n    match role {\n        Transverse::A => &mhd.bface[g1],\n        \
+                  Transverse::B => &mhd.efield[slot],\n    }\n}\n";
+    assert!(ct_resolution_violations(lawful).is_empty());
+
+    let validated = "fn ct_face_curl() { let plane = [(c + 1) % 3, (c + 2) % 3]; }\n";
+    assert!(ct_resolution_violations(validated).is_empty());
+
+    // the exemption ends with the allowlisted body: a modulo in the next
+    // function is flagged even with no recognized fn line in between.
+    let after_closed = "fn ct_face_curl() {}\n\nfn unrelated() {\n    let p1 = (dir + 1) % 3;\n}\n";
+    let hits = ct_resolution_violations(after_closed);
+    assert_eq!(
+        hits.len(),
+        1,
+        "modulo after a closed allowlisted body: {hits:?}"
+    );
+
+    // a multiline allowlisted signature still covers its body.
+    let multiline = "fn ct_face_curl<const D: usize>(\n    dir: usize,\n) -> usize {\n    \
+                     let plane = [(c + 1) % 3];\n    plane[0]\n}\n";
+    assert!(ct_resolution_violations(multiline).is_empty());
+
+    // whitespace variants of both rules are rejected.
+    let tight_modulo = "fn binder() { let p1 = (dir + 1) %3; }\n";
+    assert_eq!(ct_resolution_violations(tight_modulo).len(), 1);
+    let spaced_subscript = "fn binder() { let f = &mhd.bface[ 0 ]; }\n";
+    assert_eq!(ct_resolution_violations(spaced_subscript).len(), 1);
+}
+
 #[test]
 fn ct_builders_register_fields_through_typed_keys_only() {
     // the CT builder file: every runtime binding is a typed CtScratchKey (or a

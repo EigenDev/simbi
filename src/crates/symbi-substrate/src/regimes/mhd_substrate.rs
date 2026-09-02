@@ -1067,6 +1067,70 @@ impl<const D: usize> CtEdgeMap<D> {
             g2,
         })
     }
+
+    /// the fixed-chart 2.5D map: the chart-spelled kernels (`bx`/`br`/`b0` and
+    /// `by`/`bz`/`b1`) address their transverse faces in grid order — `A` is the
+    /// grid-axis-0 face carrying `axes[0]`, `B` the grid-axis-1 face carrying
+    /// `axes[1]` — and each chart formula owns its EMF sign, so the transverse
+    /// order is the grid's rather than the cyclic edge frame's. the single
+    /// out-of-plane edge is slot 0 and its dual component is the complement.
+    fn grid_ordered(axes: &[usize]) -> Result<Self, String> {
+        if D != 2 {
+            return Err(format!(
+                "grid-ordered edge map is the 2.5D chart map; the mesh is {D}-dimensional"
+            ));
+        }
+        let [a0, a1] = axes else {
+            return Err(format!(
+                "grid-ordered edge map needs a 2-axis plane, got {axes:?}"
+            ));
+        };
+        if *a0 >= 3 || *a1 >= 3 || a0 == a1 {
+            return Err(format!(
+                "axis map {axes:?} is not two distinct 3-vector components"
+            ));
+        }
+        Ok(Self {
+            slot: 0,
+            name_k: symbi_ir::PhysComp::new(3 - a0 - a1),
+            p1: symbi_ir::PhysComp::new(*a0),
+            p2: symbi_ir::PhysComp::new(*a1),
+            g1: symbi_ir::GridAxis::<D>::try_new(0)
+                .ok_or_else(|| format!("grid axis 0 out of the {D}-dimensional mesh"))?,
+            g2: symbi_ir::GridAxis::<D>::try_new(1)
+                .ok_or_else(|| format!("grid axis 1 out of the {D}-dimensional mesh"))?,
+        })
+    }
+}
+
+/// the incident-edge efield slots of a face curl, in the face component's cyclic
+/// plane order (the curl kernel's `e_p1`/`e_p2` slots); a 2.5D face has one
+/// incident edge, carried by `a`. the accessors are the one place an
+/// incident-edge role resolves to a storage slot.
+#[derive(Clone, Copy)]
+struct CtIncidentEdges {
+    a: usize,
+    b: Option<usize>,
+}
+
+impl CtIncidentEdges {
+    fn of(&self, t: Transverse) -> usize {
+        match t {
+            Transverse::A => self.a,
+            Transverse::B => self
+                .b
+                .expect("face curl: the 2.5D complex has one incident edge"),
+        }
+    }
+
+    /// the sole incident edge of a 2.5D face (the out-of-plane corner EMF).
+    fn sole(&self) -> usize {
+        assert!(
+            self.b.is_none(),
+            "sole() on a 3D face with two incident edges"
+        );
+        self.a
+    }
 }
 
 // edge dual-k is present iff its two plane physical components are both in-plane (grid axes).
@@ -1093,11 +1157,14 @@ fn ct_edges<const D: usize>(axes: &[usize]) -> Vec<CtEdgeMap<D>> {
 // for grid face `dir` (carrying physical component `axes[dir]`): the incident edge slots
 // (curl inputs) + the transverse id-axes (cartesian inverse-width scalars), from the
 // component's cyclic plane, filtered by edge presence. order matches the curl kernel ABI.
-fn ct_face_curl<const D: usize>(dir: usize, axes: &[usize]) -> (Vec<usize>, Vec<usize>) {
+fn ct_face_curl<const D: usize>(
+    dir: usize,
+    axes: &[usize],
+) -> (Option<CtIncidentEdges>, Vec<usize>) {
     let c = axes[dir];
     let plane = [(c + 1) % 3, (c + 2) % 3];
     let edges = ct_edges::<D>(axes);
-    let slots = plane
+    let slots: Vec<usize> = plane
         .iter()
         .filter_map(|&pk| {
             edges
@@ -1106,13 +1173,18 @@ fn ct_face_curl<const D: usize>(dir: usize, axes: &[usize]) -> (Vec<usize>, Vec<
                 .map(|e| e.slot)
         })
         .collect();
+    let incident = match slots[..] {
+        [a] => Some(CtIncidentEdges { a, b: None }),
+        [a, b] => Some(CtIncidentEdges { a, b: Some(b) }),
+        _ => None,
+    };
     // the transverse grid axes whose inverse-widths the cartesian curl reads (in-plane comps).
     let id_axes = plane
         .iter()
         .filter(|&&pk| axes.contains(&pk))
         .map(|&pk| axes.iter().position(|&a| a == pk).unwrap())
         .collect();
-    (slots, id_axes)
+    (incident, id_axes)
 }
 
 /// the CT edge EMF over each edge of the staggered complex. one code path for every
@@ -1487,11 +1559,14 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
         ),
         o => panic!("resistive_emf_ortho: unexpected scalar {o:?}"),
     });
+    let edge = CtEdgeMap::<D>::grid_ordered(&sim.geom.axes)
+        .unwrap_or_else(|e| panic!("resistive_emf_ortho: {e}"));
+    let (g1, g2) = (edge.g1.index(), edge.g2.index());
     let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
         match ct_role(b) {
-            Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[0],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[0],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[1],
+            Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
             _ => panic!("resistive_emf_ortho: unknown manifest slot '{}'", b.name()),
         }
     };
@@ -1507,7 +1582,7 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
     }
     dispatch_fields_each::<Sc, Mem, D>(
         &name,
-        mhd.efield[0].domain(),
+        mhd.efield[edge.slot].domain(),
         &inputs,
         &outputs,
         &[],
@@ -1516,8 +1591,9 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// dispatch the immersed-body localized resistive edge EMF for every body running
-/// `MagneticSpec::Resistive { eta }`: `efield[0] += eta*chi(x)*J_z` over the body's mask, added to the
-/// same edge EMF the curl consumes (div-B-clean, dissipation-only). the field threading the body is
+/// `MagneticSpec::Resistive { eta }`: `eta*chi(x)*J_z` over the body's mask, added in place to the
+/// out-of-plane edge EMF at the grid-ordered edge map's slot — the same edge EMF the curl consumes
+/// (div-B-clean, dissipation-only). the field threading the body is
 /// dissipated; the exterior flux (where `chi = 0`) is untouched. explicit limitation, fail-loud: the
 /// masked adjoint J + body-mask SDF are the cartesian 2.5D pair only; a resistive body on any other
 /// chart/dimension panics; silently ignoring the coupling would drop the body term.
@@ -1564,32 +1640,39 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
             })
         };
         // the (edge slot, transverse faces, kernel name) list to fill: 2.5D has only the out-of-plane
-        // E_z from the two in-plane faces; 3D has all three edges, each from its two transverse faces.
+        // E_z from the two in-plane faces (the chart kernel spells them in grid order); 3D has all
+        // three edges, each from its two transverse faces in the cyclic edge frame.
         let edges: Vec<(usize, usize, usize, String)> = if D == 2 {
-            vec![(0, 0, 1, "body_resistive_emf_2d".to_string())]
+            let edge = CtEdgeMap::<D>::grid_ordered(&sim.geom.axes)
+                .unwrap_or_else(|e| panic!("body_resistive_emf: {e}"));
+            vec![(
+                edge.slot,
+                edge.g1.index(),
+                edge.g2.index(),
+                "body_resistive_emf_2d".to_string(),
+            )]
         } else {
             ct_edges::<D>(&sim.geom.axes)
                 .into_iter()
                 .map(|edge| {
-                    let dir = edge.name_k.index();
                     (
                         edge.slot,
-                        (dir + 1) % 3,
-                        (dir + 2) % 3,
-                        format!("body_resistive_emf_3d_{dir}"),
+                        edge.g1.index(),
+                        edge.g2.index(),
+                        format!("body_resistive_emf_3d_{}", edge.name_k.index()),
                     )
                 })
                 .collect()
         };
-        for (eslot, p1, p2, name) in edges {
+        for (eslot, g1, g2, name) in edges {
             let scalars = scalars_for(&name, &resolve);
             // slot names differ by dim: the 2.5D kernel binds (ez, bx, by); the 3D kernels bind
             // (emf, b_p1, b_p2) for the edge's two transverse faces.
             let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
                 match ct_role(b) {
                     Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[eslot],
-                    Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[p1],
-                    Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[p2],
+                    Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
+                    Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
                     _ => panic!("body_resistive_emf: unknown manifest slot '{}'", b.name()),
                 }
             };
@@ -1615,8 +1698,9 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// add the 2.5D Cartesian Ohmic resistive edge EMF `eta * J_z` to `efield[0]` in place, from the
-/// staggered face field. the curl then consumes the augmented EMF, so `bface` picks up the resistive
+/// add the 2.5D Cartesian Ohmic resistive edge EMF `eta * J_z` to the out-of-plane edge EMF (the
+/// grid-ordered edge map's slot) in place, from the staggered face field on the map's transverse
+/// faces. the curl then consumes the augmented EMF, so `bface` picks up the resistive
 /// diffusion with no new monopole (`div(curl) = 0`). exec over the edge (efield) domain.
 fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -1627,21 +1711,24 @@ fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let id: Vec<f64> = (0..D).map(|d| 1.0 / sim.geom.dx[d]).collect();
+    let edge = CtEdgeMap::<D>::grid_ordered(&sim.geom.axes)
+        .unwrap_or_else(|e| panic!("resistive_emf_2d: {e}"));
+    let (g1, g2) = (edge.g1.index(), edge.g2.index());
     let name = "rmhd_resistive_emf_2d";
     let scalars = scalars_for(name, |bind| {
         Sc::from_f64(match bind {
             ScalarBind::Spec(s) if &**s == "eta" => eta,
-            ScalarBind::Spec(s) if &**s == "idx" => id[0],
-            ScalarBind::Spec(s) if &**s == "idy" => id[1],
+            ScalarBind::Spec(s) if &**s == "idx" => id[g1],
+            ScalarBind::Spec(s) if &**s == "idy" => id[g2],
             ScalarBind::Ref(symbi_ir::ScalarRef::InvDx(ax)) => id[*ax as usize],
             o => panic!("resistive_emf_2d: unexpected scalar {o:?}"),
         })
     });
     let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
         match ct_role(b) {
-            Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[0],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[0],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[1],
+            Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
             _ => panic!("resistive_emf_2d: unknown manifest slot '{}'", b.name()),
         }
     };
@@ -1657,7 +1744,7 @@ fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
     }
     dispatch_fields_each::<Sc, Mem, D>(
         name,
-        mhd.efield[0].domain(),
+        mhd.efield[edge.slot].domain(),
         &inputs,
         &outputs,
         &[],
@@ -1679,21 +1766,21 @@ fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
     let id: Vec<f64> = (0..D).map(|d| 1.0 / sim.geom.dx[d]).collect();
     for edge in ct_edges::<D>(&sim.geom.axes) {
         let dir = edge.name_k.index();
-        let (p1, p2) = ((dir + 1) % 3, (dir + 2) % 3);
+        let (g1, g2) = (edge.g1.index(), edge.g2.index());
         let name = format!("rmhd_resistive_emf_3d_{dir}");
         let scalars = scalars_for(&name, |bind| {
             Sc::from_f64(match bind {
                 ScalarBind::Spec(s) if &**s == "eta" => eta,
-                ScalarBind::Spec(s) if &**s == "id_p1" => id[p1],
-                ScalarBind::Spec(s) if &**s == "id_p2" => id[p2],
+                ScalarBind::Spec(s) if &**s == "id_p1" => id[g1],
+                ScalarBind::Spec(s) if &**s == "id_p2" => id[g2],
                 o => panic!("resistive_emf_3d: unexpected scalar {o:?}"),
             })
         });
         let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
             match ct_role(b) {
                 Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
-                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[p1],
-                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[p2],
+                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
+                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
                 _ => panic!("resistive_emf_3d: unknown manifest slot '{}'", b.name()),
             }
         };
@@ -1718,8 +1805,9 @@ fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// add the 2.5D cylindrical r-z Ohmic resistive edge EMF `eta * J_phi` to the corner `efield[0]`
-/// (`E_phi`) in place, from the poloidal face field (`B_r = bface[0]`, `B_z = bface[1]`). `J_phi` is
+/// add the 2.5D cylindrical r-z Ohmic resistive edge EMF `eta * J_phi` to the corner `E_phi` (the
+/// grid-ordered edge map's slot) in place, from the poloidal face field on the map's transverse
+/// faces (`B_r` on the grid-axis-0 faces, `B_z` on the grid-axis-1 faces). `J_phi` is
 /// the mimetic adjoint of the cyl-rz induction curl, so once the curl consumes the augmented EMF the
 /// resistive operator `-curl(eta J)` is negative-definite (stable Ohmic decay), div-B-clean via the
 /// same curl. binds the face-position geom scalars by manifest (log-radial aware), like the curl.
@@ -1747,11 +1835,14 @@ fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
         ),
         o => panic!("resistive_emf_cyl_rz: unexpected scalar {o:?}"),
     });
+    let edge = CtEdgeMap::<D>::grid_ordered(&sim.geom.axes)
+        .unwrap_or_else(|e| panic!("resistive_emf_cyl_rz: {e}"));
+    let (g1, g2) = (edge.g1.index(), edge.g2.index());
     let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
         match ct_role(b) {
-            Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[0],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[0],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[1],
+            Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
             _ => panic!("resistive_emf_cyl_rz: unknown manifest slot '{}'", b.name()),
         }
     };
@@ -1767,7 +1858,7 @@ fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
     }
     dispatch_fields_each::<Sc, Mem, D>(
         name,
-        mhd.efield[0].domain(),
+        mhd.efield[edge.slot].domain(),
         &inputs,
         &outputs,
         &[],
@@ -1803,10 +1894,10 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
     );
     let id: Vec<f64> = (0..D).map(|d| 1.0 / sim.geom.dx[d]).collect();
     for dir in 0..D {
-        let (edge_slots, id_axes) = ct_face_curl::<D>(dir, &axes);
-        if edge_slots.is_empty() {
+        let (incident, id_axes) = ct_face_curl::<D>(dir, &axes);
+        let Some(incident) = incident else {
             continue;
-        }
+        };
         // the spacing + spacetime slugs ride the name (uniform flat -> both empty, unchanged): a
         // log-radial grid selects the geometric-mean curl (`_logr`); a curved background adds the
         // densitized-space curl (coordinate lengths + the per-face sqrt(gamma) weight).
@@ -1858,13 +1949,8 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
         let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
             match ct_role(b) {
                 Some(CtScratch::Face(CtFaceCt::BFaceSweep)) => &mhd.bface[dir],
-                Some(CtScratch::Edge(CtEdgeCt::EmfIncident(Transverse::A))) => {
-                    &mhd.efield[edge_slots[0]]
-                }
-                Some(CtScratch::Edge(CtEdgeCt::EmfIncident(Transverse::B))) => {
-                    &mhd.efield[edge_slots[1]]
-                }
-                Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge_slots[0]],
+                Some(CtScratch::Edge(CtEdgeCt::EmfIncident(t))) => &mhd.efield[incident.of(t)],
+                Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[incident.sole()],
                 _ => panic!("rmhd_ct_curl: unknown manifest slot '{}'", b.name()),
             }
         };
@@ -1988,4 +2074,30 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
         Vec::new()
     };
     dispatch_fields_each::<Sc, Mem, D>(&bname, interior, &inputs, &outputs, &[], &bscalars);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CtEdgeMap;
+
+    /// the grid-ordered constructor is the 2.5D chart map: it rejects any other
+    /// mesh dimension, a malformed plane, and coincident components, and its
+    /// accepted form carries grid axes 0/1 with the out-of-plane complement as
+    /// the dual component (the r-z plane: A = B_r on grid axis 0, B = B_z on
+    /// grid axis 1, dual = phi).
+    #[test]
+    fn grid_ordered_is_the_two_dimensional_chart_map() {
+        assert!(CtEdgeMap::<3>::grid_ordered(&[0, 1]).is_err());
+        assert!(CtEdgeMap::<1>::grid_ordered(&[0]).is_err());
+        assert!(CtEdgeMap::<2>::grid_ordered(&[0, 1, 2]).is_err());
+        assert!(CtEdgeMap::<2>::grid_ordered(&[0, 0]).is_err());
+        assert!(CtEdgeMap::<2>::grid_ordered(&[0, 3]).is_err());
+        let m = CtEdgeMap::<2>::grid_ordered(&[0, 2]).expect("the r-z plane");
+        assert_eq!(m.slot, 0);
+        assert_eq!(m.name_k.index(), 1);
+        assert_eq!(m.p1.index(), 0);
+        assert_eq!(m.p2.index(), 2);
+        assert_eq!(m.g1.index(), 0);
+        assert_eq!(m.g2.index(), 1);
+    }
 }
