@@ -22,7 +22,7 @@
 // =============================================================================
 
 use symbi_algebra::{Matrix, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// the covariant spatial metric gamma_{ij} — lowers a contravariant index. a distinct type from
 /// its inverse [`GammaInv`] so a builder cannot silently pass one where the other is meant (the

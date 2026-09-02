@@ -761,7 +761,7 @@ mod tests {
         // SPEC's flag. closes the "consts collapse" claim end-to-end —
         // future regimes that forget to wire SPEC fail this test.
         use crate::{IsoNewtonian, Newtonian, Regime, Rhd, Rmhd};
-        use symbi_ir::algebra::Scalar;
+        use symbi_carrier::Scalar;
 
         fn check<R, S, const D: usize>(r: R, spec: &RegimeSpec)
         where

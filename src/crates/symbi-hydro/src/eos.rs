@@ -10,7 +10,7 @@
 //   let a = eos.sound_speed(rho, pre);
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// equation of state: thermodynamic closure for the euler equations.
 /// maps between (rho, p) and (rho, e_int) and provides the sound speed.

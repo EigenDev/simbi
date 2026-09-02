@@ -13,7 +13,7 @@
 use crate::eos::Eos;
 use crate::regime::Regime;
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// HLLE approximate riemann solver. two-wave solver, any regime.
 /// pure math — allocation-free, GPU-callable. `vface` is the grid velocity at the

@@ -13,7 +13,7 @@
 //   let jj = map.index_at(0.5);                 // inverse map
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// cell interval: physical extent of a single cell along one axis.
 #[derive(Debug, Clone, Copy)]

@@ -20,7 +20,7 @@ use crate::energy::{Adiabatic, DyeModel, EnergyModel, EnergySlot, IsoModel, Undy
 use crate::eos::Eos;
 use std::ops::{Add, Mul, Neg, Sub};
 use symbi_algebra::{FieldElement, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 // ---- generic state types ----
 
@@ -319,7 +319,7 @@ impl<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel> Mul<S> for ConsG<S,
 
 // ---- Selectable impls ----
 
-impl<S: Scalar, const D: usize, E: EnergyModel> symbi_ir::algebra::Selectable<S> for ConsG<S, D, E>
+impl<S: Scalar, const D: usize, E: EnergyModel> symbi_carrier::Selectable<S> for ConsG<S, D, E>
 where
     S::Mask: Copy,
 {
@@ -328,13 +328,13 @@ where
         ConsG {
             chi: Default::default(),
             den: <S as Scalar>::select(m, yes.den, no.den),
-            mom: <Tensor<S, D> as symbi_ir::algebra::Selectable<S>>::select(m, yes.mom, no.mom),
+            mom: <Tensor<S, D> as symbi_carrier::Selectable<S>>::select(m, yes.mom, no.mom),
             nrg: EnergySlot::select_mask(m, yes.nrg, no.nrg),
         }
     }
 }
 
-impl<S: Scalar, const D: usize, E: EnergyModel> symbi_ir::algebra::Selectable<S> for PrimG<S, D, E>
+impl<S: Scalar, const D: usize, E: EnergyModel> symbi_carrier::Selectable<S> for PrimG<S, D, E>
 where
     S::Mask: Copy,
 {
@@ -342,7 +342,7 @@ where
     fn select(m: S::Mask, yes: Self, no: Self) -> Self {
         PrimG {
             rho: <S as Scalar>::select(m, yes.rho, no.rho),
-            vel: <Tensor<S, D> as symbi_ir::algebra::Selectable<S>>::select(m, yes.vel, no.vel),
+            vel: <Tensor<S, D> as symbi_carrier::Selectable<S>>::select(m, yes.vel, no.vel),
             pre: EnergySlot::select_mask(m, yes.pre, no.pre),
         }
     }

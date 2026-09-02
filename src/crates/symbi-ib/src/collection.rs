@@ -19,7 +19,7 @@
 
 use crate::body::{Body, BodyKind};
 use symbi_algebra::{OrderedNumeric, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// number of body slots statically unrolled into the baked gravity/accretion
 /// source kernels. 2 covers binary systems. source bodies (gravity-on-gas or

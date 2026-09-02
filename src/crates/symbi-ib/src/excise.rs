@@ -18,7 +18,7 @@
 //   let excised = ks_excised(&x_c, spin, r_exc);
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// the excision predicate: kerr-schild radius r_ks(x; a) < r_exc, as a select
 /// mask. r_ks solves the oblate-spheroidal quartic,

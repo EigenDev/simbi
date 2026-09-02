@@ -13,7 +13,7 @@ use crate::mhd_state::MhdPrim;
 use crate::rhd;
 use crate::spatial_metric::SpatialMetric;
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// magnetic pressure p_mag = 0.5*(B^2/W^2 + (v . B)^2) (= 0.5 * b^mu b_mu spatial).
 #[inline]

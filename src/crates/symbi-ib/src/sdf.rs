@@ -21,8 +21,8 @@
 //   let ball = s.bounding_ball();
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
-use symbi_ir::dual::Dual;
+use symbi_carrier::Scalar;
+use symbi_carrier::Dual;
 
 /// the mollified indicator of a signed distance: 1 well inside the body, 0
 /// well outside, a tanh ramp of width `w` across the surface. spelled

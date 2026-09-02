@@ -63,7 +63,7 @@ pub use source_term::{PointMassGravity, UniformAccel};
 pub use state::{Cons, ConsG, Magnetic, NonMagnetic, Prim, PrimG};
 pub use symbi_algebra::Tensor;
 pub use symbi_geometry;
-pub use symbi_ir::algebra::Scalar;
+pub use symbi_carrier::Scalar;
 // the python front door's wire format — re-exported so the source API (SourceConfig +
 // expr_bridge::build_user_source) is one import surface.
 pub use dissipation::{ShockwaveLimiter, mach_scale, shear_weight};

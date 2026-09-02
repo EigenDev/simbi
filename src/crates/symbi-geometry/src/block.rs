@@ -22,7 +22,7 @@
 
 use crate::metric::{DiagonalMetric, Metric};
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// per-axis coordinate map. Copy + GPU-friendly enum.
 /// covers uniform, logarithmic, and geometrically graded spacing.

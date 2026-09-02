@@ -15,7 +15,7 @@ use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::spatial_metric::SpatialMetric;
 use crate::state::Prim;
 use symbi_algebra::{OrderedNumeric, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// the shared relativistic c2p iteration cap (`C2P_MAX_ITER`).
 const RMHD_MAX_ITER: usize = crate::c2p_result::C2P_MAX_ITER;

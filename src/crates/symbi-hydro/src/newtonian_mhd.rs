@@ -34,7 +34,7 @@ use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::regime::Regime;
 use crate::state::Cons;
 use symbi_algebra::{OrderedNumeric, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// newtonian (non-relativistic) ideal magnetohydrodynamics.
 #[derive(Clone, Copy, Debug)]

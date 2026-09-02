@@ -1472,6 +1472,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "symbi-carrier"
+version = "0.1.0"
+dependencies = [
+ "symbi-algebra",
+]
+
+[[package]]
 name = "symbi-discretize"
 version = "0.1.0"
 dependencies = [
@@ -1520,7 +1527,7 @@ name = "symbi-geometry"
 version = "0.1.0"
 dependencies = [
  "symbi-algebra",
- "symbi-ir",
+ "symbi-carrier",
 ]
 
 [[package]]
@@ -1537,6 +1544,7 @@ version = "0.1.0"
 dependencies = [
  "hdf5-metno",
  "symbi-algebra",
+ "symbi-carrier",
  "symbi-expr",
  "symbi-geometry",
  "symbi-ir",
@@ -1550,6 +1558,7 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "symbi-algebra",
+ "symbi-carrier",
  "symbi-geometry",
  "symbi-hydro",
  "symbi-ir",
@@ -1575,6 +1584,7 @@ dependencies = [
  "serde_json",
  "symbi-abi",
  "symbi-algebra",
+ "symbi-carrier",
  "syn",
 ]
 

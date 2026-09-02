@@ -11,7 +11,7 @@
 // =============================================================================
 
 use crate::eos::Eos;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// lorentz factor from velocity squared: W = 1/sqrt(1 - v^2).
 #[inline]

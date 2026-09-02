@@ -174,7 +174,7 @@ fn spherical_1d_momentum_source(d: usize) -> SourceProgram {
 fn spherical_2d_momentum_source(d: usize) -> SourceProgram {
     debug_assert_eq!(d, 2, "spherical_2d_momentum_source requires D = 2");
     SourceProgram::trace(|cx| {
-        use symbi_ir::algebra::Scalar;
+        use symbi_carrier::Scalar;
         let leaves = declare_source_leaves(cx, d);
         let (r, theta) = (leaves.x[0], leaves.x[1]);
         let (vr, vt) = (leaves.vel[0], leaves.vel[1]);
@@ -199,7 +199,7 @@ fn spherical_2d_momentum_source(d: usize) -> SourceProgram {
 fn spherical_3d_momentum_source(d: usize) -> SourceProgram {
     debug_assert_eq!(d, 3, "spherical_3d_momentum_source requires D = 3");
     SourceProgram::trace(|cx| {
-        use symbi_ir::algebra::Scalar;
+        use symbi_carrier::Scalar;
         let leaves = declare_source_leaves(cx, d);
         let (r, theta) = (leaves.x[0], leaves.x[1]);
         let (vr, vt, vp) = (leaves.vel[0], leaves.vel[1], leaves.vel[2]);
@@ -500,7 +500,7 @@ fn declare_ib_leaves<'t>(cx: TraceCx<'t>, d: usize) -> IbLeaves<'t> {
 /// callers compose it with `Gv::select(mask, full_source, zero)` to localize
 /// a source value; hash-consing shares one comparison across every output.
 fn inside_body_mask<'t>(leaves: &IbLeaves<'t>) -> symbi_ir::GvMask<'t> {
-    use symbi_ir::algebra::Scalar;
+    use symbi_carrier::Scalar;
     let d_sq = leaves
         .x
         .iter()
@@ -517,7 +517,7 @@ fn inside_body_mask<'t>(leaves: &IbLeaves<'t>) -> symbi_ir::GvMask<'t> {
 /// all D outputs via the trace's hash-consing — emitted once per kernel.
 fn rigid_body_penalty_source(d: usize) -> SourceProgram {
     SourceProgram::trace(|cx| {
-        use symbi_ir::algebra::Scalar;
+        use symbi_carrier::Scalar;
         let leaves = declare_ib_leaves(cx, d);
 
         // rigid penalty needs a body velocity — declare it alongside the base leaves.

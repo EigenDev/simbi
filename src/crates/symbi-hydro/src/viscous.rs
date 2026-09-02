@@ -27,7 +27,7 @@
 // =============================================================================
 
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 fn harmonic_mean<S: Scalar>(a: S, b: S) -> S {
     let sum = a + b;

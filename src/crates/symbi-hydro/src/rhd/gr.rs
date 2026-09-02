@@ -28,7 +28,7 @@
 // =============================================================================
 
 use symbi_algebra::{OrderedNumeric, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 use crate::c2p_result::C2pResult;
 use crate::eos::Eos;
@@ -340,7 +340,7 @@ mod tests {
         // of the regime's own algebra. `to_primitive` then inverts the densitized state back.
         use symbi_geometry::SchwarzschildKS;
         use symbi_geometry::grhd_source::coord_energy_cons_flux;
-        use symbi_ir::dual::Dual;
+        use symbi_carrier::Dual;
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let (m, r, vr) = (1.0_f64, 6.0_f64, 0.15_f64);
         let a2 = 2.0 * m / r; // 1/3

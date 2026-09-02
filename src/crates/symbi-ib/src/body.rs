@@ -14,7 +14,7 @@
 // =============================================================================
 
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// the Rodrigues rotation matrix about unit axis `n` by `theta` (row-major):
 /// `R = cos(theta) I + sin(theta) [n]_x + (1 - cos(theta)) n n^T`.

@@ -21,7 +21,7 @@
 // =============================================================================
 
 use symbi_algebra::{OrderedNumeric, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 use crate::c2p_result::C2pResult;
 use crate::eos::Eos;

@@ -47,7 +47,7 @@
 // =============================================================================
 
 use symbi_algebra::{Matrix, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// the regime-generic conserved state a constraint reads. absent slots are `None`: isothermal
 /// regimes leave the energy slot empty, unmagnetized regimes the field slot. a constraint whose slot

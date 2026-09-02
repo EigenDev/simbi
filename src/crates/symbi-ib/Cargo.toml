@@ -7,7 +7,7 @@ edition.workspace = true
 symbi-algebra = { path = "../symbi-algebra" }
 symbi-geometry = { path = "../symbi-geometry" }
 symbi-hydro = { path = "../symbi-hydro" }
-symbi-ir = { path = "../symbi-ir" }
+symbi-carrier = { path = "../symbi-carrier" }
 # the immersed-body shape wire format: a config-authored csg tree crosses
 # python -> rust as json (SdfExpr::from_json), the same wire pair the source
 # expressions use.
@@ -15,3 +15,6 @@ serde_json = "1"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+symbi-ir = { path = "../symbi-ir" }

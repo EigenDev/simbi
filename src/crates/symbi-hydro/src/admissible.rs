@@ -36,7 +36,7 @@ use symbi_algebra::{Matrix, Tensor};
 /// computation (roughly 1e-16 relative per operation), which is enough margin that a residual
 /// falling under it counts as numerical noise, with genuinely resolved small numbers sitting above.
 pub const ADMISSIBLE_REL_FLOOR: f64 = 1e-10;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// one-power-of-energy scale for relativistic hydrodynamic conserved states.
 /// `D`, `|S|`, and `E` have the same dimensions.

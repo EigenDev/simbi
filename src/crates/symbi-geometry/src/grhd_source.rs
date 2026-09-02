@@ -23,8 +23,8 @@
 // =============================================================================
 
 use symbi_algebra::{Matrix, Tensor};
-use symbi_ir::algebra::Scalar;
-use symbi_ir::dual::Dual;
+use symbi_carrier::Scalar;
+use symbi_carrier::Dual;
 
 use crate::metric::Metric;
 

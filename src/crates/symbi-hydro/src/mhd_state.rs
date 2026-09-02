@@ -28,7 +28,7 @@ use crate::energy::{Adiabatic, EnergyModel, IsoModel};
 use crate::state::{ConsG, PrimG};
 use std::ops::{Add, Deref, DerefMut, Mul, Neg, Sub};
 use symbi_algebra::{FieldElement, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// MHD primitive variables: hydro primitives + magnetic field, generic over the
 /// energy model `E` (Adiabatic scalar pressure slot, or IsoModel Zero<S> zst).
@@ -225,7 +225,7 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Mul<S> for MhdConsG<S, D, E> {
 
 // ---- Selectable impls ----
 
-impl<S: Scalar, const D: usize, E: EnergyModel> symbi_ir::algebra::Selectable<S>
+impl<S: Scalar, const D: usize, E: EnergyModel> symbi_carrier::Selectable<S>
     for MhdConsG<S, D, E>
 where
     S::Mask: Copy,
@@ -233,15 +233,15 @@ where
     #[inline]
     fn select(m: S::Mask, yes: Self, no: Self) -> Self {
         MhdConsG {
-            hydro: <ConsG<S, D, E> as symbi_ir::algebra::Selectable<S>>::select(
+            hydro: <ConsG<S, D, E> as symbi_carrier::Selectable<S>>::select(
                 m, yes.hydro, no.hydro,
             ),
-            mag: <Tensor<S, D> as symbi_ir::algebra::Selectable<S>>::select(m, yes.mag, no.mag),
+            mag: <Tensor<S, D> as symbi_carrier::Selectable<S>>::select(m, yes.mag, no.mag),
         }
     }
 }
 
-impl<S: Scalar, const D: usize, E: EnergyModel> symbi_ir::algebra::Selectable<S>
+impl<S: Scalar, const D: usize, E: EnergyModel> symbi_carrier::Selectable<S>
     for MhdPrimG<S, D, E>
 where
     S::Mask: Copy,
@@ -249,10 +249,10 @@ where
     #[inline]
     fn select(m: S::Mask, yes: Self, no: Self) -> Self {
         MhdPrimG {
-            hydro: <PrimG<S, D, E> as symbi_ir::algebra::Selectable<S>>::select(
+            hydro: <PrimG<S, D, E> as symbi_carrier::Selectable<S>>::select(
                 m, yes.hydro, no.hydro,
             ),
-            mag: <Tensor<S, D> as symbi_ir::algebra::Selectable<S>>::select(m, yes.mag, no.mag),
+            mag: <Tensor<S, D> as symbi_carrier::Selectable<S>>::select(m, yes.mag, no.mag),
         }
     }
 }

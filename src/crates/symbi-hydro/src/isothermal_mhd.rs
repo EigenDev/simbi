@@ -33,7 +33,7 @@ use crate::mhd_state::{IsoMhdCons, IsoMhdPrim};
 use crate::regime::Regime;
 use crate::state::{ConsG, PrimG};
 use symbi_algebra::{OrderedNumeric, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// isothermal ideal magnetohydrodynamics. no energy equation; p = a^2 rho.
 #[derive(Clone, Copy, Debug)]

@@ -39,7 +39,7 @@
 //   let p_face = eq.pressure_at(phi_face) + limited_slope_of_deviation;
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// the share of the segment's positive domain an extrapolation may spend with the
 /// balancing at full strength: the domain boundary itself. a discretely balanced column

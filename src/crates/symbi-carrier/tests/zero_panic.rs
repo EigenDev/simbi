@@ -67,10 +67,11 @@ fn zero_panic_in_constitution_files() {
     sources.sort();
 
     // the walk reaching the tree is a premise of everything below: a gate that discovers
-    // nothing passes forever while checking nothing. the crate carries dozens of sources,
-    // so a handful means the walk found the wrong directory or none at all.
+    // nothing passes forever while checking nothing. the foundation crate carries the
+    // constitution (lib.rs) plus the dual carrier, so fewer than two sources means the
+    // walk found the wrong directory or none at all.
     assert!(
-        sources.len() > 10,
+        sources.len() >= 2,
         "the src walk found only {} rust file(s) — discovery is broken, so this gate \
          checked nothing",
         sources.len()

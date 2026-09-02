@@ -25,7 +25,7 @@ use crate::rhd;
 use crate::spatial_metric::SpatialMetric;
 use crate::state::Cons;
 use symbi_algebra::{OrderedNumeric, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 mod algebra;
 mod cons;

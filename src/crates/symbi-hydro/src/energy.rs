@@ -15,7 +15,7 @@
 
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 // ---- energy slot trait ----
 

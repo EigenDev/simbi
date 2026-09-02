@@ -22,7 +22,7 @@
 //   let w = shear_weight(neighborhood_pressure_ratio, g);
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// shockwave limiter selector for the HLLC riemann solver. picks the flavor of
 /// HLLC the regime emits at a face:

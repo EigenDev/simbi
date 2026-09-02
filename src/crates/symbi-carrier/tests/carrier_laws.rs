@@ -19,7 +19,7 @@
 macro_rules! carrier_law_suite {
     ($modname:ident, $S:ty, $tol:expr) => {
         mod $modname {
-            use symbi_ir::algebra::Scalar;
+            use symbi_carrier::Scalar;
 
             type S = $S;
             const TOL: f64 = $tol;

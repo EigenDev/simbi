@@ -46,7 +46,7 @@
 use symbi_algebra::Tensor;
 use symbi_hydro::energy::{DyeModel, EnergyModel, EnergySlot};
 use symbi_hydro::state::ConsG;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 use crate::body_delta::BodyDelta;
 

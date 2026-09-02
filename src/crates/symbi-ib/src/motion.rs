@@ -14,7 +14,7 @@ use crate::body::{Body, BodyKind};
 use crate::body_delta::BodyDelta;
 use crate::collection::{BodyCollection, ReferenceFrame};
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// rotate a 2D vector by angle theta (radians) in the xy-plane.
 pub fn rotate_2d<S: Scalar>(v: Tensor<S, 2>, theta: S) -> Tensor<S, 2> {

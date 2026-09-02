@@ -12,7 +12,7 @@ use crate::eos::Eos;
 use crate::mhd_state::MhdPrim;
 use crate::rhd;
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// RMHD wave speeds via the full quartic dispersion relation (Mignone & Del Zanna
 /// Eq. 56), with fast paths for vsq~0 (Eq. 57) and bn~0 (Eq. 58). returns

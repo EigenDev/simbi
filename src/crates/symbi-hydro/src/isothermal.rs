@@ -25,7 +25,7 @@ use crate::eos::Eos;
 use crate::regime::Regime;
 use crate::state::{ConsG, PrimG};
 use symbi_algebra::{OrderedNumeric, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// type aliases for isothermal state types.
 pub type IsoCons<S, const D: usize> = ConsG<S, D, IsoModel>;

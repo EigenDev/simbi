@@ -19,7 +19,7 @@
 // =============================================================================
 
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// snapshot of the mesh expansion state at a particular time.
 /// purely value-based — no mutation, no side effects.

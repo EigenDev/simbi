@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 symbi-algebra = { path = "../symbi-algebra" }
+symbi-carrier = { path = "../symbi-carrier" }
 symbi-geometry = { path = "../symbi-geometry" }
 symbi-expr = { path = "../symbi-expr" }
 symbi-ir = { path = "../symbi-ir" }

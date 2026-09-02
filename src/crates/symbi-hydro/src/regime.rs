@@ -28,7 +28,7 @@ use crate::eos::Eos;
 use crate::regime_spec::RegimeSpec;
 use std::ops::{Add, Mul, Neg, Sub};
 use symbi_algebra::{OrderedNumeric, Tensor};
-use symbi_ir::algebra::{Scalar, Selectable};
+use symbi_carrier::{Scalar, Selectable};
 
 /// physics regime. bundles state types with the conversions, flux, and
 /// wave speed estimates needed by riemann solvers.

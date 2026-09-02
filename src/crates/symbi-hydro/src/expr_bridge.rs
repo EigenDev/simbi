@@ -27,7 +27,7 @@
 
 use symbi_expr::dag::{Node, Payload};
 use symbi_expr::op::Op;
-use symbi_ir::algebra::Scalar as _;
+use symbi_carrier::Scalar as _;
 use symbi_ir::{Gv, GvMask, SourceProgram, TraceCx};
 use symbi_algebra::algebra::Numeric as _;
 

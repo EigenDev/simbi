@@ -13,7 +13,7 @@ use crate::rhd::lorentz_factor;
 use crate::spatial_metric::SpatialMetric;
 use crate::state::{Cons, Prim};
 use symbi_algebra::{OrderedNumeric, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// the shared relativistic c2p iteration cap (`C2P_MAX_ITER`); the newton
 /// early-breaks on convergence, so the cap only bounds pathological inputs.

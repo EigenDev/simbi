@@ -26,7 +26,7 @@
 // =============================================================================
 
 use crate::metric::Geometry;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// the volume-weighted centroid of coordinate `axis` over a cell spanning `lo..hi`
 /// on `coords`. `axis` is the coordinate slot (0 = r/R/x, 1 = theta/phi/y,

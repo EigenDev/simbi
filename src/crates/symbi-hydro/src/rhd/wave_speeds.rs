@@ -10,7 +10,7 @@ use crate::eos::Eos;
 use crate::rhd::sound_speed_sq;
 use crate::state::Prim;
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// the Mignone & Bodo (2005) relativistic acoustic wave speeds (eqs. 21-23) as a function of
 /// the sound speed squared and the normal velocity `vn` — the single core both projections

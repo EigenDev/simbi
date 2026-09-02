@@ -26,7 +26,7 @@
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// bondi-hoyle accretion rate coefficient lambda(gamma).
 /// isothermal (gamma=1): exp(1.5)/4, adiabatic (gamma=5/3): 0.25.

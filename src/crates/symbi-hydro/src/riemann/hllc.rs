@@ -27,7 +27,7 @@ use crate::rmhd::Rmhd;
 use crate::spatial_metric::SpatialMetric;
 use crate::state::{Cons, Prim};
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::{Scalar, Selectable};
+use symbi_carrier::{Scalar, Selectable};
 
 // =============================================================================
 // newtonian HLLC — toro section 9.5.2 adaptive estimates + the HLLC+ corrections.

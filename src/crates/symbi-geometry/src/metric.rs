@@ -19,7 +19,7 @@
 // =============================================================================
 
 use symbi_algebra::{Contravariant, Covariant, Embedded, Matrix, Physical, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 // ============================================================
 // geometry enum: coordinate system identifier
@@ -3095,7 +3095,7 @@ mod tests {
         // forms are retired), so it matches a central finite difference of the metric's own
         // lapse/shift/spatial_metric. checked for schwarzschild + KS, including inside the KS horizon
         // (r < 2M). the mass is a constant dual (differentiation is w.r.t. r; M is held fixed).
-        use symbi_ir::dual::Dual;
+        use symbi_carrier::Dual;
         // dr balances central-diff truncation (O(dr^2)) against subtractive roundoff (O(eps/dr)):
         // 1e-4 keeps both ~1e-8, so an fd-appropriate relative tolerance of 1e-5 is safe.
         let dr = 1e-4;
@@ -3308,7 +3308,7 @@ mod tests {
         // origin by symmetry. the metric keeps varying there: freezing r leaves l^i = x^i/r_g
         // tracking position, so gravity inside the clamp stays live in every component of the
         // source.
-        use symbi_ir::dual::Dual;
+        use symbi_carrier::Dual;
         let bh = SchwarzschildKSCartesian {
             mass: Dual {
                 value: 1.0_f64,
@@ -3436,7 +3436,7 @@ mod tests {
         // the covariant source works in the cartesian chart: d_k gamma_ij and d_k (lapse, shift) via
         // Dual must equal a central finite difference of the metric's own components. off-axis so all
         // three coordinate derivatives are nontrivial, and inside the horizon (r < 2M) too.
-        use symbi_ir::dual::Dual;
+        use symbi_carrier::Dual;
         let dd = 1e-4;
         let close = |a: f64, b: f64| (a - b).abs() < 1e-5 * (1.0 + a.abs().max(b.abs()));
         for &p in &[[1.0_f64, 0.6, 0.8], [0.7, 0.2, 0.1], [-3.0, 2.0, 4.0]] {
@@ -3626,7 +3626,7 @@ mod tests {
         // the geodesic source's metric derivatives via forward-mode autodiff w.r.t. the cylindrical
         // coordinates (R, phi, z). d_R and d_z are nontrivial; d_phi vanishes (axisymmetry — the
         // metric is independent of phi, so S_phi is conserved). off-axis + inside the horizon.
-        use symbi_ir::dual::Dual;
+        use symbi_carrier::Dual;
         let dd = 1e-4;
         let close = |a: f64, b: f64| (a - b).abs() < 1e-5 * (1.0 + a.abs().max(b.abs()));
         for &p in &[[2.0_f64, 0.7, 1.5], [0.8, 1.2, 0.3], [4.0, 2.0, -3.0]] {

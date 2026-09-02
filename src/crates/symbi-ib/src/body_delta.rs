@@ -14,7 +14,7 @@
 
 use std::ops::AddAssign;
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 /// accumulated changes to a body from fluid interaction.
 #[derive(Clone, Copy, Debug, PartialEq)]

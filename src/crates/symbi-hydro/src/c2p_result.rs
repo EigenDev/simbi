@@ -16,7 +16,7 @@
 /// baked kernels alike. the solvers converge in far fewer steps on admissible states;
 /// the cap only bounds pathological inputs, so one number serves them all.
 use symbi_algebra::OrderedNumeric;
-use symbi_ir::algebra::Scalar;
+use symbi_carrier::Scalar;
 
 pub const C2P_MAX_ITER: usize = 100;
 

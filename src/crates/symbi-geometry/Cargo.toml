@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 symbi-algebra = { path = "../symbi-algebra" }
-symbi-ir = { path = "../symbi-ir" }
+symbi-carrier = { path = "../symbi-carrier" }
 
 [lints]
 workspace = true

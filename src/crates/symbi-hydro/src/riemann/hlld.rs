@@ -21,7 +21,7 @@ use crate::rmhd::Rmhd;
 use crate::spatial_metric::SpatialMetric;
 use crate::state::{Cons, ConsG, Prim};
 use symbi_algebra::Tensor;
-use symbi_ir::algebra::{Scalar, Selectable};
+use symbi_carrier::{Scalar, Selectable};
 
 /// physical-consistency tolerance for the intermediate-state checks.
 const CONSISTENCY_TOL: f64 = 1e-12;
