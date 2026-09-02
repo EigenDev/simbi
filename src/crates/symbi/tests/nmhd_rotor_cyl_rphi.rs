@@ -141,7 +141,7 @@ fn nmhd_rotor_cyl_rphi_preserves_divb_winds_field_stays_physical() {
     let mhd = sim.fields.mhd.as_ref().unwrap();
     let mut max_br = 0.0_f64;
     for c in sim.geom.interior.iter() {
-        let prim = sim.prim_at(c); // c2p recover — no hand-built MhdCons
+        let prim = sim.expect_prim_at(c); // c2p recover — no hand-built MhdCons
         assert!(
             prim.rho().is_finite() && prim.rho() > 0.0,
             "cell {c:?}: rho={}",

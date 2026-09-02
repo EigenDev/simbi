@@ -14,9 +14,9 @@
 //   let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
 // =============================================================================
 
+use crate::eos::EosFor;
 use crate::quantity::{Density, Pressure};
-use crate::c2p_result::{C2pResult, ErrorCode};
-use crate::eos::{EosFor};
+use crate::recovery::Recovery;
 use crate::regime::Regime;
 use crate::state::{Cons, Prim};
 use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical};
@@ -42,37 +42,32 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        cons: &Self::Cons,
+    ) -> Recovery<Self::Prim>
     where
         S: OrderedNumeric,
     {
-        // raw IEEE math; no silent floors.
-        // the diagnostic ErrorCode is preserved (it's an explicit
-        // signal that leaves the math untouched). callers can
-        // detect a pathology via `result.is_err()` and react; the
-        // `value` is the raw unfloored computation with no
-        // recovered floor substituted, so any downstream NaN propagation is
-        // visible and can be caught at the dt reduction.
+        // raw IEEE math; no silent floors. the audit is an explicit signal
+        // that leaves the math untouched: a rejected candidate travels
+        // diagnostic-only in the failure, so any downstream NaN propagation
+        // in an accepted state stays visible at the dt reduction.
         let prim = cons.to_primitive(eos);
-        let mut code = ErrorCode::NONE;
-        if prim.rho <= S::ZERO {
-            code = code.merge(ErrorCode::NEGATIVE_DENSITY);
-        }
-        if prim.pre <= S::ZERO {
-            code = code.merge(ErrorCode::NEGATIVE_PRESSURE);
-        }
-        if !(prim.rho == prim.rho) || !(prim.pre == prim.pre) {
-            code = code.merge(ErrorCode::NON_FINITE);
-        }
-        if code.is_ok() {
-            C2pResult::ok(prim)
-        } else {
-            C2pResult::err(prim, code)
-        }
+        crate::recovery::judge(
+            prim,
+            crate::recovery::newtonian_prim_audit(prim.rho, prim.pre, &prim.vel),
+        )
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
+    fn to_flux(
+        &self,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+        eos: &impl EosFor<S, Self::Energy>,
+    ) -> Self::Cons {
         let nhat = nhat.components();
         let vn = prim.vel.dot(nhat); // normal velocity
         let cons = prim.to_conserved(eos);
@@ -85,7 +80,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+    ) -> (S, S) {
         let nhat = nhat.components();
         let a = eos.sound_speed(Density(prim.rho), Pressure(prim.pre));
         let vn = prim.vel.dot(nhat);
@@ -93,7 +93,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     }
 
     #[inline]
-    fn wave_speeds_axis(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, axis: usize) -> (S, S) {
+    fn wave_speeds_axis(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        axis: usize,
+    ) -> (S, S) {
         // the speed depends only on the normal velocity -> read vel[axis] directly (no dot).
         let a = eos.sound_speed(Density(prim.rho), Pressure(prim.pre));
         let vn = prim.vel[axis];
@@ -115,9 +120,9 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{FaceNormal, Normalized};
-    use symbi_algebra::Tensor;
     use crate::eos::IdealGas;
+    use symbi_algebra::Tensor;
+    use symbi_algebra::{FaceNormal, Normalized};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-13 * a.abs().max(b.abs()).max(1.0)
@@ -133,7 +138,7 @@ mod tests {
             pre: 2.0,
         };
         let cons = regime.to_conserved(&eos, &prim);
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(approx(prim.rho, prim2.rho));
         assert!(approx(prim.vel[0], prim2.vel[0]));
         assert!(approx(prim.pre, prim2.pre));
@@ -149,7 +154,7 @@ mod tests {
             pre: 0.1,
         };
         let cons = regime.to_conserved(&eos, &prim);
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(approx(prim.rho, prim2.rho));
         for dd in 0..3 {
             assert!(approx(prim.vel[dd], prim2.vel[dd]));
@@ -257,15 +262,15 @@ mod tests {
             mom: Tensor::new([0.0]),
             nrg: 1.0,
         };
-        let result = regime.to_primitive(&eos, &cons);
-        // ErrorCode still signals the pathology...
+        let failure = regime.to_primitive(&eos, &cons).unwrap_err();
+        // the issue set signals the pathology...
         assert!(
-            result
-                .error
-                .contains(crate::c2p_result::ErrorCode::NEGATIVE_DENSITY)
+            failure
+                .issues()
+                .contains(crate::recovery::RecoveryIssues::NEGATIVE_DENSITY)
         );
-        // ...but the value is the raw computed prim (no silent floor).
-        assert_eq!(result.value.rho, -1.0);
+        // ...and the raw computed prim survives diagnostically (no silent floor).
+        assert!(failure.candidate().snapshot().contains("rho: -1.0"));
     }
 
     #[test]
@@ -279,15 +284,15 @@ mod tests {
             mom: Tensor::new([100.0]),
             nrg: 1.0,
         };
-        let result = regime.to_primitive(&eos, &cons);
+        let failure = regime.to_primitive(&eos, &cons).unwrap_err();
         assert!(
-            result
-                .error
-                .contains(crate::c2p_result::ErrorCode::NEGATIVE_PRESSURE)
+            failure
+                .issues()
+                .contains(crate::recovery::RecoveryIssues::NEGATIVE_PRESSURE)
         );
-        // raw pressure is negative; downstream callers / dt reduction
-        // are responsible for catching this.
-        assert!(result.value.pre < 0.0);
+        // the raw negative pressure survives diagnostically; an accepted state
+        // never carries it.
+        assert!(failure.candidate().snapshot().contains("pre: -"));
     }
 
     #[test]

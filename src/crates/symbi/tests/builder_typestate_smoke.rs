@@ -33,7 +33,7 @@ fn hydro_builder_reaches_ready_and_builds() {
     assert_eq!(sim.geom.interior.volume(), 16 * 16);
     // seeded: every interior cell recovers the prim it was set to.
     for c in sim.geom.interior.iter() {
-        let p = sim.prim_at(c);
+        let p = sim.expect_prim_at(c);
         assert!((p.rho() - 1.0).abs() < 1e-14, "cell {c:?}: rho={}", p.rho());
         assert!((p.pre() - 1.0).abs() < 1e-14, "cell {c:?}: p={}", p.pre());
     }
@@ -66,7 +66,7 @@ fn mhd_builder_requires_faces_then_builds() {
         "seed_faces must arm bface_initialized for the CT ground truth"
     );
     for c in sim.geom.interior.iter() {
-        let p = sim.prim_at(c);
+        let p = sim.expect_prim_at(c);
         assert!(
             p.rho().is_finite() && p.rho() > 0.0,
             "cell {c:?}: rho={}",

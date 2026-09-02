@@ -28,11 +28,11 @@
 //   let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
 // =============================================================================
 
-use crate::quantity::{Density, Pressure};
-use crate::c2p_result::{C2pResult, ErrorCode};
 use crate::energy::Adiabatic;
-use crate::eos::{EosFor};
+use crate::eos::EosFor;
 use crate::mhd_state::{MhdCons, MhdPrim};
+use crate::quantity::{Density, Pressure};
+use crate::recovery::Recovery;
 use crate::regime::Regime;
 use crate::state::Cons;
 use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical, Tensor};
@@ -107,36 +107,34 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        cons: &Self::Cons,
+    ) -> Recovery<Self::Prim>
     where
         S: OrderedNumeric,
     {
         // algebraic, no iteration: strip magnetic energy, then invert hydro.
-        // raw IEEE math; no silent floors. the
-        // ErrorCode is an explicit diagnostic, the value is the raw unfloored
-        // computation so downstream NaN propagation stays visible at the dt
+        // raw IEEE math; no silent floors. the audit is an explicit
+        // diagnostic on the raw unfloored computation, so downstream NaN
+        // propagation in an accepted state stays visible at the dt
         // reduction. the math is `nmhd_recover` (the carrier-safe single source);
         // only the comparisons below are host-side.
         let prim = nmhd_recover(eos, cons);
-        let mut code = ErrorCode::NONE;
-        if prim.rho <= S::ZERO {
-            code = code.merge(ErrorCode::NEGATIVE_DENSITY);
-        }
-        if prim.pre <= S::ZERO {
-            code = code.merge(ErrorCode::NEGATIVE_PRESSURE);
-        }
-        if !(prim.rho == prim.rho) || !(prim.pre == prim.pre) {
-            code = code.merge(ErrorCode::NON_FINITE);
-        }
-        if code.is_ok() {
-            C2pResult::ok(prim)
-        } else {
-            C2pResult::err(prim, code)
-        }
+        crate::recovery::judge(
+            prim,
+            crate::recovery::newtonian_mhd_prim_audit(prim.rho, prim.pre, &prim.vel, &prim.mag),
+        )
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
+    fn to_flux(
+        &self,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+        eos: &impl EosFor<S, Self::Energy>,
+    ) -> Self::Cons {
         let nhat = nhat.components();
         let half = S::HALF;
         let vn = prim.vel.dot(nhat);
@@ -157,7 +155,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+    ) -> (S, S) {
         let nhat = nhat.components();
         let vn = prim.vel.dot(nhat);
         let cf = fast_magnetosonic(eos, prim, nhat);
@@ -173,10 +176,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::state::Prim;
     use symbi_algebra::Tensor;
+    use symbi_algebra::{FaceNormal, Normalized};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-12 * a.abs().max(b.abs()).max(1.0)
@@ -199,7 +202,7 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let prim = prim3(0.7, [1.0, -0.3, 0.5], 0.9, [0.4, 0.2, -0.6]);
         let cons = regime.to_conserved(&eos, &prim);
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(approx(prim.rho, prim2.rho));
         for dd in 0..3 {
             assert!(approx(prim.vel[dd], prim2.vel[dd]));
@@ -304,8 +307,12 @@ mod tests {
             },
             mag: Tensor::new([3.0, 0.0, 0.0]), // 1/2|B|^2 = 4.5 > nrg
         };
-        let result = regime.to_primitive(&eos, &cons);
-        assert!(result.error.contains(ErrorCode::NEGATIVE_PRESSURE));
-        assert!(result.value.pre < 0.0); // raw, unfloored
+        let failure = regime.to_primitive(&eos, &cons).unwrap_err();
+        assert!(
+            failure
+                .issues()
+                .contains(crate::recovery::RecoveryIssues::NEGATIVE_PRESSURE)
+        );
+        assert!(failure.candidate().snapshot().contains("pre: -")); // raw, unfloored
     }
 }

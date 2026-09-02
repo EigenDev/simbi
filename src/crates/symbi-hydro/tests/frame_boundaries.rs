@@ -16,22 +16,25 @@ fn source(relative: &str) -> String {
 }
 
 /// the regime flux and wave-speed doors consume the regime-associated normal
-/// witness; a bare tensor normal stays out of the trait surface.
+/// witness; a bare tensor normal stays out of the trait surface. signatures
+/// are matched with all whitespace stripped, so the pin holds the types in
+/// the signature and is indifferent to line wrapping.
 #[test]
 fn regime_normal_doors_take_the_witness() {
     let regime = source("src/regime.rs");
+    let stripped: String = regime.chars().filter(|c| !c.is_whitespace()).collect();
     assert!(
         regime.contains("type Normal: FaceNormal<S, D>;"),
         "the Regime trait must declare its face-normal witness"
     );
     for door in [
-        "fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal",
-        "fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal",
+        "fnto_flux(&self,prim:&Self::Prim,nhat:&Self::Normal",
+        "fnwave_speeds(&self,eos:&implEosFor<S,Self::Energy>,prim:&Self::Prim,nhat:&Self::Normal",
     ] {
-        assert!(regime.contains(door), "witness door lost: {door}");
+        assert!(stripped.contains(door), "witness door lost: {door}");
     }
     assert!(
-        !regime.contains("nhat: &Tensor"),
+        !stripped.contains("nhat:&Tensor"),
         "a bare tensor normal returned to the Regime trait"
     );
 }

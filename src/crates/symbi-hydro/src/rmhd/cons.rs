@@ -9,12 +9,12 @@
 // multi-accumulator IterateInline, at S=f64/f32 it is the false-position loop.
 // =============================================================================
 
-use crate::c2p_result::C2pResult;
 use crate::eos::Eos;
 use crate::mhd_state::{MhdCons, MhdPrim};
+use crate::recovery::{Recovery, RecoveryFailure};
 use crate::spatial_metric::SpatialMetric;
 use crate::state::Prim;
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::OrderedNumeric;
 use symbi_carrier::Scalar;
 
 /// the shared relativistic c2p iteration cap (`C2P_MAX_ITER`).
@@ -134,7 +134,7 @@ fn find_mu_plus<S: Scalar>(bee_sq: S, rdb_sq: S, r: S) -> S {
 /// (KKC Eqs. 22-25), the KKC false-position root `mu` (the 6-state bracket `[mu_lo,
 /// mu_hi, f_lo, f_hi, mu, done]` over `kkc_fmu44`, Illinois half-damp, sticky `done`),
 /// and the algebraic recovery (Eqs. 26/38/39/32/41/42/43/68). no guards — the host
-/// `rmhd_to_primitive` wrapper adds the C2pResult diagnostics post-hoc. traced at
+/// `rmhd_to_primitive` wrapper judges the recovery audit post-hoc. traced at
 /// `S = Gv` (`symbi_discretize::rmhd_c2p_gv`) it lowers to one multi-accumulator
 /// `IterateInline`; at `S = f64/f32` it is the false-position loop. `use_four_velocity
 /// = false`: the returned velocity is the 3-velocity. RMHD vectors are always 3-comp.
@@ -252,9 +252,10 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     }
 }
 
-/// the host RMHD cons->prim: the branch-free `rmhd_recover` plus post-hoc C2pResult
-/// diagnostics. no silent floor — the value is the raw recovered state, the ErrorCode
-/// is the explicit signal, never a silent floor (matches `Newtonian::to_primitive`).
+/// the host RMHD cons->prim: the branch-free `rmhd_recover` plus the post-hoc
+/// recovery audit. no silent floor — an accepted state is the raw recovered
+/// state, a rejected one carries its issues with a diagnostic-only candidate
+/// (matches `Newtonian::to_primitive`).
 ///
 /// **host-only** (Tier 1.7): `S: OrderedNumeric` because the diagnostic check uses
 /// native `<` / `<=` / `==` on a host scalar. the kernel path is `rmhd_recover` above
@@ -262,39 +263,29 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
 pub(crate) fn rmhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     eos: &impl Eos<S>,
     cons: &MhdCons<S, D>,
-) -> C2pResult<MhdPrim<S, D>> {
+) -> Recovery<MhdPrim<S, D>> {
     let dd = cons.den;
 
     // input guard: clearly-invalid conserved density (host-only early-out, absent from the
-    // kernel path). B passes through. shared RHD/RMHD guard (now NaN-checked too; tier-1 #5).
-    if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
-        let floored = MhdPrim {
-            hydro: Prim {
-                rho: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
-                vel: Tensor::zeros(),
-                pre: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
-            },
-            mag: cons.mag,
-        };
-        return C2pResult::err(floored, code);
+    // kernel path). shared RHD/RMHD guard (NaN-checked too; tier-1 #5); the rejection
+    // precedes any recovery iterate, so the failure carries the diagnostic placeholder.
+    if let Some(issues) = crate::recovery::relativistic_density_guard(dd) {
+        return Err(RecoveryFailure::without_candidate(issues));
     }
 
     let prim = rmhd_recover(eos, cons, &SpatialMetric::flat(), RMHD_MAX_ITER);
 
-    // post-hoc diagnostics on the raw recovered state (the shared RHD/RMHD c2p contract).
+    // post-hoc audit on the raw recovered state (the shared RHD/RMHD c2p contract).
     let v_sq = prim.vel.dot(&prim.vel);
-    let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
-    if code.is_ok() {
-        C2pResult::ok(prim)
-    } else {
-        C2pResult::err(prim, code)
-    }
+    let audit = crate::recovery::relativistic_c2p_audit(prim.rho, prim.pre, v_sq);
+    crate::recovery::judge(prim, audit)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::eos::IdealGas;
+    use symbi_algebra::Tensor;
 
     // direct f64 reference for `kkc_fmu49` (KKC Eq. 49).
     fn ref_fmu49(mu: f64, beesq: f64, beedrsq: f64, r: f64) -> f64 {

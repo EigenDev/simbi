@@ -2362,7 +2362,7 @@ where
     ) {
         for c in self.geom.interior.iter() {
             let x = self.geom.cell_coord(c);
-            let p = self.prim_at(c);
+            let p = self.expect_prim_at(c);
             self.seed_cell(c, &f(x, p));
         }
     }
@@ -2381,17 +2381,27 @@ where
         <<R as Regime<Sc, DOF>>::Cons as SeedableCons<Sc, DOF>>::from_parts(hydro, mag)
     }
 
-    /// recover the regime's primitive at a cell (c2p) — `sim.prim_at(c)` replaces building the
-    /// Cons by hand + calling the regime recover. returns the recovered primitive (the c2p error
-    /// code is dropped; assert physicality yourself, or use `regime.to_primitive` for the full
-    /// `C2pResult`).
-    pub fn prim_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Prim {
+    /// recover the regime's primitive at a cell (c2p) — `sim.recover_at(c)` replaces building the
+    /// Cons by hand + calling the regime recover. rejection is ordinary `Result` control flow:
+    /// the caller matches the `Recovery` and decides.
+    pub fn recover_at(
+        &self,
+        coord: [isize; D],
+    ) -> symbi_hydro::Recovery<<R as Regime<Sc, DOF>>::Prim> {
         <R as Regime<Sc, DOF>>::to_primitive(
             &self.physics.regime,
             &self.physics.eos,
             &self.cons_at(coord),
         )
-        .value
+    }
+
+    /// the panicking probe over `recover_at`, named for what it does: a cell whose recovery is
+    /// rejected panics with its issue set. for tests and diagnostics that assert the cell is
+    /// physical by reading it.
+    pub fn expect_prim_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Prim {
+        self.recover_at(coord)
+            .unwrap_or_else(|failure| panic!("expect_prim_at({coord:?}): {failure}"))
+            .into_inner()
     }
 }
 

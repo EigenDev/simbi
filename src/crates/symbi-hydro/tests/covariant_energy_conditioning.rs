@@ -54,7 +54,7 @@ fn round_trip_pressure_error(r: f64, rho: f64, pre: f64, vel: f64) -> f64 {
     let gr = ks_regime(r);
     let prim = Prim::adiabatic(Density(rho), Tensor::new([vel]), Pressure(pre));
     let cons = gr.to_conserved(&eos, &Valencia(prim));
-    let back = gr.to_primitive(&eos, &cons).unwrap();
+    let back = gr.to_primitive(&eos, &cons).unwrap().into_inner();
     (back.0.pre() - pre).abs() / pre
 }
 
@@ -117,7 +117,7 @@ fn flat_round_trip_pressure_error(rho: f64, pre: f64, vel: f64) -> f64 {
     };
     let prim = Prim::adiabatic(Density(rho), Tensor::new([vel]), Pressure(pre));
     let cons = gr.to_conserved(&eos, &Valencia(prim));
-    let back = gr.to_primitive(&eos, &cons).unwrap();
+    let back = gr.to_primitive(&eos, &cons).unwrap().into_inner();
     (back.0.pre() - pre).abs() / pre
 }
 

@@ -4,16 +4,16 @@
 // the RHD cons->prim recovery — a carrier-generic Newton-Raphson on the pressure
 // root (`Scalar::iterate`), then the algebraic velocity/Lorentz/density recovery.
 // branch-free core (`rhd_recover`, what the substrate c2p kernel computes) + the
-// host wrapper (`rhd_to_primitive`) that adds the C2pResult diagnostics post-hoc.
+// host wrapper (`rhd_to_primitive`) that judges the recovery audit post-hoc.
 // =============================================================================
 
-use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
-use crate::c2p_result::C2pResult;
 use crate::eos::Eos;
+use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
+use crate::recovery::{Recovery, RecoveryFailure};
 use crate::rhd::lorentz_factor;
 use crate::spatial_metric::SpatialMetric;
 use crate::state::{Cons, Prim};
-use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_algebra::OrderedNumeric;
 use symbi_carrier::Scalar;
 
 /// the shared relativistic c2p iteration cap (`C2P_MAX_ITER`); the newton
@@ -24,7 +24,7 @@ const MAX_ITER: usize = crate::c2p_result::C2P_MAX_ITER;
 /// is the root of a 1D equation found by a carrier-generic Newton (`Scalar::iterate`),
 /// then velocity/Lorentz/density follow algebraically. no floors, no guards — exactly
 /// what the substrate c2p kernel computes (the `rhd_to_primitive` wrapper adds the
-/// host C2pResult diagnostics post-hoc, matching `Newtonian::to_primitive`).
+/// host recovery audit post-hoc, matching `Newtonian::to_primitive`).
 ///
 /// EOS-generic: works through `eos.pressure()` / `eos.sound_speed_sq()`, so no gamma is hardcoded. traced at
 /// `S = Gv` (`symbi_discretize::rhd_c2p_gv`) it lowers to the IterateInline c2p kernel;
@@ -103,9 +103,10 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     Prim { rho, vel, pre }
 }
 
-/// the host RHD cons->prim: the branch-free `rhd_recover` plus post-hoc C2pResult
-/// diagnostics. no silent floor — the value is the raw recovered state, the ErrorCode
-/// is the explicit signal, never a silent floor (matches `Newtonian::to_primitive`).
+/// the host RHD cons->prim: the branch-free `rhd_recover` plus the post-hoc
+/// recovery audit. no silent floor — an accepted state is the raw recovered
+/// state, a rejected one carries its issues with a diagnostic-only candidate
+/// (matches `Newtonian::to_primitive`).
 ///
 /// **host-only** (Tier 1.7): `S: OrderedNumeric` because the diagnostic check uses
 /// native `<` / `<=` / `==` on a host scalar. the kernel path is `rhd_recover` above
@@ -113,32 +114,24 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
 pub(crate) fn rhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     eos: &impl Eos<S>,
     cons: &Cons<S, D>,
-) -> C2pResult<Prim<S, D>> {
+) -> Recovery<Prim<S, D>> {
     let dd = cons.den;
 
     // input guard: clearly-invalid conserved density. a host-only early-out (absent from the
-    // kernel path) that keeps the recovery's `dd/ww`, `tau+dd+p` finite for callers.
-    if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
-        let floored = Prim {
-            rho: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
-            vel: Tensor::zeros(),
-            pre: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
-        };
-        return C2pResult::err(floored, code);
+    // kernel path); the rejection precedes any recovery iterate, so the failure carries the
+    // diagnostic placeholder.
+    if let Some(issues) = crate::recovery::relativistic_density_guard(dd) {
+        return Err(RecoveryFailure::without_candidate(issues));
     }
 
     // flat/orthonormal frame -> the spatial metric is identity (bit-identical to euclidean norms);
     // a genuine GR metric is threaded here once the conserved state is densitized.
     let prim = rhd_recover(eos, cons, &SpatialMetric::flat(), MAX_ITER);
 
-    // post-hoc diagnostics on the raw recovered state (shared RHD/RMHD contract; tier-1 #5).
+    // post-hoc audit on the raw recovered state (shared RHD/RMHD contract; tier-1 #5).
     let v_sq = prim.vel.dot(&prim.vel);
-    let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
-    if code.is_ok() {
-        C2pResult::ok(prim)
-    } else {
-        C2pResult::err(prim, code)
-    }
+    let audit = crate::recovery::relativistic_c2p_audit(prim.rho, prim.pre, v_sq);
+    crate::recovery::judge(prim, audit)
 }
 
 #[cfg(test)]
@@ -147,6 +140,7 @@ mod tests {
     use crate::eos::IdealGas;
     use crate::regime::Regime;
     use crate::rhd::Rhd;
+    use symbi_algebra::Tensor;
 
     fn approx_rel(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() < tol * a.abs().max(b.abs()).max(1.0)
@@ -162,7 +156,7 @@ mod tests {
             pre: 1.0,
         };
         let cons = regime.to_conserved(&eos, &prim);
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(approx_rel(prim.rho, prim2.rho, 1e-10));
         assert!(approx_rel(prim.vel[0], prim2.vel[0], 1e-10));
         assert!(approx_rel(prim.pre, prim2.pre, 1e-10));
@@ -178,7 +172,7 @@ mod tests {
             pre: 1.0,
         };
         let cons = regime.to_conserved(&eos, &prim);
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(approx_rel(prim.rho, prim2.rho, 1e-10));
         assert!(approx_rel(prim.vel[0], prim2.vel[0], 1e-10));
         assert!(approx_rel(prim.pre, prim2.pre, 1e-10));
@@ -194,7 +188,7 @@ mod tests {
             pre: 10.0,
         };
         let cons = regime.to_conserved(&eos, &prim);
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(approx_rel(prim.rho, prim2.rho, 1e-8));
         assert!(approx_rel(prim.vel[0], prim2.vel[0], 1e-8));
         assert!(approx_rel(prim.pre, prim2.pre, 1e-8));
@@ -210,7 +204,7 @@ mod tests {
             pre: 0.5,
         };
         let cons = regime.to_conserved(&eos, &prim);
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(approx_rel(prim.rho, prim2.rho, 1e-10));
         for dd in 0..3 {
             assert!(approx_rel(prim.vel[dd], prim2.vel[dd], 1e-10));
@@ -230,7 +224,7 @@ mod tests {
                 pre,
             };
             let cons = regime.to_conserved(&eos, &prim);
-            let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+            let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
             assert!(
                 approx_rel(prim.rho, prim2.rho, 1e-8),
                 "rho: {} vs {} (input rho={}, pre={})",
@@ -260,13 +254,15 @@ mod tests {
             mom: Tensor::new([0.0]),
             nrg: 1.0,
         };
-        let result = regime.to_primitive(&eos, &cons);
+        let failure = regime.to_primitive(&eos, &cons).unwrap_err();
         assert!(
-            result
-                .error
-                .contains(crate::c2p_result::ErrorCode::NEGATIVE_DENSITY)
+            failure
+                .issues()
+                .contains(crate::recovery::RecoveryIssues::NEGATIVE_DENSITY)
         );
-        assert!(result.value.rho > 0.0);
+        // the guard rejects before recovery: the failure carries the
+        // diagnostic placeholder, never a fabricated physical state.
+        assert!(failure.candidate().snapshot().contains("before recovery"));
     }
 
     #[test]
@@ -280,8 +276,7 @@ mod tests {
             mom: Tensor::new([100.0]),
             nrg: 1e-14,
         };
-        let result = regime.to_primitive(&eos, &cons);
-        assert!(result.error.is_err());
+        assert!(regime.to_primitive(&eos, &cons).is_err());
     }
 
     // the unified relativistic-c2p contract (shared with rmhd_recover): the branch-free kernel body

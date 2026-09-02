@@ -17,9 +17,9 @@
 // all functions are pure math — elemental, GPU-callable, no allocation.
 // =============================================================================
 
-use crate::c2p_result::C2pResult;
-use crate::eos::{EosFor};
+use crate::eos::EosFor;
 use crate::mhd_state::{MhdCons, MhdPrim};
+use crate::recovery::Recovery;
 use crate::regime::Regime;
 use crate::rhd;
 use crate::spatial_metric::SpatialMetric;
@@ -130,7 +130,11 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        cons: &Self::Cons,
+    ) -> Recovery<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -138,7 +142,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
+    fn to_flux(
+        &self,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+        eos: &impl EosFor<S, Self::Energy>,
+    ) -> Self::Cons {
         let nhat = nhat.components();
         let cons = self.to_conserved(eos, prim);
         let metric = SpatialMetric::flat();
@@ -166,7 +175,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+    ) -> (S, S) {
         let nhat = nhat.components();
         rmhd_wave_speeds(eos, prim, nhat)
     }
@@ -189,9 +203,9 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::state::Prim;
+    use symbi_algebra::{FaceNormal, Normalized};
 
     fn approx(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() < tol * a.abs().max(b.abs()).max(1.0)
@@ -231,7 +245,7 @@ mod tests {
             mag: Tensor::new([0.0, 0.1, 0.0]),
         };
         let cons = regime.to_conserved(&eos, &prim);
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(
             approx(prim.rho, prim2.rho, 1e-6),
             "rho: {} vs {}",
@@ -302,13 +316,15 @@ mod tests {
             },
             mag: Tensor::new([0.5, 0.0, 0.0]),
         };
-        let result = regime.to_primitive(&eos, &cons);
+        let failure = regime.to_primitive(&eos, &cons).unwrap_err();
         assert!(
-            result
-                .error
-                .contains(crate::c2p_result::ErrorCode::NEGATIVE_DENSITY)
+            failure
+                .issues()
+                .contains(crate::recovery::RecoveryIssues::NEGATIVE_DENSITY)
         );
-        assert!(result.value.rho > 0.0);
+        // the guard rejects before recovery: the failure carries the
+        // diagnostic placeholder, never a fabricated physical state.
+        assert!(failure.candidate().snapshot().contains("before recovery"));
     }
 
     #[test]

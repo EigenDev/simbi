@@ -28,11 +28,11 @@
 // =============================================================================
 
 use crate::energy::Adiabatic;
-use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Covariant, Tensor};
+use symbi_algebra::{Covariant, FaceNormal, Normalized, OrderedNumeric, Tensor};
 use symbi_carrier::Scalar;
 
-use crate::c2p_result::C2pResult;
-use crate::eos::{EosFor};
+use crate::eos::EosFor;
+use crate::recovery::{Recovery, RecoveryFailure};
 use crate::regime::Regime;
 use crate::regime_spec::RegimeSpec;
 use crate::spatial_metric::SpatialMetric;
@@ -75,7 +75,11 @@ impl<S: Scalar, const D: usize> RhdGr<S, D> {
     /// v^j` (v^i CONTRAVARIANT) and `S_i = rho h W^2 gamma_ij v^j` is lowered; identity gamma gives
     /// the euclidean norm and the orthonormal `S = rho h W^2 v`.
     #[inline]
-    fn valencia_parts(&self, eos: &impl EosFor<S, Adiabatic>, prim: &Prim<S, D>) -> ValenciaParts<S, D> {
+    fn valencia_parts(
+        &self,
+        eos: &impl EosFor<S, Adiabatic>,
+        prim: &Prim<S, D>,
+    ) -> ValenciaParts<S, D> {
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let ww = lorentz_factor(v_sq);
         let rho_h = prim.rho * enthalpy(eos, prim.rho, prim.pre);
@@ -118,7 +122,11 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        cons: &Self::Cons,
+    ) -> Recovery<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -134,13 +142,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         };
         let cons = &cons;
         let dd = cons.den;
-        if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
-            let floored = Prim {
-                rho: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
-                vel: Tensor::zeros(),
-                pre: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
-            };
-            return C2pResult::err(Valencia(floored), code);
+        if let Some(issues) = crate::recovery::relativistic_density_guard(dd) {
+            return Err(RecoveryFailure::without_candidate(issues));
         }
         // recover the Valencia tau from the covariant energy first (invert ehat = alpha tau +
         // (alpha-1) D - beta^i S_i): tau = (ehat + (1-alpha) D + beta^i S_i) / alpha. alpha=1,
@@ -157,16 +160,17 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         // already contracts with `self.metric`). the SR->GR difference lives entirely in the metric value; the code path is shared.
         let prim = rhd_recover(eos, &cons_tau, &self.metric, MAX_ITER);
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
-        let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
-        if code.is_ok() {
-            C2pResult::ok(Valencia(prim))
-        } else {
-            C2pResult::err(Valencia(prim), code)
-        }
+        let audit = crate::recovery::relativistic_c2p_audit(prim.rho, prim.pre, v_sq);
+        crate::recovery::judge(Valencia(prim), audit)
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
+    fn to_flux(
+        &self,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+        eos: &impl EosFor<S, Self::Energy>,
+    ) -> Self::Cons {
         let prim = &prim.0;
         let nhat = nhat.components();
         // F^n = sqrt(-g)[rho u^n, T^n_i, -(T^n_t + rho u^n)]. in ADM variables, with the transport
@@ -196,7 +200,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+    ) -> (S, S) {
         let prim = &prim.0;
         let nhat = nhat.components();
         // Banyuls-Font coordinate speed (Font 2008 eq 37). the two velocities are distinct and must
@@ -232,10 +241,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::spatial_metric::{Gamma, GammaInv};
     use symbi_algebra::Matrix;
+    use symbi_algebra::{FaceNormal, Normalized};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-12 * a.abs().max(b.abs()).max(1.0)
@@ -263,9 +272,14 @@ mod tests {
                 vel: Tensor::new([v]),
                 pre: 0.5,
             };
-            let (cf, cg) = (flat.to_conserved(&eos, &prim), gr.to_conserved(&eos, &Valencia(prim)));
+            let (cf, cg) = (
+                flat.to_conserved(&eos, &prim),
+                gr.to_conserved(&eos, &Valencia(prim)),
+            );
             assert!(
-                approx(cf.den, cg.0.den) && approx(cf.mom[0], cg.0.mom[0]) && approx(cf.nrg, cg.0.nrg),
+                approx(cf.den, cg.0.den)
+                    && approx(cf.mom[0], cg.0.mom[0])
+                    && approx(cf.nrg, cg.0.nrg),
                 "cons v={v}"
             );
             let (ff, fg) = (
@@ -273,7 +287,9 @@ mod tests {
                 gr.to_flux(&Valencia(prim), &nhat_gr, &eos),
             );
             assert!(
-                approx(ff.den, fg.0.den) && approx(ff.mom[0], fg.0.mom[0]) && approx(ff.nrg, fg.0.nrg),
+                approx(ff.den, fg.0.den)
+                    && approx(ff.mom[0], fg.0.mom[0])
+                    && approx(ff.nrg, fg.0.nrg),
                 "flux v={v}"
             );
             let ((slf, srf), (slg, srg)) = (
@@ -339,7 +355,7 @@ mod tests {
             "momentum flux = sqrt(gamma)(S_r alpha v^r + alpha p)"
         );
         // and the c2p undensitizes and round-trips back to the same contravariant v^r.
-        let back = gr.to_primitive(&eos, &c).unwrap();
+        let back = gr.to_primitive(&eos, &c).unwrap().into_inner();
         assert!(approx(back.0.vel[0], vr), "c2p recovers contravariant v^r");
         assert!(
             approx(back.0.rho, 1.0) && approx(back.0.pre, 0.1),
@@ -354,9 +370,9 @@ mod tests {
         // -sqrt(-g)(T^r_t + rho u^r), computed independently straight from the SchwarzschildKS line
         // element by autodiff — the transcription check on the conserved vector, not a restatement
         // of the regime's own algebra. `to_primitive` then inverts the densitized state back.
+        use symbi_carrier::Dual;
         use symbi_geometry::SchwarzschildKS;
         use symbi_geometry::grhd_source::coord_energy_cons_flux;
-        use symbi_carrier::Dual;
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let (m, r, vr) = (1.0_f64, 6.0_f64, 0.15_f64);
         let a2 = 2.0 * m / r; // 1/3
@@ -404,7 +420,7 @@ mod tests {
             f_ref[0]
         );
         // the densitized state inverts back to the primitive through the shared newton.
-        let back = gr.to_primitive(&eos, &c).unwrap();
+        let back = gr.to_primitive(&eos, &c).unwrap().into_inner();
         assert!(
             approx(back.0.rho, 1.3) && approx(back.0.vel[0], vr) && approx(back.0.pre, 0.4),
             "densitized c2p round-trips the primitive"

@@ -19,10 +19,10 @@
 //   let cons = regime.to_conserved(&eos, &prim);
 // =============================================================================
 
-use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
-use crate::c2p_result::C2pResult;
 use crate::energy::{IsoModel, Zero};
-use crate::eos::{EosFor};
+use crate::eos::EosFor;
+use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
+use crate::recovery::Recovery;
 use crate::regime::Regime;
 use crate::state::{ConsG, PrimG};
 use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical};
@@ -58,24 +58,39 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     }
 
     #[inline]
-    fn to_primitive(&self, _eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(
+        &self,
+        _eos: &impl EosFor<S, Self::Energy>,
+        cons: &Self::Cons,
+    ) -> Recovery<Self::Prim>
     where
         S: OrderedNumeric,
     {
         // mul-by-reciprocal: matches the chalkboard kernel form so CPU
         // and GPU agree bit-for-bit. divide-by-zero produces inf/NaN
-        // by IEEE rules — no silent floor. iso has no failure mode the
-        // floor would meaningfully recover from, so always Ok.
+        // by IEEE rules — no silent floor: the algebraic inversion has no
+        // iterate to diverge, and the interior it still owes is a positive
+        // finite density with finite velocity components, audited on the raw
+        // candidate.
         let inv_rho = S::ONE / cons.den;
-        C2pResult::ok(PrimG {
+        let prim = PrimG {
             rho: cons.den,
             vel: cons.mom.scale(inv_rho),
             pre: Zero::default(),
-        })
+        };
+        crate::recovery::judge(
+            prim,
+            crate::recovery::isothermal_prim_audit(prim.rho, &prim.vel),
+        )
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
+    fn to_flux(
+        &self,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+        eos: &impl EosFor<S, Self::Energy>,
+    ) -> Self::Cons {
         let nhat = nhat.components();
         let vn = prim.vel.dot(nhat);
         let pre = eos.pressure(Density(prim.rho), SpecificInternalEnergy(S::ZERO));
@@ -88,7 +103,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+    ) -> (S, S) {
         let nhat = nhat.components();
         let cs = eos.sound_speed(Density(prim.rho), Pressure(S::ZERO));
         let vn = prim.vel.dot(nhat);
@@ -116,10 +136,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{FaceNormal, Normalized};
-    use symbi_algebra::Tensor;
     use crate::energy::EnergySlot;
     use crate::eos::Isothermal;
+    use symbi_algebra::Tensor;
+    use symbi_algebra::{FaceNormal, Normalized};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-13 * a.abs().max(b.abs()).max(1.0)
@@ -224,7 +244,7 @@ mod tests {
         assert!(approx(cons.den, 2.0));
         assert!(approx(cons.mom[0], 1.4));
         assert_eq!(cons.nrg.value(), 0.0); // isothermal: nrg is zst
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(approx(prim.rho, prim2.rho));
         assert!(approx(prim.vel[0], prim2.vel[0]));
     }
@@ -235,7 +255,7 @@ mod tests {
         let eos = Isothermal { cs: 2.0 };
         let prim = iso_prim_3d(0.5, Tensor::new([1.0, -0.3, 0.7]));
         let cons = regime.to_conserved(&eos, &prim);
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(approx(prim.rho, prim2.rho));
         for dd in 0..3 {
             assert!(approx(prim.vel[dd], prim2.vel[dd]));
@@ -331,11 +351,10 @@ mod tests {
     // ---- no-floor behavior ----
 
     #[test]
-    fn iso_negative_density_passes_through() {
-        // no silent floor: negative density is preserved verbatim and
-        // velocity is the IEEE division mom / den. always Ok (iso has
-        // no recoverable failure mode that the trait method could
-        // meaningfully flag).
+    fn iso_negative_density_is_rejected() {
+        // no silent floor: the raw IEEE inversion is computed verbatim and a
+        // negative density is a rejection carrying that raw candidate
+        // diagnostically.
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 1.0 };
         let cons = IsoCons {
@@ -344,16 +363,22 @@ mod tests {
             mom: Tensor::new([2.0]),
             nrg: Zero::default(),
         };
-        let result = regime.to_primitive(&eos, &cons);
-        assert!(result.is_ok());
-        assert_eq!(result.value.rho, -1.0);
-        assert_eq!(result.value.vel[0], -2.0);
+        let failure = regime.to_primitive(&eos, &cons).unwrap_err();
+        assert!(
+            failure
+                .issues()
+                .contains(crate::recovery::RecoveryIssues::NEGATIVE_DENSITY)
+        );
+        // the raw IEEE inversion survives diagnostically; a negative density
+        // is a rejection, never a certified recovery.
+        assert!(failure.candidate().snapshot().contains("rho: -1.0"));
     }
 
     #[test]
-    fn iso_zero_density_yields_non_finite_velocity() {
-        // divide-by-zero follows IEEE semantics and surfaces as +inf so callers
-        // can detect and act (e.g., dt reduction).
+    fn iso_zero_density_rejects_with_non_finite_velocity() {
+        // divide-by-zero follows IEEE semantics and surfaces as +inf; the
+        // audit rejects the state on both the density boundary and the
+        // non-finite velocity it produces.
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 1.0 };
         let cons = IsoCons {
@@ -362,11 +387,18 @@ mod tests {
             mom: Tensor::new([1.0]),
             nrg: Zero::default(),
         };
-        let result = regime.to_primitive(&eos, &cons);
-        assert!(result.is_ok());
-        assert_eq!(result.value.rho, 0.0);
-        let v: f64 = result.value.vel[0];
-        assert!(v.is_infinite());
+        let failure = regime.to_primitive(&eos, &cons).unwrap_err();
+        assert!(
+            failure
+                .issues()
+                .contains(crate::recovery::RecoveryIssues::NEGATIVE_DENSITY)
+        );
+        assert!(
+            failure
+                .issues()
+                .contains(crate::recovery::RecoveryIssues::NON_FINITE)
+        );
+        assert!(failure.candidate().snapshot().contains("inf"));
     }
 
     #[test]

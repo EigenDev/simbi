@@ -45,7 +45,7 @@ fn rmhd_2p5d_runs_with_hlld() {
     evolve(&mut sim, &sub, 0.02).unwrap_or_else(|e| panic!("2D RMHD HLLD evolve failed: {e}"));
     assert!(sim.iteration >= 1, "no steps taken with HLLD");
     for c in sim.geom.interior.iter() {
-        let p = sim.prim_at(c);
+        let p = sim.expect_prim_at(c);
         assert!(
             p.rho().is_finite() && p.rho() > 0.0,
             "HLLD cell {c:?}: rho={}",

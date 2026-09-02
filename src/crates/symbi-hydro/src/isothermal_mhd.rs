@@ -8,7 +8,7 @@
 //
 // physics (carrier-generic over S: Scalar, valid at S = f64 and S = Gv):
 //   to_conserved:  U = (rho, rho v, B)                       (no energy)
-//   to_primitive:  rho = den, v = mom/den                    (trivial, no failure)
+//   to_primitive:  rho = den, v = mom/den                    (algebraic; audited)
 //   to_flux (nhat, vn = v.nhat, bn = B.nhat, p_tot = a^2 rho + 1/2 |B|^2):
 //     F(den) = rho vn
 //     F(mom) = rho v vn + p_tot nhat - bn B
@@ -26,12 +26,12 @@
 //   let flux = regime.to_flux(&prim, &nhat, &eos);
 // =============================================================================
 
-use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
-use crate::c2p_result::C2pResult;
-use crate::energy::Zero;
 use crate::energy::IsoModel;
-use crate::eos::{EosFor};
+use crate::energy::Zero;
+use crate::eos::EosFor;
 use crate::mhd_state::{IsoMhdCons, IsoMhdPrim};
+use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
+use crate::recovery::Recovery;
 use crate::regime::Regime;
 use crate::state::{ConsG, PrimG};
 use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical, Tensor};
@@ -99,17 +99,32 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        cons: &Self::Cons,
+    ) -> Recovery<Self::Prim>
     where
         S: OrderedNumeric,
     {
-        // trivial, no iteration. iso has no failure mode a floor meaningfully
-        // recovers (matches IsoNewtonian) -> always Ok; raw IEEE math, no floor.
-        C2pResult::ok(imhd_recover(eos, cons))
+        // trivial, no iteration; raw IEEE math, no floor. the algebraic
+        // inversion still owes the isothermal interior — positive finite
+        // density, finite velocity and cell-B components — audited on the
+        // raw candidate (matches IsoNewtonian).
+        let prim = imhd_recover(eos, cons);
+        crate::recovery::judge(
+            prim,
+            crate::recovery::isothermal_mhd_prim_audit(prim.rho, &prim.vel, &prim.mag),
+        )
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
+    fn to_flux(
+        &self,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+        eos: &impl EosFor<S, Self::Energy>,
+    ) -> Self::Cons {
         let nhat = nhat.components();
         let half = S::HALF;
         let vn = prim.vel.dot(nhat);
@@ -130,7 +145,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+    ) -> (S, S) {
         let nhat = nhat.components();
         let vn = prim.vel.dot(nhat);
         let cf = fast_magnetosonic(eos, prim, nhat);
@@ -146,9 +166,9 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::Isothermal;
     use symbi_algebra::Tensor;
+    use symbi_algebra::{FaceNormal, Normalized};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-12 * a.abs().max(b.abs()).max(1.0)
@@ -171,7 +191,7 @@ mod tests {
         let eos = Isothermal { cs: 1.0 };
         let prim = prim3(0.7, [1.0, -0.3, 0.5], [0.4, 0.2, -0.6]);
         let cons = regime.to_conserved(&eos, &prim);
-        let prim2 = regime.to_primitive(&eos, &cons).unwrap();
+        let prim2 = regime.to_primitive(&eos, &cons).unwrap().into_inner();
         assert!(approx(prim.rho, prim2.rho));
         for dd in 0..3 {
             assert!(approx(prim.vel[dd], prim2.vel[dd]));

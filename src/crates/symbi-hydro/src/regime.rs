@@ -22,9 +22,9 @@
 //   let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
 // =============================================================================
 
-use crate::c2p_result::C2pResult;
 use crate::energy::EnergyModel;
-use crate::eos::{EosFor};
+use crate::eos::EosFor;
+use crate::recovery::Recovery;
 use crate::regime_spec::RegimeSpec;
 use std::ops::{Add, Mul, Neg, Sub};
 use symbi_algebra::{FaceNormal, OrderedNumeric, Tensor};
@@ -112,28 +112,45 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
         self.to_conserved(eos, prim)
     }
 
-    /// convert conservative to primitive. returns C2pResult with a usable
-    /// (possibly floored) value and an error code describing any failures.
+    /// convert conservative to primitive. a state the regime's recovery-interior
+    /// predicate accepts arrives as `Ok(Recovered<Prim>)`; a rejected state
+    /// arrives as `Err(RecoveryFailure<Prim>)` carrying the nonempty issue set
+    /// and a diagnostic-only candidate — expected numerical rejection is
+    /// ordinary `Result` control flow.
     ///
     /// **host-only by API**: the `where S: OrderedNumeric`
-    /// bound declares that diagnostic c2p is a host computation — `C2pResult`'s
-    /// `ErrorCode` is bool-based and cannot be traced at `S = Gv`. the kernel
+    /// bound declares that diagnostic c2p is a host computation — the interior
+    /// audit is bool-based and cannot be traced at `S = Gv`. the kernel
     /// emit path uses `Cons::to_primitive` (algebraic, no diagnostics) or the
     /// carrier-generic `rhd_recover` / `rmhd_recover` directly, never this
     /// method. callers requesting `regime.to_primitive::<Gv>` fail to compile.
-    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        cons: &Self::Cons,
+    ) -> Recovery<Self::Prim>
     where
         S: OrderedNumeric;
 
     /// physical flux along direction nhat.
     /// nhat is a unit vector — dot(vel, nhat) gives the normal velocity.
     /// one implementation handles all directions.
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons;
+    fn to_flux(
+        &self,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+        eos: &impl EosFor<S, Self::Energy>,
+    ) -> Self::Cons;
 
     /// wave speeds along nhat: (lambda_minus, lambda_plus).
     /// newtonian: vn +/- cs.
     /// rhd: relativistic davis formula.
-    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S);
+    fn wave_speeds(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+    ) -> (S, S);
 
     /// characteristic wave speeds along grid axis `axis` (the CFL projection):
     /// `(lambda_minus, lambda_plus)`. the timestep needs the speed normal to each grid face,
@@ -142,7 +159,12 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// unit-vector dot, so a CFL kernel traced from this reads only the velocity components it
     /// actually uses (the cyl r-z swirl reads only v_r and v_z, leaving the folded v_phi untouched). the default
     /// is the dot form, correct for every regime.
-    fn wave_speeds_axis(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, axis: usize) -> (S, S) {
+    fn wave_speeds_axis(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        axis: usize,
+    ) -> (S, S) {
         self.wave_speeds(eos, prim, &Self::Normal::axis(axis))
     }
 

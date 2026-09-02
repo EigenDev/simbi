@@ -13,8 +13,8 @@
 // all functions are pure math — elemental, GPU-callable, no allocation.
 // =============================================================================
 
-use crate::c2p_result::C2pResult;
-use crate::eos::{EosFor};
+use crate::eos::EosFor;
+use crate::recovery::Recovery;
 use crate::regime::Regime;
 use crate::state::{Cons, Prim};
 use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Physical, Tensor};
@@ -91,7 +91,11 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        cons: &Self::Cons,
+    ) -> Recovery<Self::Prim>
     where
         S: OrderedNumeric,
     {
@@ -99,7 +103,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
+    fn to_flux(
+        &self,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+        eos: &impl EosFor<S, Self::Energy>,
+    ) -> Self::Cons {
         let nhat = nhat.components();
         let cons = self.to_conserved(eos, prim);
         let vn = prim.vel.dot(nhat);
@@ -114,13 +123,23 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+    ) -> (S, S) {
         let nhat = nhat.components();
         rhd_speeds_from_vn(sound_speed_sq(eos, prim.rho, prim.pre), prim.vel.dot(nhat))
     }
 
     #[inline]
-    fn wave_speeds_axis(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, axis: usize) -> (S, S) {
+    fn wave_speeds_axis(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        axis: usize,
+    ) -> (S, S) {
         // the 1D characteristic estimate depends only on the normal velocity (transverse
         // velocity does not enter) -> read vel[axis] directly, no unit-vector dot.
         rhd_speeds_from_vn(sound_speed_sq(eos, prim.rho, prim.pre), prim.vel[axis])
@@ -141,9 +160,9 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::newtonian::Newtonian;
+    use symbi_algebra::{FaceNormal, Normalized};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-12 * a.abs().max(b.abs()).max(1.0)
@@ -232,7 +251,8 @@ mod tests {
             pre: 1.0,
         };
         let ff = regime.to_flux(&prim, &Normalized::axis(0), &eos);
-        let flux_hlle = crate::riemann::hlle(&regime, &eos, &prim, &prim, &Normalized::axis(0), 0.0);
+        let flux_hlle =
+            crate::riemann::hlle(&regime, &eos, &prim, &prim, &Normalized::axis(0), 0.0);
         assert!(approx(ff.den, flux_hlle.den));
         assert!(approx(ff.mom[0], flux_hlle.mom[0]));
         assert!(approx(ff.nrg, flux_hlle.nrg));

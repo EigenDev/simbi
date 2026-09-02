@@ -20,18 +20,18 @@
 // more diffusive than the exact quartic.
 // =============================================================================
 
-use symbi_algebra::{FaceNormal, Normalized, OrderedNumeric, Covariant, Tensor};
+use symbi_algebra::{Covariant, FaceNormal, Normalized, OrderedNumeric, Tensor};
 use symbi_carrier::Scalar;
 
-use crate::c2p_result::C2pResult;
 use crate::energy::Adiabatic;
-use crate::eos::{EosFor};
+use crate::eos::EosFor;
 use crate::mhd_state::{MhdCons, MhdPrim};
-use crate::state::Valencia;
+use crate::recovery::{Recovery, RecoveryFailure};
 use crate::regime::Regime;
 use crate::regime_spec::RegimeSpec;
 use crate::rhd::{enthalpy, lorentz_factor, lorentz_factor_sq, sound_speed_sq};
 use crate::spatial_metric::SpatialMetric;
+use crate::state::Valencia;
 use crate::state::{Cons, Prim};
 
 use super::Rmhd;
@@ -125,7 +125,8 @@ impl<S: Scalar, const D: usize> RmhdGr<S, D> {
                 hydro: stage_gas,
                 mag: candidate_mag,
             }),
-        ).0
+        )
+        .0
     }
 }
 
@@ -174,37 +175,34 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     }
 
     #[inline]
-    fn to_primitive(&self, eos: &impl EosFor<S, Self::Energy>, cons: &Self::Cons) -> C2pResult<Self::Prim>
+    fn to_primitive(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        cons: &Self::Cons,
+    ) -> Recovery<Self::Prim>
     where
         S: OrderedNumeric,
     {
         let cons = &cons.0;
         let dd = cons.den;
-        if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
-            let floored = MhdPrim {
-                hydro: Prim {
-                    rho: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
-                    vel: Tensor::zeros(),
-                    pre: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
-                },
-                mag: cons.mag,
-            };
-            return C2pResult::err(Valencia(floored), code);
+        if let Some(issues) = crate::recovery::relativistic_density_guard(dd) {
+            return Err(RecoveryFailure::without_candidate(issues));
         }
         // the metric-aware KKC recovery: the invariants r^2/B^2/r.B form with gamma, the
         // recovered v^i is contravariant. the SR->GR difference is the metric value.
         let prim = rmhd_recover(eos, cons, &self.metric, MAX_ITER);
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
-        let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
-        if code.is_ok() {
-            C2pResult::ok(Valencia(prim))
-        } else {
-            C2pResult::err(Valencia(prim), code)
-        }
+        let audit = crate::recovery::relativistic_c2p_audit(prim.rho, prim.pre, v_sq);
+        crate::recovery::judge(Valencia(prim), audit)
     }
 
     #[inline]
-    fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl EosFor<S, Self::Energy>) -> Self::Cons {
+    fn to_flux(
+        &self,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+        eos: &impl EosFor<S, Self::Energy>,
+    ) -> Self::Cons {
         let prim = &prim.0;
         let nhat = nhat.components();
         // the Valencia spatial flux, shift-free here (the shift rides the GR flux kernel's fan):
@@ -238,7 +236,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
     }
 
     #[inline]
-    fn wave_speeds(&self, eos: &impl EosFor<S, Self::Energy>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
+    fn wave_speeds(
+        &self,
+        eos: &impl EosFor<S, Self::Energy>,
+        prim: &Self::Prim,
+        nhat: &Self::Normal,
+    ) -> (S, S) {
         let prim = &prim.0;
         let nhat = nhat.components();
         // the fast-magnetosonic bound c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2 through the
@@ -270,10 +273,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{FaceNormal, Normalized};
     use crate::eos::IdealGas;
     use crate::spatial_metric::{Gamma, GammaInv};
     use symbi_algebra::Matrix;
+    use symbi_algebra::{FaceNormal, Normalized};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-12 * a.abs().max(b.abs()).max(1.0)
@@ -320,7 +323,10 @@ mod tests {
                 },
                 mag: Tensor::new(b),
             };
-            let (cf, cg) = (flat.to_conserved(&eos, &prim), gr.to_conserved(&eos, &Valencia(prim)));
+            let (cf, cg) = (
+                flat.to_conserved(&eos, &prim),
+                gr.to_conserved(&eos, &Valencia(prim)),
+            );
             for k in 0..3 {
                 assert!(approx(cf.mom[k], cg.0.mom[k]), "cons mom{k} v={v:?}");
             }
@@ -340,8 +346,8 @@ mod tests {
                 approx(ff.den, fg.0.den) && approx(ff.nrg, fg.0.nrg),
                 "flux v={v:?}"
             );
-            let fp = flat.to_primitive(&eos, &cf).value;
-            let gp = gr.to_primitive(&eos, &cg).value;
+            let fp = flat.to_primitive(&eos, &cf).unwrap().into_inner();
+            let gp = gr.to_primitive(&eos, &cg).unwrap().into_inner();
             assert!(
                 approx(fp.hydro.rho, gp.0.hydro.rho) && approx(fp.hydro.pre, gp.0.hydro.pre),
                 "c2p v={v:?}"
@@ -516,9 +522,17 @@ mod tests {
             let cons = gr.to_conserved(&eos, &Valencia(prim));
             let back = gr.to_primitive(&eos, &cons);
             assert!(back.is_ok(), "recovery must classify ok");
-            let p = back.value;
-            assert!((p.0.hydro.rho - 1.0).abs() < 1e-10, "rho: {}", p.0.hydro.rho);
-            assert!((p.0.hydro.pre - 0.2).abs() < 1e-10, "pre: {}", p.0.hydro.pre);
+            let p = back.unwrap().into_inner();
+            assert!(
+                (p.0.hydro.rho - 1.0).abs() < 1e-10,
+                "rho: {}",
+                p.0.hydro.rho
+            );
+            assert!(
+                (p.0.hydro.pre - 0.2).abs() < 1e-10,
+                "pre: {}",
+                p.0.hydro.pre
+            );
             for k in 0..3 {
                 assert!(
                     (p.0.hydro.vel[k] - v[k]).abs() < 1e-10,

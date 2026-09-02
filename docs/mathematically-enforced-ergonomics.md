@@ -995,7 +995,13 @@ prove that predicate returns the rejection. `Regularized::into_recovered`
 forgets provenance explicitly; no blanket conversion does. Iterate guards
 (bracket clamps and coefficient floors), absorbing-region fills, and physical
 state regularizations are separate receipt kinds rather than one misleading
-"floor" category.
+"floor" category. The iterate guards on the carrier path — the HLLD
+pressure-guess floor and the extremal fan clamps — are permanently
+unreceipted: they live inside branch-free solver interiors where a receipt
+would demand a status output per guard and change the graph. They are benign
+by construction (they perturb an iterate or a coefficient, never the state),
+they are enumerated in the silent-regularization inventory above, and that
+enumeration is their record.
 
 For a symbolic carrier, the same law is a product because a Rust enum would
 branch while tracing:
@@ -1031,7 +1037,21 @@ interpretations of the mask field. The select reports its act through
 `FreezeApplied`; the independent freeze-probe kernel and its copied predicate
 can then be deleted. Multiple evaluations of the shared predicate remain
 lawful when they classify genuinely different candidate states, but the act is
-never inferred by recomputing it later.
+never inferred by recomputing it later. Whether `TroubledCell` is a fresh
+classification or a materialization of `C2pStatus` is a fact about the
+pipeline, audited once during the channel work: if nothing mutates the
+primitives between the recovery and the probe within a substage, the two
+channels carry one fact and the probe is a rename; if a ghost fill or source
+intervenes, the probe classifies a later state and is legitimately its own
+evaluation. The answer is recorded on the channel's documentation, so the
+channel work knows whether it deletes an evaluation or preserves one.
+
+Moving the freeze count from the recomputing probe to the act changes what the
+number measures: the probe counts before the body-parachute selection, the act
+counts after it, so a cell the parachute rescues stops counting as frozen.
+That is the intended number. The census gates that assert zero exterior
+freezes are unaffected; any gate holding a nonzero threshold is re-baselined
+deliberately, with the new measurement and its argument recorded in the gate.
 
 At the host seam the ladder returns a typed report rather than a boolean:
 
@@ -1053,6 +1073,9 @@ stage driver; the counts report what the actual select did, and process-global
 counters are observations of the report, not a second source of truth. The
 source-replay branch records whether the normal shared redo or conservative
 replay actually ran; it is not mislabeled as a request made after the fact.
+A regime whose ladder is inactive constructs its report through the one
+inactive-pass constructor (zero counts, the shared-redo path, `Accept`), so an
+inactive pass cannot fabricate a replay claim or a count.
 
 General admissibility is a separate, law-indexed proof:
 
@@ -1078,7 +1101,11 @@ The implementation sequence is intentionally asymmetric:
    migration with no kernel or floating-point change.
 2. Introduce the typed kernel product and dedicated `C2pStatus`,
    `TroubledCell`, and `FreezeApplied` channels. Preserve candidate arithmetic
-   and prove prepared-IR changes are limited to the new status plumbing.
+   and prove prepared-IR changes are limited to the new status plumbing — the
+   prepared-graph golden diff at this step touches only the added status
+   output. The cone-failure sentinel is still written into the pressure
+   candidate (that write is part of the preserved arithmetic); only the decode
+   moves to the status channel. Deleting the write would change the graph.
 3. Make the correcting select emit `FreezeApplied`, delete the recomputing
    freeze probe, unify mask decoding, and return `FofcReport` from the seam.
 4. Add law-indexed host admissibility witnesses for the residual queries that

@@ -143,7 +143,7 @@ fn every_level_carries_its_own_resolvable_content() {
     let mut worst = 0.0f64;
     for c in fine.geom.interior.iter() {
         let x = fine.geom.cell_coord(c);
-        let p = fine.prim_at(c);
+        let p = fine.expect_prim_at(c);
         let dv = seed_velocity(x);
         for ax in 0..3 {
             worst = worst.max((p.vel()[ax] - dv[ax]).abs());
@@ -185,7 +185,7 @@ fn curl_construction_is_divergence_free_under_the_grid_difference() {
     let fine = &hier.levels[1].state;
     let dx = fine.geom.dx;
     let vel_at = |c: [isize; 3]| -> [f64; 3] {
-        let p = fine.prim_at(c);
+        let p = fine.expect_prim_at(c);
         [p.vel()[0], p.vel()[1], p.vel()[2]]
     };
     let mut div2 = 0.0f64;

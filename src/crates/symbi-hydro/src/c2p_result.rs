@@ -1,27 +1,27 @@
 // =============================================================================
 // c2p_result.rs
 //
-// fallible conservative-to-primitive result type. bundles a usable (possibly
-// floored) primitive value with a bitflag error code. avoids NaN cascades by
-// always carrying a safe value, while recording what went wrong.
+// the diagnostic-boundary error code and the carrier-generic relativistic
+// c2p helpers: the bitflag `ErrorCode` the kernel status channel and the
+// scratch-field scans speak, plus the cone/ceiling functions both
+// relativistic recoveries share. the host recovery audits live in
+// `recovery.rs` with the outcome algebra they certify.
 //
 // usage:
-//   let result = regime.to_primitive(&eos, &cons);
-//   if result.is_ok() { /* clean */ }
-//   let prim = result.value; // always safe to use
+//   let ceiling = relativistic_velocity_ceiling_sq(r_sq);
+//   let residual = relativistic_cone_residual(qq, r_sq);
 // =============================================================================
 
 /// the iteration cap every relativistic cons->prim solver shares -- the rhd newton,
 /// the rmhd kkc false-position, and their metric-aware twins, on the host and in the
 /// baked kernels alike. the solvers converge in far fewer steps on admissible states;
 /// the cap only bounds pathological inputs, so one number serves them all.
-use symbi_algebra::OrderedNumeric;
 use symbi_carrier::Scalar;
 
 pub const C2P_MAX_ITER: usize = 100;
 
 /// bitflag error code for cons-to-prim recovery.
-/// zero = success. nonzero = something went wrong but the value is safe to use.
+/// zero = success. nonzero = the recovery audit flags for the cell.
 /// flags can be combined via `merge` (bitwise or).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
@@ -114,90 +114,6 @@ impl std::fmt::Display for ErrorCode {
     }
 }
 
-/// result of conservative-to-primitive inversion. always carries a usable
-/// value (possibly floored), paired with an error code describing what
-/// went wrong (if anything). Copy, no heap, GPU-safe.
-#[derive(Clone, Copy, Debug)]
-pub struct C2pResult<T: Copy> {
-    pub value: T,
-    pub error: ErrorCode,
-}
-
-impl<T: Copy> C2pResult<T> {
-    #[inline]
-    pub fn ok(value: T) -> Self {
-        Self {
-            value,
-            error: ErrorCode::NONE,
-        }
-    }
-
-    #[inline]
-    pub fn err(value: T, error: ErrorCode) -> Self {
-        Self { value, error }
-    }
-
-    #[inline]
-    pub fn is_ok(&self) -> bool {
-        self.error.is_ok()
-    }
-
-    #[inline]
-    pub fn unwrap(self) -> T {
-        if self.error.is_err() {
-            panic!("c2p failed: {}", self.error);
-        }
-        self.value
-    }
-}
-
-/// finite placeholder returned when relativistic c2p rejects its conserved density before
-/// recovery. the error code is authoritative and the value must never enter evolution.
-pub const C2P_FAILURE_SENTINEL: f64 = 1.0;
-
-// the shared relativistic c2p diagnostic contract (RHD + RMHD). one source so the two
-// regimes' threshold conventions cannot drift (tier-1 #5: the density-scaled-vs-absolute
-// pressure floor, the superluminal margin, and the input-NaN check had all diverged).
-//
-// these are post-hoc flags on the raw recovered state — no silent floor: the caller returns
-// the raw recovery value, this only reports what is non-physical.
-// thresholds are dimensionally clean:
-//   * NON_FINITE       : rho or pressure is NaN.
-//   * NEGATIVE_PRESSURE: pressure <= 0. a near-zero positive pressure is the
-//                        valid cold limit; the zero-pressure boundary is not
-//                        in the strict admissible interior used by the flux
-//                        and fofc kernels.
-//   * superluminal     : v^2 >= 1 (the Lorentz factor is finite only for v^2 < 1) or v^2
-//                        is NaN. no luminal margin.
-pub fn relativistic_c2p_code<S: Scalar + OrderedNumeric>(rho: S, pre: S, v_sq: S) -> ErrorCode {
-    let mut code = ErrorCode::NONE;
-    if !(rho == rho) || !(pre == pre) {
-        code = code.merge(ErrorCode::NON_FINITE);
-    }
-    if pre <= S::ZERO {
-        code = code.merge(ErrorCode::NEGATIVE_PRESSURE);
-    }
-    if v_sq >= S::ONE || !(v_sq == v_sq) {
-        code = code.merge(ErrorCode::SUPERLUMINAL);
-    }
-    code
-}
-
-// shared input-density guard for relativistic c2p (a host-only early-out before the kernel
-// path). returns the failure code for a non-positive or non-finite conserved density, else
-// None. the NaN branch was present in RHD but missing in RMHD before the unification.
-pub fn relativistic_density_guard<S: Scalar + OrderedNumeric>(dd: S) -> Option<ErrorCode> {
-    if dd <= S::ZERO || !(dd == dd) {
-        let mut code = ErrorCode::NEGATIVE_DENSITY;
-        if !(dd == dd) {
-            code = code.merge(ErrorCode::NON_FINITE);
-        }
-        Some(code)
-    } else {
-        None
-    }
-}
-
 /// the pressure written when a relativistic recovery finds the conserved state
 /// outside the physical cone. scaling the negative signal with `|D|` preserves
 /// homogeneity under a change of density units while remaining finite and
@@ -258,39 +174,6 @@ mod tests {
     fn error_code_merge_with_none() {
         let code = ErrorCode::NONE.merge(ErrorCode::NEGATIVE_PRESSURE);
         assert_eq!(code, ErrorCode::NEGATIVE_PRESSURE);
-    }
-
-    #[test]
-    fn zero_pressure_is_outside_the_strict_admissible_interior() {
-        let code = relativistic_c2p_code(1.0_f64, 0.0, 0.0);
-        assert!(code.contains(ErrorCode::NEGATIVE_PRESSURE));
-    }
-
-    #[test]
-    fn arbitrarily_small_positive_pressure_remains_admissible() {
-        let code = relativistic_c2p_code(1.0_f64, f64::MIN_POSITIVE, 0.0);
-        assert!(code.is_ok());
-    }
-
-    #[test]
-    fn c2p_result_ok() {
-        let result = C2pResult::ok(42.0_f64);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 42.0);
-    }
-
-    #[test]
-    fn c2p_result_err_has_value() {
-        let result = C2pResult::err(1e-12_f64, ErrorCode::NEGATIVE_DENSITY);
-        assert!(!result.is_ok());
-        assert_eq!(result.value, 1e-12);
-    }
-
-    #[test]
-    #[should_panic(expected = "c2p failed")]
-    fn c2p_result_unwrap_panics_on_error() {
-        let result = C2pResult::err(0.0_f64, ErrorCode::SUPERLUMINAL);
-        result.unwrap();
     }
 
     #[test]
