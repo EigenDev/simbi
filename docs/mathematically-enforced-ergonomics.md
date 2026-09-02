@@ -934,6 +934,167 @@ temperature floor, or evolved-state density floor anywhere in production —
 the only floors that run are the projections, the excision fill, and the
 iterate guards above.
 
+The recovery outcome algebra follows from that inventory. There are two
+interpretations of the same validity law, because host control flow and a
+traced accelerator program do not have the same carrier. They share the
+named acceptance predicate and its meaning; they do not pretend to share an
+operational shape or a diagnostic vocabulary they cannot both compute.
+
+On the host, recovery uses Rust's existing closed sum rather than inventing a
+second one:
+
+```rust
+pub type Recovery<T> = Result<Recovered<T>, RecoveryFailure<T>>;
+
+#[repr(transparent)]
+pub struct Recovered<T>(T);
+
+pub struct RecoveryFailure<T> {
+    issues: RecoveryIssues,
+    candidate: DiagnosticOnly<T>,
+}
+```
+
+`Recovered<T>` has a private field and is minted only after the named C2P
+interior predicate succeeds. It is deliberately not called `Admissible<T>`:
+convergence plus positive density/pressure and subluminal velocity does not
+prove the wider Wu--Tang, temperature, magnetization, or application-specific
+constraint family. Expected numerical rejection is ordinary `Result` control
+flow, not a panic. `Recovered::into_inner` is the single transition back to an
+ordinary primitive after the caller has handled the outcome.
+
+`RecoveryFailure` carries a candidate only for diagnostics. The candidate is
+not exposed as `T` or `&T`, does not dereference, and has no `into_inner`; named
+diagnostic projections may reveal scalar residuals or a formatted snapshot,
+never a primitive that can re-enter evolution. This preserves useful
+Newton/cone evidence without letting a failed primitive silently become
+physics. Early failures that have no meaningful candidate carry a dedicated
+diagnostic placeholder rather than a fabricated physical state.
+
+`RecoveryIssues` is a private-bit, non-empty set. Its public vocabulary is the
+seven existing named issues; construction occurs through those constants and
+`merge`, so neither an unknown bit pattern nor an empty failure can be minted.
+The successful branch carries no issue set at all. Serialization to the
+diagnostic `u8` representation is an explicit boundary operation, not the
+host's semantic type.
+
+Regularization is a policy applied to a rejection, not a third spelling of
+success:
+
+```rust
+pub struct Regularized<T> {
+    recovered: Recovered<T>,
+    receipt: RegularizationReceipt,
+}
+```
+
+Only a named `RegularizationPolicy` may consume a `RecoveryFailure<T>`. It
+records the original issues and every intervention, then reruns the recovery
+interior predicate before producing `Regularized<T>`. A policy that cannot
+prove that predicate returns the rejection. `Regularized::into_recovered`
+forgets provenance explicitly; no blanket conversion does. Iterate guards
+(bracket clamps and coefficient floors), absorbing-region fills, and physical
+state regularizations are separate receipt kinds rather than one misleading
+"floor" category.
+
+For a symbolic carrier, the same law is a product because a Rust enum would
+branch while tracing:
+
+```rust
+pub struct TracedRecovery<T, M> {
+    candidate: T,
+    status: KernelC2pStatus<M>,
+}
+
+pub struct KernelC2pStatus<M> {
+    accepted: M,
+}
+```
+
+`M` is the carrier predicate (`GvMask` when tracing). Candidate formulas remain
+branch-free. The one named predicate builder produces `KernelC2pStatus`; at
+materialization, candidate fields and a dedicated status channel are written
+separately. A failed pressure is never itself the control signal. The kernel
+does not counterfeit the host's seven-cause diagnosis: it carries only the
+accept/reject fact it actually computes. Backend lowering may represent that
+fact as a scalar 0/1 field, but only the typed channel renderer knows that
+representation.
+
+This gives the fallback ladder three distinct channels:
+
+- `C2pStatus`: the recovery producer's typed accept/reject fact;
+- `TroubledCell`: the one boolean convention consumed by first-order splicing;
+- `FreezeApplied`: written by the select that actually freezes a cell.
+
+They do not share storage. Counts are named reductions of masks, not alternate
+interpretations of the mask field. The select reports its act through
+`FreezeApplied`; the independent freeze-probe kernel and its copied predicate
+can then be deleted. Multiple evaluations of the shared predicate remain
+lawful when they classify genuinely different candidate states, but the act is
+never inferred by recomputing it later.
+
+At the host seam the ladder returns a typed report rather than a boolean:
+
+```rust
+pub struct FofcReport {
+    troubled: CellCount,
+    frozen: CellCount,
+    replay: SourceReplayOutcome,
+    decision: FofcDecision,
+}
+
+pub enum SourceReplayOutcome { SharedRedo, ConservativeReplay }
+pub enum FofcDecision { Accept, RetryStep }
+```
+
+The existing `StageOutcome::{Accepted, RetryStep}` remains the timestep-level
+decision. Folding `FofcReport::decision` into it is an explicit policy in the
+stage driver; the counts report what the actual select did, and process-global
+counters are observations of the report, not a second source of truth. The
+source-replay branch records whether the normal shared redo or conservative
+replay actually ran; it is not mislabeled as a request made after the fact.
+
+General admissibility is a separate, law-indexed proof:
+
+```rust
+pub struct Admissible<T, L> {
+    value: T,
+    witness: L::Witness,
+}
+```
+
+Only `L::validate` constructs it. `RecoveryInterior` may be one law; the
+Wu--Tang family and any configured temperature/magnetization family are other
+laws. A witness-producing residual evaluation distinguishes membership, a
+binding constraint, and an infeasible anchor. The existing constraint family
+must not be wired merely to obtain this type: its stage-input versus eulerian
+anchor convention remains a physical decision and blocks projection, not host
+recovery safety.
+
+The implementation sequence is intentionally asymmetric:
+
+1. Close `RecoveryIssues`; replace `C2pResult` at host regime doors with
+   `Recovery<T>` and migrate every `.value`/`.error` consumer. This is a type
+   migration with no kernel or floating-point change.
+2. Introduce the typed kernel product and dedicated `C2pStatus`,
+   `TroubledCell`, and `FreezeApplied` channels. Preserve candidate arithmetic
+   and prove prepared-IR changes are limited to the new status plumbing.
+3. Make the correcting select emit `FreezeApplied`, delete the recomputing
+   freeze probe, unify mask decoding, and return `FofcReport` from the seam.
+4. Add law-indexed host admissibility witnesses for the residual queries that
+   already exist. Do not activate new floors or the dormant constraint family.
+5. Resolve the anchor convention by a separate physical experiment; only then
+   may projection receipts and `ConstraintLedger` become production state.
+
+Each step has its own stop condition. Host compile-fail pins reject direct
+failed-candidate extraction, empty/unknown failure codes, and use of
+`Recovered<T>` as a broader `Admissible<T, L>`. Carrier tests pin one predicate
+source, the kernel's deliberately smaller status vocabulary, and distinct
+channel identities; prepared-IR and AOT equivalence pin unchanged candidate
+arithmetic. Stage tests pin that reported freeze counts equal the cells
+actually selected and that retry decisions consume the typed report exactly
+once.
+
 1. Add semantic types at primitive/conserved and centering boundaries.
 2. Make frame and variance explicit in geometric interfaces.
 3. Add dimensional and interval verification carriers where useful.
