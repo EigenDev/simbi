@@ -880,6 +880,60 @@ resistivity), outside field identity. `cons_mag_{k}`, `prim.mag[{k}]`, and
 vocabulary. the derived `edge_*`/`h_*`/`e_*`-prefixed spellings are trace-local
 SSA keys; identity lives in the wire path alone.
 
+The recovered-state validity inventory — every representation that carries
+recovery success, admissibility membership, a fallback-tier decision, or a
+regularization firing, classified by what actually holds the fact. This table
+is the source for the admissibility/regularization phase work; each row names
+the erasure and the honest form it earns.
+
+| Fact | Current representation | Error permitted | Honest form |
+| --- | --- | --- | --- |
+| host recovery outcome | `C2pResult { pub value, pub error }` (`c2p_result.rs:121`): the header promises a value "always safe to use" while `C2P_FAILURE_SENTINEL` (`:156`) forbids the failed value from entering evolution — two failure contracts in one struct. `C2pResult::err(v, ErrorCode::NONE)` mints an ok-that-claims-failure; `ErrorCode(pub u8)` mints arbitrary codes | a sentinel primitive read as physics; a fabricated or vacuous code | success mints a `Recovered` primitive (or `Admissible<_, RecoveryInterior>` only when the named recovery-interior predicate is the constructor); failure carries the code and no usable primitive, or a `Regularized` value carrying its intervention record; code minting closed |
+| kernel recovery outcome | the in-band pressure channel: cone failure writes `pre = -\|D\|` (`c2p_cone_fail_pressure`) into the physical pressure field; every kernel decode is a sign-and-finiteness test on `prim.pre` (`primitive_physical_gv`, the fofc probe/select/freeze family, the wb target decode); the `p = 0` cold boundary shares the failure branch by design; a NaN sound speed is a third spelling of the same fact, halting through a non-finite dt | a genuinely negative pressure from a bad update and a cone-failure sentinel are one signal; a decode that misses one spelling (the 2-select ghost-kill bug was this) | the outcome rides its own channel at the recovery boundary (the flag field already crosses the same seam); pressure stays physics |
+| the c2p error field | `sim.fields.c2p_error`: a float buffer holding `u8` bitflags. the kernel producer emits only `{0.0, 64.0}` (`c2p_status_gv`) while the host path emits the full seven-flag vocabulary; `scan_c2p_errors` merges both with no provenance, so the freeze-streak panic reports a vocabulary the kernel path can never have written. the same buffer is temporarily a 0/1 exterior mask (`substrate_mhd.rs` fofc), defended by lifetime discipline alone | a code read as a mask, a mask read as a code, a diagnostic that names flags nothing produced | one producer vocabulary per channel; mask scratch under its own name |
+| troubled-cell flag | `ws.fofc_flag`, a float field written 0/1, decoded three ways: `> 0` in the splice kernels, `> 0.5` on the host, and `Add`-reduced as a cardinality; ghost-filled through the physical scalar BC machinery | the boolean, the count, and the boundary fill each reinterpret the same floats under a different convention | one decode convention behind a named accessor; the count as its own reduction |
+| freeze decision | decided implicitly inside `fofc_select_gv` and independently recomputed by `fofc_freeze_probe_gv` at a different pipeline point; halt/retry keys off the recomputed count. the physicality predicate is hand-copied in five kernel builders | the two evaluations drift; the count diverges from the act | one predicate source (partially done: probe and status share `primitive_physical_gv`); the act reports itself |
+| fallback-tier taxonomy | `SourceReplay` is the one typed tier; the `KernelSet::fofc` seam returns a bare `bool` meaning "replay the step", erasing the outcome taxonomy (clean pass, corrected in place, froze, inactive), which the census then reconstructs from process-global counters | the caller distinguishes outcomes by side channels | a typed stage outcome at the seam (`StageOutcome` already exists one layer up) |
+| admissibility membership | membership has no value-level form: `rmhd_admissible_residuals` returns the raw `(q, psi)` pair, consumed only as masked selects inside theta computations. `rmhd_admissible_theta = 0` conflates an infeasible anchor with a binding constraint — the distinction `constraints::anchor_feasibility` was built to carry | an infeasible anchor reads as a hard-binding floor; no site can assert membership; ordinary C2P success is confused with membership in the broader Wu–Tang/temperature/magnetization family | the residual pair behind a witness-producing, law-parameterized `Admissible<T, L>` predicate at the few host boundaries that ask; `Recovered<T>` remains a distinct phase unless that named law is actually checked |
+| projection magnitude | the live GR projections (`fofc_project_gr_{mhd,}_gv`) blend `(D, S_i, tau)` by a theta the kernel computes and discards; the anchor-energy raise (`rmhd_anchor_energy_with_margin`) books nothing; the census counts probe hits, carrying neither movement nor magnitude | a run reports "N cells flagged" while the injected mass/energy is unknowable | the theta/binding outputs and the `ConstraintLedger` that already exist, wired |
+| multiplexed scratch | `cfl_scratch` holds, at different times, wave-speed rates, the finiteness mask, the GRMHD source theta, and the freeze mask — meanings separated by lifetime discipline and one comment; `state_finite` failure is re-encoded a third way as `lambda_max = inf` | a stale meaning read across a lifetime boundary | named scratch roles, the pattern the CT vocabulary set |
+
+The silent-regularization inventory — sites that mutate state with no record,
+distinguished from the deliberate absorbing boundaries:
+
+- the GR admissible projections: per-cell theta computed and discarded, anchor
+  energy raised unbooked (`gv/wavespeed.rs`, `admissible.rs`);
+- the source-limiter theta: materialized into `cfl_scratch` for one replay,
+  then overwritten, with no count (`substrate_mhd.rs`);
+- the RHD `rho = D / W(clamped v^2)` sanitize: the velocity stays exact so
+  `SUPERLUMINAL` still fires, and the returned density is floored with no flag
+  of its own (`rhd/cons.rs`);
+- the HLLD pressure-guess floor (`riemann/hlld.rs`), the HLLE fan clamp, and
+  the CT diffusion-coefficient floor: iterate/coefficient guards, benign,
+  recorded here as the complete set;
+- the excision vacuum fill and the `r >= M/2` metric clamp: deliberate
+  absorbing-region semantics, masked out of the census, with no accounting of
+  the absorbed mass/energy.
+
+The constraint algebra (`symbi-hydro/src/constraints.rs`: the concave
+`c(U) >= 0` family with the projection axioms, `WuTangAdmissibility`,
+`TemperatureFloor`, `MagnetizationCeiling`, `DensityFloor`, per-member theta
+attribution, `anchor_feasibility`, and the `ConstraintLedger`) is the built
+answer to the two rows above and is fully unwired: `constraint_projection_gv`
+is baked and oracle-tested, its dispatch wrapper has zero callers,
+`ConstraintParams` holds inert defaults with no config path, the
+`constraint_theta` field is allocated and untouched, and the ledger has no
+production caller. The recorded blocker is physical, ahead of any typing
+question: the family anchors on the stage input, and under constrained
+transport that anchor collapses the magnetized torus to a dt underflow at
+t = 2.286 (the live projection's eulerian anchor holds to t = 4.02). Wiring
+the family means resolving the anchor convention first. The module's usage
+example also names `joint_projection_theta`, which does not exist; the live
+name is `joint_theta`. There is currently no live magnetization ceiling,
+temperature floor, or evolved-state density floor anywhere in production —
+the only floors that run are the projections, the excision fill, and the
+iterate guards above.
+
 1. Add semantic types at primitive/conserved and centering boundaries.
 2. Make frame and variance explicit in geometric interfaces.
 3. Add dimensional and interval verification carriers where useful.
