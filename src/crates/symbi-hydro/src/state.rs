@@ -16,6 +16,7 @@
 //   let cons = prim.to_conserved(&eos);  // newtonian convenience
 // =============================================================================
 
+use crate::quantity::{Density, Pressure, StoredQuantity, VelocitySquared};
 use crate::energy::{Adiabatic, DyeModel, EnergyModel, EnergySlot, IsoModel, Undyed};
 use crate::eos::Eos;
 use std::ops::{Add, Mul, Neg, Sub};
@@ -247,14 +248,18 @@ impl<S: Scalar, const D: usize, E: EnergyModel> ConsG<S, D, E> {
 
 impl<S: Scalar, const D: usize> Prim<S, D> {
     /// convert primitive to conservative variables.
-    /// delegates nrg computation to eos.conserved_energy().
-    /// for ideal gas: nrg = ke + rho * e_int (total energy).
-    /// for isothermal: nrg = cs^2 (sound speed squared).
+    /// delegates the nrg slot to `eos.conserved_quantity()`, stripping the
+    /// closure's stored-quantity claim at the storage boundary: a gamma-law
+    /// gas stores the total energy density, isothermal stores cs^2.
     pub fn to_conserved(&self, eos: &impl Eos<S>) -> Cons<S, D> {
         let rho = self.rho;
         let mom = self.vel.scale(rho);
         let v2 = self.vel.dot(&self.vel);
-        let nrg = eos.conserved_energy(rho, v2, self.pre);
+        // the storage boundary: the closure's stored quantity strips its
+        // claim into the bare nrg slot.
+        let nrg = eos
+            .conserved_quantity(Density(rho), VelocitySquared(v2), Pressure(self.pre))
+            .into_stored();
         Cons {
             chi: Default::default(),
             den: rho,
@@ -269,11 +274,14 @@ impl<S: Scalar, const D: usize> Cons<S, D> {
     /// delegates pressure recovery to eos.recover_pressure().
     /// for ideal gas: inverts total energy to get e_int, then p.
     /// for isothermal: reads cs^2 from nrg, p = cs^2 * rho.
-    pub fn to_primitive(&self, eos: &impl Eos<S>) -> Prim<S, D> {
+    pub fn to_primitive<E: Eos<S>>(&self, eos: &E) -> Prim<S, D> {
         let rho = self.den;
         let vel = self.mom.map(|m| m / rho);
         let v2 = vel.dot(&vel);
-        let pre = eos.recover_pressure(rho, v2, self.nrg);
+        // the storage boundary: the bare nrg slot is interpreted under the
+        // closure's own claim about what it stores.
+        let stored = <E::ConservedQuantity as StoredQuantity<S>>::from_stored(self.nrg);
+        let pre = eos.recover_pressure(Density(rho), VelocitySquared(v2), stored);
         Prim { rho, vel, pre }
     }
 }

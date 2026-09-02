@@ -7,6 +7,7 @@
 // host wrapper (`rhd_to_primitive`) that adds the C2pResult diagnostics post-hoc.
 // =============================================================================
 
+use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
 use crate::c2p_result::C2pResult;
 use crate::eos::Eos;
 use crate::rhd::lorentz_factor;
@@ -64,10 +65,10 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
         let ww = S::ONE / (S::ONE - v_sq).sqrt();
         let rho = dd / ww;
         let eps = (tau + (S::ONE - ww) * dd + (S::ONE - ww * ww) * p_eq) / (dd * ww);
-        let p_eos = eos.pressure(rho, eps);
+        let p_eos = eos.pressure(Density(rho), SpecificInternalEnergy(eps));
         let ff = p_eos - p_eq;
         let h = S::ONE + eps + p_eos / rho;
-        let cs_rel_sq = eos.sound_speed_sq(rho, p_eos) / h;
+        let cs_rel_sq = eos.sound_speed_sq(Density(rho), Pressure(p_eos)) / h;
         let gg = cs_rel_sq * v_sq - S::ONE;
         p_eq - ff / gg
     };

@@ -16,6 +16,7 @@
 // subtracted from the conserved flux post-star).
 // =============================================================================
 
+use crate::quantity::{Density, Pressure};
 use super::hlle::hlle;
 use crate::dissipation::{ShockwaveLimiter, mach_scale, shear_weight};
 use crate::eos::Eos;
@@ -218,8 +219,8 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
     let f_l = regime.to_flux(prim_l, nhat, eos);
     let f_r = regime.to_flux(prim_r, nhat, eos);
 
-    let cs_l = eos.sound_speed(prim_l.rho, prim_l.pre);
-    let cs_r = eos.sound_speed(prim_r.rho, prim_r.pre);
+    let cs_l = eos.sound_speed(Density(prim_l.rho), Pressure(prim_l.pre));
+    let cs_r = eos.sound_speed(Density(prim_r.rho), Pressure(prim_r.pre));
 
     let vn_l = prim_l.vel.dot(nhc);
     let vn_r = prim_r.vel.dot(nhc);
@@ -1670,7 +1671,7 @@ mod tests {
             );
             // the premise: this face is deeply subsonic, so the correction is at full strength
             // wherever a velocity jump does exist, and its absence measures the jump.
-            let cs = eos.sound_speed(l.rho, l.pre);
+            let cs = eos.sound_speed(Density(l.rho), Pressure(l.pre));
             assert!(
                 common_v.abs() / cs < 0.1,
                 "the face must sit deep in the low-mach regime for the vanishing to be \
@@ -1689,7 +1690,7 @@ mod tests {
         // classical term.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let nhat: Normalized<Physical<f64, 1>> = Normalized::axis(0);
-        let cs = eos.sound_speed(1.0, 1.0);
+        let cs = eos.sound_speed(Density(1.0), Pressure(1.0));
         let mut previous = f64::INFINITY;
         for mach in [0.2f64, 0.1, 0.05, 0.025] {
             let v = mach * cs;

@@ -28,6 +28,7 @@
 //   let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
 // =============================================================================
 
+use crate::quantity::{Density, Pressure};
 use crate::c2p_result::{C2pResult, ErrorCode};
 use crate::eos::Eos;
 use crate::mhd_state::{MhdCons, MhdPrim};
@@ -73,7 +74,7 @@ fn fast_magnetosonic<S: Scalar, const D: usize>(
     prim: &MhdPrim<S, D>,
     nhat: &Tensor<S, D>,
 ) -> S {
-    let a_sq = eos.sound_speed_sq(prim.rho, prim.pre);
+    let a_sq = eos.sound_speed_sq(Density(prim.rho), Pressure(prim.pre));
     crate::mhd_state::fast_magnetosonic_from(a_sq, prim.rho, &prim.mag, nhat)
 }
 

@@ -19,6 +19,7 @@
 //   let cons = regime.to_conserved(&eos, &prim);
 // =============================================================================
 
+use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
 use crate::c2p_result::C2pResult;
 use crate::energy::{IsoModel, Zero};
 use crate::eos::Eos;
@@ -77,7 +78,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     fn to_flux(&self, prim: &Self::Prim, nhat: &Self::Normal, eos: &impl Eos<S>) -> Self::Cons {
         let nhat = nhat.components();
         let vn = prim.vel.dot(nhat);
-        let pre = eos.pressure(prim.rho, S::ZERO);
+        let pre = eos.pressure(Density(prim.rho), SpecificInternalEnergy(S::ZERO));
         ConsG {
             chi: Default::default(),
             den: prim.rho * vn,
@@ -89,14 +90,14 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     #[inline]
     fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
         let nhat = nhat.components();
-        let cs = eos.sound_speed(prim.rho, S::ZERO);
+        let cs = eos.sound_speed(Density(prim.rho), Pressure(S::ZERO));
         let vn = prim.vel.dot(nhat);
         (vn - cs, vn + cs)
     }
 
     #[inline]
     fn max_wave_speed(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
-        let cs = eos.sound_speed(prim.rho, S::ZERO);
+        let cs = eos.sound_speed(Density(prim.rho), Pressure(S::ZERO));
         prim.vel.map(|v| v.abs() + cs).component_max()
     }
 

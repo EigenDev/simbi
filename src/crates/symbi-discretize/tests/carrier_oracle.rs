@@ -166,7 +166,7 @@ fn iso_prim_at(i: usize) -> (Prim<f64, ISO_NCOMP>, f64) {
 // the conserved iso state carrying cs2 in the nrg slot — built by the native f64 physics.
 fn iso_cons_at(i: usize) -> Cons<f64, ISO_NCOMP> {
     let (p, _cs2) = iso_prim_at(i);
-    // `Isothermal::conserved_energy` derives nrg from self.cs (=0), so nrg is set directly to
+    // `Isothermal::conserved_quantity` derives nrg from self.cs (=0), so nrg is set directly to
     // the prescribed per-cell cs^2, exactly as the gv builder feeds the locally-isothermal field.
     let mut c = p.to_conserved(&ISO_EOS);
     c.nrg = iso_prim_at(i).1; // the prescribed per-cell cs^2 field

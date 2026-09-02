@@ -23,6 +23,7 @@ pub mod isothermal_mhd;
 pub mod mhd_state;
 pub mod newtonian;
 pub mod newtonian_mhd;
+pub mod quantity;
 pub mod regime;
 pub mod regime_spec;
 pub mod rhd;
@@ -36,6 +37,7 @@ pub mod viscous;
 pub use c2p_result::{C2pResult, ErrorCode};
 pub use energy::{Adiabatic, EnergyModel, EnergySlot, IsoModel, Zero};
 pub use eos::{Eos, IdealGas, Isothermal};
+pub use quantity::{Density, EnergyDensity, Pressure, SpecificInternalEnergy, VelocitySquared};
 pub use regime::Regime;
 pub use regime_spec::{
     C2pKind, EosKind, FieldKind, FieldSpec, ISO_MHD_SPEC, ISO_NEWTONIAN_SPEC, NEWTONIAN_MHD_SPEC,

@@ -14,6 +14,7 @@
 //   let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
 // =============================================================================
 
+use crate::quantity::{Density, Pressure};
 use crate::c2p_result::{C2pResult, ErrorCode};
 use crate::eos::Eos;
 use crate::regime::Regime;
@@ -86,7 +87,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     #[inline]
     fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Self::Normal) -> (S, S) {
         let nhat = nhat.components();
-        let a = eos.sound_speed(prim.rho, prim.pre);
+        let a = eos.sound_speed(Density(prim.rho), Pressure(prim.pre));
         let vn = prim.vel.dot(nhat);
         (vn - a, vn + a)
     }
@@ -94,14 +95,14 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     #[inline]
     fn wave_speeds_axis(&self, eos: &impl Eos<S>, prim: &Self::Prim, axis: usize) -> (S, S) {
         // the speed depends only on the normal velocity -> read vel[axis] directly (no dot).
-        let a = eos.sound_speed(prim.rho, prim.pre);
+        let a = eos.sound_speed(Density(prim.rho), Pressure(prim.pre));
         let vn = prim.vel[axis];
         (vn - a, vn + a)
     }
 
     #[inline]
     fn max_wave_speed(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
-        let a = eos.sound_speed(prim.rho, prim.pre);
+        let a = eos.sound_speed(Density(prim.rho), Pressure(prim.pre));
         prim.vel.map(|v| v.abs() + a).component_max()
     }
 

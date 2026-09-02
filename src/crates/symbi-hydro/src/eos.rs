@@ -10,49 +10,62 @@
 //   let a = eos.sound_speed(rho, pre);
 // =============================================================================
 
+use crate::quantity::{
+    Density, EnergyDensity, Pressure, SoundSpeedSquared, SpecificInternalEnergy, StoredQuantity,
+    VelocitySquared,
+};
 use symbi_carrier::Scalar;
 
 /// equation of state: thermodynamic closure for the euler equations.
 /// maps between (rho, p) and (rho, e_int) and provides the sound speed.
 ///
-/// the `conserved_energy` / `recover_pressure` pair controls what the `nrg`
-/// slot of `Cons` means. for ideal gas it is total energy (ke + rho*e_int).
-/// for isothermal it stores cs^2 — the energy equation is not evolved.
+/// the associated `ConservedQuantity` states what the `nrg` slot of `Cons`
+/// means, and the `conserved_quantity` / `recover_pressure` pair converts
+/// across it: for a gamma-law gas the slot stores the total `EnergyDensity`
+/// (ke + rho*e_int); for isothermal it stores `SoundSpeedSquared` — the
+/// energy equation is absent there.
 pub trait Eos<S: Scalar>: Copy {
     /// adiabatic sound speed: a = sqrt(dp/drho|_s)
-    fn sound_speed(&self, rho: S, pre: S) -> S;
+    fn sound_speed(&self, rho: Density<S>, pre: Pressure<S>) -> S;
 
     /// adiabatic sound speed squared: a^2 = dp/drho|_s. the default squares
     /// `sound_speed`, but EOS impls override to skip the sqrt-then-square — the
     /// relativistic c2p Newton + wave speeds need cs^2, never cs, and a stray
     /// `sqrt(x).powi(2)` is a redundant transcendental per cell (and per Newton
     /// step) on the GPU.
-    fn sound_speed_sq(&self, rho: S, pre: S) -> S {
+    fn sound_speed_sq(&self, rho: Density<S>, pre: Pressure<S>) -> S {
         let a = self.sound_speed(rho, pre);
         a * a
     }
 
     /// specific internal energy from density and pressure
-    fn internal_energy(&self, rho: S, pre: S) -> S;
+    fn internal_energy(&self, rho: Density<S>, pre: Pressure<S>) -> S;
 
     /// pressure from density and specific internal energy
-    fn pressure(&self, rho: S, e_int: S) -> S;
+    fn pressure(&self, rho: Density<S>, e_int: SpecificInternalEnergy<S>) -> S;
 
-    /// produce the nrg component of conservative state from primitives.
-    /// default: total energy = 0.5 * rho * v^2 + rho * e_int.
-    /// isothermal overrides to store cs^2.
-    fn conserved_energy(&self, rho: S, v_sq: S, pre: S) -> S {
-        S::HALF * rho * v_sq + rho * self.internal_energy(rho, pre)
-    }
+    /// what this closure stores in the conserved `nrg` slot: the total
+    /// `EnergyDensity` for a gamma-law gas, `SoundSpeedSquared` for an
+    /// isothermal one. the type is the claim, so a stored value carries its
+    /// meaning across the storage boundary and an isothermal cs^2 cannot
+    /// enter a gamma-law recovery.
+    type ConservedQuantity: Copy + StoredQuantity<S>;
 
-    /// recover pressure from conservative state.
-    /// default: invert total energy to get e_int, then call pressure().
-    /// isothermal overrides to read cs^2 from nrg.
-    fn recover_pressure(&self, rho: S, v_sq: S, nrg: S) -> S {
-        let ke = S::HALF * rho * v_sq;
-        let e_int = (nrg - ke) / rho;
-        self.pressure(rho, e_int)
-    }
+    /// produce the quantity the conserved `nrg` slot stores, from primitives.
+    fn conserved_quantity(
+        &self,
+        rho: Density<S>,
+        v_sq: VelocitySquared<S>,
+        pre: Pressure<S>,
+    ) -> Self::ConservedQuantity;
+
+    /// recover pressure from the stored conserved quantity.
+    fn recover_pressure(
+        &self,
+        rho: Density<S>,
+        v_sq: VelocitySquared<S>,
+        stored: Self::ConservedQuantity,
+    ) -> S;
 
     /// adiabatic index as generic scalar.
     /// ideal gas: returns gamma. isothermal: returns 1.0 (unused).
@@ -76,6 +89,32 @@ pub trait Eos<S: Scalar>: Copy {
     }
 }
 
+/// the gamma-law total energy density `0.5 rho v^2 + rho e_int` — the stored
+/// conserved quantity every energy-evolving closure shares.
+fn gamma_law_conserved_energy<S: Scalar, E: Eos<S> + ?Sized>(
+    eos: &E,
+    rho: Density<S>,
+    v_sq: VelocitySquared<S>,
+    pre: Pressure<S>,
+) -> EnergyDensity<S> {
+    let e_int = eos.internal_energy(rho, pre);
+    let (Density(rho), VelocitySquared(v_sq)) = (rho, v_sq);
+    EnergyDensity(S::HALF * rho * v_sq + rho * e_int)
+}
+
+/// invert the gamma-law total energy density back to pressure.
+fn gamma_law_recover_pressure<S: Scalar, E: Eos<S> + ?Sized>(
+    eos: &E,
+    rho: Density<S>,
+    v_sq: VelocitySquared<S>,
+    nrg: EnergyDensity<S>,
+) -> S {
+    let (VelocitySquared(v_sq), EnergyDensity(nrg)) = (v_sq, nrg);
+    let ke = S::HALF * rho.0 * v_sq;
+    let e_int = (nrg - ke) / rho.0;
+    eos.pressure(rho, SpecificInternalEnergy(e_int))
+}
+
 /// ideal gas with constant adiabatic index gamma.
 /// p = (gamma - 1) * rho * e_int
 #[derive(Clone, Copy, Debug)]
@@ -84,24 +123,50 @@ pub struct IdealGas<S: Scalar> {
 }
 
 impl<S: Scalar> Eos<S> for IdealGas<S> {
+    type ConservedQuantity = EnergyDensity<S>;
+
     #[inline]
-    fn sound_speed(&self, rho: S, pre: S) -> S {
+    fn conserved_quantity(
+        &self,
+        rho: Density<S>,
+        v_sq: VelocitySquared<S>,
+        pre: Pressure<S>,
+    ) -> EnergyDensity<S> {
+        gamma_law_conserved_energy(self, rho, v_sq, pre)
+    }
+
+    #[inline]
+    fn recover_pressure(
+        &self,
+        rho: Density<S>,
+        v_sq: VelocitySquared<S>,
+        stored: EnergyDensity<S>,
+    ) -> S {
+        gamma_law_recover_pressure(self, rho, v_sq, stored)
+    }
+
+    #[inline]
+    fn sound_speed(&self, rho: Density<S>, pre: Pressure<S>) -> S {
+        let (Density(rho), Pressure(pre)) = (rho, pre);
         (self.gamma * pre / rho).sqrt()
     }
 
     #[inline]
-    fn sound_speed_sq(&self, rho: S, pre: S) -> S {
+    fn sound_speed_sq(&self, rho: Density<S>, pre: Pressure<S>) -> S {
+        let (Density(rho), Pressure(pre)) = (rho, pre);
         // a^2 = gamma * p / rho, directly (no sqrt-then-square).
         self.gamma * pre / rho
     }
 
     #[inline]
-    fn internal_energy(&self, rho: S, pre: S) -> S {
+    fn internal_energy(&self, rho: Density<S>, pre: Pressure<S>) -> S {
+        let (Density(rho), Pressure(pre)) = (rho, pre);
         pre / ((self.gamma - S::ONE) * rho)
     }
 
     #[inline]
-    fn pressure(&self, rho: S, e_int: S) -> S {
+    fn pressure(&self, rho: Density<S>, e_int: SpecificInternalEnergy<S>) -> S {
+        let (Density(rho), SpecificInternalEnergy(e_int)) = (rho, e_int);
         (self.gamma - S::ONE) * rho * e_int
     }
 
@@ -123,40 +188,54 @@ pub struct Isothermal<S: Scalar> {
 
 impl<S: Scalar> Eos<S> for Isothermal<S> {
     #[inline]
-    fn sound_speed(&self, _rho: S, _pre: S) -> S {
+    fn sound_speed(&self, _rho: Density<S>, _pre: Pressure<S>) -> S {
         self.cs
     }
 
     #[inline]
-    fn sound_speed_sq(&self, _rho: S, _pre: S) -> S {
+    fn sound_speed_sq(&self, _rho: Density<S>, _pre: Pressure<S>) -> S {
         self.cs * self.cs
     }
 
     #[inline]
-    fn internal_energy(&self, _rho: S, _pre: S) -> S {
+    fn internal_energy(&self, _rho: Density<S>, _pre: Pressure<S>) -> S {
         // isothermal: no thermodynamic internal energy.
         // return cs^2 so that pressure(rho, e_int) = rho * cs^2 roundtrips.
         self.cs * self.cs
     }
 
     #[inline]
-    fn pressure(&self, rho: S, _e_int: S) -> S {
+    fn pressure(&self, rho: Density<S>, _e_int: SpecificInternalEnergy<S>) -> S {
+        let Density(rho) = rho;
         self.cs * self.cs * rho
     }
 
-    /// nrg slot stores cs^2. for globally isothermal this is self.cs^2.
+    /// the nrg slot stores cs^2 — a sound speed squared, distinct in type
+    /// from an energy density. for globally isothermal this is self.cs^2;
     /// for locally isothermal, the user sets nrg = cs^2(x) per cell.
+    type ConservedQuantity = SoundSpeedSquared<S>;
+
     #[inline]
-    fn conserved_energy(&self, _rho: S, _v_sq: S, _pre: S) -> S {
-        self.cs * self.cs
+    fn conserved_quantity(
+        &self,
+        _rho: Density<S>,
+        _v_sq: VelocitySquared<S>,
+        _pre: Pressure<S>,
+    ) -> SoundSpeedSquared<S> {
+        SoundSpeedSquared(self.cs * self.cs)
     }
 
-    /// pressure from nrg = cs^2: p = nrg * rho.
-    /// works for both globally and locally isothermal since it reads cs^2
-    /// from the stored nrg.
+    /// pressure from the stored cs^2: p = cs^2 * rho. works for both globally
+    /// and locally isothermal since it reads cs^2 from the stored slot.
     #[inline]
-    fn recover_pressure(&self, rho: S, _v_sq: S, nrg: S) -> S {
-        nrg * rho
+    fn recover_pressure(
+        &self,
+        rho: Density<S>,
+        _v_sq: VelocitySquared<S>,
+        stored: SoundSpeedSquared<S>,
+    ) -> S {
+        let (Density(rho), SoundSpeedSquared(cs_sq)) = (rho, stored);
+        cs_sq * rho
     }
 
     /// isothermal kernels use gamma as cs^2 for c2p (pre = cs^2 * rho),
@@ -192,20 +271,44 @@ impl<S: Scalar> Eos<S> for Isothermal<S> {
 pub struct TaubMathews;
 
 impl<S: Scalar> Eos<S> for TaubMathews {
+    type ConservedQuantity = EnergyDensity<S>;
+
     #[inline]
-    fn sound_speed(&self, rho: S, pre: S) -> S {
+    fn conserved_quantity(
+        &self,
+        rho: Density<S>,
+        v_sq: VelocitySquared<S>,
+        pre: Pressure<S>,
+    ) -> EnergyDensity<S> {
+        gamma_law_conserved_energy(self, rho, v_sq, pre)
+    }
+
+    #[inline]
+    fn recover_pressure(
+        &self,
+        rho: Density<S>,
+        v_sq: VelocitySquared<S>,
+        stored: EnergyDensity<S>,
+    ) -> S {
+        gamma_law_recover_pressure(self, rho, v_sq, stored)
+    }
+
+    #[inline]
+    fn sound_speed(&self, rho: Density<S>, pre: Pressure<S>) -> S {
         self.sound_speed_sq(rho, pre).sqrt()
     }
 
     #[inline]
-    fn sound_speed_sq(&self, rho: S, pre: S) -> S {
+    fn sound_speed_sq(&self, rho: Density<S>, pre: Pressure<S>) -> S {
+        let (Density(rho), Pressure(pre)) = (rho, pre);
         let theta = pre / rho;
         let h = S::from_f64(2.5) * theta + (S::from_f64(2.25) * theta * theta + S::ONE).sqrt();
         theta * (S::from_f64(5.0) * h - S::from_f64(8.0) * theta) / (S::THREE * (h - theta))
     }
 
     #[inline]
-    fn internal_energy(&self, rho: S, pre: S) -> S {
+    fn internal_energy(&self, rho: Density<S>, pre: Pressure<S>) -> S {
+        let (Density(rho), Pressure(pre)) = (rho, pre);
         // e = h - 1 - theta = 1.5 theta + (sqrt(2.25 theta^2 + 1) - 1), with the
         // sqrt-minus-one in conjugate form: the direct subtraction cancels ~11
         // digits in the cold limit (the correction is theta^2-small against 1)
@@ -216,7 +319,8 @@ impl<S: Scalar> Eos<S> for TaubMathews {
     }
 
     #[inline]
-    fn pressure(&self, rho: S, e_int: S) -> S {
+    fn pressure(&self, rho: Density<S>, e_int: SpecificInternalEnergy<S>) -> S {
+        let (Density(rho), SpecificInternalEnergy(e_int)) = (rho, e_int);
         // the closed-form inverse of `internal_energy`: p = rho e (e + 2) / (3 (e + 1)).
         rho * e_int * (e_int + S::TWO) / (S::THREE * (e_int + S::ONE))
     }
@@ -261,45 +365,59 @@ impl<S: Scalar> Eos<S> for EosSelect<S> {
     // every method is delegated explicitly, including the ones the trait defaults: a default
     // left in place here would evaluate the gamma-law form for both arms.
     #[inline]
-    fn sound_speed(&self, rho: S, pre: S) -> S {
+    fn sound_speed(&self, rho: Density<S>, pre: Pressure<S>) -> S {
         match self {
             EosSelect::Ideal(e) => e.sound_speed(rho, pre),
             EosSelect::Tm(e) => e.sound_speed(rho, pre),
         }
     }
     #[inline]
-    fn sound_speed_sq(&self, rho: S, pre: S) -> S {
+    fn sound_speed_sq(&self, rho: Density<S>, pre: Pressure<S>) -> S {
         match self {
             EosSelect::Ideal(e) => e.sound_speed_sq(rho, pre),
             EosSelect::Tm(e) => e.sound_speed_sq(rho, pre),
         }
     }
     #[inline]
-    fn internal_energy(&self, rho: S, pre: S) -> S {
+    fn internal_energy(&self, rho: Density<S>, pre: Pressure<S>) -> S {
         match self {
             EosSelect::Ideal(e) => e.internal_energy(rho, pre),
             EosSelect::Tm(e) => e.internal_energy(rho, pre),
         }
     }
     #[inline]
-    fn pressure(&self, rho: S, e_int: S) -> S {
+    fn pressure(&self, rho: Density<S>, e_int: SpecificInternalEnergy<S>) -> S {
         match self {
             EosSelect::Ideal(e) => e.pressure(rho, e_int),
             EosSelect::Tm(e) => e.pressure(rho, e_int),
         }
     }
+    // both arms are energy-evolving gamma-law closures, so the select stores
+    // the total energy density like its members.
+    type ConservedQuantity = EnergyDensity<S>;
+
     #[inline]
-    fn conserved_energy(&self, rho: S, v_sq: S, pre: S) -> S {
+    fn conserved_quantity(
+        &self,
+        rho: Density<S>,
+        v_sq: VelocitySquared<S>,
+        pre: Pressure<S>,
+    ) -> EnergyDensity<S> {
         match self {
-            EosSelect::Ideal(e) => e.conserved_energy(rho, v_sq, pre),
-            EosSelect::Tm(e) => e.conserved_energy(rho, v_sq, pre),
+            EosSelect::Ideal(e) => e.conserved_quantity(rho, v_sq, pre),
+            EosSelect::Tm(e) => e.conserved_quantity(rho, v_sq, pre),
         }
     }
     #[inline]
-    fn recover_pressure(&self, rho: S, v_sq: S, nrg: S) -> S {
+    fn recover_pressure(
+        &self,
+        rho: Density<S>,
+        v_sq: VelocitySquared<S>,
+        stored: EnergyDensity<S>,
+    ) -> S {
         match self {
-            EosSelect::Ideal(e) => e.recover_pressure(rho, v_sq, nrg),
-            EosSelect::Tm(e) => e.recover_pressure(rho, v_sq, nrg),
+            EosSelect::Ideal(e) => e.recover_pressure(rho, v_sq, stored),
+            EosSelect::Tm(e) => e.recover_pressure(rho, v_sq, stored),
         }
     }
     fn gamma(&self) -> S {
@@ -334,11 +452,11 @@ mod tests {
     fn ideal_gas_sound_speed() {
         let eos = IdealGas { gamma: 1.4 };
         // a = sqrt(gamma * p / rho) = sqrt(1.4 * 1.0 / 1.0) = sqrt(1.4)
-        let a = eos.sound_speed(1.0, 1.0);
+        let a = eos.sound_speed(Density(1.0), Pressure(1.0));
         assert!(approx(a, 1.4_f64.sqrt()));
 
         // rho=0.125, p=0.1: a = sqrt(1.4 * 0.1 / 0.125) = sqrt(1.12)
-        let a = eos.sound_speed(0.125, 0.1);
+        let a = eos.sound_speed(Density(0.125), Pressure(0.1));
         assert!(approx(a, (1.4 * 0.1 / 0.125_f64).sqrt()));
     }
 
@@ -347,8 +465,8 @@ mod tests {
         let eos = IdealGas { gamma: 1.4 };
         let rho = 2.5;
         let pre = 3.7;
-        let e_int = eos.internal_energy(rho, pre);
-        let pre_back = eos.pressure(rho, e_int);
+        let e_int = eos.internal_energy(Density(rho), Pressure(pre));
+        let pre_back = eos.pressure(Density(rho), SpecificInternalEnergy(e_int));
         assert!(approx(pre, pre_back));
     }
 
@@ -356,14 +474,14 @@ mod tests {
     fn ideal_gas_internal_energy() {
         let eos = IdealGas { gamma: 1.4 };
         // e_int = p / ((gamma-1) * rho) = 1.0 / (0.4 * 1.0) = 2.5
-        let e = eos.internal_energy(1.0, 1.0);
+        let e = eos.internal_energy(Density(1.0), Pressure(1.0));
         assert!(approx(e, 2.5));
     }
 
     #[test]
     fn ideal_gas_f32() {
         let eos = IdealGas { gamma: 1.4_f32 };
-        let a = eos.sound_speed(1.0_f32, 1.0_f32);
+        let a = eos.sound_speed(Density(1.0_f32), Pressure(1.0_f32));
         assert!((a - 1.4_f32.sqrt()).abs() < 1e-6);
     }
 
@@ -373,35 +491,35 @@ mod tests {
     fn isothermal_sound_speed() {
         let eos = Isothermal { cs: 1.0 };
         // sound speed is constant, independent of state
-        assert_eq!(eos.sound_speed(1.0, 1.0), 1.0);
-        assert_eq!(eos.sound_speed(0.001, 999.0), 1.0);
-        assert_eq!(eos.sound_speed(100.0, 0.0), 1.0);
+        assert_eq!(eos.sound_speed(Density(1.0), Pressure(1.0)), 1.0);
+        assert_eq!(eos.sound_speed(Density(0.001), Pressure(999.0)), 1.0);
+        assert_eq!(eos.sound_speed(Density(100.0), Pressure(0.0)), 1.0);
     }
 
     #[test]
     fn isothermal_pressure() {
         let eos = Isothermal { cs: 2.0 };
         // p = cs^2 * rho = 4 * rho
-        assert!(approx(eos.pressure(1.0, 0.0), 4.0));
-        assert!(approx(eos.pressure(0.5, 0.0), 2.0));
-        assert!(approx(eos.pressure(3.0, 0.0), 12.0));
+        assert!(approx(eos.pressure(Density(1.0), SpecificInternalEnergy(0.0)), 4.0));
+        assert!(approx(eos.pressure(Density(0.5), SpecificInternalEnergy(0.0)), 2.0));
+        assert!(approx(eos.pressure(Density(3.0), SpecificInternalEnergy(0.0)), 12.0));
     }
 
     #[test]
     fn isothermal_energy_roundtrip() {
         let eos = Isothermal { cs: 3.0 };
         let rho = 2.5;
-        let pre = eos.pressure(rho, 0.0); // p = 9 * 2.5 = 22.5
-        let e_int = eos.internal_energy(rho, pre);
-        let pre_back = eos.pressure(rho, e_int);
+        let pre = eos.pressure(Density(rho), SpecificInternalEnergy(0.0)); // p = 9 * 2.5 = 22.5
+        let e_int = eos.internal_energy(Density(rho), Pressure(pre));
+        let pre_back = eos.pressure(Density(rho), SpecificInternalEnergy(e_int));
         assert!(approx(pre, pre_back));
     }
 
     #[test]
     fn isothermal_f32() {
         let eos = Isothermal { cs: 1.5_f32 };
-        assert_eq!(eos.sound_speed(1.0_f32, 1.0_f32), 1.5_f32);
-        assert!((eos.pressure(2.0_f32, 0.0_f32) - 4.5_f32).abs() < 1e-6);
+        assert_eq!(eos.sound_speed(Density(1.0_f32), Pressure(1.0_f32)), 1.5_f32);
+        assert!((eos.pressure(Density(2.0_f32), SpecificInternalEnergy(0.0_f32)) - 4.5_f32).abs() < 1e-6);
     }
 
     // ---- taub-mathews (synge gas approximation) ----
@@ -419,7 +537,7 @@ mod tests {
         let eos = TaubMathews;
         for k in -6..=6 {
             let theta = 10.0_f64.powi(k);
-            let e: f64 = eos.internal_energy(1.0, theta);
+            let e: f64 = eos.internal_energy(Density(1.0), Pressure(theta));
             let h = 1.0 + e + theta;
             let resid = (h - theta) * (h - 4.0 * theta) - 1.0;
             assert!(
@@ -436,7 +554,7 @@ mod tests {
     fn taub_mathews_effective_gamma_limits() {
         let eos = TaubMathews;
         let gamma_eff = |theta: f64| {
-            let e: f64 = eos.internal_energy(1.0, theta);
+            let e: f64 = eos.internal_energy(Density(1.0), Pressure(theta));
             1.0 + theta / e
         };
         assert!((gamma_eff(1e-8) - 5.0 / 3.0).abs() < 1e-6);
@@ -457,8 +575,8 @@ mod tests {
         for k in -6..=6 {
             let pre = 10.0_f64.powi(k);
             for rho in [0.1, 1.0, 42.0] {
-                let e = eos.internal_energy(rho, pre);
-                let back = eos.pressure(rho, e);
+                let e = eos.internal_energy(Density(rho), Pressure(pre));
+                let back = eos.pressure(Density(rho), SpecificInternalEnergy(e));
                 assert!(
                     (back - pre).abs() < 1e-12 * pre,
                     "roundtrip broken at rho {rho}, p = 1e{k}: {back}"
@@ -474,7 +592,7 @@ mod tests {
     fn taub_mathews_relativistic_sound_speed_limits() {
         let eos = TaubMathews;
         let cs_rel_sq = |theta: f64| {
-            let cs2: f64 = eos.sound_speed_sq(1.0, theta);
+            let cs2: f64 = eos.sound_speed_sq(Density(1.0), Pressure(theta));
             cs2 / tm_enthalpy(theta)
         };
         assert!((cs_rel_sq(1e-10) / (5.0 / 3.0 * 1e-10) - 1.0).abs() < 1e-6);

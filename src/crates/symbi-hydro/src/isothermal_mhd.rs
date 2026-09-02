@@ -26,6 +26,7 @@
 //   let flux = regime.to_flux(&prim, &nhat, &eos);
 // =============================================================================
 
+use crate::quantity::{Density, Pressure, SpecificInternalEnergy};
 use crate::c2p_result::C2pResult;
 use crate::energy::Zero;
 use crate::eos::Eos;
@@ -69,7 +70,7 @@ fn fast_magnetosonic<S: Scalar, const D: usize>(
     prim: &IsoMhdPrim<S, D>,
     nhat: &Tensor<S, D>,
 ) -> S {
-    let a_sq = eos.sound_speed_sq(prim.rho, S::ZERO);
+    let a_sq = eos.sound_speed_sq(Density(prim.rho), Pressure(S::ZERO));
     crate::mhd_state::fast_magnetosonic_from(a_sq, prim.rho, &prim.mag, nhat)
 }
 
@@ -113,7 +114,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
         let vn = prim.vel.dot(nhat);
         let bn = prim.mag.dot(nhat);
         let bsq = prim.mag.dot(&prim.mag);
-        let pre = eos.pressure(prim.rho, S::ZERO); // a^2 rho
+        let pre = eos.pressure(Density(prim.rho), SpecificInternalEnergy(S::ZERO)); // a^2 rho
         let p_tot = pre + half * bsq; // gas + magnetic pressure
         let rho_vn = prim.rho * vn;
         IsoMhdCons {

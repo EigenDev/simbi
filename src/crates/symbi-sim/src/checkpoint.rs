@@ -422,7 +422,10 @@ where
     if !sim.physics.regime.has_energy() {
         builtins.push((
             "sound_speed",
-            Attr::F64(sim.physics.eos.sound_speed(1.0, 1.0)),
+            Attr::F64(sim.physics.eos.sound_speed(
+                symbi_hydro::quantity::Density(1.0),
+                symbi_hydro::quantity::Pressure(1.0),
+            )),
         ));
     }
     let mut meta = Tree::new("metadata");

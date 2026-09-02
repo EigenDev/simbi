@@ -8,6 +8,7 @@
 // GPU-traceable: all paths computed unconditionally, selected via S::select.
 // =============================================================================
 
+use crate::quantity::{Density, Pressure};
 use crate::eos::Eos;
 use crate::mhd_state::MhdPrim;
 use crate::rhd;
@@ -28,7 +29,7 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
     let vn = prim.vel.dot(nhat);
     let ww = rhd::lorentz_factor(vsq);
     let w2 = ww * ww;
-    let cssq = eos.sound_speed(rho, prim.pre) * eos.sound_speed(rho, prim.pre) / hh;
+    let cssq = eos.sound_speed(Density(rho), Pressure(prim.pre)) * eos.sound_speed(Density(rho), Pressure(prim.pre)) / hh;
 
     let bsq = prim.mag.dot(&prim.mag);
     let vdb = prim.vel.dot(&prim.mag);
@@ -148,7 +149,7 @@ pub fn rmhd_magnetosonic_cfl_speeds<S: Scalar, const D: usize>(
 ) -> (S, S) {
     let rho = prim.rho;
     let hh = rhd::enthalpy(eos, rho, prim.pre);
-    let cs = eos.sound_speed(rho, prim.pre);
+    let cs = eos.sound_speed(Density(rho), Pressure(prim.pre));
     let cssq = cs * cs / hh; // relativistic sound speed squared (matches rmhd_wave_speeds)
 
     let vsq = prim.vel.dot(&prim.vel);
@@ -201,7 +202,7 @@ pub fn rmhd_magnetosonic_cfl_speeds_gr<S: Scalar, const D: usize>(
 ) -> (S, S) {
     let rho = prim.rho;
     let hh = rhd::enthalpy(eos, rho, prim.pre);
-    let cs = eos.sound_speed(rho, prim.pre);
+    let cs = eos.sound_speed(Density(rho), Pressure(prim.pre));
     let cssq = cs * cs / hh;
 
     let vsq = metric.norm_sq_contra(&prim.vel);

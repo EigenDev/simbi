@@ -10,6 +10,7 @@
 // these helpers do not clamp — that would hide infeasibility from the recover step.
 // =============================================================================
 
+use crate::quantity::{Density, Pressure};
 use crate::eos::Eos;
 use symbi_carrier::Scalar;
 
@@ -30,7 +31,7 @@ pub fn lorentz_factor_sq<S: Scalar>(v_sq: S) -> S {
 /// EOS-generic — works for any EOS providing internal_energy().
 #[inline]
 pub fn enthalpy<S: Scalar>(eos: &impl Eos<S>, rho: S, pre: S) -> S {
-    S::ONE + eos.internal_energy(rho, pre) + pre / rho
+    S::ONE + eos.internal_energy(Density(rho), Pressure(pre)) + pre / rho
 }
 
 /// relativistic sound speed squared: cs_rel^2 = cs_newt^2 / h.
@@ -38,7 +39,7 @@ pub fn enthalpy<S: Scalar>(eos: &impl Eos<S>, rho: S, pre: S) -> S {
 /// so the per-cell sqrt-then-square the newton step paid for is gone.
 #[inline]
 pub fn sound_speed_sq<S: Scalar>(eos: &impl Eos<S>, rho: S, pre: S) -> S {
-    eos.sound_speed_sq(rho, pre) / enthalpy(eos, rho, pre)
+    eos.sound_speed_sq(Density(rho), Pressure(pre)) / enthalpy(eos, rho, pre)
 }
 
 /// the relativistic inertial density: rho * h * W^2 (the `wgam2` of the literature).
@@ -110,7 +111,7 @@ mod tests {
         let eos = IdealGas { gamma: 1.4 };
         let rho = 2.0;
         let pre = 3.0;
-        let e_int = eos.internal_energy(rho, pre);
+        let e_int = eos.internal_energy(Density(rho), Pressure(pre));
         let h = enthalpy(&eos, rho, pre);
         assert!(approx(h, 1.0 + e_int + pre / rho));
     }
@@ -122,7 +123,7 @@ mod tests {
         let rho = 1.0;
         let pre = 1e-10;
         let cs2 = sound_speed_sq(&eos, rho, pre);
-        let cs2_newt = eos.sound_speed(rho, pre).powi(2);
+        let cs2_newt = eos.sound_speed(Density(rho), Pressure(pre)).powi(2);
         assert!(approx_rel(cs2, cs2_newt, 1e-8));
     }
 
