@@ -923,11 +923,24 @@ answer to the two rows above and is fully unwired: `constraint_projection_gv`
 is baked and oracle-tested, its dispatch wrapper has zero callers,
 `ConstraintParams` holds inert defaults with no config path, the
 `constraint_theta` field is allocated and untouched, and the ledger has no
-production caller. The recorded blocker is physical, ahead of any typing
-question: the family anchors on the stage input, and under constrained
-transport that anchor collapses the magnetized torus to a dt underflow at
-t = 2.286 (the live projection's eulerian anchor holds to t = 4.02). Wiring
-the family means resolving the anchor convention first. The module's usage
+production caller. The anchor convention that blocked wiring is now resolved by
+a controlled A/B measurement of the two candidate anchors on the same firing
+projection. The Eulerian rebuild — the p2c reconstruction from the stage-input
+primitives paired with the candidate cell B — is admissible by construction:
+its anchor-energy raise is a millionth of the energy the projection itself
+moves (raise/segment-energy of 1.2e-6 to 4.2e-6, stable across 32^3/48^3/64^3
+and across plasma beta). The stage-input anchor pairs the stage conserved state
+with the constrained-transport-advanced B, a hybrid that sits on the
+admissibility boundary: its raise is a percent-level fraction of the projection
+energy (1.2% to 2.2%) and grows with resolution. Both survive in the accessible
+regime because the raise repairs the marginal stage anchor, so the anchor is a
+numerically rescued hybrid while the Eulerian rebuild supplies the lawful
+anchor. The sanctioned wiring is therefore behind the Eulerian rebuild — the
+convention production already runs — with the projection's receipts booked into
+the ledger; the family stays unwired until that is done. The projection is a
+truncation effect — it fires only in the turbulent near-horizon flow of a 3D
+torus and vanishes as the grid refines; a 2D axisymmetric torus never trips it,
+and there the two anchors agree to machine precision. The module's usage
 example also names `joint_projection_theta`, which does not exist; the live
 name is `joint_theta`. There is currently no live magnetization ceiling,
 temperature floor, or evolved-state density floor anywhere in production —
