@@ -79,12 +79,15 @@ from typing import Any, Iterable, Mapping, Sequence
 ARMS: tuple[str, str] = ("stage_input", "eulerian_rebuilt")
 COMPONENTS: tuple[str, str, str] = ("mass", "energy_segment", "energy_raise")
 INTEGRATORS: tuple[str, ...] = ("euler", "rk2", "rk3")
+# the guard-activation counters, exactly what `guard_census()` exposes: the
+# total fallback and freeze activations, and their causally-masked (inside the
+# horizon) subsets. finer per-tier counters (troubled vs projected vs retried)
+# would need a richer binding than the census.
 GUARD_COUNTERS: tuple[str, ...] = (
-    "c2p_failures",
-    "troubled_cells",
-    "freezes",
-    "exterior_freezes",
-    "retries",
+    "fallback",
+    "freeze",
+    "fallback_inside_horizon",
+    "freeze_inside_horizon",
 )
 CONFIG_KEYS: tuple[str, ...] = (
     "initial_conditions",

@@ -1,0 +1,112 @@
+{
+  "anchor_first": {
+    "accepted_first_iteration": -1,
+    "accepted_first_pass": -1,
+    "accepted_first_time": -1.0,
+    "attempted_first_pass": -1
+  },
+  "anchor_report": {
+    "accepted": {
+      "injected": {
+        "energy_raise": [
+          0.0,
+          0.0
+        ],
+        "energy_segment": [
+          0.0,
+          0.0
+        ],
+        "mass": [
+          0.0,
+          0.0
+        ]
+      },
+      "intervention": {
+        "energy_raise": [
+          0.0,
+          0.0
+        ],
+        "energy_segment": [
+          0.0,
+          0.0
+        ],
+        "mass": [
+          0.0,
+          0.0
+        ]
+      },
+      "min_theta": 1.0,
+      "passes": 25,
+      "passes_fired": 0,
+      "projected_cells": 0
+    },
+    "attempted": {
+      "injected": {
+        "energy_raise": [
+          0.0,
+          0.0
+        ],
+        "energy_segment": [
+          0.0,
+          0.0
+        ],
+        "mass": [
+          0.0,
+          0.0
+        ]
+      },
+      "intervention": {
+        "energy_raise": [
+          0.0,
+          0.0
+        ],
+        "energy_segment": [
+          0.0,
+          0.0
+        ],
+        "mass": [
+          0.0,
+          0.0
+        ]
+      },
+      "min_theta": 1.0,
+      "passes": 25,
+      "passes_fired": 0,
+      "projected_cells": 0
+    }
+  },
+  "config": {
+    "cfl": 0.1,
+    "chart": "kerr_ks",
+    "end_time": 400.0,
+    "eos": "ideal",
+    "grid": "96x64",
+    "initial_conditions": "gr_fishbone_moncrief_mhd.py",
+    "integrator": "rk2",
+    "run_config": "kerr_spin=0",
+    "solver": "hlld"
+  },
+  "conserved_final": {
+    "energy": 87033.35424355321,
+    "mass": 2106498.3510295125
+  },
+  "conserved_initial": {
+    "energy": 87853.48732604815,
+    "mass": 2099377.1844402207
+  },
+  "convention": "stage_input",
+  "guards": {
+    "fallback": 28,
+    "fallback_inside_horizon": 0,
+    "freeze": 0,
+    "freeze_inside_horizon": 0,
+    "replay_outcomes": {}
+  },
+  "observables": {
+    "horizon_accretion_rate": 0.16578966939508136,
+    "magnetic_energy": 3.03275455627648,
+    "survival_time": 128.34937292733667,
+    "torus_rest_mass": 2106200.2705082353
+  },
+  "resolution": 96
+}

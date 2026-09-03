@@ -1,0 +1,75 @@
+{
+  "description": "projection-anchor A/B, 3D Cartesian FM torus, spin=0, kappa=1.05, t=5 (beta=100) and t=8 (beta=1)",
+  "beta100_t5": {
+    "32": {
+      "stage_input": {
+        "survival": 5.0,
+        "proj_cells": 2674222,
+        "inj_mass_signed": -4.04505223983516,
+        "inj_mass_gross": 17.088688408706126,
+        "energy_raise": 0.006480254319202993,
+        "raise_over_segment_energy": 0.012246286468132908
+      },
+      "eulerian_rebuilt": {
+        "survival": 5.0,
+        "proj_cells": 2507788,
+        "inj_mass_signed": -6.524838756342432,
+        "inj_mass_gross": 20.394073465059385,
+        "energy_raise": 8.89143981123579e-07,
+        "raise_over_segment_energy": 1.4186815655110855e-06
+      }
+    },
+    "48": {
+      "stage_input": {
+        "survival": 5.0,
+        "proj_cells": 3428217,
+        "inj_mass_signed": -10.009209579721054,
+        "inj_mass_gross": 18.85950197870537,
+        "energy_raise": 0.010682582487613253,
+        "raise_over_segment_energy": 0.01811902054159084
+      },
+      "eulerian_rebuilt": {
+        "survival": 5.0,
+        "proj_cells": 3345528,
+        "inj_mass_signed": -15.64421516892416,
+        "inj_mass_gross": 27.16326638006479,
+        "energy_raise": 9.954295010360633e-07,
+        "raise_over_segment_energy": 1.1809830010486754e-06
+      }
+    },
+    "64": {
+      "stage_input": {
+        "survival": 5.0,
+        "proj_cells": 929255,
+        "inj_mass_signed": -3.9317031918939422,
+        "inj_mass_gross": 6.250453477102629,
+        "energy_raise": 0.004002280502120771,
+        "raise_over_segment_energy": 0.021499508340268012
+      },
+      "eulerian_rebuilt": {
+        "survival": 5.0,
+        "proj_cells": 916785,
+        "inj_mass_signed": -5.067898236111643,
+        "inj_mass_gross": 8.954702774898339,
+        "energy_raise": 1.118534556189471e-06,
+        "raise_over_segment_energy": 4.193105271271198e-06
+      }
+    }
+  },
+  "beta1_t8": {
+    "48": {
+      "stage_input": {
+        "survival": 8.0,
+        "energy_raise": 0.023596912127013602,
+        "inj_mass_signed": -13.270567439260427
+      },
+      "eulerian_rebuilt": {
+        "survival": 8.0,
+        "energy_raise": 3.6760899065457673e-06,
+        "inj_mass_signed": -24.84524339533209
+      }
+    }
+  },
+  "normalization_note": "energy_raise normalized by the projection's own segment-energy gross budget (both recorded in the ledger): eulerian_rebuilt 1.2e-6..4.2e-6 (negligible), stage_input 1.2%..2.2% and rising with resolution",
+  "verdict": "eulerian_rebuilt is admissible by construction (negligible normalized raise); stage_input is a numerically rescued hybrid (percent-level raise). No collapse divergence reproduced in accessible regime; injection segment magnitudes non-monotone (no convergence order claimed)."
+}
