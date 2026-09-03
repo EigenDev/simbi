@@ -48,7 +48,9 @@ fn coeff<'a>(lf: &'a LinForm, key: &str) -> &'a symbi_ir::proof::Poly {
 
 #[test]
 fn uct_emf_upwind_pairing_symbolic() {
-    let (kernel, writes) = uct_master_emf_proof_kernel(false);
+    let program = uct_master_emf_proof_kernel(false);
+    let kernel = program.kernel();
+    let writes = program.writes();
     let root = writes[0].value;
     let lf = LinForm::extract(kernel.graph(), root, FIELDS, SCALARS);
 
@@ -119,7 +121,9 @@ fn uct_emf_upwind_pairing_symbolic() {
 // pairing breaks.
 #[test]
 fn uct_emf_anti_upwind_pairing_is_rejected() {
-    let (kernel, writes) = uct_master_emf_proof_kernel(true);
+    let program = uct_master_emf_proof_kernel(true);
+    let kernel = program.kernel();
+    let writes = program.writes();
     let root = writes[0].value;
     let lf = LinForm::extract(kernel.graph(), root, FIELDS, SCALARS);
 

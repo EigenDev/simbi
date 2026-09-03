@@ -116,7 +116,7 @@ fn ct_curl3d_preserves_div_b() {
         let p2 = (dir + 2) % 3;
         let built = rmhd_ct_curl_3d_dir_gv(Coords::Cartesian, &[Spacing::Uniform; 3], dir);
         assert_eq!(
-            built.0.scalar_params(),
+            built.kernel().scalar_params(),
             vec!["dt".to_string(), "id_p1".to_string(), "id_p2".to_string()]
         );
         let (bvec, ep1, ep2) = (

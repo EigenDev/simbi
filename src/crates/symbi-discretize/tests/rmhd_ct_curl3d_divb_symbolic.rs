@@ -61,8 +61,10 @@ fn divb_symbolic_telescoping() {
     let mut div_contribution = LinForm::default();
 
     for dir in 0..3usize {
-        let (kernel, writes) =
+        let program =
             rmhd_ct_curl_3d_dir_gv(Coords::Cartesian, &[Spacing::Uniform; 3], dir);
+        let kernel = program.kernel();
+        let writes = program.writes();
         assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
         let root = writes[0].value;
 

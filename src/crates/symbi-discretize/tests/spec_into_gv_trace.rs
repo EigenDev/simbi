@@ -25,11 +25,11 @@
 use std::collections::HashMap;
 
 use symbi_hydro::regime_spec::law_params;
+use symbi_ir::graph::NodeId;
+use symbi_ir::gv::{Gv, TraceCx, trace};
 use symbi_source_compile::source_spec::{
     gravity_params, point_mass_gravity_sources, source_params,
 };
-use symbi_ir::graph::NodeId;
-use symbi_ir::gv::{Gv, TraceCx, trace};
 
 /// helper: evaluate a Gv-trace NodeId at f64 against a known parameter state,
 /// using scalarize + the Cpu interpreter on the trace's graph as it stands.
@@ -71,8 +71,7 @@ fn splice_produces_valid_gv_node_ids() {
 
         // build the spec source standalone, then splice into the active trace.
         let built = (point_mass_gravity_sources(3, false)[0].build_source)(3);
-        let spliced: Vec<NodeId> =
-            cx.with_trace(|t| built.splice_into(t.graph(), &leaves));
+        let spliced: Vec<NodeId> = cx.with_trace(|t| built.splice_into(t.graph(), &leaves));
 
         // wrap as Gv values — this is the contract the godunov fusion needs.
         let s_mom: Vec<Gv> = spliced.iter().map(|&n| cx.gv(n)).collect();
@@ -122,8 +121,7 @@ fn spliced_outputs_match_standalone_at_same_param_state() {
     let (_kernel, ()) = trace(|cx| {
         let leaves = declare_gravity_leaves(cx);
         let built2 = (point_mass_gravity_sources(3, false)[0].build_source)(3);
-        let spliced: Vec<NodeId> =
-            cx.with_trace(|t| built2.splice_into(t.graph(), &leaves));
+        let spliced: Vec<NodeId> = cx.with_trace(|t| built2.splice_into(t.graph(), &leaves));
 
         // sample values for each declared leaf.
         let sample_vals: Vec<(String, f64)> = leaves

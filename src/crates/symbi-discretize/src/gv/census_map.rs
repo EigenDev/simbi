@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use symbi_algebra::algebra::Numeric;
 use symbi_carrier::Scalar;
 use symbi_ir::graph::NodeId;
-use symbi_ir::{FieldRef, Gv, GvKernel, KernelWrite, KernelWrites, trace};
+use symbi_ir::{FieldRef, Gv, KernelProgram, KernelWrite, KernelWrites, trace_kernel};
 
 use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
@@ -45,8 +45,8 @@ pub fn census_map_gv<A: CensusAxis>(
     bin_axes: &[A],
     n_values: usize,
     n_segments: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         // the live primitives: a census bins the state at the time it is sampled, which is the tail
         // of an accepted step, after the recovery (the stage input holds the step's starting state).
         let mut env: HashMap<String, NodeId> = HashMap::new();

@@ -200,7 +200,7 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
         let (coords, spacing, axes) = sim_gv_geom(sim);
         let src_refs: Vec<(&str, &SourceProgram)> =
             dag.built.iter().map(|(t, b)| (t.as_str(), b)).collect();
-        let (gvk, writes) = symbi_discretize::boundary_fill_from_built_gv(
+        let program = symbi_discretize::boundary_fill_from_built_gv(
             coords,
             &spacing,
             &axes,
@@ -209,7 +209,7 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
             dag.has_energy,
             &src_refs,
         );
-        gv_kernel_to_ir(&gvk, &writes, D as u8, &format!("rt_boundary_{D}d"))
+        gv_kernel_to_ir(&program, D as u8, &format!("rt_boundary_{D}d"))
     });
     let t = sim.time;
     dispatch_runtime_ir(sim, name, ir, band, |bind| {

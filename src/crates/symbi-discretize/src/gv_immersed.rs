@@ -25,7 +25,7 @@ use symbi_ir::{FieldRef, KernelWrite, KernelWrites};
 
 use super::coords::{Coords, Spacing};
 use super::gv::{CellGeometryGv, cell_geometry_gv};
-use symbi_ir::{Gv, GvKernel, TraceCx, trace};
+use symbi_ir::{Gv, KernelProgram, TraceCx, trace, trace_kernel};
 
 #[inline]
 fn sq<'t>(a: Gv<'t>) -> Gv<'t> {
@@ -442,8 +442,8 @@ pub fn body_source_gv(
     ncomp: usize,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let gamma = cx.scalar("gamma");
         let den = cx.field("den", FieldRef::cons_den());
@@ -500,12 +500,8 @@ pub fn body_source_gv(
 /// global support — every gas cell pulls on the body — so the runtime reduces it over
 /// the full interior. reads `cons.den` alone, so the pass streams a single field.
 /// slot-0 scalar names (`body_0_*`); the dispatch rebinds them per active body.
-pub fn body_feedback_grav_gv(
-    coords: Coords,
-    ndim: usize,
-    axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn body_feedback_grav_gv(coords: Coords, ndim: usize, axes: &[usize]) -> KernelProgram {
+    trace_kernel(|cx| {
         let cart_axes = body_cart_axes(coords, ndim, axes);
         let den = cx.field("den", FieldRef::cons_den());
         let geo: CellGeometryGv =
@@ -549,7 +545,7 @@ pub fn body_feedback_drain_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     let (kernel, writes) = trace(|cx| {
         let dt = cx.scalar("dt");
         let gamma = cx.scalar("gamma");
@@ -632,7 +628,7 @@ pub fn body_feedback_drain_gv(
         writes
     });
     let kernel = kernel.with_derived_support(&writes);
-    (kernel, writes)
+    KernelProgram::new(kernel, writes)
 }
 
 /// backward feedback: per cell, per body, the cartesian force / 3D torque / absorbed mass / absorbed
@@ -645,8 +641,8 @@ pub fn body_feedback_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let gamma = cx.scalar("gamma");
         let inv_dt = Gv::ONE / dt;
@@ -804,8 +800,8 @@ pub fn body_source_iso_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let den = cx.field("den", FieldRef::cons_den());
         let mom: Vec<Gv> = (0..ncomp)
@@ -896,8 +892,8 @@ pub fn body_evolved_probe_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let gamma = cx.scalar("gamma");
         let den = cx.field("den", FieldRef::cons_den());
@@ -989,8 +985,8 @@ pub fn body_feedback_iso_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let inv_dt = Gv::ONE / dt;
         let cart_axes = body_cart_axes(coords, ndim, axes);
@@ -1220,9 +1216,9 @@ pub fn body_source_wb_gv(
     ncomp: usize,
     axes: &[usize],
     reach: i64,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
-    trace(|cx| {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let gamma = cx.scalar("gamma");
         let mom: Vec<Gv> = (0..ncomp)

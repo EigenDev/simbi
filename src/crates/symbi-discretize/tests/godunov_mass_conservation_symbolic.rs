@@ -48,12 +48,14 @@ fn g_face(d: usize) -> LinFormR {
 
 #[test]
 fn godunov_mass_conservation_symbolic() {
-    let (kernel, writes) = godunov_mass_gv(
+    let program = godunov_mass_gv(
         Coords::Cartesian,
         &[Spacing::Uniform; NDIM],
         &[0, 1],
         NDIM as u8,
     );
+    let kernel = program.kernel();
+    let writes = program.writes();
     assert_eq!(writes.len(), 1, "mass builder must write exactly rho_new");
     let flux = flux_only(LinFormR::extract_rat(
         kernel.graph(),

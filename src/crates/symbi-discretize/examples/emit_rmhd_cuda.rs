@@ -15,17 +15,18 @@
 use std::fs;
 use symbi_ir::SweepAxis;
 
-use symbi_discretize::GvKernel;
 use symbi_discretize::Spacing;
 use symbi_discretize::{
     rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_flux_gv, rmhd_resistive_emf_2d_gv,
     rmhd_resistive_emf_3d_dir_gv, rmhd_resistive_emf_cyl_rz_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering};
+use symbi_ir::{KernelEmitInputs, KernelProgram, emit_kernel_from_lowering};
 
 // emit a Gv-traced kernel (graph + ABI manifest already carried) -> CUDA source.
-fn emit_gv(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: KernelWrites) {
+fn emit_gv(out_dir: &str, name: &str, ndim: u8, program: KernelProgram) {
+    let k = program.kernel();
+    let writes = program.writes();
     assert!(
         !k.graph().has_errors(),
         "{name} graph errors: {:?}",
@@ -64,48 +65,42 @@ fn main() {
 
     // the KKC false-position c2p is the gv single-source physics (symbi-hydro's
     // `rmhd_recover` at S=Gv — the 6-state bracketed iterate -> multi-acc IterateInline).
-    let (rmhd_k, rmhd_writes) = rmhd_c2p_gv(100);
-    emit_gv(&out_dir, "rmhd_c2p", 1, rmhd_k, rmhd_writes);
+    let rmhd_k = rmhd_c2p_gv(100);
+    emit_gv(&out_dir, "rmhd_c2p", 1, rmhd_k);
 
     // theta-MC PLM (Gv stencil) + riemann::hlle at the Rmhd regime — the gv single source.
-    let (rmhd_f, rmhd_fw) = rmhd_flux_gv(1, 0, 0);
-    emit_gv(&out_dir, "rmhd_hlle_flux", 1, rmhd_f, rmhd_fw);
+    let rmhd_f = rmhd_flux_gv(1, 0, 0);
+    emit_gv(&out_dir, "rmhd_hlle_flux", 1, rmhd_f);
 
     // the 3D direction-0 flux — the hottest GPU kernel + the smem slab target.
-    let (rmhd_f3, rmhd_f3w) = rmhd_flux_gv(3, 0, 0);
-    emit_gv(&out_dir, "rmhd_face_flux_3d_0", 3, rmhd_f3, rmhd_f3w);
+    let rmhd_f3 = rmhd_flux_gv(3, 0, 0);
+    emit_gv(&out_dir, "rmhd_face_flux_3d_0", 3, rmhd_f3);
 
     // the constrained-transport curl — the gv staggered stencil (div(B)=0 preserved). the 2d curl
     // is split per in-plane direction (dir=0 -> B_x, dir=1 -> B_y, both from the corner E_z).
     // emit both.
     for dir in 0..2 {
-        let (ct_k, ct_w) = rmhd_ct_curl_2d_dir_gv(SweepAxis::new(dir, 2));
-        emit_gv(&out_dir, &format!("rmhd_ct_curl_2d_{dir}"), 2, ct_k, ct_w);
+        let ct_k = rmhd_ct_curl_2d_dir_gv(SweepAxis::new(dir, 2));
+        emit_gv(&out_dir, &format!("rmhd_ct_curl_2d_{dir}"), 2, ct_k);
     }
 
     // the ohmic resistive edge EMF (eta * J_z added to Ez) — the same Gv trace the CPU bakes, so
     // the CUDA lowering is the GPU portability gate for generic resistive MHD.
-    let (res_k, res_w) = rmhd_resistive_emf_2d_gv();
-    emit_gv(&out_dir, "rmhd_resistive_emf_2d", 2, res_k, res_w);
+    let res_k = rmhd_resistive_emf_2d_gv();
+    emit_gv(&out_dir, "rmhd_resistive_emf_2d", 2, res_k);
     for dir in 0..3 {
-        let (r3_k, r3_w) = rmhd_resistive_emf_3d_dir_gv(SweepAxis::new(dir, 3));
-        emit_gv(
-            &out_dir,
-            &format!("rmhd_resistive_emf_3d_{dir}"),
-            3,
-            r3_k,
-            r3_w,
-        );
+        let r3_k = rmhd_resistive_emf_3d_dir_gv(SweepAxis::new(dir, 3));
+        emit_gv(&out_dir, &format!("rmhd_resistive_emf_3d_{dir}"), 3, r3_k);
     }
 
     // the cylindrical r-z resistive EMF: the mimetic adjoint of the cyl induction curl, carrying the
     // face-position geom scalars through the CUDA lowering — the GPU gate for curvilinear resistive MHD.
-    let (rcyl_k, rcyl_w) = rmhd_resistive_emf_cyl_rz_gv(&[Spacing::Uniform; 2]);
-    emit_gv(&out_dir, "rmhd_resistive_emf_cyl_rz", 2, rcyl_k, rcyl_w);
+    let rcyl_k = rmhd_resistive_emf_cyl_rz_gv(&[Spacing::Uniform; 2]);
+    emit_gv(&out_dir, "rmhd_resistive_emf_cyl_rz", 2, rcyl_k);
 
     // the immersed-body localized resistive EMF: the masked current eta*chi(x)*J with the body-mask
     // SDF (tanh mollifier + body position scalars) traced in-kernel — the GPU gate for resistive sinks.
-    let (rbody_k, rbody_w) =
+    let rbody_k =
         symbi_discretize::body_resistive_emf_2d_gv(symbi_discretize::coords::Coords::Cartesian);
-    emit_gv(&out_dir, "body_resistive_emf_2d", 2, rbody_k, rbody_w);
+    emit_gv(&out_dir, "body_resistive_emf_2d", 2, rbody_k);
 }

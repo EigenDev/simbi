@@ -43,11 +43,11 @@
 // run: cargo test -p symbi-discretize --test ibm_wellposedness
 // =============================================================================
 
+use symbi_carrier::Dual;
 use symbi_discretize::ibm::{
     compact_gravity, compact_potential, drain_factor, drain_rate, softened_gravity,
     softened_potential,
 };
-use symbi_carrier::Dual;
 
 // the analytic bound constant C = 2/(3 sqrt 3) from theorem 3.
 fn bound_const() -> f64 {

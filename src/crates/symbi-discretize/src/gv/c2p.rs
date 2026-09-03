@@ -14,7 +14,7 @@ use symbi_hydro::eos::Eos as _;
 use symbi_hydro::quantity::{Density, EnergyDensity, Pressure, SoundSpeedSquared, VelocitySquared};
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::{KernelC2pStatus, traced_recovery};
-use symbi_ir::{GvMask, KernelWrite, KernelWrites};
+use symbi_ir::{GvMask, KernelProgram, KernelWrite, trace_kernel};
 
 /// the c2p status channel renderer: the typed accept/reject fact materializes
 /// in the field vocabulary the diagnostics speak — zero accepted,
@@ -36,8 +36,8 @@ fn c2p_status_write<'t>(status: KernelC2pStatus<GvMask<'t>>) -> KernelWrite {
 /// the `GvKernel` (graph + ABI manifest) and its named write effects.
 /// note: the `Regime::to_primitive` wrapper's native error-code branches are host-only
 /// diagnostics — the kernel traces the branch-free math `Cons::to_primitive`.
-pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn adiabatic_c2p_gv<const D: usize>() -> KernelProgram {
+    trace_kernel(|cx| {
         // input binding: the conserved fields + the eos scalar, as Gv leaves.
         let den = cx.field("cons_den", FieldRef::cons_den());
         let mom: Vec<Gv> = (0..D)
@@ -89,8 +89,8 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
 /// iso c2p is geometry-independent and ncomp == ndim (the cyl r-z swirl, with DOF > ndim,
 /// falls outside its coverage), so the `<D>` instance is a complete drop-in: one
 /// geometry-free builder serves every iso grid.
-pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn iso_c2p_gv<const D: usize>() -> KernelProgram {
+    trace_kernel(|cx| {
         // input binding: the conserved fields + the prescribed per-cell sound-speed-squared
         // field `cs2` (the local temperature; global isothermal is a uniform cs2). cs2 is bound
         // as a field so the run can be locally isothermal (cs varies per cell).
@@ -149,8 +149,8 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
 /// primitives alone, so the pressure there is re-derived from the prolonged rho — otherwise
 /// the face reconstruction sees a spurious vacuum at every level seam. pointwise
 /// and dimension-independent (emitted per ndim like the snapshot family).
-pub fn iso_pre_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn iso_pre_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let cs2 = cx.field("cs2", "cs2");
         // the materialized `Isothermal::pressure` closure, same single source as iso c2p.
@@ -170,8 +170,8 @@ pub fn iso_pre_gv() -> (GvKernel, KernelWrites) {
 /// `eos.pressure`/`sound_speed_sq`/explicit `h`.
 /// the host wrapper's input guard + post-hoc diagnostics are host-only — the kernel
 /// computes the raw recovery, exactly as the substrate already does.
-pub fn rhd_c2p_gv<const D: usize>(max_iters: usize, eos_arm: EosArm) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rhd_c2p_gv<const D: usize>(max_iters: usize, eos_arm: EosArm) -> KernelProgram {
+    trace_kernel(|cx| {
         // input binding: the conserved fields + the eos scalar, as Gv leaves.
         let den = cx.field("cons_den", FieldRef::cons_den());
         let mom: Vec<Gv> = (0..D)
@@ -236,7 +236,7 @@ pub fn rhd_c2p_gr_gv<const D: usize>(
     spacing: &[Spacing],
     axes: &[usize],
     max_iters: usize,
-) -> (GvKernel, KernelWrites)
+) -> KernelProgram
 where
     for<'t> SchwarzschildKS<Gv<'t>>: Metric<Gv<'t>, D>,
     for<'t> SchwarzschildKSCartesian<Gv<'t>>: Metric<Gv<'t>, D>,
@@ -245,7 +245,7 @@ where
     for<'t> SchwarzschildKSCylindrical<Gv<'t>>: Metric<Gv<'t>, D>,
     for<'t> KerrKS<Gv<'t>>: Metric<Gv<'t>, D>,
 {
-    trace(|cx| {
+    trace_kernel(|cx| {
         let den = cx.field("cons_den", FieldRef::cons_den());
         let mom: [Gv; D] = std::array::from_fn(|k| {
             cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
@@ -342,8 +342,8 @@ where
 /// 1D/2D cases), so this always traces `rmhd_recover::<Gv, 3>` — `ndim` selects the emit grid
 /// loop. reads the 8-field conserved (den, mom_{0,1,2}, nrg, mag_{0,1,2})
 /// + gamma; writes (rho, vel_{0,1,2}, pre). B passes through, recovered by the CT evolution.
-pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_c2p_gv(max_iters: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         // input binding, in the substrate's field-read order: den, mom, nrg (tau), mag, gamma.
         let den = cx.field("cons_den", FieldRef::cons_den());
         let mom: [Gv; 3] = std::array::from_fn(|k| {
@@ -406,8 +406,8 @@ pub fn rmhd_c2p_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     max_iters: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let den = cx.field("cons_den", FieldRef::cons_den());
         let mom: [Gv; 3] = std::array::from_fn(|k| {
             cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
@@ -501,8 +501,8 @@ pub fn rmhd_c2p_gr_gv(
 /// (rho, vel, pre). the host-side `to_primitive` error codes stay on the host (the
 /// traced math is branch-free, comparisons living with the caller). reads `cons_mag_k` because
 /// recovering the gas pressure requires stripping 1/2|B|^2 from the total energy.
-pub fn nmhd_c2p_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn nmhd_c2p_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let den = cx.field("cons_den", FieldRef::cons_den());
         let mom: [Gv; 3] = std::array::from_fn(|k| {
             cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
@@ -553,8 +553,8 @@ pub fn nmhd_c2p_gv() -> (GvKernel, KernelWrites) {
 
 /// trace the isothermal-MHD c2p — trivial inversion (rho = den, v = mom/den), writing rho
 /// and vel. the single source the substrate c2p kernel renders.
-pub fn imhd_c2p_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn imhd_c2p_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let den = cx.field("cons_den", FieldRef::cons_den());
         let mom: [Gv; 3] = std::array::from_fn(|k| {
             cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))

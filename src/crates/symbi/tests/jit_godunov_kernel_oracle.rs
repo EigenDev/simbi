@@ -36,7 +36,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
     let src_refs: Vec<(&str, &symbi_source_compile::source_spec::SourceProgram)> =
         force.iter().map(|(t, b)| (t.as_str(), b)).collect();
 
-    let (gvk, writes) = godunov_stage_gv_with_fused_built(
+    let program = godunov_stage_gv_with_fused_built(
         Coords::Cartesian,
         Spacetime::Minkowski,
         &[Spacing::Uniform; 2],
@@ -49,6 +49,8 @@ fn jit_fused_godunov_matches_interp_bitwise() {
         false,
         0,
     );
+    let gvk = program.kernel();
+    let writes = program.writes().as_slice();
 
     // a small domain with a 1-cell upper ghost so the `c+e` stencil reads stay in bounds.
     let (nx, ny) = (4usize, 4usize);
@@ -110,7 +112,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
         },
         field_inputs: gvk.field_inputs(),
         scalar_params: gvk.scalar_params(),
-        field_writes: &writes,
+        field_writes: writes,
         coord_components: gvk.coord_components(),
         device_preamble: &[],
         tile_spec: None,
@@ -147,7 +149,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
     }
 
     // ---- jit ----
-    let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, 2).expect("jit compile godunov");
+    let kernel = symbi_jit::compile_gv_kernel(&program, 2).expect("jit compile godunov");
     let in_refs: Vec<&[f64]> = in_bufs.iter().map(|b| b.as_slice()).collect();
     let mut out_jit: Vec<Vec<f64>> = (0..writes.len()).map(|_| vec![0.0f64; buf_len]).collect();
     {

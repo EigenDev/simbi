@@ -43,8 +43,10 @@ fn weight(kind: &str) -> f64 {
 }
 
 fn histogram(recon: Recon, balance: Balance) -> (BTreeMap<String, usize>, f64) {
-    let (k, writes) =
+    let program =
         adiabatic_hllc_plus_flux_gv::<3>(0, recon, balance, Coords::Cartesian, &[0, 1, 2]);
+    let k = program.kernel();
+    let writes = program.writes();
     let outputs: Vec<_> = writes.iter().map(|write| write.value).collect();
     let live = k.graph().reachable_from(&outputs);
     let mut h: BTreeMap<String, usize> = BTreeMap::new();
@@ -75,7 +77,7 @@ fn ablate() {
         } else {
             Balance::Plain
         };
-        let (k, w) = if plus {
+        let program = if plus {
             adiabatic_hllc_plus_flux_gv::<3>(0, Recon::Plm, bal, Coords::Cartesian, &[0, 1, 2])
         } else {
             {
@@ -83,6 +85,8 @@ fn ablate() {
                 adiabatic_hllc_flux_gv::<3>(0, Recon::Plm)
             }
         };
+        let k = program.kernel();
+        let w = program.writes();
         let outs: Vec<_> = w.iter().map(|write| write.value).collect();
         let live = k.graph().reachable_from(&outs);
         let mut h = BTreeMap::new();
@@ -185,7 +189,9 @@ fn main() {
 fn emit_probe() {
     use symbi_ir::emit::{Precision, Target, TargetConfig};
     use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
-    let (k, w) = adiabatic_hllc_flux_gv::<3>(0, Recon::Plm);
+    let program = adiabatic_hllc_flux_gv::<3>(0, Recon::Plm);
+    let k = program.kernel();
+    let w = program.writes();
     let desc = emit_kernel_from_lowering(
         k.graph(),
         &KernelEmitInputs {

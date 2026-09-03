@@ -14,7 +14,7 @@ use symbi_geometry::{
     SchwarzschildKSCylindrical,
 };
 use symbi_hydro::quantity::{Density, Pressure};
-use symbi_ir::{KernelWrite, KernelWrites};
+use symbi_ir::{KernelProgram, KernelWrite, KernelWrites, trace_kernel};
 
 /// trace the newtonian-MHD CFL wave-speed map — `NewtonianMhd::wave_speeds` (the
 /// exact closed-form fast magnetosonic; it is already cheap) folded
@@ -25,8 +25,8 @@ pub fn nmhd_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
@@ -58,8 +58,8 @@ pub fn imhd_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
@@ -186,7 +186,7 @@ pub fn euler_wave_speed_map_gv<R>(
     axes: &[usize],
     ndim: usize,
     eos_arm: EosArm,
-) -> (GvKernel, KernelWrites)
+) -> KernelProgram
 where
     R: for<'t> Regime<
             Gv<'t>,
@@ -196,7 +196,7 @@ where
             Energy = symbi_hydro::energy::Adiabatic,
         >,
 {
-    trace(|cx| {
+    trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         // the gridded normal velocities only; the non-gridded slots (cyl r-z's v_phi) stay at zero and
         // dead in the graph — `wave_speeds_axis` reads the normal velocity `vel[axes[d]]` alone.
@@ -332,8 +332,8 @@ pub fn gr_light_cone_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
         // gridded cell-center positions, spacing-aware (log = geometric mean of faces, uniform = midpoint)
         // via the shared `gv_cell_center`; ungridded slots take the exact equatorial/azimuthal constant.
@@ -451,8 +451,8 @@ pub fn rmhd_magnetosonic_cfl_map_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
@@ -504,12 +504,12 @@ pub fn kerr_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     assert!(
         coords == Coords::Spherical && ndim == 2 && axes == [0, 1],
         "the kerr wave-speed map is the (r, theta) swirl instance"
     );
-    trace(|cx| {
+    trace_kernel(|cx| {
         let inv_w = cfl_inv_widths_gv(cx, coords, spacing, axes, ndim);
         // spacing-aware cell centers: the radial axis may be log (kerr log-radial is baked), so the
         // metric (lapse, shift, gamma^{cc}) must evaluate at the geometric-mean radius. theta is
@@ -542,7 +542,7 @@ pub fn iso_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     // newtonian / isothermal are non-relativistic -> always flat spacetime + gamma-law.
     euler_wave_speed_map_gv(
         &Newtonian,
@@ -564,7 +564,7 @@ pub fn rhd_wave_speed_map_gv(
     axes: &[usize],
     ndim: usize,
     eos_arm: EosArm,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     euler_wave_speed_map_gv(&Rhd, coords, spacetime, spacing, axes, ndim, eos_arm)
 }
 
@@ -582,8 +582,8 @@ pub fn rmhd_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
@@ -633,8 +633,8 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     coords: Coords,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = axes.len();
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
@@ -710,8 +710,8 @@ pub fn rmhd_source_cfl_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     mag_from_bcell: bool,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = axes.len();
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
@@ -1019,8 +1019,8 @@ pub fn rhd_source_cfl_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ncomp: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = axes.len();
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] = std::array::from_fn(|k| {
@@ -1281,8 +1281,8 @@ pub fn rhd_source_cfl_gr_gv(
 }
 
 /// RMHD is fixed 3D. reads the full 3-velocity + 3-magnetic-field prim + gamma.
-pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
@@ -1358,7 +1358,7 @@ pub fn fofc_project_gr_mhd_gv(
     spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     fofc_project_gr_mhd_build(coords, spacetime, spacing, axes, true)
 }
 
@@ -1368,8 +1368,8 @@ fn fofc_project_gr_mhd_build(
     spacing: &[Spacing],
     axes: &[usize],
     diagnostics: bool,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = axes.len();
         let mid = gv_cell_midpoints(cx, spacing, ndim);
         let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
@@ -1561,12 +1561,12 @@ pub fn constraint_projection_gv(
     spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     use symbi_hydro::constraints::{
         ConstraintState, DensityFloor, MagnetizationCeiling, StateConstraint, TemperatureFloor,
         WuTangAdmissibility, constraint_thetas, joint_theta,
     };
-    trace(|cx| {
+    trace_kernel(|cx| {
         let ndim = axes.len();
         let mid = gv_cell_midpoints(cx, spacing, ndim);
         let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
@@ -1747,8 +1747,8 @@ pub fn fofc_source_theta_gr_mhd_gv(
     spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = axes.len();
         let mid = gv_cell_midpoints(cx, spacing, ndim);
         let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
@@ -1834,8 +1834,8 @@ pub fn fofc_project_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ncomp: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = axes.len();
         let mid = gv_cell_midpoints(cx, spacing, ndim);
         let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
@@ -1911,8 +1911,8 @@ pub fn fofc_project_gr_gv(
 /// reads them for the edge-EMF coefficients) works for NMHD — the classical regimes otherwise
 /// compute speeds inline in the flux and leave those buffers empty. mirror of
 /// `rmhd_wave_speeds_cell_gv`.
-pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
@@ -1949,8 +1949,8 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
 /// a^2 = cs^2, pressure-free). lets isothermal MHD run UCT (the regime-generic HLL edge-EMF reads
 /// these speeds); materializing them is what holds `--ct-method uct` on UCT, which silently falls
 /// back to Contact when those buffers are empty.
-pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
@@ -2101,8 +2101,10 @@ mod projection_ledger_tests {
                 diag,
             )
         };
-        let (_, writes_off) = build(false);
-        let (_, writes_on) = build(true);
+        let program_off = build(false);
+        let writes_off = program_off.writes();
+        let program_on = build(true);
+        let writes_on = program_on.writes();
         assert_eq!(
             writes_on.len(),
             writes_off.len() + 4,
@@ -2131,12 +2133,14 @@ mod projection_ledger_tests {
 
     #[test]
     fn source_theta_uses_one_shared_density_endpoint() {
-        let (kernel, writes) = fofc_source_theta_gr_mhd_gv(
+        let program = fofc_source_theta_gr_mhd_gv(
             Coords::Cartesian,
             Spacetime::KerrKS,
             &[Spacing::Uniform; 3],
             &[0, 1, 2],
         );
+        let kernel = program.kernel();
+        let writes = program.writes();
         let paths: Vec<String> = kernel
             .field_inputs()
             .iter()

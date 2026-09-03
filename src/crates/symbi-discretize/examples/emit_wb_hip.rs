@@ -22,13 +22,15 @@
 
 use std::fs;
 
+use symbi_discretize::Recon;
 use symbi_discretize::coords::{Balance, Coords};
 use symbi_discretize::gv::adiabatic_hllc_plus_flux_gv;
-use symbi_discretize::{GvKernel, Recon};
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering};
+use symbi_ir::{KernelEmitInputs, KernelProgram, emit_kernel_from_lowering};
 
-fn emit_gv(out_dir: &str, name: &str, k: GvKernel, writes: KernelWrites) {
+fn emit_gv(out_dir: &str, name: &str, program: KernelProgram) {
+    let k = program.kernel();
+    let writes = program.writes();
     assert!(
         !k.graph().has_errors(),
         "{name} graph errors: {:?}",
@@ -71,9 +73,9 @@ fn main() {
         ("flux_hllc_plus_plm_3d_plain", Balance::Plain),
         ("flux_hllc_plus_plm_3d_wb", Balance::Hydrostatic),
     ] {
-        let (k, w) =
+        let k =
             adiabatic_hllc_plus_flux_gv::<3>(0, Recon::Plm, balance, Coords::Cartesian, &[0, 1, 2]);
-        emit_gv(&out, name, k, w);
+        emit_gv(&out, name, k);
     }
     println!("done -> {out}");
 }

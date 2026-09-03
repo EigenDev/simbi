@@ -343,7 +343,7 @@ fn build_fused_cpu_kernel<const D: usize>(
 ) -> Option<FusedCpuKernel> {
     let src_refs: Vec<(&str, &SourceProgram)> =
         built.iter().map(|(t, b)| (t.as_str(), b)).collect();
-    let (gvk, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
+    let program = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         // runtime GR sources would thread the real spacetime here; only flat (Minkowski) is wired.
         // n_bodies > 0 folds the immersed-body source (gravity + accretion drain) into this stage,
         // baked at MAX_SOURCE_BODIES to match the standalone `body_source` kernel (unused slots zero via mass = 0).
@@ -361,7 +361,7 @@ fn build_fused_cpu_kernel<const D: usize>(
     );
     // an out-of-JIT-subset node -> `None` -> the caller runs the two-pass (the safe fallback). not
     // an error: the gate is "compile when possible, else interpret", never miscompile.
-    let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, D).ok()?;
+    let kernel = symbi_jit::compile_gv_kernel(&program, D).ok()?;
     // reads and writes are born-typed FieldBind; an open bind reaching this path is a
     // wiring bug (these kernels are closed-vocabulary), so demand `Ref` loudly.
     let bind_ref = |b: &FieldBind| match b {
@@ -375,18 +375,21 @@ fn build_fused_cpu_kernel<const D: usize>(
     };
     Some(FusedCpuKernel {
         kernel,
-        in_refs: gvk
+        in_refs: program
+            .kernel()
             .field_inputs()
             .iter()
             .map(|(_, rt)| bind_ref(rt))
             .collect(),
-        out_refs: writes
+        out_refs: program
+            .writes()
             .iter()
             .map(|write| bind_ref(&write.destination))
             .collect(),
         // the producer's GvKernel scalar names (raw strings) are classified to typed binds once at
         // build (off the per-stage host resolve).
-        scalar_params: gvk
+        scalar_params: program
+            .kernel()
             .scalar_params()
             .iter()
             .map(|s| ScalarBind::from_name(s.as_str()))
@@ -404,10 +407,10 @@ fn build_source_only_cpu_kernel<const D: usize>(
 ) -> Option<FusedCpuKernel> {
     let src_refs: Vec<(&str, &SourceProgram)> =
         built.iter().map(|(t, b)| (t.as_str(), b)).collect();
-    let (gvk, writes) = symbi_discretize::gv::source_apply_from_built_gv(
+    let program = symbi_discretize::gv::source_apply_from_built_gv(
         coords, spacing, axes, D as u8, ncomp, has_energy, &src_refs,
     );
-    let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, D).ok()?;
+    let kernel = symbi_jit::compile_gv_kernel(&program, D).ok()?;
     let bind_ref = |b: &FieldBind| match b {
         FieldBind::Ref(f) => *f,
         other => {
@@ -419,16 +422,19 @@ fn build_source_only_cpu_kernel<const D: usize>(
     };
     Some(FusedCpuKernel {
         kernel,
-        in_refs: gvk
+        in_refs: program
+            .kernel()
             .field_inputs()
             .iter()
             .map(|(_, rt)| bind_ref(rt))
             .collect(),
-        out_refs: writes
+        out_refs: program
+            .writes()
             .iter()
             .map(|write| bind_ref(&write.destination))
             .collect(),
-        scalar_params: gvk
+        scalar_params: program
+            .kernel()
             .scalar_params()
             .iter()
             .map(|s| ScalarBind::from_name(s.as_str()))
@@ -882,10 +888,10 @@ where
     let (coords, spacing, axes) = sim_gv_geom(sim);
     let src_refs: Vec<(&str, &SourceProgram)> =
         built.iter().map(|(t, b)| (t.as_str(), b)).collect();
-    let (gvk, writes) = symbi_discretize::source_apply_from_built_gv(
+    let program = symbi_discretize::source_apply_from_built_gv(
         coords, &spacing, &axes, D as u8, DOF, has_energy, &src_refs,
     );
-    gv_kernel_to_ir(&gvk, &writes, D as u8, &format!("rt_user_source_{D}d"))
+    gv_kernel_to_ir(&program, D as u8, &format!("rt_user_source_{D}d"))
 }
 
 /// extract the substrate geometry (coords / per-axis spacing / axis-roles) from the live sim — the
@@ -925,14 +931,15 @@ where
 /// baked into the IR (`run_gpu` asserts they agree), so it is content-derived: build a probe IR with
 /// a fixed name, hash it, rebuild with that hash. shared by the source + boundary IR builders.
 pub(crate) fn gv_kernel_to_ir(
-    gvk: &symbi_ir::GvKernel,
-    writes: &[symbi_ir::KernelWrite],
+    program: &symbi_ir::KernelProgram,
     ndim: u8,
     prefix: &str,
 ) -> (String, String) {
     use std::hash::{Hash, Hasher};
     use symbi_ir::emit::{Precision, Target, TargetConfig};
     use symbi_ir::{KernelEmitInputs, prepare, prepared_to_ir};
+    let gvk = program.kernel();
+    let writes = program.writes().as_slice();
     let mk_ir = |nm: &str| {
         let inputs = KernelEmitInputs {
             kernel_name: nm,

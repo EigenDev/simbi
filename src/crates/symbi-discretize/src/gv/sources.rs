@@ -8,7 +8,7 @@ use super::*;
 use symbi_geometry::{Cylindrical, CylindricalRPhi, Metric, Spherical};
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::spatial_metric::SpatialMetric;
-use symbi_ir::{KernelWrite, KernelWrites};
+use symbi_ir::{KernelProgram, KernelWrite, KernelWrites, trace_kernel};
 
 // =============================================================================
 // the conserved-update godunov family in Gv — the finite-volume divergence (the Gv stencil
@@ -298,8 +298,8 @@ pub(crate) fn gv_geometric_source<'t>(
 /// renders + evaluates this and asserts the analytical `rho*g_ext` / `rho*(v.g_ext)` — the
 /// same result `uniform_acceleration_*_source` produces via its hand-built graph, proving the
 /// carrier-generic form is a drop-in for the splice path (and is f64==Gv by construction).
-pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn uniform_accel_probe_gv<const D: usize>() -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("rho", FieldRef::cons_den());
         let vel: [Gv; D] =
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
@@ -324,8 +324,8 @@ pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, KernelWrites) {
 /// carrier-equivalence + the work-energy coupling are gated by `source_term_carrier.rs`.
 pub fn splice_user_source_gv(
     built: &symbi_source_compile::source_spec::SourceProgram,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         // bind every declared param (x_k, t, p_i, ...) to a runtime Gv scalar of the same name;
         // in production the position `x_k` binds to the in-kernel centroid instead.
         let mut name_to_node = std::collections::HashMap::new();
@@ -348,8 +348,8 @@ pub fn splice_user_source_gv(
 /// a host test renders + evaluates it and asserts `-rho*GM*(x-xm)/|x-xm|^3` — the same form
 /// `point_mass_{momentum,energy}_source` hand-builds, proving the carrier-generic form is a
 /// drop-in (and f64==Gv by construction). the shared `1/|x-xm|^3` is emitted once (hash-cons).
-pub fn point_mass_gravity_probe_gv<const D: usize>() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn point_mass_gravity_probe_gv<const D: usize>() -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("rho", FieldRef::cons_den());
         let vel: [Gv; D] =
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
@@ -376,8 +376,8 @@ pub fn inertial_momentum_probe_gv(
     coords: Coords,
     spacing: &[Spacing],
     ndim: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let axes: Vec<usize> = (0..ndim).collect();
         let mom: Vec<Gv> = (0..ndim)
             .map(|d| cx.field(&format!("cons_mom_{d}"), FieldRef::cons_mom(d as u8)))
@@ -406,8 +406,8 @@ pub fn geometric_momentum_source_probe_gv(
     ndim: usize,
     ncomp: usize,
     source: GeoSource,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
         // hydro shares the conserved momentum (the gas inertial reads cons.mom); rmhd computes its
         // gas momentum density from prim (cons.mom carries B-momentum), so its cons_mom list is empty.

@@ -11,12 +11,12 @@
 // =============================================================================
 
 use symbi_discretize::{
-    Coords, EosArm, GvKernel, Spacetime, Spacing, iso_flux_gv, iso_wave_speed_map_gv, rhd_flux_gv,
+    Coords, EosArm, Spacetime, Spacing, iso_flux_gv, iso_wave_speed_map_gv, rhd_flux_gv,
     rhd_wave_speed_map_gv, rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv, rmhd_hlld_flux_gv,
     rmhd_wave_speed_map_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering};
+use symbi_ir::{KernelEmitInputs, KernelProgram, emit_kernel_from_lowering};
 
 // the expensive ops — each is a multi-cycle scalar instruction or a libm call.
 // textual occurrences in the rendered (CUDA C) body are counted. CSE has already
@@ -28,7 +28,9 @@ const TRANSCENDENTALS: &[&str] = &[
     "cos(", "exp(", "log(", "pow(",
 ];
 
-fn render_rust(name: &str, ndim: u8, k: GvKernel, writes: KernelWrites) -> String {
+fn render_rust(name: &str, ndim: u8, program: KernelProgram) -> String {
+    let k = program.kernel();
+    let writes = program.writes();
     assert!(
         !k.graph().has_errors(),
         "{name} graph errors: {:?}",
@@ -102,10 +104,10 @@ fn main() {
 
     println!("=== per-cell expensive-op census (rendered CPU kernel, post-CSE) ===\n");
 
-    let (k, w) = iso_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);
-    census("iso  (Newtonian) 1D", &render_rust("iso_ws", 1, k, w));
+    let k = iso_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);
+    census("iso  (Newtonian) 1D", &render_rust("iso_ws", 1, k));
 
-    let (k, w) = rhd_wave_speed_map_gv(
+    let k = rhd_wave_speed_map_gv(
         Coords::Cartesian,
         Spacetime::Minkowski,
         &cart1,
@@ -113,35 +115,35 @@ fn main() {
         1,
         EosArm::IdealGamma,
     );
-    census("rhd 1D", &render_rust("rhd_ws", 1, k, w));
+    census("rhd 1D", &render_rust("rhd_ws", 1, k));
 
-    let (k, w) = rmhd_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);
-    census("rmhd 1D (1 axis)", &render_rust("rmhd_ws1", 1, k, w));
+    let k = rmhd_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);
+    census("rmhd 1D (1 axis)", &render_rust("rmhd_ws1", 1, k));
 
-    let (k, w) = rmhd_wave_speed_map_gv(Coords::Cartesian, &cart3, &ax3, 3);
-    census("rmhd 3D (orszag_tang)", &render_rust("rmhd_ws3", 3, k, w));
+    let k = rmhd_wave_speed_map_gv(Coords::Cartesian, &cart3, &ax3, 3);
+    census("rmhd 3D (orszag_tang)", &render_rust("rmhd_ws3", 3, k));
 
     println!("\n=== Riemann flux kernels (per face per axis — the quartic lives HERE) ===\n");
 
-    let (k, w) = iso_flux_gv::<1>(0);
-    census("iso  flux 1D", &render_rust("iso_flux", 1, k, w));
+    let k = iso_flux_gv::<1>(0);
+    census("iso  flux 1D", &render_rust("iso_flux", 1, k));
 
-    let (k, w) = rhd_flux_gv::<1>(0, EosArm::IdealGamma);
-    census("rhd flux 1D", &render_rust("rhd_flux", 1, k, w));
+    let k = rhd_flux_gv::<1>(0, EosArm::IdealGamma);
+    census("rhd flux 1D", &render_rust("rhd_flux", 1, k));
 
-    let (k, w) = rmhd_flux_gv(1, 0, 0);
-    census("rmhd flux 1D (HLLE)", &render_rust("rmhd_hlle", 1, k, w));
+    let k = rmhd_flux_gv(1, 0, 0);
+    census("rmhd flux 1D (HLLE)", &render_rust("rmhd_hlle", 1, k));
 
-    let (k, w) = rmhd_hllc_flux_gv(1, 0, 0);
-    census("rmhd flux 1D (HLLC)", &render_rust("rmhd_hllc", 1, k, w));
+    let k = rmhd_hllc_flux_gv(1, 0, 0);
+    census("rmhd flux 1D (HLLC)", &render_rust("rmhd_hllc", 1, k));
 
-    let (k, w) = rmhd_hlld_flux_gv(1, 0, 0);
-    census("rmhd flux 1D (HLLD)", &render_rust("rmhd_hlld", 1, k, w));
+    let k = rmhd_hlld_flux_gv(1, 0, 0);
+    census("rmhd flux 1D (HLLD)", &render_rust("rmhd_hlld", 1, k));
 
     println!("\n=== c2p (cons->prim) — the dominant kernel by time ===\n");
 
-    let (k, w) = rmhd_c2p_gv(100);
-    census("rmhd c2p (max_iter=100)", &render_rust("rmhd_c2p", 1, k, w));
+    let k = rmhd_c2p_gv(100);
+    census("rmhd c2p (max_iter=100)", &render_rust("rmhd_c2p", 1, k));
 
     println!(
         "\nthe native single-branch quartic needs ~2 transcendentals per axis (ONE\n\

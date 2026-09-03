@@ -52,6 +52,7 @@ pub mod proof;
 // typed kernel registry names for the amr-transfer / field-op family.
 pub mod kernel_id;
 pub mod source_program;
+pub mod effects;
 pub mod support;
 pub mod support_infer;
 
@@ -68,8 +69,9 @@ pub use symbi_abi::{
 
 // carrier-side surface
 pub use gv::{
-    Gv, GvKernel, GvMask, GvTrace, KernelWrite, KernelWrites, NumericalPolicy, RewriteClass,
-    TileSpec, TraceCx, trace, trace_for_domain, trace_with,
+    Gv, GvKernel, GvMask, GvTrace, KernelProgram, KernelWrite, KernelWrites, NumericalPolicy,
+    RewriteClass, TileSpec, TraceCx, trace, trace_for_domain, trace_kernel,
+    trace_kernel_for_domain, trace_with,
 };
 pub use source_program::SourceProgram;
 
@@ -91,6 +93,9 @@ pub use passes::scalarize::{
 };
 pub use passes::splice::{SpliceError, splice_graph};
 pub use passes::stencil_reach::{AxisReach, ReachReport, stencil_reach};
+pub use effects::{
+    Access, AnalyzedKernelProgram, Dependence, Effects, Reach, ReadFootprint, Resource,
+};
 pub use support::{ParamExpr, Support};
 
 // backends surface

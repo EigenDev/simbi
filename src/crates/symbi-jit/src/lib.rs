@@ -1451,22 +1451,21 @@ pub fn compile_kernel_prec(
 /// for v2 fusion: build the godunov+source `GvKernel` (`splice_fused_sources_to_contribs` /
 /// `godunov_stage_gv_with_fused_sources`), JIT it here, dispatch the fused single-pass kernel.
 pub fn compile_gv_kernel(
-    kernel: &symbi_ir::GvKernel,
-    writes: &[symbi_ir::KernelWrite],
+    program: &symbi_ir::KernelProgram,
     ndim: usize,
 ) -> Result<CompiledKernel, JitError> {
-    compile_gv_kernel_prec(kernel, writes, ndim, symbi_ir::emit::Precision::F64)
+    compile_gv_kernel_prec(program, ndim, symbi_ir::emit::Precision::F64)
 }
 
 /// compile a runtime `GvKernel` at the given precision (the reduced-precision runtime-JIT path,
 /// e.g. an f32 shaped immersed-body wall). the graph is traced at f64; `precision` overrides the
 /// codegen element width.
 pub fn compile_gv_kernel_prec(
-    kernel: &symbi_ir::GvKernel,
-    writes: &[symbi_ir::KernelWrite],
+    program: &symbi_ir::KernelProgram,
     ndim: usize,
     precision: symbi_ir::emit::Precision,
 ) -> Result<CompiledKernel, JitError> {
+    let kernel = program.kernel();
     let field_inputs: Vec<symbi_ir::InputKey> = kernel
         .field_inputs()
         .iter()
@@ -1476,7 +1475,7 @@ pub fn compile_gv_kernel_prec(
         kernel.graph(),
         &field_inputs,
         kernel.scalar_params(),
-        writes,
+        program.writes(),
         ndim,
         precision,
     )

@@ -34,7 +34,7 @@ use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
 use symbi_ir::{CtEdgeCt, CtFaceCt, CtScratchKey, CtWireName, Transverse};
-use symbi_ir::{Gv, GvKernel, ParamExpr, TraceCx};
+use symbi_ir::{Gv, KernelProgram, ParamExpr, TraceCx};
 
 /// the wall/drain relaxation signal speed: the fast magnetosonic speed `sqrt(c_s^2 + c_a^2)`,
 /// with `c_a^2 = |B|^2 / rho` bound as the runtime `c_a2` scalar (the max over the interior, so the
@@ -396,7 +396,7 @@ fn tag_body_mask<'t>(
 /// `eta chi >= 0` — the mask reweights the edges of the already-adjoint current, so the body's
 /// action is purely dissipative. `chi` is sampled at the E_z corner (the edge location), half a cell
 /// below the traced cell centroid on each in-plane axis.
-pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, KernelWrites) {
+pub fn body_resistive_emf_2d_gv(coords: Coords) -> KernelProgram {
     let ndim = 2usize;
     let axes: &[usize] = &[0, 1, 2][..ndim];
     let (kernel, writes) = trace(|cx| {
@@ -459,7 +459,7 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, KernelWrites) {
         )]
     });
     let kernel = kernel.with_derived_support(&writes);
-    (kernel, writes)
+    KernelProgram::new(kernel, writes)
 }
 
 /// the 3D cartesian body-masked ohmic resistive edge EMF along edge `dir`: adds `eta * chi * J_dir`
@@ -468,7 +468,7 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, KernelWrites) {
 /// transverse faces. it is the bulk 3D resistive EMF (`rmhd_resistive_emf_3d_dir_gv`) gated by the
 /// mask, so the same div-B-clean 3D curl consumes it and the composed operator is the mask-weighted
 /// negative-definite laplacian: the body can only shed the field threading it.
-pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, KernelWrites) {
+pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> KernelProgram {
     let ndim = 3usize;
     let axes: &[usize] = &[0, 1, 2][..ndim];
     let p1 = (dir + 1) % 3;
@@ -544,7 +544,7 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Ke
         vec![KernelWrite::new("emf_new", CtEdgeCt::Emf, emf_new.node())]
     });
     let kernel = kernel.with_derived_support(&writes);
-    (kernel, writes)
+    KernelProgram::new(kernel, writes)
 }
 
 /// trace the [Drain]-stack penalization for the adiabatic regime, cartesian. `ndim` is the spatial
@@ -558,7 +558,7 @@ pub fn penalize_drain_gv(
     dof: usize,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     penalize_drain_impl::<Adiabatic>(coords, ndim, dof, axes, has_dye)
 }
 
@@ -572,7 +572,7 @@ pub fn penalize_drain_iso_gv(
     dof: usize,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     penalize_drain_impl::<IsoModel>(coords, ndim, dof, axes, has_dye)
 }
 
@@ -587,7 +587,7 @@ fn penalize_drain_impl<E: EnergyModel>(
     dof: usize,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     assert!(
         (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
         "penalize_drain_gv: need 1<=ndim<=dof<=3"
@@ -700,7 +700,7 @@ fn penalize_drain_impl<E: EnergyModel>(
     // in-place cons writes are unchanged-value there, so the ball bounds
     // everything the reduction needs (dispatch may clip to it).
     let kernel = kernel.with_derived_support(&writes);
-    (kernel, writes)
+    KernelProgram::new(kernel, writes)
 }
 
 /// the shared write list every penalization surface emits: the in-place conserved
@@ -797,7 +797,7 @@ pub fn penalize_porous_gv(
     dof: usize,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     penalize_porous_impl::<Adiabatic>(coords, ndim, dof, None, false, axes, has_dye)
 }
 
@@ -811,7 +811,7 @@ pub fn penalize_porous_gv_shaped(
     dof: usize,
     shape: &SdfExpr<f64, 3>,
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     penalize_porous_impl::<Adiabatic>(
         coords,
         ndim,
@@ -833,7 +833,7 @@ pub fn penalize_porous_gv_spinning(
     dof: usize,
     shape: &SdfExpr<f64, 3>,
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     penalize_porous_impl::<Adiabatic>(
         coords,
         ndim,
@@ -855,7 +855,7 @@ pub fn penalize_porous_iso_gv(
     dof: usize,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     penalize_porous_impl::<IsoModel>(coords, ndim, dof, None, false, axes, has_dye)
 }
 
@@ -867,7 +867,7 @@ pub fn penalize_porous_iso_gv_shaped(
     dof: usize,
     shape: &SdfExpr<f64, 3>,
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     penalize_porous_impl::<IsoModel>(
         coords,
         ndim,
@@ -886,7 +886,7 @@ pub fn penalize_porous_iso_gv_spinning(
     dof: usize,
     shape: &SdfExpr<f64, 3>,
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     penalize_porous_impl::<IsoModel>(
         coords,
         ndim,
@@ -908,7 +908,7 @@ fn penalize_porous_impl<E: EnergyModel>(
     spin: bool,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     assert!(
         (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
         "penalize_porous_gv: need 1<=ndim<=dof<=3"
@@ -1097,7 +1097,7 @@ fn penalize_porous_impl<E: EnergyModel>(
     });
 
     let kernel = kernel.with_derived_support(&writes);
-    (kernel, writes)
+    KernelProgram::new(kernel, writes)
 }
 
 /// the adiabatic torque-free accretor: the drain plus a tangential
@@ -1117,7 +1117,7 @@ pub fn penalize_torque_free_gv(
     dof: usize,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     penalize_torque_free_impl::<Adiabatic>(coords, ndim, dof, axes, has_dye)
 }
 
@@ -1131,7 +1131,7 @@ pub fn penalize_torque_free_iso_gv(
     dof: usize,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     penalize_torque_free_impl::<IsoModel>(coords, ndim, dof, axes, has_dye)
 }
 
@@ -1143,7 +1143,7 @@ fn penalize_torque_free_impl<E: EnergyModel>(
     dof: usize,
     axes: &[usize],
     has_dye: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     assert!(
         (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
         "penalize_torque_free_gv: need 1<=ndim<=dof<=3"
@@ -1264,7 +1264,7 @@ fn penalize_torque_free_impl<E: EnergyModel>(
     });
 
     let kernel = kernel.with_derived_support(&writes);
-    (kernel, writes)
+    KernelProgram::new(kernel, writes)
 }
 
 #[cfg(test)]
@@ -1279,7 +1279,10 @@ mod shaped_tests {
     fn shaped_porous_kernel_bakes_geometry_and_keeps_position_runtime() {
         let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
             .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
-        let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape, false);
+        let program =
+            penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape, false);
+        let kernel = program.kernel();
+        let writes = program.writes();
         assert!(
             !kernel.graph().has_errors(),
             "shaped porous kernel traced with graph errors"
@@ -1305,7 +1308,9 @@ mod shaped_tests {
     // the unshaped path is the sphere: `body_0_racc` is a runtime scalar (the AOT kernel).
     #[test]
     fn unshaped_porous_kernel_reads_the_runtime_radius() {
-        let (kernel, _) = penalize_porous_gv(Coords::Cartesian, 3, 3, &[0, 1, 2], false);
+        let program =
+            penalize_porous_gv(Coords::Cartesian, 3, 3, &[0, 1, 2], false);
+        let kernel = program.kernel();
         assert!(kernel.scalar_params().iter().any(|p| p == "body_0_racc"));
     }
 }
@@ -1314,7 +1319,7 @@ mod shaped_tests {
 mod twin_tests {
     use super::*;
 
-    type Builder = fn(Coords, usize, usize, &[usize], bool) -> (GvKernel, KernelWrites);
+    type Builder = fn(Coords, usize, usize, &[usize], bool) -> KernelProgram;
 
     const PAIRS: [(&str, Builder, Builder); 3] = [
         ("drain", penalize_drain_gv, penalize_drain_iso_gv),
@@ -1331,8 +1336,12 @@ mod twin_tests {
     #[test]
     fn iso_twin_is_the_adiabatic_surface_minus_the_energy_channel() {
         for (name, adiabatic, iso) in PAIRS {
-            let (ka, wa) = adiabatic(Coords::Cartesian, 2, 2, &[0, 1], true);
-            let (ki, wi) = iso(Coords::Cartesian, 2, 2, &[0, 1], true);
+            let program_a = adiabatic(Coords::Cartesian, 2, 2, &[0, 1], true);
+            let ka = program_a.kernel();
+            let wa = program_a.writes();
+            let program_i = iso(Coords::Cartesian, 2, 2, &[0, 1], true);
+            let ki = program_i.kernel();
+            let wi = program_i.writes();
             let names =
                 |w: &KernelWrites| w.iter().map(|write| write.key.clone()).collect::<Vec<_>>();
             let expected: Vec<symbi_ir::OutputKey> = names(&wa)
@@ -1367,7 +1376,8 @@ mod twin_tests {
     fn dof3_kernels_write_the_out_of_plane_momentum() {
         for (name, adiabatic, iso) in PAIRS {
             for (regime, build) in [("adiabatic", adiabatic), ("iso", iso)] {
-                let (_, writes) = build(Coords::Cartesian, 2, 3, &[0, 1], false);
+                let program = build(Coords::Cartesian, 2, 3, &[0, 1], false);
+                let writes = program.writes();
                 assert!(
                     writes.iter().any(|write| write.key == "mom_out_2"),
                     "{name} ({regime}): the dof=3 kernel must write mom_out_2"

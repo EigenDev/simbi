@@ -19,7 +19,7 @@ use harness::{KernelRun, Out};
 use symbi_algebra::FaceNormal;
 use symbi_algebra::Tensor;
 use symbi_discretize::{
-    Coords, EosArm, GvKernel, Recon, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
+    Coords, EosArm, Recon, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
     adiabatic_hllc_flux_gv, imhd_c2p_gv, imhd_flux_gv, imhd_hlld_flux_gv, imhd_wave_speed_map_gv,
     iso_c2p_gv, iso_flux_gv, iso_wave_speed_map_gv, nmhd_c2p_gv, nmhd_flux_gv, nmhd_hllc_flux_gv,
     nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv, rhd_c2p_gv, rhd_flux_gr_gv, rhd_flux_gv,
@@ -38,7 +38,7 @@ use symbi_hydro::riemann::{hllc, hllc_rhd, hllc_rmhd, hlld_rmhd, hlle};
 use symbi_hydro::rmhd::{Rmhd, rmhd_magnetosonic_cfl_speeds};
 use symbi_hydro::state::PrimG;
 use symbi_hydro::state::{Cons, Prim};
-use symbi_ir::{KernelWrites, MeshScalar};
+use symbi_ir::{KernelProgram, MeshScalar};
 
 const N: usize = 6;
 const GAMMA: f64 = 1.4;
@@ -403,7 +403,7 @@ fn flux_cell<const D: usize>(dir: usize) -> [usize; D] {
 // run a cartesian euler-family flux kernel on a uniform state, computing only the interior
 // cell along sweep `dir`. binds rho/vel_{0..D-1}/pre + gamma/theta; returns the run output.
 fn run_uniform_euler_flux<const D: usize>(
-    kernel: (GvKernel, KernelWrites),
+    kernel: KernelProgram,
     prim: &Prim<f64, D>,
     gamma: f64,
     dir: usize,

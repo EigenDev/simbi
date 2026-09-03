@@ -64,7 +64,8 @@ fn expect_ball(support: Option<&Support>, what: &str, center: &[f64], radius: f6
 fn sphere_kernels_derive_the_declared_ball() {
     macro_rules! check {
         ($what:literal, $f:ident) => {{
-            let (k, _) = $f(Coords::Cartesian, 2, 2, &[0, 1], false);
+            let program = $f(Coords::Cartesian, 2, 2, &[0, 1], false);
+            let k = program.kernel();
             expect_ball(k.output_support(), $what, &POS[..2], RACC + PAD);
         }};
     }
@@ -75,23 +76,28 @@ fn sphere_kernels_derive_the_declared_ball() {
     check!("porous_iso", penalize_porous_iso_gv);
     check!("drain_iso", penalize_drain_iso_gv);
     // 2.5d (dof 3 on a 2d grid) shares the in-plane ball.
-    let (k, _) = penalize_drain_gv(Coords::Cartesian, 2, 3, &[0, 1], false);
+    let program = penalize_drain_gv(Coords::Cartesian, 2, 3, &[0, 1], false);
+    let k = program.kernel();
     expect_ball(k.output_support(), "drain 2.5d", &POS[..2], RACC + PAD);
     // 3d.
-    let (k, _) = penalize_drain_gv(Coords::Cartesian, 3, 3, &[0, 1, 2], false);
+    let program = penalize_drain_gv(Coords::Cartesian, 3, 3, &[0, 1, 2], false);
+    let k = program.kernel();
     expect_ball(k.output_support(), "drain 3d", &POS, RACC + PAD);
     // the (r, z) axisymmetric section: the on-axis mask region is a coordinate
     // ball (identity embedding), so the sphere mask carries its ball there too.
-    let (k, _) = penalize_drain_gv(Coords::Cylindrical, 2, 3, &[0, 2], false);
+    let program = penalize_drain_gv(Coords::Cylindrical, 2, 3, &[0, 2], false);
+    let k = program.kernel();
     expect_ball(k.output_support(), "drain rz", &POS[..2], RACC + PAD);
 }
 
 #[test]
 fn resistive_emf_kernels_derive_the_declared_ball() {
-    let (k, _) = body_resistive_emf_2d_gv(Coords::Cartesian);
+    let program = body_resistive_emf_2d_gv(Coords::Cartesian);
+    let k = program.kernel();
     expect_ball(k.output_support(), "emf 2d", &POS[..2], RACC + PAD);
     for dir in 0..3 {
-        let (k, _) = body_resistive_emf_3d_dir_gv(dir, Coords::Cartesian);
+        let program = body_resistive_emf_3d_dir_gv(dir, Coords::Cartesian);
+        let k = program.kernel();
         // 3d pad uses min over all three widths — still dx_0 here.
         expect_ball(k.output_support(), "emf 3d", &POS, RACC + PAD);
     }
@@ -99,7 +105,8 @@ fn resistive_emf_kernels_derive_the_declared_ball() {
 
 #[test]
 fn feedback_drain_derives_the_declared_ball() {
-    let (k, _) = body_feedback_drain_gv(Coords::Cartesian, 2, 2, &[0, 1]);
+    let program = body_feedback_drain_gv(Coords::Cartesian, 2, 2, &[0, 1]);
+    let k = program.kernel();
     expect_ball(k.output_support(), "feedback drain", &POS[..2], RACC + PAD);
 }
 
@@ -108,7 +115,8 @@ fn shaped_kernel_derives_the_shape_bounding_ball() {
     let shape = SdfExpr::<f64, 3>::cuboid([0.3, 0.0, 0.0], [0.5, 0.3, 0.2])
         .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
     let (lc, lr) = shape.bounding_ball().expect("bounded shape");
-    let (k, _) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 2, &shape, false);
+    let program = penalize_porous_gv_shaped(Coords::Cartesian, 2, 2, &shape, false);
+    let k = program.kernel();
     expect_ball(
         k.output_support(),
         "shaped static",
@@ -129,7 +137,8 @@ fn spinning_kernel_derives_the_position_centered_swept_ball() {
         lc_norm > 0.0,
         "the offset shape must have an off-center bounding ball"
     );
-    let (k, _) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &shape, false);
+    let program = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &shape, false);
+    let k = program.kernel();
     expect_ball(
         k.output_support(),
         "shaped spinning",
@@ -144,12 +153,14 @@ fn curvilinear_kernels_derive_no_ball() {
     // chart alone, so a curvilinear chart derives Everywhere — dispatch already
     // runs the whole interior off-cartesian.
     for coords in [Coords::Cylindrical, Coords::Spherical] {
-        let (k, _) = penalize_drain_gv(coords, 2, 2, &[0, 1], false);
+        let program = penalize_drain_gv(coords, 2, 2, &[0, 1], false);
+        let k = program.kernel();
         assert!(
             k.output_support().is_none(),
             "{coords:?}: a curvilinear kernel must not carry a cartesian ball"
         );
-        let (k, _) = body_feedback_drain_gv(coords, 2, 2, &[0, 1]);
+        let program = body_feedback_drain_gv(coords, 2, 2, &[0, 1]);
+        let k = program.kernel();
         assert!(
             k.output_support().is_none(),
             "{coords:?}: feedback ball leaked off-cartesian"

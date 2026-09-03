@@ -26,7 +26,7 @@ use symbi_hydro::viscous::{
     viscous_mom_update_2d, viscous_mom_update_3d, viscous_mom_update_orthogonal_2d,
 };
 use symbi_ir::gv::{KernelWrite, KernelWrites};
-use symbi_ir::{FieldRef, Gv, GvKernel, TraceCx, trace};
+use symbi_ir::{FieldRef, Gv, KernelProgram, TraceCx, trace_kernel};
 
 use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
@@ -82,8 +82,8 @@ fn accumulate_mom<'t>(cx: TraceCx<'t>, dmom: Tensor<Gv<'t>, 2>) -> KernelWrites 
 }
 
 /// trace the constant-nu isothermal viscous operator, 2D cartesian.
-pub fn viscous_iso_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn viscous_iso_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let nu = cx.scalar("nu");
         let dx = cx.scalar("dx_0");
@@ -103,8 +103,8 @@ pub fn viscous_iso_gv() -> (GvKernel, KernelWrites) {
 /// update as `viscous_iso_gv` plus the total-energy increment `dt div(tau . v)` — the viscous energy
 /// flux divergence — accumulated onto `cons.nrg`. total energy is conserved (flux form) and the
 /// irreversible heating warms the gas. runs post-c2p (prim current).
-pub fn viscous_adiabatic_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn viscous_adiabatic_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let nu = cx.scalar("nu");
         let dx = cx.scalar("dx_0");
@@ -138,19 +138,19 @@ pub fn viscous_adiabatic_gv() -> (GvKernel, KernelWrites) {
 /// (the isothermal alpha kernel uses the one global cs; on a varying-cs
 /// gas the local read is the shakura-sunyaev prescription). Omega_K from body 0's
 /// mass at the in-plane distance. cartesian 2D; carries the viscous heating.
-pub fn viscous_adiabatic_alpha_gv() -> (GvKernel, KernelWrites) {
+pub fn viscous_adiabatic_alpha_gv() -> KernelProgram {
     viscous_adiabatic_alpha_impl(false)
 }
 
 /// the DOF = 3 (2.5D magnetized-gas) variant: diffuses the out-of-plane momentum
 /// too, same local-cs nu law.
-pub fn viscous_adiabatic_alpha_gv_2p5d() -> (GvKernel, KernelWrites) {
+pub fn viscous_adiabatic_alpha_gv_2p5d() -> KernelProgram {
     viscous_adiabatic_alpha_impl(true)
 }
 
-fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, KernelWrites) {
+fn viscous_adiabatic_alpha_impl(dof3: bool) -> KernelProgram {
     const NDIM: u8 = 2;
-    trace(|cx| {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let alpha = cx.scalar("alpha");
         let gamma = cx.scalar("gamma");
@@ -259,7 +259,7 @@ pub(crate) fn scale_factors_at<'t>(coords: Coords, ndim: usize, x: &[Gv<'t>]) ->
 /// momenta and div(tau . u) onto the total energy. one kernel per chart; the
 /// heating and the momentum share their face stresses, so the discrete work
 /// telescopes and the pair conserves total energy up to the boundary flux.
-pub fn viscous_adiabatic_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
+pub fn viscous_adiabatic_ortho_gv(coords: Coords) -> KernelProgram {
     viscous_adiabatic_ortho_impl(coords, None)
 }
 
@@ -267,16 +267,13 @@ pub fn viscous_adiabatic_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
 /// per stencil cell (the local sound speed), with the keplerian frequency from the
 /// chart's radial coordinate (the central mass sits on the axis/origin, matching
 /// the iso ortho alpha kernel's convention).
-pub fn viscous_adiabatic_alpha_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
+pub fn viscous_adiabatic_alpha_ortho_gv(coords: Coords) -> KernelProgram {
     viscous_adiabatic_ortho_impl(coords, Some(()))
 }
 
-fn viscous_adiabatic_ortho_impl(
-    coords: Coords,
-    alpha_mode: Option<()>,
-) -> (GvKernel, KernelWrites) {
+fn viscous_adiabatic_ortho_impl(coords: Coords, alpha_mode: Option<()>) -> KernelProgram {
     const NDIM: u8 = 2;
-    trace(|cx| {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let dx1 = cx.scalar("dx_0");
         let dx2 = cx.scalar("dx_1");
@@ -333,9 +330,9 @@ fn viscous_adiabatic_ortho_impl(
     })
 }
 
-pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
+pub fn viscous_iso_ortho_gv(coords: Coords) -> KernelProgram {
     const NDIM: u8 = 2;
-    trace(|cx| {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let nu = cx.scalar("nu");
         let dx1 = cx.scalar("dx_0");
@@ -376,9 +373,9 @@ pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
 /// varying `nu(R) = alpha c_s^2 / Omega_k(R)`, `Omega_k = sqrt(GM/R^3)`, `R` the
 /// radial coordinate `x0` (the orbital radius on both cylindrical and spherical,
 /// the central mass on the axis). one alpha kernel for every curvilinear chart.
-pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
+pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> KernelProgram {
     const NDIM: u8 = 2;
-    trace(|cx| {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let alpha = cx.scalar("alpha");
         let cs = cx.scalar("cs");
@@ -467,8 +464,8 @@ fn accumulate_mom_3d<'t>(cx: TraceCx<'t>, dmom: Tensor<Gv<'t>, 3>) -> KernelWrit
 }
 
 /// trace the constant-nu isothermal viscous operator, 3D cartesian.
-pub fn viscous_iso_gv_3d() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn viscous_iso_gv_3d() -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let nu = cx.scalar("nu");
         let dx = cx.scalar("dx_0");
@@ -487,8 +484,8 @@ pub fn viscous_iso_gv_3d() -> (GvKernel, KernelWrites) {
 /// `viscous_iso_gv_3d` plus the total-energy increment `dt div(tau . v)` onto `cons.nrg`. serves
 /// adiabatic hydro and full-3D MHD alike (viscosity leaves B untouched, so the flux heats the gas with the
 /// 1/2 B^2 preserved). runs post-c2p.
-pub fn viscous_adiabatic_gv_3d() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn viscous_adiabatic_gv_3d() -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let nu = cx.scalar("nu");
         let dx = cx.scalar("dx_0");
@@ -537,14 +534,14 @@ fn prim_stencil_2p5d<'t>(cx: TraceCx<'t>) -> ([[Tensor<Gv<'t>, 3>; 3]; 3], [[Gv<
 /// stencil + `viscous_update_2p5d`: the isothermal twin writes the 3 momentum components; the
 /// adiabatic twin also writes the total-energy heating. serves 2.5D MHD (the toroidal velocity
 /// diffuses; B is untouched so the heat warms the gas).
-pub fn viscous_iso_gv_2p5d() -> (GvKernel, KernelWrites) {
+pub fn viscous_iso_gv_2p5d() -> KernelProgram {
     viscous_2p5d_impl(false)
 }
-pub fn viscous_adiabatic_gv_2p5d() -> (GvKernel, KernelWrites) {
+pub fn viscous_adiabatic_gv_2p5d() -> KernelProgram {
     viscous_2p5d_impl(true)
 }
-fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+fn viscous_2p5d_impl(has_energy: bool) -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let nu = cx.scalar("nu");
         let dx = cx.scalar("dx_0");
@@ -588,9 +585,9 @@ fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, KernelWrites) {
 /// nu here varies with height, where the isothermal 3D twin's is z-invariant: `Omega_k` is
 /// z-invariant in both, while the local `cs^2` varies with height through the stratified pressure
 /// and density, so each stencil cell carries its own nu. carries the viscous heating onto the total energy, like the other adiabatic forms.
-pub fn viscous_adiabatic_alpha_gv_3d() -> (GvKernel, KernelWrites) {
+pub fn viscous_adiabatic_alpha_gv_3d() -> KernelProgram {
     const NDIM: u8 = 3;
-    trace(|cx| {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let alpha = cx.scalar("alpha");
         let gamma = cx.scalar("gamma");
@@ -650,9 +647,9 @@ pub fn viscous_adiabatic_alpha_gv_3d() -> (GvKernel, KernelWrites) {
     })
 }
 
-pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, KernelWrites) {
+pub fn viscous_iso_alpha_gv_3d() -> KernelProgram {
     const NDIM: u8 = 3;
-    trace(|cx| {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let alpha = cx.scalar("alpha");
         let cs = cx.scalar("cs");
@@ -701,9 +698,9 @@ pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, KernelWrites) {
 /// (G = 1, so GM is the central body mass). the sound speed is the constant
 /// `cs` param (globally isothermal). nu vanishes toward the sink (Omega_k -> inf) — the
 /// physical alpha-disk `nu ~ r^{3/2}`.
-pub fn viscous_iso_alpha_gv() -> (GvKernel, KernelWrites) {
+pub fn viscous_iso_alpha_gv() -> KernelProgram {
     const NDIM: u8 = 2;
-    trace(|cx| {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let alpha = cx.scalar("alpha");
         let cs = cx.scalar("cs");
@@ -779,11 +776,7 @@ fn ortho_25_orbital_radius<'t>(plane: OrthoPlane25, x0: Gv<'t>, x1: Gv<'t>) -> G
 /// `alpha` swaps the constant nu for the shakura-sunyaev law nu = alpha cs^2 /
 /// Omega_K(R_cyl) (local cs^2 = gamma p / rho when adiabatic, the global `cs`
 /// scalar otherwise), Omega_K about body 0's mass on the symmetry axis.
-pub fn viscous_ortho_2p5d_gv(
-    plane: OrthoPlane25,
-    adiabatic: bool,
-    alpha: bool,
-) -> (GvKernel, KernelWrites) {
+pub fn viscous_ortho_2p5d_gv(plane: OrthoPlane25, adiabatic: bool, alpha: bool) -> KernelProgram {
     const NDIM: u8 = 2;
     let (coords, axes): (Coords, [usize; 2]) = match plane {
         OrthoPlane25::CylRPhi => (Coords::Cylindrical, [0, 1]),
@@ -798,7 +791,7 @@ pub fn viscous_ortho_2p5d_gv(
         OrthoPlane25::CylRz => [0, 2, 1],
         _ => [0, 1, 2],
     };
-    trace(|cx| {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let dx1 = cx.scalar("dx_0");
         let dx2 = cx.scalar("dx_1");
@@ -883,17 +876,13 @@ pub fn viscous_ortho_2p5d_gv(
 /// trace the full-3D orthogonal viscous operator for the cylindrical
 /// (h = (1, r, 1)) or spherical (h = (1, r, r sin(theta))) chart: the general
 /// scale-factor stress + (adiabatic) heating; `alpha` as in the 2.5D twin.
-pub fn viscous_ortho_3d_gv(
-    coords: Coords,
-    adiabatic: bool,
-    alpha: bool,
-) -> (GvKernel, KernelWrites) {
+pub fn viscous_ortho_3d_gv(coords: Coords, adiabatic: bool, alpha: bool) -> KernelProgram {
     const NDIM: u8 = 3;
     assert!(
         matches!(coords, Coords::Cylindrical | Coords::Spherical),
         "viscous_ortho_3d_gv: cylindrical / spherical charts only"
     );
-    trace(|cx| {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let dx: [Gv; 3] = std::array::from_fn(|a| cx.scalar(&format!("dx_{a}")));
         let (vst, rst) = prim_stencil_3d(cx);

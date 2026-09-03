@@ -65,7 +65,10 @@ fn dx(ax: usize) -> Poly {
 }
 
 fn curl(dir: usize) -> LinFormR {
-    let (kernel, writes) = rmhd_ct_curl_2d_sph_gv(SweepAxis::new(dir, 2), &[Spacing::Uniform; 2]);
+    let program =
+        rmhd_ct_curl_2d_sph_gv(SweepAxis::new(dir, 2), &[Spacing::Uniform; 2]);
+    let kernel = program.kernel();
+    let writes = program.writes();
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
     let lf = curl_only(LinFormR::extract_rat(
         kernel.graph(),

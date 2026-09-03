@@ -35,7 +35,9 @@ fn divb_2d_cartesian_symbolic_telescoping() {
     // B_y is dir 1 (weighted by idy, shift +y).
     let mut div = LinForm::default();
     for (dir, id_div, e_dir) in [(0usize, "idx", [1i32, 0]), (1usize, "idy", [0i32, 1])] {
-        let (kernel, writes) = rmhd_ct_curl_2d_dir_gv(SweepAxis::new(dir, 2));
+        let program = rmhd_ct_curl_2d_dir_gv(SweepAxis::new(dir, 2));
+        let kernel = program.kernel();
+        let writes = program.writes();
         assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
         let curl = curl_only(LinForm::extract(
             kernel.graph(),

@@ -36,7 +36,10 @@ const E_R: [i64; NDIM] = [1, 0, 0];
 
 // extract the dir-0 lo/hi face-area RatFuns from a fresh spherical geometry probe.
 fn sph_areas() -> (RatFun, RatFun) {
-    let (kernel, writes) = geometry_probe_gv(Coords::Spherical, &[Spacing::Uniform; NDIM], NDIM);
+    let program =
+        geometry_probe_gv(Coords::Spherical, &[Spacing::Uniform; NDIM], NDIM);
+    let kernel = program.kernel();
+    let writes = program.writes();
     // probe writes: 0=inv_volume, 1=area_lo_0, 2=area_hi_0, 3=centroid_0.
     let area_lo = extract_scalar(kernel.graph(), writes[1].value, SCALARS);
     let area_hi = extract_scalar(kernel.graph(), writes[2].value, SCALARS);

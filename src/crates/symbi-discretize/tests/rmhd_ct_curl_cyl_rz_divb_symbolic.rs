@@ -62,7 +62,10 @@ fn dx(ax: usize) -> Poly {
 
 // extract the b-stripped dt*curl rational linear form for one face axis.
 fn curl(dir: usize) -> LinFormR {
-    let (kernel, writes) = rmhd_ct_curl_cyl_rz_gv(SweepAxis::new(dir, 2), &[Spacing::Uniform; 2]);
+    let program =
+        rmhd_ct_curl_cyl_rz_gv(SweepAxis::new(dir, 2), &[Spacing::Uniform; 2]);
+    let kernel = program.kernel();
+    let writes = program.writes();
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
     let lf = curl_only(LinFormR::extract_rat(
         kernel.graph(),

@@ -14,7 +14,7 @@ use symbi_ir::{
     CtCellCt, CtEdgeCt, CtFaceCt, CtScratchKey, CtWireName, PhysComp, PlaneComp, SweepAxis,
     Transverse,
 };
-use symbi_ir::{KernelWrite, KernelWrites};
+use symbi_ir::{KernelProgram, KernelWrite, KernelWrites, trace_kernel};
 
 /// chart-generic ADM data (lapse alpha, sqrt(det gamma), full shift beta) at a world position, for
 /// the curved-spacetime CT stack. one (spacetime, coords) match selects the KS-family metric of the
@@ -195,9 +195,9 @@ fn ct_curl_metric_gv<'t>(
 /// the high boundary face is covered. dir=0: dBx/dt = -dEz/dy -> b -= dt*idy*(Ez[j+1]-Ez);
 /// dir=1: dBy/dt = +dEz/dx -> b += dt*idx*(Ez[i+1]-Ez). div(B)=0 preserved.
 /// (the out-of-plane Bz rides the induction-flux divergence.)
-pub fn rmhd_ct_curl_2d_dir_gv(dir: SweepAxis) -> (GvKernel, KernelWrites) {
+pub fn rmhd_ct_curl_2d_dir_gv(dir: SweepAxis) -> KernelProgram {
     let dir = dir.index();
-    trace(|cx| {
+    trace_kernel(|cx| {
         let b = ct_field(cx, CtFaceCt::BFaceSweep);
         let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez));
         let dt = cx.scalar("dt");
@@ -236,8 +236,8 @@ pub fn rmhd_ct_curl_2d_dir_gv(dir: SweepAxis) -> (GvKernel, KernelWrites) {
 /// negative-definite discrete laplacian and the field diffuses, decaying as `exp(-eta k^2 t)`.
 /// the same div-B-clean curl then consumes `ez`, so the update holds div(B) at machine zero
 /// (`div(curl) = 0` — the symbolic proof covers it). `eta = 0` is an exact no-op.
-pub fn rmhd_resistive_emf_2d_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_resistive_emf_2d_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez));
         let eta = cx.scalar("eta");
         let idx = cx.scalar("idx");
@@ -279,9 +279,9 @@ pub fn rmhd_resistive_emf_2d_gv() -> (GvKernel, KernelWrites) {
 /// curl `rmhd_ct_curl_3d_dir_gv` (whose `+1` reads they mirror), so the composed
 /// `curl(eta * curl(B))` is the negative-definite discrete laplacian and the field diffuses.
 /// the same div-B-clean 3D curl consumes the augmented EMF. `eta = 0` is a no-op.
-pub fn rmhd_resistive_emf_3d_dir_gv(dir: SweepAxis) -> (GvKernel, KernelWrites) {
+pub fn rmhd_resistive_emf_3d_dir_gv(dir: SweepAxis) -> KernelProgram {
     let dir = dir.index();
-    trace(|cx| {
+    trace_kernel(|cx| {
         let p1 = (dir + 1) % 3;
         let p2 = (dir + 2) % 3;
         let emf = ct_field(cx, CtEdgeCt::Emf);
@@ -326,9 +326,9 @@ pub fn rmhd_resistive_emf_3d_dir_gv(dir: SweepAxis) -> (GvKernel, KernelWrites) 
 ///   dir=1 (B_z, z-face):  dB_z/dt = -(1/r) d_r(r E_phi)   (r = grid axis 0; cylindrical metric)
 /// r is computed per-cell from gv_axis_face_at(cx, 0, ..) (the geom scalars x_lo_0/dx_0). E_phi is
 /// the corner field at offsets [0,0]/[+grid]. div(B)=0 preserved by the discrete d-of-d.
-pub fn rmhd_ct_curl_cyl_rz_gv(dir: SweepAxis, spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+pub fn rmhd_ct_curl_cyl_rz_gv(dir: SweepAxis, spacing: &[Spacing]) -> KernelProgram {
     let dir = dir.index();
-    trace(|cx| {
+    trace_kernel(|cx| {
         let b = ct_field(cx, CtFaceCt::BFaceSweep);
         let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez)); // the out-of-plane corner EMF E_phi
         let dt = cx.scalar("dt");
@@ -386,8 +386,8 @@ pub fn rmhd_ct_curl_cyl_rz_gv(dir: SweepAxis, spacing: &[Spacing]) -> (GvKernel,
 /// `w_r \propto r_edge, w_z \propto r_c, w_E \propto r_edge`, whose r-factors cancel; the discrete
 /// adjoint identity `<C E, B>_F = <E, J B>_E` pins it to machine precision. `B_r` = bface[0],
 /// `B_z` = bface[1]. `eta = 0` is an exact no-op.
-pub fn rmhd_resistive_emf_cyl_rz_gv(spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_resistive_emf_cyl_rz_gv(spacing: &[Spacing]) -> KernelProgram {
+    trace_kernel(|cx| {
         let ephi = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ephi));
         let eta = cx.scalar("eta");
         // register the geom scalars in the canonical order (both r and z faces), matching the curl ABI.
@@ -441,11 +441,8 @@ pub fn rmhd_resistive_emf_cyl_rz_gv(spacing: &[Spacing]) -> (GvKernel, KernelWri
 /// (`h_2 = r`) grow the `(1/r) d_r(r .)` factor. the geometry-agnostic adjoint reference validates each
 /// chart; `-curl(eta J)` is negative-definite (magnetic energy decays). `eta = 0` is an exact no-op.
 /// `B_i` = bface[i]; scale factors are sampled at the staggered face/corner positions of each term.
-pub fn rmhd_resistive_emf_ortho_gv(
-    coords: Coords,
-    spacing: &[Spacing],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_resistive_emf_ortho_gv(coords: Coords, spacing: &[Spacing]) -> KernelProgram {
+    trace_kernel(|cx| {
         let e = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::E)); // the out-of-plane corner EMF
         let eta = cx.scalar("eta");
         // pin the geom scalars in canonical order (both axes' faces), matching the curl ABI.
@@ -515,9 +512,9 @@ pub fn rmhd_resistive_emf_ortho_gv(
 ///   dir=1 (B_phi, phi-face): dB_phi/dt = +d_r E_z         (r = grid axis 0; flat, metric-free — mirror of r-z)
 /// r is the r-face radius (where B_r lives) via gv_axis_face_at(cx, 0, .., 0). E_z is the corner field
 /// at offsets [0,0]/[+grid]. div(B)=0 preserved by the discrete d-of-d (mixed partials cancel).
-pub fn rmhd_ct_curl_cyl_rphi_gv(dir: SweepAxis, spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+pub fn rmhd_ct_curl_cyl_rphi_gv(dir: SweepAxis, spacing: &[Spacing]) -> KernelProgram {
     let dir = dir.index();
-    trace(|cx| {
+    trace_kernel(|cx| {
         let b = ct_field(cx, CtFaceCt::BFaceSweep);
         let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez)); // the out-of-plane corner EMF E_z
         let dt = cx.scalar("dt");
@@ -571,9 +568,9 @@ pub fn rmhd_ct_curl_cyl_rphi_gv(dir: SweepAxis, spacing: &[Spacing]) -> (GvKerne
 /// opposite B_theta sign vs the cylinder's B_z). div(B)=0 preservation for a nontrivial poloidal
 /// (B_r, B_theta) field is pinned by tests/rmhd_ct_curl_2d_sph_poloidal_divb.rs: B = curl(A_phi)
 /// through this kernel, area-weighted div machine-zero both before and after a curl(E_phi) step.
-pub fn rmhd_ct_curl_2d_sph_gv(dir: SweepAxis, spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+pub fn rmhd_ct_curl_2d_sph_gv(dir: SweepAxis, spacing: &[Spacing]) -> KernelProgram {
     let dir = dir.index();
-    trace(|cx| {
+    trace_kernel(|cx| {
         let b = ct_field(cx, CtFaceCt::BFaceSweep);
         let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez)); // the out-of-plane corner EMF E_phi
         let dt = cx.scalar("dt");
@@ -644,8 +641,8 @@ pub fn rmhd_ct_curl_2d_sph_gr_gv(
     coords: Coords,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let b = ct_field(cx, CtFaceCt::BFaceSweep);
         let ez = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::Ez)); // the out-of-plane densitized corner EMF Etilde
         let dt = cx.scalar("dt");
@@ -697,12 +694,8 @@ pub fn rmhd_ct_curl_2d_sph_gr_gv(
 /// `rmhd::rmhd_ct_curl_3d_dir`: `B_dir += dt*curl`, `curl = dE_p1/dx_p2 - dE_p2/dx_p1`
 /// (cartesian, uniform `id_p1`/`id_p2`) or the orthogonal h-weighted curl (curvilinear, via
 /// `ct_curl_metric_gv`). reads e_p1/e_p2 at the cell + `+e_p2`/`+e_p1`. div(B)=0 preserved.
-pub fn rmhd_ct_curl_3d_dir_gv(
-    coords: Coords,
-    spacing: &[Spacing],
-    dir: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_ct_curl_3d_dir_gv(coords: Coords, spacing: &[Spacing], dir: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let p1 = (dir + 1) % 3;
         let p2 = (dir + 2) % 3;
         let cartesian = coords == Coords::Cartesian;
@@ -773,8 +766,8 @@ pub fn rmhd_ct_curl_3d_dir_gv(
 /// the isothermal CT face->cell B interpolation — `bcell_c = 0.5*(bface_c + bface_c[+e_c])`,
 /// a bare arithmetic average: isothermal MHD carries no energy variable, so the 1/2|B|^2
 /// energy correction is absent. reads bface only, writes bcell only.
-pub fn imhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn imhd_bcell_from_bface_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let half = Gv::from_f64(0.5);
         let off = |ax: usize| -> Vec<i32> {
             let mut o = vec![0i32; ndim];
@@ -814,8 +807,8 @@ pub fn imhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, KernelWrites) {
 /// interpolation leaves the energy untouched: `cons.nrg` (tau) already carries the magnetic energy
 /// and is conserved by the godunov flux (the poynting term), so a `nrg += 0.5 d|bcell|^2` patch
 /// would double-account it and break the telescoping.
-pub fn rmhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_bcell_from_bface_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let half = Gv::from_f64(0.5);
         let off = |ax: usize| -> Vec<i32> {
             let mut o = vec![0i32; ndim];
@@ -857,8 +850,8 @@ pub fn rmhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, KernelWrites) {
 /// contact-formula inputs by integer-offset `load_at` (corner cell EMFs v_p2*b_p1 - v_p1*b_p2
 /// at coord / -e_p1 / -e_p2 / -e_p1-e_p2; face EMFs from -bflux_a / +bflux_b; density fluxes),
 /// then the `ct_contact_emf_gv` soft blend. 8 generic inputs the dispatch binds per edge.
-pub fn rmhd_edge_emf_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_edge_emf_gv(ndim: usize, g1: usize, g2: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         // g1/g2 are the two grid offset axes the corner stencil walks (the edge's perpendicular
         // grid plane). they are decoupled from the in-plane physical components p1/p2 the runtime
         // binds to vel_p1/bcell_p1/...: for identity geometries grid axis == component (3D: g1/g2 =
@@ -981,8 +974,8 @@ pub fn rmhd_edge_emf_gr_gv(
     coords: Coords,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = 2usize;
         let (pc1, pc2, g1, g2) = gr_ct_plane(axes);
         gv_register_field(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1));
@@ -1126,8 +1119,8 @@ pub fn rmhd_bcell_from_bface_gr_gv(
     _coords: Coords,
     _spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = axes.len();
         let half = Gv::from_f64(0.5);
         let off = |ax: usize| -> Vec<i32> {
@@ -1258,8 +1251,8 @@ fn uct_hllc_coeffs<'t>(
 /// reduces to `v_y B_x - v_x B_y` in the symmetric-speed limit; the diffusion matches the verified
 /// compact Eq. 27. div(B)=0 preserved (a CT curl of one edge EMF, independent of the coefficients).
 /// component-agnostic: only the gather offsets are geometric (g1/g2 = the perpendicular grid plane).
-pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         gv_register_field(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1));
         gv_register_field(cx, "edge_vp2", CtCellCt::Vel(PlaneComp::P2));
         gv_register_field(cx, "edge_bface_a", CtFaceCt::BFace(Transverse::A));
@@ -1384,8 +1377,8 @@ pub fn rmhd_edge_emf_uct_gr_gv(
     coords: Coords,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = 2usize;
         let (pc1, pc2, g1, g2) = gr_ct_plane(axes);
         gv_register_field(cx, "edge_vp1", CtCellCt::Vel(PlaneComp::P1));
@@ -1511,8 +1504,8 @@ pub fn rmhd_edge_emf_uct_gr_3d_gv(
     spacetime: Spacetime,
     coords: Coords,
     spacing: &[Spacing],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         assert!(
             coords == Coords::Cartesian,
             "the 3d GR UCT EMF is baked for the cartesian charts"
@@ -1751,8 +1744,8 @@ fn uct_master_emf<'t>(
 /// `swap` passes by_w/by_e in each other's argument slots to inject the ct_emf.rs anti-upwind bug,
 /// for the negative control.
 #[doc(hidden)]
-pub fn uct_master_emf_proof_kernel(swap: bool) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn uct_master_emf_proof_kernel(swap: bool) -> KernelProgram {
+    trace_kernel(|cx| {
         let ux = UctDir {
             al: cx.param("al_x"),
             ar: cx.param("ar_x"),
@@ -1821,8 +1814,8 @@ pub(crate) fn hlld_wave_sum_terms<'t>(
 /// bug for the negative control. shared by `rmhd_edge_emf_uct_hlld_gv` (flat) and `_gr_gv` (both build
 /// the dissipative Phi through `hlld_wave_sum_terms`), so this one proof binds both.
 #[doc(hidden)]
-pub fn hlld_wave_sum_proof_kernel(swap: bool) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn hlld_wave_sum_proof_kernel(swap: bool) -> KernelProgram {
+    trace_kernel(|cx| {
         let alam_l = cx.param("alam_l");
         let aalf_l = cx.param("aalf_l");
         let aalf_r = cx.param("aalf_r");
@@ -1851,8 +1844,8 @@ pub fn hlld_wave_sum_proof_kernel(swap: bool) -> (GvKernel, KernelWrites) {
 /// velocity, computed in-kernel from the cell prims with the classical momentum flux
 /// `F[m_n] = rho v_n^2 + p + |B|^2/2 - B_n^2`. edge speeds & per-side states use the max-over-4-cells
 /// / 2-cell-average reconstruction. (IMHD: p = cs^2*rho; RMHD: relativistic conserved/flux.)
-pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         gv_register_field(cx, "e_rho", CtCellCt::Rho);
         gv_register_field(cx, "e_vp1", CtCellCt::Vel(PlaneComp::P1));
         gv_register_field(cx, "e_vp2", CtCellCt::Vel(PlaneComp::P2));
@@ -2128,8 +2121,8 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
     ndim: usize,
     g1: usize,
     g2: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         gv_register_field(cx, "h_rho", CtCellCt::Rho);
         if E::HAS_ENERGY {
             gv_register_field(cx, "h_pre", CtCellCt::Pre);
@@ -2312,7 +2305,7 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
 /// rho^{*s} runs unfloored: physical states give rho^{*s} > 0, and the degenerate guard (nu* = 0
 /// when the rotational waves collapse, eps = 1e-9) is the sole safeguard. zeroth order = R+/-
 /// reconstruction is identity (theta = 0). mignone & del zanna method 2.
-pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelWrites) {
+pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> KernelProgram {
     newtonian_edge_emf_uct_hlld_impl::<Adiabatic>(ndim, g1, g2)
 }
 
@@ -2322,7 +2315,7 @@ pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
 /// place of pressure (`Isothermal{cs}`, the zero-sized iso energy slot). everything else —
 /// staggered-B recon to the edge, the single-vbar advection, the master
 /// composition — matches the NMHD kernel verbatim (one shared builder).
-pub fn imhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelWrites) {
+pub fn imhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> KernelProgram {
     newtonian_edge_emf_uct_hlld_impl::<IsoModel>(ndim, g1, g2)
 }
 
@@ -2401,8 +2394,8 @@ trait WaveSumChart {
 /// Eq. 34 edge average + centered advection) up to where the geometry enters — the per-face
 /// riemann fan, the moving-interface speed, and the corner transport/densitization — so one
 /// builder carries all of them through [`WaveSumChart`].
-fn rmhd_edge_emf_uct_hlld_impl(chart: &mut impl WaveSumChart) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+fn rmhd_edge_emf_uct_hlld_impl(chart: &mut impl WaveSumChart) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = chart.ndim();
         let (g1, g2, pc1, pc2, out) = chart.plane();
         gv_register_field(cx, "e_rho", CtCellCt::Rho);
@@ -2670,7 +2663,7 @@ impl WaveSumChart for FlatWaveSum {
 /// consistency, M&DZ p.8) so Phi damps the staggered checkerboard; cell velocities/rho/pre are the
 /// 2-cell edge average. gated on `success`: where the secant fails, Phi falls back to the HLL
 /// dissipation, which stays finite because the lam are finite.
-pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelWrites) {
+pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> KernelProgram {
     rmhd_edge_emf_uct_hlld_impl(&mut FlatWaveSum { ndim, g1, g2 })
 }
 
@@ -2781,7 +2774,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     coords: Coords,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     let (pc1, pc2, g1, g2) = gr_ct_plane(axes);
     let out = 3 - pc1 - pc2;
     rmhd_edge_emf_uct_hlld_impl(&mut Gr2dWaveSum {
@@ -2887,7 +2880,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
     spacetime: Spacetime,
     coords: Coords,
     spacing: &[Spacing],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     assert!(
         coords == Coords::Cartesian,
         "the 3d GR UCT-HLLD EMF is baked for the cartesian charts"
@@ -2907,8 +2900,8 @@ pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
 
 /// the RK2 edge-EMF save `e_n = e` (pointwise copy; the generic 2-buffer copy the runtime also
 /// reuses for the bcell^n snapshot). write root == the read field node.
-pub fn rmhd_save_efield_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_save_efield_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let e = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::E));
         vec![KernelWrite::new(
             CtWireName::EN.render(),
@@ -2920,8 +2913,8 @@ pub fn rmhd_save_efield_gv() -> (GvKernel, KernelWrites) {
 
 /// the RK2 edge-EMF time-average `e = 0.5*(e + e_n)`, in-place on e. mirror of
 /// `rmhd::rmhd_average_efield`.
-pub fn rmhd_average_efield_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_average_efield_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let e = ct_field(cx, CtScratchKey::edge(CtEdgeCt::Emf, CtWireName::E));
         let en = ct_field(cx, CtEdgeCt::EmfSaved);
         let e_new = Gv::from_f64(0.5) * (e + en);
@@ -2942,8 +2935,8 @@ pub fn rmhd_average_efield_gv() -> (GvKernel, KernelWrites) {
 /// cells is flagged. `e_fo` is read+write in place. after the splice the curl of this single-valued
 /// edge EMF gives flagged cells first-order (diffused, recoverable) B while leaving unflagged faces
 /// at the high-order value and preserving div(B) = 0.
-pub fn fofc_emf_splice_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn fofc_emf_splice_gv(ndim: usize, g1: usize, g2: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let zero = vec![0i32; ndim];
         let cm = |axes: &[usize]| -> Vec<i32> {
             let mut o = vec![0i32; ndim];
@@ -2984,8 +2977,8 @@ pub fn rmhd_edge_emf_gr_3d_gv(
     spacetime: Spacetime,
     coords: Coords,
     spacing: &[Spacing],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = 3usize;
         let g1 = (dir + 1) % 3;
         let g2 = (dir + 2) % 3;
@@ -3121,8 +3114,8 @@ pub fn rmhd_ct_curl_3d_gr_dir_gv(
     spacetime: Spacetime,
     coords: Coords,
     spacing: &[Spacing],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let p1 = (dir + 1) % 3;
         let p2 = (dir + 2) % 3;
         let b = ct_field(cx, CtFaceCt::BFaceSweep);

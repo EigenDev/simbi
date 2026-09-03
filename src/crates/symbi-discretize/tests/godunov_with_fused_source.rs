@@ -58,7 +58,7 @@ fn user_source_none_matches_writes_of_plain_godunov() {
     let coords = Coords::Cartesian;
     let spacing = vec![Spacing::Uniform; 3];
     let axes = vec![0, 1, 2];
-    let (_k_plain, w_plain) = godunov_stage_gv(
+    let program_plain = godunov_stage_gv(
         coords,
         Spacetime::Minkowski,
         &spacing,
@@ -68,7 +68,8 @@ fn user_source_none_matches_writes_of_plain_godunov() {
         true,
         GeoSource::Hydro { inertial: false },
     );
-    let (_k_fused, w_fused) = godunov_stage_gv_with_fused_sources(
+    let w_plain = program_plain.writes();
+    let program_fused = godunov_stage_gv_with_fused_sources(
         coords,
         Spacetime::Minkowski,
         &spacing,
@@ -80,6 +81,7 @@ fn user_source_none_matches_writes_of_plain_godunov() {
         &[],
         false,
     );
+    let w_fused = program_fused.writes();
     let names_plain: Vec<&str> = w_plain.iter().map(|write| write.key.as_str()).collect();
     let names_fused: Vec<&str> = w_fused.iter().map(|write| write.key.as_str()).collect();
     assert_eq!(
@@ -236,7 +238,7 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
     let specs = uniform_acceleration_sources(D, false);
     let user_source = &specs[0];
 
-    let (kernel, _writes) = godunov_stage_gv_with_fused_sources(
+    let program = godunov_stage_gv_with_fused_sources(
         coords,
         Spacetime::Minkowski,
         &spacing,
@@ -248,6 +250,7 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
         &[user_source],
         false,
     );
+    let kernel = program.kernel();
 
     // sanity: the kernel's underlying graph contains a Param leaf named
     // `g_ext_0` — proves uniform_acceleration's `g_ext_k` reached
@@ -269,7 +272,7 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
 
     // control: `g_ext_0` is absent from the plain godunov graph, so the param above is
     // attributable to the splice:
-    let (k_plain, _) = godunov_stage_gv(
+    let program_plain = godunov_stage_gv(
         coords,
         Spacetime::Minkowski,
         &spacing,
@@ -279,6 +282,7 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
         true,
         GeoSource::Hydro { inertial: false },
     );
+    let k_plain = program_plain.kernel();
     let mut plain_has_g_ext = false;
     for (_id, node, _ty) in k_plain.graph().iter() {
         if let symbi_ir::graph::Op::Param(s) = &node.op {
@@ -427,7 +431,7 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
 
     let specs = uniform_acceleration_sources(D, true);
     let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = specs.iter().collect();
-    let (kernel, _writes) = godunov_stage_gv_with_fused_sources(
+    let program = godunov_stage_gv_with_fused_sources(
         coords,
         Spacetime::Minkowski,
         &spacing,
@@ -439,6 +443,7 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
         &refs,
         false,
     );
+    let kernel = program.kernel();
 
     // every Param("g_ext_k") in the graph occurs exactly once — one
     // distinct NodeId per name, so the runtime fills a single leaf per

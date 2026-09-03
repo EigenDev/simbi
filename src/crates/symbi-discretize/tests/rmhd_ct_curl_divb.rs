@@ -74,12 +74,12 @@ fn ct_curl_preserves_div_b() {
     // writes b_new so the before/after div comparison reads the originals.
     let bx_built = rmhd_ct_curl_2d_dir_gv(SweepAxis::new(0, 2));
     assert_eq!(
-        bx_built.0.scalar_params(),
+        bx_built.kernel().scalar_params(),
         vec!["dt".to_string(), "idy".to_string()]
     );
     let by_built = rmhd_ct_curl_2d_dir_gv(SweepAxis::new(1, 2));
     assert_eq!(
-        by_built.0.scalar_params(),
+        by_built.kernel().scalar_params(),
         vec!["dt".to_string(), "idx".to_string()]
     );
 

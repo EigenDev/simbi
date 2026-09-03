@@ -218,7 +218,7 @@ fn build_entry(
         .iter()
         .map(|a| EdgeSet(a.edges().to_vec()))
         .collect();
-    let (gvk, writes) = symbi_discretize::gv::census_map::census_map_gv(
+    let program = symbi_discretize::gv::census_map::census_map_gv(
         coords,
         spacing,
         axes,
@@ -229,23 +229,26 @@ fn build_entry(
         spec.n_values(),
         spec.n_segments(),
     );
-    let host_kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, ndim).ok();
+    let host_kernel = symbi_jit::compile_gv_kernel(&program, ndim).ok();
     let (device_name, device_ir) = super::runtime_source::gv_kernel_to_ir(
-        &gvk,
-        &writes,
+        &program,
         ndim as u8,
         &format!("rt_census_map_{ndim}d"),
     );
-    let value_writes = &writes[..spec.n_values()];
-    let values_host_kernel = symbi_jit::compile_gv_kernel(&gvk, value_writes, ndim).ok();
+    // the value-only sub-program: same graph, the first n_values writes.
+    let value_program = symbi_ir::KernelProgram::new(
+        program.kernel().clone(),
+        program.writes()[..spec.n_values()].to_vec(),
+    );
+    let values_host_kernel = symbi_jit::compile_gv_kernel(&value_program, ndim).ok();
     let (values_device_name, values_device_ir) = super::runtime_source::gv_kernel_to_ir(
-        &gvk,
-        value_writes,
+        &value_program,
         ndim as u8,
         &format!("rt_census_values_{ndim}d"),
     );
     Some(Entry {
-        in_refs: gvk
+        in_refs: program
+            .kernel()
             .field_inputs()
             .iter()
             .map(|(_, bind)| match bind {
@@ -258,7 +261,8 @@ fn build_entry(
                 }
             })
             .collect(),
-        scalar_params: gvk
+        scalar_params: program
+            .kernel()
             .scalar_params()
             .iter()
             .map(|s| ScalarBind::from_name(s.as_str()))

@@ -40,7 +40,9 @@ fn coeff<'a>(lf: &'a LinForm, key: &str) -> &'a Poly {
 
 #[test]
 fn hlld_wave_sum_dissipation_pairing_symbolic() {
-    let (kernel, writes) = hlld_wave_sum_proof_kernel(false);
+    let program = hlld_wave_sum_proof_kernel(false);
+    let kernel = program.kernel();
+    let writes = program.writes();
     let lf = LinForm::extract(kernel.graph(), writes[0].value, FIELDS, SCALARS);
 
     // the fast-wave endpoint pairing (the dissipation sign): each staggered endpoint is diffused by
@@ -109,7 +111,9 @@ fn hlld_wave_sum_dissipation_pairing_symbolic() {
 // pairing proof reports a real failure when the pairing breaks.
 #[test]
 fn hlld_wave_sum_symbolic_detects_swapped_fast_waves() {
-    let (kernel, writes) = hlld_wave_sum_proof_kernel(true);
+    let program = hlld_wave_sum_proof_kernel(true);
+    let kernel = program.kernel();
+    let writes = program.writes();
     let lf = LinForm::extract(kernel.graph(), writes[0].value, FIELDS, SCALARS);
     let btl = coeff(&lf, "bt_l");
     assert_eq!(

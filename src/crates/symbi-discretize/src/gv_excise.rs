@@ -49,7 +49,7 @@ use symbi_hydro::state::{Prim, Valencia};
 use symbi_hydro::{MhdPrim, RhdGr, RmhdGr};
 use symbi_ib::excise::ks_excised;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
-use symbi_ir::{FieldRef, Gv, GvKernel, TraceCx, trace};
+use symbi_ir::{FieldRef, Gv, KernelProgram, TraceCx, trace_kernel};
 
 use crate::coords::{Coords, Spacetime, Spacing};
 use crate::gv::cell_geometry_gv;
@@ -110,8 +110,8 @@ fn excised_mask_3d<'t>(cx: TraceCx<'t>, x: &[Gv<'t>; 3]) -> <Gv<'t> as Scalar>::
 /// filled state to the exc_0.. scratch (the commit is `excise_writeback`, so the
 /// fill sees the pre-pass state at every read). `dof = 2` is the in-plane GR-hydro state; `dof = 3`
 /// carries the out-of-plane momentum of the 2.5d MHD state.
-fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+fn excise_fill_2d_dof_gv(dof: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let names = prim_names(dof);
         let refs = prim_refs(dof);
         let nf = refs.len();
@@ -140,21 +140,21 @@ fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, KernelWrites) {
     })
 }
 
-pub fn excise_fill_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_fill_gv() -> KernelProgram {
     excise_fill_2d_dof_gv(2)
 }
 
 /// the 2.5d (dof = 3) gas fill: rho, vel_0..2, pre on the 2d grid — the
 /// magnetized equatorial slice's momentum set.
-pub fn excise_fill_dof3_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_fill_dof3_gv() -> KernelProgram {
     excise_fill_2d_dof_gv(3)
 }
 
 /// the sweep commit: copy the exc scratch back into the primitive fields.
 /// unmasked over the dispatch box — the fill wrote live cells' own values,
 /// so the copy is the bitwise identity there.
-fn excise_writeback_dof_gv(dof: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+fn excise_writeback_dof_gv(dof: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let names = prim_names(dof);
         let refs = prim_refs(dof);
         let vals: Vec<Gv> = (0..refs.len())
@@ -172,17 +172,17 @@ fn excise_writeback_dof_gv(dof: usize) -> (GvKernel, KernelWrites) {
     })
 }
 
-pub fn excise_writeback_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_writeback_gv() -> KernelProgram {
     excise_writeback_dof_gv(2)
 }
 
-pub fn excise_writeback_dof3_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_writeback_dof3_gv() -> KernelProgram {
     excise_writeback_dof_gv(3)
 }
 
 /// the 1d radial commit (dof = 1): rho, vel_0, pre. the writeback is a chart-free scratch copy,
 /// so this one serves the spherical row without a spacetime or geometry variant.
-pub fn excise_writeback_dof1_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_writeback_dof1_gv() -> KernelProgram {
     excise_writeback_dof_gv(1)
 }
 
@@ -193,8 +193,8 @@ pub fn excise_writeback_dof1_gv() -> (GvKernel, KernelWrites) {
 /// factors, so setting the primitives and rebuilding locally is the exact route. live cells pass their conserved
 /// state through untouched (in-place select). the metric is the spinning-kerr
 /// rank-1 form with the host-filled `kerr_spin` (zero for the a = 0 chart).
-pub fn excise_p2c_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn excise_p2c_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let gamma = cx.scalar("gamma");
         let mass = cx.scalar("schwarzschild_mass");
         let spin = cx.scalar("kerr_spin");
@@ -290,8 +290,8 @@ fn excised_mask_sph<'t>(cx: TraceCx<'t>, x_r: Gv<'t>) -> <Gv<'t> as Scalar>::Mas
 /// live cells keep their own state. the same absorbing boundary the cartesian charts use — the
 /// exterior rarefies into the vacuum at the excision faces and stays there, which is the
 /// physical content of a horizon: every characteristic points inward.
-fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let names = prim_names(dof);
         let refs = prim_refs(dof);
         let nf = refs.len();
@@ -316,12 +316,12 @@ fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites) {
 }
 
 /// the 1d radial gas fill (dof = 1): the michel / bondi row.
-pub fn excise_fill_sph_1d_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_fill_sph_1d_gv() -> KernelProgram {
     excise_fill_sph_dof_gv(1, 1)
 }
 
 /// the 2d (r, theta) gas fill with the azimuthal swirl momentum (dof = 3): the rotating GR flows.
-pub fn excise_fill_sph_2d_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_fill_sph_2d_gv() -> KernelProgram {
     excise_fill_sph_dof_gv(2, 3)
 }
 
@@ -329,8 +329,8 @@ pub fn excise_fill_sph_2d_gv() -> (GvKernel, KernelWrites) {
 /// the ingoing kerr-schild metric at the cell's own sampling position; live cells pass their
 /// conserved state through untouched. the spinning form serves both charts — at `a = 0` it is the
 /// schwarzschild kerr-schild metric, so one kernel covers the whole horizon-penetrating family.
-fn excise_p2c_sph_ks_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+fn excise_p2c_sph_ks_dof_gv(ndim: usize, dof: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let gamma = cx.scalar("gamma");
         let mass = cx.scalar("schwarzschild_mass");
         let spin = cx.scalar("kerr_spin");
@@ -390,11 +390,11 @@ fn excise_p2c_sph_ks_dof_gv(ndim: usize, dof: usize) -> (GvKernel, KernelWrites)
     })
 }
 
-pub fn excise_p2c_sph_ks_1d_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_p2c_sph_ks_1d_gv() -> KernelProgram {
     excise_p2c_sph_ks_dof_gv(1, 1)
 }
 
-pub fn excise_p2c_sph_ks_2d_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_p2c_sph_ks_2d_gv() -> KernelProgram {
     excise_p2c_sph_ks_dof_gv(2, 3)
 }
 
@@ -403,8 +403,8 @@ pub fn excise_p2c_sph_ks_2d_gv() -> (GvKernel, KernelWrites) {
 /// their own state. the rho/vel_0..2/pre set serves both the 3d GR-hydro state
 /// and the 3d magnetized gas state (the field lives on the staggered faces,
 /// outside this fill).
-pub fn excise_fill_3d_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn excise_fill_3d_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let names = prim_names(3);
         let refs = prim_refs(3);
 
@@ -433,7 +433,7 @@ pub fn excise_fill_3d_gv() -> (GvKernel, KernelWrites) {
 }
 
 /// the 3d sweep commit: copy the exc scratch back into the primitive fields.
-pub fn excise_writeback_3d_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_writeback_3d_gv() -> KernelProgram {
     excise_writeback_dof_gv(3)
 }
 
@@ -441,8 +441,8 @@ pub fn excise_writeback_3d_gv() -> (GvKernel, KernelWrites) {
 /// the valencia `to_conserved` with the (spin-generic) cartesian kerr-schild spatial
 /// metric at the cell's own centroid; live cells pass their conserved state through
 /// untouched.
-pub fn excise_p2c_3d_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn excise_p2c_3d_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let gamma = cx.scalar("gamma");
         let mass = cx.scalar("schwarzschild_mass");
         let spin = cx.scalar("kerr_spin");
@@ -509,8 +509,8 @@ pub fn excise_p2c_3d_gv() -> (GvKernel, KernelWrites) {
 /// through untouched. MHD momentum/velocity vectors are always 3-component
 /// (the 2d grid instance is the equatorial slice with z = 0 in the metric
 /// position), so one builder serves both grid dimensions.
-fn excise_p2c_mhd_dim_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+fn excise_p2c_mhd_dim_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let gamma = cx.scalar("gamma");
         let mass = cx.scalar("schwarzschild_mass");
         let spin = cx.scalar("kerr_spin");
@@ -578,11 +578,11 @@ fn excise_p2c_mhd_dim_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     })
 }
 
-pub fn excise_p2c_mhd_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_p2c_mhd_gv() -> KernelProgram {
     excise_p2c_mhd_dim_gv(2)
 }
 
-pub fn excise_p2c_mhd_3d_gv() -> (GvKernel, KernelWrites) {
+pub fn excise_p2c_mhd_3d_gv() -> KernelProgram {
     excise_p2c_mhd_dim_gv(3)
 }
 
@@ -604,8 +604,8 @@ pub fn shell_flux_map_gv(
     axes: &[usize],
     ndim: usize,
     flux_base: &str,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let geo = cell_geometry_gv(cx, coords, spacing, axes, ndim);
         let r_d = cx.scalar("diagnostic_radius");
         let spin = if matches!(spacetime, Spacetime::KerrKS) {
@@ -650,7 +650,8 @@ mod shell_flux_tests {
 
     #[test]
     fn excision_fill_reads_scale_derived_atmosphere() {
-        let (kernel, _) = excise_fill_gv();
+        let program = excise_fill_gv();
+        let kernel = program.kernel();
         assert!(
             kernel
                 .scalar_params()
@@ -669,7 +670,7 @@ mod shell_flux_tests {
     fn shell_flux_map_wires_the_diagnostic_radius_and_reads_the_flux_field() {
         // the cartesian kerr-schild shell reduction threads the diagnostic-radius level set + the
         // per-axis grid scalars, and reads the densitized mass flux; schwarzschild carries no spin.
-        let (k, writes) = shell_flux_map_gv(
+        let program = shell_flux_map_gv(
             Coords::Cartesian,
             Spacetime::SchwarzschildKS,
             &[Spacing::Uniform; 3],
@@ -677,6 +678,8 @@ mod shell_flux_tests {
             3,
             "mass_flux",
         );
+        let k = program.kernel();
+        let writes = program.writes();
         assert!(
             k.scalar_params().iter().any(|s| s == "diagnostic_radius"),
             "must wire diagnostic_radius: {:?}",
@@ -696,7 +699,7 @@ mod shell_flux_tests {
         assert_eq!(writes.len(), 1, "one scratch output per quantity pass");
 
         // the spinning-kerr chart adds the spin scalar.
-        let (kk, _) = shell_flux_map_gv(
+        let program = shell_flux_map_gv(
             Coords::Cartesian,
             Spacetime::KerrKS,
             &[Spacing::Uniform; 3],
@@ -704,6 +707,7 @@ mod shell_flux_tests {
             3,
             "nrg_flux",
         );
+        let kk = program.kernel();
         assert!(
             kk.scalar_params().iter().any(|s| s == "kerr_spin"),
             "spinning kerr carries the spin scalar"

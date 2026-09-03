@@ -16,16 +16,17 @@
 
 use std::fs;
 
-use symbi_discretize::GvKernel;
 use symbi_discretize::gv::{adiabatic_hllc_plus_flux_gv, rhd_c2p_gv};
 use symbi_discretize::{
     EosArm, ProlongOrder, Recon, field_lerp_multi_gv, refine_prolong_multi_1t_gv,
     refine_prolong_sweep_multi_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering};
+use symbi_ir::{KernelEmitInputs, KernelProgram, emit_kernel_from_lowering};
 
-fn emit_gv(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: KernelWrites) {
+fn emit_gv(out_dir: &str, name: &str, ndim: u8, program: KernelProgram) {
+    let k = program.kernel();
+    let writes = program.writes();
     assert!(
         !k.graph().has_errors(),
         "{name} graph errors: {:?}",
@@ -64,7 +65,7 @@ fn main() {
     // parabola stencil, the two velocity-jump dissipation rescalings and the
     // compression-gated flatten, all in one graph — the widest-stencil flux the device runs.
     for dir in 0..3u8 {
-        let (k, w) = adiabatic_hllc_plus_flux_gv::<3>(
+        let k = adiabatic_hllc_plus_flux_gv::<3>(
             dir,
             Recon::Ppm,
             symbi_discretize::coords::Balance::Plain,
@@ -76,7 +77,6 @@ fn main() {
             &format!("adiabatic_face_flux_hllc_plus_ppm_3d_{dir}"),
             3,
             k,
-            w,
         );
     }
 
@@ -85,27 +85,26 @@ fn main() {
     // one-tile prolong, and the three axis-split sweeps.
     let nd = 3usize;
     let ncomp = 5usize;
-    let (k, w) = field_lerp_multi_gv(nd, ncomp);
-    emit_gv(&out, "field_lerp_multi_5c_3d", 3, k, w);
-    let (k, w) = refine_prolong_multi_1t_gv(nd, 2, ProlongOrder::Quartic, ncomp);
-    emit_gv(&out, "refine_prolong_quartic_3d_5c_1t", 3, k, w);
+    let k = field_lerp_multi_gv(nd, ncomp);
+    emit_gv(&out, "field_lerp_multi_5c_3d", 3, k);
+    let k = refine_prolong_multi_1t_gv(nd, 2, ProlongOrder::Quartic, ncomp);
+    emit_gv(&out, "refine_prolong_quartic_3d_5c_1t", 3, k);
     for axis in 0..3usize {
-        let (k, w) = refine_prolong_sweep_multi_gv(nd, 2, ProlongOrder::Quartic, axis, ncomp);
+        let k = refine_prolong_sweep_multi_gv(nd, 2, ProlongOrder::Quartic, axis, ncomp);
         emit_gv(
             &out,
             &format!("refine_prolong_quartic_3d_5c_sw{axis}"),
             3,
             k,
-            w,
         );
         // the ppm-order sweep: the device-proven baseline for the same pass.
-        let (k, w) = refine_prolong_sweep_multi_gv(nd, 2, ProlongOrder::Ppm, axis, ncomp);
-        emit_gv(&out, &format!("refine_prolong_ppm_3d_5c_sw{axis}"), 3, k, w);
+        let k = refine_prolong_sweep_multi_gv(nd, 2, ProlongOrder::Ppm, axis, ncomp);
+        emit_gv(&out, &format!("refine_prolong_ppm_3d_5c_sw{axis}"), 3, k);
     }
 
     // the c2p that reported the NaN, for completeness of the standalone set.
-    let (k, w) = rhd_c2p_gv::<3>(20, EosArm::IdealGamma);
-    emit_gv(&out, "rhd_c2p_3d", 3, k, w);
+    let k = rhd_c2p_gv::<3>(20, EosArm::IdealGamma);
+    emit_gv(&out, "rhd_c2p_3d", 3, k);
 
     println!("done -> {out}");
 }

@@ -17,7 +17,7 @@ use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::Valencia;
-use symbi_ir::{KernelWrite, KernelWrites};
+use symbi_ir::{KernelProgram, KernelWrite, KernelWrites, trace_kernel};
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
 /// primitive (rho, v_{0,1,2}, pre, B_{0,1,2}) to the face, then the canonical
@@ -127,8 +127,8 @@ fn nmhd_flux_writes<'t>(flux: &MhdCons<Gv<'t>, 3>) -> KernelWrites {
     writes
 }
 
-pub fn nmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn nmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let (eos, left, right, nhat) = nmhd_reconstruct(cx, ndim, dir, coord_n);
         let flux = hlle(&NewtonianMhd, &eos, &left, &right, &nhat, Gv::ZERO);
         nmhd_flux_writes(&flux)
@@ -138,8 +138,8 @@ pub fn nmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrite
 /// NMHD HLLC face flux — `hllc_newtonian` (Li 2005, contact-resolving, transverse-B
 /// continuous) on the reconstructed L/R states. wave speeds inline, from the face states
 /// alone (the manifest stays free of ws_l/ws_r).
-pub fn nmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn nmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let (eos, left, right, nhat) = nmhd_reconstruct(cx, ndim, dir, coord_n);
         let flux = hllc_newtonian(
             &eos,
@@ -155,8 +155,8 @@ pub fn nmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Kernel
 
 /// NMHD HLLD face flux — `hlld_newtonian` (miyoshi-kusano 2005, full 5-wave). the
 /// robust solver: the algebraic c2p + this closed-form HLLD make orszag-tang stable.
-pub fn nmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn nmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let (eos, left, right, nhat) = nmhd_reconstruct(cx, ndim, dir, coord_n);
         let flux = hlld_newtonian(&eos, &left, &right, &nhat, Gv::ZERO);
         nmhd_flux_writes(&flux)
@@ -251,8 +251,8 @@ fn imhd_flux_writes<'t>(flux: &IsoMhdCons<Gv<'t>, 3>) -> KernelWrites {
 }
 
 /// isothermal-MHD HLLE face flux.
-pub fn imhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn imhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let (eos, left, right, nhat) = imhd_reconstruct(cx, ndim, dir, coord_n);
         let flux = hlle(&IsothermalMhd, &eos, &left, &right, &nhat, Gv::ZERO);
         imhd_flux_writes(&flux)
@@ -260,8 +260,8 @@ pub fn imhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrite
 }
 
 /// isothermal-MHD HLLD face flux — `hlld_isothermal` (mignone 2007, 3-state).
-pub fn imhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn imhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let (eos, left, right, nhat) = imhd_reconstruct(cx, ndim, dir, coord_n);
         let flux = hlld_isothermal(&eos, &left, &right, &nhat, Gv::ZERO);
         imhd_flux_writes(&flux)
@@ -531,7 +531,7 @@ fn euler_hlle_flux_gv<const D: usize, R>(
     coord_n: usize,
     recon: Recon,
     eos_arm: EosArm,
-) -> (GvKernel, KernelWrites)
+) -> KernelProgram
 where
     R: for<'t> Regime<
             Gv<'t>,
@@ -542,7 +542,7 @@ where
             Energy = symbi_hydro::energy::Adiabatic,
         >,
 {
-    trace(|cx| {
+    trace_kernel(|cx| {
         // gamma comes first in the manifest on every arm (under the taub-mathews closure it is
         // bound-but-inert, which keeps the ABI uniform, exactly as theta under ppm).
         let gamma = cx.scalar("gamma");
@@ -558,7 +558,7 @@ where
 /// the adiabatic (ideal-gas newtonian euler) face flux — `euler_hlle_flux_gv` at the
 /// `Newtonian` regime. replaces the cartesian `hlle_flux(.., has_energy=true)` builder.
 /// cartesian: ncomp == ndim == D, sweep coordinate == grid `dir`.
-pub fn adiabatic_flux_gv<const D: usize>(dir: u8, recon: Recon) -> (GvKernel, KernelWrites) {
+pub fn adiabatic_flux_gv<const D: usize>(dir: u8, recon: Recon) -> KernelProgram {
     euler_hlle_flux_gv::<D, _>(
         &Newtonian,
         D as u8,
@@ -572,7 +572,7 @@ pub fn adiabatic_flux_gv<const D: usize>(dir: u8, recon: Recon) -> (GvKernel, Ke
 /// the cyl r-z (axisymmetric swirl) adiabatic face flux: ncomp = 3 (v_phi swirl folds
 /// into KE) on a 2D (r, z) grid; the sweep coordinate is `axes[dir]` ([0, 2][dir] — grid
 /// axis 1 is the z coordinate). replaces the cyl r-z `hlle_flux` Expr builder.
-pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, KernelWrites) {
+pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> KernelProgram {
     let coord_n = [0usize, 2][dir as usize]; // (r, z) grid axes -> coordinates 0, 2
     euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n, Recon::Plm, EosArm::IdealGamma)
 }
@@ -581,7 +581,7 @@ pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, KernelWrites) {
 /// regime (relativistic U/F/wave speeds via mignone-bodo). replaces the `rhd_hlle_flux`
 /// Expr builder + `rhd_side`. cartesian-only (the rhd arm bakes on the cartesian chart),
 /// ncomp == ndim == D.
-pub fn rhd_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> (GvKernel, KernelWrites) {
+pub fn rhd_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> KernelProgram {
     euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize, Recon::Plm, eos_arm)
 }
 
@@ -600,7 +600,7 @@ pub fn rhd_flux_gr_gv<const D: usize>(
     spacing: &[Spacing],
     axes: &[usize],
     rusanov: bool,
-) -> (GvKernel, KernelWrites)
+) -> KernelProgram
 where
     for<'t> SchwarzschildKS<Gv<'t>>: Metric<Gv<'t>, D>,
     for<'t> SchwarzschildKSCartesian<Gv<'t>>: Metric<Gv<'t>, D>,
@@ -609,7 +609,7 @@ where
     for<'t> SchwarzschildKSCylindrical<Gv<'t>>: Metric<Gv<'t>, D>,
     for<'t> KerrKS<Gv<'t>>: Metric<Gv<'t>, D>,
 {
-    trace(|cx| {
+    trace_kernel(|cx| {
         // `D` is the momentum/velocity DOF; the reconstruction grid is `axes.len()` — they differ for
         // the spherical swirl (DOF = 3 on a 2D (r, theta) grid, out-of-plane v_phi reconstructed along
         // the gridded sweeps like any transverse component). the sweep normal is coordinate `axes[dir]`.
@@ -775,7 +775,7 @@ where
 /// type-system claim ([[isothermal.rs]]: "zero-overhead isothermal hydrodynamics via
 /// the energy model type system") at the gv-trace layer too. ncomp == ndim == D, sweep
 /// coordinate == grid `dir` (cartesian).
-pub fn iso_flux_gv<const D: usize>(dir: u8) -> (GvKernel, KernelWrites) {
+pub fn iso_flux_gv<const D: usize>(dir: u8) -> KernelProgram {
     iso_hlle_flux_gv::<D>(D as u8, dir, dir as usize)
 }
 
@@ -786,8 +786,8 @@ pub fn iso_flux_gv<const D: usize>(dir: u8) -> (GvKernel, KernelWrites) {
 /// (stencil shifts along grid axis `dir`); `coord_n` is the sweep coordinate (normal
 /// velocity is `vel[coord_n]`, pressure goes on momentum `coord_n`). cartesian: ndim ==
 /// D, coord_n == dir.
-fn iso_hlle_flux_gv<const D: usize>(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+fn iso_hlle_flux_gv<const D: usize>(ndim: u8, dir: u8, coord_n: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         // theta is the whole scalar tail — the isothermal closure is set by cs alone. the
         // substrate's dispatch_flux passes ISO_GAMMA, and `scalars_for` walks the kernel's
         // manifest asking for the declared scalars, so leaving gamma out here leaves it out
@@ -905,7 +905,7 @@ fn iso_hlle_flux_gv<const D: usize>(ndim: u8, dir: u8, coord_n: usize) -> (GvKer
 /// wave speeds + induction flux, all S::select-traceable). replaces the `rmhd_hlle_flux`
 /// Expr builder + `lower_rmhd_side`. RMHD vectors are 3-component on every grid; `ndim` selects the
 /// reconstruction grid + emit loop. writes the 8 conserved fluxes (D, S_k, tau, B_k).
-pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
+pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> KernelProgram {
     let (k, writes) = trace(|cx| {
         // scalar params in the substrate order: gamma (EOS) then theta (limiter compression).
         let gamma = cx.scalar("gamma");
@@ -1010,7 +1010,7 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrite
     // reconstructed prim + the 2 per-cell wave speeds), computed automatically from the trace.
     let stencil_keys = k.stencil_read_field_keys();
     if stencil_keys.is_empty() {
-        return (k, writes);
+        return KernelProgram::new(k, writes);
     }
     let mut halo = vec![0u8; ndim as usize];
     halo[dir as usize] = 2;
@@ -1018,7 +1018,7 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrite
         halo,
         tiled_field_keys: stencil_keys,
     });
-    (k, writes)
+    KernelProgram::new(k, writes)
 }
 
 /// the RMHD face flux on a curved spatial metric — the GRMHD path (valencia covariant U/F via
@@ -1043,7 +1043,7 @@ pub fn rmhd_flux_gr_gv(
     axes: &[usize],
     hlld: bool,
     rusanov: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     let ndim = axes.len();
     let (k, writes) = trace(|cx| {
         let coord_n = axes[dir as usize];
@@ -1368,7 +1368,7 @@ pub fn rmhd_flux_gr_gv(
 
     let stencil_keys = k.stencil_read_field_keys();
     if stencil_keys.is_empty() {
-        return (k, writes);
+        return KernelProgram::new(k, writes);
     }
     let mut halo = vec![0u8; ndim];
     halo[dir as usize] = 2;
@@ -1376,7 +1376,7 @@ pub fn rmhd_flux_gr_gv(
         halo,
         tiled_field_keys: stencil_keys,
     });
-    (k, writes)
+    KernelProgram::new(k, writes)
 }
 
 // =============================================================================
@@ -1406,8 +1406,8 @@ fn adiabatic_hllc_at_arm<const D: usize>(
     balance: Balance,
     coords: Coords,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let eos = IdealGas {
             gamma: cx.scalar("gamma"),
         };
@@ -1581,7 +1581,7 @@ pub fn adiabatic_hllc_plus_flux_gv<const D: usize>(
     balance: Balance,
     coords: Coords,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     adiabatic_hllc_at_arm::<D>(
         dir,
         recon,
@@ -1592,7 +1592,7 @@ pub fn adiabatic_hllc_plus_flux_gv<const D: usize>(
     )
 }
 
-pub fn adiabatic_hllc_flux_gv<const D: usize>(dir: u8, recon: Recon) -> (GvKernel, KernelWrites) {
+pub fn adiabatic_hllc_flux_gv<const D: usize>(dir: u8, recon: Recon) -> KernelProgram {
     adiabatic_hllc_at_arm::<D>(
         dir,
         recon,
@@ -1617,7 +1617,7 @@ pub fn adiabatic_hllc_wb_flux_gv<const D: usize>(
     recon: Recon,
     coords: Coords,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     adiabatic_hllc_at_arm::<D>(
         dir,
         recon,
@@ -1633,7 +1633,7 @@ pub fn adiabatic_hlle_wb_flux_gv<const D: usize>(
     recon: Recon,
     coords: Coords,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     adiabatic_hllc_at_arm::<D>(
         dir,
         recon,
@@ -1648,8 +1648,8 @@ fn rhd_hllc_at_arm<const D: usize>(
     dir: u8,
     smoother: ShockwaveLimiter,
     eos_arm: EosArm,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         // gamma keeps its first-in-manifest slot on every arm; under the taub-mathews closure
         // it is bound-but-inert, exactly as theta under ppm.
         let gamma = cx.scalar("gamma");
@@ -1670,7 +1670,7 @@ fn rhd_hllc_at_arm<const D: usize>(
 
 /// RHD HLLC face flux — mignone-bodo (2005) quadratic for the contact speed.
 /// mirrors `euler_hlle_flux_gv(&Rhd, ...)` but calls `riemann::hllc_rhd`.
-pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> (GvKernel, KernelWrites) {
+pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> KernelProgram {
     rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::Standard, eos_arm)
 }
 
@@ -1683,15 +1683,15 @@ pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> (GvKernel, 
 /// the low-mach accuracy term of the newtonian arm stays behind: separating the velocity-jump
 /// dissipation from the pressure-jump dissipation in the relativistic flux is its own
 /// derivation, and the defect it corrects is a subsonic one.
-pub fn rhd_hllc_plus_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> (GvKernel, KernelWrites) {
+pub fn rhd_hllc_plus_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> KernelProgram {
     rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::HllcPlus, eos_arm)
 }
 
 /// RMHD HLLC face flux — mignone-bodo (2006), null vs non-null normal B-field
 /// branch. mirrors `rmhd_flux_gv` (8-component MHD primitive) but routes the
 /// reconstructed L/R state through `riemann::hllc_rmhd`; `rmhd_flux_gv` routes through `hlle`.
-pub fn rmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let (eos, left, right, nhat) = nmhd_reconstruct(cx, ndim, dir, coord_n);
         let flux = hllc_rmhd(
             &Rmhd,
@@ -1711,8 +1711,8 @@ pub fn rmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Kernel
 /// for the 15-step secant on pressure (freeze-on-converged), eagerly computes
 /// HLLE as the divergence fallback, and selects via a success mask at the end.
 /// shares the MHD primitive shape with HLLE/HLLC.
-pub fn rmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let (eos, left, right, nhat) = nmhd_reconstruct(cx, ndim, dir, coord_n);
         let flux = hlld_rmhd(
             &Rmhd,

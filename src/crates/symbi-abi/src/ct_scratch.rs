@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 /// one of the two transverse grid axes of a CT edge or face pair, in the
 /// edge-relative frame (`a` = the first in-plane grid axis `g1`, `b` = `g2`).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Transverse {
     A,
     B,
@@ -40,7 +40,7 @@ pub enum Transverse {
 /// an edge-relative physical component: the two in-plane components of the
 /// edge's dual plane (cyclic order fixes the EMF sign) and the out-of-plane
 /// component.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum PlaneComp {
     P1,
     P2,
@@ -48,7 +48,7 @@ pub enum PlaneComp {
 }
 
 /// a validated physical vector component of the MHD 3-space (`< 3`).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct PhysComp(u8);
 
 impl PhysComp {
@@ -68,7 +68,7 @@ impl PhysComp {
 /// a validated grid axis of a `D`-dimensional mesh (`< D`). distinct from
 /// `PhysComp`: on a 1.5D/2.5D grid the momentum/B vector space outruns the
 /// grid, and conflating the two index spaces is the audited category error.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct GridAxis<const D: usize>(u8);
 
 impl<const D: usize> GridAxis<D> {
@@ -91,7 +91,7 @@ impl<const D: usize> GridAxis<D> {
 /// dimension at construction. the const-generic `GridAxis<D>` types the same
 /// space where the dimension is static; this form serves the builders whose
 /// `ndim` arrives as a value.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct SweepAxis(u8);
 
 impl SweepAxis {
@@ -112,7 +112,7 @@ impl SweepAxis {
 
 /// cell-centered CT scratch roles: the edge-relative primitive/cell-B reads and
 /// the FOFC troubled-cell flag.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum CtCellCt {
     BCell(PlaneComp),
     Vel(PlaneComp),
@@ -128,7 +128,7 @@ pub enum CtCellCt {
 /// left/right signal speeds. the transverse roles live on the faces normal to
 /// the edge's two in-plane grid axes; the sweep roles live on the dispatch
 /// direction's faces.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum CtFaceCt {
     BFace(Transverse),
     BFaceSweep,
@@ -144,7 +144,7 @@ pub enum CtFaceCt {
 /// edge-centered CT scratch roles: the edge EMF (one semantic identity across
 /// its ABI spellings), the two incident-edge reads of a face curl, the saved
 /// high-order EMF the FOFC splice restores, and the RK2 stage snapshot.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum CtEdgeCt {
     Emf,
     EmfIncident(Transverse),
@@ -155,7 +155,7 @@ pub enum CtEdgeCt {
 /// the CT scratch role: what a reserved wire name means and where its buffer
 /// lives on the staggered mesh. the dispatch binder and the centering laws
 /// match on this; the wire spelling is presentation.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum CtScratch {
     Cell(CtCellCt),
     Face(CtFaceCt),
@@ -181,7 +181,7 @@ impl From<CtEdgeCt> for CtScratch {
 /// a reserved CT wire name: the exact string a kernel port renders as on the
 /// manifest. the full set is closed; `parse` recognizes these spellings alone,
 /// so a derived SSA key or a typo stays outside the typed vocabulary.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum CtWireName {
     BFaceA,
     BFaceB,
@@ -421,7 +421,7 @@ impl CtWireName {
 /// spelling it renders as. equality includes the wire, so two ports of one
 /// identity stay distinct entries in a manifest; the role is what the
 /// centering laws and the dispatch binder consume.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CtScratchKey {
     role: CtScratch,
     wire: CtWireName,
@@ -559,7 +559,7 @@ impl From<CtEdgeCt> for CtScratchKey {
 /// bare rendered string, so the manifest bytes are those of the plain string
 /// the arm carried before the vocabulary was typed; deserialization
 /// re-classifies at the same chokepoint.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[serde(into = "String", from = "String")]
 pub enum ScratchKey {
     Ct(CtScratchKey),

@@ -224,6 +224,178 @@ impl KernelWrite {
 /// the named write-effect manifest used by kernel composition.
 pub type KernelWrites = Vec<KernelWrite>;
 
+/// an executable kernel: a trace graph and its writes, owned inseparably. the
+/// bare `GvKernel` is the trace graph alone (a generic `trace<R>` product that
+/// need not be a kernel); a `KernelProgram` is the graph paired with the writes
+/// that make it executable, and every public compilation and fusion door takes
+/// this owner rather than a graph and an independently supplied write vector.
+/// the pairing is validated once, at construction, so no caller can pair a
+/// graph with out-of-bounds write roots, duplicate output keys, or duplicate
+/// write destinations.
+#[derive(Clone, Debug)]
+pub struct KernelProgram {
+    kernel: GvKernel,
+    writes: KernelWrites,
+}
+
+impl KernelProgram {
+    /// pair a graph with its writes. validates that every write root is a node
+    /// in bounds for this graph and that both the output keys and the write
+    /// destinations are unique; the write order and destinations are carried
+    /// through unchanged. a program with no writes is lawful.
+    ///
+    /// the write-root check proves the root index addresses a node of this graph
+    /// (a bound, not a provenance proof — a builder pairs the graph and writes a
+    /// single trace produces, so they share a graph by construction). unique
+    /// destinations reject output aliasing at construction, ahead of the runtime
+    /// binding that treats two outputs on one buffer as invalid.
+    pub fn new(kernel: GvKernel, writes: KernelWrites) -> Self {
+        let node_count = kernel.graph.len() as u32;
+        let mut keys: std::collections::HashSet<&str> =
+            std::collections::HashSet::with_capacity(writes.len());
+        let mut destinations: std::collections::HashSet<&FieldBind> =
+            std::collections::HashSet::with_capacity(writes.len());
+        for w in &writes {
+            assert!(
+                w.value.0 < node_count,
+                "kernel program: write root for {:?} is node {} out of bounds for its graph of {} nodes",
+                w.destination,
+                w.value.0,
+                node_count
+            );
+            assert!(
+                keys.insert(w.key.as_str()),
+                "kernel program: duplicate output key {:?} — two writes target one manifest slot",
+                w.key
+            );
+            assert!(
+                destinations.insert(&w.destination),
+                "kernel program: duplicate write destination {:?} — two outputs target one buffer",
+                w.destination
+            );
+        }
+        Self { kernel, writes }
+    }
+
+    /// the trace graph.
+    pub fn kernel(&self) -> &GvKernel {
+        &self.kernel
+    }
+
+    /// the write manifest, in binding order.
+    pub fn writes(&self) -> &KernelWrites {
+        &self.writes
+    }
+
+    /// the program books no writes. this reports the output count alone; the
+    /// proven structural identity of fusion is [`KernelProgram::noop`], whose
+    /// graph and signature are also empty.
+    pub fn has_no_outputs(&self) -> bool {
+        self.writes.is_empty()
+    }
+
+    /// reclaim the bare graph, dropping the writes. the semantic ownership door
+    /// for a consumer that needs the graph alone; the writes stay sealed inside
+    /// a `KernelProgram` and never escape as a loose pair.
+    pub fn into_kernel(self) -> GvKernel {
+        self.kernel
+    }
+
+    /// the identity element for fusion at the given grade: an empty graph with
+    /// no writes. `try_fuse(KernelProgram::noop(g), k) == k` for any tagged `k`
+    /// with `k.grade() == g`.
+    pub fn noop(grade: LaunchGrade) -> KernelProgram {
+        KernelProgram::new(GvKernel::noop(grade), Vec::new())
+    }
+
+    /// the read/write character of this kernel, derived from its own manifest:
+    /// each field input is a read, each write destination is a write, and a field
+    /// in both is held in place. every read carries the conservative `Unbounded`
+    /// footprint — the per-axis reach is a property of the prepared (scalarized)
+    /// form, so the unprepared program never claims a precision it has not
+    /// measured.
+    pub fn effects(&self) -> crate::effects::Effects {
+        let reads = self
+            .kernel
+            .field_inputs()
+            .iter()
+            .map(|(_, path)| (path.clone(), crate::effects::ReadFootprint::Unbounded));
+        let writes = self.writes.iter().map(|w| w.destination.clone());
+        crate::effects::Effects::normalized(reads, writes)
+    }
+}
+
+#[cfg(test)]
+mod kernel_program_laws {
+    use super::*;
+    use symbi_abi::FieldRef;
+    use symbi_algebra::{Space, domain};
+
+    fn a_grade() -> LaunchGrade {
+        LaunchGrade::from_domain(&domain([Space {
+            name: "i",
+            lo: 0,
+            hi: 4,
+        }]))
+    }
+
+    fn one_write_kernel() -> (GvKernel, KernelWrites) {
+        trace(|cx: TraceCx| {
+            let x = cx.field("x", FieldRef::cons_den());
+            vec![KernelWrite::new("out", FieldRef::Scratch, x.node())]
+        })
+    }
+
+    #[test]
+    fn a_valid_pairing_owns_the_graph_and_its_writes_in_order() {
+        let (k, w) = one_write_kernel();
+        let n = w.len();
+        let dest0 = w[0].destination.clone();
+        let program = KernelProgram::new(k, w);
+        assert!(!program.has_no_outputs());
+        assert_eq!(program.writes().len(), n);
+        // the write order and destinations survive the pairing unchanged.
+        assert_eq!(program.writes()[0].destination, dest0);
+    }
+
+    #[test]
+    fn a_program_with_no_writes_is_lawful() {
+        let program = KernelProgram::noop(a_grade());
+        assert!(program.has_no_outputs());
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn a_write_root_out_of_bounds_is_rejected() {
+        // noop carries an empty graph, so any node id is out of bounds for it.
+        let k = GvKernel::noop(a_grade());
+        let writes = vec![KernelWrite::new("out", FieldRef::Scratch, NodeId(0))];
+        let _ = KernelProgram::new(k, writes);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate output key")]
+    fn two_writes_to_one_output_key_are_rejected() {
+        let (k, mut w) = one_write_kernel();
+        let node = w[0].value;
+        // a second write reusing the key but a distinct destination isolates the
+        // output-key check from the destination check.
+        w.push(KernelWrite::new("out", FieldRef::PrimRho, node));
+        let _ = KernelProgram::new(k, w);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate write destination")]
+    fn two_writes_to_one_destination_are_rejected() {
+        let (k, mut w) = one_write_kernel();
+        let node = w[0].value;
+        let dest = w[0].destination.clone();
+        // a distinct output key targeting the same buffer is output aliasing.
+        w.push(KernelWrite::new("out2", dest, node));
+        let _ = KernelProgram::new(k, w);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum FusionError {
     /// the two kernels declare different launch grades. fusing would dispatch
@@ -397,6 +569,27 @@ pub fn trace_for_domain<const D: usize, R>(
     f: impl for<'t> FnOnce(TraceCx<'t>) -> R,
 ) -> (GvKernel, R) {
     trace_with(LaunchGrade::from_domain(d), f)
+}
+
+/// trace a closure that assembles the kernel's named write effects, pairing the
+/// resulting graph with those writes into one validated [`KernelProgram`]. this
+/// is the door for an executable kernel: the graph and its writes are born
+/// together and never handed out as a separable tuple.
+pub fn trace_kernel(
+    f: impl for<'t> FnOnce(TraceCx<'t>) -> KernelWrites,
+) -> KernelProgram {
+    let (kernel, writes) = trace(f);
+    KernelProgram::new(kernel, writes)
+}
+
+/// [`trace_kernel`], with the finished program tagged with the launch grade of
+/// the given `Domain<D>`. only tagged programs participate in fusion.
+pub fn trace_kernel_for_domain<const D: usize>(
+    d: &Domain<D>,
+    f: impl for<'t> FnOnce(TraceCx<'t>) -> KernelWrites,
+) -> KernelProgram {
+    let (kernel, writes) = trace_for_domain(d, f);
+    KernelProgram::new(kernel, writes)
 }
 
 /// the underlying open-run-close. exposed for callers that already hold a
@@ -693,24 +886,22 @@ impl GvKernel {
         keys
     }
 
-    /// the identity element for the fusion monoid at the given grade. an
-    /// empty graph with empty writes and reads. `try_fuse(noop(g), k) == k` for any
-    /// tagged `k` with `k.grade == g` (identity law).
-    pub fn noop(grade: LaunchGrade) -> (GvKernel, KernelWrites) {
-        (
-            GvKernel {
-                graph: Graph::new(),
-                field_inputs: Vec::new(),
-                scalar_params: Vec::new(),
-                coord_components: Vec::new(),
-                grade,
-                numerical_policy: NumericalPolicy::StrictIeee,
-                tile_spec: None,
-                output_support: None,
-                node_supports: std::collections::HashMap::new(),
-            },
-            Vec::new(),
-        )
+    /// the empty graph at the given grade — no reads, no arithmetic. paired with
+    /// empty writes by [`KernelProgram::noop`], it is the identity element of the
+    /// fusion monoid: `try_fuse(KernelProgram::noop(g), k) == k` for any tagged
+    /// `k` with `k.grade == g`.
+    pub fn noop(grade: LaunchGrade) -> GvKernel {
+        GvKernel {
+            graph: Graph::new(),
+            field_inputs: Vec::new(),
+            scalar_params: Vec::new(),
+            coord_components: Vec::new(),
+            grade,
+            numerical_policy: NumericalPolicy::StrictIeee,
+            tile_spec: None,
+            output_support: None,
+            node_supports: std::collections::HashMap::new(),
+        }
     }
 
     /// builder-style: attach a smem tile spec. validates that every tiled key
@@ -817,13 +1008,22 @@ fn collect_support_params(e: &crate::support::ParamExpr, f: &mut impl FnMut(&str
 /// preserve the original ordering: all of a's writes (with NodeIds unchanged,
 /// since the fused graph starts as a clone of a's graph), then all of b's
 /// writes with NodeIds remapped through the splice.
-pub fn try_fuse(
-    a: GvKernel,
-    a_writes: KernelWrites,
-    b: GvKernel,
-    b_writes: KernelWrites,
-) -> Result<(GvKernel, KernelWrites), FusionError> {
+pub fn try_fuse(a: KernelProgram, b: KernelProgram) -> Result<KernelProgram, FusionError> {
     use crate::passes::splice::splice_graph;
+
+    // project the read/write conflict queries from each program's authoritative
+    // effect set, then open each owner's private fields for the structural merge;
+    // the fused pair is re-sealed into one program at the end.
+    let a_fx = a.effects();
+    let b_fx = b.effects();
+    let KernelProgram {
+        kernel: a,
+        writes: a_writes,
+    } = a;
+    let KernelProgram {
+        kernel: b,
+        writes: b_writes,
+    } = b;
 
     // law: grade-equality + tagged-only.
     if !a.grade.is_tagged() || !b.grade.is_tagged() {
@@ -853,18 +1053,17 @@ pub fn try_fuse(
         });
     }
 
-    // law: disjoint writes. compare semantic field identities; render a name only for diagnostics.
-    let a_write_paths: HashSet<FieldBind> = a_writes
-        .iter()
-        .map(|write| write.destination.clone())
-        .collect();
-    let b_write_paths: HashSet<FieldBind> = b_writes
-        .iter()
-        .map(|write| write.destination.clone())
-        .collect();
-    if let Some(p) = a_write_paths.intersection(&b_write_paths).next() {
+    // the data dependences from a into b, named per shared resource.
+    let deps = a_fx.dependences_into(&b_fx);
+
+    // law: disjoint writes. a resource both kernels write (a write-write hazard)
+    // would race in a fused launch; render a name only for diagnostics.
+    if let Some(resource) = deps.iter().find_map(|d| match d {
+        crate::effects::Dependence::Waw { resource } => Some(resource),
+        _ => None,
+    }) {
         return Err(FusionError::WriteConflict {
-            runtime_path: p.name(),
+            runtime_path: resource.name(),
         });
     }
 
@@ -877,29 +1076,31 @@ pub fn try_fuse(
     // bc_k in place, both off the timestep's pre-state; excluding the writer's in-place fields
     // lets that pair fuse safely. fusion joins same-stage kernels, so the reader always wants the
     // pre-state. the disjoint-writes law above still holds, keeping every fused output
-    // single-writer. both sides compare the born-typed `FieldBind`, so aliases classified to the
+    // single-writer. resource identity is the born-typed `FieldBind`, so aliases classified to the
     // same `FieldRef` cannot evade dependency detection.
-    let a_input_paths: HashSet<FieldBind> = a.field_inputs.iter().map(|(_, p)| p.clone()).collect();
-    let b_input_paths: HashSet<FieldBind> = b.field_inputs.iter().map(|(_, p)| p.clone()).collect();
-    let a_inplace: HashSet<&FieldBind> = a_write_paths.intersection(&a_input_paths).collect();
-    let b_inplace: HashSet<&FieldBind> = b_write_paths.intersection(&b_input_paths).collect();
-    if let Some(p) = a_write_paths
-        .intersection(&b_input_paths)
-        .find(|p| !a_inplace.contains(p))
-    {
-        return Err(FusionError::InterDep {
-            written: p.name(),
-            read: p.name(),
-        });
+    let a_inplace: HashSet<&crate::effects::Resource> = a_fx.in_place().collect();
+    let b_inplace: HashSet<&crate::effects::Resource> = b_fx.in_place().collect();
+    // a writes X, b reads X: a read-after-write hazard unless a holds X in place.
+    for dep in &deps {
+        if let crate::effects::Dependence::Raw { resource } = dep {
+            if !a_inplace.contains(&resource) {
+                return Err(FusionError::InterDep {
+                    written: resource.name(),
+                    read: resource.name(),
+                });
+            }
+        }
     }
-    if let Some(p) = b_write_paths
-        .intersection(&a_input_paths)
-        .find(|p| !b_inplace.contains(p))
-    {
-        return Err(FusionError::InterDep {
-            written: p.name(),
-            read: p.name(),
-        });
+    // b writes X, a reads X: the symmetric hazard unless b holds X in place.
+    for dep in &deps {
+        if let crate::effects::Dependence::War { resource } = dep {
+            if !b_inplace.contains(&resource) {
+                return Err(FusionError::InterDep {
+                    written: resource.name(),
+                    read: resource.name(),
+                });
+            }
+        }
     }
 
     // structural merge: clone a's graph as the target. a's writes carry
@@ -978,7 +1179,7 @@ pub fn try_fuse(
         });
     }
 
-    Ok((fused, fused_writes))
+    Ok(KernelProgram::new(fused, fused_writes))
 }
 
 /// intern (or reuse) the synthetic `_coord_N` I32 param for spatial axis `ax`, recording
@@ -1742,11 +1943,13 @@ mod fusion_laws {
     #[test]
     fn fusion_rejects_mixed_numerical_theories() {
         let grade = interior_grade();
-        let (a, aw) = GvKernel::noop(grade.clone());
-        let (b, bw) = GvKernel::noop(grade);
-        let b = b.with_numerical_policy(NumericalPolicy::FiniteOnly);
+        let a = GvKernel::noop(grade.clone());
+        let b = GvKernel::noop(grade).with_numerical_policy(NumericalPolicy::FiniteOnly);
         assert!(matches!(
-            try_fuse(a, aw, b, bw),
+            try_fuse(
+                KernelProgram::new(a, Vec::new()),
+                KernelProgram::new(b, Vec::new())
+            ),
             Err(FusionError::NumericalPolicyMismatch { .. })
         ));
     }
@@ -1799,22 +2002,26 @@ mod fusion_laws {
         let baseline = manifest_sets(&k, &w);
 
         // left identity: fuse(noop(g), k) == k
-        let (noop_k, noop_w) = GvKernel::noop(g.clone());
-        let (left, left_w) =
-            try_fuse(noop_k, noop_w, k.clone(), w.clone()).expect("fuse(noop, k) must succeed");
+        let left = try_fuse(
+            KernelProgram::noop(g.clone()),
+            KernelProgram::new(k.clone(), w.clone()),
+        )
+        .expect("fuse(noop, k) must succeed");
         assert_eq!(
             baseline,
-            manifest_sets(&left, &left_w),
+            manifest_sets(left.kernel(), left.writes()),
             "left-identity violated: fuse(noop(g), k) changed the manifest"
         );
 
         // right identity: fuse(k, noop(g)) == k
-        let (noop_k2, noop_w2) = GvKernel::noop(g);
-        let (right, right_w) =
-            try_fuse(k.clone(), w.clone(), noop_k2, noop_w2).expect("fuse(k, noop) must succeed");
+        let right = try_fuse(
+            KernelProgram::new(k.clone(), w.clone()),
+            KernelProgram::noop(g),
+        )
+        .expect("fuse(k, noop) must succeed");
         assert_eq!(
             baseline,
-            manifest_sets(&right, &right_w),
+            manifest_sets(right.kernel(), right.writes()),
             "right-identity violated: fuse(k, noop(g)) changed the manifest"
         );
     }
@@ -1829,15 +2036,20 @@ mod fusion_laws {
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g.clone());
         let (c, cw) = doubler("c_in", "p.c_in", "c_out", "p.c_out", g);
 
-        let (ab, abw) = try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone()).expect("fuse(a, b)");
-        let (ab_c, ab_cw) = try_fuse(ab, abw, c.clone(), cw.clone()).expect("fuse(fuse(a, b), c)");
+        let ab = try_fuse(
+            KernelProgram::new(a.clone(), aw.clone()),
+            KernelProgram::new(b.clone(), bw.clone()),
+        )
+        .expect("fuse(a, b)");
+        let ab_c = try_fuse(ab, KernelProgram::new(c.clone(), cw.clone()))
+            .expect("fuse(fuse(a, b), c)");
 
-        let (bc, bcw) = try_fuse(b, bw, c, cw).expect("fuse(b, c)");
-        let (a_bc, a_bcw) = try_fuse(a, aw, bc, bcw).expect("fuse(a, fuse(b, c))");
+        let bc = try_fuse(KernelProgram::new(b, bw), KernelProgram::new(c, cw)).expect("fuse(b, c)");
+        let a_bc = try_fuse(KernelProgram::new(a, aw), bc).expect("fuse(a, fuse(b, c))");
 
         assert_eq!(
-            manifest_sets(&ab_c, &ab_cw),
-            manifest_sets(&a_bc, &a_bcw),
+            manifest_sets(ab_c.kernel(), ab_c.writes()),
+            manifest_sets(a_bc.kernel(), a_bc.writes()),
             "associativity violated",
         );
     }
@@ -1851,12 +2063,16 @@ mod fusion_laws {
         let (a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", g.clone());
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
 
-        let (ab, abw) = try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone()).expect("fuse(a, b)");
-        let (ba, baw) = try_fuse(b, bw, a, aw).expect("fuse(b, a)");
+        let ab = try_fuse(
+            KernelProgram::new(a.clone(), aw.clone()),
+            KernelProgram::new(b.clone(), bw.clone()),
+        )
+        .expect("fuse(a, b)");
+        let ba = try_fuse(KernelProgram::new(b, bw), KernelProgram::new(a, aw)).expect("fuse(b, a)");
 
         assert_eq!(
-            manifest_sets(&ab, &abw),
-            manifest_sets(&ba, &baw),
+            manifest_sets(ab.kernel(), ab.writes()),
+            manifest_sets(ba.kernel(), ba.writes()),
             "commutativity (mod-disjoint) violated"
         );
     }
@@ -1873,19 +2089,20 @@ mod fusion_laws {
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
         let a_roots: Vec<NodeId> = aw.iter().map(|write| write.value).collect();
 
-        let (fused, fused_w) = try_fuse(a, aw, b, bw).expect("fuse(a, b)");
+        let fused = try_fuse(KernelProgram::new(a, aw), KernelProgram::new(b, bw)).expect("fuse(a, b)");
 
         // a's writes preserved verbatim at the head of the writes manifest.
         for (i, &a_root) in a_roots.iter().enumerate() {
             assert_eq!(
-                fused_w[i].value, a_root,
+                fused.writes()[i].value,
+                a_root,
                 "a-write root #{i} was renumbered; equivalence broken"
             );
         }
 
         // every fused write root is a valid node in the fused graph.
-        let n_nodes = fused.graph.len();
-        for write in &fused_w {
+        let n_nodes = fused.kernel().graph().len();
+        for write in fused.writes() {
             assert!(
                 (write.value.0 as usize) < n_nodes,
                 "fused write {}@{} has dangling NodeId {:?}",
@@ -1902,7 +2119,7 @@ mod fusion_laws {
         let (a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", interior_grade());
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", edge_grade());
 
-        match try_fuse(a, aw, b, bw) {
+        match try_fuse(KernelProgram::new(a, aw), KernelProgram::new(b, bw)) {
             Err(FusionError::GradeMismatch { .. }) => {}
             other => panic!("expected GradeMismatch, got {other:?}"),
         }
@@ -1921,11 +2138,11 @@ mod fusion_laws {
         );
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", interior_grade());
 
-        match try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone()) {
+        match try_fuse(KernelProgram::new(a.clone(), aw.clone()), KernelProgram::new(b.clone(), bw.clone())) {
             Err(FusionError::UntaggedKernel) => {}
             other => panic!("expected UntaggedKernel, got {other:?}"),
         }
-        match try_fuse(b, bw, a, aw) {
+        match try_fuse(KernelProgram::new(b, bw), KernelProgram::new(a, aw)) {
             Err(FusionError::UntaggedKernel) => {}
             other => panic!("expected UntaggedKernel (symmetric), got {other:?}"),
         }
@@ -1939,7 +2156,7 @@ mod fusion_laws {
         let (a, aw) = doubler("a_in", "p.a_in", "shared_out", "p.shared", g.clone());
         let (b, bw) = doubler("b_in", "p.b_in", "shared_out", "p.shared", g);
 
-        match try_fuse(a, aw, b, bw) {
+        match try_fuse(KernelProgram::new(a, aw), KernelProgram::new(b, bw)) {
             Err(FusionError::WriteConflict { runtime_path }) => {
                 assert_eq!(runtime_path, "p.shared");
             }
@@ -1958,7 +2175,7 @@ mod fusion_laws {
         // b: reads p.shared (what a just wrote), writes p.b_out
         let (b, bw) = doubler("b_in", "p.shared", "b_out", "p.b_out", g);
 
-        match try_fuse(a, aw, b, bw) {
+        match try_fuse(KernelProgram::new(a, aw), KernelProgram::new(b, bw)) {
             Err(FusionError::InterDep { written, .. }) => {
                 assert_eq!(written, "p.shared");
             }
@@ -1976,7 +2193,7 @@ mod fusion_laws {
         // b: writes p.shared (what a is reading from)
         let (b, bw) = doubler("b_in", "p.src", "shared_out", "p.shared", g);
 
-        match try_fuse(a, aw, b, bw) {
+        match try_fuse(KernelProgram::new(a, aw), KernelProgram::new(b, bw)) {
             Err(FusionError::InterDep { written, .. }) => {
                 assert_eq!(written, "p.shared");
             }
@@ -2048,9 +2265,10 @@ mod fusion_laws {
         };
         a.tile_spec = Some(spec.clone());
         b.tile_spec = Some(spec.clone());
-        let (fused, _w) = try_fuse(a, aw, b, bw).expect("matched tile specs must fuse");
+        let fused = try_fuse(KernelProgram::new(a, aw), KernelProgram::new(b, bw))
+            .expect("matched tile specs must fuse");
         assert_eq!(
-            fused.tile_spec,
+            fused.kernel().tile_spec,
             Some(spec),
             "fused kernel must carry the shared spec"
         );
@@ -2067,7 +2285,7 @@ mod fusion_laws {
             halo: vec![2],
             tiled_field_keys: vec!["a_in".into()],
         });
-        match try_fuse(a, aw, b, bw) {
+        match try_fuse(KernelProgram::new(a, aw), KernelProgram::new(b, bw)) {
             Err(FusionError::TileSpecMismatch { a, b }) => {
                 assert!(
                     a.is_some() && b.is_none(),
@@ -2093,7 +2311,7 @@ mod fusion_laws {
             halo: vec![3],
             tiled_field_keys: vec!["b_in".into()],
         });
-        match try_fuse(a, aw, b, bw) {
+        match try_fuse(KernelProgram::new(a, aw), KernelProgram::new(b, bw)) {
             Err(FusionError::TileSpecMismatch { .. }) => {}
             other => panic!("expected TileSpecMismatch, got {other:?}"),
         }
@@ -2157,8 +2375,12 @@ mod fusion_laws {
         let g = interior_grade();
         let (a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", g.clone());
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
-        let (fused, _w) = try_fuse(a, aw, b, bw).expect("legacy untiled fusion must still work");
-        assert!(fused.tile_spec.is_none(), "untiled+untiled -> untiled");
+        let fused = try_fuse(KernelProgram::new(a, aw), KernelProgram::new(b, bw))
+            .expect("legacy untiled fusion must still work");
+        assert!(
+            fused.kernel().tile_spec.is_none(),
+            "untiled+untiled -> untiled"
+        );
     }
 }
 

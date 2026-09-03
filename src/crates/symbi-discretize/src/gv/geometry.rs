@@ -10,7 +10,7 @@ use symbi_geometry::{
     Geometry, KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
     SchwarzschildKSCartesian, SchwarzschildKSCylindrical, volume_weighted_centroid,
 };
-use symbi_ir::{KernelWrite, KernelWrites, TraceCx, trace};
+use symbi_ir::{KernelProgram, KernelWrite, TraceCx, trace_kernel};
 
 /// one cartesian-uniform finite-volume divergence sum over the gridded axes:
 /// `sum_i (F_i[coord+e_i] - F_i[coord]) / dx_i`. `base` names the per-direction flux field
@@ -901,12 +901,8 @@ fn cylindrical_geometry_gv<'t>(
 /// the geometry probe: write `inv_volume` + the dir-0 lo/hi face
 /// areas + the dir-0 volume-weighted centroid, so a host test bit-diffs them against the
 /// analytic formulas (incl. log spacing). identity axes (the probe is always natural-order).
-pub fn geometry_probe_gv(
-    coords: Coords,
-    spacing: &[Spacing],
-    ndim: usize,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn geometry_probe_gv(coords: Coords, spacing: &[Spacing], ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let axes: Vec<usize> = (0..ndim).collect();
         let g = cell_geometry_gv(cx, coords, spacing, &axes, ndim);
         vec![

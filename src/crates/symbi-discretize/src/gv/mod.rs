@@ -43,7 +43,7 @@ use symbi_ir::{FieldBind, FieldRef};
 
 // the carrier + trace live alongside Op + Graph in symbi-ir. the builders below
 // instantiate carrier-generic symbi-hydro physics at S = Gv and trace it into the IR.
-use symbi_ir::{Gv, GvKernel, MeshScalar, TileSpec, TraceCx, trace};
+use symbi_ir::{Gv, MeshScalar, TileSpec, TraceCx, trace};
 
 use super::coords::{Coords, EosArm, Recon, Spacetime, Spacing};
 
@@ -519,7 +519,8 @@ mod tests {
         // the rmhd flux builder declares an explicit per-axis slab tile
         // (halo on the reconstruction axis `dir`, 0 transverse). a pointwise
         // kernel (same-cell reads only) leaves the spec absent -> infers None.
-        let (flux, _) = rmhd_flux_gv(1, 0, 0);
+        let program = rmhd_flux_gv(1, 0, 0);
+        let flux = program.kernel();
         assert!(
             !flux.coord_components().is_empty(),
             "flux must be a stencil kernel"
@@ -532,7 +533,8 @@ mod tests {
         );
         assert!(!ts.tiled_field_keys.is_empty(), "tiled fields populated");
 
-        let (c2p, _) = rmhd_c2p_gv(100);
+        let program = rmhd_c2p_gv(100);
+        let c2p = program.kernel();
         assert!(
             c2p.coord_components().is_empty(),
             "c2p must be pointwise (same-cell)"
@@ -547,7 +549,9 @@ mod tests {
     fn adiabatic_c2p_traces_the_real_physics_to_a_kernel() {
         // the payoff: symbi-hydro's adiabatic c2p, run at S=Gv, yields a dispatchable
         // kernel — the right ABI manifest + the right writes — entirely from the traced physics.
-        let (k, writes) = adiabatic_c2p_gv::<1>();
+        let program = adiabatic_c2p_gv::<1>();
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(
             k.field_inputs()
                 .iter()
@@ -585,7 +589,7 @@ mod tests {
         let mk = |v: f64| symbi_ir::SourceProgram::trace(|cx| vec![cx.lit(v)]);
         let (rho, vel, pre) = (mk(2.0), mk(0.5), mk(1.0));
         let sources = [("den", &rho), ("mom", &vel), ("nrg", &pre)];
-        let (k, writes) = boundary_fill_from_built_gv(
+        let program = boundary_fill_from_built_gv(
             Coords::Cartesian,
             &[Spacing::Uniform],
             &[0],
@@ -594,6 +598,8 @@ mod tests {
             true,
             &sources,
         );
+        let k = program.kernel();
+        let writes = program.writes();
         assert!(
             !k.graph().has_errors(),
             "graph errors: {:?}",
@@ -639,7 +645,7 @@ mod tests {
             ("nrg", &nrg),
             ("bcell", &bcell),
         ];
-        let (k, writes) = boundary_fill_from_built_gv(
+        let program = boundary_fill_from_built_gv(
             Coords::Spherical,
             &[Spacing::Log, Spacing::Uniform],
             &[0, 1],
@@ -648,6 +654,8 @@ mod tests {
             true,
             &sources,
         );
+        let k = program.kernel();
+        let writes = program.writes();
         assert!(
             !k.graph().has_errors(),
             "graph errors: {:?}",
@@ -747,7 +755,9 @@ mod tests {
         // consuming the prescribed cs^2 field) at S = Gv: rho = den, vel = mom/den, pre = cs2*rho.
         // cs2 is a per-cell field (the prescribed temperature), which is what makes the run
         // locally isothermal (cs varies per cell). a global run supplies a uniform cs2.
-        let (k, writes) = iso_c2p_gv::<1>();
+        let program = iso_c2p_gv::<1>();
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(
             k.field_inputs()
                 .iter()
@@ -803,7 +813,9 @@ mod tests {
         // is a single Op::IterateInline (body traced once), so the deep newton stays folded
         // instead of unfolding into an exponential tree. the manifest + writes match the retired
         // `rhd_c2p` Expr builder.
-        let (k, writes) = rhd_c2p_gv::<1>(20, EosArm::IdealGamma);
+        let program = rhd_c2p_gv::<1>(20, EosArm::IdealGamma);
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(
             k.field_inputs()
                 .iter()
@@ -861,7 +873,9 @@ mod tests {
         // S=Gv yields a dispatchable kernel — 8 conserved reads + gamma, the 4 prim writes,
         // and the bracketed solve as a multi-accumulator IterateInline (the false-position's
         // 6-state bracket). proves iterate_vec carries the carrier-generic RMHD c2p.
-        let (k, writes) = rmhd_c2p_gv(100);
+        let program = rmhd_c2p_gv(100);
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(
             k.field_inputs()
                 .iter()
@@ -918,7 +932,9 @@ mod tests {
         // carrier-generic riemann::hlle (-> Select branches). proves cx.field_shifted +
         // symbi-hydro's hlle build a dispatchable face-flux kernel — no rhd_side-style
         // hand-written per-component U/F. manifest + writes match the substrate hlle_flux.
-        let (k, writes) = adiabatic_flux_gv::<1>(0, Recon::Plm);
+        let program = adiabatic_flux_gv::<1>(0, Recon::Plm);
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(
             k.field_inputs()
                 .iter()
@@ -970,7 +986,9 @@ mod tests {
     fn rhd_flux_traces_the_relativistic_hlle_to_a_kernel() {
         // same PLM + riemann::hlle pattern at the Rhd regime (relativistic U/F/wave speeds).
         // the only change from adiabatic is the regime — one HLLE source, two physics.
-        let (k, writes) = rhd_flux_gv::<1>(0, EosArm::IdealGamma);
+        let program = rhd_flux_gv::<1>(0, EosArm::IdealGamma);
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(
             k.field_inputs()
                 .iter()
@@ -1014,7 +1032,9 @@ mod tests {
         // so it reconstructs prim.pre and writes only den + mom. it is gamma-independent (the
         // sound speed comes from the reconstructed pressure), so the only scalar is
         // the PLM limiter `theta`.
-        let (k, writes) = iso_flux_gv::<1>(0);
+        let program = iso_flux_gv::<1>(0);
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(
             k.field_inputs()
                 .iter()
@@ -1060,7 +1080,9 @@ mod tests {
         // composed with riemann::hlle_with_speeds at the Rmhd regime. the flux reads the
         // per-cell quartic wave_speed_l/r (ws_l/ws_r, bound after the 8 prim) and forms the
         // davis fan. 8 conserved fluxes (D, S_k, tau, B_k).
-        let (k, writes) = rmhd_flux_gv(1, 0, 0);
+        let program = rmhd_flux_gv(1, 0, 0);
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(
             k.scalar_params(),
             vec!["gamma".to_string(), "theta".to_string()]
@@ -1597,7 +1619,7 @@ mod tests {
         // folded with the in-kernel cartesian-uniform widths into one timestep kernel — the same
         // physics the RHD flux's HLLE uses. cartesian 2D: reads rho + the gridded normal
         // velocities (v0, v1) + pre; the dead v2 stays a zero constant outside the graph.
-        let (k, writes) = rhd_wave_speed_map_gv(
+        let program = rhd_wave_speed_map_gv(
             Coords::Cartesian,
             Spacetime::Minkowski,
             &[Spacing::Uniform; 2],
@@ -1605,6 +1627,8 @@ mod tests {
             2,
             EosArm::IdealGamma,
         );
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(writes.len(), 1, "one scratch lambda write");
         assert_eq!(writes[0].destination.name(), "scratch");
         assert_eq!(
@@ -1737,8 +1761,10 @@ mod tests {
         // 3-vector prim + gamma (vsq/bsq), and is ~25x cheaper than the exact quartic. proves
         // the CFL pays no resolvent cubic (asinh/acosh/cos/cosh) — the mignone & del zanna
         // quartic's transcendentals stay on the riemann/flux path only.
-        let (k, writes) =
+        let program =
             rmhd_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform; 3], &[0, 1, 2], 3);
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(writes.len(), 1);
         assert_eq!(
             k.scalar_params(),
@@ -1826,7 +1852,9 @@ mod tests {
         // (lambda_min, lambda_max) pair per direction -> wave_speed_l[d] / wave_speed_r[d].
         // proves it reads the full prim + gamma, writes 6, and carries the resolvent-cubic
         // transcendentals, being the exact quartic — the cost lifted off the flux.
-        let (k, writes) = rmhd_wave_speeds_cell_gv(3);
+        let program = rmhd_wave_speeds_cell_gv(3);
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(writes.len(), 6, "lambda_min/max per 3 directions");
         let out_paths: Vec<String> = writes
             .iter()
@@ -1880,7 +1908,9 @@ mod tests {
     fn snapshot_gv_traces_a_pure_copy() {
         // u_n = cons: each write root is the read field param (a direct buffer copy), scalar-free
         // and geometry-free. ncomp=2 + energy -> cons den/mom_0/mom_1/nrg -> u_n.*.
-        let (k, writes) = snapshot_gv(2, true);
+        let program = snapshot_gv(2, true);
+        let k = program.kernel();
+        let writes = program.writes();
         assert!(k.scalar_params().is_empty(), "snapshot takes no scalars");
         assert!(
             k.coord_components().is_empty(),
@@ -1908,7 +1938,7 @@ mod tests {
         // the schwarzschild wave-speed map threads the banyuls-font coordinate correction
         // (lapse + radial proper-width -> the `schwarzschild_mass` scalar) into the DAG. the flat
         // spherical map omits that scalar and stays bit-identical to the lapse-free form.
-        let (k_gr, _) = rhd_wave_speed_map_gv(
+        let program_gr = rhd_wave_speed_map_gv(
             Coords::Spherical,
             Spacetime::SchwarzschildKS,
             &[Spacing::Uniform],
@@ -1916,6 +1946,7 @@ mod tests {
             1,
             EosArm::IdealGamma,
         );
+        let k_gr = program_gr.kernel();
         assert!(
             k_gr.scalar_params()
                 .iter()
@@ -1923,7 +1954,7 @@ mod tests {
             "Schwarzschild wave-speed map must carry the lapse mass scalar; got {:?}",
             k_gr.scalar_params(),
         );
-        let (k_flat, _) = rhd_wave_speed_map_gv(
+        let program_flat = rhd_wave_speed_map_gv(
             Coords::Spherical,
             Spacetime::Minkowski,
             &[Spacing::Uniform],
@@ -1931,6 +1962,7 @@ mod tests {
             1,
             EosArm::IdealGamma,
         );
+        let k_flat = program_flat.kernel();
         assert!(
             !k_flat
                 .scalar_params()
@@ -1946,7 +1978,7 @@ mod tests {
         // alpha = sqrt(1 - 2M/r) into the DAG, so the host scalar `schwarzschild_mass` appears in
         // the kernel manifest. the flat (minkowski) stage on the same spherical grid omits it and
         // stays bit-identical to the lapse-free flat result. proves the (spherical, schwarzschild) -> metric.lapse path.
-        let (k_gr, _) = godunov_stage_gv(
+        let program_gr = godunov_stage_gv(
             Coords::Spherical,
             Spacetime::SchwarzschildKS,
             &[Spacing::Uniform],
@@ -1956,6 +1988,7 @@ mod tests {
             true,
             GeoSource::Hydro { inertial: false },
         );
+        let k_gr = program_gr.kernel();
         assert!(
             k_gr.scalar_params()
                 .iter()
@@ -1964,7 +1997,7 @@ mod tests {
             k_gr.scalar_params(),
         );
 
-        let (k_flat, _) = godunov_stage_gv(
+        let program_flat = godunov_stage_gv(
             Coords::Spherical,
             Spacetime::Minkowski,
             &[Spacing::Uniform],
@@ -1974,6 +2007,7 @@ mod tests {
             true,
             GeoSource::Hydro { inertial: false },
         );
+        let k_flat = program_flat.kernel();
         assert!(
             !k_flat
                 .scalar_params()
@@ -1989,7 +2023,7 @@ mod tests {
         // (no geometric source). declares dt + the SSP coefficients a0/ac + the per-axis dx; reads
         // the snapshot `u_n` + the conserved fields + the per-direction fluxes (a +e_i stencil, so
         // coord axes recorded); writes the conserved set in place.
-        let (k, writes) = godunov_stage_gv(
+        let program = godunov_stage_gv(
             Coords::Cartesian,
             Spacetime::Minkowski,
             &[Spacing::Uniform; 2],
@@ -1999,6 +2033,8 @@ mod tests {
             true,
             GeoSource::Hydro { inertial: false },
         );
+        let k = program.kernel();
+        let writes = program.writes();
         assert_eq!(
             k.scalar_params(),
             vec![
@@ -2075,7 +2111,7 @@ mod tests {
         let geo = GeoSource::Hydro { inertial: false };
 
         // the compile-time spec path.
-        let (k_spec, w_spec) = godunov_stage_gv_with_fused_sources(
+        let program_spec = godunov_stage_gv_with_fused_sources(
             coords,
             Spacetime::Minkowski,
             &spacing,
@@ -2087,6 +2123,8 @@ mod tests {
             &spec_refs,
             false,
         );
+        let k_spec = program_spec.kernel();
+        let w_spec = program_spec.writes();
 
         // the runtime SourceProgram-value path (what `RuntimeSource` feeds).
         let builts: Vec<(&str, symbi_source_compile::source_spec::SourceProgram)> = specs
@@ -2095,7 +2133,7 @@ mod tests {
             .collect();
         let src_refs: Vec<(&str, &symbi_source_compile::source_spec::SourceProgram)> =
             builts.iter().map(|(t, b)| (*t, b)).collect();
-        let (k_built, w_built) = godunov_stage_gv_with_fused_built(
+        let program_built = godunov_stage_gv_with_fused_built(
             coords,
             Spacetime::Minkowski,
             &spacing,
@@ -2108,6 +2146,8 @@ mod tests {
             false,
             0,
         );
+        let k_built = program_built.kernel();
+        let w_built = program_built.writes();
 
         // the ABI manifest + writes are identical (NodeIds match because both trace the same op
         // sequence — building the SourceProgram values outside the trace leaves the node allocation
@@ -2131,7 +2171,7 @@ mod tests {
 
         // the lowered source is byte-identical — the strongest structural equality available
         // (`Graph` has no `PartialEq`; the emitted source captures the full computation).
-        let emit = |k: &GvKernel, w: &symbi_ir::KernelWrites| {
+        let emit = |k: &symbi_ir::GvKernel, w: &symbi_ir::KernelWrites| {
             let spec = KernelEmitInputs {
                 kernel_name: "fused_eq",
                 coalesce_layout: false,

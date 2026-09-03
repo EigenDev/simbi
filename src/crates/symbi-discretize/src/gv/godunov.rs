@@ -13,13 +13,13 @@ use symbi_geometry::{
     SchwarzschildKSCylindrical,
 };
 use symbi_ir::{CtCellCt, CtFaceCt, PhysComp};
-use symbi_ir::{KernelWrite, KernelWrites};
+use symbi_ir::{KernelProgram, KernelWrite, KernelWrites, trace_kernel};
 
 /// snapshot `u_n = cons` — a pure pointwise copy (the RK2 stage-0 hold), geometry-independent
 /// (works for every coord system). copies the energy too when `has_energy`. write root == the
 /// read field node (a direct buffer copy).
-pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> KernelProgram {
+    trace_kernel(|cx| {
         let den = cx.field("cons_den", FieldRef::cons_den());
         let mom: Vec<Gv> = (0..ncomp)
             .map(|k| cx.field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)))
@@ -45,8 +45,8 @@ pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
 /// stage-input state, and (b) save the high-order per-direction fluxes before the redo overwrites the
 /// live flux buffers (both are ConsFields). explicit-field dispatch: slots `s_*` (source) -> `d_*`
 /// (dest).
-pub fn fofc_copy_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn fofc_copy_gv(ncomp: usize, has_energy: bool) -> KernelProgram {
+    trace_kernel(|cx| {
         let mut writes = KernelWrites::new();
         let mut cp = |name: &str| {
             let v = cx.field(&format!("s_{name}"), &format!("s_{name}"));
@@ -73,8 +73,8 @@ pub fn fofc_copy_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) 
 /// recovery classified this very state and nothing mutates the primitives
 /// between the recovery and the fallback pass, so the decode carries the same
 /// fact; classification lives with the recovery, this only re-encodes it.
-pub fn fofc_flag_from_status_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn fofc_flag_from_status_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let status = cx.field("status", "status");
         let flag = Gv::select(status.cmp_eq(Gv::ZERO), Gv::ZERO, Gv::ONE);
         vec![KernelWrite::new("flag", "flag", flag.node())]
@@ -95,8 +95,8 @@ pub fn fofc_exterior_flag_gv(
     spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let ndim = axes.len();
         let centroid = cell_geometry_gv(cx, coords, spacing, axes, ndim).centroid;
         let mut position = [Gv::ZERO; 3];
@@ -131,8 +131,8 @@ pub fn fofc_exterior_flag_gv(
 /// reach. a max-reduce > 0 forces the CFL rate to +inf (dt -> 0, the driver halts) — the fail-loud that
 /// survives FOFC recovery. density-only, so regime- and energy-independent (one kernel per dimension);
 /// a poison in any primitive reaches the density within one c2p / flux divergence.
-pub fn state_finite_probe_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn state_finite_probe_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let flag = Gv::select((rho - rho).cmp_eq(Gv::ZERO), Gv::ZERO, Gv::ONE);
         vec![KernelWrite::new("flag", FieldRef::Scratch, flag.node())]
@@ -147,8 +147,8 @@ pub fn state_finite_probe_gv() -> (GvKernel, KernelWrites) {
 /// holding its stage input so the state stays finite. that single-cell hold is the documented
 /// conservation waiver — it discards the cell's flux exchange, bounded by the persistent-freeze
 /// fail-loud. only the conserved is chosen; the primitive is re-derived by the c2p that follows.
-pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> KernelProgram {
+    trace_kernel(|cx| {
         // finite and positive: (v - v) is 0 for a finite value and NaN for NaN or +-inf (inf - inf =
         // NaN), so cmp_eq(0) rejects every non-finite value; the > 0 rejects a vacuum/negative one. a
         // "physical" cell is one whose density (and pressure, when modeled) passes both.
@@ -224,8 +224,8 @@ pub fn fofc_select_with_body_gv(
     ndim: usize,
     axes: &[usize],
     has_energy: bool,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         // finiteness probes as named-brand fns: a local closure cannot name the trace
         // brand, and annotating the elided lifetime mints regions invariance rejects.
         fn finite<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
@@ -320,13 +320,8 @@ pub fn fofc_select_with_body_gv(
 /// buffer), so after the splice every face carries a single flux value and the following godunov
 /// telescopes conservatively across every fallback boundary. componentwise over the conserved flux
 /// (den, mom[k], nrg?); the flag is a plain 0/1 cell field with boundary-consistent ghosts.
-pub fn fofc_splice_gv(
-    ndim: usize,
-    dir: usize,
-    ncomp: usize,
-    has_energy: bool,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn fofc_splice_gv(ndim: usize, dir: usize, ncomp: usize, has_energy: bool) -> KernelProgram {
+    trace_kernel(|cx| {
         let nd = ndim as u8;
         let d = dir as u8;
         let flag_c = cx.field("flag", CtCellCt::FofcFlag);
@@ -359,8 +354,8 @@ pub fn fofc_splice_gv(
 /// is first-order iff `flag[c] > 0 OR flag[c - e_dir] > 0` — the identical mask to the gas splice.
 /// `fo_bflux_{c}` is read+write in place; the spliced induction flux feeds the cell-B predictor (HO
 /// off the fallback region, FO on it) and the Contact FO edge EMF.
-pub fn fofc_bflux_splice_gv(ndim: usize, dir: usize, ncomp: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn fofc_bflux_splice_gv(ndim: usize, dir: usize, ncomp: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let nd = ndim as u8;
         let d = dir as u8;
         let flag_c = cx.field("flag", CtCellCt::FofcFlag);
@@ -393,8 +388,8 @@ pub fn godunov_mass_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: u8,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let geo = (!is_cartesian_uniform(coords, spacing))
             .then(|| cell_geometry_gv(cx, coords, spacing, axes, ndim as usize));
@@ -431,7 +426,7 @@ pub fn godunov_stage_gv(
     ncomp: usize,
     has_energy: bool,
     source: GeoSource,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     godunov_stage_gv_with_fused_sources(
         coords,
         spacetime,
@@ -668,7 +663,7 @@ pub fn godunov_stage_gv_with_fused_sources(
     // via the predictor's `bc_k` key so try_fuse merges the two reads onto one binding.
     // the plain (unfused) stage passes false -> reads `prim.mag[k]`.
     mag_from_bcell: bool,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     let builts: Vec<(&str, symbi_source_compile::source_spec::SourceProgram)> = user_sources
         .iter()
         .map(|s| (s.target_field, (s.build_source)(ndim as usize)))
@@ -714,7 +709,7 @@ pub fn godunov_stage_gv_with_fused_built(
     // accretion drain) at weight `ac*dt`, so the single fused sweep equals `plain godunov +
     // source_apply + body_source`, in that order, bit-for-bit. 0 leaves the update body-free.
     n_bodies: usize,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     godunov_stage_gv_with_fused_built_and_geo_weight(
         coords,
         spacetime,
@@ -751,8 +746,8 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     mag_from_bcell: bool,
     n_bodies: usize,
     weighted_geo_source: bool,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let a0 = cx.scalar("a0");
         let ac = cx.scalar("ac");
@@ -1376,8 +1371,8 @@ fn apply_dag_core_gv(
     state: StateEnv,
     sources: &[(&str, &symbi_source_compile::source_spec::SourceProgram)],
     mode: WriteMode,
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let geo = (!is_cartesian_uniform(coords, spacing))
             .then(|| cell_geometry_gv(cx, coords, spacing, axes, ndim as usize));
 
@@ -1530,7 +1525,7 @@ pub fn source_apply_gv(
     ncomp: usize,
     has_energy: bool,
     user_sources: &[&symbi_source_compile::source_spec::SourceSpec],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     let builts: Vec<(&str, symbi_source_compile::source_spec::SourceProgram)> = user_sources
         .iter()
         .map(|s| (s.target_field, (s.build_source)(ndim as usize)))
@@ -1561,7 +1556,7 @@ pub fn source_apply_from_built_gv(
     ncomp: usize,
     has_energy: bool,
     sources: &[(&str, &symbi_source_compile::source_spec::SourceProgram)],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     apply_dag_core_gv(
         coords,
         spacing,
@@ -1587,7 +1582,7 @@ pub fn boundary_fill_from_built_gv(
     ncomp: usize,
     has_energy: bool,
     sources: &[(&str, &symbi_source_compile::source_spec::SourceProgram)],
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     apply_dag_core_gv(
         coords,
         spacing,
@@ -1793,8 +1788,8 @@ pub fn rmhd_bcell_godunov_euler_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let oop = oop_components(ncomp, axes);
         let bc: Vec<Gv> = oop
             .iter()
@@ -1830,8 +1825,8 @@ pub fn rmhd_bcell_godunov_rk2_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let oop = oop_components(ncomp, axes);
         let bcn: Vec<Gv> = oop
             .iter()
@@ -1948,8 +1943,8 @@ fn chi_flux_div_gv<'t>(cx: TraceCx<'t>, ndim: usize, spacing: &[Spacing]) -> Gv<
 /// difference between the fine-time-summed and coarse fluxes at the interface. `F_chi` is nonlinear
 /// in the state, so that correction has to read the stored dye flux itself; the mass-flux
 /// correction alone underdetermines it.
-pub fn chi_flux_gv(ndim: usize, dir: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn chi_flux_gv(ndim: usize, dir: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let zero_off = vec![0i32; ndim];
         let mut minus = zero_off.clone();
         minus[dir] = -1;
@@ -1974,8 +1969,8 @@ pub fn chi_flux_gv(ndim: usize, dir: usize) -> (GvKernel, KernelWrites) {
 /// `cons.chi = a0*u_n.chi + ac*(cons.chi - dt*div(F_chi))`, in place, with the
 /// per-stage convex coefficients as runtime scalars (forward-euler = (0, 1)) —
 /// one kernel serves every explicit SSP scheme.
-pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn chi_godunov_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let chin = cx.field("un_chi", FieldRef::un_chi());
         let dchi = cx.field("cons_chi", FieldRef::cons_chi());
         let dt = cx.scalar("dt");
@@ -2002,8 +1997,8 @@ pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, KernelWrites) {
 /// the dye concentration recovery: `prim.chi = cons.chi / cons.den` — chi's whole
 /// cons2prim, run after the stage's density is final so the concentration is
 /// consistent with the same-instant mass.
-pub fn chi_c2p_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn chi_c2p_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let dchi = cx.field("cons_chi", FieldRef::cons_chi());
         let den = cx.field("cons_den", FieldRef::cons_den());
         let writes = vec![KernelWrite::new(
@@ -2016,8 +2011,8 @@ pub fn chi_c2p_gv() -> (GvKernel, KernelWrites) {
 }
 
 /// the dye step snapshot: `u_n.chi <- cons.chi`, the rk2 combine's step-start state.
-pub fn chi_snapshot_gv() -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn chi_snapshot_gv() -> KernelProgram {
+    trace_kernel(|cx| {
         let dchi = cx.field("cons_chi", FieldRef::cons_chi());
         let writes = vec![KernelWrite::new(
             "un_chi_new",
@@ -2032,7 +2027,7 @@ pub fn chi_snapshot_gv() -> (GvKernel, KernelWrites) {
 mod pcp_source_weight_tests {
     use super::*;
 
-    fn rmhd_stage(weighted: bool) -> GvKernel {
+    fn rmhd_stage(weighted: bool) -> symbi_ir::GvKernel {
         godunov_stage_gv_with_fused_built_and_geo_weight(
             Coords::Cartesian,
             Spacetime::SchwarzschildKS,
@@ -2047,7 +2042,7 @@ mod pcp_source_weight_tests {
             0,
             weighted,
         )
-        .0
+        .into_kernel()
     }
 
     #[test]

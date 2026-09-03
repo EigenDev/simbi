@@ -22,12 +22,14 @@
 
 use std::fs;
 
-use symbi_discretize::{GvKernel, wb_cf_decode_gv, wb_cf_lerp_encode_gv};
+use symbi_discretize::{wb_cf_decode_gv, wb_cf_lerp_encode_gv};
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::{KernelEmitInputs, KernelWrites, emit_kernel_from_lowering};
+use symbi_ir::{KernelEmitInputs, KernelProgram, emit_kernel_from_lowering};
 
 /// render one kernel at one target and return its source.
-fn render(name: &str, k: &GvKernel, writes: &KernelWrites, target: Target) -> String {
+fn render(name: &str, program: &KernelProgram, target: Target) -> String {
+    let k = program.kernel();
+    let writes = program.writes();
     assert!(
         !k.graph().has_errors(),
         "{name} graph errors: {:?}",
@@ -74,15 +76,12 @@ fn main() {
     let out_dir = std::env::args().nth(1).unwrap_or_else(|| ".".to_string());
     fs::create_dir_all(&out_dir).expect("create out dir");
 
-    let (enc, enc_w) = wb_cf_lerp_encode_gv(3, 5, 2);
-    let (dec, dec_w) = wb_cf_decode_gv(3, 2);
+    let enc = wb_cf_lerp_encode_gv(3, 5, 2);
+    let dec = wb_cf_decode_gv(3, 2);
 
-    for (name, k, w) in [
-        ("wb_cf_lerp_encode", &enc, &enc_w),
-        ("wb_cf_decode", &dec, &dec_w),
-    ] {
-        let cuda = render(name, k, w, Target::Cuda);
-        let hip = render(name, k, w, Target::Hip);
+    for (name, prog) in [("wb_cf_lerp_encode", &enc), ("wb_cf_decode", &dec)] {
+        let cuda = render(name, prog, Target::Cuda);
+        let hip = render(name, prog, Target::Hip);
         let cuda_path = format!("{out_dir}/{name}.cuda.cpp");
         let hip_path = format!("{out_dir}/{name}.hip.cpp");
         fs::write(&cuda_path, &cuda).expect("write cuda");

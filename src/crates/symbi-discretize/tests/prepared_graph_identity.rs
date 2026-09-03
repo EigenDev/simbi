@@ -33,7 +33,9 @@ use symbi_ir::{KernelEmitInputs, prepare, prepared_to_ir};
 /// linear/log spacing selects plus boundary-kind selects) and serialize its
 /// prepared IR.
 fn traced_blob() -> String {
-    let (k, writes) = wb_ghost_fill_gv(2, 2, &[0, 1], 2, Coords::Cartesian);
+    let program = wb_ghost_fill_gv(2, 2, &[0, 1], 2, Coords::Cartesian);
+    let k = program.kernel();
+    let writes = program.writes();
     let inputs = KernelEmitInputs {
         kernel_name: "wb_ghost_fill_2d",
         ndim: 2,

@@ -30,7 +30,7 @@
 /// shape `{den, nrg, mom_k}`. `Cons` is the live conserved state, `UN`/`UStage`
 /// the rk stage snapshots, `Flux` the per-direction interface flux (the active
 /// direction is supplied out-of-band as `dir`).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum StateSlot {
     Cons,
     UN,
@@ -63,7 +63,7 @@ impl StateSlot {
 /// a component of a conserved/flux slot: scalar density, scalar energy, or a
 /// momentum component addressed per axis. the momentum axis is read off the path
 /// so `DOF != NDIM` needs no special-casing.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum StateComp {
     Den,
     Nrg,
@@ -77,7 +77,7 @@ pub enum StateComp {
 /// `name()`/`parse()`; `parse()` also accepts the secondary index spellings the
 /// producers emit (`_k` vs `[k]`) so a single ref absorbs both — `name()` mints
 /// the one canonical spelling, the round-trip is pinned on it.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum FieldRef {
     /// primitive density `prim.rho`.
     PrimRho,
@@ -412,7 +412,7 @@ fn parse_idx(s: &str) -> Option<u8> {
 /// scope. the metadata-driven typed dispatch only ever sees `Ref`; an open bind
 /// reaching that path is a loud bug — hand-built kernels route through their own
 /// raw-string path only.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum FieldBind {
     Ref(FieldRef),
     Scratch(crate::ct_scratch::ScratchKey),

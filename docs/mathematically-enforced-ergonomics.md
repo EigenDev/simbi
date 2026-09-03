@@ -1395,6 +1395,141 @@ Success means launch transformations preserve semantics because the relevant
 preconditions are explicit values or proofs, not conventions distributed among
 callers.
 
+#### Stage 2 — as implemented
+
+The graph/write pairing and the effect algebra landed together in `symbi-ir`,
+with the builder and door migration reaching every consuming crate.
+
+- **`KernelProgram { kernel, writes }`** is the opaque owner. Construction
+  validates that every write root is a node in bounds for the graph (a bound, not
+  a provenance proof — a single trace produces the graph and its writes together)
+  and that both the output keys and the write destinations are unique, so output
+  aliasing is rejected at construction. A program with no writes is lawful;
+  `has_no_outputs` reports that count, while the proven structural identity of
+  fusion is the empty-graph `KernelProgram::noop(grade)`. `trace_kernel` /
+  `trace_kernel_for_domain` are the chokepoints a builder returns through, so a
+  graph and an independently supplied write vector never travel together in a
+  public signature.
+- **Door migration.** Every kernel builder in `symbi-discretize` (209 functions)
+  returns `KernelProgram`. `try_fuse` takes and returns `KernelProgram`. The
+  compilation and emission doors — `symbi-jit::compile_gv_kernel` /
+  `compile_gv_kernel_prec` and the substrate `gv_kernel_to_ir` — take a
+  `&KernelProgram`; the AOT bake's `emit_gv` takes a `&KernelProgram` and rebinds
+  the graph and writes at its top, leaving the emission body byte-identical.
+  Where a consumer compiles a subset of a kernel's writes (the census value-only
+  map), it constructs an explicit sub-program. The `GvKernel`/`KernelWrites`
+  tuple no longer appears in any public signature across the workspace.
+- **`Effects`** is the normalized, deduped access set. `Access` distinguishes
+  `Read(Resource, ReadFootprint)`, `Write(Resource)`, and the in-place
+  `ReadWrite(Resource, ReadFootprint)` view whose read and write facts stay
+  separately queryable. `Resource` is the born-typed `FieldBind` (typed `Ref`,
+  compiler `Scratch`, external `User`), each with exact equality — resource
+  identity round-trips through the value, never through the spelling.
+  `Dependence` names `Raw`/`War`/`Waw` per shared resource; two in-place kernels
+  over one resource carry all three. The access set is sorted over structural
+  identity: an outer tag for the `FieldBind` variant, an inner tag splitting
+  `Scratch` into its typed `Ct` and open `Free` arms, and a per-arm structural
+  discriminant (the derived `Debug` of a `FieldRef` or `CtScratchKey`, or the raw
+  string of an open name) — never the rendered `name()`, which a `Ct` wire and a
+  `Free` of the same spelling share. So distinct identities never collide in the
+  key and equal semantic sets compare equal regardless of construction order. When
+  several input keys alias one resource, their footprints join by lattice
+  (`Point` is the identity, bounded reaches join componentwise by axis, a
+  dimensionality mismatch or any unbounded axis gives `Unbounded`), never
+  collapsing to `Unbounded` on any disagreement.
+- **Footprint precision follows analysis state.** `KernelProgram::effects()`
+  reports every read as `Unbounded` — the sound conservative element — because
+  the per-axis reach lives in the `FieldLoadAt` index expressions the scalarizer
+  produces. `AnalyzedKernelProgram::analyze(program)` scalarizes and measures
+  each read through the single authoritative `stencil_reach`, sharpening the
+  footprint to `Point` (a center-only read), `Bounded(reach)`, or `Unbounded`,
+  and retains the program with its measured effects (the scalarized artifact is
+  consumed by the measurement — it is an analysis of the program, not a prepared
+  executable). The unprepared program never claims a precision it has not
+  measured.
+- **Fusion projects from the effect set.** `try_fuse` derives its write-write
+  conflict and its read-after-write independence hazard from
+  `a.effects().dependences_into(&b.effects())` and `effects().in_place()`,
+  retiring the hand-recomputed write-path and input-path sets. The nine fusion
+  laws hold unchanged.
+
+The pairing preserves the emitted artifacts. Baking the full AOT kernel set
+(5369 files) at this stage and at the pre-stage baseline and comparing them:
+the 2684 prepared-IR blobs (`*.ir.json`, carrying the serialized manifests and
+the input/output binding order) are byte-identical, with no kernel added or
+removed. The 269 generated CPU sources (`*_generated.rs`) that differ are all
+body-source-fused kernels, and the difference is the coordinate-map log-spacing
+select's unswitch collapse — which axis's guard the renderer folds first, a
+`HashMap` tie-break seeded per process. Re-baking this same stage twice differs
+in 279 such files, more than the 269 across the stage boundary, so the render
+noise is bake-to-bake and independent of the change; the byte-identical prepared
+IR is the semantic proof, and the generated-source difference is that known
+unswitch nondeterminism, not a change in arithmetic or ordering.
+
+Two decisions departed from the constitution above and want review:
+
+1. **`ReadFootprint` omits `ExactOffset`.** The single authoritative reach
+   analysis (`stencil_reach`) coarsens each read to a per-axis `|offset|`
+   window; it never yields a signed exact displacement. A footprint variant that
+   nothing populates is a promise the code cannot keep, and populating it would
+   require a second reach analysis over the raw graph — the drift-prone duplicate
+   the first law forbids. The derivable footprints are `Point` / `Bounded` /
+   `Unbounded`.
+2. **`support_infer::derive_output_support` stays as it is.** It propagates the
+   tagged support balls to a kernel-level output support — a support-region
+   question, distinct from the read/write dependence the effect set answers — so
+   it is not a re-derivation of the effect algebra and gains nothing from
+   projecting through it.
+
+### Phase 7: normalize the language and geography
+
+After the architectural phases are complete, run a deliberately semantics-free
+aesthetic sweep. Its purpose is not brevity for its own sake: the names and the
+source tree should describe the architecture that survived the refactor rather
+than preserve the vocabulary and module boundaries of its migration history.
+
+The governing test is:
+
+> Can a new reader predict where a concept lives and what a name means without
+> knowing how the project used to be implemented?
+
+Proceed in three passes:
+
+1. **Canonical vocabulary.** Establish one term for each concept and remove its
+   historical synonyms. In particular, audit program versus graph, receipt
+   versus report versus ledger, recovery versus admissibility, field versus
+   slot versus binding, and effect versus access versus dependence. Preserve
+   distinctions that carry different laws; rename only false multiplicity.
+2. **Structural geography.** Rename files, modules, and directories so the tree
+   narrates the dependency direction — physics describes laws, tracing builds
+   programs, compiler layers analyze them, execution interprets them, and
+   diagnostics record interventions. Split files that still own unrelated
+   responsibilities and merge tiny modules whose boundary is purely
+   historical.
+3. **Local expression.** Tighten type, function, variable, and test names.
+   Remove suffixes such as `gv_` or `built_` once they no longer distinguish a
+   live alternative, and replace vague local names (`ctx`, `spec`, `data`,
+   `impl`) where a precise physical or compiler role is available. Do not
+   expand obvious mathematical notation into prose or erase established domain
+   language merely to make names longer.
+
+This phase has strict discipline:
+
+- rename one vocabulary family or crate at a time in reviewable commits;
+- do not retain aliases or compatibility facades for deleted internal names;
+- do not combine renames with arithmetic, scheduling, ABI, serialization, or
+  ownership changes;
+- preserve typed identities and keep strings at presentation boundaries;
+- update documentation, tests, examples, and Python names as one atomic
+  vocabulary migration where they express the same public concept;
+- prove prepared-IR and serialized-manifest identity, unchanged binding order,
+  AOT/host equivalence, and workspace all-targets cleanliness after every
+  structural pass.
+
+Success means the filesystem, public API, and local expressions tell the same
+story as the enforced architecture, with no knowledge of the refactor required
+to understand them.
+
 ## 17. Non-goals
 
 This program does not seek to:

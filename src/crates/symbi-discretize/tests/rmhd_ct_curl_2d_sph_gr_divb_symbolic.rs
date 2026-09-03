@@ -85,13 +85,15 @@ fn lapse(two_m: i64, in_numerator: bool) -> RatFun {
 }
 
 fn curl(dir: usize, spacetime: Spacetime) -> LinFormR {
-    let (kernel, writes) = rmhd_ct_curl_2d_sph_gr_gv(
+    let program = rmhd_ct_curl_2d_sph_gr_gv(
         dir,
         spacetime,
         Coords::Spherical,
         &[Spacing::Uniform; 2],
         &[0, 1],
     );
+    let kernel = program.kernel();
+    let writes = program.writes();
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
     let lf = curl_only(LinFormR::extract_rat(
         kernel.graph(),

@@ -81,7 +81,8 @@ fn the_traced_map_reproduces_the_host_evaluation_cell_for_cell() {
     let bin_axes = vec![Axis(edges.clone())];
     let n_segments = edges.len() - 1;
 
-    let built = symbi_source_compile::expr_bridge::build_census_expressions(&cfg).expect("census lowers");
+    let built =
+        symbi_source_compile::expr_bridge::build_census_expressions(&cfg).expect("census lowers");
     let out = KernelRun::new(census_map_gv(
         Coords::Spherical,
         &[Spacing::Uniform],

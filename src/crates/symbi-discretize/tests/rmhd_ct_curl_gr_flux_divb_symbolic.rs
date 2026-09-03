@@ -45,8 +45,10 @@ fn curl_only(mut lf: LinFormR) -> LinFormR {
 /// the metric-free "bare" EMF difference for face-axis `dir`: extract the flux-form curl, read the
 /// face area `w = dt / coeff(ez[0,0])` off it, and scale the metric back out.
 fn bare(dir: usize, spacetime: Spacetime, coords: Coords, axes: &[usize]) -> LinFormR {
-    let (kernel, writes) =
+    let program =
         rmhd_ct_curl_2d_sph_gr_gv(dir, spacetime, coords, &[Spacing::Uniform; 2], axes);
+    let kernel = program.kernel();
+    let writes = program.writes();
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
     let curl = curl_only(LinFormR::extract_rat(
         kernel.graph(),
@@ -129,13 +131,15 @@ fn divb_spherical_kerr_symbolic() {
 #[test]
 fn divb_gr_flux_symbolic_detects_missing_weight() {
     let raw = |dir: usize| -> LinFormR {
-        let (kernel, writes) = rmhd_ct_curl_2d_sph_gr_gv(
+        let program = rmhd_ct_curl_2d_sph_gr_gv(
             dir,
             Spacetime::SchwarzschildKS,
             Coords::Cartesian,
             &[Spacing::Uniform; 2],
             &[0, 1],
         );
+        let kernel = program.kernel();
+        let writes = program.writes();
         curl_only(LinFormR::extract_rat(
             kernel.graph(),
             writes[0].value,

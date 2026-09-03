@@ -14,10 +14,9 @@
 
 use std::collections::BTreeMap;
 
-use symbi_discretize::GvKernel;
 use symbi_discretize::coords::{Coords, Spacetime, Spacing};
 use symbi_discretize::gv::{adiabatic_c2p_gv, godunov_stage_gv, neumann_ghost_fill_gv};
-use symbi_ir::KernelWrites;
+use symbi_ir::KernelProgram;
 use symbi_ir::graph::{NodeId, Op};
 
 fn weight(kind: &str) -> f64 {
@@ -32,7 +31,9 @@ fn weight(kind: &str) -> f64 {
     }
 }
 
-fn price(name: &str, k: GvKernel, writes: KernelWrites) {
+fn price(name: &str, program: KernelProgram) {
+    let k = program.kernel();
+    let writes = program.writes();
     let outs: Vec<NodeId> = writes.iter().map(|write| write.value).collect();
     let live = k.graph().reachable_from(&outs);
     let mut h: BTreeMap<String, usize> = BTreeMap::new();
@@ -79,7 +80,7 @@ fn price(name: &str, k: GvKernel, writes: KernelWrites) {
 
 fn main() {
     let sp = [Spacing::Uniform, Spacing::Uniform, Spacing::Uniform];
-    let (k, w) = godunov_stage_gv(
+    let k = godunov_stage_gv(
         Coords::Cartesian,
         Spacetime::Minkowski,
         &sp,
@@ -89,9 +90,9 @@ fn main() {
         true,
         symbi_discretize::gv::GeoSource::Hydro { inertial: false },
     );
-    price("godunov_stage 3d (5 comp)", k, w);
-    let (k, w) = adiabatic_c2p_gv::<3>();
-    price("adiabatic_c2p 3d", k, w);
-    let (k, w) = neumann_ghost_fill_gv(3, 5, true, &sp);
-    price("neumann_ghost_fill 3d", k, w);
+    price("godunov_stage 3d (5 comp)", k);
+    let k = adiabatic_c2p_gv::<3>();
+    price("adiabatic_c2p 3d", k);
+    let k = neumann_ghost_fill_gv(3, 5, true, &sp);
+    price("neumann_ghost_fill 3d", k);
 }

@@ -90,10 +90,16 @@ fn rhd_c2p_is_dimension_generic() {
             .filter(|write| write.destination.name().starts_with("prim.vel["))
             .count()
     };
-    let (k1, w1) = rhd_c2p_gv::<1>(4, EosArm::IdealGamma);
-    let (k2, w2) = rhd_c2p_gv::<2>(4, EosArm::IdealGamma);
-    let (k3, w3) = rhd_c2p_gv::<3>(4, EosArm::IdealGamma);
-    for (k, w, want) in [(&k1, &w1, 1usize), (&k2, &w2, 2), (&k3, &w3, 3)] {
+    let p1 = rhd_c2p_gv::<1>(4, EosArm::IdealGamma);
+    let p2 = rhd_c2p_gv::<2>(4, EosArm::IdealGamma);
+    let p3 = rhd_c2p_gv::<3>(4, EosArm::IdealGamma);
+    let k1 = p1.kernel();
+    let w1 = p1.writes();
+    let k2 = p2.kernel();
+    let w2 = p2.writes();
+    let k3 = p3.kernel();
+    let w3 = p3.writes();
+    for (k, w, want) in [(k1, w1, 1usize), (k2, w2, 2), (k3, w3, 3)] {
         assert!(
             !k.graph().has_errors(),
             "rhd_c2p errors: {:?}",

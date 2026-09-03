@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_ir::{KernelWrite, KernelWrites};
+use symbi_ir::{KernelProgram, KernelWrite, trace_kernel};
 
 /// the isothermal lattice-map ghost fill — pull back rho/vel/pre at the per-axis source coord,
 /// write in place; the velocity component whose coordinate is a grid axis picks up that axis's
@@ -13,8 +13,8 @@ use symbi_ir::{KernelWrite, KernelWrites};
 /// map). rho/pre are grade-0 copies. `ncomp` velocity components, `ndim` gridded axes;
 /// `axes[d]` = the coord of grid axis d. the EOS-generic 3-field pullback the
 /// iso/newton/rhd ghost fill share.
-pub fn iso_ghost_fill_gv(ndim: usize, ncomp: usize, axes: &[usize]) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn iso_ghost_fill_gv(ndim: usize, ncomp: usize, axes: &[usize]) -> KernelProgram {
+    trace_kernel(|cx| {
         let src = gv_lattice_source(cx, ndim);
         let vel_sign: Vec<Gv> = (0..ndim)
             .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
@@ -76,8 +76,8 @@ pub fn neumann_ghost_fill_gv(
     ncomp: usize,
     has_energy: bool,
     spacing: &[Spacing],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let src = gv_lattice_source(cx, ndim);
         let dist = gv_outward_dist(cx, ndim, spacing, &src);
         let neumann = |u, q: &str| symbi_hydro::boundary_term::neumann_ghost(u, cx.scalar(q), dist);
@@ -111,8 +111,8 @@ pub fn robin_ghost_fill_gv(
     ncomp: usize,
     has_energy: bool,
     spacing: &[Spacing],
-) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+) -> KernelProgram {
+    trace_kernel(|cx| {
         let src = gv_lattice_source(cx, ndim);
         let h = gv_outward_dist(cx, ndim, spacing, &src);
         let robin = |u, a: &str, b: &str, c: &str| {
@@ -157,8 +157,8 @@ pub fn robin_ghost_fill_gv(
 /// map). the staggered `bface` transverse-halo fill dispatches this per component —
 /// the field resolves the region's absolute coords against its own staggered lo, so
 /// the same kernel serves any cell- or face-anchored scalar.
-pub fn scalar_ghost_fill_gv(ndim: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn scalar_ghost_fill_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let src = gv_lattice_source(cx, ndim);
         let sign = cx.scalar("sign");
         let v = gv_load_at(cx, "f", "f", &src) * sign;
@@ -180,8 +180,8 @@ fn gv_ghost_sign<'t>(k: usize, ndim: usize, vel_sign: &[Gv<'t>]) -> Gv<'t> {
 /// rho/vel/pre + `mhd.bcell[k]`, the velocity and B (DOF-vectors) picking up the per-axis
 /// `vel_sign` for in-plane components and copying the out-of-plane ones. `ndim` = grid axes
 /// (the lattice source + reflect signs), `ncomp` = vector components (DOF).
-pub fn rmhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn rmhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let src = gv_lattice_source(cx, ndim);
         let vel_sign: Vec<Gv> = (0..ndim)
             .map(|k| cx.scalar(&format!("vel_sign_{k}")))
@@ -214,8 +214,8 @@ pub fn rmhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites)
 
 /// the isothermal lattice-map ghost fill — the `rmhd_ghost_fill_gv` field set at the
 /// isothermal state: rho + vel + bcell, the pressure coming from the closure.
-pub fn imhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
+pub fn imhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> KernelProgram {
+    trace_kernel(|cx| {
         let src = gv_lattice_source(cx, ndim);
         let vel_sign: Vec<Gv> = (0..ndim)
             .map(|k| cx.scalar(&format!("vel_sign_{k}")))
@@ -257,9 +257,9 @@ pub fn imhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites)
 /// v^r(ghost) carrying the wall map's vel_sign. q(src) needs the source cell's position, an
 /// integer map expression — `gv_axis_face_at_index` evaluates the coordinate map there.
 /// reduces to the plain copy when gamma_{r phi} = 0, so it is baked for kerr only.
-pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> KernelProgram {
     use symbi_geometry::{KerrKS, Metric};
-    trace(|cx| {
+    trace_kernel(|cx| {
         let ndim = 2usize;
         let src = gv_lattice_source(cx, ndim);
         let vel_sign: Vec<Gv> = (0..ndim)
@@ -326,9 +326,9 @@ pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
 /// the in-plane B^r/B^theta pick up the wall map's vel_sign like the velocity; q is at the same
 /// volume-weighted centroid the velocity copy + the c2p use. reduces to the plain copy at
 /// gamma_{r phi} = 0, so it is baked for kerr only. DOF = 3 swirl (2D grid).
-pub fn rmhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, KernelWrites) {
+pub fn rmhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> KernelProgram {
     use symbi_geometry::{KerrKS, Metric};
-    trace(|cx| {
+    trace_kernel(|cx| {
         let ndim = 2usize;
         let src = gv_lattice_source(cx, ndim);
         let vel_sign: Vec<Gv> = (0..ndim)
@@ -420,9 +420,9 @@ pub fn wb_ghost_fill_gv(
     axes: &[usize],
     n_bodies: usize,
     coords: Coords,
-) -> (GvKernel, KernelWrites) {
+) -> KernelProgram {
     use symbi_hydro::hydrostatic::LocalEquilibrium;
-    trace(|cx| {
+    trace_kernel(|cx| {
         let src = gv_lattice_source(cx, ndim);
         let vel_sign: Vec<Gv> = (0..ndim)
             .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
