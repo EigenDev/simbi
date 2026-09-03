@@ -357,10 +357,7 @@ mod tests {
 
     #[test]
     fn ct_slice_anchor_recovers_with_the_candidate_field() {
-        use crate::admissible::{
-            ADMISSIBLE_REL_FLOOR, admissible_project, rmhd_admissible_residuals,
-            rmhd_admissible_theta, rmhd_state_scale,
-        };
+        use crate::admissible::admissible_project;
 
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let regime = RmhdGr::<f64, 3> {
@@ -380,80 +377,79 @@ mod tests {
         let stale_anchor = regime.to_conserved(&eos, &Valencia(stage_prim));
         let rebuilt = regime.admissible_anchor(&eos, stage_prim.hydro, candidate_field);
         let gm = Matrix::identity();
-        let stale_energy = stale_anchor.0.nrg + stale_anchor.0.den;
-        let (_, stale_psi) = rmhd_admissible_residuals(
-            stale_anchor.0.den,
-            &stale_anchor.0.mom,
-            stale_energy,
-            &candidate_field,
-            &gm,
-            &gm,
-        );
-        assert!(
-            stale_psi <= 0.0,
-            "the old-field anchor remains admissible in the candidate magnetic slice"
-        );
+        // the law-indexed host queries: the stale anchor is outside the
+        // candidate slice, the rebuilt anchor is a member with a witness.
+        let stale = crate::admissibility::WuTangState {
+            den: stale_anchor.0.den,
+            mom: stale_anchor.0.mom,
+            total_energy: stale_anchor.0.nrg + stale_anchor.0.den,
+            mag: candidate_field,
+        };
+        let outside = crate::admissibility::WuTang::validate(stale, &gm, &gm)
+            .expect_err("the stale-field anchor must lie outside the candidate magnetic slice");
+        assert!(outside.psi <= 0.0, "psi carries the slice violation");
 
         let anchor_energy = rebuilt.nrg + rebuilt.den;
-        let state_scale = rmhd_state_scale(
-            rebuilt.den,
-            &rebuilt.mom,
-            anchor_energy,
-            &candidate_field,
-            &gm,
-            &gm,
-        );
-        let eps_d = 1e-12 * state_scale;
-        let eps_q = ADMISSIBLE_REL_FLOOR * state_scale;
-        let eps_psi = ADMISSIBLE_REL_FLOOR * state_scale.powf(1.5);
-        let (anchor_q, anchor_psi) = rmhd_admissible_residuals(
-            rebuilt.den,
-            &rebuilt.mom,
-            anchor_energy,
-            &candidate_field,
-            &gm,
-            &gm,
-        );
-        assert!(anchor_q > eps_q && anchor_psi > eps_psi);
+        let anchor_state = crate::admissibility::WuTangState {
+            den: rebuilt.den,
+            mom: rebuilt.mom,
+            total_energy: anchor_energy,
+            mag: candidate_field,
+        };
+        let proof = crate::admissibility::WuTang::validate(anchor_state, &gm, &gm)
+            .expect("the rebuilt anchor is admissible with the candidate field");
+        assert!(proof.witness().q > proof.witness().margins.eps_q);
         assert_eq!(rebuilt.mag.data, candidate_field.data);
 
-        let candidate_den = 0.5 * rebuilt.den;
-        let candidate_mom = rebuilt.mom.scale(20.0);
-        let candidate_energy = 0.1 * anchor_energy;
-        let theta = rmhd_admissible_theta(
-            candidate_den,
-            candidate_mom,
-            candidate_energy,
-            rebuilt.den,
-            rebuilt.mom,
-            anchor_energy,
-            &candidate_field,
-            &gm,
-            &gm,
-            eps_d,
-            eps_q,
-            eps_psi,
-            40,
-        );
+        // an out-of-cone candidate against the good anchor binds; the blend at
+        // theta lands inside the strict interior; the projection identity is
+        // `admissible_project` (the kernel's arithmetic).
+        let candidate = crate::admissibility::WuTangState {
+            den: 0.5 * rebuilt.den,
+            mom: rebuilt.mom.scale(20.0),
+            total_energy: 0.1 * anchor_energy,
+            mag: candidate_field,
+        };
+        let crate::admissibility::WuTangVerdict::Binding { theta } =
+            crate::admissibility::WuTang::judge_against_anchor(
+                candidate,
+                &anchor_state,
+                &gm,
+                &gm,
+                40,
+            )
+        else {
+            panic!("an out-of-cone candidate against a good anchor binds");
+        };
+        assert!(theta < 1.0);
         let (projected_den, projected_mom, projected_energy) = admissible_project(
-            candidate_den,
-            candidate_mom.data,
-            candidate_energy,
-            rebuilt.den,
-            rebuilt.mom.data,
-            anchor_energy,
+            candidate.den,
+            candidate.mom.data,
+            candidate.total_energy,
+            anchor_state.den,
+            anchor_state.mom.data,
+            anchor_state.total_energy,
             theta,
         );
-        let (projected_q, projected_psi) = rmhd_admissible_residuals(
-            projected_den,
-            &Tensor::new(projected_mom),
-            projected_energy,
-            &candidate_field,
-            &gm,
-            &gm,
+        let projected = crate::admissibility::WuTangState {
+            den: projected_den,
+            mom: Tensor::new(projected_mom),
+            total_energy: projected_energy,
+            mag: candidate_field,
+        };
+        assert!(
+            matches!(
+                crate::admissibility::WuTang::judge_against_anchor(
+                    projected,
+                    &anchor_state,
+                    &gm,
+                    &gm,
+                    40,
+                ),
+                crate::admissibility::WuTangVerdict::Member(_)
+            ),
+            "the blend at theta lies inside the anchor-relative strict interior"
         );
-        assert!(theta < 1.0);
-        assert!(projected_den > eps_d && projected_q > eps_q && projected_psi > eps_psi);
         assert_eq!(rebuilt.mag.data, candidate_field.data);
     }
 

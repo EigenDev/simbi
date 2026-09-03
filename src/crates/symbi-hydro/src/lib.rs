@@ -10,6 +10,7 @@
 //   use symbi_hydro::{IdealGas, Prim, Cons, Newtonian, hlle};
 // =============================================================================
 
+pub mod admissibility;
 pub mod admissible;
 pub mod boundary_term;
 pub mod c2p_result;
@@ -46,6 +47,10 @@ pub use mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdConsG, MhdPrim, MhdPrimG
 pub use newtonian::Newtonian;
 pub use newtonian_mhd::NewtonianMhd;
 pub use quantity::{Density, EnergyDensity, Pressure, SpecificInternalEnergy, VelocitySquared};
+pub use admissibility::{
+    Admissible, AdmissibilityLaw, WuTang, WuTangMargins, WuTangOutside, WuTangState,
+    WuTangVerdict, WuTangWitness,
+};
 pub use recovery::{DiagnosticOnly, Recovered, Recovery, RecoveryFailure, RecoveryIssues};
 pub use regime::Regime;
 pub use regime_spec::{

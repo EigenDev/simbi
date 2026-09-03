@@ -176,3 +176,88 @@ fn certification_gate_flags_rogue_construction() {
                   fn judge() {\n    Ok(Recovered::mint(candidate))\n}\n";
     assert!(certification_violations(lawful).is_empty());
 }
+
+/// witness-mint violations inside admissibility.rs: function extents are
+/// brace-tracked, and the `Admissible {` construction spelling is permitted
+/// only inside `validate_with_margins` — the one primitive every query
+/// delegates to.
+fn admissible_mint_violations(text: &str) -> Vec<String> {
+    let mut fn_name = String::new();
+    let mut in_fn = false;
+    let mut entered = false;
+    let mut depth: i64 = 0;
+    let mut hits = Vec::new();
+    for (number, raw) in production_lines(text) {
+        let line = raw.split("//").next().unwrap_or("");
+        let flat: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+        if !in_fn {
+            if let Some(pos) = line.find("fn ") {
+                fn_name = line[pos + 3..]
+                    .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                in_fn = true;
+                entered = false;
+                depth = 0;
+            }
+        }
+        if in_fn {
+            depth += line.matches('{').count() as i64;
+            depth -= line.matches('}').count() as i64;
+            entered |= line.contains('{');
+        }
+        if flat.contains("Admissible{") && !(in_fn && fn_name == "validate_with_margins") {
+            hits.push(format!("{number}: {}", raw.trim()));
+        }
+        if in_fn && entered && depth <= 0 {
+            in_fn = false;
+            fn_name.clear();
+        }
+    }
+    hits
+}
+
+#[test]
+fn admissibility_witnesses_are_minted_by_validate_alone() {
+    // outside admissibility.rs the construction has no spelling at all;
+    // inside it, the spelling is confined to `validate_with_margins`.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_sources(&root, &mut files);
+    let mut hits = Vec::new();
+    for path in &files {
+        let text = std::fs::read_to_string(path).expect("source file must be readable");
+        if path.file_name().is_some_and(|n| n == "admissibility.rs") {
+            for hit in admissible_mint_violations(&text) {
+                hits.push(format!("{}:{hit}", path.display()));
+            }
+            continue;
+        }
+        for (number, line) in production_lines(&text) {
+            let flat: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+            if flat.contains("Admissible{") {
+                hits.push(format!("{}:{number}: {}", path.display(), line.trim()));
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "an admissibility witness was constructed outside validate_with_margins:\n{}",
+        hits.join("\n")
+    );
+}
+
+#[test]
+fn admissibility_mint_gate_flags_rogue_construction() {
+    // a construction after the primitive's closing brace is caught: the
+    // exemption ends with the body.
+    let after_closed = "fn validate_with_margins() {}\n\nfn rogue() {\n    \
+                        let a = Admissible { value, witness };\n}\n";
+    assert_eq!(admissible_mint_violations(after_closed).len(), 1);
+
+    // the lawful shape passes: the mint inside the primitive alone.
+    let lawful = "fn validate_with_margins() {\n    Ok(Admissible { value, witness })\n}\n\n\
+                  fn judge_against_anchor() {\n    Self::validate_with_margins(state)\n}\n";
+    assert!(admissible_mint_violations(lawful).is_empty());
+}
