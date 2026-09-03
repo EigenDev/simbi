@@ -1564,33 +1564,6 @@ fn gen_rmhd_fofc_project_gr(out_dir: &str, ndim: u8, geom: Geom) {
         &geom.axes,
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
-    // the projection-anchor experiment arms: the same projection with the
-    // named anchor convention and the diagnostic channel writes. measurement
-    // apparatus for the anchor study; the runtime reaches them only through
-    // the experiment dispatch, never the production path.
-    for (arm, convention) in [
-        ("stage", symbi_discretize::AnchorConvention::StageInput),
-        (
-            "rebuilt",
-            symbi_discretize::AnchorConvention::EulerianRebuilt,
-        ),
-    ] {
-        let name = symbi_discretize::kernel_slug::fofc_project_experiment_name(
-            "rmhd",
-            mhd_geom_slug(&geom),
-            geom.spacetime.to_spacetime(),
-            ndim as usize,
-            arm,
-        );
-        let (k, writes) = symbi_discretize::gv::fofc_project_gr_mhd_experiment_gv(
-            geom.coords,
-            geom.spacetime,
-            &geom.spacing,
-            &geom.axes,
-            convention,
-        );
-        emit_gv(out_dir, &name, ndim, &k, &writes);
-    }
 }
 
 // the state-constraint projection: the whole declared family (admissibility + whatever floors and

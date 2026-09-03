@@ -1879,11 +1879,6 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     F: FnMut(u64, f64, &[&FieldStore<D, DOF, M, f64>]) -> ControlFlow<()>,
     symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
 {
-    assert!(
-        !crate::projection_experiment::experiment_named(),
-        "the anchor experiment supports the single-grid runner; its step transaction \
-         is not wired through the decomposed loop"
-    );
     let schedule = Schedule::open(counts, stores[0].geom.ng);
     evolve_scheduled(
         stores,
@@ -1920,11 +1915,6 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
     F: FnMut(u64, f64, &[&FieldStore<D, DOF, M, f64>]) -> ControlFlow<()>,
     symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
 {
-    assert!(
-        !crate::projection_experiment::experiment_named(),
-        "the anchor experiment supports the single-grid runner; its step transaction \
-         is not wired through the decomposed loop"
-    );
     let counts = schedule.counts();
     let stages = ts.stages();
     let multistage = crate::driver::needs_step_snapshot(stages);

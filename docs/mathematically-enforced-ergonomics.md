@@ -915,15 +915,26 @@ distinguished from the deliberate absorbing boundaries:
   absorbing-region semantics, masked out of the census, with no accounting of
   the absorbed mass/energy.
 
-The constraint algebra (`symbi-hydro/src/constraints.rs`: the concave
+The live GRMHD admissible-boundary projection now books its evidence: the
+production kernel emits a typed `ProjectionReceipt` (theta and the (D, tau)
+state deltas), the substrate returns it through the `FofcReport`, and the sim
+accumulates it over the accepted step into a `ProjectionLedger` (`symbi-sim`,
+thread-local, discard-on-retry). The ledger separates the signed net injection
+from the gross absolute intervention and is read through
+`projection_ledger_report`. It is evidence about production physics, not a
+correction — the receipts record what the projection already did, and the
+candidate writes are byte-identical whether the diagnostics are on or off.
+
+The broader constraint algebra (`symbi-hydro/src/constraints.rs`: the concave
 `c(U) >= 0` family with the projection axioms, `WuTangAdmissibility`,
 `TemperatureFloor`, `MagnetizationCeiling`, `DensityFloor`, per-member theta
-attribution, `anchor_feasibility`, and the `ConstraintLedger`) is the built
-answer to the two rows above and is fully unwired: `constraint_projection_gv`
+attribution, `anchor_feasibility`) stays unwired: `constraint_projection_gv`
 is baked and oracle-tested, its dispatch wrapper has zero callers,
-`ConstraintParams` holds inert defaults with no config path, the
-`constraint_theta` field is allocated and untouched, and the ledger has no
-production caller. The anchor convention that blocked wiring is now resolved by
+`ConstraintParams` holds inert defaults with no config path, and the
+`constraint_theta` field is allocated and untouched. Activating the floors
+changes physics and is a separate decision; the projection ledger books only
+the interventions the live admissibility projection already performs. The
+anchor convention that blocked wiring was resolved by
 a controlled A/B measurement of the two candidate anchors on the same firing
 projection. The Eulerian rebuild — the p2c reconstruction from the stage-input
 primitives paired with the candidate cell B — is admissible by construction:
@@ -935,12 +946,11 @@ admissibility boundary: its raise is a percent-level fraction of the projection
 energy (1.2% to 2.2%) and grows with resolution. Both survive in the accessible
 regime because the raise repairs the marginal stage anchor, so the anchor is a
 numerically rescued hybrid while the Eulerian rebuild supplies the lawful
-anchor. The sanctioned wiring is therefore behind the Eulerian rebuild — the
-convention production already runs — with the projection's receipts booked into
-the ledger; the family stays unwired until that is done. The projection is a
-truncation effect — it fires only in the turbulent near-horizon flow of a 3D
-torus and vanishes as the grid refines; a 2D axisymmetric torus never trips it,
-and there the two anchors agree to machine precision. The module's usage
+anchor. The ledger therefore books behind the Eulerian rebuild — the convention
+production already runs. The projection is a truncation effect — it fires only
+in the turbulent near-horizon flow of a 3D torus and vanishes as the grid
+refines; a 2D axisymmetric torus never trips it, and there the two anchors agree
+to machine precision. The module's usage
 example also names `joint_projection_theta`, which does not exist; the live
 name is `joint_theta`. There is currently no live magnetization ceiling,
 temperature floor, or evolved-state density floor anywhere in production —

@@ -663,7 +663,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         dt: f64,
         a0: f64,
         ac: f64,
-        _injection_weight: f64,
         _stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
         // isothermal is HLLE-only by physics; the first-order redo is the same fan at theta = 0
@@ -693,7 +692,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                     self.body_source(sim, ac * dt)
                 }
             },
-            || {}, // iso: no admissible-boundary projection (density-only admissibility; keeps the freeze)
+            || None, // iso: no admissible-boundary projection (density-only admissibility; keeps the freeze)
             // freeze parachute evolves by the iso body source (eos param = cs, no energy field).
             sim.immersed.is_some().then(|| (ac * dt, self.cs)),
             crate::regimes::fofc::CtHooks::none(),

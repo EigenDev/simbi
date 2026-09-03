@@ -63,6 +63,11 @@ pub struct FofcReport {
     frozen: u64,
     replay: SourceReplayOutcome,
     decision: FofcDecision,
+    /// the admissible-boundary projection's receipt for this pass, when the
+    /// regime ran a projection. the substrate produces it; the sim books it
+    /// into the projection ledger. the projection is a diagnostic accounting,
+    /// so a receipt never changes the decision.
+    receipt: Option<crate::projection_ledger::ProjectionReceipt>,
 }
 
 impl FofcReport {
@@ -76,6 +81,7 @@ impl FofcReport {
             frozen: 0,
             replay: SourceReplayOutcome::SharedRedo,
             decision: FofcDecision::Accept,
+            receipt: None,
         }
     }
 
@@ -125,7 +131,24 @@ impl FofcReport {
             frozen,
             replay,
             decision,
+            receipt: None,
         }
+    }
+
+    /// attach the admissible-boundary projection's receipt for this pass. the
+    /// substrate calls this on the report it returns; the receipt is evidence,
+    /// so it never revises the counts or the decision.
+    pub fn with_receipt(
+        mut self,
+        receipt: Option<crate::projection_ledger::ProjectionReceipt>,
+    ) -> Self {
+        self.receipt = receipt;
+        self
+    }
+
+    /// the projection receipt of this pass, when a projection ran.
+    pub fn receipt(&self) -> Option<crate::projection_ledger::ProjectionReceipt> {
+        self.receipt
     }
 
     pub fn troubled(&self) -> u64 {
@@ -219,17 +242,15 @@ where
     /// correcting select actually froze, which replay path ran, and the accept/retry decision the
     /// stage driver folds into its outcome. the default is the inactive pass.
     ///
-    /// `injection_weight` is the stage's downstream shu-osher propagation
-    /// weight (`driver::downstream_injection_weight`): a conserved delta the
-    /// fallback injects into this substage's output reaches the accepted step
-    /// scaled by it. consumed by the projection-anchor measurement receipts.
+    /// the returned report carries the projection ledger receipt when the
+    /// regime ran an admissible-boundary projection; the sim books it, scaled
+    /// by the stage's downstream propagation weight, at the stage boundary.
     fn fofc(
         &self,
         _store: &FieldStore<NDIM, DOF, Mem, Sc>,
         _dt: f64,
         _a0: f64,
         _ac: f64,
-        _injection_weight: f64,
         _stage: u8,
     ) -> FofcReport {
         FofcReport::inactive()

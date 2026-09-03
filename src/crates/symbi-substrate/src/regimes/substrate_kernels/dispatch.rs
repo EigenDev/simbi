@@ -339,6 +339,8 @@ where
 /// the metric + grid scalars resolve exactly as for the source-CFL. runs ahead of the freeze-count
 /// c2p, so the freeze tier afterwards fires on a genuinely inadmissible anchor — an SSP-admissibility
 /// violation, the real poison. curved GR-hydro only.
+/// run a baked admissible-boundary projection with no diagnostic channels — the
+/// curved-hydro (RHD) path, which books no ledger evidence.
 pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
@@ -353,6 +355,35 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
+    let chart =
+        symbi_discretize::kernel_slug::fofc_project_chart(keying, geom.coords, &geom.axes, DOF, D);
+    let name = symbi_discretize::kernel_slug::fofc_project_name(prefix, chart, geom.spacetime, D);
+    fofc_project_named(sim, name, eos_param, u_stage, cons, prim, bcell, &[]);
+}
+
+/// run the GRMHD admissible-boundary projection and reduce its diagnostic
+/// channels into the projection-ledger receipt. the baked kernel emits the
+/// four diagnostic outputs (`xd_theta`, `xd_d_den`, `xd_d_nrg_seg`,
+/// `xd_d_nrg_raise`) alongside the candidate writes; this binds scratch for
+/// them, runs the kernel, and — on host memory — reduces the interior into a
+/// [`ProjectionReceipt`] the caller returns for the sim to book. a device run
+/// writes the diagnostics and returns `None`: the ledger is a host evidence
+/// diagnostic, so no per-substage device reduction runs.
+pub fn fofc_project_ledger<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    prefix: &str,
+    keying: symbi_discretize::kernel_slug::ChartKeying,
+    eos_param: f64,
+    u_stage: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    cons: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    prim: &symbi_sim::state::PrimFieldsGeneric<D, DOF, Mem, Sc>,
+    bcell: Option<[&Field<Sc, D, Mem>; 3]>,
+) -> Option<symbi_sim::projection_ledger::ProjectionReceipt>
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
     // the chart segment is derived from the grid: a caller that types it by hand gets to
     // type it wrong, and both of them did. the caller states which grid property its family
     // keys on, a two-valued choice the type system carries. the name itself is built by the
@@ -360,7 +391,30 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     let chart =
         symbi_discretize::kernel_slug::fofc_project_chart(keying, geom.coords, &geom.axes, DOF, D);
     let name = symbi_discretize::kernel_slug::fofc_project_name(prefix, chart, geom.spacetime, D);
-    fofc_project_named(sim, name, eos_param, u_stage, cons, prim, bcell, &[]);
+    let diag: [Field<Sc, D, Mem>; 4] =
+        std::array::from_fn(|_| Field::zeros(&geom.allocated).expect("projection diag field"));
+    let extra: Vec<(&str, &Field<Sc, D, Mem>)> = vec![
+        ("xd_theta", &diag[0]),
+        ("xd_d_den", &diag[1]),
+        ("xd_d_nrg_seg", &diag[2]),
+        ("xd_d_nrg_raise", &diag[3]),
+    ];
+    fofc_project_named(sim, name, eos_param, u_stage, cons, prim, bcell, &extra);
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        return None;
+    }
+    let views: [_; 4] = std::array::from_fn(|k| diag[k].view());
+    let (mut theta, mut d_den, mut d_seg, mut d_raise) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for c in geom.interior.iter() {
+        theta.push((*views[0].at(c)).to_f64());
+        d_den.push((*views[1].at(c)).to_f64());
+        d_seg.push((*views[2].at(c)).to_f64());
+        d_raise.push((*views[3].at(c)).to_f64());
+    }
+    Some(symbi_sim::projection_ledger::receipt_from_diagnostics(
+        &theta, &d_den, &d_seg, &d_raise,
+    ))
 }
 
 /// the projection dispatch body, shared by the production door above and the

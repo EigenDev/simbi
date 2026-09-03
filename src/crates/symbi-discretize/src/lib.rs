@@ -36,7 +36,6 @@ pub mod lattice;
 pub use coords::{Coords, EosArm, Recon, Spacetime, Spacing};
 // facade: the carrier types live in symbi-ir alongside Op + Graph. re-export them so the
 // builder return types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
-pub use gv::AnchorConvention;
 pub use gv::{
     GeoSource, adiabatic_c2p_gv, adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv,
     adiabatic_hllc_flux_gv, boundary_fill_from_built_gv, chi_c2p_gv, chi_flux_gv, chi_godunov_gv,

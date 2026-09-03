@@ -69,7 +69,6 @@ impl KernelSet<1, 1, HostMemory, f64> for RejectOnce {
         _dt: f64,
         _a0: f64,
         _ac: f64,
-        _injection_weight: f64,
         _stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
         use symbi_sim::substrate_seam::{FofcDecision, FofcReport, SourceReplayOutcome};

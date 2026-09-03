@@ -8391,81 +8391,54 @@ fn reset_guard_census() {
     symbi::regimes::fofc::fofc_reset_stats();
 }
 
-/// the projection-anchor experiment report: two flat tuples, `(attempted, accepted)`, each
+/// the projection ledger: the admissible-boundary projection's booked evidence for the run.
+/// two flat tuples `(attempted, accepted)`, each
 /// `(passes, passes_fired, projected_cells, min_theta,
-/// intervention_mass_signed, intervention_mass_abs,
-/// intervention_energy_segment_signed, intervention_energy_segment_abs,
-/// intervention_energy_raise_signed, intervention_energy_raise_abs,
-/// injected_mass_signed, injected_mass_abs,
-/// injected_energy_segment_signed, injected_energy_segment_abs,
-/// injected_energy_raise_signed, injected_energy_raise_abs)`.
-/// the intervention entries sum every raw per-pass projection delta (the magnitude of every
-/// correction applied); the injected entries scale each pass by its downstream shu-osher
-/// propagation weight (euler 1; rk2 1/2, 1; rk3 1/6, 2/3, 1). the injected `signed` is the
-/// exact direct projection contribution to the accepted conserved total (the run's conservation
-/// defect); the injected `abs` is the scheme-weighted gross (L1) injection budget `sum w|delta|`,
-/// which bounds the absolute net defect `|sum w delta|` from above rather than equaling it —
-/// opposite-signed corrections cancel in the net and not in the budget. receipts are per-cell
-/// sums of densitized conserved deltas over interior cells; on a uniform cartesian chart
-/// multiplying by the cell volume gives totals. attempted books every
-/// projection pass; accepted books only whole accepted steps, so a retried step's intervention
-/// stays visible without masquerading as kept physics. all zeros (min_theta = 1) when
-/// `SIMBI_ANCHOR_EXPERIMENT` never named an arm. the totals persist after the run's session
-/// closes, until the next run (or reset) clears them.
+/// [den_signed, den_gross, nrg_signed, nrg_gross],   # intervention (raw, weight one)
+/// [den_signed, den_gross, nrg_signed, nrg_gross])`. # injected (SSP-weighted)
+/// `den` is the mass slot, `nrg` the total energy slot the projection moved. intervention sums
+/// every raw per-pass delta; injected scales each pass by its downstream shu-osher propagation
+/// weight (euler 1; rk2 1/2, 1; rk3 1/6, 2/3, 1). the injected `signed` is the exact direct
+/// projection contribution to the accepted conserved total; the `gross` is the scheme-weighted
+/// L1 budget `sum w|delta|`, which bounds the absolute net from above rather than equaling it.
+/// attempted books every projection pass; accepted books only whole accepted steps. the ledger
+/// is evidence about production physics, not a correction — it records what the live projection
+/// already did. host single-grid runs collect it; the totals persist until the next run clears
+/// them. all zeros (min_theta = 1) when the projection never fired.
 #[pyfunction]
 #[allow(clippy::type_complexity)]
-fn anchor_experiment_report() -> (
-    (u64, u64, u64, f64, [f64; 6], [f64; 6]),
-    (u64, u64, u64, f64, [f64; 6], [f64; 6]),
+fn projection_ledger_report() -> (
+    (u64, u64, u64, f64, [f64; 4], [f64; 4]),
+    (u64, u64, u64, f64, [f64; 4], [f64; 4]),
 ) {
-    let flat = |t: &symbi::regimes::projection_experiment::ExperimentTotals| {
+    let flat = |t: &symbi_sim::projection_ledger::ProjectionLedger| {
         (
             t.passes,
             t.passes_fired,
             t.projected_cells,
             t.min_theta,
             [
-                t.intervention_mass.signed,
-                t.intervention_mass.abs,
-                t.intervention_energy_segment.signed,
-                t.intervention_energy_segment.abs,
-                t.intervention_energy_raise.signed,
-                t.intervention_energy_raise.abs,
+                t.intervention_den.signed,
+                t.intervention_den.abs,
+                t.intervention_nrg.signed,
+                t.intervention_nrg.abs,
             ],
             [
-                t.injected_mass.signed,
-                t.injected_mass.abs,
-                t.injected_energy_segment.signed,
-                t.injected_energy_segment.abs,
-                t.injected_energy_raise.signed,
-                t.injected_energy_raise.abs,
+                t.injected_den.signed,
+                t.injected_den.abs,
+                t.injected_nrg.signed,
+                t.injected_nrg.abs,
             ],
         )
     };
-    let (attempted, accepted) = symbi::regimes::projection_experiment::experiment_report();
+    let (attempted, accepted) = symbi_sim::projection_ledger::ledger_report();
     (flat(&attempted), flat(&accepted))
 }
 
-/// zero the projection-anchor experiment book (call between runs when measuring per run).
+/// zero the projection ledger on this thread (call between runs when measuring per run).
 #[pyfunction]
-fn reset_anchor_experiment() {
-    symbi::regimes::projection_experiment::experiment_reset();
-}
-
-/// the projection-anchor first-fire records: `(attempted_first_pass, accepted_first_pass,
-/// accepted_first_time, accepted_first_iteration)`, with -1 where no fire happened. the
-/// attempted-first is the global pass index of the first fired projection; the accepted-first
-/// carries the pass index plus the post-step simulation time and iteration of the state the
-/// accepted step produced — a rejected attempt may fire before the first projection that
-/// survives into the solution, and the two records keep that distinction.
-#[pyfunction]
-fn anchor_experiment_first() -> (i64, i64, f64, i64) {
-    let (attempted, accepted) = symbi::regimes::projection_experiment::experiment_first_report();
-    let a = attempted.map(|p| p as i64).unwrap_or(-1);
-    match accepted {
-        Some(f) => (a, f.pass as i64, f.time, f.iteration as i64),
-        None => (a, -1, -1.0, -1),
-    }
+fn reset_projection_ledger() {
+    symbi_sim::projection_ledger::ledger_reset();
 }
 
 // shared module body. the pyo3 entry-point name below decides the `PyInit_*`
@@ -8481,9 +8454,8 @@ fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bondi_sonic_radius, m)?)?;
     m.add_function(wrap_pyfunction!(guard_census, m)?)?;
     m.add_function(wrap_pyfunction!(reset_guard_census, m)?)?;
-    m.add_function(wrap_pyfunction!(anchor_experiment_report, m)?)?;
-    m.add_function(wrap_pyfunction!(reset_anchor_experiment, m)?)?;
-    m.add_function(wrap_pyfunction!(anchor_experiment_first, m)?)?;
+    m.add_function(wrap_pyfunction!(projection_ledger_report, m)?)?;
+    m.add_function(wrap_pyfunction!(reset_projection_ledger, m)?)?;
     // the feature handshake: config keys the backend does not know are silently
     // absorbed by the `_or` defaults above, so a new python front end driving an
     // old extension would drop a declared knob without a word — a run asking for

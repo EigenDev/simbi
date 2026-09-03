@@ -544,8 +544,9 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // the admissible-boundary projection (GR-hydro): blend every spliced cell toward the admissible
     // stage-input anchor onto partial-G before the c2p, so the recovery succeeds on every cell and the
     // freeze tier below fires only on a genuinely inadmissible anchor. a no-op for regimes without a
-    // baked projection (flat, MHD, iso), which keep the freeze parachute.
-    project: impl Fn(),
+    // baked projection (flat, MHD, iso), which keep the freeze parachute. curved GRMHD returns the
+    // projection ledger receipt for this pass; every other regime returns None.
+    project: impl Fn() -> Option<symbi_sim::projection_ledger::ProjectionReceipt>,
     // the freeze-tier body parachute: `Some((dt_eff, gamma))` when the sim carries immersed bodies and
     // the regime has a `_with_body` freeze-select kernel (adiabatic only). a frozen cell holds the
     // stage input `u_stage` (pre-body), so `body_apply` above — which targets the live cons — never
@@ -653,7 +654,7 @@ where
     // freeze tier afterwards counts only a genuinely inadmissible anchor. exact passthrough on an
     // admissible cell, hence a no-op wherever the tiers above already succeeded. a no-op entirely
     // for regimes with no baked projection (flat MHD, iso), which keep the freeze parachute.
-    project();
+    let projection_receipt = project();
     c2p();
     // the correcting select is the only component that freezes, and therefore the only
     // reporter: it writes the chosen state and the FreezeApplied mask together. it runs
@@ -727,7 +728,8 @@ where
     } else {
         FofcDecision::Accept
     };
-    let report = FofcReport::of_pass(troubled, frozen, exterior_froze, replay, decision);
+    let report = FofcReport::of_pass(troubled, frozen, exterior_froze, replay, decision)
+        .with_receipt(projection_receipt);
     // the census counters observe the report; the horizon subtotals split on the channel masks.
     let troubled_interior = horizon_split_count(sim, flag);
     book_census(&report, troubled_interior, frozen_interior);

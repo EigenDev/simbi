@@ -19,7 +19,7 @@
 //  use symbi_sim::substrate_seam::{KernelSet, RegimeSubstrate, Solver};
 // =============================================================================
 
-pub mod projection_experiment;
+pub mod projection_ledger;
 pub mod census;
 pub mod checkpoint;
 pub mod decomp;

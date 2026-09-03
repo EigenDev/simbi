@@ -473,7 +473,6 @@ where
         dt: f64,
         a0: f64,
         ac: f64,
-        injection_weight: f64,
         stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
         // `bcell_from_bface` (the face->cell interp + magnetic-energy patch) runs on the single
@@ -537,40 +536,28 @@ where
                         .mhd
                         .as_ref()
                         .expect("the GRMHD projection requires magnetic fields");
-                    // the state-constraint family projection (`constraint_projection`) anchors on
-                    // the stage-input conserved state, which is wrong here: constrained transport
-                    // has already advanced B, so `u_stage` paired with the candidate's cell B is a
-                    // hybrid with no admissibility guarantee, and the projection cannot recover the
-                    // cell at any blend. a sound anchor is rebuilt by p2c from the stage-input
-                    // primitives with the candidate's B (and raised to the margin), exactly as this
-                    // kernel does — substituting the family without that reconstruction collapses
-                    // the magnetized torus from t = 4.02 to a dt underflow at t = 2.286.
-                    // the projection-anchor experiment intercepts here when an arm is
-                    // named: the same tier, dispatched under the named anchor convention
-                    // with diagnostic receipts. production runs the unmodified kernel.
-                    match crate::regimes::projection_experiment::experiment_arm() {
-                        Some(convention) => {
-                            crate::regimes::projection_experiment::dispatch_projection_experiment(
-                                sim,
-                                self.eos_param.value(),
-                                [&mhd.bcell[0], &mhd.bcell[1], &mhd.bcell[2]],
-                                convention,
-                                injection_weight,
-                            );
-                        }
-                        None => crate::regimes::substrate_kernels::fofc_project(
-                            sim,
-                            "rmhd",
-                            // MHD keys its chart on the grid-axis set: B is always a 3-vector,
-                            // so the momentum-DOF lift cannot separate the two cylindrical planes.
-                            symbi_discretize::kernel_slug::ChartKeying::GridAxes,
-                            self.eos_param.value(),
-                            sim.stage_input(),
-                            &sim.fields.cons,
-                            &sim.fields.prim,
-                            Some([&mhd.bcell[0], &mhd.bcell[1], &mhd.bcell[2]]),
-                        ),
-                    }
+                    // the eulerian-rebuilt anchor is p2c from the stage-input gas primitives with
+                    // the candidate's cell B (raised to the margin), admissible in the candidate
+                    // magnetic slice by construction. the stage-input conserved state paired with
+                    // the constrained-transport-advanced B is a hybrid with no admissibility
+                    // guarantee — substituting it collapses the magnetized torus from t = 4.02 to a
+                    // dt underflow at t = 2.286 — so the rebuild is the production convention. the
+                    // kernel emits the projection ledger's receipt, which the substrate returns for
+                    // the sim to book as production evidence.
+                    crate::regimes::substrate_kernels::fofc_project_ledger(
+                        sim,
+                        "rmhd",
+                        // MHD keys its chart on the grid-axis set: B is always a 3-vector,
+                        // so the momentum-DOF lift cannot separate the two cylindrical planes.
+                        symbi_discretize::kernel_slug::ChartKeying::GridAxes,
+                        self.eos_param.value(),
+                        sim.stage_input(),
+                        &sim.fields.cons,
+                        &sim.fields.prim,
+                        Some([&mhd.bcell[0], &mhd.bcell[1], &mhd.bcell[2]]),
+                    )
+                } else {
+                    None
                 }
             },
             None, // no body-evolved freeze parachute (no MHD body source)
@@ -804,13 +791,13 @@ where
         dt: f64,
         a0: f64,
         ac: f64,
-        injection_weight: f64,
         stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
-        // the anchor experiment's step transaction closes in the driver: a
-        // pass books attempted + pending at dispatch, and the accepted-step
-        // boundary commits or the retry discards the whole step's bucket.
-        self.fofc_impl(sim, dt, a0, ac, injection_weight, stage)
+        // the projection ledger's step transaction closes in the driver: the
+        // report carries this substage's projection receipt, the sim books it
+        // into the pending bucket, and the accepted-step boundary commits or the
+        // retry discards the whole step's bucket.
+        self.fofc_impl(sim, dt, a0, ac, stage)
     }
 
     fn fofc_active(&self) -> bool {

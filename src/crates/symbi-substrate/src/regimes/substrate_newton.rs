@@ -764,7 +764,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         dt: f64,
         a0: f64,
         ac: f64,
-        _injection_weight: f64,
         _stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
         // FOFC covers the DOF == D charts only (the fofc kernels are baked at ncomp = D). `fofc` is
@@ -804,7 +803,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     self.body_source(sim, ac * dt)
                 }
             },
-            || {}, // newtonian: no admissible-boundary projection (keeps the freeze parachute)
+            || None, // newtonian: no admissible-boundary projection (keeps the freeze parachute)
             // freeze parachute evolves by the body source (adiabatic has the _with_body kernel).
             sim.immersed.is_some().then(|| (ac * dt, self.gamma)),
             crate::regimes::fofc::CtHooks::none(),

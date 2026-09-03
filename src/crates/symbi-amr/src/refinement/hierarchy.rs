@@ -1934,10 +1934,10 @@ where
             if !self.advance_level(0, dt, 0.0) {
                 break;
             }
-            // the anchor experiment's rejection boundary: the pending-step
+            // the projection ledger's rejection boundary: the pending-step
             // receipts describe states this rollback discards.
-            if symbi_sim::projection_experiment::session_is_open() {
-                symbi_sim::projection_experiment::step_discard();
+            if symbi_sim::projection_ledger::scope_is_open() {
+                symbi_sim::projection_ledger::step_discard();
             }
             for level in &mut self.levels {
                 if level.kernels.fofc_active() {
@@ -1968,12 +1968,10 @@ where
         let root = &mut self.levels[0];
         // homologous linear advance, taken when the run leaves the motion law untraced.
         advance_state_clock(&mut root.state, dt);
-        // the anchor experiment's accepted-step boundary: the pending-step
-        // receipts survive into the solution here, stamped with the post-step
-        // clock of the state this step produced.
-        if symbi_sim::projection_experiment::session_is_open() {
-            let (time, iteration) = (root.state.time, root.state.iteration);
-            symbi_sim::projection_experiment::step_commit(time, iteration);
+        // the projection ledger's accepted-step boundary: the pending-step
+        // receipts survive into the solution here.
+        if symbi_sim::projection_ledger::scope_is_open() {
+            symbi_sim::projection_ledger::step_commit();
         }
 
         self.root_body_step(dt);
@@ -4216,22 +4214,14 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
     F: FnMut(&[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>]) -> ControlFlow<()>,
 {
     let n = tiles.len();
-    // the anchor experiment's run session: this shared driver is the one path
-    // every backend run takes, so the session opens here for a single-grid run
-    // and the study refuses a decomposed or refined run (its step transaction
-    // is defined for one grid). the handle closes at return, leaving the totals
-    // queryable.
-    let experiment_session = symbi_sim::projection_experiment::experiment_named().then(|| {
-        assert!(
-            n == 1 && decomp.is_none() && tiles[0].levels.len() == 1,
-            "the anchor experiment supports a single-grid run; got {} tile(s), {} level(s), \
-             decomposed={}",
-            n,
-            tiles[0].levels.len(),
-            decomp.is_some()
-        );
-        symbi_sim::projection_experiment::open_session()
-    });
+    // the projection ledger's run scope: this shared driver is the one path
+    // every backend run takes. a single-grid run opens the scope so the
+    // projection's receipts book over the accepted step; a decomposed or
+    // refined run opens nothing, since the step transaction the ledger needs is
+    // modeled for one grid only, and simply records no evidence there. the
+    // handle closes at return, leaving the totals queryable.
+    let ledger_scope = (n == 1 && decomp.is_none() && tiles[0].levels.len() == 1)
+        .then(symbi_sim::projection_ledger::open_scope);
     let drain = |decomp: Option<(&[i32], [usize; NDIM], &T)>| match decomp {
         Some((devices, _, _)) => drain_devices::<Mem>(devices),
         None => symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>(),
@@ -4333,9 +4323,9 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
         if tiles.iter().any(|h| h.crash.is_some()) {
             // a crashed step never reached its accepted-step boundary, so its
             // projection receipts describe a state that did not survive: discard
-            // the pending bucket before the session closes.
-            if experiment_session.is_some() {
-                symbi_sim::projection_experiment::step_discard();
+            // the pending bucket before the scope closes.
+            if ledger_scope.is_some() {
+                symbi_sim::projection_ledger::step_discard();
             }
             drain(decomp);
             let _ = callback(tiles);

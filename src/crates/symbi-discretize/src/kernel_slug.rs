@@ -156,23 +156,6 @@ pub fn fofc_project_name(
     )
 }
 
-/// the projection-anchor experiment kernel name: the production projection
-/// name with the arm segment (`_expt_stage` / `_expt_rebuilt`) between the
-/// spacetime slug and the dimension tag. spelled here, once, so the bake and
-/// the experiment dispatch agree.
-pub fn fofc_project_experiment_name(
-    prefix: &str,
-    chart_suffix: &str,
-    spacetime: Spacetime,
-    ndim: usize,
-    arm: &str,
-) -> String {
-    format!(
-        "{prefix}_fofc_project{chart_suffix}{}_expt_{arm}_{ndim}d",
-        spacetime_slug(spacetime)
-    )
-}
-
 /// the face-flux kernel name, built from named fields.
 ///
 /// `{prefix}_face_flux{solver}{recon}{balance}{chart}{eos}{geom}{spacetime}_{ndim}d_{dir}`.

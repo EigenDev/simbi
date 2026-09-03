@@ -385,8 +385,19 @@ where
                 // the single fold of the ladder's decision into the stage outcome; the
                 // report's counts already flowed to the census as observations.
                 let report = prof("fofc", || {
-                    kernels.fofc(sim, args.dt, args.a0, args.ac, args.injection_weight, tag)
+                    kernels.fofc(sim, args.dt, args.a0, args.ac, tag)
                 });
+                // book the projection's receipt into the sim-owned ledger — the
+                // substrate returns it, the sim owns the transaction. a retried
+                // pass books into the pending bucket the driver discards, so its
+                // intervention stays in the attempted totals without surviving
+                // into the accepted solution. only the single-grid driver opens
+                // the ledger scope, so decomposed and refined runs book nothing.
+                if crate::projection_ledger::scope_is_open() {
+                    if let Some(receipt) = report.receipt() {
+                        crate::projection_ledger::record(&receipt, args.injection_weight);
+                    }
+                }
                 if report.decision() == crate::substrate_seam::FofcDecision::RetryStep {
                     return StageOutcome::RetryStep;
                 }

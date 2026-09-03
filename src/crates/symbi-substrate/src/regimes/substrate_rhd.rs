@@ -663,7 +663,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         dt: f64,
         a0: f64,
         ac: f64,
-        _injection_weight: f64,
         _stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
         // the first-order redo runs at theta = 0 (PCM). flat (Minkowski) SRHD uses HLLE — the
@@ -713,6 +712,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                         None, // hydro: the admissible cone carries no magnetic term
                     );
                 }
+                // the curved-hydro projection books no ledger evidence.
+                None
             },
             None, // no body-evolved freeze parachute (no rhd body source)
             crate::regimes::fofc::CtHooks::none(),
