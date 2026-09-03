@@ -23,11 +23,26 @@ from .accretion import (
     stagnation_distance,
     steady_state_time,
 )
+from .anchor_ab import (
+    AnchorComparisonError,
+    RunRecord,
+    SuiteComparison,
+    compare_pair,
+    compare_suite,
+    to_dict,
+    to_json,
+    to_markdown,
+)
 
 __all__ = [
+    "AnchorComparisonError",
     "BodyDiagnostics",
     "DatDiagnostics",
+    "RunRecord",
+    "SuiteComparison",
     "averaged_rate",
+    "compare_pair",
+    "compare_suite",
     "load_body_diagnostics",
     "load_diagnostics_dat",
     "mdot_from_cumulative",
@@ -35,4 +50,7 @@ __all__ = [
     "sphere_flux",
     "stagnation_distance",
     "steady_state_time",
+    "to_dict",
+    "to_json",
+    "to_markdown",
 ]
