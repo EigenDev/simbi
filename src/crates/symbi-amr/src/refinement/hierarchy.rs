@@ -1427,11 +1427,6 @@ where
     /// recurses through the levels, then the root advances its clock and body
     /// state (mirroring evolve_with_callback).
     pub fn evolve(&mut self, t_final: f64) -> symbi_xpu::Result<()> {
-        assert!(
-            !symbi_sim::projection_experiment::experiment_named(),
-            "the anchor experiment supports the single-grid runner; its step transaction \
-             is not wired through the refinement hierarchy"
-        );
         self.evolve_with_callback(t_final, u64::MAX, |_| std::ops::ControlFlow::Continue(()))
     }
 
@@ -1939,6 +1934,11 @@ where
             if !self.advance_level(0, dt, 0.0) {
                 break;
             }
+            // the anchor experiment's rejection boundary: the pending-step
+            // receipts describe states this rollback discards.
+            if symbi_sim::projection_experiment::session_is_open() {
+                symbi_sim::projection_experiment::step_discard();
+            }
             for level in &mut self.levels {
                 if level.kernels.fofc_active() {
                     level.kernels.restore_step(&level.state);
@@ -1968,6 +1968,13 @@ where
         let root = &mut self.levels[0];
         // homologous linear advance, taken when the run leaves the motion law untraced.
         advance_state_clock(&mut root.state, dt);
+        // the anchor experiment's accepted-step boundary: the pending-step
+        // receipts survive into the solution here, stamped with the post-step
+        // clock of the state this step produced.
+        if symbi_sim::projection_experiment::session_is_open() {
+            let (time, iteration) = (root.state.time, root.state.iteration);
+            symbi_sim::projection_experiment::step_commit(time, iteration);
+        }
 
         self.root_body_step(dt);
     }
@@ -4209,6 +4216,22 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
     F: FnMut(&[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>]) -> ControlFlow<()>,
 {
     let n = tiles.len();
+    // the anchor experiment's run session: this shared driver is the one path
+    // every backend run takes, so the session opens here for a single-grid run
+    // and the study refuses a decomposed or refined run (its step transaction
+    // is defined for one grid). the handle closes at return, leaving the totals
+    // queryable.
+    let experiment_session = symbi_sim::projection_experiment::experiment_named().then(|| {
+        assert!(
+            n == 1 && decomp.is_none() && tiles[0].levels.len() == 1,
+            "the anchor experiment supports a single-grid run; got {} tile(s), {} level(s), \
+             decomposed={}",
+            n,
+            tiles[0].levels.len(),
+            decomp.is_some()
+        );
+        symbi_sim::projection_experiment::open_session()
+    });
     let drain = |decomp: Option<(&[i32], [usize; NDIM], &T)>| match decomp {
         Some((devices, _, _)) => drain_devices::<Mem>(devices),
         None => symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>(),
@@ -4308,6 +4331,12 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
         // observer snapshot the `.crashed` checkpoint + report it, then stop the march.
         // marching on would spin on the frozen time and clamp dt to t_final on garbage.
         if tiles.iter().any(|h| h.crash.is_some()) {
+            // a crashed step never reached its accepted-step boundary, so its
+            // projection receipts describe a state that did not survive: discard
+            // the pending bucket before the session closes.
+            if experiment_session.is_some() {
+                symbi_sim::projection_experiment::step_discard();
+            }
             drain(decomp);
             let _ = callback(tiles);
             return;

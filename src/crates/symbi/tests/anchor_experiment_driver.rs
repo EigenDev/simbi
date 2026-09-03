@@ -4,7 +4,15 @@
 // the projection-anchor experiment's driver transaction, pinned on a real
 // evolve run: a violently magnetized near-horizon kerr-schild box whose
 // first step trips the admissible-boundary projection, driven through the
-// single-grid runner with the experiment arm named.
+// tile driver the production backend uses.
+//
+// the run goes through `Hierarchy::single(...).evolve_with_callback`, which is
+// exactly the path `run_simulation` takes for every grid — the single-grid case
+// is a one-level hierarchy, and the shared `evolve_tiles` loop owns the session
+// and the accepted-step transaction. a transaction wired only into the
+// standalone `sim::evolve` driver would leave the session unopened here and the
+// projection's first `record_pass` would panic, so this pins that the backend's
+// driver carries the hooks.
 //
 // gates:
 // - the accepted-first fire is stamped with the post-step clock of the state
@@ -24,9 +32,11 @@
 use std::f64::consts::PI;
 use symbi_hydro::quantity::{Density, Pressure};
 
+use std::ops::ControlFlow;
+
 use symbi::regimes::substrate_kernels::Solver;
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet3D;
-use symbi::sim::evolve::evolve_with_callback;
+use symbi::sim::refinement::Hierarchy;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
@@ -100,22 +110,29 @@ fn the_accepted_first_fire_carries_the_post_step_clock() {
     // environment; this test binary is its own process.
     unsafe { std::env::set_var("SIMBI_ANCHOR_EXPERIMENT", "eulerian_rebuilt") };
 
-    let mut sim = kerr_sim();
+    let sim = kerr_sim();
     let kern =
         RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &sim.geom.allocated)
             .with_solver(Solver::Hlld)
             .expect("hlld")
             .ct_method(CtMethod::Uct);
 
+    // the single-grid run is a one-level hierarchy driven through the shared
+    // tile driver — the exact path the backend takes, where the experiment
+    // session opens and the step transaction commits.
+    let mut hier = Hierarchy::single(sim, kern);
+
     // the post-step clock of the first accepted step, and the accepted fired
     // passes visible at that boundary — observed through the per-step
     // callback, which the driver invokes after the canonical clock advance.
     let mut first_post_step: Option<(f64, u64, u64)> = None;
-    evolve_with_callback(&mut sim, &kern, 2.0e-2, 1, |s| {
+    hier.evolve_with_callback(2.0e-2, 1, |h| {
         if first_post_step.is_none() {
             let (_, accepted) = symbi::regimes::projection_experiment::experiment_report();
-            first_post_step = Some((s.time, s.iteration, accepted.passes_fired));
+            let st = &h.levels[0].state;
+            first_post_step = Some((st.time, st.iteration, accepted.passes_fired));
         }
+        ControlFlow::Continue(())
     })
     .expect("the violent box must survive to t_final");
 
@@ -146,6 +163,11 @@ fn the_accepted_first_fire_carries_the_post_step_clock() {
     // and the injected ledger is the intervention ledger scaled by convex
     // weights in (0, 1].
     let (attempted, accepted) = symbi::regimes::projection_experiment::experiment_report();
+    assert!(
+        accepted.passes > 0,
+        "the accepted-step commit never fired through the hierarchy driver; \
+         the transaction hooks are not on the backend's path"
+    );
     assert!(attempted.passes >= accepted.passes);
     assert!(accepted.injected_mass.abs <= accepted.intervention_mass.abs);
     assert!(accepted.injected_energy_segment.abs <= accepted.intervention_energy_segment.abs);

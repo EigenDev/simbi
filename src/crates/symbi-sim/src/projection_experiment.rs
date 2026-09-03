@@ -265,6 +265,15 @@ pub fn open_session() -> ExperimentSession {
     }
 }
 
+/// whether a run session is currently open. a driver shared between the
+/// experiment and ordinary runs consults this to touch the step transaction
+/// only when the experiment is active — the projection dispatch (`record_pass`)
+/// keeps its own loud session guard, which is where an unexpected pass must
+/// fail.
+pub fn session_is_open() -> bool {
+    matches!(book().session, Session::Open(_))
+}
+
 impl Drop for ExperimentSession {
     fn drop(&mut self) {
         // release the session and empty the pending bucket first, so the book
