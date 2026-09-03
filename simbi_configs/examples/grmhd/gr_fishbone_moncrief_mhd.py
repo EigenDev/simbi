@@ -73,20 +73,21 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
     ]
 
     def _sqrtg(self, r: float, th: float) -> float:
+        # the kerr-schild spatial determinant, regular through the horizon at
+        # every spin: sqrt(det gamma) = Sigma sin(theta) sqrt(1 + 2 M r / Sigma),
+        # Sigma = r^2 + a^2 cos^2(theta). at a = 0 this is sqrt(1 + 2M/r) r^2
+        # sin(theta), the schwarzschild-kerr-schild form.
         mm, a = self.schwarzschild_mass, self.kerr_spin
         s = math.sin(th)
-        if a != 0.0:
-            sigma = r * r + a * a * math.cos(th) ** 2
-            return sigma * s * math.sqrt(1.0 + 2.0 * mm * r / sigma)
-        return r * r * s / math.sqrt(1.0 - 2.0 * mm / r)
+        sigma = r * r + a * a * math.cos(th) ** 2
+        return sigma * s * math.sqrt(1.0 + 2.0 * mm * r / sigma)
 
     def _gamma_poloidal(self, r: float, th: float) -> tuple[float, float]:
-        # (gamma_rr, gamma_theta_theta) for the poloidal |B|^2 (B^phi = 0 at seed).
+        # (gamma_rr, gamma_theta_theta) for the poloidal |B|^2 (B^phi = 0 at seed),
+        # in the horizon-penetrating kerr-schild chart at every spin.
         mm, a = self.schwarzschild_mass, self.kerr_spin
-        if a != 0.0:
-            sigma = r * r + a * a * math.cos(th) ** 2
-            return 1.0 + 2.0 * mm * r / sigma, sigma
-        return 1.0 / (1.0 - 2.0 * mm / r), r * r
+        sigma = r * r + a * a * math.cos(th) ** 2
+        return 1.0 + 2.0 * mm * r / sigma, sigma
 
     def initial_primitive_state(self) -> InitialStateType:
         gas_state = super().initial_primitive_state()
