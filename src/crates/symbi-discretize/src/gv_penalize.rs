@@ -1344,15 +1344,13 @@ mod twin_tests {
                 expected,
                 "{name}: the iso write list must be the adiabatic list minus the energy channel"
             );
-            assert_eq!(
+            assert!(
                 ka.scalar_params().iter().any(|p| p == "gamma"),
-                name == "porous",
-                "{name}: only the adiabatic porous kernel uses its EOS sound speed"
+                "{name}: every adiabatic spherical sink recovers its local sound speed from gamma"
             );
-            assert_eq!(
+            assert!(
                 ki.scalar_params().iter().any(|p| p == "cs"),
-                name == "porous",
-                "{name}: only the isothermal porous kernel uses its EOS sound speed"
+                "{name}: every isothermal spherical sink reads its prescribed sound speed"
             );
             assert!(
                 !ki.scalar_params().iter().any(|p| p == "gamma"),
