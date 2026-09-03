@@ -466,7 +466,7 @@ where
     /// arXiv:1709.05838, theorem 2.1). nothing shared between neighbors moves, so the update
     /// telescopes and `div(B)` is untouched; the only clipped quantity is a local, already
     /// non-conservative metric source. an anchor that is inadmissible with no source at all is a
-    /// timestep failure and rejects the step (`true`).
+    /// timestep failure and the report's decision rejects the step.
     fn fofc_impl(
         &self,
         sim: &FieldStore<D, 3, Mem, Sc>,
@@ -474,8 +474,7 @@ where
         a0: f64,
         ac: f64,
         stage: u8,
-    ) -> bool {
-        let pre_bind = self.pressure_slot(sim);
+    ) -> symbi_sim::substrate_seam::FofcReport {
         // `bcell_from_bface` (the face->cell interp + magnetic-energy patch) runs on the single
         // (Euler, tag 0) and corrector (rk2, tag 2) stages, never the predictor (tag 1, which leaves
         // bcell flux-predicted). re-sync exactly there.
@@ -510,8 +509,6 @@ where
             Self::kernel_prefix(),
             "", // MHD momentum is always a 3-vector; no DOF-lift tag
             self.has_additive_source(),
-            &self.cfl_scratch,
-            pre_bind,
             &self.freeze_streak,
             |dir| self.flux_impl(sim, dir, "", "_rusanov", 0.0),
             || self.c2p(sim),
@@ -569,7 +566,7 @@ where
                 resync: resync_ct,
             },
             || {
-                use crate::regimes::fofc::SourceReplay;
+                use symbi_sim::substrate_seam::SourceReplayOutcome;
                 // the source limiter is defined against the GRMHD admissible set (Wu & Tang
                 // theorem 2.1), which needs the energy slot and a curved metric to have a
                 // geometric source at all.
@@ -577,7 +574,7 @@ where
                     && has_energy
                     && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski;
                 if !curved_rmhd {
-                    return SourceReplay::NotApplicable;
+                    return SourceReplayOutcome::SharedRedo;
                 }
                 use crate::regimes::mhd_substrate as ct;
                 // the cfl scratch carries the per-cell source weight (first the anchor's zero,
@@ -620,7 +617,7 @@ where
                 resync();
                 apply_additive();
                 self.c2p(sim);
-                crate::regimes::fofc::fofc_probe(sim, "rmhd", "", pre_bind, source_weight);
+                crate::regimes::fofc::troubled_from_status(sim, source_weight);
                 // cells inside the excision surface are causally disconnected and their state is
                 // overwritten by the horizon fill, so they must not veto the step. the masking is
                 // pointwise per cell, so it applies in place over the weight buffer itself: the
@@ -640,7 +637,7 @@ where
                     // inadmissible because the state cannot be represented, not because the step
                     // was too long, so rejecting merely replays the same failure at half dt.
                     restore_stage();
-                    return SourceReplay::NotApplicable;
+                    return SourceReplayOutcome::SharedRedo;
                 }
                 // every face splice has already consumed flux_ho; its first component group is
                 // dead for the remainder of this fallback and safely retains the cell anchor.
@@ -675,7 +672,7 @@ where
                 ct::godunov_stage_pcp(sim, self.eos_param.value(), dt, a0, ac, source_weight);
                 resync();
                 apply_additive();
-                SourceReplay::Completed
+                SourceReplayOutcome::ConservativeReplay
             },
             // curved GRMHD alone has the projection tier; where it ran and still left an exterior
             // cell outside G, replaying the step beats waiving that cell's conservation.
@@ -780,7 +777,14 @@ where
         self.flux_impl(sim, dir, self.solver.kernel_suffix(), gr_solver, self.theta);
     }
 
-    fn fofc(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64, stage: u8) -> bool {
+    fn fofc(
+        &self,
+        sim: &FieldStore<D, 3, Mem, Sc>,
+        dt: f64,
+        a0: f64,
+        ac: f64,
+        stage: u8,
+    ) -> symbi_sim::substrate_seam::FofcReport {
         self.fofc_impl(sim, dt, a0, ac, stage)
     }
 

@@ -1053,12 +1053,14 @@ one day flag cells the recovery accepted; the probe's re-evaluation is
 therefore deletable in favor of a status-channel decode when the mask
 unification lands.
 
-Moving the freeze count from the recomputing probe to the act changes what the
-number measures: the probe counts before the body-parachute selection, the act
-counts after it, so a cell the parachute rescues stops counting as frozen.
-That is the intended number. The census gates that assert zero exterior
-freezes are unaffected; any gate holding a nonzero threshold is re-baselined
-deliberately, with the new measurement and its argument recorded in the gate.
+Moving the freeze count from the recomputing probe to the act was audited
+against the select kernels themselves: both selects gate on the same
+physicality predicate over the same spliced candidate the probe classified,
+and both parachute flavors — the bare stage input and its body-evolved twin —
+replace the candidate and waive the cell's conservation, so each is the freeze
+act. The act count therefore equals the old prediction cell for cell; the
+parachute chooses the value a frozen cell holds, never whether it froze. No
+census gate re-baselines; the number's producer moved, its meaning held.
 
 At the host seam the ladder returns a typed report rather than a boolean:
 

@@ -892,16 +892,21 @@ pub struct RkWorkspaceGeneric<
     /// conservatively. touched when a substage fires FOFC; a no-op otherwise and for regimes
     /// that omit FOFC.
     pub flux_ho: [ConsFieldsGeneric<NDIM, DOF, M, Sc>; NDIM],
-    /// the TroubledCell channel: the per-cell FOFC fallback flag over the allocated domain — 1
-    /// where the high-order c2p is unphysical, else 0, with boundary-consistent ghosts (a face is
-    /// first-order exactly when either adjacent cell is flagged). the splice stencil reads it at
-    /// the two cells sharing each face. provenance: the probe evaluates the same interior
-    /// predicate on the same primitives the recovery just wrote, with nothing mutating them in
-    /// between (the stage runs c2p then fofc directly), so today this channel is a re-encoding of
-    /// C2pStatus; it stays a separate channel because its consumers (the splice kernels and the
-    /// ghost fill) and its encoding differ, and the fallback ladder may one day flag cells the
-    /// recovery accepted.
+    /// the TroubledCell channel: the per-cell FOFC fallback flag over the allocated domain,
+    /// written exactly 0 or 1 (set iff the value exceeds zero — the one mask convention), with
+    /// boundary-consistent ghosts (a face is first-order exactly when either adjacent cell is
+    /// flagged). the splice stencil reads it at the two cells sharing each face. produced by the
+    /// decode of the authoritative C2pStatus channel: the recovery wrote its accept/reject fact on
+    /// this very state and nothing mutates the primitives between the recovery and the fallback
+    /// pass, so the decode carries the same fact in the splice kernels' encoding.
     pub fofc_flag: Field<Sc, NDIM, M>,
+    /// the FreezeApplied channel: the per-cell freeze act over the interior, written exactly 0 or
+    /// 1 by the correcting select itself (set iff the value exceeds zero) — 1 where the select
+    /// rejected the spliced candidate and deployed a stage-input parachute (bare or body-evolved;
+    /// both waive the cell's conservation for the substage). the freeze count and the census
+    /// freeze observations are named reductions of this mask; classification elsewhere predicts,
+    /// only the actor reports.
+    pub freeze_applied: Field<Sc, NDIM, M>,
     /// body-feedback reduction scratch, allocated on the first feedback dispatch, so a body-free
     /// sim pays neither the memory nor a per-call allocation. the feedback kernels assign-write
     /// every cell of their dispatch region before the reduction reads it, so a reused buffer
@@ -2546,6 +2551,7 @@ where
             elide_stage_snapshot: std::sync::atomic::AtomicBool::new(true),
             flux_ho: array_cons_zeros_with_energy(&allocated, has_energy)?,
             fofc_flag: Field::zeros(&allocated)?,
+            freeze_applied: Field::zeros(&allocated)?,
             body_scratch: std::sync::OnceLock::new(),
             #[cfg(debug_assertions)]
             stage_writes: std::sync::Mutex::new(None),

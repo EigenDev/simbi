@@ -772,12 +772,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         a0: f64,
         ac: f64,
         _stage: u8,
-    ) -> bool {
+    ) -> symbi_sim::substrate_seam::FofcReport {
         // FOFC covers the DOF == D charts only (the fofc kernels are baked at ncomp = D). `fofc` is
         // called unconditionally by the driver, so
         // the gate lives here (fofc_active only guards the stage-input snapshot).
         if DOF != D {
-            return false;
+            return symbi_sim::substrate_seam::FofcReport::inactive();
         }
         // the first-order redo runs HLLE at theta = 0 (PCM) — the positivity-preserving Einfeldt
         // fan — regardless of the production solver (HLLC can undershoot in a strong rarefaction).
@@ -791,8 +791,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             "adiabatic",
             "", // the DOF != D early-return means this path is always DOF == D
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
-            &self.cfl_scratch,
-            pre,
             &self.freeze_streak,
             |dir| {
                 dispatch_flux(
@@ -816,7 +814,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             // freeze parachute evolves by the body source (adiabatic has the _with_body kernel).
             sim.immersed.is_some().then(|| (ac * dt, self.gamma)),
             crate::regimes::fofc::CtHooks::none(),
-            || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
+            || symbi_sim::substrate_seam::SourceReplayOutcome::SharedRedo, // hydro: no source replay
             false, // no projection tier below the freeze; keep the parachute
         )
     }

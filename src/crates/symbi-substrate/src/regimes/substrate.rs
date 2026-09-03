@@ -663,7 +663,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         true
     }
 
-    fn fofc(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64, _stage: u8) -> bool {
+    fn fofc(
+        &self,
+        sim: &FieldStore<D, D, Mem, Sc>,
+        dt: f64,
+        a0: f64,
+        ac: f64,
+        _stage: u8,
+    ) -> symbi_sim::substrate_seam::FofcReport {
         // isothermal is HLLE-only by physics; the first-order redo is the same fan at theta = 0
         // (PCM) — the positivity-preserving Einfeldt fan. the substrate-owned pressure (cs^2*rho)
         // feeds the flux as in the production sweep.
@@ -672,8 +679,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             "iso",
             "", // iso is DOF == D (no swirl lift)
             self.has_additive_source(),
-            &self.cfl_scratch,
-            &sim.fields.cons.den,
             &self.freeze_streak,
             |dir| {
                 dispatch_flux(
@@ -697,7 +702,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             // freeze parachute evolves by the iso body source (eos param = cs, no energy field).
             sim.immersed.is_some().then(|| (ac * dt, self.cs)),
             crate::regimes::fofc::CtHooks::none(),
-            || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
+            || symbi_sim::substrate_seam::SourceReplayOutcome::SharedRedo, // hydro: no source replay
             false, // no projection tier below the freeze; keep the parachute
         )
     }

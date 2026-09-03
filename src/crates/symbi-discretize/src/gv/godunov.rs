@@ -12,7 +12,6 @@ use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
-use symbi_ir::gv::GvMask;
 use symbi_ir::{CtCellCt, CtFaceCt, PhysComp};
 use symbi_ir::{KernelWrite, KernelWrites};
 
@@ -68,46 +67,17 @@ pub fn fofc_copy_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) 
     })
 }
 
-/// the first-order flux-correction select: `out = physical(ho_prim) ? ho : fo`, componentwise over
-/// the gas conserved (den, mom[k], nrg?) and primitive (rho, vel[k], pre?). the high-order state
-/// `ho_*` is the snapshot taken before the substage was redone at first order; `fo_*` is the redone
-/// (PCM + HLLE) result, aliased to the live cons/prim `out_*` (in-place read+write). the failure
-/// test is metric-free and needs only rho/pre: both relativistic recoveries drive an out-of-cone
-/// state to a finite flagged result — density from the ceiling-clamped lorentz factor, pressure to
-/// the density-scaled non-positive cone-failure sentinel (see c2p_result) — so an unphysical recovery
-/// always shows up as rho <= 0 or pre <= 0 (both fail `> 0`), which the rho/pre tests alone catch.
-/// so a cell whose high-order c2p is physical keeps its sharp state; only the failed cells take the
-/// diffusive first-order result. carrier-generic, regime-generic (has_energy toggles the pressure law).
-/// the FOFC host-gate probe: write 1 to the scratch where the high-order c2p is unphysical (density
-/// or, for an energy regime, pressure non-finite or non-positive), else 0. a max-reduce over the
-/// interior is > 0 exactly when some zone needs correcting; a clean substage reduces to 0 and skips
-/// the whole FOFC pass (which would keep the high-order everywhere anyway — bit-identical to skip).
-fn primitive_physical_gv<'t>(cx: TraceCx<'t>, ncomp: usize, has_energy: bool) -> GvMask<'t> {
-    let finite_pos = |v: Gv<'t>| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
-    let finite = |v: Gv<'t>| (v - v).cmp_eq(Gv::ZERO);
-    let rho = cx.field("prim_rho", FieldRef::PrimRho);
-    let mut physical = if has_energy {
-        let pre = cx.field("prim_pre", FieldRef::PrimPre);
-        finite_pos(rho) & finite_pos(pre)
-    } else {
-        finite_pos(rho)
-    };
-    // the full state vector: each velocity component is tested for finiteness alone, since its sign
-    // is physical. catches a non-finite momentum the density/pressure test misses — notably for
-    // iso, whose only other guard is the density, so a NaN momentum would otherwise ride through the
-    // FOFC gate until the next flux divergence poisons the density one step later.
-    for k in 0..ncomp {
-        physical =
-            physical & finite(cx.field(&format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8)));
-    }
-    physical
-}
-
-pub fn fofc_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
+/// the TroubledCell decode: materialize the fallback flag from the
+/// authoritative C2pStatus channel the recovery kernel wrote — zero accepted,
+/// nonzero rejected — as the exact 0/1 mask the splice kernels consume. the
+/// recovery classified this very state and nothing mutates the primitives
+/// between the recovery and the fallback pass, so the decode carries the same
+/// fact; classification lives with the recovery, this only re-encodes it.
+pub fn fofc_flag_from_status_gv() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-        let physical = primitive_physical_gv(cx, ncomp, has_energy);
-        let flag = Gv::select(physical, Gv::ZERO, Gv::ONE);
-        vec![KernelWrite::new("flag", FieldRef::Scratch, flag.node())]
+        let status = cx.field("status", "status");
+        let flag = Gv::select(status.cmp_eq(Gv::ZERO), Gv::ZERO, Gv::ONE);
+        vec![KernelWrite::new("flag", "flag", flag.node())]
     })
 }
 
@@ -169,39 +139,6 @@ pub fn state_finite_probe_gv() -> (GvKernel, KernelWrites) {
     })
 }
 
-/// FOFC freeze diagnostic: write 1 to `freeze` where the spliced first-order result (`x_*`, the live
-/// cons after the face-based redo) is still unphysical — the zones the freeze tier holds at the
-/// stage input. reduced over the interior to count freezes per substage; a fully
-/// physical-constraint-preserving low-order scheme recovers every flagged cell (full first-order
-/// fluxes on all its faces), driving this to zero, so a nonzero count localizes where a
-/// physical-constraint-preserving assumption leaks and the run trades a cell's conservation for
-/// finiteness.
-pub fn fofc_freeze_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
-        // finiteness probes as named-brand fns: a local closure cannot name the trace
-        // brand, and annotating the elided lifetime mints regions invariance rejects.
-        fn finite<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
-            (v - v).cmp_eq(Gv::ZERO)
-        }
-        fn finite_pos<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
-            finite(v) & v.cmp_gt(Gv::ZERO)
-        }
-        let x_rho = cx.field("x_rho", "x_rho");
-        let mut physical = if has_energy {
-            let x_pre = cx.field("x_pre", "x_pre");
-            finite_pos(x_rho) & finite_pos(x_pre)
-        } else {
-            finite_pos(x_rho)
-        };
-        for k in 0..ncomp {
-            let path = format!("x_vel_{k}");
-            physical = physical & finite(cx.field(&path, &path));
-        }
-        let frozen = Gv::select(physical, Gv::ZERO, Gv::ONE);
-        vec![KernelWrite::new("freeze", "freeze", frozen.node())]
-    })
-}
-
 /// the FOFC freeze tier select (the face-based redo's only per-cell state replacement): keep the
 /// live spliced first-order conserved (`x_*`) where it is physical, else freeze to the stage-input
 /// state `u_stage` (`us_*`) — the pre-godunov conserved, admissible from stage entry, so the final
@@ -258,6 +195,14 @@ pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites
         if has_energy {
             sel_inplace("nrg", cx.field("us_nrg", "us_nrg"));
         }
+        // the FreezeApplied channel: this select is the component performing
+        // the freeze, so it reports the act — 1 where the candidate was
+        // rejected and the stage-input parachute deployed, else 0.
+        writes.push(KernelWrite::new(
+            "freeze",
+            "freeze",
+            Gv::select(physical, Gv::ZERO, Gv::ONE).node(),
+        ));
         writes
     })
 }
@@ -353,6 +298,15 @@ pub fn fofc_select_with_body_gv(
         if let Some((us_nrg, b_nrg)) = b_nrg {
             sel("nrg", parachute(b_nrg, us_nrg));
         }
+        // the FreezeApplied channel: 1 where the candidate was rejected and a
+        // parachute deployed — the body-evolved one or, when its guard fails,
+        // the bare stage input; both waive the cell's conservation, so both
+        // are the freeze act this select reports.
+        writes.push(KernelWrite::new(
+            "freeze",
+            "freeze",
+            Gv::select(physical_fo, Gv::ZERO, Gv::ONE).node(),
+        ));
         writes
     })
 }

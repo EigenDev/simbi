@@ -228,7 +228,7 @@ fn fofc_freeze_preserves_body_gravity() {
     };
 
     let sb = build();
-    fofc_select_with_body(&sb, "adiabatic", dt, GAMMA);
+    fofc_select_with_body(&sb, "adiabatic", dt, GAMMA, &sb.workspace.freeze_applied);
     let sp = build();
     fofc_select(
         &sp,
@@ -237,6 +237,7 @@ fn fofc_freeze_preserves_body_gravity() {
         &sp.workspace.u_stage,
         &sp.fields.cons,
         &sp.fields.prim,
+        &sp.workspace.freeze_applied,
     );
 
     let mut frozen = 0usize;
@@ -344,7 +345,7 @@ fn fofc_freeze_preserves_body_gravity_iso() {
     };
 
     let sb = build();
-    fofc_select_with_body(&sb, "iso", dt, cs);
+    fofc_select_with_body(&sb, "iso", dt, cs, &sb.workspace.freeze_applied);
     let sp = build();
     fofc_select(
         &sp,
@@ -353,6 +354,7 @@ fn fofc_freeze_preserves_body_gravity_iso() {
         &sp.workspace.u_stage,
         &sp.fields.cons,
         &sp.fields.prim,
+        &sp.workspace.freeze_applied,
     );
 
     let mut frozen = 0usize;
@@ -367,7 +369,19 @@ fn fofc_freeze_preserves_body_gravity_iso() {
         let by = *sb.fields.cons.mom[1].view().at(c);
         let px = *sp.fields.cons.mom[0].view().at(c);
         let py = *sp.fields.cons.mom[1].view().at(c);
+        // the FreezeApplied act pin: both selects report the frozen band,
+        // parachute rescue included; kept cells report no act.
+        let act_b = *sb.workspace.freeze_applied.view().at(c);
+        let act_p = *sp.workspace.freeze_applied.view().at(c);
         if frozen_band(r) {
+            assert_eq!(
+                act_b, 1.0,
+                "iso with-body select must report the freeze act at {c:?}"
+            );
+            assert_eq!(
+                act_p, 1.0,
+                "iso plain select must report the freeze act at {c:?}"
+            );
             let inward = -((bx - px) * x + (by - py) * y) / r;
             if inward > 1e-6 {
                 got_body += 1;
@@ -378,6 +392,14 @@ fn fofc_freeze_preserves_body_gravity_iso() {
             && (bx - KEPT_MARKER).abs() < 1e-12
             && (px - KEPT_MARKER).abs() < 1e-12
         {
+            assert_eq!(
+                act_b, 0.0,
+                "an iso kept cell reports no freeze act at {c:?}"
+            );
+            assert_eq!(
+                act_p, 0.0,
+                "an iso kept cell reports no freeze act at {c:?}"
+            );
             kept_ok += 1;
         }
     }

@@ -41,7 +41,7 @@ use symbi_discretize::{
     body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv, body_source_gv,
     body_source_iso_gv, chi_c2p_gv, chi_flux_gv, chi_godunov_gv, chi_snapshot_gv,
     fofc_bflux_splice_gv, fofc_copy_gv, fofc_emf_splice_gv, fofc_exterior_flag_gv,
-    fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv, fofc_select_with_body_gv, fofc_splice_gv,
+    fofc_flag_from_status_gv, fofc_select_gv, fofc_select_with_body_gv, fofc_splice_gv,
     geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv,
     imhd_edge_emf_uct_hlld_gv, imhd_wave_speeds_cell_gv, inertial_momentum_probe_gv,
     iso_ghost_fill_gv, iso_wave_speed_map_gv, neumann_ghost_fill_gv, nmhd_edge_emf_uct_hllc_gv,
@@ -1034,22 +1034,6 @@ fn gen_fofc_tagged(
     emit_gv(
         out_dir,
         &format!("{prefix}_fofc_select{dof_sfx}_{ndim}d"),
-        ndim,
-        &k,
-        &w,
-    );
-    let (k, w) = fofc_probe_gv(ncomp, has_energy);
-    emit_gv(
-        out_dir,
-        &format!("{prefix}_fofc_probe{dof_sfx}_{ndim}d"),
-        ndim,
-        &k,
-        &w,
-    );
-    let (k, w) = fofc_freeze_probe_gv(ncomp, has_energy);
-    emit_gv(
-        out_dir,
-        &format!("{prefix}_fofc_freeze{dof_sfx}_{ndim}d"),
         ndim,
         &k,
         &w,
@@ -2864,6 +2848,17 @@ fn main() {
     gen_godunov_mass_1d(&out_dir);
     for ndim in 1..=3u8 {
         gen_chi_kernels(&out_dir, ndim);
+        // the TroubledCell decode of the C2pStatus channel: pointwise and
+        // regime-independent (the status vocabulary is one), one per grid
+        // dimension.
+        let (k, w) = fofc_flag_from_status_gv();
+        emit_gv(
+            &out_dir,
+            &format!("fofc_flag_from_status_{ndim}d"),
+            ndim,
+            &k,
+            &w,
+        );
     }
     // amr field transfer: the refinement-lattice
     // pullbacks at ratio 2, every dimension.

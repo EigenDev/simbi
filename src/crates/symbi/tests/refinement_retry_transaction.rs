@@ -70,9 +70,23 @@ impl KernelSet<1, 1, HostMemory, f64> for RejectOnce {
         _a0: f64,
         _ac: f64,
         _stage: u8,
-    ) -> bool {
+    ) -> symbi_sim::substrate_seam::FofcReport {
+        use symbi_sim::substrate_seam::{FofcDecision, FofcReport, SourceReplayOutcome};
         // root, first fine substep, then second fine substep: reject only the latter.
-        self.calls.fetch_add(1, Ordering::SeqCst) + 1 == self.reject_at
+        let reject = self.calls.fetch_add(1, Ordering::SeqCst) + 1 == self.reject_at;
+        if reject {
+            // a coherent rejected pass: one troubled cell whose exterior
+            // freeze act is the retry evidence.
+            FofcReport::of_pass(
+                1,
+                1,
+                1,
+                SourceReplayOutcome::SharedRedo,
+                FofcDecision::RetryStep,
+            )
+        } else {
+            FofcReport::inactive()
+        }
     }
 
     fn horizon_accretion(

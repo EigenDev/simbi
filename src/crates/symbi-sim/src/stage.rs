@@ -376,7 +376,10 @@ where
                 prof("c2p", || kernels.c2p(sim));
             }
             PhaseKind::Fofc => {
-                if prof("fofc", || kernels.fofc(sim, args.dt, args.a0, args.ac, tag)) {
+                // the single fold of the ladder's decision into the stage outcome; the
+                // report's counts already flowed to the census as observations.
+                let report = prof("fofc", || kernels.fofc(sim, args.dt, args.a0, args.ac, tag));
+                if report.decision() == crate::substrate_seam::FofcDecision::RetryStep {
                     return StageOutcome::RetryStep;
                 }
             }

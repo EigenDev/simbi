@@ -20,9 +20,10 @@
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
-use symbi_grid::Field;
 use symbi_carrier::Scalar;
+use symbi_grid::Field;
 use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
+use symbi_sim::substrate_seam::{FofcDecision, FofcReport, SourceReplayOutcome};
 use symbi_xpu::MemorySpace;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -30,7 +31,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use crate::kernels::support::FaceDomain;
 use crate::regimes::substrate_gpu::field_reduce;
 use crate::regimes::substrate_kernels::{
-    coord_suffix, dispatch_fields_each, dispatch_named, kernel_field_binds, resolve_body_scalars,
+    coord_suffix, dispatch_fields_each, kernel_field_binds, resolve_body_scalars,
 };
 use symbi_ir::emit::ReductionOp;
 
@@ -109,7 +110,7 @@ fn post_first_fallback<const D: usize, const DOF: usize, Mem, Sc>(
     let rho = sim.fields.prim.rho.view();
     let pre = sim.fields.prim.pre_field().map(Field::view);
     for c in sim.geom.interior.iter() {
-        if (*fv.at(c)).to_f64() <= 0.5 {
+        if (*fv.at(c)).to_f64() <= 0.0 {
             continue;
         }
         let x: [f64; D] =
@@ -125,7 +126,7 @@ fn post_first_fallback<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// count the flagged cells (flag > 0.5) whose cell center |x| lies inside `r_h`, on a
+/// count the set cells (value > 0 on an exact 0/1 mask) whose cell center |x| lies inside `r_h`, on a
 /// uniform cartesian grid with origin `x_lo` and spacing `dx`. the boundary test is a
 /// diagnostic split with no physics dependence — half-cell classification error at the
 /// horizon is irrelevant (the interior fire sits deep inside, the exterior gate cares
@@ -149,22 +150,20 @@ where
             let x = x_lo[a] + (c[a] as f64 + 0.5) * dx[a];
             r2 += x * x;
         }
-        if r2 < r_h * r_h && (*view.at(c)).to_f64() > 0.5 {
+        if r2 < r_h * r_h && (*view.at(c)).to_f64() > 0.0 {
             count += 1;
         }
     }
     count
 }
 
-/// book a per-substage flagged count into a horizon subtotal, when the split is active:
-/// a configured radius, a cartesian chart, and host-resident memory. returns the number of
-/// events booked (the count inside the horizon), or 0 when no split applies — so the caller can
-/// derive the exterior count as `total - returned` and treat a run with no configured horizon as
-/// all-exterior (unchanged behavior).
-fn book_horizon_events<const D: usize, const DOF: usize, Mem, Sc>(
+/// the per-substage count of set mask cells inside the configured horizon radius, when the
+/// split is active: a configured radius, a cartesian chart, and host-resident memory. returns
+/// 0 when no split applies, so the caller derives the exterior count as `total - returned` and
+/// a run with no configured horizon treats every event as exterior.
+fn horizon_split_count<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
-    flag: &Field<Sc, D, Mem>,
-    counter: &AtomicU64,
+    mask: &Field<Sc, D, Mem>,
 ) -> u64
 where
     Mem: MemorySpace,
@@ -177,9 +176,21 @@ where
     {
         return 0;
     }
-    let n = horizon_flagged_count(flag, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, r_h);
-    counter.fetch_add(n, Ordering::Relaxed);
-    n
+    horizon_flagged_count(mask, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, r_h)
+}
+
+/// the census counters observe the report: the running totals and their horizon
+/// subtotals book from the report's counts and the horizon splits measured on
+/// the channel masks — a second source of truth does not exist.
+fn book_census(report: &FofcReport, troubled_interior: u64, frozen_interior: u64) {
+    if report.troubled() > 0 {
+        FOFC_FALLBACK_CELLS.fetch_add(report.troubled(), Ordering::Relaxed);
+        FOFC_FALLBACK_CELLS_HORIZON.fetch_add(troubled_interior, Ordering::Relaxed);
+    }
+    if report.frozen() > 0 {
+        FOFC_FREEZE_CELLS.fetch_add(report.frozen(), Ordering::Relaxed);
+        FOFC_FREEZE_CELLS_HORIZON.fetch_add(frozen_interior, Ordering::Relaxed);
+    }
 }
 
 /// consecutive substages the FOFC freeze tier may fire before the run halts. the freeze is the
@@ -281,13 +292,17 @@ pub fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     u_stage: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
     cons: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
     prim: &PrimFieldsGeneric<D, DOF, Mem, Sc>,
+    freeze: &Field<Sc, D, Mem>,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("{prefix}_fofc_select{dof_sfx}_{D}d");
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        if let Some(c) = s.strip_prefix("us_") {
+        if s == "freeze" {
+            // the FreezeApplied channel: the select reports its own act.
+            freeze
+        } else if let Some(c) = s.strip_prefix("us_") {
             // the stage-input freeze tier: conserved only (den/mom/nrg); the prim arg is unread.
             fofc_comp(u_stage, prim, c)
         } else if let Some(c) = s.strip_prefix("x_") {
@@ -322,6 +337,7 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
     prefix: &str,
     dt: f64,
     gamma: f64,
+    freeze: &Field<Sc, D, Mem>,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -335,7 +351,10 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
     let cons = &sim.fields.cons;
     let prim = &sim.fields.prim;
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        if let Some(c) = s.strip_prefix("us_") {
+        if s == "freeze" {
+            // the FreezeApplied channel: the select reports its own act.
+            freeze
+        } else if let Some(c) = s.strip_prefix("us_") {
             fofc_comp(u_stage, prim, c)
         } else if let Some(c) = s.strip_prefix("x_") {
             fofc_comp(cons, prim, c)
@@ -356,20 +375,27 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &scalars);
 }
 
-/// write the per-cell inadmissibility mask (1 where the current primitive state is unphysical)
-/// over the interior into `bad`.
-pub(crate) fn fofc_probe<const D: usize, const DOF: usize, Mem, Sc>(
+/// materialize the TroubledCell mask into `out` by decoding the authoritative
+/// C2pStatus channel over the interior: 1 where the recovery rejected the
+/// cell, else 0. the recovery classified this very state (nothing mutates the
+/// primitives between the recovery and the fallback pass), so the decode
+/// carries the same fact in the splice kernels' encoding.
+pub(crate) fn troubled_from_status<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
-    prefix: &str,
-    dof_sfx: &str,
-    pre: &Field<Sc, D, Mem>,
-    bad: &Field<Sc, D, Mem>,
+    out: &Field<Sc, D, Mem>,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let name = format!("{prefix}_fofc_probe{dof_sfx}_{D}d");
-    dispatch_named(sim, pre, Some(bad), 0, &name, &sim.geom.interior, &[], &[]);
+    let name = format!("fofc_flag_from_status_{D}d");
+    dispatch_fields_each::<Sc, Mem, D>(
+        &name,
+        &sim.geom.interior,
+        &[&sim.fields.c2p_error],
+        &[out],
+        &[],
+        &[],
+    );
 }
 
 /// the number of set cells in a 0/1 interior mask.
@@ -435,61 +461,6 @@ pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// FOFC freeze diagnostic: count the zones where the spliced first-order result is still unphysical —
-/// the zones the freeze tier holds at the stage input (the conservation waiver). writes the per-zone
-/// freeze flag to the scratch (`{prefix}_fofc_freeze{dof_sfx}_{D}d`) and max-reduces it over the
-/// interior: > 0 iff some zone froze this substage. dispatched after the spliced-godunov c2p, so `x_*`
-/// is the live conserved the select tests.
-pub(crate) fn fofc_freeze_count<const D: usize, const DOF: usize, Mem, Sc>(
-    sim: &FieldStore<D, DOF, Mem, Sc>,
-    prefix: &str,
-    dof_sfx: &str,
-    scratch: &Field<Sc, D, Mem>,
-    cons: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
-    prim: &PrimFieldsGeneric<D, DOF, Mem, Sc>,
-) -> f64
-where
-    Mem: MemorySpace + Sync,
-    Sc: Scalar + OrderedNumeric,
-{
-    let name = format!("{prefix}_fofc_freeze{dof_sfx}_{D}d");
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        if s == "freeze" {
-            scratch
-        } else if let Some(c) = s.strip_prefix("x_") {
-            fofc_comp(cons, prim, c)
-        } else {
-            panic!("fofc_freeze_count: unknown slot '{s}'")
-        }
-    };
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    for (bind, is_out) in kernel_field_binds(&name).iter() {
-        let fld = slot(&bind.name());
-        if *is_out {
-            outputs.push(fld);
-        } else {
-            inputs.push(fld);
-        }
-    }
-    dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
-    // sum: the freeze flag is 0/1, so this is the count of frozen zones (> 0 iff any froze — the
-    // caller's streak test and the observability tally both read it).
-    field_reduce(scratch, &sim.geom.interior, ReductionOp::Add)
-}
-
-/// what the GRMHD conservative source replay did with the spliced first-order state. every other
-/// regime reports `NotApplicable` and takes the shared redo.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SourceReplay {
-    /// the regime has no source replay; the shared godunov / source / body redo completes the
-    /// substage.
-    NotApplicable,
-    /// the replay completed the substage itself (godunov, CT re-sync, additive sources) with the
-    /// geometric source scaled to the largest admissible fraction.
-    Completed,
-}
-
 /// the constrained-transport hooks of the FOFC redo, carried as one value: four
 /// same-signature closures traveled as positional arguments, so transposing two of
 /// them typechecked and linked while corrupting `bcell` only on FOFC cells. hydro
@@ -533,8 +504,8 @@ impl CtHooks<fn(), fn(), fn(), fn()> {
     }
 }
 
-/// the face-based FOFC flow. (1) flag every zone whose high-order c2p is unphysical (the probe write
-/// over the interior), boundary-fill the flag; early-out if none. (2) save the high-order fluxes.
+/// the face-based FOFC flow. (1) decode the recovery's C2pStatus into the TroubledCell flag
+/// over the interior, boundary-fill the flag; early-out if none. (2) save the high-order fluxes.
 /// (3) restore cons <- u_stage so the first-order flux reconstructs from the physical stage input;
 /// c2p. (4) re-flux at first order (the caller's `first_order_flux`). (5) splice per face: keep the
 /// first-order flux where either adjacent cell is flagged, else the saved high-order flux — one flux
@@ -546,9 +517,11 @@ impl CtHooks<fn(), fn(), fn(), fn()> {
 /// supplies the substrate's own first-order flux (per direction) / c2p / godunov / source_apply.
 ///
 /// step (6) is where GRMHD diverges: `source_replay` completes the substage itself with the
-/// geometric source limited per cell, and steps (7)'s freeze tier then only ever counts. returns
-/// true when the substage cannot be completed at this timestep at all and the caller must reject
-/// and replay the whole step.
+/// geometric source limited per cell. the correcting select writes the FreezeApplied mask (the
+/// act, per cell), and the returned [`FofcReport`] carries the troubled and frozen counts, the
+/// replay path, and the accept/retry decision — a substage whose stage input is unrecoverable at
+/// this timestep reports `RetryStep`, and the driver rolls the step back and replays it at a
+/// smaller dt (the rollback discards the selected state; the act is still the act).
 pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
@@ -556,8 +529,6 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // ones (both share the `_{D}d` grid tag); "" for DOF == D and for the always-3-vector MHD.
     dof_sfx: &str,
     has_additive: bool,
-    scratch: &Field<Sc, D, Mem>,
-    pre_bind: &Field<Sc, D, Mem>,
     freeze_streak: &AtomicU32,
     first_order_flux: impl Fn(usize),
     c2p: impl Fn(),
@@ -586,47 +557,37 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // the GRMHD conservative source replay, called once the single-valued gas flux and edge EMF are
     // spliced: it limits the (non-conservative) geometric source to the largest admissible fraction
     // of the source ray instead of blending whole cell states, so the flux and CT operators stay
-    // untouched. see `SourceReplay`. every other regime reports `NotApplicable`.
-    source_replay: impl Fn() -> SourceReplay,
+    // untouched. every other regime reports the shared redo.
+    source_replay: impl Fn() -> SourceReplayOutcome,
     // whether an exterior cell the projection could not recover should reject the step (replay it
     // at a smaller dt) rather than freeze. true only where a projection exists to have tried and
     // failed first; a regime with no projection has no tier below the freeze and must keep it.
     retry_on_freeze: bool,
-    // whether the caller must reject the whole step and replay it at a smaller timestep.
-) -> bool
+) -> FofcReport
 where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let ws = &sim.workspace;
     let flag = &ws.fofc_flag;
-    // host gate + flag: write the per-cell fallback flag (1 where the high-order c2p is unphysical)
-    // over the interior. FOFC only corrects a flagged cell (a physical one keeps its high-order flux
-    // on every non-fallback face), so with none the whole pass is a no-op — skip it. a clean substage
-    // costs one pointwise probe + a reduction, skipping the flux sweep + two extra c2p passes.
-    let probe = format!("{prefix}_fofc_probe{dof_sfx}_{D}d");
-    dispatch_named(
-        sim,
-        pre_bind,
-        Some(flag),
-        0,
-        &probe,
-        &sim.geom.interior,
-        &[],
-        &[],
-    );
-    // sum (not max): the flag is 0/1, so the reduction is the count of flagged cells — it doubles as
-    // the fire/skip decision (count == 0 iff every high-order c2p was physical) and the observability
-    // tally, in a single pass.
-    let fallback_cells = field_reduce(flag, &sim.geom.interior, ReductionOp::Add);
-    if fallback_cells < 0.5 {
+    // host gate + flag: the TroubledCell decode of the recovery's status channel over the
+    // interior. FOFC only corrects a flagged cell (a physical one keeps its high-order flux
+    // on every non-fallback face), so with none the whole pass is a no-op — skip it. a clean
+    // substage costs one pointwise decode + a reduction, skipping the flux sweep + two extra
+    // c2p passes.
+    troubled_from_status(sim, flag);
+    let troubled = fofc_flag_count(sim, flag);
+    if troubled == 0 {
         advance_freeze_streak(freeze_streak, 0);
-        return false;
+        return FofcReport::of_pass(
+            0,
+            0,
+            0,
+            SourceReplayOutcome::SharedRedo,
+            FofcDecision::Accept,
+        );
     }
-    FOFC_FALLBACK_CELLS.fetch_add(fallback_cells as u64, Ordering::Relaxed);
     post_first_fallback(sim, flag);
-    // the horizon-region subtotal (inert without a configured split radius).
-    book_horizon_events(sim, flag, &FOFC_FALLBACK_CELLS_HORIZON);
     // boundary-consistent ghosts for the flag: a face straddling the periodic wrap (or any boundary)
     // must take one first-order decision from both of its cells, else the splice re-creates the very
     // non-conservation it exists to remove.
@@ -673,9 +634,10 @@ where
         fofc_splice(sim, prefix, dof_sfx, dir, flag, &ws.flux_ho[dir]);
     }
     (ct.flux_and_curl)(); // MHD: splice bflux, recompute + splice the edge EMF, re-curl bface_n -> FO B on flagged
-    match source_replay() {
-        SourceReplay::Completed => {}
-        SourceReplay::NotApplicable => {
+    let replay = source_replay();
+    match replay {
+        SourceReplayOutcome::ConservativeReplay => {}
+        SourceReplayOutcome::SharedRedo => {
             godunov();
             (ct.resync)(); // MHD: bcell_from_bface (patch stages) — re-interp bcell + the small FO-vs-FO patch
             if has_additive {
@@ -693,12 +655,22 @@ where
     // for regimes with no baked projection (flat MHD, iso), which keep the freeze parachute.
     project();
     c2p();
-    // persistent-freeze fail-loud: the freeze tier holds the stage input where even full first-order
-    // fluxes leave a cell unphysical. it is the rare correct parachute for a genuinely hard cell
-    // (isolated in time), so a single firing is not a failure — but a poisoned source / initial datum
-    // that FOFC cannot fix freezes every stage. track the consecutive streak and halt loudly once it
-    // persists.
-    let froze = fofc_freeze_count(sim, prefix, dof_sfx, scratch, cons, prim);
+    // the correcting select is the only component that freezes, and therefore the only
+    // reporter: it writes the chosen state and the FreezeApplied mask together. it runs
+    // before the retry decision below — on a rejected step the driver's rollback discards
+    // the selected state, and the report still records the act that was performed.
+    let freeze = &ws.freeze_applied;
+    match body_freeze {
+        Some((dt_eff, gamma)) => fofc_select_with_body(sim, prefix, dt_eff, gamma, freeze),
+        None => fofc_select(sim, prefix, dof_sfx, sim.stage_input(), cons, prim, freeze),
+    }
+    c2p();
+    // persistent-freeze fail-loud: the freeze act holds the stage input where even full
+    // first-order fluxes leave a cell unphysical. it is the rare correct parachute for a
+    // genuinely hard cell (isolated in time), so a single firing is not a failure — but a
+    // poisoned source / initial datum that FOFC cannot fix freezes every stage. track the
+    // consecutive streak and halt loudly once it persists.
+    let frozen = fofc_flag_count(sim, freeze);
     // the freeze-streak halt gates on the exterior (r > r_+) freeze count only. a cell inside the
     // event horizon is causally disconnected from the exterior — no numerical signal crosses r_+
     // outward faster than the light cone the CFL bounds — so a persistent freeze there is expected
@@ -709,14 +681,12 @@ where
     // domain; charging it for causally-disconnected interior fiction halts a healthy run. a run with
     // no configured horizon (flat, angular chart, device) books zero interior events, so exterior ==
     // total and the halt is bit-unchanged.
-    let interior_froze = if froze > 0.5 {
-        FOFC_FREEZE_CELLS.fetch_add(froze as u64, Ordering::Relaxed);
-        // the freeze flag lives in `scratch` after fofc_freeze_count.
-        book_horizon_events(sim, scratch, &FOFC_FREEZE_CELLS_HORIZON)
+    let frozen_interior = if frozen > 0 {
+        horizon_split_count(sim, freeze)
     } else {
         0
     };
-    let exterior_froze = (froze as u64).saturating_sub(interior_froze);
+    let exterior_froze = frozen.saturating_sub(frozen_interior);
     let streak = advance_freeze_streak(freeze_streak, exterior_froze);
     // the halt above fires on a sixteen-substage streak, so the freezes that
     // precede it are recovered silently; the first few carry the location where
@@ -732,15 +702,6 @@ where
             eprintln!("[fofc] {exterior_froze} exterior freeze(s), streak {streak}, first {first}");
         }
     }
-    // tier 3, the last resort below the projection: an exterior cell that even the projection could
-    // not land in G has an inadmissible anchor — its stage input is already unrecoverable — so the
-    // substage cannot be completed at this timestep. replaying the whole step at a smaller dt is
-    // strictly better than the freeze below, which holds the cell at that same anchor and waives
-    // its conservation. bounded by the same streak the halt uses, so a state no timestep can rescue
-    // still fails loudly instead of halving forever.
-    if exterior_froze > 0 && streak < FOFC_FREEZE_HALT_STREAK && retry_on_freeze {
-        return true;
-    }
     if streak >= FOFC_FREEZE_HALT_STREAK {
         let c2p_errors = symbi_sim::hydro_ops::scan_c2p_errors(sim);
         let first_error = symbi_sim::hydro_ops::first_c2p_error(sim)
@@ -755,59 +716,20 @@ where
              {c2p_errors}; first host error: {first_error}; first state: {first_state}."
         );
     }
-    match body_freeze {
-        Some((dt_eff, gamma)) => fofc_select_with_body(sim, prefix, dt_eff, gamma),
-        None => fofc_select(sim, prefix, dof_sfx, sim.stage_input(), cons, prim),
-    }
-    c2p();
-    false
-}
-
-#[cfg(test)]
-mod horizon_split_tests {
-    use super::{FOFC_FREEZE_HALT_STREAK, advance_freeze_streak, horizon_flagged_count};
-    use std::sync::atomic::{AtomicU32, Ordering};
-    use symbi_algebra::{Domain, Space};
-    use symbi_grid::Field;
-    use symbi_xpu::HostMemory;
-
-    #[test]
-    fn clean_substage_breaks_the_persistent_freeze_streak() {
-        let streak = AtomicU32::new(0);
-        for _ in 0..FOFC_FREEZE_HALT_STREAK {
-            assert_eq!(advance_freeze_streak(&streak, 1), 1);
-            assert_eq!(advance_freeze_streak(&streak, 0), 0);
-        }
-        assert_eq!(streak.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
-    fn masked_count_splits_by_cell_center_radius() {
-        // a 16x16 grid on (-2, 2)^2: flag one cell deep inside r_h = 1 and one far
-        // outside; only the inside one books into the horizon subtotal.
-        let n = 16isize;
-        let dom = Domain::new([
-            Space {
-                name: "i",
-                lo: 0,
-                hi: n,
-            },
-            Space {
-                name: "j",
-                lo: 0,
-                hi: n,
-            },
-        ]);
-        let flag = Field::<f64, 2, HostMemory>::zeros(&dom).unwrap();
-        let (x_lo, dx) = ([-2.0, -2.0], [0.25, 0.25]);
-        // cell [8, 8] center = (0.125, 0.125), r ~ 0.18 < 1: inside.
-        flag.set([8, 8], 1.0);
-        // cell [15, 15] center = (1.875, 1.875), r ~ 2.65 > 1: outside.
-        flag.set([15, 15], 1.0);
-        assert_eq!(horizon_flagged_count(&flag, &dom, &x_lo, &dx, 1.0), 1);
-        // no split radius -> nothing books.
-        assert_eq!(horizon_flagged_count(&flag, &dom, &x_lo, &dx, 0.0), 0);
-        // a radius covering the grid books both.
-        assert_eq!(horizon_flagged_count(&flag, &dom, &x_lo, &dx, 10.0), 2);
-    }
+    // tier 3, the last resort below the projection: an exterior cell that even the projection could
+    // not land in G has an inadmissible anchor — its stage input is already unrecoverable — so the
+    // substage cannot be completed at this timestep. replaying the whole step at a smaller dt is
+    // strictly better than the freeze, which holds the cell at that same anchor and waives its
+    // conservation. bounded by the same streak the halt uses, so a state no timestep can rescue
+    // still fails loudly instead of halving forever.
+    let decision = if exterior_froze > 0 && streak < FOFC_FREEZE_HALT_STREAK && retry_on_freeze {
+        FofcDecision::RetryStep
+    } else {
+        FofcDecision::Accept
+    };
+    let report = FofcReport::of_pass(troubled, frozen, exterior_froze, replay, decision);
+    // the census counters observe the report; the horizon subtotals split on the channel masks.
+    let troubled_interior = horizon_split_count(sim, flag);
+    book_census(&report, troubled_interior, frozen_interior);
+    report
 }

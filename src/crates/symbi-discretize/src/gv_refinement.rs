@@ -195,22 +195,22 @@ pub fn refine_restrict_gv(ndim: usize, ratio: i64) -> (GvKernel, KernelWrites) {
     );
     assert!(ratio >= 2, "refine_restrict_gv: ratio must be >= 2");
     trace(|cx| {
-    // the per-axis Refine map base: source[ax] = coord[ax] * ratio (+ child offset).
-    let scaled: Vec<NodeId> = cx.with_trace(|t| {
-        let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
-        let g = t.graph();
-        coords
-            .into_iter()
-            .map(|c| {
-                let r = g.add_const(ConstValue::I32(ratio as i32), None);
-                g.element_wise(ElementWiseOp::Mul, vec![c, r], None)
-            })
-            .collect()
-    });
-    let inv_r = Gv::from_f64(1.0 / ratio as f64);
-    let val = restrict_eval(cx, &scaled, ratio, inv_r, ndim as isize - 1, &mut [0; 3]);
-    let writes = vec![KernelWrite::new("dst", "dst", val.node())];
-    writes
+        // the per-axis Refine map base: source[ax] = coord[ax] * ratio (+ child offset).
+        let scaled: Vec<NodeId> = cx.with_trace(|t| {
+            let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
+            let g = t.graph();
+            coords
+                .into_iter()
+                .map(|c| {
+                    let r = g.add_const(ConstValue::I32(ratio as i32), None);
+                    g.element_wise(ElementWiseOp::Mul, vec![c, r], None)
+                })
+                .collect()
+        });
+        let inv_r = Gv::from_f64(1.0 / ratio as f64);
+        let val = restrict_eval(cx, &scaled, ratio, inv_r, ndim as isize - 1, &mut [0; 3]);
+        let writes = vec![KernelWrite::new("dst", "dst", val.node())];
+        writes
     })
 }
 
@@ -262,10 +262,10 @@ fn restrict_eval<'t>(
 pub fn field_copy_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     assert!((1..=3).contains(&ndim), "field_copy_gv: ndim must be 1..=3");
     trace(|cx| {
-    let v = cx.field("src", "src");
-    let _ = ndim;
-    let writes = vec![KernelWrite::new("dst", "dst", v.node())];
-    writes
+        let v = cx.field("src", "src");
+        let _ = ndim;
+        let writes = vec![KernelWrite::new("dst", "dst", v.node())];
+        writes
     })
 }
 
@@ -273,10 +273,10 @@ pub fn field_copy_gv(ndim: usize) -> (GvKernel, KernelWrites) {
 pub fn field_fill_gv(ndim: usize) -> (GvKernel, KernelWrites) {
     assert!((1..=3).contains(&ndim), "field_fill_gv: ndim must be 1..=3");
     trace(|cx| {
-    let v = cx.scalar("value");
-    let _ = ndim;
-    let writes = vec![KernelWrite::new("dst", "dst", v.node())];
-    writes
+        let v = cx.scalar("value");
+        let _ = ndim;
+        let writes = vec![KernelWrite::new("dst", "dst", v.node())];
+        writes
     })
 }
 
@@ -290,24 +290,24 @@ pub fn field_axpy_shift_gv(ndim: usize) -> (GvKernel, KernelWrites) {
         "field_axpy_shift_gv: ndim must be 1..=3"
     );
     trace(|cx| {
-    let src_coords: Vec<NodeId> = cx.with_trace(|t| {
-        let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
-        let args: Vec<NodeId> = (0..ndim)
-            .map(|ax| t.scalar_int(&format!("arg_{ax}")))
-            .collect();
-        let g = t.graph();
-        coords
-            .into_iter()
-            .zip(args)
-            .map(|(c, a)| g.element_wise(ElementWiseOp::Add, vec![c, a], None))
-            .collect()
-    });
-    let scale = cx.scalar("scale");
-    let dst = cx.field("dst", "dst");
-    let src = gv_load_at(cx, "src", "src", &src_coords);
-    let v = dst + scale * src;
-    let writes = vec![KernelWrite::new("dst", "dst", v.node())];
-    writes
+        let src_coords: Vec<NodeId> = cx.with_trace(|t| {
+            let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
+            let args: Vec<NodeId> = (0..ndim)
+                .map(|ax| t.scalar_int(&format!("arg_{ax}")))
+                .collect();
+            let g = t.graph();
+            coords
+                .into_iter()
+                .zip(args)
+                .map(|(c, a)| g.element_wise(ElementWiseOp::Add, vec![c, a], None))
+                .collect()
+        });
+        let scale = cx.scalar("scale");
+        let dst = cx.field("dst", "dst");
+        let src = gv_load_at(cx, "src", "src", &src_coords);
+        let v = dst + scale * src;
+        let writes = vec![KernelWrite::new("dst", "dst", v.node())];
+        writes
     })
 }
 
@@ -326,23 +326,23 @@ pub fn refine_acc_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Ke
     );
     assert!(ratio >= 2, "refine_acc_face_gv: ratio must be >= 2");
     trace(|cx| {
-    let scaled: Vec<NodeId> = cx.with_trace(|t| {
-        let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
-        let g = t.graph();
-        coords
-            .into_iter()
-            .map(|c| {
-                let r = g.add_const(ConstValue::I32(ratio as i32), None);
-                g.element_wise(ElementWiseOp::Mul, vec![c, r], None)
-            })
-            .collect()
-    });
-    let scale = cx.scalar("scale");
-    let dst = cx.field("dst", "dst");
-    let sum = acc_face_sum(cx, &scaled, ratio, axis, ndim as isize - 1, &mut [0; 3]);
-    let v = dst + scale * sum;
-    let writes = vec![KernelWrite::new("dst", "dst", v.node())];
-    writes
+        let scaled: Vec<NodeId> = cx.with_trace(|t| {
+            let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
+            let g = t.graph();
+            coords
+                .into_iter()
+                .map(|c| {
+                    let r = g.add_const(ConstValue::I32(ratio as i32), None);
+                    g.element_wise(ElementWiseOp::Mul, vec![c, r], None)
+                })
+                .collect()
+        });
+        let scale = cx.scalar("scale");
+        let dst = cx.field("dst", "dst");
+        let sum = acc_face_sum(cx, &scaled, ratio, axis, ndim as isize - 1, &mut [0; 3]);
+        let v = dst + scale * sum;
+        let writes = vec![KernelWrite::new("dst", "dst", v.node())];
+        writes
     })
 }
 
@@ -361,41 +361,41 @@ pub fn refine_acc_edge_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Ke
     );
     assert!(ratio >= 2, "refine_acc_edge_gv: ratio must be >= 2");
     trace(|cx| {
-    let scaled: Vec<NodeId> = cx.with_trace(|t| {
-        let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
-        let g = t.graph();
-        coords
-            .into_iter()
-            .map(|c| {
-                let r = g.add_const(ConstValue::I32(ratio as i32), None);
-                g.element_wise(ElementWiseOp::Mul, vec![c, r], None)
-            })
-            .collect()
-    });
-    let scale = cx.scalar("scale");
-    let dst = cx.field("dst", "dst");
-    let load = |off_axis: i64| {
-        let coords: Vec<NodeId> = cx.with_trace(|t| {
+        let scaled: Vec<NodeId> = cx.with_trace(|t| {
+            let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
             let g = t.graph();
-            scaled
-                .iter()
-                .enumerate()
-                .map(|(kk, &s)| {
-                    let o = if kk == axis { off_axis } else { 0 };
-                    let oc = g.add_const(ConstValue::I32(o as i32), None);
-                    g.element_wise(ElementWiseOp::Add, vec![s, oc], None)
+            coords
+                .into_iter()
+                .map(|c| {
+                    let r = g.add_const(ConstValue::I32(ratio as i32), None);
+                    g.element_wise(ElementWiseOp::Mul, vec![c, r], None)
                 })
                 .collect()
         });
-        gv_load_at(cx, "src", "src", &coords)
-    };
-    let mut sum = load(0);
-    for kk in 1..ratio {
-        sum = sum + load(kk);
-    }
-    let v = dst + scale * sum;
-    let writes = vec![KernelWrite::new("dst", "dst", v.node())];
-    writes
+        let scale = cx.scalar("scale");
+        let dst = cx.field("dst", "dst");
+        let load = |off_axis: i64| {
+            let coords: Vec<NodeId> = cx.with_trace(|t| {
+                let g = t.graph();
+                scaled
+                    .iter()
+                    .enumerate()
+                    .map(|(kk, &s)| {
+                        let o = if kk == axis { off_axis } else { 0 };
+                        let oc = g.add_const(ConstValue::I32(o as i32), None);
+                        g.element_wise(ElementWiseOp::Add, vec![s, oc], None)
+                    })
+                    .collect()
+            });
+            gv_load_at(cx, "src", "src", &coords)
+        };
+        let mut sum = load(0);
+        for kk in 1..ratio {
+            sum = sum + load(kk);
+        }
+        let v = dst + scale * sum;
+        let writes = vec![KernelWrite::new("dst", "dst", v.node())];
+        writes
     })
 }
 
@@ -461,21 +461,29 @@ pub fn refine_restrict_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKerne
     );
     assert!(ratio >= 2, "refine_restrict_face_gv: ratio must be >= 2");
     trace(|cx| {
-    let scaled: Vec<NodeId> = cx.with_trace(|t| {
-        let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
-        let g = t.graph();
-        coords
-            .into_iter()
-            .map(|c| {
-                let r = g.add_const(ConstValue::I32(ratio as i32), None);
-                g.element_wise(ElementWiseOp::Mul, vec![c, r], None)
-            })
-            .collect()
-    });
-    let inv_r = Gv::from_f64(1.0 / ratio as f64);
-    let val = restrict_face_eval(cx, &scaled, ratio, inv_r, axis, ndim as isize - 1, &mut [0; 3]);
-    let writes = vec![KernelWrite::new("dst", "dst", val.node())];
-    writes
+        let scaled: Vec<NodeId> = cx.with_trace(|t| {
+            let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
+            let g = t.graph();
+            coords
+                .into_iter()
+                .map(|c| {
+                    let r = g.add_const(ConstValue::I32(ratio as i32), None);
+                    g.element_wise(ElementWiseOp::Mul, vec![c, r], None)
+                })
+                .collect()
+        });
+        let inv_r = Gv::from_f64(1.0 / ratio as f64);
+        let val = restrict_face_eval(
+            cx,
+            &scaled,
+            ratio,
+            inv_r,
+            axis,
+            ndim as isize - 1,
+            &mut [0; 3],
+        );
+        let writes = vec![KernelWrite::new("dst", "dst", val.node())];
+        writes
     })
 }
 
@@ -541,17 +549,17 @@ pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKer
     );
     assert!(ratio >= 2, "refine_prolong_gv: ratio must be >= 2");
     trace(|cx| {
-    let alpha = cx.scalar("alpha");
-    let geom = prolong_geometry(cx, ndim, ratio);
-    let src = ProlongSrc::TimePair {
-        old: "src_old",
-        new: "src_new",
-        alpha,
-    };
-    let ctx = geom.ctx(ndim, order, &src);
-    let val = prolong_eval(cx, &ctx, ndim as isize - 1, &mut [0; 3]);
-    let writes = vec![KernelWrite::new("dst", "dst", val.node())];
-    writes
+        let alpha = cx.scalar("alpha");
+        let geom = prolong_geometry(cx, ndim, ratio);
+        let src = ProlongSrc::TimePair {
+            old: "src_old",
+            new: "src_new",
+            alpha,
+        };
+        let ctx = geom.ctx(ndim, order, &src);
+        let val = prolong_eval(cx, &ctx, ndim as isize - 1, &mut [0; 3]);
+        let writes = vec![KernelWrite::new("dst", "dst", val.node())];
+        writes
     })
 }
 
@@ -577,25 +585,25 @@ pub fn refine_prolong_multi_gv(
     assert!(ratio >= 2, "refine_prolong_multi_gv: ratio must be >= 2");
     assert!(ncomp >= 1, "refine_prolong_multi_gv: ncomp must be >= 1");
     trace(|cx| {
-    let alpha = cx.scalar("alpha");
-    let geom = prolong_geometry(cx, ndim, ratio);
-    let mut writes = Vec::with_capacity(ncomp);
-    for k in 0..ncomp {
-        let (old_name, new_name, dst_name) = (
-            format!("src_old_{k}"),
-            format!("src_new_{k}"),
-            format!("dst_{k}"),
-        );
-        let src = ProlongSrc::TimePair {
-            old: &old_name,
-            new: &new_name,
-            alpha,
-        };
-        let ctx = geom.ctx(ndim, order, &src);
-        let val = prolong_eval(cx, &ctx, ndim as isize - 1, &mut [0; 3]);
-        writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
-    }
-    writes
+        let alpha = cx.scalar("alpha");
+        let geom = prolong_geometry(cx, ndim, ratio);
+        let mut writes = Vec::with_capacity(ncomp);
+        for k in 0..ncomp {
+            let (old_name, new_name, dst_name) = (
+                format!("src_old_{k}"),
+                format!("src_new_{k}"),
+                format!("dst_{k}"),
+            );
+            let src = ProlongSrc::TimePair {
+                old: &old_name,
+                new: &new_name,
+                alpha,
+            };
+            let ctx = geom.ctx(ndim, order, &src);
+            let val = prolong_eval(cx, &ctx, ndim as isize - 1, &mut [0; 3]);
+            writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
+        }
+        writes
     })
 }
 
@@ -619,16 +627,16 @@ pub fn refine_prolong_multi_1t_gv(
     assert!(ratio >= 2, "refine_prolong_multi_1t_gv: ratio must be >= 2");
     assert!(ncomp >= 1, "refine_prolong_multi_1t_gv: ncomp must be >= 1");
     trace(|cx| {
-    let geom = prolong_geometry(cx, ndim, ratio);
-    let mut writes = Vec::with_capacity(ncomp);
-    for k in 0..ncomp {
-        let (src_name, dst_name) = (format!("src_{k}"), format!("dst_{k}"));
-        let src = ProlongSrc::Single { name: &src_name };
-        let ctx = geom.ctx(ndim, order, &src);
-        let val = prolong_eval(cx, &ctx, ndim as isize - 1, &mut [0; 3]);
-        writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
-    }
-    writes
+        let geom = prolong_geometry(cx, ndim, ratio);
+        let mut writes = Vec::with_capacity(ncomp);
+        for k in 0..ncomp {
+            let (src_name, dst_name) = (format!("src_{k}"), format!("dst_{k}"));
+            let src = ProlongSrc::Single { name: &src_name };
+            let ctx = geom.ctx(ndim, order, &src);
+            let val = prolong_eval(cx, &ctx, ndim as isize - 1, &mut [0; 3]);
+            writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
+        }
+        writes
     })
 }
 
@@ -665,65 +673,65 @@ pub fn refine_prolong_sweep_multi_gv(
         "refine_prolong_sweep_multi_gv: ncomp must be >= 1"
     );
     trace(|cx| {
-    // parent + parity on the swept axis only (the same arithmetic
-    // prolong_geometry builds per axis).
-    let (parent, parity): (NodeId, NodeId) = cx.with_trace(|t| {
-        let c = t.coord(sweep_axis as u8);
-        let g = t.graph();
-        let r = g.add_const(ConstValue::I32(ratio as i32), None);
-        let p = g.element_wise(ElementWiseOp::FloorDiv, vec![c, r], None);
-        let pr = g.element_wise(ElementWiseOp::Mul, vec![p, r], None);
-        let q = g.element_wise(ElementWiseOp::Sub, vec![c, pr], None);
-        (p, q)
-    });
-    let half = Gv::from_f64(0.5);
-    let inv_ratio = Gv::from_f64(1.0 / ratio as f64);
-    let ratio_f = Gv::from_f64(ratio as f64);
-    let one = Gv::from_f64(1.0);
-    let parity_f = cx.gv(parity);
-    let frac = (parity_f + half) * inv_ratio - half;
-    let xi_lo = parity_f * inv_ratio;
-    let xi_hi = (parity_f + one) * inv_ratio;
+        // parent + parity on the swept axis only (the same arithmetic
+        // prolong_geometry builds per axis).
+        let (parent, parity): (NodeId, NodeId) = cx.with_trace(|t| {
+            let c = t.coord(sweep_axis as u8);
+            let g = t.graph();
+            let r = g.add_const(ConstValue::I32(ratio as i32), None);
+            let p = g.element_wise(ElementWiseOp::FloorDiv, vec![c, r], None);
+            let pr = g.element_wise(ElementWiseOp::Mul, vec![p, r], None);
+            let q = g.element_wise(ElementWiseOp::Sub, vec![c, pr], None);
+            (p, q)
+        });
+        let half = Gv::from_f64(0.5);
+        let inv_ratio = Gv::from_f64(1.0 / ratio as f64);
+        let ratio_f = Gv::from_f64(ratio as f64);
+        let one = Gv::from_f64(1.0);
+        let parity_f = cx.gv(parity);
+        let frac = (parity_f + half) * inv_ratio - half;
+        let xi_lo = parity_f * inv_ratio;
+        let xi_hi = (parity_f + one) * inv_ratio;
 
-    let w = order.ghost_width() as i64;
-    let mut writes = Vec::with_capacity(ncomp);
-    for k in 0..ncomp {
-        let src_name = format!("src_{k}");
-        // the stencil loads: swept axis at parent + dd, unswept axes at the
-        // raw thread coordinate.
-        let load = |dd: i64| {
-            let coords: Vec<NodeId> = cx.with_trace(|t| {
-                let raw: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
-                let g = t.graph();
-                raw.into_iter()
-                    .enumerate()
-                    .map(|(ax, c)| {
-                        if ax == sweep_axis {
-                            let o = g.add_const(ConstValue::I32(dd as i32), None);
-                            g.element_wise(ElementWiseOp::Add, vec![parent, o], None)
-                        } else {
-                            c
-                        }
-                    })
-                    .collect()
-            });
-            gv_load_at(cx, &src_name, src_name.as_str(), &coords)
-        };
-        let vals: Vec<Gv> = (-w..=w).map(load).collect();
-        let val = match order {
-            ProlongOrder::Pcm => vals[0],
-            ProlongOrder::Plm => plm_interp(vals[0], vals[1], vals[2], frac),
-            ProlongOrder::Ppm => ppm_interp(
-                vals[0], vals[1], vals[2], vals[3], vals[4], xi_lo, xi_hi, ratio_f,
-            ),
-            ProlongOrder::Quartic => quartic_interp(
-                vals[0], vals[1], vals[2], vals[3], vals[4], xi_lo, xi_hi, ratio_f,
-            ),
-        };
-        let dst_name = format!("dst_{k}");
-        writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
-    }
-    writes
+        let w = order.ghost_width() as i64;
+        let mut writes = Vec::with_capacity(ncomp);
+        for k in 0..ncomp {
+            let src_name = format!("src_{k}");
+            // the stencil loads: swept axis at parent + dd, unswept axes at the
+            // raw thread coordinate.
+            let load = |dd: i64| {
+                let coords: Vec<NodeId> = cx.with_trace(|t| {
+                    let raw: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
+                    let g = t.graph();
+                    raw.into_iter()
+                        .enumerate()
+                        .map(|(ax, c)| {
+                            if ax == sweep_axis {
+                                let o = g.add_const(ConstValue::I32(dd as i32), None);
+                                g.element_wise(ElementWiseOp::Add, vec![parent, o], None)
+                            } else {
+                                c
+                            }
+                        })
+                        .collect()
+                });
+                gv_load_at(cx, &src_name, src_name.as_str(), &coords)
+            };
+            let vals: Vec<Gv> = (-w..=w).map(load).collect();
+            let val = match order {
+                ProlongOrder::Pcm => vals[0],
+                ProlongOrder::Plm => plm_interp(vals[0], vals[1], vals[2], frac),
+                ProlongOrder::Ppm => ppm_interp(
+                    vals[0], vals[1], vals[2], vals[3], vals[4], xi_lo, xi_hi, ratio_f,
+                ),
+                ProlongOrder::Quartic => quartic_interp(
+                    vals[0], vals[1], vals[2], vals[3], vals[4], xi_lo, xi_hi, ratio_f,
+                ),
+            };
+            let dst_name = format!("dst_{k}");
+            writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
+        }
+        writes
     })
 }
 
@@ -741,20 +749,20 @@ pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites
     );
     assert!(ncomp >= 1, "field_lerp_multi_gv: ncomp must be >= 1");
     trace(|cx| {
-    let alpha = cx.scalar("alpha");
-    let one = Gv::from_f64(1.0);
-    let _ = ndim;
-    let mut writes = Vec::with_capacity(ncomp);
-    for k in 0..ncomp {
-        let old_key = format!("src_old_{k}");
-        let new_key = format!("src_new_{k}");
-        let v_old = cx.field(&old_key, old_key.as_str());
-        let v_new = cx.field(&new_key, new_key.as_str());
-        let v = (one - alpha) * v_old + alpha * v_new;
-        let dst_name = format!("dst_{k}");
-        writes.push(KernelWrite::new(dst_name.clone(), dst_name, v.node()));
-    }
-    writes
+        let alpha = cx.scalar("alpha");
+        let one = Gv::from_f64(1.0);
+        let _ = ndim;
+        let mut writes = Vec::with_capacity(ncomp);
+        for k in 0..ncomp {
+            let old_key = format!("src_old_{k}");
+            let new_key = format!("src_new_{k}");
+            let v_old = cx.field(&old_key, old_key.as_str());
+            let v_new = cx.field(&new_key, new_key.as_str());
+            let v = (one - alpha) * v_old + alpha * v_new;
+            let dst_name = format!("dst_{k}");
+            writes.push(KernelWrite::new(dst_name.clone(), dst_name, v.node()));
+        }
+        writes
     })
 }
 
@@ -893,9 +901,8 @@ fn chained_pressure<'t>(
     vary: &[bool],
 ) -> Gv<'t> {
     let coords: Vec<NodeId> = cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
-    let phi_center = |idx: &[NodeId]| {
-        body_slots_potential(&centroid_position(cx, ndim, idx, x_lo, dx), slots)
-    };
+    let phi_center =
+        |idx: &[NodeId]| body_slots_potential(&centroid_position(cx, ndim, idx, x_lo, dx), slots);
     // the face of cell `idx` on its lower (`side = 0`) or upper (`side = 1`) edge along
     // `ax`. the side rides as a value, since a walk carries its direction as data.
     let phi_face = |idx: &[NodeId], ax: usize, side: NodeId| {
@@ -997,71 +1004,70 @@ pub fn wb_cf_lerp_encode_gv(
         "wb_cf_lerp_encode_gv: the balance-aware transfer carries rho + ndim velocities + pre"
     );
     trace(|cx| {
-    // scalar manifest in declaration order: alpha; the interior-bound int lanes;
-    // grid origin/step; body slots.
-    let alpha = cx.scalar("alpha");
-    let (lo, hi) = declare_interior_bounds(cx, ndim);
-    let x_lo: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
-        .collect();
-    let dx: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("dx_{ax}")))
-        .collect();
-    let slots = declare_body_slots(cx, ndim, n_bodies);
+        // scalar manifest in declaration order: alpha; the interior-bound int lanes;
+        // grid origin/step; body slots.
+        let alpha = cx.scalar("alpha");
+        let (lo, hi) = declare_interior_bounds(cx, ndim);
+        let x_lo: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
+            .collect();
+        let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
+        let slots = declare_body_slots(cx, ndim, n_bodies);
 
-    let one = Gv::from_f64(1.0);
-    // cell loads in interleaved (old_k, new_k) registration order — the buffer
-    // order the dispatch binds.
-    let lerp_cell: Vec<Gv> = (0..ncomp)
-        .map(|k| {
+        let one = Gv::from_f64(1.0);
+        // cell loads in interleaved (old_k, new_k) registration order — the buffer
+        // order the dispatch binds.
+        let lerp_cell: Vec<Gv> = (0..ncomp)
+            .map(|k| {
+                let old_key = format!("src_old_{k}");
+                let new_key = format!("src_new_{k}");
+                let v_old = cx.field(&old_key, old_key.as_str());
+                let v_new = cx.field(&new_key, new_key.as_str());
+                (one - alpha) * v_old + alpha * v_new
+            })
+            .collect();
+        // the lerped state at an arbitrary coarse index, from the same registered
+        // buffers.
+        let lerp_at = |k: usize, idx: &[NodeId]| {
             let old_key = format!("src_old_{k}");
             let new_key = format!("src_new_{k}");
-            let v_old = cx.field(&old_key, old_key.as_str());
-            let v_new = cx.field(&new_key, new_key.as_str());
+            let v_old = gv_load_at(cx, &old_key, old_key.as_str(), idx);
+            let v_new = gv_load_at(cx, &new_key, new_key.as_str(), idx);
             (one - alpha) * v_old + alpha * v_new
-        })
-        .collect();
-    // the lerped state at an arbitrary coarse index, from the same registered
-    // buffers.
-    let lerp_at = |k: usize, idx: &[NodeId]| {
-        let old_key = format!("src_old_{k}");
-        let new_key = format!("src_new_{k}");
-        let v_old = gv_load_at(cx, &old_key, old_key.as_str(), idx);
-        let v_new = gv_load_at(cx, &new_key, new_key.as_str(), idx);
-        (one - alpha) * v_old + alpha * v_new
-    };
-
-    let coords: Vec<NodeId> = cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
-    let ref_idx: Vec<NodeId> = (0..ndim)
-        .map(|ax| int_clamp(cx, coords[ax], lo[ax], hi[ax]))
-        .collect();
-    let p_ref = lerp_at(ncomp - 1, &ref_idx);
-    let rho_at = |idx: &[NodeId]| lerp_at(0, idx);
-    let all = vec![true; ndim];
-    let p_eq = chained_pressure(
-        cx,
-        ndim,
-        &ref_idx,
-        p_ref,
-        &rho_at,
-        &x_lo,
-        &dx,
-        &slots,
-        WB_CF_CHAIN_MAX,
-        &all,
-    );
-
-    let mut writes = Vec::with_capacity(ncomp);
-    for k in 0..ncomp {
-        let val = if k == ncomp - 1 {
-            lerp_cell[k] - p_eq
-        } else {
-            lerp_cell[k]
         };
-        let dst_name = format!("dst_{k}");
-        writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
-    }
-    writes
+
+        let coords: Vec<NodeId> =
+            cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+        let ref_idx: Vec<NodeId> = (0..ndim)
+            .map(|ax| int_clamp(cx, coords[ax], lo[ax], hi[ax]))
+            .collect();
+        let p_ref = lerp_at(ncomp - 1, &ref_idx);
+        let rho_at = |idx: &[NodeId]| lerp_at(0, idx);
+        let all = vec![true; ndim];
+        let p_eq = chained_pressure(
+            cx,
+            ndim,
+            &ref_idx,
+            p_ref,
+            &rho_at,
+            &x_lo,
+            &dx,
+            &slots,
+            WB_CF_CHAIN_MAX,
+            &all,
+        );
+
+        let mut writes = Vec::with_capacity(ncomp);
+        for k in 0..ncomp {
+            let val = if k == ncomp - 1 {
+                lerp_cell[k] - p_eq
+            } else {
+                lerp_cell[k]
+            };
+            let dst_name = format!("dst_{k}");
+            writes.push(KernelWrite::new(dst_name.clone(), dst_name, val.node()));
+        }
+        writes
     })
 }
 
@@ -1095,54 +1101,53 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, KernelWrites)
         "wb_cf_decode_gv: ndim must be 1..=3"
     );
     trace(|cx| {
-    let (lo, hi) = declare_interior_bounds(cx, ndim);
-    let x_lo: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
-        .collect();
-    let dx: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("dx_{ax}")))
-        .collect();
-    let slots = declare_body_slots(cx, ndim, n_bodies);
+        let (lo, hi) = declare_interior_bounds(cx, ndim);
+        let x_lo: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
+            .collect();
+        let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
+        let slots = declare_body_slots(cx, ndim, n_bodies);
 
-    // registration order pins the buffer order: density first (input), then the
-    // pressure (in-place).
-    let rho_at = |idx: &[NodeId]| gv_load_at(cx, "dst_rho", "dst_rho", idx);
-    let coords: Vec<NodeId> = cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
-    let _ = rho_at(&coords);
-    let departure = cx.field("dst_pre", "dst_pre");
-    let ref_idx: Vec<NodeId> = (0..ndim)
-        .map(|ax| int_clamp(cx, coords[ax], lo[ax], hi[ax]))
-        .collect();
-    let p_ref = gv_load_at(cx, "dst_pre", "dst_pre", &ref_idx);
-    let all = vec![true; ndim];
-    let p_eq = chained_pressure(
-        cx,
-        ndim,
-        &ref_idx,
-        p_ref,
-        &rho_at,
-        &x_lo,
-        &dx,
-        &slots,
-        WB_CF_CHAIN_MAX,
-        &all,
-    );
+        // registration order pins the buffer order: density first (input), then the
+        // pressure (in-place).
+        let rho_at = |idx: &[NodeId]| gv_load_at(cx, "dst_rho", "dst_rho", idx);
+        let coords: Vec<NodeId> =
+            cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+        let _ = rho_at(&coords);
+        let departure = cx.field("dst_pre", "dst_pre");
+        let ref_idx: Vec<NodeId> = (0..ndim)
+            .map(|ax| int_clamp(cx, coords[ax], lo[ax], hi[ax]))
+            .collect();
+        let p_ref = gv_load_at(cx, "dst_pre", "dst_pre", &ref_idx);
+        let all = vec![true; ndim];
+        let p_eq = chained_pressure(
+            cx,
+            ndim,
+            &ref_idx,
+            p_ref,
+            &rho_at,
+            &x_lo,
+            &dx,
+            &slots,
+            WB_CF_CHAIN_MAX,
+            &all,
+        );
 
-    // the decoded pressure is the local equilibrium plus the transported
-    // departure, and the decomposition holds only inside the physical regime.
-    // where the sum leaves it the cell takes the equilibrium alone -- the
-    // zero-departure decode, which keeps the cell on the mechanical recursion
-    // -- and where the chain itself has left the regime, the reference cell's
-    // own pressure, positive by construction as the anchor the chain starts
-    // from. a positive decoded value passes through bit for bit, so a balanced
-    // column's ghosts and the machine-exact seam gates carry the identical
-    // graph values.
-    let zero = Gv::from_f64(0.0);
-    let decoded = departure + p_eq;
-    let fallback = Gv::select(p_eq.cmp_gt(zero), p_eq, p_ref);
-    let pre_g = Gv::select(decoded.cmp_gt(zero), decoded, fallback);
-    let writes = vec![KernelWrite::new("dst_pre", "dst_pre", pre_g.node())];
-    writes
+        // the decoded pressure is the local equilibrium plus the transported
+        // departure, and the decomposition holds only inside the physical regime.
+        // where the sum leaves it the cell takes the equilibrium alone -- the
+        // zero-departure decode, which keeps the cell on the mechanical recursion
+        // -- and where the chain itself has left the regime, the reference cell's
+        // own pressure, positive by construction as the anchor the chain starts
+        // from. a positive decoded value passes through bit for bit, so a balanced
+        // column's ghosts and the machine-exact seam gates carry the identical
+        // graph values.
+        let zero = Gv::from_f64(0.0);
+        let decoded = departure + p_eq;
+        let fallback = Gv::select(p_eq.cmp_gt(zero), p_eq, p_ref);
+        let pre_g = Gv::select(decoded.cmp_gt(zero), decoded, fallback);
+        let writes = vec![KernelWrite::new("dst_pre", "dst_pre", pre_g.node())];
+        writes
     })
 }
 
@@ -1164,42 +1169,42 @@ pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> (GvKernel, KernelWrites
         "wb_target_decode_gv: expected rho + ndim velocities + optional pressure"
     );
     trace(|cx| {
-    let mut target = Vec::with_capacity(ncomp);
-    let mut candidate = Vec::with_capacity(ncomp);
-    for kk in 0..ncomp {
-        let eq_key = format!("eq_{kk}");
-        let dst_key = format!("dst_{kk}");
-        let eq = cx.field(&eq_key, eq_key.as_str());
-        let departure = cx.field(&dst_key, dst_key.as_str());
-        target.push(eq);
-        candidate.push(eq + departure);
-    }
-    // finiteness probes as named-brand fns: a local closure cannot name the trace
-    // brand, and annotating the elided lifetime mints regions invariance rejects.
-    fn finite<'t>(value: Gv<'t>) -> symbi_ir::GvMask<'t> {
-        (value - value).cmp_eq(Gv::ZERO)
-    }
-    fn finite_pos<'t>(value: Gv<'t>) -> symbi_ir::GvMask<'t> {
-        finite(value) & value.cmp_gt(Gv::ZERO)
-    }
-    let mut physical = finite_pos(candidate[0]);
-    for kk in 1..=ndim {
-        physical = physical & finite(candidate[kk]);
-    }
-    if ncomp == ndim + 2 {
-        physical = physical & finite_pos(candidate[ncomp - 1]);
-    }
-    let writes = (0..ncomp)
-        .map(|kk| {
+        let mut target = Vec::with_capacity(ncomp);
+        let mut candidate = Vec::with_capacity(ncomp);
+        for kk in 0..ncomp {
+            let eq_key = format!("eq_{kk}");
             let dst_key = format!("dst_{kk}");
-            KernelWrite::new(
-                dst_key.clone(),
-                dst_key,
-                Gv::select(physical, candidate[kk], target[kk]).node(),
-            )
-        })
-        .collect();
-    writes
+            let eq = cx.field(&eq_key, eq_key.as_str());
+            let departure = cx.field(&dst_key, dst_key.as_str());
+            target.push(eq);
+            candidate.push(eq + departure);
+        }
+        // finiteness probes as named-brand fns: a local closure cannot name the trace
+        // brand, and annotating the elided lifetime mints regions invariance rejects.
+        fn finite<'t>(value: Gv<'t>) -> symbi_ir::GvMask<'t> {
+            (value - value).cmp_eq(Gv::ZERO)
+        }
+        fn finite_pos<'t>(value: Gv<'t>) -> symbi_ir::GvMask<'t> {
+            finite(value) & value.cmp_gt(Gv::ZERO)
+        }
+        let mut physical = finite_pos(candidate[0]);
+        for kk in 1..=ndim {
+            physical = physical & finite(candidate[kk]);
+        }
+        if ncomp == ndim + 2 {
+            physical = physical & finite_pos(candidate[ncomp - 1]);
+        }
+        let writes = (0..ncomp)
+            .map(|kk| {
+                let dst_key = format!("dst_{kk}");
+                KernelWrite::new(
+                    dst_key.clone(),
+                    dst_key,
+                    Gv::select(physical, candidate[kk], target[kk]).node(),
+                )
+            })
+            .collect();
+        writes
     })
 }
 
@@ -1231,44 +1236,43 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> (GvKernel, KernelWrite
         "wb_band_decode_gv: ndim must be 1..=3"
     );
     trace(|cx| {
-    let (lo, hi) = declare_interior_bounds(cx, ndim);
-    let x_lo: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
-        .collect();
-    let dx: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("dx_{ax}")))
-        .collect();
-    let slots = declare_body_slots(cx, ndim, n_bodies);
+        let (lo, hi) = declare_interior_bounds(cx, ndim);
+        let x_lo: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
+            .collect();
+        let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
+        let slots = declare_body_slots(cx, ndim, n_bodies);
 
-    // registration order pins the buffer order: density, departures, pressure.
-    let rho_at = |idx: &[NodeId]| gv_load_at(cx, "dst_rho", "dst_rho", idx);
-    let coords: Vec<NodeId> = cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
-    let _ = rho_at(&coords);
-    let departure = cx.field("band_dep", "band_dep");
-    let p_cons = cx.field("dst_pre", "dst_pre");
-    let ref_idx: Vec<NodeId> = (0..ndim)
-        .map(|ax| int_clamp(cx, coords[ax], lo[ax], hi[ax]))
-        .collect();
-    let p_ref = gv_load_at(cx, "dst_pre", "dst_pre", &ref_idx);
-    let all = vec![true; ndim];
-    let p_eq = chained_pressure(
-        cx,
-        ndim,
-        &ref_idx,
-        p_ref,
-        &rho_at,
-        &x_lo,
-        &dx,
-        &slots,
-        WB_CF_CHAIN_MAX,
-        &all,
-    );
+        // registration order pins the buffer order: density, departures, pressure.
+        let rho_at = |idx: &[NodeId]| gv_load_at(cx, "dst_rho", "dst_rho", idx);
+        let coords: Vec<NodeId> =
+            cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+        let _ = rho_at(&coords);
+        let departure = cx.field("band_dep", "band_dep");
+        let p_cons = cx.field("dst_pre", "dst_pre");
+        let ref_idx: Vec<NodeId> = (0..ndim)
+            .map(|ax| int_clamp(cx, coords[ax], lo[ax], hi[ax]))
+            .collect();
+        let p_ref = gv_load_at(cx, "dst_pre", "dst_pre", &ref_idx);
+        let all = vec![true; ndim];
+        let p_eq = chained_pressure(
+            cx,
+            ndim,
+            &ref_idx,
+            p_ref,
+            &rho_at,
+            &x_lo,
+            &dx,
+            &slots,
+            WB_CF_CHAIN_MAX,
+            &all,
+        );
 
-    let zero = Gv::from_f64(0.0);
-    let decoded = departure + p_eq;
-    let pre_g = Gv::select(decoded.cmp_gt(zero), decoded, p_cons);
-    let writes = vec![KernelWrite::new("dst_pre", "dst_pre", pre_g.node())];
-    writes
+        let zero = Gv::from_f64(0.0);
+        let decoded = departure + p_eq;
+        let pre_g = Gv::select(decoded.cmp_gt(zero), decoded, p_cons);
+        let writes = vec![KernelWrite::new("dst_pre", "dst_pre", pre_g.node())];
+        writes
     })
 }
 
@@ -1302,77 +1306,76 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> (GvKern
         "wb_band_encode_gv: the seam normal must be a grid axis"
     );
     trace(|cx| {
-    let (lo, hi) = declare_interior_bounds(cx, ndim);
-    let a_idx: NodeId = cx.with_trace(|t| t.scalar_int("a"));
-    let face = cx.scalar("face");
-    let x_lo: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
-        .collect();
-    let dx: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("dx_{ax}")))
-        .collect();
-    let crs_x_lo: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("crs_x_lo_{ax}")))
-        .collect();
-    let crs_dx: Vec<Gv> = (0..ndim)
-        .map(|ax| cx.scalar(&format!("crs_dx_{ax}")))
-        .collect();
-    let slots = declare_body_slots(cx, ndim, n_bodies);
+        let (lo, hi) = declare_interior_bounds(cx, ndim);
+        let a_idx: NodeId = cx.with_trace(|t| t.scalar_int("a"));
+        let face = cx.scalar("face");
+        let x_lo: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
+            .collect();
+        let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
+        let crs_x_lo: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("crs_x_lo_{ax}")))
+            .collect();
+        let crs_dx: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("crs_dx_{ax}")))
+            .collect();
+        let slots = declare_body_slots(cx, ndim, n_bodies);
 
-    // registration order pins the buffer order: fine rho, fine pre, coarse rho,
-    // coarse pre, then the departure output.
-    let coords: Vec<NodeId> = cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
-    let rho_at = |idx: &[NodeId]| gv_load_at(cx, "src_rho", "src_rho", idx);
-    let _ = rho_at(&coords);
-    let pre_cell = cx.field("src_pre", "src_pre");
-    let ref_idx: Vec<NodeId> = (0..ndim)
-        .map(|ax| int_clamp(cx, coords[ax], lo[ax], hi[ax]))
-        .collect();
-    // the uncovered coarse cell: `a` on the normal axis, the thread's own parent
-    // elsewhere.
-    let two_i = int_const(cx, 2);
-    let crs_idx: Vec<NodeId> = (0..ndim)
-        .map(|ax| {
-            if ax == normal {
-                a_idx
-            } else {
-                int_op(cx, ElementWiseOp::FloorDiv, coords[ax], two_i)
-            }
-        })
-        .collect();
-    let rho_a = gv_load_at(cx, "crs_rho", "crs_rho", &crs_idx);
-    let pre_a = gv_load_at(cx, "crs_pre", "crs_pre", &crs_idx);
+        // registration order pins the buffer order: fine rho, fine pre, coarse rho,
+        // coarse pre, then the departure output.
+        let coords: Vec<NodeId> =
+            cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+        let rho_at = |idx: &[NodeId]| gv_load_at(cx, "src_rho", "src_rho", idx);
+        let _ = rho_at(&coords);
+        let pre_cell = cx.field("src_pre", "src_pre");
+        let ref_idx: Vec<NodeId> = (0..ndim)
+            .map(|ax| int_clamp(cx, coords[ax], lo[ax], hi[ax]))
+            .collect();
+        // the uncovered coarse cell: `a` on the normal axis, the thread's own parent
+        // elsewhere.
+        let two_i = int_const(cx, 2);
+        let crs_idx: Vec<NodeId> = (0..ndim)
+            .map(|ax| {
+                if ax == normal {
+                    a_idx
+                } else {
+                    int_op(cx, ElementWiseOp::FloorDiv, coords[ax], two_i)
+                }
+            })
+            .collect();
+        let rho_a = gv_load_at(cx, "crs_rho", "crs_rho", &crs_idx);
+        let pre_a = gv_load_at(cx, "crs_pre", "crs_pre", &crs_idx);
 
-    // the coarse cell's center, the seam face point on its transverse center
-    // line, and the fine edge cell's center.
-    let c_a = centroid_position(cx, ndim, &crs_idx, &crs_x_lo, &crs_dx);
-    let mut f_pt = c_a;
-    f_pt[normal] = face;
-    let c_e = centroid_position(cx, ndim, &ref_idx, &x_lo, &dx);
-    let phi_a = body_slots_potential(&c_a, &slots);
-    let phi_f = body_slots_potential(&f_pt, &slots);
-    let phi_e = body_slots_potential(&c_e, &slots);
-    let rho_e = rho_at(&ref_idx);
-    let p_ref = pre_a + rho_a * (phi_a - phi_f) + rho_e * (phi_f - phi_e);
-    // the band spans the coverage transversely and the reference is its own edge
-    // cell, so a thread leaves the reference on the seam normal alone.
-    let mut vary = vec![false; ndim];
-    vary[normal] = true;
-    let p_eq = chained_pressure(
-        cx,
-        ndim,
-        &ref_idx,
-        p_ref,
-        &rho_at,
-        &x_lo,
-        &dx,
-        &slots,
-        WB_BAND_CHAIN_MAX,
-        &vary,
-    );
-    let departure = pre_cell - p_eq;
-    let writes = vec![KernelWrite::new("dst", "dst", departure.node())];
-    writes
+        // the coarse cell's center, the seam face point on its transverse center
+        // line, and the fine edge cell's center.
+        let c_a = centroid_position(cx, ndim, &crs_idx, &crs_x_lo, &crs_dx);
+        let mut f_pt = c_a;
+        f_pt[normal] = face;
+        let c_e = centroid_position(cx, ndim, &ref_idx, &x_lo, &dx);
+        let phi_a = body_slots_potential(&c_a, &slots);
+        let phi_f = body_slots_potential(&f_pt, &slots);
+        let phi_e = body_slots_potential(&c_e, &slots);
+        let rho_e = rho_at(&ref_idx);
+        let p_ref = pre_a + rho_a * (phi_a - phi_f) + rho_e * (phi_f - phi_e);
+        // the band spans the coverage transversely and the reference is its own edge
+        // cell, so a thread leaves the reference on the seam normal alone.
+        let mut vary = vec![false; ndim];
+        vary[normal] = true;
+        let p_eq = chained_pressure(
+            cx,
+            ndim,
+            &ref_idx,
+            p_ref,
+            &rho_at,
+            &x_lo,
+            &dx,
+            &slots,
+            WB_BAND_CHAIN_MAX,
+            &vary,
+        );
+        let departure = pre_cell - p_eq;
+        let writes = vec![KernelWrite::new("dst", "dst", departure.node())];
+        writes
     })
 }
 
@@ -1387,20 +1390,20 @@ pub fn band_energy_gv(ndim: usize) -> (GvKernel, KernelWrites) {
         "band_energy_gv: ndim must be 1..=3"
     );
     trace(|cx| {
-    let gamma = cx.scalar("gamma");
-    let rho = cx.field("prim_rho", "prim_rho");
-    let vel: Vec<Gv> = (0..ndim)
-        .map(|k| {
-            let key = format!("prim_vel_{k}");
-            cx.field(&key, key.as_str())
-        })
-        .collect();
-    let pre = cx.field("prim_pre", "prim_pre");
-    let half = Gv::from_f64(0.5);
-    let v2 = vel.iter().map(|&v| v * v).sum::<Gv>();
-    let nrg = pre / (gamma - Gv::ONE) + half * rho * v2;
-    let writes = vec![KernelWrite::new("cons_nrg", "cons_nrg", nrg.node())];
-    writes
+        let gamma = cx.scalar("gamma");
+        let rho = cx.field("prim_rho", "prim_rho");
+        let vel: Vec<Gv> = (0..ndim)
+            .map(|k| {
+                let key = format!("prim_vel_{k}");
+                cx.field(&key, key.as_str())
+            })
+            .collect();
+        let pre = cx.field("prim_pre", "prim_pre");
+        let half = Gv::from_f64(0.5);
+        let v2 = vel.iter().map(|&v| v * v).sum::<Gv>();
+        let nrg = pre / (gamma - Gv::ONE) + half * rho * v2;
+        let writes = vec![KernelWrite::new("cons_nrg", "cons_nrg", nrg.node())];
+        writes
     })
 }
 
@@ -1435,13 +1438,17 @@ pub fn refine_prolong_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel
         "refine_prolong_face_gv: the face-lattice midpoint pair is ratio-2"
     );
     trace(|cx| {
-    let alpha = cx.scalar("alpha");
-    let one = Gv::from_f64(1.0);
+        let alpha = cx.scalar("alpha");
+        let one = Gv::from_f64(1.0);
 
-    // per-axis maps: the normal axis gets the face pair (lo, hi); transverse
-    // axes the cell parent + plm frac, exactly as the cell prolongation.
-    let (pair_lo, pair_hi, parent, parity): (Vec<NodeId>, Vec<NodeId>, Vec<NodeId>, Vec<NodeId>) =
-        cx.with_trace(|t| {
+        // per-axis maps: the normal axis gets the face pair (lo, hi); transverse
+        // axes the cell parent + plm frac, exactly as the cell prolongation.
+        let (pair_lo, pair_hi, parent, parity): (
+            Vec<NodeId>,
+            Vec<NodeId>,
+            Vec<NodeId>,
+            Vec<NodeId>,
+        ) = cx.with_trace(|t| {
             let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
             let g = t.graph();
             let mut lo = Vec::with_capacity(ndim);
@@ -1464,26 +1471,26 @@ pub fn refine_prolong_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel
             (lo, hi, ps, qs)
         });
 
-    let half = Gv::from_f64(0.5);
-    let inv_ratio = Gv::from_f64(1.0 / ratio as f64);
-    let frac: Vec<Gv> = parity
-        .iter()
-        .map(|&q| (cx.gv(q) + half) * inv_ratio - half)
-        .collect();
+        let half = Gv::from_f64(0.5);
+        let inv_ratio = Gv::from_f64(1.0 / ratio as f64);
+        let frac: Vec<Gv> = parity
+            .iter()
+            .map(|&q| (cx.gv(q) + half) * inv_ratio - half)
+            .collect();
 
-    let ctx = FaceProlongCtx {
-        ndim,
-        axis,
-        pair_lo: &pair_lo,
-        pair_hi: &pair_hi,
-        parent: &parent,
-        frac: &frac,
-        one,
-        alpha,
-    };
-    let val = face_prolong_eval(cx, &ctx, ndim as isize - 1, &mut [0; 3]);
-    let writes = vec![KernelWrite::new("dst", "dst", val.node())];
-    writes
+        let ctx = FaceProlongCtx {
+            ndim,
+            axis,
+            pair_lo: &pair_lo,
+            pair_hi: &pair_hi,
+            parent: &parent,
+            frac: &frac,
+            one,
+            alpha,
+        };
+        let val = face_prolong_eval(cx, &ctx, ndim as isize - 1, &mut [0; 3]);
+        let writes = vec![KernelWrite::new("dst", "dst", val.node())];
+        writes
     })
 }
 

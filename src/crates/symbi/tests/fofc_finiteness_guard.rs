@@ -80,6 +80,7 @@ fn fofc_select_freezes_nonfinite_momentum_adiabatic() {
         &s.workspace.u_stage,
         &s.fields.cons,
         &s.fields.prim,
+        &s.workspace.freeze_applied,
     );
 
     let mut band = 0usize;
@@ -142,6 +143,7 @@ fn fofc_select_freezes_nonfinite_momentum_iso() {
         &s.workspace.u_stage,
         &s.fields.cons,
         &s.fields.prim,
+        &s.workspace.freeze_applied,
     );
 
     let mut band = 0usize;

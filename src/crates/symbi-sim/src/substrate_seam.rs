@@ -24,11 +24,126 @@
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
-use symbi_hydro::regime::Regime;
 use symbi_carrier::Scalar;
+use symbi_hydro::regime::Regime;
 use symbi_xpu::MemorySpace;
 
 use crate::state::FieldStore;
+
+/// which fallback-completion path ran on a corrected substage: the shared
+/// first-order redo (godunov from the spliced fluxes), or the GRMHD
+/// conservative replay that re-runs the update with the geometric source
+/// scaled to the largest admissible fraction. an untroubled or inactive pass
+/// carries `SharedRedo` — the normal path, with nothing replayed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceReplayOutcome {
+    SharedRedo,
+    ConservativeReplay,
+}
+
+/// the fallback ladder's step decision: accept the substage, or reject the
+/// whole step for a replay at a smaller timestep. the stage driver folds this
+/// into `StageOutcome` at exactly one site.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FofcDecision {
+    Accept,
+    RetryStep,
+}
+
+/// the fallback ladder's per-substage report — four orthogonal facts. counts
+/// are named reductions of the channel masks: `troubled` from the
+/// `TroubledCell` decode of the recovery status, `frozen` from the
+/// `FreezeApplied` mask the correcting select itself wrote — the act
+/// performed, never a recomputed prediction. the process-global census
+/// counters are observations of this report.
+#[must_use = "the FOFC decision must be folded into the stage outcome"]
+#[derive(Clone, Copy, Debug)]
+pub struct FofcReport {
+    troubled: u64,
+    frozen: u64,
+    replay: SourceReplayOutcome,
+    decision: FofcDecision,
+}
+
+impl FofcReport {
+    /// the one constructor for a pass whose ladder is inactive (a regime
+    /// without FOFC, or a configuration that opts out): zero counts, the
+    /// shared-redo path, accept. an inactive pass cannot fabricate a replay
+    /// claim or a count.
+    pub fn inactive() -> Self {
+        Self {
+            troubled: 0,
+            frozen: 0,
+            replay: SourceReplayOutcome::SharedRedo,
+            decision: FofcDecision::Accept,
+        }
+    }
+
+    /// the report of an active pass, from the orchestrator's measured facts.
+    /// `frozen_exterior` is the decision evidence — the freeze acts outside
+    /// any configured horizon — validated here and folded into the decision's
+    /// coherence rather than stored (the four report fields stay orthogonal).
+    /// cross-field laws: an untroubled pass carries no acts, no replay claim,
+    /// and accepts; a conservative replay requires a troubled pass; a retry
+    /// requires at least one exterior freeze act. a freeze count exceeding the
+    /// troubled count is lawful — a splice-boundary neighbor of a flagged cell
+    /// receives mixed-order fluxes and can freeze without having been flagged.
+    pub fn of_pass(
+        troubled: u64,
+        frozen: u64,
+        frozen_exterior: u64,
+        replay: SourceReplayOutcome,
+        decision: FofcDecision,
+    ) -> Self {
+        assert!(
+            frozen_exterior <= frozen,
+            "exterior freeze evidence ({frozen_exterior}) exceeds the freeze count ({frozen})"
+        );
+        if troubled == 0 {
+            assert!(
+                frozen == 0
+                    && replay == SourceReplayOutcome::SharedRedo
+                    && decision == FofcDecision::Accept,
+                "an untroubled pass carries no acts, no replay claim, and accepts \
+                 (frozen {frozen}, replay {replay:?}, decision {decision:?})"
+            );
+        }
+        if replay == SourceReplayOutcome::ConservativeReplay {
+            assert!(
+                troubled > 0,
+                "a conservative replay requires a troubled pass"
+            );
+        }
+        if decision == FofcDecision::RetryStep {
+            assert!(
+                frozen_exterior > 0,
+                "a retry decision requires an exterior freeze act the mask shows"
+            );
+        }
+        Self {
+            troubled,
+            frozen,
+            replay,
+            decision,
+        }
+    }
+
+    pub fn troubled(&self) -> u64 {
+        self.troubled
+    }
+    /// the freeze acts of this pass. the backing `freeze_applied` mask is
+    /// pass-scoped (written only when the ladder fires); this count is the
+    /// durable record.
+    pub fn frozen(&self) -> u64 {
+        self.frozen
+    }
+    pub fn replay(&self) -> SourceReplayOutcome {
+        self.replay
+    }
+    pub fn decision(&self) -> FofcDecision {
+        self.decision
+    }
+}
 
 // =============================================================================
 // KernelSet trait
@@ -98,12 +213,11 @@ where
     /// reconstructed from the physical stage-input state (`u_stage`), and the sharp high-order state
     /// is kept everywhere else. a floor-free robustness layer: cells the sharp scheme cannot recover
     /// fall back to the diffusive-but-robust first-order update with no pressure floor. host-gated
-    /// on a failure reduction, so a clean substage pays only the scan. default: no-op.
+    /// on a failure reduction, so a clean substage pays only the scan.
     ///
-    /// returns whether the whole step must be rejected: GRMHD limits the geometric source against
-    /// a source-free low-order anchor, and an anchor that is itself inadmissible is a statement
-    /// about the timestep, not the source. the driver then rolls the step back through
-    /// `restore_step` and replays it at a smaller dt.
+    /// returns the typed per-substage [`FofcReport`]: the troubled count, the count of cells the
+    /// correcting select actually froze, which replay path ran, and the accept/retry decision the
+    /// stage driver folds into its outcome. the default is the inactive pass.
     fn fofc(
         &self,
         _store: &FieldStore<NDIM, DOF, Mem, Sc>,
@@ -111,8 +225,8 @@ where
         _a0: f64,
         _ac: f64,
         _stage: u8,
-    ) -> bool {
-        false
+    ) -> FofcReport {
+        FofcReport::inactive()
     }
 
     /// whether this kernel set runs FOFC (`fofc` is non-trivial). when true the driver also takes the

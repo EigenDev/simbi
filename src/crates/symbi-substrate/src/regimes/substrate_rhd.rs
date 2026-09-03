@@ -664,7 +664,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         a0: f64,
         ac: f64,
         _stage: u8,
-    ) -> bool {
+    ) -> symbi_sim::substrate_seam::FofcReport {
         // the first-order redo runs at theta = 0 (PCM). flat (Minkowski) SRHD uses HLLE — the
         // positivity-preserving Einfeldt fan — regardless of the production solver (HLLC can
         // undershoot in a strong rarefaction). the curved (GR) background uses the light-cone rusanov
@@ -681,8 +681,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             "rhd",
             dof_sfx,
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
-            &self.cfl_scratch,
-            pre,
             &self.freeze_streak,
             |dir| {
                 // the redo keeps the run's own eos closure (`first_order` carries it);
@@ -717,7 +715,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             },
             None, // no body-evolved freeze parachute (no rhd body source)
             crate::regimes::fofc::CtHooks::none(),
-            || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
+            || symbi_sim::substrate_seam::SourceReplayOutcome::SharedRedo, // hydro: no source replay
             false, // no projection tier below the freeze; keep the parachute
         )
     }

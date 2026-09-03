@@ -20,11 +20,11 @@
 
 use symbi_algebra::Tensor;
 use symbi_algebra::algebra::Numeric;
+use symbi_carrier::Scalar as _;
 use symbi_geometry::{CylindricalRPhi, DiagonalMetric, Metric, Spherical};
 use symbi_hydro::viscous::{
     viscous_mom_update_2d, viscous_mom_update_3d, viscous_mom_update_orthogonal_2d,
 };
-use symbi_carrier::Scalar as _;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
 use symbi_ir::{FieldRef, Gv, GvKernel, TraceCx, trace};
 
@@ -84,18 +84,18 @@ fn accumulate_mom<'t>(cx: TraceCx<'t>, dmom: Tensor<Gv<'t>, 2>) -> KernelWrites 
 /// trace the constant-nu isothermal viscous operator, 2D cartesian.
 pub fn viscous_iso_gv() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let nu = cx.scalar("nu");
-    let dx = cx.scalar("dx_0");
-    let dy = cx.scalar("dx_1");
+        let dt = cx.scalar("dt");
+        let nu = cx.scalar("nu");
+        let dx = cx.scalar("dx_0");
+        let dy = cx.scalar("dx_1");
 
-    let (vst, rst) = prim_stencil(cx);
-    // constant nu: a uniform viscosity stencil (the face average 0.5(nu+nu) = nu
-    // is bit-identical to a scalar).
-    let nust = [[nu; 3]; 3];
-    let dmom = viscous_mom_update_2d(&vst, &rst, &nust, dx, dy, dt);
-    let writes = accumulate_mom(cx, dmom);
-    writes
+        let (vst, rst) = prim_stencil(cx);
+        // constant nu: a uniform viscosity stencil (the face average 0.5(nu+nu) = nu
+        // is bit-identical to a scalar).
+        let nust = [[nu; 3]; 3];
+        let dmom = viscous_mom_update_2d(&vst, &rst, &nust, dx, dy, dt);
+        let writes = accumulate_mom(cx, dmom);
+        writes
     })
 }
 
@@ -105,31 +105,31 @@ pub fn viscous_iso_gv() -> (GvKernel, KernelWrites) {
 /// irreversible heating warms the gas. runs post-c2p (prim current).
 pub fn viscous_adiabatic_gv() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let nu = cx.scalar("nu");
-    let dx = cx.scalar("dx_0");
-    let dy = cx.scalar("dx_1");
+        let dt = cx.scalar("dt");
+        let nu = cx.scalar("nu");
+        let dx = cx.scalar("dx_0");
+        let dy = cx.scalar("dx_1");
 
-    let (vst, rst) = prim_stencil(cx);
-    let nust = [[nu; 3]; 3];
-    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2d(&vst, &rst, &nust, dx, dy, dt);
-    let mom0_c = cx.field("mom0", FieldRef::cons_mom(0));
-    let mom1_c = cx.field("mom1", FieldRef::cons_mom(1));
-    let nrg_c = cx.field("nrg", FieldRef::cons_nrg());
-    let writes = vec![
-        KernelWrite::new(
-            "mom_out_0",
-            FieldRef::cons_mom(0),
-            (mom0_c + dmom[0]).node(),
-        ),
-        KernelWrite::new(
-            "mom_out_1",
-            FieldRef::cons_mom(1),
-            (mom1_c + dmom[1]).node(),
-        ),
-        KernelWrite::new("nrg_out", FieldRef::cons_nrg(), (nrg_c + dnrg).node()),
-    ];
-    writes
+        let (vst, rst) = prim_stencil(cx);
+        let nust = [[nu; 3]; 3];
+        let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2d(&vst, &rst, &nust, dx, dy, dt);
+        let mom0_c = cx.field("mom0", FieldRef::cons_mom(0));
+        let mom1_c = cx.field("mom1", FieldRef::cons_mom(1));
+        let nrg_c = cx.field("nrg", FieldRef::cons_nrg());
+        let writes = vec![
+            KernelWrite::new(
+                "mom_out_0",
+                FieldRef::cons_mom(0),
+                (mom0_c + dmom[0]).node(),
+            ),
+            KernelWrite::new(
+                "mom_out_1",
+                FieldRef::cons_mom(1),
+                (mom1_c + dmom[1]).node(),
+            ),
+            KernelWrite::new("nrg_out", FieldRef::cons_nrg(), (nrg_c + dnrg).node()),
+        ];
+        writes
     })
 }
 
@@ -151,79 +151,80 @@ pub fn viscous_adiabatic_alpha_gv_2p5d() -> (GvKernel, KernelWrites) {
 fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let alpha = cx.scalar("alpha");
-    let gamma = cx.scalar("gamma");
-    let gm = cx.scalar("body_0_mass");
-    let dx = cx.scalar("dx_0");
-    let dy = cx.scalar("dx_1");
-    let bx = cx.scalar("body_0_pos_0");
-    let by = cx.scalar("body_0_pos_1");
+        let dt = cx.scalar("dt");
+        let alpha = cx.scalar("alpha");
+        let gamma = cx.scalar("gamma");
+        let gm = cx.scalar("body_0_mass");
+        let dx = cx.scalar("dx_0");
+        let dy = cx.scalar("dx_1");
+        let bx = cx.scalar("body_0_pos_0");
+        let by = cx.scalar("body_0_pos_1");
 
-    let geo = cell_geometry_gv(
-        cx,
-        Coords::Cartesian,
-        &vec![Spacing::Uniform; NDIM as usize],
-        &(0..NDIM as usize).collect::<Vec<_>>(),
-        NDIM as usize,
-    );
-    let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
+        let geo = cell_geometry_gv(
+            cx,
+            Coords::Cartesian,
+            &vec![Spacing::Uniform; NDIM as usize],
+            &(0..NDIM as usize).collect::<Vec<_>>(),
+            NDIM as usize,
+        );
+        let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
 
-    // per-stencil-cell nu from the local cs^2 = gamma p / rho and the keplerian
-    // frequency at that cell's in-plane distance from body 0.
-    let mut nust = [[Gv::ZERO; 3]; 3];
-    for jj in 0..3usize {
-        for ii in 0..3usize {
-            let off = [ii as i32 - 1, jj as i32 - 1];
-            let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
-            let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
-            let cs2 = gamma * pre / rho;
-            let x = xc + Gv::from_f64(ii as f64 - 1.0) * dx;
-            let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
-            let (rx, ry) = (x - bx, y - by);
-            let r = (rx * rx + ry * ry).sqrt();
-            nust[jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
+        // per-stencil-cell nu from the local cs^2 = gamma p / rho and the keplerian
+        // frequency at that cell's in-plane distance from body 0.
+        let mut nust = [[Gv::ZERO; 3]; 3];
+        for jj in 0..3usize {
+            for ii in 0..3usize {
+                let off = [ii as i32 - 1, jj as i32 - 1];
+                let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
+                let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
+                let cs2 = gamma * pre / rho;
+                let x = xc + Gv::from_f64(ii as f64 - 1.0) * dx;
+                let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
+                let (rx, ry) = (x - bx, y - by);
+                let r = (rx * rx + ry * ry).sqrt();
+                nust[jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
+            }
         }
-    }
 
-    let mut writes = KernelWrites::new();
-    if dof3 {
-        let (vst, rst) = prim_stencil_2p5d(cx);
-        let (dmom, dnrg) =
-            symbi_hydro::viscous::viscous_update_2p5d(&vst, &rst, &nust, [dx, dy], dt);
-        for c in 0..3 {
-            let mom_c = cx.field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
+        let mut writes = KernelWrites::new();
+        if dof3 {
+            let (vst, rst) = prim_stencil_2p5d(cx);
+            let (dmom, dnrg) =
+                symbi_hydro::viscous::viscous_update_2p5d(&vst, &rst, &nust, [dx, dy], dt);
+            for c in 0..3 {
+                let mom_c = cx.field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
+                writes.push(KernelWrite::new(
+                    format!("mom_out_{c}"),
+                    FieldRef::cons_mom(c as u8),
+                    (mom_c + dmom[c]).node(),
+                ));
+            }
+            let nrg = cx.field("nrg", FieldRef::cons_nrg());
             writes.push(KernelWrite::new(
-                format!("mom_out_{c}"),
-                FieldRef::cons_mom(c as u8),
-                (mom_c + dmom[c]).node(),
+                "nrg_out",
+                FieldRef::cons_nrg(),
+                (nrg + dnrg).node(),
+            ));
+        } else {
+            let (vst, rst) = prim_stencil(cx);
+            let (dmom, dnrg) =
+                symbi_hydro::viscous::viscous_update_2d(&vst, &rst, &nust, dx, dy, dt);
+            for c in 0..2 {
+                let mom_c = cx.field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
+                writes.push(KernelWrite::new(
+                    format!("mom_out_{c}"),
+                    FieldRef::cons_mom(c as u8),
+                    (mom_c + dmom[c]).node(),
+                ));
+            }
+            let nrg = cx.field("nrg", FieldRef::cons_nrg());
+            writes.push(KernelWrite::new(
+                "nrg_out",
+                FieldRef::cons_nrg(),
+                (nrg + dnrg).node(),
             ));
         }
-        let nrg = cx.field("nrg", FieldRef::cons_nrg());
-        writes.push(KernelWrite::new(
-            "nrg_out",
-            FieldRef::cons_nrg(),
-            (nrg + dnrg).node(),
-        ));
-    } else {
-        let (vst, rst) = prim_stencil(cx);
-        let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2d(&vst, &rst, &nust, dx, dy, dt);
-        for c in 0..2 {
-            let mom_c = cx.field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
-            writes.push(KernelWrite::new(
-                format!("mom_out_{c}"),
-                FieldRef::cons_mom(c as u8),
-                (mom_c + dmom[c]).node(),
-            ));
-        }
-        let nrg = cx.field("nrg", FieldRef::cons_nrg());
-        writes.push(KernelWrite::new(
-            "nrg_out",
-            FieldRef::cons_nrg(),
-            (nrg + dnrg).node(),
-        ));
-    }
-    writes
+        writes
     })
 }
 
@@ -276,97 +277,97 @@ fn viscous_adiabatic_ortho_impl(
 ) -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let dx1 = cx.scalar("dx_0");
-    let dx2 = cx.scalar("dx_1");
+        let dt = cx.scalar("dt");
+        let dx1 = cx.scalar("dx_0");
+        let dx2 = cx.scalar("dx_1");
 
-    let (vst, rst) = prim_stencil(cx);
-    let geo = cell_geometry_gv(
-        cx,
-        coords,
-        &vec![Spacing::Uniform; NDIM as usize],
-        &(0..NDIM as usize).collect::<Vec<_>>(),
-        NDIM as usize,
-    );
-    let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
+        let (vst, rst) = prim_stencil(cx);
+        let geo = cell_geometry_gv(
+            cx,
+            coords,
+            &vec![Spacing::Uniform; NDIM as usize],
+            &(0..NDIM as usize).collect::<Vec<_>>(),
+            NDIM as usize,
+        );
+        let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
 
-    let mut h1 = [[Gv::ZERO; 3]; 3];
-    let mut h2 = [[Gv::ZERO; 3]; 3];
-    let mut nust = [[Gv::ZERO; 3]; 3];
-    for dj in 0..3usize {
-        for di in 0..3usize {
-            let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
-            let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
-            let h = scale_factors_at(coords, NDIM as usize, &[x0, x1]);
-            h1[dj][di] = h[0];
-            h2[dj][di] = h[1];
-            nust[dj][di] = if alpha_mode.is_some() {
-                // the local cs^2 = gamma p / rho and Omega_K at this cell's radial
-                // coordinate (slot 0 on both supported charts).
-                let alpha = cx.scalar("alpha");
-                let gamma = cx.scalar("gamma");
-                let gm = cx.scalar("body_0_mass");
-                let off = [di as i32 - 1, dj as i32 - 1];
-                let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
-                let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
-                let cs2 = gamma * pre / rho;
-                alpha_viscosity(alpha, cs2, gm, x0)
-            } else {
-                cx.scalar("nu")
-            };
+        let mut h1 = [[Gv::ZERO; 3]; 3];
+        let mut h2 = [[Gv::ZERO; 3]; 3];
+        let mut nust = [[Gv::ZERO; 3]; 3];
+        for dj in 0..3usize {
+            for di in 0..3usize {
+                let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
+                let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
+                let h = scale_factors_at(coords, NDIM as usize, &[x0, x1]);
+                h1[dj][di] = h[0];
+                h2[dj][di] = h[1];
+                nust[dj][di] = if alpha_mode.is_some() {
+                    // the local cs^2 = gamma p / rho and Omega_K at this cell's radial
+                    // coordinate (slot 0 on both supported charts).
+                    let alpha = cx.scalar("alpha");
+                    let gamma = cx.scalar("gamma");
+                    let gm = cx.scalar("body_0_mass");
+                    let off = [di as i32 - 1, dj as i32 - 1];
+                    let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
+                    let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
+                    let cs2 = gamma * pre / rho;
+                    alpha_viscosity(alpha, cs2, gm, x0)
+                } else {
+                    cx.scalar("nu")
+                };
+            }
         }
-    }
 
-    // physical components in, physical force out — same frame as the storage.
-    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_2d(
-        &vst, &rst, &nust, &h1, &h2, dx1, dx2, dt,
-    );
-    let mut writes = accumulate_mom(cx, dmom);
-    let nrg = cx.field("nrg", FieldRef::cons_nrg());
-    writes.push(KernelWrite::new(
-        "nrg_out",
-        FieldRef::cons_nrg(),
-        (nrg + dnrg).node(),
-    ));
-    writes
+        // physical components in, physical force out — same frame as the storage.
+        let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_2d(
+            &vst, &rst, &nust, &h1, &h2, dx1, dx2, dt,
+        );
+        let mut writes = accumulate_mom(cx, dmom);
+        let nrg = cx.field("nrg", FieldRef::cons_nrg());
+        writes.push(KernelWrite::new(
+            "nrg_out",
+            FieldRef::cons_nrg(),
+            (nrg + dnrg).node(),
+        ));
+        writes
     })
 }
 
 pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let nu = cx.scalar("nu");
-    let dx1 = cx.scalar("dx_0");
-    let dx2 = cx.scalar("dx_1");
+        let dt = cx.scalar("dt");
+        let nu = cx.scalar("nu");
+        let dx1 = cx.scalar("dx_0");
+        let dx2 = cx.scalar("dx_1");
 
-    let (vst, rst) = prim_stencil(cx);
-    let geo = cell_geometry_gv(
-        cx,
-        coords,
-        &vec![Spacing::Uniform; NDIM as usize],
-        &(0..NDIM as usize).collect::<Vec<_>>(),
-        NDIM as usize,
-    );
-    let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
+        let (vst, rst) = prim_stencil(cx);
+        let geo = cell_geometry_gv(
+            cx,
+            coords,
+            &vec![Spacing::Uniform; NDIM as usize],
+            &(0..NDIM as usize).collect::<Vec<_>>(),
+            NDIM as usize,
+        );
+        let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
 
-    let mut h1 = [[Gv::ZERO; 3]; 3];
-    let mut h2 = [[Gv::ZERO; 3]; 3];
-    for dj in 0..3usize {
-        for di in 0..3usize {
-            let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
-            let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
-            let h = scale_factors_at(coords, NDIM as usize, &[x0, x1]);
-            h1[dj][di] = h[0];
-            h2[dj][di] = h[1];
+        let mut h1 = [[Gv::ZERO; 3]; 3];
+        let mut h2 = [[Gv::ZERO; 3]; 3];
+        for dj in 0..3usize {
+            for di in 0..3usize {
+                let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
+                let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
+                let h = scale_factors_at(coords, NDIM as usize, &[x0, x1]);
+                h1[dj][di] = h[0];
+                h2[dj][di] = h[1];
+            }
         }
-    }
 
-    let nust = [[nu; 3]; 3];
-    // physical components in, physical force out — same frame as the storage.
-    let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
-    let writes = accumulate_mom(cx, dmom);
-    writes
+        let nust = [[nu; 3]; 3];
+        // physical components in, physical force out — same frame as the storage.
+        let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
+        let writes = accumulate_mom(cx, dmom);
+        writes
     })
 }
 
@@ -378,48 +379,50 @@ pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
 pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let alpha = cx.scalar("alpha");
-    let cs = cx.scalar("cs");
-    let gm = cx.scalar("body_0_mass");
-    let dx1 = cx.scalar("dx_0");
-    let dx2 = cx.scalar("dx_1");
+        let dt = cx.scalar("dt");
+        let alpha = cx.scalar("alpha");
+        let cs = cx.scalar("cs");
+        let gm = cx.scalar("body_0_mass");
+        let dx1 = cx.scalar("dx_0");
+        let dx2 = cx.scalar("dx_1");
 
-    let (vst, rst) = prim_stencil(cx);
-    let geo = cell_geometry_gv(
-        cx,
-        coords,
-        &vec![Spacing::Uniform; NDIM as usize],
-        &(0..NDIM as usize).collect::<Vec<_>>(),
-        NDIM as usize,
-    );
-    let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
-    let cs2 = cs * cs;
+        let (vst, rst) = prim_stencil(cx);
+        let geo = cell_geometry_gv(
+            cx,
+            coords,
+            &vec![Spacing::Uniform; NDIM as usize],
+            &(0..NDIM as usize).collect::<Vec<_>>(),
+            NDIM as usize,
+        );
+        let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
+        let cs2 = cs * cs;
 
-    let mut h1 = [[Gv::ZERO; 3]; 3];
-    let mut h2 = [[Gv::ZERO; 3]; 3];
-    let mut nust = [[Gv::ZERO; 3]; 3];
-    for dj in 0..3usize {
-        for di in 0..3usize {
-            let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
-            let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
-            let h = scale_factors_at(coords, NDIM as usize, &[x0, x1]);
-            h1[dj][di] = h[0];
-            h2[dj][di] = h[1];
-            // nu(R) = alpha cs^2 / Omega_k(R), R the radial coordinate x0.
-            nust[dj][di] = alpha_viscosity(alpha, cs2, gm, x0);
+        let mut h1 = [[Gv::ZERO; 3]; 3];
+        let mut h2 = [[Gv::ZERO; 3]; 3];
+        let mut nust = [[Gv::ZERO; 3]; 3];
+        for dj in 0..3usize {
+            for di in 0..3usize {
+                let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
+                let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
+                let h = scale_factors_at(coords, NDIM as usize, &[x0, x1]);
+                h1[dj][di] = h[0];
+                h2[dj][di] = h[1];
+                // nu(R) = alpha cs^2 / Omega_k(R), R the radial coordinate x0.
+                nust[dj][di] = alpha_viscosity(alpha, cs2, gm, x0);
+            }
         }
-    }
 
-    // physical components in, physical force out — same frame as the storage.
-    let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
-    let writes = accumulate_mom(cx, dmom);
-    writes
+        // physical components in, physical force out — same frame as the storage.
+        let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
+        let writes = accumulate_mom(cx, dmom);
+        writes
     })
 }
 
 /// read the primitive `(velocity, density)` 3x3x3 stencil about the current cell.
-fn prim_stencil_3d<'t>(cx: TraceCx<'t>) -> ([[[Tensor<Gv<'t>, 3>; 3]; 3]; 3], [[[Gv<'t>; 3]; 3]; 3]) {
+fn prim_stencil_3d<'t>(
+    cx: TraceCx<'t>,
+) -> ([[[Tensor<Gv<'t>, 3>; 3]; 3]; 3], [[[Gv<'t>; 3]; 3]; 3]) {
     const NDIM: u8 = 3;
     let mut vst = [[[Tensor::<Gv, 3>::zeros(); 3]; 3]; 3];
     let mut rst = [[[Gv::ZERO; 3]; 3]; 3];
@@ -466,17 +469,17 @@ fn accumulate_mom_3d<'t>(cx: TraceCx<'t>, dmom: Tensor<Gv<'t>, 3>) -> KernelWrit
 /// trace the constant-nu isothermal viscous operator, 3D cartesian.
 pub fn viscous_iso_gv_3d() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let nu = cx.scalar("nu");
-    let dx = cx.scalar("dx_0");
-    let dy = cx.scalar("dx_1");
-    let dz = cx.scalar("dx_2");
+        let dt = cx.scalar("dt");
+        let nu = cx.scalar("nu");
+        let dx = cx.scalar("dx_0");
+        let dy = cx.scalar("dx_1");
+        let dz = cx.scalar("dx_2");
 
-    let (vst, rst) = prim_stencil_3d(cx);
-    let nust = [[[nu; 3]; 3]; 3];
-    let dmom = viscous_mom_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
-    let writes = accumulate_mom_3d(cx, dmom);
-    writes
+        let (vst, rst) = prim_stencil_3d(cx);
+        let nust = [[[nu; 3]; 3]; 3];
+        let dmom = viscous_mom_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
+        let writes = accumulate_mom_3d(cx, dmom);
+        writes
     })
 }
 
@@ -486,26 +489,27 @@ pub fn viscous_iso_gv_3d() -> (GvKernel, KernelWrites) {
 /// 1/2 B^2 preserved). runs post-c2p.
 pub fn viscous_adiabatic_gv_3d() -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let nu = cx.scalar("nu");
-    let dx = cx.scalar("dx_0");
-    let dy = cx.scalar("dx_1");
-    let dz = cx.scalar("dx_2");
+        let dt = cx.scalar("dt");
+        let nu = cx.scalar("nu");
+        let dx = cx.scalar("dx_0");
+        let dy = cx.scalar("dx_1");
+        let dz = cx.scalar("dx_2");
 
-    let (vst, rst) = prim_stencil_3d(cx);
-    let nust = [[[nu; 3]; 3]; 3];
-    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
-    let mom0 = cx.field("mom0", FieldRef::cons_mom(0));
-    let mom1 = cx.field("mom1", FieldRef::cons_mom(1));
-    let mom2 = cx.field("mom2", FieldRef::cons_mom(2));
-    let nrg = cx.field("nrg", FieldRef::cons_nrg());
-    let writes = vec![
-        KernelWrite::new("mom_out_0", FieldRef::cons_mom(0), (mom0 + dmom[0]).node()),
-        KernelWrite::new("mom_out_1", FieldRef::cons_mom(1), (mom1 + dmom[1]).node()),
-        KernelWrite::new("mom_out_2", FieldRef::cons_mom(2), (mom2 + dmom[2]).node()),
-        KernelWrite::new("nrg_out", FieldRef::cons_nrg(), (nrg + dnrg).node()),
-    ];
-    writes
+        let (vst, rst) = prim_stencil_3d(cx);
+        let nust = [[[nu; 3]; 3]; 3];
+        let (dmom, dnrg) =
+            symbi_hydro::viscous::viscous_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
+        let mom0 = cx.field("mom0", FieldRef::cons_mom(0));
+        let mom1 = cx.field("mom1", FieldRef::cons_mom(1));
+        let mom2 = cx.field("mom2", FieldRef::cons_mom(2));
+        let nrg = cx.field("nrg", FieldRef::cons_nrg());
+        let writes = vec![
+            KernelWrite::new("mom_out_0", FieldRef::cons_mom(0), (mom0 + dmom[0]).node()),
+            KernelWrite::new("mom_out_1", FieldRef::cons_mom(1), (mom1 + dmom[1]).node()),
+            KernelWrite::new("mom_out_2", FieldRef::cons_mom(2), (mom2 + dmom[2]).node()),
+            KernelWrite::new("nrg_out", FieldRef::cons_nrg(), (nrg + dnrg).node()),
+        ];
+        writes
     })
 }
 
@@ -541,31 +545,32 @@ pub fn viscous_adiabatic_gv_2p5d() -> (GvKernel, KernelWrites) {
 }
 fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, KernelWrites) {
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let nu = cx.scalar("nu");
-    let dx = cx.scalar("dx_0");
-    let dy = cx.scalar("dx_1");
-    let (vst, rst) = prim_stencil_2p5d(cx);
-    let nust = [[nu; 3]; 3];
-    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2p5d(&vst, &rst, &nust, [dx, dy], dt);
-    let mut writes = KernelWrites::new();
-    for c in 0..3 {
-        let mom_c = cx.field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
-        writes.push(KernelWrite::new(
-            format!("mom_out_{c}"),
-            FieldRef::cons_mom(c as u8),
-            (mom_c + dmom[c]).node(),
-        ));
-    }
-    if has_energy {
-        let nrg = cx.field("nrg", FieldRef::cons_nrg());
-        writes.push(KernelWrite::new(
-            "nrg_out",
-            FieldRef::cons_nrg(),
-            (nrg + dnrg).node(),
-        ));
-    }
-    writes
+        let dt = cx.scalar("dt");
+        let nu = cx.scalar("nu");
+        let dx = cx.scalar("dx_0");
+        let dy = cx.scalar("dx_1");
+        let (vst, rst) = prim_stencil_2p5d(cx);
+        let nust = [[nu; 3]; 3];
+        let (dmom, dnrg) =
+            symbi_hydro::viscous::viscous_update_2p5d(&vst, &rst, &nust, [dx, dy], dt);
+        let mut writes = KernelWrites::new();
+        for c in 0..3 {
+            let mom_c = cx.field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
+            writes.push(KernelWrite::new(
+                format!("mom_out_{c}"),
+                FieldRef::cons_mom(c as u8),
+                (mom_c + dmom[c]).node(),
+            ));
+        }
+        if has_energy {
+            let nrg = cx.field("nrg", FieldRef::cons_nrg());
+            writes.push(KernelWrite::new(
+                "nrg_out",
+                FieldRef::cons_nrg(),
+                (nrg + dnrg).node(),
+            ));
+        }
+        writes
     })
 }
 
@@ -586,107 +591,108 @@ fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, KernelWrites) {
 pub fn viscous_adiabatic_alpha_gv_3d() -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 3;
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let alpha = cx.scalar("alpha");
-    let gamma = cx.scalar("gamma");
-    let gm = cx.scalar("body_0_mass");
-    let dx = cx.scalar("dx_0");
-    let dy = cx.scalar("dx_1");
-    let dz = cx.scalar("dx_2");
-    let bx = cx.scalar("body_0_pos_0");
-    let by = cx.scalar("body_0_pos_1");
+        let dt = cx.scalar("dt");
+        let alpha = cx.scalar("alpha");
+        let gamma = cx.scalar("gamma");
+        let gm = cx.scalar("body_0_mass");
+        let dx = cx.scalar("dx_0");
+        let dy = cx.scalar("dx_1");
+        let dz = cx.scalar("dx_2");
+        let bx = cx.scalar("body_0_pos_0");
+        let by = cx.scalar("body_0_pos_1");
 
-    let (vst, rst) = prim_stencil_3d(cx);
+        let (vst, rst) = prim_stencil_3d(cx);
 
-    let geo = cell_geometry_gv(
-        cx,
-        Coords::Cartesian,
-        &vec![Spacing::Uniform; NDIM as usize],
-        &(0..NDIM as usize).collect::<Vec<_>>(),
-        NDIM as usize,
-    );
-    let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
+        let geo = cell_geometry_gv(
+            cx,
+            Coords::Cartesian,
+            &vec![Spacing::Uniform; NDIM as usize],
+            &(0..NDIM as usize).collect::<Vec<_>>(),
+            NDIM as usize,
+        );
+        let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
 
-    let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
-    for kk in 0..3usize {
-        for jj in 0..3usize {
-            for ii in 0..3usize {
-                let off = [ii as i32 - 1, jj as i32 - 1, kk as i32 - 1];
-                let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
-                let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
-                let cs2 = gamma * pre / rho;
-                let x = xc + Gv::from_f64(ii as f64 - 1.0) * dx;
-                let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
-                let (rx, ry) = (x - bx, y - by);
-                let r = (rx * rx + ry * ry).sqrt();
-                nust[kk][jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
+        let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
+        for kk in 0..3usize {
+            for jj in 0..3usize {
+                for ii in 0..3usize {
+                    let off = [ii as i32 - 1, jj as i32 - 1, kk as i32 - 1];
+                    let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
+                    let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
+                    let cs2 = gamma * pre / rho;
+                    let x = xc + Gv::from_f64(ii as f64 - 1.0) * dx;
+                    let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
+                    let (rx, ry) = (x - bx, y - by);
+                    let r = (rx * rx + ry * ry).sqrt();
+                    nust[kk][jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
+                }
             }
         }
-    }
 
-    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
-    let mut writes = KernelWrites::new();
-    for c in 0..3usize {
-        let mom_c = cx.field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
+        let (dmom, dnrg) =
+            symbi_hydro::viscous::viscous_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
+        let mut writes = KernelWrites::new();
+        for c in 0..3usize {
+            let mom_c = cx.field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
+            writes.push(KernelWrite::new(
+                format!("mom_out_{c}"),
+                FieldRef::cons_mom(c as u8),
+                (mom_c + dmom[c]).node(),
+            ));
+        }
+        let nrg = cx.field("nrg", FieldRef::cons_nrg());
         writes.push(KernelWrite::new(
-            format!("mom_out_{c}"),
-            FieldRef::cons_mom(c as u8),
-            (mom_c + dmom[c]).node(),
+            "nrg_out",
+            FieldRef::cons_nrg(),
+            (nrg + dnrg).node(),
         ));
-    }
-    let nrg = cx.field("nrg", FieldRef::cons_nrg());
-    writes.push(KernelWrite::new(
-        "nrg_out",
-        FieldRef::cons_nrg(),
-        (nrg + dnrg).node(),
-    ));
-    writes
+        writes
     })
 }
 
 pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 3;
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let alpha = cx.scalar("alpha");
-    let cs = cx.scalar("cs");
-    let gm = cx.scalar("body_0_mass");
-    let dx = cx.scalar("dx_0");
-    let dy = cx.scalar("dx_1");
-    let dz = cx.scalar("dx_2");
-    let bx = cx.scalar("body_0_pos_0");
-    let by = cx.scalar("body_0_pos_1");
+        let dt = cx.scalar("dt");
+        let alpha = cx.scalar("alpha");
+        let cs = cx.scalar("cs");
+        let gm = cx.scalar("body_0_mass");
+        let dx = cx.scalar("dx_0");
+        let dy = cx.scalar("dx_1");
+        let dz = cx.scalar("dx_2");
+        let bx = cx.scalar("body_0_pos_0");
+        let by = cx.scalar("body_0_pos_1");
 
-    let (vst, rst) = prim_stencil_3d(cx);
+        let (vst, rst) = prim_stencil_3d(cx);
 
-    let geo = cell_geometry_gv(
-        cx,
-        Coords::Cartesian,
-        &vec![Spacing::Uniform; NDIM as usize],
-        &(0..NDIM as usize).collect::<Vec<_>>(),
-        NDIM as usize,
-    );
-    let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
-    let cs2 = cs * cs;
+        let geo = cell_geometry_gv(
+            cx,
+            Coords::Cartesian,
+            &vec![Spacing::Uniform; NDIM as usize],
+            &(0..NDIM as usize).collect::<Vec<_>>(),
+            NDIM as usize,
+        );
+        let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
+        let cs2 = cs * cs;
 
-    // nu is z-invariant (cylindrical R), so every k-slice of the stencil is equal.
-    let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
-    for jj in 0..3usize {
-        for ii in 0..3usize {
-            let x = xc + Gv::from_f64(ii as f64 - 1.0) * dx;
-            let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
-            let (rx, ry) = (x - bx, y - by);
-            let r = (rx * rx + ry * ry).sqrt();
-            let nu = alpha_viscosity(alpha, cs2, gm, r);
-            for kk in 0..3usize {
-                nust[kk][jj][ii] = nu;
+        // nu is z-invariant (cylindrical R), so every k-slice of the stencil is equal.
+        let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
+        for jj in 0..3usize {
+            for ii in 0..3usize {
+                let x = xc + Gv::from_f64(ii as f64 - 1.0) * dx;
+                let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
+                let (rx, ry) = (x - bx, y - by);
+                let r = (rx * rx + ry * ry).sqrt();
+                let nu = alpha_viscosity(alpha, cs2, gm, r);
+                for kk in 0..3usize {
+                    nust[kk][jj][ii] = nu;
+                }
             }
         }
-    }
 
-    let dmom = viscous_mom_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
-    let writes = accumulate_mom_3d(cx, dmom);
-    writes
+        let dmom = viscous_mom_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
+        let writes = accumulate_mom_3d(cx, dmom);
+        writes
     })
 }
 
@@ -698,43 +704,43 @@ pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, KernelWrites) {
 pub fn viscous_iso_alpha_gv() -> (GvKernel, KernelWrites) {
     const NDIM: u8 = 2;
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let alpha = cx.scalar("alpha");
-    let cs = cx.scalar("cs");
-    let gm = cx.scalar("body_0_mass");
-    let dx = cx.scalar("dx_0");
-    let dy = cx.scalar("dx_1");
-    let bx = cx.scalar("body_0_pos_0");
-    let by = cx.scalar("body_0_pos_1");
+        let dt = cx.scalar("dt");
+        let alpha = cx.scalar("alpha");
+        let cs = cx.scalar("cs");
+        let gm = cx.scalar("body_0_mass");
+        let dx = cx.scalar("dx_0");
+        let dy = cx.scalar("dx_1");
+        let bx = cx.scalar("body_0_pos_0");
+        let by = cx.scalar("body_0_pos_1");
 
-    let (vst, rst) = prim_stencil(cx);
+        let (vst, rst) = prim_stencil(cx);
 
-    // the current cell centroid (geometry scaffold); the stencil cell at offset
-    // (di, dj) is centroid + (di dx, dj dy) on a uniform cartesian grid.
-    let geo = cell_geometry_gv(
-        cx,
-        Coords::Cartesian,
-        &vec![Spacing::Uniform; NDIM as usize],
-        &(0..NDIM as usize).collect::<Vec<_>>(),
-        NDIM as usize,
-    );
-    let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
-    let cs2 = cs * cs;
+        // the current cell centroid (geometry scaffold); the stencil cell at offset
+        // (di, dj) is centroid + (di dx, dj dy) on a uniform cartesian grid.
+        let geo = cell_geometry_gv(
+            cx,
+            Coords::Cartesian,
+            &vec![Spacing::Uniform; NDIM as usize],
+            &(0..NDIM as usize).collect::<Vec<_>>(),
+            NDIM as usize,
+        );
+        let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
+        let cs2 = cs * cs;
 
-    let mut nust = [[Gv::ZERO; 3]; 3];
-    for jj in 0..3usize {
-        for ii in 0..3usize {
-            let x = xc + Gv::from_f64(ii as f64 - 1.0) * dx;
-            let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
-            let (rx, ry) = (x - bx, y - by);
-            let r = (rx * rx + ry * ry).sqrt();
-            nust[jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
+        let mut nust = [[Gv::ZERO; 3]; 3];
+        for jj in 0..3usize {
+            for ii in 0..3usize {
+                let x = xc + Gv::from_f64(ii as f64 - 1.0) * dx;
+                let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
+                let (rx, ry) = (x - bx, y - by);
+                let r = (rx * rx + ry * ry).sqrt();
+                nust[jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
+            }
         }
-    }
 
-    let dmom = viscous_mom_update_2d(&vst, &rst, &nust, dx, dy, dt);
-    let writes = accumulate_mom(cx, dmom);
-    writes
+        let dmom = viscous_mom_update_2d(&vst, &rst, &nust, dx, dy, dt);
+        let writes = accumulate_mom(cx, dmom);
+        writes
     })
 }
 
@@ -793,84 +799,84 @@ pub fn viscous_ortho_2p5d_gv(
         _ => [0, 1, 2],
     };
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let dx1 = cx.scalar("dx_0");
-    let dx2 = cx.scalar("dx_1");
-    let (vst_raw, rst) = prim_stencil_2p5d(cx);
-    let vst: [[Tensor<Gv, 3>; 3]; 3] = std::array::from_fn(|j| {
-        std::array::from_fn(|i| {
-            Tensor::new([
-                vst_raw[j][i][perm[0]],
-                vst_raw[j][i][perm[1]],
-                vst_raw[j][i][perm[2]],
-            ])
-        })
-    });
-    let geo = cell_geometry_gv(
-        cx,
-        coords,
-        &vec![Spacing::Uniform; NDIM as usize],
-        &axes,
-        NDIM as usize,
-    );
-    let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
+        let dt = cx.scalar("dt");
+        let dx1 = cx.scalar("dx_0");
+        let dx2 = cx.scalar("dx_1");
+        let (vst_raw, rst) = prim_stencil_2p5d(cx);
+        let vst: [[Tensor<Gv, 3>; 3]; 3] = std::array::from_fn(|j| {
+            std::array::from_fn(|i| {
+                Tensor::new([
+                    vst_raw[j][i][perm[0]],
+                    vst_raw[j][i][perm[1]],
+                    vst_raw[j][i][perm[2]],
+                ])
+            })
+        });
+        let geo = cell_geometry_gv(
+            cx,
+            coords,
+            &vec![Spacing::Uniform; NDIM as usize],
+            &axes,
+            NDIM as usize,
+        );
+        let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
 
-    let mut h1 = [[Gv::ZERO; 3]; 3];
-    let mut h2 = [[Gv::ZERO; 3]; 3];
-    let mut h3 = [[Gv::ZERO; 3]; 3];
-    let mut nust = [[Gv::ZERO; 3]; 3];
-    for dj in 0..3usize {
-        for di in 0..3usize {
-            let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
-            let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
-            let h = ortho_25_h(plane, x0, x1);
-            h1[dj][di] = h[0];
-            h2[dj][di] = h[1];
-            h3[dj][di] = h[2];
-            nust[dj][di] = if alpha {
-                let a = cx.scalar("alpha");
-                let gm = cx.scalar("body_0_mass");
-                let cs2 = if adiabatic {
-                    let gamma = cx.scalar("gamma");
-                    let off = [di as i32 - 1, dj as i32 - 1];
-                    let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
-                    let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
-                    gamma * pre / rho
+        let mut h1 = [[Gv::ZERO; 3]; 3];
+        let mut h2 = [[Gv::ZERO; 3]; 3];
+        let mut h3 = [[Gv::ZERO; 3]; 3];
+        let mut nust = [[Gv::ZERO; 3]; 3];
+        for dj in 0..3usize {
+            for di in 0..3usize {
+                let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
+                let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
+                let h = ortho_25_h(plane, x0, x1);
+                h1[dj][di] = h[0];
+                h2[dj][di] = h[1];
+                h3[dj][di] = h[2];
+                nust[dj][di] = if alpha {
+                    let a = cx.scalar("alpha");
+                    let gm = cx.scalar("body_0_mass");
+                    let cs2 = if adiabatic {
+                        let gamma = cx.scalar("gamma");
+                        let off = [di as i32 - 1, dj as i32 - 1];
+                        let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
+                        let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
+                        gamma * pre / rho
+                    } else {
+                        let cs = cx.scalar("cs");
+                        cs * cs
+                    };
+                    let r = ortho_25_orbital_radius(plane, x0, x1);
+                    alpha_viscosity(a, cs2, gm, r)
                 } else {
-                    let cs = cx.scalar("cs");
-                    cs * cs
+                    cx.scalar("nu")
                 };
-                let r = ortho_25_orbital_radius(plane, x0, x1);
-                alpha_viscosity(a, cs2, gm, r)
-            } else {
-                cx.scalar("nu")
-            };
+            }
         }
-    }
 
-    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_2p5d(
-        &vst, &rst, &nust, &h1, &h2, &h3, dx1, dx2, dt,
-    );
-    let mut writes = KernelWrites::new();
-    for c in 0..3 {
-        // carrier component c lands on its storage slot perm[c].
-        let slot = perm[c] as u8;
-        let mom_c = cx.field(&format!("mom{}", perm[c]), FieldRef::cons_mom(slot));
-        writes.push(KernelWrite::new(
-            format!("mom_out_{}", perm[c]),
-            FieldRef::cons_mom(slot),
-            (mom_c + dmom[c]).node(),
-        ));
-    }
-    if adiabatic {
-        let nrg = cx.field("nrg", FieldRef::cons_nrg());
-        writes.push(KernelWrite::new(
-            "nrg_out",
-            FieldRef::cons_nrg(),
-            (nrg + dnrg).node(),
-        ));
-    }
-    writes
+        let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_2p5d(
+            &vst, &rst, &nust, &h1, &h2, &h3, dx1, dx2, dt,
+        );
+        let mut writes = KernelWrites::new();
+        for c in 0..3 {
+            // carrier component c lands on its storage slot perm[c].
+            let slot = perm[c] as u8;
+            let mom_c = cx.field(&format!("mom{}", perm[c]), FieldRef::cons_mom(slot));
+            writes.push(KernelWrite::new(
+                format!("mom_out_{}", perm[c]),
+                FieldRef::cons_mom(slot),
+                (mom_c + dmom[c]).node(),
+            ));
+        }
+        if adiabatic {
+            let nrg = cx.field("nrg", FieldRef::cons_nrg());
+            writes.push(KernelWrite::new(
+                "nrg_out",
+                FieldRef::cons_nrg(),
+                (nrg + dnrg).node(),
+            ));
+        }
+        writes
     })
 }
 
@@ -888,74 +894,74 @@ pub fn viscous_ortho_3d_gv(
         "viscous_ortho_3d_gv: cylindrical / spherical charts only"
     );
     trace(|cx| {
-    let dt = cx.scalar("dt");
-    let dx: [Gv; 3] = std::array::from_fn(|a| cx.scalar(&format!("dx_{a}")));
-    let (vst, rst) = prim_stencil_3d(cx);
-    let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; 3], &[0, 1, 2], 3);
-    let c: [Gv; 3] = [geo.centroid[0], geo.centroid[1], geo.centroid[2]];
+        let dt = cx.scalar("dt");
+        let dx: [Gv; 3] = std::array::from_fn(|a| cx.scalar(&format!("dx_{a}")));
+        let (vst, rst) = prim_stencil_3d(cx);
+        let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; 3], &[0, 1, 2], 3);
+        let c: [Gv; 3] = [geo.centroid[0], geo.centroid[1], geo.centroid[2]];
 
-    let mut h1 = [[[Gv::ZERO; 3]; 3]; 3];
-    let mut h2 = [[[Gv::ZERO; 3]; 3]; 3];
-    let mut h3 = [[[Gv::ZERO; 3]; 3]; 3];
-    let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
-    for dk in 0..3usize {
-        for dj in 0..3usize {
-            for di in 0..3usize {
-                let x0 = c[0] + Gv::from_f64(di as f64 - 1.0) * dx[0];
-                let x1 = c[1] + Gv::from_f64(dj as f64 - 1.0) * dx[1];
-                let (hh2, hh3, r_orb) = match coords {
-                    Coords::Cylindrical => (x0, Gv::ONE, x0),
-                    _ => (x0, x0 * x1.sin(), x0 * x1.sin()),
-                };
-                h1[dk][dj][di] = Gv::ONE;
-                h2[dk][dj][di] = hh2;
-                h3[dk][dj][di] = hh3;
-                nust[dk][dj][di] = if alpha {
-                    let a = cx.scalar("alpha");
-                    let gm = cx.scalar("body_0_mass");
-                    let cs2 = if adiabatic {
-                        let gamma = cx.scalar("gamma");
-                        let off = [di as i32 - 1, dj as i32 - 1, dk as i32 - 1];
-                        let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
-                        let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
-                        gamma * pre / rho
-                    } else {
-                        let cs = cx.scalar("cs");
-                        cs * cs
+        let mut h1 = [[[Gv::ZERO; 3]; 3]; 3];
+        let mut h2 = [[[Gv::ZERO; 3]; 3]; 3];
+        let mut h3 = [[[Gv::ZERO; 3]; 3]; 3];
+        let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
+        for dk in 0..3usize {
+            for dj in 0..3usize {
+                for di in 0..3usize {
+                    let x0 = c[0] + Gv::from_f64(di as f64 - 1.0) * dx[0];
+                    let x1 = c[1] + Gv::from_f64(dj as f64 - 1.0) * dx[1];
+                    let (hh2, hh3, r_orb) = match coords {
+                        Coords::Cylindrical => (x0, Gv::ONE, x0),
+                        _ => (x0, x0 * x1.sin(), x0 * x1.sin()),
                     };
-                    alpha_viscosity(a, cs2, gm, r_orb)
-                } else {
-                    cx.scalar("nu")
-                };
+                    h1[dk][dj][di] = Gv::ONE;
+                    h2[dk][dj][di] = hh2;
+                    h3[dk][dj][di] = hh3;
+                    nust[dk][dj][di] = if alpha {
+                        let a = cx.scalar("alpha");
+                        let gm = cx.scalar("body_0_mass");
+                        let cs2 = if adiabatic {
+                            let gamma = cx.scalar("gamma");
+                            let off = [di as i32 - 1, dj as i32 - 1, dk as i32 - 1];
+                            let pre = cx.field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
+                            let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
+                            gamma * pre / rho
+                        } else {
+                            let cs = cx.scalar("cs");
+                            cs * cs
+                        };
+                        alpha_viscosity(a, cs2, gm, r_orb)
+                    } else {
+                        cx.scalar("nu")
+                    };
+                }
             }
         }
-    }
 
-    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_3d(
-        &vst,
-        &rst,
-        &nust,
-        [&h1, &h2, &h3],
-        dx,
-        dt,
-    );
-    let mut writes = KernelWrites::new();
-    for cc in 0..3 {
-        let mom_c = cx.field(&format!("mom{cc}"), FieldRef::cons_mom(cc as u8));
-        writes.push(KernelWrite::new(
-            format!("mom_out_{cc}"),
-            FieldRef::cons_mom(cc as u8),
-            (mom_c + dmom[cc]).node(),
-        ));
-    }
-    if adiabatic {
-        let nrg = cx.field("nrg", FieldRef::cons_nrg());
-        writes.push(KernelWrite::new(
-            "nrg_out",
-            FieldRef::cons_nrg(),
-            (nrg + dnrg).node(),
-        ));
-    }
-    writes
+        let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_3d(
+            &vst,
+            &rst,
+            &nust,
+            [&h1, &h2, &h3],
+            dx,
+            dt,
+        );
+        let mut writes = KernelWrites::new();
+        for cc in 0..3 {
+            let mom_c = cx.field(&format!("mom{cc}"), FieldRef::cons_mom(cc as u8));
+            writes.push(KernelWrite::new(
+                format!("mom_out_{cc}"),
+                FieldRef::cons_mom(cc as u8),
+                (mom_c + dmom[cc]).node(),
+            ));
+        }
+        if adiabatic {
+            let nrg = cx.field("nrg", FieldRef::cons_nrg());
+            writes.push(KernelWrite::new(
+                "nrg_out",
+                FieldRef::cons_nrg(),
+                (nrg + dnrg).node(),
+            ));
+        }
+        writes
     })
 }
