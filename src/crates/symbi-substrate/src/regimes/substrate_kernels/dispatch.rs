@@ -1938,23 +1938,19 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
 /// the interior), in place on cons, with the per-cell exchange deltas reduced
 /// into the diagnostics accumulator — the same feedback stream the sink path
 /// feeds, so Mdot(t)/F_acc(t) land in the body history unchanged. cartesian +
-/// adiabatic only (the baked envelope). the convergence dials: `k_drain` scales the
-/// spherical drain's problem-data rate `k_drain sqrt(GM/r_acc^3)`, and `c_drain` sets the
-/// shaped porous wall's relaxation timescale tau = c_drain dx / c_s. both are set by
-/// convergence study, never by a target accretion rate. a parallel accretion mechanism to
-/// the drain sink.
+/// adiabatic only (the baked envelope). `c_drain` is the dimensionless acoustic
+/// crossing factor; spherical drains additionally enforce the free-fall-rate floor.
 pub fn dispatch_penalize<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
     gamma: f64,
     c_drain: f64,
-    k_drain: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     symbi_sim::driver::prof("penalize", || {
-        dispatch_penalize_inner(sim, dt, gamma, c_drain, k_drain);
+        dispatch_penalize_inner(sim, dt, gamma, c_drain);
     });
 }
 
@@ -2338,7 +2334,6 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     gamma: f64,
     c_drain: f64,
-    k_drain: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -2408,7 +2403,6 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                     .unwrap_or_else(|| panic!("penalize: unexpected scalar param {other:?}")),
             },
             ScalarBind::Spec(spec) if &**spec == "c_drain" => c_drain,
-            ScalarBind::Spec(spec) if &**spec == "k_drain" => k_drain,
             ScalarBind::Spec(spec) if &**spec == "c_a2" => c_a2_max,
             // the porous dials, from the body's declared surface stack.
             ScalarBind::Spec(spec) => match (&**spec, surface) {
@@ -2449,23 +2443,8 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             );
             continue;
         }
-        // the spherical drain rate is `k_drain * sqrt(GM / r_acc^3)`: free fall at the mask
-        // radius is the problem-data scale, so the rate exists only for a gravitating body
-        // (the mass scalar resolves to zero for any other kind, which would be a sink that
-        // silently swallows nothing). the shaped porous wall above carries its own
-        // sound-crossing dial and takes any body kind.
-        assert!(
-            bodies.get(b).has_gravity(),
-            "body {b} carries a spherical {surface} surface but does not gravitate: the \
-             drain rate k_drain*sqrt(GM/r_acc^3) has no scale without a gravitational mass. \
-             use a gravitating body kind, or give the body a shape to select the shaped \
-             porous wall.",
-            surface = match bodies.get(b).spec.surface {
-                symbi_ib::SurfaceSpec::Drain => "drain",
-                symbi_ib::SurfaceSpec::Porous { .. } => "porous",
-                symbi_ib::SurfaceSpec::TorqueFree { .. } => "torque-free",
-            },
-        );
+        // A non-gravitating spherical surface has mass zero, so its free-fall
+        // arm is zero and the same law reduces exactly to the acoustic rate.
         // the body's surface stack picks the baked kernel. the regime picks
         // the eos flavor: adiabatic recovers c_s from cons; iso reads the
         // constant `cs` param and carries the pressure in `prim.pre`. the porous

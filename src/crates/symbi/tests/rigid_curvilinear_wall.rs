@@ -181,7 +181,7 @@ fn force_receipt_is_a_cartesian_world_vector() {
         k_eta_t: 50.0,
     };
     let sim = build(V_INF, true, [0.0, 0.0], sealed);
-    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     let f = d[0].force_delta;
     assert!(f[0] > 0.0, "an x-stream must push the wall along +x: {f:?}");
@@ -203,7 +203,7 @@ fn moving_wall_target_is_rotated_into_the_local_frame() {
         k_eta_t: 50.0,
     };
     let sim = build(0.0, true, [V_INF, 0.0], sealed);
-    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     let f = d[0].force_delta;
     assert!(

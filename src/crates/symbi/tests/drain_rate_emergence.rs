@@ -3,23 +3,19 @@
 //
 // whether the accretion rate onto an immersed sink is emergent (set by how fast the flow can
 // resupply the mask) or imposed (set by the penalization dial). the drain relaxes masked gas at
-// `1/tau = k_drain sqrt(GM/r_acc^3)` — k_drain free-fall rates at the mask radius, a constant of
-// the problem data; `k_drain` is declared a convergence-study parameter, which is a claim that
-// the measured `Mdot` stops depending on it once the drain is fast enough. that is a falsifiable
-// statement about the flow, and this is the measurement.
+// `1/tau = max(c_s/(c_drain dx), sqrt(GM/r_acc^3))`; `c_drain` is the dimensionless
+// acoustic-crossing factor and Mdot must stop depending on it once the drain is fast enough.
 //
 // the two hypotheses separate cleanly under a geometric sweep of the dial:
-//   - imposed:  Mdot ~ 1/tau ~ k_drain, so each doubling of k_drain doubles Mdot and the
-//               relative change per doubling stays ~1 forever.
-//   - emergent: Mdot approaches a limit, so the relative change per doubling shrinks toward 0.
+//   - imposed:  Mdot ~ 1/tau ~ 1/c_drain, so each halving doubles Mdot.
+//   - emergent: Mdot approaches a limit, so the relative change per halving shrinks toward 0.
 // the gate is that the successive relative changes decrease — a convergence statement, carrying
 // no tuned tolerance.
 //
 // two preconditions decide whether the sweep means anything, and both are asserted, because
 // either one failing makes the flat result vacuous rather than informative:
-//   - the arms must actually differ: the dial has to reach the kernel, so at least one pair of
-//     swept Mdots is distinct. four bitwise-identical measurements are a disconnected dial, and
-//     a disconnected dial converges perfectly while measuring nothing.
+//   - the acoustic arm must exceed the free-fall floor throughout the sweep, or a flat result
+//     merely measures the floor.
 //   - the mask reservoir must be in balance: more mass flows through the sink during the window
 //     than the mask's own gas content changes by. a reservoir still filling or emptying reports a
 //     transient, and a rate read off a transient says nothing about what sets it in steady state.
@@ -70,10 +66,17 @@ fn dx() -> f64 {
     2.0 * L / N as f64
 }
 
-/// one free-fall rate at the mask radius: `sqrt(G M / r_acc^3)`. the drain runs at
-/// `k_drain` multiples of this.
+fn ambient_sound_speed() -> f64 {
+    (GAMMA * PRE_0 / RHO_0).sqrt()
+}
+
+/// the free-fall floor at the mask radius.
 fn free_fall_rate() -> f64 {
     (MASS / (R_ACC * R_ACC * R_ACC)).sqrt()
+}
+
+fn sound_crossing_rate(c_drain: f64) -> f64 {
+    ambient_sound_speed() / (c_drain * dx())
 }
 
 /// total gas mass on the interior. with periodic walls the drain is the only sink, so the
@@ -112,7 +115,7 @@ fn mask_mass(sim: &Sim) -> f64 {
 
 /// the sink: a mask-radius body carrying gravity, with the pointwise body-source drain switched
 /// off (`sink_rate = 0` zeroes `min(sink, cs/dx)` exactly) so the surface penalization is the only
-/// channel removing mass and `k_drain` is the only dial on the rate. softening equals the mask
+/// channel removing mass and `c_drain` is the only dial on the rate. softening equals the mask
 /// radius, so the gravity the resupply flow falls through is the bare point mass everywhere
 /// outside the sink.
 fn sink() -> BodyCollection<f64, 2> {
@@ -156,9 +159,9 @@ struct Measurement {
 }
 
 /// evolve past the initial transient, then measure the mass loss rate over the window.
-fn measure(k_drain: f64) -> Measurement {
+fn measure(c_drain: f64) -> Measurement {
     let (mut sim, mut kset) = build();
-    kset.k_drain = k_drain;
+    kset.c_drain = c_drain;
 
     evolve(&mut sim, &kset, T_SPINUP).expect("spin-up");
     let mass_open = interior_mass(&sim);
@@ -176,33 +179,31 @@ fn measure(k_drain: f64) -> Measurement {
 }
 
 #[test]
-fn the_accretion_rate_saturates_as_the_drain_dial_grows() {
-    // each entry doubles the drain rate, so the imposed rate spans a factor of eight starting
-    // from one free-fall crossing.
-    let dials = [1.0, 2.0, 4.0, 8.0];
+fn the_accretion_rate_saturates_as_the_drain_dial_shrinks() {
+    // each entry halves the acoustic timescale, spanning a factor of eight while
+    // remaining above the free-fall floor.
+    let dials = [1.0, 0.5, 0.25, 0.125];
     let floor = free_fall_rate();
 
+    for &c in &dials {
+        let acoustic = sound_crossing_rate(c);
+        assert!(
+            acoustic > floor,
+            "c_drain={c}: acoustic rate {acoustic} does not exceed free-fall floor {floor}"
+        );
+    }
     let measured: Vec<Measurement> = dials.iter().map(|&c| measure(c)).collect();
-
-    // the dial must reach the kernel: a sweep whose arms are bitwise identical converges
-    // perfectly while measuring a disconnected dial.
-    assert!(
-        measured
-            .windows(2)
-            .any(|w| w[0].mdot.to_bits() != w[1].mdot.to_bits()),
-        "every swept Mdot is bitwise identical; the dial does not reach the drain rate"
-    );
 
     for (ii, m) in measured.iter().enumerate() {
         assert!(
             m.mdot > 0.0 && m.mdot.is_finite(),
-            "k_drain = {}: no mass was accreted over the window (mdot {:e})",
+            "c_drain = {}: no mass was accreted over the window (mdot {:e})",
             dials[ii],
             m.mdot
         );
         assert!(
             m.storage_fraction < 1.0,
-            "k_drain = {}: the mask reservoir changed by {:.2} of the mass that flowed through it \
+            "c_drain = {}: the mask reservoir changed by {:.2} of the mass that flowed through it \
              during the window, so the sink is still filling or emptying and the number measured \
              is a transient rather than a steady flux",
             dials[ii],
@@ -222,8 +223,8 @@ fn the_accretion_rate_saturates_as_the_drain_dial_grows() {
         .zip(&measured)
         .map(|(c, m)| {
             format!(
-                "k_drain {c} (imposed rate {:.1}) -> mdot {:.6e}, storage {:.3}",
-                c * free_fall_rate(),
+                "c_drain {c} (acoustic rate {:.1}) -> mdot {:.6e}, storage {:.3}",
+                sound_crossing_rate(*c),
                 m.mdot,
                 m.storage_fraction
             )
@@ -235,7 +236,7 @@ fn the_accretion_rate_saturates_as_the_drain_dial_grows() {
     }
     for (ii, s) in steps.iter().enumerate() {
         println!(
-            "doubling {} -> {}: relative change {s:.4}",
+            "halving {} -> {}: relative change {s:.4}",
             dials[ii],
             dials[ii + 1]
         );

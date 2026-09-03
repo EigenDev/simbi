@@ -12,10 +12,9 @@
 // buffers: cons (den, mom_0.., nrg) in place, plus per-body delta scratch
 // (pen_0_mass, pen_0_force_{ax}, pen_0_energy) for the feedback reduction.
 // scalars: dt, gamma, the grid (x_lo/dx/map_kind per axis), body_0_pos_*,
-// body_0_racc (the mask radius), and the convergence dials: `k_drain` for the spherical
-// drain (rate = k_drain sqrt(GM/r_acc^3), a constant of the problem data) and `c_drain`
-// for the shaped porous wall (tau = c_drain dx / c_s) — each pushed until the answer
-// stops moving.
+// body_0_racc (the mask radius), and the dimensionless crossing factor `c_drain`.
+// A spherical drain uses the faster of its acoustic cell-crossing rate and the
+// free-fall rate at the mask; a shaped porous wall uses the acoustic rate.
 // the mask width is one minimum cell. outputs declare the support ball
 // body_0_pos +- (body_0_racc + DRAIN_SUPPORT_WIDTHS min dx): beyond it tanh
 // saturation makes chi exactly zero and the update an exact no-op.
@@ -283,30 +282,15 @@ fn body_mask_sdf<'t>(cx: TraceCx<'t>, center: [Gv<'t>; 3]) -> SdfExpr<Gv<'t>, 3>
 /// a symmetric body (sphere, symmetric CSG). everything dynamical (translation, gravity, the
 /// omega x r wall velocity, the torque moment arm `x - center`) is referenced to the com, so an
 /// asymmetric mass distribution would offset the mask placement alone.
-/// the drain rate for a spherical accretor: `k_drain` free-fall rates at the mask radius,
-/// `k_drain * sqrt(GM / r_acc^3)`, a constant of the problem data.
+/// the drain rate for a spherical accretor: the faster of one acoustic-cell
+/// crossing and free fall through the mask,
+/// `max(signal_speed / (c_drain dx), sqrt(GM / r_acc^3))`.
 ///
-/// free fall bounds how fast gas crosses the mask, so a rate at or above `Omega_ff =
-/// sqrt(GM/r_acc^3)` removes it within one crossing at any refinement depth and the emergent
-/// accretion rate is set by the flow. `k_drain` is the convergence dial, swept until the
-/// answer stops moving.
-///
-/// the rate is a function of the problem data alone, which is what keeps the penalized system
-/// well behaved. a rate keyed to the cell's own sound speed feeds back on what the drain
-/// produces: at the mollified seam the undrained neighbors hold ambient pressure and refill a
-/// draining cell acoustically while its mass returns only by advection, so c_s ~
-/// sqrt(gamma p_amb / rho) grows as rho falls, the rate grows with it, and the density obeys
-/// rho_dot ~ -sqrt(rho) — vacuum in finite time, with the sound speed and the CFL step
-/// diverging on the way. a bounded state-independent rate turns that finite-time extinction
-/// into at-worst exponential decay, and the timestep keeps a floor on every trajectory. the
-/// drain update itself is an exact exponential, non-expansive at any rate.
-fn spherical_drain_rate<'t>(cx: TraceCx<'t>) -> Gv<'t> {
-    let mass = cx.scalar("body_0_mass");
-    let racc = cx.scalar("body_0_racc");
-    let k_drain = cx.scalar("k_drain");
-    k_drain * (mass / (racc * racc * racc)).sqrt()
-}
-
+/// `c_drain = 1` gives one signal-crossing time and the gravitational arm
+/// prevents a resolved accretor from becoming less absorbing than free fall.
+/// The state-dependent acoustic arm is non-self-amplifying under the pure
+/// drain: uniform conserved scaling preserves velocity, specific internal
+/// energy, and hence sound speed exactly.
 fn body_mask_sdf_shaped<'t>(
     cx: TraceCx<'t>,
     center: [Gv<'t>; 3],
@@ -610,6 +594,8 @@ fn penalize_drain_impl<E: EnergyModel>(
     );
     let (kernel, writes) = trace(|cx| {
         let dt = cx.scalar("dt");
+        let eos = cx.scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
+        let c_drain = cx.scalar("c_drain");
 
         // conserved reads (in-place: the same fields are the writes). the momentum runs over dof (all
         // active components), so a 2.5D MHD sink drains the out-of-plane momentum and its kinetic energy.
@@ -658,9 +644,18 @@ fn penalize_drain_impl<E: EnergyModel>(
         let chi = symbi_ib::sdf::chi(phi, min_w);
         tag_body_mask(cx, &chi, coords, ndim, axes, None, false);
 
-        // this kernel is the sphere path by construction (it takes no shape parameter), so the
-        // drain runs at the problem-data rate `k_drain * Omega_ff`, independent of the cell state.
-        let inv_tau = spherical_drain_rate(cx);
+        let cs = if E::HAS_ENERGY {
+            let mom_sq = mom.iter().fold(Gv::ZERO, |sum, m| sum + *m * *m);
+            symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg.value(), eos)
+        } else {
+            eos
+        };
+        let sound_rate = signal_speed(cx, cs) / (c_drain * min_w);
+        let inv_tau = symbi_ib::drain::spherical_drain_rate(
+            sound_rate,
+            cx.scalar("body_0_mass"),
+            cx.scalar("body_0_racc"),
+        );
 
         // the property stack: [Drain]. contribute at Gv, then
         // the same integrator that runs at f64.
@@ -991,13 +986,15 @@ fn penalize_porous_impl<E: EnergyModel>(
         } else {
             eos
         };
-        // the sphere path drains at the problem-data rate `k_drain * Omega_ff` (the `r_acc` scalar
-        // supplies the radius). a shaped wall spans a range of radii, so it keeps the sound-crossing
-        // form tau = c_drain dx / c_s, whose state feedback the wall's own mass resupply bounds.
+        let sound_rate = signal_speed(cx, cs) / (c_drain * min_w);
         let inv_tau = if shape.is_none() {
-            spherical_drain_rate(cx)
+            symbi_ib::drain::spherical_drain_rate(
+                sound_rate,
+                cx.scalar("body_0_mass"),
+                cx.scalar("body_0_racc"),
+            )
         } else {
-            signal_speed(cx, cs) / (c_drain * min_w)
+            sound_rate
         };
         let rate_scale = signal_speed(cx, cs) / min_w;
 
@@ -1153,6 +1150,8 @@ fn penalize_torque_free_impl<E: EnergyModel>(
     );
     let (kernel, writes) = trace(|cx| {
         let dt = cx.scalar("dt");
+        let eos = cx.scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
+        let c_drain = cx.scalar("c_drain");
         let xi = cx.scalar("xi");
 
         let den = cx.field("den", symbi_ir::FieldRef::cons_den());
@@ -1194,9 +1193,18 @@ fn penalize_torque_free_impl<E: EnergyModel>(
         let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
         tag_body_mask(cx, &chi, coords, ndim, axes, None, false);
 
-        // this kernel is the sphere path by construction (it takes no shape parameter), so the
-        // drain runs at the problem-data rate `k_drain * Omega_ff`, independent of the cell state.
-        let inv_tau = spherical_drain_rate(cx);
+        let cs = if E::HAS_ENERGY {
+            let mom_sq = mom.iter().fold(Gv::ZERO, |sum, m| sum + *m * *m);
+            symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg.value(), eos)
+        } else {
+            eos
+        };
+        let sound_rate = signal_speed(cx, cs) / (c_drain * min_w);
+        let inv_tau = symbi_ib::drain::spherical_drain_rate(
+            sound_rate,
+            cx.scalar("body_0_mass"),
+            cx.scalar("body_0_racc"),
+        );
 
         // the outward surface normal in the cell's physical frame: the cartesian
         // r_hat from the body center rotated into the orthonormal basis (identity on
@@ -1318,10 +1326,8 @@ mod twin_tests {
         ),
     ];
 
-    // each iso surface differs from its adiabatic twin only by the energy channel.
-    // the shaped/surface-rate porous path additionally swaps `gamma` for `cs`;
-    // the spherical drain and torque-free paths use the problem-data free-fall
-    // rate and therefore read neither EOS parameter.
+    // each iso surface differs from its adiabatic twin only by the energy channel
+    // and by the lawful source of sound speed (`gamma` recovery versus fixed `cs`).
     #[test]
     fn iso_twin_is_the_adiabatic_surface_minus_the_energy_channel() {
         for (name, adiabatic, iso) in PAIRS {

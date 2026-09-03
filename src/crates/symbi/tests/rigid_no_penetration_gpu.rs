@@ -106,8 +106,8 @@ fn cons_rel_gap(h: &HostSim, d: &DevSim) -> f64 {
 fn cartesian_shaped_wall_penalize_matches_cpu_on_device() {
     let h = build::<CpuSpace, HostMemory>();
     let d = build::<CudaSpace, UnifiedMemory>();
-    dispatch_penalize(&h, 1e-3, GAMMA, 1.0, 3.0);
-    dispatch_penalize(&d, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&h, 1e-3, GAMMA, 1.0);
+    dispatch_penalize(&d, 1e-3, GAMMA, 1.0);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
 
     let gap = cons_rel_gap(&h, &d);

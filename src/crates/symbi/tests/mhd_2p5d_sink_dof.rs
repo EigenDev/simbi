@@ -59,7 +59,7 @@ fn make() -> Sim {
     .build();
     sim.with_bodies(
         BodyCollection::new().add(
-            // gravitating because the spherical drain rate is k_drain*sqrt(GM/r_acc^3);
+            // gravitating because the spherical drain carries a free-fall-rate arm;
             // the pull never acts here, since the gravity source is not dispatched.
             Body::black_hole(
                 0,

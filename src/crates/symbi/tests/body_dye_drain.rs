@@ -51,7 +51,7 @@ fn build() -> Sim {
             BodyCollection::new().add(
                 // a bare drain: no wall channels, so the only thing acting is the mass sink and any
                 // dye error cannot be attributed to a momentum or thermal channel. the body
-                // gravitates because the spherical drain rate is k_drain*sqrt(GM/r_acc^3);
+                // gravitates because the spherical drain carries a free-fall-rate arm;
                 // its pull never acts here, since the gravity source is not dispatched.
                 Body::black_hole(
                     0,
@@ -96,7 +96,7 @@ fn a_sink_removes_mass_and_its_dye_together() {
     let mass0 = total_mass(&sim);
     let dt = 1e-3;
     for _ in 0..40 {
-        dispatch_penalize(&sim, dt, GAMMA, 1.0, 3.0);
+        dispatch_penalize(&sim, dt, GAMMA, 1.0);
     }
     let mass1 = total_mass(&sim);
 
@@ -174,7 +174,7 @@ mod isothermal {
             .with_bodies(
                 BodyCollection::new().add(
                     // gravitating for the same reason as the adiabatic arm: the spherical
-                    // drain rate is k_drain*sqrt(GM/r_acc^3), and the pull never acts here.
+                    // drain rate includes sqrt(GM/r_acc^3), and the pull never acts here.
                     Body::black_hole(
                         0,
                         Tensor::new([0.0, 0.0]),
@@ -209,7 +209,7 @@ mod isothermal {
         };
         let mass0 = mass(&sim);
         for _ in 0..40 {
-            dispatch_penalize(&sim, 1e-3, 1.0, 1.0, 3.0);
+            dispatch_penalize(&sim, 1e-3, 1.0, 1.0);
         }
         let swallowed = (mass0 - mass(&sim)) / mass0;
         assert!(

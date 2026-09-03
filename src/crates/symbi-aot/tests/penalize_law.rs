@@ -23,18 +23,13 @@ const DX: f64 = 0.05;
 const POS: [f64; 2] = [0.11, -0.07];
 const RACC: f64 = 0.15;
 const C_DRAIN: f64 = 1.0;
-const K_DRAIN: f64 = 3.0;
 /// the accretor mass: with `RACC = 0.15` the free-fall rate `sqrt(MASS/RACC^3)` is 34.4, so a
 /// step's drained fraction is order one and a rate error is visible against it.
 const MASS: f64 = 4.0;
 
-/// the f64 twin of the kernel's `spherical_drain_rate`: `k_drain` free-fall rates at the mask
-/// radius, a constant of the problem data. the rate reads no cell state, so a cell's drained
-/// fraction per step is the same whatever its density and pressure — the property that keeps a
-/// pressure-fed evacuating seam cell from feeding its own drain. takes the radius explicitly --
-/// the cases here use several.
-fn drain_rate(racc: f64) -> f64 {
-    K_DRAIN * (MASS / (racc * racc * racc)).sqrt()
+/// the f64 twin of the kernel's spherical-rate law.
+fn drain_rate(sound_rate: f64, racc: f64) -> f64 {
+    sound_rate.max((MASS / (racc * racc * racc)).sqrt())
 }
 const DT: f64 = 0.008;
 const GAMMA: f64 = 1.4;
@@ -123,7 +118,6 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             "dt" => DT,
             "gamma" => GAMMA,
             "c_drain" => C_DRAIN,
-            "k_drain" => K_DRAIN,
             // hydro: zero alfven contribution reduces the magnetosonic signal
             // speed sqrt(cs^2 + c_a2) to the sound-speed form exactly.
             "c_a2" => 0.0,
@@ -222,7 +216,9 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             let x = [mid(ii), mid(jj)];
             let dv = 1.0 / (1.0 / (width(ii) * width(jj)));
             let ch = chi(sphere.dist(x), DX);
-            let inv_tau = drain_rate(RACC);
+            let mom_sq = cons.mom().dot(&cons.mom());
+            let cs = symbi_ib::drain::sound_speed_from_cons(cons.den(), mom_sq, cons.nrg(), GAMMA);
+            let inv_tau = drain_rate(cs / (C_DRAIN * DX), RACC);
             let kin = BodyKin::<f64, 2> {
                 u_solid: Tensor::zeros(),
                 omega: Tensor::zeros(),
@@ -308,7 +304,6 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             "dt" => DT,
             "cs" => CS,
             "c_drain" => C_DRAIN,
-            "k_drain" => K_DRAIN,
             "x_lo_0" | "x_lo_1" => X_LO,
             "dx_0" | "dx_1" => DX,
             "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" => 0.0,
@@ -384,7 +379,7 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             );
             let mid = |i: usize| ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5;
             let ch = chi(sphere.dist([mid(ii), mid(jj)]), DX);
-            let inv_tau = drain_rate(RACC);
+            let inv_tau = drain_rate(CS / (C_DRAIN * DX), RACC);
             let kin = BodyKin::<f64, 2> {
                 u_solid: Tensor::zeros(),
                 omega: Tensor::zeros(),
@@ -465,7 +460,6 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             "dt" => DT,
             "cs" => CS,
             "c_drain" => C_DRAIN,
-            "k_drain" => K_DRAIN,
             "x_lo_0" => R_LO,
             "x_lo_1" => PHI_LO,
             "dx_0" => DR,
@@ -552,7 +546,7 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             );
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
-            let inv_tau = drain_rate(RACC_C);
+            let inv_tau = drain_rate(CS / (C_DRAIN * min_w), RACC_C);
             let kin = BodyKin::<f64, 2> {
                 u_solid: Tensor::zeros(),
                 omega: Tensor::zeros(),
@@ -658,7 +652,6 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
                 "dt" => DT,
                 "cs" => CS,
                 "c_drain" => C_DRAIN,
-                "k_drain" => K_DRAIN,
                 "xi" => xi_val,
                 "x_lo_0" => R_LO,
                 "x_lo_1" => PHI_LO,
@@ -743,7 +736,7 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
             );
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
-            let inv_tau = drain_rate(RACC_C);
+            let inv_tau = drain_rate(CS / (C_DRAIN * min_w), RACC_C);
             // the physical-frame normal: Cartesian r_hat rotated into the ortho basis.
             let xrel = [xc[0] - CENTER[0], xc[1] - CENTER[1]];
             let r = (xrel[0] * xrel[0] + xrel[1] * xrel[1]).sqrt();
@@ -868,7 +861,6 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
                 "dt" => DT,
                 "cs" => CS,
                 "c_drain" => C_DRAIN,
-                "k_drain" => K_DRAIN,
                 "xi" => xi_val,
                 "x_lo_0" | "x_lo_1" => X_LO,
                 "dx_0" | "dx_1" => DX,
@@ -944,7 +936,7 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
             );
             let x = [mid(ii), mid(jj)];
             let ch = chi(sphere.dist(x), DX);
-            let inv_tau = drain_rate(RACC);
+            let inv_tau = drain_rate(CS / (C_DRAIN * DX), RACC);
             let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
             let r = x_rel.dot(&x_rel).sqrt();
             let normal = x_rel.scale(1.0 / r.max(1e-300));
@@ -1059,7 +1051,6 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
                 "dt" => DT,
                 "gamma" => GAMMA,
                 "c_drain" => C_DRAIN,
-                "k_drain" => K_DRAIN,
                 "porosity" => p_val,
                 "k_eta_n" => K_ETA_N,
                 "k_eta_t" => K_ETA_T,
@@ -1153,7 +1144,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
             let ch = chi(sphere.dist(x), DX);
             let mom_sq = cons.mom().dot(&cons.mom());
             let cs = symbi_ib::drain::sound_speed_from_cons(cons.den(), mom_sq, cons.nrg(), GAMMA);
-            let inv_tau = drain_rate(RACC);
+            let inv_tau = drain_rate(cs / (C_DRAIN * DX), RACC);
             let rate_scale = cs / DX;
             let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
             let r = x_rel.dot(&x_rel).sqrt();
@@ -1297,7 +1288,6 @@ fn iso_porous_reduces_to_iso_drain_at_p1() {
             "dt" => DT,
             "cs" => 0.8,
             "c_drain" => C_DRAIN,
-            "k_drain" => K_DRAIN,
             "porosity" => 1.0,
             "k_eta_n" => 30.0,
             "k_eta_t" => 5.0,
@@ -1352,7 +1342,6 @@ fn adiabatic_torque_free_reduces_to_drain_at_xi0() {
             "dt" => DT,
             "gamma" => GAMMA,
             "c_drain" => C_DRAIN,
-            "k_drain" => K_DRAIN,
             // hydro: zero alfven contribution reduces the magnetosonic signal
             // speed sqrt(cs^2 + c_a2) to the sound-speed form exactly.
             "c_a2" => 0.0,
@@ -1420,7 +1409,6 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
             "dt" => DT,
             "cs" => CS,
             "c_drain" => C_DRAIN,
-            "k_drain" => K_DRAIN,
             "x_lo_0" => R_LO,
             "x_lo_1" => PHI_LO,
             "dx_0" => DR,
@@ -1455,7 +1443,7 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
                 ConsG::<f64, 2, IsoModel>::isothermal(Density(den[c]), Tensor::new([mx[c], my[c]]));
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
-            let inv_tau = drain_rate(RACC_C);
+            let inv_tau = drain_rate(CS / (C_DRAIN * min_w), RACC_C);
             let kin = BodyKin::<f64, 2> {
                 u_solid: Tensor::zeros(),
                 omega: Tensor::zeros(),
@@ -1482,14 +1470,11 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
     );
 }
 
-/// the drained fraction is a function of position alone. two runs of the compiled drain over
-/// states six orders apart in density and pressure must scale every cell by the identical
-/// factor: the rate reads GM, r_acc and k_drain, never the cell. a rate keyed to the cell's own
-/// sound speed fails this immediately — c_s differs by three orders between the two states — and
-/// that coupling is a finite-time extinction mechanism at a pressure-fed evacuating seam cell,
-/// where refill holds the pressure while the drain empties the density.
+/// uniform conserved scaling leaves the compiled drain fraction invariant:
+/// density, momentum, and energy move together, so the recovered sound speed
+/// and both arms of the spherical-rate maximum are unchanged.
 #[test]
-fn the_drained_fraction_reads_no_cell_state() {
+fn uniform_state_scaling_leaves_the_drained_fraction_invariant() {
     let (kernel, ir) = kernel_by_name::<f64>("penalize_drain_2d").expect("kernel in registry");
     let n2 = N * N;
     let scalar = |name: &str| -> f64 {
@@ -1497,7 +1482,6 @@ fn the_drained_fraction_reads_no_cell_state() {
             "dt" => DT,
             "gamma" => GAMMA,
             "c_drain" => C_DRAIN,
-            "k_drain" => K_DRAIN,
             "c_a2" => 0.0,
             "x_lo_0" | "x_lo_1" => X_LO,
             "dx_0" | "dx_1" => DX,
@@ -1510,9 +1494,7 @@ fn the_drained_fraction_reads_no_cell_state() {
         }
     };
 
-    // two uniform states: an ambient gas, and the same gas evacuated a millionfold in density
-    // while holding most of its pressure — the seam-cell shape, with c_s three orders apart.
-    // the scales are powers of two so recovering the fraction by division is exact.
+    // powers-of-two scaling keeps the conserved ratios exact.
     let run = |rho: f64, pre: f64| -> Vec<f64> {
         let den = vec![rho; n2];
         let mom = vec![0.0; n2];
@@ -1521,13 +1503,14 @@ fn the_drained_fraction_reads_no_cell_state() {
         outs[0].iter().map(|d| d / rho).collect()
     };
     let thick = run(1.0, 1.0);
-    let thin = run(2.0_f64.powi(-20), 2.0_f64.powi(-7));
+    let scale = 2.0_f64.powi(-20);
+    let thin = run(scale, scale);
 
     let mut drained = 0usize;
     for (c, (a, b)) in thick.iter().zip(thin.iter()).enumerate() {
         assert!(
             a.to_bits() == b.to_bits(),
-            "cell {c}: drained fraction depends on the state ({a:.17e} vs {b:.17e})"
+            "cell {c}: uniform scaling changed the drained fraction ({a:.17e} vs {b:.17e})"
         );
         if *a < 1.0 {
             drained += 1;

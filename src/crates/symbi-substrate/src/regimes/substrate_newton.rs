@@ -104,14 +104,8 @@ pub struct AdiabaticSubstrateKernelSet<
     /// to the two-pass on non-f64 carriers, device memory, or an out-of-JIT-subset source. the
     /// two-pass remains the default; the fused path is bit-for-bit identical to it.
     pub fuse_runtime: bool,
-    /// the shaped porous wall's drain timescale dial tau = c_drain dx / c_s: a
-    /// convergence-study parameter, never tuned to a target rate.
+    /// dimensionless acoustic crossing factor: tau = c_drain dx / signal_speed.
     pub c_drain: f64,
-    /// the spherical drain rate dial: rate = k_drain sqrt(GM/r_acc^3), a constant of the
-    /// problem data. a mask cell empties within 1/k_drain of a free-fall crossing, so the
-    /// emergent accretion rate is flat in k_drain once it reaches order one — the convergence
-    /// study sweeps it. the shaped porous wall keeps its own dial `c_drain`.
-    pub k_drain: f64,
     /// the body-only fused godunov kernel (godunov + geo + immersed-body wrap, no user source),
     /// resolved once + cached here on the kernel-set — a gravity/accretion run with no runtime source
     /// to carry the body. built lazily on first `godunov_stage` (geometry + bodies known then), gated
@@ -167,7 +161,6 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             runtime_source: None,
             fuse_runtime: false,
             c_drain: 1.0,
-            k_drain: 3.0,
             fused_rhs: OnceLock::new(),
             boundary_dags: Vec::new(),
             gradient_bcs: Vec::new(),
@@ -902,7 +895,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // the penalization drain is the sole accretion mechanism on
         // cartesian grids — the in-godunov sink resolves its rate to
         // zero under the same predicate (params::penalize_owns_accretion).
-        dispatch_penalize(sim, dt, self.gamma, self.c_drain, self.k_drain);
+        dispatch_penalize(sim, dt, self.gamma, self.c_drain);
     }
 
     fn body_feedback(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {

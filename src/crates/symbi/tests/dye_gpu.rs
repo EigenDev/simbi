@@ -127,7 +127,7 @@ fn a_sink_carries_the_dye_with_the_mass_on_gpu() {
         .build()
         .with_bodies(
             BodyCollection::new().add(
-                // gravitating because the spherical drain rate is k_drain*sqrt(GM/r_acc^3);
+                // gravitating because the spherical drain carries a free-fall-rate arm;
                 // the pull never acts here, since the gravity source is not dispatched.
                 Body::black_hole(
                     0,
@@ -163,7 +163,7 @@ fn a_sink_carries_the_dye_with_the_mass_on_gpu() {
     };
     let mass0 = mass();
     for _ in 0..40 {
-        dispatch_penalize(&sim, 1e-3, 1.4, 1.0, 3.0);
+        dispatch_penalize(&sim, 1e-3, 1.4, 1.0);
     }
     symbi_xpu::cuda::ctx_sync();
     let swallowed = (mass0 - mass()) / mass0;

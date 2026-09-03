@@ -221,27 +221,21 @@ class AccretionProperties:
                 f"accretion_radius must be > 0: a sink of zero radius drains no "
                 f"gas. got {self.accretion_radius}."
             )
-        # the drain rate is not a free parameter. every immersed-boundary surface (drain, porous,
-        # torque-free) drains through the penalization stack. the spherical accretor drains at
-        # `k_drain * sqrt(GM / r_acc^3)` — a constant of the problem data, k_drain free-fall rates
-        # at the mask radius, so a mask cell empties within a fraction of a crossing and the
-        # emergent Mdot is set by the flow. the rate reads no cell state: a rate keyed to the
-        # cell's own sound speed feeds back at a pressure-fed evacuating seam cell and empties it
-        # in finite time, taking the timestep with it. the shaped porous wall relaxes on its own
-        # dial `tau = c_drain * dx / c_s`. the legacy in-godunov sink that `sink_rate` once set is
+        # every immersed-boundary surface drains through the penalization stack. the spherical
+        # accretor uses the faster of one acoustic cell crossing and free fall through the mask;
+        # the shaped porous wall uses the acoustic rate. the pure drain scales every conserved
+        # component uniformly, so its state-dependent sound speed is invariant under the drain
+        # itself. the legacy in-godunov sink that `sink_rate` once set is
         # retired, and the scalar is bound to zero wherever a surface exists, which is everywhere.
         #
         # refused rather than ignored: a run that sets it is asserting control over the accretion
         # rate that it does not have, and the resulting Mdot looks entirely reasonable — it is
-        # simply the free-fall drain, whatever the dial said. the sink is self-similar across
-        # resolution by construction, so there is nothing here to tune per run.
+        # simply the penalization drain, whatever the dial said.
         if self.sink_rate != 0.0:
             raise _config_error(
                 f"sink_rate={self.sink_rate} is not a live parameter: the immersed-boundary "
-                "penalization surface owns accretion, and the spherical drain runs at "
-                "k_drain*sqrt(GM/r_acc^3) — the scalar is bound to zero. drop the argument. to "
-                "change the drain rate the dial is `k_drain` on the substrate kernel set, which "
-                "is not yet exposed to the configuration layer."
+                "penalization surface owns accretion; the scalar is bound to zero. drop the "
+                "argument."
             )
         if self.porosity is not None and not (0.0 <= self.porosity <= 1.0):
             raise _config_error(

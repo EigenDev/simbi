@@ -84,7 +84,7 @@ fn two_way_body_ke_change_balances_gas_energy() {
     // wall exchanges with the local flow it develops, which is all the energy ledger needs).
     let mut gas_energy_change = 0.0_f64;
     for _ in 0..25 {
-        dispatch_penalize(&sim, dt, GAMMA, 1.0, 3.0);
+        dispatch_penalize(&sim, dt, GAMMA, 1.0);
         let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
         gas_energy_change += deltas[0].energy_delta;
         apply_body_deltas(&mut sim.immersed.as_mut().unwrap().bodies, &deltas, dt);

@@ -43,7 +43,7 @@ def test_zero_accretion_radius_rejected() -> None:
 @pytest.mark.parametrize("rate", [-1.0, 1.0e-30, 0.5, 1.0e6])
 def test_any_nonzero_sink_rate_rejected(rate: float) -> None:
     # the drain rate is not a parameter. the spherical accretor drains at the problem-data rate
-    # `k_drain * sqrt(GM / r_acc^3)`, and the sink scalar is bound to zero wherever a surface
+    # the penalization drain, and the sink scalar is bound to zero wherever a surface
     # exists — which `penalize_owns_accretion` makes unconditional.
     #
     # any nonzero value is refused, not merely a negative one. a positive value is the dangerous

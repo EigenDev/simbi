@@ -68,7 +68,7 @@ fn penalize_drains_the_mask_and_conserves_gas_plus_body() {
         .collect();
 
     let dt = 1e-3;
-    dispatch_penalize(&sim, dt, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, dt, GAMMA, 1.0);
 
     let im = sim.immersed.as_ref().unwrap();
     let deltas = im.diagnostics.consolidate();
@@ -237,7 +237,7 @@ fn iso_dispatch_drains_directly() {
             0.0,
             0.12,
         )));
-    dispatch_penalize(&sim, 1e-3, 1.0, 1.0, 3.0);
+    dispatch_penalize(&sim, 1e-3, 1.0, 1.0);
     let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert!(
         deltas[0].mass_delta > 0.0,
@@ -297,7 +297,7 @@ fn torque_receipt_equals_the_moment_of_the_momentum_loss() {
         .collect();
 
     let dt = 1e-3;
-    dispatch_penalize(&sim, dt, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, dt, GAMMA, 1.0);
     let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert!(deltas[0].mass_delta > 0.0, "the drain never fired");
 
@@ -379,7 +379,7 @@ fn porous_surface_endpoints_hold_through_the_dispatch() {
         k_eta_n: 50.0,
         k_eta_t: 0.0,
     });
-    dispatch_penalize(&sealed, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sealed, 1e-3, GAMMA, 1.0);
     let d = sealed.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert_eq!(
         d[0].mass_delta, 0.0,
@@ -397,7 +397,7 @@ fn porous_surface_endpoints_hold_through_the_dispatch() {
         k_eta_n: 50.0,
         k_eta_t: 0.0,
     });
-    dispatch_penalize(&porous, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&porous, 1e-3, GAMMA, 1.0);
     let d = porous.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert!(d[0].mass_delta > 0.0, "the half-open surface never drained");
 }
@@ -443,7 +443,7 @@ fn porous_absorption_converges_under_grid_refinement() {
                 ),
             );
 
-        dispatch_penalize(&sim, EXPOSURE_TIME, GAMMA, 1.0, 3.0);
+        dispatch_penalize(&sim, EXPOSURE_TIME, GAMMA, 1.0);
         let receipt = sim.immersed.as_ref().unwrap().diagnostics.consolidate()[0];
         let force = receipt.force_delta;
         assert!(
@@ -528,7 +528,7 @@ fn rigid_wall_non_accreting_penalizes_without_draining() {
             .accretion_radius(),
         None
     );
-    dispatch_penalize(&rigid, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&rigid, 1e-3, GAMMA, 1.0);
     let d = rigid.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert_eq!(
         d[0].mass_delta, 0.0,
@@ -592,7 +592,7 @@ fn shaped_box_rigid_wall_penalizes_via_runtime_jit() {
         [0.15, 0.15, 1.0],
     ));
 
-    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert_eq!(
         d[0].mass_delta, 0.0,
@@ -652,7 +652,7 @@ fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
         [0.15, 0.15, 1.0],
     ));
 
-    dispatch_penalize(&sim, 1e-3, 1.0, 1.0, 3.0);
+    dispatch_penalize(&sim, 1e-3, 1.0, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert_eq!(
         d[0].mass_delta, 0.0,
@@ -702,7 +702,7 @@ fn two_way_spin_is_dragged_to_a_stop() {
         Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.25, 0.1, 1.0]));
 
     let dt = 1e-3;
-    dispatch_penalize(&sim, dt, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, dt, GAMMA, 1.0);
     let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     symbi_ib::apply_body_deltas(&mut sim.immersed.as_mut().unwrap().bodies, &deltas, dt);
     // spin was about z, so the drag reduces the z component of the angular-velocity vector.
@@ -747,7 +747,7 @@ fn two_way_body_is_pushed_downstream_by_the_flow() {
         Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.2, 0.2, 1.0]));
 
     let dt = 1e-3;
-    dispatch_penalize(&sim, dt, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, dt, GAMMA, 1.0);
     let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     symbi_ib::apply_body_deltas(&mut sim.immersed.as_mut().unwrap().bodies, &deltas, dt);
     let b = sim.immersed.as_ref().unwrap().bodies.get(0);
@@ -802,7 +802,7 @@ fn spinning_box_about_x_axis_imparts_torque_3d() {
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.1, 0.3, 0.1]));
 
-    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert_eq!(
         d[0].mass_delta, 0.0,
@@ -867,7 +867,7 @@ fn shaped_box_rigid_wall_cylindrical_penalizes() {
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.4, 0.4, 1.0]));
 
-    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert_eq!(
         d[0].mass_delta, 0.0,
@@ -917,7 +917,7 @@ fn spinning_box_wall_imparts_torque_to_still_fluid() {
     };
 
     let spinning = build(5.0);
-    dispatch_penalize(&spinning, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&spinning, 1e-3, GAMMA, 1.0);
     let d = spinning
         .immersed
         .as_ref()
@@ -936,7 +936,7 @@ fn spinning_box_wall_imparts_torque_to_still_fluid() {
 
     // baseline: the same wall with no spin leaves still fluid still — negligible torque.
     let still = build(0.0);
-    dispatch_penalize(&still, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&still, 1e-3, GAMMA, 1.0);
     let d0 = still.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert!(
         d0[0].torque_delta[2].abs() < 1e-12,
@@ -1017,7 +1017,7 @@ fn rz_on_axis_sink_drains_conserves_and_books_axis_torque() {
         .map(|c| *sim.fields.cons.den.view().at(c))
         .collect();
 
-    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
 
     let after_mass = mass(&sim);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
@@ -1089,5 +1089,5 @@ fn rz_off_axis_body_fails_loud() {
             0.0,
             0.1,
         )));
-    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
 }

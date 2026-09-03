@@ -86,8 +86,8 @@ fn two_way_spin_torque_matches_cpu_on_device() {
     let mut h = build_twoway::<CpuSpace, HostMemory>();
     let mut d = build_twoway::<CudaSpace, UnifiedMemory>();
     let dt = 1e-3;
-    dispatch_penalize(&h, dt, GAMMA, 1.0, 3.0);
-    dispatch_penalize(&d, dt, GAMMA, 1.0, 3.0);
+    dispatch_penalize(&h, dt, GAMMA, 1.0);
+    dispatch_penalize(&d, dt, GAMMA, 1.0);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
 
     // the penalized cons fields agree cell-by-cell.
@@ -180,8 +180,8 @@ fn build_iso<S: ExecutionSpace, Mem: MemorySpace>() -> IsoSim<S, Mem> {
 fn iso_shaped_wall_matches_cpu_on_device() {
     let h = build_iso::<CpuSpace, HostMemory>();
     let d = build_iso::<CudaSpace, UnifiedMemory>();
-    dispatch_penalize(&h, 1e-3, 1.0, 1.0, 3.0);
-    dispatch_penalize(&d, 1e-3, 1.0, 1.0, 3.0);
+    dispatch_penalize(&h, 1e-3, 1.0, 1.0);
+    dispatch_penalize(&d, 1e-3, 1.0, 1.0);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
 
     // the iso kernel drops the nrg channel: compare den + mom only.

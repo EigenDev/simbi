@@ -53,6 +53,13 @@ pub fn drain_timescale<S: Scalar>(dx: S, c_s: S, c_drain: S) -> S {
     c_drain * dx / c_s
 }
 
+/// the spherical accretor's inverse drain timescale: no slower than either
+/// the local signal crossing of one cell or free fall through the mask.
+#[inline]
+pub fn spherical_drain_rate<S: Scalar>(sound_rate: S, mass: S, r_acc: S) -> S {
+    sound_rate.max((mass / (r_acc * r_acc * r_acc)).sqrt())
+}
+
 /// the exact-exponential uniform-scaling drain on one masked cell's conserved
 /// vector. returns the drained state `U exp(-chi dt/tau)` and the cell's exact
 /// contribution to the body -- the cell-integrated `U_old - U_new` (absorbed
@@ -167,6 +174,43 @@ mod tests {
             (e0 - e1).abs() < 1e-14,
             "specific internal energy changed: {e0} -> {e1}"
         );
+        let gamma = 5.0 / 3.0;
+        let cs0 = sound_speed_from_cons(cons.den(), cons.mom().dot(&cons.mom()), cons.nrg(), gamma);
+        let cs1 = sound_speed_from_cons(
+            drained.den(),
+            drained.mom().dot(&drained.mom()),
+            drained.nrg(),
+            gamma,
+        );
+        assert!(
+            (cs0 - cs1).abs() < 1e-14,
+            "sound speed changed: {cs0} -> {cs1}"
+        );
+    }
+
+    #[test]
+    fn spherical_rate_selects_the_faster_physical_clock() {
+        let mass = 2.0_f64;
+        let radius = 0.5_f64;
+        let free_fall = (mass / (radius * radius * radius)).sqrt();
+        assert_eq!(
+            spherical_drain_rate(0.5 * free_fall, mass, radius),
+            free_fall
+        );
+        assert_eq!(
+            spherical_drain_rate(2.0 * free_fall, mass, radius),
+            2.0 * free_fall
+        );
+    }
+
+    #[test]
+    fn bhl_default_resolves_to_the_historical_free_fall_floor() {
+        let dx = 1.0_f64 / 64.0;
+        let r_acc = 3.0 * dx;
+        let sound_rate = 1.0 / dx;
+        let free_fall = (1.0 / (r_acc * r_acc * r_acc)).sqrt();
+        assert!(free_fall > sound_rate);
+        assert_eq!(spherical_drain_rate(sound_rate, 1.0, r_acc), free_fall);
     }
 
     // exact gas+body conservation: the body's gain is exactly what the gas lost.
