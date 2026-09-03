@@ -38,6 +38,7 @@ fn rmhd_c2p_1d(
     pv1: &mut [f64],
     pv2: &mut [f64],
     ppre: &mut [f64],
+    c2p_status: &mut [f64],
     grid_size_0: i32,
     dom_lo_0: i32,
     _l0: i32,
@@ -71,6 +72,7 @@ fn rmhd_c2p_1d(
         .output("prim.vel_1", pv1)
         .output("prim.vel_2", pv2)
         .output("prim.pre", ppre)
+        .output("scratch", c2p_status)
         .grid(&grid)
         .dom_lo(&dom)
         .scalar("gamma", gamma)
@@ -133,14 +135,46 @@ fn aot_rmhd_c2p_round_trips() {
     // separate output buffers (the kernel takes 5 distinct &mut [f64]).
     let (mut rho_o, mut p_o) = (vec![0.0; n], vec![0.0; n]);
     let (mut v0_o, mut v1_o, mut v2_o) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+    let mut status_o = vec![-1.0; n];
 
     rmhd_c2p_1d(
-        &den, &mom[0], &mom[1], &mom[2], &nrg, &mag[0], &mag[1], &mag[2], &mut rho_o, &mut v0_o,
-        &mut v1_o, &mut v2_o, &mut p_o, n as i32, 0, // grid_size_0, dom_lo_0
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 13 buf_lo
+        &den,
+        &mom[0],
+        &mom[1],
+        &mom[2],
+        &nrg,
+        &mag[0],
+        &mag[1],
+        &mag[2],
+        &mut rho_o,
+        &mut v0_o,
+        &mut v1_o,
+        &mut v2_o,
+        &mut p_o,
+        &mut status_o,
+        n as i32,
+        0, // grid_size_0, dom_lo_0
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0, // 13 buf_lo
         GAMMA,
     );
 
+    // the status channel rides the recovery kernel: every case here is a
+    // physical state, so the accept/reject fact is zero on each cell.
+    for (i, s) in status_o.iter().enumerate() {
+        assert_eq!(*s, 0.0, "c2p_status[{i}] on a physical state");
+    }
     let vel_o = [&v0_o, &v1_o, &v2_o];
     for (i, &(rho, v, p, _b)) in prims.iter().enumerate() {
         let close = |a: f64, want: f64, what: &str| {
@@ -155,4 +189,41 @@ fn aot_rmhd_c2p_round_trips() {
             close(vel_o[k][i], v[k], &format!("v[{k}]"));
         }
     }
+}
+
+#[test]
+fn rmhd_out_of_cone_rejects_with_the_pressure_sentinel() {
+    // the RMHD twin of the RHD cone rejection, at zero field: the KKC
+    // recovery clamps the candidate finite, the pressure carries the
+    // density-scaled sentinel -|D|, and the status channel carries the
+    // rejection.
+    let n = 1;
+    let (mut rho, mut p_o) = (vec![0.0; n], vec![0.0; n]);
+    let (mut v0, mut v1, mut v2) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+    let mut status = vec![-1.0; n];
+    NamedKernel::new("rmhd_c2p_1d")
+        .input("cons.den", &[1.0])
+        .input("cons.mom_0", &[10.0])
+        .input("cons.mom_1", &[0.0])
+        .input("cons.mom_2", &[0.0])
+        .input("cons.nrg", &[0.1])
+        .input("cons.mag_0", &[0.0])
+        .input("cons.mag_1", &[0.0])
+        .input("cons.mag_2", &[0.0])
+        .output("prim.rho", &mut rho)
+        .output("prim.vel_0", &mut v0)
+        .output("prim.vel_1", &mut v1)
+        .output("prim.vel_2", &mut v2)
+        .output("prim.pre", &mut p_o)
+        .output("scratch", &mut status)
+        .grid(&[n as u32])
+        .dom_lo(&[0])
+        .scalar("gamma", GAMMA)
+        .run();
+    assert_eq!(status[0], 64.0, "the status channel carries the rejection");
+    assert_eq!(
+        p_o[0], -1.0,
+        "the raw cone sentinel -|D| survives on the candidate"
+    );
+    assert!(rho[0].is_finite() && v0[0].is_finite());
 }

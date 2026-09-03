@@ -30,9 +30,9 @@ use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use symbi_algebra::{Domain, OrderedNumeric};
+use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_hydro::regime::Regime;
-use symbi_carrier::Scalar;
 use symbi_ir::{FieldRef, ScalarRef};
 use symbi_xpu::MemorySpace;
 
@@ -40,14 +40,14 @@ use crate::kernels::support::cfl_from_lambda;
 use std::sync::Arc;
 
 use crate::regimes::substrate_kernels::{
-    RegimeKind, RuntimeSource, ScalarBind, Solver, dispatch_c2p_status, dispatch_driven_boundaries,
-    dispatch_named, dispatch_runtime_source, geom_scalar, kernel_bindings, kernel_geom,
-    mhd_flux_suffix, mhd_geom_suffix, motion_scalar, scalars_for, spacetime_slug,
+    RegimeKind, RuntimeSource, ScalarBind, Solver, dispatch_driven_boundaries, dispatch_named,
+    dispatch_runtime_source, geom_scalar, kernel_bindings, kernel_geom, mhd_flux_suffix,
+    mhd_geom_suffix, motion_scalar, scalars_for, spacetime_slug,
 };
-use symbi_source_compile::source_spec::SourceProgram;
 use symbi_sim::state::CtMethod;
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::KernelSet;
+use symbi_source_compile::source_spec::SourceProgram;
 
 static MHD_CFL_DIAGNOSTIC_CALLS: AtomicU64 = AtomicU64::new(0);
 
@@ -622,16 +622,17 @@ where
                 self.c2p(sim);
                 crate::regimes::fofc::fofc_probe(sim, "rmhd", "", pre_bind, source_weight);
                 // cells inside the excision surface are causally disconnected and their state is
-                // overwritten by the horizon fill, so they must not veto the step. the c2p error
-                // field is the scratch for the masked count: the next c2p rewrites it before any
-                // reader, on both the reject and the continue path.
+                // overwritten by the horizon fill, so they must not veto the step. the masking is
+                // pointwise per cell, so it applies in place over the weight buffer itself: the
+                // raw mask has no reader past this count (the source-theta write overwrites the
+                // buffer next), and the c2p status channel keeps its single producer.
                 crate::regimes::substrate_kernels::fofc_exterior_mask(
                     sim,
                     self.excision_radius,
                     source_weight,
-                    &sim.fields.c2p_error,
+                    source_weight,
                 );
-                if crate::regimes::fofc::fofc_flag_count(sim, &sim.fields.c2p_error) != 0 {
+                if crate::regimes::fofc::fofc_flag_count(sim, source_weight) != 0 {
                     // the source-free low-order anchor is itself inadmissible, so there is no
                     // admissible endpoint to measure a source fraction against — this tier cannot
                     // act. hand the substage to the ordinary redo, whose projection maps the cell
@@ -808,7 +809,13 @@ where
         }
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, -1.0);
         // eos_param is gamma (has_energy MHD); both drain dials use the adiabatic defaults.
-        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.eos_param.value(), 1.0, 3.0);
+        crate::regimes::substrate_kernels::dispatch_penalize(
+            sim,
+            dt,
+            self.eos_param.value(),
+            1.0,
+            3.0,
+        );
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, 1.0);
     }
 
@@ -851,14 +858,15 @@ where
         dispatch_named(
             sim,
             pre_bind,
-            None,
+            // the c2p status channel binds as the kernel's scratch output: the
+            // recovery writes its accept/reject fact alongside the candidate.
+            Some(&sim.fields.c2p_error),
             0,
             &cname,
             &sim.geom.interior,
             &[],
             &scalars,
         );
-        dispatch_c2p_status(sim, pre_bind, Self::kernel_prefix(), "");
     }
 
     fn wave_speeds(&self, sim: &FieldStore<D, 3, Mem, Sc>) {

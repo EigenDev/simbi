@@ -13,7 +13,22 @@ use symbi_geometry::{
 use symbi_hydro::eos::Eos as _;
 use symbi_hydro::quantity::{Density, EnergyDensity, Pressure, SoundSpeedSquared, VelocitySquared};
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
-use symbi_ir::{KernelWrite, KernelWrites};
+use symbi_hydro::{KernelC2pStatus, traced_recovery};
+use symbi_ir::{GvMask, KernelWrite, KernelWrites};
+
+/// the c2p status channel renderer: the typed accept/reject fact materializes
+/// in the field vocabulary the diagnostics speak — zero accepted,
+/// `ErrorCode::INVALID_PRIMITIVE` rejected. the write rides the recovery
+/// kernel itself, so the candidate fields and the status channel leave one
+/// trace together and a rejected pressure is data on its own channel.
+fn c2p_status_write<'t>(status: KernelC2pStatus<GvMask<'t>>) -> KernelWrite {
+    let code = Gv::select(
+        status.accepted(),
+        Gv::ZERO,
+        Gv::from_f64(symbi_hydro::c2p_result::ErrorCode::INVALID_PRIMITIVE.0 as f64),
+    );
+    KernelWrite::new("c2p_status", FieldRef::Scratch, code.node())
+}
 
 /// trace the real adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
 /// `S = Gv` — into a dispatchable kernel. the carrier-generic physics is the kernel
@@ -35,6 +50,7 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
         let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
         let cons = Cons::<Gv, D>::adiabatic(Density(den), Tensor::new(mom_arr), EnergyDensity(nrg));
         let prim: Prim<Gv, D> = cons.to_primitive(&IdealGas { gamma });
+        let (prim, c2p_status) = traced_recovery::newtonian(prim).into_parts();
 
         // decompose the recovered primitive into field writes.
         let mut writes = vec![KernelWrite::new(
@@ -54,6 +70,8 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
             FieldRef::PrimPre,
             prim.pre().node(),
         ));
+
+        writes.push(c2p_status_write(c2p_status));
 
         writes
     })
@@ -99,6 +117,7 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
             SoundSpeedSquared(cs2),
         ); // cs unused: recovery consumes the prescribed cs2
         let prim = Prim::adiabatic(Density(rho), vel, Pressure(pre));
+        let (prim, c2p_status) = traced_recovery::isothermal(prim).into_parts();
 
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
@@ -117,6 +136,8 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, KernelWrites) {
             FieldRef::PrimPre,
             prim.pre().node(),
         ));
+
+        writes.push(c2p_status_write(c2p_status));
 
         writes
     })
@@ -173,6 +194,9 @@ pub fn rhd_c2p_gv<const D: usize>(max_iters: usize, eos_arm: EosArm) -> (GvKerne
             max_iters,
         );
 
+        let (prim, c2p_status) =
+            traced_recovery::relativistic(prim, &SpatialMetric::flat()).into_parts();
+
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
             FieldRef::PrimRho,
@@ -190,6 +214,8 @@ pub fn rhd_c2p_gv<const D: usize>(max_iters: usize, eos_arm: EosArm) -> (GvKerne
             FieldRef::PrimPre,
             prim.pre().node(),
         ));
+
+        writes.push(c2p_status_write(c2p_status));
 
         writes
     })
@@ -281,6 +307,7 @@ where
         let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
         let cons = Cons::<Gv, D>::adiabatic(Density(den), mom_t, EnergyDensity(tau));
         let prim = rhd_recover(&IdealGas { gamma }, &cons, &metric, max_iters);
+        let (prim, c2p_status) = traced_recovery::relativistic(prim, &metric).into_parts();
 
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
@@ -299,6 +326,8 @@ where
             FieldRef::PrimPre,
             prim.pre().node(),
         ));
+        writes.push(c2p_status_write(c2p_status));
+
         writes
     })
 }
@@ -337,6 +366,9 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, KernelWrites) {
             max_iters,
         );
 
+        let (prim, c2p_status) =
+            traced_recovery::relativistic_mhd(prim, &SpatialMetric::flat()).into_parts();
+
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
             FieldRef::PrimRho,
@@ -354,6 +386,8 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, KernelWrites) {
             FieldRef::PrimPre,
             prim.pre().node(),
         ));
+
+        writes.push(c2p_status_write(c2p_status));
 
         writes
     })
@@ -427,6 +461,7 @@ pub fn rmhd_c2p_gr_gv(
             Tensor::new(mag),
         );
         let prim = rmhd_recover(&IdealGas { gamma: gamma_eos }, &cons, &metric, max_iters);
+        let (prim, c2p_status) = traced_recovery::relativistic_mhd(prim, &metric).into_parts();
 
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
@@ -445,6 +480,8 @@ pub fn rmhd_c2p_gr_gv(
             FieldRef::PrimPre,
             prim.pre().node(),
         ));
+
+        writes.push(c2p_status_write(c2p_status));
 
         writes
     })
@@ -480,6 +517,7 @@ pub fn nmhd_c2p_gv() -> (GvKernel, KernelWrites) {
             Tensor::new(mag),
         );
         let prim = nmhd_recover(&IdealGas { gamma }, &cons);
+        let (prim, c2p_status) = traced_recovery::newtonian_mhd(prim).into_parts();
 
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
@@ -498,6 +536,8 @@ pub fn nmhd_c2p_gv() -> (GvKernel, KernelWrites) {
             FieldRef::PrimPre,
             prim.pre().node(),
         ));
+
+        writes.push(c2p_status_write(c2p_status));
 
         writes
     })
@@ -529,6 +569,7 @@ pub fn imhd_c2p_gv() -> (GvKernel, KernelWrites) {
         // imhd_recover is pure kinematics, so the EOS argument is inert; Gv::zero keeps `cs`
         // out of the manifest.
         let prim = imhd_recover(&Isothermal { cs: Gv::ZERO }, &cons);
+        let (prim, c2p_status) = traced_recovery::isothermal_mhd(prim).into_parts();
 
         let mut writes = vec![KernelWrite::new(
             "prim_rho",
@@ -543,6 +584,8 @@ pub fn imhd_c2p_gv() -> (GvKernel, KernelWrites) {
             ));
         }
         // the writes stop at vel — the isothermal closure sets the pressure from rho.
+        writes.push(c2p_status_write(c2p_status));
+
         writes
     })
 }

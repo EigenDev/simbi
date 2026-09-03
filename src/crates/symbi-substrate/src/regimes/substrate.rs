@@ -21,9 +21,9 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
+use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_ir::ScalarRef;
-use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::sync::Arc;
@@ -32,11 +32,11 @@ use symbi_source_compile::source_spec::SourceProgram;
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FluxSpec, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
-    dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_c2p_status,
-    dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
-    dispatch_godunov_maybe_fused, dispatch_godunov_with_body_source, dispatch_gradient_boundaries,
-    dispatch_named, dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel,
-    geom_scalar, motion_scalar, resolve_params, scalars_for,
+    dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_driven_boundaries,
+    dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused,
+    dispatch_godunov_with_body_source, dispatch_gradient_boundaries, dispatch_named,
+    dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel, geom_scalar,
+    motion_scalar, resolve_params, scalars_for,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Geometry;
@@ -361,6 +361,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             outputs.push(&sim.fields.prim.vel[k]);
         }
         outputs.push(&self.pre);
+        // the c2p status channel: the recovery kernel writes its accept/reject
+        // fact alongside the candidate, so the channel has one producer.
+        outputs.push(&sim.fields.c2p_error);
         let name = format!("iso_c2p_{D}d");
         dispatch_fields::<Sc, Mem, D>(
             &name,
@@ -371,7 +374,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             &[],
             &[],
         );
-        dispatch_c2p_status(sim, &self.pre, "iso", "");
     }
 
     fn godunov_stage(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
@@ -750,7 +752,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     fn penalize(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
         // the [Drain] stack: the sole accretion mechanism on
         // cartesian grids; the iso kernel reads `cs` through the eos-param slot.
-        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.cs, self.c_drain, self.k_drain);
+        crate::regimes::substrate_kernels::dispatch_penalize(
+            sim,
+            dt,
+            self.cs,
+            self.c_drain,
+            self.k_drain,
+        );
     }
 
     fn viscous(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {

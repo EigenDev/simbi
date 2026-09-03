@@ -154,22 +154,6 @@ pub fn fofc_exterior_flag_gv(
     })
 }
 
-/// write the authoritative primitive-validity status after c2p. zero means the
-/// recovered primitive lies in the same strict interior accepted by fofc;
-/// `INVALID_PRIMITIVE` means it lies outside. c2p and fofc share
-/// `primitive_physical_gv`, so their
-/// pressure-zero and finiteness semantics agree by construction.
-pub fn c2p_status_gv(ncomp: usize, has_energy: bool) -> (GvKernel, KernelWrites) {
-    trace(|cx| {
-        let status = Gv::select(
-            primitive_physical_gv(cx, ncomp, has_energy),
-            Gv::ZERO,
-            Gv::from_f64(symbi_hydro::c2p_result::ErrorCode::INVALID_PRIMITIVE.0 as f64),
-        );
-        vec![KernelWrite::new("status", FieldRef::Scratch, status.node())]
-    })
-}
-
 /// ghost-band fail-loud probe: write 1 where the density is non-finite (NaN or +-inf via
 /// `(rho - rho) != 0`), else 0. run over the allocated domain (interior + ghosts): first-order flux
 /// correction keeps the interior finite and acts on the interior alone, so a poisoned boundary

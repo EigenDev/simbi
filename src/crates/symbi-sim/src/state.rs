@@ -447,9 +447,12 @@ pub struct PartitionFieldsGeneric<
     pub cons: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
     pub prim: PrimFieldsGeneric<NDIM, DOF, M, Sc>,
     pub flux: [ConsFieldsGeneric<NDIM, DOF, M, Sc>; NDIM],
-    /// per-cell c2p validity status. zero means the recovered primitive lies in
-    /// the strict admissible interior; nonzero means recovery produced a state
-    /// rejected by the same predicate used by fofc.
+    /// the C2pStatus channel: the recovery kernels' typed accept/reject fact,
+    /// written by the c2p kernel itself alongside the candidate primitives
+    /// (`kernel_recovery_status` is the one predicate source). zero means the
+    /// recovered primitive lies in the strict admissible interior;
+    /// `ErrorCode::INVALID_PRIMITIVE` means it lies outside. the buffer
+    /// carries this channel alone — masks and other scratch live elsewhere.
     pub c2p_error: Field<Sc, NDIM, M>,
     /// MHD staggered fields. None for pure hydro regimes.
     pub mhd: Option<MhdStaggeredFields<NDIM, DOF, M, Sc>>,
@@ -889,10 +892,15 @@ pub struct RkWorkspaceGeneric<
     /// conservatively. touched when a substage fires FOFC; a no-op otherwise and for regimes
     /// that omit FOFC.
     pub flux_ho: [ConsFieldsGeneric<NDIM, DOF, M, Sc>; NDIM],
-    /// the per-cell FOFC fallback flag over the allocated domain: 1 where the high-order c2p is
-    /// unphysical, else 0, with boundary-consistent ghosts (a face is first-order exactly when
-    /// either adjacent cell is flagged). the splice stencil reads it at the two cells sharing each
-    /// face.
+    /// the TroubledCell channel: the per-cell FOFC fallback flag over the allocated domain — 1
+    /// where the high-order c2p is unphysical, else 0, with boundary-consistent ghosts (a face is
+    /// first-order exactly when either adjacent cell is flagged). the splice stencil reads it at
+    /// the two cells sharing each face. provenance: the probe evaluates the same interior
+    /// predicate on the same primitives the recovery just wrote, with nothing mutating them in
+    /// between (the stage runs c2p then fofc directly), so today this channel is a re-encoding of
+    /// C2pStatus; it stays a separate channel because its consumers (the splice kernels and the
+    /// ghost fill) and its encoding differ, and the fallback ladder may one day flag cells the
+    /// recovery accepted.
     pub fofc_flag: Field<Sc, NDIM, M>,
     /// body-feedback reduction scratch, allocated on the first feedback dispatch, so a body-free
     /// sim pays neither the memory nor a per-call allocation. the feedback kernels assign-write

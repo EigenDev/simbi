@@ -10,9 +10,9 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
+use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_ir::ScalarRef;
-use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::collections::HashMap;
@@ -919,30 +919,6 @@ pub fn dispatch_named<const D: usize, const DOF: usize, Mem, Sc>(
     // cover/whole policy internally (host block-split when a serial twin exists; one whole launch
     // on device), so the scheduling seam is unchanged.
     super::exec::dispatch_fields_each::<Sc, Mem, D>(name, exec, &inputs, &outputs, ints, scalars);
-}
-
-/// materialize the authoritative post-c2p validity status using the same
-/// primitive predicate as fofc.
-pub fn dispatch_c2p_status<const D: usize, const DOF: usize, Mem, Sc>(
-    sim: &FieldStore<D, DOF, Mem, Sc>,
-    pre: &Field<Sc, D, Mem>,
-    prefix: &str,
-    dof_sfx: &str,
-) where
-    Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
-{
-    let name = format!("{prefix}_c2p_status{dof_sfx}_{D}d");
-    dispatch_named(
-        sim,
-        pre,
-        Some(&sim.fields.c2p_error),
-        0,
-        &name,
-        &sim.geom.interior,
-        &[],
-        &[],
-    );
 }
 
 /// the well-balanced forward body source: gravity as the (curvilinear: area-weighted)

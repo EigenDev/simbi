@@ -1044,7 +1044,14 @@ primitives between the recovery and the probe within a substage, the two
 channels carry one fact and the probe is a rename; if a ghost fill or source
 intervenes, the probe classifies a later state and is legitimately its own
 evaluation. The answer is recorded on the channel's documentation, so the
-channel work knows whether it deletes an evaluation or preserves one.
+channel work knows whether it deletes an evaluation or preserves one. The
+audit ran with the channel work: the stage driver runs c2p then fofc directly,
+nothing mutates the primitives between the recovery's writes and the probe's
+reads, so today `TroubledCell` is a re-encoding of `C2pStatus`. The channels
+stay distinct because their consumers and encodings differ and the ladder may
+one day flag cells the recovery accepted; the probe's re-evaluation is
+therefore deletable in favor of a status-channel decode when the mask
+unification lands.
 
 Moving the freeze count from the recomputing probe to the act changes what the
 number measures: the probe counts before the body-parachute selection, the act

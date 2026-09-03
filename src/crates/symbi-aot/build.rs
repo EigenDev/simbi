@@ -39,7 +39,7 @@ use symbi_discretize::GvKernel;
 use symbi_discretize::{
     Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, body_feedback_drain_gv,
     body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv, body_source_gv,
-    body_source_iso_gv, c2p_status_gv, chi_c2p_gv, chi_flux_gv, chi_godunov_gv, chi_snapshot_gv,
+    body_source_iso_gv, chi_c2p_gv, chi_flux_gv, chi_godunov_gv, chi_snapshot_gv,
     fofc_bflux_splice_gv, fofc_copy_gv, fofc_emf_splice_gv, fofc_exterior_flag_gv,
     fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv, fofc_select_with_body_gv, fofc_splice_gv,
     geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv,
@@ -1011,24 +1011,6 @@ fn gen_state_finite(out_dir: &str, ndim: u8) {
 // the post-c2p primitive-validity status, emitted per (prefix, chart-suffix) alongside the c2p it
 // annotates: `c2p` dispatches it unconditionally, including on the DOF-lift charts where the regime
 // runs no first-order flux correction, so its binding stays independent of the fofc family's chart coverage.
-fn gen_c2p_status(
-    out_dir: &str,
-    ndim: u8,
-    prefix: &str,
-    dof_sfx: &str,
-    ncomp: usize,
-    has_energy: bool,
-) {
-    let (k, w) = c2p_status_gv(ncomp, has_energy);
-    emit_gv(
-        out_dir,
-        &format!("{prefix}_c2p_status{dof_sfx}_{ndim}d"),
-        ndim,
-        &k,
-        &w,
-    );
-}
-
 // the fofc copy/select/probe triple + probe for one (prefix, ncomp). `dof_sfx` distinguishes the
 // spherical-swirl (DOF > D) instance (ncomp = DOF) from the DOF == D one (both share the `_{ndim}d`
 // grid tag) — "" for DOF == D and for the always-3-vector MHD, matching the runtime name build.
@@ -1064,7 +1046,6 @@ fn gen_fofc_tagged(
         &k,
         &w,
     );
-    gen_c2p_status(out_dir, ndim, prefix, dof_sfx, ncomp, has_energy);
     let (k, w) = fofc_freeze_probe_gv(ncomp, has_energy);
     emit_gv(
         out_dir,
@@ -3488,7 +3469,6 @@ fn main() {
     gen_adiabatic_c2p(&out_dir, 2, cyl.clone());
     // the swirl chart runs no first-order flux correction (the fofc kernels are baked at
     // ncomp = ndim), but c2p still annotates its recovery, so the status kernel is needed here.
-    gen_c2p_status(&out_dir, 2, "adiabatic", "_cyl_rz", 3, true);
     gen_iso_wave_speed_map(&out_dir, 2, cyl.clone());
     gen_iso_ghost_fill(&out_dir, 2, cyl.clone());
     gen_neumann_ghost_fill(&out_dir, 2, cyl.clone());

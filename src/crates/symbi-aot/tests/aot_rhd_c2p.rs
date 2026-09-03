@@ -33,6 +33,7 @@ fn rhd_c2p_1d(
     prim_rho: &mut [f64],
     prim_vel: &mut [f64],
     prim_pre: &mut [f64],
+    c2p_status: &mut [f64],
     grid_size_0: i32,
     dom_lo_0: i32,
     _l0: i32,
@@ -52,6 +53,7 @@ fn rhd_c2p_1d(
         .output("prim.rho", prim_rho)
         .output("prim.vel_0", prim_vel)
         .output("prim.pre", prim_pre)
+        .output("scratch", c2p_status)
         .grid(&grid)
         .dom_lo(&dom)
         .scalar("gamma", gamma)
@@ -119,6 +121,7 @@ fn run_kernel(den: &[f64], mom: &[f64], nrg: &[f64]) -> (Vec<f64>, Vec<f64>, Vec
     let mut prim_rho = vec![0.0_f64; n];
     let mut prim_vel = vec![0.0_f64; n];
     let mut prim_pre = vec![0.0_f64; n];
+    let mut c2p_status = vec![-1.0_f64; n];
     rhd_c2p_1d(
         den,
         mom,
@@ -126,6 +129,7 @@ fn run_kernel(den: &[f64], mom: &[f64], nrg: &[f64]) -> (Vec<f64>, Vec<f64>, Vec
         &mut prim_rho,
         &mut prim_vel,
         &mut prim_pre,
+        &mut c2p_status,
         n as i32,
         0,
         0,
@@ -136,6 +140,11 @@ fn run_kernel(den: &[f64], mom: &[f64], nrg: &[f64]) -> (Vec<f64>, Vec<f64>, Vec
         0,
         GAMMA,
     );
+    // the status channel rides the recovery kernel: every case here is a
+    // physical state, so the accept/reject fact is zero on each cell.
+    for (i, s) in c2p_status.iter().enumerate() {
+        assert_eq!(*s, 0.0, "c2p_status[{i}] on a physical state");
+    }
     (prim_rho, prim_vel, prim_pre)
 }
 
@@ -259,4 +268,38 @@ fn rhd_c2p_matches_reference_newton() {
             pre[i]
         );
     }
+}
+
+#[test]
+fn rhd_out_of_cone_rejects_with_the_pressure_sentinel() {
+    // momentum well past the cone bound (q = tau/D + 1 - sqrt(1 + r^2) < 0
+    // at r = 10): outside the physical cone at a moderate scale, so the
+    // ceiling-clamped candidate stays finite in f64.
+    // the kernel recovers a finite ceiling-clamped candidate, drives the
+    // pressure to the density-scaled sentinel -|D|, and the status channel
+    // carries the rejection — data and control ride separate channels. the
+    // flat subluminal clause is belt here: the velocity ceiling keeps the
+    // candidate norm below one, so the rejection arrives through the
+    // sentinel pressure.
+    let n = 1;
+    let (mut rho, mut vel, mut pre) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+    let mut status = vec![-1.0; n];
+    NamedKernel::new("rhd_c2p_1d")
+        .input("cons.den", &[1.0])
+        .input("cons.mom_0", &[10.0])
+        .input("cons.nrg", &[0.1])
+        .output("prim.rho", &mut rho)
+        .output("prim.vel_0", &mut vel)
+        .output("prim.pre", &mut pre)
+        .output("scratch", &mut status)
+        .grid(&[n as u32])
+        .dom_lo(&[0])
+        .scalar("gamma", GAMMA)
+        .run();
+    assert_eq!(status[0], 64.0, "the status channel carries the rejection");
+    assert_eq!(
+        pre[0], -1.0,
+        "the raw cone sentinel -|D| survives on the candidate"
+    );
+    assert!(rho[0].is_finite() && vel[0].is_finite());
 }

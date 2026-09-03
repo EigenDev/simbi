@@ -25,16 +25,16 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
+use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_ir::ScalarRef;
-use symbi_carrier::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::sync::Arc;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    FluxSpec, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_c2p_status,
+    FluxSpec, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
     dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
     dispatch_godunov, dispatch_gradient_boundaries, dispatch_runtime_source, dof_lift_suffix,
     fused_runtime_cpu_kernel, geom_scalar, gr_chart_dof_tag, kernel_geom, resolve_params,
@@ -42,9 +42,9 @@ use crate::regimes::substrate_kernels::{
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Spacetime;
-use symbi_source_compile::source_spec::SourceProgram;
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::{KernelSet, WithExcision, WithViscosity};
+use symbi_source_compile::source_spec::SourceProgram;
 
 /// a D-generic RHD `KernelSet`, every method substrate-generated.
 // viscosity is isothermal-only; RHD uses the no-op default.
@@ -299,6 +299,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             outputs.push(&sim.fields.prim.vel[k]);
         }
         outputs.push(pre);
+        // the c2p status channel: the recovery kernel writes its accept/reject
+        // fact alongside the candidate, so the channel has one producer.
+        outputs.push(&sim.fields.c2p_error);
 
         // the GR path uses the metric-aware Valencia recovery (`|S|^2 = gamma^{ij} S_i S_j`,
         // contravariant `v^i`); its name carries the spacetime slug and it reads the lapse
@@ -374,8 +377,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             &[],
             &scalars,
         );
-        let status_sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
-        dispatch_c2p_status(sim, pre, "rhd", status_sfx);
     }
 
     fn godunov_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
