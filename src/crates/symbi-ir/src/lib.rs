@@ -53,6 +53,7 @@ pub mod proof;
 pub mod kernel_id;
 pub mod source_program;
 pub mod effects;
+pub mod composition;
 pub mod support;
 pub mod support_infer;
 
@@ -96,6 +97,7 @@ pub use passes::stencil_reach::{AxisReach, ReachReport, stencil_reach};
 pub use effects::{
     Access, AnalyzedKernelProgram, Dependence, Effects, Reach, ReadFootprint, Resource,
 };
+pub use composition::{Composition, CompositionView, ConflictSet};
 pub use support::{ParamExpr, Support};
 
 // backends surface

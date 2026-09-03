@@ -297,7 +297,10 @@ fn access_order(a: &Access) -> (u8, &Resource) {
     }
 }
 
-fn dependence_order(d: &Dependence) -> (&Resource, u8) {
+/// the canonical order of a dependence: by resource identity, then hazard kind
+/// (RAW, WAR, WAW). shared with the composition algebra so a merged conflict
+/// set sorts by the same key as `dependences_into`.
+pub(crate) fn dependence_order(d: &Dependence) -> (&Resource, u8) {
     match d {
         Dependence::Raw { resource } => (resource, 0),
         Dependence::War { resource } => (resource, 1),

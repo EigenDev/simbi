@@ -1481,6 +1481,73 @@ Two decisions departed from the constitution above and want review:
    it is not a re-derivation of the effect algebra and gains nothing from
    projecting through it.
 
+#### Stage 3 — as implemented
+
+The composition algebra lives in `symbi-ir/src/composition.rs`, additive over
+Stage 2's `Effects`. It represents ordered and independent composition as
+values with structured proof; fusion, scheduling, launch order, builders, and
+emitters are untouched, and nothing executes differently.
+
+- **`Composition`** is the owner: a private tree whose leaf holds one
+  `KernelProgram` with its effects (conservative from `KernelProgram::effects`,
+  or measured when built `From<AnalyzedKernelProgram>`), whose `Sequential`
+  group holds parts in program order, and whose `Parallel` group holds parts
+  proven pairwise independent. The tree is readable through `view()` and the
+  retained programs come back in semantic order through `programs()`; a
+  parallel group cannot be constructed except through the proof, so holding the
+  value is holding the proof.
+- **`then`** is total. `parallel` returns `Result<Composition, ConflictSet>`.
+  Both live on `Composition` and on `KernelProgram` (`first.then(second)`,
+  `left.parallel(right)?`). Lawfulness is `Effects::dependences_into` over the
+  two operands' aggregate effects, in both serializations; read/read sharing
+  yields nothing, and an `Unbounded` footprint means unknown locality, so it
+  never conflicts with an unrelated resource (identity is exact `FieldBind`
+  equality).
+- **`ConflictSet`** is the complete, canonical evidence: the union of the
+  dependences of both serializations, sorted by resource then hazard, deduped,
+  nonempty by construction. A parallel group has no order, so a resource one
+  side writes and the other reads obstructs both orders and carries both the
+  `Raw` of the write-first serialization and the `War` of the read-first one;
+  a resource both sides write carries `Waw`; two in-place programs carry all
+  three. This is why swapping the operands yields an equal `ConflictSet`, while
+  RAW, WAR, and WAW stay distinct and each names a serialization. There is no
+  boolean compatibility surface, and the structural gate
+  `tests/no_public_boolean_compatibility.rs` scans every public signature in
+  the workspace for one (a bool-returning function named like a compatibility
+  predicate or taking an effect-algebra type).
+- **Normalization.** Nested groups of one kind flatten (a sequence into its
+  parent sequence, preserving order; a parallel group into its parent parallel
+  group, which is lawful because the aggregate check over a group covers every
+  leaf), the canonical noop `KernelProgram::noop(grade)` drops out of either
+  composition, and a single survivor stands alone. This gives left and right
+  noop identity, associativity of `then`, and deterministic normalization at
+  the semantic level. A parallel group keeps its construction order; lawful
+  commutativity holds on the aggregate effects and the leaf set.
+- **Aggregate versus structure.** `aggregate_effects()` is what a group touches
+  against the outside — `Effects::normalized` over every leaf's reads and
+  writes, so aliased footprints join by the Stage 2 lattice (`Point` identity,
+  bounded componentwise max, unbounded dominance) and a measured leaf's sharp
+  footprint survives into the union. `ordered_dependences()` is the order the
+  structure carries — each earlier part's aggregate into each later part's, for
+  every sequential group, recursively. A write-then-read sequence shows `x` in
+  place in the aggregate and `Raw{x}` in the ordered dependences; the two are
+  never conflated.
+- **Nested conflicts surface.** A group's aggregate covers every nested leaf, so
+  wrapping a conflicting program in a sequence, or in a lawful parallel group,
+  cannot launder its conflict against a later `parallel` operand — the gate
+  `a_sequence_cannot_hide_a_nested_conflict` pins both wrappings from both
+  sides.
+
+The one deviation from the stage brief: the brief described the one-direction
+`a.dependences_into(&b)` vector as the parallel conflict set, and also asked
+that reversed construction order produce the same evidence. For a write/read
+pair those two requirements cannot both hold — one direction yields `Raw`, the
+other `War` — so the conflict set is the union over both serializations, which
+is the complete obstruction of an unordered pair and is reversal-invariant. The
+`Unknown` dependence variant of the constitution sketch stays absent for the
+Stage 2 reason: identity is always resolved and an unbounded footprint is a
+locality fact, so there is no genuinely unresolved dependence to name.
+
 ### Phase 7: normalize the language and geography
 
 After the architectural phases are complete, run a deliberately semantics-free
