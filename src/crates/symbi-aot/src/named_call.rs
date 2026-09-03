@@ -281,6 +281,7 @@ mod tests {
         let mom = vec![0.0f64; n];
         let nrg = vec![1.5f64; n]; // p/(gamma-1) = 1/(5/3 - 1) = 1.5
         let (mut rho, mut vel, mut pre) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+        let mut status = vec![-1.0f64; n]; // the c2p status channel ("scratch")
         let grid = [n as u32];
         let dom = [0i32];
         // deliberately bind in a scrambled order to prove binding keys on field name; positional order is ignored.
@@ -289,6 +290,7 @@ mod tests {
             .input("cons.nrg", &nrg)
             .output("prim.rho", &mut rho)
             .input("cons.den", &den)
+            .output("scratch", &mut status)
             .output("prim.vel_0", &mut vel)
             .input("cons.mom_0", &mom)
             .grid(&grid)
@@ -299,6 +301,10 @@ mod tests {
             assert!((rho[ii] - 1.0).abs() < 1e-9, "rho[{ii}] = {}", rho[ii]);
             assert!(vel[ii].abs() < 1e-9, "vel[{ii}] = {}", vel[ii]);
             assert!((pre[ii] - 1.0).abs() < 1e-6, "pre[{ii}] = {}", pre[ii]);
+            assert_eq!(
+                status[ii], 0.0,
+                "the status channel decodes accepted on a valid rest state"
+            );
         }
     }
 

@@ -11,6 +11,7 @@
 
 pub mod fofc;
 pub mod mhd_substrate;
+pub mod projection_experiment;
 pub mod regime_substrate;
 pub mod source_config;
 pub mod substrate;

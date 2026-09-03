@@ -360,11 +360,34 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     let chart =
         symbi_discretize::kernel_slug::fofc_project_chart(keying, geom.coords, &geom.axes, DOF, D);
     let name = symbi_discretize::kernel_slug::fofc_project_name(prefix, chart, geom.spacetime, D);
+    fofc_project_named(sim, name, eos_param, u_stage, cons, prim, bcell, &[]);
+}
+
+/// the projection dispatch body, shared by the production door above and the
+/// anchor-experiment dispatch (which supplies its own kernel name plus the
+/// diagnostic-channel slots).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fofc_project_named<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    name: String,
+    eos_param: f64,
+    u_stage: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    cons: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    prim: &symbi_sim::state::PrimFieldsGeneric<D, DOF, Mem, Sc>,
+    bcell: Option<[&Field<Sc, D, Mem>; 3]>,
+    extra_slots: &[(&str, &Field<Sc, D, Mem>)],
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
     // x_* -> live cons (read + write in place), us_* -> stage input (read), bc_* -> cell-centered B
     // (read-only: the magnetized residual needs the field, and constrained transport owns the
     // staggered value shared with the neighbor, so the blend leaves it fixed and div(B) survives).
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        if let Some(c) = s.strip_prefix("us_") {
+        if let Some((_, f)) = extra_slots.iter().find(|(k, _)| *k == s) {
+            f
+        } else if let Some(c) = s.strip_prefix("us_") {
             crate::regimes::fofc::fofc_comp(u_stage, prim, c)
         } else if let Some(c) = s.strip_prefix("x_") {
             crate::regimes::fofc::fofc_comp(cons, prim, c)

@@ -564,7 +564,12 @@ mod tests {
             .iter()
             .map(|write| write.destination.name())
             .collect();
-        assert_eq!(write_paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
+        // the recovered primitives plus the c2p status channel ("scratch"): the
+        // accept/reject fact materializes alongside the candidate in one kernel.
+        assert_eq!(
+            write_paths,
+            vec!["prim.rho", "prim.vel[0]", "prim.pre", "scratch"]
+        );
         assert!(
             !k.graph().has_errors(),
             "graph errors: {:?}",
@@ -763,7 +768,12 @@ mod tests {
             .iter()
             .map(|write| write.destination.name())
             .collect();
-        assert_eq!(write_paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
+        // the recovered primitives plus the c2p status channel ("scratch"): the
+        // accept/reject fact materializes alongside the candidate in one kernel.
+        assert_eq!(
+            write_paths,
+            vec!["prim.rho", "prim.vel[0]", "prim.pre", "scratch"]
+        );
         assert!(
             !k.graph().has_errors(),
             "graph errors: {:?}",
@@ -810,7 +820,12 @@ mod tests {
             .iter()
             .map(|write| write.destination.name())
             .collect();
-        assert_eq!(write_paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
+        // the recovered primitives plus the c2p status channel ("scratch"): the
+        // accept/reject fact materializes alongside the candidate in one kernel.
+        assert_eq!(
+            write_paths,
+            vec!["prim.rho", "prim.vel[0]", "prim.pre", "scratch"]
+        );
         assert!(
             !k.graph().has_errors(),
             "graph errors: {:?}",
@@ -868,6 +883,7 @@ mod tests {
             .iter()
             .map(|write| write.destination.name())
             .collect();
+        // the recovered primitives plus the c2p status channel ("scratch").
         assert_eq!(
             write_paths,
             vec![
@@ -875,7 +891,8 @@ mod tests {
                 "prim.vel[0]",
                 "prim.vel[1]",
                 "prim.vel[2]",
-                "prim.pre"
+                "prim.pre",
+                "scratch"
             ]
         );
         assert!(

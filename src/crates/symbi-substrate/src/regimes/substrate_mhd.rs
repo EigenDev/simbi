@@ -473,6 +473,7 @@ where
         dt: f64,
         a0: f64,
         ac: f64,
+        injection_weight: f64,
         stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
         // `bcell_from_bface` (the face->cell interp + magnetic-energy patch) runs on the single
@@ -544,18 +545,32 @@ where
                     // primitives with the candidate's B (and raised to the margin), exactly as this
                     // kernel does — substituting the family without that reconstruction collapses
                     // the magnetized torus from t = 4.02 to a dt underflow at t = 2.286.
-                    crate::regimes::substrate_kernels::fofc_project(
-                        sim,
-                        "rmhd",
-                        // MHD keys its chart on the grid-axis set: B is always a 3-vector,
-                        // so the momentum-DOF lift cannot separate the two cylindrical planes.
-                        symbi_discretize::kernel_slug::ChartKeying::GridAxes,
-                        self.eos_param.value(),
-                        sim.stage_input(),
-                        &sim.fields.cons,
-                        &sim.fields.prim,
-                        Some([&mhd.bcell[0], &mhd.bcell[1], &mhd.bcell[2]]),
-                    );
+                    // the projection-anchor experiment intercepts here when an arm is
+                    // named: the same tier, dispatched under the named anchor convention
+                    // with diagnostic receipts. production runs the unmodified kernel.
+                    match crate::regimes::projection_experiment::experiment_arm() {
+                        Some(convention) => {
+                            crate::regimes::projection_experiment::dispatch_projection_experiment(
+                                sim,
+                                self.eos_param.value(),
+                                [&mhd.bcell[0], &mhd.bcell[1], &mhd.bcell[2]],
+                                convention,
+                                injection_weight,
+                            );
+                        }
+                        None => crate::regimes::substrate_kernels::fofc_project(
+                            sim,
+                            "rmhd",
+                            // MHD keys its chart on the grid-axis set: B is always a 3-vector,
+                            // so the momentum-DOF lift cannot separate the two cylindrical planes.
+                            symbi_discretize::kernel_slug::ChartKeying::GridAxes,
+                            self.eos_param.value(),
+                            sim.stage_input(),
+                            &sim.fields.cons,
+                            &sim.fields.prim,
+                            Some([&mhd.bcell[0], &mhd.bcell[1], &mhd.bcell[2]]),
+                        ),
+                    }
                 }
             },
             None, // no body-evolved freeze parachute (no MHD body source)
@@ -619,17 +634,23 @@ where
                 self.c2p(sim);
                 crate::regimes::fofc::troubled_from_status(sim, source_weight);
                 // cells inside the excision surface are causally disconnected and their state is
-                // overwritten by the horizon fill, so they must not veto the step. the masking is
-                // pointwise per cell, so it applies in place over the weight buffer itself: the
-                // raw mask has no reader past this count (the source-theta write overwrites the
-                // buffer next), and the c2p status channel keeps its single producer.
+                // overwritten by the horizon fill, so they must not veto the step. the masked
+                // flags land in the dedicated veto scratch (allocated exactly where this tier
+                // runs), keeping the kernel's input and output on distinct allocations; the raw
+                // mask in the weight buffer has no reader past this count (the source-theta
+                // write overwrites it next), and the c2p status channel keeps its single
+                // producer.
+                let exterior_veto = mhd
+                    .exterior_veto
+                    .as_ref()
+                    .expect("the source-replay tier runs only on a rejectable background");
                 crate::regimes::substrate_kernels::fofc_exterior_mask(
                     sim,
                     self.excision_radius,
                     source_weight,
-                    source_weight,
+                    exterior_veto,
                 );
-                if crate::regimes::fofc::fofc_flag_count(sim, source_weight) != 0 {
+                if crate::regimes::fofc::fofc_flag_count(sim, exterior_veto) != 0 {
                     // the source-free low-order anchor is itself inadmissible, so there is no
                     // admissible endpoint to measure a source fraction against — this tier cannot
                     // act. hand the substage to the ordinary redo, whose projection maps the cell
@@ -783,9 +804,13 @@ where
         dt: f64,
         a0: f64,
         ac: f64,
+        injection_weight: f64,
         stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
-        self.fofc_impl(sim, dt, a0, ac, stage)
+        // the anchor experiment's step transaction closes in the driver: a
+        // pass books attempted + pending at dispatch, and the accepted-step
+        // boundary commits or the retry discards the whole step's bucket.
+        self.fofc_impl(sim, dt, a0, ac, injection_weight, stage)
     }
 
     fn fofc_active(&self) -> bool {

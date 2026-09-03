@@ -1345,11 +1345,61 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, KernelWrites) {
 /// conserved form produces a guaranteed-admissible anchor in the affine slice B = B_candidate
 /// while the shared face field stays as constrained transport left it. the projection can therefore
 /// always recover the gas state while preserving div(B) = 0.
+/// the anchor convention of the GRMHD admissible projection — the one
+/// experimental degree of freedom of the projection-anchor study. every
+/// instruction after anchor construction is shared verbatim between the arms.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AnchorConvention {
+    /// the anchor is the stage-input conserved state itself, paired with the
+    /// candidate's cell field; its admissibility in that magnetic slice is
+    /// unproven (the certificate it carries names the stage-input field).
+    StageInput,
+    /// the anchor is rebuilt by p2c from the stage-input gas primitives and
+    /// the candidate's cell field, admissible in the candidate slice by
+    /// construction — the production convention.
+    EulerianRebuilt,
+}
+
 pub fn fofc_project_gr_mhd_gv(
     coords: Coords,
     spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
+) -> (GvKernel, KernelWrites) {
+    fofc_project_gr_mhd_build(
+        coords,
+        spacetime,
+        spacing,
+        axes,
+        AnchorConvention::EulerianRebuilt,
+        false,
+    )
+}
+
+/// the projection-anchor experiment variant: the named anchor convention plus
+/// the diagnostic channel writes (`xd_theta`, `xd_d_den`, `xd_d_nrg_seg`,
+/// `xd_d_nrg_raise`). candidate arithmetic and write order are those of the
+/// production kernel; the diagnostics are appended outputs computed from the
+/// existing nodes, and the anchor-energy raise is accounted separately from
+/// the segment blend so the two interventions cannot masquerade as one
+/// another.
+pub fn fofc_project_gr_mhd_experiment_gv(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    axes: &[usize],
+    convention: AnchorConvention,
+) -> (GvKernel, KernelWrites) {
+    fofc_project_gr_mhd_build(coords, spacetime, spacing, axes, convention, true)
+}
+
+fn fofc_project_gr_mhd_build(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    axes: &[usize],
+    convention: AnchorConvention,
+    diagnostics: bool,
 ) -> (GvKernel, KernelWrites) {
     trace(|cx| {
         let ndim = axes.len();
@@ -1396,32 +1446,52 @@ pub fn fofc_project_gr_mhd_gv(
         let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
             cx.field(&format!("bcell_{k}"), &format!("mhd.bcell[{k}]"))
         }));
-        // the stage-input primitives still occupy the primitive fields here: FOFC restored u_stage and
-        // ran c2p before constructing the first-order flux, and the candidate c2p runs later.
-        // combine that known-physical gas state with candidate B and convert it through the same GRMHD
-        // physics used by initialization. this makes the anchor admissible in the candidate magnetic
-        // slice by construction.
-        let anchor_gas = Prim::adiabatic(
-            Density(cx.field("prim_rho", FieldRef::PrimRho)),
-            Tensor::new(std::array::from_fn(|kk| {
-                cx.field(&format!("prim_vel_{kk}"), FieldRef::PrimVel(kk as u8))
-            })),
-            Pressure(cx.field("prim_pre", FieldRef::PrimPre)),
-        );
-        let anchor_regime = RmhdGr {
-            metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)),
-            alpha,
+        // anchor construction — the single point the two conventions diverge;
+        // everything below is shared verbatim.
+        let (a_den, s_a, e_anchor) = match convention {
+            AnchorConvention::EulerianRebuilt => {
+                // the stage-input primitives still occupy the primitive fields here: FOFC restored
+                // u_stage and ran c2p before constructing the first-order flux, and the candidate
+                // c2p runs later. combine that known-physical gas state with candidate B and convert
+                // it through the same GRMHD physics used by initialization. this makes the anchor
+                // admissible in the candidate magnetic slice by construction.
+                let anchor_gas = Prim::adiabatic(
+                    Density(cx.field("prim_rho", FieldRef::PrimRho)),
+                    Tensor::new(std::array::from_fn(|kk| {
+                        cx.field(&format!("prim_vel_{kk}"), FieldRef::PrimVel(kk as u8))
+                    })),
+                    Pressure(cx.field("prim_pre", FieldRef::PrimPre)),
+                );
+                let anchor_regime = RmhdGr {
+                    metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)),
+                    alpha,
+                };
+                let anchor = anchor_regime.admissible_anchor(
+                    &IdealGas {
+                        gamma: cx.scalar("gamma"),
+                    },
+                    anchor_gas,
+                    b,
+                );
+                let a_den = anchor.den();
+                let s_a = *anchor.mom();
+                let e_anchor = anchor.nrg() + a_den;
+                (a_den, s_a, e_anchor)
+            }
+            AnchorConvention::StageInput => {
+                // the stage-input conserved slots directly, mapped to the eulerian energy by the
+                // same slot transform the candidate uses. the gamma scalar stays bound so both
+                // arms carry one scalar manifest.
+                let _ = cx.scalar("gamma");
+                let a_den = cx.field("us_den", "us_den");
+                let s_a = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
+                    cx.field(&format!("us_mom_{k}"), &format!("us_mom_{k}"))
+                }));
+                let us_nrg = cx.field("us_nrg", "us_nrg");
+                let e_anchor = (us_nrg + a_den + beta_dot(&s_a)) * inv_alpha;
+                (a_den, s_a, e_anchor)
+            }
         };
-        let anchor = anchor_regime.admissible_anchor(
-            &IdealGas {
-                gamma: cx.scalar("gamma"),
-            },
-            anchor_gas,
-            b,
-        );
-        let a_den = anchor.den();
-        let s_a = *anchor.mom();
-        let e_anchor = anchor.nrg() + a_den;
         // strict-interior floors use one shared local conserved-state scale. D, |S|, E, and |B|^2
         // carry one power of energy; psi carries three halves. including magnetic energy prevents a
         // magnetically dominated atmosphere from defining its numerical margin using gas energy alone.
@@ -1471,6 +1541,30 @@ pub fn fofc_project_gr_mhd_gv(
             "x_nrg",
             proj(x_nrg, a_nrg).node(),
         ));
+        if diagnostics {
+            // diagnostic channels, computed from the nodes above so the candidate
+            // graph is untouched: the applied theta, and the injections as the
+            // written-minus-candidate slot deltas of the very projection nodes
+            // the writes carry — the receipts equal the applied intervention to
+            // the last bit. the stored-energy delta splits into the
+            // anchor-energy raise in its closed form,
+            // `(1 - theta) alpha (e_a - e_anchor)`, and the segment blend as
+            // the remainder, so the two parts sum to the total exactly and
+            // neither can hide in the other.
+            let one = Gv::ONE;
+            let d_den = proj(x_den, a_den) - x_den;
+            let d_nrg_total = proj(x_nrg, a_nrg) - x_nrg;
+            let d_nrg_raise = (one - theta) * alpha * (e_a - e_anchor);
+            let d_nrg_seg = d_nrg_total - d_nrg_raise;
+            for (key, node) in [
+                ("xd_theta", theta.node()),
+                ("xd_d_den", d_den.node()),
+                ("xd_d_nrg_seg", d_nrg_seg.node()),
+                ("xd_d_nrg_raise", d_nrg_raise.node()),
+            ] {
+                writes.push(KernelWrite::new(key, key, node));
+            }
+        }
         writes
     })
 }

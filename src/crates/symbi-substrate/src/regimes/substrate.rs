@@ -669,6 +669,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         dt: f64,
         a0: f64,
         ac: f64,
+        _injection_weight: f64,
         _stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
         // isothermal is HLLE-only by physics; the first-order redo is the same fan at theta = 0

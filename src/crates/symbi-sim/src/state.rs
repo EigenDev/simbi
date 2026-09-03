@@ -636,6 +636,14 @@ pub struct MhdStaggeredFields<
     /// conserved + magnetic state.
     pub step_snapshot: Option<MhdStepSnapshot<D, DOF, M, Sc>>,
 
+    /// FOFC: the excision-vetoed admissibility mask of the source-replay tier —
+    /// the anchor-failure flags with causally disconnected cells dropped,
+    /// feeding the tier's reject/continue count. a distinct buffer keeps the
+    /// masking kernel's input and output on separate allocations. present
+    /// exactly where the tier runs (the same rejectable curved backgrounds
+    /// that carry `step_snapshot`); rewritten on every firing substage.
+    pub exterior_veto: Option<Field<Sc, D, M>>,
+
     /// cell-centered B: bcell[c] on the allocated domain (same as cons/prim), one
     /// per DOF vector component. the D in-plane components [0..D) are interpolated
     /// from bface after CT; the (dof-d) out-of-plane components [D..DOF) have no
@@ -785,6 +793,9 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         } else {
             None
         };
+        let exterior_veto = rejectable
+            .then(|| Field::zeros(allocated))
+            .transpose()?;
 
         // edge-centered E: extra in both transverse directions.
         // for D=2, all efield slots use the corner domain (extend in both
@@ -839,6 +850,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
 
         Ok(MhdStaggeredFields {
             step_snapshot,
+            exterior_veto,
             bcell,
             bcell_n,
             bcell_stage,

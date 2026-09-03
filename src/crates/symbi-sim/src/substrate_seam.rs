@@ -218,12 +218,18 @@ where
     /// returns the typed per-substage [`FofcReport`]: the troubled count, the count of cells the
     /// correcting select actually froze, which replay path ran, and the accept/retry decision the
     /// stage driver folds into its outcome. the default is the inactive pass.
+    ///
+    /// `injection_weight` is the stage's downstream shu-osher propagation
+    /// weight (`driver::downstream_injection_weight`): a conserved delta the
+    /// fallback injects into this substage's output reaches the accepted step
+    /// scaled by it. consumed by the projection-anchor measurement receipts.
     fn fofc(
         &self,
         _store: &FieldStore<NDIM, DOF, Mem, Sc>,
         _dt: f64,
         _a0: f64,
         _ac: f64,
+        _injection_weight: f64,
         _stage: u8,
     ) -> FofcReport {
         FofcReport::inactive()

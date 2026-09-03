@@ -41,6 +41,10 @@ fn rhd_c2p_1d(
     _: i32,
     gamma: f64,
 ) {
+    // the c2p status channel ("scratch"): the equivalence under test is the
+    // primitive carrier; the channel is bound here and held to its two lawful
+    // encodings (0 accepted, 64 rejected).
+    let mut status = vec![-1.0f64; cd.len()];
     NamedKernel::new("rhd_c2p_1d")
         .input("cons.den", cd)
         .input("cons.mom_0", cm)
@@ -48,10 +52,17 @@ fn rhd_c2p_1d(
         .output("prim.rho", pr)
         .output("prim.vel_0", pv)
         .output("prim.pre", pp)
+        .output("scratch", &mut status)
         .grid(&[g as u32])
         .dom_lo(&[dl])
         .scalar("gamma", gamma)
         .run();
+    for (ii, s) in status.iter().enumerate() {
+        assert!(
+            *s == 0.0 || *s == 64.0,
+            "c2p status[{ii}] = {s}: outside the {{accepted, rejected}} alphabet"
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -86,6 +97,8 @@ fn rmhd_c2p_1d(
     _: i32,
     gamma: f64,
 ) {
+    // the c2p status channel ("scratch"), held to its two lawful encodings.
+    let mut status = vec![-1.0f64; cd.len()];
     NamedKernel::new("rmhd_c2p_1d")
         .input("cons.den", cd)
         .input("cons.mom_0", cm0)
@@ -100,10 +113,17 @@ fn rmhd_c2p_1d(
         .output("prim.vel_1", pv1)
         .output("prim.vel_2", pv2)
         .output("prim.pre", pp)
+        .output("scratch", &mut status)
         .grid(&[g as u32])
         .dom_lo(&[dl])
         .scalar("gamma", gamma)
         .run();
+    for (ii, s) in status.iter().enumerate() {
+        assert!(
+            *s == 0.0 || *s == 64.0,
+            "c2p status[{ii}] = {s}: outside the {{accepted, rejected}} alphabet"
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

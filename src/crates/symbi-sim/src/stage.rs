@@ -18,7 +18,8 @@
 // fold (after it, per stage), which is its documented sequence delta.
 //
 // usage:
-//  fold_stage(sim, kernels, StageArgs { dt, a0, ac, stage, n_stages, allow_elision },
+//  fold_stage(sim, kernels,
+//             StageArgs { dt, a0, ac, stage, n_stages, injection_weight, allow_elision },
 //             &mut |_hp: HookPoint| {});
 // =============================================================================
 
@@ -264,6 +265,11 @@ pub struct StageArgs {
     /// zero-based stage index and the scheme's stage count.
     pub stage: usize,
     pub n_stages: usize,
+    /// the downstream shu-osher propagation weight of this stage's output —
+    /// `driver::downstream_injection_weight(stages, stage)` on the same table
+    /// that supplied `(a0, ac)`. a conserved delta a fallback injects into
+    /// this stage's output reaches the accepted step scaled by this factor.
+    pub injection_weight: f64,
     /// whether this driver may elide the stage-0 stage-input copy (the
     /// per-step snapshot already holds it). the decomposed loop passes false —
     /// it never tracks the alias.
@@ -378,7 +384,9 @@ where
             PhaseKind::Fofc => {
                 // the single fold of the ladder's decision into the stage outcome; the
                 // report's counts already flowed to the census as observations.
-                let report = prof("fofc", || kernels.fofc(sim, args.dt, args.a0, args.ac, tag));
+                let report = prof("fofc", || {
+                    kernels.fofc(sim, args.dt, args.a0, args.ac, args.injection_weight, tag)
+                });
                 if report.decision() == crate::substrate_seam::FofcDecision::RetryStep {
                     return StageOutcome::RetryStep;
                 }

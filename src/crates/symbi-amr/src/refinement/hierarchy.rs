@@ -1427,6 +1427,11 @@ where
     /// recurses through the levels, then the root advances its clock and body
     /// state (mirroring evolve_with_callback).
     pub fn evolve(&mut self, t_final: f64) -> symbi_xpu::Result<()> {
+        assert!(
+            !symbi_sim::projection_experiment::experiment_named(),
+            "the anchor experiment supports the single-grid runner; its step transaction \
+             is not wired through the refinement hierarchy"
+        );
         self.evolve_with_callback(t_final, u64::MAX, |_| std::ops::ControlFlow::Continue(()))
     }
 
@@ -2309,6 +2314,7 @@ where
                 ac,
                 stage: ii,
                 n_stages: n,
+                injection_weight: symbi_sim::driver::downstream_injection_weight(stages, ii),
                 allow_elision: true,
             },
             &mut hook,
@@ -3149,6 +3155,7 @@ where
                     ac: 1.0,
                     stage: 0,
                     n_stages: 1,
+                    injection_weight: 1.0,
                     allow_elision: false,
                 },
                 &mut |_hp: HookPoint| {},

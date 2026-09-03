@@ -65,6 +65,14 @@ pub fn step_once<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
+    // the anchor experiment's accepted-step stamp is the post-step clock,
+    // which this per-step driver's callers advance; `evolve` owns the whole
+    // step sequence and is the experiment's runner.
+    assert!(
+        !symbi_sim::projection_experiment::experiment_named(),
+        "the anchor experiment runs through `evolve`: the per-step drivers advance the \
+         simulation clock in their caller, so the accepted-step stamp is out of reach here"
+    );
     sim.dt = dt;
     while step(sim, kernels) {
         kernels.restore_step(sim);
@@ -184,6 +192,13 @@ where
         emit_trace_neighborhood(sim, c);
     }
 
+    // the anchor experiment's run session: opening clears the book and claims
+    // it for this run; the handle closes at return, leaving the completed
+    // totals queryable. a production run (no experiment named) opens nothing
+    // and reaches no transaction hook.
+    let experiment_session = symbi_sim::projection_experiment::experiment_named()
+        .then(symbi_sim::projection_experiment::open_session);
+
     let mut last_cb = sim.iteration;
     while sim.time < t_final {
         let cfl = prof("cfl", || kernels.cfl(sim));
@@ -200,6 +215,9 @@ where
         sim.dt = dt;
         loop {
             if step(sim, kernels) {
+                if experiment_session.is_some() {
+                    symbi_sim::projection_experiment::step_discard();
+                }
                 kernels.restore_step(sim);
                 symbi_sim::tracers::restore_transport_state(&mut sim.store);
                 sim.dt = retry_timestep(sim.dt, sim.time)?;
@@ -207,7 +225,6 @@ where
             }
             break;
         }
-
         // no per-step host-side scans: the `if !dt.is_finite()` check
         // above catches NaN/Inf cascades on the very next iteration
         // (NaN cons -> NaN wave speeds -> NaN dt -> panic). a per-cell host
@@ -222,6 +239,13 @@ where
         // translation keeps a = 1 (the offset is a_dot * time, derivable).
         let dt = sim.dt;
         advance_state_clock(sim, dt);
+        // the anchor experiment's accepted-step boundary: the pending-step
+        // receipts survive into the solution here and nowhere else, stamped
+        // with the clock of the state this step produced (the canonical
+        // advance above has already run).
+        if experiment_session.is_some() {
+            symbi_sim::projection_experiment::step_commit(sim.time, sim.iteration);
+        }
         if sim.has_tracers() {
             let geometry = sim.geom.block_geometry(sim.physics.metric);
             let layout = symbi_sim::tracers::TransportLayout::single(&sim.geom.interior);
@@ -487,6 +511,10 @@ where
                 ac: stage.ac,
                 stage: stage.index,
                 n_stages: n,
+                injection_weight: symbi_sim::driver::downstream_injection_weight(
+                    stages,
+                    stage.index,
+                ),
                 allow_elision: true,
             },
             &mut |_| {},

@@ -55,6 +55,9 @@ fn rmhd_c2p_1d(
 ) {
     let grid = [grid_size_0 as u32];
     let dom = [dom_lo_0];
+    // the c2p status channel ("scratch"), held to its two lawful encodings
+    // (0 accepted, 64 rejected).
+    let mut status = vec![-1.0f64; den.len()];
     NamedKernel::new("rmhd_c2p_1d")
         .input("cons.den", den)
         .input("cons.mom_0", sx)
@@ -69,10 +72,17 @@ fn rmhd_c2p_1d(
         .output("prim.vel_1", vy)
         .output("prim.vel_2", vz)
         .output("prim.pre", pre)
+        .output("scratch", &mut status)
         .grid(&grid)
         .dom_lo(&dom)
         .scalar("gamma", gamma)
         .run();
+    for (ii, s) in status.iter().enumerate() {
+        assert!(
+            *s == 0.0 || *s == 64.0,
+            "c2p status[{ii}] = {s}: outside the {{accepted, rejected}} alphabet"
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

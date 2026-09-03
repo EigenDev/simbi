@@ -110,6 +110,17 @@ pub fn needs_step_snapshot(stages: &[(f64, f64)]) -> bool {
     stages.len() > 1
 }
 
+/// the downstream shu-osher propagation weight of stage `stage`'s output: the
+/// product of the convex coefficients `ac` of every later stage. each later
+/// combine `a0*u_n + ac*(u_prev + dt L)` folds the previous state in with
+/// weight `ac` and the flux divergence telescopes over the interior, so a
+/// conserved-quantity delta added to a stage's output reaches the accepted
+/// step total scaled by exactly this factor. euler -> [1]; rk2 -> [1/2, 1];
+/// rk3 -> [1/6, 2/3, 1].
+pub fn downstream_injection_weight(stages: &[(f64, f64)], stage: usize) -> f64 {
+    stages[stage + 1..].iter().map(|&(_a0, ac)| ac).product()
+}
+
 // env-gated per-phase profiler (SYMBI_PROFILE=1). accumulates main-thread wall
 // time per phase; each kernel call returns when its rayon par_iter joins, so
 // main-thread timing captures the phase's wall cost. used by the zone-cycle
@@ -348,8 +359,8 @@ pub fn evolve_bodies<R: Regime<f64, D>, const D: usize, const DOF: usize, M, E, 
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_clock, check_dt_or_panic, needs_step_snapshot, retry_timestep, select_timestep,
-        stage_schedule,
+        advance_clock, check_dt_or_panic, downstream_injection_weight, needs_step_snapshot,
+        retry_timestep, select_timestep, stage_schedule,
     };
 
     #[test]
@@ -453,5 +464,22 @@ mod tests {
     fn only_multistage_schemes_need_a_step_snapshot() {
         assert!(!needs_step_snapshot(&[(0.0, 1.0)]));
         assert!(needs_step_snapshot(&[(0.0, 1.0), (0.5, 0.5)]));
+    }
+
+    /// the downstream propagation weights of the three SSP tables, exactly:
+    /// a delta injected after a stage's combine is rescaled by every later
+    /// convex coefficient on its way into the accepted step.
+    #[test]
+    fn injection_weights_match_the_ssp_convexity() {
+        use crate::state::Timestepping;
+        let w = |t: Timestepping| -> Vec<f64> {
+            let stages = t.stages();
+            (0..stages.len())
+                .map(|s| downstream_injection_weight(stages, s))
+                .collect()
+        };
+        assert_eq!(w(Timestepping::Euler), vec![1.0]);
+        assert_eq!(w(Timestepping::Rk2), vec![0.5, 1.0]);
+        assert_eq!(w(Timestepping::Rk3), vec![1.0 / 6.0, 2.0 / 3.0, 1.0]);
     }
 }

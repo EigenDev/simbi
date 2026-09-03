@@ -198,15 +198,14 @@ fn rejecting_a_step_restores_the_full_magnetized_entry_state() {
 #[test]
 fn rollback_storage_exists_exactly_where_a_step_can_be_rejected() {
     let curved = kerr_sim();
+    let curved_mhd = curved.fields.mhd.as_ref().expect("magnetized run");
     assert!(
-        curved
-            .fields
-            .mhd
-            .as_ref()
-            .expect("magnetized run")
-            .step_snapshot
-            .is_some(),
+        curved_mhd.step_snapshot.is_some(),
         "a curved magnetized background can reject a step and needs the rollback snapshot"
+    );
+    assert!(
+        curved_mhd.exterior_veto.is_some(),
+        "the source-replay tier runs on a rejectable background and needs its veto scratch"
     );
 
     let dx = 1.0 / N as f64;
@@ -221,14 +220,14 @@ fn rollback_storage_exists_exactly_where_a_step_can_be_rejected() {
         .set_initial(|[x, y, z]| swirl_prim(x, y, z))
         .seed_faces(|axis, _| if axis == 0 { B0 } else { 0.0 })
         .build();
+    let flat_mhd = flat.fields.mhd.as_ref().expect("magnetized run");
     assert!(
-        flat.fields
-            .mhd
-            .as_ref()
-            .expect("magnetized run")
-            .step_snapshot
-            .is_none(),
+        flat_mhd.step_snapshot.is_none(),
         "flat MHD accepts every step; the rollback snapshot would be a dead allocation the \
          size of the whole conserved + magnetic state"
+    );
+    assert!(
+        flat_mhd.exterior_veto.is_none(),
+        "flat MHD has no source-replay tier; its veto scratch would be a dead allocation"
     );
 }

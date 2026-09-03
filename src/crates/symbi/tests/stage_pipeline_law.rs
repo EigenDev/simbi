@@ -90,6 +90,7 @@ impl KernelSet<2, 2, HostMemory, f64> for Recorder {
         _dt: f64,
         _a0: f64,
         _ac: f64,
+        _injection_weight: f64,
         _stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
         self.push("fofc");
