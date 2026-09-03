@@ -1165,10 +1165,231 @@ single validated constructor.
 
 ### Phase 6: make effects compositional
 
-1. Derive read, write, support, and stencil effects from domain descriptions.
-2. Express parallel and sequential composition separately.
-3. Treat fusion as a target-dependent optimization of parallel composition.
-4. Verify effect inference against emitted-kernel behavior.
+The objective is to make the program's existing read/write/locality contracts
+truthful, composable, and compiler-enforced, while preserving generated
+arithmetic, ABI names, buffer order, and execution behavior. A kernel program
+must have one authoritative effect description derived from its actual IR — not
+a second handwritten account that can drift — and composition (sequential
+ordering, parallel independence) must reason over that description with
+structured evidence, never a boolean "compatible".
+
+#### Stage 1 audit — the effect truth today
+
+The single most important finding: a kernel's read-set and write-set exist
+conceptually as `GvKernel.field_inputs` + `KernelWrites` (the latter is already
+named "the named write-effect manifest", `symbi-ir/src/gv.rs:224`), but that
+notion is **re-derived independently three times**, in two different identity
+namespaces, and the write half is not even owned by the kernel:
+
+1. at bake, `render.rs:271-313` recomputes the input/output split and buffer
+   order as an `is_output: bool` per `FieldBinding`;
+2. at execution, `symbi-exec/src/policy.rs:150-170` (and again inline at
+   `:241-254` for the parallel cover path) enforces aliasing over runtime
+   pointer identity (`as_ptr()`);
+3. at fusion, `gv.rs:856-903` computes write-conflict and inter-dependence over
+   typed `FieldBind` identity.
+
+`KernelWrites` is a free-standing `Vec` threaded alongside `GvKernel` by caller
+convention (`try_fuse(a, a_writes, b, b_writes)`, `noop() -> (GvKernel,
+KernelWrites)`); nothing binds a kernel to its writes, and nothing checks that a
+`KernelWrite.value` NodeId belongs to the trace's dataflow or that its
+`destination` is actually produced. This is the largest drift surface and the
+keystone the phase must fix.
+
+The drift and the authority are at two different times, and both findings hold:
+the `is_out` split at `render.rs:271-313` makes read/write **direction**
+authoritative, but only *after* the sibling `KernelWrites` has been assembled
+into the manifest — it is downstream of the construction-time pairing, so it
+inherits whatever writes the builder handed back. Dispatch therefore generally
+consumes authoritative manifest direction, while kernel construction can still
+pair a graph with missing, foreign, or incorrectly ordered writes with nothing
+to object. Folding writes into the kernel closes the construction-time gap the
+manifest cannot see.
+
+The inventory, one row per effect fact:
+
+| effect fact | authoritative source | duplicates / re-derivations | exact or conservative | identity namespace | drift risk | proposed Phase-6 owner |
+|---|---|---|---|---|---|---|
+| pointwise reads | `field_inputs: Vec<(InputKey, FieldBind)>` (`gv.rs:45`, deduped first-seen) | graph `Op::Load`/param nodes | exact | typed `FieldBind` (but `InputKey`/`LoadAt Symbol` are interned strings, rejoined by string equality `gv.rs:680`) | low | kept on trace, projected into the effect set |
+| shifted reads | `Op::LoadAt(Symbol, Vec<NodeId>)` with exact integer offsets (`graph.rs:498`; builders `gv.rs:493,529`) | `stencil_reach` coarsens to per-axis `|offset|` (`passes/stencil_reach.rs`); `TileSpec.halo` hand-declared | graph exact; reach conservative (`Unbounded` on scaled/select/runtime index) | offsets are ints; field key is a `Symbol` | halo/tile declaration can silently understate real reach — no gate links them | `Read(Resource, ReadFootprint)`: exact offset where the index statically resolves, else bounded/unbounded reach |
+| writes | `KernelWrite { key, destination: FieldBind, value: NodeId }` (`gv.rs:204`), returned as a sibling `Vec` | `is_output` at bake (`render.rs:273`); scalarizer keeps only `value` | exact destination, **unchecked value** | typed `FieldBind` | **high** — not owned by the kernel, not validated against the graph | fold `KernelWrites` **into** `GvKernel`; the write-set |
+| in-place (RMW) | implicit: a field in both `field_inputs` and `field_writes` | re-derived by set-intersection at `try_fuse` (`gv.rs:882`) and `support_infer` (`:363`); folded to `is_output=true` at bake | exact intersection | typed `FieldBind` | recomputed per consumer; no marker on `KernelWrite`/`FieldBinding` | a first-class RMW access, so no site re-derives it |
+| locality / support | `output_support` declared (`gv.rs:604`) then derived (`support_infer.rs`); `stencil_reach` for reach | `TileSpec` (hand-declared, `infer_tile_spec` returns it unchanged — a misnomer, `gv.rs:670`) | derived exact where affine, else `Everywhere`/`Unbounded` (fail-safe) | `ParamExpr` over scalar manifest | `TileSpec` halo vs actual reach | the locality projection of the effect set |
+| reductions | none at `GvKernel` level; three unrelated notions — `graph::ReduceOp` (in-kernel axis, `graph.rs:425`), `emit::ReductionOp` (launch whole-field, `emit.rs:272`), `engine.rs` segmented (`:304`) | census "map" traces as ordinary pointwise writes; the fold is separate untraced machinery | host exact; device segmented uses order-nondeterministic atomics (`engine.rs:300`, self-reports `ReductionOrder`) | `ReductionOp` / bucket index | three enums, "never convert" (`emit.rs:266`) | deferred launch-level work — outside the initial kernel-access algebra unless a common semantic carrier is proven |
+| aliasing rule | prose + asserts at `policy.rs:150-170`; re-implemented at `:241-254`; fusion analog `gv.rs:856-903` | three independent derivations | conservative (pointer HashSet; can't see partial overlap) | **two namespaces**: runtime pointer at exec, `FieldBind` at fusion | high — same law spelled three times | one alias/dependence checker consuming the effect set; the pointer check stays a runtime backstop |
+| dependence (fusion) | `WriteConflict` (Waw) + `InterDep` (Raw and War lumped together) + in-place exemption (`gv.rs:856-903`) | the only true read/write-set dependence analysis in the tree | exact over declared paths; order-agnostic within a stage | `FieldBind` | War and Waw are not distinguished | refine `InterDep` into `Raw`/`War`/`Waw` |
+| resource identity | `FieldRef` (closed physical vocab), `ScratchKey`/`CtScratchKey` (typed CT scratch from Phase 5), `ScalarRef` | scalar params degrade to interned strings **inside `GvKernel`** (`scalar_params: Vec<ScalarParam>`, `gv.rs:47`); census/source scratch mint `format!` strings → `ScratchKey::Free` | — | typed core with open `Free`/`User`/`Spec` tails | `FieldBind::from_path` classifies an unknown (misspelled) path as `Scratch` with no error (`field_ref.rs:427`) | reuse `FieldBind`/`CtScratchKey` as the effect's `Resource`; the string tails are the seam to close |
+| source composition | `build_total_source` `Add`-fold (`simulation_laws.rs:378`); order = `overlays()` `Vec` chain (`:326`) | `SourceProgram.params` = "first mention" order | semantically order-free (`Add`), structurally order-dependent | param **strings**, `target_field: &str` | ABI-visible param order = `Vec` order; the fused path already consumes only the first family (`:155`) | Stage 4 validates composition using effects while preserving current source/param order; canonical source ordering is a separate future ABI/bake change |
+| stage order | `STAGE_PIPELINE` + `fold_stage` (`stage.rs:144,287`), folded by all drivers | none for the stage sequence; the per-**step** scaffolding is hand-copied per driver (`evolve.rs:225`, `hierarchy.rs`, `decomp.rs`) | exact | — | per-step extras drift, guarded only by `stage_pipeline_law.rs` | the per-step scaffolding is the remaining un-unified sequence |
+| launch ordering | implicit caller call-order; **no scheduler, DAG, token, or barrier in `symbi-exec`** | — | sequential program order | none | — | new: sequential/parallel composition as a value, ordering unchanged |
+| host/device transfer | `MemorySpace` models allocation only; `SharedHandle` dirty-bit API exists (`handle.rs:57`) but is **dead code** (no consumers) | implicit unified-memory coherence + manual `ctx_sync` (`engine.rs:547`) | implicit/none | `SharedHandle` Arc (unused) | coherency is aspirational, unenforced | out of scope for the kernel effect algebra; the observable one is the device reduction's reported non-reproducibility |
+| host-side observable state | three inconsistent representations: projection ledger (thread-local `Cell<Book>`, typed, `projection_ledger.rs`), FOFC/guard census (process-global `AtomicU64`, untyped, **not run-scoped**, `fofc.rs:44`), horizon ledger (owned per-body, typed, `driver.rs:260`) | — | — | typed / untyped / typed | the FOFC globals are shared across concurrent runs | a typed, run-scoped observable channel; the FOFC atomics are the reclassification target |
+
+Direct answers to the investigation questions:
+
+- **`GvKernel` exposes enough IR to derive effects exactly?** Not by itself.
+  Reads and their exact offsets are recoverable from `graph()` + `field_inputs()`;
+  writes are a sibling `Vec`; reductions have no marker; `infer_tile_spec`
+  does not infer. Extraction is exact where the graph is intact and conservative
+  (fail-safe wide) where a bound cannot be proven.
+- **Scratch alias rules — IR, executor, or handwritten dispatch?** All three
+  (`is_output` at bake, pointer asserts at exec, `FieldBind` sets at fusion), no
+  single authoritative object.
+- **Reductions vs pointwise?** Indistinguishable at the IR level; three
+  unrelated reduce notions live in emit/exec, and whole-field vs segmented are
+  already separate machinery with separate result types.
+- **Source composition depends on incidental vector order?** Semantically no
+  (`Add`), structurally yes (concatenation → first-mention param manifest), and
+  the fused path already leaks order.
+- **Shifted reads — exact vectors or coarse reach?** Exact integer offsets in
+  the graph; the derived reach coarsens to per-axis unsigned magnitude.
+- **In-place needs an explicit RMW effect?** It has none today; it is
+  re-derived by intersection at every consumer.
+- **Any parallel execution today?** None. The exec layer is sequential
+  caller-ordered; the only parallelism is rayon fork-join over a proven-disjoint
+  cell partition within one launch. Phase 6 establishes the proof algebra, not a
+  scheduler.
+- **Phase 5 CT scratch supplies scratch identity?** Yes — `CtScratchKey` is a
+  complete typed identity already used in `FieldBind`/`try_fuse`, the correct
+  substrate to adopt; the gap is census/source scratch minting raw strings.
+
+#### The proposed constitution
+
+The hypothesis model holds, with repository-driven refinements. The trace graph
+type is `GvKernel`; the audit found no `KernelProgram`. The construction audit
+settles the ownership question: `trace<R>(...) -> (GvKernel, R)` (`gv.rs:389`)
+is generic over the closure's return, so a `GvKernel` is produced paired with
+whatever `R` the trace yields — `KernelWrites` for a kernel, but a
+`SourceProgram` or other value for a source or boundary trace. Writes are
+therefore **not intrinsic to every `GvKernel`**, so the owner is a new opaque
+`KernelProgram { kernel: GvKernel, writes: KernelWrites }` rather than an owned
+`GvKernel` field. The invariant the phase establishes is that **no public
+compilation or fusion door accepts a graph and an independently supplied write
+vector**. `Resource` is the existing typed
+`FieldBind` (physical `FieldRef` ∪ `ScratchKey`/`CtScratchKey` ∪ the
+`User`/`Free` tails), never a string; scalar parameters are a distinct resource
+class. A read's displacement is exact only where the `LoadAt` offset statically
+resolves to a constant; otherwise stencil analysis yields a bounded reach or
+`Unbounded`, so a read carries a `ReadFootprint`, never an assumed exact offset.
+
+```rust
+struct KernelProgram {     // the opaque owner: a graph and its writes, paired once
+    kernel: GvKernel,
+    writes: KernelWrites,
+}
+
+struct Effects {
+    accesses: AccessSet,   // canonical, normalized, deduped
+    locality: Locality,    // derived from read footprints + support
+}
+
+enum Access {
+    Read(Resource, ReadFootprint),
+    Write(Resource),
+    ReadWrite(Resource),   // a normalized VIEW; its Read and Write facts stay queryable
+}
+
+enum ReadFootprint {
+    Point,                 // pointwise
+    ExactOffset(Offset),   // a statically resolved constant displacement
+    Bounded(Reach),        // affine but not constant: a per-axis reach
+    Unbounded,             // scaled / select / runtime index — analysis could not bound it
+}
+
+enum Dependence {
+    Raw { resource: Resource }, // refines fusion's InterDep
+    War { resource: Resource },
+    Waw { resource: Resource },
+    Unknown { reason: UnknownReason },  // genuinely unresolved footprint or identity
+}
+
+enum Composition { Sequential, Parallel }
+```
+
+The initial kernel-access algebra models only the per-kernel field footprint —
+reads, shifted reads, writes, and in-place — of a pointwise-or-stencil kernel.
+Reductions stay out of it. The three meanings of "reduce" the audit found are
+genuinely distinct and must not collapse into one enum: `graph::ReduceOp` is
+kernel-internal compute (an axis fold that lowers to loop code, whose access
+footprint is still fully described by its `ReadAt` reads and its `Write`);
+`emit::ReductionOp` whole-field and the `engine.rs` segmented fold are separate
+launch-level morphisms that never trace as `GvKernel`s at all. A reduction
+effect kind — and the segmented atomic-add non-reproducibility as an observable
+effect — enters the algebra only if the final audit proves a common semantic
+carrier for them, and even then whole-field and segmented stay distinct.
+Forcing all three into one `Reduce` variant now would manufacture the false
+unity Phase 6 exists to remove.
+
+Four refinements the audit forces:
+
+1. **Writes pair with the graph once, behind an opaque owner.** Introduce
+   `KernelProgram { kernel, writes }` (or make writes an owned `GvKernel` field
+   only if the construction audit proves outputs are intrinsic to every graph).
+   The invariant is that no public compilation or fusion door accepts a graph
+   and an independently supplied write vector, so the three re-derivations
+   become projections of one value and no caller can pair a graph with missing,
+   foreign, or misordered writes.
+2. **In-place is a first-class `ReadWrite` — a normalized view, not lost
+   information.** The underlying `Read` and `Write` facts stay queryable, so
+   dependence classification still distinguishes RAW, WAR, and WAW involving an
+   in-place kernel (two in-place accesses on one resource carry multiple
+   dependencies, not one). `try_fuse` and `support_infer` stop reconstructing
+   in-place by set-intersection; the fusion "same-stage reader wants the
+   pre-state" exemption is expressed once, on the access.
+3. **`Unknown` is reserved for genuinely unresolved footprint or identity, not
+   for an open vocabulary.** `ScratchKey::Free("a")` and `User("a")` have exact
+   equality identities and compose by exact match; treating them as
+   conflict-with-everything would cripple lawful fusion. `Unknown` covers only
+   an unbounded/unresolved read footprint or a resource whose identity cannot be
+   resolved. The real hazard — `FieldBind::from_path` silently classifying a
+   misspelled physical field as `Scratch` — is closed at the parsing boundary:
+   Stage 2 makes `from_path` fail loud on an unrecognized physical-looking path,
+   rather than making the algebra pessimistic.
+4. **The identity namespace unifies on `FieldBind`.** Fusion already uses it;
+   exec's pointer check remains as the final runtime backstop, not a second
+   source of truth. The host-side observable transactions (projection ledger,
+   FOFC census, horizon ledger) are a related concern at the driver layer, not
+   the kernel effect algebra — noted for a run-scoped typed channel, with the
+   process-global FOFC atomics as the reclassification target, but not folded
+   into the kernel `Effects`.
+
+Physics keeps describing physics; the effect set is derived, immutable, and read
+through `program.effects()`; users never enumerate read/write sets.
+
+#### Recommended stage boundaries
+
+- **Stage 2 — canonical effect extraction (lowest crate: `symbi-ir`).** Pair
+  writes with the graph behind `KernelProgram`; derive `Effects` from `graph()`
+  + `field_inputs()` + the now-owned writes, recording each read's `ReadFootprint`
+  (point / exact offset / bounded / unbounded) truthfully rather than assuming an
+  exact offset. Delete the redundant handwritten summaries where derivation is
+  exact — the bake `is_output` split and the fusion in-place recomputation become
+  projections. Pin exact extraction for pointwise, stencil, in-place, and scratch
+  kernels. Extraction must not alter prepared IR or generated code (verify by
+  prepared-IR byte identity). Make `from_path` fail loud on an unrecognized
+  physical-looking path.
+- **Stage 3 — dependence algebra.** Pure `Sequential`/`Parallel` composition;
+  `Raw`/`War`/`Waw`/`Unknown` classification; shifted-read footprint union;
+  identity and associativity laws; structured evidence naming the resource and
+  dependence kind. Refine fusion's `InterDep` into the typed kinds. Schedule
+  nothing differently.
+- **Stage 4 — migrate the composition doors.** Move `try_fuse`, the exec
+  aliasing checks (`policy.rs`), and the handwritten positional buffer `Vec`s
+  (`dispatch.rs:1718/2265/2601/2707`) onto the one effect set, and validate
+  source-program composition using effects while preserving the current source
+  and parameter ordering. Delete the parallel handwritten dependency logic only
+  after equivalence. Keep execution
+  order; do not activate the dormant intra-stage parallelism the algebra could
+  now justify.
+- **Stage 5 — enforcement and closure.** Structural gates forbidding new
+  stringly resource identities or parallel metadata outside the constitution;
+  prepared-IR byte identity, AOT candidate/kernel equivalence, unchanged
+  manifests/binding order, CPU/CUDA type checks, single-grid/decomposed/refined
+  ordering equivalence, aliasing-rejection and reduction and
+  source-composition tests, workspace all-targets, focused batteries. Where
+  generated text differs only from the known `unswitch` bake nondeterminism,
+  compare prepared IR and explain the downstream noise rather than fixing
+  unswitch here.
 
 Success means launch transformations preserve semantics because the relevant
 preconditions are explicit values or proofs, not conventions distributed among
