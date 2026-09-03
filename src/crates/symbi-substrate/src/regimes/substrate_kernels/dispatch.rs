@@ -12,7 +12,7 @@
 use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_carrier::Scalar;
 use symbi_grid::Field;
-use symbi_ir::ScalarRef;
+use symbi_ir::{FieldBind, FieldRef, ScalarRef};
 use symbi_xpu::MemorySpace;
 
 use std::collections::HashMap;
@@ -23,7 +23,10 @@ use crate::regimes::substrate_gpu::{field_max_reduce, field_reduce};
 use symbi_ir::emit::ReductionOp;
 use symbi_sim::state::FieldStore;
 
-use super::binding::{bind_manifest, kernel_bindings, kernel_field_binds, resolve_path};
+use super::binding::{
+    bind_by_binds, bind_by_manifest, bind_manifest, free_payload, kernel_bindings,
+    resolve_feedback_slot, resolve_path, resolve_penalize_slot,
+};
 use super::exec::{dispatch_fields, dispatch_fields_runtime_ir};
 use super::layout::{geom_suffix, gr_chart_dof_tag, penalize_name, spacetime_slug};
 use super::params::{
@@ -118,24 +121,9 @@ where
     gravity_limited_dt(hydro_dt, cfl, peak_acceleration, min_physical_width)
 }
 
-fn fofc_primitive_component(path: &str) -> Option<String> {
-    match path {
-        "prim.rho" | "prim_rho" => Some("rho".to_string()),
-        "prim.pre" | "prim_pre" => Some("pre".to_string()),
-        _ => path
-            .strip_prefix("prim.vel[")
-            .and_then(|rest| rest.strip_suffix(']'))
-            .or_else(|| path.strip_prefix("prim_vel_"))
-            .map(|index| format!("vel_{index}")),
-    }
-}
-
 #[cfg(test)]
 mod body_gravity_cfl_tests {
-    use super::{
-        compact_peak_acceleration, fofc_primitive_component, gravity_limited_dt,
-        plummer_peak_acceleration,
-    };
+    use super::{compact_peak_acceleration, gravity_limited_dt, plummer_peak_acceleration};
 
     #[test]
     fn plummer_peak_matches_the_analytic_maximum() {
@@ -188,17 +176,6 @@ mod body_gravity_cfl_tests {
     #[test]
     fn absent_gravity_leaves_the_hydrodynamic_step_unchanged() {
         assert_eq!(gravity_limited_dt(0.02, 0.4, 0.0, 0.01), 0.02);
-    }
-
-    #[test]
-    fn fofc_projection_resolves_canonical_primitive_manifest_paths() {
-        assert_eq!(fofc_primitive_component("prim.rho").as_deref(), Some("rho"));
-        assert_eq!(
-            fofc_primitive_component("prim.vel[2]").as_deref(),
-            Some("vel_2")
-        );
-        assert_eq!(fofc_primitive_component("prim.pre").as_deref(), Some("pre"));
-        assert_eq!(fofc_primitive_component("cons.den"), None);
     }
 }
 
@@ -435,30 +412,38 @@ pub(crate) fn fofc_project_named<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
-    // x_* -> live cons (read + write in place), us_* -> stage input (read), bc_* -> cell-centered B
-    // (read-only: the magnetized residual needs the field, and constrained transport owns the
-    // staggered value shared with the neighbor, so the blend leaves it fixed and div(B) survives).
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        if let Some((_, f)) = extra_slots.iter().find(|(k, _)| *k == s) {
-            f
-        } else if let Some(c) = s.strip_prefix("us_") {
-            crate::regimes::fofc::fofc_comp(u_stage, prim, c)
-        } else if let Some(c) = s.strip_prefix("x_") {
-            crate::regimes::fofc::fofc_comp(cons, prim, c)
-        } else if let Some(c) = fofc_primitive_component(s) {
-            crate::regimes::fofc::fofc_comp(cons, prim, &c)
-        } else if let Some(c) = s.strip_prefix("bc_") {
-            let k: usize = c
-                .parse()
-                .unwrap_or_else(|_| panic!("fofc_project: bad cell-B index '{s}'"));
-            bcell.unwrap_or_else(|| {
+    // the typed cell-centered B `BCell(k)` and the stage-input primitive gas state
+    // (`PrimRho` / `PrimVel(k)` / `PrimPre`, the eulerian-rebuilt anchor's source) bind by
+    // variant; the free scratch slots are x_* -> live cons (read + write in place), us_* ->
+    // stage input (read), and the per-site diagnostic channels. the cell B is read-only: the
+    // magnetized residual needs the field, and constrained transport owns the staggered
+    // value shared with the neighbor, so the blend leaves it fixed and div(B) survives.
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        match b {
+            FieldBind::Ref(FieldRef::BCell(k)) => bcell.unwrap_or_else(|| {
                 panic!(
-                    "fofc_project: kernel '{name}' reads '{s}' but no cell-B was supplied — the \
-                     magnetized admissibility residual requires it"
+                    "fofc_project: kernel '{name}' reads '{}' but no cell-B was supplied — the \
+                     magnetized admissibility residual requires it",
+                    b.name()
                 )
-            })[k]
-        } else {
-            panic!("fofc_project: unknown slot '{s}'")
+            })[*k as usize],
+            FieldBind::Ref(FieldRef::PrimRho) => &prim.rho,
+            FieldBind::Ref(FieldRef::PrimVel(k)) => &prim.vel[*k as usize],
+            FieldBind::Ref(FieldRef::PrimPre) => {
+                prim.pre_field().expect("fofc_project: pressure field")
+            }
+            other => {
+                let s = free_payload("fofc_project", other);
+                if let Some((_, f)) = extra_slots.iter().find(|(k, _)| *k == s) {
+                    f
+                } else if let Some(c) = s.strip_prefix("us_") {
+                    crate::regimes::fofc::fofc_comp(u_stage, prim, c)
+                } else if let Some(c) = s.strip_prefix("x_") {
+                    crate::regimes::fofc::fofc_comp(cons, prim, c)
+                } else {
+                    panic!("fofc_project: unknown slot '{s}'")
+                }
+            }
         }
     };
     // metric mass/spin + grid scalars, resolved as in cfl_wave_speed.
@@ -493,16 +478,7 @@ pub(crate) fn fofc_project_named<const D: usize, const DOF: usize, Mem, Sc>(
         }
     };
     let scalars = scalars_for(&name, &resolve);
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    for (bind, is_out) in kernel_field_binds(&name).iter() {
-        let fld = slot(&bind.name());
-        if *is_out {
-            outputs.push(fld);
-        } else {
-            inputs.push(fld);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(&name, slot);
     super::exec::dispatch_fields_each::<Sc, Mem, D>(
         &name,
         &geom.interior,
@@ -557,16 +533,17 @@ pub fn fofc_source_theta<const D: usize, const DOF: usize, Mem, Sc>(
         "rmhd_fofc_source_theta{sfx}{}_{D}d",
         spacetime_slug(geom.spacetime)
     );
-    let slot = |path: &str| -> &Field<Sc, D, Mem> {
+    // the cell-centered B binds by its typed `BCell(k)`; the anchor `a_*`, candidate `x_*`,
+    // and `theta` slots are free scratch.
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        if let FieldBind::Ref(FieldRef::BCell(kk)) = b {
+            return bcell[*kk as usize];
+        }
+        let path = free_payload("fofc_source_theta", b);
         if let Some(suffix) = path.strip_prefix("a_") {
             conserved_component(anchor, suffix, path)
         } else if let Some(suffix) = path.strip_prefix("x_") {
             conserved_component(candidate, suffix, path)
-        } else if let Some(raw) = path.strip_prefix("bc_") {
-            let kk: usize = raw
-                .parse()
-                .unwrap_or_else(|_| panic!("fofc_source_theta: bad magnetic slot '{path}'"));
-            bcell[kk]
         } else if path == "theta" {
             theta
         } else {
@@ -602,16 +579,7 @@ pub fn fofc_source_theta<const D: usize, const DOF: usize, Mem, Sc>(
         }
     };
     let scalars = scalars_for(&name, &resolve);
-    let mut inputs = Vec::new();
-    let mut outputs = Vec::new();
-    for (bind, is_output) in kernel_field_binds(&name).iter() {
-        let field = slot(&bind.name());
-        if *is_output {
-            outputs.push(field);
-        } else {
-            inputs.push(field);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(&name, slot);
     super::exec::dispatch_fields_each::<Sc, Mem, D>(
         &name,
         &geom.interior,
@@ -651,16 +619,17 @@ pub fn constraint_projection<const D: usize, const DOF: usize, Mem, Sc>(
         "rmhd_constraint_projection{sfx}{}_{D}d",
         spacetime_slug(geom.spacetime)
     );
-    let slot = |path: &str| -> &Field<Sc, D, Mem> {
+    // the cell-centered B binds by its typed `BCell(k)`; the anchor `a_*`, candidate `x_*`,
+    // `theta`, and `binding` slots are free scratch.
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        if let FieldBind::Ref(FieldRef::BCell(kk)) = b {
+            return bcell[*kk as usize];
+        }
+        let path = free_payload("constraint_projection", b);
         if let Some(c) = path.strip_prefix("a_") {
             conserved_component(anchor, c, path)
         } else if let Some(c) = path.strip_prefix("x_") {
             conserved_component(candidate, c, path)
-        } else if let Some(raw) = path.strip_prefix("bc_") {
-            let kk: usize = raw
-                .parse()
-                .unwrap_or_else(|_| panic!("constraint_projection: bad magnetic slot '{path}'"));
-            bcell[kk]
         } else if path == "theta" {
             theta
         } else if path == "binding" {
@@ -702,16 +671,7 @@ pub fn constraint_projection<const D: usize, const DOF: usize, Mem, Sc>(
         }
     };
     let scalars = scalars_for(&name, &resolve);
-    let mut inputs = Vec::new();
-    let mut outputs = Vec::new();
-    for (bind, is_output) in kernel_field_binds(&name).iter() {
-        let field = slot(&bind.name());
-        if *is_output {
-            outputs.push(field);
-        } else {
-            inputs.push(field);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(&name, slot);
     super::exec::dispatch_fields_each::<Sc, Mem, D>(
         &name,
         &geom.interior,
@@ -790,21 +750,13 @@ pub fn fofc_exterior_mask<const D: usize, const DOF: usize, Mem, Sc>(
         }
     };
     let scalars = scalars_for(&name, &resolve);
-    let slot = |path: &str| match path {
+    // both slots are free scratch.
+    let slot = |b: &FieldBind| match free_payload("fofc_exterior_mask", b) {
         "bad" => bad,
         "exterior" => exterior,
-        _ => panic!("fofc_exterior_mask: unknown slot '{path}'"),
+        path => panic!("fofc_exterior_mask: unknown slot '{path}'"),
     };
-    let mut inputs = Vec::new();
-    let mut outputs = Vec::new();
-    for (bind, is_output) in kernel_field_binds(&name).iter() {
-        let field = slot(&bind.name());
-        if *is_output {
-            outputs.push(field);
-        } else {
-            inputs.push(field);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(&name, slot);
     super::exec::dispatch_fields_each::<Sc, Mem, D>(
         &name,
         &geom.interior,
@@ -1709,23 +1661,17 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     let per_body = D + 5;
     let n_out = symbi_ib::MAX_SOURCE_BODIES * per_body;
 
-    // inputs in the manifest field_inputs order: cons.den, mom_0.., nrg (pure reads).
-    let nrg = sim
-        .fields
-        .cons
-        .nrg_field()
-        .expect("body_feedback needs cons.nrg");
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-    for comp in 0..DOF {
-        inputs.push(&sim.fields.cons.mom[comp]);
-    }
-    inputs.push(nrg);
     // reduction scratch, cached on the workspace across calls (allocated on the
     // first feedback dispatch, which a sim carrying bodies is what reaches). the
     // kernel assign-writes every interior cell before the reduce, so the buffer
     // arrives fully defined.
     let scratch = feedback_scratch(sim, n_out);
-    let outputs: Vec<&Field<Sc, D, Mem>> = scratch.iter().collect();
+    // bound by manifest: cons.den, mom_0.., nrg (pure reads) -> the per-body
+    // `fb_{b}_*` reduction slots.
+    let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
+        FieldBind::Ref(fref) => resolve_path(sim, None, None, 0, *fref),
+        other => resolve_feedback_slot(other, per_body, scratch),
+    });
     dispatch_fields::<Sc, Mem, D>(
         &name,
         &geom.allocated,
@@ -1861,18 +1807,15 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
     // buffer arrives fully defined).
     let scratch = feedback_scratch(sim, per_drain);
 
-    let nrg = sim
-        .fields
-        .cons
-        .nrg_field()
-        .expect("body_feedback needs cons.nrg");
-    let mut den_in: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-    let mut full_in: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-    for comp in 0..DOF {
-        full_in.push(&sim.fields.cons.mom[comp]);
-    }
-    full_in.push(nrg);
-    den_in.truncate(1);
+    // both passes bind by manifest onto the same fields: the gravity pass reads cons.den
+    // and writes the D force slots; the drain pass reads den, mom_0.., nrg and writes the
+    // force / torque / mass / energy slots of body slot 0.
+    let feedback_slot = |b: &FieldBind| match b {
+        FieldBind::Ref(fref) => resolve_path(sim, None, None, 0, *fref),
+        other => resolve_feedback_slot(other, per_drain, scratch),
+    };
+    let (den_in, g_out) = bind_by_manifest(&grav_name, feedback_slot);
+    let (full_in, d_out) = bind_by_manifest(&drain_name, feedback_slot);
 
     for b in 0..bodies.len() {
         let body = bodies.get(b);
@@ -1887,7 +1830,6 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
         if body.has_gravity() {
             // gravity reaction: global support, reads cons.den only.
-            let g_out: Vec<&Field<Sc, D, Mem>> = scratch[..D].iter().collect();
             let g_scalars = resolve(&grav_name, b);
             dispatch_fields::<Sc, Mem, D>(
                 &grav_name,
@@ -1949,7 +1891,6 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
         let (mut mass, mut energy) = (0.0f64, 0.0f64);
         if let Some(bbox) = bbox {
-            let d_out: Vec<&Field<Sc, D, Mem>> = scratch[..per_drain].iter().collect();
             let d_scalars = resolve(&drain_name, b);
             dispatch_fields::<Sc, Mem, D>(
                 &drain_name,
@@ -2022,12 +1963,14 @@ struct ShapedPenalizeKernel {
 /// the device (CUDA) form of the shaped porous kernel: the serialized backend-neutral IR blob
 /// (rendered + NVRTC-compiled + cached by the dispatch engine at launch, at the launch precision),
 /// a stable kernel name (the engine's render cache keys on it, so it is unique per distinct shape),
-/// and the scalar manifest resolved through the shared per-body resolver. the device sibling of
-/// `ShapedPenalizeKernel`; the shape geometry is baked into the graph as constants, so a moving
-/// body reuses the one blob.
+/// the blob's own field manifest in buffer-index order (the dispatch binds by it, as the AOT
+/// path binds by the baked manifest), and the scalar manifest resolved through the shared
+/// per-body resolver. the device sibling of `ShapedPenalizeKernel`; the shape geometry is
+/// baked into the graph as constants, so a moving body reuses the one blob.
 struct ShapedIr {
     name: String,
     ir: String,
+    binds: Vec<(FieldBind, bool)>,
     scalar_params: Vec<super::params::ScalarBind>,
 }
 
@@ -2113,9 +2056,11 @@ fn shaped_penalize_ir(
     let mut prepared = symbi_ir::prepare(gvk.graph(), &inputs);
     prepared.numerical_policy = gvk.numerical_policy();
     let ir = symbi_ir::prepared_to_ir(&prepared);
+    let binds = symbi_ir::kernel_bindings_from_ir(&ir);
     let built = Arc::new(ShapedIr {
         name,
         ir,
+        binds,
         scalar_params: gvk
             .scalar_params()
             .iter()
@@ -2262,19 +2207,13 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         // registry bakes for the analytic sphere), NVRTC-compiles + caches it per shape, and
         // dispatches it in place.
         let sk = shaped_penalize_ir(coords, D, DOF, has_energy, spin, shape);
-        // in-place cons: every field input is also a write, folded into the output group by the IR
-        // manifest, so the input list is empty and the outputs run den, mom.., nrg, then the
-        // n_delta + n_torque scratch — the kernel's declared write order.
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for c in 0..DOF {
-            outputs.push(&sim.fields.cons.mom[c]);
-        }
-        if let Some(n) = nrg {
-            outputs.push(n);
-        }
-        for s in scratch[..n_delta + n_torque + D].iter() {
-            outputs.push(s);
-        }
+        // bound by the blob's own manifest: the in-place cons fields (den, mom.., nrg) fold into
+        // the output group, followed by the `pen_0_*` receipt slots in the kernel's declared
+        // write order, so the input group is empty.
+        let (inputs, outputs) = bind_by_binds(&sk.name, &sk.binds, |b| match b {
+            FieldBind::Ref(fref) => resolve_path(sim, None, None, 0, *fref),
+            other => resolve_penalize_slot(other, has_energy, scratch),
+        });
         let scalars: Vec<Sc> = sk
             .scalar_params
             .iter()
@@ -2285,7 +2224,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
             &sk.ir,
             &sim.geom.allocated,
             &bbox,
-            &[],
+            &inputs,
             &outputs,
             &[],
             &scalars,
@@ -2597,27 +2536,24 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         };
         let Some(bbox) = bbox else { continue };
 
-        // in-place cons: every field input is also a write, so the manifest folds them into the output
-        // group — the input list is empty and the output order is den, mom.., nrg, then the D+2 delta
-        // scratch. the DOF-aware kernel (selected via `_dof{DOF}` above) writes all DOF momentum
-        // components, so bind all DOF; the force receipt scratch stays D (the in-plane reaction).
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for comp in 0..DOF {
-            outputs.push(&sim.fields.cons.mom[comp]);
-        }
-        if let Some(nrg) = nrg {
-            outputs.push(nrg);
-        }
-        // the dyed kernel writes the drained `cons.chi` immediately after the energy slot, so it
-        // binds in that position; the plain kernel emits no such write and binds nothing here.
-        if let Some(chi) = sim.fields.cons.chi_field() {
-            outputs.push(chi);
-        }
-        for s in scratch[..n_delta + n_torque + D].iter() {
-            outputs.push(s);
-        }
+        // bound by manifest. the cons fields are in-place (read + write), so the manifest carries
+        // them as outputs: den, mom over all DOF (the `_dof{DOF}` kernel drains every momentum
+        // component), nrg on an energy regime, the drained `cons.chi` on a dyed run, then the
+        // `pen_0_*` receipt slots (mass, in-plane force, energy, torque, normal force).
+        let (inputs, outputs) = bind_by_manifest(name, |b| match b {
+            FieldBind::Ref(fref) => resolve_path(sim, None, None, 0, *fref),
+            other => resolve_penalize_slot(other, nrg.is_some(), scratch),
+        });
         let scalars = scalars_for(name, |bind| Sc::from_f64(bind_value(bind, b)));
-        dispatch_fields::<Sc, Mem, D>(name, &geom.allocated, &bbox, &[], &outputs, &[], &scalars);
+        dispatch_fields::<Sc, Mem, D>(
+            name,
+            &geom.allocated,
+            &bbox,
+            &inputs,
+            &outputs,
+            &[],
+            &scalars,
+        );
 
         let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
         let mass = field_reduce(&scratch[0], &bbox, ReductionOp::Add);
@@ -2706,16 +2642,15 @@ pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
     let per_body = D + 4;
     let n_out = symbi_ib::MAX_SOURCE_BODIES * per_body;
 
-    // inputs in the manifest order: cons.den, mom_0.., prim.pre (pure reads).
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-    for comp in 0..DOF {
-        inputs.push(&sim.fields.cons.mom[comp]);
-    }
-    inputs.push(pre);
     let scratch: Vec<Field<Sc, D, Mem>> = (0..n_out)
         .map(|_| Field::<Sc, D, Mem>::zeros(&geom.allocated).expect("feedback scratch alloc"))
         .collect();
-    let outputs: Vec<&Field<Sc, D, Mem>> = scratch.iter().collect();
+    // bound by manifest: cons.den, mom_0.., prim.pre (pure reads) -> the per-body
+    // `fb_{b}_*` reduction slots.
+    let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
+        FieldBind::Ref(fref) => resolve_path(sim, Some(pre), None, 0, *fref),
+        other => resolve_feedback_slot(other, per_body, &scratch),
+    });
     dispatch_fields::<Sc, Mem, D>(
         &name,
         &geom.allocated,
@@ -3330,4 +3265,75 @@ pub fn dispatch_godunov_with_sources<const D: usize, const DOF: usize, Mem, Sc>(
         }
     });
     dispatch_named(sim, pre, None, 0, &name, &geom.interior, &[], &scalars);
+}
+
+#[cfg(test)]
+mod shaped_penalize_binding_tests {
+    use super::shaped_penalize_ir;
+    use crate::regimes::substrate_kernels::binding::{bind_by_binds, resolve_penalize_slot};
+    use symbi_algebra::{domain, index};
+    use symbi_grid::Field;
+    use symbi_ir::{FieldBind, FieldRef, StateComp, StateSlot};
+    use symbi_xpu::HostMemory;
+
+    const D: usize = 2;
+    type HostField = Field<f64, D, HostMemory>;
+
+    /// the device path binds the shaped porous kernel by the manifest its runtime IR
+    /// carries, through the same `bind_by_binds` the baked kernels use. the in-place
+    /// cons fields fold into the output group as den, mom.., nrg, followed by the
+    /// receipt scratch in `resolve_penalize_slot` order (mass, force[D], energy,
+    /// torque, normal force), and the input group is empty.
+    #[test]
+    fn shaped_penalize_runtime_ir_binds_cons_then_receipts_in_manifest_order() {
+        let dom = domain([index("i").over(4), index("j").over(4)]);
+        let field = || HostField::zeros(&dom).expect("alloc");
+        let (den, mom, nrg) = (field(), [field(), field()], field());
+        let n_delta = 1 + D + 1;
+        let n_torque = symbi_discretize::gv_penalize::torque_axes(D).len();
+        let scratch: Vec<HostField> = (0..n_delta + n_torque + D).map(|_| field()).collect();
+
+        let shape = symbi_ib::sdf::SdfExpr::<f64, 3>::sphere([0.0; 3], 0.5);
+        let sk = shaped_penalize_ir(
+            symbi_discretize::Coords::Cartesian,
+            D,
+            D,
+            true,
+            false,
+            &shape,
+        );
+        let binds = symbi_ir::kernel_bindings_from_ir(&sk.ir);
+        assert_eq!(binds, sk.binds, "the cached manifest is the blob's own");
+
+        let (inputs, outputs) = bind_by_binds(&sk.name, &binds, |b| match b {
+            FieldBind::Ref(FieldRef::State {
+                slot: StateSlot::Cons,
+                comp,
+            }) => match *comp {
+                StateComp::Den => &den,
+                StateComp::Mom(k) => &mom[k as usize],
+                StateComp::Nrg => &nrg,
+                StateComp::Chi => panic!("the shaped kernel carries no dye"),
+            },
+            other => resolve_penalize_slot::<f64, HostMemory, D>(other, true, &scratch),
+        });
+
+        assert!(
+            inputs.is_empty(),
+            "every cons field is in place, so the input group is empty; got {}",
+            inputs.len()
+        );
+        let expected: Vec<&HostField> = std::iter::once(&den)
+            .chain(mom.iter())
+            .chain(std::iter::once(&nrg))
+            .chain(scratch.iter())
+            .collect();
+        assert_eq!(outputs.len(), expected.len());
+        for (ii, (got, want)) in outputs.iter().zip(&expected).enumerate() {
+            assert!(
+                std::ptr::eq(*got, *want),
+                "output {ii} departs from the den, mom.., nrg, receipts order"
+            );
+        }
+    }
 }

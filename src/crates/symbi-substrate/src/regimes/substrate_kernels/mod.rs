@@ -37,9 +37,14 @@ mod types;
 pub use exec::*;
 pub use layout::*;
 pub use types::*;
-// the raw field manifest accessor — for the component-agnostic CT kernels (edge EMF / curl) that
-// bind generic slots positionally, ordered by the recorded manifest.
-pub(crate) use binding::kernel_field_binds;
+// the manifest-driven field binding: `bind_by_manifest` splits a kernel's baked manifest into
+// (inputs, outputs) through a per-site slot resolver; `resolve_path` binds the typed
+// `FieldRef` vocabulary and `resolve_snapshot_into` the snapshot family's explicit target.
+// a resolver reads a bind by its typed family: `ct_role` for the reserved CT scratch,
+// `free_payload` for the spelling of a free scratch slot.
+pub(crate) use binding::{
+    bind_by_manifest, ct_role, free_payload, resolve_path, resolve_snapshot_into,
+};
 // the typed (field, is_output) manifest: what a kernel actually reads and writes. public so a
 // caller deciding whether to run a producer can ask the consumer instead of re-deriving which
 // solver arm consumes what.

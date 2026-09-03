@@ -33,12 +33,12 @@ use std::sync::{Arc, OnceLock};
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FluxSpec, FusedCpuKernel, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver,
-    body_fused_in, cfl_wave_speed, dispatch_body_feedback, dispatch_body_source,
+    bind_by_manifest, body_fused_in, cfl_wave_speed, dispatch_body_feedback, dispatch_body_source,
     dispatch_body_source_wb, dispatch_driven_boundaries, dispatch_fields, dispatch_flux,
     dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_gradient_boundaries,
     dispatch_named, dispatch_penalize, dispatch_runtime_source, dispatch_source_apply,
     dof_lift_suffix, fused_runtime_cpu_kernel, geom_scalar, motion_scalar, resolve_body_only_fused,
-    resolve_params, scalars_for,
+    resolve_params, resolve_snapshot_into, scalars_for,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_sim::state::FieldStore;
@@ -813,23 +813,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn snapshot_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
-        // u_stage = cons (pure copy), positional [den, mom_0.., nrg] — the snapshot kernel's
-        // manifest order (snapshot_gv) — over the interior the source pass iterates. explicit
-        // buffers (not dispatch_named, whose manifest fixes the output to u_n).
-        let nrg = sim.fields.cons.nrg_field().expect("adiabatic cons.nrg");
-        let u_nrg = sim.workspace.u_stage.nrg_field().expect("u_stage.nrg");
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for k in 0..DOF {
-            inputs.push(&sim.fields.cons.mom[k]);
-        }
-        inputs.push(nrg);
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.workspace.u_stage.den];
-        for k in 0..DOF {
-            outputs.push(&sim.workspace.u_stage.mom[k]);
-        }
-        outputs.push(u_nrg);
+        // u_stage = cons (pure copy of den, mom_0.., nrg) over the interior the source pass
+        // iterates. the snapshot kernel's manifest names `u_n` as its destination; the
+        // resolver binds that slot onto u_stage.
         let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("adiabatic_snapshot{sfx}_{D}d");
+        let (inputs, outputs) = bind_by_manifest(&name, |b| {
+            resolve_snapshot_into(sim, &sim.workspace.u_stage, b)
+        });
         dispatch_fields::<Sc, Mem, D>(
             &name,
             &sim.geom.allocated,

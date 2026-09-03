@@ -11,7 +11,7 @@
 use symbi_algebra::OrderedNumeric;
 use symbi_carrier::Scalar;
 use symbi_grid::Field;
-use symbi_ir::{FieldBind, FieldRef};
+use symbi_ir::{CtScratch, FieldBind, FieldRef, ScratchKey};
 use symbi_xpu::MemorySpace;
 
 use std::collections::HashMap;
@@ -105,6 +105,203 @@ pub(crate) fn kernel_field_binds(name: &str) -> Arc<[(FieldBind, bool)]> {
             .entry(name.to_string())
             .or_insert(parsed),
     )
+}
+
+/// bind a kernel's baked manifest to sim fields through `resolve`, split into
+/// `(inputs, outputs)` in manifest order within each group. the manifest carries the
+/// read/write role: a pure read lands in `inputs`, a written resource appears in the
+/// manifest exactly once with `is_output` and lands in `outputs`, bound once as a mutable
+/// output. this is the one place a dispatch reads `kernel_field_binds` for binding.
+///
+/// fail-loud conditions, in the order they fire:
+/// - the kernel is unbaked (`kernel_field_binds` panics naming it);
+/// - a `FieldBind` appears twice in the manifest (a duplicated role);
+/// - `resolve` meets a bind it has no arm for (the resolver's own exhaustive panic).
+///
+/// physical aliasing of the resolved allocations is the executor's contract, checked once
+/// on every launch by `disjoint_host_buffers` / `dispatch_fields_cover`.
+pub(crate) fn bind_by_manifest<'a, Sc, Mem, const D: usize>(
+    name: &str,
+    resolve: impl Fn(&FieldBind) -> &'a Field<Sc, D, Mem>,
+) -> (Vec<&'a Field<Sc, D, Mem>>, Vec<&'a Field<Sc, D, Mem>>)
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    bind_by_binds(name, &kernel_field_binds(name), resolve)
+}
+
+/// the manifest-slice form of `bind_by_manifest`: `binds` is the kernel's
+/// `(bind, is_output)` list in buffer-index order. `name` labels the panics.
+pub(crate) fn bind_by_binds<'a, Sc, Mem, const D: usize>(
+    name: &str,
+    binds: &[(FieldBind, bool)],
+    resolve: impl Fn(&FieldBind) -> &'a Field<Sc, D, Mem>,
+) -> (Vec<&'a Field<Sc, D, Mem>>, Vec<&'a Field<Sc, D, Mem>>)
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    let mut seen: std::collections::HashSet<&FieldBind> =
+        std::collections::HashSet::with_capacity(binds.len());
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    for (bind, is_output) in binds {
+        assert!(
+            seen.insert(bind),
+            "bind_by_manifest('{name}'): manifest binding '{}' appears twice",
+            bind.name()
+        );
+        let fld = resolve(bind);
+        if *is_output {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
+    }
+    (inputs, outputs)
+}
+
+/// resolve the snapshot family's manifest (`cons.* -> u_n.*`) onto an explicit
+/// conserved target: `cons.*` reads bind the live conserved state, `u_n.*` writes bind
+/// `target`. the stage snapshot (`u_stage = cons`) dispatches the same baked copy kernel
+/// as `u_n = cons`, so the manifest's `u_n` slot names the destination role, and the
+/// site supplies which buffer plays it.
+pub(crate) fn resolve_snapshot_into<'a, const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &'a FieldStore<D, DOF, Mem, Sc>,
+    target: &'a symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    bind: &FieldBind,
+) -> &'a Field<Sc, D, Mem>
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    use symbi_ir::{StateComp, StateSlot};
+    let FieldBind::Ref(FieldRef::State { slot, comp }) = bind else {
+        panic!("snapshot: unexpected manifest slot '{}'", bind.name());
+    };
+    let group = match slot {
+        StateSlot::Cons => &sim.fields.cons,
+        StateSlot::UN => target,
+        other => panic!("snapshot: unexpected state slot {other:?}"),
+    };
+    match comp {
+        StateComp::Den => &group.den,
+        StateComp::Mom(k) => &group.mom[*k as usize],
+        StateComp::Nrg => group.nrg_field().expect("snapshot: energy field"),
+        StateComp::Chi => panic!("snapshot: the dye rides its own copy kernel"),
+    }
+}
+
+/// the free scratch spelling a bind carries: the string payload of
+/// `FieldBind::Scratch(ScratchKey::Free)`. identity is the typed variant, so the
+/// physical `Ref` family, the reserved CT scratch vocabulary, and user fields are each
+/// rejected here by family — a coincident spelling in another family is a different
+/// resource. `site` labels the panic.
+pub(crate) fn free_payload<'b>(site: &str, bind: &'b FieldBind) -> &'b str {
+    match bind {
+        FieldBind::Scratch(ScratchKey::Free(s)) => s,
+        FieldBind::Scratch(ScratchKey::Ct(_)) => panic!(
+            "{site}: reserved CT scratch '{}' bound where a free scratch slot was expected",
+            bind.name()
+        ),
+        FieldBind::Ref(_) => panic!(
+            "{site}: physical field '{}' bound where a free scratch slot was expected",
+            bind.name()
+        ),
+        FieldBind::User(_) => panic!(
+            "{site}: user field '{}' bound where a free scratch slot was expected",
+            bind.name()
+        ),
+    }
+}
+
+/// the typed CT role of a manifest bind, when it names reserved CT scratch. the
+/// dispatch binders match roles, so a producer spelling change cannot silently
+/// re-route a buffer.
+pub(crate) fn ct_role(b: &FieldBind) -> Option<CtScratch> {
+    match b {
+        FieldBind::Scratch(k) => k.ct_role(),
+        _ => None,
+    }
+}
+
+/// resolve a body-feedback reduction slot `fb_{b}_{force_{ax} | torque_{t} | mass |
+/// energy}` onto the workspace scratch: body `b` owns `per_body` consecutive fields laid
+/// out force[D], torque[3], mass, energy — the order the reduction sums. the slot is
+/// free scratch; any other bind family is rejected before the spelling is read.
+pub(crate) fn resolve_feedback_slot<'a, Sc, Mem, const D: usize>(
+    bind: &FieldBind,
+    per_body: usize,
+    scratch: &'a [Field<Sc, D, Mem>],
+) -> &'a Field<Sc, D, Mem>
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    let name = free_payload("body feedback", bind);
+    let unknown = || panic!("body feedback: unknown manifest slot '{name}'");
+    let Some(rest) = name.strip_prefix("fb_") else {
+        unknown()
+    };
+    let Some((body, quantity)) = rest.split_once('_') else {
+        unknown()
+    };
+    let base = body.parse::<usize>().unwrap_or_else(|_| unknown()) * per_body;
+    let offset = if let Some(ax) = quantity.strip_prefix("force_") {
+        ax.parse::<usize>().unwrap_or_else(|_| unknown())
+    } else if let Some(t) = quantity.strip_prefix("torque_") {
+        D + t.parse::<usize>().unwrap_or_else(|_| unknown())
+    } else if quantity == "mass" {
+        D + 3
+    } else if quantity == "energy" {
+        D + 4
+    } else {
+        unknown()
+    };
+    &scratch[base + offset]
+}
+
+/// resolve a penalization receipt slot `pen_0_{mass | force_{a} | energy | torque_{a} |
+/// force_normal_{a}}` onto the receipt scratch: mass, force[D], energy (energy regimes),
+/// then the torque components of `torque_axes(D)`, then the normal force[D]. the slot
+/// is free scratch; any other bind family is rejected before the spelling is read.
+pub(crate) fn resolve_penalize_slot<'a, Sc, Mem, const D: usize>(
+    bind: &FieldBind,
+    has_energy: bool,
+    scratch: &'a [Field<Sc, D, Mem>],
+) -> &'a Field<Sc, D, Mem>
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    let name = free_payload("penalize", bind);
+    let unknown = || panic!("penalize: unknown manifest slot '{name}'");
+    let Some(quantity) = name.strip_prefix("pen_0_") else {
+        unknown()
+    };
+    let torque_axes = symbi_discretize::gv_penalize::torque_axes(D);
+    let n_delta = 1 + D + usize::from(has_energy);
+    let n_torque = torque_axes.len();
+    let index = if quantity == "mass" {
+        0
+    } else if let Some(a) = quantity.strip_prefix("force_normal_") {
+        n_delta + n_torque + a.parse::<usize>().unwrap_or_else(|_| unknown())
+    } else if let Some(a) = quantity.strip_prefix("force_") {
+        1 + a.parse::<usize>().unwrap_or_else(|_| unknown())
+    } else if quantity == "energy" {
+        assert!(
+            has_energy,
+            "penalize: energy receipt bound on an energy-free regime"
+        );
+        1 + D
+    } else if let Some(a) = quantity.strip_prefix("torque_") {
+        let a = a.parse::<usize>().unwrap_or_else(|_| unknown());
+        n_delta + (a - torque_axes.start)
+    } else {
+        unknown()
+    };
+    &scratch[index]
 }
 
 pub fn kernel_bindings(name: &str) -> Arc<[(FieldRef, bool)]> {
@@ -288,6 +485,229 @@ where
         // in the dispatch's sweep direction.
         FieldRef::ConsMag(c) => &mhd().bcell[c as usize],
         FieldRef::FluxMag(c) => &mhd().bflux[dir][c as usize],
+    }
+}
+
+#[cfg(test)]
+mod manifest_binding_tests {
+    use super::*;
+    use symbi_algebra::{Domain, domain, index};
+    use symbi_aot::BufHandle;
+    use symbi_exec::layout::alloc_layout;
+    use symbi_exec::policy::{disjoint_host_buffers, dispatch_fields_cover};
+    use symbi_xpu::HostMemory;
+
+    type HostField = Field<f64, 1, HostMemory>;
+
+    fn line() -> Domain<1> {
+        domain([index("i").over(8)])
+    }
+
+    fn field(dom: &Domain<1>) -> HostField {
+        HostField::zeros(dom).expect("alloc")
+    }
+
+    fn same(a: &HostField, b: &HostField) -> bool {
+        a.as_ptr() == b.as_ptr()
+    }
+
+    fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+        payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
+    }
+
+    /// the manifest role is the split: reads land in `inputs`, writes in `outputs`, each
+    /// group in manifest order. the manifest encodes a written resource once, as
+    /// `is_output`, so it binds exactly once, as a mutable output; whether the kernel
+    /// also reads it is the `Effects` layer's claim.
+    #[test]
+    fn a_written_resource_binds_once_as_a_mutable_output() {
+        let dom = line();
+        let (read, aux, write, written) = (field(&dom), field(&dom), field(&dom), field(&dom));
+        let binds = vec![
+            (FieldBind::Ref(FieldRef::cons_den()), false),
+            (FieldBind::scratch("out"), true),
+            (FieldBind::Ref(FieldRef::PrimRho), true),
+            (FieldBind::scratch("aux"), false),
+        ];
+        let (inputs, outputs) = bind_by_binds("fake", &binds, |bind| match bind {
+            FieldBind::Ref(FieldRef::State { .. }) => &read,
+            FieldBind::Ref(FieldRef::PrimRho) => &written,
+            FieldBind::Scratch(ScratchKey::Free(s)) if &**s == "out" => &write,
+            FieldBind::Scratch(ScratchKey::Free(s)) if &**s == "aux" => &aux,
+            other => panic!("unexpected slot '{}'", other.name()),
+        });
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(outputs.len(), 2);
+        assert!(same(inputs[0], &read) && same(inputs[1], &aux));
+        assert!(same(outputs[0], &write) && same(outputs[1], &written));
+        let written_bindings = inputs
+            .iter()
+            .chain(outputs.iter())
+            .filter(|f| same(f, &written))
+            .count();
+        assert_eq!(
+            written_bindings, 1,
+            "a written resource binds once, as an output"
+        );
+    }
+
+    /// a receipt slot is identified by its typed family: a physical field, a reserved
+    /// CT scratch, or a user field carrying a receipt spelling is rejected by family,
+    /// and only a free scratch spelling reaches the receipt parse.
+    #[test]
+    fn receipt_slots_reject_every_family_but_free_scratch() {
+        let dom = line();
+        let scratch: Vec<HostField> = (0..4).map(|_| field(&dom)).collect();
+        let free = FieldBind::scratch("pen_0_force_0");
+        assert!(same(
+            resolve_penalize_slot::<f64, HostMemory, 1>(&free, true, &scratch),
+            &scratch[1]
+        ));
+        let rejected = [
+            (
+                FieldBind::Ref(FieldRef::PrimRho),
+                "physical field 'prim.rho'",
+            ),
+            (
+                FieldBind::user("pen_0_force_0"),
+                "user field 'pen_0_force_0'",
+            ),
+            (
+                FieldBind::from(symbi_ir::CtCellCt::FofcFlag),
+                "reserved CT scratch 'flag'",
+            ),
+        ];
+        for (bind, expect) in rejected {
+            let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                resolve_penalize_slot::<f64, HostMemory, 1>(&bind, true, &scratch);
+            }))
+            .err()
+            .expect("a non-free bind must be rejected");
+            let msg = panic_message(err);
+            assert!(msg.contains(expect), "got: {msg}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "manifest binding 'prim.rho' appears twice")]
+    fn duplicate_manifest_binding_is_rejected() {
+        let dom = line();
+        let f = field(&dom);
+        let binds = vec![
+            (FieldBind::Ref(FieldRef::PrimRho), false),
+            (FieldBind::Ref(FieldRef::PrimRho), true),
+        ];
+        let _ = bind_by_binds("dup", &binds, |_| &f);
+    }
+
+    /// two differently named manifest resources whose resolver collapses them onto one
+    /// allocation pass the structural split and are stopped by the executor's
+    /// distinctness check: a `&` and a `&mut` to one buffer is the aliasing the check exists for.
+    #[test]
+    fn two_resources_on_one_allocation_are_rejected_by_the_executor() {
+        let dom = line();
+        let shared = field(&dom);
+        let binds = vec![
+            (FieldBind::scratch("us_den"), false),
+            (FieldBind::scratch("x_den"), true),
+        ];
+        let (inputs, outputs) = bind_by_binds("collapsed", &binds, |_| &shared);
+        assert_eq!((inputs.len(), outputs.len()), (1, 1));
+        let layouts = [alloc_layout(&dom); 2];
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            disjoint_host_buffers("collapsed", &inputs, &outputs, &layouts);
+        }))
+        .err()
+        .expect("an input aliasing an output must be rejected");
+        let msg = panic_message(err);
+        assert!(
+            msg.contains(
+                "disjoint_host_buffers('collapsed'): a binding is both an input and an output"
+            ),
+            "got: {msg}"
+        );
+    }
+
+    /// a legal in-place binding (one resource, `is_output`, passed once as an output) is
+    /// accepted and bound mutably; a distinct read + write pair is accepted as `Host` then
+    /// `HostMut`.
+    #[test]
+    fn legal_in_place_and_disjoint_bindings_are_accepted() {
+        let dom = line();
+        let (read, in_place) = (field(&dom), field(&dom));
+        let binds = vec![(FieldBind::Ref(FieldRef::PrimRho), true)];
+        let (inputs, outputs) = bind_by_binds("in_place", &binds, |_| &in_place);
+        let layouts = [alloc_layout(&dom); 1];
+        let bufs = disjoint_host_buffers("in_place", &inputs, &outputs, &layouts);
+        assert_eq!(bufs.len(), 1);
+        assert!(matches!(bufs[0].handle, BufHandle::HostMut(_)));
+
+        let layouts = [alloc_layout(&dom); 2];
+        let bufs = disjoint_host_buffers("pair", &[&read], &[&in_place], &layouts);
+        assert_eq!(bufs.len(), 2);
+        assert!(matches!(bufs[0].handle, BufHandle::Host(_)));
+        assert!(matches!(bufs[1].handle, BufHandle::HostMut(_)));
+    }
+
+    #[test]
+    fn duplicate_mutable_outputs_are_rejected_by_the_executor() {
+        let dom = line();
+        let f = field(&dom);
+        let layouts = [alloc_layout(&dom); 2];
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            disjoint_host_buffers("twice", &[], &[&f, &f], &layouts);
+        }))
+        .err()
+        .expect("two mutable bindings of one buffer must be rejected");
+        let msg = panic_message(err);
+        assert!(
+            msg.contains(
+                "disjoint_host_buffers('twice'): two OUTPUT bindings resolve to the same allocation"
+            ),
+            "got: {msg}"
+        );
+    }
+
+    /// the disjoint-cover executor enforces the identical rule on every build: an output
+    /// aliasing an input, or two outputs on one buffer, is stopped before any block runs.
+    /// the check sits behind the serial-twin lookup, so the gate first proves the twin is
+    /// baked (otherwise the cover declines silently and the assertion is never reached).
+    #[test]
+    fn parallel_cover_enforces_the_same_alias_rule() {
+        const NAME: &str = "iso_snapshot_1d";
+        assert!(
+            symbi_aot::kernel_by_name::<f64>(&format!("{NAME}_serial")).is_some(),
+            "{NAME}_serial is not baked; the cover path declines before its alias check and \
+             this gate would pass vacuously"
+        );
+        let dom = line();
+        let (a, b) = (field(&dom), field(&dom));
+        let expect_alias_panic = |inputs: &[&HostField], outputs: &[&HostField]| {
+            let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                dispatch_fields_cover::<f64, HostMemory, 1>(
+                    NAME,
+                    &dom,
+                    [4],
+                    inputs,
+                    outputs,
+                    &[],
+                    &[],
+                )
+            }))
+            .err()
+            .expect("the cover path must reject an aliased output");
+            let msg = panic_message(err);
+            assert!(
+                msg.contains("dispatch_fields_cover('iso_snapshot_1d'): an output aliases"),
+                "got: {msg}"
+            );
+        };
+        expect_alias_panic(&[&a, &b], &[&a, &b]);
+        expect_alias_panic(&[], &[&a, &a]);
     }
 }
 

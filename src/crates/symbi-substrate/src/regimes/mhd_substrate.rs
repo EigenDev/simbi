@@ -22,16 +22,6 @@
 
 use symbi_ir::{CtCellCt, CtEdgeCt, CtFaceCt, CtScratch, FieldBind, Transverse};
 
-/// the typed CT role of a manifest bind, when it names reserved CT scratch.
-/// the dispatch binders match roles, so a producer spelling change cannot
-/// silently re-route a buffer.
-fn ct_role(b: &FieldBind) -> Option<CtScratch> {
-    match b {
-        FieldBind::Scratch(k) => k.ct_role(),
-        _ => None,
-    }
-}
-
 use symbi_algebra::OrderedNumeric;
 use symbi_carrier::Scalar;
 use symbi_grid::Field;
@@ -42,8 +32,9 @@ use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    ScalarBind, Solver, body_scalar, dispatch_fields_each, dispatch_named, expect_kernel,
-    geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, scalars_for, spacetime_slug,
+    ScalarBind, Solver, bind_by_manifest, body_scalar, ct_role, dispatch_fields_each,
+    dispatch_named, expect_kernel, geom_scalar, kernel_geom, mhd_geom_suffix, scalars_for,
+    spacetime_slug,
 };
 use symbi_algebra::Domain;
 use symbi_grid::ghost::BcType;
@@ -929,16 +920,7 @@ pub(crate) fn fofc_splice_induction<const D: usize, const DOF: usize, Mem, Sc>(
                 _ => panic!("fofc_splice_induction: unknown slot '{}'", b.name()),
             }
         };
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        for (bind, is_out) in kernel_field_binds(&name).iter() {
-            let fld = slot(bind);
-            if *is_out {
-                outputs.push(fld);
-            } else {
-                inputs.push(fld);
-            }
-        }
+        let (inputs, outputs) = bind_by_manifest(&name, slot);
         dispatch_fields_each::<Sc, Mem, D>(
             &name,
             &sim.geom.interior.face_domain(dir),
@@ -971,16 +953,7 @@ pub(crate) fn fofc_emf_splice<const D: usize, const DOF: usize, Mem, Sc>(
                 _ => panic!("fofc_emf_splice: unknown slot '{}'", b.name()),
             }
         };
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        for (bind, is_out) in kernel_field_binds(&name).iter() {
-            let fld = slot(bind);
-            if *is_out {
-                outputs.push(fld);
-            } else {
-                inputs.push(fld);
-            }
-        }
+        let (inputs, outputs) = bind_by_manifest(&name, slot);
         dispatch_fields_each::<Sc, Mem, D>(
             &name,
             mhd.efield[edge.slot].domain(),
@@ -1334,16 +1307,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
                 _ => panic!("rmhd_edge_emf: unknown manifest slot '{}'", b.name()),
             }
         };
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        for (bind, is_out) in kernel_field_binds(&name).iter() {
-            let fld = slot(bind);
-            if *is_out {
-                outputs.push(fld);
-            } else {
-                inputs.push(fld);
-            }
-        }
+        let (inputs, outputs) = bind_by_manifest(&name, slot);
         let scalars = scalars_for(&name, &scalar);
         dispatch_fields_each::<Sc, Mem, D>(
             &name,
@@ -1570,16 +1534,7 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
             _ => panic!("resistive_emf_ortho: unknown manifest slot '{}'", b.name()),
         }
     };
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    for (bind, is_out) in kernel_field_binds(&name).iter() {
-        let fld = slot(bind);
-        if *is_out {
-            outputs.push(fld);
-        } else {
-            inputs.push(fld);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(&name, slot);
     dispatch_fields_each::<Sc, Mem, D>(
         &name,
         mhd.efield[edge.slot].domain(),
@@ -1676,16 +1631,7 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
                     _ => panic!("body_resistive_emf: unknown manifest slot '{}'", b.name()),
                 }
             };
-            let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-            let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-            for (bind, is_out) in kernel_field_binds(&name).iter() {
-                let fld = slot(bind);
-                if *is_out {
-                    outputs.push(fld);
-                } else {
-                    inputs.push(fld);
-                }
-            }
+            let (inputs, outputs) = bind_by_manifest(&name, slot);
             dispatch_fields_each::<Sc, Mem, D>(
                 &name,
                 mhd.efield[eslot].domain(),
@@ -1732,16 +1678,7 @@ fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
             _ => panic!("resistive_emf_2d: unknown manifest slot '{}'", b.name()),
         }
     };
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    for (bind, is_out) in kernel_field_binds(name).iter() {
-        let fld = slot(bind);
-        if *is_out {
-            outputs.push(fld);
-        } else {
-            inputs.push(fld);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(name, slot);
     dispatch_fields_each::<Sc, Mem, D>(
         name,
         mhd.efield[edge.slot].domain(),
@@ -1784,16 +1721,7 @@ fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
                 _ => panic!("resistive_emf_3d: unknown manifest slot '{}'", b.name()),
             }
         };
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        for (bind, is_out) in kernel_field_binds(&name).iter() {
-            let fld = slot(bind);
-            if *is_out {
-                outputs.push(fld);
-            } else {
-                inputs.push(fld);
-            }
-        }
+        let (inputs, outputs) = bind_by_manifest(&name, slot);
         dispatch_fields_each::<Sc, Mem, D>(
             &name,
             mhd.efield[edge.slot].domain(),
@@ -1846,16 +1774,7 @@ fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
             _ => panic!("resistive_emf_cyl_rz: unknown manifest slot '{}'", b.name()),
         }
     };
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    for (bind, is_out) in kernel_field_binds(name).iter() {
-        let fld = slot(bind);
-        if *is_out {
-            outputs.push(fld);
-        } else {
-            inputs.push(fld);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(name, slot);
     dispatch_fields_each::<Sc, Mem, D>(
         name,
         mhd.efield[edge.slot].domain(),
@@ -1954,16 +1873,7 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
                 _ => panic!("rmhd_ct_curl: unknown manifest slot '{}'", b.name()),
             }
         };
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        for (bind, is_out) in kernel_field_binds(&ct_name).iter() {
-            let fld = slot(bind);
-            if *is_out {
-                outputs.push(fld);
-            } else {
-                inputs.push(fld);
-            }
-        }
+        let (inputs, outputs) = bind_by_manifest(&ct_name, slot);
         dispatch_fields_each::<Sc, Mem, D>(
             &ct_name,
             &interior.extend(dir, 0, 1),
@@ -1979,12 +1889,12 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
 /// bcell + cons.nrg over the interior. `bcell = interp(bface)` and `nrg += (1/2)(gamma_ij B^i B^j |
 /// interp - | bcell_old)` keeps the cell B and the total energy consistent with the CT-updated face
 /// field. bind by manifest: the kernel is component-agnostic (positional), each slot mapped to its
-/// actual field, axis-role'd, ordered by the recorded manifest: `bf_{c}` (grid face c) -> bface[c];
-/// `bc_{c}` (in-place cell, grid face c carries physical component axes[c]) -> bcell[axes[c]]; `nrg`
-/// -> cons.nrg. idempotent: once `bcell == interp(bface)` a second call adds a zero energy patch, so
-/// the gas-only FOFC redo re-runs it to re-attach the consistent cell B + patch onto the FOFC'd gas
-/// (the redo feeds the cell-B predictor the high-order induction flux, so `bcell_old` is the HO
-/// predictor and the patch is the small HO reconciliation (no shock).
+/// actual field, axis-role'd, ordered by the recorded manifest: `bf_{c}` (grid face c, the reserved
+/// CT face scratch `BFaceComp(c)`) -> bface[c]; `bc_{c}` (in-place cell, grid face c carries physical
+/// component axes[c]) -> bcell[axes[c]]. the interpolation leaves the energy untouched: `cons.nrg`
+/// already carries the magnetic energy and is conserved by the godunov flux. idempotent: once
+/// `bcell == interp(bface)` a second call is the identity, so the gas-only FOFC redo re-runs it to
+/// re-attach the consistent cell B onto the FOFC'd gas.
 pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     has_energy: bool,
@@ -1993,7 +1903,6 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-    let cnrg = sim.fields.cons.nrg_field();
     let interior = &sim.geom.interior;
     let axes = sim.geom.axes;
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
@@ -2023,24 +1932,12 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
             let c = *c as usize;
             return &mhd.bcell[if gr { c } else { axes[c] }];
         }
-        if b.name() == "nrg" {
-            return cnrg.expect("cons.nrg");
-        }
         panic!(
             "rmhd_bcell_from_bface: unknown manifest slot '{}'",
             b.name()
         );
     };
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    for (bind, is_out) in kernel_field_binds(&bname).iter() {
-        let fld = slot(bind);
-        if *is_out {
-            outputs.push(fld);
-        } else {
-            inputs.push(fld);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(&bname, slot);
     let bscalars: Vec<Sc> = if gr {
         scalars_for(&bname, |bind| {
             let ScalarBind::Ref(sref) = bind else {

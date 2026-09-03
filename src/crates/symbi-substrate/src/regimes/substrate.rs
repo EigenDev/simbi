@@ -23,7 +23,7 @@
 use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_carrier::Scalar;
 use symbi_grid::Field;
-use symbi_ir::ScalarRef;
+use symbi_ir::{FieldBind, ScalarRef, ScratchKey};
 use symbi_xpu::MemorySpace;
 
 use std::sync::Arc;
@@ -31,12 +31,12 @@ use symbi_source_compile::source_spec::SourceProgram;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    FluxSpec, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
-    dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_driven_boundaries,
-    dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused,
-    dispatch_godunov_with_body_source, dispatch_gradient_boundaries, dispatch_named,
-    dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel, geom_scalar,
-    motion_scalar, resolve_params, scalars_for,
+    FluxSpec, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, bind_by_manifest,
+    cfl_wave_speed, dispatch_body_feedback_iso, dispatch_body_source_iso,
+    dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
+    dispatch_godunov_maybe_fused, dispatch_godunov_with_body_source, dispatch_gradient_boundaries,
+    dispatch_named, dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel,
+    geom_scalar, motion_scalar, resolve_params, resolve_path, resolve_snapshot_into, scalars_for,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Geometry;
@@ -342,23 +342,18 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // the primitives now hold a state recovered from the conserved fields; anything
         // reading prim.* outside the evolve loop checks this before trusting it.
         sim.mark_primitives_recovered();
-        // inputs (manifest order): cons den, mom_0.., then the prescribed cs2 field.
-        // outputs: prim rho, vel_0.., self.pre (= cs2*rho). cs2 is a read-only field,
-        // so the run can be locally isothermal. no scalar params.
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for k in 0..D {
-            inputs.push(&sim.fields.cons.mom[k]);
-        }
-        inputs.push(&self.cs2);
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
-        for k in 0..D {
-            outputs.push(&sim.fields.prim.vel[k]);
-        }
-        outputs.push(&self.pre);
-        // the c2p status channel: the recovery kernel writes its accept/reject
-        // fact alongside the candidate, so the channel has one producer.
-        outputs.push(&sim.fields.c2p_error);
+        // bound by manifest: cons den, mom_0.., the prescribed cs2 field (read-only, so
+        // the run can be locally isothermal) -> prim rho, vel_0.., self.pre (= cs2*rho),
+        // and the c2p status channel the recovery kernel writes alongside the candidate.
+        // the cs2 slot is the free scratch spelling `cs2`; the rest is the typed `Ref` vocabulary.
         let name = format!("iso_c2p_{D}d");
+        let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
+            FieldBind::Ref(fref) => {
+                resolve_path(sim, Some(&self.pre), Some(&sim.fields.c2p_error), 0, *fref)
+            }
+            FieldBind::Scratch(ScratchKey::Free(s)) if &**s == "cs2" => &self.cs2,
+            other => panic!("iso c2p: unknown manifest slot '{}'", other.name()),
+        });
         dispatch_fields::<Sc, Mem, D>(
             &name,
             &sim.geom.allocated,
@@ -478,11 +473,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         let name = format!("iso_ghost_fill_{D}d");
         GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
             |region, p| {
-                let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
-                for k in 0..D {
-                    outputs.push(&sim.fields.prim.vel[k]);
-                }
-                outputs.push(&self.pre);
+                let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
+                    FieldBind::Ref(fref) => resolve_path(sim, Some(&self.pre), None, 0, *fref),
+                    other => panic!("iso ghost_fill: unknown manifest slot '{}'", other.name()),
+                });
                 // params by name via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
                 // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int \sqcup float
                 // coproduct).
@@ -504,7 +498,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                     &name,
                     &sim.geom.allocated,
                     &region.domain,
-                    &[],
+                    &inputs,
                     &outputs,
                     &ints,
                     &scalars,
@@ -629,15 +623,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
 
     fn snapshot(&self, sim: &FieldStore<D, D, Mem, Sc>) {
         // u_n = cons (pure copy), no energy law, over the full allocated domain.
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for k in 0..D {
-            inputs.push(&sim.fields.cons.mom[k]);
-        }
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.workspace.u_n.den];
-        for k in 0..D {
-            outputs.push(&sim.workspace.u_n.mom[k]);
-        }
         let name = format!("iso_snapshot_{D}d");
+        let (inputs, outputs) =
+            bind_by_manifest(&name, |b| resolve_snapshot_into(sim, &sim.workspace.u_n, b));
         dispatch_fields::<Sc, Mem, D>(
             &name,
             &sim.geom.allocated,
@@ -702,18 +690,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     }
 
     fn snapshot_stage(&self, sim: &FieldStore<D, D, Mem, Sc>) {
-        // u_stage = cons (pure copy via the snapshot kernel), positional buffers (no nrg).
-        // identical to `snapshot` but targets u_stage — the stage-input state the additive
-        // source pass reads. snapshot over the interior (where source_apply iterates).
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for k in 0..D {
-            inputs.push(&sim.fields.cons.mom[k]);
-        }
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.workspace.u_stage.den];
-        for k in 0..D {
-            outputs.push(&sim.workspace.u_stage.mom[k]);
-        }
+        // u_stage = cons (pure copy via the snapshot kernel, no nrg): the stage-input state
+        // the additive source pass reads, over the interior (where source_apply iterates).
+        // the manifest's `u_n` destination slot is resolved onto u_stage.
         let name = format!("iso_snapshot_{D}d");
+        let (inputs, outputs) = bind_by_manifest(&name, |b| {
+            resolve_snapshot_into(sim, &sim.workspace.u_stage, b)
+        });
         dispatch_fields::<Sc, Mem, D>(
             &name,
             &sim.geom.allocated,

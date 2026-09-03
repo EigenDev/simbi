@@ -27,18 +27,18 @@
 use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_carrier::Scalar;
 use symbi_grid::Field;
-use symbi_ir::ScalarRef;
+use symbi_ir::{FieldBind, ScalarRef};
 use symbi_xpu::MemorySpace;
 
 use std::sync::Arc;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    FluxSpec, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
+    FluxSpec, GradientBc, RuntimeSource, ScalarBind, Solver, bind_by_manifest, cfl_wave_speed,
     dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
     dispatch_godunov, dispatch_gradient_boundaries, dispatch_runtime_source, dof_lift_suffix,
     fused_runtime_cpu_kernel, geom_scalar, gr_chart_dof_tag, kernel_geom, resolve_params,
-    scalars_for, shell_accretion_rates, spacetime_slug,
+    resolve_path, resolve_snapshot_into, scalars_for, shell_accretion_rates, spacetime_slug,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Spacetime;
@@ -285,23 +285,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // the primitives now hold a state recovered from the conserved fields; anything
         // reading prim.* outside the evolve loop checks this before trusting it.
         sim.mark_primitives_recovered();
-        let cnrg = sim.fields.cons.nrg_field().expect("Rhd requires cons.nrg");
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-
-        // inputs: cons den, mom_0..mom_{DOF-1}, nrg. outputs: prim rho, vel_0.., pre.
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for k in 0..DOF {
-            inputs.push(&sim.fields.cons.mom[k]);
-        }
-        inputs.push(cnrg);
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
-        for k in 0..DOF {
-            outputs.push(&sim.fields.prim.vel[k]);
-        }
-        outputs.push(pre);
-        // the c2p status channel: the recovery kernel writes its accept/reject
-        // fact alongside the candidate, so the channel has one producer.
-        outputs.push(&sim.fields.c2p_error);
 
         // the GR path uses the metric-aware Valencia recovery (`|S|^2 = gamma^{ij} S_i S_j`,
         // contravariant `v^i`); its name carries the spacetime slug and it reads the lapse
@@ -368,6 +352,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             });
             (name, scalars)
         };
+        // bound by manifest: cons den, mom_0.., nrg -> prim rho, vel_0.., pre, and the c2p
+        // status channel the recovery kernel writes alongside the candidate.
+        let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
+            FieldBind::Ref(fref) => {
+                resolve_path(sim, Some(pre), Some(&sim.fields.c2p_error), 0, *fref)
+            }
+            other => panic!("rhd c2p: unknown manifest slot '{}'", other.name()),
+        });
         dispatch_fields::<Sc, Mem, D>(
             &name,
             &sim.geom.allocated,
@@ -527,11 +519,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
         GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
             |region, p| {
-                let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
-                for k in 0..DOF {
-                    outputs.push(&sim.fields.prim.vel[k]);
-                }
-                outputs.push(pre);
+                let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
+                    FieldBind::Ref(fref) => resolve_path(sim, Some(pre), None, 0, *fref),
+                    other => panic!("rhd ghost_fill: unknown manifest slot '{}'", other.name()),
+                });
                 // ints: map_type_0..{D-1}, arg_0..{D-1}. scalars: vel_sign_0..{D-1} (+ the
                 // metric mass/spin and the log-aware grid scalars on the kerr instance).
                 // params by name via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
@@ -576,7 +567,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     &name,
                     &sim.geom.allocated,
                     &region.domain,
-                    &[],
+                    &inputs,
                     &outputs,
                     &ints,
                     &scalars,
@@ -596,24 +587,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn snapshot(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
-        let cnrg = sim.fields.cons.nrg_field().expect("cons.nrg");
-        let unrg = sim.workspace.u_n.nrg_field().expect("u_n.nrg");
-
-        // inputs: cons den, mom_0.., nrg. outputs: u_n den, mom_0.., nrg. the DOF-lift tag
-        // (spherical swirl) selects the instance copying the extra momentum.
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for k in 0..DOF {
-            inputs.push(&sim.fields.cons.mom[k]);
-        }
-        inputs.push(cnrg);
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.workspace.u_n.den];
-        for k in 0..DOF {
-            outputs.push(&sim.workspace.u_n.mom[k]);
-        }
-        outputs.push(unrg);
-
+        // u_n = cons (den, mom_0.., nrg), bound by manifest. the DOF-lift tag (spherical
+        // swirl) selects the instance copying the extra momentum.
         let geom_sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("rhd_snapshot{geom_sfx}_{D}d");
+        let (inputs, outputs) =
+            bind_by_manifest(&name, |b| resolve_snapshot_into(sim, &sim.workspace.u_n, b));
         dispatch_fields::<Sc, Mem, D>(
             &name,
             &sim.geom.allocated,
@@ -627,21 +606,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn snapshot_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // u_stage = cons (den, mom_0.., nrg), the pre-godunov state FOFC restores to reconstruct
-        // the first-order redo from. mirrors `snapshot` (which targets u_n).
-        let cnrg = sim.fields.cons.nrg_field().expect("cons.nrg");
-        let unrg = sim.workspace.u_stage.nrg_field().expect("u_stage.nrg");
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for k in 0..DOF {
-            inputs.push(&sim.fields.cons.mom[k]);
-        }
-        inputs.push(cnrg);
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.workspace.u_stage.den];
-        for k in 0..DOF {
-            outputs.push(&sim.workspace.u_stage.mom[k]);
-        }
-        outputs.push(unrg);
+        // the first-order redo from. the snapshot manifest's `u_n` destination slot is
+        // resolved onto u_stage.
         let geom_sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("rhd_snapshot{geom_sfx}_{D}d");
+        let (inputs, outputs) = bind_by_manifest(&name, |b| {
+            resolve_snapshot_into(sim, &sim.workspace.u_stage, b)
+        });
         dispatch_fields::<Sc, Mem, D>(
             &name,
             &sim.geom.allocated,

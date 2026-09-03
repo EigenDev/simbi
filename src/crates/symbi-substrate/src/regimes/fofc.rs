@@ -31,9 +31,11 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use crate::kernels::support::FaceDomain;
 use crate::regimes::substrate_gpu::field_reduce;
 use crate::regimes::substrate_kernels::{
-    coord_suffix, dispatch_fields_each, kernel_field_binds, resolve_body_scalars,
+    bind_by_manifest, coord_suffix, ct_role, dispatch_fields_each, free_payload,
+    resolve_body_scalars,
 };
 use symbi_ir::emit::ReductionOp;
+use symbi_ir::{CtCellCt, CtScratch, FieldBind};
 
 // FOFC observability counters — the running totals of deliberate fallback events over a run, so a
 // run can surface how often/where the first-order flux correction and the last-resort freeze fired
@@ -258,24 +260,18 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("{prefix}_fofc_{tag}{dof_sfx}_{D}d");
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        let comp = &s[2..]; // strip "s_" / "d_"
-        if s.starts_with("s_") {
+    // every slot is free scratch spelled `s_{comp}` / `d_{comp}`.
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        let s = free_payload("fofc_copy", b);
+        if let Some(comp) = s.strip_prefix("s_") {
             fofc_comp(src.0, src.1, comp)
-        } else {
+        } else if let Some(comp) = s.strip_prefix("d_") {
             fofc_comp(dst.0, dst.1, comp)
+        } else {
+            panic!("fofc_copy: unknown slot '{s}'")
         }
     };
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    for (bind, is_out) in kernel_field_binds(&name).iter() {
-        let fld = slot(&bind.name());
-        if *is_out {
-            outputs.push(fld);
-        } else {
-            inputs.push(fld);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(&name, slot);
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.allocated, &inputs, &outputs, &[], &[]);
 }
 
@@ -298,7 +294,9 @@ pub fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("{prefix}_fofc_select{dof_sfx}_{D}d");
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
+    // every slot is free scratch: `freeze`, `us_{comp}`, `x_{comp}`.
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        let s = free_payload("fofc_select", b);
         if s == "freeze" {
             // the FreezeApplied channel: the select reports its own act.
             freeze
@@ -313,16 +311,7 @@ pub fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
             panic!("fofc_select: unknown slot '{s}'")
         }
     };
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    for (bind, is_out) in kernel_field_binds(&name).iter() {
-        let fld = slot(&bind.name());
-        if *is_out {
-            outputs.push(fld);
-        } else {
-            inputs.push(fld);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(&name, slot);
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
 }
 
@@ -350,7 +339,9 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
     let u_stage = sim.stage_input();
     let cons = &sim.fields.cons;
     let prim = &sim.fields.prim;
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
+    // every slot is free scratch: `freeze`, `us_{comp}`, `x_{comp}`.
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        let s = free_payload("fofc_select_with_body", b);
         if s == "freeze" {
             // the FreezeApplied channel: the select reports its own act.
             freeze
@@ -362,16 +353,7 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
             panic!("fofc_select_with_body: unknown slot '{s}'")
         }
     };
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    for (bind, is_out) in kernel_field_binds(&name).iter() {
-        let fld = slot(&bind.name());
-        if *is_out {
-            outputs.push(fld);
-        } else {
-            inputs.push(fld);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(&name, slot);
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &scalars);
 }
 
@@ -429,10 +411,14 @@ pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
     let name = format!("{prefix}_fofc_splice{dof_sfx}_{D}d_{dir}");
     let flux = &sim.fields.flux[dir];
     let prim = &sim.fields.prim;
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        if s == "flag" {
-            flag
-        } else if let Some(c) = s.strip_prefix("fo_") {
+    // the flag is the reserved CT cell scratch `FofcFlag`; the flux slots are free scratch
+    // spelled `fo_{comp}` / `ho_{comp}`.
+    let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        if ct_role(b) == Some(CtScratch::Cell(CtCellCt::FofcFlag)) {
+            return flag;
+        }
+        let s = free_payload("fofc_splice", b);
+        if let Some(c) = s.strip_prefix("fo_") {
             // the live flux buffer: read (first-order) + write (spliced), one in-place binding.
             fofc_comp(flux, prim, c)
         } else if let Some(c) = s.strip_prefix("ho_") {
@@ -441,16 +427,7 @@ pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
             panic!("fofc_splice: unknown slot '{s}'")
         }
     };
-    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-    for (bind, is_out) in kernel_field_binds(&name).iter() {
-        let fld = slot(&bind.name());
-        if *is_out {
-            outputs.push(fld);
-        } else {
-            inputs.push(fld);
-        }
-    }
+    let (inputs, outputs) = bind_by_manifest(&name, slot);
     dispatch_fields_each::<Sc, Mem, D>(
         &name,
         &sim.geom.interior.face_domain(dir),
