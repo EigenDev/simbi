@@ -19,6 +19,10 @@ pub mod sim;
 // one-import convenience surface for users: `use symbi::prelude::*;`
 pub mod prelude;
 
+// the rust scientific surface: a `Problem` stated in physics vocabulary,
+// realized on the engine through the source admission door.
+pub mod problem;
+
 // tiled parallel dispatch (DomainForEach trait for #[symbi::kernel(coord)])
 pub mod dispatch;
 

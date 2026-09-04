@@ -1674,32 +1674,49 @@ makes safe to reason about but which no stage activates:
   generated-source difference under every byte-identity comparison);
 - Metal and SYCL backend adapters (only CPU, CUDA, and HIP are wired).
 
-### Phase 7: normalize the language and geography
+### Phase 7: design the scientific language and normalize its geography
 
-After the architectural phases are complete, run a deliberately semantics-free
-aesthetic sweep. Its purpose is not brevity for its own sake: the names and the
-source tree should describe the architecture that survived the refactor rather
-than preserve the vocabulary and module boundaries of its migration history.
+After the architectural phases are complete, first design the scientific API
+that exposes their payoff, then run a deliberately semantics-preserving
+aesthetic sweep. The API will not emerge automatically from better internals:
+without an explicit pass, internal compiler vocabulary can remain the accidental
+user interface. Its purpose is not brevity for its own sake. A scientist should
+state physics and numerical intent; tracing, admission witnesses, manifests,
+buffer binding, effects, and backend launch mechanics should remain behind the
+compiler boundary unless the expert API is deliberately requested.
 
-The governing test is:
+The governing tests are:
 
 > Can a new reader predict where a concept lives and what a name means without
 > knowing how the project used to be implemented?
+>
+> Can a representative simulation be understood and configured without knowing
+> IR nodes, tracing machinery, manifests, buffer order, admission witnesses, or
+> backend-specific launch details?
 
-Proceed in three passes:
+Proceed in four passes:
 
-1. **Canonical vocabulary.** Establish one term for each concept and remove its
+1. **Scientific surface.** Derive the smallest public language from real
+   simulations — BHL accretion, blast waves, disks, and immersed bodies — rather
+   than from the current crate layout. The surface should name fields, physical
+   laws, sources, boundaries, recovery/admissibility policy, lawful composition,
+   numerical policy, diagnostics, and backend selection. Provide constructors
+   that mint the required internal witnesses, small end-to-end examples, and
+   compile-fail tests for invalid combinations. Keep a clearly marked expert
+   escape hatch for compiler-level work; do not make ordinary scientific code
+   manipulate `GvKernel`, IR nodes, manifests, buffer lists, or raw effect sets.
+2. **Canonical vocabulary.** Establish one term for each concept and remove its
    historical synonyms. In particular, audit program versus graph, receipt
    versus report versus ledger, recovery versus admissibility, field versus
    slot versus binding, and effect versus access versus dependence. Preserve
    distinctions that carry different laws; rename only false multiplicity.
-2. **Structural geography.** Rename files, modules, and directories so the tree
+3. **Structural geography.** Rename files, modules, and directories so the tree
    narrates the dependency direction — physics describes laws, tracing builds
    programs, compiler layers analyze them, execution interprets them, and
    diagnostics record interventions. Split files that still own unrelated
    responsibilities and merge tiny modules whose boundary is purely
    historical.
-3. **Local expression.** Tighten type, function, variable, and test names.
+4. **Local expression.** Tighten type, function, variable, and test names.
    Remove suffixes such as `gv_` or `built_` once they no longer distinguish a
    live alternative, and replace vague local names (`ctx`, `spec`, `data`,
    `impl`) where a precise physical or compiler role is available. Do not
@@ -1712,6 +1729,10 @@ This phase has strict discipline:
 - do not retain aliases or compatibility facades for deleted internal names;
 - do not combine renames with arithmetic, scheduling, ABI, serialization, or
   ownership changes;
+- design and pin the scientific surface before renaming internals around it;
+- keep the ordinary scientific API independent of compiler and backend types,
+  and keep the expert escape hatch explicit rather than allowing accidental
+  leakage;
 - preserve typed identities and keep strings at presentation boundaries;
 - update documentation, tests, examples, and Python names as one atomic
   vocabulary migration where they express the same public concept;
@@ -1721,7 +1742,160 @@ This phase has strict discipline:
 
 Success means the filesystem, public API, and local expressions tell the same
 story as the enforced architecture, with no knowledge of the refactor required
-to understand them.
+to understand them. A representative problem should read primarily as physics
+and numerical intent, while the system derives execution, proves composition
+and admission legality, selects a capable backend, and records every numerical
+intervention.
+
+#### Pass 1 — the scientific surface (designed, not built)
+
+An exemplar-driven read-only audit of four representative problems — Bondi/BHL
+accretion (`newtonian/bondi.py`, `grhd/gr_bondi.py`), a Sedov blast with static
+refinement (`newtonian/sedov.py`, `refined_blast.py`), a Fishbone-Moncrief torus
+and a locally-isothermal disk (`grhd/gr_fishbone_moncrief.py`,
+`isothermal/dittmann_single_disk.py`), and a tumbling rigid body
+(`ibm/tumbling_body.py`) — establishes where the current language stands.
+
+**The boundary already holds.** No compiler-internal type reaches config code.
+`GvKernel`/`KernelProgram`, the effect algebra, manifests and buffer order, the
+admission witnesses, kernel-name strings, and `MemorySpace` appear nowhere in
+`simbi/` or `simbi_configs/`; the backend (cuda/hip) is a build choice, and a
+config sees only `gpus` and a compute mode. A scientist writes a Pydantic
+`SimbiProblem` subclass: required `regime` + closure, `coord_system`,
+`resolution`, `bounds`; one `initial_primitive_state` generator; and optional
+overrides for boundaries, sources, bodies, refinement, and transport. The
+redesign is vocabulary and a few specific seams, not a rewrite.
+
+**The seams to close.**
+
+- **The source graph is visible.** The source DSL is a traced expression graph.
+  Its ergonomic layer names physics (`force`, `cooling`, `sponge`, `coords`,
+  `velocity`), but `Expr`, `ExprGraph`, and a bare `.graph` handle are public and
+  three configs reach for the graph directly, in two patterns: the disk passes
+  `x1.graph` to a constant, and the two refined-atmosphere configs call
+  `primitives[0].graph.compile(..)` (the leak-ratchet pin found the complete set,
+  which the manual read undercounted). The graph is the compiler's, and it should
+  stay behind the boundary; a source reads as an algebraic function of named
+  physical quantities, with the graph minted for the scientist rather than by them.
+- **Four distinct concerns share no discoverable home.** Excision, background
+  state, sinks, and numerical failure handling are each expressed obliquely today —
+  `excision_radius`, an `atm_pre_frac` corona, drain radii on bodies, and floors
+  buried in the recovery ladder — with no shared place to find them. They must stay
+  four typed concepts, not collapse into one, because they carry different laws:
+  **excision** defines the computational domain (a region the solver does not
+  evolve); **atmosphere/background** defines physical initial or ambient state;
+  **sink/drain** defines a modeled source or boundary interaction (a body
+  capability); and **recovery/admissibility** defines numerical failure handling
+  (floors, the c2p fallback ladder). They may share one discoverable configuration
+  neighborhood, but each stays a distinct type with its own laws — unifying them
+  would be the false economy this phase exists to remove.
+- **The grid is recomputed by hand.** Every `initial_primitive_state` recomputes
+  `dx` from `bounds`/`resolution` and loops raw indices. The mesh geometry the
+  system already owns should be handed to the generator (cell centroids, volumes,
+  spacing) so the scientist states a field as a function of position, not of a
+  reconstructed index.
+- **There is no Rust scientific surface.** Python is the sole frontend; the Rust
+  `examples/` are compiler tooling (codegen, kernel survey, timing). The ideal
+  Rust usage is greenfield — a `Problem` a scientist fills, free of IR and
+  kernels — and designing it doubles as a check that the concepts are language-
+  independent.
+
+**The five layers.** Every configurable quantity sorts into exactly one:
+
+| layer | the scientist manipulates | examples today |
+|---|---|---|
+| scientific concepts | fields, regime + closure, geometry, boundaries, sources, bodies, recovery policy, lawful composition | `regime`, `initial_primitive_state`, `bx*`, `force`/`sponge`, `immersed_bodies` |
+| advanced numerical policy | solver, reconstruction, limiter, CFL, time stepping, refinement, viscosity/resistivity, mesh motion | `solver`, `reconstruction`, `cfl_number`, `refinement_*`, `viscosity` |
+| diagnostics + intervention evidence | checkpoints, census/reductions, the recovery ledger, tracers | `census_expressions`, `checkpoint_interval`, the projection ledger |
+| compiler/runtime internals (hidden) | tracing, IR nodes, manifests, effects, admission witnesses, buffer order, kernel names, launch | `Expr`/`ExprGraph`/`.graph`, everything Rust-side |
+| expert escape hatch (explicit) | the compiler surface, requested by name | `simbi.expert` / `symbi::expert` (proposed) |
+
+**Ideal usage — Python.** The Sedov blast, in the proposed surface, states physics
+and hands the generator the mesh it needs, with no hand-recomputed geometry and no
+graph handle:
+
+```python
+class SedovTaylor(Problem):
+    gamma: float = 5 / 3
+    e0: float = 1.0
+
+    regime = Regime.newtonian(self.gamma)
+    geometry = Geometry.spherical(radius=(0.1, 1.0), zones_per_decade=128, spacing=Log)
+    boundaries = Boundaries(r=(Reflecting, Outflow), theta=Reflecting)
+
+    def initial_state(self, mesh) -> GasState:
+        r = mesh.centroid.r
+        hot = mesh.encloses(radius=mesh.dr[0])
+        return GasState(density=self.rho_amb, pressure=where(hot, self.e0 / mesh.cell_volume, self.p_amb))
+```
+
+The Bondi accretor adds a source and a body as composable contributions, and
+states the four distinct concerns as their own typed fields — excision on the
+geometry (it shapes the domain), the background as ambient state, the sink as a
+body capability, and floors as the numerical recovery policy:
+
+```python
+    geometry = Geometry.spherical(radius=(1.0, 100.0), spacing=Log).excise(Ball(self.r_excise))
+    background = Ambient.cold_vacuum(density=self.rho_floor, pressure=self.p_floor)
+    sources = [Sponge(toward=self.far_field, over=Shell(inner=0.9 * self.r_out))]
+    bodies = [Accretor(at=Origin, radius=self.r_acc, gravity=PointMass(self.gm))]
+    recovery = Recovery(floors=self.background)
+```
+
+**Ideal usage — Rust.** The same problem, in a surface that does not exist today,
+carries the same concepts with no IR or kernel type in sight:
+
+```rust
+struct Sedov { gamma: f64, e0: f64 }
+impl Problem for Sedov {
+    fn regime(&self) -> Regime { Regime::newtonian(self.gamma) }
+    fn geometry(&self) -> Geometry { Geometry::spherical().radius(0.1, 1.0).zones_per_decade(128).log() }
+    fn boundaries(&self) -> Boundaries { Boundaries::new().r(Reflecting, Outflow).theta(Reflecting) }
+    fn initial_state(&self, mesh: &Mesh) -> GasState {
+        let hot = mesh.encloses(mesh.dr()[0]);
+        GasState::new(self.rho_amb, where_(hot, self.e0 / mesh.cell_volume(), self.p_amb))
+    }
+}
+```
+
+**Canonical vocabulary and migration map** (Pass 2 renames these; Pass 1 fixes the
+public term):
+
+| concept | current names | canonical |
+|---|---|---|
+| a state quantity | field / slot / component / variable / leaf | **field** (primitive), **conserved slot** (den/mom/nrg) — distinct laws, kept |
+| a source term | source spec / signature / vocabulary / kind | **contribution** (the value) + **signature** (its declared reads/params) |
+| accumulated run output | receipt / report / ledger / census | **ledger** (intervention evidence) + **census** (binned reduction) — distinct, kept |
+| the outer-boundary relaxation | sponge / buffer / damping / relax | **sponge** (toward a state) vs **relax** (toward equilibrium) — distinct, kept; drop "buffer/damping" as synonyms |
+| an immersed boundary | body / wall / surface / mask / sink / accretor / drain | **body** (the object) with **capability** (rigid / accretor / gravitational) |
+| static refinement | refinement / fmr / amr / smr | **refinement** |
+| the closure | regime / eos / adiabatic\_index==1 | **regime** carries the closure; isothermal is a regime, never a gamma value |
+| the traced source graph | Expr / ExprGraph / .graph | hidden; the scientist writes an **expression** over named quantities |
+
+**Compatibility policy.** The scientific surface is designed once and pinned before
+any internal rename. The existing `SimbiProblem` config shape is preserved through
+Pass 1 (it is already insulated); the source DSL's graph handles (`Expr`,
+`ExprGraph`, `.graph`) move behind an expression builder, and the one config that
+touches `.graph` migrates with that change. No compatibility facade is retained for
+a deleted internal name; the expert escape hatch is the only sanctioned path to the
+compiler surface, requested explicitly.
+
+**Construction-rejection laws (Python) and compile-fail laws (Rust).** The proposed
+surface rejects, at construction on the Python side and at compile time on the Rust
+side rather than at run, every invalid combination the four problems could form: an
+energy source on an isothermal regime; a magnetic field or CT method on a non-MHD
+regime; a source whose observed reads exceed its declared signature (already enforced
+by admission); a boundary state whose arity mismatches the regime's primitive count;
+a body capability that the regime cannot support; a refinement region outside the
+domain; a gamma supplied to an isothermal regime or a sound speed to an energy regime.
+
+**Acceptance examples.** Pass 1 is complete when the four exemplars are written in
+the proposed Python surface and the proposed Rust surface, each expressing every
+feature it uses today — refinement, driven boundaries, sponges, accretors, rigid
+bodies with CSG shapes, GR spacetimes, local isothermality, viscosity — with no
+occurrence of `Expr`/`ExprGraph`/`.graph`, IR nodes, manifests, effects, admission
+witnesses, buffer order, kernel names, or backend launch types, and each runs to a
+checkpoint whose baked kernels match today's byte-for-byte.
 
 ## 17. Non-goals
 
