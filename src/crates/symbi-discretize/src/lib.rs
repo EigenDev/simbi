@@ -32,6 +32,7 @@ pub mod gv_viscous;
 pub mod ibm;
 pub mod kernel_slug;
 pub mod lattice;
+pub mod magnetic_slip_ct;
 
 pub use coords::{Coords, EosArm, Recon, Spacetime, Spacing};
 // facade: the carrier types live in symbi-ir alongside Op + Graph. re-export them so the
