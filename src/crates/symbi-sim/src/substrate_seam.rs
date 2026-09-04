@@ -7,7 +7,7 @@
 // `FieldStore`/`state.rs` from depending up into `regimes` (which would be a cycle).
 //
 // homed here in `symbi-sim`, every reference from the sim core points down; the
-// concrete kernelsets in the `symbi` crate's `regimes/` implement `KernelSet` and
+// concrete kernelsets in `symbi-substrate`'s `regimes/` implement `KernelSet` and
 // depend down on this module.
 //
 // contents:
@@ -16,7 +16,7 @@
 //
 // the regime -> concrete-KernelSet map (`RegimeSubstrate`) and the `sim.substrate()`
 // convenience are not here: they name concrete kernelsets, so they live in the substrate
-// layer (the `symbi` crate). the orphan rule enforces this — a trait mapping the foreign
+// layer (`symbi-substrate`). the orphan rule enforces this — a trait mapping the foreign
 // `Regime` types to local kernelsets must be local to the crate that owns the kernelsets.
 //
 // usage:

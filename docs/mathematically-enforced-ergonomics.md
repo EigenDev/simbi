@@ -2302,6 +2302,51 @@ compatibility policy for no semantic gain. The action is a doc clarification at 
 two enum definitions — recording that here "slot" means the state-buffer family and
 "comp" the state-vector member — not a type churn.
 
+### Phase 7 Pass 3 — structural geography (audited, aligned)
+
+The crate and module geography already matches the dependency story
+`scientific API -> physics -> tracing -> compiler -> runtime -> diagnostics`. The
+~20 `symbi-*` crates form a clean downward-only dependency graph with no wrong-way
+edge: physics (`symbi-hydro`, `symbi-geometry`) depends on nothing above
+carrier/geometry, the IR (`symbi-ir`) and compiler backends (`symbi-jit`,
+`symbi-aot`) sit below program construction (`symbi-source-compile`) and the
+runtime (`symbi-exec`, `symbi-substrate`), and the scientific API boundary
+(`symbi-py`) sits at the top.
+
+The alignment is enforced, not conventional. The load-bearing boundaries to
+preserve:
+
+- **physics ⊥ compiler**, enforced by a structural gate test
+  (`symbi-hydro/tests/physics_graph_boundary.rs`) that fails the build if `Graph`,
+  `NodeId`, or the IR op vocabulary appears in physics production code — the single
+  most load-bearing boundary;
+- the **sim ↔ substrate seam** (`substrate_seam.rs`): `KernelSet`/`Solver`/
+  `RegimeKind` homed in `symbi-sim` so `FieldStore` points down and the concrete
+  kernelsets in `symbi-substrate/regimes/` point down onto the abstraction, breaking
+  a would-be cycle;
+- the **carrier/constitution split** (`symbi-carrier`): `Scalar`/`Dual`/`Gv` below
+  physics and IR, so one physics source compiles at `S = f64` (host) and `S = Gv`
+  (trace);
+- the **discretize bridge** (`symbi-discretize`): the one place physics crosses
+  into IR (instantiating carrier-generic physics at `S = Gv`), isolated so the
+  physics ⊥ compiler boundary can hold;
+- the **abi leaf** (`symbi-abi`): the closed, wire-sensitive field-name vocabulary,
+  kept below the IR.
+
+Verified deliberate seams that look misplaced but are not: `GuardReceipt` (defined
+in `symbi-sim`, minted by the substrate producer — correct diagnostic ownership),
+`census_sample` in the substrate (only the device-bound reduce lives there; the
+binning algebra is pure in `symbi-sim/census.rs`), `gpu_launcher` in
+`symbi-source-compile` (the GPU peer of the CPU source evaluator, same IR), and
+`ReductionOp` in `symbi-ir` (a genuine compiler emit-vocabulary type reused
+downward). None move.
+
+The one genuine defect is documentation drift: the `substrate_seam.rs` header names
+"the `symbi` crate's `regimes/`", but the concrete kernelsets and `RegimeSubstrate`
+map live in `symbi-substrate/regimes/`. The comment describes an earlier phase's
+geography and now mis-points a reader; corrected in place. No file moves are
+justified — semantic ownership and filesystem ownership are aligned.
+
 ## 17. Non-goals
 
 This program does not seek to:
