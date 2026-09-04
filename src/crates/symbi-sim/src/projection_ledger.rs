@@ -224,6 +224,16 @@ pub fn open_scope() -> LedgerScope {
     }
 }
 
+impl LedgerScope {
+    /// the accepted projection totals booked under this run's scope. reading
+    /// requires the open scope, so only the run that owns the booking window can
+    /// extract its own evidence — a sequential or concurrent run reads its own,
+    /// never another's.
+    pub fn accepted(&self) -> ProjectionLedger {
+        BOOK.with(|cell| cell.get().accepted)
+    }
+}
+
 impl Drop for LedgerScope {
     fn drop(&mut self) {
         let unresolved = with_book(|b| {
@@ -426,6 +436,23 @@ mod tests {
         let s = open_scope();
         let overlap = std::panic::catch_unwind(open_scope);
         assert!(overlap.is_err());
+        drop(s);
+    }
+
+    /// a rejected nested open leaves the outer scope's booking intact: the open
+    /// checks `!open` before clearing, so it panics without touching the book,
+    /// and the outer run commits and reports its own evidence unchanged.
+    #[test]
+    fn a_rejected_nested_open_leaves_the_outer_scope_intact() {
+        let s = open_scope();
+        record(&fired(3.0, 0.0), 1.0);
+        let nested = std::panic::catch_unwind(open_scope);
+        assert!(nested.is_err(), "the nested open must reject");
+        // the outer scope still books, commits, and reports its own totals.
+        step_commit();
+        let (_, accepted) = ledger_report();
+        assert_eq!(accepted.passes, 1);
+        assert_eq!(accepted.intervention_den.signed, 3.0);
         drop(s);
     }
 

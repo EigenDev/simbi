@@ -20,6 +20,7 @@
 // =============================================================================
 
 pub mod projection_ledger;
+pub mod run_diagnostics;
 pub mod census;
 pub mod checkpoint;
 pub mod decomp;

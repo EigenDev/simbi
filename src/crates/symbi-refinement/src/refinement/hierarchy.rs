@@ -1426,7 +1426,10 @@ where
     /// march the hierarchy to t_final: the root's cfl sets dt, advance_level
     /// recurses through the levels, then the root advances its clock and body
     /// state (mirroring evolve_with_callback).
-    pub fn evolve(&mut self, t_final: f64) -> symbi_xpu::Result<()> {
+    pub fn evolve(
+        &mut self,
+        t_final: f64,
+    ) -> symbi_xpu::Result<symbi_sim::run_diagnostics::RunDiagnostics> {
         self.evolve_with_callback(t_final, u64::MAX, |_| std::ops::ControlFlow::Continue(()))
     }
 
@@ -1439,7 +1442,7 @@ where
         t_final: f64,
         interval: u64,
         callback: impl FnMut(&Self) -> std::ops::ControlFlow<()>,
-    ) -> symbi_xpu::Result<()> {
+    ) -> symbi_xpu::Result<symbi_sim::run_diagnostics::RunDiagnostics> {
         self.evolve_with_callback_impl(t_final, interval, true, callback)
     }
 
@@ -1451,7 +1454,7 @@ where
         t_final: f64,
         interval: u64,
         callback: impl FnMut(&Self) -> std::ops::ControlFlow<()>,
-    ) -> symbi_xpu::Result<()> {
+    ) -> symbi_xpu::Result<symbi_sim::run_diagnostics::RunDiagnostics> {
         for level in &self.levels {
             level.kernels.ghost_fill(&level.state);
         }
@@ -1464,7 +1467,7 @@ where
         interval: u64,
         prepare_initial_state: bool,
         mut callback: impl FnMut(&Self) -> std::ops::ControlFlow<()>,
-    ) -> symbi_xpu::Result<()> {
+    ) -> symbi_xpu::Result<symbi_sim::run_diagnostics::RunDiagnostics> {
         // homologous mesh motion applies on a single grid: the hierarchy's flux
         // registers and transfer operators are written for a fixed mesh. a
         // 1-level hierarchy runs without registers or transfer, so motion is
@@ -1485,14 +1488,25 @@ where
         // context, so the exchange schedule is empty and the step runs the uni-grid
         // transaction. the driver owns the watchdog, the step-panic catch, and the
         // observer cadence for every shape.
-        evolve_tiles::<R, NDIM, DOF, M, E, S, Mem, K, symbi_sim::decomp::LocalCopy, _>(
+        let diagnostics = evolve_tiles::<
+            R,
+            NDIM,
+            DOF,
+            M,
+            E,
+            S,
+            Mem,
+            K,
+            symbi_sim::decomp::LocalCopy,
+            _,
+        >(
             std::slice::from_mut(self),
             None,
             t_final,
             interval,
             |ts| callback(&ts[0]),
         );
-        Ok(())
+        Ok(diagnostics)
     }
 
     /// run the one-time IC preparation at the current time: bcell-from-bface,
@@ -4203,7 +4217,8 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
     t_final: f64,
     interval: u64,
     mut callback: F,
-) where
+) -> symbi_sim::run_diagnostics::RunDiagnostics
+where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
@@ -4222,6 +4237,16 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
     // handle closes at return, leaving the totals queryable.
     let ledger_scope = (n == 1 && decomp.is_none() && tiles[0].levels.len() == 1)
         .then(symbi_sim::projection_ledger::open_scope);
+    // the run-owned diagnostics: the accepted projection totals read from this
+    // run's own scope. a decomposed or refined run opens no scope and reports the
+    // empty projection. reading through the scope binds the evidence to this run,
+    // so no other run's totals can leak in.
+    let run_diagnostics = || symbi_sim::run_diagnostics::RunDiagnostics {
+        projection: ledger_scope
+            .as_ref()
+            .map(symbi_sim::projection_ledger::LedgerScope::accepted)
+            .unwrap_or_default(),
+    };
     let drain = |decomp: Option<(&[i32], [usize; NDIM], &T)>| match decomp {
         Some((devices, _, _)) => drain_devices::<Mem>(devices),
         None => symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>(),
@@ -4329,7 +4354,7 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
             }
             drain(decomp);
             let _ = callback(tiles);
-            return;
+            return run_diagnostics();
         }
         let it = tiles[0].levels[0].state.iteration;
         if it.saturating_sub(last_cb) >= interval {
@@ -4340,7 +4365,7 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
             // the host read in the caller is coherent, then return.
             if callback(tiles).is_break() {
                 drain(decomp);
-                return;
+                return run_diagnostics();
             }
         }
     }
@@ -4348,6 +4373,7 @@ pub fn evolve_tiles<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, 
     // no-op on a host backend).
     drain(decomp);
     let _ = callback(tiles);
+    run_diagnostics()
 }
 
 /// one collective root step of the decomposed march at an agreed timestep: every tile
@@ -4673,7 +4699,9 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
     // cadence. the callback keeps its historical clock: iterations counted from this
     // call's entry, alongside the root time the tiles carry.
     let iter0 = tiles[0].levels[0].state.iteration;
-    evolve_tiles(
+    // a decomposed run opens no projection scope, so its run diagnostics carry the
+    // empty projection; the single-grid path is the one that books evidence.
+    let _ = evolve_tiles(
         tiles,
         Some((devices, counts, transport)),
         t_final,
