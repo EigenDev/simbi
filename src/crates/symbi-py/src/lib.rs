@@ -2144,7 +2144,14 @@ where
         None
     };
     let diag_interval = (cfg.diagnostic_interval * cfg.time_unit).max(f64::MIN_POSITIVE);
-    let mut next_diag = diag_interval;
+    // the existing diagnostics.dat is the authority for the restart seam: whether the
+    // resume-clock sample is already on disk, and where the cadence resumes so no
+    // historical interval is re-emitted.
+    let diag_plan = diag_path.as_ref().map(|dp| {
+        plan_diagnostics(last_diagnostics_time(dp), cfg.start_time, diag_interval)
+            .unwrap_or_else(|detail| panic!("{detail}"))
+    });
+    let mut next_diag = diag_plan.as_ref().map_or(diag_interval, |p| p.next);
     let start = std::time::Instant::now();
     // checkpoint-write seconds, accumulated on every run regardless of SYMBI_PROFILE: the
     // exit summary reports the sustained integration rate with i/o excluded — on a
@@ -2229,12 +2236,14 @@ where
             }
         }
         if let Some(dp) = &diag_path {
-            if let Some(im) = hier.levels.last().and_then(|l| l.state.immersed.as_ref()) {
-                let _ = append_diagnostics(dp, t0, &im.bodies);
-                table.post_diagnostic(&format!(
-                    "diagnostics {dp}  ({}, initial)",
-                    fmt_time_msg(cfg, t0)
-                ));
+            if diag_plan.as_ref().is_some_and(|p| p.write_initial) {
+                if let Some(im) = hier.levels.last().and_then(|l| l.state.immersed.as_ref()) {
+                    let _ = append_diagnostics(dp, cfg.start_time, &im.bodies);
+                    table.post_diagnostic(&format!(
+                        "diagnostics {dp}  ({}, initial)",
+                        fmt_time_msg(cfg, cfg.start_time)
+                    ));
+                }
             }
         }
         set_row(&mut table, i0, t0, d0, t_final, 0.0);
@@ -2394,15 +2403,10 @@ where
         // a dt that spans several intervals collapses to a single notice) and mark
         // the frame dirty so the write is visible the moment it happens.
         if let Some(dp) = &diag_path {
-            let mut wrote = false;
-            while time_at_or_after(time, next_diag) {
+            if diagnostics_due(time, &mut next_diag, diag_interval) {
                 if let Some(im) = h.levels.last().and_then(|l| l.state.immersed.as_ref()) {
                     let _ = append_diagnostics(dp, time, &im.bodies);
                 }
-                next_diag += diag_interval;
-                wrote = true;
-            }
-            if wrote {
                 table.post_diagnostic(&format!("diagnostics {dp}  ({})", fmt_time_msg(cfg, time)));
                 dirty = true;
             }
@@ -3525,6 +3529,91 @@ fn append_diagnostics<const D: usize>(
     Ok(())
 }
 
+/// the clock of the last sample recorded in a `diagnostics.dat` table, or `None` when
+/// the file is absent or carries only its `#`-commented header. the schema puts the
+/// time first on every row, so the final data line's first field is the tail sample's
+/// timestamp; a sample spans one row per body, all sharing that clock.
+fn last_diagnostics_time(path: &str) -> Option<f64> {
+    let text = std::fs::read_to_string(path).ok()?;
+    text.lines()
+        .rev()
+        .find(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+        .and_then(|l| l.split_whitespace().next())
+        .and_then(|field| field.parse::<f64>().ok())
+}
+
+/// two clocks that agree to within the cadence comparator's roundoff tolerance.
+fn same_diagnostic_time(a: f64, b: f64) -> bool {
+    time_at_or_after(a, b) && time_at_or_after(b, a)
+}
+
+/// the diagnostics write plan for a run's start: whether to emit the seam sample at the
+/// resume clock, and the first cadence boundary strictly beyond both the resume clock
+/// and any tail already on disk. the existing `diagnostics.dat` is the authority for
+/// whether the seam sample is already present, so the plan never assumes what a prior
+/// run wrote. the resulting table holds strictly increasing sample times with at most
+/// one sample at `resume_time`.
+#[derive(Debug)]
+struct DiagnosticsPlan {
+    write_initial: bool,
+    next: f64,
+}
+
+/// derive the write plan from the file's recorded tail and the resume clock. a tail
+/// strictly beyond `resume_time` is a restarted branch grafted onto a later timeline
+/// and is rejected — appending would interleave two histories, and trimming the file
+/// is a policy the caller must state. a fresh file (or one whose tail predates the
+/// resume clock) takes the seam sample; a tail already at the resume clock cedes it to
+/// the run that wrote it.
+fn plan_diagnostics(
+    last_written: Option<f64>,
+    resume_time: f64,
+    interval: f64,
+) -> Result<DiagnosticsPlan, String> {
+    let write_initial = match last_written {
+        None => true,
+        Some(last) if same_diagnostic_time(last, resume_time) => false,
+        Some(last) if time_at_or_after(resume_time, last) => true,
+        Some(last) => {
+            return Err(format!(
+                "diagnostics.dat records t = {last:.8e} beyond the restart clock \
+                 t = {resume_time:.8e}: appending would splice a restarted branch into \
+                 a later timeline. trim the file to the restart time to proceed."
+            ));
+        }
+    };
+    // the first cadence multiple strictly beyond both the resume clock and the recorded
+    // tail, so no historical interval is ever re-emitted. the direct estimate lands
+    // within one interval of the boundary; the corrections settle it in O(1) steps.
+    let floor = last_written.map_or(resume_time, |last| last.max(resume_time));
+    let mut next = ((floor / interval).floor().max(0.0) + 1.0) * interval;
+    while time_at_or_after(floor, next) {
+        next += interval;
+    }
+    while next > interval && !time_at_or_after(floor, next - interval) {
+        next -= interval;
+    }
+    Ok(DiagnosticsPlan {
+        write_initial,
+        next,
+    })
+}
+
+/// advance a cadence cursor past every boundary at or before `time`, reporting whether
+/// a sample is due. one call per callback collapses a step that spans many intervals to
+/// a single sample stamped at `time`, keeping the table's sample times strictly
+/// increasing. both the single-grid and decomposed drivers schedule through this, so
+/// their cadence cannot diverge.
+fn diagnostics_due(time: f64, next: &mut f64, interval: f64) -> bool {
+    if !time_at_or_after(time, *next) {
+        return false;
+    }
+    while time_at_or_after(time, *next) {
+        *next += interval;
+    }
+    true
+}
+
 #[cfg(test)]
 mod diagnostics_tests {
     use super::*;
@@ -3689,6 +3778,217 @@ mod diagnostics_tests {
         }];
         let coll = build_bodies::<2>(&params, None);
         assert!(coll.get(0).two_way_coupling);
+    }
+
+    // =====================================================================
+    // diagnostics restart seam: the file on disk is the authority for whether
+    // the resume-clock sample already exists, and the cadence resumes strictly
+    // beyond the recorded tail so no historical interval is re-emitted. the
+    // single-grid and decomposed drivers schedule through the same helpers, so
+    // these unit tests bind both.
+    // =====================================================================
+
+    // a fresh file (or a run at t=0) writes the seam and resumes one interval later.
+    #[test]
+    fn plan_writes_the_seam_on_a_fresh_file() {
+        let dt = 0.25;
+        let plan = plan_diagnostics(None, 0.0, dt).unwrap();
+        assert!(plan.write_initial, "a fresh file must record the initial sample");
+        assert!(
+            (plan.next - dt).abs() < 1e-12,
+            "a fresh run resumes the cadence at the first interval, got {}",
+            plan.next
+        );
+    }
+
+    // a restart with a fresh diagnostics file still records the resume-clock sample,
+    // and the cadence resumes on the first multiple strictly beyond the resume clock.
+    #[test]
+    fn plan_writes_the_seam_when_the_file_is_fresh_on_restart() {
+        let dt = 0.25;
+        let resume = 7.1; // between the 28th and 29th boundary (28*dt = 7.0)
+        let plan = plan_diagnostics(None, resume, dt).unwrap();
+        assert!(plan.write_initial, "a fresh file records the seam even on restart");
+        assert!(plan.next > resume, "cadence resumes past the resume clock");
+        assert!(
+            plan.next <= resume + dt + 1e-12,
+            "cadence resumes on the very next boundary, not further, got {}",
+            plan.next
+        );
+    }
+
+    // a tail already at the resume clock is owned by the run that wrote it: the
+    // resumed run cedes the seam and resumes strictly beyond it.
+    #[test]
+    fn plan_cedes_a_seam_already_present() {
+        let dt = 0.5;
+        let resume = 5.0; // exactly the 10th boundary
+        let plan = plan_diagnostics(Some(resume), resume, dt).unwrap();
+        assert!(!plan.write_initial, "the prior run owns the resume-clock sample");
+        assert!(plan.next > resume, "cadence resumes strictly beyond the seam");
+        assert!((plan.next - (resume + dt)).abs() < 1e-12, "got {}", plan.next);
+    }
+
+    // a tail behind the resume clock leaves the seam missing: the resumed run fills it.
+    #[test]
+    fn plan_fills_a_missing_seam() {
+        let dt = 0.5;
+        let resume = 5.0;
+        let tail = 4.0; // last sample predates the checkpoint we resumed from
+        let plan = plan_diagnostics(Some(tail), resume, dt).unwrap();
+        assert!(plan.write_initial, "a tail behind the resume clock leaves the seam to fill");
+        assert!(plan.next > resume, "cadence resumes past the resume clock, got {}", plan.next);
+    }
+
+    // a tail strictly beyond the resume clock is a restarted branch grafted onto a
+    // later timeline; the plan refuses it rather than interleaving two histories.
+    #[test]
+    fn plan_rejects_a_tail_beyond_the_resume_clock() {
+        let dt = 0.5;
+        let resume = 5.0;
+        let tail = 6.5; // output already past where this restart begins
+        let err = plan_diagnostics(Some(tail), resume, dt)
+            .expect_err("a tail beyond the restart clock must be rejected");
+        assert!(err.contains("beyond the restart clock"), "{err}");
+    }
+
+    // a single step spanning many intervals reports one due sample and advances the
+    // cursor past every crossed boundary — no burst of same-timestamp rows.
+    #[test]
+    fn a_large_step_yields_one_sample_not_a_burst() {
+        let dt = 0.1;
+        let mut next = dt;
+        let jump = 5.05; // spans ~50 intervals in one step
+        assert!(diagnostics_due(jump, &mut next, dt), "the crossed cadence is due");
+        assert!(next > jump, "the cursor advances past the step, got {next}");
+        assert!(
+            !diagnostics_due(jump, &mut next, dt),
+            "the same clock yields no second sample"
+        );
+    }
+
+    // last_diagnostics_time round-trips through the real writer: absent -> None,
+    // header-only -> None, and after writes -> the tail sample's clock.
+    #[test]
+    fn last_recorded_time_reads_the_file_tail() {
+        let bodies = BodyCollection::new().add(symbi_ib::Body::<f64, 2>::gravitational(
+            0,
+            Tensor::new([1.0, 2.0]),
+            Tensor::zeros(),
+            1.0,
+            0.1,
+            0.05,
+        ));
+        let dir = std::env::temp_dir().join(format!("symbi_diag_tail_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("diagnostics.dat");
+        let ps = path.to_str().unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(last_diagnostics_time(ps), None, "an absent file has no tail");
+        for t in [0.0_f64, 0.5, 1.25] {
+            append_diagnostics(ps, t, &bodies).unwrap();
+        }
+        let tail = last_diagnostics_time(ps).expect("a written file has a tail");
+        assert!((tail - 1.25).abs() < 1e-9, "tail clock is the last sample, got {tail}");
+    }
+
+    // end-to-end over the real file writer: an initial run emits a seam-and-cadence
+    // series, a restart reads the file to decide the seam, and the concatenated
+    // sample clocks are strictly increasing with exactly one sample per cadence point.
+    // the two restart geometries are the seam landing on a boundary (ceded) and
+    // between boundaries (filled).
+    fn replay_across_restart(dt: f64, run1_samples: &[f64], resume: f64, run2_end: f64) -> Vec<f64> {
+        let bodies = BodyCollection::new().add(symbi_ib::Body::<f64, 2>::gravitational(
+            0,
+            Tensor::zeros(),
+            Tensor::zeros(),
+            1.0,
+            0.1,
+            0.05,
+        ));
+        let dir = std::env::temp_dir().join(format!(
+            "symbi_diag_restart_{}_{}",
+            std::process::id(),
+            (resume * 1e6) as u64
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("diagnostics.dat");
+        let ps = path.to_str().unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        // run 1's recorded series: the samples on disk when the run stopped, tail at
+        // or behind the checkpoint the restart resumes from.
+        for &t in run1_samples {
+            append_diagnostics(ps, t, &bodies).unwrap();
+        }
+
+        // run 2: restart at `resume`, letting the file decide the seam, then step the
+        // cadence forward to run2_end.
+        let p2 = plan_diagnostics(last_diagnostics_time(ps), resume, dt).unwrap();
+        if p2.write_initial {
+            append_diagnostics(ps, resume, &bodies).unwrap();
+        }
+        let mut next = p2.next;
+        let mut t = resume;
+        while t < run2_end - 1e-12 {
+            t = (t + dt).min(run2_end);
+            if diagnostics_due(t, &mut next, dt) {
+                append_diagnostics(ps, t, &bodies).unwrap();
+            }
+        }
+
+        // the recorded sample clocks: one distinct value per cadence point (a sample
+        // is one row per body; a single body here makes rows and samples coincide).
+        let text = std::fs::read_to_string(&path).unwrap();
+        text.lines()
+            .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+            .map(|l| l.split_whitespace().next().unwrap().parse::<f64>().unwrap())
+            .collect()
+    }
+
+    fn assert_strictly_increasing_single_seam(times: &[f64], seam: f64) {
+        for w in times.windows(2) {
+            assert!(
+                w[1] > w[0] + 1e-12,
+                "sample clocks must strictly increase across the restart, saw {} then {}",
+                w[0],
+                w[1]
+            );
+        }
+        let at_seam = times.iter().filter(|t| (**t - seam).abs() < 1e-9).count();
+        assert!(at_seam <= 1, "at most one sample at the restart clock, found {at_seam}");
+    }
+
+    // the run ends between boundaries, so the checkpoint we resume from predates the
+    // last-written sample: the resumed run fills the seam once.
+    #[test]
+    fn restart_between_boundaries_fills_the_seam_once() {
+        let dt = 0.5;
+        // run1's tail is the 3.0 boundary; the checkpoint sits between boundaries at 3.2,
+        // so the resume-clock sample is missing and the resumed run fills it.
+        let run1 = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
+        let resume = 3.2;
+        let times = replay_across_restart(dt, &run1, resume, 6.0);
+        assert_strictly_increasing_single_seam(&times, resume);
+        assert!(
+            times.iter().any(|t| (*t - resume).abs() < 1e-9),
+            "the missing seam at {resume} was filled"
+        );
+    }
+
+    // the run ends exactly on a boundary, so the resume-clock sample is already on
+    // disk: the resumed run cedes it, and no duplicate appears at the seam.
+    #[test]
+    fn restart_on_a_boundary_does_not_duplicate_the_seam() {
+        let dt = 0.5;
+        // run1 wrote a sample at exactly the checkpoint clock; the resumed run cedes it.
+        let run1 = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
+        let resume = 3.0;
+        let times = replay_across_restart(dt, &run1, resume, 6.0);
+        assert_strictly_increasing_single_seam(&times, resume);
+        let at_seam = times.iter().filter(|t| (*t - resume).abs() < 1e-9).count();
+        assert_eq!(at_seam, 1, "exactly one sample at the seam, neither dropped nor doubled");
     }
 
     // the softening family must survive `build_bodies` on both capability arms. an accreting body
@@ -4609,7 +4909,14 @@ where
         None
     };
     let diag_interval = (cfg.diagnostic_interval * cfg.time_unit).max(f64::MIN_POSITIVE);
-    let mut next_diag = diag_interval;
+    // the existing diagnostics.dat is the authority for the restart seam: whether the
+    // resume-clock sample is already on disk, and where the cadence resumes so no
+    // historical interval is re-emitted.
+    let diag_plan = diag_path.as_ref().map(|dp| {
+        plan_diagnostics(last_diagnostics_time(dp), cfg.start_time, diag_interval)
+            .unwrap_or_else(|detail| panic!("{detail}"))
+    });
+    let mut next_diag = diag_plan.as_ref().map_or(diag_interval, |p| p.next);
 
     // pin every tile's physical clock to the start time (nonzero on restart): the decomposed
     // loop advances these per step, and the checkpoint writer records the gather target's
@@ -4635,8 +4942,14 @@ where
             &checkpoint_name(cfg, &tag),
             &checkpoint_metadata(cfg, cfg.checkpoint_index),
         );
-        if let Some(dp) = &diag_path {
-            if let Some(im) = sh[0].immersed.as_ref() {
+    }
+
+    // the seam sample rides the plan, independent of the checkpoint guard above: a
+    // fresh file (or a tail behind the resume clock) records the resume-clock sample
+    // even on restart, while a tail already at the resume clock cedes it.
+    if let Some(dp) = &diag_path {
+        if diag_plan.as_ref().is_some_and(|p| p.write_initial) {
+            if let Some(im) = tiles[0].0.immersed.as_ref() {
                 let _ = append_diagnostics(dp, cfg.start_time, &im.bodies);
             }
         }
@@ -4691,12 +5004,9 @@ where
                 // body diagnostics at their own cadence: any tile's bodies carry the global
                 // (cross-tile-summed) force/torque/accreted-mass after step_bodies_decomposed.
                 if let Some(dp) = &diag_path {
-                    if time + f64::EPSILON >= next_diag {
+                    if diagnostics_due(time, &mut next_diag, diag_interval) {
                         if let Some(im) = sh[0].immersed.as_ref() {
                             let _ = append_diagnostics(dp, time, &im.bodies);
-                        }
-                        while next_diag <= time {
-                            next_diag += diag_interval;
                         }
                     }
                 }
