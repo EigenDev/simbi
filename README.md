@@ -219,6 +219,12 @@ whichever you build last owns `gpu_ext`.
 ./dev.py install --hip   # rebuild the amd backend
 ```
 
+The AOT bake writes its generated kernel source, registry, and neutral
+`*.ir.json` inspection artifacts to Cargo's `OUT_DIR`, normally beneath
+`target/<profile>/build/symbi-aot-<hash>/out/`. Different profiles, feature
+sets, and build hashes may retain more than one copy. These are disposable build
+artifacts, not source data; `./dev.py clean` (or `cargo clean`) removes them.
+
 ---
 
 ## Usage
@@ -274,6 +280,28 @@ SYMBI_PROFILE=1 simbi run <problem> ...
 prints a per-phase wall-time breakdown at the end of the run — flux, godunov, c2p,
 checkpoint I/O, even the JIT compile — in ns per zone-cycle. The exit summary reports
 wall time and I/O time separately, and quotes throughput over pure integration time.
+
+**Programmatic runs return their own diagnostics.** If you already have a
+problem instance, `run` returns a frozen `RunResult` after a real execution:
+
+```python
+from simbi import run
+
+result = run(problem, compute_mode="cpu")
+if result is not None:  # None means no backend was installed, so SIMBI ran in demo mode
+    print(result.data_directory)
+    print(result.diagnostics.projection.projected_cells)
+    print(result.diagnostics.projection.injected_nrg)
+    print(result.diagnostics.guards.troubled_cells)
+    print(result.diagnostics.guards.frozen_cells)
+```
+
+These are accepted, run-owned values: retries and rejected steps do not enter
+the returned evidence, and concurrent runs do not share it. `troubled_cells`
+counts cells flagged by recovery; `frozen_cells` counts cells the correcting
+select actually held. A troubled-cell count is not a claim that a cell-local
+fallback was applied—the flux splice itself acts on faces. Existing callers may
+continue to ignore the return value.
 
 ### Visualization
 
@@ -565,15 +593,24 @@ def source_expressions(self) -> list[ExpressionDict]:
     return [expr.sponge([kappa, 1.0, 0.0, 0.0, 1.0], dim=2)]
 ```
 
-The available constructors are `force`, `rotating_frame`, `cooling`, `relax`, `sponge`, `inject`,
-and `raw`, along with `boundary` for a driven Dirichlet face and `equilibrium` for a stationary
-target. Each constructor validates its arguments in Python. All of them accept a `region=` mask,
-and `raw` also accepts `target=`.
+The available constructors are `force`, `rotating_frame`, `cooling`,
+`velocity_relaxation`, `sponge`, `inject`, and `raw`, along with `boundary` for
+a driven Dirichlet face and `equilibrium` for a stationary target.
+`velocity_relaxation` changes momentum and its associated kinetic work without
+relaxing density or internal energy; `sponge` relaxes a full primitive reference
+state. The old `relax` constructor remains a deprecated input alias. Each
+constructor validates its arguments in Python. All of them accept a `region=`
+mask, and `raw` also accepts `target=`.
 
 Reference states are given as primitive variables and converted by the conservation law for the
 selected regime. The same sponge interface therefore works for Newtonian, relativistic, and curved
 spacetime problems. See `newtonian/rt.py`, `newtonian/rotating_sponge.py`, and
 `grhd/gr_bondi_cartesian.py` for examples.
+
+Problem configurations that expose an outer sponge use the canonical names
+`use_sponge`, `sponge_time_fraction`, `sponge_parameters`, and `sponge_terms`.
+The former `buffer` spellings remain accepted temporarily as deprecated input;
+serialized compatibility keys are unchanged.
 
 ### Immersed bodies
 
@@ -868,15 +905,26 @@ HIP source at run time, or, for Python source terms, machine code compiled at st
 Cranelift. Evaluating the same kernel with `f64` also gives the tests a reference for comparing CPU,
 GPU, and JIT results bit for bit.
 
-The compiler performs common-subexpression elimination, constant-power strength reduction (`r ** -2` becomes two multiplies), lazy scheduling for sufficiently expensive conditional branches, and select vectorization for suitable branch-free kernel bodies. The graph tracks dependencies so generated kernels compute only the values needed by their outputs.
+The compiler performs common-subexpression elimination, constant-power strength
+reduction (`r ** -2` becomes two multiplies), lazy scheduling for sufficiently
+expensive conditional branches, and select vectorization for suitable
+branch-free kernel bodies. A `KernelProgram` owns its graph and writes as one
+value; its derived `Effects` record reads, writes, in-place access, and stencil
+reach. Checked composition uses those effects to preserve ordering and reject
+unlawful parallel combinations, while the baked manifest is the sole authority
+for runtime buffer roles. Generated kernels compute only the values needed by
+their outputs.
 
 A few core pieces:
 
 - **`symbi-ir`** holds the kernel IR, graph passes, and CPU/CUDA/HIP code generation
 - **`symbi-hydro`** is the physics: regimes, equations of state, and the Riemann solvers
 - **`symbi-jit`** is the Cranelift JIT for runtime-authored kernels (your Python source expressions)
-- **`symbi`** is the top crate: the builder API and the single-grid `evolve` driver
-- **`symbi-sim`** holds simulation state, checkpoint I/O, the census, tracers, and the decomposed driver. It sits below the integrator in the dependency graph
+- **`symbi`** is the user-facing Rust crate: the builder API, scientific `Problem` surface, prelude, and orchestration entry points
+- **`symbi-sim`** holds simulation state, shared stage/step machinery,
+  checkpoint I/O, census, tracers, the flat-decomposed driver, and run-owned
+  diagnostic evidence. It sits below the concrete integrators in the dependency
+  graph
 - **`symbi-discretize`** traces the carrier-generic physics into the IR
 - **`symbi-aot`** bakes those traced kernels at build time
 - **`symbi-exec`** is the CPU executor and its cache-blocked cover
@@ -884,7 +932,7 @@ A few core pieces:
 - **`symbi-geometry`** holds the metrics, coordinate charts, and the `Spacetime` implementations
 - **`symbi-io`** does the HDF5 checkpoints, and **`symbi-display`** is the live TUI
 - **`symbi-substrate`** assembles the per-regime kernel sets (flux, c2p, godunov, cfl, ghost fill)
-- **`symbi-refinement`** is the refinement hierarchy: prolongation, restriction, flux registers, and subcycling
+- **`symbi-refinement`** is the fixed refinement hierarchy and its evolution driver: prolongation, restriction, flux registers, and subcycling
 - **`symbi-ib`** is the immersed-body layer: body state, motion, and accretion ledgers
 - **`symbi-xpu`** is the device layer: memory, streams, and kernel launches
 - **`symbi-afterglow`** does the radiation transport and observables
@@ -930,7 +978,7 @@ for dashes; underscores also work). The CLI finds it by name, wherever it lives.
 | `newtonian/field_loop.py` | `field-loop` | Advected field loop — the constrained-transport regression |
 | `newtonian/quirk.py` | `quirk` | Odd-even decoupling — run it with `--solver hllc` and `hllc_plus` and diff |
 | `isothermal/kepler.py` | `kepler` | Keplerian disk with a central mass |
-| `newtonian/bondi.py` | `bondi` | 3D Bondi accretion onto a sink, with a buffer zone and optional refinement |
+| `newtonian/bondi.py` | `bondi` | 3D Bondi accretion onto a sink, with a sponge zone and optional refinement |
 | `newtonian/refined_blast.py` | `refined-blast` | Static mesh refinement on a blast wave |
 | `newtonian/traced_kh.py` | `traced-kh` | Lagrangian tracer particles riding a KH billow |
 | `newtonian/dyed_kh.py` | `dyed-kh` | Passive scalar (dye) advection |
