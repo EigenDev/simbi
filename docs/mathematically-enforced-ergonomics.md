@@ -2213,6 +2213,67 @@ requires well-balanced pressure-gravity reconstruction by law, or the tests
 exercise a lawful non-WB limit, is a physics-contract question for separate
 review; this vocabulary pass changes neither the validator nor the fixtures.
 
+#### Pass 2 — the immersed-body family (audited, largely already correct)
+
+The immersed-body vocabulary already carries distinct roles for each term, so this
+family is mostly not a rename. The object-plus-capability model holds on the Python
+config surface (`ImmersedBodyConfig.capability: BodyCapability` plus optional
+`gravitational`/`accretion`/`rigid`/`magnetic` property blocks). The terms are
+layered, not overloaded:
+
+- `body` is the object noun throughout; `immersed` is a qualifier that never
+  stands alone. Leave.
+- `drain` is the numerical mechanism (the exact-exponential uniform-scaling kernel
+  `U -> U exp(-chi dt/tau)`); `accretor` is the capability (the mass-removing
+  object, `BodyCapability.ACCRETION`) that uses the drain; `sink` is a prose
+  synonym of the accretor. Distinct roles — leave the mechanism/capability split.
+- `porous` and `torque_free` are distinct, mutually exclusive accretor laws, each
+  its own `SurfaceSpec`/`Property`/`KernelId`; a rigid wall is the `p=0` endpoint
+  of porous. Leave.
+- `wall`/`surface`/`rigid` name three layers (a penalization channel, the surface
+  umbrella, the capability flag), used consistently. `mask` is the occupancy
+  indicator field; `penalize` is the mechanism that forces the masked cells.
+  Cleanly separated — leave.
+- The IB `PenalizationRelaxation` accumulator stays in `symbi-ib`; the outer-domain
+  `sponge` is a separate subsystem in `symbi-source-compile`. No type, module, or
+  wire name bridges them — the earlier non-merge holds.
+
+Three narrow actionable items:
+
+1. **`sink_rate` is dead** — a retired scalar bound to zero and refused if set
+   (`bodies.py`), superseded by the drain. It is wire-sensitive (`AccretionProperties`,
+   `BinaryComponentConfig`, the wire parser, `BodyScalar::Sink`,
+   `source_spec::SINK_RATE`). It keeps its current loud rejection — silently
+   accepting a physical parameter that has no effect is worse than refusing it —
+   and is deferred to a dedicated public-removal pass alongside
+   `RefinementCriterion`, not renamed or softened here.
+2. **`sink_delta` — traced, no bug, dead field.** The polarity discrepancy is
+   annotation-only: `sink_delta` and `xi` are two disconnected coordinates, not the
+   same dial passed through. The live torque-free control is `torque_free_xi`,
+   carried unchanged from the config field (`lib.rs:1405`) to the surface
+   (`lib.rs:3321`), the kernel scalar (`dispatch.rs:2408`), and the tangential term
+   `lambda_ut = -xi*lambda_rho` (`penalize.rs:241`) — no complement anywhere. Its
+   endpoints (`xi=0` standard drain, `xi=1` fully torque-free) match the `xi`
+   docstring and are pinned bit-for-bit by `penalize_law` (`xi=0` equals the plain
+   drain). `sink_delta` is inert: hardcoded to `1.0` (`lib.rs:3313`), read by no
+   penalize kernel (the kernel binds `"xi"`, never the `body_{idx}_delta` scalar).
+   Its docstring (`body.rs:72`, "0=torque-free, 1=standard") is a stale artifact of
+   the retired Dittmann dial, whose intended polarity was the complement
+   `sink_delta = 1 - xi` — so its correct rename is NOT `torque_free_xi`. The field
+   joins `sink_rate` and `RefinementCriterion` as dead code deferred to a public
+   removal pass; the misleading docstring is the only live defect.
+3. **`sink` as a bare prose noun** — a comment-only synonym of `accretor`; optional
+   prose standardization, zero code or wire impact.
+
+Model observation: `magnetic` is a capability in fact (`MagneticSpec::Resistive`,
+Ohmic resistivity threading the body) but rides as a separate property block rather
+than a `BodyCapability` bit. This is left as-is: "capability" is the conceptual
+role, and a rich property block is the more truthful representation of resistivity
+than a single flag — it is not forced into a bit for visual uniformity.
+
+No further immersed-body renames are justified; the family closes after the
+`sink_delta` polarity investigation, unless that finds a real bug.
+
 ## 17. Non-goals
 
 This program does not seek to:
