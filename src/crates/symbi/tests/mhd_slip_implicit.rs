@@ -453,6 +453,92 @@ fn the_production_solve_is_transactional_and_proves_the_face_energy_theorem() {
     );
 }
 
+// the face-partitioned cell magnetic energy M_{f,c} = 1/4 sum_d (B_{d,-}^2 + B_{d,+}^2): each face's
+// 1/2 B^2 shared by its two adjacent cells. summed over the periodic physical complex it is the
+// face-Hodge energy M_face.
+fn face_partitioned_energy(sim: &Sim, f: &symbi_sim::state::BfaceFields<3, HostMemory, f64>) -> f64 {
+    let mut e = 0.0;
+    for c in sim.geom.interior.iter() {
+        for d in 0..3 {
+            let mut up = c;
+            up[d] += 1;
+            let (bm, bp) = (*f.b[d].at(c), *f.b[d].at(up));
+            e += 0.25 * (bm * bm + bp * bp);
+        }
+    }
+    e
+}
+
+// the face-to-cell magnetic-energy defect delta_c = 1/8 sum_d (B_{d,+} - B_{d,-})^2 >= 0: the
+// unresolved subcell magnetic variance, summed over the interior.
+fn defect_energy(sim: &Sim, f: &symbi_sim::state::BfaceFields<3, HostMemory, f64>) -> f64 {
+    let mut e = 0.0;
+    for c in sim.geom.interior.iter() {
+        for d in 0..3 {
+            let mut up = c;
+            up[d] += 1;
+            let g = *f.b[d].at(up) - *f.b[d].at(c);
+            e += 0.125 * g * g;
+        }
+    }
+    e
+}
+
+#[test]
+fn the_face_to_cell_defect_identity_and_partition_hold() {
+    let sim = build_sim();
+    let field = face_of(&random_face(31), &sim);
+    set_bface(&sim, &field); // periodic halo carried, so B_{d,+} at the boundary wraps correctly
+    let ws = sim.fields.mhd.as_ref().unwrap().magnetic_slip.as_ref().unwrap();
+    // stash the seeded field into a workspace face for the energy helpers.
+    for d in 0..3 {
+        for c in ws.input.b[d].domain().iter() {
+            ws.input.b[d].set(c, field[&(d, c)]);
+        }
+    }
+
+    // delta_c = M_{f,c} - M_{c,c} cell by cell.
+    let mut max_id = 0.0_f64;
+    let mut min_delta = f64::INFINITY;
+    for c in sim.geom.interior.iter() {
+        let (mut mfc, mut mcc, mut dc) = (0.0, 0.0, 0.0);
+        for d in 0..3 {
+            let mut up = c;
+            up[d] += 1;
+            let (bm, bp) = (*ws.input.b[d].at(c), *ws.input.b[d].at(up));
+            mfc += 0.25 * (bm * bm + bp * bp);
+            let avg = 0.5 * (bm + bp);
+            mcc += 0.5 * avg * avg;
+            dc += 0.125 * (bp - bm) * (bp - bm);
+        }
+        max_id = max_id.max(((mfc - mcc) - dc).abs());
+        min_delta = min_delta.min(dc);
+    }
+    assert!(max_id < 1e-13, "delta_c = M_fc - M_cc identity broke: max |diff| = {max_id:.3e}");
+    assert!(min_delta >= 0.0, "the defect is negative somewhere: min delta_c = {min_delta:.3e}");
+
+    // sum_c M_{f,c} = M_face, and sum_c (M_cc + delta_c) = M_face.
+    let m_face = face_energy_ws(&sim, &ws.input);
+    let m_fc = face_partitioned_energy(&sim, &ws.input);
+    let m_cc = cell_energy_ws(&sim, &ws.input);
+    let m_delta = defect_energy(&sim, &ws.input);
+    let scale = m_face.abs().max(1.0);
+    assert!(
+        (m_fc - m_face).abs() < 1e-11 * scale,
+        "sum_c M_fc != M_face: {m_fc:.9e} vs {m_face:.9e}"
+    );
+    assert!(
+        (m_cc + m_delta - m_face).abs() < 1e-11 * scale,
+        "sum_c (M_cc + delta_c) != M_face: {:.9e} vs {m_face:.9e}",
+        m_cc + m_delta
+    );
+    println!(
+        "\ndefect bridge:  M_face = {m_face:.6e}  M_cc = {m_cc:.6e}  sum delta = {m_delta:.6e}  M_cc+delta = {:.6e}  (delta = {:.1}% of M_face)\n",
+        m_cc + m_delta,
+        100.0 * m_delta / m_face
+    );
+}
+
 // the cell magnetic energy 1/2 sum_cells |interp B_f|^2 of a workspace face field, interp being the
 // forward face-average bcell_d = 0.5(bf_d[c] + bf_d[c+e_d]).
 fn cell_energy_ws(sim: &Sim, f: &symbi_sim::state::BfaceFields<3, HostMemory, f64>) -> f64 {
