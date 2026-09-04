@@ -1303,7 +1303,6 @@ where
             dt,
             stage,
             self.resistivity,
-            self.eos_param.value(),
         );
     }
 

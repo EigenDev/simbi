@@ -1330,7 +1330,6 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     stage: u8,
     eta: f64,
-    gamma: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -1446,11 +1445,6 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // resistive body. rides the same curl, so it is div-B-clean and dissipation-only exactly like the
     // uniform resistivity above.
     body_resistive_emf::<D, DOF, Mem, Sc>(sim);
-
-    // body-localized magnetic slip: each immersed body running `MagneticSpec::Slip` assembles its
-    // per-cell dyad F_q into the slip-quadrature scratch and scatters it to the edge EMF before the
-    // curl. the augmented EMF rides the same curl, so the tensor slip transport is div-B-clean.
-    body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma);
 
     // the curl bface update: `bface -= dt*curl(efield)` per in-plane face axis.
     ct_curl::<D, DOF, Mem, Sc>(sim, dt);
