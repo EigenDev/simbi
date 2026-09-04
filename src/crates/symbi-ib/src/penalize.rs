@@ -504,6 +504,61 @@ mod tests {
         }
     }
 
+    // the material-drain separation law in a strongly magnetized cell. the gas drain
+    // scales the conserved gas vector uniformly, so the recovered specific internal
+    // energy is invariant and admissible at any magnetization — but only when the
+    // magnetic energy 1/2|B|^2 is stripped before the scaling and restored after. a
+    // naive scaling of the total energy (field energy included) drives the recovered
+    // gas energy negative in a low-beta cell, an inadmissible pressure. the field
+    // energy can dominate the gas energy by orders of magnitude, so the sandwich is
+    // load-bearing rather than a convenience.
+    #[test]
+    fn low_beta_drain_stays_admissible_only_through_the_energy_sandwich() {
+        // a low-beta cell at rest: gas internal energy 0.01, magnetic energy 5.0, so
+        // the field energy is 500x the gas energy (plasma beta ~ 2e-3).
+        let den = 1.0;
+        let e_int = 0.01;
+        let e_gas = den * e_int; // v = 0: gas total energy is the internal energy
+        let e_mag = 5.0; // 1/2|B|^2, carried in the same nrg slot by the MHD store
+        let e_total = e_gas + e_mag;
+
+        // a strong pure drain: f_rho = exp(-inv_tau dt) = 1/2.
+        let (inv_tau, dt) = (f64::ln(2.0), 1.0);
+        let mut acc = PenalizationRelaxation::none();
+        Property::Drain { inv_tau }.contribute(1.0, &kin(), &mut acc);
+        let f_rho = (-(inv_tau * dt)).exp();
+
+        // the sandwich: strip 1/2|B|^2, drain the gas-only energy, restore the field.
+        let gas = Cons3::adiabatic(Density(den), Tensor::zeros(), EnergyDensity(e_gas));
+        let (drained_gas, _) = penalize_cell(&gas, &acc, normal(), dt, 1.0, 0);
+        let recovered_total = drained_gas.nrg().value() + e_mag;
+        let recovered_e_int = (recovered_total - e_mag) / drained_gas.den();
+        assert!(
+            recovered_e_int > 0.0,
+            "the sandwiched drain produced an inadmissible pressure at low beta: \
+             e_int {recovered_e_int}"
+        );
+        assert!(
+            (recovered_e_int - e_int).abs() < 1e-12,
+            "uniform gas drain must preserve the specific internal energy: \
+             {e_int} -> {recovered_e_int}"
+        );
+
+        // the naive drain: scale the total energy (field included), then recover the gas.
+        // f_rho e_total - e_mag = 0.5 * 5.01 - 5 = -2.495, so the recovered gas energy is
+        // negative and the pressure inadmissible.
+        let total = Cons3::adiabatic(Density(den), Tensor::zeros(), EnergyDensity(e_total));
+        let (drained_total, _) = penalize_cell(&total, &acc, normal(), dt, 1.0, 0);
+        let naive_e_int = (drained_total.nrg().value() - e_mag) / drained_total.den();
+        assert!(
+            naive_e_int < 0.0,
+            "the naive drain must drive the recovered gas energy negative at low beta \
+             (the counterexample the sandwich averts): e_int {naive_e_int}"
+        );
+        let expect_naive = (f_rho * e_total - e_mag) / (den * f_rho);
+        assert!((naive_e_int - expect_naive).abs() < 1e-12);
+    }
+
     // each channel's exact exponential against the analytic frozen-
     // coefficient solution, all three active at once.
     #[test]
