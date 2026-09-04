@@ -26,10 +26,12 @@
 //  // }
 // =============================================================================
 
-/// one of the four conserved/flux buffer families that share the same component
-/// shape `{den, nrg, mom_k}`. `Cons` is the live conserved state, `UN`/`UStage`
-/// the rk stage snapshots, `Flux` the per-direction interface flux (the active
-/// direction is supplied out-of-band as `dir`).
+/// selects the allocated state-buffer family (`Cons`, `UN`, `UStage`, `Flux`),
+/// which all share the component shape `{den, nrg, mom_k}`. `Cons` is the live
+/// conserved state, `UN`/`UStage` the rk stage snapshots, `Flux` the per-direction
+/// interface flux (the active direction is supplied out-of-band as `dir`). this is
+/// the storage-buffer axis, not a scalar position within the state vector — that
+/// member is `StateComp`.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum StateSlot {
     Cons,
@@ -60,9 +62,10 @@ impl StateSlot {
     }
 }
 
-/// a component of a conserved/flux slot: scalar density, scalar energy, or a
-/// momentum component addressed per axis. the momentum axis is read off the path
-/// so `DOF != NDIM` needs no special-casing.
+/// selects the member within a state-buffer family (`Den`, `Nrg`, `Mom(axis)`,
+/// `Chi`): scalar density, scalar energy, a per-axis momentum component, or the
+/// passive scalar. `Mom` additionally carries the true vector component (the axis
+/// is read off the path, so `DOF != NDIM` needs no special-casing).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum StateComp {
     Den,

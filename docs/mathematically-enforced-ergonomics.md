@@ -2274,6 +2274,34 @@ than a single flag — it is not forced into a bit for visual uniformity.
 No further immersed-body renames are justified; the family closes after the
 `sink_delta` polarity investigation, unless that finds a real bug.
 
+#### Pass 2 — the state-quantity family (audited, already clean)
+
+Phase 5's typed layer already gave each state-quantity term one law, so this
+family needs no rename. `field` is a stored/named array resource (`FieldStore`,
+`FieldSpec`, `FieldRef`, `FieldBind`); `variable` is the scientific DSL symbol over
+a hidden IR leaf, with the `NodeId`/`Node` handles never reaching the config
+surface; `state` names the whole vector (`FieldStore`, `SimState`), never a single
+quantity; physical quantity identity is folded declaratively into `FieldSpec.name`
+by design; `component` as a vector axis (`FieldKind::DimVector`, `MomFlux.comp`)
+holds. The scientist never sees an IR node, a slot index, or a buffer family.
+
+One genuine cross-law relabeling, in `symbi-abi`, that is a defensible internal
+dual-use rather than a defect: `StateSlot` (`Cons/UN/UStage/Flux`,
+`field_ref.rs:34`) selects which allocated array — a storage-buffer family — not a
+layout-position index, and `StateComp` (`Den/Nrg/Mom/Chi`, `:67`) carries the
+scalar state positions (den/nrg) alongside the true momentum component. So the ABI
+uses "slot" for the buffer axis and "component" for the member axis — the inverse
+of the naive convention. It is self-consistent everywhere (`FieldRef::State{slot,
+comp}` is a 2-D address), and the three concerns stay in three distinct types
+(`StateSlot`, `StateComp`, `FieldBind`), so nothing is conflated. Both enums are
+wire-sensitive: their serde variant names ride persisted manifests, their prefixes
+(`cons`/`u_n`/`u_stage`/`flux`) ride the runtime kernel paths, and `FieldSpec.name`
+drives the checkpoint dataset spellings (`den`/`rho`/`pre`/`m1..mD`), read by
+`scripts/plot_*.py`. Renaming would demand a checkpoint + manifest + reader
+compatibility policy for no semantic gain. The action is a doc clarification at the
+two enum definitions — recording that here "slot" means the state-buffer family and
+"comp" the state-vector member — not a type churn.
+
 ## 17. Non-goals
 
 This program does not seek to:
