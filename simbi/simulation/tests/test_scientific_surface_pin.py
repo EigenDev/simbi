@@ -4,8 +4,8 @@
 # Phase 7 Pass 1 pins for the scientific surface. these lock the contract the
 # eventual vocabulary/geography renames must preserve, before any rename:
 #   - the config surface exposes no compiler-internal concept (a leak ratchet
-#     that can only shrink), with the one documented graph-handle leak tracked
-#     explicitly so it cannot proliferate;
+#     that can only shrink; Pass 2 closed the graph-handle leaks, so it now holds
+#     at zero);
 #   - the representative problems express their science and serialize to the
 #     backend wire without a config author touching an IR node, manifest,
 #     effect, admission witness, kernel name, or buffer order;
@@ -36,15 +36,12 @@ FORBIDDEN_INTERNALS = (
     "Dependence",
 )
 
-# the known graph-handle leaks, tracked so the ratchet fails if a fourth
-# appears. two patterns: the disk sponge passes `x1.graph` to a constant, and the
-# atmosphere/equilibrium configs call `primitives[0].graph.compile(..)`. both
-# close when the expression builder mints the graph in a later pass.
-DOCUMENTED_GRAPH_LEAKS = {
-    "isothermal/dittmann_single_disk.py",
-    "newtonian/refined_atmosphere.py",
-    "newtonian/refined_isothermal_atmosphere.py",
-}
+# the graph-handle leaks are closed: no config reaches for the raw expression
+# graph. the disk passes the typed coordinate to `constant`, the atmosphere
+# configs read their equilibrium through `Equilibrium.sampler()`, and direct
+# graph access lives in the `simbi.expression.expert` namespace. the ratchet now
+# holds at zero — any new leak fails immediately.
+DOCUMENTED_GRAPH_LEAKS: set[str] = set()
 
 
 def _config_sources() -> list[Path]:

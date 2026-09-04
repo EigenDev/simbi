@@ -27,7 +27,7 @@
 #  graph.compile(eq.acceleration).serialize_source("force", dim=1)
 # =============================================================================
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Callable, Sequence
 
 from .dag_expression import (
     X1_ALIASES,
@@ -61,6 +61,14 @@ class Equilibrium:
     primitives: list[Expr]
     acceleration: list[Expr]
     potential: Expr
+
+    def sampler(self) -> Callable[..., list[float]]:
+        """a callable returning the equilibrium's primitive state `[rho, v.., p]`
+        at a point, keyed by coordinate (`sample(x1=r)`). compilation happens here,
+        once, at the framework boundary, so a config states the equilibrium and
+        reads its value without holding the expression graph."""
+        compiled = self.primitives[0]._graph.compile(self.primitives)
+        return lambda **coords: compiled.evaluate(**coords)
 
 
 def gradient(scalar: Expr, dim: int) -> list[Expr]:

@@ -235,11 +235,6 @@ class Expr:
         self._node_id: NodeId = node_id
 
     @property
-    def graph(self) -> ExprGraph:
-        """Get the underlying graph."""
-        return self._graph
-
-    @property
     def node_id(self) -> NodeId:
         """Get the node ID in the graph."""
         return self._node_id
@@ -501,7 +496,7 @@ def _graph_of(where: "ExprGraph | Expr") -> ExprGraph:
     a state leaf is almost always wanted alongside coordinates that exist, and
     `density(x1)` says "the density at the same place as x1" without the caller
     having to hold the graph in a variable to say it."""
-    return where.graph if isinstance(where, Expr) else where
+    return where._graph if isinstance(where, Expr) else where
 
 
 # factory functions
@@ -816,7 +811,7 @@ def tabulated_1d(
     return _tabulated_1d_expr_values(
         coordinate,
         xs,
-        tuple(constant(value, coordinate.graph) for value in ys),
+        tuple(constant(value, coordinate._graph) for value in ys),
         bounds_mode,
     )
 
@@ -828,7 +823,7 @@ def _tabulated_1d_expr_values(
     bounds: TableBounds,
 ) -> Expr:
     """linear interpolation over expression-valued samples."""
-    graph = coordinate.graph
+    graph = coordinate._graph
     segments: list[Expr] = []
     for left_x, right_x, left_y, right_y in zip(
         coordinates, coordinates[1:], values, values[1:]
@@ -870,7 +865,7 @@ def tabulated_2d(
     bounds: TableBounds | str,
 ) -> Expr:
     """bilinear immutable field on a rectilinear two-dimensional table."""
-    if coordinate_x.graph is not coordinate_y.graph:
+    if coordinate_x._graph is not coordinate_y._graph:
         raise ValueError("tabulated_2d coordinates must belong to the same graph")
     xs = tuple(float(value) for value in coordinates_x)
     ys = tuple(float(value) for value in coordinates_y)
@@ -896,7 +891,7 @@ def tabulated_2d(
             "tabulated_2d bounds must be 'clamp' or 'zero'"
         ) from exc
 
-    graph = coordinate_x.graph
+    graph = coordinate_x._graph
     row_fields = tuple(
         _tabulated_1d_expr_values(
             coordinate_x,
@@ -927,8 +922,8 @@ def tabulated_3d(
 ) -> Expr:
     """trilinear immutable field on a rectilinear three-dimensional table."""
     if not (
-        coordinate_x.graph is coordinate_y.graph
-        and coordinate_x.graph is coordinate_z.graph
+        coordinate_x._graph is coordinate_y._graph
+        and coordinate_x._graph is coordinate_z._graph
     ):
         raise ValueError("tabulated_3d coordinates must belong to the same graph")
     xs = tuple(float(value) for value in coordinates_x)
@@ -969,7 +964,7 @@ def tabulated_3d(
             "tabulated_3d bounds must be 'clamp' or 'zero'"
         ) from exc
 
-    graph = coordinate_x.graph
+    graph = coordinate_x._graph
     plane_fields = []
     for plane in planes:
         row_fields = tuple(

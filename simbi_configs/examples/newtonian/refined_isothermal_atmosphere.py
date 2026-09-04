@@ -155,14 +155,13 @@ class RefinedIsothermalAtmosphere(SimbiProblem):
         with the hierarchy-consistent form of the same state."""
 
         def gas_state() -> GasStateGenerator:
-            primitives = self._atmosphere().primitives
-            compiled = primitives[0].graph.compile(primitives)
+            sample = self._atmosphere().sampler()
             (ncells,) = self.resolution
             xmin, xmax = self.bounds[0]
             dx = (xmax - xmin) / ncells
             for ii in range(ncells):
                 x = xmin + (ii + 0.5) * dx
-                density, velocity = compiled.evaluate(x1=x)
+                density, velocity = sample(x1=x)
                 yield (density, velocity)
 
         return gas_state

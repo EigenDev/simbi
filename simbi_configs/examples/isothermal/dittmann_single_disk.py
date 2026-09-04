@@ -249,24 +249,24 @@ class DittmannSingleDisk(SimbiProblem):
         converts it, forming S_U = kappa (U_ref - U) for density and momentum
         (iso carries no energy equation)."""
         bp = self.buffer_parameters
-        buffer_radius = expr.constant(bp["buffer_radius"], x1.graph)
-        buffer_width = expr.constant(bp["buffer_width"], x1.graph)
-        damp_time = expr.constant(bp["damp_time"], x1.graph)
+        buffer_radius = expr.constant(bp["buffer_radius"], x1)
+        buffer_width = expr.constant(bp["buffer_width"], x1)
+        damp_time = expr.constant(bp["damp_time"], x1)
 
         r = expr.sqrt(x1 * x1 + x2 * x2) + 1e-10
         radial = (r - buffer_radius) / buffer_width
-        ramp = expr.max_expr(expr.constant(0.0, x1.graph), radial)
-        ramp = expr.min_expr(ramp, expr.constant(1.0, x1.graph))
+        ramp = expr.max_expr(expr.constant(0.0, x1), radial)
+        ramp = expr.min_expr(ramp, expr.constant(1.0, x1))
         ramp = ramp * ramp * (3.0 - 2.0 * ramp)  # smooth cubic
         kappa = ramp / damp_time
 
         # the outer disk reference: Sigma = 1 (outside the cavity), sub-keplerian
         # v_phi^2 = v_kep^2 - cs^2, tangential in the plane.
-        gm = expr.constant(self.central_mass, x1.graph)
-        cs2 = expr.constant(self.ambient_sound_speed ** 2, x1.graph)
-        rho_ref = expr.constant(1.0, x1.graph)
+        gm = expr.constant(self.central_mass, x1)
+        cs2 = expr.constant(self.ambient_sound_speed ** 2, x1)
+        rho_ref = expr.constant(1.0, x1)
         v_phi = expr.sqrt(
-            expr.max_expr(gm / r - cs2, expr.constant(0.0, x1.graph))
+            expr.max_expr(gm / r - cs2, expr.constant(0.0, x1))
         )
         r_inv = 1.0 / r
         vel_x = -1.0 * v_phi * x2 * r_inv

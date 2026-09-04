@@ -174,14 +174,13 @@ class RefinedAtmosphere(SimbiProblem):
         """
 
         def gas_state() -> GasStateGenerator:
-            primitives = self._atmosphere().primitives
-            compiled = primitives[0].graph.compile(primitives)
+            sample = self._atmosphere().sampler()
             (ncells,) = self.resolution
             xmin, xmax = self.bounds[0]
             dx = (xmax - xmin) / ncells
             for ii in range(ncells):
                 x = xmin + (ii + 0.5) * dx
-                rho, velocity, pressure = compiled.evaluate(x1=x)
+                rho, velocity, pressure = sample(x1=x)
                 yield (rho, velocity, pressure)
 
         return gas_state

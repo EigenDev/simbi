@@ -13,6 +13,7 @@ import math
 import pytest
 
 import simbi.expression as expr
+from simbi.expression import expert
 from simbi.functional.bondi import (
     accretion_coefficient,
     bondi_far_field,
@@ -26,11 +27,10 @@ from simbi.functional.bondi import (
 
 
 def _eval_at(outputs: list[expr.Expr], x: float, y: float, z: float) -> list[float]:
-    graph = outputs[0].graph
-    return graph.compile(outputs).evaluate(x1=x, x2=y, x3=z)
+    return expert.compile_outputs(outputs).evaluate(x1=x, x2=y, x3=z)
 
 
-def _coords(graph: expr.ExprGraph) -> tuple[expr.Expr, expr.Expr, expr.Expr]:
+def _coords(graph: expert.ExprGraph) -> tuple[expr.Expr, expr.Expr, expr.Expr]:
     return (
         expr.variable("x1", graph),
         expr.variable("x2", graph),
@@ -69,7 +69,7 @@ def test_bondi_profile_center_guard() -> None:
 def test_sponge_ramp_is_its_own_region_mask() -> None:
     # kappa must be exactly zero inside the onset (it replaces a `where` gate)
     # and saturate at 1/damp_time beyond onset + width.
-    graph = expr.ExprGraph()
+    graph = expert.ExprGraph()
     x1, x2, x3 = _coords(graph)
     kappa, _ = sponge_ramp(x1, x2, x3, onset_radius=2.0, width=1.0, damp_time=4.0)
 
@@ -88,7 +88,7 @@ def test_far_field_carries_the_constant_bondi_flux() -> None:
     # the O(1/r_norm) density and velocity corrections cancel in rho v, so
     # 4 pi r^2 rho v must be constant to second order across the buffer.
     gamma = 5.0 / 3.0
-    graph = expr.ExprGraph()
+    graph = expert.ExprGraph()
     x1, x2, x3 = _coords(graph)
     r = expr.sqrt(x1 * x1 + x2 * x2 + x3 * x3)
     rho, v_r, _ = bondi_far_field(
@@ -113,7 +113,7 @@ def test_far_field_carries_the_constant_bondi_flux() -> None:
 
 
 def test_sponge_wire_isothermal_has_no_energy_channel() -> None:
-    graph = expr.ExprGraph()
+    graph = expert.ExprGraph()
     x1, x2, x3 = _coords(graph)
     kappa, r = sponge_ramp(x1, x2, x3, onset_radius=1.0, width=1.0, damp_time=1.0)
     rho, v_r, cs_eq = bondi_far_field(
@@ -133,7 +133,7 @@ def test_sponge_wire_carries_primitives_under_the_ideal_gas_closure() -> None:
     # by the evolving regime from these, which is what lets one wire serve a newtonian
     # gas, a relativistic one and a curved background.
     gamma = 1.4
-    graph = expr.ExprGraph()
+    graph = expert.ExprGraph()
     x1, x2, x3 = _coords(graph)
     rho = expr.constant(2.0, graph) + 0.0 * x1
     cs = expr.constant(0.5, graph) + 0.0 * x1
@@ -159,7 +159,7 @@ def test_composed_outputs_match_the_pieces() -> None:
         sound_speed=0.8,
         gamma=gamma,
     )
-    graph = expr.ExprGraph()
+    graph = expert.ExprGraph()
     x1, x2, x3 = _coords(graph)
     composed = far_field_sponge_outputs(x1, x2, x3, **kw)
 

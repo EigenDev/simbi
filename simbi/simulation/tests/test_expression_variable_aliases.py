@@ -8,12 +8,13 @@
 
 import pytest
 
+from simbi.expression import expert
 from simbi.expression.dag_expression import ExprGraph, variable
 
 
 def _op_of(name: str) -> str:
     expr = variable(name, ExprGraph())
-    nodes = expr.graph.compile([expr]).serialize_source(
+    nodes = expert.compile_outputs([expr]).serialize_source(
         "raw", dim=1, target="den"
     )["nodes"]
     assert len(nodes) == 1

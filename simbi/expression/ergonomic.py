@@ -47,7 +47,7 @@ def _resolve(outputs: Sequence[Outputish]) -> tuple[ExprGraph, list[Expr]]:
     them."""
     if not outputs:
         raise ValueError("expression outputs are empty; nothing to serialize")
-    graphs = [o.graph for o in outputs if isinstance(o, Expr)]
+    graphs = [o._graph for o in outputs if isinstance(o, Expr)]
     for first, other in zip(graphs, graphs[1:]):
         if first is not other:
             raise ValueError(

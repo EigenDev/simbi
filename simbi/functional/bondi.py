@@ -90,7 +90,7 @@ def sponge_ramp(
     exactly zero inside the onset, so kappa is its own region mask and no separate
     `where` gate is needed. the backend forms S = kappa (U_ref - U) per conserved
     component."""
-    graph = x1.graph
+    graph = x1._graph
     onset = expr.constant(onset_radius, graph)
     w = expr.constant(width, graph)
     tau = expr.constant(damp_time, graph)
