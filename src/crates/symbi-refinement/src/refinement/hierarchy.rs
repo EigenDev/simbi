@@ -2210,6 +2210,24 @@ where
         l.kernels.ghost_fill(&l.state);
     }
 
+    /// one material-drain operation D(dt) at `level`: penalize followed by the primitive/ghost
+    /// rebuild. exposed for the drain-semigroup pin.
+    pub fn drain_and_rebuild(&self, level: usize, dt: f64) {
+        self.levels[level].kernels.penalize(&self.levels[level].state, dt);
+        self.slip_rebuild(level);
+    }
+
+    /// the interior conserved-density field at `level`, as a flat snapshot for state comparisons.
+    pub fn density_snapshot(&self, level: usize) -> Vec<f64> {
+        let l = &self.levels[level];
+        l.state
+            .geom
+            .interior
+            .iter()
+            .map(|c| *l.state.fields.cons.den.at(c))
+            .collect()
+    }
+
     /// step prologue: snapshot this level's prims (for the finer level's time-interpolated ghost
     /// prolongation) + the rk u_n snapshot. `advance_level` calls begin / stage* / tail in order;
     /// splitting them out lets the decomposed root driver drive the root stages one at a time with

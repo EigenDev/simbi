@@ -78,6 +78,83 @@ fn build_slip_sim() -> Sim {
     )
 }
 
+fn build_drain_sim() -> Sim {
+    // the same field/gas but a pure-drain body with no magnetic coupling, to isolate D's semigroup.
+    let dx = 1.0 / N as f64;
+    let k = 2.0 * std::f64::consts::PI;
+    let a0 = 0.3;
+    let sim = SimStateGeneric::<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
+        NewtonianMhd,
+        IdealGas { gamma: GAMMA },
+        Cartesian,
+    )
+    .cells([N, N, N])
+    .origin([0.0, 0.0, 0.0])
+    .spacing([dx, dx, dx])
+    .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+    .cfl(0.3)
+    .allocate()
+    .expect("drain sim construction failed")
+    .set_initial(|_| {
+        MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+            Tensor::new([0.0, 0.0, 0.0]),
+        )
+    })
+    .seed_faces(move |axis, [x, y, _z]| match axis {
+        0 => -a0 * (k * x).cos() * (k * y).sin(),
+        1 => a0 * (k * x).sin() * (k * y).cos(),
+        _ => 0.0,
+    })
+    .build();
+    sim.with_bodies(
+        BodyCollection::new().add(
+            Body::black_hole(0, Tensor::new(BODY), Tensor::zeros(), 1.0, R_BODY, 0.05, 1.0, 1.0, R_BODY)
+                .with_surface(SurfaceSpec::Drain),
+        ),
+    )
+}
+
+fn max_rel_diff(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs() / x.abs().max(1e-12))
+        .fold(0.0_f64, f64::max)
+}
+
+#[test]
+fn drain_half_steps_compose_to_second_order() {
+    // D_{dt/2} o D_{dt/2} vs D_{dt}. the uniform drain preserves e_int and cs, so a frozen rate would
+    // give an exact semigroup; the alfven term c_a2 = |B|^2/rho is recomputed from the drained state
+    // and rises as rho drains, so the composition differs at O(dt^2). pins the pure-draining case and
+    // that broadening beyond it needs a rate-freezing decision.
+    let run = |dt: f64| -> f64 {
+        // two half-drains with a rebuild between, vs one full drain.
+        let sim_two = build_drain_sim();
+        let sub_two = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim_two.geom.allocated);
+        let mut two = Hierarchy::single(sim_two, sub_two);
+        two.evolve(1.0e-9).expect("prime");
+
+        let sim_one = build_drain_sim();
+        let sub_one = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim_one.geom.allocated);
+        let mut one = Hierarchy::single(sim_one, sub_one);
+        one.evolve(1.0e-9).expect("prime");
+
+        two.drain_and_rebuild(0, 0.5 * dt);
+        two.drain_and_rebuild(0, 0.5 * dt);
+        one.drain_and_rebuild(0, dt);
+        max_rel_diff(&two.density_snapshot(0), &one.density_snapshot(0))
+    };
+    let e_full = run(DT);
+    let e_half = run(0.5 * DT);
+    assert!(e_full > 1e-9, "vacuous semigroup test (diff {e_full})");
+    let ratio = e_full / e_half.max(1e-300);
+    println!(
+        "\ndrain semigroup:  |D_h/2 o D_h/2 - D_h| = {e_full:.3e} (dt)  {e_half:.3e} (dt/2)  ratio = {ratio:.2} (O(dt^2) -> ~4)\n"
+    );
+    assert!(ratio > 3.0, "drain composition error is not O(dt^2): ratio {ratio:.2}");
+}
+
 #[test]
 fn slip_coupled_step_schedule_is_palindromic() {
     let sim = build_slip_sim();
