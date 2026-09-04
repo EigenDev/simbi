@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use symbi_discretize::Spacetime;
 use symbi_discretize::coords::{Coords, Spacing};
-use symbi_discretize::gv::{GeoSource, godunov_stage_gv_with_fused_built};
+use symbi_discretize::gv::{GeoSource, godunov_stage_gv_with_fused_bodies};
 use symbi_ir::backends::interp::{Cpu, CpuField, CpuFieldMut};
 use symbi_ir::backends::kernel::KernelEmitInputs;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -35,7 +35,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
         &symbi_hydro::NEWTONIAN_SPEC,
     ).unwrap();
 
-    let program = godunov_stage_gv_with_fused_built(
+    let program = godunov_stage_gv_with_fused_bodies(
         Coords::Cartesian,
         Spacetime::Minkowski,
         &[Spacing::Uniform; 2],

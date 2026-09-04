@@ -598,7 +598,7 @@ mod tests {
             &symbi_hydro::regime_spec::NEWTONIAN_SPEC,
         )
         .expect("a full prim prescription");
-        let program = boundary_fill_from_built_gv(
+        let program = boundary_fill_from_prescription_gv(
             Coords::Cartesian,
             &[Spacing::Uniform],
             &[0],
@@ -656,7 +656,7 @@ mod tests {
             &symbi_hydro::regime_spec::NEWTONIAN_MHD_SPEC,
         )
         .expect("a full MHD prim prescription");
-        let program = boundary_fill_from_built_gv(
+        let program = boundary_fill_from_prescription_gv(
             Coords::Spherical,
             &[Spacing::Log, Spacing::Uniform],
             &[0, 1],
@@ -2108,7 +2108,7 @@ mod tests {
     #[test]
     fn fused_built_core_matches_spec_adapter_trace() {
         // the SourceSpec entry (`godunov_stage_gv_with_fused_sources`) and the SourceProgram core
-        // (`godunov_stage_gv_with_fused_built`) emit an identical godunov+source kernel — same
+        // (`godunov_stage_gv_with_fused_bodies`) emit an identical godunov+source kernel — same
         // ABI manifest, same writes, same lowered source. the AOT spec path and the runtime
         // SourceProgram path share a single trace, so they stay in lockstep. a family depending on
         // both position and energy (mom + nrg) exercises the centroid `x_k` binding and the energy
@@ -2144,7 +2144,7 @@ mod tests {
         let w_spec = program_spec.writes();
 
         // the core (what `RuntimeSource` feeds), body-free.
-        let program_built = godunov_stage_gv_with_fused_built(
+        let program_built = godunov_stage_gv_with_fused_bodies(
             coords,
             Spacetime::Minkowski,
             &spacing,

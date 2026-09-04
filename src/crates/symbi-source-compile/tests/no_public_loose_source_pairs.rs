@@ -271,12 +271,12 @@ fn every_production_source_path_carries_the_admission_witness() {
         ),
         (
             "symbi-discretize/src/gv/godunov.rs",
-            "godunov_stage_gv_with_fused_built",
+            "godunov_stage_gv_with_fused_bodies",
             "AdmittedSources",
         ),
         (
             "symbi-discretize/src/gv/godunov.rs",
-            "godunov_stage_gv_with_fused_built_and_geo_weight",
+            "godunov_stage_gv_with_fused_bodies_and_geo_weight",
             "AdmittedSources",
         ),
         (
@@ -286,7 +286,7 @@ fn every_production_source_path_carries_the_admission_witness() {
         ),
         (
             "symbi-discretize/src/gv/godunov.rs",
-            "boundary_fill_from_built_gv",
+            "boundary_fill_from_prescription_gv",
             "BoundaryPrescription",
         ),
     ];

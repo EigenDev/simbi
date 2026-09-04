@@ -373,7 +373,7 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// build the fused godunov+source host kernel from a runtime user source: trace the combined
-/// `GvKernel` (the step-2 `godunov_stage_gv_with_fused_built` core, fed the loaded `SourceProgram`s)
+/// `GvKernel` (the step-2 `godunov_stage_gv_with_fused_bodies` core, fed the loaded `SourceProgram`s)
 /// and Cranelift-JIT it. `None` when a node falls outside the JIT subset -> the caller runs the
 /// two-pass. `geo` must match the AOT godunov the two-pass uses, so the fused and two-pass results
 /// stay bit-equivalent.
@@ -387,7 +387,7 @@ fn build_fused_cpu_kernel<const D: usize>(
     built: &AdmittedSources,
     n_bodies: usize,
 ) -> Option<FusedCpuKernel> {
-    let program = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
+    let program = symbi_discretize::gv::godunov_stage_gv_with_fused_bodies(
         // runtime GR sources would thread the real spacetime here; only flat (Minkowski) is wired.
         // n_bodies > 0 folds the immersed-body source (gravity + accretion drain) into this stage,
         // baked at MAX_SOURCE_BODIES to match the standalone `body_source` kernel (unused slots zero via mass = 0).

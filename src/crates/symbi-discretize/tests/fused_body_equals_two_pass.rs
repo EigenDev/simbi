@@ -1,7 +1,7 @@
 // =============================================================================
 // fused_body_equals_two_pass.rs
 //
-// proves the immersed-body fold into `godunov_stage_gv_with_fused_built` (n_bodies > 0)
+// proves the immersed-body fold into `godunov_stage_gv_with_fused_bodies` (n_bodies > 0)
 // is bit-for-bit identical to the standalone two-pass execution: plain `godunov_stage_gv`
 // followed by the `body_source_gv` pass. this is the correctness gate that lets the body
 // ride inside the single fused update sweep (one launch), sparing a separate full-grid
@@ -27,7 +27,7 @@ mod harness;
 use harness::KernelRun;
 use symbi_discretize::body_source_gv;
 use symbi_discretize::coords::{Coords, Spacetime, Spacing};
-use symbi_discretize::gv::{GeoSource, godunov_stage_gv, godunov_stage_gv_with_fused_built};
+use symbi_discretize::gv::{GeoSource, godunov_stage_gv, godunov_stage_gv_with_fused_bodies};
 
 const GAMMA: f64 = 1.4;
 const DT: f64 = 0.01;
@@ -116,7 +116,7 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
     stage_scalars.extend(geom_and_body_scalars());
 
     // fused: godunov + body welded into one kernel (n_bodies = 1, no user sources).
-    let out_fused = KernelRun::new(godunov_stage_gv_with_fused_built(
+    let out_fused = KernelRun::new(godunov_stage_gv_with_fused_bodies(
         Coords::Cartesian,
         Spacetime::Minkowski,
         &[Spacing::Uniform; 2],

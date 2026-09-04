@@ -38,7 +38,7 @@ pub use coords::{Coords, EosArm, Recon, Spacetime, Spacing};
 // builder return types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
 pub use gv::{
     GeoSource, adiabatic_c2p_gv, adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv,
-    adiabatic_hllc_flux_gv, boundary_fill_from_built_gv, chi_c2p_gv, chi_flux_gv, chi_godunov_gv,
+    adiabatic_hllc_flux_gv, boundary_fill_from_prescription_gv, chi_c2p_gv, chi_flux_gv, chi_godunov_gv,
     chi_snapshot_gv, constraint_projection_gv, fofc_bflux_splice_gv, fofc_copy_gv,
     fofc_emf_splice_gv, fofc_exterior_flag_gv, fofc_flag_from_status_gv, fofc_select_gv,
     fofc_select_with_body_gv, fofc_splice_gv, geometric_momentum_source_probe_gv,

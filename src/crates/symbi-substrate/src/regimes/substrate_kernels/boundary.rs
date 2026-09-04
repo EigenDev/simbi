@@ -197,7 +197,7 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let (name, ir) = dag.gpu_ir.get_or_init(|| {
         let (coords, spacing, axes) = sim_gv_geom(sim);
-        let program = symbi_discretize::boundary_fill_from_built_gv(
+        let program = symbi_discretize::boundary_fill_from_prescription_gv(
             coords,
             &spacing,
             &axes,

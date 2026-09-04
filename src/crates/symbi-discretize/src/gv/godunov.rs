@@ -649,7 +649,7 @@ fn splice_fused_sources_to_contribs<'t>(
 ///
 /// the body-free entry: the bake-time producer for the AOT `_with_{slug}` variants, whose
 /// sources are admitted specs (`AdmittedSources::admit_specs`), delegating to
-/// [`godunov_stage_gv_with_fused_built`] with no immersed body. the immersed body belongs to
+/// [`godunov_stage_gv_with_fused_bodies`] with no immersed body. the immersed body belongs to
 /// the runtime-source path, which threads the real count through the core.
 pub fn godunov_stage_gv_with_fused_sources(
     coords: Coords,
@@ -666,7 +666,7 @@ pub fn godunov_stage_gv_with_fused_sources(
     // the plain (unfused) stage passes false -> reads `prim.mag[k]`.
     mag_from_bcell: bool,
 ) -> KernelProgram {
-    godunov_stage_gv_with_fused_built(
+    godunov_stage_gv_with_fused_bodies(
         coords,
         spacetime,
         spacing,
@@ -686,7 +686,7 @@ pub fn godunov_stage_gv_with_fused_sources(
 /// runtime user-source CPU fusion feeds `RuntimeSource`'s admitted programs. one trace, both
 /// paths — the godunov+source lowering lives in one place.
 #[allow(clippy::too_many_arguments)]
-pub fn godunov_stage_gv_with_fused_built(
+pub fn godunov_stage_gv_with_fused_bodies(
     coords: Coords,
     spacetime: Spacetime,
     spacing: &[Spacing],
@@ -702,7 +702,7 @@ pub fn godunov_stage_gv_with_fused_built(
     // source_apply + body_source`, in that order, bit-for-bit. 0 leaves the update body-free.
     n_bodies: usize,
 ) -> KernelProgram {
-    godunov_stage_gv_with_fused_built_and_geo_weight(
+    godunov_stage_gv_with_fused_bodies_and_geo_weight(
         coords,
         spacetime,
         spacing,
@@ -725,7 +725,7 @@ pub fn godunov_stage_gv_with_fused_built(
 /// local metric source is multiplied by the typed scratch field. the ordinary stage
 /// delegates here with `false`, so its graph and abi are unchanged.
 #[allow(clippy::too_many_arguments)]
-pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
+pub fn godunov_stage_gv_with_fused_bodies_and_geo_weight(
     coords: Coords,
     spacetime: Spacetime,
     spacing: &[Spacing],
@@ -1537,7 +1537,7 @@ pub fn source_apply_gv(
 /// `"den"`/`"mom"`/`"nrg"` (mapping to `prim.rho`/`prim.vel_k`/`prim.pre`) with the DAG that
 /// reads only `x_k`/`t`/`p_i` and outputs the prescribed value. dispatched over a face's
 /// ghost band.
-pub fn boundary_fill_from_built_gv(
+pub fn boundary_fill_from_prescription_gv(
     coords: Coords,
     spacing: &[Spacing],
     axes: &[usize],
@@ -1991,7 +1991,7 @@ mod pcp_source_weight_tests {
     use super::*;
 
     fn rmhd_stage(weighted: bool) -> symbi_ir::GvKernel {
-        godunov_stage_gv_with_fused_built_and_geo_weight(
+        godunov_stage_gv_with_fused_bodies_and_geo_weight(
             Coords::Cartesian,
             Spacetime::SchwarzschildKS,
             &[Spacing::Uniform; 3],

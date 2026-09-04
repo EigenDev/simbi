@@ -843,7 +843,7 @@ fn gen_godunov_with_body_source(
         "{prefix}_godunov_stage_with_body_source{}_{ndim}d",
         geom.suffix()
     );
-    let program = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
+    let program = symbi_discretize::gv::godunov_stage_gv_with_fused_bodies(
         geom.coords,
         symbi_discretize::Spacetime::Minkowski,
         &geom.spacing,
@@ -1607,7 +1607,7 @@ fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
         geom.spacetime_suffix()
     );
     let program =
-        symbi_discretize::gv::godunov_stage_gv_with_fused_built_and_geo_weight(
+        symbi_discretize::gv::godunov_stage_gv_with_fused_bodies_and_geo_weight(
             geom.coords,
             geom.spacetime,
             &geom.spacing,

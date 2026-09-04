@@ -2347,6 +2347,36 @@ map live in `symbi-substrate/regimes/`. The comment describes an earlier phase's
 geography and now mis-points a reader; corrected in place. No file moves are
 justified — semantic ownership and filesystem ownership are aligned.
 
+### Phase 7 Pass 4 — local expression audit (audited, one relic)
+
+Local naming is already largely precise, so this pass is narrow. The two
+obsolete-prefix questions resolve opposite to each other:
+
+- **`gv_` / `_gv` / `Gv` is live and load-bearing — kept.** Each marks physics
+  traced at `S = Gv` into the IR, and every one has a present non-`gv_`
+  carrier-generic counterpart it calls at `S = f64`/`Dual` (`gv_penalize` ->
+  `penalize_cell`, `gv_refinement` -> `prolong_field`, `StateLawGv` -> `StateLaw`).
+  The suffix distinguishes a live host/trace pair everywhere; it is the sole
+  IR-front-end marker.
+- **`built_` is a dead migration relic.** `BuiltSource` was removed when graph
+  construction left physics; the token survives only in three public godunov/
+  boundary door names and distinguishes nothing live — its typed replacements are
+  `AdmittedSources` and `BoundaryPrescription`, and the door-table test forbids the
+  old loose pair. The sibling `godunov_stage_gv_with_fused_sources` is already the
+  clean name.
+
+The renames (internal Rust, not wire/kernel-id/serialized): `..._with_fused_built`
+-> `..._with_fused_bodies` (the added axis over `_with_fused_sources` is the
+immersed-body count), `..._with_fused_built_and_geo_weight` ->
+`..._with_fused_bodies_and_geo_weight`, and `boundary_fill_from_built_gv` ->
+`boundary_fill_from_prescription_gv` (the parameter is a `BoundaryPrescription`).
+The baked kernels key on the kernel slug, not the builder function name, so the
+2684 `.ir.json` stay byte-identical.
+
+No vague-name same-scope collisions were found: `spec`/`cx`/`cfg` are each
+unambiguous per scope. The orchestration doors, the Python config-author API, and
+the migration qualifiers are clean.
+
 ## 17. Non-goals
 
 This program does not seek to:

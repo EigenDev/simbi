@@ -892,7 +892,7 @@ fn strip_and_mask(
 /// the boundary front door: compile a `SourceConfig` into a driven-boundary
 /// prescription — a complete primitive state `[rho, vel_0..vel_{D-1}, pre]` the ghost cells are set
 /// to (Dirichlet), `combine = overwrite`. returns `(slot, SourceProgram)` in the structural-slot
-/// convention `den`/`mom`/`nrg` that [`symbi_discretize::boundary_fill_from_built_gv`] writes to
+/// convention `den`/`mom`/`nrg` that [`symbi_discretize::boundary_fill_from_prescription_gv`] writes to
 /// `prim.rho`/`prim.vel_k`/`prim.pre`. each slot is an independent lowering of the user DAG over its
 /// output subset, so the velocity vector lands as the `ncomp`-output `mom` slot.
 ///
