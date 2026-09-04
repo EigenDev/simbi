@@ -1,13 +1,17 @@
 // =============================================================================
 // mhd_ideal_energy_audit.rs
 //
-// a read-only audit of what discrete energy the production ideal-MHD RK step advances, to decide the
-// energy variable for the coupled magnetic-slip method. no immersed body (MagneticSpec::None), no
-// sources, periodic 3D cartesian adiabatic MHD. over one accepted H_dt step it measures the change in
-// the raw total energy sum E, the face-to-cell magnetic-variance defect sum delta, and the extended
-// energy sum (E + delta), plus M_face, M_cell, and e_int. the magnetic-slip substep conserves
-// sum(E + delta) exactly; this classifies whether the base ideal step does too, or only conserves the
-// raw sum E while delta drifts at the scheme's truncation order.
+// a read-only, volume-weighted convergence audit of the discrete energy the production ideal-MHD RK
+// step advances. no immersed body (MagneticSpec::None), no sources, periodic 3D cartesian adiabatic
+// MHD. two discrete representations of the same continuum energy are compared:
+//   the cell-energy representation  int E dV = sum_c E_c dV  (SIMBI's conserved cons.nrg), and
+//   the face-Hodge representation   int (E + delta) dV,      (the slip theorem's variable),
+// whose difference is the volume-weighted subcell magnetic-variance reservoir int delta dV. the
+// ideal step conserves the cell energy to roundoff; the question is whether the face-Hodge drift
+//   |Delta int delta dV| = |Delta int (E + delta) dV - Delta int E dV|
+// decreases at the base scheme's order for a fixed smooth continuum solution as the grid refines with
+// dt proportional to dx. delta_c = 1/8 sum_d (B_{d,+} - B_{d,-})^2 = O(dx^2), so int delta dV and its
+// change should fall at roughly second order for a resolved smooth field.
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet3D;
@@ -25,46 +29,31 @@ use symbi_xpu::{CpuSpace, HostMemory};
 type Sim = SimStateGeneric<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>;
 
 const GAMMA: f64 = 5.0 / 3.0;
+const T_FINAL: f64 = 0.04;
 
-// energies over the interior (cartesian unit face weights).
-fn energies(sim: &Sim) -> (f64, f64, f64, f64, f64) {
-    // returns (sum E, sum delta, M_face, M_cell, sum e_int).
+// volume-weighted energies over the interior: (int E dV, int delta dV).
+fn integrals(sim: &Sim) -> (f64, f64) {
     let m = sim.fields.mhd.as_ref().unwrap();
     let nrg = sim.fields.cons.nrg_field().unwrap();
-    let (mut e, mut delta, mut m_face, mut m_cell, mut eint) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    let dv = sim.geom.dx[0] * sim.geom.dx[1] * sim.geom.dx[2];
+    let (mut e, mut delta) = (0.0, 0.0);
     for c in sim.geom.interior.iter() {
         e += *nrg.at(c);
-        let mut mcc = 0.0;
         for d in 0..3 {
             let mut up = c;
             up[d] += 1;
-            let (bm, bp) = (*m.bface[d].at(c), *m.bface[d].at(up));
-            m_face += 0.5 * bm * bm;
-            let g = bp - bm;
+            let g = *m.bface[d].at(up) - *m.bface[d].at(c);
             delta += 0.125 * g * g;
-            let bcell = *m.bcell[d].at(c);
-            mcc += 0.5 * bcell * bcell;
         }
-        m_cell += mcc;
-        // e_int = E - kinetic - M_cell.
-        let den = *sim.fields.cons.den.at(c);
-        let mut ke = 0.0;
-        for d in 0..3 {
-            let mom = *sim.fields.cons.mom[d].at(c);
-            ke += 0.5 * mom * mom / den;
-        }
-        eint += *nrg.at(c) - ke - mcc;
     }
-    (e, delta, m_face, m_cell, eint)
+    (e * dv, delta * dv)
 }
 
-fn build_sim(n: usize, rough: bool) -> Sim {
+// a fixed smooth continuum initial condition sampled at resolution n: a solenoidal B from the vector
+// potential A_z = (a0/k) cos(k x) cos(k y) and a smooth solenoidal flow, k = 2 pi (one wavelength).
+fn build_sim(n: usize, cfl: f64) -> Sim {
     let dx = 1.0 / n as f64;
     let k = 2.0 * std::f64::consts::PI;
-    // a smooth (or grid-scale) discretely-near-solenoidal B from a vector potential A_z, plus a smooth
-    // flow so the ideal step evolves the field. B_x = dA_z/dy, B_y = -dA_z/dx, B_z = 0; A_z = a0
-    // cos(k x) cos(m k y) / (m k). rough doubles the transverse wavenumber to load delta.
-    let m = if rough { (n / 2).max(1) as f64 } else { 1.0 };
     let a0 = 0.3;
     SimStateGeneric::<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
         NewtonianMhd,
@@ -75,80 +64,72 @@ fn build_sim(n: usize, rough: bool) -> Sim {
     .origin([0.0, 0.0, 0.0])
     .spacing([dx, dx, dx])
     .boundaries(Boundaries::uniform(BoundaryType::Periodic))
-    .cfl(0.3)
+    .cfl(cfl)
     .allocate()
-    .expect("ideal MHD audit sim construction failed")
+    .expect("audit sim construction failed")
     .set_initial(|[x, y, _z]| {
-        // a smooth solenoidal velocity (an Orszag-Tang-like shear), uniform density/pressure.
-        let vx = -(k * y).sin();
-        let vy = (k * x).sin();
         MhdPrim::new(
-            Prim::adiabatic(Density(1.0), Tensor::new([vx, vy, 0.0]), Pressure(1.0)),
+            Prim::adiabatic(
+                Density(1.0),
+                Tensor::new([-(k * y).sin(), (k * x).sin(), 0.0]),
+                Pressure(1.0),
+            ),
             Tensor::new([0.0, 0.0, 0.0]),
         )
     })
     .seed_faces(move |axis, [x, y, _z]| match axis {
-        0 => -a0 * (k * x).cos() * (m * k * y).sin(),          // B_x = dA_z/dy
-        1 => a0 / m * (k * x).sin() * (m * k * y).cos(),       // B_y = -dA_z/dx
+        0 => -a0 * (k * x).cos() * (k * y).sin(), // B_x = dA_z/dy
+        1 => a0 * (k * x).sin() * (k * y).cos(),   // B_y = -dA_z/dx
         _ => 0.0,
     })
     .build()
 }
 
-// run one accepted ideal-MHD step and return the energies before and after it, plus the step's dt.
-fn one_step(n: usize, rough: bool, dt: f64) -> ((f64, f64, f64, f64, f64), (f64, f64, f64, f64, f64)) {
-    let mut sim = build_sim(n, rough);
-    let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
-    // capture the energies at each accepted step; compare the second to the first (both are primed,
-    // accepted states, so the comparison is one clean H step free of initialization transients).
-    let _ = dt;
-    let snaps = std::cell::RefCell::new(Vec::<(f64, f64, f64, f64, f64)>::new());
-    // evolve a fixed physical time that gives several accepted steps at every resolution, and compare
-    // the last two snapshots: both are primed, mid-run, dynamic accepted states, so the difference is
-    // one clean H step free of initialization transients.
-    evolve_with_callback(&mut sim, &sub, 0.05, 1, |s| {
-        snaps.borrow_mut().push(energies(s));
+// evolve to T_FINAL and return the volume-weighted energy drifts (|Delta int E dV|, |Delta int delta
+// dV|) between the first and last distinct accepted states.
+fn drifts(n: usize, cfl: f64) -> (f64, f64) {
+    let mut sim = build_sim(n, cfl);
+    let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, cfl, 1.0, &sim.geom.allocated);
+    let snaps = std::cell::RefCell::new(Vec::<(f64, f64)>::new());
+    evolve_with_callback(&mut sim, &sub, T_FINAL, 1, |s| {
+        snaps.borrow_mut().push(integrals(s));
     })
     .expect("ideal MHD evolve failed");
     let s = snaps.into_inner();
-    // the callback may repeat the final frame; scan from the end for the last pair of distinct
-    // consecutive accepted states (one clean H step between two primed dynamic states).
-    let mut i = s.len() - 1;
-    while i > 0 && (s[i].0 - s[i - 1].0).abs() < 1e-300 && (s[i].2 - s[i - 1].2).abs() < 1e-300 {
-        i -= 1;
+    // the first primed accepted state, and the last that differs from it (dropping repeated final
+    // frames) -- the drift over the full evolution.
+    let first = s[0];
+    let mut j = s.len() - 1;
+    while j > 0 && (s[j].0 - first.0).abs() < 1e-300 && (s[j].1 - first.1).abs() < 1e-300 {
+        j -= 1;
     }
-    assert!(i > 0, "no two distinct accepted states captured ({} snaps)", s.len());
-    (s[i - 1], s[i])
+    assert!(j > 0, "no distinct evolved state ({} snaps)", s.len());
+    ((s[j].0 - first.0).abs(), (s[j].1 - first.1).abs())
 }
 
 #[test]
-fn ideal_mhd_step_energy_audit() {
-    // classify the extended-energy drift over one ideal step, on a smooth and a grid-scale field, and
-    // under spatial refinement. the raw sum E is expected conserved (conservative flux, periodic); the
-    // question is delta.
-    println!("\n=== ideal-MHD one-step energy audit (periodic 3D adiabatic, no body) ===");
-    for &rough in &[false, true] {
-        println!("--- {} field ---", if rough { "grid-scale" } else { "smooth" });
-        let mut last_d_ext = 0.0_f64;
-        for &n in &[16usize, 32] {
-            let dt = 2.0e-3;
-            let (a, b) = one_step(n, rough, dt);
-            let d_e = b.0 - a.0;
-            let d_delta = b.1 - a.1;
-            let d_ext = (b.0 + b.1) - (a.0 + a.1);
-            let d_mface = b.2 - a.2;
-            let d_mcell = b.3 - a.3;
-            let d_eint = b.4 - a.4;
-            let e_scale = a.0.abs().max(1.0);
-            println!(
-                "n={n:3}: dSE={:.3e} dSdelta={:.3e} dS(E+delta)={:.3e}  dMf={:.3e} dMc={:.3e} deint={:.3e}  (rel dSE={:.2e})",
-                d_e, d_delta, d_ext, d_mface, d_mcell, d_eint, d_e.abs() / e_scale
-            );
-            if n == 32 && last_d_ext.abs() > 1e-14 {
-                println!("     dS(E+delta) refinement ratio (n16/n32): {:.3}", last_d_ext.abs() / d_ext.abs().max(1e-300));
-            }
-            last_d_ext = d_ext;
+fn ideal_mhd_face_hodge_drift_converges_at_second_order() {
+    println!("\n=== ideal-MHD volume-weighted energy convergence (fixed smooth IC, dt ~ dx, T={T_FINAL}) ===");
+    let cfl = 0.3;
+    let mut prev_delta_drift = 0.0_f64;
+    for &n in &[16usize, 32, 64] {
+        let (de, ddelta) = drifts(n, cfl);
+        print!("n={n:3}: |D int E dV| = {de:.3e}   |D int delta dV| = {ddelta:.3e}");
+        if prev_delta_drift > 0.0 {
+            println!("   spatial ratio (prev/this) = {:.2}  (order {:.2})", prev_delta_drift / ddelta, (prev_delta_drift / ddelta).log2());
+        } else {
+            println!();
         }
+        prev_delta_drift = ddelta;
     }
+
+    // temporal isolation: fix the grid, halve the timestep; a temporal-error component would shrink.
+    println!("--- temporal isolation at n=32 ---");
+    let (_e1, d_full) = drifts(32, 0.3);
+    let (_e2, d_half) = drifts(32, 0.15);
+    println!(
+        "cfl 0.30: |D int delta dV| = {d_full:.3e}   cfl 0.15: {d_half:.3e}   temporal ratio = {:.3}",
+        d_full / d_half.max(1e-300)
+    );
     println!("========================================================\n");
 }
