@@ -33,6 +33,32 @@
 
 use symbi_algebra::{Domain, Space};
 use symbi_geometry::Metric;
+
+// the magnetic-slip coupled-step schedule spy: when armed, the palindromic driver records each
+// sub-operation's name and duration, so a test can prove the composition order and durations without
+// running a numerical step. off by default (a None recorder), so production carries no cost.
+thread_local! {
+    static SLIP_SCHEDULE: std::cell::RefCell<Option<Vec<(&'static str, f64)>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// arm the schedule spy: subsequent coupled steps record their sub-operation trace.
+pub fn slip_schedule_arm() {
+    SLIP_SCHEDULE.with(|s| *s.borrow_mut() = Some(Vec::new()));
+}
+
+/// take and disarm the recorded schedule trace, if armed.
+pub fn slip_schedule_take() -> Option<Vec<(&'static str, f64)>> {
+    SLIP_SCHEDULE.with(|s| s.borrow_mut().take())
+}
+
+fn slip_schedule_record(op: &'static str, dt: f64) {
+    SLIP_SCHEDULE.with(|s| {
+        if let Some(v) = s.borrow_mut().as_mut() {
+            v.push((op, dt));
+        }
+    });
+}
 use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
@@ -2111,6 +2137,77 @@ where
             }
         }
         self.level_step_tail(level, dt, alpha0)
+    }
+
+    /// the palindromic coupled step for a slip-enabled draining body:
+    ///   D(dt/2) M(dt/2) H(dt) M(dt/2) D(dt/2),
+    /// where D is the material drain, M the implicit magnetic-slip midpoint, and H the ideal-MHD RK
+    /// evolution (its stages and tail EMF, without the drain). the drain and slip each advance for a
+    /// total duration dt; the magnetic solve never runs inside an RK stage. each M freezes its
+    /// predictor from the state entering that half, and the rebuild points restore the primitives and
+    /// magnetic/cell state each operator's successor reads. returns true on a step failure (a
+    /// nonconverged magnetic solve or a stage retry request); increment 3 treats that as a hard
+    /// failure, and the whole composite sits inside the caller's attempt boundary for later restore.
+    /// narrow slice: one stationary slip draining body, single level, periodic 3D cartesian host,
+    /// adiabatic MHD; unsupported combinations fail loudly before the first half-step.
+    pub fn advance_slip_coupled_step(&mut self, level: usize, dt: f64, alpha0: f64) -> bool {
+        assert_eq!(self.levels.len(), 1, "magnetic-slip coupling is single-level (no refinement) yet");
+        assert!(
+            !self.levels[level].state.has_tracers(),
+            "magnetic-slip coupling does not support tracers yet"
+        );
+        let half = 0.5 * dt;
+
+        // D(dt/2): the material drain, then rebuild primitives/ghosts.
+        slip_schedule_record("D", half);
+        {
+            let l = &self.levels[level];
+            l.kernels.penalize(&l.state, half);
+        }
+        self.slip_rebuild(level);
+
+        // M(dt/2): the implicit slip midpoint from the post-drain state, then rebuild magnetic/cell.
+        slip_schedule_record("M", half);
+        if !self.levels[level].kernels.magnetic_slip_step(&self.levels[level].state, half) {
+            return true; // nonconverged solve -> hard failure this increment
+        }
+        self.slip_rebuild(level);
+
+        // H(dt): the ideal-MHD RK step (stages + tail EMF), without the drain.
+        slip_schedule_record("H", dt);
+        self.level_step_begin(level, dt);
+        let n = self.levels[level].state.timestepping.stages().len();
+        for ii in 0..n {
+            if self.level_stage(level, ii, dt, alpha0) {
+                return true;
+            }
+        }
+        self.level_tail_emf(level, dt);
+        self.slip_rebuild(level);
+
+        // M(dt/2): a fresh predictor frozen from the accepted output of H.
+        slip_schedule_record("M", half);
+        if !self.levels[level].kernels.magnetic_slip_step(&self.levels[level].state, half) {
+            return true;
+        }
+        self.slip_rebuild(level);
+
+        // D(dt/2): the closing drain.
+        slip_schedule_record("D", half);
+        {
+            let l = &self.levels[level];
+            l.kernels.penalize(&l.state, half);
+        }
+        self.slip_rebuild(level);
+        false
+    }
+
+    /// restore the primitives and physical ghost bands an operator's successor reads: c2p recovers the
+    /// primitive state from the conserved fields, ghost_fill refills the boundary bands.
+    fn slip_rebuild(&self, level: usize) {
+        let l = &self.levels[level];
+        l.kernels.c2p(&l.state);
+        l.kernels.ghost_fill(&l.state);
     }
 
     /// step prologue: snapshot this level's prims (for the finer level's time-interpolated ghost

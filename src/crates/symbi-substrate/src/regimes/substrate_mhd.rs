@@ -828,6 +828,27 @@ where
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, 1.0);
     }
 
+    fn has_magnetic_slip(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> bool {
+        sim.immersed.as_ref().is_some_and(|im| {
+            (0..im.bodies.len())
+                .any(|b| matches!(im.bodies.get(b).spec.magnetic, symbi_ib::MagneticSpec::Slip { .. }))
+        })
+    }
+
+    fn magnetic_slip_step(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) -> bool {
+        if !self.has_magnetic_slip(sim) {
+            return true;
+        }
+        let gamma = self.eos_param.value();
+        let receipt = crate::regimes::mhd_substrate::magnetic_slip_solve::<D, 3, Mem, Sc>(
+            sim, dt, gamma, 1e-10, 500,
+        );
+        if receipt.converged {
+            crate::regimes::mhd_substrate::magnetic_slip_commit::<D, 3, Mem, Sc>(sim, dt, gamma);
+        }
+        receipt.converged
+    }
+
     fn c2p(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         // the primitives now hold a state recovered from the conserved fields; anything
         // reading prim.* outside the evolve loop checks this before trusting it.

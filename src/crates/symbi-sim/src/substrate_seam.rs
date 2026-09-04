@@ -369,6 +369,20 @@ where
     /// default: no-op (inviscid regimes, and sets without a baked viscous kernel).
     fn viscous(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 
+    /// whether this set runs the implicit magnetic-slip midpoint on `store`: an immersed body with a
+    /// slip magnetic coupling on an MHD regime. the coupled driver selects the palindromic schedule
+    /// on it. default: false.
+    fn has_magnetic_slip(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) -> bool {
+        false
+    }
+
+    /// one implicit magnetic-slip midpoint substep over `dt`: the transactional solve followed by the
+    /// defect-bridge commit. returns whether the linear solve converged; `true` when the set does not
+    /// run slip (a no-op substep converges trivially). default: no-op.
+    fn magnetic_slip_step(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) -> bool {
+        true
+    }
+
     /// horizon excision: overwrite the causally disconnected cells inside the
     /// kerr-schild-radius level set r_ks(x; a) < r_exc (the sphere about the chart
     /// origin at a = 0, the oblate spheroid at spin — strictly inside the horizon)
