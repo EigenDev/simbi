@@ -2,7 +2,7 @@
 // transfer.rs
 //
 // the inter-level field-transfer driver: selects the
-// regions and dispatches the aot amr kernels (refine_restrict_{D}d /
+// regions and dispatches the aot refinement kernels (refine_restrict_{D}d /
 // refine_prolong_{order}_{D}d, built in symbi-discretize gv_refinement.rs) per field
 // component through `dispatch_fields_each` — each buffer resolves the absolute
 // level-global thread coordinate against its own lo, so no index translation
@@ -322,8 +322,8 @@ fn sweep_domains<const D: usize>(region: &Domain<D>, w: isize) -> (Domain<D>, Do
 }
 
 /// the per-slab intermediates of the axis-split prolongation: one prim batch
-/// per pass, shaped exactly to the slab's mixed lattices. SMR slabs are
-/// static, so these allocate once (the fine level's lazy init) and are reused
+/// per pass, shaped exactly to the slab's mixed lattices. the refinement slabs
+/// are fixed, so these allocate once (the fine level's lazy init) and are reused
 /// every call — the step loop allocates nothing.
 pub struct ProlongSweepScratch<const D: usize, const DOF: usize, Mem: MemorySpace> {
     pub a: PrimFieldsGeneric<D, DOF, Mem>,

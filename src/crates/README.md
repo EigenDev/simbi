@@ -110,7 +110,7 @@ as well serve the baked kernels too.
 | Crate | What it holds |
 | --- | --- |
 | `symbi-sim` | The state containers, the stepping primitives, checkpoints. |
-| `symbi-amr` | Static mesh refinement and conservative level transfer. |
+| `symbi-refinement` | Fixed mesh refinement and conservative level transfer. |
 | `symbi` | The builder and the evolution driver a user calls. |
 
 **Output and post-processing**

@@ -1,7 +1,7 @@
 // =============================================================================
 // gv_refinement.rs
 //
-// the amr field-transfer kernels: restriction
+// the refinement field-transfer kernels: restriction
 // (fine -> coarse conservative child average) and prolongation (coarse -> fine
 // limited interpolation, time-interpolated between two coarse snapshots) as
 // gv-traced pullbacks over the refinement lattice maps (lattice.rs
@@ -10,7 +10,7 @@
 // destination thread coordinate is the level-global index, and each field
 // buffer resolves it against its own lo.
 //
-// the straightforward formulation of this transfer (symbi-amr prolong_nd /
+// the straightforward formulation of this transfer (symbi-refinement prolong_nd /
 // restrict_nd) is an axis-by-axis sweep over scratch buffers — host-only by
 // construction. here the
 // sweep is inlined per destination cell: pass order is axis 0 innermost, the
@@ -251,7 +251,7 @@ fn restrict_eval<'t>(
 }
 
 // =============================================================================
-// register / snapshot utility kernels (the amr gpu pass): the flux-register
+// register / snapshot utility kernels (the refinement gpu pass): the flux-register
 // accumulate/apply/zero and the *_old snapshots as substrate kernels, so the
 // berger-oliger driver touches no field from the host on a device backend.
 // =============================================================================

@@ -98,7 +98,7 @@ fn sample_ms(n_values: usize, reps: usize) -> f64 {
 /// of. measured through the production driver so it carries the whole step: stages, flux, godunov,
 /// recovery, boundaries.
 fn hydro_step_ms(window: f64) -> f64 {
-    use symbi_amr::refinement::Hierarchy;
+    use symbi_refinement::refinement::Hierarchy;
     let sim = build();
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);

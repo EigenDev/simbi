@@ -138,7 +138,7 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
     tiles
 }
 
-// drive the tiles through the production decomposed-hierarchy loop (symbi-amr): exercises the
+// drive the tiles through the production decomposed-hierarchy loop (symbi-refinement): exercises the
 // same `evolve_hierarchy_decomposed` a multi-gpu refinement run would call, so a divergence
 // between test and production is impossible. host: all tiles on "device 0".
 fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2], t_final: f64, ts: Timestepping) {

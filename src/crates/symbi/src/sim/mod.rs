@@ -7,15 +7,15 @@
 //                   the sim<->substrate seam, lifted below the substrate.
 //   evolve        — the evolve driver (drives the KernelSet trait); stays here, it depends
 //                   on the substrate (regimes) + the executor, which sit above it in the layering.
-//   refinement    — static mesh refinement (SMR) hierarchy; stays here for the same reason.
+//   refinement    — the fixed mesh-refinement hierarchy; stays here for the same reason.
 // =============================================================================
 
 // the sim-state core lives in `symbi-sim`; re-exported at the `crate::sim::*`
 // paths, which is where regimes, dispatch, the prelude, and tests name it.
 pub use symbi_sim::{checkpoint, decomp, driver, hydro_ops, state, substrate_seam, tracers};
 
-// SMR lives in the `symbi-amr` crate; re-exported at the `crate::sim::refinement`
-// path, which is where tests and examples name it.
-pub use symbi_amr::refinement;
+// the refinement hierarchy lives in the `symbi-refinement` crate; re-exported at the
+// `crate::sim::refinement` path, which is where tests and examples name it.
+pub use symbi_refinement::refinement;
 
 pub mod evolve;

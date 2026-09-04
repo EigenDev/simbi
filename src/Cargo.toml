@@ -16,7 +16,7 @@ members = [
     "crates/symbi-exec",
     "crates/symbi-sim",
     "crates/symbi-substrate",
-    "crates/symbi-amr",
+    "crates/symbi-refinement",
     "crates/symbi-afterglow",
     "crates/symbi-afterglow-io",
     "crates/symbi-xpu",

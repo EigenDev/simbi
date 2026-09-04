@@ -3,7 +3,7 @@
 //
 // shared timestep-driver primitives that operate on `SimStateGeneric`.
 // these are not specific to the single-grid integrator — both the top-level
-// `evolve` loop (symbi) and the AMR hierarchy driver (symbi-amr) need them, so they
+// `evolve` loop (symbi) and the refinement hierarchy driver (symbi-refinement) need them, so they
 // live in the sim-state core below both drivers:
 // - check_dt / check_dt_or_panic — dt-livelock guard (NaN/Inf/non-positive)
 // - the SYMBI_PROFILE per-phase profiler (prof / reset_profile / report_profile)
@@ -23,7 +23,7 @@ use symbi_xpu::{ExecutionSpace, MemorySpace};
 use crate::state::{FieldStore, SimStateGeneric};
 
 /// the loud livelock guard: a NaN/Inf/non-positive `dt` means the state went NaN and the loop
-/// would spin forever without surfacing it. shared by `evolve` and the AMR driver so both paths
+/// would spin forever without surfacing it. shared by `evolve` and the refinement driver so both paths
 /// have identical protection.
 pub fn check_dt_or_panic(dt: f64, iter: u64, time: f64) {
     if let Err(e) = check_dt(dt, iter, time) {
@@ -155,7 +155,7 @@ pub fn report_profile() -> Vec<(&'static str, f64)> {
 }
 
 /// `c_{k+1} = ac*(c_k + 1)` — euler -> [1]; rk2 -> [1, 1]; rk3 -> [1, 1/2, 1].
-/// consumers: the amr coarse-fine ghost time interpolation (stage k+1
+/// consumers: the refinement coarse-fine ghost time interpolation (stage k+1
 /// reconstructs from that state) and the mesh-motion stage clock (a stage's
 /// entry time is the previous stage's exit).
 pub fn stage_time_fractions(stages: &[(f64, f64)]) -> Vec<f64> {

@@ -1,13 +1,13 @@
 // =============================================================================
 // hierarchy.rs
 //
-// the static-mesh-refinement (SMR) hierarchy. each
+// the fixed mesh-refinement hierarchy. each
 // level is a complete SimStateGeneric + its KernelSet; the hierarchy adds only
 // inter-level coordination: recursive berger-oliger subcycling with
 // time-interpolated coarse-fine ghost prolongation, conservative restriction,
 // and flux-register refluxing. the single-level engine is untouched —
 //
-// single-coverage cap (this is SMR): each level refines one box
+// single-coverage cap: each level refines one box
 // (`coverage: Option<Domain>`), with one FluxRegister per coarse-fine
 // level-pair. the refined region is fixed at setup and stays where it was
 // placed; there is a single patch per level and no berger-rigoutsos
@@ -123,7 +123,7 @@ where
     /// staggered domains, cloned from this level's bface).
     pub bface_old: Option<[Field<f64, NDIM, Mem>; NDIM]>,
     /// per-slab intermediates of the axis-split prolongation into this level,
-    /// in `cf_ghost_slabs` order. SMR slabs are static, so
+    /// in `cf_ghost_slabs` order. the refinement slabs are fixed, so
     /// the shapes are too: lazily allocated on the first prolongation, reused
     /// on every call (the step loop allocates nothing). uninitialized on the
     /// root.
@@ -136,7 +136,7 @@ where
     pub band_departure: std::sync::OnceLock<Field<f64, NDIM, Mem>>,
     /// the region of this level covered by the next finer level, in absolute
     /// indices of this level. None on the finest. single-coverage cap: one
-    /// refined box per level (static refinement / SMR — a single `Domain`,
+    /// refined box per level (a single `Domain`,
     /// placed at setup).
     pub coverage: Option<Domain<NDIM>>,
     /// this level's numerical flux of the run's stationary target state, `F(qt)`, when the run
@@ -714,7 +714,7 @@ where
 
     /// decimate the hierarchy to a screen-sized density heatmap, compositing the
     /// nested refinement levels: each root cell descends to the finest level whose
-    /// `coverage` box contains it (SMR = single nested box per level, ratio 2), so
+    /// `coverage` box contains it (a single nested box per level, ratio 2), so
     /// the refined region shows its fine detail and the rest shows the coarse grid.
     /// a single-level hierarchy is just the root decimation. cost is screen-bounded.
     pub fn field_slice_composite(
@@ -3799,7 +3799,7 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
 // decomposed hierarchy driver (refinement x decomposition)
 // =============================================================================
 
-/// the sub-grid of tiles that carry the first fine level. for SMR (one refined box per level) the
+/// the sub-grid of tiles that carry the first fine level. with one refined box per level the
 /// refined tiles form a contiguous rectangle; `order[k]` is the tile index at fine-flatten position
 /// `k`, and `devices[k]`/`counts` give that sub-grid's device map + shape for `exchange_grid`. when
 /// the patch is tile-local the sub-grid is 1x1, so the fine exchange is a no-op; when
@@ -3811,7 +3811,7 @@ pub struct FineSubgrid<const NDIM: usize> {
 }
 
 /// derive the first-fine-level sub-grid from which tiles carry a fine level. None if no tile is
-/// refined. asserts the refined tiles fill a rectangle (the SMR single-box invariant). pub so the
+/// refined. asserts the refined tiles fill a rectangle (the single-box invariant). pub so the
 /// seed every tile's fine levels from its coarse level, decomposition-aware: the root
 /// conserved cut halos are exchanged first, then each tile prolongs.
 ///
@@ -3907,7 +3907,7 @@ where
     }
     assert!(
         order.iter().all(|&i| i != usize::MAX),
-        "refinement x decomposition: refined tiles do not form a rectangle (SMR is single-box)"
+        "refinement x decomposition: refined tiles do not form a rectangle (a single refined box per level)"
     );
     let sub_devices: Vec<i32> = order.iter().map(|&i| devices[i]).collect();
     Some(FineSubgrid {

@@ -8,9 +8,9 @@ bench = false
 
 [features]
 default = []
-gpu = ["symbi-xpu/gpu", "symbi-grid/gpu", "symbi-exec/gpu", "symbi-sim/gpu", "symbi-substrate/gpu", "symbi-amr/gpu"]
-cuda = ["gpu", "symbi-xpu/cuda", "symbi-grid/cuda", "symbi-exec/cuda", "symbi-sim/cuda", "symbi-substrate/cuda", "symbi-amr/cuda"]
-hip = ["gpu", "symbi-xpu/hip", "symbi-grid/hip", "symbi-exec/hip", "symbi-sim/hip", "symbi-substrate/hip", "symbi-amr/hip"]
+gpu = ["symbi-xpu/gpu", "symbi-grid/gpu", "symbi-exec/gpu", "symbi-sim/gpu", "symbi-substrate/gpu", "symbi-refinement/gpu"]
+cuda = ["gpu", "symbi-xpu/cuda", "symbi-grid/cuda", "symbi-exec/cuda", "symbi-sim/cuda", "symbi-substrate/cuda", "symbi-refinement/cuda"]
+hip = ["gpu", "symbi-xpu/hip", "symbi-grid/hip", "symbi-exec/hip", "symbi-sim/hip", "symbi-substrate/hip", "symbi-refinement/hip"]
 hdf5 = []  # placeholder for symbi-py compat
 
 [dependencies]
@@ -27,7 +27,7 @@ symbi-aot = { path = "../symbi-aot" }
 symbi-exec = { path = "../symbi-exec" }
 symbi-sim = { path = "../symbi-sim" }
 symbi-substrate = { path = "../symbi-substrate" }
-symbi-amr = { path = "../symbi-amr" }
+symbi-refinement = { path = "../symbi-refinement" }
 # runtime user-source kernels. the same gv builder build.rs AOT-bakes
 # (source_apply_from_built_gv) is invoked at runtime to JIT a loaded-DAG source into the
 # substrate IR -> NVRTC, so a python-authored source runs on-device with no recompile.

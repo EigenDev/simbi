@@ -1,6 +1,6 @@
-# symbi-amr
+# symbi-refinement
 
-Static mesh refinement. A hierarchy of levels, each with its own simulation state
+Fixed mesh refinement. A hierarchy of levels, each with its own simulation state
 and kernel set, plus the transfer operators that move data between them and the
 registers that keep the coarse-fine interface conservative.
 
@@ -17,7 +17,7 @@ sibling of the single-grid driver rather than a layer above it.
 
 ## Where to start reading
 
-`refinement.rs`, which holds `SmrHierarchy`.
+`refinement/hierarchy.rs`, which holds `Hierarchy`.
 
 ## Things worth knowing before you change it
 

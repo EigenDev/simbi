@@ -1,15 +1,14 @@
 // =============================================================================
-// amr/mod.rs
+// refinement/mod.rs
 //
-// static mesh refinement (SMR) over the kernel-native engine.
+// fixed mesh refinement over the kernel-native engine.
 // a Hierarchy owns one SimStateGeneric + KernelSet per refinement level and
-// composes the existing single-level stage loop per level; nothing here
-// modifies the single-level engine.
+// composes the existing single-level stage loop per level; the single-level
+// engine stays intact.
 //
-// single-coverage cap: one refined box per level, one FluxRegister per
-// coarse-fine level-pair, no patch graph, no clustering. this is SMR;
-// multi-patch adaptive AMR is deferred. the `amr` module
-// spelling is a code-symbol naming debt and makes no adaptivity claim.
+// single-coverage cap: one refined box per level, declared at setup and held for
+// the run, with one FluxRegister per coarse-fine level-pair. multi-patch
+// solution-adaptive refinement lies outside this implementation.
 //
 //   hierarchy     — Hierarchy + LevelData + the berger-oliger subcycle driver
 //   transfer      — cf ghost slabs + prolong/restrict kernel dispatch

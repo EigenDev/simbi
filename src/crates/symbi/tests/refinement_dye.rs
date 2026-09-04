@@ -21,7 +21,7 @@
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
-use symbi_amr::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
+use symbi_refinement::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;

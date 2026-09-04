@@ -884,7 +884,7 @@ A few core pieces:
 - **`symbi-geometry`** holds the metrics, coordinate charts, and the `Spacetime` implementations
 - **`symbi-io`** does the HDF5 checkpoints, and **`symbi-display`** is the live TUI
 - **`symbi-substrate`** assembles the per-regime kernel sets (flux, c2p, godunov, cfl, ghost fill)
-- **`symbi-amr`** is the refinement hierarchy: prolongation, restriction, flux registers, and subcycling
+- **`symbi-refinement`** is the refinement hierarchy: prolongation, restriction, flux registers, and subcycling
 - **`symbi-ib`** is the immersed-body layer: body state, motion, and accretion ledgers
 - **`symbi-xpu`** is the device layer: memory, streams, and kernel launches
 - **`symbi-afterglow`** does the radiation transport and observables

@@ -1868,7 +1868,7 @@ public term):
 | accumulated run output | receipt / report / ledger / census | **ledger** (intervention evidence) + **census** (binned reduction) — distinct, kept |
 | the outer-boundary relaxation | sponge / buffer / damping / relax | **sponge** (toward a state) vs **relax** (toward equilibrium) — distinct, kept; drop "buffer/damping" as synonyms |
 | an immersed boundary | body / wall / surface / mask / sink / accretor / drain | **body** (the object) with **capability** (rigid / accretor / gravitational) |
-| static refinement | refinement / fmr / amr / smr | **refinement** |
+| static refinement | refinement / fmr / amr / smr | **refinement** (generic infrastructure); the `fixed`/`adaptive` policy words stay where they guard the unimplemented path |
 | the closure | regime / eos / adiabatic\_index==1 | **regime** carries the closure; isothermal is a regime, never a gamma value |
 | the traced source graph | Expr / ExprGraph / .graph | hidden; the scientist writes an **expression** over named quantities |
 
@@ -1896,6 +1896,70 @@ bodies with CSG shapes, GR spacetimes, local isothermality, viscosity — with n
 occurrence of `Expr`/`ExprGraph`/`.graph`, IR nodes, manifests, effects, admission
 witnesses, buffer order, kernel names, or backend launch types, and each runs to a
 checkpoint whose baked kernels match today's byte-for-byte.
+
+#### Pass 2 — the refinement family (audited, not built)
+
+**Central finding: the backend refines statically, only.** A refined hierarchy is
+declared at setup and held for the whole run; no regridding, cell tagging, error
+estimation, clustering, or derefinement exists anywhere in the evolve loop. The
+implementation states this itself: the single refined box per level "is SMR;
+multi-patch adaptive AMR is deferred. the `amr` module spelling is a code-symbol
+naming debt and makes no adaptivity claim" (`symbi-amr/src/refinement/mod.rs`), and
+"the refined region is fixed at setup and stays where it was placed"
+(`hierarchy.rs`). The Python frontend agrees — "fixed mesh refinement only"
+(`simbi/simulation/problem.py`) — and derives refinement regions from geometry
+(telescoping boxes about a center), never from the solution.
+
+**Verdict on `fmr` / `smr` / `amr`: three spellings for one static mechanism, not
+three policies.** `smr` = "static mesh refinement" (the Rust name for what it does);
+`fmr` = "fixed mesh refinement" (the Python label for the same thing — "fixed" and
+"static" carry no distinct law here); `amr` = the crate/module spelling, disclaimed
+in the code as naming debt. Genuine adaptive refinement does not exist.
+
+**The distinction that is real and stays:** `RefinementMode.{FIXED,ADAPTIVE}` and
+`SubCycleMode.{STANDARD,NONE,ADAPTIVE,MANUAL}`. Their `adaptive`/`manual` arms are
+live rejection paths (`raise NotImplementedError`) that stop a scientist from
+declaring an unimplemented policy. The word `adaptive` there names a contract, not a
+synonym; flattening it would delete a guard.
+
+**Rename (internal, generic mechanism) — compile + targeted-test gate:** the `amr`
+spelling for the policy-agnostic mechanism — crate `symbi-amr`, and the module/type/
+comment uses of "AMR" as the generic label (~83 sites). The transfer types
+(`Hierarchy`, `LevelData`, `FineSubgrid`, `FluxRegister`, `EmfRegister`,
+`RefinementRegion`, `ProlongOrder`) and the `refinement.rs`/`hierarchy.rs`/
+`transfer.rs` files are internal. Collapse the `fmr`/`smr` spellings onto one term;
+`refinement` for the mechanism, or `static_refinement` where the honest policy label
+earns its place.
+
+**Unsupported adaptive scaffolding, handled separately:** `RefinementCriterion`
+`{GRADIENT,VALUE,CUSTOM}` (`simbi/types/input.py`) — an adaptive-refinement enum with
+zero references, describing a capability the backend lacks. It is a public Python
+type, so its removal is an API/feature-surface decision, not a semantics-free
+vocabulary migration; the rename pass leaves it untouched and it is retired later
+under an explicit removal policy.
+
+**Do not touch without a compatibility policy + serialization/artifact comparison
+(wire-sensitive):**
+
+- Python config field keys read by name across the boundary: `refinement_enabled`,
+  `refinement_regions`, `refinement_ratios`, `refinement_max_levels`,
+  `refinement_substeps`, `refinement_subcycling_mode`, `refinement_mode`,
+  `seed_from_equilibrium` — the Rust extractor looks these up by exact string.
+- Serialized enum string values: `RefinementMode` `"fixed"/"adaptive"`, `SubCycleMode`
+  `"standard"/"none"/"adaptive"/"manual"` — compared against checkpoint metadata.
+- Checkpoint / HDF5 keys (frozen layout): the per-level groups `/level_i`, and the
+  restart keys `refinement_level_dts`, `refinement_level_substeps`,
+  `refinement_subcycling_mode`; the reader accessor `has_refinement`.
+- Kernel-name ABI strings in the AOT registry, emitted and looked up by exact string:
+  `refine_restrict_{n}d`, `refine_prolong_{order}_{n}d`, the face/edge variants. These
+  are interned precisely to be a stable ABI; changing an emitted `.name()` changes the
+  baked artifacts and breaks byte-identity. The `KernelId::Refine*` variants and
+  `ProlongTag` back these strings — the variant spelling may change only if `.name()`
+  output does not.
+
+The `amr`→`refinement` rename is mostly internal because neither the `/level_i` HDF5
+groups nor the `refine_*` kernel names contain "amr"; the byte-identity comparison
+still runs to prove it.
 
 ## 17. Non-goals
 

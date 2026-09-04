@@ -152,7 +152,7 @@ fn build_tiles(partition: &Partition<2>, ts: Timestepping) -> Vec<Hier> {
     tiles
 }
 
-// drive the tiles through the production decomposed-hierarchy loop (symbi-amr). the same lib fn
+// drive the tiles through the production decomposed-hierarchy loop (symbi-refinement). the same lib fn
 // `evolve_hierarchy_decomposed` handles the tile-local case (fine sub-grid 1x1) and the spanning case
 // (the patch spans the cut, so the fine sub-grid has an internal cut and the fine halos are exchanged)
 // -- this test proves the spanning-patch path. host: all tiles on "device 0".

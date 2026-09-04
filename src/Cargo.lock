@@ -1397,7 +1397,6 @@ dependencies = [
  "rayon",
  "smallvec",
  "symbi-algebra",
- "symbi-amr",
  "symbi-aot",
  "symbi-carrier",
  "symbi-discretize",
@@ -1410,6 +1409,7 @@ dependencies = [
  "symbi-io",
  "symbi-ir",
  "symbi-jit",
+ "symbi-refinement",
  "symbi-sim",
  "symbi-source-compile",
  "symbi-substrate",
@@ -1442,24 +1442,6 @@ dependencies = [
 [[package]]
 name = "symbi-algebra"
 version = "0.1.0"
-
-[[package]]
-name = "symbi-amr"
-version = "0.1.0"
-dependencies = [
- "rayon",
- "symbi-algebra",
- "symbi-discretize",
- "symbi-geometry",
- "symbi-grid",
- "symbi-hydro",
- "symbi-ib",
- "symbi-ir",
- "symbi-sim",
- "symbi-source-compile",
- "symbi-substrate",
- "symbi-xpu",
-]
 
 [[package]]
 name = "symbi-aot"
@@ -1624,6 +1606,24 @@ dependencies = [
  "symbi-io",
  "symbi-sim",
  "symbi-source-compile",
+]
+
+[[package]]
+name = "symbi-refinement"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+ "symbi-algebra",
+ "symbi-discretize",
+ "symbi-geometry",
+ "symbi-grid",
+ "symbi-hydro",
+ "symbi-ib",
+ "symbi-ir",
+ "symbi-sim",
+ "symbi-source-compile",
+ "symbi-substrate",
+ "symbi-xpu",
 ]
 
 [[package]]

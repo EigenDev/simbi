@@ -1,8 +1,8 @@
 // =============================================================================
-// symbi-amr/src/lib.rs
+// symbi-refinement/src/lib.rs
 //
-// the static mesh refinement (SMR) crate: the per-level
-// `SimStateGeneric` + `KernelSet` hierarchy, the coarse-fine flux/EMF registers,
+// the mesh-refinement crate: a fixed per-level hierarchy declared at setup — the
+// per-level `SimStateGeneric` + `KernelSet` tree, the coarse-fine flux/EMF registers,
 // and the conservative restriction/prolongation transfer operators.
 //
 // sits above `symbi-sim` (per-level sims + the shared driver primitives it reuses)
@@ -11,8 +11,8 @@
 // same `symbi_sim::driver` primitives dry, neither depends on the other.
 //
 // usage:
-//  use symbi_amr::refinement::SmrHierarchy;
+//  use symbi_refinement::refinement::Hierarchy;
 // =============================================================================
 
-// static mesh refinement (SMR) hierarchy over per-level KernelSets.
+// the fixed per-level refinement hierarchy over per-level KernelSets.
 pub mod refinement;
