@@ -2,7 +2,7 @@
 // penalize.rs
 //
 // the composable immersed-boundary property algebra:
-// properties contribute a relaxation rate and a target into a `Relax`
+// properties contribute a relaxation rate and a target into a `PenalizationRelaxation`
 // accumulator; the engine integrates the accumulated system once, as exact
 // frozen-coefficient exponentials on three disjoint primitive channels —
 //   rho:   den' = den * exp(-lambda_rho dt)          (the uniform drain)
@@ -13,7 +13,7 @@
 // unconditionally stable for any dt, and commuting exactly under property stack
 // reordering: the energy reconstruction reads the velocity relaxation summed
 // across all properties (for the wall-work / dissipation term below), so
-// the accumulated Relax is order-independent.
+// the accumulated PenalizationRelaxation is order-independent.
 //
 // the conserved reconstruction is spelled as a conserved scaling plus
 // corrections that vanish exactly at zero rates:
@@ -38,7 +38,7 @@
 // slot discards the e-channel corrections by construction (EnergySlot).
 //
 // usage:
-//   let mut acc = Relax::none();
+//   let mut acc = PenalizationRelaxation::none();
 //   for p in &stack { p.contribute(chi, &kin, &mut acc); }
 //   let (u_new, delta) = penalize_cell(&cons, &acc, normal, dt, volume, idx);
 // =============================================================================
@@ -128,7 +128,7 @@ pub const TORQUE_FREE_RETENTION_FLOOR: f64 = 1e-4;
 /// rates add across properties; targets are assigned (single-body stack — the
 /// multi-body nearest-wins policy composes above this).
 #[derive(Clone, Copy, Debug)]
-pub struct Relax<S: Scalar, const D: usize> {
+pub struct PenalizationRelaxation<S: Scalar, const D: usize> {
     pub lambda_rho: S,
     pub lambda_un: S,
     pub lambda_ut: S,
@@ -142,7 +142,7 @@ pub struct Relax<S: Scalar, const D: usize> {
     pub ut_growth_cap: S,
 }
 
-impl<S: Scalar, const D: usize> Relax<S, D> {
+impl<S: Scalar, const D: usize> PenalizationRelaxation<S, D> {
     /// no relaxation on any channel: `penalize_cell` on this is an exact no-op.
     pub fn none() -> Self {
         Self {
@@ -196,7 +196,12 @@ pub enum Property<S: Scalar> {
 }
 
 impl<S: Scalar> Property<S> {
-    pub fn contribute<const D: usize>(&self, chi: S, kin: &BodyKin<S, D>, acc: &mut Relax<S, D>) {
+    pub fn contribute<const D: usize>(
+        &self,
+        chi: S,
+        kin: &BodyKin<S, D>,
+        acc: &mut PenalizationRelaxation<S, D>,
+    ) {
         match *self {
             Property::Drain { inv_tau } => {
                 acc.lambda_rho = acc.lambda_rho + chi * inv_tau;
@@ -253,7 +258,7 @@ impl<S: Scalar> Property<S> {
 /// every property stack, including drag work landing on the body.
 pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
     cons: &ConsG<S, D, E, X>,
-    relax: &Relax<S, D>,
+    relax: &PenalizationRelaxation<S, D>,
     normal: Tensor<S, D>,
     dt: S,
     volume: S,
@@ -383,7 +388,7 @@ mod tests {
                                     u.scale(den),
                                     EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
                                 );
-                                let relax = Relax {
+                                let relax = PenalizationRelaxation {
                                     lambda_rho: l_rho,
                                     lambda_un: l_un,
                                     lambda_ut: l_ut,
@@ -425,7 +430,7 @@ mod tests {
             }
         }
         // non-vacuity: the wall has to have moved the entropy on a substantial fraction of the
-        // lattice. a `Relax` that reduced to a no-op everywhere would satisfy the inequality
+        // lattice. a `PenalizationRelaxation` that reduced to a no-op everywhere would satisfy the inequality
         // trivially.
         println!("adiabatic wall: {moved}/{checked} lattice points moved the entropy");
         assert!(
@@ -474,7 +479,7 @@ mod tests {
         let (chi, tau, dt, vol) = (0.73, 0.04, 0.011, 1.5e-3);
         // contribute adds chi * inv_tau; inv_tau = 1/tau makes lambda = chi/tau,
         // matching drain_cell's exponent exactly.
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::Drain { inv_tau: 1.0 / tau }.contribute(chi, &kin(), &mut acc);
         let (pen, pen_delta) = penalize_cell(&cons, &acc, normal(), dt, vol, 0);
         let (dr, dr_delta) = drain_cell(&cons, chi, tau, dt, vol, 0);
@@ -508,7 +513,7 @@ mod tests {
         let k = kin();
         let n = normal();
         let dt = 0.37;
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::Drain { inv_tau: 2.0 }.contribute(0.8, &k, &mut acc);
         Property::Wall {
             inv_eta_n: 30.0,
@@ -551,7 +556,7 @@ mod tests {
     }
 
     // the properties act on disjoint channels, so every stack
-    // ordering accumulates the same Relax and produces the same bits.
+    // ordering accumulates the same PenalizationRelaxation and produces the same bits.
     #[test]
     fn stack_order_does_not_change_a_single_bit() {
         let cons = sample_cons();
@@ -574,7 +579,7 @@ mod tests {
             [2, 1, 0],
         ];
         let run = |order: &[usize; 3]| {
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             for &i in order {
                 props[i].contribute(0.6, &k, &mut acc);
             }
@@ -598,7 +603,7 @@ mod tests {
         let cons = sample_cons();
         let k = kin();
         let n = normal();
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::Wall {
             inv_eta_n: 1e12,
             inv_eta_t: 1e12,
@@ -624,7 +629,7 @@ mod tests {
     #[test]
     fn gas_loss_equals_body_gain_exactly() {
         let cons = sample_cons();
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::PorousAccretor {
             p: 0.4,
             inv_tau: 8.0,
@@ -729,7 +734,7 @@ mod tests {
         };
 
         for &xi in &[0.0, 0.5, 1.0] {
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin0, &mut acc);
             let (_out, delta) = penalize_cell(&cons, &acc, n, dt, vol, 0);
             let coeff = 1.0 - f_rho.powf(1.0 - xi); // retained-tangential complement
@@ -740,7 +745,7 @@ mod tests {
         }
 
         // the torque-free endpoint is exactly zero for this orbiting cell.
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::TorqueFreeAccretor { inv_tau, xi: 1.0 }.contribute(chi, &kin0, &mut acc);
         let (_o, d) = penalize_cell(&cons, &acc, n, dt, vol, 0);
         assert!(moment(&r, &d.force_delta)[2].abs() < 1e-12);
@@ -767,7 +772,7 @@ mod tests {
         );
 
         // (1) lambda_rho dt = 30 -> f_rho ~ 9e-14, finite. cap = infinity (raw).
-        let mut acc = Relax::<f64, 2>::none();
+        let mut acc = PenalizationRelaxation::<f64, 2>::none();
         acc.lambda_rho = 30.0;
         acc.lambda_ut = -30.0; // xi = 1, uncapped
         let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
@@ -782,7 +787,7 @@ mod tests {
         );
 
         // (2) lambda_rho dt = 1000 -> f_rho underflows to 0 -> 0 * inf = NaN.
-        let mut acc = Relax::<f64, 2>::none();
+        let mut acc = PenalizationRelaxation::<f64, 2>::none();
         acc.lambda_rho = 1e3;
         acc.lambda_ut = -1e3;
         let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
@@ -816,7 +821,7 @@ mod tests {
             u.scale(den),
             EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
         );
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::TorqueFreeAccretor {
             inv_tau: 1e3,
             xi: 1.0,
@@ -839,7 +844,7 @@ mod tests {
             u2.scale(den),
             EnergyDensity(den * (e_int + 0.5 * u2.dot(&u2))),
         );
-        let mut acc2 = Relax::none();
+        let mut acc2 = PenalizationRelaxation::none();
         Property::TorqueFreeAccretor {
             inv_tau: 0.5,
             xi: 1.0,
@@ -878,7 +883,7 @@ mod tests {
         // physical per-step drain fractions, down to the floor (1e-4): torque-free.
         for &f_rho in &[0.9_f64, 0.5, 0.1, 1e-2, 1e-3, 1e-4] {
             let inv_tau = -f_rho.ln() / dt;
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             Property::TorqueFreeAccretor { inv_tau, xi: 1.0 }.contribute(1.0, &kin0, &mut acc);
             let (_o, d) = penalize_cell(&cons, &acc, n, dt, 1.0, 0);
             assert!(
@@ -888,7 +893,7 @@ mod tests {
         }
         // below the floor (f_rho = 1e-6): the cap fires -> a bounded standard torque.
         let inv_tau = -(1e-6_f64).ln() / dt;
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::TorqueFreeAccretor { inv_tau, xi: 1.0 }.contribute(1.0, &kin0, &mut acc);
         let (_o, d) = penalize_cell(&cons, &acc, n, dt, 1.0, 0);
         let t = moment(&r, &d.force_delta)[2];
@@ -944,7 +949,7 @@ mod tests {
 
         let n = normal();
         let dt = 0.23;
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::Wall {
             inv_eta_n: 12.0,
             inv_eta_t: 4.0,
@@ -973,7 +978,7 @@ mod tests {
         let n = normal();
         let dt = 0.05;
         let run = |kin_used: &BodyKin<f64, 3>| {
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             Property::Wall {
                 inv_eta_n: 9.0,
                 inv_eta_t: 3.0,
@@ -1013,7 +1018,7 @@ mod tests {
             u.scale(den),
             EnergyDensity(den * (e_int + 0.5 * u.dot(&u))),
         );
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::Wall {
             inv_eta_n: 1e12,
             inv_eta_t: 1e12,
@@ -1050,7 +1055,7 @@ mod tests {
             omega: Tensor::zeros(),
             e_wall: 0.0,
         };
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::PorousAccretor {
             p: 0.3,
             inv_tau: 0.0,
@@ -1076,7 +1081,7 @@ mod tests {
         let n = normal();
         let (chi, dt) = (0.8, 0.02);
 
-        let mut porous = Relax::none();
+        let mut porous = PenalizationRelaxation::none();
         Property::PorousAccretor {
             p: 1.0,
             inv_tau: 6.0,
@@ -1084,14 +1089,14 @@ mod tests {
             inv_eta_t: 7.0,
         }
         .contribute(chi, &k, &mut porous);
-        let mut drain = Relax::none();
+        let mut drain = PenalizationRelaxation::none();
         Property::Drain { inv_tau: 6.0 }.contribute(chi, &k, &mut drain);
         let (a, _) = penalize_cell(&cons, &porous, n, dt, 1.0, 0);
         let (b, _) = penalize_cell(&cons, &drain, n, dt, 1.0, 0);
         assert_eq!(a.den().to_bits(), b.den().to_bits());
         assert_eq!(a.nrg().to_bits(), b.nrg().to_bits());
 
-        let mut sealed = Relax::none();
+        let mut sealed = PenalizationRelaxation::none();
         Property::PorousAccretor {
             p: 0.0,
             inv_tau: 6.0,
@@ -1116,7 +1121,7 @@ mod tests {
             e_wall: 5.0,
         };
         let n = Tensor::new([1.0, 0.0]);
-        let mut acc = Relax::none();
+        let mut acc = PenalizationRelaxation::none();
         Property::Drain { inv_tau: 4.0 }.contribute(0.5, &k, &mut acc);
         Property::IsothermalWall { inv_eta: 1e9 }.contribute(0.5, &k, &mut acc);
         let (out, delta) = penalize_cell(&cons, &acc, n, 0.1, 1.0, 0);

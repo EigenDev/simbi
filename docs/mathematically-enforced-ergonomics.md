@@ -2120,6 +2120,53 @@ dataclasses reject attribute assignment; and when no `diagnostics.*` field name 
 a transaction word. This touches the `run()` entrypoint and the backend return
 boundary; it is a deliberate feature to build after review, not a rename.
 
+#### Pass 2 — the outer-relaxation family (audited, not built)
+
+**`sponge` is one clean word and stays.** Every occurrence means outer-domain
+full-state relaxation toward a primitive reference `[kappa, rho_ref, vel_ref..,
+pre_ref]`: the `SourceKind.SPONGE` config, `sponge_wire`, the
+`sponge_{density,momentum,energy}` laws, the `user_sponge_sources` lowering. It is
+the model term.
+
+**The IB-penalization / sponge non-merge already holds in the code.** The
+immersed-boundary penalization (`symbi-ib::penalize::penalize_cell`, the
+`Penalize{Drain,DrainIso,Porous,TorqueFreeIso}` KernelIds, configured through the
+bodies API) and the outer-domain sponge relaxation (the source-compile path, no
+KernelId) share no type, kernel, or config key. They resemble each other only in
+the exponential math and in some comment prose. Nothing to un-merge.
+
+**Correction to the migration map: `relax` is not "toward equilibrium."** The code
+has no elliptic/SOR/well-balancing relaxation. `SourceKind.RELAX` is a velocity-only
+drag toward a target velocity `[rate, v_0..]` — a momentum-only sponge, the same
+reference-state relaxation family as `SPONGE`, differing only in which channels it
+touches. Well-balancing is spelled `well_balanced`, never `relax`. So `sponge` and
+`relax` are one family split by channel coverage, not "state vs equilibrium."
+
+**The genuine overload is `buffer`.** Its dominant sense is ordinary memory
+storage (device buffers, halo/exchange staging, scratch — the overwhelming
+majority of occurrences). But the config-author-facing `use_buffer` /
+`buffer_parameters` / `buffer_sponge_terms` / `buffer_radius` fields name the
+spatial sponge annulus — a physics region colliding with the memory sense. Worse,
+the porous example's `buffer_index` is a porosity power-law index, not a zone at
+all, and serializes to the path token `bufn` while `buffer_time_fraction`
+serializes to `sponge`. These config fields are the real debt.
+
+**A shared identifier invites the very conflation the non-merge rule guards:** the
+IB accumulator struct `symbi-ib::penalize::Relax` and the sponge/drag source both
+use the word `relax`. They do not conflate structurally, but the shared name makes
+the boundary lexically invisible.
+
+Proposed mapping — rename only the contradictory/overloaded:
+
+| item | classification | proposal | surface |
+|---|---|---|---|
+| `sponge`, `Penalize*`, `drain_rate` | one consistent law each | leave | — |
+| config `use_buffer`/`buffer_parameters`/`buffer_sponge_terms`/`buffer_radius` (the sponge annulus) | physics region overloading the memory word | → `use_sponge`/`sponge_parameters`/`sponge_terms`/`sponge_radius` | public config + path tokens — needs an alias/deprecation policy and a path-token compatibility shim |
+| `buffer_index` (porous example) | a porosity power-law index mislabeled `buffer` | → `porosity_index` | example-local public field |
+| `symbi-ib::penalize::Relax` struct | IB accumulator sharing the sponge word | → `WallRelax` (or `PenaltyAccum`) | internal Rust — compile + penalize tests |
+| `SourceKind.RELAX` (velocity drag) | truthfully a momentum-only sponge | optional → `VELOCITY_SPONGE`; do not recast as "toward equilibrium" | public wire — lower priority, alias policy |
+| `damp` in Riemann-dissipation prose | a coefficient/effect, honest | leave | — |
+
 ## 17. Non-goals
 
 This program does not seek to:

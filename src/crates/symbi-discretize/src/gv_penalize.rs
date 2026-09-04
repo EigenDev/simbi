@@ -3,7 +3,7 @@
 //
 // the traced immersed-boundary penalization kernel:
 // per cell, the sphere SDF's signed distance -> the mollified chi -> the
-// property stack's Relax accumulation -> the same carrier-generic
+// property stack's PenalizationRelaxation accumulation -> the same carrier-generic
 // `penalize_cell` that runs at f64, evaluated at Gv. the [Drain] stack is
 // the p = 1 anchor: chi/tau on the rho channel only, every other channel's
 // correction an exact arithmetic zero, so the kernel reduces bit-for-bit to
@@ -30,7 +30,7 @@ use symbi_carrier::Scalar;
 use symbi_geometry::{Cylindrical, CylindricalRPhi, DiagonalMetric, Metric, Spherical};
 use symbi_hydro::energy::{Adiabatic, Dyed, EnergyModel, EnergySlot, IsoModel};
 use symbi_hydro::state::ConsG;
-use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
+use symbi_ib::penalize::{BodyKin, PenalizationRelaxation, Property, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
 use symbi_ir::{CtEdgeCt, CtFaceCt, CtScratchKey, CtWireName, Transverse};
@@ -664,7 +664,7 @@ fn penalize_drain_impl<E: EnergyModel>(
             omega: Tensor::zeros(),
             e_wall: Gv::ZERO,
         };
-        let mut acc = Relax::<Gv, 3>::none();
+        let mut acc = PenalizationRelaxation::<Gv, 3>::none();
         Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
         // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
         // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
@@ -1063,7 +1063,7 @@ fn penalize_porous_impl<E: EnergyModel>(
             u_solid: solid_velocity_phys(coords, ndim, axes, &geo.centroid, &kin_cart.u_solid),
             ..kin_cart
         };
-        let mut acc = Relax::<Gv, 3>::none();
+        let mut acc = PenalizationRelaxation::<Gv, 3>::none();
         Property::PorousAccretor {
             p: porosity,
             inv_tau,
@@ -1104,7 +1104,7 @@ fn penalize_porous_impl<E: EnergyModel>(
 /// anti-relaxation `lambda_t = -xi lambda_rho` about the sphere normal, so the
 /// accreted mass delivers zero net angular momentum to the body (the dittmann &
 /// ryan 2021 torque-free sink, coordinate-free via the SDF normal). the
-/// retention floor (`Relax.ut_growth_cap`, set by the property) bounds the
+/// retention floor (`PenalizationRelaxation.ut_growth_cap`, set by the property) bounds the
 /// growing tangential factor at the evacuation limit. the sound speed is
 /// recovered from the conserved state and the energy channel is carried (delta
 /// outputs mass + force + energy + torque). `xi = 0` reduces to
@@ -1236,7 +1236,7 @@ fn penalize_torque_free_impl<E: EnergyModel>(
             omega: Tensor::zeros(),
             e_wall: Gv::ZERO,
         };
-        let mut acc = Relax::<Gv, 3>::none();
+        let mut acc = PenalizationRelaxation::<Gv, 3>::none();
         Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
         // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
         // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.

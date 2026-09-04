@@ -3,7 +3,7 @@
 //
 // the [Drain] penalization kernel's gates: the
 // compiled kernel is bit-identical to the f64 host chain built from the same
-// carrier-generic functions (sphere SDF chi -> Relax -> penalize_cell), the
+// carrier-generic functions (sphere SDF chi -> PenalizationRelaxation -> penalize_cell), the
 // per-cell deltas equal the gas's conserved loss exactly, and the blob
 // declares its support ball.
 // =============================================================================
@@ -13,7 +13,7 @@ use symbi_aot::{CpuField, CpuFieldMut, kernel_by_name};
 use symbi_hydro::energy::Adiabatic;
 use symbi_hydro::quantity::{Density, EnergyDensity};
 use symbi_hydro::state::ConsG;
-use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
+use symbi_ib::penalize::{BodyKin, PenalizationRelaxation, Property, penalize_cell};
 use symbi_ib::sdf::{SdfExpr, chi};
 use symbi_ir::kernel_output_support_from_ir;
 
@@ -224,7 +224,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
                 omega: Tensor::zeros(),
                 e_wall: 0.0,
             };
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
 
@@ -385,7 +385,7 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
                 omega: Tensor::zeros(),
                 e_wall: 0.0,
             };
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (width(ii) * width(jj)));
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
@@ -552,7 +552,7 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
                 omega: Tensor::zeros(),
                 e_wall: 0.0,
             };
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (ir2(ii) * iphi(jj) * 1.0));
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
@@ -758,7 +758,7 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
                 omega: Tensor::zeros(),
                 e_wall: 0.0,
             };
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             Property::TorqueFreeAccretor { inv_tau, xi: XI }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (ir2(ii) * iphi(jj) * 1.0));
             let (expect, delta) = penalize_cell(&cons, &acc, normal, DT, dv, 0);
@@ -945,7 +945,7 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
                 omega: Tensor::zeros(),
                 e_wall: 0.0,
             };
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             Property::TorqueFreeAccretor { inv_tau, xi: XI }.contribute(ch, &kin, &mut acc);
             let dv = width(ii) * width(jj);
             let (expect, delta) = penalize_cell(&cons, &acc, normal, DT, dv, 0);
@@ -1154,7 +1154,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
                 omega: Tensor::zeros(),
                 e_wall: 0.0,
             };
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             Property::PorousAccretor {
                 p: P,
                 inv_tau,
@@ -1449,7 +1449,7 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
                 omega: Tensor::zeros(),
                 e_wall: 0.0,
             };
-            let mut acc = Relax::none();
+            let mut acc = PenalizationRelaxation::none();
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (ir2(ii) * iphi(jj) * 1.0));
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
