@@ -119,6 +119,13 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
             self.n_sources == self.bodies.len(),
             "source bodies must be added before fragments"
         );
+        assert!(
+            !body.spec.magnetic.requires_material_drain()
+                || body.spec.surface.provides_material_drain(),
+            "a magnetic-slip body closes its slip coefficient on the drain time tau_rho, so its \
+             surface must remove mass; pair the slip coupling with a draining surface (Drain, \
+             TorqueFree, or Porous with porosity > 0)"
+        );
         self.bodies.push(body);
         self.n_sources += 1;
         self
@@ -442,6 +449,39 @@ mod tests {
     #[should_panic(expected = "wall-only rigid body")]
     fn gravitational_fragment_rejected() {
         BodyCollection::new().add_fragment(grav(0, 0.0, 0.0));
+    }
+
+    use crate::{MagneticSpec, SurfaceSpec};
+
+    fn slip_accretor(surface: Option<SurfaceSpec>) -> Body<f64, 2> {
+        let b = Body::<f64, 2>::black_hole(0, V2::zeros(), V2::zeros(), 1.0, 0.1, 0.04, 1.0, 1.0, 0.2);
+        let b = match surface {
+            Some(s) => b.with_surface(s),
+            None => b, // the default surface is the drain
+        };
+        b.with_magnetic(MagneticSpec::Slip {
+            diffusivity_ratio: 2.0,
+            shell_width: 0.05,
+            slip_length_ratio: 1.0,
+            field_regularization: 0.1,
+            placement: 0.0,
+        })
+    }
+
+    // a slip coupling closes its coefficient on the drain time, so a body carrying it must drain.
+    // the default (drain) surface is accepted.
+    #[test]
+    fn a_magnetic_slip_on_a_draining_accretor_is_accepted() {
+        let coll = BodyCollection::new().add(slip_accretor(None));
+        assert!(coll.get(0).spec.magnetic.requires_material_drain());
+    }
+
+    // a sealed porous wall supplies no drain time; pairing slip with it is refused at the door.
+    #[test]
+    #[should_panic(expected = "surface must remove mass")]
+    fn a_magnetic_slip_without_a_draining_surface_is_refused() {
+        let sealed = SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 };
+        BodyCollection::new().add(slip_accretor(Some(sealed)));
     }
 
     #[test]

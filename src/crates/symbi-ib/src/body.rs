@@ -123,6 +123,19 @@ pub enum SurfaceSpec {
     TorqueFree { xi: f64 },
 }
 
+impl SurfaceSpec {
+    /// whether the surface removes mass at a positive rate, supplying the drain timescale
+    /// `tau_rho` a slip coupling closes on. the drain and torque-free accretors always do; a porous
+    /// wall does only while its porosity keeps the drain channel open (`porosity = 0` is a sealed
+    /// wall).
+    pub fn provides_material_drain(&self) -> bool {
+        match *self {
+            SurfaceSpec::Drain | SurfaceSpec::TorqueFree { .. } => true,
+            SurfaceSpec::Porous { porosity, .. } => porosity > 0.0,
+        }
+    }
+}
+
 /// the magnetic coupling a body's surface runs — the MHD analog of `SurfaceSpec`.
 /// config-static — a parameter set, restored from the config on restart. `None` is
 /// transparent to the magnetic field: a hydro run and an MHD run with a non-magnetic body
@@ -140,6 +153,97 @@ pub enum MagneticSpec {
     /// consumes it) and unconditionally dissipative (`-C diag(eta*chi) C^T` is negative-definite for
     /// `eta >= 0`), so the body sheds field monotonically.
     Resistive { eta: f64 },
+    /// force-selective ambipolar magnetic slip: the field is transported relative to the accreting
+    /// matter by the Lorentz-driven slip velocity, through the tensor edge EMF
+    /// `a_B chi_B (|B|^2 I - B B)(curl B)`, so a compressed field releases flux while a force-free
+    /// field is left exactly untouched. div-B-clean (the shared curl consumes it) and passive
+    /// (magnetic energy converts to gas heat at `a_B chi_B |J x B|^2 >= 0`). the coefficient closes
+    /// on the body's own drain time through the magnetic Damkohler number `diffusivity_ratio` = D_B,
+    /// so the model carries no free resistivity dial:
+    ///   a_B = ell_B^2 / ((|B|^2 + field_regularization^2) D_B tau_rho),   ell_B = slip_length_ratio w.
+    /// two widths play distinct roles: `shell_width` = w is the mollification width of the shell
+    /// profile (the tanh ramp and the placement scale), while the transport length ell_B, set by the
+    /// dimensionless `slip_length_ratio` = ell_B / w, is what enters the coefficient. the sharp-
+    /// interface limit assumes ell_B ~ w; keeping the ratio free lets a convergence study test that
+    /// scaling rather than bake it (default 1). `field_regularization` = B_0 bounds the slip speed at
+    /// magnetic nulls; `placement` centers the shell mask, in units of w, inside (< 0), across (0),
+    /// or outside (> 0) the mass surface.
+    Slip {
+        diffusivity_ratio: f64,
+        shell_width: f64,
+        slip_length_ratio: f64,
+        field_regularization: f64,
+        placement: f64,
+    },
+}
+
+impl MagneticSpec {
+    /// reject a magnetic coupling whose declared scales cannot define the operator: the slip closure
+    /// needs a positive finite decoupling ratio, layer width, and null regularization, and a finite
+    /// placement (unclamped, so the validation sweep keeps the signed value). fails loudly at the
+    /// construction door.
+    pub fn validate(&self) {
+        match *self {
+            MagneticSpec::None => {}
+            MagneticSpec::Resistive { eta } => {
+                assert!(
+                    eta.is_finite() && eta >= 0.0,
+                    "magnetic resistivity eta must be finite and nonnegative, got {eta}"
+                );
+            }
+            MagneticSpec::Slip {
+                diffusivity_ratio,
+                shell_width,
+                slip_length_ratio,
+                field_regularization,
+                placement,
+            } => {
+                assert!(
+                    diffusivity_ratio.is_finite() && diffusivity_ratio > 0.0,
+                    "magnetic-slip diffusivity_ratio D_B must be finite and positive, got \
+                     {diffusivity_ratio}"
+                );
+                assert!(
+                    shell_width.is_finite() && shell_width > 0.0,
+                    "magnetic-slip shell_width w must be finite and positive, got {shell_width}"
+                );
+                assert!(
+                    slip_length_ratio.is_finite() && slip_length_ratio > 0.0,
+                    "magnetic-slip slip_length_ratio ell_B/w must be finite and positive, got \
+                     {slip_length_ratio}"
+                );
+                assert!(
+                    field_regularization.is_finite() && field_regularization > 0.0,
+                    "magnetic-slip field_regularization B_0 must be finite and positive (it bounds \
+                     the slip speed at magnetic nulls), got {field_regularization}"
+                );
+                assert!(
+                    placement.is_finite(),
+                    "magnetic-slip placement must be finite (shell widths, signed), got {placement}"
+                );
+            }
+        }
+    }
+
+    /// whether the coupling closes its coefficient on a material-drain timescale, so the body it
+    /// runs on must supply one. slip alone reads `tau_rho`; the others stand on their own.
+    pub fn requires_material_drain(&self) -> bool {
+        matches!(self, MagneticSpec::Slip { .. })
+    }
+
+    /// the magnetic transport length ell_B = slip_length_ratio * w that enters the slip coefficient,
+    /// for a slip coupling. the mollification width w (`shell_width`) drives the shell profile and is
+    /// a separate role. `None` for the couplings that carry no transport length.
+    pub fn transport_length(&self) -> Option<f64> {
+        match *self {
+            MagneticSpec::Slip {
+                shell_width,
+                slip_length_ratio,
+                ..
+            } => Some(slip_length_ratio * shell_width),
+            _ => None,
+        }
+    }
 }
 
 /// the full surface-coupling stack a body runs: the hydrodynamic surface physics and,
@@ -262,8 +366,11 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         self
     }
 
-    /// declare the magnetic coupling (fluent; the default is `None`, transparent to B).
+    /// declare the magnetic coupling (fluent; the default is `None`, transparent to B). the coupling's
+    /// scales are validated here; the material-drain coupling a slip surface requires is checked when
+    /// the body joins the collection, where its surface stack is final.
     pub fn with_magnetic(mut self, magnetic: MagneticSpec) -> Self {
+        magnetic.validate();
         self.spec.magnetic = magnetic;
         self
     }
@@ -776,6 +883,109 @@ mod tests {
                 k_eta_n: 50.0,
                 k_eta_t: 50.0,
             },
+        );
+    }
+
+    fn valid_slip() -> MagneticSpec {
+        MagneticSpec::Slip {
+            diffusivity_ratio: 2.0,
+            shell_width: 0.05,
+            slip_length_ratio: 1.0,
+            field_regularization: 0.1,
+            placement: 0.0,
+        }
+    }
+
+    #[test]
+    fn a_valid_magnetic_slip_declares_cleanly() {
+        let b = Body::<f64, 2>::rigid_sphere(0, V2::zeros(), V2::zeros(), 1.0, 0.1, 1.0, false)
+            .with_magnetic(valid_slip());
+        assert_eq!(b.spec.magnetic, valid_slip());
+        assert!(b.spec.magnetic.requires_material_drain());
+        assert!(!MagneticSpec::None.requires_material_drain());
+        assert!(!MagneticSpec::Resistive { eta: 0.1 }.requires_material_drain());
+    }
+
+    // the transport length is ell_B = slip_length_ratio * w, distinct from the mollification width
+    // w; the couplings that carry no transport length report None.
+    #[test]
+    fn transport_length_is_the_ratio_times_the_width() {
+        let spec = MagneticSpec::Slip {
+            diffusivity_ratio: 2.0,
+            shell_width: 0.05,
+            slip_length_ratio: 3.0,
+            field_regularization: 0.1,
+            placement: 0.0,
+        };
+        assert!((spec.transport_length().unwrap() - 0.15).abs() < 1e-15);
+        assert_eq!(MagneticSpec::None.transport_length(), None);
+        assert_eq!(MagneticSpec::Resistive { eta: 0.1 }.transport_length(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "diffusivity_ratio D_B must be finite and positive")]
+    fn a_nonpositive_diffusivity_ratio_is_refused() {
+        MagneticSpec::Slip {
+            diffusivity_ratio: 0.0,
+            shell_width: 0.05,
+            slip_length_ratio: 1.0,
+            field_regularization: 0.1,
+            placement: 0.0,
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "slip_length_ratio ell_B/w must be finite and positive")]
+    fn a_nonpositive_slip_length_ratio_is_refused() {
+        MagneticSpec::Slip {
+            diffusivity_ratio: 2.0,
+            shell_width: 0.05,
+            slip_length_ratio: 0.0,
+            field_regularization: 0.1,
+            placement: 0.0,
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "field_regularization B_0 must be finite and positive")]
+    fn a_zero_field_regularization_is_refused() {
+        MagneticSpec::Slip {
+            diffusivity_ratio: 2.0,
+            shell_width: 0.05,
+            slip_length_ratio: 1.0,
+            field_regularization: 0.0,
+            placement: 0.0,
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "placement must be finite")]
+    fn a_nonfinite_placement_is_refused() {
+        MagneticSpec::Slip {
+            diffusivity_ratio: 2.0,
+            shell_width: 0.05,
+            slip_length_ratio: 1.0,
+            field_regularization: 0.1,
+            placement: f64::INFINITY,
+        }
+        .validate();
+    }
+
+    // the drain predicate: draining surfaces supply tau_rho; a sealed porous wall does not.
+    #[test]
+    fn only_draining_surfaces_provide_a_material_drain() {
+        assert!(SurfaceSpec::Drain.provides_material_drain());
+        assert!(SurfaceSpec::TorqueFree { xi: 1.0 }.provides_material_drain());
+        assert!(
+            SurfaceSpec::Porous { porosity: 0.5, k_eta_n: 1.0, k_eta_t: 1.0 }
+                .provides_material_drain()
+        );
+        assert!(
+            !SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0, k_eta_t: 1.0 }
+                .provides_material_drain()
         );
     }
 

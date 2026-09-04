@@ -40,6 +40,36 @@ pub fn slip_apply<S: Scalar, const D: usize>(
     z.scale(coeff * b2) - b.scale(coeff * bz)
 }
 
+/// the ambipolar slip coefficient in SIMBI code units,
+///   a_B = ell_B^2 / ((|B|^2 + B_0^2) D_B tau_rho),
+/// closing the magnetic model on the body's own drain time `tau_rho` through the magnetic
+/// Damkohler number `D_B`, with transport length `ell_B` (= slip_length_ratio * mollification
+/// width) and null regularizer `B_0`. code units normalize the field by `B = B_G / sqrt(4 pi)`,
+/// so `J = curl B` carries the current the Gaussian closure writes as `curl B_G / (4 pi)` and
+/// the magnetic energy is `B^2 / 2`. the Gaussian `4 pi` cancels between the coefficient and
+/// `B_reg^2`, leaving this factor-free form. `B_0 > 0` keeps `a_B` finite and positive at
+/// magnetic nulls.
+pub fn slip_coefficient<S: Scalar>(ell_b: S, b2: S, b0: S, d_b: S, tau_rho: S) -> S {
+    ell_b * ell_b / ((b2 + b0 * b0) * d_b * tau_rho)
+}
+
+/// the magnetic-shell mask `chi_B = 4 chi(phi_B) [1 - chi(phi_B)]`, a bump that vanishes in
+/// the resolved exterior and the deep interior and peaks where unresolved flux-matter
+/// decoupling occurs. `chi` is the mollified indicator of the signed distance, of width `w`,
+/// shifted by the placement,
+///   phi_B = phi - placement * w,   chi(phi_B) = 1/2 (1 - tanh(phi_B / w)),
+/// so the shell centers at `phi = placement * w`: inside the mass surface for `placement < 0`,
+/// symmetrically across it for `0`, outside for `> 0`. `w` is the mollification width alone —
+/// the transport length ell_B that scales the coefficient is a separate role. formed from the
+/// signed distance directly, so which side is interior is carried by `phi`, not inferred from
+/// an already-sampled mask. `placement` is dimensionless (widths of `w`), so the shell is
+/// resolution-independent when `w` is physical.
+pub fn chi_shell<S: Scalar>(phi: S, w: S, placement: S) -> S {
+    let phi_b = phi - placement * w;
+    let c = crate::sdf::chi(phi_b, w);
+    S::from_f64(4.0) * c * (S::ONE - c)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +243,84 @@ mod tests {
             prev = mag;
         }
         assert_eq!(prev, 0.0, "the slip field is exactly zero at |B| = 0");
+    }
+
+    // the coefficient and EMF describe the same physics whether evaluated in Gaussian units
+    // (a_G, B_G, J_G with explicit 4 pi) or SIMBI code units (a_B, B, J). the coefficient is
+    // invariant (the 4 pi cancels), the EMF transforms like the field (E_G = sqrt(4 pi) E),
+    // and the dissipation is a physical scalar identical in both systems.
+    #[test]
+    fn coefficient_and_emf_match_gaussian_and_code_units() {
+        let four_pi = 4.0 * std::f64::consts::PI;
+        let root = four_pi.sqrt();
+        // ell_b is the transport length (slip_length_ratio * w), the length that enters a_B.
+        let (ell_b, b0, d_b, tau) = (0.05_f64, 0.1, 2.0, 0.3);
+
+        // a physical state in code units: B = B_G/sqrt(4 pi), J = curl B.
+        let b = Tensor::new([0.4, -0.9, 0.5]);
+        let j = Tensor::new([0.7, 0.2, -0.6]);
+        let a_code = slip_coefficient(ell_b, b.dot(&b), b0, d_b, tau);
+        let e_code = slip_apply(a_code, &b, &j);
+
+        // the same state in Gaussian units: B_G = sqrt(4 pi) B, J_G = J/sqrt(4 pi),
+        // B_0G = sqrt(4 pi) B_0, and a_G carries the explicit 4 pi.
+        let bg = b.scale(root);
+        let jg = j.scale(1.0 / root);
+        let b0g = b0 * root;
+        let a_gauss = four_pi * ell_b * ell_b / ((bg.dot(&bg) + b0g * b0g) * d_b * tau);
+        let e_gauss = slip_apply(a_gauss, &bg, &jg);
+
+        assert!(
+            (a_gauss - a_code).abs() < 1e-12 * a_code,
+            "coefficient not invariant: a_G {a_gauss} vs a_B {a_code}"
+        );
+        for k in 0..3 {
+            assert!(
+                (e_gauss[k] - root * e_code[k]).abs() < 1e-12,
+                "axis {k}: E_G {} vs sqrt(4pi) E {}",
+                e_gauss[k],
+                root * e_code[k]
+            );
+        }
+        let (q_code, q_gauss) = (j.dot(&e_code), jg.dot(&e_gauss));
+        assert!(
+            (q_gauss - q_code).abs() < 1e-12,
+            "dissipation not invariant: Q_G {q_gauss} vs Q {q_code}"
+        );
+    }
+
+    // the shell mask peaks at phi = placement*ell_B, stays in [0, 1], and vanishes many widths
+    // to either side of the shell.
+    #[test]
+    fn shell_mask_peaks_at_the_placement_and_stays_bounded() {
+        let w = 0.1_f64; // the mollification width
+        assert!((chi_shell(0.0, w, 0.0) - 1.0).abs() < 1e-12, "symmetric peak is 1 at phi = 0");
+        assert!(chi_shell(-20.0 * w, w, 0.0) < 1e-6, "vanishes deep inside");
+        assert!(chi_shell(20.0 * w, w, 0.0) < 1e-6, "vanishes far outside");
+        for i in -60..=60 {
+            let v = chi_shell(i as f64 * w * 0.2, w, 0.0);
+            assert!(v >= -1e-15 && v <= 1.0 + 1e-12, "chi_B out of [0,1]: {v}");
+        }
+    }
+
+    // placement shifts the shell along the signed distance and preserves orientation: the peak
+    // tracks phi = placement*ell_B, and opposite placement signs center on opposite sides, so
+    // the mask distinguishes inside from outside rather than collapsing to a symmetric bump.
+    #[test]
+    fn placement_shifts_the_shell_and_preserves_orientation() {
+        let w = 0.1_f64;
+        for placement in [-1.5_f64, 0.0, 1.5] {
+            let peak = chi_shell(placement * w, w, placement);
+            assert!((peak - 1.0).abs() < 1e-12, "placement {placement}: peak not at placement*w");
+        }
+        // an inside placement peaks at phi < 0; sampling that same phi under an outside placement
+        // is off-peak. the sign of placement is a real orientation, not a symmetry.
+        let inside_peak = chi_shell(-1.5 * w, w, -1.5);
+        let outside_at_inside_phi = chi_shell(-1.5 * w, w, 1.5);
+        assert!(inside_peak > 0.99, "inside placement peaks inside");
+        assert!(
+            outside_at_inside_phi < 0.5,
+            "placement sign failed to distinguish inside from outside: {outside_at_inside_phi}"
+        );
     }
 }
