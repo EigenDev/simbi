@@ -33,7 +33,7 @@ use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{BodyKin, PenalizationRelaxation, Property, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
-use symbi_ir::{CtEdgeCt, CtFaceCt, CtScratchKey, CtWireName, Transverse};
+use symbi_ir::{CtCellCt, CtEdgeCt, CtFaceCt, CtScratchKey, CtWireName, PhysComp, Transverse};
 use symbi_ir::{Gv, KernelProgram, ParamExpr, TraceCx};
 
 /// the wall/drain relaxation signal speed: the fast magnetosonic speed `sqrt(c_s^2 + c_a^2)`,
@@ -541,6 +541,150 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> KernelProgram
         tag_body_mask(cx, &chi, coords, ndim, axes, None, false);
 
         let emf_new = emf + eta * chi * j;
+        vec![KernelWrite::new("emf_new", CtEdgeCt::Emf, emf_new.node())]
+    });
+    let kernel = kernel.with_derived_support(&writes);
+    KernelProgram::new(kernel, writes)
+}
+
+/// the magnetic-slip cell pass (3D cartesian): the per-cell quadrature vector
+/// `F_q = A(B_q) (R J)_q`, the intermediate the edge pass scatters to the oriented edge EMF.
+/// `B_q` is the cell-centered field `bcell` (the forward face-average). `(R J)_q[d]` gathers the
+/// four `d`-edge currents bounding the cell (forward transverse offsets, weight 1/4), each edge
+/// current the discrete `curl B` from backward face differences. the dyad coefficient
+/// `a_B chi_B` closes on the local drain rate `lambda_rho` (the same `spherical_drain_rate` the
+/// material drain applies) and the shell mask `chi_B`, so `a_B = ell_B^2 lambda_rho / ((|B|^2 +
+/// B_0^2) D_B)`. writes `fq_0..2`. explicit oracle: it validates the operator's signs, staggering,
+/// and energy law and carries the diffusive stability limit `dt <~ dx^2 / eta_B`.
+pub fn body_slip_quadrature_3d_gv(coords: Coords) -> KernelProgram {
+    let ndim = 3usize;
+    let axes: &[usize] = &[0, 1, 2];
+    let (kernel, writes) = trace(|cx| {
+        // B_q: the cell-centered magnetic field (the forward face-average bcell).
+        let b_q: Vec<Gv> = (0..3)
+            .map(|c| cx.field(&format!("bc_{c}"), symbi_ir::FieldRef::BCell(c as u8)))
+            .collect();
+
+        let inv_dx: Vec<Gv> = (0..3)
+            .map(|a| Gv::ONE / cx.scalar(&format!("dx_{a}")))
+            .collect();
+
+        // (R J)_q[d] = 1/4 sum over the four d-edges bounding the cell (forward transverse offsets)
+        // of the edge current (curl B)_d = dB_p2/dx_p1 - dB_p1/dx_p2, from backward face differences.
+        let bface = |c: usize, off: &[i32]| {
+            crate::gv::gv_field_at(cx, &format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c)), 3, off)
+        };
+        let quarter = Gv::from_f64(0.25);
+        let j_q: Vec<Gv> = (0..3)
+            .map(|d| {
+                let p1 = (d + 1) % 3;
+                let p2 = (d + 2) % 3;
+                let curl_at = |eoff: [i32; 3]| -> Gv {
+                    let mut o_mp1 = eoff;
+                    o_mp1[p1] -= 1;
+                    let mut o_mp2 = eoff;
+                    o_mp2[p2] -= 1;
+                    (bface(p2, &eoff) - bface(p2, &o_mp1)) * inv_dx[p1]
+                        - (bface(p1, &eoff) - bface(p1, &o_mp2)) * inv_dx[p2]
+                };
+                let mut e1 = [0, 0, 0];
+                e1[p1] = 1;
+                let mut e2 = [0, 0, 0];
+                e2[p2] = 1;
+                let mut e12 = [0, 0, 0];
+                e12[p1] = 1;
+                e12[p2] = 1;
+                (curl_at([0, 0, 0]) + curl_at(e1) + curl_at(e2) + curl_at(e12)) * quarter
+            })
+            .collect();
+
+        // the local drain rate lambda_rho = 1/tau_rho: the same spherical_drain_rate the material
+        // drain applies, from the fast-magnetosonic signal speed, body mass, and accretion radius.
+        let gamma = cx.scalar("gamma");
+        let den = cx.field("den", symbi_ir::FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..3)
+            .map(|c| cx.field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
+            .collect();
+        let nrg = cx.field("nrg", symbi_ir::FieldRef::cons_nrg());
+        let mom_sq = mom.iter().fold(Gv::ZERO, |s, m| s + *m * *m);
+        let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
+        let c_drain = cx.scalar("c_drain");
+        let mut min_w = gv_axis_width(cx, 0, Spacing::Uniform);
+        for ax in 1..3 {
+            min_w = min_w.min(gv_axis_width(cx, ax, Spacing::Uniform));
+        }
+        let sound_rate = signal_speed(cx, cs) / (c_drain * min_w);
+        let lambda_rho = symbi_ib::drain::spherical_drain_rate(
+            sound_rate,
+            cx.scalar("body_0_mass"),
+            cx.scalar("body_0_racc"),
+        );
+
+        // the shell mask chi_B at the cell center: phi is the physical distance to the body surface.
+        let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let center: [Gv; 3] = std::array::from_fn(|a| cx.scalar(&format!("body_0_pos_{a}")));
+        let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
+        let x: [Gv; 3] = std::array::from_fn(|a| x_cart[a]);
+        let phi = body_mask_sdf(cx, center).dist(x);
+        let w = cx.scalar("slip_w");
+        let placement = cx.scalar("slip_placement");
+        let chi_b = symbi_ib::magnetic_slip::chi_shell(phi, w, placement);
+        tag_body_mask(cx, &chi_b, coords, ndim, axes, None, false);
+
+        // a_B = ell_B^2 / ((|B|^2 + B_0^2) D_B tau_rho), ell_B = slip_length_ratio w, tau_rho =
+        // 1/lambda_rho. the frozen dyad coefficient is a_B chi_B.
+        let ell_b = cx.scalar("slip_ell_ratio") * w;
+        let b_sq = b_q.iter().fold(Gv::ZERO, |s, b| s + *b * *b);
+        let a_b = symbi_ib::magnetic_slip::slip_coefficient(
+            ell_b,
+            b_sq,
+            cx.scalar("slip_b0"),
+            cx.scalar("slip_d_b"),
+            Gv::ONE / lambda_rho,
+        );
+
+        let coeff = a_b * chi_b;
+        let b_vec = Tensor::new([b_q[0], b_q[1], b_q[2]]);
+        let j_vec = Tensor::new([j_q[0], j_q[1], j_q[2]]);
+        let f_q = symbi_ib::magnetic_slip::slip_apply(coeff, &b_vec, &j_vec);
+
+        (0..3)
+            .map(|c| {
+                KernelWrite::new(
+                    format!("fq_{c}_new"),
+                    CtCellCt::SlipQuadrature(PhysComp::new(c)),
+                    f_q[c].node(),
+                )
+            })
+            .collect::<Vec<_>>()
+    });
+    let kernel = kernel.with_derived_support(&writes);
+    KernelProgram::new(kernel, writes)
+}
+
+/// the magnetic-slip edge pass (3D cartesian) along edge `dir`: scatter the cell-quadrature vector
+/// to the oriented edge EMF, `efield[dir] += (R^* F)_dir`. the weighted-adjoint scatter reads the
+/// `dir`-component `fq_dir` at the four cells sharing the edge (backward transverse offsets, the
+/// exact transpose of the cell pass's forward gather), weight 1/4. the augmented EMF rides the
+/// shared CT curl, so the slip transport is div-B-clean. explicit oracle.
+pub fn body_slip_emf_3d_dir_gv(dir: usize, _coords: Coords) -> KernelProgram {
+    let p1 = (dir + 1) % 3;
+    let p2 = (dir + 2) % 3;
+    let (kernel, writes) = trace(|cx| {
+        let emf = crate::gv::ct_field(cx, CtEdgeCt::Emf);
+        let fq = |off: &[i32]| {
+            crate::gv::gv_field_at(cx, &format!("fq_{dir}"), CtCellCt::SlipQuadrature(PhysComp::new(dir)), 3, off)
+        };
+        let mut om1 = [0, 0, 0];
+        om1[p1] = -1;
+        let mut om2 = [0, 0, 0];
+        om2[p2] = -1;
+        let mut om12 = [0, 0, 0];
+        om12[p1] = -1;
+        om12[p2] = -1;
+        let scattered =
+            (fq(&[0, 0, 0]) + fq(&om1) + fq(&om2) + fq(&om12)) * Gv::from_f64(0.25);
+        let emf_new = emf + scattered;
         vec![KernelWrite::new("emf_new", CtEdgeCt::Emf, emf_new.node())]
     });
     let kernel = kernel.with_derived_support(&writes);

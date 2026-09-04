@@ -1330,6 +1330,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     stage: u8,
     eta: f64,
+    gamma: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -1445,6 +1446,11 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // resistive body. rides the same curl, so it is div-B-clean and dissipation-only exactly like the
     // uniform resistivity above.
     body_resistive_emf::<D, DOF, Mem, Sc>(sim);
+
+    // body-localized magnetic slip: each immersed body running `MagneticSpec::Slip` assembles its
+    // per-cell dyad F_q into the slip-quadrature scratch and scatters it to the edge EMF before the
+    // curl. the augmented EMF rides the same curl, so the tensor slip transport is div-B-clean.
+    body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma);
 
     // the curl bface update: `bface -= dt*curl(efield)` per in-plane face axis.
     ct_curl::<D, DOF, Mem, Sc>(sim, dt);
@@ -1635,6 +1641,139 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
             dispatch_fields_each::<Sc, Mem, D>(
                 &name,
                 mhd.efield[eslot].domain(),
+                &inputs,
+                &outputs,
+                &[],
+                &scalars,
+            );
+        }
+    }
+}
+
+/// the immersed-body magnetic-slip operator (3D cartesian), in two passes per slip body. the cell
+/// pass assembles the per-cell quadrature vector `F_q = A(B_q)(R J)_q` into the slip-quadrature
+/// scratch from the cell B, the four bounding edge currents, the local drain rate, and the shell
+/// mask; the three edge passes scatter it to the oriented edge EMF with the weighted-adjoint `R^*`.
+/// the augmented EMF rides the shared CT curl, so the tensor slip transport is div-B-clean and its
+/// magnetic-energy loss is the nonnegative dissipation. gated to 3D cartesian adiabatic MHD; every
+/// other chart, dimension, or regime fails loudly.
+pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    gamma: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_ir::{FieldRef, ScalarBind, StateComp, StateSlot};
+    let Some(im) = sim.immersed.as_ref() else {
+        return;
+    };
+    let bodies = &im.bodies;
+    for b in 0..bodies.len() {
+        let symbi_ib::MagneticSpec::Slip {
+            diffusivity_ratio,
+            shell_width,
+            slip_length_ratio,
+            field_regularization,
+            placement,
+        } = bodies.get(b).spec.magnetic
+        else {
+            continue;
+        };
+        assert!(
+            sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 3 && DOF == 3,
+            "MagneticSpec::Slip is a 3D cartesian operator (staggered gather/scatter on the full CT \
+             complex); the {:?} chart in {D}D with DOF {DOF} needs its own pass, not yet built",
+            sim.geom.coords
+        );
+        assert!(
+            sim.fields.cons.nrg_field().is_some(),
+            "MagneticSpec::Slip needs the adiabatic energy channel to receive its heating Q_B; \
+             isothermal MHD has no thermal sink and requires an explicit radiated-energy policy"
+        );
+        let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+        let slip_q = mhd
+            .slip_quadrature
+            .as_ref()
+            .expect("slip-quadrature scratch (allocated at attach_bodies for a slip body)");
+
+        // the fast-magnetosonic lift for the drain rate: the max Alfven speed squared over the
+        // interior (global under decomposition), matching the material drain's rate exactly.
+        let c_a2_max: f64 = im
+            .c_a2_override()
+            .unwrap_or_else(|| symbi_sim::state::local_c_a2_max(sim));
+        let resolve = |bind: &ScalarBind| -> Sc {
+            Sc::from_f64(match bind {
+                ScalarBind::Spec(s) if &**s == "c_drain" => 1.0,
+                ScalarBind::Spec(s) if &**s == "c_a2" => c_a2_max,
+                ScalarBind::Spec(s) if &**s == "slip_w" => shell_width,
+                ScalarBind::Spec(s) if &**s == "slip_placement" => placement,
+                ScalarBind::Spec(s) if &**s == "slip_ell_ratio" => slip_length_ratio,
+                ScalarBind::Spec(s) if &**s == "slip_b0" => field_regularization,
+                ScalarBind::Spec(s) if &**s == "slip_d_b" => diffusivity_ratio,
+                ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => gamma,
+                ScalarBind::Ref(ScalarRef::Body { idx: 0, field }) => {
+                    body_scalar::<D>(Some(bodies), b as u8, *field)
+                }
+                ScalarBind::Ref(other) => {
+                    geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+                        .unwrap_or_else(|| panic!("body_slip_emf: unexpected scalar {other:?}"))
+                }
+                o => panic!("body_slip_emf: unexpected scalar {o:?}"),
+            })
+        };
+
+        // cell pass: F_q -> the slip-quadrature scratch, over the interior.
+        let cell_name = "body_slip_quadrature_3d";
+        let cell_scalars = scalars_for(cell_name, &resolve);
+        let cell_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
+            match ct_role(bind) {
+                Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
+                Some(CtScratch::Face(CtFaceCt::BFaceComp(c))) => &mhd.bface[c.index()],
+                _ => match bind {
+                    FieldBind::Ref(FieldRef::BCell(c)) => &mhd.bcell[*c as usize],
+                    FieldBind::Ref(FieldRef::State {
+                        slot: StateSlot::Cons,
+                        comp,
+                    }) => match comp {
+                        StateComp::Den => &sim.fields.cons.den,
+                        StateComp::Mom(k) => &sim.fields.cons.mom[*k as usize],
+                        StateComp::Nrg => sim.fields.cons.nrg_field().expect("adiabatic nrg"),
+                        o => panic!("body_slip_emf cell: unexpected cons component {o:?}"),
+                    },
+                    o => panic!("body_slip_emf cell: unknown manifest slot '{}'", o.name()),
+                },
+            }
+        };
+        let (inputs, outputs) = bind_by_manifest(cell_name, cell_slot);
+        dispatch_fields_each::<Sc, Mem, D>(
+            cell_name,
+            &sim.geom.interior,
+            &inputs,
+            &outputs,
+            &[],
+            &cell_scalars,
+        );
+
+        // edge pass: efield[dir] += (R^* F)_dir, one kernel per edge direction. the scatter reads
+        // the neighboring cells' quadrature, so an edge at the interior boundary reads F_q in the
+        // halo; the shell mask localizes F_q to the body, so a slip shell interior to the domain has
+        // F_q = 0 in the halo and the scatter is exact there. a shell reaching a domain or tile
+        // boundary needs the quadrature halo filled first (the periodic/BC and decomposition seam).
+        for dir in 0..3 {
+            let name = format!("body_slip_emf_3d_{dir}");
+            let scalars = scalars_for(&name, &resolve);
+            let edge_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
+                match ct_role(bind) {
+                    Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[dir],
+                    Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
+                    _ => panic!("body_slip_emf edge: unknown manifest slot '{}'", bind.name()),
+                }
+            };
+            let (inputs, outputs) = bind_by_manifest(&name, edge_slot);
+            dispatch_fields_each::<Sc, Mem, D>(
+                &name,
+                mhd.efield[dir].domain(),
                 &inputs,
                 &outputs,
                 &[],

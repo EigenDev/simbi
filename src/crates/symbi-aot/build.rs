@@ -1411,6 +1411,16 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
             &program,
         );
     }
+    // the 3D Cartesian immersed-body magnetic-slip operator, in two passes. the cell pass assembles
+    // the per-cell quadrature vector F_q = A(B_q)(R J)_q into the slip-quadrature scratch; the three
+    // edge passes scatter it to the oriented edge EMF with the weighted-adjoint R^*, so the tensor
+    // slip transport rides the shared CT curl div-B-clean.
+    let program = symbi_discretize::body_slip_quadrature_3d_gv(Coords::Cartesian);
+    emit_gv(out_dir, "body_slip_quadrature_3d", 3, &program);
+    for dir in 0..3 {
+        let program = symbi_discretize::body_slip_emf_3d_dir_gv(dir, Coords::Cartesian);
+        emit_gv(out_dir, &format!("body_slip_emf_3d_{dir}"), 3, &program);
+    }
 }
 
 // the RMHD face flux along a given sweep `dir` at 3D (per-dir kernel; the
