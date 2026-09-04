@@ -1961,6 +1961,165 @@ The `amr`→`refinement` rename is mostly internal because neither the `/level_i
 groups nor the `refine_*` kernel names contain "amr"; the byte-identity comparison
 still runs to prove it.
 
+#### Pass 2 — the run-output family (audited, not built)
+
+**Central finding: the internal diagnostics vocabulary already honors its laws;
+this family is not a rename.** The distinctions are real and correctly applied:
+
+- `ProjectionReceipt` (`symbi-sim/src/projection_ledger.rs`) — operation-local
+  evidence from one projection pass. A correct Receipt.
+- `ProjectionLedger` (same file) — run-lifetime, fully transactional:
+  `attempted`/`pending`/`accepted` buckets, `step_commit` promotes, `step_discard`
+  rolls back on retry, totals fold from the accepted bucket only. The reference
+  Ledger.
+- `FofcReport` (`substrate_seam.rs`) — a single substage's bounded aggregate. A
+  correct Report; it counts categorically, which a report may do.
+- `ItoTransportReceipt` (`tracers.rs`), `RecoveryIssues`/`Recovery`/
+  `KernelC2pStatus` (`recovery.rs`, `traced_recovery.rs`), and the step-scoped
+  `DiagnosticAccumulator.totals` (`ib/diagnostics.rs`) all match their laws.
+
+**The one genuine contradiction: `Census` names two opposite content kinds.** The
+rubric reserves Census for categorical event counts with no conserved accounting.
+Two subsystems share the word:
+
+- the dominant `Census` (`census.rs`, `reader/census.py`, `expression/census.py`,
+  HDF5 group `census/<name>`, `CensusConfig` wire form) is a user-configurable
+  binned reduction that accumulates EXTENSIVE conserved quantities — mass and
+  energy sums, folded by an Add/Min/Max monoid. This is the ordinary demographic
+  sense of a census (enumerate the grid population into bins), stated plainly in
+  its own docstrings, and it is settled public API across the config surface, the
+  HDF5 keys, and the reader. It stays as-is.
+- `guard_census()` (`symbi-py` pyfunction over the FOFC atomics in `fofc.rs`) is
+  categorical guard-activation counts with no conserved accounting — the
+  rubric-correct census.
+
+The resolution is a rubric amendment, not a public rename. In simbi, `Census`
+legitimately means a binned extensive reduction — the demographic enumeration of
+the grid population into bins — and that public API stays. Categorical event
+counts are called **guard counts** (or **guards**) in prose and in any future API,
+so the two meanings stop sharing a word going forward. The existing `guard_census()`
+pyfunction is a settled public wire and is left as-is; it is not renamed now and
+gets no compatibility shim for aesthetics alone.
+
+**`ConstraintLedger` — audited, dead code, no live bug.** Its `book`
+(`constraints.rs:509`) is an unconditional additive `+=` with no commit/rollback,
+unlike its transactional sibling `ProjectionLedger`. A trace of every call site
+found the only construction and the only two `book` calls inside `#[cfg(test)]`
+(`constraints.rs:1016,1023,1024`); no driver, kernel, retry, refinement, or
+decomposition path reaches it. So it cannot over-count rejected work — there is no
+production booking at all. The injection accounting the drivers actually use is
+`ProjectionLedger`, whose `record`/`step_commit`/`step_discard`/`LedgerScope`
+keep rolled-back passes in `attempted`/`pending` and out of `accepted`
+(`projection_ledger.rs:293-328,206-239`). The latent hazard stands for the future:
+`ConstraintLedger` exists to give the per-constraint numerical-vs-model injection
+split `ProjectionLedger` does not track by name; wiring it into the stage apply for
+that breakdown requires the same pending/commit/discard barrier first, or it will
+over-count on every discarded retry.
+
+**Cross-language drift (not a rubric misuse):** the offline A/B harness names a
+`ProjectionLedger` bucket `Receipts` and an injection ledger `Injection`
+(`analysis/anchor_ab.py`). Harmless in an analysis script, but a grep-by-word
+consolidation will trip on it.
+
+**The scientist-facing surface does not exist yet.** `run(...)` returns `None`
+(`runner.py`); the readout surface today is checkpoint HDF5 read through
+`simbi/reader/`, a sidecar `diagnostics.dat`, and the `guard_census()` /
+`projection_ledger_report()` pyfunctions. A `result.diagnostics.*` namespace is
+net-new API — a feature, not a vocabulary migration. The proposed mapping, for
+when that surface is built, keeps every transaction word internal and exposes only
+settled accepted numbers:
+
+| readout | internal producer | surfaces | stays internal |
+|---|---|---|---|
+| `result.diagnostics.projection` | `ProjectionLedger` accepted bucket | `passes_fired`, `projected_cells`, `min_theta`, injected `den`/`nrg` as `{signed, gross}` | `attempted`/`pending`, commit/discard, `LedgerScope`, thread-local `Book`, the receipt |
+| `result.diagnostics.guards` | FOFC atomics via `guard_census()` | `{fallback, freeze, fallback_inside_horizon, freeze_inside_horizon}` counts | `FofcReport`, `FofcDecision`, `book_census` |
+| `result.diagnostics.recovery` | `RecoveryIssues`/`KernelC2pStatus` | per-run c2p-failure counts by issue category | candidate snapshots, mask algebra |
+| `result.diagnostics.constraints` | `ConstraintLedger.split_by_category` | `(numerical, model)` injected `(den, nrg)` + per-constraint `firings` | `book`, entry internals |
+| `result.diagnostics.bodies` | `BodyDiagnostics`/`DatDiagnostics` | `mdot`, `accreted_mass`, `force` series | HDF5 plumbing |
+| `result.census["<name>"]` (separate from `.diagnostics`) | `CensusHistory` → HDF5 → `reader.Census` | the user's registered binned reductions | segment markers, cadence machinery |
+
+#### Pass 2 — `RunResult.diagnostics` (designed, not built)
+
+`run(...)` returns `None` today and its callers ignore the return, so returning a
+frozen `RunResult` instead is backward-compatible — nothing that currently writes
+`run(problem)` breaks. `RunResult` gives the scientist a single discoverable,
+read-only handle to the evidence a run produced, without exposing any transaction
+machinery.
+
+**Ownership law: the diagnostics value is run-owned, produced by the backend.**
+The result reports one run's evidence because the backend returns that evidence as
+a value scoped to the run, not because Python snapshots a global. Sourcing the
+surface from the process-global guard counters (`fofc.rs` atomics) and the
+thread-local projection `Book`, then resetting them per run, would make `RunResult`
+*appear* run-scoped while two concurrent or nested runs reset and contaminate each
+other — a clean façade over unclean ownership, the exact failure this program
+exists to prevent. So the guard counts move into the same run-owned lifetime as
+the projection evidence, and the backend hands back a single `RunDiagnostics
+{ projection, guards }` bound to that run.
+
+**Read-only law.** `RunResult` and every `diagnostics.*` leaf is a frozen
+dataclass of settled numbers, assembled solely from the backend's returned value.
+No leaf carries `attempted`/`pending`, a commit or discard method, a `LedgerScope`,
+a thread-local `Book`, or an admission witness — the reader sees accepted totals
+and categorical counts, never the machinery that decided them.
+
+**The surface.**
+
+```python
+result = run(problem, compute_mode="cpu")
+
+result.diagnostics.projection.passes_fired      # int
+result.diagnostics.projection.projected_cells   # int
+result.diagnostics.projection.min_theta         # float
+result.diagnostics.projection.injected_den      # (signed, gross)
+result.diagnostics.projection.injected_nrg      # (signed, gross)
+
+result.diagnostics.guards.fallback              # int
+result.diagnostics.guards.freeze
+result.diagnostics.guards.fallback_inside_horizon
+result.diagnostics.guards.freeze_inside_horizon
+
+result.data_directory                           # Path, for reader access
+```
+
+`diagnostics.projection` carries the run's accepted projection totals;
+`diagnostics.guards` its guard-activation counts. `data_directory` is a `Path`; a
+checkpoint/HDF5 handle carries its own lifetime and failure semantics and is a
+separate later addition, kept out of this pass. Census stays out of
+`RunResult.diagnostics` entirely — a user-registered binned reduction is read
+through `simbi/reader/`, not intervention evidence.
+
+**Legacy readouts stay.** `guard_census()` and `projection_ledger_report()` remain
+as compatibility observations of the process-global/thread-local state. The new API
+does not call them; tests prove `RunResult` is assembled only from the backend's
+returned `RunDiagnostics`.
+
+**Deferred leaf: `diagnostics.recovery`.** No honestly run-scoped producer exposes
+per-run c2p-failure counts by issue category yet — the evidence exists in
+`RecoveryIssues` / `KernelC2pStatus` but is not returned through the run boundary.
+The recovery leaf lands when a run-owned producer exists; the frozen-dataclass shape
+above is stable under adding it. No empty or partially truthful leaf is invented in
+the meantime.
+
+**Implementation sequence.**
+
+1. A run-owned Rust `RunDiagnostics { projection, guards }` returned through the
+   backend boundary; a test proving two sequential runs and two concurrent runs
+   report their own evidence with no cross-contamination.
+2. A frozen Python `RunResult` / `RunDiagnostics` assembled solely from that
+   returned value.
+3. The old pyfunctions preserved as legacy observations, with a test proving the
+   new API does not read them.
+4. `diagnostics.recovery` added once a run-owned recovery producer exists.
+
+**Acceptance for the build.** The feature is complete when `run()` returns a
+`RunResult` whose `diagnostics.projection` and `diagnostics.guards` are the
+backend's run-owned values; when concurrent runs do not contaminate each other;
+when a config that ignores the return still runs unchanged; when the frozen
+dataclasses reject attribute assignment; and when no `diagnostics.*` field name is
+a transaction word. This touches the `run()` entrypoint and the backend return
+boundary; it is a deliberate feature to build after review, not a rename.
+
 ## 17. Non-goals
 
 This program does not seek to:
