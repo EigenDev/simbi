@@ -12,6 +12,7 @@
 //   let projected = diagnostics.projection.projected_cells;
 // =============================================================================
 
+use crate::guard_ledger::GuardTotals;
 use crate::projection_ledger::ProjectionLedger;
 
 /// the accepted evidence of one run.
@@ -20,4 +21,7 @@ pub struct RunDiagnostics {
     /// the admissible-boundary projection's accepted intervention totals, booked
     /// over the states that survived into the solution.
     pub projection: ProjectionLedger,
+    /// the FOFC guard acts — troubled and frozen cell counts — accepted over the
+    /// states that survived into the solution.
+    pub guards: GuardTotals,
 }

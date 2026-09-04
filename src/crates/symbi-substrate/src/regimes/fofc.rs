@@ -705,10 +705,21 @@ where
     } else {
         FofcDecision::Accept
     };
-    let report = FofcReport::of_pass(troubled, frozen, exterior_froze, replay, decision)
-        .with_receipt(projection_receipt);
-    // the census counters observe the report; the horizon subtotals split on the channel masks.
+    // the horizon subtotals split on the channel masks: the troubled subset from
+    // the flag, the frozen subset from the freeze-applied mask.
     let troubled_interior = horizon_split_count(sim, flag);
+    // the guard receipt, minted at the sites that performed the acts: troubled
+    // from the recovery flag, frozen from the freeze-applied mask.
+    let guards = symbi_sim::guard_ledger::GuardReceipt::of_pass(
+        troubled,
+        troubled_interior,
+        frozen,
+        frozen_interior,
+    );
+    let report = FofcReport::of_pass(troubled, frozen, exterior_froze, replay, decision)
+        .with_receipt(projection_receipt)
+        .with_guards(guards);
+    // the process-global census counters observe the report as attempted events.
     book_census(&report, troubled_interior, frozen_interior);
     report
 }

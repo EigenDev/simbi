@@ -68,6 +68,10 @@ pub struct FofcReport {
     /// into the projection ledger. the projection is a diagnostic accounting,
     /// so a receipt never changes the decision.
     receipt: Option<crate::projection_ledger::ProjectionReceipt>,
+    /// the guard acts of this pass — troubled and frozen cell counts — minted at
+    /// the sites that performed them. the sim books them into the guard ledger;
+    /// diagnostic evidence, so they never change the decision.
+    guards: crate::guard_ledger::GuardReceipt,
 }
 
 impl FofcReport {
@@ -82,6 +86,7 @@ impl FofcReport {
             replay: SourceReplayOutcome::SharedRedo,
             decision: FofcDecision::Accept,
             receipt: None,
+            guards: crate::guard_ledger::GuardReceipt::empty(),
         }
     }
 
@@ -132,6 +137,7 @@ impl FofcReport {
             replay,
             decision,
             receipt: None,
+            guards: crate::guard_ledger::GuardReceipt::empty(),
         }
     }
 
@@ -146,9 +152,22 @@ impl FofcReport {
         self
     }
 
+    /// attach this pass's guard acts, minted at the flag and freeze sites. the
+    /// substrate calls this on the report it returns; the acts are evidence, so
+    /// they never revise the counts or the decision.
+    pub fn with_guards(mut self, guards: crate::guard_ledger::GuardReceipt) -> Self {
+        self.guards = guards;
+        self
+    }
+
     /// the projection receipt of this pass, when a projection ran.
     pub fn receipt(&self) -> Option<crate::projection_ledger::ProjectionReceipt> {
         self.receipt
+    }
+
+    /// this pass's guard acts — the troubled and frozen cell counts.
+    pub fn guards(&self) -> crate::guard_ledger::GuardReceipt {
+        self.guards
     }
 
     pub fn troubled(&self) -> u64 {

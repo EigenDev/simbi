@@ -1948,10 +1948,13 @@ where
             if !self.advance_level(0, dt, 0.0) {
                 break;
             }
-            // the projection ledger's rejection boundary: the pending-step
-            // receipts describe states this rollback discards.
+            // the projection and guard ledgers' rejection boundary: the
+            // pending-step evidence describes states this rollback discards.
             if symbi_sim::projection_ledger::scope_is_open() {
                 symbi_sim::projection_ledger::step_discard();
+            }
+            if symbi_sim::guard_ledger::scope_is_open() {
+                symbi_sim::guard_ledger::step_discard();
             }
             for level in &mut self.levels {
                 if level.kernels.fofc_active() {
@@ -1982,10 +1985,13 @@ where
         let root = &mut self.levels[0];
         // homologous linear advance, taken when the run leaves the motion law untraced.
         advance_state_clock(&mut root.state, dt);
-        // the projection ledger's accepted-step boundary: the pending-step
-        // receipts survive into the solution here.
+        // the projection and guard ledgers' accepted-step boundary: the
+        // pending-step evidence survives into the solution here.
         if symbi_sim::projection_ledger::scope_is_open() {
             symbi_sim::projection_ledger::step_commit();
+        }
+        if symbi_sim::guard_ledger::scope_is_open() {
+            symbi_sim::guard_ledger::step_commit();
         }
 
         self.root_body_step(dt);
@@ -4237,15 +4243,20 @@ where
     // handle closes at return, leaving the totals queryable.
     let ledger_scope = (n == 1 && decomp.is_none() && tiles[0].levels.len() == 1)
         .then(symbi_sim::projection_ledger::open_scope);
-    // the run-owned diagnostics: the accepted projection totals read from this
-    // run's own scope. a decomposed or refined run opens no scope and reports the
-    // empty projection. reading through the scope binds the evidence to this run,
-    // so no other run's totals can leak in.
+    // the guard ledger books on every run shape — single grid, decomposed,
+    // refined — so its scope opens unconditionally, and every tile's and level's
+    // substages book into this thread's ledger.
+    let guard_scope = symbi_sim::guard_ledger::open_scope();
+    // the run-owned diagnostics: the accepted totals read from this run's own
+    // scopes. the projection scope opens only on the single grid; the guard scope
+    // opens always. reading through the scopes binds the evidence to this run, so
+    // no other run's totals can leak in.
     let run_diagnostics = || symbi_sim::run_diagnostics::RunDiagnostics {
         projection: ledger_scope
             .as_ref()
             .map(symbi_sim::projection_ledger::LedgerScope::accepted)
             .unwrap_or_default(),
+        guards: guard_scope.accepted(),
     };
     let drain = |decomp: Option<(&[i32], [usize; NDIM], &T)>| match decomp {
         Some((devices, _, _)) => drain_devices::<Mem>(devices),
@@ -4352,6 +4363,10 @@ where
             if ledger_scope.is_some() {
                 symbi_sim::projection_ledger::step_discard();
             }
+            // the crashed step never reached its accepted boundary, so its guard
+            // acts describe a state that did not survive: discard the pending
+            // bucket before the scope closes.
+            symbi_sim::guard_ledger::step_discard();
             drain(decomp);
             let _ = callback(tiles);
             return run_diagnostics();
@@ -4538,7 +4553,17 @@ where
                 }
             }
             if !retry {
+                // the guard ledger's accepted-step boundary: every tile's and
+                // level's pending acts survive into the solution here.
+                if symbi_sim::guard_ledger::scope_is_open() {
+                    symbi_sim::guard_ledger::step_commit();
+                }
                 break 'attempt;
+            }
+            // the guard ledger's rejection boundary: the pending acts describe
+            // states this collective rollback discards.
+            if symbi_sim::guard_ledger::scope_is_open() {
+                symbi_sim::guard_ledger::step_discard();
             }
             // Collective rollback: every tile returns to the same root-step entry before any halo is
             // exchanged or the reduced timestep is replayed.  This includes host-side tracer/body
@@ -4659,7 +4684,8 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
     t_final: f64,
     interval: u64,
     mut on_checkpoint: F,
-) where
+) -> symbi_sim::run_diagnostics::RunDiagnostics
+where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
@@ -4699,9 +4725,9 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
     // cadence. the callback keeps its historical clock: iterations counted from this
     // call's entry, alongside the root time the tiles carry.
     let iter0 = tiles[0].levels[0].state.iteration;
-    // a decomposed run opens no projection scope, so its run diagnostics carry the
-    // empty projection; the single-grid path is the one that books evidence.
-    let _ = evolve_tiles(
+    // a decomposed run books guard evidence across its tiles but opens no
+    // projection scope, so its diagnostics carry the empty projection.
+    evolve_tiles(
         tiles,
         Some((devices, counts, transport)),
         t_final,
@@ -4710,7 +4736,7 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
             let s = &march_tiles[0].levels[0].state;
             on_checkpoint(s.iteration - iter0, s.time, march_tiles)
         },
-    );
+    )
 }
 
 fn wb_ghost_enabled() -> bool {

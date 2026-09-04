@@ -8389,6 +8389,13 @@ fn bondi_sonic_radius(gamma: f64) -> f64 {
 /// fallback_inside_horizon, freeze_inside_horizon)` in cell-substage events. `run_simulation`
 /// zeroes these at run start, so the values are that run's totals.
 ///
+/// the `fallback` fields count TROUBLED CELLS — cells the recovery flagged at the c2p-status
+/// decode — summed over every substage, including substages later rejected and replayed. they
+/// are attempted-event counts, not a per-cell count of applied first-order flux (the fallback is
+/// applied per face in the splice). the run-owned `RunDiagnostics.guards` reports the accepted
+/// troubled and frozen cell counts of the surviving solution instead; this census is the legacy
+/// process-global attempted counter, kept for gate acceptance thresholds.
+///
 /// this is the one number that says whether a passing gate passed on its own merits or on a
 /// limiter. it covers the whole defensive surface of a smooth GR-hydro run, not just FOFC:
 /// `fofc_orchestrate` early-returns when no cell is flagged, and both the admissible-boundary

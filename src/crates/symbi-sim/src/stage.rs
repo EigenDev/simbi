@@ -398,6 +398,14 @@ where
                         crate::projection_ledger::record(&receipt, args.injection_weight);
                     }
                 }
+                // book the guard acts into the sim-owned guard ledger. the driver
+                // opens the guard scope for every run shape, so a retried pass
+                // books into the pending bucket the driver discards, keeping its
+                // acts in the attempted totals without surviving into the accepted
+                // solution.
+                if crate::guard_ledger::scope_is_open() {
+                    crate::guard_ledger::record(&report.guards());
+                }
                 if report.decision() == crate::substrate_seam::FofcDecision::RetryStep {
                     return StageOutcome::RetryStep;
                 }
