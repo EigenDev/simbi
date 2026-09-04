@@ -717,6 +717,14 @@ pub struct MhdStaggeredFields<
     /// used by UCT-HLL emf construction (Eq. 33).
     pub v_upwind: [[Field<Sc, D, M>; D]; D],
 
+    /// the magnetic-slip cell-quadrature vector F_q = A(B_q)(R J)_q: three cell-centered
+    /// components on the allocated domain, the intermediate the tensor slip operator's cell
+    /// pass writes and its edge pass scatters to the edge EMF. present only when an immersed
+    /// body runs `MagneticSpec::Slip` (allocated at `attach_bodies`), so a non-slip MHD run
+    /// carries no extra cell fields; a distinct allocation from `efield`/`bcell`, so the two
+    /// passes never alias.
+    pub slip_quadrature: Option<BcellFields<D, DOF, M, Sc>>,
+
     /// whether bface has been explicitly initialized.
     /// set by mhd_init_bface_from_bcell or by direct user writes.
     /// evolve() uses this to auto-init bface from bcell on first call
@@ -864,8 +872,22 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             wave_speed_l,
             wave_speed_r,
             v_upwind: v_upwind_outer.try_into().unwrap_or_else(|_| unreachable!()),
+            // allocated on demand at attach_bodies when a slip body is present.
+            slip_quadrature: None,
             bface_initialized: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// allocate the magnetic-slip cell-quadrature scratch `F_q` (three cell-centered
+    /// components) if it is not already present. idempotent; called at `attach_bodies`
+    /// when an immersed body runs `MagneticSpec::Slip`.
+    pub fn alloc_slip_quadrature(&mut self, allocated: &Domain<D>) -> symbi_xpu::Result<()> {
+        if self.slip_quadrature.is_none() {
+            self.slip_quadrature = Some(BcellFields {
+                b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -2767,6 +2789,17 @@ where
                 ConsFieldsGeneric::zeros_with_energy(&self.geom.allocated, has_energy)
             {
                 self.fields.source = Some(src_field);
+            }
+        }
+        // a magnetic-slip body drives the tensor CT operator, which stages its per-cell dyad
+        // in the slip-quadrature scratch. allocate it once here, where the bodies are known.
+        let needs_slip_quadrature = (0..n)
+            .any(|b| matches!(bodies.get(b).spec.magnetic, symbi_ib::MagneticSpec::Slip { .. }));
+        if needs_slip_quadrature {
+            let allocated = self.geom.allocated.clone();
+            if let Some(mhd) = self.fields.mhd.as_mut() {
+                mhd.alloc_slip_quadrature(&allocated)
+                    .expect("magnetic-slip quadrature scratch allocation");
             }
         }
         self.immersed = Some(ImmersedBodies {
