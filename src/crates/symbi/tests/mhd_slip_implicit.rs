@@ -453,6 +453,79 @@ fn the_production_solve_is_transactional_and_proves_the_face_energy_theorem() {
     );
 }
 
+// the cell magnetic energy 1/2 sum_cells |interp B_f|^2 of a workspace face field, interp being the
+// forward face-average bcell_d = 0.5(bf_d[c] + bf_d[c+e_d]).
+fn cell_energy_ws(sim: &Sim, f: &symbi_sim::state::BfaceFields<3, HostMemory, f64>) -> f64 {
+    let mut e = 0.0;
+    for c in sim.geom.interior.iter() {
+        for d in 0..3 {
+            let mut up = c;
+            up[d] += 1;
+            let bcell = 0.5 * (*f.b[d].at(c) + *f.b[d].at(up));
+            e += 0.5 * bcell * bcell;
+        }
+    }
+    e
+}
+
+// the four-way energy comparison of the converged candidate: the face-Hodge magnetic loss, the
+// midpoint quadratic receipt Q_h, the cell-centred magnetic loss (what bcell_from_bface would
+// thermalize at fixed total energy), and their mutual relation. Q_h = -dM_face closes by the theorem;
+// -dM_cell is what SIMBI's energy representation would realize as gas heat.
+#[test]
+fn the_four_way_energy_comparison_reports_the_commit_seam() {
+    let sim = build_sim();
+    let b0 = face_of(&random_face(11), &sim);
+    set_bface(&sim, &b0);
+    interp_bcell(&sim);
+    let dt = DT;
+    let receipt = magnetic_slip_solve::<3, 3, HostMemory, f64>(&sim, dt, GAMMA, 1e-13, 500);
+    assert!(receipt.converged);
+    let ws = sim.fields.mhd.as_ref().unwrap().magnetic_slip.as_ref().unwrap();
+
+    // 1. face-Hodge magnetic loss.
+    let neg_dm_face = face_energy_ws(&sim, &ws.input) - face_energy_ws(&sim, &ws.candidate);
+
+    // 2. midpoint quadratic receipt Q_h = dt <B^{1/2}, L* B^{1/2}>.
+    for d in 0..3 {
+        for c in ws.rhs.b[d].domain().iter() {
+            ws.rhs.b[d].set(c, 0.5 * (*ws.candidate.b[d].at(c) + *ws.input.b[d].at(c)));
+        }
+    }
+    let mhd = sim.fields.mhd.as_ref().unwrap();
+    for d in 0..3 {
+        for c in sim.geom.interior.iter() {
+            mhd.bcell[d].set(c, *ws.frozen_bcell.b[d].at(c));
+        }
+    }
+    magnetic_slip_apply_operator::<3, 3, HostMemory, f64>(
+        &sim, GAMMA, true, &ws.rhs, &ws.operator_direction,
+    );
+    let mut quad = 0.0;
+    for d in 0..3 {
+        for c in sim.geom.interior.iter() {
+            quad += *ws.rhs.b[d].at(c) * *ws.operator_direction.b[d].at(c);
+        }
+    }
+    let q_h = dt * quad;
+
+    // 3. cell-centred magnetic loss = the realized gas heat under fixed-total-energy reconciliation.
+    let neg_dm_cell = cell_energy_ws(&sim, &ws.input) - cell_energy_ws(&sim, &ws.candidate);
+
+    println!("\n=== four-way energy comparison (N={N}, dt={dt}) ===");
+    println!("Q_h  (midpoint quadratic receipt)          : {q_h:.9e}  (>= 0)");
+    println!("-dM_face  (face-Hodge magnetic loss)       : {neg_dm_face:.9e}");
+    println!("|Q_h - (-dM_face)|  (theorem residual)     : {:.3e}", (q_h - neg_dm_face).abs());
+    println!("-dM_cell  (realized gas heat via bcell)    : {neg_dm_cell:.9e}");
+    println!("Q_h - (-dM_cell)  (the commit seam)        : {:.9e}", q_h - neg_dm_cell);
+    println!("relative seam |Q_h - -dM_cell| / Q_h       : {:.3e}", (q_h - neg_dm_cell).abs() / q_h.abs());
+    println!("==================================================\n");
+
+    // the theorem holds on the face norm; the cell-centred realization is nonnegative.
+    assert!((q_h - neg_dm_face).abs() < 1e-8 * q_h.abs(), "face theorem broke");
+    assert!(neg_dm_cell >= -1e-10, "cell-centred realized heat is negative");
+}
+
 // the operator reads only the physical (interior) face DOFs and regenerates the halo from them by
 // the pure periodic extension P, so corrupting the iterate's halo before apply cannot change the
 // result. this pins that the halo is derived storage, not an independent Krylov unknown.
