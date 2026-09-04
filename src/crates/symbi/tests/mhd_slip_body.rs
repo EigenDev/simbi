@@ -391,20 +391,26 @@ fn report() {
     // divergence defect and magnetic-energy change through the augmented curl.
     let div_before = max_div_b(&sim);
     let e_before = face_energy(&sim);
+    let b_before = face_snapshot(&sim);
     ct_curl::<3, 3, HostMemory, f64>(&sim, DT);
     let div_after = max_div_b(&sim);
     let e_after = face_energy(&sim);
+    let dw = e_after - e_before;
+    let half_db_sq = 0.5 * delta_b_sq(&sim, &b_before); // = (dt^2/2)||C E||^2, the explicit-Euler term
+    let complete = -DT * quad_edge + half_db_sq; // the finite-step energy law
 
     println!("\n=== magnetic-slip explicit-oracle numerical report (N={N}, dt={DT}) ===");
     println!("reference-vs-baked max |F_baked - F_ref|   : {max_err:.3e}  (max |F_ref| = {max_mag:.3e})");
     println!("relative element-wise error                : {:.3e}", max_err / max_mag.max(1e-300));
-    println!("quadratic form  <R J, A(B_q) R J>_q        : {quad_cell:.6e}  (>= 0)");
-    println!("quadratic form  <J, E>_edge                : {quad_edge:.6e}");
-    println!("cell/edge form agreement |diff|            : {:.3e}", (quad_cell - quad_edge).abs());
+    println!("adjoint <R J, A(B_q) R J>_q                : {quad_cell:.9e}  (>= 0)");
+    println!("adjoint <J, R* F>_edge                     : {quad_edge:.9e}");
+    println!("full-domain adjoint residual |diff|        : {:.3e}", (quad_cell - quad_edge).abs());
     println!("divergence defect  max|div B| before/after : {div_before:.3e} / {div_after:.3e}");
-    println!("magnetic-energy change  dW = W_after-W_bef : {:.6e}  (<= 0)", e_after - e_before);
-    println!("predicted  -dt <J,E>_edge                  : {:.6e}", -DT * quad_edge);
-    println!("energy-identity residual |dW + dt<J,E>|    : {:.3e}", (e_after - e_before + DT * quad_edge).abs());
+    println!("magnetic-energy change  dW                 : {dw:.9e}  (<= 0)");
+    println!("first-order term  -dt <J,E>                : {:.9e}", -DT * quad_edge);
+    println!("explicit-step term  (dt^2/2)||C E||^2      : {half_db_sq:.9e}");
+    println!("complete law  -dt<J,E> + (dt^2/2)||CE||^2  : {complete:.9e}");
+    println!("complete-identity residual |dW - law|      : {:.3e}", (dw - complete).abs());
     println!("========================================================\n");
 }
 
@@ -420,6 +426,114 @@ fn face_energy(sim: &Sim) -> f64 {
         }
     }
     e
+}
+
+// the interior face field, per component, as a flat snapshot keyed by (d, coord).
+fn face_snapshot(sim: &Sim) -> std::collections::HashMap<(usize, [isize; 3]), f64> {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    let mut out = std::collections::HashMap::new();
+    for d in 0..3 {
+        for c in sim.geom.interior.iter() {
+            out.insert((d, c), *m.bface[d].at(c));
+        }
+    }
+    out
+}
+
+// sum over the interior faces of (bface_now - bface_before)^2 = ||Delta B||^2 = dt^2 ||C E||^2.
+fn delta_b_sq(sim: &Sim, before: &std::collections::HashMap<(usize, [isize; 3]), f64>) -> f64 {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    let mut s = 0.0;
+    for d in 0..3 {
+        for c in sim.geom.interior.iter() {
+            let db = *m.bface[d].at(c) - before[&(d, c)];
+            s += db * db;
+        }
+    }
+    s
+}
+
+// the discrete edge inner products of the operator: <R J, A(B_q) R J>_q (cell form, from the
+// reference F) and <J, R* F>_edge (edge form, from the baked slip EMF and the edge current). with the
+// quadrature halo filled these are equal to roundoff on the whole periodic domain.
+fn adjoint_forms(sim: &Sim, lam: f64) -> (f64, f64) {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    let inv_dx = 1.0 / sim.geom.dx[0];
+    let mut cell = 0.0;
+    let mut edge = 0.0;
+    for c in sim.geom.interior.iter() {
+        let f = f_ref(sim, m, c, lam);
+        for d in 0..3 {
+            cell += j_gather(m, d, c, inv_dx) * f[d];
+            edge += curl_edge(m, d, c, inv_dx) * *m.efield[d].at(c);
+        }
+    }
+    (cell, edge)
+}
+
+#[test]
+fn the_operator_adjoint_closes_on_the_full_periodic_domain() {
+    let sim = build_sim(slip_spec());
+    seed(&sim, |d, c| rnd(c, d as u64 + 1));
+    let lam = lambda_rho(&sim);
+    body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
+    let (cell, edge) = adjoint_forms(&sim, lam);
+    assert!(cell > 1e-6, "vacuous adjoint test (cell form = {cell})");
+    assert!(cell >= -1e-10, "quadratic form is negative: {cell}");
+    assert!(
+        (cell - edge).abs() < 1e-9 * cell.abs(),
+        "the adjoint <J, R* F>_e = <R J, F>_q does not close on the periodic domain: \
+         cell {cell:.9e} vs edge {edge:.9e} (rel {:.2e})",
+        (cell - edge).abs() / cell.abs()
+    );
+}
+
+#[test]
+fn the_complete_explicit_energy_identity_closes_to_roundoff() {
+    // the finite explicit-Euler step B^{n+1} = B^n - dt C E gives
+    //   dW = -dt <J, E>_e + (dt^2/2) ||C E||^2,
+    // exact to roundoff once J = C* B is the discrete adjoint of the CT curl C.
+    let sim = build_sim(slip_spec());
+    seed(&sim, |d, c| rnd(c, d as u64 + 1));
+    let lam = lambda_rho(&sim);
+    body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
+    let (_cell, jdote) = adjoint_forms(&sim, lam);
+
+    let e_before = face_energy(&sim);
+    let b_before = face_snapshot(&sim);
+    ct_curl::<3, 3, HostMemory, f64>(&sim, DT);
+    let dw = face_energy(&sim) - e_before;
+    let law = -DT * jdote + 0.5 * delta_b_sq(&sim, &b_before);
+    assert!(
+        (dw - law).abs() < 1e-10 * dw.abs().max(law.abs()).max(1.0),
+        "the complete explicit energy law does not close: dW = {dw:.9e}, \
+         -dt<J,E> + (dt^2/2)||CE||^2 = {law:.9e}, residual {:.3e}",
+        (dw - law).abs()
+    );
+}
+
+#[test]
+fn the_first_order_energy_residual_is_second_order_in_dt() {
+    // the residual dW + dt<J,E> = (dt^2/2)||C E||^2 scales as dt^2: halving dt quarters it. the slip
+    // EMF is computed once (dt-independent), so ||C E|| is fixed and only the dt^2 prefactor moves.
+    let residual = |dt: f64| -> f64 {
+        let sim = build_sim(slip_spec());
+        seed(&sim, |d, c| rnd(c, d as u64 + 1));
+        let lam = lambda_rho(&sim);
+        body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
+        let (_c, jdote) = adjoint_forms(&sim, lam);
+        let e_before = face_energy(&sim);
+        ct_curl::<3, 3, HostMemory, f64>(&sim, dt);
+        (face_energy(&sim) - e_before) + dt * jdote
+    };
+    let r_full = residual(DT);
+    let r_half = residual(DT / 2.0);
+    assert!(r_full.abs() > 1e-12, "vacuous scaling test (residual = {r_full})");
+    let ratio = r_half / r_full;
+    assert!(
+        (ratio - 0.25).abs() < 1e-6,
+        "the first-order residual is not O(dt^2): residual(dt/2)/residual(dt) = {ratio:.9} (expected 0.25)"
+    );
 }
 
 fn max_div_b(sim: &Sim) -> f64 {

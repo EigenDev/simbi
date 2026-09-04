@@ -1755,11 +1755,16 @@ pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
             &cell_scalars,
         );
 
-        // edge pass: efield[dir] += (R^* F)_dir, one kernel per edge direction. the scatter reads
-        // the neighboring cells' quadrature, so an edge at the interior boundary reads F_q in the
-        // halo; the shell mask localizes F_q to the body, so a slip shell interior to the domain has
-        // F_q = 0 in the halo and the scatter is exact there. a shell reaching a domain or tile
-        // boundary needs the quadrature halo filled first (the periodic/BC and decomposition seam).
+        // fill the quadrature halo before the scatter reads it: the edge pass gathers F_q from the
+        // neighboring cells, so a boundary edge reads the wrapped (periodic) or BC image. this makes
+        // R^* the exact transpose of R across the domain seam, so <J, R^* F>_e = <R J, F>_q closes
+        // to roundoff on the whole periodic domain, not merely the interior.
+        let bc = crate::kernels::support::to_bc_array_scalar::<D>(&sim.boundaries);
+        for c in 0..3 {
+            flag_ghost_fill::<D, DOF, Mem, Sc>(sim, &slip_q[c], bc);
+        }
+
+        // edge pass: efield[dir] += (R^* F)_dir, one kernel per edge direction.
         for dir in 0..3 {
             let name = format!("body_slip_emf_3d_{dir}");
             let scalars = scalars_for(&name, &resolve);
