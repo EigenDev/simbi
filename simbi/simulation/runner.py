@@ -18,6 +18,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
+from simbi.simulation.results import RunResult, from_native_diagnostics
 from simbi.types.bodies import body_payload
 from simbi.types.input import BoundaryCondition
 
@@ -737,7 +738,7 @@ def run(
     validate: bool = False,
     live_monitor: bool = False,
     max_steps: int = 0,
-) -> None:
+) -> "RunResult | None":
     """
     run a simulation with the given problem configuration.
 
@@ -802,7 +803,8 @@ def run(
         print("demo mode: simulation would execute with:")
         for key, value in sorted(exec_dict.items()):
             print(f"  {key}: {value}")
-        return
+        # a dry run produces no solution, so it carries no diagnostics.
+        return None
     _require_backend_features(problem, backend)
 
     # forward gpu block dims to the backend. the run dashboard — problem setup,
@@ -824,8 +826,11 @@ def run(
     scale_factor = problem.scale_factor or (lambda t: 1.0)
     scale_factor_derivative = problem.scale_factor_derivative or (lambda t: 0.0)
 
-    # run simulation
-    backend.run_simulation(
+    # run simulation. the backend returns this run's own accepted diagnostics as
+    # a typed transport; assemble the public frozen result from it, resolved
+    # against the same data directory the run wrote to. an exception propagates
+    # and produces no result.
+    native = backend.run_simulation(
         prim_gen=prim_iterator,
         staggered_bfields=bfield_iterators,
         sim_info=exec_dict,
@@ -834,6 +839,7 @@ def run(
         chi_field=problem.passive_scalar(),
         cohort_field=problem.tracer_cohort(),
     )
+    return from_native_diagnostics(native, data_dir)
 
 
 def _check_first_tuple(problem: SimbiProblem, it: GasStateGenerator) -> GasStateGenerator:

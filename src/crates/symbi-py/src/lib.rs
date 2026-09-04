@@ -1993,7 +1993,7 @@ mod checkpoint_schedule_tests {
 fn run_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     hier: &mut Hierarchy<R, D, DOF, M, E, S, Mem, K>,
     cfg: &Config,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, Box<dyn std::error::Error>>
 where
     R: Regime<f64, D>,
     M: Metric<f64, D> + Copy + Send + Sync,
@@ -2601,11 +2601,11 @@ where
         }
         std::ops::ControlFlow::Continue(())
     };
-    if cfg.restart_path.is_some() {
-        hier.resume_with_callback(cfg.t_final, 1, callback)?;
+    let diagnostics = if cfg.restart_path.is_some() {
+        hier.resume_with_callback(cfg.t_final, 1, callback)?
     } else {
-        hier.evolve_with_callback(cfg.t_final, 1, callback)?;
-    }
+        hier.evolve_with_callback(cfg.t_final, 1, callback)?
+    };
 
     // the run loop is done: stop + join the render thread so the main thread has
     // sole terminal ownership for leaving the alt screen + printing the exit frame.
@@ -2633,7 +2633,7 @@ where
         );
         table.post_warning(&summary);
         table.exit_frame(ExitKind::Interrupt, &summary);
-        return Ok(());
+        return Ok(diagnostics);
     }
 
     // crashed: the observer already snapshotted the `.crashed` state. surface the halt as the red
@@ -2669,7 +2669,7 @@ where
         if c.panic.is_some() {
             return Err(summary.into());
         }
-        return Ok(());
+        return Ok(diagnostics);
     }
 
     let root = &hier.levels[0].state;
@@ -2750,7 +2750,7 @@ where
     table.exit_frame(ExitKind::Success, &summary);
     dump_profile_if_enabled(root.iteration, n_zones);
     dump_dispatch_profile_if_enabled();
-    Ok(())
+    Ok(diagnostics)
 }
 
 /// dump the dispatch micro-profile to stderr when `SYMBI_DISPATCH_PROF` is set. the
@@ -4561,7 +4561,7 @@ fn run_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     mut tiles: Vec<(SimStateGeneric<R, D, DOF, M, E, S, Mem>, K)>,
     mut global: SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     counts: [usize; D],
-) -> Result<(), String>
+) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String>
 where
     R: Regime<f64, D>,
     M: Metric<f64, D> + Copy + Send + Sync,
@@ -4644,7 +4644,7 @@ where
 
     let mut next_cp = cfg.start_time + cp_dt;
     let mut cp_index = cfg.checkpoint_index + 1;
-    {
+    let diagnostics = {
         // the decomposed loop owns the tiles by `&mut` (the per-step immersed-body bookkeeping
         // mutates the bodies). build the `&mut` store handles + the `&` kernels from the same tiles
         // (disjoint tuple fields). the checkpoint callback receives the shared tile slice it needs
@@ -4702,8 +4702,8 @@ where
                 }
                 std::ops::ControlFlow::Continue(())
             },
-        );
-    }
+        )
+    };
 
     // canonical final snapshot, mirroring the single-grid run (shared reborrow again).
     {
@@ -4720,7 +4720,7 @@ where
         &checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed)),
         &checkpoint_metadata(cfg, cp_index),
     );
-    Ok(())
+    Ok(diagnostics)
 }
 
 /// the multi-gpu (gpus>1) refined path: decompose a 2-level static-refinement hierarchy. each tile
@@ -4736,7 +4736,7 @@ fn run_refined_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem
     mut tiles: Vec<Hierarchy<R, D, DOF, M, E, S, Mem, K>>,
     mut global: Hierarchy<R, D, DOF, M, E, S, Mem, K>,
     counts: [usize; D],
-) -> Result<(), String>
+) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String>
 where
     R: Regime<f64, D> + Copy,
     M: Metric<f64, D> + Copy + Send + Sync,
@@ -4819,7 +4819,7 @@ where
 
     let mut next_cp = cfg.start_time + cp_dt;
     let mut cp_index = cfg.checkpoint_index + 1;
-    evolve_hierarchy_decomposed(
+    let diagnostics = evolve_hierarchy_decomposed(
         &mut tiles,
         counts,
         &devices,
@@ -4847,7 +4847,7 @@ where
         &checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed)),
         cp_index,
     );
-    Ok(())
+    Ok(diagnostics)
 }
 
 /// the multi-gpu (gpus>1) refined hydro path: per-tile static-refinement hierarchies driven by the
@@ -7011,7 +7011,11 @@ macro_rules! iso_dispatch {
 /// runtime dispatch on the config tags -> a monomorphized sim. hydro regimes
 /// (newtonian/rhd/isothermal) x cartesian (+ curvilinear for adiabatic) x 1/2/3d;
 /// the mhd regimes (rmhd/nmhd/imhd) x cartesian x 1/2/3d.
-fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> Result<(), String> {
+fn dispatch_and_run(
+    cfg: &Config,
+    prims: &[Vec<f64>],
+    bfields: &[Vec<f64>],
+) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String> {
     validate_porous_body_overlaps(&cfg.bodies)?;
     // static mesh refinement is wired for hydro (incl. globally-isothermal). the two cases
     // refused below need fine-level prolongation the transfer set does not carry:
@@ -8119,6 +8123,119 @@ fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
     }
 }
 
+// =============================================================================
+// run-diagnostics transport
+//
+// frozen, read-only carriers that move one run's owned diagnostics across the
+// python boundary by named getters. private-facing (`_Native*`): the scientific
+// api is the python `RunResult` dataclass tree the frontend builds from these.
+// =============================================================================
+
+/// a count of cells and the subset inside a configured horizon.
+#[pyclass(frozen, name = "_NativeCellCount")]
+struct NativeCellCount {
+    inner: symbi_sim::guard_ledger::CellCount,
+}
+
+#[pymethods]
+impl NativeCellCount {
+    #[getter]
+    fn total(&self) -> u64 {
+        self.inner.total
+    }
+    #[getter]
+    fn inside_horizon(&self) -> u64 {
+        self.inner.inside_horizon
+    }
+}
+
+/// the FOFC guard acts of a run: troubled and frozen cell counts.
+#[pyclass(frozen, name = "_NativeGuardDiagnostics")]
+struct NativeGuardDiagnostics {
+    inner: symbi_sim::guard_ledger::GuardTotals,
+}
+
+#[pymethods]
+impl NativeGuardDiagnostics {
+    #[getter]
+    fn troubled_cells(&self) -> NativeCellCount {
+        NativeCellCount {
+            inner: self.inner.troubled_cells,
+        }
+    }
+    #[getter]
+    fn frozen_cells(&self) -> NativeCellCount {
+        NativeCellCount {
+            inner: self.inner.frozen_cells,
+        }
+    }
+}
+
+/// the admissible-boundary projection's accepted intervention totals.
+#[pyclass(frozen, name = "_NativeProjectionDiagnostics")]
+struct NativeProjectionDiagnostics {
+    inner: symbi_sim::projection_ledger::ProjectionLedger,
+}
+
+#[pymethods]
+impl NativeProjectionDiagnostics {
+    #[getter]
+    fn passes_fired(&self) -> u64 {
+        self.inner.passes_fired
+    }
+    #[getter]
+    fn projected_cells(&self) -> u64 {
+        self.inner.projected_cells
+    }
+    #[getter]
+    fn min_theta(&self) -> f64 {
+        self.inner.min_theta
+    }
+    /// the signed direct projection contribution to the accepted conserved mass.
+    #[getter]
+    fn injected_den_signed(&self) -> f64 {
+        self.inner.injected_den.signed
+    }
+    /// the gross (L1) projection activity in the accepted conserved mass.
+    #[getter]
+    fn injected_den_gross(&self) -> f64 {
+        self.inner.injected_den.abs
+    }
+    /// the signed direct projection contribution to the accepted conserved energy.
+    #[getter]
+    fn injected_nrg_signed(&self) -> f64 {
+        self.inner.injected_nrg.signed
+    }
+    /// the gross (L1) projection activity in the accepted conserved energy.
+    #[getter]
+    fn injected_nrg_gross(&self) -> f64 {
+        self.inner.injected_nrg.abs
+    }
+}
+
+/// one run's accepted diagnostics: the projection and guard evidence of the
+/// states that survived into the solution.
+#[pyclass(frozen, name = "_NativeRunDiagnostics")]
+struct NativeRunDiagnostics {
+    inner: symbi_sim::run_diagnostics::RunDiagnostics,
+}
+
+#[pymethods]
+impl NativeRunDiagnostics {
+    #[getter]
+    fn projection(&self) -> NativeProjectionDiagnostics {
+        NativeProjectionDiagnostics {
+            inner: self.inner.projection,
+        }
+    }
+    #[getter]
+    fn guards(&self) -> NativeGuardDiagnostics {
+        NativeGuardDiagnostics {
+            inner: self.inner.guards,
+        }
+    }
+}
+
 #[pyfunction]
 #[pyo3(signature = (
     prim_gen,
@@ -8138,7 +8255,7 @@ fn run_simulation(
     adot: &Bound<'_, PyAny>,
     chi_field: Option<&Bound<'_, PyAny>>,
     cohort_field: Option<&Bound<'_, PyAny>>,
-) -> PyResult<()> {
+) -> PyResult<NativeRunDiagnostics> {
     let mut cfg = parse_config(sim_info)?;
     validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
     // drain the passive-scalar generator (None = undyed). one flat cell-centered
@@ -8194,8 +8311,10 @@ fn run_simulation(
 
     // the solve is pure rust with no python access — release the gil so rayon
     // gets real parallelism (and python stays responsive).
-    py.detach(|| dispatch_and_run(&cfg, &prims, &bfields))
-        .map_err(PyRuntimeError::new_err)
+    let diagnostics = py
+        .detach(|| dispatch_and_run(&cfg, &prims, &bfields))
+        .map_err(PyRuntimeError::new_err)?;
+    Ok(NativeRunDiagnostics { inner: diagnostics })
 }
 
 /// whether a config's `alpha`-key spelling is unambiguous.
@@ -8473,6 +8592,10 @@ fn reset_projection_ledger() {
 // the NVRTC device path — so the registration is identical and lives here.
 fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_simulation, m)?)?;
+    m.add_class::<NativeRunDiagnostics>()?;
+    m.add_class::<NativeProjectionDiagnostics>()?;
+    m.add_class::<NativeGuardDiagnostics>()?;
+    m.add_class::<NativeCellCount>()?;
     m.add_function(wrap_pyfunction!(validate_simulation, m)?)?;
     m.add_function(wrap_pyfunction!(attach_dashboard, m)?)?;
     m.add_function(wrap_pyfunction!(bondi_profile, m)?)?;

@@ -27,6 +27,14 @@ from simbi.types.typing import (
 from .checkpoint import merge_with_checkpoint
 from .param import ProblemParam, get_param_metadata
 from .problem import SimbiProblem
+from .results import (
+    CellCount,
+    GuardDiagnostics,
+    Injection,
+    ProjectionDiagnostics,
+    RunDiagnostics,
+    RunResult,
+)
 from .runner import run, to_execution_dict
 
 __all__ = [
@@ -34,6 +42,13 @@ __all__ = [
     "SimbiProblem",
     "ProblemParam",
     "run",
+    # run results
+    "RunResult",
+    "RunDiagnostics",
+    "ProjectionDiagnostics",
+    "GuardDiagnostics",
+    "CellCount",
+    "Injection",
     # utilities
     "to_execution_dict",
     "merge_with_checkpoint",
