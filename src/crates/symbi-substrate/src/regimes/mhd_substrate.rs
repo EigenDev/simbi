@@ -1821,7 +1821,7 @@ where
 
 // out = alpha*x + y over the interior.
 fn face_axpy<const D: usize, const DOF: usize, Mem, Sc>(
-    _sim: &FieldStore<D, DOF, Mem, Sc>,
+    sim: &FieldStore<D, DOF, Mem, Sc>,
     alpha: f64,
     x: &Face<D, Mem, Sc>,
     y: &Face<D, Mem, Sc>,
@@ -1831,7 +1831,7 @@ fn face_axpy<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     for d in 0..D {
-        for c in out.b[d].domain().iter() {
+        for c in sim.geom.interior.iter() {
             let v = alpha * x.b[d].at(c).to_f64() + y.b[d].at(c).to_f64();
             out.b[d].set(c, Sc::from_f64(v));
         }
@@ -1848,7 +1848,7 @@ fn snapshot_bface<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
     for d in 0..D {
-        for c in dst.b[d].domain().iter() {
+        for c in sim.geom.interior.iter() {
             dst.b[d].set(c, *mhd.bface[d].at(c));
         }
     }
@@ -1864,7 +1864,7 @@ fn restore_bface<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
     for d in 0..D {
-        for c in src.b[d].domain().iter() {
+        for c in sim.geom.interior.iter() {
             mhd.bface[d].set(c, *src.b[d].at(c));
         }
     }
@@ -1900,6 +1900,31 @@ where
     }
 }
 
+/// the pure periodic extension P of the physical face DOFs into the bface halo: every halo entry is
+/// set to its unique interior image under the periodic wrap, so no physics enters (unlike the MHD
+/// ghost fill). the physical faces are the cell interior; the extra face and the transverse halo of
+/// each `bface[d]` are derived storage, regenerated here from the interior. cartesian periodic.
+fn periodic_extend_bface<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
+    let lo: [isize; D] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+    let n: [usize; D] = sim.geom.interior.shape();
+    for d in 0..D {
+        for c in mhd.bface[d].domain().iter() {
+            let image: [isize; D] =
+                std::array::from_fn(|a| lo[a] + (c[a] - lo[a]).rem_euclid(n[a] as isize));
+            if image != c {
+                let v = *mhd.bface[d].at(image);
+                mhd.bface[d].set(c, v);
+            }
+        }
+    }
+}
+
 /// apply the frozen slip operator L* = C R* A(B*) R C* to a face field `p`, into `out`. production
 /// `bcell` must already hold the frozen predictor B*. this reuses the exact production chain: set
 /// bface = p, refill its periodic halo, run the two-pass slip operator into the edge EMF, then curl.
@@ -1916,13 +1941,14 @@ pub fn magnetic_slip_apply_operator<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let _ = has_energy;
-    restore_bface(sim, p); // production bface <- p, halo included (the vectors carry a periodic halo)
+    restore_bface(sim, p); // production bface interior <- p (the physical face DOFs)
+    periodic_extend_bface(sim); // regenerate the halo as the pure periodic image P of the interior
     zero_efield(sim);
     body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma); // efield = R* A(B*) R C* p
     ct_curl::<D, DOF, Mem, Sc>(sim, 1.0); // bface <- p - C E
     let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
     for d in 0..D {
-        for c in out.b[d].domain().iter() {
+        for c in sim.geom.interior.iter() {
             out.b[d].set(c, Sc::from_f64(p.b[d].at(c).to_f64() - mhd.bface[d].at(c).to_f64()));
         }
     }
@@ -1971,8 +1997,8 @@ where
 
     // predictor B* = B^0 - dt/2 L(B^0) B^0, A(B^0) nonlinear (bcell = interp(B^0)).
     restore_bface(sim, &ws.input);
+    periodic_extend_bface(sim);
     interp_bcell(sim);
-    ghost_fill::<D, DOF, Mem, Sc>(sim, has_energy);
     zero_efield(sim);
     body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma);
     ct_curl::<D, DOF, Mem, Sc>(sim, 0.5 * dt); // bface <- B*
@@ -1990,7 +2016,7 @@ where
 
     // conjugate gradient on (I + dt/2 L*) x = rhs, x_0 = 0.
     for d in 0..D {
-        for c in ws.rhs.b[d].domain().iter() {
+        for c in sim.geom.interior.iter() {
             ws.iterate.b[d].set(c, Sc::ZERO);
             ws.residual.b[d].set(c, *ws.rhs.b[d].at(c));
             ws.direction.b[d].set(c, *ws.rhs.b[d].at(c));
@@ -2021,13 +2047,16 @@ where
 
     if converged {
         for d in 0..D {
-            for c in ws.candidate.b[d].domain().iter() {
+            for c in sim.geom.interior.iter() {
                 ws.candidate.b[d].set(c, *ws.iterate.b[d].at(c));
             }
         }
     }
-    // restore production state: the solve mutates neither bface, bcell, nor cons.nrg.
+    // restore production state: the physical face DOFs return to B^0, its periodic halo is
+    // regenerated, and bcell is reinterpolated. the solve mutates neither the physical bface, bcell,
+    // nor cons.nrg.
     restore_bface(sim, &ws.input);
+    periodic_extend_bface(sim);
     interp_bcell(sim);
 
     MagneticSlipSolveReceipt {

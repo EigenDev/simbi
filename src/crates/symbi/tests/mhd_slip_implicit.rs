@@ -453,6 +453,57 @@ fn the_production_solve_is_transactional_and_proves_the_face_energy_theorem() {
     );
 }
 
+// the operator reads only the physical (interior) face DOFs and regenerates the halo from them by
+// the pure periodic extension P, so corrupting the iterate's halo before apply cannot change the
+// result. this pins that the halo is derived storage, not an independent Krylov unknown.
+#[test]
+fn the_operator_ignores_iterate_halo_corruption() {
+    let sim = build_sim();
+    freeze_predictor(&sim, random_face(101)); // sets production bcell = interp(B*)
+    let ws = sim.fields.mhd.as_ref().unwrap().magnetic_slip.as_ref().unwrap();
+    let interior: std::collections::HashSet<[isize; 3]> = sim.geom.interior.iter().collect();
+
+    // the physical direction (interior); the halo starts as one corruption.
+    for d in 0..3 {
+        for c in ws.direction.b[d].domain().iter() {
+            let v = if interior.contains(&c) { rnd(c, 7 + d as u64) } else { 999.0 };
+            ws.direction.b[d].set(c, v);
+        }
+    }
+    magnetic_slip_apply_operator::<3, 3, HostMemory, f64>(
+        &sim, GAMMA, true, &ws.direction, &ws.operator_direction,
+    );
+    let out1: Vec<f64> = (0..3)
+        .flat_map(|d| sim.geom.interior.iter().map(move |c| (d, c)))
+        .map(|(d, c)| *ws.operator_direction.b[d].at(c))
+        .collect();
+
+    // a different halo corruption, same interior.
+    for d in 0..3 {
+        for c in ws.direction.b[d].domain().iter() {
+            if !interior.contains(&c) {
+                ws.direction.b[d].set(c, -12345.0);
+            }
+        }
+    }
+    magnetic_slip_apply_operator::<3, 3, HostMemory, f64>(
+        &sim, GAMMA, true, &ws.direction, &ws.operator_direction,
+    );
+    let out2: Vec<f64> = (0..3)
+        .flat_map(|d| sim.geom.interior.iter().map(move |c| (d, c)))
+        .map(|(d, c)| *ws.operator_direction.b[d].at(c))
+        .collect();
+
+    let max_diff = out1.iter().zip(&out2).map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max);
+    let scale = out1.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+    assert!(scale > 1e-6, "vacuous halo-corruption pin");
+    assert!(
+        max_diff == 0.0,
+        "the operator depends on the iterate halo (max diff {max_diff:.3e}): the halo is not being \
+         regenerated as pure periodic storage"
+    );
+}
+
 #[test]
 fn the_frozen_operator_l_is_symmetric() {
     let sim = build_sim();
