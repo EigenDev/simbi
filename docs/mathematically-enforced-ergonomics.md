@@ -1747,7 +1747,7 @@ and numerical intent, while the system derives execution, proves composition
 and admission legality, selects a capable backend, and records every numerical
 intervention.
 
-#### Pass 1 — the scientific surface (designed, not built)
+#### Pass 1 — the scientific surface (designed and pinned)
 
 An exemplar-driven read-only audit of four representative problems — Bondi/BHL
 accretion (`newtonian/bondi.py`, `grhd/gr_bondi.py`), a Sedov blast with static
@@ -1858,8 +1858,8 @@ impl Problem for Sedov {
 }
 ```
 
-**Canonical vocabulary and migration map** (Pass 2 renames these; Pass 1 fixes the
-public term):
+**Canonical vocabulary and migration map** (the Pass-2 commits below landed these;
+Pass 1 pinned the public surface first):
 
 | concept | current names | canonical |
 |---|---|---|
@@ -1897,7 +1897,7 @@ occurrence of `Expr`/`ExprGraph`/`.graph`, IR nodes, manifests, effects, admissi
 witnesses, buffer order, kernel names, or backend launch types, and each runs to a
 checkpoint whose baked kernels match today's byte-for-byte.
 
-#### Pass 2 — the refinement family (audited, not built)
+#### Pass 2 — the refinement family (audited and renamed)
 
 **Central finding: the backend refines statically, only.** A refined hierarchy is
 declared at setup and held for the whole run; no regridding, cell tagging, error
@@ -1961,7 +1961,7 @@ The `amr`→`refinement` rename is mostly internal because neither the `/level_i
 groups nor the `refine_*` kernel names contain "amr"; the byte-identity comparison
 still runs to prove it.
 
-#### Pass 2 — the run-output family (audited, not built)
+#### Pass 2 — the run-output family (audited; RunResult built)
 
 **Central finding: the internal diagnostics vocabulary already honors its laws;
 this family is not a rename.** The distinctions are real and correctly applied:
@@ -2038,7 +2038,7 @@ settled accepted numbers:
 | `result.diagnostics.bodies` | `BodyDiagnostics`/`DatDiagnostics` | `mdot`, `accreted_mass`, `force` series | HDF5 plumbing |
 | `result.census["<name>"]` (separate from `.diagnostics`) | `CensusHistory` → HDF5 → `reader.Census` | the user's registered binned reductions | segment markers, cadence machinery |
 
-#### Pass 2 — `RunResult.diagnostics` (designed, not built)
+#### Pass 2 — `RunResult.diagnostics` (built)
 
 `run(...)` returns `None` today and its callers ignore the return, so returning a
 frozen `RunResult` instead is backward-compatible — nothing that currently writes
@@ -2117,10 +2117,11 @@ the meantime.
 backend's run-owned values; when concurrent runs do not contaminate each other;
 when a config that ignores the return still runs unchanged; when the frozen
 dataclasses reject attribute assignment; and when no `diagnostics.*` field name is
-a transaction word. This touches the `run()` entrypoint and the backend return
-boundary; it is a deliberate feature to build after review, not a rename.
+a transaction word. This landed across `ca696c9f` (run-owned projection),
+`671fd713` (run-owned guards), `853a2cd0` (the flat-decomposed driver), and
+`0d174f42` (the public frozen `RunResult`); every acceptance point above is met.
 
-#### Pass 2 — the outer-relaxation family (audited, not built)
+#### Pass 2 — the outer-relaxation family (audited and migrated)
 
 **`sponge` is one clean word and stays.** Every occurrence means outer-domain
 full-state relaxation toward a primitive reference `[kappa, rho_ref, vel_ref..,
@@ -2376,6 +2377,35 @@ The baked kernels key on the kernel slug, not the builder function name, so the
 No vague-name same-scope collisions were found: `spec`/`cx`/`cfg` are each
 unambiguous per scope. The orchestration doors, the Python config-author API, and
 the migration qualifiers are clean.
+
+#### Phase 7 closure
+
+Phase 7 is complete, and with it the mathematically-enforced-ergonomics program.
+The recurring result across the passes: the typed foundation from Phases 4-6 had
+already made most of the vocabulary and geography truthful, so the audits largely
+confirmed the names were right and directed the real work to the few genuine gaps.
+
+- Pass 1 designed and pinned the scientific surface.
+- Pass 2 migrated the families that carried real debt — the expression graph behind
+  the framework, `symbi-amr` -> `symbi-refinement`, the `buffer` -> `sponge` façade,
+  `RELAX` -> `VELOCITY_RELAXATION`, the IB `Relax` -> `PenalizationRelaxation` — and
+  built the one missing surface, the public `RunResult` diagnostics, over four
+  commits. The run-output, immersed-body, and state-quantity vocabularies audited as
+  already correct; their audits surfaced two dead scalars and a documentation drift
+  rather than live defects.
+- Pass 3 confirmed the crate geography matches the dependency story, enforced by the
+  physics ⊥ compiler gate test; no file moves were justified.
+- Pass 4 renamed the three `built` doors — the last migration relic — and confirmed
+  the rest of the local naming precise, with `gv_` load-bearing.
+
+Each vocabulary migration preserved the serialized wire and the baked IR
+byte-for-byte; the two-way façades and str-enum aliases carry legacy inputs through
+a compatibility window while the canonical names become the scientific surface.
+
+One project remains explicitly separate: the public removal of the three dead
+identifiers these passes found — `RefinementCriterion`, `sink_rate`, and
+`sink_delta` — each loudly refused or inert today, awaiting a compatibility and
+versioning decision. That is a deletion policy, not unfinished ergonomics work.
 
 ## 17. Non-goals
 
