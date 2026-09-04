@@ -26,7 +26,7 @@ use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, MagneticSpec, SurfaceSpec};
 use symbi_substrate::regimes::mhd_substrate::{
-    body_slip_emf, ct_curl, magnetic_slip_apply_operator, magnetic_slip_solve,
+    body_slip_emf, ct_curl, magnetic_slip_apply_operator, magnetic_slip_commit, magnetic_slip_solve,
 };
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -610,6 +610,100 @@ fn the_four_way_energy_comparison_reports_the_commit_seam() {
     // the theorem holds on the face norm; the cell-centred realization is nonnegative.
     assert!((q_h - neg_dm_face).abs() < 1e-8 * q_h.abs(), "face theorem broke");
     assert!(neg_dm_cell >= -1e-10, "cell-centred realized heat is negative");
+}
+
+// production-state energies over the interior (uniform gas, v = 0, so kinetic = 0).
+fn prod_m_face(sim: &Sim) -> f64 {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    let mut e = 0.0;
+    for d in 0..3 {
+        for c in sim.geom.interior.iter() {
+            let b = *m.bface[d].at(c);
+            e += 0.5 * b * b;
+        }
+    }
+    e
+}
+fn prod_defect(sim: &Sim) -> f64 {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    let mut e = 0.0;
+    for c in sim.geom.interior.iter() {
+        for d in 0..3 {
+            let mut up = c;
+            up[d] += 1;
+            let g = *m.bface[d].at(up) - *m.bface[d].at(c);
+            e += 0.125 * g * g;
+        }
+    }
+    e
+}
+fn prod_nrg_sum(sim: &Sim) -> f64 {
+    let nrg = sim.fields.cons.nrg_field().unwrap();
+    sim.geom.interior.iter().map(|c| *nrg.at(c)).sum()
+}
+fn prod_eint(sim: &Sim, c: [isize; 3]) -> f64 {
+    // e_int = nrg - kinetic - M_cc; kinetic = 0 (v = 0), M_cc = 1/2 sum_d bcell_d^2.
+    let m = sim.fields.mhd.as_ref().unwrap();
+    let nrg = *sim.fields.cons.nrg_field().unwrap().at(c);
+    let mut m_cc = 0.0;
+    for d in 0..3 {
+        let b = *m.bcell[d].at(c);
+        m_cc += 0.5 * b * b;
+    }
+    nrg - m_cc
+}
+
+#[test]
+fn the_commit_thermalizes_exactly_q_h_and_conserves_the_extended_energy() {
+    let sim = build_sim();
+    let b0 = face_of(&random_face(11), &sim);
+    set_bface(&sim, &b0);
+    interp_bcell(&sim);
+    let dt = DT;
+
+    // extended energy E_h = sum(E + delta) and per-cell e_int before.
+    let eh_before = prod_nrg_sum(&sim) + prod_defect(&sim);
+    let m_face_before = prod_m_face(&sim);
+    let eint_before: Vec<f64> = sim.geom.interior.iter().map(|c| prod_eint(&sim, c)).collect();
+
+    let receipt = magnetic_slip_solve::<3, 3, HostMemory, f64>(&sim, dt, GAMMA, 1e-13, 500);
+    assert!(receipt.converged);
+    magnetic_slip_commit::<3, 3, HostMemory, f64>(&sim, dt, GAMMA);
+
+    let eh_after = prod_nrg_sum(&sim) + prod_defect(&sim);
+    let m_face_after = prod_m_face(&sim);
+    let q_h = m_face_before - m_face_after; // = -dM_face, the dissipation
+    let eint_after: Vec<f64> = sim.geom.interior.iter().map(|c| prod_eint(&sim, c)).collect();
+
+    // global gas heat equals the face-Hodge dissipation.
+    let heat: f64 = eint_after.iter().zip(&eint_before).map(|(a, b)| a - b).sum();
+    // per-cell heat is nonnegative (no negative partition, no double heating).
+    let min_cell_heat = eint_after
+        .iter()
+        .zip(&eint_before)
+        .map(|(a, b)| a - b)
+        .fold(f64::INFINITY, f64::min);
+
+    let scale = q_h.abs().max(1.0);
+    assert!(q_h > 1e-3, "vacuous: no dissipation ({q_h})");
+    assert!(
+        (heat - q_h).abs() < 1e-8 * scale,
+        "global gas heat != Q_h: sum(de_int) = {heat:.9e} vs Q_h = {q_h:.9e}"
+    );
+    assert!(
+        min_cell_heat >= -1e-10 * scale,
+        "a cell was cooled by the commit: min de_int = {min_cell_heat:.3e}"
+    );
+    assert!(
+        (eh_after - eh_before).abs() < 1e-8 * (eh_before.abs().max(1.0)),
+        "extended energy sum(E + delta) not conserved: {eh_before:.9e} -> {eh_after:.9e}, drift {:.3e}",
+        (eh_after - eh_before).abs()
+    );
+    println!(
+        "\ncommit bridge:  Q_h = {q_h:.9e}  gas heat = {heat:.9e}  |heat - Q_h| = {:.3e}  min cell heat = {min_cell_heat:.3e}  E_h drift = {:.3e}\n",
+        (heat - q_h).abs(),
+        (eh_after - eh_before).abs()
+    );
 }
 
 // the operator reads only the physical (interior) face DOFs and regenerates the halo from them by

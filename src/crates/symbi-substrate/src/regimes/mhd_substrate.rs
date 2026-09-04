@@ -2068,6 +2068,123 @@ where
     }
 }
 
+// the gathered midpoint current (R J)_q[d] at cell `c`: 1/4 the sum of the four bounding d-edge
+// curls (forward transverse offsets), each curl from backward face differences of `bface`. matches
+// the cell pass's gather, so <(R J)_q, F_q> reproduces the midpoint quadratic per cell.
+fn gathered_current<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    d: usize,
+    c: [isize; D],
+) -> f64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
+    let inv_dx: [f64; D] = std::array::from_fn(|a| 1.0 / sim.geom.dx[a]);
+    let p1 = (d + 1) % 3;
+    let p2 = (d + 2) % 3;
+    let bf = |comp: usize, off: [isize; D]| mhd.bface[comp].at(off).to_f64();
+    let curl_at = |eoff: [isize; D]| -> f64 {
+        let mut mp1 = eoff;
+        mp1[p1] -= 1;
+        let mut mp2 = eoff;
+        mp2[p2] -= 1;
+        (bf(p2, eoff) - bf(p2, mp1)) * inv_dx[p1] - (bf(p1, eoff) - bf(p1, mp2)) * inv_dx[p2]
+    };
+    let mut e1 = c;
+    e1[p1] += 1;
+    let mut e2 = c;
+    e2[p2] += 1;
+    let mut e12 = c;
+    e12[p1] += 1;
+    e12[p2] += 1;
+    0.25 * (curl_at(c) + curl_at(e1) + curl_at(e2) + curl_at(e12))
+}
+
+/// commit a converged magnetic-slip candidate into the production state through the face-to-cell
+/// defect bridge. the CT slip operator dissipates face-Hodge magnetic energy `Q_h = -dM_face`, but
+/// the conserved state tracks the cell-centred energy `M_cc`. deposit the change exactly:
+///   E_c += (M_cc^1 - M_cc^0) + q_c,
+/// where `q_c = dt (R J^{1/2})_c . F_q,c >= 0` is the per-cell midpoint dissipation with
+/// `sum_c q_c = Q_h`. the gas internal energy then gains exactly `q_c` per cell (no double heating,
+/// no negative partition) and `sum_c (E_c + delta_c)` is invariant. finally set the physical bface to
+/// the candidate and reinterpolate bcell. host, 3D cartesian, adiabatic.
+pub fn magnetic_slip_commit<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    gamma: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    assert!(Mem::IS_HOST_ACCESSIBLE, "magnetic-slip commit is host-only");
+    let has_energy = sim.fields.cons.nrg_field().is_some();
+    assert!(has_energy, "magnetic-slip commit needs the adiabatic energy channel");
+    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
+    let ws = mhd.magnetic_slip.as_ref().expect("magnetic-slip workspace");
+    let ncells = sim.geom.interior.volume();
+
+    // M_cc per cell before (from the substep input B^0 -> interp(B^0)).
+    restore_bface(sim, &ws.input);
+    periodic_extend_bface(sim);
+    interp_bcell(sim);
+    let bcell_before: Vec<f64> = (0..DOF)
+        .flat_map(|d| sim.geom.interior.iter().map(move |c| (d, c)))
+        .map(|(d, c)| mhd.bcell[d].at(c).to_f64())
+        .collect();
+
+    // B^{1/2} into ws.rhs; freeze bcell = B*; cell pass fills F_q = A(B*)(R J^{1/2}); q_c = dt (R J . F_q).
+    for d in 0..D {
+        for c in ws.rhs.b[d].domain().iter() {
+            ws.rhs.b[d].set(
+                c,
+                Sc::from_f64(0.5 * (ws.candidate.b[d].at(c).to_f64() + ws.input.b[d].at(c).to_f64())),
+            );
+        }
+    }
+    for d in 0..DOF {
+        for c in sim.geom.interior.iter() {
+            mhd.bcell[d].set(c, *ws.frozen_bcell.b[d].at(c));
+        }
+    }
+    restore_bface(sim, &ws.rhs);
+    periodic_extend_bface(sim);
+    zero_efield(sim);
+    body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma);
+    let fq = mhd.slip_quadrature.as_ref().expect("slip-quadrature scratch");
+    let q_c: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| {
+            let mut q = 0.0;
+            for d in 0..3 {
+                q += gathered_current::<D, DOF, Mem, Sc>(sim, d, c) * fq[d].at(c).to_f64();
+            }
+            dt * q
+        })
+        .collect();
+
+    // set bface = candidate B^1, reinterpolate bcell.
+    restore_bface(sim, &ws.candidate);
+    periodic_extend_bface(sim);
+    interp_bcell(sim);
+
+    // deposit E_c += (M_cc^1 - M_cc^0) + q_c.
+    let nrg = sim.fields.cons.nrg_field().expect("adiabatic energy field");
+    for (qi, c) in sim.geom.interior.iter().enumerate() {
+        let mut d_mcc = 0.0;
+        for d in 0..DOF {
+            let bnew = mhd.bcell[d].at(c).to_f64();
+            let bold = bcell_before[d * ncells + qi];
+            d_mcc += 0.5 * (bnew * bnew - bold * bold);
+        }
+        let e = nrg.at(c).to_f64() + d_mcc + q_c[qi];
+        nrg.set(c, Sc::from_f64(e));
+    }
+}
+
 /// add the 2.5D Cartesian Ohmic resistive edge EMF `eta * J_z` to the out-of-plane edge EMF (the
 /// grid-ordered edge map's slot) in place, from the staggered face field on the map's transverse
 /// faces. the curl then consumes the augmented EMF, so `bface` picks up the resistive
