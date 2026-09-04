@@ -22,6 +22,7 @@ pub mod drain;
 pub mod excise;
 pub mod gravity;
 pub mod history;
+pub mod magnetic_slip;
 pub mod motion;
 pub mod penalize;
 pub mod sdf;
