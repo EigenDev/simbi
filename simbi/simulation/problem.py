@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import math
 import warnings
 from abc import abstractmethod
@@ -134,6 +135,18 @@ def _humanize_validation_error(setup_name: str, exc: ValidationError) -> str:
     lines.append("")
     lines.append("run with `--info` to list every parameter and its default.")
     return "\n".join(lines)
+
+
+def _subclass_overrides(cls: type, name: str) -> bool:
+    """whether a subclass below `SimbiProblem` redefines `name` (a method or
+    property). walks the MRO and stops at `SimbiProblem`, so only a config's own
+    override counts, never the base definition."""
+    for klass in cls.__mro__:
+        if klass.__name__ == "SimbiProblem":
+            return False
+        if name in klass.__dict__:
+            return True
+    return False
 
 
 class SimbiProblem(BaseModel):
@@ -809,10 +822,90 @@ class SimbiProblem(BaseModel):
     # =========================================================================
     # boundary expressions (override in subclass for custom bcs)
     # =========================================================================
+    # sponge-zone parameters. `sponge_parameters` is the canonical override
+    # point; `buffer_parameters` is the historical name kept as the one serialized
+    # computed field (the wire key is unchanged) through a compatibility window.
+    # the two bridge both ways: a config overriding `sponge_parameters` feeds the
+    # serialized `buffer_parameters` that delegates to it, and a config overriding
+    # only the legacy `buffer_parameters` is read by `sponge_parameters`.
+    # overriding both is rejected at construction, since the precedence would be
+    # silent.
+    @property
+    def sponge_parameters(self) -> dict[str, float]:
+        """the sponge-zone parameters (kappa, reference radii). override this."""
+        if _subclass_overrides(type(self), "buffer_parameters") and not _subclass_overrides(
+            type(self), "sponge_parameters"
+        ):
+            return self.buffer_parameters
+        return {}
+
     @computed_field
     @property
     def buffer_parameters(self) -> dict[str, float]:
-        return {}
+        """deprecated alias of `sponge_parameters`, retained as the historical
+        serialized key for one compatibility window. override `sponge_parameters`."""
+        return self.sponge_parameters
+
+    # the sponge-source outputs [kappa, rho_ref, vel_ref.., pre_ref]. `sponge_terms`
+    # is canonical; `buffer_sponge_terms` is the deprecated name, bridged the same
+    # way as the parameters so a config overriding or calling either works.
+    def sponge_terms(self, *coords: Any) -> list[Any]:
+        """the sponge-source outputs over the given coordinates. override this."""
+        if _subclass_overrides(type(self), "buffer_sponge_terms") and not _subclass_overrides(
+            type(self), "sponge_terms"
+        ):
+            return self.buffer_sponge_terms(*coords)
+        return []
+
+    def buffer_sponge_terms(self, *coords: Any) -> list[Any]:
+        """deprecated alias of `sponge_terms`; override `sponge_terms` instead."""
+        return self.sponge_terms(*coords)
+
+    # the canonical/legacy method pairs the facade bridges both ways.
+    _SPONGE_FACADE_PAIRS: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("sponge_parameters", "buffer_parameters"),
+        ("sponge_terms", "buffer_sponge_terms"),
+    )
+
+    @model_validator(mode="after")
+    def _pin_sponge_facade_precedence(self) -> "SimbiProblem":
+        # a legacy override of `buffer_parameters` / `buffer_sponge_terms` keeps
+        # working through the bridge (no warning — the structural compat is the
+        # point). overriding both the canonical and deprecated name is rejected,
+        # since the precedence would be silent.
+        cls = type(self)
+        for canonical, legacy in self._SPONGE_FACADE_PAIRS:
+            if _subclass_overrides(cls, legacy) and _subclass_overrides(cls, canonical):
+                raise ValueError(
+                    f"{cls.__name__} overrides both `{canonical}` (canonical) and the "
+                    f"deprecated `{legacy}`; override only `{canonical}`."
+                )
+        return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_deprecated_param_names(cls, data: Any) -> Any:
+        """accept a field's deprecated input names for a compatibility window: a
+        legacy key is remapped to the canonical field with one deprecation
+        warning, and supplying both the canonical and a legacy name fails loudly
+        rather than choosing by order."""
+        if not isinstance(data, dict):
+            return data
+        for field_name, field_info in cls.model_fields.items():
+            for legacy in get_param_metadata(field_info).deprecated_names:
+                if legacy in data:
+                    if field_name in data:
+                        raise ValueError(
+                            f"supply either `{field_name}` or the deprecated "
+                            f"`{legacy}`, not both."
+                        )
+                    warnings.warn(
+                        f"`{legacy}` is deprecated; use `{field_name}`.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                    data[field_name] = data.pop(legacy)
+        return data
 
     @computed_field
     @property
@@ -1466,6 +1559,17 @@ class SimbiProblem(BaseModel):
             except argparse.ArgumentError:
                 pass  # already registered
 
+            # deprecated aliases: hidden flags that write the canonical dest, so
+            # `--use-buffer` still sets `use_sponge` for a compatibility window.
+            for legacy in metadata.deprecated_names:
+                legacy_cli = legacy.replace("_", "-")
+                try:
+                    group.add_argument(
+                        f"--{legacy_cli}", **{**kwargs, "help": argparse.SUPPRESS}
+                    )
+                except argparse.ArgumentError:
+                    pass
+
     @classmethod
     def _field_is_cli(cls, field_name: str) -> bool:
         """whether a field is cli-exposed, inheriting the flag across the mro.
@@ -1535,6 +1639,8 @@ class SimbiProblem(BaseModel):
         namespace: Optional[argparse.Namespace] = None,
     ) -> SimbiProblem:
         """create instance from cli arguments."""
+        # a deprecated flag warns once, and mixing it with its canonical flag fails.
+        cls._check_deprecated_cli_flags(argv)
         # create a dedicated parser for problem-specific args only
         parser = argparse.ArgumentParser(add_help=False)
         cls.setup_cli(parser)
@@ -1562,6 +1668,36 @@ class SimbiProblem(BaseModel):
         problem = cls.from_namespace(parsed)
         problem._cli_explicit = set(vars(explicit_ns))
         return problem
+
+    @classmethod
+    def _check_deprecated_cli_flags(cls, argv: Optional[Sequence[str]]) -> None:
+        """warn once on a deprecated cli flag and reject mixing it with its
+        canonical flag. reads the raw tokens so `--use-buffer` and `--use-sponge`
+        are told apart even though both write the same dest."""
+        tokens = list(argv) if argv is not None else sys.argv[1:]
+
+        def used(flag: str) -> bool:
+            return any(tok == flag or tok.startswith(flag + "=") for tok in tokens)
+
+        for field_name, field_info in cls.model_fields.items():
+            metadata = get_param_metadata(field_info)
+            if not metadata.deprecated_names:
+                continue
+            canonical_flag = f"--{metadata.cli_name or field_name.replace('_', '-')}"
+            for legacy in metadata.deprecated_names:
+                legacy_flag = f"--{legacy.replace('_', '-')}"
+                if not used(legacy_flag):
+                    continue
+                if used(canonical_flag):
+                    raise ConfigError(
+                        f"pass either {canonical_flag} or the deprecated "
+                        f"{legacy_flag}, not both."
+                    )
+                warnings.warn(
+                    f"{legacy_flag} is deprecated; use {canonical_flag}.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
     @classmethod
     def from_namespace(cls, namespace: argparse.Namespace) -> SimbiProblem:

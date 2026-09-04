@@ -133,7 +133,7 @@ def _run(tmp_path: Path, bondi_inflow: bool):
 
 def _steady_flux(problem, data_dir: Path, label: str) -> float:
     """the plateau value of the flux at r_0, with the plateau itself asserted."""
-    r_0 = problem.buffer_parameters["buffer_radius"]
+    r_0 = problem.sponge_parameters["buffer_radius"]
     history = sorted(
         (_radial_mass_flux(f, r_0) for f in data_dir.rglob("*.chkpt.*.h5")),
         key=lambda row: row[1],
@@ -164,7 +164,7 @@ def _flux(tmp_path_factory):
     bondi_problem, bondi_dir = _run(tmp_path, bondi_inflow=True)
 
     return {
-        "r_0": static_problem.buffer_parameters["buffer_radius"],
+        "r_0": static_problem.sponge_parameters["buffer_radius"],
         "target": (
             4.0
             * np.pi

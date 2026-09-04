@@ -100,24 +100,26 @@ class SphericalBondiTest(SimbiProblem):
     ]
 
     # =========================================================================
-    # buffer zone parameters
+    # sponge zone parameters
     # =========================================================================
-    use_buffer: Annotated[
+    use_sponge: Annotated[
         bool,
         ProblemParam(
             True,
             cli=True,
-            description="enable buffer zone damping to background solution",
-            group="buffer zone",
+            description="enable the outer sponge zone relaxing to the background",
+            group="sponge zone",
+            deprecated_names=["use_buffer"],
         ),
     ]
-    buffer_time_fraction: Annotated[
+    sponge_time_fraction: Annotated[
         float,
         ProblemParam(
             0.1,
             cli=True,
-            description="damping timescale as fraction of bondi time",
-            group="buffer zone",
+            description="sponge damping timescale as a fraction of the bondi time",
+            group="sponge zone",
+            deprecated_names=["buffer_time_fraction"],
         ),
     ]
     domain_fraction: Annotated[
@@ -125,8 +127,8 @@ class SphericalBondiTest(SimbiProblem):
         ProblemParam(
             0.8,
             cli=True,
-            description="inner edge of buffer zone as fraction of domain radius",
-            group="buffer zone",
+            description="inner edge of the sponge zone as a fraction of the domain radius",
+            group="sponge zone",
         ),
     ]
 
@@ -404,15 +406,15 @@ class SphericalBondiTest(SimbiProblem):
         )
 
     @property
-    def buffer_parameters(self) -> dict[str, float]:
-        """buffer damping parameters for outer boundary."""
-        if not self.use_buffer:
+    def sponge_parameters(self) -> dict[str, float]:
+        """sponge damping parameters for outer boundary."""
+        if not self.use_sponge:
             return {}
 
         domain_size = self.domain_radius * self.bondi_radius
         buffer_width = (1.0 - self.domain_fraction) * domain_size
         buffer_radius = domain_size - buffer_width
-        damp_time = self.buffer_time_fraction * self.bondi_time
+        damp_time = self.sponge_time_fraction * self.bondi_time
 
         return {
             "buffer_radius": buffer_radius,
@@ -421,19 +423,19 @@ class SphericalBondiTest(SimbiProblem):
         }
 
     # =========================================================================
-    # buffer damping implementation
+    # sponge damping implementation
     # =========================================================================
-    def buffer_sponge_terms(
+    def sponge_terms(
         self,
         x1: expr.Expr,
         x2: expr.Expr,
         x3: expr.Expr,
     ) -> list[expr.Expr]:
-        """the outer buffer zone as the rust `sponge` source's outputs
+        """the outer sponge zone as the rust `sponge` source's outputs
         [kappa, rho_ref, vel_ref_*, pre_ref] (the isothermal regime stops before
         pre_ref), relaxing toward the far-field asymptotic bondi state. one
         shared text: `simbi.functional.bondi.far_field_sponge_outputs`."""
-        buffer_params = self.buffer_parameters
+        buffer_params = self.sponge_parameters
         return bondi_shared.far_field_sponge_outputs(
             x1,
             x2,
@@ -449,13 +451,13 @@ class SphericalBondiTest(SimbiProblem):
 
     @property
     def source_expressions(self) -> list[ExpressionDict]:
-        """the outer buffer-zone full-state sponge as a rust `sponge` source (or no source when
+        """the outer sponge zone full-state sponge as a rust `sponge` source (or no source when
         disabled). the reference travels as primitives and the regime
         converts it, so no closure parameter rides the source. the well-posed (gamma < 5/3) Bondi test is regulated by the sonic
         surface, so the sponge is an outer-boundary nicety, not load-bearing."""
-        if not self.use_buffer:
+        if not self.use_sponge:
             return []
-        outputs = self.buffer_sponge_terms(*expr.coords(3))
+        outputs = self.sponge_terms(*expr.coords(3))
         return [expr.sponge(outputs, dim=3)]
 
     # =========================================================================
@@ -600,6 +602,6 @@ class SphericalBondiTest(SimbiProblem):
                     f"{dx_fine:.5f} ({self.bondi_radius / dx_fine:.1f} zones/R_B)",
                 )
             )
-        for key, value in self.buffer_parameters.items():
-            rows.append(("buffer (derived)", key.replace("_", " "), f"{value:.3f}"))
+        for key, value in self.sponge_parameters.items():
+            rows.append(("sponge (derived)", key.replace("_", " "), f"{value:.3f}"))
         return rows

@@ -2167,6 +2167,34 @@ Proposed mapping — rename only the contradictory/overloaded:
 | `SourceKind.RELAX` (velocity drag) | truthfully a momentum-only sponge | optional → `VELOCITY_SPONGE`; do not recast as "toward equilibrium" | public wire — lower priority, alias policy |
 | `damp` in Riemann-dissipation prose | a coefficient/effect, honest | leave | — |
 
+**As implemented.** The base `SimbiProblem` carries a two-way compatibility
+façade: `sponge_parameters`/`sponge_terms` are the canonical override points, and
+`buffer_parameters`/`buffer_sponge_terms` remain the single serialized computed
+field and its method twin for one deprecation window. A config overriding the
+canonical name feeds the serialized legacy key; a config overriding only the
+legacy name is read by the canonical name; overriding both fails at construction.
+`ProblemParam` gained a generic `deprecated_names` that accepts legacy input keys
+and hidden CLI flags — `use_buffer`→`use_sponge`, `buffer_time_fraction`→
+`sponge_time_fraction` — each remapped to the canonical field with one deprecation
+warning, and mixing a legacy and canonical name fails loudly. A legacy method
+override is a silent structural bridge; only deprecated input keys and flags warn.
+Canonical and legacy inputs produce byte-identical execution dictionaries and
+output directories. The `"buffer_radius"` dictionary key stays as a legacy wire
+spelling.
+
+`porosity_index` is deferred: its only implementation is in a gitignored science
+config, so the repository has not migrated it.
+
+**Recorded, out of scope for this pass:** the gitignored porous science config's
+`porosity=0` validator rejects the run point two tracked tests
+(`test_porous_output_path`, `test_porous_seed_angular_momentum`) supply —
+`porosity 0 requires --wb-reconstruction: the sealed marginal null fails without
+KM pressure-gravity pairing`. Reproduced on HEAD independently of this migration
+(with the tracked changes stashed). Whether a sealed (`p=0`) porous accretor
+requires well-balanced pressure-gravity reconstruction by law, or the tests
+exercise a lawful non-WB limit, is a physics-contract question for separate
+review; this vocabulary pass changes neither the validator nor the fixtures.
+
 ## 17. Non-goals
 
 This program does not seek to:

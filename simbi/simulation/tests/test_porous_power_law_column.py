@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
 import simbi.expression as expr
 
 _CONFIG = (
@@ -158,11 +159,11 @@ def test_the_reservoir_holds_the_starting_column(porous_cls):
     problem = _problem(porous_cls, entropy_slope=1.0 / 6.0)
     graph = expr.ExprGraph()
     axes = [expr.variable(f"x{ax + 1}", graph) for ax in range(3)]
-    terms = problem.buffer_sponge_terms(*axes)
+    terms = problem.sponge_terms(*axes)
     compiled = graph.compile([terms[1], terms[-1]])
     gamma = problem.adiabatic_index
     state = _column(problem)
-    buffer_radius = problem.buffer_parameters["buffer_radius"]
+    buffer_radius = problem.sponge_parameters["buffer_radius"]
     for r in (buffer_radius, 1.05 * buffer_radius, 1.2 * buffer_radius):
         rho_ref, pre_ref = compiled.evaluate(x1=r, x2=0.0, x3=0.0)
         rho, pre = state(r)

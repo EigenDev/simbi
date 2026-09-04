@@ -19,6 +19,7 @@
 # =============================================================================
 import pytest
 
+
 import simbi.expression as expr
 from simbi_configs.science.projects.porous_turbulent_accretor import (
     PorousTurbulentAccretor,
@@ -36,7 +37,7 @@ def velocity_reference(problem: PorousTurbulentAccretor) -> list[float]:
     would have to be read against the local density to know what it prescribes."""
     graph = expr.ExprGraph()
     axes = [expr.variable(f"x{ii}", graph) for ii in (1, 2, 3)]
-    outputs = problem.buffer_sponge_terms(*axes)
+    outputs = problem.sponge_terms(*axes)
     assert len(outputs) == 6, "sponge needs [kappa, rho_ref, vel_x..z, pre_ref]"
     return graph.compile(outputs[2:5]).evaluate(x1=0.9, x2=0.0, x3=0.0)
 
@@ -83,7 +84,7 @@ def test_the_thermodynamic_reference_is_the_isentrope(porosity: float) -> None:
     problem = PorousTurbulentAccretor(porosity=porosity)
     graph = expr.ExprGraph()
     axes = [expr.variable(f"x{ii}", graph) for ii in (1, 2, 3)]
-    outputs = problem.buffer_sponge_terms(*axes)
+    outputs = problem.sponge_terms(*axes)
     radius = 0.9
     (den_ref,) = graph.compile([outputs[1]]).evaluate(x1=radius, x2=0.0, x3=0.0)
     gamma = problem.adiabatic_index

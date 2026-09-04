@@ -28,6 +28,10 @@ class ParamMetadata:
     # the admissible values, when a parameter takes one of a fixed set. carried as
     # metadata consumed by the cli and checkpoint layers; this type does not validate membership.
     choices: Optional[tuple[Any, ...]] = None
+    # deprecated input/cli names this field still accepts for a compatibility
+    # window. a legacy name is remapped to the canonical field with one
+    # deprecation warning; supplying both the canonical and a legacy name fails.
+    deprecated_names: tuple[str, ...] = ()
 
 
 def ProblemParam(
@@ -39,6 +43,7 @@ def ProblemParam(
     description: Optional[str] = None,
     group: Optional[str] = None,
     choices: Optional[Sequence[Any]] = None,
+    deprecated_names: Optional[Sequence[str]] = None,
     **field_kwargs: Any,
 ) -> FieldInfo:
     """
@@ -75,6 +80,7 @@ def ProblemParam(
         cli_name=cli_name,
         group=group,
         choices=tuple(choices) if choices is not None else None,
+        deprecated_names=tuple(deprecated_names) if deprecated_names else (),
     )
     extra: dict[str, Any] = {"param_metadata": metadata}
     return Field(

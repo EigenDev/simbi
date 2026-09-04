@@ -133,7 +133,7 @@ class KeplerianRingTest(SimbiProblem):
         return 0.01
 
     @property
-    def buffer_parameters(self) -> dict[str, float]:
+    def sponge_parameters(self) -> dict[str, float]:
         r_outer = min(abs(self.bounds[0][1]), abs(self.bounds[1][1]))
         r_buffer = r_outer * (1.0 - self.buffer_width)
 

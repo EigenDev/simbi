@@ -91,10 +91,13 @@ class DittmannSingleDisk(SimbiProblem):
     # buffer zone: a sponge that relaxes the outer annulus toward the initial
     # disk equilibrium, so the flow reaches a steady state
     # (dittmann uses a dirichlet outer bc).
-    use_buffer: Annotated[
+    use_sponge: Annotated[
         bool,
         ProblemParam(
-            True, cli=True, description="enable the outer-boundary sponge"
+            True,
+            cli=True,
+            description="enable the outer-boundary sponge",
+            deprecated_names=["use_buffer"],
         ),
     ]
     buffer_fraction: Annotated[
@@ -227,7 +230,7 @@ class DittmannSingleDisk(SimbiProblem):
         ]
 
     @property
-    def buffer_parameters(self) -> dict[str, float]:
+    def sponge_parameters(self) -> dict[str, float]:
         """outer-sponge geometry + timescale."""
         domain_half = abs(self.bounds[0][1])
         buffer_width = (1.0 - self.buffer_fraction) * domain_half
@@ -239,7 +242,7 @@ class DittmannSingleDisk(SimbiProblem):
             "damp_time": self.buffer_damp_orbits * t_orbit,
         }
 
-    def buffer_sponge_terms(
+    def sponge_terms(
         self, x1: expr.Expr, x2: expr.Expr
     ) -> list[expr.Expr]:
         """the iso sponge outputs [kappa, rho_ref, vel_ref_x, vel_ref_y]: relax
@@ -248,7 +251,7 @@ class DittmannSingleDisk(SimbiProblem):
         the buffer annulus. the reference travels as primitives and the regime
         converts it, forming S_U = kappa (U_ref - U) for density and momentum
         (iso carries no energy equation)."""
-        bp = self.buffer_parameters
+        bp = self.sponge_parameters
         buffer_radius = expr.constant(bp["buffer_radius"], x1)
         buffer_width = expr.constant(bp["buffer_width"], x1)
         damp_time = expr.constant(bp["damp_time"], x1)
@@ -277,9 +280,9 @@ class DittmannSingleDisk(SimbiProblem):
     @property
     def source_expressions(self) -> list[ExpressionDict]:
         """the outer sponge as a rust `sponge` source (or none when disabled)."""
-        if not self.use_buffer:
+        if not self.use_sponge:
             return []
-        outputs = self.buffer_sponge_terms(*expr.coords(2))
+        outputs = self.sponge_terms(*expr.coords(2))
         return [expr.sponge(outputs, dim=2)]
 
     def initial_primitive_state(self) -> InitialStateType:
