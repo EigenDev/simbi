@@ -2164,7 +2164,7 @@ Proposed mapping — rename only the contradictory/overloaded:
 | config `use_buffer`/`buffer_parameters`/`buffer_sponge_terms`/`buffer_radius` (the sponge annulus) | physics region overloading the memory word | → `use_sponge`/`sponge_parameters`/`sponge_terms`/`sponge_radius` | public config + path tokens — needs an alias/deprecation policy and a path-token compatibility shim |
 | `buffer_index` (porous example) | a porosity power-law index mislabeled `buffer` | → `porosity_index` | example-local public field |
 | `symbi-ib::penalize::Relax` struct | IB accumulator sharing the sponge word | → `WallRelax` (or `PenaltyAccum`) | internal Rust — compile + penalize tests |
-| `SourceKind.RELAX` (velocity drag) | truthfully a momentum-only sponge | optional → `VELOCITY_SPONGE`; do not recast as "toward equilibrium" | public wire — lower priority, alias policy |
+| `SourceKind.RELAX` (velocity drag) | truthfully a momentum-only relaxation | → `VELOCITY_RELAXATION` enum/API + `velocity_relaxation(...)` constructor; keep the serialized value `"relax"`; deprecated `relax(...)` input alias | public wire — its own compatibility-gated commit |
 | `damp` in Riemann-dissipation prose | a coefficient/effect, honest | leave | — |
 
 **As implemented.** The base `SimbiProblem` carries a two-way compatibility
@@ -2184,6 +2184,24 @@ spelling.
 
 `porosity_index` is deferred: its only implementation is in a gitignored science
 config, so the repository has not migrated it.
+
+**`SourceKind.RELAX` audit (verified velocity-only, migration proposed):** the
+relax source damps momentum toward a target velocity at fixed density
+(`S_mom = max(kappa,0)*rho*(v_ref - v)`, `symbi-hydro/src/source_term.rs:89-95`);
+its energy term is exactly the kinetic work of that drag (`S_nrg = v . S_mom`,
+`:101-102`), not an independent internal-energy or temperature target. The
+full-reference-state relaxer with a `pre*inv_gm1` internal-energy target is the
+distinct `sponge` kind (`:117-139`). No regime adds a density or magnetic-field
+channel; the relativistic regimes reject relax rather than reinterpret it
+(`expr_bridge.rs:685`). So `VELOCITY_RELAXATION` is the truthful canonical name.
+The serialized wire is the string `"relax"` (matched at `expr_bridge.rs:683` and
+`runner.py:442,455,494`); `SourceKind` is a `str` enum, so renaming the member to
+`VELOCITY_RELAXATION` while keeping `= "relax"` preserves the wire, and no baked
+kernel/manifest identifier embeds the enum member name. Migration: the
+`VELOCITY_RELAXATION` enum member and a `velocity_relaxation(...)` constructor
+become canonical, `relax(...)` stays a deprecated public input alias, the runner
+and bridge are unchanged (they key on `"relax"`), and the Rust leaf internals
+(`user_relax_*`) may be renamed wire-neutrally. Its own compatibility-gated commit.
 
 **Recorded, out of scope for this pass:** the gitignored porous science config's
 `porosity=0` validator rejects the run point two tracked tests

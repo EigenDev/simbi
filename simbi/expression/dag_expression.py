@@ -8,8 +8,8 @@ from typing import Any, Callable, Optional, Sequence, Set, TypeVar, Union
 class SourceKind(str, enum.Enum):
     """the conservation law the rust framework wraps a user source field in.
     typo-proof front for the `kind` string crossing into rust's `SourceConfig`
-    (str subclass -> serializes to its `.value`). FORCE/COOLING/RELAX are the
-    safe primitive-lifted constructors; RAW writes conserved components directly
+    (str subclass -> serializes to its `.value`). FORCE/COOLING/VELOCITY_RELAXATION
+    are the safe primitive-lifted constructors; RAW writes conserved components directly
     to a single slot (the regime-agnostic escape hatch). INJECT writes the whole
     conserved vector [den, mom_0..mom_{D-1}, nrg] additively from one config — a
     mass+momentum+energy deposition (jet/wind), which reaches past the one slot
@@ -18,14 +18,19 @@ class SourceKind(str, enum.Enum):
     relaxes den, mom and nrg toward a reference given as PRIMITIVES
     [kappa, rho_ref, vel_ref.., pre_ref], which the regime converts through its own
     conservation law — so one wire serves newtonian, relativistic and curved
-    backgrounds alike, and no closure parameter rides the source. RELAX relaxes the
-    velocity alone (density-preserving drag). ROTATING_FRAME takes
+    backgrounds alike, and no closure parameter rides the source. VELOCITY_RELAXATION
+    relaxes the velocity alone (density-preserving momentum drag; the energy term is
+    the kinetic work of that drag). ROTATING_FRAME takes
     [omega, origin_x, origin_y] and applies the Newtonian Coriolis and centrifugal
     force for constant rotation about the positive z axis."""
 
     FORCE = "force"
     ROTATING_FRAME = "rotating_frame"
     COOLING = "cooling"
+    VELOCITY_RELAXATION = "relax"
+    # deprecated alias declared after the canonical member: a str-Enum with the
+    # same value makes `RELAX is VELOCITY_RELAXATION` and keeps it out of
+    # iteration/schema, so the canonical member is the one exposed.
     RELAX = "relax"
     SPONGE = "sponge"
     INJECT = "inject"

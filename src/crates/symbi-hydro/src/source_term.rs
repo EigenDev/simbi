@@ -86,7 +86,7 @@ pub fn cooling<S: Scalar>(rate: S) -> S {
 /// max(kappa, 0) * rho * (v_ref_k - vel_k)`, the linear drag toward a reference
 /// velocity. `kappa` is clamped non-negative ([`clamp_rate`]) so the relaxation
 /// damps — damping is the one behavior the form can express.
-pub fn relax_momentum<S: Scalar>(rho: S, vel: &[S], kappa: S, v_ref: &[S]) -> Vec<S> {
+pub fn velocity_relaxation_momentum<S: Scalar>(rho: S, vel: &[S], kappa: S, v_ref: &[S]) -> Vec<S> {
     let k = clamp_rate(kappa);
     vel.iter()
         .zip(v_ref.iter())
@@ -98,8 +98,8 @@ pub fn relax_momentum<S: Scalar>(rho: S, vel: &[S], kappa: S, v_ref: &[S]) -> Ve
 /// drag does, derived from the same `(kappa, v_ref)` the momentum lift uses. with
 /// `kappa >= 0` the work term is sign-definite: kinetic energy leaves the flow
 /// whenever `vel` departs from `v_ref`.
-pub fn relax_energy<S: Scalar>(rho: S, vel: &[S], kappa: S, v_ref: &[S]) -> S {
-    dot(vel, &relax_momentum(rho, vel, kappa, v_ref))
+pub fn velocity_relaxation_energy<S: Scalar>(rho: S, vel: &[S], kappa: S, v_ref: &[S]) -> S {
+    dot(vel, &velocity_relaxation_momentum(rho, vel, kappa, v_ref))
 }
 
 // ----- full conserved-state relaxation (the buffer zone) ---------------------
@@ -120,7 +120,7 @@ pub fn sponge_density<S: Scalar>(rho: S, kappa: S, den_ref: S) -> S {
 
 /// full-state relaxation momentum lift: `S_mom_k = max(kappa,0) * (mom_ref_k - rho*vel_k)`,
 /// relaxing the conserved momentum `rho*vel_k` toward a reference momentum `mom_ref_k`.
-/// distinct from `relax_momentum` (intensive velocity at fixed rho) — working on the
+/// distinct from `velocity_relaxation_momentum` (intensive velocity at fixed rho) — working on the
 /// conserved variable is what lets it compose with a simultaneous density relaxation.
 pub fn sponge_momentum<S: Scalar>(rho: S, vel: &[S], kappa: S, mom_ref: &[S]) -> Vec<S> {
     let k = clamp_rate(kappa);
@@ -530,19 +530,19 @@ mod tests {
         let vel = [3.0_f64, 0.0];
         let v_ref = [0.0_f64, 0.0];
 
-        let no_op = relax_momentum(rho, &vel, -5.0, &v_ref);
+        let no_op = velocity_relaxation_momentum(rho, &vel, -5.0, &v_ref);
         assert!(
             no_op.iter().all(|&s| s.abs() < 1e-15),
             "negative kappa must clamp to a no-op"
         );
 
-        let drag = relax_momentum(rho, &vel, 2.0, &v_ref);
+        let drag = velocity_relaxation_momentum(rho, &vel, 2.0, &v_ref);
         assert!(
             (drag[0] - (-6.0)).abs() < 1e-13,
             "drag opposes velocity: {}",
             drag[0]
         );
-        let work = relax_energy(rho, &vel, 2.0, &v_ref);
+        let work = velocity_relaxation_energy(rho, &vel, 2.0, &v_ref);
         assert!(
             work < 0.0,
             "relaxation must remove kinetic energy, got {work}"

@@ -111,10 +111,24 @@ def cooling(outputs: Sequence[Outputish], *, dim: int, **kw) -> dict:
     return source(SourceKind.COOLING, outputs, dim=dim, **kw)
 
 
+def velocity_relaxation(outputs: Sequence[Outputish], *, dim: int, **kw) -> dict:
+    """velocity relaxation toward a target, `[rate, v_0..v_{dim-1}]`: a
+    density-preserving momentum drag whose energy term is the kinetic work of the
+    drag alone."""
+    _check_arity("velocity_relaxation", len(outputs), [1 + dim], "rate, v_0..v_{dim-1}")
+    return source(SourceKind.VELOCITY_RELAXATION, outputs, dim=dim, **kw)
+
+
 def relax(outputs: Sequence[Outputish], *, dim: int, **kw) -> dict:
-    """velocity relaxation toward a target, `[rate, v_0..v_{dim-1}]`."""
-    _check_arity("relax", len(outputs), [1 + dim], "rate, v_0..v_{dim-1}")
-    return source(SourceKind.RELAX, outputs, dim=dim, **kw)
+    """deprecated alias of `velocity_relaxation`."""
+    import warnings
+
+    warnings.warn(
+        "`relax(...)` is deprecated; use `velocity_relaxation(...)`.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return velocity_relaxation(outputs, dim=dim, **kw)
 
 
 def rotating_frame(outputs: Sequence[Outputish], *, dim: int, **kw) -> dict:

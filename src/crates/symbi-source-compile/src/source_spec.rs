@@ -1092,14 +1092,14 @@ pub fn user_cooling_source(rate: &SourceProgram, _d: usize) -> SourceProgram {
 /// max(kappa, 0) * rho * (v_ref_k - vel_k)`, the linear drag toward a reference velocity `v_ref`.
 /// the `field` carries `outputs = [kappa, v_ref_0 .. v_ref_{D-1}]` (the rate, then the D-vector
 /// target). the lift clamps `kappa` non-negative so the relaxation damps — the stability
-/// invariant that `force`/`raw` leave to the caller. pair with [`user_relax_energy_source`] for
+/// invariant that `force`/`raw` leave to the caller. pair with [`velocity_relaxation_energy_source`] for
 /// the work term (energy regimes), which traces the same lift over the same field so the
 /// coupling stays in step.
-pub fn user_relax_momentum_source(field: &SourceProgram, d: usize) -> SourceProgram {
+pub fn velocity_relaxation_momentum_source(field: &SourceProgram, d: usize) -> SourceProgram {
     assert_eq!(
         field.outputs().len(),
         1 + d,
-        "user_relax_momentum_source: field must be [kappa, v_ref_0..v_ref_{}], got {} outputs",
+        "velocity_relaxation_momentum_source: field must be [kappa, v_ref_0..v_ref_{}], got {} outputs",
         d - 1,
         field.outputs().len(),
     );
@@ -1107,7 +1107,7 @@ pub fn user_relax_momentum_source(field: &SourceProgram, d: usize) -> SourceProg
         let rho = cx.scalar(law_params::RHO);
         let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
         let f = cx.splice_source_as_scalars(field);
-        symbi_hydro::source_term::relax_momentum(rho, &vel, f[0], &f[1..1 + d])
+        symbi_hydro::source_term::velocity_relaxation_momentum(rho, &vel, f[0], &f[1..1 + d])
     })
 }
 
@@ -1115,11 +1115,11 @@ pub fn user_relax_momentum_source(field: &SourceProgram, d: usize) -> SourceProg
 /// relaxation drag does, derived from the same field the momentum source uses (so the energy
 /// bookkeeping stays in step). energy regimes only. with `kappa >= 0` the work term is
 /// sign-definite: the relaxation removes kinetic energy whenever `vel` departs from `v_ref`.
-pub fn user_relax_energy_source(field: &SourceProgram, d: usize) -> SourceProgram {
+pub fn velocity_relaxation_energy_source(field: &SourceProgram, d: usize) -> SourceProgram {
     assert_eq!(
         field.outputs().len(),
         1 + d,
-        "user_relax_energy_source: field must be [kappa, v_ref_0..v_ref_{}], got {} outputs",
+        "velocity_relaxation_energy_source: field must be [kappa, v_ref_0..v_ref_{}], got {} outputs",
         d - 1,
         field.outputs().len(),
     );
@@ -1127,7 +1127,7 @@ pub fn user_relax_energy_source(field: &SourceProgram, d: usize) -> SourceProgra
         let rho = cx.scalar(law_params::RHO);
         let vel: Vec<Gv> = (0..d).map(|k| cx.scalar(&law_params::vel(k))).collect();
         let f = cx.splice_source_as_scalars(field);
-        vec![symbi_hydro::source_term::relax_energy(
+        vec![symbi_hydro::source_term::velocity_relaxation_energy(
             rho,
             &vel,
             f[0],

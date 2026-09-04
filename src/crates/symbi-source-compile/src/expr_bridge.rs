@@ -694,12 +694,12 @@ fn lower_user_field(
             let field = strip_and_mask(&field, has_region, 0..1);
             let mut out = vec![(
                 "mom".to_string(),
-                crate::source_spec::user_relax_momentum_source(&field, cfg.dim),
+                crate::source_spec::velocity_relaxation_momentum_source(&field, cfg.dim),
             )];
             if spec.has_energy {
                 out.push((
                     "nrg".to_string(),
-                    crate::source_spec::user_relax_energy_source(&field, cfg.dim),
+                    crate::source_spec::velocity_relaxation_energy_source(&field, cfg.dim),
                 ));
             }
             Ok(out)
