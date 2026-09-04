@@ -69,7 +69,10 @@ pub enum BodyKind<S: Scalar> {
         accretion_radius: S,
         total_accreted_mass: S,
         accretion_rate: S,
-        sink_delta: S, // 0 = torque-free, 1 = standard
+        // inert retired coordinate: no penalize kernel consumes it. the live
+        // torque-free dial is `torque_free_xi` (xi = 0 standard drain, xi = 1
+        // fully torque-free), carried on `SurfaceSpec::TorqueFree`.
+        sink_delta: S,
     },
     /// the GR excision horizon as a first-class immersed boundary: a diagnostic-carrying
     /// absorbing surface whose gravity is the fixed metric and whose sink is the vacuum
