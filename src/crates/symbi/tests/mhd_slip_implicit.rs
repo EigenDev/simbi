@@ -165,6 +165,215 @@ fn dot(sim: &Sim, a: &Face, b: &Face) -> f64 {
     s
 }
 
+// --- face-field linear algebra over the full (halo-inclusive) domain ---
+fn keys(sim: &Sim) -> Vec<(usize, [isize; 3])> {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    let mut v = Vec::new();
+    for d in 0..3 {
+        for c in m.bface[d].domain().iter() {
+            v.push((d, c));
+        }
+    }
+    v
+}
+fn axpy(sim: &Sim, a: f64, x: &Face, y: &Face) -> Face {
+    keys(sim).into_iter().map(|k| (k, a * x[&k] + y[&k])).collect()
+}
+fn scale(sim: &Sim, a: f64, x: &Face) -> Face {
+    keys(sim).into_iter().map(|k| (k, a * x[&k])).collect()
+}
+
+fn set_bface(sim: &Sim, x: &Face) {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    for d in 0..3 {
+        for c in m.bface[d].domain().iter() {
+            m.bface[d].set(c, x[&(d, c)]);
+        }
+    }
+}
+fn get_bface(sim: &Sim) -> Face {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    keys(sim).into_iter().map(|k| (k, *m.bface[k.0].at(k.1))).collect()
+}
+// freeze bcell = interp(bface) over the interior: the dyad/coefficient state.
+fn interp_bcell(sim: &Sim) {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    for d in 0..3 {
+        for c in sim.geom.interior.iter() {
+            let mut up = c;
+            up[d] += 1;
+            m.bcell[d].set(c, 0.5 * (*m.bface[d].at(c) + *m.bface[d].at(up)));
+        }
+    }
+}
+
+// the nonlinear explicit oracle step x - dt L(x) x, with A(x) evaluated at bcell = interp(x). the
+// predictor uses dt/2; it is a CT curl update, so it preserves div B.
+fn explicit_step(sim: &Sim, x: &Face, dt: f64) -> Face {
+    set_bface(sim, x);
+    interp_bcell(sim);
+    let m = sim.fields.mhd.as_ref().unwrap();
+    for d in 0..3 {
+        for c in m.efield[d].domain().iter() {
+            m.efield[d].set(c, 0.0);
+        }
+    }
+    body_slip_emf::<3, 3, HostMemory, f64>(sim, GAMMA);
+    ct_curl::<3, 3, HostMemory, f64>(sim, dt);
+    get_bface(sim)
+}
+
+// the frozen system operator (I + dt/2 L*) applied to x; L* uses the currently frozen bcell = B*.
+fn apply_sys(sim: &Sim, x: &Face, dt: f64) -> Face {
+    axpy(sim, 0.5 * dt, &apply_l(sim, x), x)
+}
+
+// mirrors the production MagneticSlipSolveReceipt shape; some fields are recorded for the receipt
+// but not asserted on in every test.
+#[allow(dead_code)]
+struct Receipt {
+    iterations: usize,
+    initial_residual_norm: f64,
+    final_residual_norm: f64,
+    requested_tolerance: f64,
+    converged: bool,
+}
+
+// matrix-free conjugate gradient for the SPD midpoint system (I + dt/2 L*) X = rhs. bcell must
+// already hold the frozen predictor B*.
+fn cg(sim: &Sim, rhs: &Face, dt: f64, tol: f64, max_iter: usize) -> (Face, Receipt) {
+    let dotf = |a: &Face, b: &Face| dot(sim, a, b);
+    let mut x: Face = keys(sim).into_iter().map(|k| (k, 0.0)).collect();
+    let mut r = rhs.clone(); // r = rhs - sys(0) = rhs
+    let r0 = dotf(&r, &r).sqrt();
+    let mut p = r.clone();
+    let mut rs = dotf(&r, &r);
+    let mut iterations = 0;
+    let target = tol * r0.max(1e-300);
+    let mut final_res = r0;
+    for it in 0..max_iter {
+        let ap = apply_sys(sim, &p, dt);
+        let alpha = rs / dotf(&p, &ap);
+        x = axpy(sim, alpha, &p, &x);
+        r = axpy(sim, -alpha, &ap, &r);
+        let rs_new = dotf(&r, &r);
+        final_res = rs_new.sqrt();
+        iterations = it + 1;
+        if final_res <= target {
+            break;
+        }
+        let beta = rs_new / rs;
+        p = axpy(sim, beta, &p, &r);
+        rs = rs_new;
+    }
+    (
+        x,
+        Receipt {
+            iterations,
+            initial_residual_norm: r0,
+            final_residual_norm: final_res,
+            requested_tolerance: tol,
+            converged: final_res <= target,
+        },
+    )
+}
+
+// one production-shaped midpoint step: second-order explicit predictor B* = B0 - dt/2 L(B0) B0,
+// freeze A* = A(B*), then solve (I + dt/2 L*) B1 = (I - dt/2 L*) B0 by CG.
+fn midpoint_step(sim: &Sim, b0: &Face, dt: f64, tol: f64) -> (Face, Face, Receipt) {
+    let bstar = explicit_step(sim, b0, 0.5 * dt); // the predictor (CT update, div-B preserving)
+    set_bface(sim, &bstar);
+    interp_bcell(sim); // freeze A* = A(B*)
+    // rhs = (I - dt/2 L*) B0.
+    let lb0 = apply_l(sim, b0);
+    let rhs = axpy(sim, -0.5 * dt, &lb0, b0);
+    let (b1, receipt) = cg(sim, &rhs, dt, tol, 500);
+    (b1, bstar, receipt)
+}
+
+fn face_energy_of(sim: &Sim, x: &Face) -> f64 {
+    let mut e = 0.0;
+    for d in 0..3 {
+        for c in sim.geom.interior.iter() {
+            let b = x[&(d, c)];
+            e += 0.5 * b * b;
+        }
+    }
+    e
+}
+
+#[test]
+fn the_midpoint_solve_satisfies_the_energy_theorem() {
+    // W^1 - W^0 = -dt <B^{1/2}, L* B^{1/2}> = -dt <R J^{1/2}, A* R J^{1/2}>_q, exact to the converged
+    // linear residual plus roundoff (B^{1/2} = (B1+B0)/2, A* frozen at the predictor).
+    let sim = build_sim();
+    let b0 = face_of(&random_face(11), &sim);
+    let dt = DT;
+    let (b1, _bstar, receipt) = midpoint_step(&sim, &b0, dt, 1e-13);
+    assert!(receipt.converged, "CG did not converge: {} iters, res {:.3e}", receipt.iterations, receipt.final_residual_norm);
+
+    // bcell is frozen at B* from midpoint_step; L* = the frozen operator.
+    let bhalf = scale(&sim, 0.5, &axpy(&sim, 1.0, &b1, &b0));
+    let quad = dot(&sim, &bhalf, &apply_l(&sim, &bhalf)); // <R J^{1/2}, A* R J^{1/2}>_q
+    let dw = face_energy_of(&sim, &b1) - face_energy_of(&sim, &b0);
+    let predicted = -dt * quad;
+    assert!(quad >= -1e-10, "midpoint dissipation is negative: {quad:.3e}");
+    assert!(
+        (dw - predicted).abs() < 1e-9 * dw.abs().max(predicted.abs()).max(1.0),
+        "midpoint energy theorem fails: dW = {dw:.9e}, -dt<RJ,A*RJ>_q = {predicted:.9e}, residual {:.3e}",
+        (dw - predicted).abs()
+    );
+    println!(
+        "\nmidpoint energy theorem:  dW = {dw:.9e}  -dt<RJ,A*RJ> = {predicted:.9e}  residual {:.3e}  (CG {} iters, res {:.2e})\n",
+        (dw - predicted).abs(),
+        receipt.iterations,
+        receipt.final_residual_norm
+    );
+}
+
+#[test]
+fn the_midpoint_method_is_second_order_in_time() {
+    // evolve a fixed field over a fixed horizon with step dt and dt/2, against a fine dt/8 reference.
+    // the nonlinear predictor gives second-order temporal accuracy, so the error quarters.
+    let sim = build_sim();
+    let b0 = face_of(&random_face(11), &sim);
+    let horizon = 8.0 * DT;
+    let evolve = |steps: usize| -> Face {
+        let dt = horizon / steps as f64;
+        let mut b = b0.clone();
+        for _ in 0..steps {
+            let (b1, _s, rec) = midpoint_step(&sim, &b, dt, 1e-13);
+            assert!(rec.converged, "CG diverged in the order study");
+            b = b1;
+        }
+        b
+    };
+    let l2 = |a: &Face, b: &Face| -> f64 {
+        let mut s = 0.0;
+        for d in 0..3 {
+            for c in sim.geom.interior.iter() {
+                let e = a[&(d, c)] - b[&(d, c)];
+                s += e * e;
+            }
+        }
+        s.sqrt()
+    };
+    let reference = evolve(64);
+    let coarse = evolve(8);
+    let fine = evolve(16);
+    let e_coarse = l2(&coarse, &reference);
+    let e_fine = l2(&fine, &reference);
+    let ratio = e_coarse / e_fine;
+    println!(
+        "\ntemporal order:  E(dt) = {e_coarse:.3e}  E(dt/2) = {e_fine:.3e}  ratio = {ratio:.3}  (second order -> ~4)\n"
+    );
+    assert!(e_coarse > 1e-12, "vacuous order test (error {e_coarse})");
+    assert!(
+        ratio > 3.4,
+        "the midpoint method is not second order: E(dt)/E(dt/2) = {ratio:.3} (expected ~4)"
+    );
+}
+
 #[test]
 fn the_frozen_operator_l_is_symmetric() {
     let sim = build_sim();
