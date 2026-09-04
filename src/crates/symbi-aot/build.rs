@@ -510,12 +510,14 @@ fn coords_suffix(coords: Coords) -> &'static str {
 // follow once their fused-source builders validate against the GPU.
 // =============================================================================
 
-/// one row in the regime bake table — the kernel-name prefix + whether the
-/// regime carries an energy conservation law. iso (mass + mom only) sets
-/// `has_energy = false`; adiabatic / RHD / RMHD set `true`.
+/// one row in the regime bake table — the kernel-name prefix, whether the
+/// regime carries an energy conservation law, and the regime spec the fused
+/// specs are admitted against. iso (mass + mom only) sets `has_energy =
+/// false`; adiabatic / RHD / RMHD set `true`.
 struct RegimeBuild {
     prefix: &'static str,
     has_energy: bool,
+    spec: &'static symbi_hydro::RegimeSpec,
 }
 
 /// every regime with AOT-baked fused-source kernels. RHD + RMHD slot in
@@ -524,10 +526,12 @@ const REGIMES: &[RegimeBuild] = &[
     RegimeBuild {
         prefix: "iso",
         has_energy: false,
+        spec: &symbi_hydro::ISO_NEWTONIAN_SPEC,
     },
     RegimeBuild {
         prefix: "adiabatic",
         has_energy: true,
+        spec: &symbi_hydro::NEWTONIAN_SPEC,
     },
 ];
 
@@ -777,8 +781,8 @@ fn geo_source(prefix: &str) -> GeoSource {
 // coefficients `(a0, ac)` as runtime scalars, keeping the integrator stage a runtime
 // parameter rather than a codegen axis, so the same kernel serves forward-Euler,
 // SSP-RK2, and SSP-RK3 (the driver feeds the per-stage coefficients). `fused = None`
-// emits the plain kernel; `fused = Some((slug, specs))` adds the `_with_{slug}` infix
-// and splices the specs into the forward-Euler operator. one helper covers the
+// emits the plain kernel; `fused = Some((slug, admitted))` adds the `_with_{slug}` infix
+// and splices the admitted sources into the forward-Euler operator. one helper covers the
 // cross-product — (fused x regime x ndim x geometry) is data, with zero copy-paste.
 fn gen_godunov_stage(
     out_dir: &str,
@@ -786,7 +790,7 @@ fn gen_godunov_stage(
     prefix: &str,
     has_energy: bool,
     geom: Geom,
-    fused: Option<(&str, &[&symbi_source_compile::source_spec::SourceSpec])>,
+    fused: Option<(&str, &symbi_source_compile::AdmittedSources)>,
 ) {
     let suffix_with = fused
         .map(|(slug, _)| format!("_with_{slug}"))
@@ -805,8 +809,8 @@ fn gen_godunov_stage(
         geo_slug,
         geom.spacetime_suffix()
     );
-    let no_sources: [&symbi_source_compile::source_spec::SourceSpec; 0] = [];
-    let sources: &[&symbi_source_compile::source_spec::SourceSpec] = match fused {
+    let no_sources = symbi_source_compile::AdmittedSources::none();
+    let sources: &symbi_source_compile::AdmittedSources = match fused {
         Some((_, s)) => s,
         None => &no_sources,
     };
@@ -839,7 +843,6 @@ fn gen_godunov_with_body_source(
         "{prefix}_godunov_stage_with_body_source{}_{ndim}d",
         geom.suffix()
     );
-    let refs: [(&str, &symbi_source_compile::source_spec::SourceProgram); 0] = [];
     let program = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         geom.coords,
         symbi_discretize::Spacetime::Minkowski,
@@ -849,7 +852,7 @@ fn gen_godunov_with_body_source(
         geom.ncomp as usize,
         has_energy,
         geo_source(prefix),
-        &refs,
+        &symbi_source_compile::AdmittedSources::none(),
         /* mag_from_bcell = */ false,
         /* n_bodies = */ MAX_SOURCE_BODIES,
     );
@@ -867,7 +870,7 @@ fn gen_source_apply(
     has_energy: bool,
     geom: Geom,
     slug: &str,
-    sources: &[&symbi_source_compile::source_spec::SourceSpec],
+    sources: &symbi_source_compile::AdmittedSources,
 ) {
     let name = format!("{prefix}_source_with_{slug}{}_{ndim}d", geom.suffix());
     let program = symbi_discretize::gv::source_apply_gv(
@@ -1590,7 +1593,7 @@ fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
         3,
         true,
         GeoSource::Rmhd,
-        &[],
+        &symbi_source_compile::AdmittedSources::none(),
         /* mag_from_bcell = */ false,
     );
     emit_gv(out_dir, &name, ndim, &program);
@@ -1613,7 +1616,7 @@ fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
             3,
             true,
             GeoSource::Rmhd,
-            &[],
+            &symbi_source_compile::AdmittedSources::none(),
             /* mag_from_bcell = */ false,
             0,
             true,
@@ -3353,6 +3356,22 @@ fn main() {
                 let specs = family.source_specs(ndim as usize, regime.has_energy);
                 let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> =
                     specs.iter().collect();
+                // the family's specs pass the contribution door at this dimension on this
+                // regime before either kernel folds them: a spec off its signature fails
+                // the bake.
+                let admitted = symbi_source_compile::AdmittedSources::admit_specs(
+                    &refs,
+                    regime.spec,
+                    ndim as usize,
+                )
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "{} {}d {}: fused family fails admission: {e:?}",
+                        regime.prefix,
+                        ndim,
+                        family.slug()
+                    )
+                });
                 // the fused variant — source folded into the godunov stage (one launch).
                 gen_godunov_stage(
                     &out_dir,
@@ -3360,7 +3379,7 @@ fn main() {
                     regime.prefix,
                     regime.has_energy,
                     Geom::cart(ndim),
-                    Some((family.slug(), &refs)),
+                    Some((family.slug(), &admitted)),
                 );
                 // the standalone additive variant — `cons += dt*S` as a separate per-stage pass.
                 // the general source executor: plain godunov + this pass reproduces the fused
@@ -3372,7 +3391,7 @@ fn main() {
                     regime.has_energy,
                     Geom::cart(ndim),
                     family.slug(),
-                    &refs,
+                    &admitted,
                 );
             }
             // the immersed-body source, fused (Cartesian; cyl/sph below).

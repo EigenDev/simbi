@@ -67,6 +67,7 @@ fn adiabatic_runtime_force_fused_equals_two_pass_rk2() {
     // writes of the fused godunov.
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.5, -0.3],
+        "vocabulary":{"reads":[],"params":[0,1]},
         "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "PARAMETER", "param_idx": 1} ]
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse config");
@@ -157,6 +158,7 @@ fn iso_runtime_force_fused_equals_two_pass_rk2() {
 
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.4, -0.25],
+        "vocabulary":{"reads":[],"params":[0,1]},
         "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "PARAMETER", "param_idx": 1} ]
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse config");
@@ -233,6 +235,7 @@ fn adiabatic_fused_equals_two_pass_on_the_cache_tiled_cover() {
 
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.5, -0.3],
+        "vocabulary":{"reads":[],"params":[0,1]},
         "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "PARAMETER", "param_idx": 1} ]
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse config");

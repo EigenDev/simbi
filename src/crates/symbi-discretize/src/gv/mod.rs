@@ -586,9 +586,18 @@ mod tests {
         // the same operator (apply_dag_core_gv) as the source pass, at the
         // (Coord, Assign) coordinate. proves the abstraction is general — two instances, one builder.
         // a prim prescription: rho=2, vel=0.5, pre=1 (consts; a real boundary reads x/t, same path).
-        let mk = |v: f64| symbi_ir::SourceProgram::trace(|cx| vec![cx.lit(v)]);
-        let (rho, vel, pre) = (mk(2.0), mk(0.5), mk(1.0));
-        let sources = [("den", &rho), ("mom", &vel), ("nrg", &pre)];
+        // the prescription enters through the boundary door, from the wire a driven face
+        // serializes: the complete prim state [rho, vel_0, pre] as constants.
+        let prescription = symbi_source_compile::expr_bridge::build_boundary_dag(
+            &symbi_source_compile::SourceConfig::from_json(
+                r#"{"kind":"dirichlet","dim":1,"outputs":[0,1,2],"params":[],
+                    "nodes":[{"op":"CONSTANT","value":2.0},{"op":"CONSTANT","value":0.5},
+                             {"op":"CONSTANT","value":1.0}]}"#,
+            )
+            .expect("parse"),
+            &symbi_hydro::regime_spec::NEWTONIAN_SPEC,
+        )
+        .expect("a full prim prescription");
         let program = boundary_fill_from_built_gv(
             Coords::Cartesian,
             &[Spacing::Uniform],
@@ -596,7 +605,7 @@ mod tests {
             1,
             1,
             true,
-            &sources,
+            &prescription,
         );
         let k = program.kernel();
         let writes = program.writes();
@@ -632,19 +641,21 @@ mod tests {
         // the toroidal driven boundary: an MHD prescription (ncomp=3) with a `bcell` slot must
         // emit prim.mag[k] writes alongside rho/vel/pre. a purely toroidal injection sets the
         // in-plane B (mag[0],mag[1]) to 0 and the out-of-plane B_phi (mag[2]) to a value.
-        let mk = |vals: &[f64]| {
-            symbi_ir::SourceProgram::trace(|cx| vals.iter().map(|&v| cx.lit(v)).collect())
-        };
-        let den = mk(&[1.0]);
-        let mom = mk(&[0.1, 0.0, 0.0]);
-        let nrg = mk(&[1.0]);
-        let bcell = mk(&[0.0, 0.0, 0.5]); // B_r=0, B_theta=0, B_phi=0.5 (purely toroidal)
-        let sources = [
-            ("den", &den),
-            ("mom", &mom),
-            ("nrg", &nrg),
-            ("bcell", &bcell),
-        ];
+        // the wire a driven MHD face serializes: `dim` is the vector component count (3 on
+        // the 2.5D grid) and the outputs are [rho, vel_0..2, pre, B_0..2]; B_r=0, B_theta=0,
+        // B_phi=0.5 (purely toroidal).
+        let prescription = symbi_source_compile::expr_bridge::build_boundary_dag(
+            &symbi_source_compile::SourceConfig::from_json(
+                r#"{"kind":"dirichlet","dim":3,"outputs":[0,1,2,3,4,5,6,7],"params":[],
+                    "nodes":[{"op":"CONSTANT","value":1.0},{"op":"CONSTANT","value":0.1},
+                             {"op":"CONSTANT","value":0.0},{"op":"CONSTANT","value":0.0},
+                             {"op":"CONSTANT","value":1.0},{"op":"CONSTANT","value":0.0},
+                             {"op":"CONSTANT","value":0.0},{"op":"CONSTANT","value":0.5}]}"#,
+            )
+            .expect("parse"),
+            &symbi_hydro::regime_spec::NEWTONIAN_MHD_SPEC,
+        )
+        .expect("a full MHD prim prescription");
         let program = boundary_fill_from_built_gv(
             Coords::Spherical,
             &[Spacing::Log, Spacing::Uniform],
@@ -652,7 +663,7 @@ mod tests {
             2,
             3,
             true,
-            &sources,
+            &prescription,
         );
         let k = program.kernel();
         let writes = program.writes();
@@ -2107,10 +2118,16 @@ mod tests {
 
         let specs = symbi_source_compile::source_spec::point_mass_gravity_sources(2, true);
         let spec_refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = specs.iter().collect();
+        let admitted = symbi_source_compile::AdmittedSources::admit_specs(
+            &spec_refs,
+            &symbi_hydro::regime_spec::NEWTONIAN_SPEC,
+            2,
+        )
+        .expect("gravity on its signature");
         let (coords, spacing, axes) = (Coords::Cartesian, [Spacing::Uniform; 2], [0usize, 1]);
         let geo = GeoSource::Hydro { inertial: false };
 
-        // the compile-time spec path.
+        // the body-free bake entry.
         let program_spec = godunov_stage_gv_with_fused_sources(
             coords,
             Spacetime::Minkowski,
@@ -2120,19 +2137,13 @@ mod tests {
             2,
             true,
             geo,
-            &spec_refs,
+            &admitted,
             false,
         );
         let k_spec = program_spec.kernel();
         let w_spec = program_spec.writes();
 
-        // the runtime SourceProgram-value path (what `RuntimeSource` feeds).
-        let builts: Vec<(&str, symbi_source_compile::source_spec::SourceProgram)> = specs
-            .iter()
-            .map(|s| (s.target_field, (s.build_source)(2)))
-            .collect();
-        let src_refs: Vec<(&str, &symbi_source_compile::source_spec::SourceProgram)> =
-            builts.iter().map(|(t, b)| (*t, b)).collect();
+        // the core (what `RuntimeSource` feeds), body-free.
         let program_built = godunov_stage_gv_with_fused_built(
             coords,
             Spacetime::Minkowski,
@@ -2142,7 +2153,7 @@ mod tests {
             2,
             true,
             geo,
-            &src_refs,
+            &admitted,
             false,
             0,
         );

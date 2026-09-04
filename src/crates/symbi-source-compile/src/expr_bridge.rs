@@ -25,11 +25,22 @@
 //   let built = lower_dag_to_program(&nodes, &[root])?;   // -> SourceProgram
 // =============================================================================
 
+use symbi_algebra::algebra::Numeric as _;
+use symbi_carrier::Scalar as _;
 use symbi_expr::dag::{Node, Payload};
 use symbi_expr::op::Op;
-use symbi_carrier::Scalar as _;
 use symbi_ir::{Gv, GvMask, SourceProgram, TraceCx};
-use symbi_algebra::algebra::Numeric as _;
+
+use crate::source_effects::{AdmittedSources, SourceTarget, TypedReadSet, admit_user_contribution};
+use crate::source_spec::source_params::{Read, ReadFamily};
+use crate::source_spec::user_params::UserVocabulary;
+
+/// the refusal of the cell-volume leaf in a source: a source is a per-unit-volume density
+/// added to a conserved density, so weighting it by the cell measure would make the
+/// deposited amount scale with the resolution. the leaf is a binned-reduction weight.
+const CELL_VOLUME_REJECTION: &str = "cell volume is not a source-term input: a source is a per-unit-volume density, so \
+     weighting it by the cell measure makes the deposited amount resolution-dependent. \
+     it is a binned-reduction weight only";
 
 /// a `symbi-expr` op falls outside the `symbi-ir` vocabulary, or the DAG is malformed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,14 +170,38 @@ fn eval_dag<'t>(cx: TraceCx<'t>, nodes: &[Node]) -> Result<Vec<ExprValue<'t>>, B
                 }
                 _ => return Err(bad()),
             },
-            Add => { let (a, b) = binary(&map)?; ExprValue::Scalar(a + b) }
-            Sub => { let (a, b) = binary(&map)?; ExprValue::Scalar(a - b) }
-            Mul => { let (a, b) = binary(&map)?; ExprValue::Scalar(a * b) }
-            Div => { let (a, b) = binary(&map)?; ExprValue::Scalar(a / b) }
-            Pow => { let (a, b) = binary(&map)?; ExprValue::Scalar(a.powf(b)) }
-            Min => { let (a, b) = binary(&map)?; ExprValue::Scalar(a.min(b)) }
-            Max => { let (a, b) = binary(&map)?; ExprValue::Scalar(a.max(b)) }
-            Atan2 => { let (a, b) = binary(&map)?; ExprValue::Scalar(a.atan2(b)) }
+            Add => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Scalar(a + b)
+            }
+            Sub => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Scalar(a - b)
+            }
+            Mul => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Scalar(a * b)
+            }
+            Div => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Scalar(a / b)
+            }
+            Pow => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Scalar(a.powf(b))
+            }
+            Min => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Scalar(a.min(b))
+            }
+            Max => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Scalar(a.max(b))
+            }
+            Atan2 => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Scalar(a.atan2(b))
+            }
             Neg => ExprValue::Scalar(-unary(&map)?),
             Abs => ExprValue::Scalar(unary(&map)?.abs()),
             Sqrt => ExprValue::Scalar(unary(&map)?.sqrt()),
@@ -187,11 +222,26 @@ fn eval_dag<'t>(cx: TraceCx<'t>, nodes: &[Node]) -> Result<Vec<ExprValue<'t>>, B
             Asinh => ExprValue::Scalar(unary(&map)?.asinh()),
             Acosh => ExprValue::Scalar(unary(&map)?.acosh()),
             Atanh => ExprValue::Scalar(unary(&map)?.atanh()),
-            Lt => { let (a, b) = binary(&map)?; ExprValue::Mask(a.cmp_lt(b)) }
-            Gt => { let (a, b) = binary(&map)?; ExprValue::Mask(a.cmp_gt(b)) }
-            Le => { let (a, b) = binary(&map)?; ExprValue::Mask(a.cmp_le(b)) }
-            Ge => { let (a, b) = binary(&map)?; ExprValue::Mask(a.cmp_ge(b)) }
-            Eq => { let (a, b) = binary(&map)?; ExprValue::Mask(a.cmp_eq(b)) }
+            Lt => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Mask(a.cmp_lt(b))
+            }
+            Gt => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Mask(a.cmp_gt(b))
+            }
+            Le => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Mask(a.cmp_le(b))
+            }
+            Ge => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Mask(a.cmp_ge(b))
+            }
+            Eq => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Mask(a.cmp_eq(b))
+            }
             And | Or => match node.payload {
                 Payload::Binary(l, r) => {
                     let a = child(&map, i, l)?.mask(i, op)?;
@@ -280,33 +330,35 @@ fn lower_masked_dag_to_program(
     }
 }
 
-/// the front door: turn a serialized `SourceConfig` (python -> json -> `SourceConfig::from_json`)
-/// into the axiomatic `SourceProgram`(s), wrapping the user's free field in the conservation law
-/// per `kind`. returns `(target_field, SourceProgram)` pairs ready to splice into the godunov source
-/// dispatch — `"force"` yields momentum (+ energy, if the regime has it), `"cooling"` yields a
-/// lone energy sink, `"inject"` writes the full conserved vector [den, mom, (nrg)] additively from
-/// one config (mass+momentum+energy deposition), `"raw"` writes the outputs straight to a single
-/// `target` (the escape hatch). the framework authors the conservative components for
-/// force/cooling, so the coupling holds by construction.
-///
-/// validation is regime-driven via `spec` (the static `RegimeSpec`), so an ill-posed config fails
-/// at build time, ahead of attach and well ahead of any evolve step:
-/// - `force`/`cooling`/`relax` carry newtonian conservation laws; they are rejected for a
-///   relativistic regime (whose conserved momentum is `rho h W^2 v`, a different law). a
-///   relativistic regime uses `raw`, supplying conserved components directly.
-/// - `cooling` (and `force`/`relax`'s energy overlay) require `has_energy`; cooling on an
-///   energy-free (isothermal) regime is rejected loudly at bridge time.
-/// - `raw` targets must be a substrate conserved slot (`den | mom | nrg`), and `nrg` requires
-///   `has_energy`.
-/// - arity: `force` declares one acceleration per dim (`outputs.len() == dim`); `cooling` a single
-///   rate; `relax` `[kappa, v_ref_0 .. v_ref_{dim-1}]` (`1 + dim`); `inject` `[den, mom_0 ..
-///   mom_{dim-1}, nrg]` (`2 + dim` on energy regimes, `1 + dim` on iso). (the `dim == sim DOF`
-///   cross-check is the const-generic apply path's, where DOF is known.)
-///
-/// the **`region`** axis: if `cfg.region` names a mask node `chi(x)`, the
-/// contribution is multiplied by it. the conservation lifts are linear in the field, so masking the
-/// field (for `relax`: the rate `kappa` alone) equals masking the conserved contribution — the
-/// splice is unchanged, and CPU + GPU fall out of the existing path.
+/// a census map lowered by [`build_census_expressions`]: one program whose outputs are the
+/// bin-axis coordinates followed by the accumulator values. a census is a per-cell reduction
+/// and adds to no conserved slot, so it is evaluated through its own evaluator constructor.
+#[derive(Clone)]
+pub struct CensusProgram(SourceProgram);
+
+impl CensusProgram {
+    /// the lowered program.
+    pub fn program(&self) -> &SourceProgram {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for CensusProgram {
+    type Target = SourceProgram;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for CensusProgram {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CensusProgram")
+            .field("outputs", &self.0.outputs().len())
+            .field("params", &self.0.params())
+            .finish()
+    }
+}
+
 /// lower a census's bin-axis and value expressions into one `SourceProgram`, whose outputs are
 /// the axis coordinates followed by the accumulator values (the order
 /// `CensusConfig::output_nodes` declares).
@@ -318,7 +370,7 @@ fn lower_masked_dag_to_program(
 ///
 /// `dv` is a legal leaf here, where a source term refuses it: the cell measure is the natural
 /// weight for an extensive quantity, and it is what keeps a sum correct on a curvilinear grid.
-pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<SourceProgram, String> {
+pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<CensusProgram, String> {
     if cfg.values.is_empty() {
         return Err(format!("census '{}': registers no values", cfg.name));
     }
@@ -346,6 +398,7 @@ pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<Source
     // replacing a per-cell libm pow in a kernel that runs over every leaf cell.
     let (nodes, outputs) = symbi_expr::strength_reduce(&nodes, &outputs);
     lower_dag_to_program(&nodes, &outputs)
+        .map(CensusProgram)
         .map_err(|e| format!("census '{}': bridge: {e:?}", cfg.name))
 }
 
@@ -355,14 +408,142 @@ pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<Source
 pub fn build_user_source(
     cfg: &symbi_expr::SourceConfig,
     spec: &symbi_hydro::regime_spec::RegimeSpec,
-) -> Result<Vec<(String, SourceProgram)>, String> {
+) -> Result<AdmittedSources, String> {
     build_user_source_with_law(cfg, spec, None)
 }
 
 /// lower one user source against `law`, the conserved state the regime builds from
 /// primitives. `sponge` relaxes toward that state and so requires it; the other
-/// kinds ignore it.
+/// kinds ignore it. every contribution passes the checked door before it is returned.
 pub fn build_user_source_with_law(
+    cfg: &symbi_expr::SourceConfig,
+    spec: &symbi_hydro::regime_spec::RegimeSpec,
+    law: Option<&symbi_hydro::state_law::StateLaw>,
+) -> Result<AdmittedSources, String> {
+    lower_user_source(cfg, spec, law, 0)
+}
+
+/// the state reads a kind's conservation-law lift introduces around the user's field, fixed
+/// by the kind ahead of any graph. `force` and `relax` multiply the field by the density and
+/// dot it with the velocity for the work term; `rotating_frame` adds the coriolis and
+/// centrifugal accelerations from the velocity and the position; `sponge` relaxes the full
+/// conserved state, built from the primitives the regime carries through the state law,
+/// which on a curved background samples the metric at the cell position. `cooling`,
+/// `inject` and `raw` write the user's field as it is.
+fn lift_reads(kind: &str, has_energy: bool) -> &'static [ReadFamily] {
+    match kind {
+        "force" | "relax" => &[ReadFamily::Rho, ReadFamily::Vel],
+        "rotating_frame" => &[ReadFamily::Rho, ReadFamily::Vel, ReadFamily::X],
+        "sponge" if has_energy => &[
+            ReadFamily::Rho,
+            ReadFamily::Vel,
+            ReadFamily::Pre,
+            ReadFamily::X,
+        ],
+        "sponge" => &[ReadFamily::Rho, ReadFamily::Vel, ReadFamily::X],
+        _ => &[],
+    }
+}
+
+/// the declaration a configured source carries, typed from the wire ahead of any graph: the
+/// reads its frontend context granted, parsed into the typed read vocabulary, together with
+/// the reads the kind's conservation lift introduces at the grid's axes, and the parameter
+/// indices it granted, each inside its value list, lowering to `p{first_parameter + idx}`.
+/// `first_parameter` is 0 for a source on its own and the running offset inside a
+/// collection, whose sources share one global parameter numbering. a config without a
+/// declaration is refused: the declaration is what the built program is held to.
+pub fn configured_vocabulary(
+    cfg: &symbi_expr::SourceConfig,
+    spec: &symbi_hydro::regime_spec::RegimeSpec,
+    first_parameter: usize,
+) -> Result<UserVocabulary, String> {
+    let declared = cfg.vocabulary.as_ref().ok_or_else(|| {
+        format!(
+            "'{}' source carries no vocabulary declaration; `serialize_source` records the \
+             reads and parameters the expression context granted",
+            cfg.kind
+        )
+    })?;
+    let granted = declared.reads.iter().map(|name| match Read::parse(name) {
+        Some(read) => Ok(read),
+        None if name == "dv" => Err(CELL_VOLUME_REJECTION.to_string()),
+        None => Err(format!(
+            "declared read '{name}' is outside the source vocabulary \
+             (rho | pre | vel_k | x_k | t)"
+        )),
+    });
+    let lifted = lift_reads(&cfg.kind, spec.has_energy)
+        .iter()
+        .flat_map(|family| family.reads(cfg.dim))
+        .map(Ok);
+    let reads = granted
+        .chain(lifted)
+        .collect::<Result<TypedReadSet, String>>()?;
+    for &idx in &declared.params {
+        if idx >= cfg.params.len() {
+            return Err(format!(
+                "declared parameter {idx} has no value: the source supplies {} parameter value(s)",
+                cfg.params.len()
+            ));
+        }
+    }
+    Ok(UserVocabulary::Granted {
+        reads,
+        first: first_parameter,
+        parameters: declared.params.clone(),
+    })
+}
+
+/// lower one configured source and hold each lowered contribution to the declaration the
+/// config carries. the vocabulary is typed first, from the declaration alone; the lowering
+/// then produces the contributions; the door compares the two, and holds the declaration
+/// itself inside the regime's capabilities. the lowered programs are returned as they came
+/// out of the lifts.
+fn lower_user_source(
+    cfg: &symbi_expr::SourceConfig,
+    spec: &symbi_hydro::regime_spec::RegimeSpec,
+    law: Option<&symbi_hydro::state_law::StateLaw>,
+    first_parameter: usize,
+) -> Result<AdmittedSources, String> {
+    let vocabulary = configured_vocabulary(cfg, spec, first_parameter)?;
+    let lowered = lower_user_field(cfg, spec, law)?;
+    for (target, built) in &lowered {
+        let slot = SourceTarget::slot_name(target)
+            .ok_or_else(|| format!("target '{target}' is outside the conserved vocabulary"))?;
+        admit_user_contribution(slot, built, &vocabulary, spec, cfg.dim)
+            .map_err(|e| format!("'{}' contribution to '{slot}': {e:?}", cfg.kind))?;
+    }
+    Ok(AdmittedSources::new(lowered))
+}
+
+/// turn a serialized `SourceConfig` (python -> json -> `SourceConfig::from_json`)
+/// into the axiomatic `SourceProgram`(s), wrapping the user's free field in the conservation law
+/// per `kind`. returns `(target_field, SourceProgram)` pairs ready to splice into the godunov source
+/// dispatch — `"force"` yields momentum (+ energy, if the regime has it), `"cooling"` yields a
+/// lone energy sink, `"inject"` writes the full conserved vector [den, mom, (nrg)] additively from
+/// one config (mass+momentum+energy deposition), `"raw"` writes the outputs straight to a single
+/// `target` (the escape hatch). the framework authors the conservative components for
+/// force/cooling, so the coupling holds by construction.
+///
+/// validation is regime-driven via `spec` (the static `RegimeSpec`), so an ill-posed config fails
+/// at build time, ahead of attach and well ahead of any evolve step:
+/// - `force`/`cooling`/`relax` carry newtonian conservation laws; they are rejected for a
+///   relativistic regime (whose conserved momentum is `rho h W^2 v`, a different law). a
+///   relativistic regime uses `raw`, supplying conserved components directly.
+/// - `cooling` (and `force`/`relax`'s energy overlay) require `has_energy`; cooling on an
+///   energy-free (isothermal) regime is rejected loudly at bridge time.
+/// - `raw` targets must be a substrate conserved slot (`den | mom | nrg`), and `nrg` requires
+///   `has_energy`.
+/// - arity: `force` declares one acceleration per dim (`outputs.len() == dim`); `cooling` a single
+///   rate; `relax` `[kappa, v_ref_0 .. v_ref_{dim-1}]` (`1 + dim`); `inject` `[den, mom_0 ..
+///   mom_{dim-1}, nrg]` (`2 + dim` on energy regimes, `1 + dim` on iso). (the `dim == sim DOF`
+///   cross-check is the const-generic apply path's, where DOF is known.)
+///
+/// the **`region`** axis: if `cfg.region` names a mask node `chi(x)`, the
+/// contribution is multiplied by it. the conservation lifts are linear in the field, so masking the
+/// field (for `relax`: the rate `kappa` alone) equals masking the conserved contribution — the
+/// splice is unchanged, and CPU + GPU fall out of the existing path.
+fn lower_user_field(
     cfg: &symbi_expr::SourceConfig,
     spec: &symbi_hydro::regime_spec::RegimeSpec,
     law: Option<&symbi_hydro::state_law::StateLaw>,
@@ -413,12 +594,7 @@ pub fn build_user_source_with_law(
     // deposited amount depend on the grid. rejecting it here turns what the per-cell source
     // param resolver (which binds no `dv`) would raise mid-evolve into a build-time error.
     if field.params().iter().any(|p| p == "dv") {
-        return Err(
-            "cell volume is not a source-term input: a source is a per-unit-volume density, so \
-             weighting it by the cell measure makes the deposited amount resolution-dependent. \
-             it is a binned-reduction weight only"
-                .to_string(),
-        );
+        return Err(CELL_VOLUME_REJECTION.to_string());
     }
 
     let reject_relativistic = |law: &str| -> Result<(), String> {
@@ -629,30 +805,31 @@ pub fn build_user_source_with_law(
 pub fn build_user_sources(
     configs: &[symbi_expr::SourceConfig],
     spec: &symbi_hydro::regime_spec::RegimeSpec,
-) -> Result<(Vec<(String, SourceProgram)>, Vec<f64>), String> {
+) -> Result<(AdmittedSources, Vec<f64>), String> {
     build_user_sources_with_law(configs, spec, None)
 }
 
-/// lower an ordered collection against `law`; see `build_user_source_with_law`.
+/// lower an ordered collection against `law`; see `build_user_source_with_law`. each
+/// source's contributions pass the door under its own declaration (its numbered scalars
+/// start at the collection's running offset) before same-target contributions are summed.
 pub fn build_user_sources_with_law(
     configs: &[symbi_expr::SourceConfig],
     spec: &symbi_hydro::regime_spec::RegimeSpec,
     law: Option<&symbi_hydro::state_law::StateLaw>,
-) -> Result<(Vec<(String, SourceProgram)>, Vec<f64>), String> {
-    let mut parameter_offset = 0usize;
+) -> Result<(AdmittedSources, Vec<f64>), String> {
     let mut params = Vec::new();
     let mut lowered = Vec::new();
 
     for config in configs {
+        let first_parameter = params.len();
         let mut config = config.clone();
         for node in &mut config.nodes {
             if let Some(index) = &mut node.param_idx {
-                *index += parameter_offset;
+                *index += first_parameter;
             }
         }
-        parameter_offset += config.params.len();
         params.extend_from_slice(&config.params);
-        lowered.extend(build_user_source_with_law(&config, spec, law)?);
+        lowered.extend(lower_user_source(&config, spec, law, first_parameter)?.into_pairs());
     }
 
     let mut composed: Vec<(String, SourceProgram)> = Vec::new();
@@ -663,7 +840,7 @@ pub fn build_user_sources_with_law(
             composed.push((target, built));
         }
     }
-    Ok((composed, params))
+    Ok((AdmittedSources::new(composed), params))
 }
 
 fn sum_source_programs(
@@ -742,10 +919,57 @@ pub fn boundary_prim_arity(spec: &symbi_hydro::regime_spec::RegimeSpec, d: usize
     1 + d + usize::from(spec.has_energy) + if spec.is_mhd { d } else { 0 }
 }
 
+/// a driven-boundary prescription that passed [`build_boundary_dag`]: one program per
+/// primitive slot (`den`/`mom`/`nrg`, `bcell` on MHD, `chi` with a dye), each reading
+/// coordinates and time alone and assigning the ghost state. a prescription adds to no
+/// conserved slot, so it is attached through its own constructor, apart from the source
+/// contributions.
+#[derive(Clone)]
+pub struct BoundaryPrescription(Vec<(String, SourceProgram)>);
+
+impl BoundaryPrescription {
+    /// the `(slot, program)` pairs.
+    pub fn pairs(&self) -> &[(String, SourceProgram)] {
+        &self.0
+    }
+
+    /// the pairs by value, for a holder that stores them.
+    pub fn into_pairs(self) -> Vec<(String, SourceProgram)> {
+        self.0
+    }
+}
+
+impl std::ops::Deref for BoundaryPrescription {
+    type Target = [(String, SourceProgram)];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'a> IntoIterator for &'a BoundaryPrescription {
+    type Item = &'a (String, SourceProgram);
+    type IntoIter = std::slice::Iter<'a, (String, SourceProgram)>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl std::fmt::Debug for BoundaryPrescription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(
+                self.0
+                    .iter()
+                    .map(|(slot, built)| (slot.as_str(), built.outputs().len())),
+            )
+            .finish()
+    }
+}
+
 pub fn build_boundary_dag(
     cfg: &symbi_expr::SourceConfig,
     spec: &symbi_hydro::regime_spec::RegimeSpec,
-) -> Result<Vec<(String, SourceProgram)>, String> {
+) -> Result<BoundaryPrescription, String> {
     let nodes = symbi_expr::nodes_from_descs(&cfg.nodes).map_err(|e| format!("dag load: {e}"))?;
     let (nodes, reduced_outputs) = symbi_expr::strength_reduce(&nodes, &cfg.outputs);
     let d = cfg.dim;
@@ -779,9 +1003,8 @@ pub fn build_boundary_dag(
     // split the user DAG into per-slot prescriptions: den <- rho, mom <- the d-vector vel,
     // nrg <- pre, bcell <- the d-vector cell B. each is an independent lowering over its
     // output subset, building its own graph.
-    let lower = |outs: &[usize]| {
-        lower_dag_to_program(&nodes, outs).map_err(|e| format!("bridge: {e:?}"))
-    };
+    let lower =
+        |outs: &[usize]| lower_dag_to_program(&nodes, outs).map_err(|e| format!("bridge: {e:?}"));
     let mut out = vec![
         ("den".to_string(), lower(&reduced_outputs[0..1])?),
         ("mom".to_string(), lower(&reduced_outputs[1..1 + d])?),
@@ -801,16 +1024,16 @@ pub fn build_boundary_dag(
     if has_dye {
         out.push(("chi".to_string(), lower(&reduced_outputs[next..next + 1])?));
     }
-    Ok(out)
+    Ok(BoundaryPrescription(out))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, RHD_SPEC, RMHD_SPEC};
     use symbi_expr::dag::Dag;
-    use symbi_ir::backends::interp::{Backend, Cpu};
+    use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, RHD_SPEC, RMHD_SPEC};
     use symbi_ir::NodeId;
+    use symbi_ir::backends::interp::{Backend, Cpu};
     use symbi_ir::passes::scalarize::scalarize;
 
     // ---- the axiomatic validation gate (build_user_source vs RegimeSpec) -------------------
@@ -834,7 +1057,10 @@ mod tests {
     /// hand over the law belonging to the regime it names.
     fn law_for(spec: &symbi_hydro::regime_spec::RegimeSpec) -> symbi_hydro::state_law::StateLaw {
         if spec.is_relativistic {
-            symbi_hydro::state_law::StateLaw::relativistic(1.4, symbi_hydro::state_law::Background::Minkowski)
+            symbi_hydro::state_law::StateLaw::relativistic(
+                1.4,
+                symbi_hydro::state_law::Background::Minkowski,
+            )
         } else {
             fixture_law()
         }
@@ -843,11 +1069,14 @@ mod tests {
     fn lower(
         cfg: &symbi_expr::SourceConfig,
         spec: &symbi_hydro::regime_spec::RegimeSpec,
-    ) -> Result<Vec<(String, SourceProgram)>, String> {
+    ) -> Result<AdmittedSources, String> {
         build_user_source_with_law(cfg, spec, Some(&law_for(spec)))
     }
 
-    fn expect_err(cfg: &symbi_expr::SourceConfig, spec: &symbi_hydro::regime_spec::RegimeSpec) -> String {
+    fn expect_err(
+        cfg: &symbi_expr::SourceConfig,
+        spec: &symbi_hydro::regime_spec::RegimeSpec,
+    ) -> String {
         match lower(cfg, spec) {
             Err(e) => e,
             Ok(_) => panic!("expected the config to be rejected"),
@@ -861,7 +1090,7 @@ mod tests {
         // so the leaf is refused at build time; the per-cell source param resolver binds no
         // `dv`, so this check converts a mid-evolve panic into a build-time error.
         let cfg = cfg_from(
-            r#"{ "kind":"raw", "dim":1, "outputs":[1], "params":[], "target":"den",
+            r#"{ "kind":"raw", "dim":1, "outputs":[1], "params":[], "vocabulary":{"reads":["dv"],"params":[]}, "target":"den",
                  "nodes":[ {"op":"VARIABLE_DV"},
                            {"op":"MULTIPLY","left":0,"right":0} ] }"#,
         );
@@ -875,11 +1104,11 @@ mod tests {
     #[test]
     fn source_collection_isolates_params_and_sums_shared_targets() {
         let first = cfg_from(
-            r#"{ "kind":"raw", "dim":1, "outputs":[0], "params":[2.0], "target":"nrg",
+            r#"{ "kind":"raw", "dim":1, "outputs":[0], "params":[2.0], "vocabulary":{"reads":[],"params":[0]}, "target":"nrg",
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let second = cfg_from(
-            r#"{ "kind":"raw", "dim":1, "outputs":[0], "params":[5.0], "target":"nrg",
+            r#"{ "kind":"raw", "dim":1, "outputs":[0], "params":[5.0], "vocabulary":{"reads":[],"params":[0]}, "target":"nrg",
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
 
@@ -902,6 +1131,7 @@ mod tests {
         // if the python adapter and this loader ever drift, this fails.
         let cfg = cfg_from(
             r#"{"kind": "force", "dim": 2, "outputs": [0, 1], "params": [],
+                "vocabulary":{"reads":[],"params":[]},
                 "nodes": [{"op": "CONSTANT", "value": 0.0},
                           {"op": "CONSTANT", "value": -1.0}]}"#,
         );
@@ -918,7 +1148,7 @@ mod tests {
     #[test]
     fn python_tabulated_field_lowers_and_interpolates_in_the_rust_evaluator() {
         let cfg = cfg_from(
-            r#"{"kind":"raw","dim":1,"outputs":[23],"params":[],"target":"nrg","nodes":[
+            r#"{"kind":"raw","dim":1,"outputs":[23],"params":[], "vocabulary":{"reads":["x_0"],"params":[]},"target":"nrg","nodes":[
                 {"op":"VARIABLE_X1"},{"op":"CONSTANT","value":1.0},
                 {"op":"CONSTANT","value":10.0},{"op":"CONSTANT","value":10.0},
                 {"op":"SUBTRACT","left":0,"right":1},
@@ -957,6 +1187,7 @@ mod tests {
     fn rotating_frame_lowers_to_momentum_and_energy_and_rejects_relativity() {
         let cfg = cfg_from(
             r#"{"kind": "rotating_frame", "dim": 2, "outputs": [0, 1, 2], "params": [],
+                "vocabulary":{"reads":[],"params":[]},
                 "nodes": [{"op": "CONSTANT", "value": 2.0},
                           {"op": "CONSTANT", "value": 0.0},
                           {"op": "CONSTANT", "value": 0.0}]}"#,
@@ -976,12 +1207,14 @@ mod tests {
     fn rotating_frame_composes_with_sponge_in_one_momentum_plan() {
         let rotating = cfg_from(
             r#"{"kind": "rotating_frame", "dim": 2, "outputs": [0, 1, 2], "params": [],
+                "vocabulary":{"reads":[],"params":[]},
                 "nodes": [{"op": "CONSTANT", "value": 2.0},
                           {"op": "CONSTANT", "value": 0.0},
                           {"op": "CONSTANT", "value": 0.0}]}"#,
         );
         let sponge = cfg_from(
             r#"{"kind": "sponge", "dim": 2, "outputs": [0, 1, 2, 3], "params": [],
+                "vocabulary":{"reads":[],"params":[]},
                 "nodes": [{"op": "CONSTANT", "value": 1.0},
                           {"op": "CONSTANT", "value": 1.0},
                           {"op": "CONSTANT", "value": 0.0},
@@ -1019,12 +1252,14 @@ mod tests {
     fn rotating_frame_centrifugal_force_balances_a_harmonic_force() {
         let rotating = cfg_from(
             r#"{"kind": "rotating_frame", "dim": 2, "outputs": [0, 1, 2], "params": [],
+                "vocabulary":{"reads":[],"params":[]},
                 "nodes": [{"op": "CONSTANT", "value": 2.0},
                           {"op": "CONSTANT", "value": 0.0},
                           {"op": "CONSTANT", "value": 0.0}]}"#,
         );
         let restoring = cfg_from(
             r#"{"kind": "force", "dim": 2, "outputs": [3, 4], "params": [],
+                "vocabulary":{"reads":["x_0","x_1"],"params":[]},
                 "nodes": [{"op": "VARIABLE_X1"}, {"op": "VARIABLE_X2"},
                           {"op": "CONSTANT", "value": -4.0},
                           {"op": "MULTIPLY", "left": 0, "right": 2},
@@ -1057,6 +1292,7 @@ mod tests {
         // reference and the adiabatic index never crosses the language boundary.
         let cfg = cfg_from(
             r#"{"kind": "sponge", "dim": 3, "outputs": [3, 4, 0, 1, 2, 5], "params": [],
+                "vocabulary":{"reads":["x_0","x_1","x_2"],"params":[]},
                 "nodes": [{"op": "VARIABLE_X1"}, {"op": "VARIABLE_X2"}, {"op": "VARIABLE_X3"},
                           {"op": "CONSTANT", "value": 2.0}, {"op": "CONSTANT", "value": 1.0},
                           {"op": "CONSTANT", "value": 10.0}]}"#,
@@ -1108,6 +1344,7 @@ mod tests {
         // mom + nrg overlays (newtonian has energy).
         let cfg = cfg_from(
             r#"{ "kind":"force", "dim":2, "outputs":[0,1], "params":[0.5],
+                 "vocabulary":{"reads":[],"params":[0]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"CONSTANT","value":0.0} ] }"#,
         );
         let built = lower(&cfg, &NEWTONIAN_SPEC).expect("force ok on newtonian");
@@ -1122,6 +1359,7 @@ mod tests {
         // iso has no energy: the mom overlay is the whole emission.
         let cfg = cfg_from(
             r#"{ "kind":"force", "dim":2, "outputs":[0,1], "params":[0.5],
+                 "vocabulary":{"reads":[],"params":[0]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"CONSTANT","value":0.0} ] }"#,
         );
         let built = lower(&cfg, &ISO_NEWTONIAN_SPEC).expect("force ok on iso");
@@ -1136,6 +1374,7 @@ mod tests {
         // RHD momentum is rho*h*W^2*v — the newtonian force law is wrong; reject.
         let cfg = cfg_from(
             r#"{ "kind":"force", "dim":1, "outputs":[0], "params":[0.5],
+                 "vocabulary":{"reads":[],"params":[0]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let err = expect_err(&cfg, &RHD_SPEC);
@@ -1152,6 +1391,7 @@ mod tests {
         // slot at once). the multi-channel deposition single-slot raw reaches one slot at a time.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":2, "outputs":[0,1,2,3], "params":[],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":3.0}, {"op":"CONSTANT","value":4.0} ] }"#,
         );
@@ -1181,6 +1421,7 @@ mod tests {
         // whole emission.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":2, "outputs":[0,1,2], "params":[],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":3.0} ] }"#,
         );
@@ -1198,6 +1439,7 @@ mod tests {
         // [D_dot, S_dot_0, tau_dot] at dim=1 -> 3 outputs.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":1, "outputs":[0,1,2], "params":[],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":3.0} ] }"#,
         );
@@ -1216,6 +1458,7 @@ mod tests {
         // eta_0=100 (node divide -> 0.1), S_mom_r=9.998, mirroring the axis_jet source shape.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":2, "outputs":[2,3,4,0], "params":[],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":10.0}, {"op":"CONSTANT","value":100.0},
                            {"op":"DIVIDE","left":0,"right":1}, {"op":"CONSTANT","value":9.998},
                            {"op":"CONSTANT","value":0.0} ] }"#,
@@ -1246,6 +1489,7 @@ mod tests {
         // carries 3 components [S_mom_r, 0, 0]. mirrors the blade / threed_jet source shape.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":3, "outputs":[2,3,4,5,0], "params":[],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":10.0}, {"op":"CONSTANT","value":100.0},
                            {"op":"DIVIDE","left":0,"right":1}, {"op":"CONSTANT","value":9.998},
                            {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":0.0} ] }"#,
@@ -1273,6 +1517,7 @@ mod tests {
         // rejected pre-attach, ahead of any evolve step.
         let cfg = cfg_from(
             r#"{ "kind":"inject", "dim":2, "outputs":[0,1,2], "params":[],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":3.0} ] }"#,
         );
@@ -1288,6 +1533,7 @@ mod tests {
         // cooling targets nrg, which iso lacks -> reject up front.
         let cfg = cfg_from(
             r#"{ "kind":"cooling", "dim":1, "outputs":[0], "params":[1.0],
+                 "vocabulary":{"reads":[],"params":[0]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let err = expect_err(&cfg, &ISO_NEWTONIAN_SPEC);
@@ -1302,6 +1548,7 @@ mod tests {
         // force declares one accel component per dim: outputs.len() must == dim.
         let cfg = cfg_from(
             r#"{ "kind":"force", "dim":2, "outputs":[0], "params":[0.5],
+                 "vocabulary":{"reads":[],"params":[0]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let err = expect_err(&cfg, &NEWTONIAN_SPEC);
@@ -1314,7 +1561,7 @@ mod tests {
     #[test]
     fn raw_bad_target_is_rejected() {
         let cfg = cfg_from(
-            r#"{ "kind":"raw", "dim":1, "outputs":[0], "params":[1.0], "target":"pressure",
+            r#"{ "kind":"raw", "dim":1, "outputs":[0], "params":[1.0], "vocabulary":{"reads":[],"params":[0]}, "target":"pressure",
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let err = expect_err(&cfg, &NEWTONIAN_SPEC);
@@ -1327,7 +1574,7 @@ mod tests {
     #[test]
     fn raw_nrg_on_iso_is_rejected() {
         let cfg = cfg_from(
-            r#"{ "kind":"raw", "dim":1, "outputs":[0], "params":[1.0], "target":"nrg",
+            r#"{ "kind":"raw", "dim":1, "outputs":[0], "params":[1.0], "vocabulary":{"reads":[],"params":[0]}, "target":"nrg",
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let err = expect_err(&cfg, &ISO_NEWTONIAN_SPEC);
@@ -1346,6 +1593,7 @@ mod tests {
         // nodes: 0=param p0, 1=const 0, 2=VARIABLE_X1 (chi). outputs=[0,1], region=2.
         let cfg = cfg_from(
             r#"{ "kind":"force", "dim":2, "outputs":[0,1], "region":2, "params":[0.5],
+                 "vocabulary":{"reads":["x_0"],"params":[0]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"CONSTANT","value":0.0},
                            {"op":"VARIABLE_X1"} ] }"#,
         );
@@ -1384,6 +1632,7 @@ mod tests {
         // S_mom_0 = max(kappa,0) * rho * (v_ref_0 - vel_0).
         let cfg = cfg_from(
             r#"{ "kind":"relax", "dim":2, "outputs":[0,1,2], "params":[2.0, 0.0],
+                 "vocabulary":{"reads":[],"params":[0,1]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1},
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
@@ -1434,6 +1683,7 @@ mod tests {
         // flow keeps its energy. the energy-injecting mode is unexpressible by construction.
         let cfg = cfg_from(
             r#"{ "kind":"relax", "dim":1, "outputs":[0,1], "params":[-5.0, 0.0],
+                 "vocabulary":{"reads":[],"params":[0,1]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         );
         let built = lower(&cfg, &NEWTONIAN_SPEC).expect("relax");
@@ -1464,6 +1714,7 @@ mod tests {
         //   kappa=2, rho_ref=1, vel_ref=[0.5,0], pre_ref=3.95, gamma=1.4.
         let cfg = cfg_from(
             r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2,3,4], "params":[],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":2.0}, {"op":"CONSTANT","value":1.0},
                            {"op":"CONSTANT","value":0.5}, {"op":"CONSTANT","value":0.0},
                            {"op":"CONSTANT","value":3.95} ] }"#,
@@ -1511,6 +1762,7 @@ mod tests {
         // this flat 1d sponge with them.
         let cfg = cfg_from(
             r#"{ "kind":"sponge", "dim":1, "outputs":[0,1,2], "params":[],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
@@ -1542,6 +1794,7 @@ mod tests {
         // and relax toward a state the evolution does not store.
         let cfg = cfg_from(
             r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2,2,3], "params":[],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":1.0} ] }"#,
         );
@@ -1573,6 +1826,7 @@ mod tests {
         // densitization to the metric rather than to a constant the arm carries.
         let cfg = cfg_from(
             r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2,2,3], "params":[],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
                            {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":1.0} ] }"#,
         );
@@ -1653,6 +1907,7 @@ mod tests {
         // read from whichever output happened to sit at that index.
         let cfg = cfg_from(
             r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2], "params":[2.5],
+                 "vocabulary":{"reads":[],"params":[]},
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":1.0},
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
@@ -1672,7 +1927,7 @@ mod tests {
         // Lambda(rho, T), T = pre/rho, be user-defined. nodes: 0=param C, 1=VARIABLE_RHO,
         // 2=VARIABLE_PRESSURE, 3=mul(C,rho), 4=mul(3,pre), 5=neg(4). outputs=[5], target=nrg.
         let cfg = cfg_from(
-            r#"{ "kind":"raw", "dim":1, "outputs":[5], "params":[0.25], "target":"nrg",
+            r#"{ "kind":"raw", "dim":1, "outputs":[5], "params":[0.25], "vocabulary":{"reads":["pre","rho"],"params":[0]}, "target":"nrg",
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"VARIABLE_RHO"},
                            {"op":"VARIABLE_PRESSURE"}, {"op":"MULTIPLY","left":0,"right":1},
                            {"op":"MULTIPLY","left":3,"right":2}, {"op":"NEG","left":4} ] }"#,
@@ -1708,7 +1963,7 @@ mod tests {
         // written straight to the `den` slot. the single-slot path for mass loading, where
         // `inject` carries the full conserved vector.
         let cfg = cfg_from(
-            r#"{ "kind":"raw", "dim":1, "outputs":[2], "params":[0.5], "target":"den",
+            r#"{ "kind":"raw", "dim":1, "outputs":[2], "params":[0.5], "vocabulary":{"reads":["rho"],"params":[0]}, "target":"den",
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"VARIABLE_RHO"},
                            {"op":"MULTIPLY","left":0,"right":1} ] }"#,
         );
@@ -1732,6 +1987,7 @@ mod tests {
         // iso has no energy: relax yields the momentum drag alone.
         let cfg = cfg_from(
             r#"{ "kind":"relax", "dim":1, "outputs":[0,1], "params":[1.0, 0.0],
+                 "vocabulary":{"reads":[],"params":[0,1]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         );
         let built = lower(&cfg, &ISO_NEWTONIAN_SPEC).expect("relax iso");
@@ -1745,6 +2001,7 @@ mod tests {
     fn relax_on_relativistic_is_rejected() {
         let cfg = cfg_from(
             r#"{ "kind":"relax", "dim":1, "outputs":[0,1], "params":[1.0, 0.0],
+                 "vocabulary":{"reads":[],"params":[0,1]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         );
         let err = expect_err(&cfg, &RHD_SPEC);
@@ -1759,6 +2016,7 @@ mod tests {
         // relax needs [kappa, v_ref_0..v_ref_{dim-1}] = 1 + dim outputs.
         let cfg = cfg_from(
             r#"{ "kind":"relax", "dim":2, "outputs":[0,1], "params":[1.0, 0.0],
+                 "vocabulary":{"reads":[],"params":[0,1]},
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         );
         let err = expect_err(&cfg, &NEWTONIAN_SPEC);
@@ -1958,6 +2216,7 @@ mod state_law_seam_tests {
     fn force_cfg() -> symbi_expr::SourceConfig {
         symbi_expr::SourceConfig::from_json(
             r#"{"kind":"force","dim":1,"outputs":[0],"params":[0.0],
+                "vocabulary":{"reads":[],"params":[0]},
                 "nodes":[{"op":"PARAMETER","param_idx":0}]}"#,
         )
         .expect("parse")
@@ -1970,8 +2229,11 @@ mod state_law_seam_tests {
         // evolution stores `rho v` — a wrong answer no output reveals, so it is caught
         // where the mismatch is made rather than carried into the graph.
         let law = StateLaw::relativistic(4.0 / 3.0, Background::Minkowski);
-        let err = match build_user_source_with_law(&force_cfg(), &symbi_hydro::NEWTONIAN_SPEC, Some(&law))
-        {
+        let err = match build_user_source_with_law(
+            &force_cfg(),
+            &symbi_hydro::NEWTONIAN_SPEC,
+            Some(&law),
+        ) {
             Err(e) => e,
             Ok(_) => panic!("a relativistic law on a newtonian regime must be refused"),
         };
@@ -1984,10 +2246,11 @@ mod state_law_seam_tests {
         // threading the law changes nothing for the kinds that do not read it, so every
         // existing source keeps its graph. the sponge is what will consume it.
         let law = StateLaw::newtonian(5.0 / 3.0);
-        let with = build_user_source_with_law(&force_cfg(), &symbi_hydro::NEWTONIAN_SPEC, Some(&law))
-            .expect("lowers with a law");
-        let without =
-            build_user_source(&force_cfg(), &symbi_hydro::NEWTONIAN_SPEC).expect("lowers without one");
+        let with =
+            build_user_source_with_law(&force_cfg(), &symbi_hydro::NEWTONIAN_SPEC, Some(&law))
+                .expect("lowers with a law");
+        let without = build_user_source(&force_cfg(), &symbi_hydro::NEWTONIAN_SPEC)
+            .expect("lowers without one");
         assert_eq!(with.len(), without.len());
         for ((ta, a), (tb, b)) in with.iter().zip(&without) {
             assert_eq!(ta, tb, "target moved");

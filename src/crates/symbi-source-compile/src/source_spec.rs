@@ -38,14 +38,22 @@ use symbi_ir::{Gv, TraceCx};
 // `source_spec::SourceProgram` stays the domain-facing path.
 pub use symbi_ir::SourceProgram;
 
+use crate::simulation_laws::CompositionError;
+use crate::source_effects::{
+    SourceParameter, SourceSignature, SourceTarget, TypedParameterSet, TypedReadSet,
+};
 use crate::state_law_gv::StateLawGv;
-use symbi_hydro::regime_spec::law_params;
+use symbi_hydro::regime_spec::{RegimeSpec, law_params};
 use symbi_hydro::source_term::{PointMassGravity, UniformAccel};
 
 /// the origin of a source — drives diagnostics, audit-mode comments, and
 /// composability rules. callers extend this enum as new overlays land
 /// (gravity, immersed-body, user-formulated, ...).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+///
+/// the kind fixes the source's signature: the framework kinds derive theirs
+/// from their parameter modules (`gravity_params`, `ib_params`), and a
+/// user-formulated source carries its own closed declaration in the variant.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SourceKind {
     /// curvilinear-coordinate source: centrifugal, coriolis, suppressed-
     /// dimension pressure. **the metric is its sole author.**
@@ -54,8 +62,17 @@ pub enum SourceKind {
     Gravity,
     /// immersed-body forcing (penalty, sink, rigid).
     ImmersedBody,
-    /// user-formulated source term (e.g., heating, radiation cooling).
-    UserDefined,
+    /// user-formulated source term (e.g., heating, radiation cooling), with
+    /// the reads and parameters it declares.
+    UserDefined(user_params::UserVocabulary),
+}
+
+/// the axis index of a `<prefix><k>` name, for a well-formed integer `k`.
+fn axis_suffix(name: &str, prefix: &str) -> Option<source_params::Axis> {
+    name.strip_prefix(prefix)?
+        .parse()
+        .ok()
+        .map(source_params::Axis)
 }
 
 // the built form of one `SourceSpec` at a chosen dimension is the opaque
@@ -72,7 +89,7 @@ pub enum SourceKind {
 /// are equal iff they declare the same `(kind, target_field)` pair —
 /// matching `LawSpec`'s identity discipline. the build_source fn pointer
 /// is implementation detail and excluded from the equality check.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct SourceSpec {
     /// the source's origin / category. drives `Audit` provenance and the
     /// runtime overlay composition order (geometric first, then gravity,
@@ -102,12 +119,152 @@ impl std::hash::Hash for SourceSpec {
     }
 }
 
+/// the reads a metric-derived source observes: the primitive state and the
+/// position the scale factors depend on.
+const METRIC_READS: &[source_params::ReadFamily] = &[
+    source_params::ReadFamily::Rho,
+    source_params::ReadFamily::Vel,
+    source_params::ReadFamily::Pre,
+    source_params::ReadFamily::X,
+];
+
+/// the reads a body-force source observes: density for the force, velocity
+/// for the work it does, position for the field it samples.
+const FORCE_READS: &[source_params::ReadFamily] = &[
+    source_params::ReadFamily::Rho,
+    source_params::ReadFamily::Vel,
+    source_params::ReadFamily::X,
+];
+
+fn reads_at(families: &[source_params::ReadFamily], d: usize) -> TypedReadSet {
+    families.iter().flat_map(|family| family.reads(d)).collect()
+}
+
+impl SourceSpec {
+    /// the signature this source is held to at dimension `d` on `regime`: the
+    /// typed target it adds to and the reads and parameters it may observe.
+    /// a framework kind derives its signature from the physics of the kind
+    /// and its parameter module — a metric source observes the primitive
+    /// state and position and owns no scalar; gravity and immersed-body
+    /// sources observe density, velocity and position and own the scalars
+    /// their `*_params` module names. a user source expands the vocabulary it
+    /// declared at construction.
+    pub fn signature(
+        &self,
+        regime: &RegimeSpec,
+        d: usize,
+    ) -> Result<SourceSignature, CompositionError> {
+        let target = SourceTarget::resolve(self.kind.clone(), self.target_field, regime, d)?;
+        let (reads, parameters): (TypedReadSet, TypedParameterSet) = match &self.kind {
+            SourceKind::Geometric => (reads_at(METRIC_READS, d), TypedParameterSet::default()),
+            SourceKind::Gravity => (
+                reads_at(FORCE_READS, d),
+                gravity_params::Param::declared(d)
+                    .map(SourceParameter::Gravity)
+                    .collect(),
+            ),
+            SourceKind::ImmersedBody => (
+                reads_at(FORCE_READS, d),
+                ib_params::Param::declared(d)
+                    .map(SourceParameter::ImmersedBody)
+                    .collect(),
+            ),
+            SourceKind::UserDefined(vocabulary) => {
+                return SourceSignature::of_user(self.target_field, vocabulary, regime, d);
+            }
+        };
+        Ok(SourceSignature {
+            target,
+            reads,
+            parameters,
+        })
+    }
+}
+
 /// canonical parameter naming for position components — extends
-/// `law_params` with the spatial coords the source builders need.
+/// `law_params` with the spatial coords the source builders need — and the
+/// typed read vocabulary a source signature is written in.
 pub mod source_params {
+    use symbi_hydro::regime_spec::law_params;
+
     /// per-axis coordinate value `x_<k>` (e.g., `x_0 = r` in spherical).
     pub fn x(k: usize) -> String {
         format!("x_{k}")
+    }
+
+    /// a grid axis index. per-axis reads and parameters (`vel_<k>`, `x_<k>`,
+    /// `xm_<k>`, ...) carry it typed; a signature taken at dimension `d`
+    /// holds the axes `k < d`.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct Axis(pub usize);
+
+    /// the simulation-time leaf `t`.
+    pub const T: &str = "t";
+
+    /// a state or coordinate leaf a source observes: the `law_params`
+    /// primitives `rho`, `pre`, `vel_<k>`, the position `x_<k>` and the
+    /// time `t`.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum Read {
+        Rho,
+        Pre,
+        Vel(Axis),
+        X(Axis),
+        T,
+    }
+
+    impl Read {
+        /// the scalar leaf name the builders declare for this read.
+        pub fn name(self) -> String {
+            match self {
+                Read::Rho => law_params::RHO.to_string(),
+                Read::Pre => law_params::PRE.to_string(),
+                Read::Vel(Axis(k)) => law_params::vel(k),
+                Read::X(Axis(k)) => x(k),
+                Read::T => T.to_string(),
+            }
+        }
+
+        /// the read a leaf name denotes; `None` for a name outside the read
+        /// vocabulary.
+        pub fn parse(name: &str) -> Option<Self> {
+            if name == law_params::RHO {
+                return Some(Read::Rho);
+            }
+            if name == law_params::PRE {
+                return Some(Read::Pre);
+            }
+            if name == T {
+                return Some(Read::T);
+            }
+            super::axis_suffix(name, "vel_")
+                .map(Read::Vel)
+                .or_else(|| super::axis_suffix(name, "x_").map(Read::X))
+        }
+    }
+
+    /// a read family independent of dimension: the scalar primitives, the
+    /// time, and the per-axis families that hold one read per grid axis.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum ReadFamily {
+        Rho,
+        Pre,
+        Vel,
+        X,
+        T,
+    }
+
+    impl ReadFamily {
+        /// the reads this family holds at dimension `d`.
+        pub fn reads(self, d: usize) -> Vec<Read> {
+            match self {
+                ReadFamily::Rho => vec![Read::Rho],
+                ReadFamily::Pre => vec![Read::Pre],
+                ReadFamily::Vel => (0..d).map(|k| Read::Vel(Axis(k))).collect(),
+                ReadFamily::X => (0..d).map(|k| Read::X(Axis(k))).collect(),
+                ReadFamily::T => vec![Read::T],
+            }
+        }
     }
 }
 
@@ -344,6 +501,8 @@ pub fn cartesian_geometric_sources(_d: usize) -> Vec<SourceSpec> {
 /// gravity-specific parameter names. extends `law_params` + `source_params`
 /// with the gravitating-mass slots (one per point mass).
 pub mod gravity_params {
+    use super::source_params::Axis;
+
     /// the product `G * M` — the only mass-dependent scalar gravity needs.
     /// (separating `G` and `M` would make the spec carry a global constant;
     /// passing the product keeps the param manifest minimal.)
@@ -357,6 +516,45 @@ pub mod gravity_params {
     /// `-GM (x-xm)/(|x-xm|^2 + eps^2)^{3/2}`; `eps > 0` keeps it finite at the mass
     /// position. `eps = 0` recovers the bare `1/r^3` point particle.
     pub const EPS: &str = "eps";
+
+    /// the typed gravity vocabulary: every scalar point-mass gravity owns.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum Param {
+        Gm,
+        Eps,
+        Xm(Axis),
+    }
+
+    impl Param {
+        /// the scalar leaf name the gravity builders declare for this parameter.
+        pub fn name(self) -> String {
+            match self {
+                Param::Gm => GM.to_string(),
+                Param::Eps => EPS.to_string(),
+                Param::Xm(Axis(k)) => xm(k),
+            }
+        }
+
+        /// the gravity parameter a leaf name denotes; `None` outside the
+        /// gravity vocabulary.
+        pub fn parse(name: &str) -> Option<Self> {
+            if name == GM {
+                return Some(Param::Gm);
+            }
+            if name == EPS {
+                return Some(Param::Eps);
+            }
+            super::axis_suffix(name, "xm_").map(Param::Xm)
+        }
+
+        /// every gravity parameter at dimension `d`: `xm_<k>` for `k < d`,
+        /// then `gm` and `eps`.
+        pub fn declared(d: usize) -> impl Iterator<Item = Self> {
+            (0..d)
+                .map(|k| Param::Xm(Axis(k)))
+                .chain([Param::Gm, Param::Eps])
+        }
+    }
 }
 
 /// declare the point-mass gravity leaves at compile-time dimension `D` and build the
@@ -367,7 +565,12 @@ pub mod gravity_params {
 /// fused family bakes them into one kernel. must be called inside an open trace ([`SourceProgram::trace`]).
 fn point_mass_gv<'t, const D: usize>(
     cx: TraceCx<'t>,
-) -> (Gv<'t>, [Gv<'t>; D], [Gv<'t>; D], PointMassGravity<Gv<'t>, D>) {
+) -> (
+    Gv<'t>,
+    [Gv<'t>; D],
+    [Gv<'t>; D],
+    PointMassGravity<Gv<'t>, D>,
+) {
     let rho = cx.scalar(law_params::RHO);
     let vel: [Gv; D] = std::array::from_fn(|k| cx.scalar(&law_params::vel(k)));
     let x: [Gv; D] = std::array::from_fn(|k| cx.scalar(&source_params::x(k)));
@@ -455,6 +658,8 @@ fn point_mass_energy_source(d: usize) -> SourceProgram {
 
 /// immersed-body parameter naming.
 pub mod ib_params {
+    use super::source_params::Axis;
+
     /// the body's center position component `body_xm_<k>`.
     pub fn body_xm(k: usize) -> String {
         format!("body_xm_{k}")
@@ -469,6 +674,55 @@ pub mod ib_params {
     }
     /// accretion sink rate (1/time). mass removal per unit density per unit time.
     pub const SINK_RATE: &str = "sink_rate";
+
+    /// the typed immersed-body vocabulary: every scalar an immersed-body
+    /// source owns.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum Param {
+        BodyXm(Axis),
+        BodyRadius,
+        PenaltyStrength,
+        Vbody(Axis),
+        SinkRate,
+    }
+
+    impl Param {
+        /// the scalar leaf name the immersed-body builders declare for this
+        /// parameter.
+        pub fn name(self) -> String {
+            match self {
+                Param::BodyXm(Axis(k)) => body_xm(k),
+                Param::BodyRadius => BODY_RADIUS.to_string(),
+                Param::PenaltyStrength => PENALTY_STRENGTH.to_string(),
+                Param::Vbody(Axis(k)) => vbody(k),
+                Param::SinkRate => SINK_RATE.to_string(),
+            }
+        }
+
+        /// the immersed-body parameter a leaf name denotes; `None` outside
+        /// the immersed-body vocabulary.
+        pub fn parse(name: &str) -> Option<Self> {
+            match name {
+                BODY_RADIUS => return Some(Param::BodyRadius),
+                PENALTY_STRENGTH => return Some(Param::PenaltyStrength),
+                SINK_RATE => return Some(Param::SinkRate),
+                _ => {}
+            }
+            super::axis_suffix(name, "body_xm_")
+                .map(Param::BodyXm)
+                .or_else(|| super::axis_suffix(name, "vbody_").map(Param::Vbody))
+        }
+
+        /// every immersed-body parameter at dimension `d`: the per-axis
+        /// center and velocity for `k < d`, the radius, the penalty strength
+        /// and the sink rate.
+        pub fn declared(d: usize) -> impl Iterator<Item = Self> {
+            (0..d)
+                .map(|k| Param::BodyXm(Axis(k)))
+                .chain((0..d).map(|k| Param::Vbody(Axis(k))))
+                .chain([Param::BodyRadius, Param::PenaltyStrength, Param::SinkRate])
+        }
+    }
 }
 
 /// IB common leaves — the params shared between rigid-penalty and accretion
@@ -578,38 +832,141 @@ pub fn rigid_body_penalty_sources(_d: usize) -> Vec<SourceSpec> {
 // vehicle: a known-analytical source where the data form is unambiguous.
 // =============================================================================
 
-/// user-source-specific parameter naming. each user source may add its
-/// own params; the framework only reserves namespaces that conflict with
-/// the existing reserved names (rho, vel_k, pre, x_k, gamma, cs_sq, gm,
-/// xm_k, body_xm_k, body_radius, sink_rate, penalty_strength, vbody_k).
+/// user-source parameter naming and the closed declaration a user source
+/// carries. a leaf's identity comes from the framework vocabulary first —
+/// `rho`, `vel_<k>`, `pre`, `x_<k>` are reads and the `gravity_params` /
+/// `ib_params` names are those kinds' scalars — so a user parameter spelled
+/// with a framework name resolves to the framework's parameter and fails the
+/// user signature instead of aliasing the framework's leaf in a fold.
 pub mod user_params {
-    /// uniform external acceleration vector component `g_ext_<k>` — the
-    /// reserved name for the constant-gravity example. user sources
-    /// introducing their own scalar params should pick names outside this
-    /// reserved set.
+    use super::source_params::ReadFamily;
+    use crate::source_effects::TypedReadSet;
+
+    /// the family name of the uniform external acceleration components.
+    const G_EXT_FAMILY: &str = "g_ext";
+
+    /// the uniform external acceleration vector, one scalar per axis.
+    pub const G_EXT: UserParam = UserParam::PerAxis(G_EXT_FAMILY);
+
+    /// uniform external acceleration vector component `g_ext_<k>`.
     pub fn g_ext(k: usize) -> String {
-        format!("g_ext_{k}")
+        format!("{G_EXT_FAMILY}_{k}")
+    }
+
+    /// one scalar parameter family a user source owns.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum UserParam {
+        /// a single scalar leaf with this name.
+        Scalar(&'static str),
+        /// one leaf per grid axis, `<name>_<k>` for `k < d`.
+        PerAxis(&'static str),
+    }
+
+    impl UserParam {
+        /// the leaf names this family holds at dimension `d`.
+        pub fn names(self, d: usize) -> Vec<String> {
+            match self {
+                UserParam::Scalar(name) => vec![name.to_string()],
+                UserParam::PerAxis(family) => (0..d).map(|k| format!("{family}_{k}")).collect(),
+            }
+        }
+    }
+
+    /// the prefix of a configured source's numbered scalar leaves: the
+    /// serialized dag's `PARAMETER` node `param_idx = k` lowers to `p{k}`.
+    pub const NUMBERED_PREFIX: &str = "p";
+
+    /// the numbered scalar leaf a configured source's parameter `idx` lowers
+    /// to, inside a collection whose parameter numbering starts this source at
+    /// `first`.
+    pub fn numbered(first: usize, idx: usize) -> String {
+        format!("{NUMBERED_PREFIX}{}", first + idx)
+    }
+
+    /// the closed declaration a user source carries, in the two forms a
+    /// declaration takes. the built program is held to exactly this
+    /// vocabulary, and the vocabulary itself is held inside the reads the
+    /// regime can supply.
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    pub enum UserVocabulary {
+        /// a source written in rust: the read families it observes and the
+        /// scalar families it owns, dimension-generic, expanded at the grid's
+        /// axes when the signature is taken.
+        Families {
+            reads: &'static [ReadFamily],
+            parameters: &'static [UserParam],
+        },
+        /// a source loaded from a config: the typed reads its frontend context
+        /// granted, at their concrete axes, and the parameter indices it
+        /// granted, which lower to `p{first + idx}`. `first` is the source's
+        /// offset inside a collection whose parameter indices are global.
+        Granted {
+            reads: TypedReadSet,
+            first: usize,
+            parameters: Vec<usize>,
+        },
+    }
+
+    impl UserVocabulary {
+        /// the vocabulary of a source that observes nothing and owns no
+        /// scalar (a constant source).
+        pub const EMPTY: Self = Self::Families {
+            reads: &[],
+            parameters: &[],
+        };
+
+        /// the reads this declaration holds at dimension `d`.
+        pub fn reads(&self, d: usize) -> TypedReadSet {
+            match self {
+                Self::Families { reads, .. } => {
+                    reads.iter().flat_map(|family| family.reads(d)).collect()
+                }
+                Self::Granted { reads, .. } => reads.clone(),
+            }
+        }
+
+        /// the scalar leaf names this declaration owns at dimension `d`.
+        pub fn parameter_names(&self, d: usize) -> Vec<String> {
+            match self {
+                Self::Families { parameters, .. } => parameters
+                    .iter()
+                    .flat_map(|family| family.names(d))
+                    .collect(),
+                Self::Granted {
+                    first, parameters, ..
+                } => parameters
+                    .iter()
+                    .map(|&idx| numbered(*first, idx))
+                    .collect(),
+            }
+        }
     }
 }
 
 /// the universal user-source constructor — wrap any
-/// `fn(d) -> SourceProgram` builder into a `SourceSpec`. the only
-/// constraint is the type signature; the framework enforces the rest at
-/// compile time + via `SimulationLaws::validate`.
+/// `fn(d) -> SourceProgram` builder into a `SourceSpec` together with the
+/// closed vocabulary its program is held to. the composition layer checks the
+/// built program against the vocabulary at every dimension and rejects an
+/// undeclared read or parameter with the offending leaf named.
 ///
 /// usage:
 ///   ```ignore
 ///   fn my_cooling_source(d: usize) -> SourceProgram { ... }
-///   let cooling = user_defined_source("nrg", my_cooling_source);
+///   const COOLING: UserVocabulary = UserVocabulary::Families {
+///       reads: &[ReadFamily::Rho, ReadFamily::Pre],
+///       parameters: &[UserParam::Scalar("lambda_0")],
+///   };
+///   let cooling = user_defined_source("nrg", COOLING, my_cooling_source);
 ///   let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_user(vec![cooling]);
 ///   sim.validate()?;
 ///   ```
 pub fn user_defined_source(
     target_field: &'static str,
+    vocabulary: user_params::UserVocabulary,
     builder: fn(usize) -> SourceProgram,
 ) -> SourceSpec {
     SourceSpec {
-        kind: SourceKind::UserDefined,
+        kind: SourceKind::UserDefined(vocabulary),
         target_field,
         build_source: builder,
     }
@@ -797,7 +1154,7 @@ pub fn user_relax_energy_source(field: &SourceProgram, d: usize) -> SourceProgra
 ///
 /// masking rides `kappa` alone, which factors into every channel; masking the reference
 /// would corrupt the state the flow relaxes toward rather than where it relaxes.
-pub fn user_sponge_sources(
+pub(crate) fn user_sponge_sources(
     field: &SourceProgram,
     d: usize,
     law: &symbi_hydro::state_law::StateLaw,
@@ -828,13 +1185,11 @@ pub fn user_sponge_sources(
                 Gv::ZERO
             };
             let ref_pre = if has_energy { f[2 + d] } else { Gv::ZERO };
-            let convert = |rho, vel, pre| {
-                match d {
-                    1 => law.to_conserved_gv_flat::<1>(rho, vel, pre),
-                    2 => Ok(law.to_conserved_gv::<2>(cx, rho, vel, pre)),
-                    3 => Ok(law.to_conserved_gv::<3>(cx, rho, vel, pre)),
-                    other => Err(format!("sponge: unsupported dimension {other}")),
-                }
+            let convert = |rho, vel, pre| match d {
+                1 => law.to_conserved_gv_flat::<1>(rho, vel, pre),
+                2 => Ok(law.to_conserved_gv::<2>(cx, rho, vel, pre)),
+                3 => Ok(law.to_conserved_gv::<3>(cx, rho, vel, pre)),
+                other => Err(format!("sponge: unsupported dimension {other}")),
             };
             let u_ref = match convert(f[1], &f[2..2 + d], ref_pre) {
                 Ok(u) => u,
@@ -963,13 +1318,27 @@ fn uniform_vel<'t, const D: usize>(cx: TraceCx<'t>) -> [Gv<'t>; D] {
 /// example case for the user-defined kind; demonstrates how to write
 /// one + serves as a test vehicle with known analytical form.
 pub fn uniform_acceleration_sources(_d: usize, has_energy: bool) -> Vec<SourceSpec> {
+    use source_params::ReadFamily;
+    use user_params::UserVocabulary;
+    /// `S_mom_k = rho * g_ext_k` observes density alone.
+    const MOMENTUM: UserVocabulary = UserVocabulary::Families {
+        reads: &[ReadFamily::Rho],
+        parameters: &[user_params::G_EXT],
+    };
+    /// `S_nrg = rho * (vel . g_ext)` observes density and velocity.
+    const ENERGY: UserVocabulary = UserVocabulary::Families {
+        reads: &[ReadFamily::Rho, ReadFamily::Vel],
+        parameters: &[user_params::G_EXT],
+    };
     let mut sources = vec![user_defined_source(
         "mom",
+        MOMENTUM,
         uniform_acceleration_momentum_source,
     )];
     if has_energy {
         sources.push(user_defined_source(
             "nrg",
+            ENERGY,
             uniform_acceleration_energy_source,
         ));
     }
@@ -1008,8 +1377,8 @@ pub fn point_mass_gravity_sources(_d: usize, has_energy: bool) -> Vec<SourceSpec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_ir::backends::interp::{Backend, Cpu};
     use symbi_ir::NodeId;
+    use symbi_ir::backends::interp::{Backend, Cpu};
     use symbi_ir::passes::scalarize::scalarize;
 
     fn eval_source(built: &SourceProgram, output: NodeId, values: &[(&str, f64)]) -> f64 {
@@ -1067,7 +1436,11 @@ mod tests {
         assert_eq!(specs[0].target_field, "mom");
 
         let built = (specs[0].build_source)(1);
-        assert_eq!(built.outputs().len(), 1, "1D momentum source has 1 component");
+        assert_eq!(
+            built.outputs().len(),
+            1,
+            "1D momentum source has 1 component"
+        );
 
         let x0 = source_params::x(0);
         let v0 = law_params::vel(0);
@@ -1823,9 +2196,87 @@ mod tests {
 
     #[test]
     fn user_defined_source_constructor_produces_correct_spec() {
-        let s = user_defined_source("mom", uniform_acceleration_momentum_source);
-        assert_eq!(s.kind, SourceKind::UserDefined);
+        let vocabulary = user_params::UserVocabulary::Families {
+            reads: &[source_params::ReadFamily::Rho],
+            parameters: &[user_params::G_EXT],
+        };
+        let s = user_defined_source(
+            "mom",
+            vocabulary.clone(),
+            uniform_acceleration_momentum_source,
+        );
+        assert_eq!(s.kind, SourceKind::UserDefined(vocabulary));
         assert_eq!(s.target_field, "mom");
+    }
+
+    #[test]
+    fn framework_signatures_derive_from_their_parameter_modules() {
+        use crate::source_effects::SourceParameter;
+        use source_params::{Axis, Read};
+        use symbi_hydro::regime_spec::NEWTONIAN_SPEC;
+
+        let geometric = spherical_geometric_sources(2)[0]
+            .signature(&NEWTONIAN_SPEC, 2)
+            .expect("metric signature");
+        assert!(geometric.parameters.is_empty(), "the metric owns no scalar");
+        assert!(geometric.reads.contains(Read::Pre));
+        assert!(!geometric.reads.contains(Read::Vel(Axis(2))));
+
+        let gravity = point_mass_gravity_sources(2, false)[0]
+            .signature(&NEWTONIAN_SPEC, 2)
+            .expect("gravity signature");
+        assert!(!gravity.reads.contains(Read::Pre));
+        let expected: Vec<SourceParameter> = gravity_params::Param::declared(2)
+            .map(SourceParameter::Gravity)
+            .collect();
+        assert_eq!(gravity.parameters.len(), expected.len());
+        for parameter in &expected {
+            assert!(gravity.parameters.contains(parameter));
+        }
+        assert!(!gravity.parameters.contains(&SourceParameter::Gravity(
+            gravity_params::Param::Xm(Axis(2))
+        )));
+
+        let ib = rigid_body_penalty_sources(2)[0]
+            .signature(&NEWTONIAN_SPEC, 2)
+            .expect("immersed-body signature");
+        assert!(
+            ib.parameters
+                .contains(&SourceParameter::ImmersedBody(ib_params::Param::SinkRate))
+        );
+        assert!(
+            !ib.parameters
+                .contains(&SourceParameter::Gravity(gravity_params::Param::Gm))
+        );
+    }
+
+    #[test]
+    fn parameter_vocabularies_round_trip_through_their_names() {
+        for parameter in gravity_params::Param::declared(3) {
+            assert_eq!(
+                gravity_params::Param::parse(&parameter.name()),
+                Some(parameter)
+            );
+            assert_eq!(ib_params::Param::parse(&parameter.name()), None);
+        }
+        for parameter in ib_params::Param::declared(3) {
+            assert_eq!(ib_params::Param::parse(&parameter.name()), Some(parameter));
+            assert_eq!(gravity_params::Param::parse(&parameter.name()), None);
+        }
+        for family in [
+            source_params::ReadFamily::Rho,
+            source_params::ReadFamily::Pre,
+            source_params::ReadFamily::Vel,
+            source_params::ReadFamily::X,
+        ] {
+            for read in family.reads(3) {
+                assert_eq!(source_params::Read::parse(&read.name()), Some(read));
+            }
+        }
+        assert_eq!(source_params::Read::parse("gm"), None);
+        assert_eq!(source_params::Read::parse("vel_"), None);
+        assert_eq!(user_params::G_EXT.names(2), ["g_ext_0", "g_ext_1"]);
+        assert_eq!(user_params::UserParam::Scalar("kappa").names(3), ["kappa"]);
     }
 
     #[test]
@@ -1906,7 +2357,7 @@ mod tests {
         let grav = point_mass_gravity_sources(3, true);
         let ib = rigid_body_penalty_sources(3);
 
-        assert_eq!(user[0].kind, SourceKind::UserDefined);
+        assert!(matches!(user[0].kind, SourceKind::UserDefined(_)));
         assert_ne!(user[0].kind, geom[0].kind);
         assert_ne!(user[0].kind, grav[0].kind);
         assert_ne!(user[0].kind, ib[0].kind);

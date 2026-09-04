@@ -13,8 +13,7 @@ use symbi_carrier::Scalar;
 use symbi_geometry::Geometry;
 use symbi_grid::Field;
 use symbi_ir::{FieldBind, FieldRef, ScalarRef};
-use symbi_source_compile::SourceEvaluator;
-use symbi_source_compile::source_spec::SourceProgram;
+use symbi_source_compile::{AdmittedSources, BoundaryPrescription, SourceEvaluator};
 use symbi_xpu::MemorySpace;
 
 use std::sync::{Arc, OnceLock};
@@ -33,7 +32,7 @@ use symbi_ib::collection::MAX_SOURCE_BODIES;
 
 /// dispatch a runtime-built IR kernel — one whose neutral IR blob was produced at sim
 /// startup (not AOT-baked into the registry), e.g., a python-authored user source lowered
-/// via `source_apply_from_built_gv` -> `prepared_to_ir`. binds the kernel's buffers by its
+/// via `source_apply_gv` -> `prepared_to_ir`. binds the kernel's buffers by its
 /// own manifest (`kernel_bindings_from_ir`) through `resolve_path`, and its scalar params
 /// by name through `resolve_scalar`, then launches on-device (render + nvrtc-jit, cached by
 /// `name`). device-only: the host path runs the per-cell interpreter, so the cpu arm here is
@@ -116,13 +115,22 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
 // write) and the energy regimes share this code unchanged.
 // =============================================================================
 
-/// a runtime-loaded user source. holds the spec-validated DAGs (`built`) as the single source of
+/// the admitted programs a `RuntimeSource` holds: the source contributions the checked
+/// contribution door returned, or the driven-boundary prescription the boundary door
+/// returned. each kernel builder takes the witness it needs, so an admitted source cannot
+/// be dispatched as a prescription or the reverse.
+pub(crate) enum RuntimePrograms {
+    Sources(AdmittedSources),
+    Boundary(BoundaryPrescription),
+}
+
+/// a runtime-loaded user source. holds the admitted DAGs (`built`) as the single source of
 /// truth: the CPU pass drives `eval` (the per-cell IR interpreter), the GPU pass JIT-builds a
 /// substrate kernel from `built` (lazily, cached in `gpu_ir`). `params` are the DAG's `p{i}` knobs;
 /// `has_energy` is the attaching regime's authority (drives the `nrg` write).
 pub struct RuntimeSource {
     pub eval: SourceEvaluator,
-    pub(crate) built: Vec<(String, SourceProgram)>,
+    pub(crate) built: RuntimePrograms,
     pub params: Vec<f64>,
     pub(crate) has_energy: bool,
     pub(crate) gpu_ir: OnceLock<(String, String)>,
@@ -133,7 +141,7 @@ pub struct RuntimeSource {
     /// any less `Sync` than `built` already does.
     fused_cpu: OnceLock<Option<FusedCpuKernel>>,
     /// the compiled standalone source pass (the two-pass twin of `fused_cpu`): the source-only
-    /// `GvKernel` (`source_apply_from_built_gv`, the same builder the gpu path uses) cranelift-JIT'd
+    /// `GvKernel` (`source_apply_gv`, the same builder the gpu path uses) cranelift-JIT'd
     /// into one native kernel dispatched over the interior like any other — replacing the per-cell
     /// evaluation harness, whose per-cell coord/param/lookup orchestration measured 93 ns/zone-cycle
     /// on the bondi sponge (vs ~4 for a compiled kernel over the same math). `Some(None)` = out of
@@ -156,15 +164,53 @@ pub(crate) struct FusedCpuKernel {
 }
 
 impl RuntimeSource {
-    /// build from spec-validated `(target, SourceProgram)` pairs. `has_energy` comes from the
-    /// attaching kernel-set's `RegimeSpec` (e.g., `NEWTONIAN_SPEC.has_energy` /
-    /// `ISO_NEWTONIAN_SPEC.has_energy`) — the set is the regime.
-    pub fn new(
-        built: Vec<(String, SourceProgram)>,
+    /// build from admitted user contributions, the witness the checked contribution door
+    /// returns. `has_energy` comes from the attaching kernel-set's `RegimeSpec` (e.g.,
+    /// `NEWTONIAN_SPEC.has_energy` / `ISO_NEWTONIAN_SPEC.has_energy`) — the set is the regime.
+    pub fn new(built: AdmittedSources, params: Vec<f64>, has_energy: bool) -> Arc<Self> {
+        let eval = SourceEvaluator::from_built(&built);
+        Self::hold(eval, RuntimePrograms::Sources(built), params, has_energy)
+    }
+
+    /// build from a driven-boundary prescription: the per-slot programs a ghost fill assigns
+    /// the primitive state from. the same holder as a source, since the host fill evaluates
+    /// per cell and the device fill builds its kernel from the same programs.
+    pub fn prescription(
+        built: BoundaryPrescription,
         params: Vec<f64>,
         has_energy: bool,
     ) -> Arc<Self> {
-        let eval = SourceEvaluator::from_built(&built);
+        let eval = SourceEvaluator::from_prescription(&built);
+        Self::hold(eval, RuntimePrograms::Boundary(built), params, has_energy)
+    }
+
+    /// the admitted source contributions this holder carries. a holder built from a
+    /// boundary prescription has none, and reaching for them is a dispatch wiring fault.
+    pub(crate) fn sources(&self) -> &AdmittedSources {
+        match &self.built {
+            RuntimePrograms::Sources(sources) => sources,
+            RuntimePrograms::Boundary(_) => {
+                panic!("a driven-boundary prescription was dispatched as a source contribution")
+            }
+        }
+    }
+
+    /// the driven-boundary prescription this holder carries; the mirror of [`Self::sources`].
+    pub(crate) fn prescribed(&self) -> &BoundaryPrescription {
+        match &self.built {
+            RuntimePrograms::Boundary(prescription) => prescription,
+            RuntimePrograms::Sources(_) => {
+                panic!("a source contribution was dispatched as a driven-boundary prescription")
+            }
+        }
+    }
+
+    fn hold(
+        eval: SourceEvaluator,
+        built: RuntimePrograms,
+        params: Vec<f64>,
+        has_energy: bool,
+    ) -> Arc<Self> {
         Arc::new(Self {
             eval,
             built,
@@ -338,11 +384,9 @@ fn build_fused_cpu_kernel<const D: usize>(
     ncomp: usize,
     has_energy: bool,
     geo: symbi_discretize::gv::GeoSource,
-    built: &[(String, SourceProgram)],
+    built: &AdmittedSources,
     n_bodies: usize,
 ) -> Option<FusedCpuKernel> {
-    let src_refs: Vec<(&str, &SourceProgram)> =
-        built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let program = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         // runtime GR sources would thread the real spacetime here; only flat (Minkowski) is wired.
         // n_bodies > 0 folds the immersed-body source (gravity + accretion drain) into this stage,
@@ -355,7 +399,7 @@ fn build_fused_cpu_kernel<const D: usize>(
         ncomp,
         has_energy,
         geo,
-        &src_refs,
+        built,
         false,
         n_bodies,
     );
@@ -403,12 +447,10 @@ fn build_source_only_cpu_kernel<const D: usize>(
     axes: &[usize],
     ncomp: usize,
     has_energy: bool,
-    built: &[(String, SourceProgram)],
+    built: &AdmittedSources,
 ) -> Option<FusedCpuKernel> {
-    let src_refs: Vec<(&str, &SourceProgram)> =
-        built.iter().map(|(t, b)| (t.as_str(), b)).collect();
-    let program = symbi_discretize::gv::source_apply_from_built_gv(
-        coords, spacing, axes, D as u8, ncomp, has_energy, &src_refs,
+    let program = symbi_discretize::gv::source_apply_gv(
+        coords, spacing, axes, D as u8, ncomp, has_energy, built,
     );
     let kernel = symbi_jit::compile_gv_kernel(&program, D).ok()?;
     let bind_ref = |b: &FieldBind| match b {
@@ -468,7 +510,7 @@ where
                     &axes,
                     DOF,
                     rs.has_energy,
-                    &rs.built,
+                    rs.sources(),
                 )
             })
         })
@@ -590,7 +632,7 @@ where
                     DOF,
                     rs.has_energy,
                     geo,
-                    &rs.built,
+                    rs.sources(),
                     n_bodies,
                 )
             })
@@ -675,7 +717,7 @@ where
                 DOF,
                 has_energy,
                 geo,
-                &[],
+                &AdmittedSources::none(),
                 MAX_SOURCE_BODIES,
             )
         })
@@ -829,7 +871,7 @@ pub(crate) fn resolve_runtime_param<const D: usize, const DOF: usize>(
 }
 
 /// the GPU pass: JIT-build a substrate kernel from the loaded DAGs and launch it on-device. the
-/// kernel is `source_apply_from_built_gv` (the same builder build.rs AOT-bakes), invoked at runtime
+/// kernel is `source_apply_gv` (the same builder build.rs AOT-bakes), invoked at runtime
 /// over the user `SourceProgram`s; the IR is built once (lazily; geometry known only at dispatch),
 /// NVRTC-compiled + module-cached by a content-addressed name, then re-launched every stage with
 /// fresh `(dt=weight, t, p{i})` scalars. bit-identical-by-construction to the CPU interpreter pass.
@@ -843,7 +885,7 @@ fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let (name, ir) = rs
         .gpu_ir
-        .get_or_init(|| build_runtime_source_ir(sim, &rs.built, rs.has_energy));
+        .get_or_init(|| build_runtime_source_ir(sim, rs.sources(), rs.has_energy));
     let t = sim.time;
     // resolve each kernel scalar by name (the IR's declared order): dt = the SSP stage weight, the
     // lazily-declared geom centroid params (x_lo_k / dx_k), sim time t, and the user knobs p{i}.
@@ -878,7 +920,7 @@ fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
 /// sources reuse one JIT module, distinct sources get distinct modules.
 fn build_runtime_source_ir<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
-    built: &[(String, SourceProgram)],
+    built: &AdmittedSources,
     has_energy: bool,
 ) -> (String, String)
 where
@@ -886,11 +928,8 @@ where
     Mem: MemorySpace,
 {
     let (coords, spacing, axes) = sim_gv_geom(sim);
-    let src_refs: Vec<(&str, &SourceProgram)> =
-        built.iter().map(|(t, b)| (t.as_str(), b)).collect();
-    let program = symbi_discretize::source_apply_from_built_gv(
-        coords, &spacing, &axes, D as u8, DOF, has_energy, &src_refs,
-    );
+    let program =
+        symbi_discretize::source_apply_gv(coords, &spacing, &axes, D as u8, DOF, has_energy, built);
     gv_kernel_to_ir(&program, D as u8, &format!("rt_user_source_{D}d"))
 }
 

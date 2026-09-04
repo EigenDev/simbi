@@ -29,6 +29,15 @@ use symbi_discretize::coords::{Coords, Spacetime, Spacing};
 use symbi_discretize::gv::{
     GeoSource, godunov_stage_gv, godunov_stage_gv_with_fused_sources, source_apply_gv,
 };
+use symbi_hydro::regime_spec::NEWTONIAN_SPEC;
+use symbi_source_compile::AdmittedSources;
+use symbi_source_compile::source_spec::SourceSpec;
+
+/// the bake-time door the producers accept: the specs admitted on the newtonian regime at
+/// dimension `d`, each held to the signature its kind derives.
+fn admitted(specs: &[&SourceSpec], d: usize) -> AdmittedSources {
+    AdmittedSources::admit_specs(specs, &NEWTONIAN_SPEC, d).expect("specs on their signature")
+}
 
 // the godunov-stage kernel reads the u_n snapshot + the (a0, ac) SSP coefficients. these tests
 // exercise the source fusion + the analytical forward-euler update, so they run at the euler
@@ -78,7 +87,7 @@ fn user_source_none_matches_writes_of_plain_godunov() {
         3,
         true,
         GeoSource::Hydro { inertial: false },
-        &[],
+        &AdmittedSources::none(),
         false,
     );
     let w_fused = program_fused.writes();
@@ -142,7 +151,7 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
         D,
         true,
         GeoSource::Hydro { inertial: false },
-        &[user_source],
+        &admitted(&[user_source], D),
         false,
     );
 
@@ -247,7 +256,7 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
         D,
         true,
         GeoSource::Hydro { inertial: false },
-        &[user_source],
+        &admitted(&[user_source], D),
         false,
     );
     let kernel = program.kernel();
@@ -341,7 +350,7 @@ fn multi_source_fuses_mom_and_nrg_overlays_in_one_kernel() {
         D,
         true,
         GeoSource::Hydro { inertial: false },
-        &refs,
+        &admitted(&refs, D),
         false,
     );
 
@@ -440,7 +449,7 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
         D,
         true,
         GeoSource::Hydro { inertial: false },
-        &refs,
+        &admitted(&refs, D),
         false,
     );
     let kernel = program.kernel();
@@ -539,35 +548,46 @@ fn unsupported_target_field_panics_loudly() {
     let spacing = vec![Spacing::Uniform; D];
     let axes = vec![0];
 
-    // hand-built spec with an unknown target_field; the panic fires on the
-    // dispatch match, ahead of both splicing and any call to build_source.
+    // hand-built spec with an unknown target_field. the producer accepts admitted sources
+    // alone, and admission resolves the target on the regime, so the bogus target is refused
+    // with the field named ahead of any splice.
     fn empty_builder(_d: usize) -> symbi_source_compile::source_spec::SourceProgram {
-        // 1 output, bound to rho; the dispatch panic fires first, so this
-        // graph stands unevaluated.
         symbi_ir::SourceProgram::trace(|cx| vec![cx.scalar("rho")])
     }
     let bad_spec = symbi_source_compile::source_spec::SourceSpec {
-        kind: symbi_source_compile::source_spec::SourceKind::UserDefined,
+        kind: symbi_source_compile::source_spec::SourceKind::UserDefined(
+            symbi_source_compile::source_spec::user_params::UserVocabulary::Families {
+                reads: &[symbi_source_compile::source_spec::source_params::ReadFamily::Rho],
+                parameters: &[],
+            },
+        ),
         target_field: "bogus_target", // outside the godunov vocabulary (den/mom/nrg/bcell)
         build_source: empty_builder,
     };
     let refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = vec![&bad_spec];
+    match AdmittedSources::admit_specs(&refs, &NEWTONIAN_SPEC, D) {
+        Err(symbi_source_compile::CompositionError::UnknownTargetField { target, .. }) => {
+            assert_eq!(target, "bogus_target");
+        }
+        other => panic!("expected UnknownTargetField at admission, got {other:?}"),
+    }
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = godunov_stage_gv_with_fused_sources(
-            coords,
-            Spacetime::Minkowski,
-            &spacing,
-            &axes,
-            D as u8,
-            D,
-            true,
-            GeoSource::Hydro { inertial: false },
-            &refs,
-            false,
-        );
-    }));
-    assert!(result.is_err(), "unsupported target_field MUST panic");
+    // the producer's own dispatch guard stays behind the door: a well-formed admitted
+    // source on the same grid traces without a panic.
+    let good = uniform_acceleration_sources(D, false);
+    let good_refs: Vec<&symbi_source_compile::source_spec::SourceSpec> = good.iter().collect();
+    let _ = godunov_stage_gv_with_fused_sources(
+        coords,
+        Spacetime::Minkowski,
+        &spacing,
+        &axes,
+        D as u8,
+        D,
+        true,
+        GeoSource::Hydro { inertial: false },
+        &admitted(&good_refs, D),
+        false,
+    );
 }
 
 #[test]
@@ -587,7 +607,7 @@ fn source_apply_pass_adds_dt_times_source() {
         D as u8,
         D,
         true,
-        &refs,
+        &admitted(&refs, D),
     );
 
     let rho = 1.5_f64;
@@ -660,7 +680,7 @@ fn fused_stage_equals_plain_plus_additive_pass() {
         D,
         true,
         geo,
-        &refs,
+        &admitted(&refs, D),
         false,
     );
     let plain = godunov_stage_gv(
@@ -673,7 +693,7 @@ fn fused_stage_equals_plain_plus_additive_pass() {
         true,
         geo,
     );
-    let pass = source_apply_gv(coords, &sp, &axes, D as u8, D, true, &refs);
+    let pass = source_apply_gv(coords, &sp, &axes, D as u8, D, true, &admitted(&refs, D));
 
     let (rho, mom, nrg) = (1.5_f64, [0.3_f64, -0.2, 0.4], 5.0_f64);
     let (rho_n, mom_n, nrg_n) = (1.1_f64, [0.1_f64, 0.05, -0.2], 4.0_f64);

@@ -25,7 +25,7 @@ use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_ir::ScalarRef;
-use symbi_source_compile::source_spec::SourceProgram;
+use symbi_source_compile::{AdmittedSources, BoundaryPrescription};
 use symbi_xpu::MemorySpace;
 
 use std::sync::{Arc, OnceLock};
@@ -177,16 +177,12 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// attach a runtime-loaded user source from already-lowered `(target, SourceProgram)`
     /// pairs (the `build_user_source` output of a python -> json `SourceConfig`). one source of
     /// truth: the substrate derives both the CPU per-cell interpreter (`SourceEvaluator::from_built`)
-    /// and — lazily, on first device dispatch — the GPU IR (the same `source_apply_from_built_gv`
+    /// and — lazily, on first device dispatch — the GPU IR (the same `source_apply_gv`
     /// builder build.rs AOT-bakes), so the host runs the interpreter and the device runs an
     /// nvrtc-jit kernel, both from the same DAG, no recompile. `params` are the DAG's `p{i}` knobs.
     /// `let built = build_user_source(&cfg, has_energy)?;`
     /// `let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());`
-    pub fn with_runtime_source(
-        mut self,
-        built: Vec<(String, SourceProgram)>,
-        params: Vec<f64>,
-    ) -> Self {
+    pub fn with_runtime_source(mut self, built: AdmittedSources, params: Vec<f64>) -> Self {
         // has_energy = true is the authority here (Newtonian's RegimeSpec) —
         // the set is the regime. validation of the source vs the regime happened at
         // `build_user_source(cfg, &NEWTONIAN_SPEC)`.
@@ -199,11 +195,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// same source, faster execution; bit-for-bit identical to `with_runtime_source` (the two-pass).
     /// host + f64 only; otherwise it transparently falls back
     /// to the two-pass.
-    pub fn with_fused_runtime_source(
-        mut self,
-        built: Vec<(String, SourceProgram)>,
-        params: Vec<f64>,
-    ) -> Self {
+    pub fn with_fused_runtime_source(mut self, built: AdmittedSources, params: Vec<f64>) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
         self.fuse_runtime = true;
         self
@@ -236,13 +228,13 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// `let sub = sim.substrate().with_driven_boundary(built, cfg.params.clone()).0;`
     pub fn with_driven_boundary(
         mut self,
-        built: Vec<(String, SourceProgram)>,
+        built: BoundaryPrescription,
         params: Vec<f64>,
     ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
         // has_energy = true (Newtonian) — the boundary prescribes prim.pre as well as rho/vel.
         self.boundary_dags
-            .push(RuntimeSource::new(built, params, true));
+            .push(RuntimeSource::prescription(built, params, true));
         (self, id)
     }
 

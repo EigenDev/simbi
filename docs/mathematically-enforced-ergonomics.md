@@ -1356,6 +1356,65 @@ Four refinements the audit forces:
 Physics keeps describing physics; the effect set is derived, immutable, and read
 through `program.effects()`; users never enumerate read/write sets.
 
+#### Backend portability as a checked boundary
+
+Maximal portability means that physics, tracing, effect analysis, and prepared
+IR do not know whether the eventual target is CPU, CUDA, HIP, Metal, SYCL, or a
+future backend. A backend declares its capabilities and lowers only programs it
+can represent. An unsupported program must fail before code generation with a
+structured capability error; it must never reach a renderer crash, acquire a
+silent fallback, or change numerical policy implicitly.
+
+The intended boundary is:
+
+`physics laws -> carrier-generic trace -> KernelProgram/Effects -> prepared IR
+-> capability validation -> backend lowering and runtime`
+
+A backend capability description should cover at least scalar types, address
+spaces and memory/coherence rules, atomics, whole-field and segmented reduction
+modes, dynamic iteration and control-flow limits, workgroup/local memory,
+launch limits, and numerical policy. Adding a backend should normally require a
+capability declaration, renderer/compiler adapter, runtime/memory adapter, and
+backend-specific conformance tests — not changes to physics, hydro, geometry,
+or discretization crates. Metal may lower to MSL with its explicit address-space
+and threadgroup limits; SYCL may lower through generated C++/SYCL and its
+external toolchain. Neither model belongs in the shared IR unless it expresses
+a genuinely backend-independent semantic fact.
+
+The seven principal portability risks split into removable leaks and
+irreducible target differences:
+
+1. **CUDA/HIP syntax and launch assumptions:** remove them completely from the
+   shared layers; isolate them in backend lowering and build integration, with
+   structural gates against their reintroduction.
+2. **Unified-memory assumptions:** hardware differences cannot be removed, but
+   they can be completely contained behind an explicit allocation, transfer,
+   coherence, and ownership contract.
+3. **Implicit host/device synchronization:** remove the implicitness by making
+   transfers, dependencies, dirty state, and synchronization explicit runtime
+   effects. The backend-specific mechanism remains internal to the adapter.
+4. **Reduction and atomic semantics:** ordering, reproducibility, and available
+   atomics genuinely differ. Keep whole-field and segmented modes distinct,
+   declare their guarantees, and reject unsupported combinations rather than
+   inventing false common semantics.
+5. **Dynamic loops, stack arrays, and control-flow limits:** target limits are
+   irreducible; validate the prepared program against declared capabilities and
+   return a structured error before lowering.
+6. **Floating-point and fast-math differences:** cross-architecture bit identity
+   is not generally available. Encode the numerical policy and required
+   guarantees explicitly, test the promised laws/tolerances, and reject a
+   backend that cannot honor them.
+7. **Scattered `cfg(cuda)` / `cfg(hip)` decisions:** remove them from upper
+   layers in favor of capability queries and backend traits. Target-specific
+   conditionals remain only inside backend modules and toolchain integration.
+
+Thus the physical and compiler-facing risks can be removed as silent failure
+modes. The remaining hardware and numerical differences cannot honestly be
+abolished, but they can be confined to one typed, capability-checked boundary.
+The acceptance test for a new backend is that it either executes the declared
+semantics or refuses the program explicitly, while the prepared program,
+effects, binding identity, and physics remain unchanged.
+
 #### Recommended stage boundaries
 
 - **Stage 2 — canonical effect extraction (lowest crate: `symbi-ir`).** Pair
@@ -1384,7 +1443,8 @@ through `program.effects()`; users never enumerate read/write sets.
 - **Stage 5 — enforcement and closure.** Structural gates forbidding new
   stringly resource identities or parallel metadata outside the constitution;
   prepared-IR byte identity, AOT candidate/kernel equivalence, unchanged
-  manifests/binding order, CPU/CUDA type checks, single-grid/decomposed/refined
+  manifests/binding order, checks for every enabled backend (CPU execution plus
+  CUDA and HIP compilation/emission today), single-grid/decomposed/refined
   ordering equivalence, aliasing-rejection and reduction and
   source-composition tests, workspace all-targets, focused batteries. Where
   generated text differs only from the known `unswitch` bake nondeterminism,

@@ -148,12 +148,48 @@ VEL3_ALIASES = ["vel3", "vz", "v3"]
 DV_ALIASES = ["dv", "cell_volume", "volume"]
 
 
+def read_symbol(name: str) -> str:
+    """the wire symbol a variable name denotes: `x_0`/`x_1`/`x_2` for the coordinate
+    aliases, `t`, `rho`, `vel_0`/`vel_1`/`vel_2`, `pre`, or `dv`. raises for a name
+    outside the leaf vocabulary."""
+    if name in X1_ALIASES:
+        return "x_0"
+    if name in X2_ALIASES:
+        return "x_1"
+    if name in X3_ALIASES:
+        return "x_2"
+    if name == "t":
+        return "t"
+    if name in RHO_ALIASES:
+        return "rho"
+    if name in VEL1_ALIASES:
+        return "vel_0"
+    if name in VEL2_ALIASES:
+        return "vel_1"
+    if name in VEL3_ALIASES:
+        return "vel_2"
+    if name in PRE_ALIASES:
+        return "pre"
+    if name in DV_ALIASES:
+        return "dv"
+    raise ValueError(f"unknown variable '{name}'")
+
+
 class ExprGraph:
-    """Immutable directed acyclic graph of expressions."""
+    """Immutable directed acyclic graph of expressions.
+
+    the graph is the source-building context: every leaf a constructor mints on it
+    (`variable`, `density`, `velocity`, `pressure`, `parameter`, ...) is recorded as a
+    granted read or parameter. `serialize_source` emits that granted set as the
+    source's vocabulary declaration, independently of the node walk that emits the
+    expression itself, so the backend can hold the observed expression to the symbols
+    the context granted."""
 
     def __init__(self) -> None:
         self._nodes: dict[NodeId, NodeDef] = {}
         self._next_id: int = 0
+        self._granted_reads: set[str] = set()
+        self._granted_parameters: set[int] = set()
 
     def add_node(self, op_type: str, *inputs: NodeId, **attrs: Any) -> NodeId:
         """Add a node to the graph, returning its unique ID."""
@@ -161,6 +197,22 @@ class ExprGraph:
         self._next_id += 1
         self._nodes[node_id] = (op_type, inputs, attrs)
         return node_id
+
+    def grant_read(self, name: str) -> None:
+        """record that this context granted the variable leaf `name`."""
+        self._granted_reads.add(name)
+
+    def grant_parameter(self, idx: int) -> None:
+        """record that this context granted the parameter leaf `param_idx = idx`."""
+        self._granted_parameters.add(int(idx))
+
+    def granted_vocabulary(self) -> dict[str, list[Any]]:
+        """the granted leaves as the wire declaration `{reads, params}`: the reads by
+        wire symbol, sorted, and the parameter indices, sorted."""
+        return {
+            "reads": sorted({read_symbol(name) for name in self._granted_reads}),
+            "params": sorted(self._granted_parameters),
+        }
 
     def get_node(self, node_id: NodeId) -> Optional[NodeDef]:
         """Get node definition by ID."""
@@ -460,35 +512,34 @@ def constant(value: float, graph: "ExprGraph | Expr") -> Expr:
 
 
 def variable(name: str, graph: "ExprGraph | Expr") -> Expr:
-    """Create a variable expression."""
+    """Create a variable expression. the graph records the leaf as a granted read."""
     g = _graph_of(graph)
+    g.grant_read(name)
     return Expr(g, g.add_node("variable", name=name))
 
 
 def parameter(idx: int, graph: "ExprGraph | Expr") -> Expr:
-    """Create a parameter expression."""
+    """Create a parameter expression. the graph records the index as a granted parameter."""
     g = _graph_of(graph)
+    g.grant_parameter(idx)
     return Expr(g, g.add_node("parameter", param_idx=idx))
 
 
 def density(graph: "ExprGraph | Expr") -> Expr:
     """the per-cell density rho (a fluid-state leaf for state-dependent sources)."""
-    g = _graph_of(graph)
-    return Expr(g, g.add_node("variable", name="rho"))
+    return variable("rho", graph)
 
 
 def velocity(axis: int, graph: "ExprGraph | Expr") -> Expr:
     """the per-cell velocity component `vel[axis]` (0-indexed: 0->vx, 1->vy, 2->vz)."""
     if axis not in (0, 1, 2):
         raise ValueError(f"velocity axis must be 0, 1, or 2, got {axis}")
-    g = _graph_of(graph)
-    return Expr(g, g.add_node("variable", name=f"vel{axis + 1}"))
+    return variable(f"vel{axis + 1}", graph)
 
 
 def pressure(graph: "ExprGraph | Expr") -> Expr:
     """the per-cell pressure (energy-bearing regimes only; rejected on isothermal)."""
-    g = _graph_of(graph)
-    return Expr(g, g.add_node("variable", name="pre"))
+    return variable("pre", graph)
 
 
 def cell_volume(graph: "ExprGraph | Expr") -> Expr:
@@ -500,8 +551,7 @@ def cell_volume(graph: "ExprGraph | Expr") -> Expr:
     per-unit-volume density and weighting it by the measure would make the deposited
     amount depend on the resolution.
     """
-    g = _graph_of(graph)
-    return Expr(g, g.add_node("variable", name="dv"))
+    return variable("dv", graph)
 
 
 # math functions
@@ -1569,6 +1619,9 @@ class CompiledExpr:
                     sponge takes no params: the closure comes from the regime
           region -- optional node index of a chi(x) mask folded into the source
           target -- for kind='raw' only: the conserved slot ('den'|'mom'|'nrg')
+
+        the `vocabulary` field is the graph's granted leaves (`ExprGraph.granted_vocabulary`),
+        captured as the leaf constructors ran; the backend holds the serialized nodes to it.
         """
         base = self._serialize_nodes()
         # normalize the enums to their canonical rust strings at the boundary.
@@ -1578,6 +1631,7 @@ class CompiledExpr:
             "dim": int(dim),
             "outputs": base["output_indices"],
             "params": [float(p) for p in (params or [])],
+            "vocabulary": self._graph.granted_vocabulary(),
             "nodes": base["expressions"],
         }
         if region is not None:

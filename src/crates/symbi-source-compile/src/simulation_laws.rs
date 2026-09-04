@@ -42,8 +42,13 @@ use std::collections::HashSet;
 
 use symbi_ir::SourceProgram;
 
-use symbi_hydro::regime_spec::RegimeSpec;
+use crate::source_effects::{
+    SourceContributionEffects, SourceParameter, SourceTarget, common_target, early_materialization,
+    is_energy_target,
+};
+use crate::source_spec::source_params::Read;
 use crate::source_spec::{SourceKind, SourceSpec};
+use symbi_hydro::regime_spec::RegimeSpec;
 
 /// **fused-source family**: a runtime declaration of a
 /// family of `SourceSpec` overlays that has a single corresponding AOT-baked
@@ -291,11 +296,11 @@ impl<'a> SimulationLaws<'a> {
             self = self.with_fused_family(family, d);
         }
         for spec in overlay.specs {
-            match spec.kind {
+            match &spec.kind {
                 SourceKind::Geometric => self.geometric.push(spec),
                 SourceKind::Gravity => self.gravity.push(spec),
                 SourceKind::ImmersedBody => self.ib.push(spec),
-                SourceKind::UserDefined => self.user.push(spec),
+                SourceKind::UserDefined(_) => self.user.push(spec),
             }
         }
         self
@@ -367,37 +372,91 @@ impl<'a> SimulationLaws<'a> {
     /// (constants, params, elementwise arithmetic, transcendentals, select);
     /// the source layer lowers through that subset alone, and a source
     /// reaching beyond it would need the splice extended to match.
+    ///
+    /// the infallible door over [`Self::compose_source`]: panics on a fold that
+    /// breaks the contribution law (mixed targets, an undeclared leaf, an
+    /// early materialization, a component-count mismatch).
     pub fn build_total_source(&self, field: &str, d: usize) -> Option<SourceProgram> {
-        let sources: Vec<&SourceSpec> = self.sources_for(field).collect();
-        if sources.is_empty() {
-            return None;
-        }
-        let built: Vec<SourceProgram> =
-            sources.iter().map(|source| (source.build_source)(d)).collect();
-
-        Some(SourceProgram::trace(|cx| {
-            let mut acc: Option<Vec<_>> = None;
-            for program in &built {
-                let outs = cx.splice_source_as_scalars(program);
-                acc = Some(match acc {
-                    None => outs,
-                    Some(prev) => {
-                        assert_eq!(
-                            prev.len(),
-                            outs.len(),
-                            "build_total_source: overlays for field '{field}' must \
-                             emit the same component count (got {} vs {})",
-                            prev.len(),
-                            outs.len(),
-                        );
-                        prev.into_iter().zip(outs).map(|(a, b)| a + b).collect()
-                    }
-                });
-            }
-            acc.expect("non-empty sources guaranteed above")
-        }))
+        self.compose_source(field, d)
+            .unwrap_or_else(|e| panic!("build_total_source: field '{field}': {e:?}"))
     }
 
+    /// the checked additive fold for `field`. every overlay is built at `d` and
+    /// held to the signature its provenance derives (`SourceSpec::signature`),
+    /// yielding its observed effects ([`SourceContributionEffects`]): the fold
+    /// is rejected when the contributions disagree on the typed target, when
+    /// one observes a read or parameter outside its signature, or when one
+    /// binds a buffer of its own ahead of the fold. the composed program is
+    /// the unchecked sum, byte for byte: the overlays are spliced in overlay
+    /// order and its param manifest is the first-mention order across them.
+    pub fn compose_source(
+        &self,
+        field: &str,
+        d: usize,
+    ) -> Result<Option<SourceProgram>, CompositionError> {
+        let sources: Vec<&SourceSpec> = self.sources_for(field).collect();
+        if sources.is_empty() {
+            return Ok(None);
+        }
+        let built: Vec<SourceProgram> = sources
+            .iter()
+            .map(|source| (source.build_source)(d))
+            .collect();
+        let contributions = sources
+            .iter()
+            .zip(&built)
+            .map(|(source, program)| {
+                SourceContributionEffects::derive(source, program, self.regime, d)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let target = common_target(&contributions)?;
+
+        let program = fold_additive(field, &built);
+        // the fold materializes once: one output root per target component,
+        // every leaf a scalar the consumer binds.
+        assert_eq!(
+            program.outputs().len(),
+            target.components().len(),
+            "compose_source: field '{field}' folds to {} roots for a {}-component target",
+            program.outputs().len(),
+            target.components().len(),
+        );
+        assert!(
+            early_materialization(&program).is_none(),
+            "compose_source: field '{field}' folded program binds outside its scalar leaves",
+        );
+        Ok(Some(program))
+    }
+}
+
+/// the additive fold: splice every built overlay into one trace as scalar
+/// leaves (shared names dedup onto one leaf, first mention fixes the manifest
+/// order) and sum corresponding components in overlay order.
+fn fold_additive(field: &str, built: &[SourceProgram]) -> SourceProgram {
+    SourceProgram::trace(|cx| {
+        let mut acc: Option<Vec<_>> = None;
+        for program in built {
+            let outs = cx.splice_source_as_scalars(program);
+            acc = Some(match acc {
+                None => outs,
+                Some(prev) => {
+                    assert_eq!(
+                        prev.len(),
+                        outs.len(),
+                        "build_total_source: overlays for field '{field}' must \
+                         emit the same component count (got {} vs {})",
+                        prev.len(),
+                        outs.len(),
+                    );
+                    prev.into_iter().zip(outs).map(|(a, b)| a + b).collect()
+                }
+            });
+        }
+        acc.expect("non-empty sources guaranteed above")
+    })
+}
+
+impl<'a> SimulationLaws<'a> {
     /// validate the composition against the 5 strictness clauses (those
     /// checkable at the structural layer; clauses 1 & 3 are
     /// compile-enforced and graph-witnessed by the source builders).
@@ -430,15 +489,15 @@ impl<'a> SimulationLaws<'a> {
         // `UnknownTargetField` is preempted (iso's `nrg` is "unknown" by structure but
         // the user-facing reason is "iso has no energy equation").
         for source in self.overlays() {
-            if !self.regime.has_energy && source.target_field == "nrg" {
+            if !self.regime.has_energy && is_energy_target(source.target_field) {
                 return Err(CompositionError::EnergyOverlayOnIsothermal {
-                    kind: source.kind,
+                    kind: source.kind.clone(),
                     regime: self.regime.name,
                 });
             }
             if !known_fields.contains(source.target_field) {
                 return Err(CompositionError::UnknownTargetField {
-                    kind: source.kind,
+                    kind: source.kind.clone(),
                     target: source.target_field,
                     regime: self.regime.name,
                 });
@@ -449,9 +508,10 @@ impl<'a> SimulationLaws<'a> {
     }
 }
 
-/// failure modes the validator catches. each variant carries the diagnostic
-/// context an audit log needs (regime + the offending source's kind/target).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// failure modes the validator and the checked fold catch. each variant carries
+/// the diagnostic context an audit log needs (regime + the offending source's
+/// kind/target, and the offending leaf or target where one exists).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompositionError {
     /// the regime's own laws table references a field not in
     /// `RegimeSpec.fields`. surfaces internal inconsistency in the spec.
@@ -474,6 +534,66 @@ pub enum CompositionError {
         kind: SourceKind,
         regime: &'static str,
     },
+    /// the target is a regime field with no conserved-slot `FieldRef` a
+    /// source can add to.
+    UntypedTarget {
+        kind: SourceKind,
+        target: &'static str,
+    },
+    /// the built contribution emits a different output count than its typed
+    /// target has components.
+    ComponentArity {
+        kind: SourceKind,
+        target: &'static str,
+        expected: usize,
+        got: usize,
+    },
+    /// the contribution observes a state or coordinate read outside its
+    /// signature: an axis the grid lacks, or a primitive its provenance
+    /// declares no use of.
+    UndeclaredRead {
+        kind: SourceKind,
+        target: &'static str,
+        read: Read,
+    },
+    /// a user source's declaration claims a read the regime cannot supply at
+    /// this dimension: the pressure on an isothermal regime, or a velocity or
+    /// coordinate axis the grid lacks. the declaration is bounded by the
+    /// regime's capabilities ahead of any comparison with the built program.
+    ReadOutsideRegime {
+        kind: SourceKind,
+        target: &'static str,
+        read: Read,
+        regime: &'static str,
+    },
+    /// a user source's declaration claims a scalar name a framework family
+    /// owns (`gm`, `body_radius`, ...). the leaf's identity is the framework's,
+    /// so a user source can neither declare nor observe it.
+    ReservedParameter {
+        kind: SourceKind,
+        target: &'static str,
+        parameter: SourceParameter,
+    },
+    /// the contribution observes a scalar parameter outside its signature.
+    /// the parameter carries the family that owns the name, so a user leaf
+    /// spelled with a framework name reports as that framework's parameter.
+    UndeclaredParameter {
+        kind: SourceKind,
+        target: &'static str,
+        parameter: SourceParameter,
+    },
+    /// the contribution's graph carries an effect ahead of the fold: a
+    /// buffer binding, a gather, or a sealed graph output. `witness` names it.
+    EarlyMaterialization {
+        kind: SourceKind,
+        target: &'static str,
+        witness: String,
+    },
+    /// two contributions in one fold add to different typed targets.
+    MixedTargets {
+        first: SourceTarget,
+        other: SourceTarget,
+    },
 }
 
 // =============================================================================
@@ -483,10 +603,14 @@ pub enum CompositionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
+    use crate::source_spec::source_params::{Axis, ReadFamily};
+    use crate::source_spec::user_params::{UserParam, UserVocabulary};
     use crate::source_spec::{
-        point_mass_gravity_sources, rigid_body_penalty_sources, spherical_geometric_sources,
+        gravity_params, point_mass_gravity_sources, rigid_body_penalty_sources,
+        spherical_geometric_sources,
     };
+    use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
+    use symbi_ir::FieldRef;
 
     #[test]
     fn new_simulation_laws_starts_empty() {
@@ -507,7 +631,7 @@ mod tests {
             .with_gravity(point_mass_gravity_sources(3, true))
             .with_ib(rigid_body_penalty_sources(3));
 
-        let kinds: Vec<SourceKind> = sim.overlays().map(|s| s.kind).collect();
+        let kinds: Vec<SourceKind> = sim.overlays().map(|s| s.kind.clone()).collect();
         // expected: [Geometric, Gravity, Gravity, ImmersedBody]
         //           (spherical 1 source; gravity 2 sources; IB 1 source)
         assert_eq!(
@@ -541,7 +665,7 @@ mod tests {
         assert_eq!(den_count, 0, "den gets none (no accretion in this stack)");
 
         // and the kinds on each field are diagnostic-distinct.
-        let mom_kinds: Vec<SourceKind> = sim.sources_for("mom").map(|s| s.kind).collect();
+        let mom_kinds: Vec<SourceKind> = sim.sources_for("mom").map(|s| s.kind.clone()).collect();
         assert_eq!(
             mom_kinds,
             vec![
@@ -613,7 +737,7 @@ mod tests {
         // construct an overlay with a bogus target_field and prove the
         // validator catches it. simulates a typo or cross-regime mix-up.
         let bogus = vec![SourceSpec {
-            kind: SourceKind::UserDefined,
+            kind: SourceKind::UserDefined(UserVocabulary::EMPTY),
             target_field: "bogus_field",
             // any builder works for this structural test.
             build_source: bogus_builder,
@@ -626,7 +750,7 @@ mod tests {
                 target,
                 regime,
             } => {
-                assert_eq!(kind, SourceKind::UserDefined);
+                assert_eq!(kind, SourceKind::UserDefined(UserVocabulary::EMPTY));
                 assert_eq!(target, "bogus_field");
                 assert_eq!(regime, "newtonian");
             }
@@ -686,7 +810,7 @@ mod tests {
     /// of (param_name, value) pairs.
     fn eval_built(built: &SourceProgram, output: symbi_ir::NodeId, values: &[(&str, f64)]) -> f64 {
         use symbi_ir::backends::interp::{Backend, Cpu};
-    
+
         use symbi_ir::passes::scalarize::scalarize;
         let lowered = scalarize(&built.graph(), output, "total_source");
         let inputs: Vec<f64> = built
@@ -717,8 +841,8 @@ mod tests {
         // when only one overlay targets the field, the combined graph
         // computes the same value as the source's own builder. proves
         // the splice operation reproduces the source's algebra exactly.
-        use symbi_hydro::regime_spec::law_params;
         use crate::source_spec::source_params;
+        use symbi_hydro::regime_spec::law_params;
         let sim =
             SimulationLaws::new(&NEWTONIAN_SPEC).with_geometric(spherical_geometric_sources(2));
         let combined = sim.build_total_source("mom", 2).expect("one source");
@@ -765,8 +889,8 @@ mod tests {
         // gravity, both targeting `mom`. the combined total must equal the
         // elementwise sum of the individual contributions. proves the
         // additive-composition contract end-to-end.
-        use symbi_hydro::regime_spec::law_params;
         use crate::source_spec::{gravity_params, source_params};
+        use symbi_hydro::regime_spec::law_params;
 
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
             .with_geometric(spherical_geometric_sources(2))
@@ -825,8 +949,8 @@ mod tests {
         // **the triple-source test** — three momentum sources composed:
         // spherical geometric + gravity + rigid penalty. the additive
         // composition contract scales beyond pairs.
-        use symbi_hydro::regime_spec::law_params;
         use crate::source_spec::{gravity_params, ib_params, source_params};
+        use symbi_hydro::regime_spec::law_params;
 
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
             .with_geometric(spherical_geometric_sources(2))
@@ -926,7 +1050,374 @@ mod tests {
         assert_eq!(rho_count, 1, "shared `rho` param must appear exactly once");
     }
 
-    // ----- user-defined source composition --------------------------------
+    // ----- the contribution law: what the checked fold rejects ------------
+
+    /// a gravity-kind builder that reads a velocity component the 2D grid lacks.
+    fn reads_off_grid_axis(_d: usize) -> SourceProgram {
+        SourceProgram::trace(|cx| {
+            let rho = cx.scalar("rho");
+            let stray = cx.scalar("vel_5");
+            vec![rho * stray, rho]
+        })
+    }
+
+    /// a geometric-kind builder that reaches for gravity's mass parameter.
+    fn metric_source_declaring_gm(_d: usize) -> SourceProgram {
+        SourceProgram::trace(|cx| {
+            let pre = cx.scalar("pre");
+            let gm = cx.scalar("gm");
+            vec![pre * gm, pre]
+        })
+    }
+
+    /// a user builder whose own parameter is spelled with gravity's reserved name.
+    fn user_source_aliasing_gm(_d: usize) -> SourceProgram {
+        SourceProgram::trace(|cx| {
+            let rho = cx.scalar("rho");
+            let gm = cx.scalar("gm");
+            vec![rho * gm, rho * gm]
+        })
+    }
+
+    /// the vocabulary that builder declares: it believes `gm` is its own scalar.
+    const ALIASING_GM: UserVocabulary = UserVocabulary::Families {
+        reads: &[ReadFamily::Rho],
+        parameters: &[UserParam::Scalar("gm")],
+    };
+
+    /// the vocabulary of a builder that reads density alone.
+    const READS_RHO: UserVocabulary = UserVocabulary::Families {
+        reads: &[ReadFamily::Rho],
+        parameters: &[],
+    };
+
+    /// a builder that binds the conserved density buffer directly instead of
+    /// reading the `rho` scalar the fold substitutes.
+    fn binds_a_buffer(_d: usize) -> SourceProgram {
+        SourceProgram::trace(|cx| {
+            let den = cx.field("den", FieldRef::cons_den());
+            vec![den, den]
+        })
+    }
+
+    /// a builder that seals its own graph output ahead of the fold.
+    fn seals_its_output(_d: usize) -> SourceProgram {
+        SourceProgram::trace(|cx| {
+            let rho = cx.scalar("rho");
+            let out = rho * cx.lit(2.0);
+            let node = out.node();
+            cx.with_trace(|t| t.graph().set_output(node));
+            vec![out, out]
+        })
+    }
+
+    fn spec(
+        kind: SourceKind,
+        target_field: &'static str,
+        build: fn(usize) -> SourceProgram,
+    ) -> SourceSpec {
+        SourceSpec {
+            kind,
+            target_field,
+            build_source: build,
+        }
+    }
+
+    #[test]
+    fn compose_rejects_a_fold_with_mixed_targets() {
+        // a fold is keyed by one field, so two overlays reaching it share the
+        // target by construction; the law itself is exercised on the effect
+        // values, where a momentum and an energy contribution disagree.
+        use crate::source_effects::{SourceContributionEffects, common_target};
+        let specs = point_mass_gravity_sources(2, true);
+        let effects: Vec<SourceContributionEffects> = specs
+            .iter()
+            .map(|s| {
+                SourceContributionEffects::derive(s, &(s.build_source)(2), &NEWTONIAN_SPEC, 2)
+                    .expect("gravity contributions are pure")
+            })
+            .collect();
+        assert_eq!(
+            common_target(&effects[..1]).unwrap().components(),
+            [FieldRef::cons_mom(0), FieldRef::cons_mom(1)]
+        );
+        match common_target(&effects).expect_err("mom + nrg in one fold") {
+            CompositionError::MixedTargets { first, other } => {
+                assert_eq!(
+                    first.components(),
+                    [FieldRef::cons_mom(0), FieldRef::cons_mom(1)]
+                );
+                assert_eq!(other.components(), [FieldRef::cons_nrg()]);
+            }
+            other => panic!("expected MixedTargets, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compose_rejects_an_undeclared_read() {
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(vec![spec(
+            SourceKind::Gravity,
+            "mom",
+            reads_off_grid_axis,
+        )]);
+        sim.validate().expect("the target is a regime field");
+        match sim
+            .compose_source("mom", 2)
+            .expect_err("vel_5 has no axis at D=2")
+        {
+            CompositionError::UndeclaredRead { kind, target, read } => {
+                assert_eq!(kind, SourceKind::Gravity);
+                assert_eq!(target, "mom");
+                assert_eq!(read, Read::Vel(Axis(5)));
+            }
+            other => panic!("expected UndeclaredRead, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compose_rejects_an_undeclared_parameter() {
+        // the metric authors a geometric source alone: a mass parameter is
+        // outside its vocabulary.
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_geometric(vec![spec(
+            SourceKind::Geometric,
+            "mom",
+            metric_source_declaring_gm,
+        )]);
+        match sim
+            .compose_source("mom", 2)
+            .expect_err("gm on a geometric source")
+        {
+            CompositionError::UndeclaredParameter {
+                kind, parameter, ..
+            } => {
+                assert_eq!(kind, SourceKind::Geometric);
+                assert_eq!(
+                    parameter,
+                    SourceParameter::Gravity(gravity_params::Param::Gm)
+                );
+            }
+            other => panic!("expected UndeclaredParameter, got {other:?}"),
+        }
+
+        // a user parameter spelled with a framework name would dedup onto
+        // gravity's leaf in the fold. the leaf's identity is gravity's `gm`,
+        // so the user declaration claiming that spelling as its own scalar is
+        // refused at the declaration, ahead of any program.
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
+            .with_gravity(point_mass_gravity_sources(2, false))
+            .with_user(vec![spec(
+                SourceKind::UserDefined(ALIASING_GM),
+                "mom",
+                user_source_aliasing_gm,
+            )]);
+        match sim
+            .compose_source("mom", 2)
+            .expect_err("user source aliasing gm")
+        {
+            CompositionError::ReservedParameter {
+                kind, parameter, ..
+            } => {
+                assert_eq!(kind, SourceKind::UserDefined(ALIASING_GM));
+                assert_eq!(
+                    parameter,
+                    SourceParameter::Gravity(gravity_params::Param::Gm)
+                );
+            }
+            other => panic!("expected ReservedParameter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compose_rejects_a_contribution_that_materializes_early() {
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_user(vec![spec(
+            SourceKind::UserDefined(UserVocabulary::EMPTY),
+            "mom",
+            binds_a_buffer,
+        )]);
+        match sim
+            .compose_source("mom", 2)
+            .expect_err("a buffer binding inside a contribution")
+        {
+            CompositionError::EarlyMaterialization { witness, .. } => {
+                assert_eq!(witness, "buffer binding `den`");
+            }
+            other => panic!("expected EarlyMaterialization, got {other:?}"),
+        }
+
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_user(vec![spec(
+            SourceKind::UserDefined(READS_RHO),
+            "mom",
+            seals_its_output,
+        )]);
+        match sim
+            .compose_source("mom", 2)
+            .expect_err("a sealed output inside a contribution")
+        {
+            CompositionError::EarlyMaterialization { witness, .. } => {
+                assert_eq!(witness, "sealed graph output");
+            }
+            other => panic!("expected EarlyMaterialization, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compose_rejects_a_component_count_off_the_typed_target() {
+        // an empty-output builder on the D-vector momentum slot.
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_user(vec![spec(
+            SourceKind::UserDefined(UserVocabulary::EMPTY),
+            "mom",
+            bogus_builder,
+        )]);
+        assert!(matches!(
+            sim.compose_source("mom", 3),
+            Err(CompositionError::ComponentArity {
+                expected: 3,
+                got: 0,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn composed_program_materializes_once_per_target_component() {
+        // the fold's only materialization is its output roots: one terminal
+        // root per target component, each the additive fold of every overlay,
+        // with no leaf bound outside the scalar manifest.
+        use symbi_ir::{ElementWiseOp, Op};
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
+            .with_geometric(spherical_geometric_sources(2))
+            .with_gravity(point_mass_gravity_sources(2, false))
+            .with_ib(rigid_body_penalty_sources(2));
+        let combined = sim
+            .compose_source("mom", 2)
+            .unwrap()
+            .expect("three overlays");
+        let graph = combined.graph();
+
+        assert_eq!(
+            combined.outputs().len(),
+            2,
+            "one root per momentum component"
+        );
+        assert!(
+            graph.output().is_none(),
+            "the fold seals no graph output of its own"
+        );
+        assert!(crate::source_effects::early_materialization(&combined).is_none());
+
+        for &root in combined.outputs() {
+            assert!(
+                matches!(&graph.node(root).op, Op::ElementWise(ElementWiseOp::Add, _)),
+                "a multi-overlay root is the fold's Add"
+            );
+            let consumed = graph.iter().any(|(_, node, _)| {
+                let mut hit = false;
+                node.op
+                    .clone()
+                    .try_map_inputs(|id| {
+                        hit |= id == root;
+                        Ok::<_, ()>(id)
+                    })
+                    .ok();
+                hit
+            });
+            assert!(
+                !consumed,
+                "a fold root is terminal: nothing in the graph reads it"
+            );
+        }
+
+        // a lone overlay folds to its own output: no Add is minted around it.
+        let single =
+            SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(2, false));
+        let one = single.compose_source("mom", 2).unwrap().unwrap();
+        assert_eq!(one.outputs().len(), 2);
+        let direct = (point_mass_gravity_sources(2, false)[0].build_source)(2);
+        assert_eq!(
+            one.graph().len(),
+            direct.graph().len(),
+            "the splice adds no node to a lone overlay"
+        );
+    }
+
+    #[test]
+    fn composed_manifest_is_first_mention_order_across_overlays_in_overlay_order() {
+        // the byte pin on the composed manifest: overlay order (geometric,
+        // gravity, IB) then first mention within each, shared names deduped
+        // onto their first overlay.
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
+            .with_geometric(spherical_geometric_sources(2))
+            .with_gravity(point_mass_gravity_sources(2, true))
+            .with_ib(rigid_body_penalty_sources(2));
+        let mom = sim.compose_source("mom", 2).unwrap().unwrap();
+        assert_eq!(
+            mom.params(),
+            [
+                "rho",
+                "vel_0",
+                "vel_1",
+                "pre",
+                "x_0",
+                "x_1",
+                "xm_0",
+                "xm_1",
+                "gm",
+                "eps",
+                "body_xm_0",
+                "body_xm_1",
+                "body_radius",
+                "vbody_0",
+                "vbody_1",
+                "penalty_strength",
+            ]
+        );
+        let nrg = sim.compose_source("nrg", 2).unwrap().unwrap();
+        assert_eq!(
+            nrg.params(),
+            [
+                "rho", "vel_0", "vel_1", "x_0", "x_1", "xm_0", "xm_1", "gm", "eps"
+            ]
+        );
+
+        // and the composed graph equals the plain splice-and-sum fold node for
+        // node: the checks read the contributions, the program is the sum.
+        let built: Vec<SourceProgram> = sim
+            .sources_for("mom")
+            .map(|s| (s.build_source)(2))
+            .collect();
+        let reference = SourceProgram::trace(|cx| {
+            let mut acc: Option<Vec<_>> = None;
+            for program in &built {
+                let outs = cx.splice_source_as_scalars(program);
+                acc = Some(match acc {
+                    None => outs,
+                    Some(prev) => prev.into_iter().zip(outs).map(|(a, b)| a + b).collect(),
+                });
+            }
+            acc.unwrap()
+        });
+        assert_eq!(mom.params(), reference.params());
+        assert_eq!(mom.outputs(), reference.outputs());
+        assert_eq!(mom.graph().len(), reference.graph().len());
+        for ((_, a, ta), (_, b, tb)) in mom.graph().iter().zip(reference.graph().iter()) {
+            assert_eq!(a.op, b.op);
+            assert_eq!(ta, tb);
+        }
+    }
+
+    #[test]
+    fn build_total_source_panics_on_a_rejected_fold() {
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_user(vec![spec(
+            SourceKind::UserDefined(UserVocabulary::EMPTY),
+            "mom",
+            binds_a_buffer,
+        )]);
+        let outcome = std::panic::catch_unwind(|| sim.build_total_source("mom", 2));
+        assert!(
+            outcome.is_err(),
+            "the infallible door panics where compose_source errs"
+        );
+    }
 
     // ----- end-to-end emit: spec data drives codegen ----------------------
 
@@ -988,9 +1479,13 @@ mod tests {
         assert_eq!(sim.sources_for("nrg").count(), 2);
 
         // the kind discriminator survives composition.
-        let mom_kinds: Vec<SourceKind> = sim.sources_for("mom").map(|s| s.kind).collect();
+        let mom_kinds: Vec<SourceKind> = sim.sources_for("mom").map(|s| s.kind.clone()).collect();
         assert!(mom_kinds.contains(&SourceKind::Gravity));
-        assert!(mom_kinds.contains(&SourceKind::UserDefined));
+        assert!(
+            mom_kinds
+                .iter()
+                .any(|kind| matches!(kind, SourceKind::UserDefined(_)))
+        );
 
         // and build_total_source does merge them into one graph — proves
         // the user source flows through the same splice path as the rest.
@@ -1004,11 +1499,15 @@ mod tests {
         // target_field outside the regime's fields array fails validation
         // identically to a typo in any framework source.
         use crate::source_spec::user_defined_source;
-        let bogus = vec![user_defined_source("not_a_real_field", bogus_builder)];
+        let bogus = vec![user_defined_source(
+            "not_a_real_field",
+            UserVocabulary::EMPTY,
+            bogus_builder,
+        )];
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_user(bogus);
         match sim.validate() {
             Err(CompositionError::UnknownTargetField {
-                kind: SourceKind::UserDefined,
+                kind: SourceKind::UserDefined(_),
                 target: "not_a_real_field",
                 regime: "newtonian",
             }) => {}
@@ -1058,8 +1557,9 @@ mod tests {
             via_setter.derive_fused_binding()
         );
         // and the validation-facing bucket contents are identical.
-        let kinds =
-            |s: &SimulationLaws| -> Vec<SourceKind> { s.overlays().map(|x| x.kind).collect() };
+        let kinds = |s: &SimulationLaws| -> Vec<SourceKind> {
+            s.overlays().map(|x| x.kind.clone()).collect()
+        };
         assert_eq!(kinds(&via_surface), kinds(&via_setter));
         assert_eq!(via_surface.gravity.len(), via_setter.gravity.len());
     }

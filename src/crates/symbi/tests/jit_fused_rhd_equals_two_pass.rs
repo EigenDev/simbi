@@ -52,7 +52,7 @@ fn rhd_raw_source_fused_equals_two_pass_rk2() {
     // a raw radiative-cooling-style source S_nrg = -(C * rho * pre) — reads the per-cell state, the
     // FP-sensitive path (rho/pre binding must match between fused + two-pass). outputs=[5], target=nrg.
     let json = r#"{
-        "kind": "raw", "dim": 2, "outputs": [5], "params": [0.25], "target": "nrg",
+        "kind": "raw", "dim": 2, "outputs": [5], "params": [0.25], "vocabulary":{"reads":["pre","rho"],"params":[0]}, "target": "nrg",
         "nodes": [ {"op":"PARAMETER","param_idx":0}, {"op":"VARIABLE_RHO"},
                    {"op":"VARIABLE_PRESSURE"}, {"op":"MULTIPLY","left":0,"right":1},
                    {"op":"MULTIPLY","left":3,"right":2}, {"op":"NEG","left":4} ]

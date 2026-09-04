@@ -467,7 +467,7 @@ impl CensusEvaluator {
         let spec = CensusSpec::from_config(cfg)?;
         let built = symbi_source_compile::expr_bridge::build_census_expressions(cfg)?;
         let n_nodes = built.graph().len();
-        let eval = symbi_source_compile::SourceEvaluator::from_built(&[(CENSUS_FIELD.to_string(), built)]);
+        let eval = symbi_source_compile::SourceEvaluator::from_census(CENSUS_FIELD, &built);
         Ok(CensusEvaluator {
             spec,
             eval,
@@ -510,7 +510,7 @@ impl CensusEvaluator {
     /// lower the registration again, for a caller tracing the same expressions into a kernel.
     /// the same `CensusConfig` the interpreter was built from, so the two cannot describe
     /// different censuses.
-    pub fn lower(&self) -> Result<symbi_source_compile::source_spec::SourceProgram, String> {
+    pub fn lower(&self) -> Result<symbi_source_compile::CensusProgram, String> {
         symbi_source_compile::expr_bridge::build_census_expressions(&self.cfg)
     }
 

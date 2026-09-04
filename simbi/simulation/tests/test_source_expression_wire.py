@@ -94,6 +94,44 @@ def test_fluid_state_leaves_emit_state_ops() -> None:
     assert ops == ["VARIABLE_VEL1", "VARIABLE_VEL2", "VARIABLE_PRESSURE"]
 
 
+def test_serialize_source_declares_the_granted_vocabulary() -> None:
+    # the graph is the source-building context: each leaf constructor records the read or
+    # parameter it granted, and `serialize_source` emits that set as `vocabulary`, apart
+    # from the node walk. a granted leaf the outputs never reach is still declared, so the
+    # declaration is the grant and the nodes are the observation.
+    g = expr.ExprGraph()
+    rho = expr.density(g)
+    _unused_vel = expr.velocity(1, g)
+    _unused_phi = expr.variable("phi", g)
+    rate = expr.parameter(0, g) * rho
+    cfg = g.compile([rate]).serialize_source(
+        expr.SourceKind.COOLING, dim=2, params=[0.1]
+    )
+    assert cfg["vocabulary"] == {"reads": ["rho", "vel_1", "x_2"], "params": [0]}
+    assert {n["op"] for n in cfg["nodes"]} == {"PARAMETER", "VARIABLE_RHO", "MULTIPLY"}
+    json.dumps(cfg)
+
+    # a leaf minted past the constructors (the bypass a hand-built node takes) is observed
+    # by the walk and absent from the grant; the backend refuses that wire.
+    g2 = expr.ExprGraph()
+    rho2 = expr.density(g2)
+    vel = expr.Expr(g2, g2.add_node("variable", name="vel1"))
+    cfg2 = g2.compile([rho2 * vel]).serialize_source("raw", dim=2, target="den")
+    assert cfg2["vocabulary"] == {"reads": ["rho"], "params": []}
+    assert "VARIABLE_VEL1" in [n["op"] for n in cfg2["nodes"]]
+
+
+def test_boundary_and_motion_wires_carry_no_vocabulary() -> None:
+    # a prescription assigns the state and a motion law scales the mesh; neither is a
+    # source contribution, so neither wire declares one.
+    g = expr.ExprGraph()
+    t = expr.variable("t", g)
+    motion = g.compile([1.0 + t, expr.constant(1.0, g)]).serialize_motion()
+    boundary = g.compile([expr.constant(1.0, g), t]).serialize_boundary(dim=1)
+    assert "vocabulary" not in motion
+    assert "vocabulary" not in boundary
+
+
 def test_velocity_axis_bounds() -> None:
     import pytest
 

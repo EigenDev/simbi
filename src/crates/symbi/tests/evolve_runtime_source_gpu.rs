@@ -4,7 +4,7 @@
 // GPU validation of the runtime user-source path: a runtime-loaded user source (python -> json ->
 // SourceConfig, no recompile) must run on the device via NVRTC and match the CPU per-cell
 // interpreter. proves the
-// runtime DAG -> `source_apply_from_built_gv` -> neutral IR -> render(Cuda) -> nvrtc-jit path closes
+// runtime DAG -> `source_apply_gv` -> neutral IR -> render(Cuda) -> nvrtc-jit path closes
 // on-device, the device twin of the CPU `evolve_runtime_source.rs`.
 //
 // the test isolates the source kernel (no multi-step evolve, so no FMA-induced dt drift): build two
@@ -105,6 +105,7 @@ fn force_const_json(dim: usize) -> String {
         .collect();
     format!(
         r#"{{ "kind": "force", "dim": {dim}, "outputs": {outputs:?}, "params": [0.5],
+            "vocabulary":{{"reads":[],"params":[0]}},
             "nodes": [ {{"op": "PARAMETER", "param_idx": 0}}, {{"op": "CONSTANT", "value": 0.0}} ] }}"#,
     )
 }
@@ -117,6 +118,7 @@ fn force_posdep_json(dim: usize) -> String {
         .collect();
     format!(
         r#"{{ "kind": "force", "dim": {dim}, "outputs": {outputs:?}, "params": [0.5],
+            "vocabulary":{{"reads":["x_0"],"params":[0]}},
             "nodes": [ {{"op": "VARIABLE_X1"}}, {{"op": "PARAMETER", "param_idx": 0}},
                        {{"op": "MULTIPLY", "left": 0, "right": 1}}, {{"op": "CONSTANT", "value": 0.0}} ] }}"#,
     )
@@ -203,6 +205,7 @@ fn runtime_force_posdep_gpu_3d() {
 // trace + render on device without panicking at trace time. force a = [p0, 0] masked chi = (x_0 < 0.5).
 const REGION_JSON_2D: &str = r#"{
     "kind": "force", "dim": 2, "outputs": [0, 1], "region": 6, "params": [0.5],
+    "vocabulary":{"reads":["x_0"],"params":[0]},
     "nodes": [
         {"op": "PARAMETER", "param_idx": 0}, {"op": "CONSTANT", "value": 0.0},
         {"op": "VARIABLE_X1"}, {"op": "CONSTANT", "value": 0.5},
@@ -214,6 +217,7 @@ const REGION_JSON_2D: &str = r#"{
 // relax velocity toward v_ref = 0, rate kappa = p0 = 2. outputs = [kappa, v_ref_0, v_ref_1].
 const RELAX_JSON_2D: &str = r#"{
     "kind": "relax", "dim": 2, "outputs": [0, 1, 1], "params": [2.0],
+    "vocabulary":{"reads":[],"params":[0]},
     "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "CONSTANT", "value": 0.0} ]
 }"#;
 

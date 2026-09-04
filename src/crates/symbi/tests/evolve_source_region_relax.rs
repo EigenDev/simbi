@@ -37,6 +37,7 @@ fn region_masked_force_acts_only_in_the_left_half() {
     //        6=IF_THEN_ELSE(cond=4, then=5, else=1). outputs=[0,1], region=6.
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "region": 6, "params": [0.5],
+        "vocabulary":{"reads":["x_0"],"params":[0]},
         "nodes": [
             {"op": "PARAMETER", "param_idx": 0},
             {"op": "CONSTANT", "value": 0.0},
@@ -89,6 +90,7 @@ fn relax_sponge_damps_uniform_flow() {
     // on a uniform periodic flow: d(mom)/dt = -kappa*mom -> mom(t) = mom0 * exp(-kappa*t).
     let json = r#"{
         "kind": "relax", "dim": 2, "outputs": [0, 1, 1], "params": [2.0],
+        "vocabulary":{"reads":[],"params":[0]},
         "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "CONSTANT", "value": 0.0} ]
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse");

@@ -89,7 +89,7 @@ impl GpuSourceKernel {
 
         let mut field_kernels: HashMap<String, FieldGpuKernel> = HashMap::new();
         for field_name in laws.fields_with_overlays() {
-            if let Some(built) = laws.build_total_source(field_name, d) {
+            if let Some(built) = laws.compose_source(field_name, d)? {
                 let entry_name = format!("{}_source", field_name);
                 let source = built.cuda_source_kernel(&entry_name);
                 field_kernels.insert(

@@ -27,7 +27,7 @@ use symbi_ir::{FieldBind, ScalarRef, ScratchKey};
 use symbi_xpu::MemorySpace;
 
 use std::sync::Arc;
-use symbi_source_compile::source_spec::SourceProgram;
+use symbi_source_compile::{AdmittedSources, BoundaryPrescription};
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
@@ -205,11 +205,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// rejected up front:
     /// `let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC)?;`
     /// `let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());`
-    pub fn with_runtime_source(
-        mut self,
-        built: Vec<(String, SourceProgram)>,
-        params: Vec<f64>,
-    ) -> Self {
+    pub fn with_runtime_source(mut self, built: AdmittedSources, params: Vec<f64>) -> Self {
         // has_energy = false is the authority here (iso's RegimeSpec): no `nrg` write is emitted.
         self.runtime_source = Some(RuntimeSource::new(built, params, false));
         self
@@ -219,11 +215,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// source rides inside the Cranelift-JIT'd godunov stage, one launch). same physics as
     /// `with_runtime_source`, bit-for-bit identical; host + f64 only,
     /// else it falls back to the two-pass.
-    pub fn with_fused_runtime_source(
-        mut self,
-        built: Vec<(String, SourceProgram)>,
-        params: Vec<f64>,
-    ) -> Self {
+    pub fn with_fused_runtime_source(mut self, built: AdmittedSources, params: Vec<f64>) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, false));
         self.fuse_runtime = true;
         self
@@ -277,13 +269,13 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// the ghost pressure as `cs2 * rho` after the fill).
     pub fn with_driven_boundary(
         mut self,
-        built: Vec<(String, SourceProgram)>,
+        built: BoundaryPrescription,
         params: Vec<f64>,
     ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
         // has_energy = false: no prim.pre assignment rides the dag.
         self.boundary_dags
-            .push(RuntimeSource::new(built, params, false));
+            .push(RuntimeSource::prescription(built, params, false));
         (self, id)
     }
 

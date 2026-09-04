@@ -29,12 +29,11 @@ fn jit_fused_godunov_matches_interp_bitwise() {
     let force = symbi_source_compile::expr_bridge::build_user_source(
         &symbi_source_compile::SourceConfig::from_json(
             r#"{ "kind": "force", "dim": 2, "outputs": [0,1], "params": [0.5,-0.3],
+                 "vocabulary":{"reads":[],"params":[0,1]},
                  "nodes": [ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         ).unwrap(),
         &symbi_hydro::NEWTONIAN_SPEC,
     ).unwrap();
-    let src_refs: Vec<(&str, &symbi_source_compile::source_spec::SourceProgram)> =
-        force.iter().map(|(t, b)| (t.as_str(), b)).collect();
 
     let program = godunov_stage_gv_with_fused_built(
         Coords::Cartesian,
@@ -45,7 +44,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
         2,
         true,
         GeoSource::Hydro { inertial: true },
-        &src_refs,
+        &force,
         false,
         0,
     );

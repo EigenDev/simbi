@@ -44,7 +44,7 @@ use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Spacetime;
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::{KernelSet, WithExcision, WithViscosity};
-use symbi_source_compile::source_spec::SourceProgram;
+use symbi_source_compile::{AdmittedSources, BoundaryPrescription};
 
 /// a D-generic RHD `KernelSet`, every method substrate-generated.
 // viscosity is isothermal-only; RHD uses the no-op default.
@@ -163,12 +163,12 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// a complete prim prescription `[rho, vel.., pre]`.
     pub fn with_driven_boundary(
         mut self,
-        built: Vec<(String, SourceProgram)>,
+        built: BoundaryPrescription,
         params: Vec<f64>,
     ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
         self.boundary_dags
-            .push(RuntimeSource::new(built, params, true));
+            .push(RuntimeSource::prescription(built, params, true));
         (self, id)
     }
 
@@ -184,11 +184,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// attach a runtime user source from already-lowered `(target, SourceProgram)`
     /// pairs (the `build_user_source` output of a `kind="raw"` RHD `SourceConfig`).
     /// applied two-pass in `source_apply` (plain godunov + `dispatch_runtime_source`).
-    pub fn with_runtime_source(
-        mut self,
-        built: Vec<(String, SourceProgram)>,
-        params: Vec<f64>,
-    ) -> Self {
+    pub fn with_runtime_source(mut self, built: AdmittedSources, params: Vec<f64>) -> Self {
         // has_energy = true (RHD carries tau); validation happened at
         // `build_user_source(cfg, &RHD_SPEC)`.
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
@@ -198,11 +194,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// attach a runtime user source and fuse it into the godunov stage (flat host+f64); the two-pass
     /// twin `with_runtime_source` forces the separate pass. bit-identical (falls back off-host / non-f64
     /// / GR). no immersed-body fold — RHD has no Newtonian body.
-    pub fn with_fused_runtime_source(
-        mut self,
-        built: Vec<(String, SourceProgram)>,
-        params: Vec<f64>,
-    ) -> Self {
+    pub fn with_fused_runtime_source(mut self, built: AdmittedSources, params: Vec<f64>) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
         self.fuse_runtime = true;
         self

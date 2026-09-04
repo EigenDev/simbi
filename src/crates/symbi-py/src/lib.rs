@@ -464,7 +464,7 @@ fn get_source_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
 trait AttachRuntimeSource: Sized {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
+        built: symbi_source_compile::AdmittedSources,
         params: Vec<f64>,
     ) -> Result<Self, String>;
 }
@@ -474,7 +474,7 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
+        built: symbi_source_compile::AdmittedSources,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         // fused by default: the user source (and any immersed body) rides inside the godunov stage on
@@ -488,7 +488,7 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
+        built: symbi_source_compile::AdmittedSources,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         // fused by default on a flat host+f64 run; GR / device / non-f64 fall back to the two-pass.
@@ -501,7 +501,7 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
+        built: symbi_source_compile::AdmittedSources,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         // fused by default on host + f64 (iso has no energy, so the body stays its own pass — the
@@ -522,7 +522,7 @@ where
 {
     fn attach_runtime_source(
         self,
-        built: Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
+        built: symbi_source_compile::AdmittedSources,
         params: Vec<f64>,
     ) -> Result<Self, String> {
         Ok(self.with_runtime_source(built, params))
@@ -636,13 +636,7 @@ fn lower_configured_sources(
     source_jsons: &[SourcePayload],
     spec: &symbi_hydro::RegimeSpec,
     law: Option<&symbi_hydro::state_law::StateLaw>,
-) -> Result<
-    (
-        Vec<(String, symbi_source_compile::source_spec::SourceProgram)>,
-        Vec<f64>,
-    ),
-    String,
-> {
+) -> Result<(symbi_source_compile::AdmittedSources, Vec<f64>), String> {
     let configs = source_jsons
         .iter()
         .map(|source| {
@@ -669,6 +663,7 @@ mod source_collection_tests {
             origin: "source_expressions[3]".to_string(),
             json: r#"{
                 "kind":"force", "dim":1, "outputs":[2], "params":[],
+                "vocabulary":{"reads":[],"params":[]},
                 "nodes":[{"op":"CONSTANT","value":1.0},
                          {"op":"CONSTANT","value":2.0},
                          {"op":"MOD","left":0,"right":1}]
@@ -693,6 +688,30 @@ mod source_collection_tests {
             Ok(_) => panic!("malformed source json was accepted"),
         };
         assert!(error.contains("source_expressions[2] parse:"), "{error}");
+    }
+
+    #[test]
+    fn a_source_granted_rho_alone_that_reads_vel_is_refused_at_the_binding() {
+        // the wire a python graph emits when its context granted `density()` alone while the
+        // dag carries a velocity leaf: the config door refuses the contribution with the
+        // observed read named, and the collection index points at the source.
+        let sources = [SourcePayload {
+            origin: "source_expressions[0]".to_string(),
+            json: r#"{
+                "kind":"raw", "dim":2, "target":"den", "outputs":[2], "params":[],
+                "vocabulary":{"reads":["rho"],"params":[]},
+                "nodes":[{"op":"VARIABLE_RHO"}, {"op":"VARIABLE_VEL1"},
+                         {"op":"MULTIPLY","left":0,"right":1}]
+            }"#
+            .to_string(),
+        }];
+        let error = match lower_configured_sources(&sources, &symbi_hydro::NEWTONIAN_SPEC, None) {
+            Err(error) => error,
+            Ok(_) => panic!("a read outside the granted vocabulary was accepted"),
+        };
+        assert!(error.contains("source_expressions[0] lower:"), "{error}");
+        assert!(error.contains("UndeclaredRead"), "{error}");
+        assert!(error.contains("Vel(Axis(0))"), "{error}");
     }
 
     fn census_payload(origin: &str, name: &str) -> SourcePayload {

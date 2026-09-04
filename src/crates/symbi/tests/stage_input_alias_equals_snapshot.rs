@@ -60,6 +60,7 @@ fn stage0_un_alias_matches_the_snapshot_stage_copy() {
     // both of which evaluate S at the stage input — the buffer under test.
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.7, -0.4],
+        "vocabulary":{"reads":[],"params":[0,1]},
         "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "PARAMETER", "param_idx": 1} ]
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse config");

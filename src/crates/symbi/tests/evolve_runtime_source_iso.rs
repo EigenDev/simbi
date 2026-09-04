@@ -34,6 +34,7 @@ fn runtime_loaded_force_accelerates_iso_gas() {
     // force a = [p0, 0], p0 = 0.5 — same config shape as the adiabatic twin.
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.5],
+        "vocabulary":{"reads":[],"params":[0]},
         "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "CONSTANT", "value": 0.0} ]
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse config");

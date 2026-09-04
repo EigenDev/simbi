@@ -69,6 +69,7 @@ fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
     // external acceleration (force kind) -> mom + energy overlays; exercised alongside the body.
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.5, -0.3],
+        "vocabulary":{"reads":[],"params":[0,1]},
         "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "PARAMETER", "param_idx": 1} ]
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse config");

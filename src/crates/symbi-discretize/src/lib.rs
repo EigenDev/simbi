@@ -61,8 +61,8 @@ pub use gv::{
     rmhd_magnetosonic_cfl_map_gr_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv,
     rmhd_resistive_emf_cyl_rz_gv, rmhd_resistive_emf_ortho_gv, rmhd_save_efield_gv,
     rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gr_gv, rmhd_wave_speeds_cell_gv,
-    robin_ghost_fill_gv, scalar_ghost_fill_gv, snapshot_gv, source_apply_from_built_gv,
-    source_apply_gv, splice_user_source_gv, state_finite_probe_gv, uct_master_emf_proof_kernel,
+    robin_ghost_fill_gv, scalar_ghost_fill_gv, snapshot_gv, source_apply_gv,
+    splice_user_source_gv, state_finite_probe_gv, uct_master_emf_proof_kernel,
     uniform_accel_probe_gv, wb_ghost_fill_gv,
 };
 pub use gv_excise::{

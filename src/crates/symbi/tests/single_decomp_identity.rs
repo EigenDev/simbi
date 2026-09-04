@@ -134,6 +134,7 @@ fn make_with_sources(timestepping: Timestepping) -> (Sim, Kern) {
     let configs = [
         r#"{
             "kind":"force", "dim":2, "outputs":[2,3], "params":[0.25],
+            "vocabulary":{"reads":["x_0"],"params":[0]},
             "nodes":[{"op":"PARAMETER","param_idx":0},
                      {"op":"VARIABLE_X1"},
                      {"op":"MULTIPLY","left":0,"right":1},
@@ -141,6 +142,7 @@ fn make_with_sources(timestepping: Timestepping) -> (Sim, Kern) {
         }"#,
         r#"{
             "kind":"force", "dim":2, "outputs":[2,3], "params":[0.75],
+            "vocabulary":{"reads":["x_0"],"params":[0]},
             "nodes":[{"op":"PARAMETER","param_idx":0},
                      {"op":"VARIABLE_X1"},
                      {"op":"MULTIPLY","left":0,"right":1},
@@ -148,6 +150,7 @@ fn make_with_sources(timestepping: Timestepping) -> (Sim, Kern) {
         }"#,
         r#"{
             "kind":"force", "dim":2, "outputs":[23,24], "params":[],
+            "vocabulary":{"reads":["x_0"],"params":[]},
             "nodes":[
                 {"op":"VARIABLE_X1"},{"op":"CONSTANT","value":0.0},
                 {"op":"CONSTANT","value":0.0},{"op":"CONSTANT","value":1.0},

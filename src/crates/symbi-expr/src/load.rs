@@ -292,7 +292,8 @@ pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError>
 ///
 /// json shape (None node fields omitted):
 /// ```json
-/// { "kind": "force", "dim": 2, "outputs": [2, 3], "params": [],
+/// { "kind": "force", "dim": 2, "outputs": [2, 3], "params": [0.4],
+///   "vocabulary": { "reads": ["x_0"], "params": [0] },
 ///   "nodes": [ {"op":"VARIABLE_X1"}, {"op":"parameter","param_idx":0},
 ///              {"op":"multiply","left":1,"right":0}, {"op":"constant","value":0.4} ] }
 /// ```
@@ -315,6 +316,13 @@ pub struct SourceConfig {
     /// runtime parameter values, indexed by each `PARAMETER` node's `param_idx`.
     #[serde(default)]
     pub params: Vec<f64>,
+    /// the leaves the source's building context granted it, captured as the frontend
+    /// minted them and carried apart from `nodes`. a source contribution is admitted only
+    /// when every leaf its dag observes is in this declaration, so the field is required
+    /// for the source kinds; a boundary prescription or a motion law (which add to no
+    /// conserved slot) carries none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vocabulary: Option<SourceVocabulary>,
     /// **`region` axis** — an optional node index (into `nodes`) of a mask
     /// `chi(x) in [0,1]` restricting where the source acts (sponge layers, jet nozzles). the
     /// contribution is multiplied by `chi` at build time (the lift is linear in the field, so
@@ -324,6 +332,17 @@ pub struct SourceConfig {
     pub region: Option<usize>,
     /// the flat, topologically-ordered DAG.
     pub nodes: Vec<NodeDesc>,
+}
+
+/// the vocabulary a source's frontend context granted it: the state and coordinate
+/// reads by wire symbol (`rho`, `pre`, `vel_<k>`, `x_<k>`, `t`) and the `param_idx`
+/// values of its parameter leaves. the frontend records each as the corresponding leaf
+/// constructor runs, so the set is a capability grant rather than a hand-written list,
+/// and the dag in `nodes` is compared against it at admission.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceVocabulary {
+    pub reads: Vec<String>,
+    pub params: Vec<usize>,
 }
 
 impl SourceConfig {
@@ -522,6 +541,7 @@ mod tests {
         // fields are omitted, exactly as the python emitter writes them.
         let json = r#"{
             "kind": "raw", "dim": 1, "target": "nrg", "outputs": [3], "params": [2.5],
+            "vocabulary":{"reads":["x_0"],"params":[0]},
             "nodes": [
                 {"op": "VARIABLE_X1"},
                 {"op": "SIN", "left": 0},

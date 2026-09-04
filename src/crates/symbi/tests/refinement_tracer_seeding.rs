@@ -173,6 +173,7 @@ fn refined_density_source_spawns_only_the_composite_added_mass() {
     let source = SourceConfig::from_json(
         r#"{
             "kind": "raw", "dim": 1, "outputs": [0], "params": [],
+            "vocabulary":{"reads":[],"params":[]},
             "target": "den",
             "nodes": [ {"op": "CONSTANT", "value": 0.2} ]
         }"#,

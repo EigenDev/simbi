@@ -125,7 +125,7 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
         2,
         true,
         GeoSource::Hydro { inertial: true },
-        &[],
+        &symbi_source_compile::AdmittedSources::none(),
         false,
         1,
     ))

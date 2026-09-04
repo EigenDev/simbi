@@ -9,6 +9,7 @@
 //
 // organization:
 //   source_spec       — SourceSpec registry + the traced source builders
+//   source_effects    — typed source signature, observed effects + the additive fold law
 //   expr_bridge       — symbi-expr DAG interpreted at the carrier
 //   simulation_laws   — regime + overlay composition and validation
 //   state_law_gv      — StateLaw's traced conserved-state conversion
@@ -28,12 +29,21 @@ pub mod gpu_launcher;
 pub mod gpu_source_kernel;
 pub mod motion_law;
 pub mod simulation_laws;
+pub mod source_effects;
 pub mod source_evaluator;
 pub mod source_spec;
 pub mod state_law_gv;
 
+pub use expr_bridge::{BoundaryPrescription, CensusProgram};
+#[cfg(feature = "gpu")]
+pub use gpu_launcher::launch_source_kernel;
+pub use gpu_source_kernel::GpuSourceKernel;
 pub use simulation_laws::{
     CompositionError, FusedSourceFamily, Overlay, SimulationLaws, point_mass, uniform_accel,
+};
+pub use source_effects::{
+    AdmittedSources, SourceContributionEffects, SourceParameter, SourceSignature, SourceTarget,
+    TypedParameterSet, TypedReadSet, admit_user_contribution,
 };
 pub use source_evaluator::SourceEvaluator;
 pub use source_spec::{
@@ -43,9 +53,6 @@ pub use source_spec::{
     user_defined_source, user_force_energy_source, user_force_momentum_source,
 };
 pub use state_law_gv::StateLawGv;
-#[cfg(feature = "gpu")]
-pub use gpu_launcher::launch_source_kernel;
-pub use gpu_source_kernel::GpuSourceKernel;
 
 // the python front door's wire format — re-exported so the source API (SourceConfig +
 // expr_bridge::build_user_source) is one import surface.

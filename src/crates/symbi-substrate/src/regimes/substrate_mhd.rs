@@ -47,7 +47,7 @@ use crate::regimes::substrate_kernels::{
 use symbi_sim::state::CtMethod;
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::KernelSet;
-use symbi_source_compile::source_spec::SourceProgram;
+use symbi_source_compile::{AdmittedSources, BoundaryPrescription};
 
 static MHD_CFL_DIAGNOSTIC_CALLS: AtomicU64 = AtomicU64::new(0);
 
@@ -289,12 +289,15 @@ where
     /// out-of-plane B_phi is the injected toroidal field (cell-centered, div-free by axisymmetry).
     pub fn with_driven_boundary(
         mut self,
-        built: Vec<(String, SourceProgram)>,
+        built: BoundaryPrescription,
         params: Vec<f64>,
     ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
-        self.boundary_dags
-            .push(RuntimeSource::new(built, params, R::SPEC.has_energy));
+        self.boundary_dags.push(RuntimeSource::prescription(
+            built,
+            params,
+            R::SPEC.has_energy,
+        ));
         (self, id)
     }
 
@@ -309,11 +312,7 @@ where
         self
     }
 
-    pub fn with_runtime_source(
-        mut self,
-        built: Vec<(String, SourceProgram)>,
-        params: Vec<f64>,
-    ) -> Self {
+    pub fn with_runtime_source(mut self, built: AdmittedSources, params: Vec<f64>) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, R::SPEC.has_energy));
         self
     }

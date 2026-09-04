@@ -39,6 +39,7 @@ type Hier = Hierarchy<Newtonian, 2, 2, Cartesian, IdealGas<f64>, CpuSpace, HostM
 
 const SOURCE_JSON: &str = r#"{
     "kind": "force", "dim": 2, "outputs": [0, 1], "params": [],
+    "vocabulary":{"reads":["x_0"],"params":[]},
     "nodes": [ {"op": "VARIABLE_X1"}, {"op": "CONSTANT", "value": 0.0} ]
 }"#;
 

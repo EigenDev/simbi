@@ -43,7 +43,7 @@ const N: usize = 100;
 // guards never fire) but unrecoverable — the redo restores the stage input and
 // the sink re-poisons it, forcing the freeze tier every substage.
 const SINK_JSON: &str = r#"{
-    "kind": "raw", "dim": 1, "outputs": [0], "params": [], "target": "nrg",
+    "kind": "raw", "dim": 1, "outputs": [0], "params": [], "vocabulary":{"reads":[],"params":[]}, "target": "nrg",
     "nodes": [ {"op": "CONSTANT", "value": -1.0e6} ]
 }"#;
 

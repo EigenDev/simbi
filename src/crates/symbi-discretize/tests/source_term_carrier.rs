@@ -219,7 +219,8 @@ fn front_door_json_force_config_renders_axiomatic_source() {
     use symbi_source_compile::expr_bridge::build_user_source;
 
     let json = r#"{
-        "kind": "force", "dim": 2, "outputs": [2, 3], "params": [],
+        "kind": "force", "dim": 2, "outputs": [2, 3], "params": [2.5],
+        "vocabulary":{"reads":["x_0"],"params":[0]},
         "nodes": [
             {"op": "VARIABLE_X1"},
             {"op": "PARAMETER", "param_idx": 0},

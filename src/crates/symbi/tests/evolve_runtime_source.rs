@@ -30,6 +30,7 @@ fn runtime_loaded_force_accelerates_gas() {
     // exactly what the python `Dag.force_source([p0, const(0.0)], dim=2)` emits, p0 = 0.5.
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.5],
+        "vocabulary":{"reads":[],"params":[0]},
         "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "CONSTANT", "value": 0.0} ]
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse config");
@@ -81,6 +82,7 @@ fn runtime_source_collection_sums_independent_parameters() {
     let first = SourceConfig::from_json(
         r#"{
             "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.2],
+            "vocabulary":{"reads":[],"params":[0]},
             "nodes": [ {"op": "PARAMETER", "param_idx": 0},
                        {"op": "CONSTANT", "value": 0.0} ]
         }"#,
@@ -89,6 +91,7 @@ fn runtime_source_collection_sums_independent_parameters() {
     let second = SourceConfig::from_json(
         r#"{
             "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.3],
+            "vocabulary":{"reads":[],"params":[0]},
             "nodes": [ {"op": "PARAMETER", "param_idx": 0},
                        {"op": "CONSTANT", "value": 0.0} ]
         }"#,

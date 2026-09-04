@@ -121,7 +121,7 @@ impl SourceEvaluator {
         // skipped, matching the runtime's expectation that an empty
         // entry means "no source-term computation for this field."
         for field_name in laws.fields_with_overlays() {
-            if let Some(built) = laws.build_total_source(field_name, d) {
+            if let Some(built) = laws.compose_source(field_name, d)? {
                 let components: Vec<LoweredFn> = built
                     .outputs()
                     .iter()
@@ -141,13 +141,40 @@ impl SourceEvaluator {
         Ok(Self { field_kernels })
     }
 
-    /// build the evaluator directly from already-lowered `(target_field, SourceProgram)` pairs — the
-    /// runtime path. unlike [`Self::new`] (which composes a `SimulationLaws` of compile-time
-    /// fn-builders, AOT), this takes `SourceProgram` values — e.g., `expr_bridge::build_user_source`'s
-    /// output from a `SourceConfig` loaded at sim startup (python -> json, no recompile). each
-    /// field's `SourceProgram` is scalarized into per-component `LoweredFn`s, exactly as `new` does.
-    /// panics on a duplicate target field (the caller should pre-merge same-field sources).
-    pub fn from_built(sources: &[(String, crate::source_spec::SourceProgram)]) -> Self {
+    /// build the evaluator from admitted user contributions — the runtime path. unlike
+    /// [`Self::new`] (which composes a `SimulationLaws` of compile-time fn-builders, AOT), this
+    /// takes lowered `SourceProgram` values: `expr_bridge::build_user_source`'s output from a
+    /// `SourceConfig` loaded at sim startup (python -> json, no recompile). each field's program
+    /// is scalarized into per-component `LoweredFn`s, exactly as `new` does. panics on a
+    /// duplicate target field (the collection lowering pre-merges same-field sources).
+    ///
+    /// the argument is the witness the checked contribution door returns, so a contribution
+    /// reaches the evaluator only after its declaration held; a bare pair list has no way in:
+    ///
+    /// ```compile_fail
+    /// use symbi_source_compile::{SourceEvaluator, SourceProgram};
+    /// let program = SourceProgram::trace(|cx| vec![cx.scalar("rho")]);
+    /// let pairs = vec![("nrg".to_string(), program)];
+    /// let _ = SourceEvaluator::from_built(&pairs);
+    /// ```
+    pub fn from_built(sources: &crate::source_effects::AdmittedSources) -> Self {
+        Self::lower(sources.pairs())
+    }
+
+    /// build the evaluator from a driven-boundary prescription: the per-slot programs the
+    /// host ghost fill evaluates per cell. a prescription assigns the primitive state and
+    /// adds to no conserved slot, so it enters through `build_boundary_dag`'s own door.
+    pub fn from_prescription(prescription: &crate::expr_bridge::BoundaryPrescription) -> Self {
+        Self::lower(prescription.pairs())
+    }
+
+    /// build the evaluator from a census map under the single key `field`: the one program
+    /// whose outputs are the bin coordinates and the accumulators, evaluated per cell.
+    pub fn from_census(field: &str, census: &crate::expr_bridge::CensusProgram) -> Self {
+        Self::lower(&[(field.to_string(), census.program().clone())])
+    }
+
+    fn lower(sources: &[(String, crate::source_spec::SourceProgram)]) -> Self {
         let mut field_kernels: HashMap<String, FieldKernel> = HashMap::new();
         for (field, built) in sources {
             let components: Vec<LoweredFn> = built
@@ -163,7 +190,7 @@ impl SourceEvaluator {
                 )
                 .is_some()
             {
-                panic!("SourceEvaluator::from_built: duplicate target field '{field}'");
+                panic!("SourceEvaluator: duplicate target field '{field}'");
             }
         }
         Self { field_kernels }
@@ -236,11 +263,11 @@ impl SourceEvaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, law_params};
     use crate::source_spec::{
         cylindrical_geometric_sources, gravity_params, ib_params, point_mass_gravity_sources,
         rigid_body_penalty_sources, source_params,
     };
+    use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, law_params};
 
     #[test]
     fn evaluator_for_empty_overlays_has_no_fields() {
