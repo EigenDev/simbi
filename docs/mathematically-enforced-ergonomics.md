@@ -1608,6 +1608,72 @@ is the complete obstruction of an unordered pair and is reversal-invariant. The
 Stage 2 reason: identity is always resolved and an unbounded footprint is a
 locality fact, so there is no genuinely unresolved dependence to name.
 
+#### Stage 4 — as implemented
+
+The handwritten composition doors now consume authoritative typed evidence.
+
+- **Exec buffer binding.** One `bind_by_manifest(name, resolve)` in the substrate
+  binding layer classifies a kernel's buffers by the baked manifest's `is_output`
+  flag — the effect role recorded at codegen — sending each to the output group
+  when written and the input group otherwise, with an in-place resource bound once
+  as a mutable output. A typed resolver maps each manifest `FieldBind` to its sim
+  field, matching `Ref(FieldRef::..)` and `Scratch(ScratchKey::Free(..))` and
+  rejecting a `User` or `Ct` scratch of a coincident spelling, so a framework name
+  like `gm` resolves to `Gravity(Gm)` rather than a user claim. The runtime-JIT
+  shaped-penalize kernel converges on the same door through `bind_by_binds` over
+  its own `kernel_bindings_from_ir` manifest. The executor's physical pointer-alias
+  checks in `policy.rs` are unchanged — they prove a distinct property (two logical
+  resources must not share one allocation) and remain the release-active backstop
+  on every launch. The baked kernels are byte-identical.
+- **Source composition.** Each source overlay carries a typed `SourceSignature`
+  (`SourceTarget`, `TypedReadSet`, `TypedParameterSet`); the additive fold admits a
+  contribution only when its observed effects sit within its declaration and its
+  declaration within the regime's capabilities, all contributions share one target,
+  none materializes an external write, and the composed program performs exactly one
+  write per target component. The declaration is capability-derived: a Rust source
+  carries its `UserVocabulary` at construction, and a config or Python source's
+  building context records the symbols it grants as leaves are minted, serialized
+  into `SourceConfig` and typed before lowering so the declaration is compared
+  independently against the observed graph. Every production source path — the
+  source evaluator, the runtime source, the fused godunov stage, and the AOT bake —
+  consumes an `AdmittedSources` (or `BoundaryPrescription`) witness, so a bare
+  `(target, SourceProgram)` pair reaches nothing. The composed program and the baked
+  kernels are byte-identical.
+
+#### Stage 5 — enforcement and closure
+
+Structural gates hold each Phase 6 invariant in place, and the batteries confirm
+the migration changed no behavior.
+
+- **Structural gates.** A public signature never exposes the loose `(GvKernel,
+  KernelWrites)` pair (`no_public_loose_pair`); a composition never exposes a
+  boolean compatibility predicate (`no_public_boolean_compatibility`); a public
+  source door never accepts a raw `(target, SourceProgram)` pair or an unadmitted
+  spec list (`no_public_loose_source_pairs`); the baked manifest is the sole binding
+  classifier, the lossy `FieldBind::from_path` string classifier stays at the ABI
+  boundary, and a resolver decides by the typed variant rather than a rendered name
+  (`dispatch_binding_invariants`).
+- **Backends.** The CPU, CUDA, and HIP feature sets all type-check.
+- **Batteries.** Aliasing (the executor pointer checks and the shaped-JIT tests),
+  composition and fusion laws, source admission, single-grid and decomposed and
+  refined evolution equivalence, and the recovery retry/rollback ledger all pass.
+- **Artifacts.** Baking the AOT kernel set at the pre-Phase-6 commit and at the
+  Phase 6 head and comparing them: the neutral IR blobs (prepared IR, manifests,
+  scalar params, writes, binding order) are byte-identical; the rendered CPU-source
+  differences are the pre-existing map-kind unswitch render tie-break, which two
+  same-source bakes reproduce.
+
+Deliberately deferred beyond Phase 6, each a capability the effect algebra now
+makes safe to reason about but which no stage activates:
+
+- launch-level reductions as a first-class effect (the three reduction notions
+  stay separate; the effect set describes pointwise access alone);
+- actual parallel scheduling — `Composition::parallel` proves independence, and
+  nothing executes concurrently on the strength of that proof;
+- unswitch render determinism (the map-kind tie-break in the renderer, the sole
+  generated-source difference under every byte-identity comparison);
+- Metal and SYCL backend adapters (only CPU, CUDA, and HIP are wired).
+
 ### Phase 7: normalize the language and geography
 
 After the architectural phases are complete, run a deliberately semantics-free
