@@ -133,6 +133,70 @@ fn seed(sim: &Sim, field: impl Fn(usize, [isize; 3]) -> f64) {
     }
 }
 
+// seed a solenoidal face field B = curl A from a random edge vector potential A: div B = div curl A
+// = 0 to roundoff by the discrete CT identity D C = 0. built by loading A into the edge EMF and
+// applying the production curl once (bface -= dt*curl(E) with dt = -1 gives bface = curl(A)), then
+// clearing the EMF and interpolating the cell B.
+fn seed_solenoidal(sim: &Sim) {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    for d in 0..3 {
+        for c in m.efield[d].domain().iter() {
+            m.efield[d].set(c, rnd(c, d as u64 + 41));
+        }
+        for c in m.bface[d].domain().iter() {
+            m.bface[d].set(c, 0.0);
+        }
+    }
+    ct_curl::<3, 3, HostMemory, f64>(sim, -1.0); // bface = curl(A)
+    for d in 0..3 {
+        for c in m.efield[d].domain().iter() {
+            m.efield[d].set(c, 0.0);
+        }
+        for c in sim.geom.interior.iter() {
+            let mut up = c;
+            up[d] += 1;
+            m.bcell[d].set(c, 0.5 * (*m.bface[d].at(c) + *m.bface[d].at(up)));
+        }
+    }
+}
+
+#[test]
+fn a_solenoidal_field_stays_solenoidal() {
+    // manufactured div-free field (B = curl A): div B is at roundoff before and after the operator,
+    // and the operator's change to B is itself div-free -- solenoidal maintenance, not merely
+    // preservation of a nonzero divergence.
+    let sim = build_sim(slip_spec());
+    seed_solenoidal(&sim);
+    let div_field_before = div_field(&sim);
+    let div_before = max_div_b(&sim);
+
+    body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
+    ct_curl::<3, 3, HostMemory, f64>(&sim, DT);
+    let div_after = max_div_b(&sim);
+    let div_delta = div_field(&sim)
+        .iter()
+        .map(|(c, d)| (d - div_field_before[c]).abs())
+        .fold(0.0_f64, f64::max);
+
+    let scale = {
+        let m = sim.fields.mhd.as_ref().unwrap();
+        let mut mx = 0.0_f64;
+        for d in 0..3 {
+            for c in sim.geom.interior.iter() {
+                mx = mx.max(m.bface[d].at(c).abs());
+            }
+        }
+        mx / sim.geom.dx[0]
+    };
+    println!(
+        "\nsolenoidal seed (B = curl A):  max|div B^n| = {div_before:.3e}  max|div B^n+1| = {div_after:.3e}  max|div dB| = {div_delta:.3e}  (field scale {scale:.3e})\n"
+    );
+    assert!(scale > 1e-3, "vacuous solenoidal test (field scale {scale})");
+    assert!(div_before < 1e-11 * scale, "seed is not solenoidal: max|div B^n| = {div_before}");
+    assert!(div_after < 1e-11 * scale, "operator broke solenoidality: max|div B^n+1| = {div_after}");
+    assert!(div_delta < 1e-11 * scale, "the operator's dB is not div-free: max|div dB| = {div_delta}");
+}
+
 fn bcell(m: &Mhd, d: usize, c: [isize; 3]) -> f64 {
     *m.bcell[d].at(c)
 }
@@ -550,4 +614,22 @@ fn max_div_b(sim: &Sim) -> f64 {
         mx = mx.max(div.abs());
     }
     mx
+}
+
+// the per-cell staggered divergence of B over the interior, reading the full face field (halo
+// included) so the stencil is complete at every interior cell.
+fn div_field(sim: &Sim) -> std::collections::HashMap<[isize; 3], f64> {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    let inv_dx = 1.0 / sim.geom.dx[0];
+    let mut out = std::collections::HashMap::new();
+    for c in sim.geom.interior.iter() {
+        let mut div = 0.0;
+        for d in 0..3 {
+            let mut up = c;
+            up[d] += 1;
+            div += (*m.bface[d].at(up) - *m.bface[d].at(c)) * inv_dx;
+        }
+        out.insert(c, div);
+    }
+    out
 }
