@@ -725,6 +725,11 @@ pub struct MhdStaggeredFields<
     /// passes never alias.
     pub slip_quadrature: Option<BcellFields<D, DOF, M, Sc>>,
 
+    /// scratch for the implicit magnetic-slip midpoint solve, present only when a slip body runs.
+    /// the solve is transactional: it reads the substep input, iterates in these buffers, and
+    /// returns a converged candidate without mutating the production bface/bcell/cons.nrg.
+    pub magnetic_slip: Option<MagneticSlipWorkspace<D, DOF, M, Sc>>,
+
     /// whether bface has been explicitly initialized.
     /// set by mhd_init_bface_from_bcell or by direct user writes.
     /// evolve() uses this to auto-init bface from bcell on first call
@@ -874,6 +879,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             v_upwind: v_upwind_outer.try_into().unwrap_or_else(|_| unreachable!()),
             // allocated on demand at attach_bodies when a slip body is present.
             slip_quadrature: None,
+            magnetic_slip: None,
             bface_initialized: std::sync::atomic::AtomicBool::new(false),
         })
     }
@@ -889,6 +895,72 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         }
         Ok(())
     }
+
+    /// allocate the implicit magnetic-slip midpoint workspace if it is not already present:
+    /// face-vector scratch on the `bface` domains and cell scratch on the allocated domain.
+    /// idempotent; called at `attach_bodies` for a slip body.
+    pub fn alloc_magnetic_slip_workspace(&mut self, allocated: &Domain<D>) -> symbi_xpu::Result<()> {
+        if self.magnetic_slip.is_some() {
+            return Ok(());
+        }
+        let face_doms: Vec<Domain<D>> = (0..D).map(|d| self.bface.b[d].domain().clone()).collect();
+        let face_group = |doms: &[Domain<D>]| -> symbi_xpu::Result<BfaceFields<D, M, Sc>> {
+            let mut v = Vec::with_capacity(D);
+            for dom in doms {
+                v.push(Field::zeros(dom)?);
+            }
+            Ok(BfaceFields {
+                b: v.try_into().unwrap_or_else(|_| unreachable!()),
+            })
+        };
+        let cell_group = || -> symbi_xpu::Result<BcellFields<D, DOF, M, Sc>> {
+            Ok(BcellFields {
+                b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
+            })
+        };
+        self.magnetic_slip = Some(MagneticSlipWorkspace {
+            input: face_group(&face_doms)?,
+            frozen_bcell: cell_group()?,
+            quadrature: cell_group()?,
+            rhs: face_group(&face_doms)?,
+            iterate: face_group(&face_doms)?,
+            residual: face_group(&face_doms)?,
+            direction: face_group(&face_doms)?,
+            operator_direction: face_group(&face_doms)?,
+            candidate: face_group(&face_doms)?,
+        });
+        Ok(())
+    }
+}
+
+/// scratch for the implicit magnetic-slip midpoint solve. each role is an explicit typed field
+/// rather than an anonymous flattened set. allocated only when a supported `MagneticSpec::Slip`
+/// body exists, so non-slip MHD runs carry none of it.
+pub struct MagneticSlipWorkspace<
+    const D: usize,
+    const DOF: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
+    /// the immutable substep-input face field B^0.
+    pub input: BfaceFields<D, M, Sc>,
+    /// the midpoint predictor's cell field B* = interp(B^0 - dt/2 L(B^0) B^0); the frozen dyad
+    /// A(B*), its coefficient, and the shell mask read it.
+    pub frozen_bcell: BcellFields<D, DOF, M, Sc>,
+    /// the per-cell dyad staging F_q = A(B*)(R J).
+    pub quadrature: BcellFields<D, DOF, M, Sc>,
+    /// the right-hand side (I - dt/2 L*) B^0.
+    pub rhs: BfaceFields<D, M, Sc>,
+    /// the CG iterate; holds the converged candidate at exit.
+    pub iterate: BfaceFields<D, M, Sc>,
+    /// the CG residual.
+    pub residual: BfaceFields<D, M, Sc>,
+    /// the CG search direction.
+    pub direction: BfaceFields<D, M, Sc>,
+    /// the system-operator image (I + dt/2 L*) direction.
+    pub operator_direction: BfaceFields<D, M, Sc>,
+    /// the accepted converged candidate B^1, copied from the iterate at convergence.
+    pub candidate: BfaceFields<D, M, Sc>,
 }
 
 /// RK workspace for one partition. `NDIM` = grid dim, `DOF` = vector component dim
@@ -2800,6 +2872,8 @@ where
             if let Some(mhd) = self.fields.mhd.as_mut() {
                 mhd.alloc_slip_quadrature(&allocated)
                     .expect("magnetic-slip quadrature scratch allocation");
+                mhd.alloc_magnetic_slip_workspace(&allocated)
+                    .expect("magnetic-slip midpoint workspace allocation");
             }
         }
         self.immersed = Some(ImmersedBodies {

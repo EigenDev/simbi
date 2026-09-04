@@ -25,7 +25,9 @@ use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, MagneticSpec, SurfaceSpec};
-use symbi_substrate::regimes::mhd_substrate::{body_slip_emf, ct_curl};
+use symbi_substrate::regimes::mhd_substrate::{
+    body_slip_emf, ct_curl, magnetic_slip_apply_operator, magnetic_slip_solve,
+};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim = SimStateGeneric<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>;
@@ -371,6 +373,83 @@ fn the_midpoint_method_is_second_order_in_time() {
     assert!(
         ratio > 3.4,
         "the midpoint method is not second order: E(dt)/E(dt/2) = {ratio:.3} (expected ~4)"
+    );
+}
+
+// M_face(x) = 1/2 sum_interior |x|^2 over the workspace face field.
+fn face_energy_ws(sim: &Sim, f: &symbi_sim::state::BfaceFields<3, HostMemory, f64>) -> f64 {
+    let mut e = 0.0;
+    for d in 0..3 {
+        for c in sim.geom.interior.iter() {
+            let b = *f.b[d].at(c);
+            e += 0.5 * b * b;
+        }
+    }
+    e
+}
+
+#[test]
+fn the_production_solve_is_transactional_and_proves_the_face_energy_theorem() {
+    let sim = build_sim();
+    let b0 = face_of(&random_face(11), &sim);
+    set_bface(&sim, &b0);
+    interp_bcell(&sim);
+
+    let bface_before = get_bface(&sim);
+    let dt = DT;
+    let receipt = magnetic_slip_solve::<3, 3, HostMemory, f64>(&sim, dt, GAMMA, 1e-13, 500);
+    assert!(
+        receipt.converged,
+        "production CG did not converge: {} iters, res {:.3e}",
+        receipt.iterations, receipt.final_residual_norm
+    );
+
+    // transactional: production bface is restored to the substep input (the solve mutates neither it
+    // nor bcell nor cons.nrg; the candidate lives in the workspace).
+    let bface_after = get_bface(&sim);
+    let mut max_drift = 0.0_f64;
+    for k in keys(&sim) {
+        max_drift = max_drift.max((bface_before[&k] - bface_after[&k]).abs());
+    }
+    assert!(max_drift < 1e-12, "the solve mutated production bface: max drift {max_drift:.3e}");
+
+    // the face-norm energy theorem: dM_face = -dt <B^{1/2}, L* B^{1/2}> = -Q_h, Q_h >= 0.
+    let ws = sim.fields.mhd.as_ref().unwrap().magnetic_slip.as_ref().unwrap();
+    let dm_face = face_energy_ws(&sim, &ws.candidate) - face_energy_ws(&sim, &ws.input);
+
+    // B^{1/2} = (candidate + input)/2 into ws.rhs over the full domain (periodic halo carried), freeze
+    // bcell = B*, then L* B^{1/2} into ws.operator_direction.
+    for d in 0..3 {
+        for c in ws.rhs.b[d].domain().iter() {
+            ws.rhs.b[d].set(c, 0.5 * (*ws.candidate.b[d].at(c) + *ws.input.b[d].at(c)));
+        }
+    }
+    let mhd = sim.fields.mhd.as_ref().unwrap();
+    for d in 0..3 {
+        for c in sim.geom.interior.iter() {
+            mhd.bcell[d].set(c, *ws.frozen_bcell.b[d].at(c));
+        }
+    }
+    magnetic_slip_apply_operator::<3, 3, HostMemory, f64>(
+        &sim, GAMMA, true, &ws.rhs, &ws.operator_direction,
+    );
+    let mut quad = 0.0;
+    for d in 0..3 {
+        for c in sim.geom.interior.iter() {
+            quad += *ws.rhs.b[d].at(c) * *ws.operator_direction.b[d].at(c);
+        }
+    }
+    let q_h = dt * quad; // the dissipated face-Hodge magnetic energy, >= 0
+    assert!(q_h >= -1e-10, "face dissipation is negative: Q_h = {q_h:.3e}");
+    assert!(
+        (q_h + dm_face).abs() < 1e-8 * q_h.abs().max(dm_face.abs()).max(1.0),
+        "face energy theorem fails: Q_h = {q_h:.9e}, -dM_face = {:.9e}, residual {:.3e}",
+        -dm_face,
+        (q_h + dm_face).abs()
+    );
+    println!(
+        "\nproduction solve:  CG {} iters (res {:.2e})  Q_h = {q_h:.9e}  -dM_face = {:.9e}  residual {:.3e}  bface-drift {max_drift:.2e}\n",
+        receipt.iterations, receipt.final_residual_norm, -dm_face, (q_h + dm_face).abs()
     );
 }
 

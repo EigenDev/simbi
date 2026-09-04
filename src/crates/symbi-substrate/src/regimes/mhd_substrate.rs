@@ -1782,6 +1782,263 @@ pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
+// =============================================================================
+// the implicit magnetic-slip midpoint solve (transactional, host, 3D cartesian periodic).
+// =============================================================================
+
+/// the accepted receipt of a converged implicit magnetic-slip midpoint solve. an accepted receipt is
+/// converged by construction; a nonconverged solve returns `converged = false` and its candidate is
+/// discarded by the caller.
+#[derive(Clone, Copy, Debug)]
+pub struct MagneticSlipSolveReceipt {
+    pub iterations: usize,
+    pub initial_residual_norm: f64,
+    pub final_residual_norm: f64,
+    pub requested_tolerance: f64,
+    pub converged: bool,
+}
+
+type Face<const D: usize, Mem, Sc> = symbi_sim::state::BfaceFields<D, Mem, Sc>;
+
+// the face inner product over the interior (periodic: one entry per unique face per orientation).
+fn face_dot<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    a: &Face<D, Mem, Sc>,
+    b: &Face<D, Mem, Sc>,
+) -> f64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mut s = 0.0;
+    for d in 0..D {
+        for c in sim.geom.interior.iter() {
+            s += a.b[d].at(c).to_f64() * b.b[d].at(c).to_f64();
+        }
+    }
+    s
+}
+
+// out = alpha*x + y over the interior.
+fn face_axpy<const D: usize, const DOF: usize, Mem, Sc>(
+    _sim: &FieldStore<D, DOF, Mem, Sc>,
+    alpha: f64,
+    x: &Face<D, Mem, Sc>,
+    y: &Face<D, Mem, Sc>,
+    out: &Face<D, Mem, Sc>,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    for d in 0..D {
+        for c in out.b[d].domain().iter() {
+            let v = alpha * x.b[d].at(c).to_f64() + y.b[d].at(c).to_f64();
+            out.b[d].set(c, Sc::from_f64(v));
+        }
+    }
+}
+
+// copy production bface interior into `dst`.
+fn snapshot_bface<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dst: &Face<D, Mem, Sc>,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
+    for d in 0..D {
+        for c in dst.b[d].domain().iter() {
+            dst.b[d].set(c, *mhd.bface[d].at(c));
+        }
+    }
+}
+
+// write `src` into production bface interior.
+fn restore_bface<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    src: &Face<D, Mem, Sc>,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
+    for d in 0..D {
+        for c in src.b[d].domain().iter() {
+            mhd.bface[d].set(c, *src.b[d].at(c));
+        }
+    }
+}
+
+// set production cell B = interp(bface) over the interior (the forward face-average).
+fn interp_bcell<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>)
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
+    let half = Sc::from_f64(0.5);
+    for d in 0..D {
+        for c in sim.geom.interior.iter() {
+            let mut up = c;
+            up[d] += 1;
+            mhd.bcell[d].set(c, half * (*mhd.bface[d].at(c) + *mhd.bface[d].at(up)));
+        }
+    }
+}
+
+fn zero_efield<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>)
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
+    for d in 0..D {
+        for c in mhd.efield[d].domain().iter() {
+            mhd.efield[d].set(c, Sc::ZERO);
+        }
+    }
+}
+
+/// apply the frozen slip operator L* = C R* A(B*) R C* to a face field `p`, into `out`. production
+/// `bcell` must already hold the frozen predictor B*. this reuses the exact production chain: set
+/// bface = p, refill its periodic halo, run the two-pass slip operator into the edge EMF, then curl.
+/// `L* p = C E` recovered as `p - (p - dt C E)|_{dt=1}`, so no separate curl stencil is written.
+/// transiently mutates production bface/efield; the caller restores them.
+pub fn magnetic_slip_apply_operator<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    gamma: f64,
+    has_energy: bool,
+    p: &Face<D, Mem, Sc>,
+    out: &Face<D, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let _ = has_energy;
+    restore_bface(sim, p); // production bface <- p, halo included (the vectors carry a periodic halo)
+    zero_efield(sim);
+    body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma); // efield = R* A(B*) R C* p
+    ct_curl::<D, DOF, Mem, Sc>(sim, 1.0); // bface <- p - C E
+    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
+    for d in 0..D {
+        for c in out.b[d].domain().iter() {
+            out.b[d].set(c, Sc::from_f64(p.b[d].at(c).to_f64() - mhd.bface[d].at(c).to_f64()));
+        }
+    }
+}
+
+/// the transactional implicit magnetic-slip midpoint solve over substep `dt`. reads the production
+/// face field B^0, forms the second-order explicit predictor B* = B^0 - dt/2 L(B^0) B^0, freezes
+/// A* = A(B*), and solves the SPD system (I + dt/2 L*) B^1 = (I - dt/2 L*) B^0 by conjugate gradient
+/// in the workspace. it does not mutate production `bface`, `bcell`, or `cons.nrg`: the converged
+/// candidate B^1 is left in the workspace for a separate commit. on nonconvergence the candidate is
+/// not accepted. host-only, 3D cartesian; other memory/charts fail loudly.
+pub fn magnetic_slip_solve<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    gamma: f64,
+    tol: f64,
+    max_iter: usize,
+) -> MagneticSlipSolveReceipt
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    assert!(
+        Mem::IS_HOST_ACCESSIBLE,
+        "the implicit magnetic-slip solve runs on host memory; device execution is not implemented \
+         and must not fall back to a host copy"
+    );
+    assert!(
+        sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 3 && DOF == 3,
+        "the implicit magnetic-slip solve is a 3D cartesian operator; the {:?} chart in {D}D DOF \
+         {DOF} is not implemented",
+        sim.geom.coords
+    );
+    let has_energy = sim.fields.cons.nrg_field().is_some();
+    assert!(
+        has_energy,
+        "magnetic slip needs the adiabatic energy channel; isothermal MHD has no thermal sink"
+    );
+    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
+    let ws = mhd
+        .magnetic_slip
+        .as_ref()
+        .expect("magnetic-slip midpoint workspace (allocated at attach_bodies)");
+
+    snapshot_bface(sim, &ws.input); // save the substep input B^0
+
+    // predictor B* = B^0 - dt/2 L(B^0) B^0, A(B^0) nonlinear (bcell = interp(B^0)).
+    restore_bface(sim, &ws.input);
+    interp_bcell(sim);
+    ghost_fill::<D, DOF, Mem, Sc>(sim, has_energy);
+    zero_efield(sim);
+    body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma);
+    ct_curl::<D, DOF, Mem, Sc>(sim, 0.5 * dt); // bface <- B*
+    interp_bcell(sim); // production bcell <- interp(B*) (bface holds B*): freeze A*
+    // capture the frozen predictor cell field after the interpolation, so it is interp(B*).
+    for d in 0..DOF {
+        for c in sim.geom.interior.iter() {
+            ws.frozen_bcell.b[d].set(c, *mhd.bcell[d].at(c));
+        }
+    }
+
+    // rhs = (I - dt/2 L*) B^0.
+    magnetic_slip_apply_operator(sim, gamma, has_energy, &ws.input, &ws.operator_direction);
+    face_axpy(sim, -0.5 * dt, &ws.operator_direction, &ws.input, &ws.rhs);
+
+    // conjugate gradient on (I + dt/2 L*) x = rhs, x_0 = 0.
+    for d in 0..D {
+        for c in ws.rhs.b[d].domain().iter() {
+            ws.iterate.b[d].set(c, Sc::ZERO);
+            ws.residual.b[d].set(c, *ws.rhs.b[d].at(c));
+            ws.direction.b[d].set(c, *ws.rhs.b[d].at(c));
+        }
+    }
+    let r0 = face_dot(sim, &ws.residual, &ws.residual).sqrt();
+    let target = tol * r0.max(1e-300);
+    let mut rs = face_dot(sim, &ws.residual, &ws.residual);
+    let mut iterations = 0;
+    let mut final_res = r0;
+    for it in 0..max_iter {
+        magnetic_slip_apply_operator(sim, gamma, has_energy, &ws.direction, &ws.operator_direction);
+        face_axpy(sim, 0.5 * dt, &ws.operator_direction, &ws.direction, &ws.operator_direction);
+        let alpha = rs / face_dot(sim, &ws.direction, &ws.operator_direction);
+        face_axpy(sim, alpha, &ws.direction, &ws.iterate, &ws.iterate);
+        face_axpy(sim, -alpha, &ws.operator_direction, &ws.residual, &ws.residual);
+        let rs_new = face_dot(sim, &ws.residual, &ws.residual);
+        final_res = rs_new.sqrt();
+        iterations = it + 1;
+        if final_res <= target {
+            break;
+        }
+        let beta = rs_new / rs;
+        face_axpy(sim, beta, &ws.direction, &ws.residual, &ws.direction);
+        rs = rs_new;
+    }
+    let converged = final_res <= target;
+
+    if converged {
+        for d in 0..D {
+            for c in ws.candidate.b[d].domain().iter() {
+                ws.candidate.b[d].set(c, *ws.iterate.b[d].at(c));
+            }
+        }
+    }
+    // restore production state: the solve mutates neither bface, bcell, nor cons.nrg.
+    restore_bface(sim, &ws.input);
+    interp_bcell(sim);
+
+    MagneticSlipSolveReceipt {
+        iterations,
+        initial_residual_norm: r0,
+        final_residual_norm: final_res,
+        requested_tolerance: tol,
+        converged,
+    }
+}
+
 /// add the 2.5D Cartesian Ohmic resistive edge EMF `eta * J_z` to the out-of-plane edge EMF (the
 /// grid-ordered edge map's slot) in place, from the staggered face field on the map's transverse
 /// faces. the curl then consumes the augmented EMF, so `bface` picks up the resistive
