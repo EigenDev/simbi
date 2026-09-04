@@ -1872,7 +1872,8 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     interval: u64,
     transport: &T,
     on_checkpoint: F,
-) where
+) -> crate::run_diagnostics::RunDiagnostics
+where
     M: MemorySpace,
     K: KernelSet<D, DOF, M, f64>,
     T: HaloTransport,
@@ -1908,7 +1909,8 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
     interval: u64,
     transport: &T,
     mut on_checkpoint: F,
-) where
+) -> crate::run_diagnostics::RunDiagnostics
+where
     M: MemorySpace,
     K: KernelSet<D, DOF, M, f64>,
     T: HaloTransport,
@@ -2006,6 +2008,17 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
             );
         }
     }
+
+    // the guard ledger's run scope: the flat-decomposed driver books every tile's
+    // substages on this host thread, so its scope opens here and stays open for
+    // the whole march. the accepted totals are read back through it at every exit.
+    // a crash unwinds through the scope, whose drop clears the pending bucket, so
+    // an aborted step's acts never survive.
+    let guard_scope = crate::guard_ledger::open_scope();
+    let run_diagnostics = || crate::run_diagnostics::RunDiagnostics {
+        projection: crate::projection_ledger::ProjectionLedger::default(),
+        guards: guard_scope.accepted(),
+    };
 
     let mut t = start_time;
     let mut iter: u64 = 0;
@@ -2185,8 +2198,14 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
                 }
             }
             if !retry {
+                // the guard ledger's accepted-step boundary: every tile's pending
+                // acts survive into the solution here.
+                crate::guard_ledger::step_commit();
                 break 'attempt injection_ledgers;
             }
+            // the guard ledger's rejection boundary: the pending acts describe
+            // states this per-tile rollback discards.
+            crate::guard_ledger::step_discard();
             // per-tile rollback restores the fields and each tracer's step-entry ancestry, but the
             // stage loop migrates tracer records between tiles as they cross a cut. a migrated
             // record now lives in a different tile's storage and no per-tile restore puts it back.
@@ -2454,13 +2473,14 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
             drain_devices::<M>(devices);
             let sh = shared!();
             if on_checkpoint(iter, t, &sh).is_break() {
-                return;
+                return run_diagnostics();
             }
         }
     }
     drain_devices::<M>(devices);
     let sh = shared!();
     let _ = on_checkpoint(iter, t, &sh);
+    run_diagnostics()
 }
 
 // the gather/scatter kernels for `StagedCopy`: pack a strided strip into a contiguous
