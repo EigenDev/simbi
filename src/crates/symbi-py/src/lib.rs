@@ -3093,6 +3093,42 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     if !cfg.bodies.is_empty() {
         push("Physics", "immersed bodies", cfg.bodies.len().to_string());
     }
+    // the operator support of every sink on a refined staggered grid, in finest cells: the
+    // accretion sphere, the drain mask and the slip shell to their f64 support, and the stencil
+    // reach. the finest level contains it, so the margin from the sink to the innermost region's
+    // boundary is the number to read when a run is refused.
+    if cfg.refinement_enabled && cfg.regime.contains("mhd") {
+        if let Some(inner) = cfg.refinement_regions.last() {
+            let levels = cfg.refinement_regions.len() as i32;
+            let dx_fine = cfg.dx[0] / 2f64.powi(levels);
+            let widths = symbi_ib::sdf::mask_support_widths();
+            for (idx, b) in cfg.bodies.iter().enumerate() {
+                if b.capability & 2 == 0 {
+                    continue;
+                }
+                let r = b.accretion_radius;
+                let drain = r + widths * dx_fine;
+                let slip = b.magnetic_slip.map_or(r, |m| r + m.placement * m.shell_width + widths * m.shell_width);
+                let support = drain.max(slip) + 3.0 * dx_fine;
+                let margin = (0..cfg.dims)
+                    .map(|ax| {
+                        let (lo, hi) = (inner[2 * ax], inner[2 * ax + 1]);
+                        let p = b.position.get(ax).copied().unwrap_or(0.0);
+                        (p - lo).min(hi - p)
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                push(
+                    "Physics",
+                    &format!("sink {idx} support"),
+                    format!(
+                        "{:.1} fine cells of {:.1} to the innermost boundary",
+                        support / dx_fine,
+                        margin / dx_fine
+                    ),
+                );
+            }
+        }
+    }
     if !cfg.source_jsons.is_empty() {
         push("Physics", "source term", "active".into());
     }
@@ -7846,6 +7882,18 @@ fn dispatch_and_run(
     // on a refined staggered grid is refused.
     if !cfg.bodies.is_empty() && cfg.refinement_enabled && cfg.regime.contains("mhd") {
         validate_refined_mhd_bodies(&cfg.bodies, &cfg.regime, cfg.dims, &cfg.coord_system, cfg.locally_isothermal)?;
+    }
+    // a gpu build evolves on device memory, where the MHD immersed-body drain has no form: its
+    // magnetic-energy sandwich and Alfven stiffness reduction are host passes. refuse rather than
+    // run a sink that would silently stop draining.
+    if cfg!(feature = "gpu") && cfg.regime.contains("mhd") && !cfg.bodies.is_empty() {
+        return Err(
+            "immersed bodies in MHD (rmhd, nmhd, imhd) run on the cpu build: the drain's \
+             magnetic-energy sandwich and Alfven stiffness reduction have no device form yet, and a \
+             gpu run would leave the sink inert while reporting accretion. run this configuration \
+             with compute_mode='cpu' until the device-native MHD drain lands"
+                .to_string(),
+        );
     }
     // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/rhd/isothermal) and
     // single-level MHD (rmhd/nmhd/imhd, the equivalence-tested staggered-CT halo exchange + face
