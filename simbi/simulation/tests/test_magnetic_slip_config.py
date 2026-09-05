@@ -249,6 +249,74 @@ def test_2p5d_slip_restart_matches_the_uninterrupted_run(tmp_path) -> None:
         _assert_tree_equal(a["level_0"], b["level_0"])
 
 
+# -- the isothermal closure ------------------------------------------------------------------
+
+
+def _body_dataset(directory: Path, name: str) -> np.ndarray | None:
+    with h5py.File(_final(directory), "r") as h:
+        return h[f"bodies/{name}"][...] if name in h["bodies"] else None
+
+
+class _TransparentIsoDisk(_TransparentDisk):
+    """the transparent 2.5D sink on the isothermal gas: the control the isothermal slip departs from."""
+
+
+@needs_backend
+def test_2p5d_isothermal_slip_from_config_acts_and_books_exported_heat() -> None:
+    slip_dir = Path(tempfile.mkdtemp())
+    control_dir = Path(tempfile.mkdtemp())
+    runner.run(_disk(MagneticSlipDisk2p5d, slip_dir, thermal_closure="isothermal"), compute_mode="cpu", max_steps=20)
+    runner.run(_disk(_TransparentIsoDisk, control_dir, thermal_closure="isothermal"), compute_mode="cpu", max_steps=20)
+    assert not glob.glob(os.path.join(slip_dir, "*crashed*")), "the isothermal 2.5D slip run crashed"
+    slip = _interior_2d(slip_dir, ("rho", "b3"))
+    control = _interior_2d(control_dir, ("rho", "b3"))
+    for nm, arr in slip.items():
+        assert np.all(np.isfinite(arr)), f"non-finite {nm} in the isothermal slip run"
+    bscale = np.abs(control["b3"]).max()
+    assert bscale > 1e-6, "the vertical field vanished; the comparison is vacuous"
+    db = np.abs(slip["b3"] - control["b3"]).max()
+    assert db > 1e-6 * bscale, f"the isothermal slip left the vertical field bit-near-identical to the transparent sink ({db:e})"
+    exported = _body_dataset(slip_dir, "exported_slip_heat")
+    assert exported is not None, "the isothermal checkpoint carries no exported_slip_heat receipt"
+    assert exported[0] > 0.0, "the isothermal sink exported no heat"
+    assert _body_dataset(slip_dir, "magnetic_slip_heating") is None, "an isothermal run reported gas heating"
+    assert _body_dataset(control_dir, "exported_slip_heat")[0] == 0.0, "a transparent sink exported heat"
+
+
+@needs_backend
+def test_2p5d_adiabatic_slip_books_its_heating_under_its_own_name() -> None:
+    slip_dir = Path(tempfile.mkdtemp())
+    runner.run(_disk(MagneticSlipDisk2p5d, slip_dir), compute_mode="cpu", max_steps=20)
+    heating = _body_dataset(slip_dir, "magnetic_slip_heating")
+    assert heating is not None, "the adiabatic checkpoint carries no magnetic_slip_heating receipt"
+    assert heating[0] > 0.0, "the adiabatic sink released no heat"
+    assert _body_dataset(slip_dir, "exported_slip_heat") is None, "an adiabatic run reported exported heat"
+
+
+# the paired comparison: the same disk, the same slip, under both closures. the isothermal gas
+# carries no pressure field, its closure being p = cs^2 rho; the adiabatic gas keeps the slip heat,
+# so its entropy p / rho^gamma rises above the transparent sink's where the shell dissipates. both
+# closures book their heat under their own names.
+@needs_backend
+def test_the_two_closures_differ_by_the_retained_slip_heat() -> None:
+    adiabatic = Path(tempfile.mkdtemp())
+    control = Path(tempfile.mkdtemp())
+    isothermal = Path(tempfile.mkdtemp())
+    runner.run(_disk(MagneticSlipDisk2p5d, adiabatic), compute_mode="cpu", max_steps=20)
+    runner.run(_disk(_TransparentDisk, control), compute_mode="cpu", max_steps=20)
+    runner.run(_disk(MagneticSlipDisk2p5d, isothermal, thermal_closure="isothermal"), compute_mode="cpu", max_steps=20)
+    with h5py.File(_final(isothermal), "r") as h:
+        assert "pre" not in h["level_0/partition_0/hydro/primitives"], "the isothermal gas carries a pressure field"
+    gamma = 5.0 / 3.0
+    a = _interior_2d(adiabatic, ("rho", "pre"))
+    c = _interior_2d(control, ("rho", "pre"))
+    entropy_rise = (a["pre"] / a["rho"] ** gamma - c["pre"] / c["rho"] ** gamma).max()
+    assert entropy_rise > 1e-9, f"the adiabatic slip retained no heat above the transparent sink (entropy rise {entropy_rise:e})"
+    heating = _body_dataset(adiabatic, "magnetic_slip_heating")[0]
+    exported = _body_dataset(isothermal, "exported_slip_heat")[0]
+    assert heating > 0.0 and exported > 0.0, f"a closure released no heat: retained {heating}, exported {exported}"
+
+
 # -- the refined hierarchy ------------------------------------------------------------------
 # a 32^3 root refined once over the central seven eighths: 56 fine cells per side. the sink of
 # two fine cells with a one-cell slip shell has an operator support (the accretion sphere, the
@@ -333,3 +401,22 @@ def test_refined_mhd_bodies_are_admitted_on_a_3d_cartesian_grid_only() -> None:
     )
     with pytest.raises(RuntimeError, match="3d cartesian"):
         runner.run(problem, compute_mode="cpu", max_steps=1)
+
+
+@needs_backend
+def test_a_refined_isothermal_slip_run_books_exported_heat_and_keeps_the_containment_rule() -> None:
+    slip_dir = Path(tempfile.mkdtemp())
+    runner.run(_refined(MagneticSlipBondiSink, slip_dir, thermal_closure="isothermal"), compute_mode="cpu", max_steps=12)
+    assert not glob.glob(os.path.join(slip_dir, "*crashed*")), "the refined isothermal slip run crashed"
+    fine = _fine_interior(slip_dir, ("rho", "b1"))
+    assert all(np.all(np.isfinite(a)) for a in fine.values()), "non-finite fine-level state"
+    exported = _body_dataset(slip_dir, "exported_slip_heat")
+    assert exported is not None and exported[0] > 0.0, "the refined isothermal sink exported no heat"
+    assert _body_dataset(slip_dir, "magnetic_slip_heating") is None
+    # the containment rule binds through the hierarchy attach, the path a refined run takes.
+    with pytest.raises(RuntimeError, match="sink support sphere"):
+        runner.run(
+            _refined(MagneticSlipBondiSink, Path(tempfile.mkdtemp()), fraction=0.5, thermal_closure="isothermal"),
+            compute_mode="cpu",
+            max_steps=1,
+        )

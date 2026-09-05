@@ -1930,11 +1930,15 @@ where
                 body.velocity[a] = vel[b * D + a];
             }
             body.mass = mass[b];
-            if let Some(h) = heat.as_ref() {
-                body.slip_heat_total = h[b];
-            }
-            if let Some(h) = heat_rate.as_ref() {
-                body.slip_heat_rate = h[b];
+            // the slip heat belongs to the body that owns the slip; a gravity-only proxy of it on
+            // a coarser level carries the coupling stripped and books nothing.
+            if matches!(body.spec.magnetic, symbi_ib::MagneticSpec::Slip { .. }) {
+                if let Some(h) = heat.as_ref() {
+                    body.slip_heat_total = h[b];
+                }
+                if let Some(h) = heat_rate.as_ref() {
+                    body.slip_heat_rate = h[b];
+                }
             }
             if let symbi_ib::BodyKind::BlackHole {
                 total_accreted_mass,

@@ -67,6 +67,18 @@ from simbi.types.typing import (
 class MagneticSlipBondiSink(SimbiProblem):
     """bondi accretion of a weakly magnetized gas onto a point mass with a magnetic-slip shell."""
 
+    # the thermal closure the slip operator runs under: an adiabatic gas keeps the released
+    # magnetic energy as heat (Newtonian MHD); an isothermal gas exports it to the cooling bath
+    # at once (isothermal MHD), the body booking it as `exported_slip_heat`.
+    thermal_closure: Annotated[
+        str,
+        ProblemParam(
+            "adiabatic",
+            cli=True,
+            description="thermal closure: 'adiabatic' (regime nmhd, heat retained) or "
+            "'isothermal' (regime imhd, heat exported)",
+        ),
+    ]
     # physics
     adiabatic_index: Annotated[
         float, ProblemParam(5.0 / 3.0, description="adiabatic index")
@@ -217,7 +229,17 @@ class MagneticSlipBondiSink(SimbiProblem):
     ]
 
     def setup(self) -> None:
-        """derive the domain size and run control from the bondi scales."""
+        """derive the domain size and run control from the bondi scales, and the regime from the
+        thermal closure."""
+        if self.thermal_closure not in ("adiabatic", "isothermal"):
+            raise ValueError(
+                f"thermal_closure={self.thermal_closure!r}; choose 'adiabatic' or 'isothermal'"
+            )
+        if self.isothermal_closure:
+            self.regime = Regime.IMHD
+            self.sound_speed = self.ambient_sound_speed
+        else:
+            self.regime = Regime.NMHD
         super().setup()
         if self.bounds is None:
             rb = self.domain_radius * self.bondi_radius
@@ -243,13 +265,15 @@ class MagneticSlipBondiSink(SimbiProblem):
         return self.bondi_radius / self.ambient_sound_speed
 
     @property
+    def isothermal_closure(self) -> bool:
+        return self.thermal_closure == "isothermal"
+
+    @property
     def ambient_pressure(self) -> float:
-        # p_inf = rho_inf cs^2 / gamma so that cs^2 = gamma p / rho holds.
-        return (
-            self.ambient_density
-            * self.ambient_sound_speed**2
-            / self.adiabatic_index
-        )
+        # p_inf = rho_inf cs^2 / gamma so that cs^2 = gamma p / rho holds on the adiabatic gas;
+        # p = rho cs^2 on the isothermal one.
+        gamma = 1.0 if self.isothermal_closure else self.adiabatic_index
+        return self.ambient_density * self.ambient_sound_speed**2 / gamma
 
     @property
     def b0(self) -> float:
@@ -302,8 +326,10 @@ class MagneticSlipBondiSink(SimbiProblem):
             nx, ny, nz = self.resolution
             rho = self.ambient_density
             pre = self.ambient_pressure
+            # the isothermal primitive carries no pressure slot: p = cs^2 rho is the closure.
+            state = (rho, 0.0, 0.0, 0.0) if self.isothermal_closure else (rho, 0.0, 0.0, 0.0, pre)
             for _ in range(nx * ny * nz):
-                yield (rho, 0.0, 0.0, 0.0, pre)
+                yield state
 
         def b_field(bn: str) -> StaggeredBFieldGenerator:
             nx, ny, nz = self.resolution
