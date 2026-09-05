@@ -1378,6 +1378,17 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
                 .collect();
             fused_save_buffers(&pairs);
         }
+        // the RK2 predictor CT update: save the pre-curl anchor B^n (also the FOFC anchor), then curl
+        // E^n to advance bface to the predictor B* = B^n - dt curl(E^n) and interpolate the predictor
+        // cell field. the corrector stage's godunov then evaluates E* = E(B*), so the averaged EMF is
+        // a true midpoint rather than 1/2(E^n + E(B^n)). the closing stage restores B^n before its curl.
+        {
+            let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
+                (0..D).map(|d| (&mhd.bface[d], &mhd.bface_n[d])).collect();
+            fofc_copy_fields(&pairs);
+        }
+        ct_curl::<D, DOF, Mem, Sc>(sim, dt); // bface <- B* = B^n - dt curl(E^n)
+        bcell_from_bface::<D, DOF, Mem, Sc>(sim, has_energy);
         return;
     }
     if stage == 2 {
@@ -1417,12 +1428,15 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
                 .collect();
             fused_avg_buffers(&pairs);
         }
-    }
-
-    // FOFC: snapshot bface -> bface_n before the curl. only the curling stages reach here (the
-    // predictor returned above after saving its EMF), so this captures `bface^n` — the value the
-    // CT redo restores before re-applying the curl exactly once from the spliced edge EMF.
-    {
+        // the corrector restores the pre-curl anchor B^n the predictor saved into bface_n (bface holds
+        // the predictor B*), then curls the averaged EMF once from B^n. bface_n stays the FOFC redo
+        // anchor. the single-stage Euler path (stage 0) takes the else branch instead.
+        let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
+            (0..D).map(|d| (&mhd.bface_n[d], &mhd.bface[d])).collect();
+        fofc_copy_fields(&pairs);
+    } else {
+        // the forward-Euler single stage: capture the pre-curl anchor B^n as the FOFC redo anchor, then
+        // curl its current field directly.
         let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
             (0..D).map(|d| (&mhd.bface[d], &mhd.bface_n[d])).collect();
         fofc_copy_fields(&pairs);

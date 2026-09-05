@@ -284,6 +284,100 @@ fn build_wave_sim(
     .build()
 }
 
+// scaling probe: one corrector step of passive induction at dt and dt/2. ||E*-En|| ~ dt means the
+// predictor midpoint correction exists; O(1) means stage 2 evaluates an inconsistent state.
+#[test]
+fn diag_passive_e_scaling() {
+    let k = 2.0 * std::f64::consts::PI;
+    // dt = 0 idempotence: the predictor state equals stage-1, so a consistent stage-2 EMF must reproduce
+    // E^n exactly (||E*-En|| = 0). any nonzero value is a pure producer inconsistency, temporal-error-free.
+    for dt in [0.0f64, 5.0e-4, 2.5e-4] {
+        let sim = build_wave_sim(
+            24,
+            |_| (1.0, [0.5, 0.0, 0.0], 1.0),
+            move |axis, [x, _, _]| if axis == 1 { 0.01 * (k * x).sin() } else { 0.0 },
+            move |[x, _, _]| [0.0, 0.01 * (k * x).sin(), 0.0],
+        );
+        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        // the fixture seeds both magnetic representations consistently, so the primed state is already
+        // canonical and the step measures from t = 0 with no time advanced beforehand.
+        hier.hydro_map(0, dt);
+    }
+}
+
+// the H-only ownership ladder: acoustic (B=0), passive induction (weak B advected by a uniform flow,
+// negligible Lorentz), and a strong-field MHD wave. acoustic ~2 => the SSP-RK stage/rebuild path is
+// first order; acoustic ~4 & passive ~2 => CT/EMF staging; both ~4 & strong ~2 => the gas-CT coupling.
+#[test]
+fn the_acoustic_and_passive_induction_waves_are_second_order() {
+    let k = 2.0 * std::f64::consts::PI;
+    let l2 = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>().sqrt();
+    macro_rules! wave {
+        ($label:expr, $gated:expr, $build:expr) => {{
+            let run = |dt: f64, nsteps: usize| {
+                let sim = $build;
+                let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+                let mut hier = Hierarchy::single(sim, sub);
+                hier.prime();
+                for _ in 0..nsteps {
+                    assert!(!hier.hydro_map(0, dt), "H retry");
+                }
+                let (bf, _bc, nrg, pre) = hier.slip_state_snapshots(0);
+                (bf, hier.density_snapshot(0), nrg, pre)
+            };
+            let dt = 2.5e-4;
+            let (a, b, c) = (run(dt, 8), run(dt / 2.0, 16), run(dt / 4.0, 32));
+            for (fname, x, y, z) in [
+                ("bface", &a.0, &b.0, &c.0),
+                ("density", &a.1, &b.1, &c.1),
+                ("energy", &a.2, &b.2, &c.2),
+                ("pressure", &a.3, &b.3, &c.3),
+            ] {
+                let fine = l2(y, z);
+                let r = l2(x, y) / fine.max(1e-300);
+                println!("WAVE {:>8} {fname:>8}: ratio={r:.2}", $label);
+                // a field the fixture leaves identically zero has no order to read.
+                if $gated && fine > 1e-14 {
+                    assert!(r > 3.5, "{} wave: H is not second order in {fname}: ratio {r:.2}", $label);
+                }
+            }
+        }};
+    }
+    // acoustic: smooth density/velocity/pressure perturbation, no field.
+    wave!("acoustic", true, build_wave_sim(
+        24,
+        move |[x, _, _]| (1.0 + 0.1 * (k * x).sin(), [0.1 * (k * x).sin(), 0.0, 0.0], 1.0 + 0.14 * (k * x).sin()),
+        |_, _| 0.0,
+        |_| [0.0, 0.0, 0.0],
+    ));
+    // passive induction: uniform flow advects a weak transverse B (Lorentz ~ B^2 ~ 1e-4 negligible).
+    wave!("passive", true, build_wave_sim(
+        24,
+        |_| (1.0, [0.5, 0.0, 0.0], 1.0),
+        move |axis, [x, _, _]| if axis == 1 { 0.01 * (k * x).sin() } else { 0.0 },
+        // By(x) sits on the y-faces, so a cell's two bounding y-faces share its x: the average is the
+        // same sinusoid at the cell center, exactly.
+        move |[x, _, _]| [0.0, 0.01 * (k * x).sin(), 0.0],
+    ));
+    // strong MHD wave: strong Bx background + a smooth velocity perturbation driving Alfven/magnetosonic.
+    // read at 24 cells per side, where the staggered field is still pre-asymptotic (its ratio climbs
+    // with resolution and reaches four at 48), so this rung reports without gating.
+    wave!("strongMHD", false, build_wave_sim(
+        24,
+        move |[x, _, _]| (1.0, [0.0, 0.1 * (k * x).sin(), 0.0], 1.0),
+        move |axis, [x, y, _]| match axis {
+            0 => 1.0 + 0.1 * (k * y).sin(),
+            1 => 0.1 * (k * x).sin(),
+            _ => 0.0,
+        },
+        // each face component varies only across its own normal, so the two bounding faces of a cell
+        // carry equal values and their average is the analytic field at the cell center.
+        move |[x, y, _]| [1.0 + 0.1 * (k * y).sin(), 0.1 * (k * x).sin(), 0.0],
+    ));
+}
+
 // an MHD initial condition owes two consistent magnetic representations: staggered faces carrying the
 // divergence constraint, and cell-centered B equal to their arithmetic average, whose magnetic energy
 // prim->cons deposits into cons.nrg. seeding nonzero faces beside a zero cell B satisfies div B = 0 yet
@@ -360,5 +454,50 @@ fn seeded_face_and_cell_magnetic_fields_agree_after_priming() {
         same(&format!("{name} density"), &rho0, &rho1);
         same(&format!("{name} energy"), &nrg0, &nrg1);
         same(&format!("{name} pressure"), &pre0, &pre1);
+    }
+}
+
+// H standalone temporal convergence on a smooth strong-uniform-field, body-free, FOFC-free fixture,
+// swept over resolution. an extra halving level distinguishes a pre-asymptotic ratio from a stable
+// ratio of two. the staggered-field ratio climbs with resolution (about 2.5 at 12 cells per side, 3.8
+// at 24, 4.0 at 48) while the energy ratio sits at four throughout: the temporal order is two, and the
+// coarse grids are read through their own spatial truncation in the field.
+#[test]
+fn the_ideal_mhd_step_is_second_order_per_field_once_resolved() {
+    let l2 = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>().sqrt();
+    let run = |n: usize, dt: f64, nsteps: usize| -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let sim = build_smooth_field_sim(n);
+        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        for _ in 0..nsteps {
+            assert!(!hier.hydro_map(0, dt), "H stage retry on the smooth fixture");
+        }
+        let (bf, _bc, nrg, pre) = hier.slip_state_snapshots(0);
+        (bf, nrg, pre)
+    };
+    for n in [12usize, 24, 48] {
+        // fixed horizon, four timestep levels: ratios of successive differences reveal the asymptotic
+        // order. dt well below the fast-magnetosonic CFL at every resolution.
+        let dt = 2.5e-4;
+        let (u1, u2, u3, u4) = (run(n, dt, 8), run(n, dt / 2.0, 16), run(n, dt / 4.0, 32), run(n, dt / 8.0, 64));
+        for (fname, i) in [("bface", 0), ("energy", 1), ("pressure", 2)] {
+            let g = |u: &(Vec<f64>, Vec<f64>, Vec<f64>)| match i {
+                0 => u.0.clone(),
+                1 => u.1.clone(),
+                _ => u.2.clone(),
+            };
+            let (e1, e2, e3) = (l2(&g(&u1), &g(&u2)), l2(&g(&u2), &g(&u3)), l2(&g(&u3), &g(&u4)));
+            let (r1, r2) = (e1 / e2.max(1e-300), e2 / e3.max(1e-300));
+            println!("H N={n:<3} {fname:>8}: ratios {r1:.2} {r2:.2}  (successive; -> 4 if second order)");
+            // the finest grid resolves every field's structure; there the temporal order reads clean.
+            if n == 48 {
+                assert!(e3 > 1e-14, "vacuous H order measurement in {fname} at N={n}");
+                assert!(
+                    r1 > 3.5 && r2 > 3.5,
+                    "the ideal-MHD RK2 step is not second order in {fname} at N={n}: ratios {r1:.2} {r2:.2}"
+                );
+            }
+        }
     }
 }
