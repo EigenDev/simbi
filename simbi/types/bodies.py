@@ -346,6 +346,59 @@ class MagneticProperties:
 
 
 @dataclass(frozen=True)
+class MagneticSlipProperties:
+    """force-selective magnetic slip at a mass-removing sink (`MagneticSpec::Slip`). the field
+    threading a shell around the sink is transported relative to the draining gas by the
+    Lorentz-driven slip velocity, so compressed flux is released while a force-free field is left
+    exactly untouched; the magnetic energy released heats the gas. the coefficient closes on the
+    sink's own drain time tau_rho through a magnetic Damkohler number, so the model carries no free
+    resistivity:
+
+        a_B = ell_B^2 / ((|B|^2 + field_regularization^2) * diffusivity_ratio * tau_rho)
+        ell_B = slip_length_ratio * shell_width
+
+    parameters (code units; magnetic energy |B|^2 / 2):
+      diffusivity_ratio    D_B = tau_B / tau_rho > 0, how much slower the field decouples than the
+                           gas drains. D_B near 1 releases flux on the accretion time; larger holds
+                           the field longer.
+      shell_width          w > 0, the mollification width of the slip shell (tanh ramp), in length
+                           units; a few cells at the sink's mask edge.
+      field_regularization B_0 > 0, bounds the slip speed at magnetic nulls; a small fraction of
+                           the ambient field strength.
+      slip_length_ratio    ell_B / w > 0, the transport length in shell widths. 1 is the sharp-
+                           interface scaling.
+      placement            shell center in shell widths relative to the mass surface: negative
+                           inside, 0 centered on it, positive outside. finite, signed.
+
+    runs on an adiabatic Newtonian MHD 3D cartesian grid (`Regime.NMHD`, cpu), on a body whose
+    surface removes mass (a plain accretion drain, a torque-free drain, or a porous surface with
+    porosity > 0), since tau_rho is that drain's timescale. the backend reads `magnetic.slip`."""
+
+    diffusivity_ratio: float
+    shell_width: float
+    field_regularization: float
+    slip_length_ratio: float = 1.0
+    placement: float = 0.0
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("diffusivity_ratio", self.diffusivity_ratio),
+            ("shell_width", self.shell_width),
+            ("field_regularization", self.field_regularization),
+            ("slip_length_ratio", self.slip_length_ratio),
+        ):
+            if not (math.isfinite(value) and value > 0.0):
+                raise _config_error(
+                    f"magnetic slip {name} must be finite and positive; got {value}."
+                )
+        if not math.isfinite(self.placement):
+            raise _config_error(
+                f"magnetic slip placement must be finite (signed shell widths); got "
+                f"{self.placement}."
+            )
+
+
+@dataclass(frozen=True)
 class ImmersedBodyConfig:
     capability: BodyCapability
     mass: float
@@ -357,8 +410,9 @@ class ImmersedBodyConfig:
     gravitational: Optional[GravitationalProperties] = None
     accretion: Optional[AccretionProperties] = None
     rigid: Optional[RigidProperties] = None
-    # MHD magnetic coupling (Ohmic resistive sink); None = magnetically transparent.
-    magnetic: Optional[MagneticProperties] = None
+    # MHD magnetic coupling: an Ohmic resistive sink or the force-selective magnetic slip;
+    # None = magnetically transparent. one coupling per body.
+    magnetic: Optional[MagneticProperties | MagneticSlipProperties] = None
 
     def __post_init__(self) -> None:
         unsupported = self.capability & ~_WIRED_CAPABILITIES
@@ -415,6 +469,25 @@ class ImmersedBodyConfig:
                 "capability GRAVITATIONAL requires a `gravitational` property "
                 "block (the softening length)."
             )
+        if isinstance(self.magnetic, MagneticSlipProperties):
+            # the slip coefficient closes on the drain time tau_rho, so the surface must remove mass:
+            # a plain accretion drain, a torque-free drain, or a porous surface with porosity > 0.
+            acc = self.accretion
+            drains = (
+                has_capability(self.capability, BodyCapability.ACCRETION)
+                and acc is not None
+                and (
+                    acc.torque_free_xi is not None
+                    or acc.porosity is None
+                    or acc.porosity > 0.0
+                )
+            )
+            if not drains:
+                raise _config_error(
+                    "magnetic slip closes its coefficient on the sink's drain time, so the body "
+                    "must remove mass: give it capability ACCRETION with a draining surface (a "
+                    "plain drain, torque_free_xi, or porosity > 0)."
+                )
 
     def to_backend(self) -> dict[str, Any]:
         """the backend body wire: the nested dict the rust `BodyParams` reads --
@@ -422,8 +495,13 @@ class ImmersedBodyConfig:
         and the `gravitational` / `accretion` / `rigid` property groups (with
         `rigid.shape.wire` for a shaped wall). the field tree IS the contract, so the
         serialization is the identity asdict; the key set is pinned by test so a field
-        rename cannot silently become a backend unwrap_or default."""
-        return asdict(self)
+        rename cannot silently become a backend unwrap_or default. the magnetic coupling crosses
+        as `magnetic.resistivity` for the Ohmic sink and as the `magnetic.slip` group for the
+        magnetic slip, so the backend reads exactly one of the two."""
+        wire = asdict(self)
+        if isinstance(self.magnetic, MagneticSlipProperties):
+            wire["magnetic"] = {"slip": asdict(self.magnetic)}
+        return wire
 
 
 @dataclass(frozen=True)
@@ -676,4 +754,5 @@ __all__ = [
     "BodyCapability",
     "has_capability",
     "MagneticProperties",
+    "MagneticSlipProperties",
 ]

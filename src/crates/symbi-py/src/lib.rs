@@ -258,6 +258,70 @@ struct BodyParams {
     /// the body's Ohmic resistivity `eta` (`MagneticSpec::Resistive`): a magnetized immersed sink that
     /// dissipates the field threading it. None = magnetically transparent (`MagneticSpec::None`).
     magnetic_resistivity: Option<f64>,
+    /// the force-selective magnetic slip (`MagneticSpec::Slip`), read from the `magnetic.slip` group.
+    /// a body carries at most one magnetic coupling; the resistive and slip wires are exclusive.
+    magnetic_slip: Option<MagneticSlipParams>,
+}
+
+/// the magnetic-slip scales as the body wire carries them under `magnetic.slip`: the Damkohler
+/// ratio D_B, the shell mollification width w, the transport-length ratio ell_B / w, the null
+/// regularization B_0, and the signed shell placement in units of w. every key is required.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MagneticSlipParams {
+    diffusivity_ratio: f64,
+    shell_width: f64,
+    slip_length_ratio: f64,
+    field_regularization: f64,
+    placement: f64,
+}
+
+/// the public-boundary contract of a magnetic-slip body: exactly one magnetic coupling, a run the
+/// slip operator is built for (adiabatic Newtonian MHD on a 3D cartesian grid; the implicit-midpoint
+/// solve runs on the host), and a surface that removes mass, since the slip coefficient closes on
+/// that drain's timescale tau_rho.
+fn validate_magnetic_slip_bodies(
+    bodies: &[BodyParams],
+    regime: &str,
+    dims: usize,
+    coord_system: &str,
+    locally_isothermal: bool,
+) -> Result<(), String> {
+    const ACCRETION: u64 = 2;
+    for (idx, b) in bodies.iter().enumerate() {
+        if b.magnetic_slip.is_none() {
+            continue;
+        }
+        if b.magnetic_resistivity.is_some_and(|eta| eta > 0.0) {
+            return Err(format!(
+                "immersed body {idx} declares both a resistivity and the magnetic slip; a body \
+                 carries exactly one magnetic coupling"
+            ));
+        }
+        if regime != "nmhd" || locally_isothermal {
+            return Err(format!(
+                "immersed body {idx}: the magnetic slip runs in adiabatic Newtonian MHD (regime \
+                 nmhd, not locally isothermal); this run is regime {} (locally_isothermal {})",
+                regime, locally_isothermal
+            ));
+        }
+        if dims != 3 || coord_system != "cartesian" {
+            return Err(format!(
+                "immersed body {idx}: the magnetic slip runs on a 3D cartesian grid; this run is \
+                 {}D {}",
+                dims, coord_system
+            ));
+        }
+        let drains = b.capability & ACCRETION != 0
+            && (b.torque_free_xi.is_some() || b.porosity.is_none_or(|p| p > 0.0));
+        if !drains {
+            return Err(format!(
+                "immersed body {idx}: the magnetic slip closes its coefficient on the sink's drain \
+                 time, so the body must remove mass (capability ACCRETION with a plain drain, a \
+                 torque-free drain, or porosity > 0)"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_porous_body_overlaps(bodies: &[BodyParams]) -> Result<(), String> {
@@ -1452,9 +1516,36 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             inertia_principal,
             two_way_coupling,
             magnetic_resistivity: sub_f64_opt(b, "magnetic", "resistivity"),
+            magnetic_slip: parse_magnetic_slip(b),
         });
     }
     out
+}
+
+/// the `magnetic.slip` group, when the body declares the magnetic slip. a declared group with a
+/// missing or non-numeric scale is a wire fault and fails here rather than silently defaulting.
+fn parse_magnetic_slip(body: &Bound<'_, PyDict>) -> Option<MagneticSlipParams> {
+    let slip = body
+        .get_item("magnetic")
+        .ok()
+        .flatten()
+        .and_then(|g| g.cast::<PyDict>().ok().cloned())
+        .and_then(|gd| gd.get_item("slip").ok().flatten())
+        .and_then(|sl| sl.cast::<PyDict>().ok().cloned())?;
+    let f = |key: &str| -> f64 {
+        slip.get_item(key)
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_else(|| panic!("immersed body `magnetic.slip.{key}` is missing or not a number"))
+    };
+    Some(MagneticSlipParams {
+        diffusivity_ratio: f("diffusivity_ratio"),
+        shell_width: f("shell_width"),
+        slip_length_ratio: f("slip_length_ratio"),
+        field_regularization: f("field_regularization"),
+        placement: f("placement"),
+    })
 }
 
 /// the prescribed binary orbit params (`body_system.binary_config`): total mass, semi-major axis,
@@ -1544,6 +1635,7 @@ fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) 
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: two_way,
             magnetic_resistivity: None,
+            magnetic_slip: None,
         });
     }
 }
@@ -3362,10 +3454,21 @@ fn build_bodies<const D: usize>(
         } else {
             symbi_ib::SofteningKind::Plummer
         });
-        // a magnetized sink: the body dissipates the field threading it (MHD runs only; a no-op on B
-        // for a hydro/None body). applied on top of the surface stack.
-        let body = match b.magnetic_resistivity {
-            Some(eta) if eta > 0.0 => body.with_magnetic(symbi_ib::MagneticSpec::Resistive { eta }),
+        // the magnetic coupling, applied on top of the surface stack: the force-selective slip when
+        // the wire carries the `magnetic.slip` group, the Ohmic sink for a positive resistivity, and
+        // transparency otherwise (a no-op on B for a hydro body). `validate_magnetic_slip_bodies`
+        // has already refused a body declaring both.
+        let body = match (b.magnetic_slip, b.magnetic_resistivity) {
+            (Some(slip), _) => body.with_magnetic(symbi_ib::MagneticSpec::Slip {
+                diffusivity_ratio: slip.diffusivity_ratio,
+                shell_width: slip.shell_width,
+                slip_length_ratio: slip.slip_length_ratio,
+                field_regularization: slip.field_regularization,
+                placement: slip.placement,
+            }),
+            (None, Some(eta)) if eta > 0.0 => {
+                body.with_magnetic(symbi_ib::MagneticSpec::Resistive { eta })
+            }
             _ => body,
         };
         coll = coll.add(body.with_two_way_coupling(b.two_way_coupling));
@@ -3614,6 +3717,194 @@ fn diagnostics_due(time: f64, next: &mut f64, interval: f64) -> bool {
     true
 }
 
+// the public boundary of the magnetic-slip sink: the parsed body wire becomes `MagneticSpec::Slip`,
+// the contract refuses runs the operator is not built for, and a configured slip body allocates its
+// workspace and drives the palindromic coupled step through the ordinary root advance.
+#[cfg(test)]
+mod magnetic_slip_boundary_tests {
+    use super::*;
+    use symbi::sim::refinement::Hierarchy;
+    use symbi::sim::refinement::hierarchy::{slip_schedule_arm, slip_schedule_take};
+    use symbi::sim::state::{Boundaries, BoundaryType, SimStateGeneric};
+    use symbi::symbi_xpu::{CpuSpace, HostMemory};
+    use symbi_geometry::Cartesian;
+    use symbi_hydro::eos::IdealGas;
+    use symbi_hydro::mhd_state::MhdPrim;
+    use symbi_hydro::newtonian_mhd::NewtonianMhd;
+    use symbi_hydro::state::Prim;
+
+    const SLIP: MagneticSlipParams = MagneticSlipParams {
+        diffusivity_ratio: 2.0,
+        shell_width: 0.12,
+        slip_length_ratio: 1.0,
+        field_regularization: 0.1,
+        placement: 0.0,
+    };
+
+    // a gravitating accretor with a plain drain at the box center: the surface stack a slip
+    // coupling closes on.
+    fn draining_sink(slip: Option<MagneticSlipParams>, resistivity: Option<f64>) -> BodyParams {
+        BodyParams {
+            capability: 3, // gravitational | accretion
+            mass: 1.0,
+            radius: 0.22,
+            position: vec![0.5, 0.5, 0.5],
+            velocity: vec![0.0, 0.0, 0.0],
+            softening: 0.05,
+            softening_kind: 0.0,
+            accretion_radius: 0.22,
+            sink_rate: 1.0,
+            porosity: None,
+            k_eta_n: 0.0,
+            k_eta_t: 0.0,
+            torque_free_xi: None,
+            inertia: 0.0,
+            no_slip: false,
+            shape_json: None,
+            omega: 0.0,
+            spin_axis: [0.0, 0.0, 1.0],
+            inertia_principal: [0.0; 3],
+            two_way_coupling: false,
+            magnetic_resistivity: resistivity,
+            magnetic_slip: slip,
+        }
+    }
+
+    #[test]
+    fn build_bodies_carries_exactly_one_magnetic_coupling() {
+        let slip = build_bodies::<3>(&[draining_sink(Some(SLIP), None)], None);
+        assert_eq!(
+            slip.get(0).spec.magnetic,
+            symbi_ib::MagneticSpec::Slip {
+                diffusivity_ratio: 2.0,
+                shell_width: 0.12,
+                slip_length_ratio: 1.0,
+                field_regularization: 0.1,
+                placement: 0.0,
+            }
+        );
+        let resistive = build_bodies::<3>(&[draining_sink(None, Some(0.1))], None);
+        assert_eq!(resistive.get(0).spec.magnetic, symbi_ib::MagneticSpec::Resistive { eta: 0.1 });
+        let transparent = build_bodies::<3>(&[draining_sink(None, None)], None);
+        assert_eq!(transparent.get(0).spec.magnetic, symbi_ib::MagneticSpec::None);
+    }
+
+    #[test]
+    fn the_boundary_admits_the_slip_only_where_the_operator_is_built() {
+        let check = |bodies: &[BodyParams], regime: &str, dims: usize, coords: &str, iso: bool| {
+            validate_magnetic_slip_bodies(bodies, regime, dims, coords, iso)
+        };
+        check(&[draining_sink(Some(SLIP), None)], "nmhd", 3, "cartesian", false)
+            .expect("an adiabatic 3D cartesian draining sink carries the slip");
+        // the contract binds slip bodies only; other couplings run wherever they already run.
+        check(&[draining_sink(None, Some(0.1))], "imhd", 2, "spherical", true)
+            .expect("a resistive sink is outside this contract");
+        let open_porous = {
+            let mut b = draining_sink(Some(SLIP), None);
+            b.porosity = Some(0.5);
+            b
+        };
+        check(&[open_porous], "nmhd", 3, "cartesian", false).expect("an open porous surface drains");
+        let torque_free = {
+            let mut b = draining_sink(Some(SLIP), None);
+            b.torque_free_xi = Some(0.5);
+            b
+        };
+        check(&[torque_free], "nmhd", 3, "cartesian", false).expect("a torque-free drain drains");
+
+        let sealed = {
+            let mut b = draining_sink(Some(SLIP), None);
+            b.porosity = Some(0.0);
+            b
+        };
+        let no_sink = {
+            let mut b = draining_sink(Some(SLIP), None);
+            b.capability = 1;
+            b
+        };
+        let refused: [(&str, Vec<BodyParams>, &str, usize, &str, bool); 8] = [
+            ("both couplings", vec![draining_sink(Some(SLIP), Some(0.1))], "nmhd", 3, "cartesian", false),
+            ("isothermal regime", vec![draining_sink(Some(SLIP), None)], "imhd", 3, "cartesian", false),
+            ("relativistic regime", vec![draining_sink(Some(SLIP), None)], "rmhd", 3, "cartesian", false),
+            ("locally isothermal", vec![draining_sink(Some(SLIP), None)], "nmhd", 3, "cartesian", true),
+            ("two dimensions", vec![draining_sink(Some(SLIP), None)], "nmhd", 2, "cartesian", false),
+            ("spherical chart", vec![draining_sink(Some(SLIP), None)], "nmhd", 3, "spherical", false),
+            ("sealed porous surface", vec![sealed], "nmhd", 3, "cartesian", false),
+            ("no sink", vec![no_sink], "nmhd", 3, "cartesian", false),
+        ];
+        for (label, bodies, regime, dims, coords, iso) in refused {
+            let err = check(&bodies, regime, dims, coords, iso)
+                .expect_err(&format!("{label}: the boundary admitted the slip"));
+            assert!(err.contains("magnetic slip") || err.contains("immersed body"), "{label}: {err}");
+        }
+    }
+
+    // the wire a config produces, built into a 3D adiabatic MHD state: the slip workspace and the
+    // quadrature scratch are allocated when the bodies attach, and one root advance runs the
+    // palindromic D(dt/2) M(dt/2) H(dt) M(dt/2) D(dt/2) composition.
+    #[test]
+    fn a_configured_slip_body_allocates_its_workspace_and_drives_the_coupled_step() {
+        let n = 12usize;
+        let dx = 1.0 / n as f64;
+        let k = 2.0 * std::f64::consts::PI;
+        let a0 = 0.3;
+        let sim = SimStateGeneric::<
+            NewtonianMhd,
+            3,
+            3,
+            Cartesian,
+            IdealGas<f64>,
+            CpuSpace,
+            HostMemory,
+            f64,
+        >::build(NewtonianMhd, IdealGas { gamma: 5.0 / 3.0 }, Cartesian)
+        .cells([n, n, n])
+        .origin([0.0, 0.0, 0.0])
+        .spacing([dx, dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+        .cfl(0.3)
+        .allocate()
+        .expect("sim construction")
+        // the cell field is the exact average of its bounding faces, so the seeding deposits the
+        // magnetic energy the first primitive recovery subtracts.
+        .set_initial(move |[x, y, _z]| {
+            let bx = |xf: f64| -a0 * (k * xf).cos() * (k * y).sin();
+            let by = |yf: f64| a0 * (k * x).sin() * (k * yf).cos();
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+                Tensor::new([
+                    0.5 * (bx(x - 0.5 * dx) + bx(x + 0.5 * dx)),
+                    0.5 * (by(y - 0.5 * dx) + by(y + 0.5 * dx)),
+                    0.0,
+                ]),
+            )
+        })
+        .seed_faces(move |axis, [x, y, _z]| match axis {
+            0 => -a0 * (k * x).cos() * (k * y).sin(),
+            1 => a0 * (k * x).sin() * (k * y).cos(),
+            _ => 0.0,
+        })
+        .build();
+        let sim = sim.with_bodies(build_bodies::<3>(&[draining_sink(Some(SLIP), None)], None));
+        {
+            let mhd = sim.fields.mhd.as_ref().expect("mhd fields");
+            assert!(mhd.magnetic_slip.is_some(), "the slip midpoint workspace was not allocated");
+            assert!(mhd.slip_quadrature.is_some(), "the slip quadrature scratch was not allocated");
+        }
+        let sub = symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet3D::<
+            HostMemory,
+            f64,
+        >::new(5.0 / 3.0, 0.3, 1.0, &sim.geom.allocated);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        slip_schedule_arm();
+        hier.step_root_with_dt(2.0e-3);
+        let trace = slip_schedule_take().expect("the schedule spy was armed");
+        let ops: Vec<&str> = trace.iter().map(|(op, _)| *op).collect();
+        assert_eq!(ops, ["D", "M", "H", "M", "D"], "the root advance did not run the coupled step");
+    }
+}
+
 #[cfg(test)]
 mod diagnostics_tests {
     use super::*;
@@ -3641,6 +3932,7 @@ mod diagnostics_tests {
             inertia_principal: [0.0; 3],
             two_way_coupling: false,
             magnetic_resistivity: None,
+            magnetic_slip: None,
         }
     }
 
@@ -3775,6 +4067,7 @@ mod diagnostics_tests {
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: true,
             magnetic_resistivity: None,
+            magnetic_slip: None,
         }];
         let coll = build_bodies::<2>(&params, None);
         assert!(coll.get(0).two_way_coupling);
@@ -4022,6 +4315,7 @@ mod diagnostics_tests {
                 inertia_principal: [0.0, 0.0, 0.0],
                 two_way_coupling: false,
                 magnetic_resistivity: None,
+                magnetic_slip: None,
             }];
             *build_bodies::<2>(&params, None).get(0)
         };
@@ -4069,6 +4363,7 @@ mod diagnostics_tests {
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: false,
             magnetic_resistivity: None,
+            magnetic_slip: None,
         };
         let params = vec![accretor(0.5), accretor(-0.5)];
         let binary = BinaryCfg {
@@ -4119,6 +4414,7 @@ mod diagnostics_tests {
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: false,
             magnetic_resistivity: None,
+            magnetic_slip: None,
         }];
         let coll = build_bodies::<2>(&params, None);
         let body = coll.get(0);
@@ -4168,6 +4464,7 @@ mod diagnostics_tests {
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: false,
             magnetic_resistivity: None,
+            magnetic_slip: None,
         };
         let params = vec![
             rigid(Some(
@@ -4210,6 +4507,7 @@ mod diagnostics_tests {
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: false,
             magnetic_resistivity: None,
+            magnetic_slip: None,
         }];
         let coll = build_bodies::<2>(&params, None);
         // omega = rate * spin_axis = 3.5 * (0,0,1).
@@ -7327,6 +7625,13 @@ fn dispatch_and_run(
     bfields: &[Vec<f64>],
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String> {
     validate_porous_body_overlaps(&cfg.bodies)?;
+    validate_magnetic_slip_bodies(
+        &cfg.bodies,
+        &cfg.regime,
+        cfg.dims,
+        &cfg.coord_system,
+        cfg.locally_isothermal,
+    )?;
     // static mesh refinement is wired for hydro (incl. globally-isothermal). the two cases
     // refused below need fine-level prolongation the transfer set does not carry:
     if cfg.refinement_enabled

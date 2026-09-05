@@ -13,6 +13,8 @@ import math
 import pytest
 
 from simbi.simulation.problem import ConfigError
+from dataclasses import replace
+
 from simbi.types.bodies import (
     AccretionProperties,
     BinaryComponentConfig,
@@ -21,6 +23,8 @@ from simbi.types.bodies import (
     GravitationalProperties,
     GravitationalSystemConfig,
     ImmersedBodyConfig,
+    MagneticProperties,
+    MagneticSlipProperties,
     RigidProperties,
     body_payload,
 )
@@ -52,6 +56,15 @@ _ACCRETION_KEYS = {
     "sink_rate",
     "porosity",
     "torque_free_xi",
+}
+# the magnetic coupling: the Ohmic sink crosses as `magnetic.resistivity`, the magnetic slip as the
+# `magnetic.slip` group carrying every scale `MagneticSpec::Slip` needs (all read as required keys).
+_SLIP_KEYS = {
+    "diffusivity_ratio",
+    "shell_width",
+    "slip_length_ratio",
+    "field_regularization",
+    "placement",
 }
 
 
@@ -104,6 +117,29 @@ def test_accretion_to_backend_emits_the_accretion_group() -> None:
     assert wire["accretion"]["accretion_radius"] == 0.1
     assert wire["accretion"]["porosity"] == 0.3
     assert wire["accretion"]["torque_free_xi"] is None
+
+
+def test_magnetic_couplings_emit_exactly_one_wire() -> None:
+    transparent = _accretor().to_backend()
+    assert transparent["magnetic"] is None
+    resistive = replace(
+        _accretor(), magnetic=MagneticProperties(resistivity=0.1)
+    ).to_backend()
+    assert resistive["magnetic"] == {"resistivity": 0.1}
+    slip = replace(
+        _accretor(),
+        magnetic=MagneticSlipProperties(
+            diffusivity_ratio=2.0,
+            shell_width=0.05,
+            field_regularization=0.01,
+            placement=-0.5,
+        ),
+    ).to_backend()
+    assert set(slip["magnetic"]) == {"slip"}
+    assert set(slip["magnetic"]["slip"]) == _SLIP_KEYS
+    assert slip["magnetic"]["slip"]["diffusivity_ratio"] == 2.0
+    assert slip["magnetic"]["slip"]["slip_length_ratio"] == 1.0
+    assert slip["magnetic"]["slip"]["placement"] == -0.5
 
 
 def test_spin_axis_is_normalized_before_serialization() -> None:
