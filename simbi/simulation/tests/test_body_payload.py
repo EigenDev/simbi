@@ -205,6 +205,38 @@ def test_body_payload_composes_present_kinds_and_omits_absent() -> None:
     assert len(both["body_system"]["binary_config"]["components"]) == 2
 
 
+def test_binary_components_serialize_the_same_magnetic_union() -> None:
+    slip = MagneticSlipProperties(
+        diffusivity_ratio=2.0,
+        shell_width=0.1,
+        field_regularization=0.01,
+    )
+    component = BinaryComponentConfig(
+        mass=1.0,
+        radius=0.0,
+        is_an_accretor=True,
+        softening_length=0.05,
+        two_way_coupling=False,
+        accretion_radius=0.1,
+        magnetic=slip,
+    )
+    assert component.to_body_config()["magnetic"] == {
+        "slip": {
+            "diffusivity_ratio": 2.0,
+            "shell_width": 0.1,
+            "field_regularization": 0.01,
+            "slip_length_ratio": 1.0,
+            "placement": 0.0,
+        }
+    }
+
+    resistive = replace(component, magnetic=MagneticProperties(resistivity=0.2))
+    assert resistive.to_body_config()["magnetic"] == {"resistivity": 0.2}
+
+    with pytest.raises(ConfigError, match="must be an accretor"):
+        replace(component, is_an_accretor=False)
+
+
 def test_body_payload_rejects_a_raw_dict_body() -> None:
     # a raw dict bypasses every field validation; the backend would read it through
     # silent unwrap_or defaults. the ssot refuses it loudly.

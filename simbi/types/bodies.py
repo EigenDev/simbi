@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # =============================================================================
 # bodies.py
 #
@@ -92,9 +94,31 @@ class BinaryComponentConfig:
     total_accreted_mass: float = 0.0
     # which family `softening_length` parameterizes; see SOFTENING_KINDS.
     softening_kind: str = "plummer"
+    # The same mutually-exclusive magnetic coupling carried by a standalone
+    # immersed body.  Keeping it on the component is essential: the backend
+    # turns prescribed binary components into ordinary Body values before it
+    # attaches the Keplerian orbit, so dropping the coupling here would make a
+    # moving magnetic sink impossible through the public API.
+    magnetic: MagneticProperties | MagneticSlipProperties | None = None
 
     def __post_init__(self) -> None:
         _validate_softening_kind(self.softening_kind)
+        if not isinstance(
+            self.magnetic,
+            (MagneticProperties, MagneticSlipProperties, type(None)),
+        ):
+            raise _config_error(
+                "binary-component magnetic coupling must be MagneticProperties, "
+                "MagneticSlipProperties, or None"
+            )
+        if (
+            isinstance(self.magnetic, MagneticSlipProperties)
+            and not self.is_an_accretor
+        ):
+            raise _config_error(
+                "magnetic slip closes on a drain time, so a binary component carrying "
+                "it must be an accretor"
+            )
 
     def to_body_config(self) -> dict:
         """the backend wire for one binary component: top-level mass / radius / kinematics plus
@@ -124,6 +148,11 @@ class BinaryComponentConfig:
                 "sink_rate": self.sink_rate,
                 "total_accreted_mass": self.total_accreted_mass,
             }
+
+        if isinstance(self.magnetic, MagneticSlipProperties):
+            config["magnetic"] = {"slip": asdict(self.magnetic)}
+        elif isinstance(self.magnetic, MagneticProperties):
+            config["magnetic"] = asdict(self.magnetic)
 
         return config
 

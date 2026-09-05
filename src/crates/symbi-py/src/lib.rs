@@ -1669,8 +1669,8 @@ fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) 
             spin_axis: [0.0, 0.0, 1.0],
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: two_way,
-            magnetic_resistivity: None,
-            magnetic_slip: None,
+            magnetic_resistivity: sub_f64_opt(c, "magnetic", "resistivity"),
+            magnetic_slip: parse_magnetic_slip(c),
         });
     }
 }
@@ -3828,6 +3828,30 @@ mod magnetic_slip_boundary_tests {
         assert_eq!(resistive.get(0).spec.magnetic, symbi_ib::MagneticSpec::Resistive { eta: 0.1 });
         let transparent = build_bodies::<3>(&[draining_sink(None, None)], None);
         assert_eq!(transparent.get(0).spec.magnetic, symbi_ib::MagneticSpec::None);
+    }
+
+    #[test]
+    fn prescribed_binary_build_keeps_each_components_magnetic_coupling() {
+        let params = vec![
+            draining_sink(Some(SLIP), None),
+            draining_sink(None, Some(0.25)),
+        ];
+        let binary = BinaryCfg {
+            total_mass: 2.0,
+            semi_major: 1.0,
+            eccentricity: 0.0,
+            mass_ratio: 1.0,
+        };
+        let bodies = build_bodies::<2>(&params, Some(&binary));
+        assert!(bodies.is_binary());
+        assert!(matches!(
+            bodies.get(0).spec.magnetic,
+            symbi_ib::MagneticSpec::Slip { .. }
+        ));
+        assert_eq!(
+            bodies.get(1).spec.magnetic,
+            symbi_ib::MagneticSpec::Resistive { eta: 0.25 }
+        );
     }
 
     #[test]
