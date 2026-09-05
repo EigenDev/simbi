@@ -79,12 +79,13 @@ pub use gv_immersed::{
 pub use gv_penalize::{
     body_resistive_emf_2d_gv, body_resistive_emf_3d_dir_gv, body_slip_emf_3d_dir_gv,
     body_slip_quadrature_3d_gv, penalize_drain_gv, penalize_drain_midpoint_gv,
+    slip_commit_energy_3d_gv, slip_dissipation_3d_gv, slip_gas_energy_3d_gv,
     penalize_drain_iso_gv, penalize_porous_gv, penalize_porous_gv_shaped,
     penalize_porous_gv_spinning, penalize_porous_iso_gv, penalize_porous_iso_gv_shaped,
     penalize_porous_iso_gv_spinning, penalize_torque_free_gv, penalize_torque_free_iso_gv,
 };
 pub use gv_refinement::{
-    ProlongOrder, WB_BAND_CHAIN_MAX, WB_CF_CHAIN_MAX, band_energy_gv, field_axpy_shift_gv,
+    ProlongOrder, WB_BAND_CHAIN_MAX, WB_CF_CHAIN_MAX, band_energy_gv, field_axpy_shift_gv, field_lincomb_gv, field_product_gv,
     field_copy_gv, field_fill_gv, field_lerp_multi_gv, refine_acc_edge_gv, refine_acc_face_gv,
     refine_prolong_face_gv, refine_prolong_gv, refine_prolong_multi_1t_gv, refine_prolong_multi_gv,
     refine_prolong_sweep_multi_gv, refine_restrict_face_gv, refine_restrict_gv, wb_band_decode_gv,

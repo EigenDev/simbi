@@ -194,6 +194,14 @@ pub enum KernelId {
     FieldAxpyShift {
         ndim: u8,
     },
+    /// in-place linear combination `dst = a * dst + b * src` (the Krylov recurrences).
+    FieldLincomb {
+        ndim: u8,
+    },
+    /// pointwise product `prod = x * y` (the inner-product integrand before the reduction).
+    FieldProduct {
+        ndim: u8,
+    },
 }
 
 // ndim (1..=3) -> 0-based table index, with a loud message on an out-of-range
@@ -274,6 +282,12 @@ impl KernelId {
                 "field_axpy_shift_2d",
                 "field_axpy_shift_3d",
             ][dim_ix(ndim)],
+            KernelId::FieldLincomb { ndim } => {
+                ["field_lincomb_1d", "field_lincomb_2d", "field_lincomb_3d"][dim_ix(ndim)]
+            }
+            KernelId::FieldProduct { ndim } => {
+                ["field_product_1d", "field_product_2d", "field_product_3d"][dim_ix(ndim)]
+            }
             KernelId::RefineProlong { order, ndim } => match (order, ndim) {
                 (ProlongTag::Pcm, 1) => "refine_prolong_pcm_1d",
                 (ProlongTag::Pcm, 2) => "refine_prolong_pcm_2d",
@@ -514,6 +528,8 @@ mod tests {
             KernelId::FieldAxpyShift { ndim: 3 }.name(),
             "field_axpy_shift_3d"
         );
+        assert_eq!(KernelId::FieldLincomb { ndim: 3 }.name(), "field_lincomb_3d");
+        assert_eq!(KernelId::FieldProduct { ndim: 3 }.name(), "field_product_3d");
     }
 
     // every valid (axis < ndim) face/edge combination resolves to a real name,

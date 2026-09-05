@@ -556,6 +556,128 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> KernelProgram
 /// material drain applies) and the shell mask `chi_B`, so `a_B = ell_B^2 lambda_rho / ((|B|^2 +
 /// B_0^2) D_B)`. writes `fq_0..2`. explicit oracle: it validates the operator's signs, staggering,
 /// and energy law and carries the diffusive stability limit `dt <~ dx^2 / eta_B`.
+/// the gathered midpoint current `(R J)_q[d]` at the cell, `d = 0..3`: 1/4 the sum over the four
+/// d-edges bounding the cell (forward transverse offsets) of the edge current
+/// `(curl B)_d = dB_p2/dx_p1 - dB_p1/dx_p2`, each from backward differences of the staggered
+/// face field `bf_c` (`CtFaceCt::BFaceComp`). the slip cell pass forms its dyad on this gather and
+/// the dissipation pass contracts it with the dyad output, so `<(R J)_q, F_q>` per cell is the
+/// midpoint quadratic of the operator.
+fn gathered_current_gv<'t>(cx: TraceCx<'t>, inv_dx: &[Gv<'t>]) -> Vec<Gv<'t>> {
+    let bface = |c: usize, off: &[i32]| {
+        crate::gv::gv_field_at(cx, &format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c)), 3, off)
+    };
+    let quarter = Gv::from_f64(0.25);
+    (0..3)
+        .map(|d| {
+            let p1 = (d + 1) % 3;
+            let p2 = (d + 2) % 3;
+            let curl_at = |eoff: [i32; 3]| -> Gv<'t> {
+                let mut o_mp1 = eoff;
+                o_mp1[p1] -= 1;
+                let mut o_mp2 = eoff;
+                o_mp2[p2] -= 1;
+                (bface(p2, &eoff) - bface(p2, &o_mp1)) * inv_dx[p1]
+                    - (bface(p1, &eoff) - bface(p1, &o_mp2)) * inv_dx[p2]
+            };
+            let mut e1 = [0, 0, 0];
+            e1[p1] = 1;
+            let mut e2 = [0, 0, 0];
+            e2[p2] = 1;
+            let mut e12 = [0, 0, 0];
+            e12[p1] = 1;
+            e12[p2] = 1;
+            (curl_at([0, 0, 0]) + curl_at(e1) + curl_at(e2) + curl_at(e12)) * quarter
+        })
+        .collect()
+}
+
+/// the entering gas internal energy density of the magnetic-slip predictor,
+/// `e_g^0 = E - |mom|^2/(2 rho) - |B_cell|^2/2`, written to the `slip_ge` cell scratch the slip
+/// coefficient's sound speed reads. 3D cartesian adiabatic MHD.
+pub fn slip_gas_energy_3d_gv() -> KernelProgram {
+    let (kernel, writes) = trace(|cx| {
+        let den = cx.field("den", symbi_ir::FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..3)
+            .map(|c| cx.field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
+            .collect();
+        let nrg = cx.field("nrg", symbi_ir::FieldRef::cons_nrg());
+        let b_q: Vec<Gv> = (0..3)
+            .map(|c| cx.field(&format!("bc_{c}"), symbi_ir::FieldRef::BCell(c as u8)))
+            .collect();
+        let half = Gv::from_f64(0.5);
+        let mom_sq = mom.iter().fold(Gv::ZERO, |s, m| s + *m * *m);
+        let b_sq = b_q.iter().fold(Gv::ZERO, |s, b| s + *b * *b);
+        let e_g = nrg - half * mom_sq / den - half * b_sq;
+        vec![KernelWrite::new("slip_ge_new", CtCellCt::SlipGasEnergy, e_g.node())]
+    });
+    KernelProgram::new(kernel, writes)
+}
+
+/// the per-cell magnetic dissipation rate of the slip operator on the state the quadrature was
+/// formed on, `qdot_c = (R J)_c . F_q,c`, with `(R J)_c` gathered from the staggered field the
+/// kernel is bound to and `F_q` the slip cell pass output. nonnegative cell by cell, since
+/// `F_q = A (R J)` with `A` positive semidefinite. 3D cartesian.
+pub fn slip_dissipation_3d_gv() -> KernelProgram {
+    let (kernel, writes) = trace(|cx| {
+        let inv_dx: Vec<Gv> = (0..3)
+            .map(|a| Gv::ONE / cx.scalar(&format!("dx_{a}")))
+            .collect();
+        let j_q = gathered_current_gv(cx, &inv_dx);
+        let f_q: Vec<Gv> = (0..3)
+            .map(|c| crate::gv::ct_field(cx, CtCellCt::SlipQuadrature(PhysComp::new(c))))
+            .collect();
+        let qdot = (0..3).fold(Gv::ZERO, |s, c| s + j_q[c] * f_q[c]);
+        vec![KernelWrite::new("slip_qdot_new", CtCellCt::SlipDissipation, qdot.node())]
+    });
+    let kernel = kernel.with_derived_support(&writes);
+    KernelProgram::new(kernel, writes)
+}
+
+/// the magnetic-slip commit's energy deposit through the face-to-cell defect bridge:
+/// `E += (M_cc^1 - M_cc^0) + dt qdot`, with `M_cc^1 = |B_cell|^2/2` from the committed cell field,
+/// `M_cc^0 = |interp(B^0)|^2/2` from the substep-input faces the kernel is bound to (the forward
+/// face average), and `qdot` the midpoint dissipation rate. the gas internal energy then gains
+/// exactly `dt qdot` per cell and the cell-summed total energy changes by the operator's
+/// face-Hodge dissipation alone. 3D cartesian adiabatic MHD; writes the total energy in place.
+pub fn slip_commit_energy_3d_gv() -> KernelProgram {
+    let (kernel, writes) = trace(|cx| {
+        let dt = cx.scalar("dt");
+        let nrg = cx.field("nrg", symbi_ir::FieldRef::cons_nrg());
+        let b_new: Vec<Gv> = (0..3)
+            .map(|c| cx.field(&format!("bc_{c}"), symbi_ir::FieldRef::BCell(c as u8)))
+            .collect();
+        let half = Gv::from_f64(0.5);
+        let b_old: Vec<Gv> = (0..3)
+            .map(|c| {
+                let mut up = [0, 0, 0];
+                up[c] = 1;
+                let lo = crate::gv::gv_field_at(
+                    cx,
+                    &format!("bf_{c}"),
+                    CtFaceCt::BFaceComp(PhysComp::new(c)),
+                    3,
+                    &[0, 0, 0],
+                );
+                let hi = crate::gv::gv_field_at(
+                    cx,
+                    &format!("bf_{c}"),
+                    CtFaceCt::BFaceComp(PhysComp::new(c)),
+                    3,
+                    &up,
+                );
+                half * (lo + hi)
+            })
+            .collect();
+        let qdot = crate::gv::ct_field(cx, CtCellCt::SlipDissipation);
+        let m_new = b_new.iter().fold(Gv::ZERO, |s, b| s + *b * *b) * half;
+        let m_old = b_old.iter().fold(Gv::ZERO, |s, b| s + *b * *b) * half;
+        let e = nrg + (m_new - m_old) + dt * qdot;
+        vec![KernelWrite::new("nrg_new", symbi_ir::FieldRef::cons_nrg(), e.node())]
+    });
+    let kernel = kernel.with_derived_support(&writes);
+    KernelProgram::new(kernel, writes)
+}
+
 pub fn body_slip_quadrature_3d_gv(coords: Coords) -> KernelProgram {
     let ndim = 3usize;
     let axes: &[usize] = &[0, 1, 2];
@@ -569,34 +691,7 @@ pub fn body_slip_quadrature_3d_gv(coords: Coords) -> KernelProgram {
             .map(|a| Gv::ONE / cx.scalar(&format!("dx_{a}")))
             .collect();
 
-        // (R J)_q[d] = 1/4 sum over the four d-edges bounding the cell (forward transverse offsets)
-        // of the edge current (curl B)_d = dB_p2/dx_p1 - dB_p1/dx_p2, from backward face differences.
-        let bface = |c: usize, off: &[i32]| {
-            crate::gv::gv_field_at(cx, &format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c)), 3, off)
-        };
-        let quarter = Gv::from_f64(0.25);
-        let j_q: Vec<Gv> = (0..3)
-            .map(|d| {
-                let p1 = (d + 1) % 3;
-                let p2 = (d + 2) % 3;
-                let curl_at = |eoff: [i32; 3]| -> Gv {
-                    let mut o_mp1 = eoff;
-                    o_mp1[p1] -= 1;
-                    let mut o_mp2 = eoff;
-                    o_mp2[p2] -= 1;
-                    (bface(p2, &eoff) - bface(p2, &o_mp1)) * inv_dx[p1]
-                        - (bface(p1, &eoff) - bface(p1, &o_mp2)) * inv_dx[p2]
-                };
-                let mut e1 = [0, 0, 0];
-                e1[p1] = 1;
-                let mut e2 = [0, 0, 0];
-                e2[p2] = 1;
-                let mut e12 = [0, 0, 0];
-                e12[p1] = 1;
-                e12[p2] = 1;
-                (curl_at([0, 0, 0]) + curl_at(e1) + curl_at(e2) + curl_at(e12)) * quarter
-            })
-            .collect();
+        let j_q = gathered_current_gv(cx, &inv_dx);
 
         // the local drain rate lambda_rho = 1/tau_rho the material drain reads: the fast-magnetosonic
         // cell-crossing rate on the cell's own local Alfven term |B|^2/rho lifted by free fall. the

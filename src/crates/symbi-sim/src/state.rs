@@ -929,6 +929,8 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             operator_direction: face_group(&face_doms)?,
             candidate: face_group(&face_doms)?,
             gas_energy: Field::zeros(allocated)?,
+            dissipation: Field::zeros(allocated)?,
+            product: face_group(&face_doms)?,
         });
         Ok(())
     }
@@ -966,6 +968,13 @@ pub struct MagneticSlipWorkspace<
     /// speed reads. filled once from the predictor state before the freeze, so the operator's drain
     /// clock never consults the endpoint-reconciled total energy during the CG solve or the commit.
     pub gas_energy: Field<Sc, D, M>,
+    /// the per-cell magnetic dissipation rate `qdot_c = (R J)_c . F_q,c` the slip cell pass
+    /// produces: the predictor lifts `gas_energy` by `(dt/2) qdot^0`, and the commit deposits
+    /// `dt qdot^{1/2}` into the total energy.
+    pub dissipation: Field<Sc, D, M>,
+    /// face scratch for the inner product: the pointwise product of two Krylov vectors, reduced
+    /// over the physical faces to the scalar the conjugate-gradient recurrence reads.
+    pub product: BfaceFields<D, M, Sc>,
 }
 
 /// RK workspace for one partition. `NDIM` = grid dim, `DOF` = vector component dim

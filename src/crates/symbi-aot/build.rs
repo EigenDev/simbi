@@ -246,7 +246,8 @@ fn gen_scalar_ghost_fill(out_dir: &str) {
 // src/dst, dispatched per component via dispatch_fields_each.
 fn gen_refine_transfer(out_dir: &str, ndim: u8) {
     use symbi_discretize::{
-        ProlongOrder, field_axpy_shift_gv, field_copy_gv, field_fill_gv, refine_acc_face_gv,
+        ProlongOrder, field_axpy_shift_gv, field_copy_gv, field_fill_gv, field_lincomb_gv,
+        field_product_gv, refine_acc_face_gv,
         refine_prolong_gv, refine_restrict_face_gv, refine_restrict_gv,
     };
     // names via `KernelId` — the same source the dispatch reads, so the registry
@@ -279,6 +280,22 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
     emit_gv(
         out_dir,
         KernelId::FieldAxpyShift { ndim }.name(),
+        ndim,
+        &program,
+    );
+    // the Krylov recurrences of the implicit magnetic-slip solve: the in-place linear combination
+    // and the inner-product integrand (reduced by the field reduction).
+    let program = field_lincomb_gv(nd);
+    emit_gv(
+        out_dir,
+        KernelId::FieldLincomb { ndim }.name(),
+        ndim,
+        &program,
+    );
+    let program = field_product_gv(nd);
+    emit_gv(
+        out_dir,
+        KernelId::FieldProduct { ndim }.name(),
         ndim,
         &program,
     );
@@ -1417,6 +1434,15 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
     // slip transport rides the shared CT curl div-B-clean.
     let program = symbi_discretize::body_slip_quadrature_3d_gv(Coords::Cartesian);
     emit_gv(out_dir, "body_slip_quadrature_3d", 3, &program);
+    // the implicit slip solve's cell passes: the entering gas energy of the predictor, the
+    // dissipation rate contracting the gathered current with the dyad output, and the commit's
+    // energy deposit through the face-to-cell defect bridge.
+    let program = symbi_discretize::slip_gas_energy_3d_gv();
+    emit_gv(out_dir, "slip_gas_energy_3d", 3, &program);
+    let program = symbi_discretize::slip_dissipation_3d_gv();
+    emit_gv(out_dir, "slip_dissipation_3d", 3, &program);
+    let program = symbi_discretize::slip_commit_energy_3d_gv();
+    emit_gv(out_dir, "slip_commit_energy_3d", 3, &program);
     for dir in 0..3 {
         let program = symbi_discretize::body_slip_emf_3d_dir_gv(dir, Coords::Cartesian);
         emit_gv(out_dir, &format!("body_slip_emf_3d_{dir}"), 3, &program);

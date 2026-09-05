@@ -135,6 +135,11 @@ fn build_smooth_field_sim(n: usize) -> Sim {
 // the same field and gas but a pure-drain body with no magnetic slip: the evolve loop must keep the
 // ordinary RK march for it, bit-for-bit.
 fn build_drain_only_sim() -> Sim {
+    build_drain_sim_with(MagneticSpec::None)
+}
+
+// a draining body carrying the given magnetic coupling.
+fn build_drain_sim_with(magnetic: MagneticSpec) -> Sim {
     let dx = 1.0 / N as f64;
     let k = 2.0 * std::f64::consts::PI;
     let a0 = 0.3;
@@ -171,9 +176,36 @@ fn build_drain_only_sim() -> Sim {
     sim.with_bodies(
         BodyCollection::new().add(
             Body::black_hole(0, Tensor::new(BODY), Tensor::zeros(), 1.0, R_BODY, 0.05, 1.0, 1.0, R_BODY)
-                .with_surface(SurfaceSpec::Drain),
+                .with_surface(SurfaceSpec::Drain)
+                .with_magnetic(magnetic),
         ),
     )
+}
+
+// the slip workspace and its quadrature scratch exist only for a slip body: a transparent or a
+// resistive sink allocates neither, so a run without the slip never carries the solve's storage
+// and never reaches its kernels.
+#[test]
+fn a_body_without_the_slip_allocates_no_slip_storage() {
+    for (label, magnetic) in [
+        ("transparent", MagneticSpec::None),
+        ("resistive", MagneticSpec::Resistive { eta: 0.1 }),
+    ] {
+        let sim = build_drain_sim_with(magnetic);
+        let mhd = sim.fields.mhd.as_ref().expect("mhd fields");
+        assert!(mhd.magnetic_slip.is_none(), "{label}: the slip workspace was allocated");
+        assert!(mhd.slip_quadrature.is_none(), "{label}: the slip quadrature scratch was allocated");
+        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        slip_schedule_arm();
+        hier.step_root_with_dt(DT);
+        let trace = slip_schedule_take().expect("schedule was armed");
+        assert!(trace.is_empty(), "{label}: a body without the slip entered the coupled step: {trace:?}");
+    }
+    let sim = build_slip_sim();
+    let mhd = sim.fields.mhd.as_ref().expect("mhd fields");
+    assert!(mhd.magnetic_slip.is_some() && mhd.slip_quadrature.is_some(), "a slip body allocates both");
 }
 
 fn max_rel_diff(a: &[f64], b: &[f64]) -> f64 {

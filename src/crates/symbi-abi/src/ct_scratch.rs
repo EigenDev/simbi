@@ -127,6 +127,10 @@ pub enum CtCellCt {
     /// sound speed reads: a per-cell scalar the solve fills once from the predictor state, so the
     /// frozen operator's drain clock never consults the endpoint-reconciled total energy.
     SlipGasEnergy,
+    /// the per-cell magnetic dissipation rate `qdot_c = (R J)_c . F_q,c >= 0` of the slip
+    /// operator at the state the quadrature was formed on: the predicted heat that lifts the
+    /// midpoint gas energy, and the heat the commit deposits into the total energy.
+    SlipDissipation,
 }
 
 /// face-centered CT scratch roles: the staggered face B (edge-relative
@@ -220,6 +224,7 @@ pub enum CtWireName {
     HoBFlux(PhysComp),
     Fq(PhysComp),
     SlipGe,
+    SlipQdot,
     WslP1,
     WslP2,
     WsrP1,
@@ -269,6 +274,7 @@ impl CtWireName {
             CtWireName::HoBFlux(c) => format!("ho_bflux_{}", c.index()),
             CtWireName::Fq(c) => format!("fq_{}", c.index()),
             CtWireName::SlipGe => "slip_ge".into(),
+            CtWireName::SlipQdot => "slip_qdot".into(),
             CtWireName::WslP1 => "wsl_p1".into(),
             CtWireName::WslP2 => "wsl_p2".into(),
             CtWireName::WsrP1 => "wsr_p1".into(),
@@ -327,6 +333,7 @@ impl CtWireName {
             "fq_1" => CtWireName::Fq(PhysComp(1)),
             "fq_2" => CtWireName::Fq(PhysComp(2)),
             "slip_ge" => CtWireName::SlipGe,
+            "slip_qdot" => CtWireName::SlipQdot,
             "wsl_p1" => CtWireName::WslP1,
             "wsl_p2" => CtWireName::WslP2,
             "wsr_p1" => CtWireName::WsrP1,
@@ -371,6 +378,7 @@ impl CtWireName {
             W::HoBFlux(c) => CtFaceCt::BFluxHighOrder(c).into(),
             W::Fq(c) => CtCellCt::SlipQuadrature(c).into(),
             W::SlipGe => CtCellCt::SlipGasEnergy.into(),
+            W::SlipQdot => CtCellCt::SlipDissipation.into(),
             W::WslP1 => CtFaceCt::WaveL(Transverse::A).into(),
             W::WslP2 => CtFaceCt::WaveL(Transverse::B).into(),
             W::WsrP1 => CtFaceCt::WaveR(Transverse::A).into(),
@@ -433,6 +441,7 @@ impl CtWireName {
             v.push(W::Fq(PhysComp(c)));
         }
         v.push(W::SlipGe);
+        v.push(W::SlipQdot);
         v
     }
 }
@@ -478,6 +487,7 @@ impl CtScratchKey {
             CtScratch::Cell(CtCellCt::FofcFlag) => W::Flag,
             CtScratch::Cell(CtCellCt::SlipQuadrature(c)) => W::Fq(c),
             CtScratch::Cell(CtCellCt::SlipGasEnergy) => W::SlipGe,
+            CtScratch::Cell(CtCellCt::SlipDissipation) => W::SlipQdot,
             CtScratch::Edge(CtEdgeCt::Emf) => W::Emf,
             CtScratch::Edge(CtEdgeCt::EmfIncident(Transverse::A)) => W::EP1,
             CtScratch::Edge(CtEdgeCt::EmfIncident(Transverse::B)) => W::EP2,
@@ -700,6 +710,7 @@ mod tests {
             ("fq_1", "Cell"),
             ("fq_2", "Cell"),
             ("slip_ge", "Cell"),
+            ("slip_qdot", "Cell"),
         ];
         let all = CtWireName::all();
         assert_eq!(all.len(), expected.len(), "vocabulary size drifted");

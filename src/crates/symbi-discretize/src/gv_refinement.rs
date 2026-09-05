@@ -280,6 +280,36 @@ pub fn field_fill_gv(ndim: usize) -> KernelProgram {
     })
 }
 
+/// dst = a * dst + b * src, pointwise, with runtime scalars `a` and `b`: the in-place linear
+/// combination a Krylov recurrence is built from (x += alpha p, r -= alpha A p, p = r + beta p,
+/// and the operator shift (I +- dt/2 L) p). each buffer resolves the thread coord against its own
+/// lo, so staggered face fields combine with the same kernel.
+pub fn field_lincomb_gv(ndim: usize) -> KernelProgram {
+    assert!((1..=3).contains(&ndim), "field_lincomb_gv: ndim must be 1..=3");
+    trace_kernel(|cx| {
+        let a = cx.scalar("a");
+        let b = cx.scalar("b");
+        let dst = cx.field("dst", "dst");
+        let src = cx.field("src", "src");
+        let _ = ndim;
+        let v = a * dst + b * src;
+        vec![KernelWrite::new("dst", "dst", v.node())]
+    })
+}
+
+/// prod = x * y, pointwise: the integrand of an inner product, reduced afterwards over the
+/// physical faces by the field reduction, so only the scalar crosses to the host.
+pub fn field_product_gv(ndim: usize) -> KernelProgram {
+    assert!((1..=3).contains(&ndim), "field_product_gv: ndim must be 1..=3");
+    trace_kernel(|cx| {
+        let x = cx.field("x", "x");
+        let y = cx.field("y", "y");
+        let _ = ndim;
+        let v = x * y;
+        vec![KernelWrite::new("prod", "prod", v.node())]
+    })
+}
+
 /// dst(c) += scale * src(c + arg), with per-axis runtime integer offsets (the
 /// lattice-style args) and a runtime scalar `scale`. serves the register's
 /// coarse-flux accumulation (arg = 0, scale = -A*w) and the reflux apply
