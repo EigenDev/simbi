@@ -245,7 +245,7 @@ fn the_frozen_operator_is_symmetric_and_semidefinite_on_the_mixed_complex() {
     let nrg = sim.fields.cons.nrg_field().unwrap();
     for c in sim.geom.interior.iter() {
         let m_cell: f64 = (0..3).map(|d| 0.5 * (*m.bcell[d].at(c)).powi(2)).sum();
-        ws.gas_energy.set(c, *nrg.at(c) - m_cell);
+        ws.gas_energy.as_ref().unwrap().set(c, *nrg.at(c) - m_cell);
     }
     let n = n_of(&sim);
     let fill = |faces: &symbi_sim::state::BfaceFields<2, HostMemory, f64>, cell: &Cell, salt: u64| {
@@ -293,14 +293,14 @@ fn the_predictor_heat_contracts_all_three_current_components() {
         out.set(c, *m.bcell[2].at(c));
     }
     for (c, e) in sim.geom.interior.iter().zip(&e_g0) {
-        ws.gas_energy.set(c, *e);
+        ws.gas_energy.as_ref().unwrap().set(c, *e);
     }
     for k in 0..2 {
         for c in m.efield.e[k].domain().iter() {
             m.efield.e[k].set(c, 0.0);
         }
     }
-    body_slip_emf_2p5d::<2, 3, HostMemory, f64>(&sim, GAMMA, DT, &bz, &out);
+    body_slip_emf_2p5d::<2, 3, HostMemory, f64>(&sim, GAMMA, DT, &bz, &out, None);
     let fq = m.slip_quadrature.as_ref().unwrap();
     let qdot_ref: Vec<f64> = sim
         .geom
@@ -324,7 +324,7 @@ fn the_predictor_heat_contracts_all_three_current_components() {
     assert!(scale > 1e-8, "vacuous: no dissipation");
     let mut worst = 0.0_f64;
     for ((c, e0), q) in sim.geom.interior.iter().zip(&e_g0).zip(&qdot_ref) {
-        let staged = *ws.gas_energy.at(c);
+        let staged = *ws.gas_energy.as_ref().unwrap().at(c);
         worst = worst.max((staged - (e0 + 0.5 * DT * q)).abs());
         assert!(*q >= -1e-12 * scale, "negative predicted heat at {c:?}: {q:.3e}");
     }

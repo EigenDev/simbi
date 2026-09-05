@@ -1434,8 +1434,10 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
     // slip transport rides the shared CT curl div-B-clean.
     // the 2.5D slip operator on the mixed face-plus-cell complex: the cell pass with the
     // (D_y B_z, -D_x B_z, G_z) current, the corner z-edge scatter, and the B_z flux update.
-    let program = symbi_discretize::body_slip_quadrature_2d_gv(Coords::Cartesian);
+    let program = symbi_discretize::body_slip_quadrature_2d_gv(Coords::Cartesian, true);
     emit_gv(out_dir, "body_slip_quadrature_2d", 2, &program);
+    let program = symbi_discretize::body_slip_quadrature_2d_gv(Coords::Cartesian, false);
+    emit_gv(out_dir, "body_slip_quadrature_2d_iso", 2, &program);
     let program = symbi_discretize::body_slip_emf_2d_gv();
     emit_gv(out_dir, "body_slip_emf_2d", 2, &program);
     let program = symbi_discretize::body_slip_bz_2d_gv();
@@ -1448,8 +1450,10 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
     emit_gv(out_dir, "slip_dissipation_2d", 2, &program);
     let program = symbi_discretize::slip_commit_energy_2d_gv();
     emit_gv(out_dir, "slip_commit_energy_2d", 2, &program);
-    let program = symbi_discretize::body_slip_quadrature_3d_gv(Coords::Cartesian);
+    let program = symbi_discretize::body_slip_quadrature_3d_gv(Coords::Cartesian, true);
     emit_gv(out_dir, "body_slip_quadrature_3d", 3, &program);
+    let program = symbi_discretize::body_slip_quadrature_3d_gv(Coords::Cartesian, false);
+    emit_gv(out_dir, "body_slip_quadrature_3d_iso", 3, &program);
     // the implicit slip solve's cell passes: the entering gas energy of the predictor, the
     // dissipation rate contracting the gathered current with the dyad output, and the commit's
     // energy deposit through the face-to-cell defect bridge.
@@ -1471,6 +1475,11 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
         emit_gv(out_dir, &format!("penalize_drain_midpoint_{ndim}d"), ndim, &program);
         let program = symbi_discretize::penalize_drain_midpoint_gv(Coords::Cartesian, ndim as usize, 3, true);
         emit_gv(out_dir, &format!("penalize_drain_midpoint_dyed_{ndim}d"), ndim, &program);
+        // the isothermal twins: the prescribed sound speed in the rate, no energy slot.
+        let program = symbi_discretize::penalize_drain_midpoint_iso_gv(Coords::Cartesian, ndim as usize, 3, false);
+        emit_gv(out_dir, &format!("penalize_drain_midpoint_iso_{ndim}d"), ndim, &program);
+        let program = symbi_discretize::penalize_drain_midpoint_iso_gv(Coords::Cartesian, ndim as usize, 3, true);
+        emit_gv(out_dir, &format!("penalize_drain_midpoint_iso_dyed_{ndim}d"), ndim, &program);
     }
 }
 

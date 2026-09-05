@@ -316,6 +316,11 @@ pub struct Body<S: Scalar, const D: usize> {
     /// axes). anisotropic (unequal) moments make Euler's gyroscopic term nonzero -> torque-free
     /// precession/nutation (an asymmetric body wobbles). default isotropic (1, 1, 1).
     pub inertia_body: [S; 3],
+    /// the magnetic-slip heat this body's shell has released, cumulative over the run: deposited in
+    /// the gas on an adiabatic closure, exported to the cooling bath on an isothermal one.
+    pub slip_heat_total: S,
+    /// the slip heat release rate over the last step.
+    pub slip_heat_rate: S,
 }
 
 // -- factory functions --
@@ -348,6 +353,8 @@ impl<S: Scalar, const D: usize> Body<S, D> {
             ],
             omega: Tensor::zeros(),
             inertia_body: [S::ONE, S::ONE, S::ONE],
+            slip_heat_total: S::ZERO,
+            slip_heat_rate: S::ZERO,
         }
     }
 

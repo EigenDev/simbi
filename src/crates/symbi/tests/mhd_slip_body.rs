@@ -68,9 +68,9 @@ fn slip_emf(sim: &Sim) {
         let den = *sim.fields.cons.den.at(c);
         let mom_sq: f64 = (0..3).map(|k| (*sim.fields.cons.mom[k].at(c)).powi(2)).sum();
         let m_cell: f64 = (0..3).map(|d| 0.5 * (*m.bcell[d].at(c)).powi(2)).sum();
-        ws.gas_energy.set(c, *nrg.at(c) - 0.5 * mom_sq / den - m_cell);
+        ws.gas_energy.as_ref().unwrap().set(c, *nrg.at(c) - 0.5 * mom_sq / den - m_cell);
     }
-    body_slip_emf::<3, 3, HostMemory, f64>(sim, GAMMA);
+    body_slip_emf::<3, 3, HostMemory, f64>(sim, GAMMA, None);
 }
 
 // a deterministic pseudo-random field in [-0.5, 0.5], periodic (wrapped coords) and asymmetric

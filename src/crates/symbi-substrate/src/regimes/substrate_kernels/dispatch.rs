@@ -1707,6 +1707,7 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
                 mass_delta: sums[base + D + 3],
                 prev_mass_delta: 0.0,
                 energy_delta: sums[base + D + 4],
+        slip_heat_delta: 0.0,
             });
         }
     }
@@ -1923,6 +1924,7 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
             mass_delta: mass,
             prev_mass_delta: 0.0,
             energy_delta: energy,
+        slip_heat_delta: 0.0,
         });
     }
 }
@@ -2322,6 +2324,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         mass_delta: mass,
         prev_mass_delta: 0.0,
         energy_delta: energy,
+        slip_heat_delta: 0.0,
     });
 }
 
@@ -2465,16 +2468,17 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         );
         if has_slip {
             assert!(
-                coords_g == cart && DOF == 3 && (D == 3 || D == 2) && nrg.is_some(),
-                "the magnetic-slip midpoint drain is a cartesian adiabatic kernel on a 3D grid or a \
-                 2.5D x-y grid; got coords {coords_g:?} D={D} DOF={DOF} energy={}",
-                nrg.is_some()
+                coords_g == cart && DOF == 3 && (D == 3 || D == 2),
+                "the magnetic-slip midpoint drain is a cartesian kernel on a 3D grid or a 2.5D x-y \
+                 grid; got coords {coords_g:?} D={D} DOF={DOF}"
             );
         }
         // the midpoint drain is baked with all three momentum components on either grid, so its
-        // name carries the grid dimension alone.
+        // name carries the grid dimension alone; the isothermal twin reads the prescribed sound
+        // speed and binds no energy slot.
         let name_owned: String = if has_slip {
-            format!("penalize_drain_midpoint{dye}_{D}d")
+            let closure = if nrg.is_some() { "" } else { "_iso" };
+            format!("penalize_drain_midpoint{closure}{dye}_{D}d")
         } else {
             match (bodies.get(b).spec.surface, nrg.is_some()) {
             (symbi_ib::SurfaceSpec::Drain, true) => {
@@ -2619,6 +2623,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             mass_delta: mass,
             prev_mass_delta: 0.0,
             energy_delta: energy,
+        slip_heat_delta: 0.0,
         });
     }
 }
@@ -2706,6 +2711,7 @@ pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
                 mass_delta: sums[base + D + 3],
                 prev_mass_delta: 0.0,
                 energy_delta: 0.0,
+        slip_heat_delta: 0.0,
             });
         }
     }

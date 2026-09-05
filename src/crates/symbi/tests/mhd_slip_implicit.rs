@@ -145,7 +145,7 @@ fn apply_l(sim: &Sim, x: &Face) -> Face {
             m.efield[d].set(c, 0.0);
         }
     }
-    body_slip_emf::<3, 3, HostMemory, f64>(sim, GAMMA);
+    body_slip_emf::<3, 3, HostMemory, f64>(sim, GAMMA, None);
     ct_curl::<3, 3, HostMemory, f64>(sim, 1.0); // bface <- x - C E
     let mut out = Face::new();
     for d in 0..3 {
@@ -220,7 +220,7 @@ fn explicit_step(sim: &Sim, x: &Face, dt: f64) -> Face {
             m.efield[d].set(c, 0.0);
         }
     }
-    body_slip_emf::<3, 3, HostMemory, f64>(sim, GAMMA);
+    body_slip_emf::<3, 3, HostMemory, f64>(sim, GAMMA, None);
     ct_curl::<3, 3, HostMemory, f64>(sim, dt);
     get_bface(sim)
 }

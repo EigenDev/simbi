@@ -626,6 +626,8 @@ struct BodyStateSnap {
     rate: Vec<f64>,            // [nb] instantaneous Mdot (0 for non-sinks)
     accreted_energy: Vec<f64>, // [nb] cumulative covariant (killing) energy (GR horizon only)
     energy_rate: Vec<f64>,     // [nb] instantaneous Edot (GR horizon only)
+    slip_heat: Vec<f64>,       // [nb] cumulative magnetic-slip heat released by the body's shell
+    slip_heat_rate: Vec<f64>,  // [nb] its rate over the last step
     ang_mom: Vec<f64>,         // [nb, 3] world-frame angular momentum L = I omega
     ke_trans: Vec<f64>,        // [nb] translational kinetic energy 0.5 m |v|^2
     ke_rot: Vec<f64>,          // [nb] rotational kinetic energy 0.5 omega.I.omega
@@ -645,6 +647,8 @@ fn body_state_snap<const D: usize>(im: &ImmersedBodies<D>) -> BodyStateSnap {
         rate: Vec::with_capacity(nb),
         accreted_energy: Vec::with_capacity(nb),
         energy_rate: Vec::with_capacity(nb),
+        slip_heat: Vec::with_capacity(nb),
+        slip_heat_rate: Vec::with_capacity(nb),
         ang_mom: Vec::with_capacity(nb * 3),
         ke_trans: Vec::with_capacity(nb),
         ke_rot: Vec::with_capacity(nb),
@@ -712,6 +716,8 @@ fn body_state_snap<const D: usize>(im: &ImmersedBodies<D>) -> BodyStateSnap {
         };
         snap.accreted_energy.push(acc_e);
         snap.energy_rate.push(rate_e);
+        snap.slip_heat.push(body.slip_heat_total);
+        snap.slip_heat_rate.push(body.slip_heat_rate);
     }
     snap
 }
@@ -945,7 +951,17 @@ fn combine_continuous_tracer_snaps(
     Some(combined)
 }
 
-fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
+/// the dataset naming the magnetic-slip heat by its fate under the run's closure: deposited in
+/// the gas (adiabatic) or exported to the cooling bath (isothermal).
+fn slip_heat_dataset_name(has_energy: bool) -> &'static str {
+    if has_energy {
+        "magnetic_slip_heating"
+    } else {
+        "exported_slip_heat"
+    }
+}
+
+fn body_state_group<'a, const D: usize>(snap: &'a BodyStateSnap, heat_name: &str) -> Tree<'a> {
     let nb = snap.nb;
     let mut t = Tree::new("bodies")
         .with_attr("n_bodies", nb as u64)
@@ -979,6 +995,16 @@ fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
             "accretion_energy_rate",
             vec![nb],
             DataRef::F64(&snap.energy_rate),
+        ))
+        .with_dataset(Dataset::new(
+            heat_name.to_string(),
+            vec![nb],
+            DataRef::F64(&snap.slip_heat),
+        ))
+        .with_dataset(Dataset::new(
+            format!("{heat_name}_rate"),
+            vec![nb],
+            DataRef::F64(&snap.slip_heat_rate),
         ))
         .with_dataset(Dataset::new(
             "orientation",
@@ -1155,7 +1181,7 @@ where
     // buffers, so they live here and the tree borrows them.
     let body_snap = sim.immersed.as_ref().map(body_state_snap);
     if let Some(bs) = body_snap.as_ref() {
-        tree.push_group(body_state_group::<D>(bs));
+        tree.push_group(body_state_group::<D>(bs, slip_heat_dataset_name(sim.fields.cons.nrg_field().is_some())));
     }
     let tr_snap = sim.tracers.as_ref().map(tracer_snap);
     if let Some(ts) = tr_snap.as_ref() {
@@ -1215,7 +1241,7 @@ where
         .last()
         .map(body_state_snap);
     if let Some(bs) = body_snap.as_ref() {
-        root.push_group(body_state_group::<D>(bs));
+        root.push_group(body_state_group::<D>(bs, slip_heat_dataset_name(levels[0].fields.cons.nrg_field().is_some())));
     }
     // the tracer population lives on whichever level carries it (uni-grid:
     // level 0) — same group layout as the single-grid writer.
@@ -1890,6 +1916,13 @@ where
             get("accretion_rate")?,
         );
         let nb = im.bodies.len().min(mass.len());
+        // the slip heat under either closure's name; files written before the receipt existed
+        // leave the counters at zero.
+        let optional = |name: &str| -> Option<Vec<f64>> {
+            bodies_g.find_dataset(name).and_then(|d| d.data.as_f64().map(|v| v.to_vec()))
+        };
+        let heat = optional("magnetic_slip_heating").or_else(|| optional("exported_slip_heat"));
+        let heat_rate = optional("magnetic_slip_heating_rate").or_else(|| optional("exported_slip_heat_rate"));
         for b in 0..nb {
             let body = im.bodies.get_mut(b);
             for a in 0..D {
@@ -1897,6 +1930,12 @@ where
                 body.velocity[a] = vel[b * D + a];
             }
             body.mass = mass[b];
+            if let Some(h) = heat.as_ref() {
+                body.slip_heat_total = h[b];
+            }
+            if let Some(h) = heat_rate.as_ref() {
+                body.slip_heat_rate = h[b];
+            }
             if let symbi_ib::BodyKind::BlackHole {
                 total_accreted_mass,
                 accretion_rate,

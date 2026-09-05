@@ -96,6 +96,8 @@ pub fn apply_body_deltas<const D: usize>(
                     body.velocity[a] = body.velocity[a] + delta.force_delta[a] * dt / m;
                 }
             }
+            body.slip_heat_total += delta.slip_heat_delta;
+            body.slip_heat_rate = if dt > 0.0 { delta.slip_heat_delta / dt } else { 0.0 };
             if let BodyKind::BlackHole {
                 total_accreted_mass,
                 accretion_rate,

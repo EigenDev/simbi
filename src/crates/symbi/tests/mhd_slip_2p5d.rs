@@ -156,10 +156,10 @@ fn slip_2p5d(sim: &Sim, dt: f64, bz_op: &Cell, bz_out: &Cell) {
         let den = *sim.fields.cons.den.at(c);
         let mom_sq: f64 = (0..3).map(|k| (*sim.fields.cons.mom[k].at(c)).powi(2)).sum();
         let m_cell: f64 = (0..3).map(|d| 0.5 * (*m.bcell[d].at(c)).powi(2)).sum();
-        ws.gas_energy.set(c, *nrg.at(c) - 0.5 * mom_sq / den - m_cell);
+        ws.gas_energy.as_ref().unwrap().set(c, *nrg.at(c) - 0.5 * mom_sq / den - m_cell);
     }
     zero_efield(m);
-    body_slip_emf_2p5d::<2, 3, HostMemory, f64>(sim, GAMMA, dt, bz_op, bz_out);
+    body_slip_emf_2p5d::<2, 3, HostMemory, f64>(sim, GAMMA, dt, bz_op, bz_out, None);
 }
 
 // ---- host references ---------------------------------------------------------------------------
@@ -510,7 +510,7 @@ fn apply_frozen(sim: &Sim, p_faces: &[Vec<f64>; 2], p_z: &Cell, out_z: &Cell) ->
     }
     copy_cell(p_z, out_z);
     zero_efield(m);
-    body_slip_emf_2p5d::<2, 3, HostMemory, f64>(sim, GAMMA, 1.0, p_z, out_z);
+    body_slip_emf_2p5d::<2, 3, HostMemory, f64>(sim, GAMMA, 1.0, p_z, out_z, None);
     ct_curl::<2, 3, HostMemory, f64>(sim, 1.0);
     let lp_faces: [Vec<f64>; 2] = std::array::from_fn(|d| {
         sim.geom
@@ -532,7 +532,7 @@ fn the_frozen_operator_is_symmetric_and_semidefinite_on_the_mixed_complex() {
     let nrg = sim.fields.cons.nrg_field().unwrap();
     for c in sim.geom.interior.iter() {
         let m_cell: f64 = (0..3).map(|d| 0.5 * (*m.bcell[d].at(c)).powi(2)).sum();
-        ws.gas_energy.set(c, *nrg.at(c) - m_cell);
+        ws.gas_energy.as_ref().unwrap().set(c, *nrg.at(c) - m_cell);
     }
     let n = n_of(&sim);
     let vector = |salt: u64| -> ([Vec<f64>; 2], Cell) {

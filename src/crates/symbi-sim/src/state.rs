@@ -903,7 +903,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
     /// explicit step and is built without it; a magnetic-slip body makes the root step a
     /// transaction (a nonconverged solve or a rejected substage replays from the step entry), so
     /// the snapshot is allocated when such a body attaches. the regime carries the energy slot.
-    pub fn alloc_step_snapshot(&mut self, allocated: &Domain<D>) -> symbi_xpu::Result<()> {
+    pub fn alloc_step_snapshot(&mut self, allocated: &Domain<D>, has_energy: bool) -> symbi_xpu::Result<()> {
         if self.step_snapshot.is_some() {
             return Ok(());
         }
@@ -912,7 +912,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             faces.push(Field::zeros(self.bface.b[d].domain())?);
         }
         self.step_snapshot = Some(MhdStepSnapshot {
-            cons: ConsFieldsGeneric::zeros_with_energy(allocated, true)?,
+            cons: ConsFieldsGeneric::zeros_with_energy(allocated, has_energy)?,
             bcell: BcellFields {
                 b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
             },
@@ -923,7 +923,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         Ok(())
     }
 
-    pub fn alloc_magnetic_slip_workspace(&mut self, allocated: &Domain<D>) -> symbi_xpu::Result<()> {
+    pub fn alloc_magnetic_slip_workspace(&mut self, allocated: &Domain<D>, has_energy: bool) -> symbi_xpu::Result<()> {
         if self.magnetic_slip.is_some() {
             return Ok(());
         }
@@ -952,8 +952,9 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             direction: face_group(&face_doms)?,
             operator_direction: face_group(&face_doms)?,
             candidate: face_group(&face_doms)?,
-            gas_energy: Field::zeros(allocated)?,
+            gas_energy: if has_energy { Some(Field::zeros(allocated)?) } else { None },
             dissipation: Field::zeros(allocated)?,
+            dissipation_body: Field::zeros(allocated)?,
             product: face_group(&face_doms)?,
             z: if D < DOF {
                 Some(MagneticSlipCellComplex {
@@ -1002,14 +1003,16 @@ pub struct MagneticSlipWorkspace<
     pub operator_direction: BfaceFields<D, M, Sc>,
     /// the accepted converged candidate B^1, copied from the iterate at convergence.
     pub candidate: BfaceFields<D, M, Sc>,
-    /// the frozen predicted midpoint gas internal energy density e_g* the slip coefficient's sound
-    /// speed reads. filled once from the predictor state before the freeze, so the operator's drain
-    /// clock never consults the endpoint-reconciled total energy during the CG solve or the commit.
-    pub gas_energy: Field<Sc, D, M>,
+    /// the predicted midpoint gas internal energy density the adiabatic coefficient's sound speed
+    /// reads; absent on an isothermal closure, whose coefficient reads the prescribed sound speed.
+    pub gas_energy: Option<Field<Sc, D, M>>,
     /// the per-cell magnetic dissipation rate `qdot_c = (R J)_c . F_q,c` the slip cell pass
     /// produces: the predictor lifts `gas_energy` by `(dt/2) qdot^0`, and the commit deposits
     /// `dt qdot^{1/2}` into the total energy.
     pub dissipation: Field<Sc, D, M>,
+    /// the dissipation rate of one body's shell alone, the per-body heat receipt's staging; the
+    /// bodies' rates sum into `dissipation`.
+    pub dissipation_body: Field<Sc, D, M>,
     /// face scratch for the inner product: the pointwise product of two Krylov vectors, reduced
     /// over the physical faces to the scalar the conjugate-gradient recurrence reads.
     pub product: BfaceFields<D, M, Sc>,
@@ -2942,12 +2945,13 @@ where
             .any(|b| matches!(bodies.get(b).spec.magnetic, symbi_ib::MagneticSpec::Slip { .. }));
         if needs_slip_quadrature {
             let allocated = self.geom.allocated.clone();
+            let has_energy = self.fields.cons.nrg_field().is_some();
             if let Some(mhd) = self.fields.mhd.as_mut() {
                 mhd.alloc_slip_quadrature(&allocated)
                     .expect("magnetic-slip quadrature scratch allocation");
-                mhd.alloc_magnetic_slip_workspace(&allocated)
+                mhd.alloc_magnetic_slip_workspace(&allocated, has_energy)
                     .expect("magnetic-slip midpoint workspace allocation");
-                mhd.alloc_step_snapshot(&allocated)
+                mhd.alloc_step_snapshot(&allocated, has_energy)
                     .expect("magnetic-slip step-entry rollback snapshot allocation");
             }
         }

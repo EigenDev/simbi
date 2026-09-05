@@ -682,23 +682,30 @@ pub fn slip_commit_energy_3d_gv() -> KernelProgram {
 /// state `b_q` (the cell-centered field the operator is frozen on) and the cell gas state. the
 /// local drain rate lambda_rho = 1/tau_rho is the one the material drain reads: the fast-
 /// magnetosonic cell-crossing rate on the cell's own local Alfven term |B|^2/rho lifted by free
-/// fall, on the gas sound speed from the predicted midpoint gas internal energy density e_g* staged
-/// in `slip_ge` (cs^2 = gamma(gamma-1) e_g*/rho), so the drain clock tracks the substep-midpoint gas
-/// state without consulting the endpoint-reconciled total energy. the shell mask chi_B reads the
-/// physical distance from the cell center to the body surface, and
-/// a_B = ell_B^2 / ((|B|^2 + B_0^2) D_B tau_rho) with ell_B = slip_length_ratio w.
+/// fall. on an adiabatic closure the gas sound speed comes from the predicted midpoint gas
+/// internal energy density e_g* staged in `slip_ge` (cs^2 = gamma(gamma-1) e_g*/rho), so the
+/// drain clock tracks the substep-midpoint gas state without consulting the endpoint-reconciled
+/// total energy; on an isothermal closure it is the prescribed sound speed `cs`, and the kernel
+/// binds no energy slot. the shell mask chi_B reads the physical distance from the cell center to
+/// the body surface, and a_B = ell_B^2 / ((|B|^2 + B_0^2) D_B tau_rho) with
+/// ell_B = slip_length_ratio w.
 fn slip_dyad_coefficient_gv<'t>(
     cx: TraceCx<'t>,
     coords: Coords,
     ndim: usize,
     axes: &[usize],
+    has_energy: bool,
     b_q: &[Gv<'t>],
 ) -> Gv<'t> {
-    let gamma = cx.scalar("gamma");
     let den = cx.field("den", symbi_ir::FieldRef::cons_den());
     let b_sq = b_q.iter().fold(Gv::ZERO, |s, b| s + *b * *b);
-    let e_g = crate::gv::ct_field(cx, CtCellCt::SlipGasEnergy);
-    let cs = (gamma * (gamma - Gv::ONE) * e_g / den).sqrt();
+    let cs = if has_energy {
+        let gamma = cx.scalar("gamma");
+        let e_g = crate::gv::ct_field(cx, CtCellCt::SlipGasEnergy);
+        (gamma * (gamma - Gv::ONE) * e_g / den).sqrt()
+    } else {
+        cx.scalar("cs")
+    };
     let c_drain = cx.scalar("c_drain");
     let mut min_w = gv_axis_width(cx, 0, Spacing::Uniform);
     for ax in 1..ndim {
@@ -826,7 +833,7 @@ pub fn slip_commit_energy_2d_gv() -> KernelProgram {
 /// the face-plus-cell inner product with R* the exact transpose. the dyad coefficient is frozen on
 /// the cell field `bc_c` (the interpolated in-plane components and the coefficient state's `B_z`),
 /// which coincides with the operand for the explicit operator. writes F_q = a_B chi_B (|B|^2 I - B B) R B.
-pub fn body_slip_quadrature_2d_gv(coords: Coords) -> KernelProgram {
+pub fn body_slip_quadrature_2d_gv(coords: Coords, has_energy: bool) -> KernelProgram {
     let ndim = 2usize;
     let axes: &[usize] = &[0, 1];
     let (kernel, writes) = trace(|cx| {
@@ -838,7 +845,7 @@ pub fn body_slip_quadrature_2d_gv(coords: Coords) -> KernelProgram {
             .collect();
         let [j_x, j_y, j_z] = mixed_current_2d_gv(cx, &inv_dx);
 
-        let coeff = slip_dyad_coefficient_gv(cx, coords, ndim, axes, &b_q);
+        let coeff = slip_dyad_coefficient_gv(cx, coords, ndim, axes, has_energy, &b_q);
         let b_vec = Tensor::new([b_q[0], b_q[1], b_q[2]]);
         let j_vec = Tensor::new([j_x, j_y, j_z]);
         let f_q = symbi_ib::magnetic_slip::slip_apply(coeff, &b_vec, &j_vec);
@@ -898,7 +905,7 @@ pub fn body_slip_bz_2d_gv() -> KernelProgram {
     KernelProgram::new(kernel, writes)
 }
 
-pub fn body_slip_quadrature_3d_gv(coords: Coords) -> KernelProgram {
+pub fn body_slip_quadrature_3d_gv(coords: Coords, has_energy: bool) -> KernelProgram {
     let ndim = 3usize;
     let axes: &[usize] = &[0, 1, 2];
     let (kernel, writes) = trace(|cx| {
@@ -913,7 +920,7 @@ pub fn body_slip_quadrature_3d_gv(coords: Coords) -> KernelProgram {
 
         let j_q = gathered_current_gv(cx, &inv_dx);
 
-        let coeff = slip_dyad_coefficient_gv(cx, coords, ndim, axes, &b_q);
+        let coeff = slip_dyad_coefficient_gv(cx, coords, ndim, axes, has_energy, &b_q);
         let b_vec = Tensor::new([b_q[0], b_q[1], b_q[2]]);
         let j_vec = Tensor::new([j_q[0], j_q[1], j_q[2]]);
         let f_q = symbi_ib::magnetic_slip::slip_apply(coeff, &b_vec, &j_vec);
@@ -990,7 +997,9 @@ pub fn penalize_drain_iso_gv(
     penalize_drain_impl::<IsoModel>(coords, ndim, dof, axes, has_dye)
 }
 
-/// the second-order material drain for the magnetic-slip path (3D cartesian, adiabatic). the drain
+/// the second-order material drain for the magnetic-slip path (cartesian), traced once over the
+/// energy model: the adiabatic kernel recovers the sound speed from the energy slot and gamma, the
+/// isothermal kernel reads the prescribed `cs` and binds no energy slot. the drain
 /// rate `lambda = max(sqrt(cs^2 + |B|^2/rho) inv_cd_dx, sqrt(GM/r_acc^3))` stiffens as the density
 /// drains at fixed field, so evaluating it at the entering state is first-order in time. this kernel
 /// takes the local Alfven speed from the cell's own `bcell` (not the domain-wide max) and integrates
@@ -1000,6 +1009,15 @@ pub fn penalize_drain_iso_gv(
 /// dissolved dye) uniformly; `B` is untouched. `penalize_cell` applies `exp(-chi dt inv_tau)`, so the
 /// effective rate reproducing `f` is `-ln(f)/(chi dt)`, with a guard leaving `chi = 0` an exact no-op.
 pub fn penalize_drain_midpoint_gv(coords: Coords, ndim: usize, dof: usize, has_dye: bool) -> KernelProgram {
+    penalize_drain_midpoint_impl::<Adiabatic>(coords, ndim, dof, has_dye)
+}
+
+/// the isothermal twin of [`penalize_drain_midpoint_gv`].
+pub fn penalize_drain_midpoint_iso_gv(coords: Coords, ndim: usize, dof: usize, has_dye: bool) -> KernelProgram {
+    penalize_drain_midpoint_impl::<IsoModel>(coords, ndim, dof, has_dye)
+}
+
+fn penalize_drain_midpoint_impl<E: EnergyModel>(coords: Coords, ndim: usize, dof: usize, has_dye: bool) -> KernelProgram {
     let axes: &[usize] = &[0, 1, 2][..ndim];
     assert!(
         coords == Coords::Cartesian && (ndim == 3 || ndim == 2) && dof == 3,
@@ -1009,17 +1027,20 @@ pub fn penalize_drain_midpoint_gv(coords: Coords, ndim: usize, dof: usize, has_d
     );
     let (kernel, writes) = trace(|cx| {
         let dt = cx.scalar("dt");
-        let gamma = cx.scalar("gamma");
+        let eos = cx.scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
         let c_drain = cx.scalar("c_drain");
 
         let den = cx.field("den", symbi_ir::FieldRef::cons_den());
         let mom: Vec<Gv> = (0..dof)
             .map(|c| cx.field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
             .collect();
-        let nrg: <Adiabatic as EnergyModel>::Slot<Gv> =
-            <<Adiabatic as EnergyModel>::Slot<Gv> as EnergySlot<Gv>>::from_scalar(
+        let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
+            <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(
                 cx.field("nrg", symbi_ir::FieldRef::cons_nrg()),
-            );
+            )
+        } else {
+            <E::Slot<Gv> as EnergySlot<Gv>>::zero()
+        };
         // the cell-centered field: the local Alfven speed c_a^2 = |B|^2/rho, the density-dependent
         // stiffness the midpoint tracks.
         let b_q: Vec<Gv> = (0..3)
@@ -1049,10 +1070,15 @@ pub fn penalize_drain_midpoint_gv(coords: Coords, ndim: usize, dof: usize, has_d
         let chi = symbi_ib::sdf::chi(phi, min_w);
         tag_body_mask(cx, &chi, coords, ndim, axes, None, false);
 
-        // the sound speed is invariant under the uniform drain (e_int is preserved), so the drain rate
-        // shifts only through the local Alfven term |B|^2/rho.
-        let mom_sq = mom.iter().fold(Gv::ZERO, |sum, m| sum + *m * *m);
-        let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg.value(), gamma);
+        // the sound speed is invariant under the uniform drain (e_int is preserved on an adiabatic
+        // closure, prescribed on an isothermal one), so the drain rate shifts only through the
+        // local Alfven term |B|^2/rho.
+        let cs = if E::HAS_ENERGY {
+            let mom_sq = mom.iter().fold(Gv::ZERO, |sum, m| sum + *m * *m);
+            symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg.value(), eos)
+        } else {
+            eos
+        };
         let mass = cx.scalar("body_0_mass");
         let r_acc = cx.scalar("body_0_racc");
         let inv_cd_dx = Gv::ONE / (c_drain * min_w);
@@ -1081,7 +1107,7 @@ pub fn penalize_drain_midpoint_gv(coords: Coords, ndim: usize, dof: usize, has_d
         let mut slots: Vec<Gv> = vec![den];
         slots.extend((0..3).map(|a| if a < dof { mom[a] } else { Gv::ZERO }));
         slots.push(nrg.value());
-        let cons = ConsG::<Gv, 3, Adiabatic, Dyed>::from_slots(&slots).with_chi(chi_val);
+        let cons = ConsG::<Gv, 3, E, Dyed>::from_slots(&slots).with_chi(chi_val);
         let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
         let n_cart: Vec<Gv> = vec![Gv::ZERO; ndim];
         let (f_cart, torque) = cartesian_receipt(
@@ -1093,7 +1119,7 @@ pub fn penalize_drain_midpoint_gv(coords: Coords, ndim: usize, dof: usize, has_d
             &center,
             &delta.force_delta,
         );
-        penalize_writes::<Adiabatic>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart)
+        penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart)
     });
     let kernel = kernel.with_derived_support(&writes);
     KernelProgram::new(kernel, writes)
@@ -1853,6 +1879,52 @@ mod twin_tests {
             penalize_torque_free_iso_gv,
         ),
     ];
+
+    // the slip-path kernels on an isothermal closure read the prescribed sound speed and bind
+    // neither the energy slot nor the predicted gas-energy staging; the drain's write list is the
+    // adiabatic list minus the energy channel, the quadrature's write list is identical.
+    #[test]
+    fn iso_slip_kernels_read_the_closure_sound_speed_and_bind_no_energy() {
+        let pairs: Vec<(&str, KernelProgram, KernelProgram)> = vec![
+            (
+                "quadrature 2d",
+                body_slip_quadrature_2d_gv(Coords::Cartesian, true),
+                body_slip_quadrature_2d_gv(Coords::Cartesian, false),
+            ),
+            (
+                "quadrature 3d",
+                body_slip_quadrature_3d_gv(Coords::Cartesian, true),
+                body_slip_quadrature_3d_gv(Coords::Cartesian, false),
+            ),
+            (
+                "midpoint drain 2d",
+                penalize_drain_midpoint_gv(Coords::Cartesian, 2, 3, false),
+                penalize_drain_midpoint_iso_gv(Coords::Cartesian, 2, 3, false),
+            ),
+            (
+                "midpoint drain 3d",
+                penalize_drain_midpoint_gv(Coords::Cartesian, 3, 3, true),
+                penalize_drain_midpoint_iso_gv(Coords::Cartesian, 3, 3, true),
+            ),
+        ];
+        for (name, adiabatic, iso) in &pairs {
+            let (ka, ki) = (adiabatic.kernel(), iso.kernel());
+            assert!(ka.scalar_params().iter().any(|p| p == "gamma"), "{name}: the adiabatic kernel reads gamma");
+            assert!(ki.scalar_params().iter().any(|p| p == "cs"), "{name}: the iso kernel reads the prescribed sound speed");
+            assert!(!ki.scalar_params().iter().any(|p| p == "gamma"), "{name}: the iso kernel must not read gamma");
+            let iso_inputs: Vec<String> = ki.field_inputs().iter().map(|(k, _)| format!("{k:?}")).collect();
+            assert!(
+                !iso_inputs.iter().any(|k| k.contains("nrg") || k.contains("slip_ge")),
+                "{name}: the iso kernel binds an energy field: {iso_inputs:?}"
+            );
+            let names = |w: &KernelWrites| w.iter().map(|write| write.key.clone()).collect::<Vec<_>>();
+            let expected: Vec<symbi_ir::OutputKey> = names(&adiabatic.writes())
+                .into_iter()
+                .filter(|n| n != "nrg_out" && n != "pen_energy")
+                .collect();
+            assert_eq!(names(&iso.writes()), expected, "{name}: the iso write list is the adiabatic list minus the energy channel");
+        }
+    }
 
     // each iso surface differs from its adiabatic twin only by the energy channel
     // and by the lawful source of sound speed (`gamma` recovery versus fixed `cs`).

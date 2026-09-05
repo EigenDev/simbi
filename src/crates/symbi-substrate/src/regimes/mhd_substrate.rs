@@ -1661,25 +1661,82 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// the immersed-body magnetic-slip operator (3D cartesian), in two passes per slip body. the cell
-/// pass assembles the per-cell quadrature vector `F_q = A(B_q)(R J)_q` into the slip-quadrature
-/// scratch from the cell B, the four bounding edge currents, the local drain rate, and the shell
-/// mask; the three edge passes scatter it to the oriented edge EMF with the weighted-adjoint `R^*`.
-/// the augmented EMF rides the shared CT curl, so the tensor slip transport is div-B-clean and its
-/// magnetic-energy loss is the nonnegative dissipation. gated to 3D cartesian adiabatic MHD; every
-/// other chart, dimension, or regime fails loudly.
+/// the dissipation request of a slip pass: the substep the heat integrates over and the staggered
+/// field and cell operand the rate's current is gathered from. with a request the pass stages every
+/// body's dissipation rate `qdot_c = (R J)_c . F_q,c` into the workspace total while that body's own
+/// quadrature vector is in the scratch, so the heat is attributed body by body.
+pub struct SlipHeat<'a, const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric> {
+    pub dt: f64,
+    pub bface_source: &'a [Field<Sc, D, Mem>],
+    pub bz_source: Option<&'a Field<Sc, D, Mem>>,
+}
+
+/// the body-independent scalars of a scatter pass: the substep and the grid.
+fn scatter_scalar<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    name: &str,
+    bind: &symbi_ir::ScalarBind,
+) -> Sc
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_ir::ScalarBind;
+    Sc::from_f64(match bind {
+        ScalarBind::Ref(ScalarRef::Dt) => dt,
+        ScalarBind::Ref(other) => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+            .unwrap_or_else(|| panic!("{name}: unexpected scalar {other:?}")),
+        o => panic!("{name}: unexpected scalar {o:?}"),
+    })
+}
+
+/// the 3D cartesian magnetic-slip operator on the staggered complex. for every slip body the cell
+/// pass forms its quadrature vector F_q^b = A_b(B_q) (R J)_q into the slip-quadrature scratch and
+/// the vectors sum in the workspace; one edge pass then scatters the sum to the oriented edge EMF,
+/// efield += R^* sum_b F_q^b, so the operator is the sum of the bodies' operators and the
+/// weighted-adjoint scatter stays the exact transpose of the gather. the coefficient of each body
+/// reads its drain clock from the cell's own local Alfven term, the identical `local_drain_rate`
+/// the material drain integrates. with a heat request each body's dissipation rate is staged on
+/// its own vector and summed into the workspace total; the return lists (body index, sum over the
+/// interior of qdot) per slip body. a store without a slip body returns empty and touches nothing.
 pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
-) where
+    heat: Option<SlipHeat<'_, D, Mem, Sc>>,
+) -> Vec<(usize, f64)>
+where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     use symbi_ir::{FieldRef, ScalarBind, StateComp, StateSlot};
+    let mut sums = Vec::new();
     let Some(im) = sim.immersed.as_ref() else {
-        return;
+        return sums;
     };
     let bodies = &im.bodies;
+    let Some(slip_q) = sim.fields.mhd.as_ref().and_then(|m| m.slip_quadrature.as_ref()) else {
+        return sums;
+    };
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let ws = mhd
+        .magnetic_slip
+        .as_ref()
+        .expect("magnetic-slip workspace (allocated at attach_bodies for a slip body)");
+    let interior = &sim.geom.interior;
+    let has_energy = sim.fields.cons.nrg_field().is_some();
+    let cell_name = if has_energy {
+        "body_slip_quadrature_3d"
+    } else {
+        "body_slip_quadrature_3d_iso"
+    };
+    for c in 0..3 {
+        field_fill_over(interior, &ws.quadrature.b[c], 0.0);
+    }
+    if heat.is_some() {
+        field_fill_over(interior, &ws.dissipation, 0.0);
+    }
+    let mut any = false;
     for b in 0..bodies.len() {
         let symbi_ib::MagneticSpec::Slip {
             diffusivity_ratio,
@@ -1691,30 +1748,13 @@ pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
         else {
             continue;
         };
+        any = true;
         assert!(
             sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 3 && DOF == 3,
             "MagneticSpec::Slip is a 3D cartesian operator (staggered gather/scatter on the full CT \
              complex); the {:?} chart in {D}D with DOF {DOF} needs its own pass, not yet built",
             sim.geom.coords
         );
-        assert!(
-            sim.fields.cons.nrg_field().is_some(),
-            "MagneticSpec::Slip needs the adiabatic energy channel to receive its heating Q_B; \
-             isothermal MHD has no thermal sink and requires an explicit radiated-energy policy"
-        );
-        let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-        let slip_q = mhd
-            .slip_quadrature
-            .as_ref()
-            .expect("slip-quadrature scratch (allocated at attach_bodies for a slip body)");
-        let ws = mhd
-            .magnetic_slip
-            .as_ref()
-            .expect("magnetic-slip workspace (allocated at attach_bodies for a slip body)");
-
-        // the slip coefficient reads its drain clock tau_rho from the cell's own local Alfven term
-        // (the `bcell`/`den` fields inside the kernel), the identical `local_drain_rate` the material
-        // drain integrates, so no domain-wide c_a2 is bound here.
         let resolve = |bind: &ScalarBind| -> Sc {
             Sc::from_f64(match bind {
                 ScalarBind::Spec(s) if &**s == "c_drain" => 1.0,
@@ -1735,13 +1775,12 @@ pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
             })
         };
 
-        // cell pass: F_q -> the slip-quadrature scratch, over the interior.
-        let cell_name = "body_slip_quadrature_3d";
+        // cell pass: this body's F_q into the slip-quadrature scratch, over the interior.
         let cell_scalars = scalars_for(cell_name, &resolve);
         let cell_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
             match ct_role(bind) {
                 Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
-                Some(CtScratch::Cell(CtCellCt::SlipGasEnergy)) => &ws.gas_energy,
+                Some(CtScratch::Cell(CtCellCt::SlipGasEnergy)) => ws.gas_energy.as_ref().expect("adiabatic gas-energy staging"),
                 Some(CtScratch::Face(CtFaceCt::BFaceComp(c))) => &mhd.bface[c.index()],
                 _ => match bind {
                     FieldBind::Ref(FieldRef::BCell(c)) => &mhd.bcell[*c as usize],
@@ -1759,70 +1798,99 @@ pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
             }
         };
         let (inputs, outputs) = bind_by_manifest(cell_name, cell_slot);
-        dispatch_fields_each::<Sc, Mem, D>(
-            cell_name,
-            &sim.geom.interior,
-            &inputs,
-            &outputs,
-            &[],
-            &cell_scalars,
-        );
-
-        // fill the quadrature halo before the scatter reads it: the edge pass gathers F_q from the
-        // neighboring cells, so a boundary edge reads the wrapped (periodic) or BC image. this makes
-        // R^* the exact transpose of R across the domain seam, so <J, R^* F>_e = <R J, F>_q closes
-        // to roundoff on the whole periodic domain, not merely the interior.
-        let bc = crate::kernels::support::to_bc_array_scalar::<D>(&sim.boundaries);
-        for c in 0..3 {
-            flag_ghost_fill::<D, DOF, Mem, Sc>(sim, &slip_q[c], bc);
+        dispatch_fields_each::<Sc, Mem, D>(cell_name, interior, &inputs, &outputs, &[], &cell_scalars);
+        if let Some(h) = heat.as_ref() {
+            slip_cell_pass(sim, "slip_dissipation_3d", h.dt, h.bface_source, h.bz_source, &ws.dissipation_body);
+            field_lincomb_over(interior, 1.0, &ws.dissipation, 1.0, &ws.dissipation_body);
+            sums.push((b, field_reduce(&ws.dissipation_body, interior, ReductionOp::Add)));
         }
-
-        // edge pass: efield[dir] += (R^* F)_dir, one kernel per edge direction.
-        for dir in 0..3 {
-            let name = format!("body_slip_emf_3d_{dir}");
-            let scalars = scalars_for(&name, &resolve);
-            let edge_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
-                match ct_role(bind) {
-                    Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[dir],
-                    Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
-                    _ => panic!("body_slip_emf edge: unknown manifest slot '{}'", bind.name()),
-                }
-            };
-            let (inputs, outputs) = bind_by_manifest(&name, edge_slot);
-            dispatch_fields_each::<Sc, Mem, D>(
-                &name,
-                mhd.efield[dir].domain(),
-                &inputs,
-                &outputs,
-                &[],
-                &scalars,
-            );
+        for c in 0..3 {
+            field_lincomb_over(interior, 1.0, &ws.quadrature.b[c], 1.0, &slip_q[c]);
         }
     }
+    if !any {
+        return sums;
+    }
+    for c in 0..3 {
+        field_copy_over(interior, &ws.quadrature.b[c], &slip_q[c]);
+    }
+
+    // fill the quadrature halo before the scatter reads it: the edge pass gathers F_q from the
+    // neighboring cells, so a boundary edge reads the wrapped (periodic) or BC image. this makes
+    // R^* the exact transpose of R across the domain seam, so <J, R^* F>_e = <R J, F>_q closes
+    // to roundoff on the whole periodic domain, not merely the interior.
+    let bc = crate::kernels::support::to_bc_array_scalar::<D>(&sim.boundaries);
+    for c in 0..3 {
+        flag_ghost_fill::<D, DOF, Mem, Sc>(sim, &slip_q[c], bc);
+    }
+
+    // edge pass: efield[dir] += (R^* F)_dir, one kernel per edge direction.
+    for dir in 0..3 {
+        let name = format!("body_slip_emf_3d_{dir}");
+        let scalars = scalars_for(&name, |bind: &ScalarBind| scatter_scalar(sim, 0.0, &name, bind));
+        let edge_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
+            match ct_role(bind) {
+                Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[dir],
+                Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
+                _ => panic!("body_slip_emf edge: unknown manifest slot '{}'", bind.name()),
+            }
+        };
+        let (inputs, outputs) = bind_by_manifest(&name, edge_slot);
+        dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[dir].domain(), &inputs, &outputs, &[], &scalars);
+    }
+    sums
 }
 
-/// the 2.5D magnetic-slip operator on the mixed complex F_x + F_y + C_z, for the slip body of a
-/// cartesian x-y run with three vector components. the cell pass forms F_q = A(B_q) R B with the
-/// current gathered from the production faces and from `bz_operand` (the operand's cell `B_z`), the
-/// edge pass scatters F_q,z to the corner z-edge EMF the CT curl consumes, and the out-of-plane
-/// pass advances `bz_out` by `-dt (D_x F_y - D_y F_x)`. `bz_out` holds the operand's `B_z` on
-/// entry; the explicit operator binds both to the production cell field, and the frozen operator
-/// on a Krylov iterate binds workspace vectors. the coefficient is frozen on production `bcell`.
+/// the 2.5D magnetic-slip operator on the mixed complex F_x + F_y + C_z, for the slip bodies of a
+/// cartesian x-y run with three vector components. for every slip body the cell pass forms
+/// F_q^b = A_b(B_q) R B with the current gathered from the production faces and from `bz_operand`
+/// (the operand's cell `B_z`), and the vectors sum; the edge pass then scatters the summed F_q,z to
+/// the corner z-edge EMF the CT curl consumes, and the out-of-plane pass advances `bz_out` by
+/// `-dt (D_x F_y - D_y F_x)` of the sum. `bz_out` holds the operand's `B_z` on entry; the explicit
+/// operator binds both to the production cell field, and the frozen operator on a Krylov iterate
+/// binds workspace vectors. the coefficient is frozen on production `bcell`. with a heat request
+/// each body's dissipation rate is staged on its own vector and summed into the workspace total;
+/// the return lists (body index, sum over the interior of qdot) per slip body.
 pub fn body_slip_emf_2p5d<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
     dt: f64,
     bz_operand: &Field<Sc, D, Mem>,
     bz_out: &Field<Sc, D, Mem>,
-) where
+    heat: Option<SlipHeat<'_, D, Mem, Sc>>,
+) -> Vec<(usize, f64)>
+where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     use symbi_ir::{FieldRef, ScalarBind, StateComp, StateSlot};
+    let mut sums = Vec::new();
     let Some(im) = sim.immersed.as_ref() else {
-        return;
+        return sums;
     };
     let bodies = &im.bodies;
+    let Some(slip_q) = sim.fields.mhd.as_ref().and_then(|m| m.slip_quadrature.as_ref()) else {
+        return sums;
+    };
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let ws = mhd
+        .magnetic_slip
+        .as_ref()
+        .expect("magnetic-slip workspace (allocated at attach_bodies for a slip body)");
+    let interior = &sim.geom.interior;
+    let has_energy = sim.fields.cons.nrg_field().is_some();
+    let cell_name = if has_energy {
+        "body_slip_quadrature_2d"
+    } else {
+        "body_slip_quadrature_2d_iso"
+    };
+    for c in 0..3 {
+        field_fill_over(interior, &ws.quadrature.b[c], 0.0);
+    }
+    if heat.is_some() {
+        field_fill_over(interior, &ws.dissipation, 0.0);
+    }
+    let mut any = false;
     for b in 0..bodies.len() {
         let symbi_ib::MagneticSpec::Slip {
             diffusivity_ratio,
@@ -1834,25 +1902,13 @@ pub fn body_slip_emf_2p5d<const D: usize, const DOF: usize, Mem, Sc>(
         else {
             continue;
         };
+        any = true;
         assert!(
             sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 2 && DOF == 3,
             "the 2.5D magnetic slip is a cartesian x-y operator with three vector components; the \
              {:?} chart in {D}D with DOF {DOF} has no such operator",
             sim.geom.coords
         );
-        assert!(
-            sim.fields.cons.nrg_field().is_some(),
-            "MagneticSpec::Slip needs the adiabatic energy channel to receive its heating"
-        );
-        let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-        let slip_q = mhd
-            .slip_quadrature
-            .as_ref()
-            .expect("slip-quadrature scratch (allocated at attach_bodies for a slip body)");
-        let ws = mhd
-            .magnetic_slip
-            .as_ref()
-            .expect("magnetic-slip workspace (allocated at attach_bodies for a slip body)");
         let resolve = |bind: &ScalarBind| -> Sc {
             Sc::from_f64(match bind {
                 ScalarBind::Spec(s) if &**s == "c_drain" => 1.0,
@@ -1874,13 +1930,13 @@ pub fn body_slip_emf_2p5d<const D: usize, const DOF: usize, Mem, Sc>(
             })
         };
 
-        // cell pass: F_q over the interior, the current from the faces and the operand's B_z.
-        let cell_name = "body_slip_quadrature_2d";
+        // cell pass: this body's F_q over the interior, the current from the faces and the
+        // operand's B_z.
         let cell_scalars = scalars_for(cell_name, &resolve);
         let cell_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
             match ct_role(bind) {
                 Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
-                Some(CtScratch::Cell(CtCellCt::SlipGasEnergy)) => &ws.gas_energy,
+                Some(CtScratch::Cell(CtCellCt::SlipGasEnergy)) => ws.gas_energy.as_ref().expect("adiabatic gas-energy staging"),
                 Some(CtScratch::Cell(CtCellCt::SlipOperandBz)) => bz_operand,
                 Some(CtScratch::Face(CtFaceCt::BFaceComp(c))) => &mhd.bface[c.index()],
                 _ => match bind {
@@ -1899,64 +1955,58 @@ pub fn body_slip_emf_2p5d<const D: usize, const DOF: usize, Mem, Sc>(
             }
         };
         let (inputs, outputs) = bind_by_manifest(cell_name, cell_slot);
-        dispatch_fields_each::<Sc, Mem, D>(
-            cell_name,
-            &sim.geom.interior,
-            &inputs,
-            &outputs,
-            &[],
-            &cell_scalars,
-        );
-
-        // the quadrature halo, so the corner scatter and the central differences read the wrapped
-        // or boundary image and both transposes close across the domain seam.
-        let bc = crate::kernels::support::to_bc_array_scalar::<D>(&sim.boundaries);
-        for c in 0..3 {
-            flag_ghost_fill::<D, DOF, Mem, Sc>(sim, &slip_q[c], bc);
+        dispatch_fields_each::<Sc, Mem, D>(cell_name, interior, &inputs, &outputs, &[], &cell_scalars);
+        if let Some(h) = heat.as_ref() {
+            slip_cell_pass(sim, "slip_dissipation_2d", h.dt, h.bface_source, h.bz_source, &ws.dissipation_body);
+            field_lincomb_over(interior, 1.0, &ws.dissipation, 1.0, &ws.dissipation_body);
+            sums.push((b, field_reduce(&ws.dissipation_body, interior, ReductionOp::Add)));
         }
-
-        // edge pass: the corner z-edge EMF the 2D CT curl consumes.
-        let edge = CtEdgeMap::<D>::grid_ordered(&sim.geom.axes)
-            .unwrap_or_else(|e| panic!("body_slip_emf_2p5d: {e}"));
-        let edge_name = "body_slip_emf_2d";
-        let edge_scalars = scalars_for(edge_name, &resolve);
-        let edge_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
-            match ct_role(bind) {
-                Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
-                Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
-                _ => panic!("body_slip_emf_2p5d edge: unknown manifest slot '{}'", bind.name()),
-            }
-        };
-        let (inputs, outputs) = bind_by_manifest(edge_name, edge_slot);
-        dispatch_fields_each::<Sc, Mem, D>(
-            edge_name,
-            mhd.efield[edge.slot].domain(),
-            &inputs,
-            &outputs,
-            &[],
-            &edge_scalars,
-        );
-
-        // out-of-plane pass: B_z -= dt (D_x F_y - D_y F_x) on the operand slot.
-        let bz_name = "body_slip_bz_2d";
-        let bz_scalars = scalars_for(bz_name, &resolve);
-        let bz_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
-            match ct_role(bind) {
-                Some(CtScratch::Cell(CtCellCt::SlipOperandBz)) => bz_out,
-                Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
-                _ => panic!("body_slip_emf_2p5d bz: unknown manifest slot '{}'", bind.name()),
-            }
-        };
-        let (inputs, outputs) = bind_by_manifest(bz_name, bz_slot);
-        dispatch_fields_each::<Sc, Mem, D>(
-            bz_name,
-            &sim.geom.interior,
-            &inputs,
-            &outputs,
-            &[],
-            &bz_scalars,
-        );
+        for c in 0..3 {
+            field_lincomb_over(interior, 1.0, &ws.quadrature.b[c], 1.0, &slip_q[c]);
+        }
     }
+    if !any {
+        return sums;
+    }
+    for c in 0..3 {
+        field_copy_over(interior, &ws.quadrature.b[c], &slip_q[c]);
+    }
+
+    // the quadrature halo, so the corner scatter and the central differences read the wrapped
+    // or boundary image and both transposes close across the domain seam.
+    let bc = crate::kernels::support::to_bc_array_scalar::<D>(&sim.boundaries);
+    for c in 0..3 {
+        flag_ghost_fill::<D, DOF, Mem, Sc>(sim, &slip_q[c], bc);
+    }
+
+    // edge pass: the corner z-edge EMF the 2D CT curl consumes.
+    let edge = CtEdgeMap::<D>::grid_ordered(&sim.geom.axes)
+        .unwrap_or_else(|e| panic!("body_slip_emf_2p5d: {e}"));
+    let edge_name = "body_slip_emf_2d";
+    let edge_scalars = scalars_for(edge_name, |bind: &ScalarBind| scatter_scalar(sim, dt, edge_name, bind));
+    let edge_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
+        match ct_role(bind) {
+            Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
+            Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
+            _ => panic!("body_slip_emf_2p5d edge: unknown manifest slot '{}'", bind.name()),
+        }
+    };
+    let (inputs, outputs) = bind_by_manifest(edge_name, edge_slot);
+    dispatch_fields_each::<Sc, Mem, D>(edge_name, mhd.efield[edge.slot].domain(), &inputs, &outputs, &[], &edge_scalars);
+
+    // out-of-plane pass: B_z -= dt (D_x F_y - D_y F_x) on the operand slot.
+    let bz_name = "body_slip_bz_2d";
+    let bz_scalars = scalars_for(bz_name, |bind: &ScalarBind| scatter_scalar(sim, dt, bz_name, bind));
+    let bz_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
+        match ct_role(bind) {
+            Some(CtScratch::Cell(CtCellCt::SlipOperandBz)) => bz_out,
+            Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
+            _ => panic!("body_slip_emf_2p5d bz: unknown manifest slot '{}'", bind.name()),
+        }
+    };
+    let (inputs, outputs) = bind_by_manifest(bz_name, bz_slot);
+    dispatch_fields_each::<Sc, Mem, D>(bz_name, interior, &inputs, &outputs, &[], &bz_scalars);
+    sums
 }
 
 // =============================================================================
@@ -2219,6 +2269,7 @@ fn slip_cell_pass<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     bface_source: &[Field<Sc, D, Mem>],
     bz_source: Option<&Field<Sc, D, Mem>>,
+    dissipation: &Field<Sc, D, Mem>,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -2238,8 +2289,10 @@ fn slip_cell_pass<const D: usize, const DOF: usize, Mem, Sc>(
     let slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
         match ct_role(bind) {
             Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
-            Some(CtScratch::Cell(CtCellCt::SlipGasEnergy)) => &ws.gas_energy,
-            Some(CtScratch::Cell(CtCellCt::SlipDissipation)) => &ws.dissipation,
+            Some(CtScratch::Cell(CtCellCt::SlipGasEnergy)) => {
+                ws.gas_energy.as_ref().expect("adiabatic gas-energy staging")
+            }
+            Some(CtScratch::Cell(CtCellCt::SlipDissipation)) => dissipation,
             Some(CtScratch::Cell(CtCellCt::SlipOperandBz)) => {
                 bz_source.unwrap_or_else(|| panic!("{name}: the operand's B_z slot has no binding"))
             }
@@ -2308,21 +2361,24 @@ fn mixed_lincomb<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-fn mixed_fill_interior<const D: usize, const DOF: usize, Mem, Sc>(
+// dst = src over the interior faces and cells.
+fn mixed_copy_interior<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
+    src: Mixed<'_, D, Mem, Sc>,
     dst: Mixed<'_, D, Mem, Sc>,
-    value: f64,
 ) where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
+    let interior = &sim.geom.interior;
     for d in 0..D {
-        field_fill_over(&sim.geom.interior, &dst.faces.b[d], value);
+        field_copy_over(interior, &src.faces.b[d], &dst.faces.b[d]);
     }
-    if let Some(dz) = dst.z {
-        field_fill_over(&sim.geom.interior, dz, value);
+    if let (Some(sz), Some(dz)) = (src.z, dst.z) {
+        field_copy_over(interior, sz, dz);
     }
 }
+
 
 /// the mixed inner product: each interior face of each orientation once (one entry per unique
 /// face on a periodic domain) plus each interior cell once, all under the one uniform cell volume.
@@ -2411,9 +2467,11 @@ fn apply_operator_mixed<const D: usize, const DOF: usize, Mem, Sc>(
         (Some(pz), Some(oz)) => {
             cell_halo_fill(sim, pz);
             field_copy_over(pz.domain(), pz, oz);
-            body_slip_emf_2p5d::<D, DOF, Mem, Sc>(sim, gamma, 1.0, pz, oz);
+            body_slip_emf_2p5d::<D, DOF, Mem, Sc>(sim, gamma, 1.0, pz, oz, None);
         }
-        _ => body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma),
+        _ => {
+            body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma, None);
+        }
     }
     ct_curl::<D, DOF, Mem, Sc>(sim, 1.0);
     let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
@@ -2483,10 +2541,6 @@ where
         sim.geom.coords
     );
     let has_energy = sim.fields.cons.nrg_field().is_some();
-    assert!(
-        has_energy,
-        "magnetic slip needs the adiabatic energy channel; isothermal MHD has no thermal sink"
-    );
     let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
     let ws = mhd
         .magnetic_slip
@@ -2517,39 +2571,46 @@ where
     extend_bface_periodic(sim);
     interp_bcell(sim);
 
-    // the frozen coefficient's gas state is an explicit midpoint prediction, not a magnetic-energy
-    // subtraction: e_g^0 = E^0 - KE^0 - M_cell(B^0) is the entering gas internal energy, with the
-    // kinetic energy of all three momentum components and M_cell over all three cell components;
-    // the predictor A(B^0) reads it via `slip_ge`, and after the half-step it is lifted by the
-    // predicted dissipative heat (dt/2) qdot^0 to the midpoint e_g*, so A* is frozen at the
-    // midpoint gas state while the exact commit still reconciles the endpoint total energy.
-    slip_cell_pass(sim, &format!("slip_gas_energy_{dim}"), dt, &mhd.bface.b, None);
+    // the frozen coefficient's gas state on an adiabatic closure is an explicit midpoint
+    // prediction, not a magnetic-energy subtraction: e_g^0 = E^0 - KE^0 - M_cell(B^0) is the
+    // entering gas internal energy, with the kinetic energy of all three momentum components and
+    // M_cell over all three cell components; the predictor A(B^0) reads it via `slip_ge`, and
+    // after the half-step it is lifted by the predicted dissipative heat (dt/2) qdot^0 to the
+    // midpoint e_g*, so A* is frozen at the midpoint gas state while the exact commit still
+    // reconciles the endpoint total energy. an isothermal closure prescribes the sound speed, so
+    // the coefficient has no gas state to predict.
+    if has_energy {
+        slip_cell_pass(sim, &format!("slip_gas_energy_{dim}"), dt, &mhd.bface.b, None, &ws.dissipation);
+    }
 
     zero_efield(sim);
     match zc {
         // the 2.5D pass forms F_q^0 = A(B^0) R B^0, scatters its z-component to the corner EMF, and
-        // advances the cell B_z to the predictor in place; the dissipation then reads the faces (still
+        // advances the cell B_z to the predictor in place; the dissipation reads the faces (still
         // B^0, the curl not yet applied) and the saved B_z^0.
         Some(z) => {
-            body_slip_emf_2p5d::<D, DOF, Mem, Sc>(sim, gamma, 0.5 * dt, &mhd.bcell[oop], &mhd.bcell[oop]);
-            slip_cell_pass(sim, "slip_dissipation_2d", dt, &mhd.bface.b, Some(&z.input));
+            let heat = SlipHeat { dt, bface_source: &mhd.bface.b, bz_source: Some(&z.input) };
+            body_slip_emf_2p5d::<D, DOF, Mem, Sc>(sim, gamma, 0.5 * dt, &mhd.bcell[oop], &mhd.bcell[oop], Some(heat));
         }
         None => {
-            body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma); // F_q^0 = A(B^0) R J^0 into slip_quadrature
-            slip_cell_pass(sim, "slip_dissipation_3d", dt, &mhd.bface.b, None);
+            // F_q^0 = A(B^0) R J^0 into slip_quadrature, qdot^0 into the workspace total.
+            let heat = SlipHeat { dt, bface_source: &mhd.bface.b, bz_source: None };
+            body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma, Some(heat));
         }
     }
     ct_curl::<D, DOF, Mem, Sc>(sim, 0.5 * dt); // bface <- B*
 
     // e_g* = e_g^0 + (dt/2) qdot^0, frozen in `slip_ge` for the solve and the commit.
-    dispatch_fields_each::<Sc, Mem, D>(
-        KernelId::FieldAxpyShift { ndim: D as u8 }.name(),
-        interior,
-        &[&ws.dissipation],
-        &[&ws.gas_energy],
-        &[0i32; 3][..D],
-        &[Sc::from_f64(0.5 * dt)],
-    );
+    if let Some(gas_energy) = ws.gas_energy.as_ref() {
+        dispatch_fields_each::<Sc, Mem, D>(
+            KernelId::FieldAxpyShift { ndim: D as u8 }.name(),
+            interior,
+            &[&ws.dissipation],
+            &[gas_energy],
+            &[0i32; 3][..D],
+            &[Sc::from_f64(0.5 * dt)],
+        );
+    }
     interp_bcell(sim); // production in-plane bcell <- interp(B*) (bface holds B*): freeze A*
     // capture the frozen predictor cell field after the interpolation, so it is interp(B*) with B_z*.
     for d in 0..DOF {
@@ -2566,22 +2627,22 @@ where
     apply_operator_mixed(sim, gamma, input, op_dir);
     mixed_lincomb(sim, 1.0, rhs, -0.5 * dt, op_dir);
 
-    // conjugate gradient on (I + dt/2 L*) x = rhs, x_0 = 0, over the mixed complex.
-    mixed_fill_interior(sim, iterate, 0.0);
-    for d in 0..D {
-        field_copy_over(interior, &ws.rhs.b[d], &ws.residual.b[d]);
-        field_copy_over(interior, &ws.rhs.b[d], &ws.direction.b[d]);
-    }
-    if let Some(z) = zc {
-        field_copy_over(interior, &z.rhs, &z.residual);
-        field_copy_over(interior, &z.rhs, &z.direction);
-    }
+    // conjugate gradient on (I + dt/2 L*) x = rhs over the mixed complex, from x_0 = B^0: the
+    // initial residual is then rhs - (I + dt/2 L*) B^0 = -dt L* B^0, the operator's action already
+    // in hand, so a force-free field starts converged and the candidate is the input bit for bit.
+    // the convergence target is the residual relative to the right-hand side's norm.
+    mixed_lincomb(sim, 0.0, residual, -dt, op_dir);
+    mixed_copy_interior(sim, residual, direction);
+    let rhs_norm = mixed_dot(sim, rhs, rhs, product).sqrt();
     let r0 = mixed_dot(sim, residual, residual, product).sqrt();
-    let target = tol * r0.max(1e-300);
+    let target = tol * rhs_norm.max(1e-300);
     let mut rs = r0 * r0;
     let mut iterations = 0;
     let mut final_res = r0;
     for it in 0..max_iter {
+        if final_res <= target {
+            break;
+        }
         apply_operator_mixed(sim, gamma, direction, op_dir);
         mixed_lincomb(sim, 0.5 * dt, op_dir, 1.0, direction);
         let alpha = rs / mixed_dot(sim, direction, op_dir, product);
@@ -2619,16 +2680,18 @@ where
     }
 }
 
-/// commit a converged magnetic-slip candidate into the production state through the face-to-cell
-/// defect bridge. the CT slip operator dissipates face-Hodge magnetic energy `Q_h = -dM_face`, but
-/// the conserved state tracks the cell-centred energy `M_cc`. deposit the change exactly:
-///   E_c += (M_cc^1 - M_cc^0) + q_c,
-/// where `q_c = dt (R J^{1/2})_c . F_q,c >= 0` is the per-cell midpoint dissipation with
-/// `sum_c q_c = Q_h`. on a 2.5D grid `M_cc` carries the interpolated in-plane components and the
-/// cell B_z directly, `dM_cc = dM_xy,interp + (B_z^1)^2/2 - (B_z^0)^2/2`, the defect living in the
-/// in-plane part alone. the gas internal energy then gains exactly `q_c` per cell and the summed
-/// extended energy is invariant. finally set the physical field to the candidate and reinterpolate
-/// bcell. cartesian, adiabatic, in the run's memory space.
+/// commit a converged magnetic-slip candidate into the production state. the CT slip operator
+/// dissipates face-Hodge magnetic energy `Q_h = -dM_face`; the per-cell midpoint dissipation
+/// `q_c = dt (R J^{1/2})_c . F_q,c >= 0` sums to it, and every slip body books the heat its own
+/// shell released as its slip-heat receipt. on an adiabatic closure the conserved state tracks the
+/// cell-centred energy `M_cc`, and the change is deposited exactly through the face-to-cell defect
+/// bridge, E_c += (M_cc^1 - M_cc^0) + q_c: on a 2.5D grid `M_cc` carries the interpolated in-plane
+/// components and the cell B_z directly, `dM_cc = dM_xy,interp + (B_z^1)^2/2 - (B_z^0)^2/2`, the
+/// defect living in the in-plane part alone; the gas internal energy then gains exactly `q_c` per
+/// cell and the summed extended energy is invariant. on an isothermal closure the heat leaves the
+/// system through the cooling bath, the receipt being its only record, so the face-Hodge magnetic
+/// energy decreases by exactly the booked heat. finally set the physical field to the candidate
+/// and reinterpolate bcell. cartesian, in the run's memory space.
 pub fn magnetic_slip_commit<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
@@ -2638,7 +2701,6 @@ pub fn magnetic_slip_commit<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let has_energy = sim.fields.cons.nrg_field().is_some();
-    assert!(has_energy, "magnetic-slip commit needs the adiabatic energy channel");
     let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
     let ws = mhd.magnetic_slip.as_ref().expect("magnetic-slip workspace");
     let interior = &sim.geom.interior;
@@ -2661,21 +2723,32 @@ pub fn magnetic_slip_commit<const D: usize, const DOF: usize, Mem, Sc>(
     restore_bface(sim, &ws.rhs);
     extend_bface_periodic(sim);
     zero_efield(sim);
-    match zc {
+    let sums = match zc {
         Some(z) => {
             // the B_z pass output lands in the scratch member; the commit reads F_q and the
             // dissipation alone here.
-            body_slip_emf_2p5d::<D, DOF, Mem, Sc>(sim, gamma, dt, &z.rhs, &z.product);
-            slip_cell_pass(sim, "slip_dissipation_2d", dt, &mhd.bface.b, Some(&z.rhs));
+            let heat = SlipHeat { dt, bface_source: &mhd.bface.b, bz_source: Some(&z.rhs) };
+            body_slip_emf_2p5d::<D, DOF, Mem, Sc>(sim, gamma, dt, &z.rhs, &z.product, Some(heat))
         }
         None => {
-            body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma);
-            slip_cell_pass(sim, "slip_dissipation_3d", dt, &mhd.bface.b, None);
+            let heat = SlipHeat { dt, bface_source: &mhd.bface.b, bz_source: None };
+            body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma, Some(heat))
+        }
+    };
+
+    // the per-body heat receipt, Q_b = dt dV sum_c qdot_c^b, booked with the step's body deltas.
+    if let Some(im) = sim.immersed.as_ref() {
+        let vol: f64 = sim.geom.dx.iter().product();
+        for (b, qdot_sum) in sums {
+            let mut delta = symbi_ib::BodyDelta::<f64, D>::new(b);
+            delta.slip_heat_delta = dt * vol * qdot_sum;
+            im.diagnostics.accumulate(delta);
         }
     }
 
-    // set the physical field to the candidate B^1 (its periodic images regenerated), reinterpolate
-    // the in-plane bcell, and deposit E_c += dM_cc + dt qdot with M_cc^0 read from the input.
+    // set the physical field to the candidate B^1 (its periodic images regenerated) and
+    // reinterpolate the in-plane bcell; on an adiabatic closure deposit E_c += dM_cc + dt qdot
+    // with M_cc^0 read from the input.
     restore_bface(sim, &ws.candidate);
     extend_bface_periodic(sim);
     if let Some(z) = zc {
@@ -2683,9 +2756,11 @@ pub fn magnetic_slip_commit<const D: usize, const DOF: usize, Mem, Sc>(
         cell_halo_fill(sim, &mhd.bcell[oop]);
     }
     interp_bcell(sim);
-    match zc {
-        Some(z) => slip_cell_pass(sim, "slip_commit_energy_2d", dt, &ws.input.b, Some(&z.input)),
-        None => slip_cell_pass(sim, "slip_commit_energy_3d", dt, &ws.input.b, None),
+    if has_energy {
+        match zc {
+            Some(z) => slip_cell_pass(sim, "slip_commit_energy_2d", dt, &ws.input.b, Some(&z.input), &ws.dissipation),
+            None => slip_cell_pass(sim, "slip_commit_energy_3d", dt, &ws.input.b, None, &ws.dissipation),
+        }
     }
 }
 

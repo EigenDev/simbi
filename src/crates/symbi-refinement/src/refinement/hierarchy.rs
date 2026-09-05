@@ -1294,8 +1294,9 @@ where
         if self.finest_has_magnetic_slip() {
             for ll in 0..self.levels.len() {
                 let allocated = self.levels[ll].state.geom.allocated.clone();
+                let has_energy = self.levels[ll].state.fields.cons.nrg_field().is_some();
                 if let Some(mhd) = self.levels[ll].state.fields.mhd.as_mut() {
-                    mhd.alloc_step_snapshot(&allocated)
+                    mhd.alloc_step_snapshot(&allocated, has_energy)
                         .expect("magnetic-slip step-entry rollback snapshot allocation");
                 }
             }

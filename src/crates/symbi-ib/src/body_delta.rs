@@ -37,6 +37,10 @@ pub struct BodyDelta<S: Scalar, const D: usize> {
     /// budget `Edot = energy_delta / dt`. closes the gas+body energy ledger: the fluid
     /// loses exactly this (uniform-scaling drain), and the body books the matching gain.
     pub energy_delta: S,
+    /// the magnetic-slip heat this body's shell released over the step, `sum_c dt qdot_c dV`:
+    /// deposited in the gas on an adiabatic closure, exported to the cooling bath on an
+    /// isothermal one. accumulated like the mass.
+    pub slip_heat_delta: S,
 }
 
 impl<S: Scalar, const D: usize> BodyDelta<S, D> {
@@ -49,6 +53,7 @@ impl<S: Scalar, const D: usize> BodyDelta<S, D> {
             mass_delta: S::ZERO,
             prev_mass_delta: S::ZERO,
             energy_delta: S::ZERO,
+            slip_heat_delta: S::ZERO,
         }
     }
 
@@ -61,6 +66,7 @@ impl<S: Scalar, const D: usize> BodyDelta<S, D> {
         self.torque_delta = timestep_totals.torque_delta;
         self.mass_delta = self.mass_delta + timestep_totals.mass_delta;
         self.energy_delta = self.energy_delta + timestep_totals.energy_delta;
+        self.slip_heat_delta = self.slip_heat_delta + timestep_totals.slip_heat_delta;
     }
 }
 
@@ -73,6 +79,7 @@ impl<S: Scalar, const D: usize> AddAssign for BodyDelta<S, D> {
         self.torque_delta = self.torque_delta + rhs.torque_delta;
         self.mass_delta = self.mass_delta + rhs.mass_delta;
         self.energy_delta = self.energy_delta + rhs.energy_delta;
+        self.slip_heat_delta = self.slip_heat_delta + rhs.slip_heat_delta;
     }
 }
 
