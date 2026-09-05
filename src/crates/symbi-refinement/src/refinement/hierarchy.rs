@@ -1270,7 +1270,16 @@ where
     /// restriction then sets the covered coarse cells. body motion advances
     /// once per root step on the finest and is synced outward. the sink region
     /// lies inside the finest level — asserted every step as the bodies move.
-    pub fn with_bodies(mut self, bodies: symbi_ib::BodyCollection<f64, NDIM>) -> Self {
+    pub fn with_bodies(self, bodies: symbi_ib::BodyCollection<f64, NDIM>) -> Self {
+        self.try_with_bodies(bodies).unwrap_or_else(|message| panic!("{message}"))
+    }
+
+    /// `with_bodies` returning the containment violation as an error instead of panicking, for
+    /// a caller that reports it as a configuration fault.
+    pub fn try_with_bodies(
+        mut self,
+        bodies: symbi_ib::BodyCollection<f64, NDIM>,
+    ) -> Result<Self, String> {
         let n = self.levels.len();
         for ll in 0..n {
             let coll = if ll + 1 == n {
@@ -1291,8 +1300,10 @@ where
                 }
             }
         }
-        self.assert_sinks_inside_finest();
-        self
+        if let Some(message) = self.sink_containment_violation() {
+            return Err(message);
+        }
+        Ok(self)
     }
 
     /// exclude cells within `radius` of the origin from the stationarity diagnostic.
@@ -1351,10 +1362,6 @@ where
     /// interior — a sink straddling a coarse-fine boundary corrupts the mass
     /// accounting the refluxing protects.
     fn assert_sinks_inside_finest(&self) {
-        // a 1-level hierarchy has no coarse-fine boundary for a sink to straddle.
-        if self.levels.len() < 2 {
-            return;
-        }
         self.assert_sinks_inside_finest_clipped();
     }
 
@@ -1366,14 +1373,20 @@ where
     /// separately forbids sphere overlap on an unrefined tile of a refined run (refluxing
     /// protects drains inside refined regions).
     pub fn assert_sinks_inside_finest_clipped(&self) {
+        if let Some(message) = self.sink_containment_violation() {
+            panic!("{message}");
+        }
+    }
+
+    /// the first sink whose support sphere leaves the finest level, described; `None` when
+    /// every sink is contained or the hierarchy has a single level.
+    pub fn sink_containment_violation(&self) -> Option<String> {
         if self.levels.len() < 2 {
-            return;
+            return None;
         }
         let root = &self.levels[0].state;
         let finest = &self.levels[self.levels.len() - 1].state;
-        let Some(im) = finest.immersed.as_ref() else {
-            return;
-        };
+        let im = finest.immersed.as_ref()?;
         let rg = &root.geom;
         let fg = &finest.geom;
         let dx_fine = fg.dx[0];
@@ -1382,7 +1395,11 @@ where
         // slipped cell lies within reach of a coarse-fine ghost. a hydrodynamic hierarchy keeps
         // the accretion sphere as its containment.
         let strict = finest.fields.mhd.is_some();
+        let mut violation: Option<String> = None;
         im.bodies.visit_accretion(|body| {
+            if violation.is_some() {
+                return;
+            }
             let racc: f64 = if strict {
                 sink_support_radius(body, dx_fine)
             } else {
@@ -1406,18 +1423,21 @@ where
             for ax in 0..NDIM {
                 let flo = fg.x_lo[ax] + fg.interior.spaces[ax].lo as f64 * fg.dx[ax];
                 let fhi = fg.x_lo[ax] + fg.interior.spaces[ax].hi as f64 * fg.dx[ax];
-                assert!(
-                    clip_lo[ax] >= flo && clip_hi[ax] <= fhi,
-                    "refinement x decomposition: body {} sink support sphere (radius {racc:.4}: the \
-                     accretion sphere, the drain mask and slip shell to their f64 support, and the \
-                     stencil reach) clip [{:.4}, {:.4}] leaves this tile's finest level \
-                     [{flo:.4}, {fhi:.4}] on axis {ax}",
-                    body.idx,
-                    clip_lo[ax],
-                    clip_hi[ax]
-                );
+                if !(clip_lo[ax] >= flo && clip_hi[ax] <= fhi) {
+                    violation = Some(format!(
+                        "refinement x decomposition: body {} sink support sphere (radius {racc:.4}: the \
+                         accretion sphere, the drain mask and slip shell to their f64 support, and the \
+                         stencil reach) clip [{:.4}, {:.4}] leaves this tile's finest level \
+                         [{flo:.4}, {fhi:.4}] on axis {ax}",
+                        body.idx,
+                        clip_lo[ax],
+                        clip_hi[ax]
+                    ));
+                    return;
+                }
             }
         });
+        violation
     }
 
     /// true when any accretion sphere overlaps this hierarchy's root interior — the

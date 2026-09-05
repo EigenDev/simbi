@@ -347,6 +347,41 @@ fn validate_magnetic_slip_bodies(
     Ok(())
 }
 
+/// immersed bodies on a refined staggered-field hierarchy: adiabatic Newtonian MHD on a 3D
+/// cartesian grid, every body a drain (transparent, resistive, or magnetic-slip coupling) with
+/// no rigid surface. the hierarchy itself checks that each sink's operator support lies inside
+/// the finest level once the grid exists.
+fn validate_refined_mhd_bodies(
+    bodies: &[BodyParams],
+    regime: &str,
+    dims: usize,
+    coord_system: &str,
+    locally_isothermal: bool,
+) -> Result<(), String> {
+    const RIGID: u64 = 1 << 4;
+    if regime != "nmhd" || locally_isothermal {
+        return Err(format!(
+            "immersed bodies with refinement run in adiabatic Newtonian MHD (regime nmhd, not \
+             locally isothermal); this run is regime {regime} (locally_isothermal {locally_isothermal})"
+        ));
+    }
+    if dims != 3 || coord_system != "cartesian" {
+        return Err(format!(
+            "immersed bodies with refinement in MHD run on a 3D cartesian grid; this run is {dims}D \
+             {coord_system}"
+        ));
+    }
+    for (idx, b) in bodies.iter().enumerate() {
+        if b.capability & RIGID != 0 {
+            return Err(format!(
+                "immersed body {idx} carries a rigid surface; a rigid body on a refined staggered \
+                 grid is refused (the wall would meet a coarse-fine face)"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_porous_body_overlaps(bodies: &[BodyParams]) -> Result<(), String> {
     const ACCRETION: u64 = 2;
     const RIGID: u64 = 1 << 4;
@@ -6450,9 +6485,11 @@ macro_rules! build_and_run_mhd {
             .seed_faces_indexed(&bufs[0..$d])
             .build();
 
-        // attach immersed bodies (gravity / accretion sinks) when the config
-        // declares any; body-free runs keep the original sim untouched.
-        let sim = if cfg.bodies.is_empty() {
+        // attach immersed bodies (gravity / accretion sinks) when the config declares any;
+        // body-free runs keep the original sim untouched. a refined run attaches them to the
+        // hierarchy instead: the finest level owns the sinks, the coarser levels carry
+        // gravity-only proxies.
+        let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
             sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
@@ -6538,6 +6575,12 @@ macro_rules! build_and_run_mhd {
             }
             ks
         });
+        // the sinks on the finest level, gravity-only proxies below; a sink whose operator
+        // support (accretion sphere, drain mask, slip shell, stencil reach) leaves the finest
+        // level is a configuration fault reported here.
+        if !cfg.bodies.is_empty() && cfg.refinement_enabled {
+            hier = hier.try_with_bodies(build_bodies_and_horizon::<$d>(cfg))?;
+        }
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -7782,12 +7825,13 @@ fn dispatch_and_run(
     }
     // immersed bodies + refinement: the finest-owns-bodies AMR sync (`hier.with_bodies` — full
     // bodies on the finest level, gravity-only proxy on coarser) is wired for every hydro regime
-    // (newtonian/rhd/isothermal — the iso body source/feedback/penalize kernels are baked and the
-    // build macro is shared). MHD is refused: coupling a body to a staggered face field is
-    // not wired.
+    // and, for the staggered field, for adiabatic Newtonian MHD on a 3D cartesian grid with
+    // draining bodies (transparent, resistive, or magnetic-slip coupling). the finest level
+    // owns the drain, the slip, and the receipts; the coarser levels carry gravity-only
+    // proxies; the coupled root step is a transaction over every level. a rigid or shaped body
+    // on a refined staggered grid is refused.
     if !cfg.bodies.is_empty() && cfg.refinement_enabled && cfg.regime.contains("mhd") {
-        return Err("immersed bodies with refinement are not wired for MHD (staggered-B body coupling pending)"
-            .to_string());
+        validate_refined_mhd_bodies(&cfg.bodies, &cfg.regime, cfg.dims, &cfg.coord_system, cfg.locally_isothermal)?;
     }
     // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/rhd/isothermal) and
     // single-level MHD (rmhd/nmhd/imhd, the equivalence-tested staggered-CT halo exchange + face

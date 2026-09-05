@@ -4,8 +4,8 @@
 # the public path of the magnetic-slip sink: a python `MagneticSlipProperties` on an
 # accreting body reaches the backend as the `magnetic.slip` wire, is refused where the
 # operator has no meaning (a surface that removes no mass, degenerate scales), and drives a
-# cpu run whose field departs from the magnetically transparent sink, from a fresh start
-# and across a checkpoint restart.
+# cpu run whose field departs from the magnetically transparent sink, from a fresh start,
+# across a checkpoint restart, and on a refined hierarchy whose finest level owns the sink.
 # =============================================================================
 import glob
 import math
@@ -247,3 +247,89 @@ def test_2p5d_slip_restart_matches_the_uninterrupted_run(tmp_path) -> None:
         assert b["metadata"].attrs["iteration"] == 6
         assert a["metadata"].attrs["time"] == b["metadata"].attrs["time"]
         _assert_tree_equal(a["level_0"], b["level_0"])
+
+
+# -- the refined hierarchy ------------------------------------------------------------------
+# a 32^3 root refined once over the central seven eighths: 56 fine cells per side. the sink of
+# two fine cells with a one-cell slip shell has an operator support (the accretion sphere, the
+# drain mask and the shell to their f64 support of about twenty widths, and the stencil reach)
+# of about 25 fine cells, inside the finest level's 28; a two-cell shell would need 45.
+REFINED_RES = 32
+
+
+def _refined(cls, directory: Path, fraction: float = 0.875, **kw):
+    # the region is a construction-time field validated against the level count, so the box
+    # half-width comes from an unrefined instance of the same problem.
+    probe = cls(resolution=(REFINED_RES, REFINED_RES, REFINED_RES), data_directory=directory)
+    probe.setup()
+    half = fraction * probe.domain_radius * probe.bondi_radius
+    return cls(
+        resolution=(REFINED_RES, REFINED_RES, REFINED_RES),
+        r_acc_scale=2.0,
+        shell_cells=1.0,
+        refinement_enabled=True,
+        refinement_max_levels=2,
+        refinement_ratios=[2],
+        refinement_regions=[[-half, half, -half, half, -half, half]],
+        data_directory=directory,
+        **kw,
+    )
+
+
+def _fine_interior(directory: Path, names: tuple[str, ...]) -> dict[str, np.ndarray]:
+    out = {}
+    with h5py.File(_final(directory), "r") as h:
+        prims = h["level_1/partition_0/hydro/primitives"]
+        for nm in names:
+            out[nm] = prims[nm][...]
+    return out
+
+
+@needs_backend
+def test_refined_slip_from_config_genuinely_acts() -> None:
+    slip_dir = Path(tempfile.mkdtemp())
+    control_dir = Path(tempfile.mkdtemp())
+    runner.run(_refined(MagneticSlipBondiSink, slip_dir), compute_mode="cpu", max_steps=12)
+    runner.run(_refined(_TransparentSink, control_dir), compute_mode="cpu", max_steps=12)
+    assert not glob.glob(os.path.join(slip_dir, "*crashed*")), "the refined slip run crashed"
+    slip = _fine_interior(slip_dir, ("rho", "b1", "pre"))
+    control = _fine_interior(control_dir, ("rho", "b1", "pre"))
+    for nm, arr in slip.items():
+        assert np.all(np.isfinite(arr)), f"non-finite {nm} on the fine level of the slip run"
+    bscale = np.abs(control["b1"]).max()
+    assert bscale > 1e-6, "the field never developed on the fine level; the comparison is vacuous"
+    db = np.abs(slip["b1"] - control["b1"]).max()
+    assert db > 1e-6 * bscale, (
+        f"the magnetic slip left the fine-level field bit-near-identical to the transparent "
+        f"sink ({db:e}); the refined build drops the coupling"
+    )
+    with h5py.File(_final(slip_dir), "r") as h:
+        accreted = h["bodies/total_accreted_mass"][...]
+    assert accreted[0] > 0.0, "the finest sink recorded no accretion in the checkpoint"
+
+
+@needs_backend
+def test_refined_sink_support_must_lie_inside_the_finest_level() -> None:
+    # the central half: 32 fine cells per side, 16 from the center to the coarse-fine boundary,
+    # short of the sink's operator support.
+    with pytest.raises(RuntimeError, match="sink support sphere"):
+        runner.run(
+            _refined(MagneticSlipBondiSink, Path(tempfile.mkdtemp()), fraction=0.5),
+            compute_mode="cpu",
+            max_steps=1,
+        )
+
+
+@needs_backend
+def test_refined_mhd_bodies_are_admitted_on_a_3d_cartesian_grid_only() -> None:
+    directory = Path(tempfile.mkdtemp())
+    problem = MagneticSlipDisk2p5d(
+        resolution=(RES, RES, 1),
+        data_directory=directory,
+        refinement_enabled=True,
+        refinement_max_levels=2,
+        refinement_ratios=[2],
+        refinement_regions=[[-0.25, 0.25, -0.25, 0.25]],
+    )
+    with pytest.raises(RuntimeError, match="3d cartesian"):
+        runner.run(problem, compute_mode="cpu", max_steps=1)
