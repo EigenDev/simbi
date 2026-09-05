@@ -370,9 +370,11 @@ class MagneticSlipProperties:
       placement            shell center in shell widths relative to the mass surface: negative
                            inside, 0 centered on it, positive outside. finite, signed.
 
-    runs on an adiabatic Newtonian MHD 3D cartesian grid (`Regime.NMHD`, cpu), on a body whose
-    surface removes mass (a plain accretion drain, a torque-free drain, or a porous surface with
-    porosity > 0), since tau_rho is that drain's timescale. the backend reads `magnetic.slip`."""
+    runs in adiabatic Newtonian MHD (`Regime.NMHD`) on a cartesian grid, 3D or 2.5D (an x-y grid
+    with three vector components, where the sink is a cylinder along the missing axis and the
+    out-of-plane field takes part in the slip), on a body whose surface removes mass (a plain
+    accretion drain, a torque-free drain, or a porous surface with porosity > 0), since tau_rho is
+    that drain's timescale. the backend reads `magnetic.slip`."""
 
     diffusivity_ratio: float
     shell_width: float

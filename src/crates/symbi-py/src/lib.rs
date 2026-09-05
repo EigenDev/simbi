@@ -276,9 +276,8 @@ struct MagneticSlipParams {
 }
 
 /// the public-boundary contract of a magnetic-slip body: exactly one magnetic coupling, a run the
-/// slip operator is built for (adiabatic Newtonian MHD on a 3D cartesian grid; the implicit-midpoint
-/// solve runs on the host), and a surface that removes mass, since the slip coefficient closes on
-/// that drain's timescale tau_rho.
+/// slip operator is built for (adiabatic Newtonian MHD on a cartesian grid, 3D or 2.5D), and a
+/// surface that removes mass, since the slip coefficient closes on that drain's timescale tau_rho.
 fn validate_magnetic_slip_bodies(
     bodies: &[BodyParams],
     regime: &str,
@@ -304,10 +303,10 @@ fn validate_magnetic_slip_bodies(
                 regime, locally_isothermal
             ));
         }
-        if dims != 3 || coord_system != "cartesian" {
+        if !(dims == 3 || dims == 2) || coord_system != "cartesian" {
             return Err(format!(
-                "immersed body {idx}: the magnetic slip runs on a 3D cartesian grid; this run is \
-                 {}D {}",
+                "immersed body {idx}: the magnetic slip runs on a cartesian grid in 3D or in 2.5D \
+                 (an x-y grid with three vector components); this run is {}D {}",
                 dims, coord_system
             ));
         }
@@ -3796,6 +3795,8 @@ mod magnetic_slip_boundary_tests {
         };
         check(&[draining_sink(Some(SLIP), None)], "nmhd", 3, "cartesian", false)
             .expect("an adiabatic 3D cartesian draining sink carries the slip");
+        check(&[draining_sink(Some(SLIP), None)], "nmhd", 2, "cartesian", false)
+            .expect("an adiabatic 2.5D cartesian draining sink carries the slip");
         // the contract binds slip bodies only; other couplings run wherever they already run.
         check(&[draining_sink(None, Some(0.1))], "imhd", 2, "spherical", true)
             .expect("a resistive sink is outside this contract");
@@ -3827,7 +3828,7 @@ mod magnetic_slip_boundary_tests {
             ("isothermal regime", vec![draining_sink(Some(SLIP), None)], "imhd", 3, "cartesian", false),
             ("relativistic regime", vec![draining_sink(Some(SLIP), None)], "rmhd", 3, "cartesian", false),
             ("locally isothermal", vec![draining_sink(Some(SLIP), None)], "nmhd", 3, "cartesian", true),
-            ("two dimensions", vec![draining_sink(Some(SLIP), None)], "nmhd", 2, "cartesian", false),
+            ("one dimension", vec![draining_sink(Some(SLIP), None)], "nmhd", 1, "cartesian", false),
             ("spherical chart", vec![draining_sink(Some(SLIP), None)], "nmhd", 3, "spherical", false),
             ("sealed porous surface", vec![sealed], "nmhd", 3, "cartesian", false),
             ("no sink", vec![no_sink], "nmhd", 3, "cartesian", false),
@@ -3837,6 +3838,66 @@ mod magnetic_slip_boundary_tests {
                 .expect_err(&format!("{label}: the boundary admitted the slip"));
             assert!(err.contains("magnetic slip") || err.contains("immersed body"), "{label}: {err}");
         }
+    }
+
+    // the same wire on a 2.5D grid: the workspace carries the cell B_z complex, and the root advance
+    // runs the coupled composition.
+    #[test]
+    fn a_configured_slip_body_drives_the_coupled_step_on_a_2p5d_grid() {
+        let n = 12usize;
+        let dx = 1.0 / n as f64;
+        let k = 2.0 * std::f64::consts::PI;
+        let (a0, b0) = (0.3, 0.2);
+        let sim = SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
+            NewtonianMhd,
+            IdealGas { gamma: 5.0 / 3.0 },
+            Cartesian,
+        )
+        .cells([n, n])
+        .origin([0.0, 0.0])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+        .cfl(0.3)
+        .allocate()
+        .expect("sim construction")
+        .set_initial(move |[x, y]| {
+            let bx = |xf: f64| -a0 * (k * xf).cos() * (k * y).sin();
+            let by = |yf: f64| a0 * (k * x).sin() * (k * yf).cos();
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+                Tensor::new([
+                    0.5 * (bx(x - 0.5 * dx) + bx(x + 0.5 * dx)),
+                    0.5 * (by(y - 0.5 * dx) + by(y + 0.5 * dx)),
+                    b0 * (k * x).cos() * (k * y).cos(),
+                ]),
+            )
+        })
+        .seed_faces(move |axis, [x, y]| match axis {
+            0 => -a0 * (k * x).cos() * (k * y).sin(),
+            _ => a0 * (k * x).sin() * (k * y).cos(),
+        })
+        .build();
+        let mut body = draining_sink(Some(SLIP), None);
+        body.position = vec![0.5, 0.5];
+        body.velocity = vec![0.0, 0.0];
+        let sim = sim.with_bodies(build_bodies::<2>(&[body], None));
+        {
+            let mhd = sim.fields.mhd.as_ref().expect("mhd fields");
+            let ws = mhd.magnetic_slip.as_ref().expect("the slip workspace was not allocated");
+            assert!(ws.z.is_some(), "the 2.5D workspace carries no cell B_z complex");
+        }
+        let sub = symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet::<
+            HostMemory,
+            f64,
+            2,
+        >::new(5.0 / 3.0, 0.3, 1.0, &sim.geom.allocated);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        slip_schedule_arm();
+        hier.step_root_with_dt(2.0e-3);
+        let trace = slip_schedule_take().expect("the schedule spy was armed");
+        let ops: Vec<&str> = trace.iter().map(|(op, _)| *op).collect();
+        assert_eq!(ops, ["D", "M", "H", "M", "D"], "the 2.5D root advance did not run the coupled step");
     }
 
     // the wire a config produces, built into a 3D adiabatic MHD state: the slip workspace and the
