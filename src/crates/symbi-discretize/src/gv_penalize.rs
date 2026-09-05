@@ -999,13 +999,12 @@ pub fn penalize_drain_iso_gv(
 /// for a cell that crosses branches mid-step. the resulting factor `f` scales den/mom/energy (and the
 /// dissolved dye) uniformly; `B` is untouched. `penalize_cell` applies `exp(-chi dt inv_tau)`, so the
 /// effective rate reproducing `f` is `-ln(f)/(chi dt)`, with a guard leaving `chi = 0` an exact no-op.
-pub fn penalize_drain_midpoint_gv(coords: Coords, has_dye: bool) -> KernelProgram {
-    let ndim = 3usize;
-    let dof = 3usize;
-    let axes: &[usize] = &[0, 1, 2];
+pub fn penalize_drain_midpoint_gv(coords: Coords, ndim: usize, dof: usize, has_dye: bool) -> KernelProgram {
+    let axes: &[usize] = &[0, 1, 2][..ndim];
     assert!(
-        coords == Coords::Cartesian,
-        "the midpoint material drain is a 3D cartesian slip-path kernel; the {coords:?} chart uses the \
+        coords == Coords::Cartesian && (ndim == 3 || ndim == 2) && dof == 3,
+        "the midpoint material drain is a cartesian slip-path kernel on a 3D grid or a 2.5D x-y grid \
+         (three momentum components); the {coords:?} chart in {ndim}D with dof {dof} uses the \
          global-c_a2 penalize_drain"
     );
     let (kernel, writes) = trace(|cx| {
@@ -1035,9 +1034,17 @@ pub fn penalize_drain_midpoint_gv(coords: Coords, has_dye: bool) -> KernelProgra
             min_w = min_w.min(gv_axis_width(cx, ax, Spacing::Uniform));
         }
 
-        let center: [Gv; 3] = std::array::from_fn(|a| cx.scalar(&format!("body_0_pos_{a}")));
+        // an ungridded slot sits at zero for the center and the cell alike: the 2.5D removal region
+        // is the in-plane ball extruded along the missing axis.
+        let center: [Gv; 3] = std::array::from_fn(|a| {
+            if a < ndim {
+                cx.scalar(&format!("body_0_pos_{a}"))
+            } else {
+                Gv::ZERO
+            }
+        });
         let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-        let x: [Gv; 3] = std::array::from_fn(|a| x_cart[a]);
+        let x: [Gv; 3] = std::array::from_fn(|a| if a < x_cart.len() { x_cart[a] } else { Gv::ZERO });
         let phi = body_mask_sdf(cx, center).dist(x);
         let chi = symbi_ib::sdf::chi(phi, min_w);
         tag_body_mask(cx, &chi, coords, ndim, axes, None, false);

@@ -2465,14 +2465,16 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         );
         if has_slip {
             assert!(
-                coords_g == cart && D == 3 && DOF == 3 && nrg.is_some(),
-                "the magnetic-slip midpoint drain is a 3D cartesian adiabatic kernel; got coords \
-                 {coords_g:?} D={D} DOF={DOF} energy={}",
+                coords_g == cart && DOF == 3 && (D == 3 || D == 2) && nrg.is_some(),
+                "the magnetic-slip midpoint drain is a cartesian adiabatic kernel on a 3D grid or a \
+                 2.5D x-y grid; got coords {coords_g:?} D={D} DOF={DOF} energy={}",
                 nrg.is_some()
             );
         }
+        // the midpoint drain is baked with all three momentum components on either grid, so its
+        // name carries the grid dimension alone.
         let name_owned: String = if has_slip {
-            format!("penalize_drain_midpoint{dye}_3d")
+            format!("penalize_drain_midpoint{dye}_{D}d")
         } else {
             match (bodies.get(b).spec.surface, nrg.is_some()) {
             (symbi_ib::SurfaceSpec::Drain, true) => {
@@ -2507,7 +2509,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // 2.5D MHD (DOF > D) selects the DOF-aware `_dof{DOF}` kernel that drains all momentum
         // components; hydro / full 3D MHD (DOF == D) keep the base name. the baked matrix covers
         // cartesian all-surfaces + curvilinear drain; anything else fails loud as an unbaked kernel.
-        let name_owned = if DOF != D {
+        let name_owned = if DOF != D && !has_slip {
             format!("{name_owned}_dof{DOF}")
         } else {
             name_owned

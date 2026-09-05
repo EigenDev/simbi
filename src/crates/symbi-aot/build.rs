@@ -1466,10 +1466,12 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
     // the second-order material drain the slip-coupled step runs: a local-Alfven midpoint rate, so
     // the density drain stays second-order accurate where the field stiffens the mask. the dyed twin
     // drains the dissolved passive scalar with the same factor.
-    let program = symbi_discretize::penalize_drain_midpoint_gv(Coords::Cartesian, false);
-    emit_gv(out_dir, "penalize_drain_midpoint_3d", 3, &program);
-    let program = symbi_discretize::penalize_drain_midpoint_gv(Coords::Cartesian, true);
-    emit_gv(out_dir, "penalize_drain_midpoint_dyed_3d", 3, &program);
+    for ndim in [3u8, 2u8] {
+        let program = symbi_discretize::penalize_drain_midpoint_gv(Coords::Cartesian, ndim as usize, 3, false);
+        emit_gv(out_dir, &format!("penalize_drain_midpoint_{ndim}d"), ndim, &program);
+        let program = symbi_discretize::penalize_drain_midpoint_gv(Coords::Cartesian, ndim as usize, 3, true);
+        emit_gv(out_dir, &format!("penalize_drain_midpoint_dyed_{ndim}d"), ndim, &program);
+    }
 }
 
 // the RMHD face flux along a given sweep `dir` at 3D (per-dir kernel; the
