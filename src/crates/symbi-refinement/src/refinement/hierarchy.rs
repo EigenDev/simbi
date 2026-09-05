@@ -1592,9 +1592,12 @@ where
             symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
             let err = scan_c2p_errors(&lvl.state);
             if err.is_err() {
+                let first_state = symbi_sim::hydro_ops::first_c2p_failure_state(&lvl.state)
+                    .unwrap_or_else(|| "unavailable".to_string());
                 panic!(
-                    "hierarchy: c2p failed on initial conditions at level {} (time {:.4e}): {}",
-                    ll, lvl.state.time, err
+                    "hierarchy: c2p failed on initial conditions at level {} (time {:.4e}): {}; \
+                     first state: {}",
+                    ll, lvl.state.time, err, first_state
                 );
             }
         }
@@ -2202,6 +2205,22 @@ where
         false
     }
 
+    /// the ideal-MHD step H(dt) the coupled step applies: the RK stages and the tail EMF (no drain, no
+    /// magnetic slip), then the primitive/ghost rebuild its successor reads. exposed for the operator-
+    /// split isolation study. returns true on a stage retry request.
+    pub fn hydro_map(&mut self, level: usize, dt: f64) -> bool {
+        self.level_step_begin(level, dt);
+        let n = self.levels[level].state.timestepping.stages().len();
+        for ii in 0..n {
+            if self.level_stage(level, ii, dt, 0.0) {
+                return true;
+            }
+        }
+        self.level_tail_emf(level, dt);
+        self.slip_rebuild(level);
+        false
+    }
+
     /// restore the primitives and physical ghost bands an operator's successor reads: c2p recovers the
     /// primitive state from the conserved fields, ghost_fill refills the boundary bands.
     fn slip_rebuild(&self, level: usize) {
@@ -2226,6 +2245,26 @@ where
             .iter()
             .map(|c| *l.state.fields.cons.den.at(c))
             .collect()
+    }
+
+    /// interior flat snapshots of the magnetic and thermodynamic state for the M-map isolation study:
+    /// the staggered face field, the cell-centered field, the conserved total energy, and the recovered
+    /// pressure. each walks the same interior order, so a per-field convergence ratio is well-defined.
+    pub fn slip_state_snapshots(&self, level: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let l = &self.levels[level];
+        let mhd = l.state.fields.mhd.as_ref().expect("mhd fields");
+        let cells: Vec<_> = l.state.geom.interior.iter().collect();
+        let bface = (0..DOF)
+            .flat_map(|d| cells.iter().map(move |c| *mhd.bface[d].at(*c)))
+            .collect();
+        let bcell = (0..DOF)
+            .flat_map(|d| cells.iter().map(move |c| *mhd.bcell[d].at(*c)))
+            .collect();
+        let nrg_field = l.state.fields.cons.nrg_field().expect("adiabatic energy");
+        let nrg = cells.iter().map(|c| *nrg_field.at(*c)).collect();
+        let pre_field = l.state.fields.prim.pre.as_ref().expect("pressure field");
+        let pre = cells.iter().map(|c| *pre_field.at(*c)).collect();
+        (bface, bcell, nrg, pre)
     }
 
     /// step prologue: snapshot this level's prims (for the finer level's time-interpolated ghost

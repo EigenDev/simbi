@@ -42,25 +42,42 @@ fn slip_spec() -> MagneticSpec {
 }
 
 fn build_slip_sim() -> Sim {
-    let dx = 1.0 / N as f64;
+    build_slip_sim_n(N)
+}
+
+fn build_slip_sim_n(n: usize) -> Sim {
+    build_slip_sim_na(n, 0.3)
+}
+
+fn build_slip_sim_na(n: usize, a0: f64) -> Sim {
+    let dx = 1.0 / n as f64;
     let k = 2.0 * std::f64::consts::PI;
-    let a0 = 0.3;
     let sim = SimStateGeneric::<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
         NewtonianMhd,
         IdealGas { gamma: GAMMA },
         Cartesian,
     )
-    .cells([N, N, N])
+    .cells([n, n, n])
     .origin([0.0, 0.0, 0.0])
     .spacing([dx, dx, dx])
     .boundaries(Boundaries::uniform(BoundaryType::Periodic))
     .cfl(0.3)
     .allocate()
     .expect("schedule sim construction failed")
-    .set_initial(|_| {
+    // both face components vary across their own normal, so the cell value the CT interpolation forms
+    // departs from the analytic field at the cell center. seeding the average of the two bounding face
+    // values reproduces that interpolation exactly, deposits the magnetic energy the first C2P
+    // subtracts, and leaves the face->cell projection an identity at t = 0.
+    .set_initial(move |[x, y, _z]| {
+        let bx = |xf: f64| -a0 * (k * xf).cos() * (k * y).sin();
+        let by = |yf: f64| a0 * (k * x).sin() * (k * yf).cos();
         MhdPrim::new(
             Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
-            Tensor::new([0.0, 0.0, 0.0]),
+            Tensor::new([
+                0.5 * (bx(x - 0.5 * dx) + bx(x + 0.5 * dx)),
+                0.5 * (by(y - 0.5 * dx) + by(y + 0.5 * dx)),
+                0.0,
+            ]),
         )
     })
     .seed_faces(move |axis, [x, y, _z]| match axis {
@@ -78,8 +95,46 @@ fn build_slip_sim() -> Sim {
     )
 }
 
-fn build_drain_sim() -> Sim {
-    // the same field/gas but a pure-drain body with no magnetic coupling, to isolate D's semigroup.
+// a smooth, strong, discrete-divergence-free field for the H convergence study: a strong uniform
+// background Bx = 1 (magnetic pressure important) plus a small smooth perturbation. each face component
+// depends only on a transverse coordinate, so div B = 0 exactly by construction with no grid-scale
+// structure. no immersed body -> H's magnetic dynamics are measured without gravity or a mask.
+fn build_smooth_field_sim(n: usize) -> Sim {
+    let dx = 1.0 / n as f64;
+    let k = 2.0 * std::f64::consts::PI;
+    let eps = 0.1;
+    SimStateGeneric::<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
+        NewtonianMhd,
+        IdealGas { gamma: GAMMA },
+        Cartesian,
+    )
+    .cells([n, n, n])
+    .origin([0.0, 0.0, 0.0])
+    .spacing([dx, dx, dx])
+    .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+    .cfl(0.3)
+    .allocate()
+    .expect("smooth field sim construction failed")
+    // each face component varies only across its own normal, so a cell's two bounding faces are equal
+    // and the arithmetic average the CT interpolation forms is the analytic field at the cell center.
+    // seeding that value deposits exactly the magnetic energy the first C2P subtracts.
+    .set_initial(move |[x, y, _z]| {
+        MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
+            Tensor::new([1.0 + eps * (k * y).sin(), eps * (k * x).sin(), 0.0]),
+        )
+    })
+    .seed_faces(move |axis, [x, y, _z]| match axis {
+        0 => 1.0 + eps * (k * y).sin(), // Bx(y): strong uniform + smooth, d/dx = 0
+        1 => eps * (k * x).sin(),        // By(x): smooth, d/dy = 0
+        _ => 0.0,
+    })
+    .build()
+}
+
+// the same field and gas but a pure-drain body with no magnetic slip: the evolve loop must keep the
+// ordinary RK march for it, bit-for-bit.
+fn build_drain_only_sim() -> Sim {
     let dx = 1.0 / N as f64;
     let k = 2.0 * std::f64::consts::PI;
     let a0 = 0.3;
@@ -94,11 +149,17 @@ fn build_drain_sim() -> Sim {
     .boundaries(Boundaries::uniform(BoundaryType::Periodic))
     .cfl(0.3)
     .allocate()
-    .expect("drain sim construction failed")
-    .set_initial(|_| {
+    .expect("drain-only sim construction failed")
+    .set_initial(move |[x, y, _z]| {
+        let bx = |xf: f64| -a0 * (k * xf).cos() * (k * y).sin();
+        let by = |yf: f64| a0 * (k * x).sin() * (k * yf).cos();
         MhdPrim::new(
             Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
-            Tensor::new([0.0, 0.0, 0.0]),
+            Tensor::new([
+                0.5 * (bx(x - 0.5 * dx) + bx(x + 0.5 * dx)),
+                0.5 * (by(y - 0.5 * dx) + by(y + 0.5 * dx)),
+                0.0,
+            ]),
         )
     })
     .seed_faces(move |axis, [x, y, _z]| match axis {
@@ -130,12 +191,12 @@ fn drain_half_steps_compose_to_second_order() {
     // that broadening beyond it needs a rate-freezing decision.
     let run = |dt: f64| -> f64 {
         // two half-drains with a rebuild between, vs one full drain.
-        let sim_two = build_drain_sim();
+        let sim_two = build_drain_only_sim();
         let sub_two = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim_two.geom.allocated);
         let mut two = Hierarchy::single(sim_two, sub_two);
         two.evolve(1.0e-9).expect("prime");
 
-        let sim_one = build_drain_sim();
+        let sim_one = build_drain_only_sim();
         let sub_one = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim_one.geom.allocated);
         let mut one = Hierarchy::single(sim_one, sub_one);
         one.evolve(1.0e-9).expect("prime");
@@ -184,4 +245,120 @@ fn slip_coupled_step_schedule_is_palindromic() {
         ops[..h_pos].contains(&"M") && ops[h_pos + 1..].contains(&"M"),
         "each RK step must be bracketed by magnetic slip, never contain it"
     );
+}
+
+// a body-free smooth-wave fixture for the H-only ownership ladder: the primitive IC, the seeded face
+// field, and the cell-centered B are supplied as closures. div B = 0 is the caller's responsibility
+// (each fixture uses a component that depends only on a transverse coordinate).
+//
+// the caller owes both magnetic representations, consistently: staggered B carries the divergence
+// constraint and cell B is its arithmetic face average, bcell_c = (bface_c[i] + bface_c[i+1])/2. the
+// cell value is what prim->cons deposits as magnetic energy in cons.nrg, and the CT face->cell
+// interpolation rewrites bcell from the faces while leaving nrg alone. supplying the exact average
+// makes that interpolation an identity, so the first C2P subtracts the same magnetic energy the
+// seeding deposited.
+fn build_wave_sim(
+    n: usize,
+    prim: impl Fn([f64; 3]) -> (f64, [f64; 3], f64) + 'static,
+    face: impl Fn(usize, [f64; 3]) -> f64 + 'static,
+    cell_b: impl Fn([f64; 3]) -> [f64; 3] + 'static,
+) -> Sim {
+    let dx = 1.0 / n as f64;
+    SimStateGeneric::<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
+        NewtonianMhd,
+        IdealGas { gamma: GAMMA },
+        Cartesian,
+    )
+    .cells([n, n, n])
+    .origin([0.0, 0.0, 0.0])
+    .spacing([dx, dx, dx])
+    .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+    .cfl(0.3)
+    .allocate()
+    .expect("wave sim construction failed")
+    .set_initial(move |x| {
+        let (rho, v, p) = prim(x);
+        MhdPrim::new(Prim::adiabatic(Density(rho), Tensor::new(v), Pressure(p)), Tensor::new(cell_b(x)))
+    })
+    .seed_faces(move |axis, x| face(axis, x))
+    .build()
+}
+
+// an MHD initial condition owes two consistent magnetic representations: staggered faces carrying the
+// divergence constraint, and cell-centered B equal to their arithmetic average, whose magnetic energy
+// prim->cons deposits into cons.nrg. seeding nonzero faces beside a zero cell B satisfies div B = 0 yet
+// leaves cons.nrg short by |B|^2/2, and the first face->cell interpolation then hands C2P a magnetic
+// energy to subtract that was never deposited, an O(|B|^2) pressure step on step one that pollutes
+// every temporal-convergence measurement taken from the fixture.
+//
+// a consistently seeded state is a fixed point of the projection the first step applies: interpolating
+// faces to cells reproduces the seeded cell B, and the following C2P reproduces the seeded pressure. a
+// zero-length step exercises exactly that projection, so bit-identical state across it certifies the
+// seeding, and any change localizes the inconsistency to the field it moved.
+#[test]
+fn seeded_face_and_cell_magnetic_fields_agree_after_priming() {
+    // the seeded cell average evaluates the analytic face field at x_c +- dx/2 while the grid places
+    // its faces at x_lo + i dx; the two spellings of the same point agree to the last bit, so the
+    // seeded average and the kernel's average of the stored faces differ at roundoff. the bound is a
+    // few ulps of the field's own amplitude. the defect it guards against, a cell field inconsistent
+    // with its faces, is O(|B|) in the field and O(|B|^2) in the pressure, fourteen orders above it.
+    let same = |name: &str, a: &[f64], b: &[f64]| {
+        let scale = a.iter().fold(0.0_f64, |m, x| m.max(x.abs())).max(1.0);
+        let tol = 64.0 * f64::EPSILON * scale;
+        let worst = a
+            .iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            worst <= tol,
+            "seeded state is not a fixed point of the face->cell projection: {name} moved by {worst:.3e} (roundoff bound {tol:.3e})"
+        );
+    };
+    let k = 2.0 * std::f64::consts::PI;
+    let mut fixtures: Vec<(&str, Sim)> = vec![
+        ("smooth_strong_field", build_smooth_field_sim(12)),
+        ("slip_body", build_slip_sim_n(12)),
+        (
+            "passive_wave",
+            build_wave_sim(
+                12,
+                |_| (1.0, [0.5, 0.0, 0.0], 1.0),
+                move |axis, [x, _, _]| if axis == 1 { 0.01 * (k * x).sin() } else { 0.0 },
+                move |[x, _, _]| [0.0, 0.01 * (k * x).sin(), 0.0],
+            ),
+        ),
+        (
+            "strong_wave",
+            build_wave_sim(
+                12,
+                move |[x, _, _]| (1.0, [0.0, 0.1 * (k * x).sin(), 0.0], 1.0),
+                move |axis, [x, y, _]| match axis {
+                    0 => 1.0 + 0.1 * (k * y).sin(),
+                    1 => 0.1 * (k * x).sin(),
+                    _ => 0.0,
+                },
+                move |[x, y, _]| [1.0 + 0.1 * (k * y).sin(), 0.1 * (k * x).sin(), 0.0],
+            ),
+        ),
+    ];
+    for (name, sim) in fixtures.drain(..) {
+        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        let (bf0, bc0, nrg0, pre0) = hier.slip_state_snapshots(0);
+        let rho0 = hier.density_snapshot(0);
+        assert!(
+            bc0.iter().any(|b| b.abs() > 1e-12),
+            "{name}: cell B is zero everywhere, so the projection cannot be exercised"
+        );
+        hier.hydro_map(0, 0.0);
+        let (bf1, bc1, nrg1, pre1) = hier.slip_state_snapshots(0);
+        let rho1 = hier.density_snapshot(0);
+        same(&format!("{name} bface"), &bf0, &bf1);
+        same(&format!("{name} bcell"), &bc0, &bc1);
+        same(&format!("{name} density"), &rho0, &rho1);
+        same(&format!("{name} energy"), &nrg0, &nrg1);
+        same(&format!("{name} pressure"), &pre0, &pre1);
+    }
 }
