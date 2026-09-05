@@ -44,8 +44,11 @@ fn slip_spec() -> MagneticSpec {
     }
 }
 
+// the vector potential's phase keeps the sink at the box center off the field's null: at the
+// center sin(k x + pi/4) sin(k y + pi/4) = -1/2, so the in-plane field is finite where the slip acts.
 fn potential(amp: f64, k: f64) -> impl Fn(f64, f64) -> f64 + Copy {
-    move |x: f64, y: f64| amp * (k * x).sin() * (k * y).sin()
+    let phase = 0.25 * std::f64::consts::PI;
+    move |x: f64, y: f64| amp * (k * x + phase).sin() * (k * y + phase).sin()
 }
 fn face_of_potential(az: impl Fn(f64, f64) -> f64 + Copy, dx: f64) -> impl Fn(usize, [f64; 3]) -> f64 + Copy {
     move |axis: usize, [x, y, _z]: [f64; 3]| match axis {

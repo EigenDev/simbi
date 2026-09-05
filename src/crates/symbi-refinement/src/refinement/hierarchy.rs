@@ -949,10 +949,13 @@ where
             if let (Some(cn), Some(fn_nrg)) = (cc.nrg_field(), fc.nrg_field()) {
                 prolong_field(cn, &zero, fn_nrg, &region, order, 0.0);
             }
-            // mhd: cell-centered B + the staggered faces (divergence-free
-            // prolongation per normal axis — Balsara). seeding the faces div-free
-            // is what lets the fine CT start at div(B)=0 and coarse-fine
-            // consistent; the cell B is prolonged alongside for the flux.
+            // mhd: the staggered faces by the divergence-free prolongation per normal axis
+            // (Balsara), so the fine CT starts at div(B) = 0 and coarse-fine consistent. the
+            // cell-centered B is then the interpolation of the seeded faces, the relation the CT
+            // corrector maintains on every step, with the total energy shifted by the change in
+            // the cell magnetic energy so the prolonged thermal state is kept; the prolonged cell
+            // field supplies the magnetic energy that shift starts from. the out-of-plane cell
+            // component of a 2.5D grid has no face and keeps its prolonged value.
             if let (Some(cm), Some(fm)) = (coarse.fields.mhd.as_ref(), fine.fields.mhd.as_ref()) {
                 for k in 0..DOF {
                     prolong_field(&cm.bcell[k], &zero, &fm.bcell[k], &region, order, 0.0);
@@ -969,6 +972,7 @@ where
                         0.0,
                     );
                 }
+                bcell_from_bface_region(fm, fc.nrg_field(), &region);
                 fm.bface_initialized
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }

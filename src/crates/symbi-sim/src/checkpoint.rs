@@ -596,9 +596,14 @@ where
         ));
     }
 
+    // the level's own clock: every level shares the root's time after a root step, and a finer
+    // level's iteration counts its substeps, ratio times the root's per level.
     Tree::new(format!("level_{idx}"))
         .with_attr("scale_factor_a", sim.motion.a)
         .with_attr("scale_factor_adot", sim.motion.a_dot)
+        .with_attr("time", sim.time)
+        .with_attr("dt", sim.dt)
+        .with_attr("iteration", Attr::U64(sim.iteration))
         .with_group(mesh)
         .with_group(partition_0)
         .with_group(cons)
@@ -1201,12 +1206,13 @@ where
     for (idx, snap) in snaps.iter().enumerate() {
         root.push_group(build_level_group(levels[idx], snap, idx));
     }
-    // per-body kinematic + accretion state (restart round-trip), from
-    // whichever level carries the immersed sidecar.
+    // per-body kinematic + accretion state (restart round-trip) from the finest level carrying
+    // the immersed sidecar: the finest level owns every sink's drain and books its accreted mass,
+    // while the coarser levels hold gravity-only proxies whose kinematics are copies.
     let body_snap = levels
         .iter()
         .filter_map(|l| l.immersed.as_ref())
-        .next()
+        .last()
         .map(body_state_snap);
     if let Some(bs) = body_snap.as_ref() {
         root.push_group(body_state_group::<D>(bs));
@@ -1545,6 +1551,16 @@ where
     let level_0 = tree
         .find_group(&level_name)
         .ok_or_else(|| IoError::MissingPath(level_name.clone()))?;
+    // the level's own clock, when the file carries one; older files hold the root's clock alone.
+    if let Some(a) = level_0.find_attr("time") {
+        sim.time = a.as_f64(&format!("{level_name}/time"))?;
+    }
+    if let Some(a) = level_0.find_attr("dt") {
+        sim.dt = a.as_f64(&format!("{level_name}/dt"))?;
+    }
+    if let Some(a) = level_0.find_attr("iteration") {
+        sim.iteration = a.as_u64(&format!("{level_name}/iteration"))?;
+    }
     let interior = sim.geom.interior.clone();
 
     // conserved (primary — c2p will derive prims on restart). RegimeSpec-driven.
