@@ -22,6 +22,8 @@ from simbi.types.bodies import (
     GravitationalProperties,
     ImmersedBodyConfig,
 )
+from simbi.types import Regime
+from simbi.types.input import normalize_regime
 from simbi.types.typing import GasStateGenerator, InitialStateType
 from simbi.simulation.tests.fixtures.mhd_energy_conservation import (
     MhdEnergyConservation,
@@ -180,12 +182,24 @@ def test_python_runner_restart_matches_uninterrupted_state(tmp_path):
         )
 
 
+# a checkpoint names its regime in the configuration vocabulary; the bare "mhd" that earlier
+# adiabatic Newtonian MHD checkpoints recorded is a legacy slug the reader maps to nmhd.
+def test_legacy_mhd_checkpoint_slug_restarts_as_newtonian_mhd() -> None:
+    assert normalize_regime("mhd") == "nmhd"
+    assert Regime(normalize_regime("mhd")) is Regime.NMHD
+    for current in Regime:
+        assert normalize_regime(current.value) == current.value
+
+
+# the relativistic and the Newtonian MHD regimes both restart to the uninterrupted state: the
+# staggered field, the conserved state, and the regime slug the checkpoint records all round-trip.
 @pytest.mark.simulation
-def test_python_runner_restart_preserves_staggered_mhd_state(tmp_path):
+@pytest.mark.parametrize("regime", [Regime.RMHD, Regime.NMHD])
+def test_python_runner_restart_preserves_staggered_mhd_state(tmp_path, regime):
     continuous_dir = tmp_path / "mhd-continuous"
     split_dir = tmp_path / "mhd-split"
     restarted_dir = tmp_path / "mhd-restarted"
-    common = {"resolution": (32, 8, 1)}
+    common = {"resolution": (32, 8, 1), "regime": regime}
 
     run(
         MhdEnergyConservation(data_directory=continuous_dir, **common),

@@ -64,15 +64,16 @@ class Regime(str, ExtendedEnum):
     ISOTHERMAL = "isothermal"
 
 
-# legacy regime slugs: names that carry "special" in the fluid regime itself. a
-# relativity-agnostic slug replaces each. `normalize_regime` remaps them so checkpoints and
-# config strings written under those names still load.
-_LEGACY_REGIME_SLUGS = {"srhd": "rhd", "srmhd": "rmhd"}
+# legacy regime slugs: names that carry "special" in the fluid regime itself, and the bare "mhd"
+# earlier checkpoints recorded for adiabatic Newtonian MHD. a current slug replaces each.
+# `normalize_regime` remaps them so checkpoints and config strings written under those names
+# still load.
+_LEGACY_REGIME_SLUGS = {"srhd": "rhd", "srmhd": "rmhd", "mhd": "nmhd"}
 
 
 def normalize_regime(regime: str) -> str:
-    """map a legacy regime slug to its current name (srhd -> rhd, srmhd -> rmhd) so old checkpoints
-    and configs load. a no-op for every current name."""
+    """map a legacy regime slug to its current name (srhd -> rhd, srmhd -> rmhd, mhd -> nmhd) so
+    old checkpoints and configs load. a no-op for every current name."""
     return _LEGACY_REGIME_SLUGS.get(regime, regime)
 
 

@@ -320,13 +320,15 @@ where
 // =============================================================================
 
 fn regime_name<R: Regime<f64, D>, const D: usize>(r: &R) -> &'static str {
-    // `has_energy() == false` marks the isothermal (IsoModel) regimes, which carry
-    // no energy equation — distinguish them so the checkpoint regime is faithful.
+    // the checkpoint carries the regime in the configuration vocabulary (newtonian, isothermal,
+    // rhd, rmhd, nmhd, imhd), so a restart parses it back into the same enum the run was
+    // configured from. `has_energy() == false` marks the isothermal (IsoModel) regimes, which
+    // carry no energy equation.
     if r.is_mhd() {
         if r.is_relativistic() {
             "rmhd"
         } else if r.has_energy() {
-            "mhd"
+            "nmhd"
         } else {
             "imhd"
         }
@@ -1968,6 +1970,19 @@ mod tests {
     use symbi_xpu::{CpuSpace, HostMemory};
 
     type Sim = SimState<Newtonian, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+
+    // the regime slug a checkpoint records is the configuration vocabulary, so a restart parses
+    // it back into the enum the run was configured from.
+    #[test]
+    fn the_checkpoint_regime_slug_is_the_configuration_name() {
+        assert_eq!(regime_name::<Newtonian, 3>(&Newtonian), "newtonian");
+        assert_eq!(
+            regime_name::<symbi_hydro::newtonian_mhd::NewtonianMhd, 3>(
+                &symbi_hydro::newtonian_mhd::NewtonianMhd
+            ),
+            "nmhd"
+        );
+    }
 
     #[test]
     fn mesh_centers_respect_the_interior_origin() {
