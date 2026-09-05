@@ -899,6 +899,30 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
     /// allocate the implicit magnetic-slip midpoint workspace if it is not already present:
     /// face-vector scratch on the `bface` domains and cell scratch on the allocated domain.
     /// idempotent; called at `attach_bodies` for a slip body.
+    /// allocate the step-entry rollback snapshot when absent. a Newtonian MHD run accepts every
+    /// explicit step and is built without it; a magnetic-slip body makes the root step a
+    /// transaction (a nonconverged solve or a rejected substage replays from the step entry), so
+    /// the snapshot is allocated when such a body attaches. the regime carries the energy slot.
+    pub fn alloc_step_snapshot(&mut self, allocated: &Domain<D>) -> symbi_xpu::Result<()> {
+        if self.step_snapshot.is_some() {
+            return Ok(());
+        }
+        let mut faces: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
+        for d in 0..D {
+            faces.push(Field::zeros(self.bface.b[d].domain())?);
+        }
+        self.step_snapshot = Some(MhdStepSnapshot {
+            cons: ConsFieldsGeneric::zeros_with_energy(allocated, true)?,
+            bcell: BcellFields {
+                b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
+            },
+            bface: BfaceFields {
+                b: faces.try_into().unwrap_or_else(|_| unreachable!()),
+            },
+        });
+        Ok(())
+    }
+
     pub fn alloc_magnetic_slip_workspace(&mut self, allocated: &Domain<D>) -> symbi_xpu::Result<()> {
         if self.magnetic_slip.is_some() {
             return Ok(());
@@ -2923,6 +2947,8 @@ where
                     .expect("magnetic-slip quadrature scratch allocation");
                 mhd.alloc_magnetic_slip_workspace(&allocated)
                     .expect("magnetic-slip midpoint workspace allocation");
+                mhd.alloc_step_snapshot(&allocated)
+                    .expect("magnetic-slip step-entry rollback snapshot allocation");
             }
         }
         self.immersed = Some(ImmersedBodies {

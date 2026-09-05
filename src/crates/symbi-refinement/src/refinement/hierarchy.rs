@@ -59,6 +59,41 @@ fn slip_schedule_record(op: &'static str, dt: f64) {
         }
     });
 }
+
+/// a point of the coupled root step at which an armed failure fires once, so a retry gate can
+/// reject an attempt exactly there and check that the rollback restores every level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlipFailPoint {
+    /// after the opening D-M pair and its synchronization, before the ideal-MHD step.
+    AfterOpening,
+    /// inside the ideal-MHD step, at the finest level's fine substep of this ordinal (1-based)
+    /// within the current root attempt.
+    FineSubstep(usize),
+    /// after the closing magnetic solve.
+    ClosingSolve,
+}
+
+thread_local! {
+    static SLIP_FAILURE: std::cell::RefCell<Option<SlipFailPoint>> = const { std::cell::RefCell::new(None) };
+    static SLIP_FINE_SUBSTEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// arm one failure of the coupled root step at `point`; it fires once and disarms.
+pub fn slip_failure_arm(point: SlipFailPoint) {
+    SLIP_FAILURE.with(|f| *f.borrow_mut() = Some(point));
+}
+
+fn slip_failure_fires(point: SlipFailPoint) -> bool {
+    SLIP_FAILURE.with(|f| {
+        let mut armed = f.borrow_mut();
+        if *armed == Some(point) {
+            *armed = None;
+            true
+        } else {
+            false
+        }
+    })
+}
 use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
@@ -240,6 +275,9 @@ where
     injection_ledger: std::collections::BTreeMap<symbi_sim::mass_transport::ContainerId, f64>,
     /// coarse-fine prolongation order (one above the evolution reconstruction).
     pub prolong_order: ProlongOrder,
+    /// set while the coupled root step drives the ideal-MHD hierarchy operator: the material drain
+    /// belongs to the split operator D outside that operator, so no level tail penalizes.
+    drain_suppressed: bool,
     /// flux_registers[ll] corrects the interface between level ll and ll+1.
     pub flux_registers: Vec<FluxRegister<NDIM, DOF, Mem>>,
     /// emf_registers[ll] corrects the coarse bface at the same interface (mhd
@@ -1011,6 +1049,7 @@ where
             }],
             injection_ledger: std::collections::BTreeMap::new(),
             prolong_order: ProlongOrder::Plm,
+            drain_suppressed: false,
             flux_registers: Vec::new(),
             emf_registers: Vec::new(),
             tracer_interfaces: Vec::new(),
@@ -1204,6 +1243,7 @@ where
             levels,
             injection_ledger: std::collections::BTreeMap::new(),
             prolong_order,
+            drain_suppressed: false,
             flux_registers,
             emf_registers,
             tracer_interfaces,
@@ -1235,6 +1275,17 @@ where
                 gravity_only(&bodies)
             };
             self.levels[ll].state.attach_bodies(coll);
+        }
+        // a magnetic-slip sink makes the root step a transaction over every level: a rejected
+        // attempt replays each level from its step entry, so each carries the rollback snapshot.
+        if self.finest_has_magnetic_slip() {
+            for ll in 0..self.levels.len() {
+                let allocated = self.levels[ll].state.geom.allocated.clone();
+                if let Some(mhd) = self.levels[ll].state.fields.mhd.as_mut() {
+                    mhd.alloc_step_snapshot(&allocated)
+                        .expect("magnetic-slip step-entry rollback snapshot allocation");
+                }
+            }
         }
         self.assert_sinks_inside_finest();
         self
@@ -1857,6 +1908,10 @@ where
                 (level.state.immersed.as_mut(), snapshot.bodies[ii].as_ref())
             {
                 immersed.bodies.clone_from(bodies);
+                // the per-step deltas the rejected attempt booked (a drain's accreted mass and
+                // force, a feedback force) are discarded with it: the accumulator is empty at
+                // every step entry, the accepted-root feedback having consolidated and reset it.
+                immersed.diagnostics.reset();
             }
             level.state.motion = snapshot.motion[ii];
             level.state.time = snapshot.clocks[ii].0;
@@ -2176,54 +2231,85 @@ where
     /// narrow slice: one stationary slip draining body, single level, periodic 3D cartesian host,
     /// adiabatic MHD; unsupported combinations fail loudly before the first half-step.
     pub fn advance_slip_coupled_step(&mut self, level: usize, dt: f64, alpha0: f64) -> bool {
-        assert_eq!(self.levels.len(), 1, "magnetic-slip coupling is single-level (no refinement) yet");
+        assert_eq!(level, 0, "the coupled step is a root-step composition");
         assert!(
-            !self.levels[level].state.has_tracers(),
+            self.levels.iter().all(|l| !l.state.has_tracers()),
             "magnetic-slip coupling does not support tracers yet"
         );
+        let fi = self.levels.len() - 1;
+        let refined = fi > 0;
         let half = 0.5 * dt;
+        SLIP_FINE_SUBSTEPS.with(|c| c.set(0));
 
-        // D(dt/2): the material drain, then rebuild primitives/ghosts.
+        // D(dt/2): the material drain on the finest level, then rebuild primitives/ghosts.
         slip_schedule_record("D", half);
         {
-            let l = &self.levels[level];
+            let l = &self.levels[fi];
             l.kernels.penalize(&l.state, half);
         }
-        self.slip_rebuild(level);
+        self.slip_rebuild(fi);
 
-        // M(dt/2): the implicit slip midpoint from the post-drain state, then rebuild magnetic/cell.
+        // M(dt/2): the implicit slip midpoint from the post-drain state on the finest level, then
+        // rebuild magnetic/cell.
         slip_schedule_record("M", half);
-        if !self.levels[level].kernels.magnetic_slip_step(&self.levels[level].state, half) {
+        if !self.levels[fi].kernels.magnetic_slip_step(&self.levels[fi].state, half) {
             return true; // nonconverged solve -> hard failure this increment
         }
-        self.slip_rebuild(level);
-
-        // H(dt): the ideal-MHD RK step (stages + tail EMF), without the drain.
-        slip_schedule_record("H", dt);
-        self.level_step_begin(level, dt);
-        let n = self.levels[level].state.timestepping.stages().len();
-        for ii in 0..n {
-            if self.level_stage(level, ii, dt, alpha0) {
-                return true;
-            }
+        self.slip_rebuild(fi);
+        // the covered parent regions become the finest state: the split operators acted on the
+        // finest level alone, with their whole support inside it, so no interface flux or edge
+        // EMF is owed and the update is a pure transfer.
+        if refined {
+            self.sync_all_fine_to_coarse();
         }
-        self.level_tail_emf(level, dt);
-        self.slip_rebuild(level);
-
-        // M(dt/2): a fresh predictor frozen from the accepted output of H.
-        slip_schedule_record("M", half);
-        if !self.levels[level].kernels.magnetic_slip_step(&self.levels[level].state, half) {
+        if slip_failure_fires(SlipFailPoint::AfterOpening) {
             return true;
         }
-        self.slip_rebuild(level);
 
-        // D(dt/2): the closing drain.
+        // H(dt): the ideal-MHD step without the drain. on a single grid the RK stages and the tail
+        // EMF, bit for bit the single-level schedule; on a refined hierarchy the complete level
+        // recursion (stages, fine subcycling, stage-time prolongation, CT EMF accumulation,
+        // restriction, flux and EMF reflux, level clocks) with every level tail's drain withheld.
+        slip_schedule_record("H", dt);
+        if refined {
+            self.drain_suppressed = true;
+            let failed = self.advance_level(0, dt, alpha0);
+            self.drain_suppressed = false;
+            if failed {
+                return true;
+            }
+        } else {
+            self.level_step_begin(level, dt);
+            let n = self.levels[level].state.timestepping.stages().len();
+            for ii in 0..n {
+                if self.level_stage(level, ii, dt, alpha0) {
+                    return true;
+                }
+            }
+            self.level_tail_emf(level, dt);
+            self.slip_rebuild(level);
+        }
+
+        // M(dt/2): a fresh predictor frozen from the accepted output of H, on the finest level.
+        slip_schedule_record("M", half);
+        if !self.levels[fi].kernels.magnetic_slip_step(&self.levels[fi].state, half) {
+            return true;
+        }
+        self.slip_rebuild(fi);
+        if slip_failure_fires(SlipFailPoint::ClosingSolve) {
+            return true;
+        }
+
+        // D(dt/2): the closing drain on the finest level.
         slip_schedule_record("D", half);
         {
-            let l = &self.levels[level];
+            let l = &self.levels[fi];
             l.kernels.penalize(&l.state, half);
         }
-        self.slip_rebuild(level);
+        self.slip_rebuild(fi);
+        if refined {
+            self.sync_all_fine_to_coarse();
+        }
         false
     }
 
@@ -2665,7 +2751,7 @@ where
             .immersed
             .as_ref()
             .is_some_and(|immersed| immersed.bodies.rigid_count() > 0);
-        if l.state.has_bodies() && (!has_finer || has_rigid) {
+        if l.state.has_bodies() && (!has_finer || has_rigid) && !self.drain_suppressed {
             let accretion_density = if l.state.has_tracers() {
                 symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
                 Some(symbi_sim::tracers::snapshot_accretion_density(&l.state))
@@ -2928,6 +3014,7 @@ where
     /// span a tile cut), so this method is the single-tile reference. pure extraction.
     fn level_subcycle(&mut self, level: usize, dt: f64) -> bool {
         let fine_dt = dt / RATIO as f64;
+        let child_is_finest = level + 2 == self.levels.len();
         for sub in 0..RATIO {
             let alpha = sub as f64 / RATIO as f64;
             self.prolong_cf(level + 1, alpha);
@@ -2935,6 +3022,15 @@ where
             prof("ghost_fill", || f.kernels.ghost_fill(&f.state));
             if self.advance_level(level + 1, fine_dt, alpha) {
                 return true;
+            }
+            if child_is_finest {
+                let ordinal = SLIP_FINE_SUBSTEPS.with(|c| {
+                    c.set(c.get() + 1);
+                    c.get()
+                });
+                if slip_failure_fires(SlipFailPoint::FineSubstep(ordinal)) {
+                    return true;
+                }
             }
         }
         false
