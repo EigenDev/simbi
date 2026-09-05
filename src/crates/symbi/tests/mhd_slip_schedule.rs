@@ -466,12 +466,14 @@ mod expensive {
         }
     }
 
-    // the staggered field's ratio climbs with resolution (about 2 at 24 cells per side, 3.9 then 3.3
-    // at 48), consistent with second order read through a receding mask-seam spatial structure. the
-    // 96-cell grid is the closing measurement: both successive bface ratios above 3.73 close the
-    // gate; a finest ratio that improves but stays near 3.2 to 3.5 is still pre-asymptotic and is to
-    // be characterized, and one that stagnates or declines is a residual term to be investigated,
-    // never attributed to resolution by default.
+    // the staggered field's ratio is resolution-controlled in this experiment: about 2 at 24 cells per
+    // side, 3.9 then 3.3 at 48, and 3.83 then 3.92 at 96 (observed orders 1.94 and 1.97), with the
+    // finer ratio improving on the coarser at each grid and the 48-cell numbers reproduced to the
+    // printed digit between debug and release builds. the gate: both successive bface ratios above
+    // 3.73, the finest difference above the solver floor, the gas fields near four, every guard quiet.
+    // a finest ratio that improves but stays near 3.2 to 3.5 is pre-asymptotic and is characterized;
+    // one that stagnates or declines is a residual term to investigate, never attributed to resolution
+    // by default.
     #[test]
     fn expensive_strong_field_coupled_step_staggered_field_is_second_order_at_96() {
         let seq = strong_field_sequence(96, 8, 4);
