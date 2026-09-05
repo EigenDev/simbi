@@ -1440,6 +1440,14 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
     emit_gv(out_dir, "body_slip_emf_2d", 2, &program);
     let program = symbi_discretize::body_slip_bz_2d_gv();
     emit_gv(out_dir, "body_slip_bz_2d", 2, &program);
+    // the 2.5D implicit solve's cell passes: the entering gas energy (the pointwise 3D program on a
+    // 2D grid), the mixed-current dissipation rate, and the commit's energy deposit.
+    let program = symbi_discretize::slip_gas_energy_3d_gv();
+    emit_gv(out_dir, "slip_gas_energy_2d", 2, &program);
+    let program = symbi_discretize::slip_dissipation_2d_gv();
+    emit_gv(out_dir, "slip_dissipation_2d", 2, &program);
+    let program = symbi_discretize::slip_commit_energy_2d_gv();
+    emit_gv(out_dir, "slip_commit_energy_2d", 2, &program);
     let program = symbi_discretize::body_slip_quadrature_3d_gv(Coords::Cartesian);
     emit_gv(out_dir, "body_slip_quadrature_3d", 3, &program);
     // the implicit slip solve's cell passes: the entering gas energy of the predictor, the

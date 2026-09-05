@@ -744,6 +744,79 @@ fn slip_dyad_coefficient_gv<'t>(
     a_b * chi_b
 }
 
+/// the 2.5D current of the operand at the cell, `R B = (D_y B_z, -D_x B_z, G_z(B_x, B_y))`: central
+/// differences of the operand's cell `B_z` (`slip_bz`) and the 1/4-weighted gather of the four corner
+/// z-edge currents from backward differences of the staggered faces `bf_c`.
+fn mixed_current_2d_gv<'t>(cx: TraceCx<'t>, inv_dx: &[Gv<'t>]) -> [Gv<'t>; 3] {
+    let half = Gv::from_f64(0.5);
+    let bz = |off: &[i32]| crate::gv::gv_field_at(cx, "slip_bz", CtCellCt::SlipOperandBz, 2, off);
+    let bface = |c: usize, off: &[i32]| {
+        crate::gv::gv_field_at(cx, &format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c)), 2, off)
+    };
+    let j_x = (bz(&[0, 1]) - bz(&[0, -1])) * half * inv_dx[1];
+    let j_y = Gv::ZERO - (bz(&[1, 0]) - bz(&[-1, 0])) * half * inv_dx[0];
+    let curl_at = |eoff: [i32; 2]| -> Gv<'t> {
+        let mx = [eoff[0] - 1, eoff[1]];
+        let my = [eoff[0], eoff[1] - 1];
+        (bface(1, &eoff) - bface(1, &mx)) * inv_dx[0] - (bface(0, &eoff) - bface(0, &my)) * inv_dx[1]
+    };
+    let j_z = (curl_at([0, 0]) + curl_at([1, 0]) + curl_at([0, 1]) + curl_at([1, 1]))
+        * Gv::from_f64(0.25);
+    [j_x, j_y, j_z]
+}
+
+/// the 2.5D per-cell magnetic dissipation rate `qdot = (R B) . F_q` with the mixed current gathered
+/// from the bound faces and the operand's cell `B_z`: all three components of the current enter,
+/// so the predicted heat and the committed heat carry the out-of-plane channel.
+pub fn slip_dissipation_2d_gv() -> KernelProgram {
+    let (kernel, writes) = trace(|cx| {
+        let inv_dx: Vec<Gv> = (0..2)
+            .map(|a| Gv::ONE / cx.scalar(&format!("dx_{a}")))
+            .collect();
+        let j = mixed_current_2d_gv(cx, &inv_dx);
+        let f_q: Vec<Gv> = (0..3)
+            .map(|c| crate::gv::ct_field(cx, CtCellCt::SlipQuadrature(PhysComp::new(c))))
+            .collect();
+        let qdot = (0..3).fold(Gv::ZERO, |s, c| s + j[c] * f_q[c]);
+        vec![KernelWrite::new("slip_qdot_new", CtCellCt::SlipDissipation, qdot.node())]
+    });
+    let kernel = kernel.with_derived_support(&writes);
+    KernelProgram::new(kernel, writes)
+}
+
+/// the 2.5D commit's energy deposit through the face-to-cell defect bridge:
+/// `E += dM_cell + dt qdot` with `dM_cell = dM_xy,interp + (B_z^1)^2/2 - (B_z^0)^2/2`. the in-plane
+/// part is the change of the interpolated cell energy, `M_xy^1` from the committed cell field and
+/// `M_xy^0` from the substep-input faces the kernel is bound to; the out-of-plane part carries no
+/// defect, `B_z` being cell-centered in both states, with `B_z^0` read from the bound `slip_bz`.
+pub fn slip_commit_energy_2d_gv() -> KernelProgram {
+    let (kernel, writes) = trace(|cx| {
+        let dt = cx.scalar("dt");
+        let nrg = cx.field("nrg", symbi_ir::FieldRef::cons_nrg());
+        let b_new: Vec<Gv> = (0..3)
+            .map(|c| cx.field(&format!("bc_{c}"), symbi_ir::FieldRef::BCell(c as u8)))
+            .collect();
+        let half = Gv::from_f64(0.5);
+        let b_old_xy: Vec<Gv> = (0..2)
+            .map(|c| {
+                let mut up = [0, 0];
+                up[c] = 1;
+                let lo = crate::gv::gv_field_at(cx, &format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c)), 2, &[0, 0]);
+                let hi = crate::gv::gv_field_at(cx, &format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c)), 2, &up);
+                half * (lo + hi)
+            })
+            .collect();
+        let bz_old = crate::gv::ct_field(cx, CtCellCt::SlipOperandBz);
+        let qdot = crate::gv::ct_field(cx, CtCellCt::SlipDissipation);
+        let m_new = b_new.iter().fold(Gv::ZERO, |s, b| s + *b * *b) * half;
+        let m_old = (b_old_xy[0] * b_old_xy[0] + b_old_xy[1] * b_old_xy[1] + bz_old * bz_old) * half;
+        let e = nrg + (m_new - m_old) + dt * qdot;
+        vec![KernelWrite::new("nrg_new", symbi_ir::FieldRef::cons_nrg(), e.node())]
+    });
+    let kernel = kernel.with_derived_support(&writes);
+    KernelProgram::new(kernel, writes)
+}
+
 /// the 2.5D slip cell pass (cartesian x-y grid, three vector components). the operand lives on the
 /// mixed complex F_x + F_y + C_z: the in-plane components on staggered faces, the out-of-plane
 /// `B_z` at cell centers (`slip_bz`). its current at the cell is
@@ -763,20 +836,7 @@ pub fn body_slip_quadrature_2d_gv(coords: Coords) -> KernelProgram {
         let inv_dx: Vec<Gv> = (0..2)
             .map(|a| Gv::ONE / cx.scalar(&format!("dx_{a}")))
             .collect();
-        let half = Gv::from_f64(0.5);
-        let bz = |off: &[i32]| crate::gv::gv_field_at(cx, "slip_bz", CtCellCt::SlipOperandBz, 2, off);
-        let bface = |c: usize, off: &[i32]| {
-            crate::gv::gv_field_at(cx, &format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c)), 2, off)
-        };
-        let j_x = (bz(&[0, 1]) - bz(&[0, -1])) * half * inv_dx[1];
-        let j_y = Gv::ZERO - (bz(&[1, 0]) - bz(&[-1, 0])) * half * inv_dx[0];
-        let curl_at = |eoff: [i32; 2]| -> Gv {
-            let mx = [eoff[0] - 1, eoff[1]];
-            let my = [eoff[0], eoff[1] - 1];
-            (bface(1, &eoff) - bface(1, &mx)) * inv_dx[0] - (bface(0, &eoff) - bface(0, &my)) * inv_dx[1]
-        };
-        let j_z = (curl_at([0, 0]) + curl_at([1, 0]) + curl_at([0, 1]) + curl_at([1, 1]))
-            * Gv::from_f64(0.25);
+        let [j_x, j_y, j_z] = mixed_current_2d_gv(cx, &inv_dx);
 
         let coeff = slip_dyad_coefficient_gv(cx, coords, ndim, axes, &b_q);
         let b_vec = Tensor::new([b_q[0], b_q[1], b_q[2]]);

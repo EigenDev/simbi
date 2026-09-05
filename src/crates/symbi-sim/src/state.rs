@@ -931,6 +931,20 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             gas_energy: Field::zeros(allocated)?,
             dissipation: Field::zeros(allocated)?,
             product: face_group(&face_doms)?,
+            z: if D < DOF {
+                Some(MagneticSlipCellComplex {
+                    input: Field::zeros(allocated)?,
+                    rhs: Field::zeros(allocated)?,
+                    iterate: Field::zeros(allocated)?,
+                    residual: Field::zeros(allocated)?,
+                    direction: Field::zeros(allocated)?,
+                    operator_direction: Field::zeros(allocated)?,
+                    candidate: Field::zeros(allocated)?,
+                    product: Field::zeros(allocated)?,
+                })
+            } else {
+                None
+            },
         });
         Ok(())
     }
@@ -975,6 +989,27 @@ pub struct MagneticSlipWorkspace<
     /// face scratch for the inner product: the pointwise product of two Krylov vectors, reduced
     /// over the physical faces to the scalar the conjugate-gradient recurrence reads.
     pub product: BfaceFields<D, M, Sc>,
+    /// the cell-centered out-of-plane companion of every Krylov vector on a 2.5D grid, where the
+    /// operand's B_z lives at cell centers beside the in-plane faces and the solve is one block
+    /// conjugate gradient on the mixed complex. absent on a fully gridded chart.
+    pub z: Option<MagneticSlipCellComplex<D, M, Sc>>,
+}
+
+/// the cell-centered B_z members of the magnetic-slip solve's vectors, one per face group of the
+/// workspace, so a mixed vector is a face group paired with its member here.
+pub struct MagneticSlipCellComplex<
+    const D: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
+    pub input: Field<Sc, D, M>,
+    pub rhs: Field<Sc, D, M>,
+    pub iterate: Field<Sc, D, M>,
+    pub residual: Field<Sc, D, M>,
+    pub direction: Field<Sc, D, M>,
+    pub operator_direction: Field<Sc, D, M>,
+    pub candidate: Field<Sc, D, M>,
+    pub product: Field<Sc, D, M>,
 }
 
 /// RK workspace for one partition. `NDIM` = grid dim, `DOF` = vector component dim

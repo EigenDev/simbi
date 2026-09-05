@@ -2277,7 +2277,8 @@ where
         let l = &self.levels[level];
         let mhd = l.state.fields.mhd.as_ref().expect("mhd fields");
         let cells: Vec<_> = l.state.geom.interior.iter().collect();
-        let bface = (0..DOF)
+        // the staggered field has one component per gridded axis; the cell field one per vector slot.
+        let bface = (0..NDIM)
             .flat_map(|d| cells.iter().map(move |c| *mhd.bface[d].at(*c)))
             .collect();
         let bcell = (0..DOF)

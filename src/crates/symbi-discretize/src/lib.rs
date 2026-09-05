@@ -78,7 +78,8 @@ pub use gv_immersed::{
 };
 pub use gv_penalize::{
     body_resistive_emf_2d_gv, body_resistive_emf_3d_dir_gv, body_slip_emf_3d_dir_gv,
-    body_slip_bz_2d_gv, body_slip_emf_2d_gv, body_slip_quadrature_2d_gv,
+    body_slip_bz_2d_gv, body_slip_emf_2d_gv, body_slip_quadrature_2d_gv, slip_commit_energy_2d_gv,
+    slip_dissipation_2d_gv,
     body_slip_quadrature_3d_gv, penalize_drain_gv, penalize_drain_midpoint_gv,
     slip_commit_energy_3d_gv, slip_dissipation_3d_gv, slip_gas_energy_3d_gv,
     penalize_drain_iso_gv, penalize_porous_gv, penalize_porous_gv_shaped,
