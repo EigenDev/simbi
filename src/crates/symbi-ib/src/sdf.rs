@@ -33,6 +33,16 @@ pub fn chi<S: Scalar>(phi: S, w: S) -> S {
     S::HALF * (S::ONE - (phi / w).tanh())
 }
 
+/// the distance, in mask widths, beyond which the mask `chi` is exactly zero in f64 arithmetic:
+/// `1 - tanh(x)` falls below half an ulp of one once `2 exp(-2x) < eps/2`, so `tanh(x)` rounds to
+/// one and `chi` to zero for `x > ln(4/eps)/2`; one further width covers a `tanh` that is not
+/// correctly rounded at the threshold. inside the body the same bound puts `chi` at exactly one.
+/// the support of every mask-weighted operator therefore ends this many widths from the surface,
+/// and a shell mask `4 chi (1 - chi)` vanishes on both sides of it.
+pub fn mask_support_widths() -> f64 {
+    0.5 * (4.0 / f64::EPSILON).ln() + 1.0
+}
+
 /// a signed-distance expression over carrier `S` in `D` dimensions. shape
 /// parameters are carrier values: f64 constants on the host, scalar-param
 /// nodes in a trace — one structure serves both.
@@ -494,6 +504,15 @@ fn enclosing_ball<const D: usize>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_mask_is_exactly_zero_beyond_its_support_width_and_positive_inside_it() {
+        let x = super::mask_support_widths();
+        assert!(super::chi(x, 1.0_f64) == 0.0, "chi is not exactly zero at the support width");
+        assert!(super::chi(x * 1.5, 1.0_f64) == 0.0);
+        assert!(super::chi(x - 2.0, 1.0_f64) > 0.0, "chi vanishes two widths inside the support width");
+        assert!(super::chi(-x, 1.0_f64) == 1.0, "chi is not exactly one deep inside the body");
+    }
+
     use super::*;
 
     type Sdf3 = SdfExpr<f64, 3>;

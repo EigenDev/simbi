@@ -1321,8 +1321,18 @@ where
         };
         let rg = &root.geom;
         let fg = &finest.geom;
+        let dx_fine = fg.dx[0];
+        // a staggered-field hierarchy contains the sphere the operators act on: the drain mask
+        // and the slip shell to their f64 support, plus the stencil reach, so no drained or
+        // slipped cell lies within reach of a coarse-fine ghost. a hydrodynamic hierarchy keeps
+        // the accretion sphere as its containment.
+        let strict = finest.fields.mhd.is_some();
         im.bodies.visit_accretion(|body| {
-            let racc: f64 = body.accretion_radius().unwrap_or(0.0);
+            let racc: f64 = if strict {
+                sink_support_radius(body, dx_fine)
+            } else {
+                body.accretion_radius().unwrap_or(0.0)
+            };
             // sphere-box overlap against the root interior, per axis.
             let mut clip_lo = [0.0f64; NDIM];
             let mut clip_hi = [0.0f64; NDIM];
@@ -1343,7 +1353,10 @@ where
                 let fhi = fg.x_lo[ax] + fg.interior.spaces[ax].hi as f64 * fg.dx[ax];
                 assert!(
                     clip_lo[ax] >= flo && clip_hi[ax] <= fhi,
-                    "refinement x decomposition: body {} sink sphere clip [{:.4}, {:.4}] leaves                      this tile's finest level [{flo:.4}, {fhi:.4}] on axis {ax}",
+                    "refinement x decomposition: body {} sink support sphere (radius {racc:.4}: the \
+                     accretion sphere, the drain mask and slip shell to their f64 support, and the \
+                     stencil reach) clip [{:.4}, {:.4}] leaves this tile's finest level \
+                     [{flo:.4}, {fhi:.4}] on axis {ax}",
                     body.idx,
                     clip_lo[ax],
                     clip_hi[ax]
@@ -1977,9 +1990,7 @@ where
             // a slip-enabled draining body runs the palindromic D-M-H-M-D coupled step in place of the
             // plain RK march; the snapshot above (taken before the first D) is the boundary its retry
             // restores to. a body with no magnetic slip keeps the ordinary advance bit-for-bit.
-            let root_is_slip = self.levels[0]
-                .kernels
-                .has_magnetic_slip(&self.levels[0].state);
+            let root_is_slip = self.finest_has_magnetic_slip();
             let failed = if root_is_slip {
                 self.advance_slip_coupled_step(0, dt, 0.0)
             } else {
@@ -2927,6 +2938,48 @@ where
             }
         }
         false
+    }
+
+    /// whether the finest level carries a magnetic-slip body. the finest level is the sole owner
+    /// of every sink coupling on a refined hierarchy (coarser levels hold gravity-only proxies), so
+    /// the coupled-step decision reads the owner; on a single grid the finest is the root.
+    pub fn finest_has_magnetic_slip(&self) -> bool {
+        let fi = self.levels.len() - 1;
+        self.levels[fi].kernels.has_magnetic_slip(&self.levels[fi].state)
+    }
+
+    /// the transfer-only synchronization of `level + 1` into `level`: the covered coarse cells
+    /// become the conservative restriction of their fine children, the covered coarse faces the
+    /// area-weighted average of the coincident fine faces (interface faces included), the cell
+    /// field over the coverage and its one-cell shell the interpolation of those faces, then the
+    /// coarse primitives and ghosts are rebuilt. no flux or EMF reflux is applied and no register is
+    /// touched: this is the redundancy update after a split operator that acted on the finest level
+    /// alone with its whole support inside the finest patch, where the coarse-fine interface saw
+    /// no flux and no edge EMF. the restricted energy carries the fine magnetic energy already, and
+    /// the face-to-cell interpolation leaves it alone.
+    pub fn sync_fine_to_coarse(&self, level: usize) {
+        let (lo, hi) = self.levels.split_at(level + 1);
+        let coarse = &lo[level];
+        let fine = &hi[0];
+        let cov = coarse.coverage.as_ref().expect("a level with a finer child carries its coverage");
+        restrict_cons(&fine.state.fields.cons, &coarse.state.fields.cons, cov);
+        if let (Some(cmhd), Some(fmhd)) = (coarse.state.fields.mhd.as_ref(), fine.state.fields.mhd.as_ref()) {
+            for aa in 0..NDIM {
+                restrict_cell_field(&fmhd.bcell[aa], &cmhd.bcell[aa], cov);
+            }
+            restrict_bface(&fmhd.bface, &cmhd.bface, cov);
+            let shell = shell_around(cov, &coarse.state.geom.interior);
+            bcell_from_bface_region(cmhd, coarse.state.fields.cons.nrg_field(), &shell);
+        }
+        coarse.kernels.c2p(&coarse.state);
+        coarse.kernels.ghost_fill(&coarse.state);
+    }
+
+    /// synchronize every covered parent region from the finest level down to the root.
+    pub fn sync_all_fine_to_coarse(&self) {
+        for level in (0..self.levels.len().saturating_sub(1)).rev() {
+            self.sync_fine_to_coarse(level);
+        }
     }
 
     /// restrict the finer level into this level's coverage + apply the flux/emf reflux + re-derive
@@ -3886,8 +3939,10 @@ fn save_prim_old<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     }
 }
 
-/// remove accretion from coarser-level body proxies. rigid surfaces remain active because a
-/// body may cross a coarse-fine boundary and must act on uncovered coarse cells.
+/// the coarser-level proxy of each body: the same mass, softening, and motion, with accretion
+/// and every magnetic coupling removed, so the finest level alone drains, dissipates, or slips
+/// the field. rigid surfaces remain active because a body may cross a coarse-fine boundary and
+/// must act on uncovered coarse cells.
 fn gravity_only<const D: usize>(
     bodies: &symbi_ib::BodyCollection<f64, D>,
 ) -> symbi_ib::BodyCollection<f64, D> {
@@ -3896,8 +3951,30 @@ fn gravity_only<const D: usize>(
         if let symbi_ib::BodyKind::BlackHole { softening, .. } = body.kind {
             body.kind = symbi_ib::BodyKind::Gravitational { softening };
         }
+        body.spec.magnetic = symbi_ib::MagneticSpec::None;
     });
     coll
+}
+
+/// the outer radius of a sink's operator support on a grid of spacing `dx`: the accretion sphere
+/// plus the width over which its drain mask `chi(phi, dx)` stays nonzero in f64, or, for a
+/// magnetic-slip body, the shell `4 chi (1 - chi)` of width w centered `placement` widths off the
+/// surface, whichever reaches farther, plus the three-cell reach of the current gather, the edge
+/// scatter, and the curl. beyond this radius every kernel of the drain and the slip writes an
+/// exact zero.
+fn sink_support_radius<const D: usize>(body: &symbi_ib::Body<f64, D>, dx: f64) -> f64 {
+    let racc: f64 = body.accretion_radius().unwrap_or(0.0);
+    let widths = symbi_ib::sdf::mask_support_widths();
+    let drain = racc + widths * dx;
+    let slip = match body.spec.magnetic {
+        symbi_ib::MagneticSpec::Slip {
+            shell_width,
+            placement,
+            ..
+        } => racc + placement * shell_width + widths * shell_width,
+        _ => racc,
+    };
+    drain.max(slip) + 3.0 * dx
 }
 
 /// restore the hydrodynamic conserved state over an inactive composite-grid region.
