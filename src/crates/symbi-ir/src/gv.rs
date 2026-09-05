@@ -1454,8 +1454,10 @@ impl<'t> symbi_algebra::algebra::Numeric for Gv<'t> {
 // Mask discipline: `GvMask` is a newtype around `Gv` that wraps a Bool-typed
 // graph node. construction is `pub(crate)`, so `Scalar::cmp_*` is the sole
 // producer of masks — the type system enforces "masks at the graph layer are
-// always Bool-typed." `BitAnd` / `BitOr` / `Not` emit the corresponding graph Bool
-// ops (`ElementWiseOp::BitAnd` / `BitOr` / `BitNot`).
+// always bool-typed." mask conjunction lowers through a select. this keeps
+// mask composition in the control-flow vocabulary understood consistently by
+// cuda and hip instead of asking the device compiler to materialize bitwise
+// arithmetic on comparison results. disjunction and negation remain graph boolean ops.
 //
 // this is the single carrier surface workspace-wide.
 // =============================================================================
@@ -1472,8 +1474,8 @@ impl<'t> std::ops::BitAnd for GvMask<'t> {
         let a = self.0.node();
         let b = rhs.0.node();
         GvMask(Gv::of(with_trace(|t| {
-            t.graph
-                .element_wise(ElementWiseOp::BitAnd, vec![a, b], None)
+            let no = t.graph.add_const(ConstValue::Bool(false), None);
+            t.graph.select(a, b, no, None)
         })))
     }
 }
