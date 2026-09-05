@@ -366,8 +366,12 @@ One thing to know: the `body_diagnostics` and census series inside a checkpoint 
 run segment only and start empty again after a restart. Stitch the segments offline.
 
 Each checkpoint carries `metadata` (time, dt, iteration, gamma, cfl, regime, spacetime, solver,
-spacing, ...) plus a `level_<N>` group per refinement level holding the primitives and conserved
-state, and — when the run has them — `bodies`, `body_diagnostics`, `tracers`, and `census/<name>`.
+spacing, ...) plus the compiled backend's `build_git_sha`, `build_git_dirty`, and
+`build_source_id`, and the defining Python file's `config_source` and `config_sha256`. A dirty
+backend is labeled `<commit>-dirty` rather than claiming that the clean commit reproduces it.
+The same short identities appear in the startup table. Each `level_<N>` group holds the primitives
+and conserved state, and — when the run has them — the file also carries `bodies`,
+`body_diagnostics`, `tracers`, and `census/<name>`.
 Immersed-body runs also append a plain-text `diagnostics.dat` (time, position, velocity, force,
 torque, mass, accreted mass, accretion rate per body) if you set `--diagnostic-interval`; it's off
 by default.

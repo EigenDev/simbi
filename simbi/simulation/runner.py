@@ -11,7 +11,9 @@
 # =============================================================================
 from __future__ import annotations
 
+import hashlib
 import importlib
+import inspect
 import math
 import os
 from pathlib import Path
@@ -79,6 +81,28 @@ def _collect_custom_params(problem: SimbiProblem) -> list[list[str]]:
     return rows
 
 
+def _config_source_identity(problem: SimbiProblem) -> tuple[str, str]:
+    """Return the readable path and SHA-256 of the problem's defining source file.
+
+    The backend commit identifies compiled numerics; this identifies the Python
+    configuration, which can change without rebuilding that backend. Dynamically
+    defined problems have no file and are recorded explicitly as such.
+    """
+    source = inspect.getsourcefile(type(problem))
+    if source is None:
+        return "<dynamic>", "unavailable"
+    path = Path(source).resolve()
+    try:
+        display = str(path.relative_to(Path.cwd().resolve()))
+    except ValueError:
+        display = str(path)
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        digest = "unavailable"
+    return display, digest
+
+
 def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     """
     convert problem config to dict for the rust backend.
@@ -109,6 +133,9 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
 
     # the problem's class name — shown in the rust run dashboard header.
     model_dict["name"] = type(problem).__name__
+    config_source, config_sha256 = _config_source_identity(problem)
+    model_dict["config_source"] = config_source
+    model_dict["config_sha256"] = config_sha256
 
     # ensure data_directory is string with trailing slash
     data_dir = model_dict.get("data_directory", "data/")

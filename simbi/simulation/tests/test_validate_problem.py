@@ -6,6 +6,9 @@
 # =============================================================================
 
 import argparse
+import hashlib
+import inspect
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated
 
@@ -53,6 +56,14 @@ def test_validate_problem_writes_no_output_directory(tmp_path) -> None:
     output = tmp_path / "must-not-exist"
     runner.validate_problem(SodProblem(data_directory=str(output)))
     assert not output.exists()
+
+
+def test_execution_dict_records_the_exact_config_source() -> None:
+    payload = to_execution_dict(SodProblem())
+    source = Path(inspect.getsourcefile(SodProblem)).resolve()
+
+    assert Path(payload["config_source"]).resolve() == source
+    assert payload["config_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
 
 
 def test_rust_preflight_rejects_bare_source_payload() -> None:

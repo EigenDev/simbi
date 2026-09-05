@@ -52,6 +52,26 @@ use symbi_sim::state::CtMethod;
 use symbi_sim::state::SimStateGeneric;
 use symbi_sim::substrate_seam::{WithExcision, WithResistivity, WithViscosity};
 
+const BUILD_GIT_SHA: &str = env!("SIMBI_BUILD_GIT_SHA");
+const BUILD_GIT_DIRTY: bool = env!("SIMBI_BUILD_GIT_DIRTY").as_bytes()[0] == b'1';
+
+fn build_source_id() -> String {
+    if BUILD_GIT_DIRTY {
+        format!("{BUILD_GIT_SHA}-dirty")
+    } else {
+        BUILD_GIT_SHA.to_string()
+    }
+}
+
+fn build_source_label() -> String {
+    let short: String = BUILD_GIT_SHA.chars().take(12).collect();
+    if BUILD_GIT_DIRTY {
+        format!("{short}-dirty")
+    } else {
+        short
+    }
+}
+
 // =============================================================================
 // parsed configuration — a plain-rust mirror of the python exec_dict. the
 // monomorphized dispatch below reads these tags to pick the concrete SimState.
@@ -59,6 +79,10 @@ use symbi_sim::substrate_seam::{WithExcision, WithResistivity, WithViscosity};
 
 struct Config {
     name: String,
+    /// defining Python configuration file and its content hash. unlike the backend build
+    /// identity, these are captured when the run starts because changing a config needs no rebuild.
+    config_source: String,
+    config_sha256: String,
     regime: String,
     coord_system: String,
     // the spacetime background ("minkowski" default, "schwarzschild" for GR), orthogonal to
@@ -1104,6 +1128,18 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .flatten()
             .and_then(|v| v.extract::<String>().ok())
             .unwrap_or_default(),
+        config_source: dict
+            .get_item("config_source")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<String>().ok())
+            .unwrap_or_else(|| "<unknown>".to_string()),
+        config_sha256: dict
+            .get_item("config_sha256")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<String>().ok())
+            .unwrap_or_else(|| "unavailable".to_string()),
         regime: enum_str(dict, "regime")?,
         coord_system,
         // the spacetime background; flat ("minkowski") unless the config opts into GR.
@@ -3149,6 +3185,12 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     // run: the schedule + outputs.
     push("Run", "t_final", t_final_disp);
     push("Run", "checkpoint dt", cp);
+    push("Run", "backend build", build_source_label());
+    push(
+        "Run",
+        "config sha256",
+        cfg.config_sha256.chars().take(12).collect(),
+    );
     if custom_unit {
         push(
             "Run",
@@ -8044,6 +8086,11 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         .collect::<Vec<_>>()
         .join(",");
     Metadata::new()
+        .with("build_git_sha", BUILD_GIT_SHA)
+        .with("build_git_dirty", BUILD_GIT_DIRTY)
+        .with("build_source_id", build_source_id())
+        .with("config_source", cfg.config_source.as_str())
+        .with("config_sha256", cfg.config_sha256.as_str())
         .with("solver", cfg.solver_name.as_str())
         .with("reconstruction", cfg.reconstruction_name.as_str())
         .with("eos", cfg.eos_name.as_str())
@@ -8934,6 +8981,12 @@ fn run_simulation(
 ) -> PyResult<NativeRunDiagnostics> {
     let mut cfg = parse_config(sim_info)?;
     validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
+    eprintln!(
+        "SIMBI provenance: backend={} config={} config_sha256={}",
+        build_source_id(),
+        cfg.config_source,
+        cfg.config_sha256
+    );
     // drain the passive-scalar generator (None = undyed). one flat cell-centered
     // buffer; the per-arm seeding checks the count against the interior.
     if let Some(chi_field) = chi_field {
@@ -9281,6 +9334,11 @@ fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(reset_guard_census, m)?)?;
     m.add_function(wrap_pyfunction!(projection_ledger_report, m)?)?;
     m.add_function(wrap_pyfunction!(reset_projection_ledger, m)?)?;
+    // Queryable before a run so submission tooling can print the identity of the
+    // installed extension it is about to execute. checkpoints carry the same value.
+    m.add("BUILD_GIT_SHA", BUILD_GIT_SHA)?;
+    m.add("BUILD_GIT_DIRTY", BUILD_GIT_DIRTY)?;
+    m.add("BUILD_SOURCE_ID", build_source_id())?;
     // the feature handshake: config keys the backend does not know are silently
     // absorbed by the `_or` defaults above, so a new python front end driving an
     // old extension would drop a declared knob without a word — a run asking for
@@ -9520,9 +9578,22 @@ mod tile_coord_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{tile_boundaries, wrap_capability, wrap_topology};
+    use super::{
+        BUILD_GIT_DIRTY, BUILD_GIT_SHA, build_source_id, build_source_label, tile_boundaries,
+        wrap_capability, wrap_topology,
+    };
     use symbi::sim::decomp::Topology;
     use symbi::sim::state::{Boundaries, BoundaryType};
+
+    #[test]
+    fn compiled_backend_carries_a_self_consistent_source_identity() {
+        assert!(!BUILD_GIT_SHA.is_empty());
+        assert!(!BUILD_GIT_SHA.chars().any(char::is_whitespace));
+        let id = build_source_id();
+        assert!(id.starts_with(BUILD_GIT_SHA));
+        assert_eq!(id.ends_with("-dirty"), BUILD_GIT_DIRTY);
+        assert!(build_source_label().len() <= 18);
+    }
 
     fn phys2(
         lo0: BoundaryType,
