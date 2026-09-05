@@ -23,7 +23,7 @@ use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
-use symbi_ib::drain::{sound_speed_from_cons, spherical_drain_rate};
+use symbi_ib::drain::{local_drain_rate, sound_speed_from_cons};
 use symbi_ib::magnetic_slip::{chi_shell, slip_apply, slip_coefficient};
 use symbi_ib::{Body, BodyCollection, MagneticSpec, SurfaceSpec};
 use symbi_substrate::regimes::mhd_substrate::{body_slip_emf, ct_curl};
@@ -55,6 +55,22 @@ fn slip_spec() -> MagneticSpec {
 
 fn wrap(v: isize) -> isize {
     v.rem_euclid(N as isize)
+}
+
+// stage e_g = E - KE - M_cell(B) into the frozen gas-energy scratch the slip coefficient reads, then
+// run the operator. the production solve fills this from its midpoint predictor; the direct oracle
+// evaluates the coefficient at the seeded cell state, which is what `f_ref` also reads.
+fn slip_emf(sim: &Sim) {
+    let m = sim.fields.mhd.as_ref().unwrap();
+    let ws = m.magnetic_slip.as_ref().expect("slip workspace");
+    let nrg = sim.fields.cons.nrg_field().unwrap();
+    for c in sim.geom.interior.iter() {
+        let den = *sim.fields.cons.den.at(c);
+        let mom_sq: f64 = (0..3).map(|k| (*sim.fields.cons.mom[k].at(c)).powi(2)).sum();
+        let m_cell: f64 = (0..3).map(|d| 0.5 * (*m.bcell[d].at(c)).powi(2)).sum();
+        ws.gas_energy.set(c, *nrg.at(c) - 0.5 * mom_sq / den - m_cell);
+    }
+    body_slip_emf::<3, 3, HostMemory, f64>(sim, GAMMA);
 }
 
 // a deterministic pseudo-random field in [-0.5, 0.5], periodic (wrapped coords) and asymmetric
@@ -170,7 +186,7 @@ fn a_solenoidal_field_stays_solenoidal() {
     let div_field_before = div_field(&sim);
     let div_before = max_div_b(&sim);
 
-    body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
+    slip_emf(&sim);
     ct_curl::<3, 3, HostMemory, f64>(&sim, DT);
     let div_after = max_div_b(&sim);
     let div_delta = div_field(&sim)
@@ -234,28 +250,19 @@ fn j_gather(m: &Mhd, d: usize, c: [isize; 3], inv_dx: f64) -> f64 {
         + curl_edge(m, d, e12, inv_dx))
 }
 
-// the global drain rate lambda_rho for the uniform gas state (constant over the grid): the same
-// spherical_drain_rate the material drain applies.
-fn lambda_rho(sim: &Sim) -> f64 {
-    let m = sim.fields.mhd.as_ref().unwrap();
-    let some_cell = sim.geom.interior.iter().next().unwrap();
-    let den = *sim.fields.cons.den.at(some_cell);
-    let nrg = *sim.fields.cons.nrg_field().unwrap().at(some_cell);
-    let cs = sound_speed_from_cons(den, 0.0, nrg, GAMMA); // v = 0, mom_sq = 0
-    let c_a2 = symbi_sim::state::local_c_a2_max(sim);
-    let signal = (cs * cs + c_a2).sqrt();
-    let dx = sim.geom.dx[0];
-    let sound_rate = signal / (1.0 * dx); // c_drain = 1
-    let _ = m;
-    spherical_drain_rate(sound_rate, 1.0, R_BODY)
-}
-
 // the reference cell-quadrature vector F_q[d] at cell `c`, from bcell, the gathered current, and the
-// slip coefficient/shell mask evaluated exactly as the kernel does.
-fn f_ref(sim: &Sim, m: &Mhd, c: [isize; 3], lam: f64) -> [f64; 3] {
+// slip coefficient/shell mask evaluated exactly as the kernel does. tau_rho closes on the cell's own
+// local drain rate lambda_rho (cs from the cell gas state at v = 0, the local Alfven term |B|^2/rho),
+// the identical clock the material drain integrates.
+fn f_ref(sim: &Sim, m: &Mhd, c: [isize; 3]) -> [f64; 3] {
     let dx = sim.geom.dx[0];
     let inv_dx = 1.0 / dx;
     let b_q = Tensor::new([bcell(m, 0, c), bcell(m, 1, c), bcell(m, 2, c)]);
+    let b_sq = b_q.dot(&b_q);
+    let den = *sim.fields.cons.den.at(c);
+    let nrg = *sim.fields.cons.nrg_field().unwrap().at(c);
+    let cs = sound_speed_from_cons(den, 0.0, nrg - 0.5 * b_sq, GAMMA); // gas cs: v = 0, strip 0.5|B|^2
+    let lam = local_drain_rate(cs, b_sq, den, inv_dx, 1.0, R_BODY); // c_drain = 1, inv_cd_dx = 1/dx
     let j_q = Tensor::new([
         j_gather(m, 0, c, inv_dx),
         j_gather(m, 1, c, inv_dx),
@@ -267,7 +274,7 @@ fn f_ref(sim: &Sim, m: &Mhd, c: [isize; 3], lam: f64) -> [f64; 3] {
     let phi = dist - R_BODY;
     let chi_b = chi_shell(phi, W, PLACEMENT);
     let ell_b = ELL_RATIO * W;
-    let a_b = slip_coefficient(ell_b, b_q.dot(&b_q), B0, D_B, 1.0 / lam);
+    let a_b = slip_coefficient(ell_b, b_sq, B0, D_B, 1.0 / lam);
     let f = slip_apply(a_b * chi_b, &b_q, &j_q);
     [f[0], f[1], f[2]]
 }
@@ -278,15 +285,14 @@ fn f_ref(sim: &Sim, m: &Mhd, c: [isize; 3], lam: f64) -> [f64; 3] {
 fn slip_cell_pass_matches_the_reference_elementwise() {
     let sim = build_sim(slip_spec());
     seed(&sim, |d, c| rnd(c, d as u64 + 1));
-    let lam = lambda_rho(&sim);
-    body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
+    slip_emf(&sim);
 
     let m = sim.fields.mhd.as_ref().unwrap();
     let slip_q = m.slip_quadrature.as_ref().expect("slip-quadrature scratch");
     let mut max_err = 0.0_f64;
     let mut max_mag = 0.0_f64;
     for c in sim.geom.interior.iter() {
-        let f = f_ref(&sim, m, c, lam);
+        let f = f_ref(&sim, m, c);
         for d in 0..3 {
             let got = *slip_q[d].at(c);
             max_err = max_err.max((got - f[d]).abs());
@@ -308,7 +314,7 @@ fn slip_operator_dissipates_and_preserves_div_b() {
     let div_before = max_div_b(&sim);
     let e_before = face_energy(&sim);
 
-    body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
+    slip_emf(&sim);
     ct_curl::<3, 3, HostMemory, f64>(&sim, DT);
 
     let div_after = max_div_b(&sim);
@@ -328,7 +334,7 @@ fn slip_operator_dissipates_and_preserves_div_b() {
 fn a_uniform_field_is_an_exact_no_op() {
     let sim = build_sim(slip_spec());
     seed(&sim, |d, _| [0.7, -0.4, 0.3][d]); // uniform B: zero current
-    body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
+    slip_emf(&sim);
     let m = sim.fields.mhd.as_ref().unwrap();
     let slip_q = m.slip_quadrature.as_ref().unwrap();
     let mut max_fq = 0.0_f64;
@@ -350,13 +356,13 @@ fn the_slip_quadrature_is_translation_covariant() {
     let shift = [1isize, 1, 1];
     let base = build_sim(slip_spec());
     seed(&base, |d, c| rnd(c, d as u64 + 1));
-    body_slip_emf::<3, 3, HostMemory, f64>(&base, GAMMA);
+    slip_emf(&base);
 
     let shifted = build_sim(slip_spec());
     seed(&shifted, |d, c| {
         rnd([c[0] - shift[0], c[1] - shift[1], c[2] - shift[2]], d as u64 + 1)
     });
-    body_slip_emf::<3, 3, HostMemory, f64>(&shifted, GAMMA);
+    slip_emf(&shifted);
 
     // the full operator carries the body mask at a fixed point, so it is not shift covariant. the
     // stencil under test is the current gather R (curl B); assert it translates exactly, so an
@@ -416,17 +422,16 @@ fn magnetic_none_and_resistive_do_not_touch_the_slip_scratch() {
 fn report() {
     let sim = build_sim(slip_spec());
     seed(&sim, |d, c| rnd(c, d as u64 + 1));
-    let lam = lambda_rho(&sim);
     let dx = sim.geom.dx[0];
     let inv_dx = 1.0 / dx;
 
     // element-wise reference vs baked cell pass.
-    body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
+    slip_emf(&sim);
     let m = sim.fields.mhd.as_ref().unwrap();
     let slip_q = m.slip_quadrature.as_ref().unwrap();
     let (mut max_err, mut max_mag) = (0.0_f64, 0.0_f64);
     for c in sim.geom.interior.iter() {
-        let f = f_ref(&sim, m, c, lam);
+        let f = f_ref(&sim, m, c);
         for d in 0..3 {
             max_err = max_err.max((*slip_q[d].at(c) - f[d]).abs());
             max_mag = max_mag.max(f[d].abs());
@@ -438,7 +443,7 @@ fn report() {
     let interior: std::collections::HashSet<[isize; 3]> = sim.geom.interior.iter().collect();
     let mut quad_cell = 0.0_f64;
     for c in sim.geom.interior.iter() {
-        let f = f_ref(&sim, m, c, lam);
+        let f = f_ref(&sim, m, c);
         for d in 0..3 {
             quad_cell += j_gather(m, d, c, inv_dx) * f[d];
         }
@@ -520,13 +525,13 @@ fn delta_b_sq(sim: &Sim, before: &std::collections::HashMap<(usize, [isize; 3]),
 // the discrete edge inner products of the operator: <R J, A(B_q) R J>_q (cell form, from the
 // reference F) and <J, R* F>_edge (edge form, from the baked slip EMF and the edge current). with the
 // quadrature halo filled these are equal to roundoff on the whole periodic domain.
-fn adjoint_forms(sim: &Sim, lam: f64) -> (f64, f64) {
+fn adjoint_forms(sim: &Sim) -> (f64, f64) {
     let m = sim.fields.mhd.as_ref().unwrap();
     let inv_dx = 1.0 / sim.geom.dx[0];
     let mut cell = 0.0;
     let mut edge = 0.0;
     for c in sim.geom.interior.iter() {
-        let f = f_ref(sim, m, c, lam);
+        let f = f_ref(sim, m, c);
         for d in 0..3 {
             cell += j_gather(m, d, c, inv_dx) * f[d];
             edge += curl_edge(m, d, c, inv_dx) * *m.efield[d].at(c);
@@ -539,9 +544,8 @@ fn adjoint_forms(sim: &Sim, lam: f64) -> (f64, f64) {
 fn the_operator_adjoint_closes_on_the_full_periodic_domain() {
     let sim = build_sim(slip_spec());
     seed(&sim, |d, c| rnd(c, d as u64 + 1));
-    let lam = lambda_rho(&sim);
-    body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
-    let (cell, edge) = adjoint_forms(&sim, lam);
+    slip_emf(&sim);
+    let (cell, edge) = adjoint_forms(&sim);
     assert!(cell > 1e-6, "vacuous adjoint test (cell form = {cell})");
     assert!(cell >= -1e-10, "quadratic form is negative: {cell}");
     assert!(
@@ -559,9 +563,8 @@ fn the_complete_explicit_energy_identity_closes_to_roundoff() {
     // exact to roundoff once J = C* B is the discrete adjoint of the CT curl C.
     let sim = build_sim(slip_spec());
     seed(&sim, |d, c| rnd(c, d as u64 + 1));
-    let lam = lambda_rho(&sim);
-    body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
-    let (_cell, jdote) = adjoint_forms(&sim, lam);
+    slip_emf(&sim);
+    let (_cell, jdote) = adjoint_forms(&sim);
 
     let e_before = face_energy(&sim);
     let b_before = face_snapshot(&sim);
@@ -583,9 +586,8 @@ fn the_first_order_energy_residual_is_second_order_in_dt() {
     let residual = |dt: f64| -> f64 {
         let sim = build_sim(slip_spec());
         seed(&sim, |d, c| rnd(c, d as u64 + 1));
-        let lam = lambda_rho(&sim);
-        body_slip_emf::<3, 3, HostMemory, f64>(&sim, GAMMA);
-        let (_c, jdote) = adjoint_forms(&sim, lam);
+        slip_emf(&sim);
+        let (_c, jdote) = adjoint_forms(&sim);
         let e_before = face_energy(&sim);
         ct_curl::<3, 3, HostMemory, f64>(&sim, dt);
         (face_energy(&sim) - e_before) + dt * jdote

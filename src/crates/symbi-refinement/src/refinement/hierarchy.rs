@@ -2221,6 +2221,18 @@ where
         false
     }
 
+    /// the complete production magnetic-slip map M(dt) as the coupled step applies it: the implicit
+    /// midpoint solve and commit, then the primitive/ghost rebuild its successor reads. exposed for the
+    /// M-map isolation study (per-field convergence and time reversibility). returns true on a
+    /// nonconverged solve.
+    pub fn magnetic_slip_map(&self, level: usize, dt: f64) -> bool {
+        if !self.levels[level].kernels.magnetic_slip_step(&self.levels[level].state, dt) {
+            return true;
+        }
+        self.slip_rebuild(level);
+        false
+    }
+
     /// restore the primitives and physical ghost bands an operator's successor reads: c2p recovers the
     /// primitive state from the conserved fields, ghost_fill refills the boundary bands.
     fn slip_rebuild(&self, level: usize) {

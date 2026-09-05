@@ -1704,16 +1704,17 @@ pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
             .slip_quadrature
             .as_ref()
             .expect("slip-quadrature scratch (allocated at attach_bodies for a slip body)");
+        let ws = mhd
+            .magnetic_slip
+            .as_ref()
+            .expect("magnetic-slip workspace (allocated at attach_bodies for a slip body)");
 
-        // the fast-magnetosonic lift for the drain rate: the max Alfven speed squared over the
-        // interior (global under decomposition), matching the material drain's rate exactly.
-        let c_a2_max: f64 = im
-            .c_a2_override()
-            .unwrap_or_else(|| symbi_sim::state::local_c_a2_max(sim));
+        // the slip coefficient reads its drain clock tau_rho from the cell's own local Alfven term
+        // (the `bcell`/`den` fields inside the kernel), the identical `local_drain_rate` the material
+        // drain integrates, so no domain-wide c_a2 is bound here.
         let resolve = |bind: &ScalarBind| -> Sc {
             Sc::from_f64(match bind {
                 ScalarBind::Spec(s) if &**s == "c_drain" => 1.0,
-                ScalarBind::Spec(s) if &**s == "c_a2" => c_a2_max,
                 ScalarBind::Spec(s) if &**s == "slip_w" => shell_width,
                 ScalarBind::Spec(s) if &**s == "slip_placement" => placement,
                 ScalarBind::Spec(s) if &**s == "slip_ell_ratio" => slip_length_ratio,
@@ -1737,6 +1738,7 @@ pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
         let cell_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
             match ct_role(bind) {
                 Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
+                Some(CtScratch::Cell(CtCellCt::SlipGasEnergy)) => &ws.gas_energy,
                 Some(CtScratch::Face(CtFaceCt::BFaceComp(c))) => &mhd.bface[c.index()],
                 _ => match bind {
                     FieldBind::Ref(FieldRef::BCell(c)) => &mhd.bcell[*c as usize],
@@ -2013,9 +2015,49 @@ where
     restore_bface(sim, &ws.input);
     periodic_extend_bface(sim);
     interp_bcell(sim);
+
+    // the frozen coefficient's gas state is an explicit midpoint prediction, not a magnetic-energy
+    // subtraction: e_g^0 = E^0 - KE^0 - M_cell(B^0) is the entering gas internal energy; the predictor
+    // A(B^0) reads it via `slip_ge`, and after the half-step it is lifted by the predicted dissipative
+    // heat (dt/2) qdot^0 to the midpoint e_g*. that keeps A* frozen at the midpoint gas state while the
+    // exact commit still reconciles the endpoint total energy.
+    let cons = &sim.fields.cons;
+    let nrg_field = cons.nrg_field().expect("adiabatic energy");
+    let e_g0: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| {
+            let den = cons.den.at(c).to_f64();
+            let mom_sq: f64 = (0..DOF).map(|k| cons.mom[k].at(c).to_f64().powi(2)).sum();
+            let m_cell: f64 = (0..DOF).map(|d| 0.5 * mhd.bcell[d].at(c).to_f64().powi(2)).sum();
+            nrg_field.at(c).to_f64() - 0.5 * mom_sq / den - m_cell
+        })
+        .collect();
+    for (e, c) in e_g0.iter().zip(sim.geom.interior.iter()) {
+        ws.gas_energy.set(c, Sc::from_f64(*e));
+    }
+
     zero_efield(sim);
-    body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma);
+    body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma); // F_q^0 = A(B^0) R J^0 into slip_quadrature
+    // qdot^0_c = (R J^0)_c . F_q^0_c, the predicted dissipation rate, with bface still B^0.
+    let slip_q = mhd.slip_quadrature.as_ref().expect("slip-quadrature scratch");
+    let qdot0: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| {
+            (0..3)
+                .map(|d| gathered_current::<D, DOF, Mem, Sc>(sim, d, c) * slip_q[d].at(c).to_f64())
+                .sum()
+        })
+        .collect();
     ct_curl::<D, DOF, Mem, Sc>(sim, 0.5 * dt); // bface <- B*
+
+    // e_g* = e_g^0 + (dt/2) qdot^0, frozen in `slip_ge` for the solve and the commit.
+    for ((e0, q), c) in e_g0.iter().zip(&qdot0).zip(sim.geom.interior.iter()) {
+        ws.gas_energy.set(c, Sc::from_f64(e0 + 0.5 * dt * q));
+    }
     interp_bcell(sim); // production bcell <- interp(B*) (bface holds B*): freeze A*
     // capture the frozen predictor cell field after the interpolation, so it is interp(B*).
     for d in 0..DOF {

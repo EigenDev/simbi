@@ -928,6 +928,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             direction: face_group(&face_doms)?,
             operator_direction: face_group(&face_doms)?,
             candidate: face_group(&face_doms)?,
+            gas_energy: Field::zeros(allocated)?,
         });
         Ok(())
     }
@@ -961,6 +962,10 @@ pub struct MagneticSlipWorkspace<
     pub operator_direction: BfaceFields<D, M, Sc>,
     /// the accepted converged candidate B^1, copied from the iterate at convergence.
     pub candidate: BfaceFields<D, M, Sc>,
+    /// the frozen predicted midpoint gas internal energy density e_g* the slip coefficient's sound
+    /// speed reads. filled once from the predictor state before the freeze, so the operator's drain
+    /// clock never consults the endpoint-reconciled total energy during the CG solve or the commit.
+    pub gas_energy: Field<Sc, D, M>,
 }
 
 /// RK workspace for one partition. `NDIM` = grid dim, `DOF` = vector component dim

@@ -598,24 +598,30 @@ pub fn body_slip_quadrature_3d_gv(coords: Coords) -> KernelProgram {
             })
             .collect();
 
-        // the local drain rate lambda_rho = 1/tau_rho: the same spherical_drain_rate the material
-        // drain applies, from the fast-magnetosonic signal speed, body mass, and accretion radius.
+        // the local drain rate lambda_rho = 1/tau_rho the material drain reads: the fast-magnetosonic
+        // cell-crossing rate on the cell's own local Alfven term |B|^2/rho lifted by free fall. the
+        // drain and this coefficient share `local_drain_rate` on the gas sound speed, so tau_rho is one
+        // clock for both.
         let gamma = cx.scalar("gamma");
         let den = cx.field("den", symbi_ir::FieldRef::cons_den());
-        let mom: Vec<Gv> = (0..3)
-            .map(|c| cx.field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
-            .collect();
-        let nrg = cx.field("nrg", symbi_ir::FieldRef::cons_nrg());
-        let mom_sq = mom.iter().fold(Gv::ZERO, |s, m| s + *m * *m);
-        let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
+        let b_sq = b_q.iter().fold(Gv::ZERO, |s, b| s + *b * *b);
+        // the gas sound speed reads the frozen predicted midpoint gas internal energy density e_g* the
+        // solve stages in `slip_ge` (cs^2 = gamma(gamma-1) e_g*/rho). e_g* = e_g^0 + (dt/2) qdot^0 is the
+        // predicted dissipative heat, so the drain clock tracks the substep-midpoint gas state without
+        // consulting the endpoint-reconciled total energy.
+        let e_g = crate::gv::ct_field(cx, CtCellCt::SlipGasEnergy);
+        let cs = (gamma * (gamma - Gv::ONE) * e_g / den).sqrt();
         let c_drain = cx.scalar("c_drain");
         let mut min_w = gv_axis_width(cx, 0, Spacing::Uniform);
         for ax in 1..3 {
             min_w = min_w.min(gv_axis_width(cx, ax, Spacing::Uniform));
         }
-        let sound_rate = signal_speed(cx, cs) / (c_drain * min_w);
-        let lambda_rho = symbi_ib::drain::spherical_drain_rate(
-            sound_rate,
+        let inv_cd_dx = Gv::ONE / (c_drain * min_w);
+        let lambda_rho = symbi_ib::drain::local_drain_rate(
+            cs,
+            b_sq,
+            den,
+            inv_cd_dx,
             cx.scalar("body_0_mass"),
             cx.scalar("body_0_racc"),
         );
@@ -634,7 +640,6 @@ pub fn body_slip_quadrature_3d_gv(coords: Coords) -> KernelProgram {
         // a_B = ell_B^2 / ((|B|^2 + B_0^2) D_B tau_rho), ell_B = slip_length_ratio w, tau_rho =
         // 1/lambda_rho. the frozen dyad coefficient is a_B chi_B.
         let ell_b = cx.scalar("slip_ell_ratio") * w;
-        let b_sq = b_q.iter().fold(Gv::ZERO, |s, b| s + *b * *b);
         let a_b = symbi_ib::magnetic_slip::slip_coefficient(
             ell_b,
             b_sq,

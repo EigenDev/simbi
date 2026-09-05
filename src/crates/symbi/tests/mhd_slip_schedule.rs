@@ -247,6 +247,69 @@ fn slip_coupled_step_schedule_is_palindromic() {
     );
 }
 
+fn l2_diff(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>().sqrt()
+}
+
+// the complete production magnetic-slip map (solve -> commit -> c2p -> ghost fill), evolved in
+// isolation on the full state, is second order in time per field: bface, bcell, cons.nrg, and pressure
+// each quarter their fixed-time error when the step halves. this holds because the solve freezes the
+// coefficient on an explicit predicted midpoint gas energy (e_g* = e_g^0 + (dt/2) qdot^0) rather than
+// reconstructing gas energy from the endpoint-reconciled total energy. the deep-interior ratios (cells
+// off the periodic wrap, no derived-halo dependence) confirm the order on the physical complex.
+#[test]
+fn the_production_m_map_is_second_order_per_field() {
+    let run = |dt: f64, nsteps: usize| -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let sim = build_slip_sim_na(N, 0.3);
+        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        for _ in 0..nsteps {
+            assert!(!hier.magnetic_slip_map(0, dt), "the M map diverged at dt={dt}");
+        }
+        hier.slip_state_snapshots(0)
+    };
+    // the deep-interior cell mask: cells whose whole interp/curl stencil stays off the periodic wrap,
+    // so bcell/nrg/pressure there depend on no derived halo face. this reads the physical complex only,
+    // ruling out a boundary-storage artifact in the order measurement.
+    let deep: Vec<bool> = {
+        let sim = build_slip_sim_na(N, 0.3);
+        sim.geom
+            .interior
+            .iter()
+            .map(|c| (0..3).all(|a| c[a] >= 2 && c[a] < N as isize - 2))
+            .collect()
+    };
+    let ncells = deep.len();
+    let l2_deep = |a: &[f64], b: &[f64], tiled: bool| -> f64 {
+        let mut s = 0.0;
+        for (i, (x, y)) in a.iter().zip(b).enumerate() {
+            let cell = if tiled { i % ncells } else { i };
+            if deep[cell] {
+                s += (x - y) * (x - y);
+            }
+        }
+        s.sqrt()
+    };
+    let dt = 1.0e-3;
+    let (a_bf, a_bc, a_nr, a_pr) = run(dt, 8);
+    let (b_bf, b_bc, b_nr, b_pr) = run(dt / 2.0, 16);
+    let (c_bf, c_bc, c_nr, c_pr) = run(dt / 4.0, 32);
+    for (name, tiled, (a, b, c)) in [
+        ("bface", true, (&a_bf, &b_bf, &c_bf)),
+        ("bcell", true, (&a_bc, &b_bc, &c_bc)),
+        ("nrg", false, (&a_nr, &b_nr, &c_nr)),
+        ("pressure", false, (&a_pr, &b_pr, &c_pr)),
+    ] {
+        let (ef_lo, ef_hi) = (l2_diff(a, b), l2_diff(b, c));
+        let (ed_lo, ed_hi) = (l2_deep(a, b, tiled), l2_deep(b, c, tiled));
+        let (full, deep) = (ef_lo / ef_hi.max(1e-300), ed_lo / ed_hi.max(1e-300));
+        println!("M map {name:>8}: full ratio={full:.2}  deep-interior ratio={deep:.2}");
+        assert!(ef_lo > 1e-12, "M map {name}: vacuous ({ef_lo})");
+        assert!(deep > 3.4, "the production M map is not second order in {name}: deep ratio {deep:.2}");
+    }
+}
+
 // a body-free smooth-wave fixture for the H-only ownership ladder: the primitive IC, the seeded face
 // field, and the cell-centered B are supplied as closures. div B = 0 is the caller's responsibility
 // (each fixture uses a component that depends only on a transverse coordinate).

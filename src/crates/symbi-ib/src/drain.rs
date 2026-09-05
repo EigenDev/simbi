@@ -60,6 +60,18 @@ pub fn spherical_drain_rate<S: Scalar>(sound_rate: S, mass: S, r_acc: S) -> S {
     sound_rate.max((mass / (r_acc * r_acc * r_acc)).sqrt())
 }
 
+/// the instantaneous local drain rate `lambda_rho` for a slip-enabled cell: the fast-magnetosonic
+/// cell-crossing rate `sqrt(cs^2 + |B|^2/rho) * inv_cd_dx` lifted by the free-fall rate
+/// `sqrt(GM/r_acc^3)`, on the cell's own density and field. `inv_cd_dx = 1/(c_drain dx)`. the material
+/// drain and the magnetic-slip coefficient evaluate this one rate law at a cell state: the drain
+/// integrates it over its substep, and the slip coefficient `a_B` freezes its reciprocal
+/// `tau_rho = 1/lambda_rho` at the magnetic predictor state -- one clock, read two ways.
+#[inline]
+pub fn local_drain_rate<S: Scalar>(cs: S, b_sq: S, den: S, inv_cd_dx: S, mass: S, r_acc: S) -> S {
+    let sound_rate = (cs * cs + b_sq / den).sqrt() * inv_cd_dx;
+    spherical_drain_rate(sound_rate, mass, r_acc)
+}
+
 /// the exact-exponential uniform-scaling drain on one masked cell's conserved
 /// vector. returns the drained state `U exp(-chi dt/tau)` and the cell's exact
 /// contribution to the body -- the cell-integrated `U_old - U_new` (absorbed
@@ -355,5 +367,31 @@ mod tests {
             (mdot_mass_2x - 2.0 * mdot_mass).abs() < 1e-13,
             "rate is not a linear flow-functional"
         );
+    }
+}
+
+#[cfg(test)]
+mod drain_rate_tests {
+    #[test]
+    fn drain_and_slip_share_one_local_rate() {
+        use super::{local_drain_rate, spherical_drain_rate};
+        let inv_cd_dx = 5.0f64;
+        let (mass, r_acc) = (2.0f64, 0.3f64);
+        let lambda_ff = (mass / (r_acc * r_acc * r_acc)).sqrt();
+        // acoustic-dominant, free-fall-dominant, and near-crossover cells.
+        let cells: [(&str, f64, f64, f64); 3] = [
+            ("acoustic", 1.0, 9.0, 0.4),   // sqrt(1 + 9/0.4)*5 = big > ff
+            ("free-fall", 1.5, 0.01, 5.0), // tiny field: acoustic ~ cs*inv_cd_dx < ff
+            ("crossover", 1.0, 4.0, 0.5),  // acoustic ~ ff
+        ];
+        for (name, cs, b2, rho) in cells {
+            let rate = local_drain_rate(cs, b2, rho, inv_cd_dx, mass, r_acc);
+            // the slip path builds tau_rho = 1/lambda_rho from the same call; the drain path feeds the
+            // same rate into the free-fall max. both must equal this one value and pick one branch.
+            let acoustic = (cs * cs + b2 / rho).sqrt() * inv_cd_dx;
+            let expect = spherical_drain_rate(acoustic, mass, r_acc);
+            assert_eq!(rate, expect, "{name}: local_drain_rate disagrees with the shared rate law");
+            assert_eq!(rate, acoustic.max(lambda_ff), "{name}: branch choice differs from max(acoustic, ff)");
+        }
     }
 }
