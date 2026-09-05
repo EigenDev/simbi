@@ -1421,6 +1421,13 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
         let program = symbi_discretize::body_slip_emf_3d_dir_gv(dir, Coords::Cartesian);
         emit_gv(out_dir, &format!("body_slip_emf_3d_{dir}"), 3, &program);
     }
+    // the second-order material drain the slip-coupled step runs: a local-Alfven midpoint rate, so
+    // the density drain stays second-order accurate where the field stiffens the mask. the dyed twin
+    // drains the dissolved passive scalar with the same factor.
+    let program = symbi_discretize::penalize_drain_midpoint_gv(Coords::Cartesian, false);
+    emit_gv(out_dir, "penalize_drain_midpoint_3d", 3, &program);
+    let program = symbi_discretize::penalize_drain_midpoint_gv(Coords::Cartesian, true);
+    emit_gv(out_dir, "penalize_drain_midpoint_dyed_3d", 3, &program);
 }
 
 // the RMHD face flux along a given sweep `dir` at 3D (per-dir kernel; the

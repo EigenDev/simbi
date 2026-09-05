@@ -184,19 +184,21 @@ fn max_rel_diff(a: &[f64], b: &[f64]) -> f64 {
 }
 
 #[test]
-fn drain_half_steps_compose_to_second_order() {
-    // D_{dt/2} o D_{dt/2} vs D_{dt}. the uniform drain preserves e_int and cs, so a frozen rate would
-    // give an exact semigroup; the alfven term c_a2 = |B|^2/rho is recomputed from the drained state
-    // and rises as rho drains, so the composition differs at O(dt^2). pins the pure-draining case and
-    // that broadening beyond it needs a rate-freezing decision.
+fn drain_half_steps_compose_to_third_order() {
+    // D_{dt/2} o D_{dt/2} vs D_{dt} on the slip-path midpoint drain. the uniform drain preserves e_int
+    // and cs, so the only state dependence is the local Alfven term c_a2 = |B|^2/rho, which rises as
+    // rho drains at fixed B. the midpoint rate makes the drain second-order accurate in time, so the
+    // full step and two half steps agree to O(dt^3): halving dt shrinks their difference by ~8. the
+    // start-state rate (the legacy global drain) would shrink it by only ~4.
+    let semigroup_dt = 8.0 * DT; // large enough that the O(dt^3) difference clears the roundoff floor
     let run = |dt: f64| -> f64 {
         // two half-drains with a rebuild between, vs one full drain.
-        let sim_two = build_drain_only_sim();
+        let sim_two = build_slip_sim();
         let sub_two = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim_two.geom.allocated);
         let mut two = Hierarchy::single(sim_two, sub_two);
         two.evolve(1.0e-9).expect("prime");
 
-        let sim_one = build_drain_only_sim();
+        let sim_one = build_slip_sim();
         let sub_one = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim_one.geom.allocated);
         let mut one = Hierarchy::single(sim_one, sub_one);
         one.evolve(1.0e-9).expect("prime");
@@ -206,14 +208,14 @@ fn drain_half_steps_compose_to_second_order() {
         one.drain_and_rebuild(0, dt);
         max_rel_diff(&two.density_snapshot(0), &one.density_snapshot(0))
     };
-    let e_full = run(DT);
-    let e_half = run(0.5 * DT);
+    let e_full = run(semigroup_dt);
+    let e_half = run(0.5 * semigroup_dt);
     assert!(e_full > 1e-9, "vacuous semigroup test (diff {e_full})");
     let ratio = e_full / e_half.max(1e-300);
     println!(
-        "\ndrain semigroup:  |D_h/2 o D_h/2 - D_h| = {e_full:.3e} (dt)  {e_half:.3e} (dt/2)  ratio = {ratio:.2} (O(dt^2) -> ~4)\n"
+        "\ndrain semigroup:  |D_h/2 o D_h/2 - D_h| = {e_full:.3e} (dt)  {e_half:.3e} (dt/2)  ratio = {ratio:.2} (O(dt^3) -> ~8)\n"
     );
-    assert!(ratio > 3.0, "drain composition error is not O(dt^2): ratio {ratio:.2}");
+    assert!(ratio > 6.0, "midpoint drain composition error is not O(dt^3): ratio {ratio:.2} (expect ~8)");
 }
 
 #[test]
@@ -245,6 +247,231 @@ fn slip_coupled_step_schedule_is_palindromic() {
         ops[..h_pos].contains(&"M") && ops[h_pos + 1..].contains(&"M"),
         "each RK step must be bracketed by magnetic slip, never contain it"
     );
+}
+
+#[test]
+fn the_evolve_loop_drives_the_coupled_schedule_for_a_slip_body() {
+    // a root step of the ordinary evolve driver runs the palindromic coupled step for a slip body: the
+    // gate in step_root_with_dt selects advance_slip_coupled_step, so the spy records D M H M D.
+    let sim = build_slip_sim();
+    let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+    let mut hier = Hierarchy::single(sim, sub);
+    hier.prime();
+
+    slip_schedule_arm();
+    hier.step_root_with_dt(DT);
+    let trace = slip_schedule_take().expect("schedule was armed");
+    let ops: Vec<&str> = trace.iter().map(|(op, _)| *op).collect();
+    assert_eq!(ops, ["D", "M", "H", "M", "D"], "the evolve loop did not run the coupled step D M H M D");
+}
+
+#[test]
+fn a_non_slip_body_keeps_the_ordinary_advance() {
+    // a pure-drain body carries no magnetic slip, so the gate keeps advance_level: the coupled step
+    // never runs, and the spy records nothing. this is the non-slip bit-identity boundary -- the same
+    // RK march the driver ran before the coupled step existed.
+    let sim = build_drain_only_sim();
+    let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+    let mut hier = Hierarchy::single(sim, sub);
+    hier.prime();
+
+    slip_schedule_arm();
+    hier.step_root_with_dt(DT);
+    let trace = slip_schedule_take().expect("schedule was armed");
+    assert!(trace.is_empty(), "a non-slip body entered the coupled step: {trace:?}");
+}
+
+// Aitken self-convergence of the density to the same final time: |u(dt)-u(dt/2)| / |u(dt/2)-u(dt/4)|
+// -> 4 for a second-order method. an L2 field norm, since the body-center cell drains toward zero
+// density where a relative difference is meaningless noise. `a0` sets the seed field amplitude.
+fn coupled_temporal_ratio(a0: f64) -> (f64, f64) {
+    let l2_rel = |a: &[f64], b: &[f64]| -> f64 {
+        let num: f64 = a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum();
+        let den: f64 = b.iter().map(|y| y * y).sum();
+        (num / den.max(1e-300)).sqrt()
+    };
+    let run = |dt: f64, nsteps: usize| -> Vec<f64> {
+        let sim = build_slip_sim_na(N, a0);
+        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        for _ in 0..nsteps {
+            hier.step_root_with_dt(dt);
+        }
+        hier.density_snapshot(0)
+    };
+    // four timestep levels to the same final time: a pair of successive ratios separates an asymptotic
+    // second-order trend from a single pre-asymptotic coincidence.
+    let dt = 1.0e-3;
+    let (a, b, c, d) = (run(dt, 8), run(dt / 2.0, 16), run(dt / 4.0, 32), run(dt / 8.0, 64));
+    let (e_lo, e_mid, e_hi) = (l2_rel(&a, &b), l2_rel(&b, &c), l2_rel(&c, &d));
+    println!(
+        "DMHMD a0={a0}: diffs {e_lo:.3e} {e_mid:.3e} {e_hi:.3e}  ratios {:.2} {:.2}  (successive; -> 4 if second order)",
+        e_lo / e_mid.max(1e-300),
+        e_mid / e_hi.max(1e-300)
+    );
+    (e_mid / e_hi.max(1e-300), e_mid)
+}
+
+// the drain rate lambda_rho = max(sqrt(cs^2 + |B|^2/rho) / (c_drain dx), sqrt(GM/r_acc^3)) evaluated
+// on a snapshot, together with the branch it selects. the acoustic arm stiffens without bound as the
+// density drains at fixed field, so a cell's branch and its stiffness h lambda both track depletion.
+fn drain_clock_census(
+    n: usize,
+    rho: &[f64],
+    bcell: &[f64],
+    pre: &[f64],
+    h: f64,
+) -> (f64, f64, usize) {
+    let ncells = rho.len();
+    let inv_cd_dx = n as f64; // c_drain = 1 on the slip path, so 1/(c_drain dx) = n
+    let lambda_ff = (1.0f64 / (R_BODY * R_BODY * R_BODY)).sqrt(); // body mass 1
+    let mut min_rho = f64::INFINITY;
+    let mut max_h_lambda = 0.0f64;
+    let mut acoustic = 0usize;
+    for ii in 0..ncells {
+        let den = rho[ii];
+        let b_sq: f64 = (0..3).map(|d| bcell[d * ncells + ii].powi(2)).sum();
+        let cs_sq = GAMMA * pre[ii] / den;
+        let sound_rate = ((cs_sq + b_sq / den).max(0.0)).sqrt() * inv_cd_dx;
+        min_rho = min_rho.min(den);
+        max_h_lambda = max_h_lambda.max(h * sound_rate.max(lambda_ff));
+        if sound_rate > lambda_ff {
+            acoustic += 1;
+        }
+    }
+    (min_rho, max_h_lambda, acoustic)
+}
+
+// the asymptotic order of the strong-field coupled step, read off a single long horizon by refinement
+// alone. a fitted expansion cannot settle this: three successive differences determine three powers
+// only up to a near-degeneracy between the linear and cubic terms, which shows up as coefficients that
+// track each other. successive ratios need no model. a sequence approaching four is second order; one
+// descending toward two carries a genuine first-order component.
+#[test]
+fn diag_dmhmd_asymptotic_order_strong_field() {
+    let l2_rel = |a: &[f64], b: &[f64]| -> f64 {
+        let num: f64 = a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum();
+        let den: f64 = b.iter().map(|y| y * y).sum();
+        (num / den.max(1e-300)).sqrt()
+    };
+    // the first-order flux fallback and the step-retry path are both discrete switches on the state:
+    // either firing in different cells at different timesteps makes the solution map irregular in dt,
+    // which no smooth error expansion describes. the census reports both alongside the differences, so
+    // a ratio sequence is only read as an order once they are quiet.
+    let run = |dt: f64, nsteps: usize| -> ([Vec<f64>; 4], u64, u64, usize) {
+        let nn: usize = std::env::var("SYMBI_ASYMPTOTIC_N").ok().and_then(|s| s.parse().ok()).unwrap_or(N);
+        let sim = build_slip_sim_na(nn, 0.3);
+        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        symbi_sim::guard_ledger::reset();
+        let scope = symbi_sim::guard_ledger::open_scope();
+        for _ in 0..nsteps {
+            hier.step_root_with_dt(dt);
+        }
+        // the retry loop lives inside the driver and shrinks dt on rejection, so a rejected step is
+        // invisible at this call site. the ledger still records it: a discarded step books attempted
+        // acts that never reach accepted, so the two totals separate exactly when a retry happened.
+        let (attempted, accepted) = symbi_sim::guard_ledger::report();
+        drop(scope);
+        symbi_sim::guard_ledger::reset();
+        let (bf, _bc, nrg, pre) = hier.slip_state_snapshots(0);
+        (
+            [hier.density_snapshot(0), bf, nrg, pre],
+            attempted.troubled_cells.total,
+            attempted.frozen_cells.total,
+            (attempted.troubled_cells.total - accepted.troubled_cells.total) as usize,
+        )
+    };
+    // the longest horizon carries the largest departure from four, so it resolves the trend soonest.
+    let dt = 1.0e-3;
+    let steps: usize = std::env::var("SYMBI_ASYMPTOTIC_STEPS").ok().and_then(|s| s.parse().ok()).unwrap_or(16);
+    let levels: usize = std::env::var("SYMBI_ASYMPTOTIC_LEVELS").ok().and_then(|s| s.parse().ok()).unwrap_or(6);
+    let runs: Vec<([Vec<f64>; 4], u64, u64, usize)> = (0..levels)
+        .map(|ll| run(dt / (1u32 << ll) as f64, steps << ll))
+        .collect();
+    println!("\nASYMPTOTIC T={:.0e} strong field a0=0.3", steps as f64 * dt);
+    for (ll, r) in runs.iter().enumerate() {
+        println!(
+            "  dt/{:<3}: troubled={:<8} frozen={:<8} discarded={}",
+            1u32 << ll,
+            r.1,
+            r.2,
+            r.3
+        );
+    }
+    // every evolved field carries the same temporal order; a sequence that misbehaves in one field
+    // alone is a cancellation in that field's norm rather than a property of the method.
+    for (ff, fname) in ["density", "bface", "energy", "pressure"].iter().enumerate() {
+        let diffs: Vec<f64> = runs
+            .windows(2)
+            .map(|w| l2_rel(&w[0].0[ff], &w[1].0[ff]))
+            .collect();
+        let ratios: Vec<f64> = diffs.windows(2).map(|w| w[0] / w[1].max(1e-300)).collect();
+        println!(
+            "  {fname:>8}: diffs {}  ratios {}",
+            diffs.iter().map(|d| format!("{d:.3e}")).collect::<Vec<_>>().join(" "),
+            ratios.iter().map(|r| format!("{r:.2}")).collect::<Vec<_>>().join(" ")
+        );
+    }
+}
+
+// the strong-field coupled step's density ratio on this 12-cell grid drifts below four as the horizon
+// lengthens. holding the field fixed and varying the horizon alone separates the candidate drivers
+// that live in the drain: depletion of the masked cells, stiffening of the Alfven term |B|^2/rho, and
+// migration across the acoustic/free-fall branch of the rate law. the census reports each directly.
+// on this fixture every cell sits on the acoustic branch throughout, h lambda holds flat at 1.6e-2,
+// and the density floor stays above 0.78, so the drift is none of these; it is the grid's own
+// pre-asymptotic spatial structure at the mask seam, which recedes with resolution.
+#[test]
+fn diag_dmhmd_depletion_matrix() {
+    let l2_rel = |a: &[f64], b: &[f64]| -> f64 {
+        let num: f64 = a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum();
+        let den: f64 = b.iter().map(|y| y * y).sum();
+        (num / den.max(1e-300)).sqrt()
+    };
+    let run = |dt: f64, nsteps: usize| -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let sim = build_slip_sim_na(N, 0.3);
+        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        for _ in 0..nsteps {
+            hier.step_root_with_dt(dt);
+        }
+        let (_bf, bc, _nrg, pre) = hier.slip_state_snapshots(0);
+        (hier.density_snapshot(0), bc, pre)
+    };
+    let dt = 1.0e-3;
+    // the branch population at t = 0 fixes the baseline the horizons are compared against.
+    let (r0, b0, p0) = run(dt, 0);
+    let (min0, hl0, ac0) = drain_clock_census(N, &r0, &b0, &p0, dt);
+    println!(
+        "\nDEPLETION t=0          : min_rho={min0:.3e}  max h*lambda={hl0:.3e}  acoustic cells={ac0}/{}",
+        r0.len()
+    );
+    for horizon in [1usize, 2, 4, 8, 16] {
+        let (a, _, _) = run(dt, horizon);
+        let (b, _, _) = run(dt / 2.0, 2 * horizon);
+        let (c, bc, pc) = run(dt / 4.0, 4 * horizon);
+        let (d, _, _) = run(dt / 8.0, 8 * horizon);
+        let (e_lo, e_mid, e_hi) = (l2_rel(&a, &b), l2_rel(&b, &c), l2_rel(&c, &d));
+        let (min_rho, h_lambda, acoustic) = drain_clock_census(N, &c, &bc, &pc, dt);
+        // fit e(dt) = B dt + A dt^2 + C dt^3 to the three successive differences. a two-term fit
+        // charges a neglected cubic term to the linear one, so the cubic is carried explicitly: with
+        // diff(dt) = (3/4) A dt^2 + (1/2) B dt + (7/8) C dt^3 and its two halvings, the system inverts
+        // to C first. only a linear coefficient that survives this separation is a real order defect.
+        let c_dt3 = (64.0 / 21.0) * (e_lo - 6.0 * e_mid + 8.0 * e_hi);
+        let b_dt = 2.0 * (4.0 * e_mid - e_lo + (7.0 / 16.0) * c_dt3);
+        let a_dt2 = (4.0 / 3.0) * (e_lo - 0.5 * b_dt - 0.875 * c_dt3);
+        println!(
+            "DEPLETION steps={horizon:>2} T={:.0e}: min_rho={min_rho:.3e}  max h*lambda={h_lambda:.3e}  acoustic={acoustic}  ratios {:.2} {:.2}  A*dt^2={a_dt2:.3e}  B*dt={b_dt:.3e}  C*dt^3={c_dt3:.3e}  B*dt/T={:.3e}",
+            horizon as f64 * dt,
+            e_lo / e_mid.max(1e-300),
+            e_mid / e_hi.max(1e-300),
+            b_dt / (horizon as f64 * dt)
+        );
+    }
 }
 
 fn l2_diff(a: &[f64], b: &[f64]) -> f64 {
@@ -563,4 +790,72 @@ fn the_ideal_mhd_step_is_second_order_per_field_once_resolved() {
             }
         }
     }
+}
+
+// the operator-split ladder at strong field: standalone D and H, the DMD and MHM triples, and the full
+// DMHMD, each self-converged per field (bface, density, total energy, pressure) on the 12-cell grid.
+// the field-free rungs (D, DMD) read four in every field; every rung containing H reads the grid's
+// pre-asymptotic staggered-field structure rather than a temporal order, so a rung below four is
+// attributable to the splitting only when it also appears at a resolution where H alone reads four.
+#[test]
+fn diag_split_ladder_order() {
+    let l2 = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>().sqrt();
+    macro_rules! rung {
+        ($label:expr, $body:expr) => {{
+            let run = |dt: f64, nsteps: usize| {
+                let sim = build_slip_sim_na(N, 0.3);
+                let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+                let mut hier = Hierarchy::single(sim, sub);
+                hier.prime();
+                for _ in 0..nsteps {
+                    ($body)(&mut hier, dt);
+                }
+                let (bf, _bc, nrg, pre) = hier.slip_state_snapshots(0);
+                (bf, hier.density_snapshot(0), nrg, pre)
+            };
+            let dt = 1.0e-3;
+            let (a, b, c) = (run(dt, 8), run(dt / 2.0, 16), run(dt / 4.0, 32));
+            for (fname, x, y, z) in [
+                ("bface", &a.0, &b.0, &c.0),
+                ("density", &a.1, &b.1, &c.1),
+                ("energy", &a.2, &b.2, &c.2),
+                ("pressure", &a.3, &b.3, &c.3),
+            ] {
+                let r = l2(x, y) / l2(y, z).max(1e-300);
+                println!("LADDER {:>6} {fname:>8}: ratio={r:.2}", $label);
+            }
+        }};
+    }
+    rung!("D", |h: &mut Hierarchy<_,3,3,_,_,_,_,_>, dt: f64| {
+        h.drain_and_rebuild(0, dt);
+    });
+    rung!("H", |h: &mut Hierarchy<_,3,3,_,_,_,_,_>, dt: f64| {
+        h.hydro_map(0, dt);
+    });
+    rung!("DMD", |h: &mut Hierarchy<_,3,3,_,_,_,_,_>, dt: f64| {
+        h.drain_and_rebuild(0, 0.5 * dt);
+        h.magnetic_slip_map(0, dt);
+        h.drain_and_rebuild(0, 0.5 * dt);
+    });
+    rung!("MHM", |h: &mut Hierarchy<_,3,3,_,_,_,_,_>, dt: f64| {
+        h.magnetic_slip_map(0, 0.5 * dt);
+        h.hydro_map(0, dt);
+        h.magnetic_slip_map(0, 0.5 * dt);
+    });
+    rung!("DMHMD", |h: &mut Hierarchy<_,3,3,_,_,_,_,_>, dt: f64| {
+        h.advance_slip_coupled_step(0, dt, 0.0);
+    });
+}
+
+#[test]
+fn the_drain_hydro_coupled_step_is_second_order_in_time() {
+    // fixed grid, refine the timestep: the spatial error is common to every run and cancels to leading
+    // order, so the fixed-time error isolates the temporal order and quarters when dt halves. the
+    // density is the field this grid resolves well enough to read: the staggered field and the
+    // pressure carry a mask-seam spatial structure that a 12-cell grid leaves pre-asymptotic, so their
+    // ratios reach four only from about 48 cells per side, where every evolved field does.
+    let (ratio, e_lo) = coupled_temporal_ratio(0.3);
+    println!("\ndrain-hydro coupled temporal:  ratio = {ratio:.2}  (second order -> ~4)\n");
+    assert!(e_lo > 1e-10, "vacuous coupled-order test (diff {e_lo})");
+    assert!(ratio > 3.4, "the drain-hydro coupled step is not second order in time: ratio {ratio:.2}");
 }

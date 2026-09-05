@@ -725,6 +725,108 @@ pub fn penalize_drain_iso_gv(
     penalize_drain_impl::<IsoModel>(coords, ndim, dof, axes, has_dye)
 }
 
+/// the second-order material drain for the magnetic-slip path (3D cartesian, adiabatic). the drain
+/// rate `lambda = max(sqrt(cs^2 + |B|^2/rho) inv_cd_dx, sqrt(GM/r_acc^3))` stiffens as the density
+/// drains at fixed field, so evaluating it at the entering state is first-order in time. this kernel
+/// takes the local Alfven speed from the cell's own `bcell` (not the domain-wide max) and integrates
+/// the masked step with `event_split_drain_factor`: exact free-fall to the acoustic/free-fall crossing
+/// density, then a midpoint on the acoustic remainder, so the drain stays second-order accurate even
+/// for a cell that crosses branches mid-step. the resulting factor `f` scales den/mom/energy (and the
+/// dissolved dye) uniformly; `B` is untouched. `penalize_cell` applies `exp(-chi dt inv_tau)`, so the
+/// effective rate reproducing `f` is `-ln(f)/(chi dt)`, with a guard leaving `chi = 0` an exact no-op.
+pub fn penalize_drain_midpoint_gv(coords: Coords, has_dye: bool) -> KernelProgram {
+    let ndim = 3usize;
+    let dof = 3usize;
+    let axes: &[usize] = &[0, 1, 2];
+    assert!(
+        coords == Coords::Cartesian,
+        "the midpoint material drain is a 3D cartesian slip-path kernel; the {coords:?} chart uses the \
+         global-c_a2 penalize_drain"
+    );
+    let (kernel, writes) = trace(|cx| {
+        let dt = cx.scalar("dt");
+        let gamma = cx.scalar("gamma");
+        let c_drain = cx.scalar("c_drain");
+
+        let den = cx.field("den", symbi_ir::FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..dof)
+            .map(|c| cx.field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
+            .collect();
+        let nrg: <Adiabatic as EnergyModel>::Slot<Gv> =
+            <<Adiabatic as EnergyModel>::Slot<Gv> as EnergySlot<Gv>>::from_scalar(
+                cx.field("nrg", symbi_ir::FieldRef::cons_nrg()),
+            );
+        // the cell-centered field: the local Alfven speed c_a^2 = |B|^2/rho, the density-dependent
+        // stiffness the midpoint tracks.
+        let b_q: Vec<Gv> = (0..3)
+            .map(|c| cx.field(&format!("bc_{c}"), symbi_ir::FieldRef::BCell(c as u8)))
+            .collect();
+        let b_sq = b_q.iter().fold(Gv::ZERO, |s, b| s + *b * *b);
+
+        let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+        let dv = Gv::ONE / geo.inv_volume;
+        let mut min_w = gv_axis_width(cx, 0, Spacing::Uniform);
+        for ax in 1..ndim {
+            min_w = min_w.min(gv_axis_width(cx, ax, Spacing::Uniform));
+        }
+
+        let center: [Gv; 3] = std::array::from_fn(|a| cx.scalar(&format!("body_0_pos_{a}")));
+        let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
+        let x: [Gv; 3] = std::array::from_fn(|a| x_cart[a]);
+        let phi = body_mask_sdf(cx, center).dist(x);
+        let chi = symbi_ib::sdf::chi(phi, min_w);
+        tag_body_mask(cx, &chi, coords, ndim, axes, None, false);
+
+        // the sound speed is invariant under the uniform drain (e_int is preserved), so the drain rate
+        // shifts only through the local Alfven term |B|^2/rho.
+        let mom_sq = mom.iter().fold(Gv::ZERO, |sum, m| sum + *m * *m);
+        let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg.value(), gamma);
+        let mass = cx.scalar("body_0_mass");
+        let r_acc = cx.scalar("body_0_racc");
+        let inv_cd_dx = Gv::ONE / (c_drain * min_w);
+        let lambda_ff = (mass / (r_acc * r_acc * r_acc)).sqrt();
+
+        // the event-split second-order factor: exact free-fall to the acoustic/free-fall crossing, then
+        // midpoint on the acoustic remainder. penalize_cell applies exp(-chi dt inv_tau), so the
+        // effective rate reproducing the factor f is -ln(f)/(chi dt); the guard keeps chi = 0 an exact
+        // no-op (f = 1, inv_tau = 0).
+        let f = symbi_ib::drain::event_split_drain_factor(den, chi, dt, cs, b_sq, inv_cd_dx, lambda_ff);
+        let tiny = Gv::from_f64(1e-300);
+        let inv_tau_eff = (Gv::ZERO - f.max(tiny).ln()) / (chi * dt).max(tiny);
+
+        let kin = BodyKin::<Gv, 3> {
+            u_solid: Tensor::zeros(),
+            omega: Tensor::zeros(),
+            e_wall: Gv::ZERO,
+        };
+        let mut acc = PenalizationRelaxation::<Gv, 3>::none();
+        Property::Drain { inv_tau: inv_tau_eff }.contribute(chi, &kin, &mut acc);
+        let chi_val = if has_dye {
+            cx.field("chi", symbi_ir::FieldRef::cons_chi())
+        } else {
+            Gv::ZERO
+        };
+        let mut slots: Vec<Gv> = vec![den];
+        slots.extend((0..3).map(|a| if a < dof { mom[a] } else { Gv::ZERO }));
+        slots.push(nrg.value());
+        let cons = ConsG::<Gv, 3, Adiabatic, Dyed>::from_slots(&slots).with_chi(chi_val);
+        let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
+        let n_cart: Vec<Gv> = vec![Gv::ZERO; ndim];
+        let (f_cart, torque) = cartesian_receipt(
+            coords,
+            ndim,
+            axes,
+            &geo.centroid,
+            &x,
+            &center,
+            &delta.force_delta,
+        );
+        penalize_writes::<Adiabatic>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart)
+    });
+    let kernel = kernel.with_derived_support(&writes);
+    KernelProgram::new(kernel, writes)
+}
+
 /// the [Drain] stack traced once, generic over the energy model: the adiabatic and
 /// isothermal kernels are the same graph up to the energy channel, so one builder
 /// carries both. `E::HAS_ENERGY` gates the `nrg` field read/write, the sound-speed

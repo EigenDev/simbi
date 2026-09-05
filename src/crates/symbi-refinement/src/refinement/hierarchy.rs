@@ -1974,7 +1974,18 @@ where
                     level.kernels.snapshot_retry(&level.state);
                 }
             }
-            if !self.advance_level(0, dt, 0.0) {
+            // a slip-enabled draining body runs the palindromic D-M-H-M-D coupled step in place of the
+            // plain RK march; the snapshot above (taken before the first D) is the boundary its retry
+            // restores to. a body with no magnetic slip keeps the ordinary advance bit-for-bit.
+            let root_is_slip = self.levels[0]
+                .kernels
+                .has_magnetic_slip(&self.levels[0].state);
+            let failed = if root_is_slip {
+                self.advance_slip_coupled_step(0, dt, 0.0)
+            } else {
+                self.advance_level(0, dt, 0.0)
+            };
+            if !failed {
                 break;
             }
             // the projection and guard ledgers' rejection boundary: the

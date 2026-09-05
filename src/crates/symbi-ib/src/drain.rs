@@ -72,6 +72,51 @@ pub fn local_drain_rate<S: Scalar>(cs: S, b_sq: S, den: S, inv_cd_dx: S, mass: S
     spherical_drain_rate(sound_rate, mass, r_acc)
 }
 
+/// the second-order material-drain factor over a masked step, exact across the acoustic/free-fall
+/// branch crossing. the drain rate `lambda(rho) = max(lambda_ff, sqrt(cs^2 + b2/rho) inv_cd_dx)` has a
+/// constant free-fall arm and an acoustic arm that stiffens as the density drains, so a cell entering
+/// on the free-fall arm can cross to the acoustic arm partway through the step. the mask `chi` rescales
+/// time uniformly, so a masked step of length `h` is the unmasked flow over `T = chi h`: drain the
+/// free-fall arm exactly up to the crossing time, then midpoint-integrate the remaining acoustic
+/// interval. the free-fall arm is linear in log-density (exact) and the acoustic arm is second-order
+/// (midpoint), so the composite stays second-order accurate through the crossing. the returned factor
+/// `f` in (0, 1] scales the conserved gas vector; `B` is untouched.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn event_split_drain_factor<S: Scalar>(
+    rho: S,
+    chi: S,
+    h: S,
+    cs: S,
+    b2: S,
+    inv_cd_dx: S,
+    lambda_ff: S,
+) -> S {
+    let eps = S::from_f64(1e-300);
+    // the mask rescales time: the masked step of length h is chi h of the unmasked drain flow.
+    let t_total = chi * h;
+    // the crossing satisfies sqrt(cs^2 + c_a2) inv_cd_dx = lambda_ff, i.e. c_a2 = (lambda_ff/inv_cd_dx)^2
+    // - cs^2. free-fall lifts c_a2 = |B|^2/rho by exp(lambda_ff t); it meets the crossing at t_c. an arg
+    // at or below one (cell already acoustic, or no free-fall arm) clamps t_c to zero.
+    let lam_over = lambda_ff / inv_cd_dx;
+    let c_a2_cross = lam_over * lam_over - cs * cs;
+    let c_a2_0 = b2 / rho.max(eps);
+    let arg = (c_a2_cross / c_a2_0.max(eps)).max(eps);
+    let t_c = arg.ln() / lambda_ff.max(eps);
+    let t_ff = t_c.max(S::ZERO).min(t_total);
+    let f_ff = (S::ZERO - lambda_ff * t_ff).exp();
+    let rho1 = rho * f_ff;
+    let t_ac = t_total - t_ff;
+    // the acoustic segment: midpoint on the true (max) rate, which past the crossing is the acoustic
+    // arm. cs is invariant under the uniform drain, so only the Alfven term shifts between the predictor
+    // and the corrector.
+    let rate1 = ((cs * cs + b2 / rho1).sqrt() * inv_cd_dx).max(lambda_ff);
+    let rho_star = rho1 * (S::ZERO - rate1 * t_ac * S::HALF).exp();
+    let rate_star = ((cs * cs + b2 / rho_star).sqrt() * inv_cd_dx).max(lambda_ff);
+    let f_ac = (S::ZERO - rate_star * t_ac).exp();
+    f_ff * f_ac
+}
+
 /// the exact-exponential uniform-scaling drain on one masked cell's conserved
 /// vector. returns the drained state `U exp(-chi dt/tau)` and the cell's exact
 /// contribution to the body -- the cell-integrated `U_old - U_new` (absorbed
@@ -138,6 +183,210 @@ pub fn drain_body_cell<S: Scalar, const D: usize, E: EnergyModel>(
     let chi = drain_mask(dist, r_mask, w);
     let tau = drain_timescale(dx, c_s, c_drain);
     drain_cell(cons, chi, tau, dt, volume, idx)
+}
+
+#[cfg(test)]
+mod event_split_drain_tests {
+    use super::event_split_drain_factor;
+
+    // the drain rate lambda(rho) = max( sqrt(cs^2 + b2/rho) inv_cd_dx, lambda_ff ): the acoustic arm
+    // stiffens as rho drains (the Alfven term |B|^2/rho rises), the free-fall arm is constant, and the
+    // nonsmooth max crosses between them.
+    fn rate_of(cs: f64, b2: f64, inv_cd_dx: f64, lambda_ff: f64) -> impl Fn(f64) -> f64 {
+        move |rho: f64| ((cs * cs + b2 / rho).sqrt() * inv_cd_dx).max(lambda_ff)
+    }
+
+    // the reference: y = log rho, dy/dt = -lambda(e^y), integrated with RK4 over `substeps` -- a
+    // high-accuracy scalar solution of the exact drain flow (unmasked, chi = 1).
+    fn reference(rho0: f64, t: f64, rate: &impl Fn(f64) -> f64, substeps: usize) -> f64 {
+        let h = t / substeps as f64;
+        let mut y = rho0.ln();
+        let f = |y: f64| -rate(y.exp());
+        for _ in 0..substeps {
+            let k1 = f(y);
+            let k2 = f(y + 0.5 * h * k1);
+            let k3 = f(y + 0.5 * h * k2);
+            let k4 = f(y + h * k3);
+            y += h / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+        }
+        y.exp()
+    }
+
+    // the masked reference: dy/dt = -chi lambda(e^y), RK4 over `substeps`.
+    #[allow(clippy::too_many_arguments)]
+    fn reference_chi(rho0: f64, t: f64, rate: &impl Fn(f64) -> f64, chi: f64, substeps: usize) -> f64 {
+        let h = t / substeps as f64;
+        let mut y = rho0.ln();
+        let f = |y: f64| -chi * rate(y.exp());
+        for _ in 0..substeps {
+            let k1 = f(y);
+            let k2 = f(y + 0.5 * h * k1);
+            let k3 = f(y + 0.5 * h * k2);
+            let k4 = f(y + h * k3);
+            y += h / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+        }
+        y.exp()
+    }
+
+    // one event-split drain step at mask `chi` and a fixed-time evolution of `steps` of them.
+    #[allow(clippy::too_many_arguments)]
+    fn step_chi(rho: f64, h: f64, chi: f64, cs: f64, b2: f64, inv_cd_dx: f64, lambda_ff: f64) -> f64 {
+        rho * event_split_drain_factor(rho, chi, h, cs, b2, inv_cd_dx, lambda_ff)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn evolve_chi(rho0: f64, t: f64, steps: usize, chi: f64, cs: f64, b2: f64, inv_cd_dx: f64, lambda_ff: f64) -> f64 {
+        let h = t / steps as f64;
+        let mut rho = rho0;
+        for _ in 0..steps {
+            rho = step_chi(rho, h, chi, cs, b2, inv_cd_dx, lambda_ff);
+        }
+        rho
+    }
+
+    // a fixed-time evolution at mask chi = 1.
+    fn evolve(rho0: f64, t: f64, steps: usize, cs: f64, b2: f64, inv_cd_dx: f64, lambda_ff: f64) -> f64 {
+        evolve_chi(rho0, t, steps, 1.0, cs, b2, inv_cd_dx, lambda_ff)
+    }
+
+    // second order on the density-dependent acoustic arm: the fixed-time error quarters when the step
+    // halves.
+    #[test]
+    fn drain_is_second_order_on_the_acoustic_branch() {
+        let (cs, b2, inv_cd_dx, ff) = (1.0, 4.0, 20.0, 0.0); // ff = 0: acoustic arm always active
+        let (rho0, t) = (1.0, 0.02);
+        let rate = rate_of(cs, b2, inv_cd_dx, ff);
+        let refn = reference(rho0, t, &rate, 8192);
+        let e_coarse = (evolve(rho0, t, 16, cs, b2, inv_cd_dx, ff) - refn).abs();
+        let e_fine = (evolve(rho0, t, 32, cs, b2, inv_cd_dx, ff) - refn).abs();
+        let ratio = e_coarse / e_fine.max(1e-300);
+        println!("\nacoustic: E(h)={e_coarse:.3e} E(h/2)={e_fine:.3e} order={:.2}\n", ratio.log2());
+        assert!(e_coarse > 1e-10, "vacuous ({e_coarse})");
+        assert!(ratio > 3.6, "acoustic branch not second order: ratio {ratio:.2}");
+    }
+
+    // the free-fall arm is a constant rate, so the exponential drain is the exact flow and the scheme
+    // reproduces it to roundoff (a constant-coefficient linear ODE has no scheme error).
+    #[test]
+    fn drain_is_exact_on_the_free_fall_branch() {
+        let (cs, b2, inv_cd_dx, ff) = (0.0, 0.0, 1.0, 30.0); // acoustic = 0, so lambda = ff constant
+        let rate = rate_of(cs, b2, inv_cd_dx, ff);
+        let refn = reference(1.0, 0.03, &rate, 8192);
+        let got = evolve(1.0, 0.03, 4, cs, b2, inv_cd_dx, ff);
+        assert!((got - refn).abs() < 1e-11 * refn, "constant-rate drain not exact: {got:.15e} vs {refn:.15e}");
+    }
+
+    // the branch crossing is resolved by exact event splitting: a step that carries a cell from the
+    // free-fall arm across to the acoustic arm keeps second order, because the free-fall segment is
+    // integrated exactly to the crossing time and only the acoustic remainder carries the midpoint
+    // error. this is the case that dropped to first order without the split.
+    #[test]
+    fn event_splitting_restores_second_order_across_the_crossover() {
+        let (cs, b2, inv_cd_dx) = (1.0, 4.0, 5.0);
+        let ff = (1.0 + 4.0 / 0.5f64).sqrt() * inv_cd_dx; // acoustic == ff at rho = 0.5
+        let (rho0, t) = (1.0, 0.08); // the solution passes through rho = 0.5 within the interval
+        let rate = rate_of(cs, b2, inv_cd_dx, ff);
+        let refn = reference(rho0, t, &rate, 16384);
+        let e_coarse = (evolve(rho0, t, 16, cs, b2, inv_cd_dx, ff) - refn).abs();
+        let e_fine = (evolve(rho0, t, 32, cs, b2, inv_cd_dx, ff) - refn).abs();
+        let order = (e_coarse / e_fine.max(1e-300)).log2();
+        println!("\ncrossover order = {order:.2} (event-split)\n");
+        assert!(e_coarse > 1e-10, "vacuous crossover test ({e_coarse})");
+        assert!(order > 1.8, "event splitting did not restore second order across the crossing: {order:.2}");
+    }
+
+    // event splitting holds second order for crossings placed anywhere within the step and for
+    // fractional masks: the crossing is located at an off-boundary fraction of the interval (never
+    // aligned with a step edge at N = 16 or 32), the mask chi rescales the drain clock, and each case's
+    // global error still quarters when the step halves.
+    #[test]
+    fn event_splitting_is_second_order_for_arbitrary_crossings_and_masks() {
+        let (cs, b2, inv_cd_dx) = (1.0, 4.0, 5.0);
+        // (label, crossing density rho_c, mask chi, off-boundary fraction of the interval at the cross)
+        let cases: [(&str, f64, f64, f64); 4] = [
+            ("early rho_c=0.7 chi=1.0", 0.7, 1.0, 0.31),
+            ("mid   rho_c=0.5 chi=0.7", 0.5, 0.7, 0.53),
+            ("late  rho_c=0.3 chi=0.2", 0.3, 0.2, 0.68),
+            ("late  rho_c=0.4 chi=0.5", 0.4, 0.5, 0.79),
+        ];
+        for (label, rho_c, chi, frac) in cases {
+            let ff = (cs * cs + b2 / rho_c).sqrt() * inv_cd_dx; // acoustic == ff at rho = rho_c
+            let rho0 = 1.0;
+            // the masked free-fall arm reaches rho_c at t_cross; size the interval so that crossing
+            // lands at `frac` of it -- an off-boundary fraction for 16 and 32 uniform steps.
+            let t_cross = (rho0 / rho_c).ln() / (chi * ff);
+            let t = t_cross / frac;
+            let rate = rate_of(cs, b2, inv_cd_dx, ff);
+            let refn = reference_chi(rho0, t, &rate, chi, 32768);
+            let e16 = (evolve_chi(rho0, t, 16, chi, cs, b2, inv_cd_dx, ff) - refn).abs();
+            let e32 = (evolve_chi(rho0, t, 32, chi, cs, b2, inv_cd_dx, ff) - refn).abs();
+            let order = (e16 / e32.max(1e-300)).log2();
+            println!("{label}: E(h)={e16:.3e} E(h/2)={e32:.3e} order={order:.2}");
+            assert!(e16 > 1e-10, "{label}: vacuous ({e16})");
+            assert!(order > 1.8, "{label}: not second order across the crossing: order {order:.2}");
+        }
+    }
+
+    // a step that drains a free-fall cell but stops short of the crossing stays exactly on the
+    // free-fall arm: a constant rate, so the exponential drain is the exact flow to roundoff.
+    #[test]
+    fn a_step_short_of_the_crossing_stays_exactly_on_free_fall() {
+        let (cs, b2, inv_cd_dx) = (1.0f64, 4.0, 5.0);
+        let rho_c = 0.3f64;
+        let ff = (cs * cs + b2 / rho_c).sqrt() * inv_cd_dx; // crossing far below the run
+        let (chi, rho0) = (0.7, 1.0);
+        // drain only to rho ~ 0.6, never reaching rho_c = 0.3: pure free-fall.
+        let t = (rho0 / 0.6f64).ln() / (chi * ff);
+        let rate = rate_of(cs, b2, inv_cd_dx, ff);
+        let refn = reference_chi(rho0, t, &rate, chi, 32768);
+        let got = evolve_chi(rho0, t, 4, chi, cs, b2, inv_cd_dx, ff);
+        assert!(
+            (got - refn).abs() < 1e-11 * refn,
+            "a step short of the crossing is not exact free-fall: {got:.15e} vs {refn:.15e}"
+        );
+    }
+
+    // the factor stays in [0, 1] and finite for arbitrarily stiff finite steps and for a vanishing
+    // mask -- density scales down, never negative and never NaN; a step stiff enough to evacuate the
+    // cell underflows the factor to zero (the full-drain limit), and chi = 0 is an exact no-op (f = 1).
+    #[test]
+    fn drain_factor_stays_in_the_unit_interval() {
+        let (cs, b2, inv_cd_dx, ff) = (1.0f64, 4.0, 20.0, 15.0);
+        for &chi in &[0.0f64, 0.3, 1.0] {
+            for &h in &[1e-6f64, 1.0, 1e3, 1e9] {
+                let f = event_split_drain_factor(1.0, chi, h, cs, b2, inv_cd_dx, ff);
+                assert!(f.is_finite() && (0.0..=1.0).contains(&f), "factor left [0,1] at chi={chi} h={h}: f={f}");
+            }
+        }
+        // chi = 0 is a bit-exact no-op.
+        let f0 = event_split_drain_factor(1.0f64, 0.0, 3.0, cs, b2, inv_cd_dx, ff);
+        assert_eq!(f0, 1.0, "zero mask must be an exact no-op, got {f0}");
+    }
+
+    // the drain and the slip operator read one instantaneous rate for a cell state: both consume
+    // `local_drain_rate`, so the branch choice (acoustic vs free-fall) and the numeric value agree on
+    // heterogeneous fields. this pins the coupling clock -- D and M share tau_rho.
+    #[test]
+    fn drain_and_slip_share_one_local_rate() {
+        use super::{local_drain_rate, spherical_drain_rate};
+        let inv_cd_dx = 5.0f64;
+        let (mass, r_acc) = (2.0f64, 0.3f64);
+        let lambda_ff = (mass / (r_acc * r_acc * r_acc)).sqrt();
+        // acoustic-dominant, free-fall-dominant, and near-crossover cells.
+        let cells: [(&str, f64, f64, f64); 3] = [
+            ("acoustic", 1.0, 9.0, 0.4),   // sqrt(1 + 9/0.4)*5 = big > ff
+            ("free-fall", 1.5, 0.01, 5.0), // tiny field: acoustic ~ cs*inv_cd_dx < ff
+            ("crossover", 1.0, 4.0, 0.5),  // acoustic ~ ff
+        ];
+        for (name, cs, b2, rho) in cells {
+            let rate = local_drain_rate(cs, b2, rho, inv_cd_dx, mass, r_acc);
+            // the slip path builds tau_rho = 1/lambda_rho from the same call; the drain path feeds the
+            // same rate into the free-fall max. both must equal this one value and pick one branch.
+            let acoustic = (cs * cs + b2 / rho).sqrt() * inv_cd_dx;
+            let expect = spherical_drain_rate(acoustic, mass, r_acc);
+            assert_eq!(rate, expect, "{name}: local_drain_rate disagrees with the shared rate law");
+            assert_eq!(rate, acoustic.max(lambda_ff), "{name}: branch choice differs from max(acoustic, ff)");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -367,31 +616,5 @@ mod tests {
             (mdot_mass_2x - 2.0 * mdot_mass).abs() < 1e-13,
             "rate is not a linear flow-functional"
         );
-    }
-}
-
-#[cfg(test)]
-mod drain_rate_tests {
-    #[test]
-    fn drain_and_slip_share_one_local_rate() {
-        use super::{local_drain_rate, spherical_drain_rate};
-        let inv_cd_dx = 5.0f64;
-        let (mass, r_acc) = (2.0f64, 0.3f64);
-        let lambda_ff = (mass / (r_acc * r_acc * r_acc)).sqrt();
-        // acoustic-dominant, free-fall-dominant, and near-crossover cells.
-        let cells: [(&str, f64, f64, f64); 3] = [
-            ("acoustic", 1.0, 9.0, 0.4),   // sqrt(1 + 9/0.4)*5 = big > ff
-            ("free-fall", 1.5, 0.01, 5.0), // tiny field: acoustic ~ cs*inv_cd_dx < ff
-            ("crossover", 1.0, 4.0, 0.5),  // acoustic ~ ff
-        ];
-        for (name, cs, b2, rho) in cells {
-            let rate = local_drain_rate(cs, b2, rho, inv_cd_dx, mass, r_acc);
-            // the slip path builds tau_rho = 1/lambda_rho from the same call; the drain path feeds the
-            // same rate into the free-fall max. both must equal this one value and pick one branch.
-            let acoustic = (cs * cs + b2 / rho).sqrt() * inv_cd_dx;
-            let expect = spherical_drain_rate(acoustic, mass, r_acc);
-            assert_eq!(rate, expect, "{name}: local_drain_rate disagrees with the shared rate law");
-            assert_eq!(rate, acoustic.max(lambda_ff), "{name}: branch choice differs from max(acoustic, ff)");
-        }
     }
 }

@@ -2456,7 +2456,25 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         } else {
             ""
         };
-        let name_owned: String = match (bodies.get(b).spec.surface, nrg.is_some()) {
+        // a slip body's material drain runs the local-Alfven midpoint rate (second-order in time),
+        // which reads the cell's own `bcell` rather than the domain-wide c_a2 max. a body with no
+        // magnetic slip keeps the legacy global-rate drain bit-for-bit.
+        let has_slip = matches!(
+            bodies.get(b).spec.magnetic,
+            symbi_ib::MagneticSpec::Slip { .. }
+        );
+        if has_slip {
+            assert!(
+                coords_g == cart && D == 3 && DOF == 3 && nrg.is_some(),
+                "the magnetic-slip midpoint drain is a 3D cartesian adiabatic kernel; got coords \
+                 {coords_g:?} D={D} DOF={DOF} energy={}",
+                nrg.is_some()
+            );
+        }
+        let name_owned: String = if has_slip {
+            format!("penalize_drain_midpoint{dye}_3d")
+        } else {
+            match (bodies.get(b).spec.surface, nrg.is_some()) {
             (symbi_ib::SurfaceSpec::Drain, true) => {
                 penalize_name(&format!("penalize_drain{dye}"), coords_g, D, &geom.axes)
             }
@@ -2484,6 +2502,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 D,
                 &geom.axes,
             ),
+            }
         };
         // 2.5D MHD (DOF > D) selects the DOF-aware `_dof{DOF}` kernel that drains all momentum
         // components; hydro / full 3D MHD (DOF == D) keep the base name. the baked matrix covers
