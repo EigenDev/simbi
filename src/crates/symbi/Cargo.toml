@@ -8,6 +8,11 @@ bench = false
 
 [features]
 default = []
+# the strong-field convergence studies in tests/mhd_slip_schedule.rs (48- and 96-cell grids, minutes
+# to tens of minutes in release). run with:
+#   git rev-parse HEAD && cargo test -p symbi --release --features expensive-convergence-tests \
+#       --test mhd_slip_schedule expensive_ -- --nocapture --test-threads=1
+expensive-convergence-tests = []
 gpu = ["symbi-xpu/gpu", "symbi-grid/gpu", "symbi-exec/gpu", "symbi-sim/gpu", "symbi-substrate/gpu", "symbi-refinement/gpu"]
 cuda = ["gpu", "symbi-xpu/cuda", "symbi-grid/cuda", "symbi-exec/cuda", "symbi-sim/cuda", "symbi-substrate/cuda", "symbi-refinement/cuda"]
 hip = ["gpu", "symbi-xpu/hip", "symbi-grid/hip", "symbi-exec/hip", "symbi-sim/hip", "symbi-substrate/hip", "symbi-refinement/hip"]

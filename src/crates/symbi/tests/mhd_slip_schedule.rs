@@ -313,164 +313,216 @@ fn coupled_temporal_ratio(a0: f64) -> (f64, f64) {
     (e_mid / e_hi.max(1e-300), e_mid)
 }
 
-// the drain rate lambda_rho = max(sqrt(cs^2 + |B|^2/rho) / (c_drain dx), sqrt(GM/r_acc^3)) evaluated
-// on a snapshot, together with the branch it selects. the acoustic arm stiffens without bound as the
-// density drains at fixed field, so a cell's branch and its stiffness h lambda both track depletion.
-fn drain_clock_census(
-    n: usize,
-    rho: &[f64],
-    bcell: &[f64],
-    pre: &[f64],
-    h: f64,
-) -> (f64, f64, usize) {
-    let ncells = rho.len();
-    let inv_cd_dx = n as f64; // c_drain = 1 on the slip path, so 1/(c_drain dx) = n
-    let lambda_ff = (1.0f64 / (R_BODY * R_BODY * R_BODY)).sqrt(); // body mass 1
-    let mut min_rho = f64::INFINITY;
-    let mut max_h_lambda = 0.0f64;
-    let mut acoustic = 0usize;
-    for ii in 0..ncells {
-        let den = rho[ii];
-        let b_sq: f64 = (0..3).map(|d| bcell[d * ncells + ii].powi(2)).sum();
-        let cs_sq = GAMMA * pre[ii] / den;
-        let sound_rate = ((cs_sq + b_sq / den).max(0.0)).sqrt() * inv_cd_dx;
-        min_rho = min_rho.min(den);
-        max_h_lambda = max_h_lambda.max(h * sound_rate.max(lambda_ff));
-        if sound_rate > lambda_ff {
-            acoustic += 1;
-        }
-    }
-    (min_rho, max_h_lambda, acoustic)
-}
+// the strong-field convergence studies below run on grids of 48 and 96 cells per side, minutes to
+// tens of minutes in a release build, so they sit behind the opt-in feature. one exact command runs
+// them, recording the commit the numbers belong to:
+//
+//   git rev-parse HEAD && cargo test -p symbi --release --features expensive-convergence-tests \
+//       --test mhd_slip_schedule expensive_ -- --nocapture --test-threads=1
+//
+// every study asserts its acceptance criterion; a study whose criterion is open fails rather than
+// reporting.
+#[cfg(feature = "expensive-convergence-tests")]
+mod expensive {
+    use super::*;
 
-// the asymptotic order of the strong-field coupled step, read off a single long horizon by refinement
-// alone. a fitted expansion cannot settle this: three successive differences determine three powers
-// only up to a near-degeneracy between the linear and cubic terms, which shows up as coefficients that
-// track each other. successive ratios need no model. a sequence approaching four is second order; one
-// descending toward two carries a genuine first-order component.
-#[test]
-fn diag_dmhmd_asymptotic_order_strong_field() {
-    let l2_rel = |a: &[f64], b: &[f64]| -> f64 {
+    const FIELDS: [&str; 4] = ["density", "bface", "energy", "pressure"];
+
+    // the drain rate lambda_rho = max(sqrt(cs^2 + |B|^2/rho) / (c_drain dx), sqrt(GM/r_acc^3)) evaluated
+    // on a snapshot, together with the branch it selects. the acoustic arm stiffens without bound as the
+    // density drains at fixed field, so a cell's branch and its stiffness h lambda both track depletion.
+    fn drain_clock_census(
+        n: usize,
+        rho: &[f64],
+        bcell: &[f64],
+        pre: &[f64],
+        h: f64,
+    ) -> (f64, f64, usize) {
+        let ncells = rho.len();
+        let inv_cd_dx = n as f64; // c_drain = 1 on the slip path, so 1/(c_drain dx) = n
+        let lambda_ff = (1.0f64 / (R_BODY * R_BODY * R_BODY)).sqrt(); // body mass 1
+        let mut min_rho = f64::INFINITY;
+        let mut max_h_lambda = 0.0f64;
+        let mut acoustic = 0usize;
+        for ii in 0..ncells {
+            let den = rho[ii];
+            let b_sq: f64 = (0..3).map(|d| bcell[d * ncells + ii].powi(2)).sum();
+            let cs_sq = GAMMA * pre[ii] / den;
+            let sound_rate = ((cs_sq + b_sq / den).max(0.0)).sqrt() * inv_cd_dx;
+            min_rho = min_rho.min(den);
+            max_h_lambda = max_h_lambda.max(h * sound_rate.max(lambda_ff));
+            if sound_rate > lambda_ff {
+                acoustic += 1;
+            }
+        }
+        (min_rho, max_h_lambda, acoustic)
+    }
+
+    struct Sequence {
+        diffs: [Vec<f64>; 4],
+        ratios: [Vec<f64>; 4],
+        troubled: u64,
+        frozen: u64,
+    }
+
+    fn l2_rel(a: &[f64], b: &[f64]) -> f64 {
         let num: f64 = a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum();
         let den: f64 = b.iter().map(|y| y * y).sum();
         (num / den.max(1e-300)).sqrt()
-    };
-    // the first-order flux fallback and the step-retry path are both discrete switches on the state:
-    // either firing in different cells at different timesteps makes the solution map irregular in dt,
-    // which no smooth error expansion describes. the census reports both alongside the differences, so
-    // a ratio sequence is only read as an order once they are quiet.
-    let run = |dt: f64, nsteps: usize| -> ([Vec<f64>; 4], u64, u64, usize) {
-        let nn: usize = std::env::var("SYMBI_ASYMPTOTIC_N").ok().and_then(|s| s.parse().ok()).unwrap_or(N);
-        let sim = build_slip_sim_na(nn, 0.3);
-        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
-        let mut hier = Hierarchy::single(sim, sub);
-        hier.prime();
-        symbi_sim::guard_ledger::reset();
-        let scope = symbi_sim::guard_ledger::open_scope();
-        for _ in 0..nsteps {
-            hier.step_root_with_dt(dt);
-        }
-        // the retry loop lives inside the driver and shrinks dt on rejection, so a rejected step is
-        // invisible at this call site. the ledger still records it: a discarded step books attempted
-        // acts that never reach accepted, so the two totals separate exactly when a retry happened.
-        let (attempted, accepted) = symbi_sim::guard_ledger::report();
-        drop(scope);
-        symbi_sim::guard_ledger::reset();
-        let (bf, _bc, nrg, pre) = hier.slip_state_snapshots(0);
-        (
-            [hier.density_snapshot(0), bf, nrg, pre],
-            attempted.troubled_cells.total,
-            attempted.frozen_cells.total,
-            (attempted.troubled_cells.total - accepted.troubled_cells.total) as usize,
-        )
-    };
-    // the longest horizon carries the largest departure from four, so it resolves the trend soonest.
-    let dt = 1.0e-3;
-    let steps: usize = std::env::var("SYMBI_ASYMPTOTIC_STEPS").ok().and_then(|s| s.parse().ok()).unwrap_or(16);
-    let levels: usize = std::env::var("SYMBI_ASYMPTOTIC_LEVELS").ok().and_then(|s| s.parse().ok()).unwrap_or(6);
-    let runs: Vec<([Vec<f64>; 4], u64, u64, usize)> = (0..levels)
-        .map(|ll| run(dt / (1u32 << ll) as f64, steps << ll))
-        .collect();
-    println!("\nASYMPTOTIC T={:.0e} strong field a0=0.3", steps as f64 * dt);
-    for (ll, r) in runs.iter().enumerate() {
-        println!(
-            "  dt/{:<3}: troubled={:<8} frozen={:<8} discarded={}",
-            1u32 << ll,
-            r.1,
-            r.2,
-            r.3
-        );
     }
-    // every evolved field carries the same temporal order; a sequence that misbehaves in one field
-    // alone is a cancellation in that field's norm rather than a property of the method.
-    for (ff, fname) in ["density", "bface", "energy", "pressure"].iter().enumerate() {
-        let diffs: Vec<f64> = runs
-            .windows(2)
-            .map(|w| l2_rel(&w[0].0[ff], &w[1].0[ff]))
-            .collect();
-        let ratios: Vec<f64> = diffs.windows(2).map(|w| w[0] / w[1].max(1e-300)).collect();
-        println!(
-            "  {fname:>8}: diffs {}  ratios {}",
-            diffs.iter().map(|d| format!("{d:.3e}")).collect::<Vec<_>>().join(" "),
-            ratios.iter().map(|r| format!("{r:.2}")).collect::<Vec<_>>().join(" ")
-        );
-    }
-}
 
-// the strong-field coupled step's density ratio on this 12-cell grid drifts below four as the horizon
-// lengthens. holding the field fixed and varying the horizon alone separates the candidate drivers
-// that live in the drain: depletion of the masked cells, stiffening of the Alfven term |B|^2/rho, and
-// migration across the acoustic/free-fall branch of the rate law. the census reports each directly.
-// on this fixture every cell sits on the acoustic branch throughout, h lambda holds flat at 1.6e-2,
-// and the density floor stays above 0.78, so the drift is none of these; it is the grid's own
-// pre-asymptotic spatial structure at the mask seam, which recedes with resolution.
-#[test]
-fn diag_dmhmd_depletion_matrix() {
-    let l2_rel = |a: &[f64], b: &[f64]| -> f64 {
-        let num: f64 = a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum();
-        let den: f64 = b.iter().map(|y| y * y).sum();
-        (num / den.max(1e-300)).sqrt()
-    };
-    let run = |dt: f64, nsteps: usize| -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let sim = build_slip_sim_na(N, 0.3);
-        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
-        let mut hier = Hierarchy::single(sim, sub);
-        hier.prime();
-        for _ in 0..nsteps {
-            hier.step_root_with_dt(dt);
-        }
-        let (_bf, bc, _nrg, pre) = hier.slip_state_snapshots(0);
-        (hier.density_snapshot(0), bc, pre)
-    };
-    let dt = 1.0e-3;
-    // the branch population at t = 0 fixes the baseline the horizons are compared against.
-    let (r0, b0, p0) = run(dt, 0);
-    let (min0, hl0, ac0) = drain_clock_census(N, &r0, &b0, &p0, dt);
-    println!(
-        "\nDEPLETION t=0          : min_rho={min0:.3e}  max h*lambda={hl0:.3e}  acoustic cells={ac0}/{}",
-        r0.len()
-    );
-    for horizon in [1usize, 2, 4, 8, 16] {
-        let (a, _, _) = run(dt, horizon);
-        let (b, _, _) = run(dt / 2.0, 2 * horizon);
-        let (c, bc, pc) = run(dt / 4.0, 4 * horizon);
-        let (d, _, _) = run(dt / 8.0, 8 * horizon);
-        let (e_lo, e_mid, e_hi) = (l2_rel(&a, &b), l2_rel(&b, &c), l2_rel(&c, &d));
-        let (min_rho, h_lambda, acoustic) = drain_clock_census(N, &c, &bc, &pc, dt);
-        // fit e(dt) = B dt + A dt^2 + C dt^3 to the three successive differences. a two-term fit
-        // charges a neglected cubic term to the linear one, so the cubic is carried explicitly: with
-        // diff(dt) = (3/4) A dt^2 + (1/2) B dt + (7/8) C dt^3 and its two halvings, the system inverts
-        // to C first. only a linear coefficient that survives this separation is a real order defect.
-        let c_dt3 = (64.0 / 21.0) * (e_lo - 6.0 * e_mid + 8.0 * e_hi);
-        let b_dt = 2.0 * (4.0 * e_mid - e_lo + (7.0 / 16.0) * c_dt3);
-        let a_dt2 = (4.0 / 3.0) * (e_lo - 0.5 * b_dt - 0.875 * c_dt3);
+    // the strong-field coupled step on an n-cell grid, refined `levels` times from `steps` steps of
+    // dt = 1e-3 to the same final time. each run books the first-order flux fallback, floors, and
+    // retries in the guard ledger, since any of them firing in different cells at different timesteps
+    // makes the solution map irregular in dt. prints the raw relative L2 norms of successive
+    // differences per field with the build profile, grid, horizon, and solver tolerance, so a ratio
+    // can be re-derived and compared across machines.
+    fn strong_field_sequence(n: usize, steps: usize, levels: usize) -> Sequence {
+        let dt = 1.0e-3;
+        let run = |dt: f64, nsteps: usize| -> ([Vec<f64>; 4], u64, u64) {
+            let sim = build_slip_sim_na(n, 0.3);
+            let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+            let mut hier = Hierarchy::single(sim, sub);
+            hier.prime();
+            symbi_sim::guard_ledger::reset();
+            let scope = symbi_sim::guard_ledger::open_scope();
+            for _ in 0..nsteps {
+                hier.step_root_with_dt(dt);
+            }
+            let (attempted, _accepted) = symbi_sim::guard_ledger::report();
+            drop(scope);
+            symbi_sim::guard_ledger::reset();
+            let (bf, _bc, nrg, pre) = hier.slip_state_snapshots(0);
+            (
+                [hier.density_snapshot(0), bf, nrg, pre],
+                attempted.troubled_cells.total,
+                attempted.frozen_cells.total,
+            )
+        };
+        let runs: Vec<([Vec<f64>; 4], u64, u64)> =
+            (0..levels).map(|ll| run(dt / (1u32 << ll) as f64, steps << ll)).collect();
+        let diffs: [Vec<f64>; 4] = std::array::from_fn(|ff| {
+            runs.windows(2).map(|w| l2_rel(&w[0].0[ff], &w[1].0[ff])).collect()
+        });
+        let ratios: [Vec<f64>; 4] =
+            std::array::from_fn(|ff| diffs[ff].windows(2).map(|w| w[0] / w[1].max(1e-300)).collect());
+        let troubled = runs.iter().map(|r| r.1).sum();
+        let frozen = runs.iter().map(|r| r.2).sum();
         println!(
-            "DEPLETION steps={horizon:>2} T={:.0e}: min_rho={min_rho:.3e}  max h*lambda={h_lambda:.3e}  acoustic={acoustic}  ratios {:.2} {:.2}  A*dt^2={a_dt2:.3e}  B*dt={b_dt:.3e}  C*dt^3={c_dt3:.3e}  B*dt/T={:.3e}",
-            horizon as f64 * dt,
-            e_lo / e_mid.max(1e-300),
-            e_mid / e_hi.max(1e-300),
-            b_dt / (horizon as f64 * dt)
+            "\nSTRONG-FIELD DMHMD a0=0.3  grid {n}^3  base dt {dt:.1e} x {steps} steps  T={:.1e}  levels {levels}  \
+             profile {}  arch {}  cpus {}  slip CG tol 1e-10 rel / 500 iters",
+            steps as f64 * dt,
+            if cfg!(debug_assertions) { "debug" } else { "release" },
+            std::env::consts::ARCH,
+            std::thread::available_parallelism().map(|c| c.get()).unwrap_or(0)
         );
+        println!("  guards: troubled={troubled} frozen={frozen}");
+        for ff in 0..4 {
+            println!(
+                "  {:>8}: diffs {}  ratios {}",
+                FIELDS[ff],
+                diffs[ff].iter().map(|d| format!("{d:.4e}")).collect::<Vec<_>>().join(" "),
+                ratios[ff].iter().map(|r| format!("{r:.3}")).collect::<Vec<_>>().join(" ")
+            );
+        }
+        Sequence { diffs, ratios, troubled, frozen }
+    }
+
+    // ratio 3.73 corresponds to a measured order of 1.9. the finest successive difference must sit
+    // well above the solver floor: the slip solve converges to 1e-10 relative residual per step, and
+    // the observed differences are 1e-6 to 1e-8 relative.
+    const SECOND_ORDER_RATIO: f64 = 3.73;
+    const NOISE_FLOOR: f64 = 1.0e-9;
+
+    fn require_quiet(seq: &Sequence) {
+        assert!(
+            seq.troubled == 0 && seq.frozen == 0,
+            "a guard fired during the sequence (troubled {} frozen {}): the map is irregular in dt",
+            seq.troubled,
+            seq.frozen
+        );
+    }
+
+    fn require_second_order(seq: &Sequence, ff: usize, ratio_floor: f64) {
+        let fine = *seq.diffs[ff].last().unwrap();
+        assert!(fine > NOISE_FLOOR, "{}: finest difference {fine:.3e} is at the solver floor", FIELDS[ff]);
+        assert!(
+            seq.ratios[ff].iter().all(|r| *r > ratio_floor),
+            "{}: ratios {:?} do not all exceed {ratio_floor}",
+            FIELDS[ff],
+            seq.ratios[ff]
+        );
+    }
+
+    // on 48 cells per side the gas fields are resolved: density, energy, and pressure self-converge
+    // at four over a 64-step horizon with every guard quiet. the staggered field is reported here and
+    // gated on the finer grid below.
+    #[test]
+    fn expensive_strong_field_coupled_step_thermodynamic_fields_are_second_order() {
+        let seq = strong_field_sequence(48, 8, 4);
+        require_quiet(&seq);
+        for ff in [0, 2, 3] {
+            require_second_order(&seq, ff, 3.5);
+        }
+    }
+
+    // the staggered field's ratio climbs with resolution (about 2 at 24 cells per side, 3.9 then 3.3
+    // at 48), consistent with second order read through a receding mask-seam spatial structure. the
+    // 96-cell grid is the closing measurement: both successive bface ratios above 3.73 close the
+    // gate; a finest ratio that improves but stays near 3.2 to 3.5 is still pre-asymptotic and is to
+    // be characterized, and one that stagnates or declines is a residual term to be investigated,
+    // never attributed to resolution by default.
+    #[test]
+    fn expensive_strong_field_coupled_step_staggered_field_is_second_order_at_96() {
+        let seq = strong_field_sequence(96, 8, 4);
+        require_quiet(&seq);
+        for ff in [0, 2, 3] {
+            require_second_order(&seq, ff, 3.5);
+        }
+        require_second_order(&seq, 1, SECOND_ORDER_RATIO);
+    }
+
+    // the drain-side candidates for a residual first-order term, each measured on the fixture: every
+    // masked cell sits on the acoustic branch of the rate law throughout, so the max(acoustic,
+    // free-fall) switching surface is never crossed between operators; the stiffness h lambda stays
+    // small and flat; and the density stays bounded away from zero. under those conditions the
+    // density ratio on the 12-cell grid holds near four at every horizon.
+    #[test]
+    fn expensive_depletion_matrix_keeps_every_cell_on_one_branch() {
+        let run = |dt: f64, nsteps: usize| -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+            let sim = build_slip_sim_na(N, 0.3);
+            let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+            let mut hier = Hierarchy::single(sim, sub);
+            hier.prime();
+            for _ in 0..nsteps {
+                hier.step_root_with_dt(dt);
+            }
+            let (_bf, bc, _nrg, pre) = hier.slip_state_snapshots(0);
+            (hier.density_snapshot(0), bc, pre)
+        };
+        let dt = 1.0e-3;
+        let (r0, b0, p0) = run(dt, 0);
+        let ncells = r0.len();
+        let (_, hl0, ac0) = drain_clock_census(N, &r0, &b0, &p0, dt);
+        assert!(ac0 == ncells, "the fixture starts with {ac0}/{ncells} cells on the acoustic branch");
+        println!("\nDEPLETION t=0: max h*lambda={hl0:.3e}  acoustic={ac0}/{ncells}");
+        for horizon in [1usize, 2, 4, 8, 16] {
+            let (a, _, _) = run(dt, horizon);
+            let (b, _, _) = run(dt / 2.0, 2 * horizon);
+            let (c, bc, pc) = run(dt / 4.0, 4 * horizon);
+            let (e_lo, e_hi) = (l2_rel(&a, &b), l2_rel(&b, &c));
+            let ratio = e_lo / e_hi.max(1e-300);
+            let (min_rho, h_lambda, acoustic) = drain_clock_census(N, &c, &bc, &pc, dt);
+            println!(
+                "DEPLETION steps={horizon:>2} T={:.0e}: min_rho={min_rho:.3e}  max h*lambda={h_lambda:.3e}  acoustic={acoustic}  ratio {ratio:.2}",
+                horizon as f64 * dt
+            );
+            assert!(acoustic == ncells, "T={}: {acoustic}/{ncells} cells acoustic, a branch crossing occurred", horizon as f64 * dt);
+            assert!(h_lambda < 0.05, "T={}: h lambda {h_lambda:.3e} is stiff", horizon as f64 * dt);
+            assert!(min_rho > 0.5, "T={}: density depleted to {min_rho:.3e}", horizon as f64 * dt);
+            assert!(e_hi > 1e-12, "T={}: vacuous measurement", horizon as f64 * dt);
+            assert!(ratio > 3.5, "T={}: density ratio {ratio:.2} on the resolved field", horizon as f64 * dt);
+        }
     }
 }
 
