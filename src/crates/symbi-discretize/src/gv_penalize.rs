@@ -678,6 +678,166 @@ pub fn slip_commit_energy_3d_gv() -> KernelProgram {
     KernelProgram::new(kernel, writes)
 }
 
+/// the frozen dyad coefficient `a_B chi_B` of the slip operator at the cell, from the coefficient
+/// state `b_q` (the cell-centered field the operator is frozen on) and the cell gas state. the
+/// local drain rate lambda_rho = 1/tau_rho is the one the material drain reads: the fast-
+/// magnetosonic cell-crossing rate on the cell's own local Alfven term |B|^2/rho lifted by free
+/// fall, on the gas sound speed from the predicted midpoint gas internal energy density e_g* staged
+/// in `slip_ge` (cs^2 = gamma(gamma-1) e_g*/rho), so the drain clock tracks the substep-midpoint gas
+/// state without consulting the endpoint-reconciled total energy. the shell mask chi_B reads the
+/// physical distance from the cell center to the body surface, and
+/// a_B = ell_B^2 / ((|B|^2 + B_0^2) D_B tau_rho) with ell_B = slip_length_ratio w.
+fn slip_dyad_coefficient_gv<'t>(
+    cx: TraceCx<'t>,
+    coords: Coords,
+    ndim: usize,
+    axes: &[usize],
+    b_q: &[Gv<'t>],
+) -> Gv<'t> {
+    let gamma = cx.scalar("gamma");
+    let den = cx.field("den", symbi_ir::FieldRef::cons_den());
+    let b_sq = b_q.iter().fold(Gv::ZERO, |s, b| s + *b * *b);
+    let e_g = crate::gv::ct_field(cx, CtCellCt::SlipGasEnergy);
+    let cs = (gamma * (gamma - Gv::ONE) * e_g / den).sqrt();
+    let c_drain = cx.scalar("c_drain");
+    let mut min_w = gv_axis_width(cx, 0, Spacing::Uniform);
+    for ax in 1..ndim {
+        min_w = min_w.min(gv_axis_width(cx, ax, Spacing::Uniform));
+    }
+    let inv_cd_dx = Gv::ONE / (c_drain * min_w);
+    let lambda_rho = symbi_ib::drain::local_drain_rate(
+        cs,
+        b_sq,
+        den,
+        inv_cd_dx,
+        cx.scalar("body_0_mass"),
+        cx.scalar("body_0_racc"),
+    );
+
+    let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
+    // the body position carries one scalar per gridded axis; an ungridded slot sits at zero for
+    // both the center and the cell, so the mask distance of a 2.5D run is the in-plane distance:
+    // the removal region is a cylinder along the missing axis.
+    let center: [Gv; 3] = std::array::from_fn(|a| {
+        if a < ndim {
+            cx.scalar(&format!("body_0_pos_{a}"))
+        } else {
+            Gv::ZERO
+        }
+    });
+    let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
+    let x: [Gv; 3] = std::array::from_fn(|a| if a < x_cart.len() { x_cart[a] } else { Gv::ZERO });
+    let phi = body_mask_sdf(cx, center).dist(x);
+    let w = cx.scalar("slip_w");
+    let placement = cx.scalar("slip_placement");
+    let chi_b = symbi_ib::magnetic_slip::chi_shell(phi, w, placement);
+    tag_body_mask(cx, &chi_b, coords, ndim, axes, None, false);
+
+    let ell_b = cx.scalar("slip_ell_ratio") * w;
+    let a_b = symbi_ib::magnetic_slip::slip_coefficient(
+        ell_b,
+        b_sq,
+        cx.scalar("slip_b0"),
+        cx.scalar("slip_d_b"),
+        Gv::ONE / lambda_rho,
+    );
+    a_b * chi_b
+}
+
+/// the 2.5D slip cell pass (cartesian x-y grid, three vector components). the operand lives on the
+/// mixed complex F_x + F_y + C_z: the in-plane components on staggered faces, the out-of-plane
+/// `B_z` at cell centers (`slip_bz`). its current at the cell is
+///   R B = (D_y B_z, -D_x B_z, G_z(B_x, B_y)),
+/// with D_x, D_y central differences of the cell `B_z` and G_z the 1/4-weighted gather of the four
+/// corner z-edge currents (backward face differences), so the dissipative operator R* A R closes on
+/// the face-plus-cell inner product with R* the exact transpose. the dyad coefficient is frozen on
+/// the cell field `bc_c` (the interpolated in-plane components and the coefficient state's `B_z`),
+/// which coincides with the operand for the explicit operator. writes F_q = a_B chi_B (|B|^2 I - B B) R B.
+pub fn body_slip_quadrature_2d_gv(coords: Coords) -> KernelProgram {
+    let ndim = 2usize;
+    let axes: &[usize] = &[0, 1];
+    let (kernel, writes) = trace(|cx| {
+        let b_q: Vec<Gv> = (0..3)
+            .map(|c| cx.field(&format!("bc_{c}"), symbi_ir::FieldRef::BCell(c as u8)))
+            .collect();
+        let inv_dx: Vec<Gv> = (0..2)
+            .map(|a| Gv::ONE / cx.scalar(&format!("dx_{a}")))
+            .collect();
+        let half = Gv::from_f64(0.5);
+        let bz = |off: &[i32]| crate::gv::gv_field_at(cx, "slip_bz", CtCellCt::SlipOperandBz, 2, off);
+        let bface = |c: usize, off: &[i32]| {
+            crate::gv::gv_field_at(cx, &format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c)), 2, off)
+        };
+        let j_x = (bz(&[0, 1]) - bz(&[0, -1])) * half * inv_dx[1];
+        let j_y = Gv::ZERO - (bz(&[1, 0]) - bz(&[-1, 0])) * half * inv_dx[0];
+        let curl_at = |eoff: [i32; 2]| -> Gv {
+            let mx = [eoff[0] - 1, eoff[1]];
+            let my = [eoff[0], eoff[1] - 1];
+            (bface(1, &eoff) - bface(1, &mx)) * inv_dx[0] - (bface(0, &eoff) - bface(0, &my)) * inv_dx[1]
+        };
+        let j_z = (curl_at([0, 0]) + curl_at([1, 0]) + curl_at([0, 1]) + curl_at([1, 1]))
+            * Gv::from_f64(0.25);
+
+        let coeff = slip_dyad_coefficient_gv(cx, coords, ndim, axes, &b_q);
+        let b_vec = Tensor::new([b_q[0], b_q[1], b_q[2]]);
+        let j_vec = Tensor::new([j_x, j_y, j_z]);
+        let f_q = symbi_ib::magnetic_slip::slip_apply(coeff, &b_vec, &j_vec);
+        (0..3)
+            .map(|c| {
+                KernelWrite::new(
+                    format!("fq_{c}_new"),
+                    CtCellCt::SlipQuadrature(PhysComp::new(c)),
+                    f_q[c].node(),
+                )
+            })
+            .collect::<Vec<_>>()
+    });
+    let kernel = kernel.with_derived_support(&writes);
+    KernelProgram::new(kernel, writes)
+}
+
+/// the 2.5D slip edge pass: scatter the out-of-plane quadrature component to the corner z-edge EMF,
+/// `efield += (R^* F)_z`, reading `fq_2` at the four cells sharing the corner (backward offsets,
+/// weight 1/4): the exact transpose of the cell pass's corner gather. the shared CT curl then
+/// consumes the augmented EMF, so the in-plane transport is div-B-clean.
+pub fn body_slip_emf_2d_gv() -> KernelProgram {
+    let (kernel, writes) = trace(|cx| {
+        let emf = crate::gv::ct_field(cx, CtEdgeCt::Emf);
+        let fq = |off: &[i32]| {
+            crate::gv::gv_field_at(cx, "fq_2", CtCellCt::SlipQuadrature(PhysComp::new(2)), 2, off)
+        };
+        let scattered = (fq(&[0, 0]) + fq(&[-1, 0]) + fq(&[0, -1]) + fq(&[-1, -1])) * Gv::from_f64(0.25);
+        let emf_new = emf + scattered;
+        vec![KernelWrite::new("emf_new", CtEdgeCt::Emf, emf_new.node())]
+    });
+    let kernel = kernel.with_derived_support(&writes);
+    KernelProgram::new(kernel, writes)
+}
+
+/// the 2.5D slip out-of-plane update, `B_z -= dt (D_x F_y - D_y F_x)`: the transpose of the cell
+/// current gather `(D_y B_z, -D_x B_z)` applied to the in-plane quadrature components, in flux form
+/// (the central difference is the divergence of the face-averaged flux `(F_y, -F_x)`, so the update
+/// telescopes). in place on the operand's `B_z` slot.
+pub fn body_slip_bz_2d_gv() -> KernelProgram {
+    let (kernel, writes) = trace(|cx| {
+        let dt = cx.scalar("dt");
+        let inv_dx: Vec<Gv> = (0..2)
+            .map(|a| Gv::ONE / cx.scalar(&format!("dx_{a}")))
+            .collect();
+        let half = Gv::from_f64(0.5);
+        let bz = crate::gv::ct_field(cx, CtCellCt::SlipOperandBz);
+        let fq = |c: usize, off: &[i32]| {
+            crate::gv::gv_field_at(cx, &format!("fq_{c}"), CtCellCt::SlipQuadrature(PhysComp::new(c)), 2, off)
+        };
+        let dx_fy = (fq(1, &[1, 0]) - fq(1, &[-1, 0])) * half * inv_dx[0];
+        let dy_fx = (fq(0, &[0, 1]) - fq(0, &[0, -1])) * half * inv_dx[1];
+        let bz_new = bz - dt * (dx_fy - dy_fx);
+        vec![KernelWrite::new("bz_new", CtCellCt::SlipOperandBz, bz_new.node())]
+    });
+    let kernel = kernel.with_derived_support(&writes);
+    KernelProgram::new(kernel, writes)
+}
+
 pub fn body_slip_quadrature_3d_gv(coords: Coords) -> KernelProgram {
     let ndim = 3usize;
     let axes: &[usize] = &[0, 1, 2];
@@ -693,57 +853,7 @@ pub fn body_slip_quadrature_3d_gv(coords: Coords) -> KernelProgram {
 
         let j_q = gathered_current_gv(cx, &inv_dx);
 
-        // the local drain rate lambda_rho = 1/tau_rho the material drain reads: the fast-magnetosonic
-        // cell-crossing rate on the cell's own local Alfven term |B|^2/rho lifted by free fall. the
-        // drain and this coefficient share `local_drain_rate` on the gas sound speed, so tau_rho is one
-        // clock for both.
-        let gamma = cx.scalar("gamma");
-        let den = cx.field("den", symbi_ir::FieldRef::cons_den());
-        let b_sq = b_q.iter().fold(Gv::ZERO, |s, b| s + *b * *b);
-        // the gas sound speed reads the frozen predicted midpoint gas internal energy density e_g* the
-        // solve stages in `slip_ge` (cs^2 = gamma(gamma-1) e_g*/rho). e_g* = e_g^0 + (dt/2) qdot^0 is the
-        // predicted dissipative heat, so the drain clock tracks the substep-midpoint gas state without
-        // consulting the endpoint-reconciled total energy.
-        let e_g = crate::gv::ct_field(cx, CtCellCt::SlipGasEnergy);
-        let cs = (gamma * (gamma - Gv::ONE) * e_g / den).sqrt();
-        let c_drain = cx.scalar("c_drain");
-        let mut min_w = gv_axis_width(cx, 0, Spacing::Uniform);
-        for ax in 1..3 {
-            min_w = min_w.min(gv_axis_width(cx, ax, Spacing::Uniform));
-        }
-        let inv_cd_dx = Gv::ONE / (c_drain * min_w);
-        let lambda_rho = symbi_ib::drain::local_drain_rate(
-            cs,
-            b_sq,
-            den,
-            inv_cd_dx,
-            cx.scalar("body_0_mass"),
-            cx.scalar("body_0_racc"),
-        );
-
-        // the shell mask chi_B at the cell center: phi is the physical distance to the body surface.
-        let geo = cell_geometry_gv(cx, coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
-        let center: [Gv; 3] = std::array::from_fn(|a| cx.scalar(&format!("body_0_pos_{a}")));
-        let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-        let x: [Gv; 3] = std::array::from_fn(|a| x_cart[a]);
-        let phi = body_mask_sdf(cx, center).dist(x);
-        let w = cx.scalar("slip_w");
-        let placement = cx.scalar("slip_placement");
-        let chi_b = symbi_ib::magnetic_slip::chi_shell(phi, w, placement);
-        tag_body_mask(cx, &chi_b, coords, ndim, axes, None, false);
-
-        // a_B = ell_B^2 / ((|B|^2 + B_0^2) D_B tau_rho), ell_B = slip_length_ratio w, tau_rho =
-        // 1/lambda_rho. the frozen dyad coefficient is a_B chi_B.
-        let ell_b = cx.scalar("slip_ell_ratio") * w;
-        let a_b = symbi_ib::magnetic_slip::slip_coefficient(
-            ell_b,
-            b_sq,
-            cx.scalar("slip_b0"),
-            cx.scalar("slip_d_b"),
-            Gv::ONE / lambda_rho,
-        );
-
-        let coeff = a_b * chi_b;
+        let coeff = slip_dyad_coefficient_gv(cx, coords, ndim, axes, &b_q);
         let b_vec = Tensor::new([b_q[0], b_q[1], b_q[2]]);
         let j_vec = Tensor::new([j_q[0], j_q[1], j_q[2]]);
         let f_q = symbi_ib::magnetic_slip::slip_apply(coeff, &b_vec, &j_vec);

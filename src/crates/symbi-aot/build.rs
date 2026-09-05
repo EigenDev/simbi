@@ -1432,6 +1432,14 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
     // the per-cell quadrature vector F_q = A(B_q)(R J)_q into the slip-quadrature scratch; the three
     // edge passes scatter it to the oriented edge EMF with the weighted-adjoint R^*, so the tensor
     // slip transport rides the shared CT curl div-B-clean.
+    // the 2.5D slip operator on the mixed face-plus-cell complex: the cell pass with the
+    // (D_y B_z, -D_x B_z, G_z) current, the corner z-edge scatter, and the B_z flux update.
+    let program = symbi_discretize::body_slip_quadrature_2d_gv(Coords::Cartesian);
+    emit_gv(out_dir, "body_slip_quadrature_2d", 2, &program);
+    let program = symbi_discretize::body_slip_emf_2d_gv();
+    emit_gv(out_dir, "body_slip_emf_2d", 2, &program);
+    let program = symbi_discretize::body_slip_bz_2d_gv();
+    emit_gv(out_dir, "body_slip_bz_2d", 2, &program);
     let program = symbi_discretize::body_slip_quadrature_3d_gv(Coords::Cartesian);
     emit_gv(out_dir, "body_slip_quadrature_3d", 3, &program);
     // the implicit slip solve's cell passes: the entering gas energy of the predictor, the

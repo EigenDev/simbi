@@ -1801,6 +1801,164 @@ pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
+/// the 2.5D magnetic-slip operator on the mixed complex F_x + F_y + C_z, for the slip body of a
+/// cartesian x-y run with three vector components. the cell pass forms F_q = A(B_q) R B with the
+/// current gathered from the production faces and from `bz_operand` (the operand's cell `B_z`), the
+/// edge pass scatters F_q,z to the corner z-edge EMF the CT curl consumes, and the out-of-plane
+/// pass advances `bz_out` by `-dt (D_x F_y - D_y F_x)`. `bz_out` holds the operand's `B_z` on
+/// entry; the explicit operator binds both to the production cell field, and the frozen operator
+/// on a Krylov iterate binds workspace vectors. the coefficient is frozen on production `bcell`.
+pub fn body_slip_emf_2p5d<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    gamma: f64,
+    dt: f64,
+    bz_operand: &Field<Sc, D, Mem>,
+    bz_out: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_ir::{FieldRef, ScalarBind, StateComp, StateSlot};
+    let Some(im) = sim.immersed.as_ref() else {
+        return;
+    };
+    let bodies = &im.bodies;
+    for b in 0..bodies.len() {
+        let symbi_ib::MagneticSpec::Slip {
+            diffusivity_ratio,
+            shell_width,
+            slip_length_ratio,
+            field_regularization,
+            placement,
+        } = bodies.get(b).spec.magnetic
+        else {
+            continue;
+        };
+        assert!(
+            sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 2 && DOF == 3,
+            "the 2.5D magnetic slip is a cartesian x-y operator with three vector components; the \
+             {:?} chart in {D}D with DOF {DOF} has no such operator",
+            sim.geom.coords
+        );
+        assert!(
+            sim.fields.cons.nrg_field().is_some(),
+            "MagneticSpec::Slip needs the adiabatic energy channel to receive its heating"
+        );
+        let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+        let slip_q = mhd
+            .slip_quadrature
+            .as_ref()
+            .expect("slip-quadrature scratch (allocated at attach_bodies for a slip body)");
+        let ws = mhd
+            .magnetic_slip
+            .as_ref()
+            .expect("magnetic-slip workspace (allocated at attach_bodies for a slip body)");
+        let resolve = |bind: &ScalarBind| -> Sc {
+            Sc::from_f64(match bind {
+                ScalarBind::Spec(s) if &**s == "c_drain" => 1.0,
+                ScalarBind::Spec(s) if &**s == "slip_w" => shell_width,
+                ScalarBind::Spec(s) if &**s == "slip_placement" => placement,
+                ScalarBind::Spec(s) if &**s == "slip_ell_ratio" => slip_length_ratio,
+                ScalarBind::Spec(s) if &**s == "slip_b0" => field_regularization,
+                ScalarBind::Spec(s) if &**s == "slip_d_b" => diffusivity_ratio,
+                ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => gamma,
+                ScalarBind::Ref(ScalarRef::Dt) => dt,
+                ScalarBind::Ref(ScalarRef::Body { idx: 0, field }) => {
+                    body_scalar::<D>(Some(bodies), b as u8, *field)
+                }
+                ScalarBind::Ref(other) => {
+                    geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+                        .unwrap_or_else(|| panic!("body_slip_emf_2p5d: unexpected scalar {other:?}"))
+                }
+                o => panic!("body_slip_emf_2p5d: unexpected scalar {o:?}"),
+            })
+        };
+
+        // cell pass: F_q over the interior, the current from the faces and the operand's B_z.
+        let cell_name = "body_slip_quadrature_2d";
+        let cell_scalars = scalars_for(cell_name, &resolve);
+        let cell_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
+            match ct_role(bind) {
+                Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
+                Some(CtScratch::Cell(CtCellCt::SlipGasEnergy)) => &ws.gas_energy,
+                Some(CtScratch::Cell(CtCellCt::SlipOperandBz)) => bz_operand,
+                Some(CtScratch::Face(CtFaceCt::BFaceComp(c))) => &mhd.bface[c.index()],
+                _ => match bind {
+                    FieldBind::Ref(FieldRef::BCell(c)) => &mhd.bcell[*c as usize],
+                    FieldBind::Ref(FieldRef::State {
+                        slot: StateSlot::Cons,
+                        comp,
+                    }) => match comp {
+                        StateComp::Den => &sim.fields.cons.den,
+                        StateComp::Mom(k) => &sim.fields.cons.mom[*k as usize],
+                        StateComp::Nrg => sim.fields.cons.nrg_field().expect("adiabatic nrg"),
+                        o => panic!("body_slip_emf_2p5d cell: unexpected cons component {o:?}"),
+                    },
+                    o => panic!("body_slip_emf_2p5d cell: unknown manifest slot '{}'", o.name()),
+                },
+            }
+        };
+        let (inputs, outputs) = bind_by_manifest(cell_name, cell_slot);
+        dispatch_fields_each::<Sc, Mem, D>(
+            cell_name,
+            &sim.geom.interior,
+            &inputs,
+            &outputs,
+            &[],
+            &cell_scalars,
+        );
+
+        // the quadrature halo, so the corner scatter and the central differences read the wrapped
+        // or boundary image and both transposes close across the domain seam.
+        let bc = crate::kernels::support::to_bc_array_scalar::<D>(&sim.boundaries);
+        for c in 0..3 {
+            flag_ghost_fill::<D, DOF, Mem, Sc>(sim, &slip_q[c], bc);
+        }
+
+        // edge pass: the corner z-edge EMF the 2D CT curl consumes.
+        let edge = CtEdgeMap::<D>::grid_ordered(&sim.geom.axes)
+            .unwrap_or_else(|e| panic!("body_slip_emf_2p5d: {e}"));
+        let edge_name = "body_slip_emf_2d";
+        let edge_scalars = scalars_for(edge_name, &resolve);
+        let edge_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
+            match ct_role(bind) {
+                Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
+                Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
+                _ => panic!("body_slip_emf_2p5d edge: unknown manifest slot '{}'", bind.name()),
+            }
+        };
+        let (inputs, outputs) = bind_by_manifest(edge_name, edge_slot);
+        dispatch_fields_each::<Sc, Mem, D>(
+            edge_name,
+            mhd.efield[edge.slot].domain(),
+            &inputs,
+            &outputs,
+            &[],
+            &edge_scalars,
+        );
+
+        // out-of-plane pass: B_z -= dt (D_x F_y - D_y F_x) on the operand slot.
+        let bz_name = "body_slip_bz_2d";
+        let bz_scalars = scalars_for(bz_name, &resolve);
+        let bz_slot = |bind: &FieldBind| -> &Field<Sc, D, Mem> {
+            match ct_role(bind) {
+                Some(CtScratch::Cell(CtCellCt::SlipOperandBz)) => bz_out,
+                Some(CtScratch::Cell(CtCellCt::SlipQuadrature(c))) => &slip_q[c.index()],
+                _ => panic!("body_slip_emf_2p5d bz: unknown manifest slot '{}'", bind.name()),
+            }
+        };
+        let (inputs, outputs) = bind_by_manifest(bz_name, bz_slot);
+        dispatch_fields_each::<Sc, Mem, D>(
+            bz_name,
+            &sim.geom.interior,
+            &inputs,
+            &outputs,
+            &[],
+            &bz_scalars,
+        );
+    }
+}
+
 // =============================================================================
 // the implicit magnetic-slip midpoint solve (transactional, host, 3D cartesian periodic).
 // =============================================================================
