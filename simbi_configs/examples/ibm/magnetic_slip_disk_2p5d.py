@@ -22,10 +22,18 @@
 # vertically invariant plane with cylindrical sink regions, the reduced form a
 # circumbinary calculation builds on.
 #
-# the edge EMF is the UCT scheme with the HLLD solver. the default Contact EMF
+# the ideal-MHD transport is the UCT edge EMF with the two-wave HLLE solver, a
+# choice made for regularity rather than sharpness. the default Contact EMF
 # upwinds its corner terms by the sign of the mass flux, which switches wherever
 # that flux crosses zero and holds the in-plane field at first order in time on
-# flows with such crossings; UCT carries no such switch.
+# flows with such crossings. under UCT the choice of solver still matters once a
+# vertical field is present: HLLD's fan has degenerate branches where the normal
+# field crosses zero under a rotated tangential field, and on a shear flow with
+# vertical flux its in-plane convergence is irregular; that regime is exactly
+# this model's. UCT with HLLE carries neither switch and reads second order in
+# every field on that fixture, at the cost of more diffusion. HLLD remains
+# available through --solver hlld as an opt-in sharp solver until its B_n -> 0
+# branch is regularized and gated on its own.
 #
 # parameters (code units, magnetic energy |B|^2 / 2):
 #   diffusivity_ratio    D_B > 0: tau_B / tau_rho.
@@ -39,6 +47,7 @@
 #  simbi run magnetic_slip_disk_2p5d.py
 #  simbi run magnetic_slip_disk_2p5d.py --beta 10 --diffusivity-ratio 4
 #  simbi run magnetic_slip_disk_2p5d.py --resolution 256,256,1
+#  simbi run magnetic_slip_disk_2p5d.py --solver hlld        # sharper, see the caveat above
 # =============================================================================
 import math
 from dataclasses import replace
@@ -129,7 +138,10 @@ class MagneticSlipDisk2p5d(SimbiProblem):
         CoordSystem, ProblemParam(CoordSystem.CARTESIAN, description="coordinate system")
     ]
     regime: Annotated[Regime, ProblemParam(Regime.NMHD, description="physics regime")]
-    solver: Annotated[Solver, ProblemParam(Solver.HLLD, description="riemann solver")]
+    solver: Annotated[
+        Solver,
+        ProblemParam(Solver.HLLE, description="riemann solver (hlle for regularity; hlld opt-in)"),
+    ]
     ct_method: Annotated[
         CtMethod, ProblemParam(CtMethod.UCT, description="constrained-transport edge EMF")
     ]

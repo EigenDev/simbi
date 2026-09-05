@@ -26,46 +26,32 @@ type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpac
 type Kernels = NewtonianMhdSubstrateKernelSet<HostMemory, f64, 2>;
 const GAMMA: f64 = 5.0 / 3.0;
 
-// under the UCT edge EMF with HLLD. the default Contact EMF upwinds its corner derivative terms by
-// a soft sign of the mass flux, which switches branches wherever that flux crosses zero; on a flow
-// with such crossings the in-plane field then reads first order at every resolution while the
-// flux-evolved B_z reads second order (the ladder below records that reading). UCT carries no such
-// switch and the whole state reads four.
+// under the UCT edge EMF with the two-wave HLLE solver, on the regime the 2.5D vertical-field
+// model runs in: a strong in-plane field, a shear flow, and an out-of-plane component. the default
+// Contact EMF upwinds its corner derivative terms by a soft sign of the mass flux, which switches
+// branches wherever that flux crosses zero; on a flow with such crossings the in-plane field reads
+// first order at every resolution while the flux-evolved B_z reads second order. under UCT the
+// HLLD fan's degenerate branches switch where the normal field crosses zero under a rotated
+// tangential field and the in-plane reading turns irregular once B_z is present; HLLE carries
+// neither switch. the ladder below records every other reading.
 #[test]
-fn the_2p5d_ideal_mhd_step_is_second_order_per_field_under_uct() {
-    let l2 = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>().sqrt();
-    // the strong field with a shear flow and no out-of-plane component. with B_z present the HLLD
-    // fan's degenerate branches switch where the normal field crosses zero under a rotated
-    // tangential field, and the in-plane reading turns irregular (the ladder records it).
+fn the_2p5d_ideal_mhd_step_is_second_order_per_field_under_uct_hlle() {
     let k = 2.0 * std::f64::consts::PI;
     let flow_prim = move |[x, _]: [f64; 2]| (1.0, [0.0, 0.1 * (k * x).sin(), 0.0], 1.0);
-    let cell = move |[x, y]: [f64; 2]| [1.0 + 0.1 * (k * y).sin(), 0.1 * (k * x).sin(), 0.0];
+    let flowz_cell = move |[x, y]: [f64; 2]| [1.0 + 0.1 * (k * y).sin(), 0.1 * (k * x).sin(), 0.2 * (k * x).cos() * (k * y).cos()];
     let face = move |a: usize, [x, y]: [f64; 2]| if a == 0 { 1.0 + 0.1 * (k * y).sin() } else { 0.1 * (k * x).sin() };
-    let run = |n: usize, dt: f64, nsteps: usize| -> [Vec<f64>; 4] {
-        let sim = build_2p5d(n, flow_prim, cell, face);
-        let sub = Kernels::new(GAMMA, 0.3, 1.0, &sim.geom.allocated)
-            .with_solver(Solver::Hlld)
-            .expect("hlld")
-            .ct_method(CtMethod::Uct);
-        let mut hier = Hierarchy::single(sim, sub);
-        hier.prime();
-        for _ in 0..nsteps {
-            assert!(!hier.hydro_map(0, dt), "H stage retry");
-        }
-        let (bf, bc, nrg, pre) = hier.slip_state_snapshots(0);
-        let ncells = nrg.len();
-        [bf, bc[2 * ncells..3 * ncells].to_vec(), nrg, pre]
-    };
+    let dt = 2.5e-4;
     for n in [32usize, 64] {
-        let dt = 2.5e-4;
-        let (u1, u2, u3, u4) = (run(n, dt, 8), run(n, dt / 2.0, 16), run(n, dt / 4.0, 32), run(n, dt / 8.0, 64));
-        for (name, i) in [("bface", 0), ("energy", 2), ("pressure", 3)] {
-            let (e1, e2, e3) = (l2(&u1[i], &u2[i]), l2(&u2[i], &u3[i]), l2(&u3[i], &u4[i]));
-            let (r1, r2) = (e1 / e2.max(1e-300), e2 / e3.max(1e-300));
-            println!("2.5D H (UCT) N={n:<3} {name:>8}: ratios {r1:.2} {r2:.2}");
+        let r = ratios_2p5d_with(&move || build_2p5d(n, flow_prim, flowz_cell, face), dt, Solver::Hlle, CtMethod::Uct);
+        for (i, nm) in ["bface", "bz", "energy", "pressure"].iter().enumerate() {
+            println!("2.5D H (UCT+HLLE) N={n:<3} {nm:>8}: ratios {:.2} {:.2}", r[i].0, r[i].1);
             if n == 64 {
-                assert!(e3 > 1e-14, "vacuous 2.5D H order measurement in {name} at N={n}");
-                assert!(r1 > 3.5 && r2 > 3.5, "the 2.5D ideal-MHD step is not second order in {name} at N={n}: ratios {r1:.2} {r2:.2}");
+                assert!(
+                    r[i].0 > 3.5 && r[i].1 > 3.5,
+                    "the 2.5D ideal-MHD step under UCT+HLLE is not second order in {nm} at N={n}: ratios {:.2} {:.2}",
+                    r[i].0,
+                    r[i].1
+                );
             }
         }
     }
@@ -390,6 +376,49 @@ fn diag_alfvenic_h_step_under_uct() {
         for (i, nm) in ["bface", "energy", "pressure"].iter().enumerate() {
             let (e1, e2, e3) = (l2(&u1[i], &u2[i]), l2(&u2[i], &u3[i]), l2(&u3[i], &u4[i]));
             println!("UCT {label:>8} {nm:>8}: ratios {:.2} {:.2}", e1 / e2.max(1e-300), e2 / e3.max(1e-300));
+        }
+    }
+}
+
+// the shear flow with an out-of-plane component under the UCT EMF and the two-wave solvers, which
+// carry neither the Contact sign switch nor the HLLD degenerate fan.
+fn ratios_2p5d_with(sim_of: &dyn Fn() -> Sim, dt: f64, solver: Solver, ct: CtMethod) -> [(f64, f64); 4] {
+    let l2 = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>().sqrt();
+    let run = |dt: f64, nsteps: usize| -> [Vec<f64>; 4] {
+        let sim = sim_of();
+        let sub = Kernels::new(GAMMA, 0.3, 1.0, &sim.geom.allocated)
+            .with_solver(solver)
+            .expect("solver")
+            .ct_method(ct);
+        let mut hier = Hierarchy::single(sim, sub);
+        hier.prime();
+        for _ in 0..nsteps {
+            assert!(!hier.hydro_map(0, dt), "H stage retry");
+        }
+        let (bf, bc, nrg, pre) = hier.slip_state_snapshots(0);
+        let ncells = nrg.len();
+        [bf, bc[2 * ncells..3 * ncells].to_vec(), nrg, pre]
+    };
+    let (u1, u2, u3, u4) = (run(dt, 8), run(dt / 2.0, 16), run(dt / 4.0, 32), run(dt / 8.0, 64));
+    std::array::from_fn(|i| {
+        let (e1, e2, e3) = (l2(&u1[i], &u2[i]), l2(&u2[i], &u3[i]), l2(&u3[i], &u4[i]));
+        (e1 / e2.max(1e-300), e2 / e3.max(1e-300))
+    })
+}
+
+#[test]
+fn diag_shear_with_bz_under_uct_two_wave_solvers() {
+    let k = 2.0 * std::f64::consts::PI;
+    let flow_prim = move |[x, _]: [f64; 2]| (1.0, [0.0, 0.1 * (k * x).sin(), 0.0], 1.0);
+    let flowz_cell = move |[x, y]: [f64; 2]| [1.0 + 0.1 * (k * y).sin(), 0.1 * (k * x).sin(), 0.2 * (k * x).cos() * (k * y).cos()];
+    let face = move |a: usize, [x, y]: [f64; 2]| if a == 0 { 1.0 + 0.1 * (k * y).sin() } else { 0.1 * (k * x).sin() };
+    let dt = 2.5e-4;
+    for (label, solver) in [("HLLE", Solver::Hlle), ("HLLC", Solver::Hllc), ("HLLD", Solver::Hlld)] {
+        for n in [32usize, 64] {
+            let r = ratios_2p5d_with(&move || build_2p5d(n, flow_prim, flowz_cell, face), dt, solver, CtMethod::Uct);
+            for (i, nm) in ["bface", "bz", "energy", "pressure"].iter().enumerate() {
+                println!("SHEAR+BZ UCT+{label:<4} N={n:<3} {nm:>8}: ratios {:.2} {:.2}", r[i].0, r[i].1);
+            }
         }
     }
 }

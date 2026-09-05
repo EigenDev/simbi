@@ -86,15 +86,17 @@ fn build(n: usize, magnetic: MagneticSpec) -> Sim {
     )
 }
 
-// the ideal-MHD step runs under the UCT edge EMF with HLLD: the Contact EMF's mass-flux soft-sign
-// upwinding switches branches where the mass flux changes sign, which holds the in-plane field at
-// first order in time on any flow with such a crossing, so a temporal-order gate on the coupled
-// step reads the CT method rather than the splitting unless the EMF is itself second order.
+// the ideal-MHD step runs under the UCT edge EMF with the two-wave HLLE solver, the transport the
+// 2.5D vertical-field model uses: the Contact EMF's mass-flux soft-sign upwinding holds the
+// in-plane field at first order in time on any flow whose mass flux changes sign, and the HLLD fan
+// switches branches where the normal field crosses zero under a vertical component, so a
+// temporal-order gate on the coupled step reads the transport rather than the splitting unless the
+// transport is itself second order on this regime.
 fn primed(n: usize, magnetic: MagneticSpec) -> Hierarchy<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kernels> {
     let sim = build(n, magnetic);
     let sub = Kernels::new(GAMMA, 0.3, 1.0, &sim.geom.allocated)
-        .with_solver(Solver::Hlld)
-        .expect("hlld")
+        .with_solver(Solver::Hlle)
+        .expect("hlle")
         .ct_method(CtMethod::Uct);
     let mut hier = Hierarchy::single(sim, sub);
     hier.prime();
