@@ -353,7 +353,7 @@ fn validate_magnetic_slip_bodies(
 }
 
 /// immersed bodies on a refined staggered-field hierarchy: adiabatic Newtonian MHD or isothermal
-/// MHD on a 3D cartesian grid, every body a drain (transparent, resistive, or magnetic-slip coupling) with
+/// MHD on a 3D or 2.5D cartesian grid, every body a drain (transparent, resistive, or magnetic-slip coupling) with
 /// no rigid surface. the hierarchy itself checks that each sink's operator support lies inside
 /// the finest level once the grid exists.
 fn validate_refined_mhd_bodies(
@@ -372,10 +372,10 @@ fn validate_refined_mhd_bodies(
              (locally_isothermal {locally_isothermal})"
         ));
     }
-    if dims != 3 || coord_system != "cartesian" {
+    if !(dims == 3 || dims == 2) || coord_system != "cartesian" {
         return Err(format!(
-            "immersed bodies with refinement in MHD run on a 3D cartesian grid; this run is {dims}D \
-             {coord_system}"
+            "immersed bodies with refinement in MHD run on a 3D or 2.5D cartesian grid; this run is \
+             {dims}D {coord_system}"
         ));
     }
     for (idx, b) in bodies.iter().enumerate() {
@@ -7897,9 +7897,9 @@ fn dispatch_and_run(
     // refused below need fine-level prolongation the transfer set does not carry:
     if cfg.refinement_enabled
         && cfg.regime.contains("mhd")
-        && !(cfg.dims == 3 && cfg.coord_system == "cartesian")
+        && !((cfg.dims == 3 || cfg.dims == 2) && cfg.coord_system == "cartesian")
     {
-        return Err("mhd refinement requires a 3d cartesian grid (the CT \
+        return Err("mhd refinement requires a 3d or 2.5d cartesian grid (the CT \
                     reflux assumes 1/dx curl coefficients)"
             .to_string());
     }
@@ -7916,7 +7916,7 @@ fn dispatch_and_run(
     }
     // immersed bodies + refinement: the finest-owns-bodies AMR sync (`hier.with_bodies` — full
     // bodies on the finest level, gravity-only proxy on coarser) is wired for every hydro regime
-    // and, for the staggered field, for adiabatic Newtonian MHD and isothermal MHD on a 3D
+    // and, for the staggered field, for adiabatic Newtonian MHD and isothermal MHD on a 3D or 2.5D
     // cartesian grid with draining bodies (transparent, resistive, or magnetic-slip coupling). the finest level
     // owns the drain, the slip, and the receipts; the coarser levels carry gravity-only
     // proxies; the coupled root step is a transaction over every level. a rigid or shaped body

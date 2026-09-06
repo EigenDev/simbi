@@ -1283,8 +1283,8 @@ pub fn bface_cf_halo_slabs<const D: usize>(
 /// refine_prolong_face_gv).
 pub fn prolong_face_field<const D: usize, Mem: MemorySpace>(
     axis: usize,
-    old: &symbi_grid::Field<f64, D, Mem>,
-    new: &symbi_grid::Field<f64, D, Mem>,
+    old: &[symbi_grid::Field<f64, D, Mem>],
+    new: &[symbi_grid::Field<f64, D, Mem>],
     dst: &symbi_grid::Field<f64, D, Mem>,
     region: &Domain<D>,
     alpha: f64,
@@ -1294,7 +1294,16 @@ pub fn prolong_face_field<const D: usize, Mem: MemorySpace>(
         ndim: D as u8,
     }
     .name();
-    dispatch_fields_each::<f64, Mem, D>(name, region, &[old, new], &[dst], &[], &[alpha]);
+    // the normal component's time pair first, then each transverse component's, the kernel's
+    // read order; the transverse faces carry the divergence-closing cross slopes.
+    let mut inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = vec![&old[axis], &new[axis]];
+    for t in 0..D {
+        if t != axis {
+            inputs.push(&old[t]);
+            inputs.push(&new[t]);
+        }
+    }
+    dispatch_fields_each::<f64, Mem, D>(name, region, &inputs, &[dst], &[], &[alpha]);
 }
 
 /// restrict the staggered face field bface[axis] (area-weighted average of the

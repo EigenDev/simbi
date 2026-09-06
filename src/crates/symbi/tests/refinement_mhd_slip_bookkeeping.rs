@@ -554,3 +554,26 @@ fn a_prescribed_binary_of_slip_sinks_orbits_and_accretes_on_the_finest() {
     assert_covered_is_restriction(&hier, "binary");
 }
 
+
+// every level is divergence-free after the seed: the face prolongation closes each fine cell's
+// divergence whenever the parent's is closed.
+#[test]
+fn every_level_is_divergence_free_after_the_seed() {
+    let hier = build(BoundaryType::Periodic, [-0.375, 0.375], None);
+    for (ll, l) in hier.levels.iter().enumerate() {
+        let sim = &l.state;
+        let m = sim.fields.mhd.as_ref().unwrap();
+        let mut worst = 0.0f64;
+        for c in sim.geom.interior.iter() {
+            let mut div = 0.0;
+            for d in 0..3 {
+                let mut up = c;
+                up[d] += 1;
+                div += (*m.bface[d].at(up) - *m.bface[d].at(c)) / sim.geom.dx[d];
+            }
+            worst = worst.max(div.abs());
+        }
+        println!("[3D] level {ll} max|div B| after seed + prime: {worst:.3e}");
+        assert!(worst < 1e-12, "level {ll} is not divergence-free after the seed: {worst:.3e}");
+    }
+}

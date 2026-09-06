@@ -389,19 +389,41 @@ def test_refined_sink_support_must_lie_inside_the_finest_level() -> None:
         )
 
 
-@needs_backend
-def test_refined_mhd_bodies_are_admitted_on_a_3d_cartesian_grid_only() -> None:
-    directory = Path(tempfile.mkdtemp())
-    problem = MagneticSlipDisk2p5d(
-        resolution=(RES, RES, 1),
-        data_directory=directory,
+# -- the refined 2.5D disk -----------------------------------------------------------------
+# a 32^2 root refined once over the central seven eighths: 56 fine cells per side, the sink of
+# two fine cells with a one-cell shell inside the finest level's 28.
+def _refined_disk(cls, directory: Path, fraction: float = 0.875, **kw):
+    probe = cls(resolution=(REFINED_RES, REFINED_RES, 1), data_directory=directory, **kw)
+    probe.setup()
+    half = fraction * probe.domain_radius * probe.bondi_radius
+    return cls(
+        resolution=(REFINED_RES, REFINED_RES, 1),
+        r_acc_scale=2.0,
+        shell_cells=1.0,
         refinement_enabled=True,
         refinement_max_levels=2,
         refinement_ratios=[2],
-        refinement_regions=[[-0.25, 0.25, -0.25, 0.25]],
+        refinement_regions=[[-half, half, -half, half]],
+        data_directory=directory,
+        **kw,
     )
-    with pytest.raises(RuntimeError, match="3d cartesian"):
-        runner.run(problem, compute_mode="cpu", max_steps=1)
+
+
+@needs_backend
+def test_a_refined_2p5d_disk_runs_under_both_closures_with_the_finest_owning_the_sink() -> None:
+    for closure, heat_name in [("isothermal", "exported_slip_heat"), ("adiabatic", "magnetic_slip_heating")]:
+        directory = Path(tempfile.mkdtemp())
+        runner.run(_refined_disk(MagneticSlipDisk2p5d, directory, thermal_closure=closure), compute_mode="cpu", max_steps=12)
+        assert not glob.glob(os.path.join(directory, "*crashed*")), f"the refined 2.5D {closure} run crashed"
+        with h5py.File(_final(directory), "r") as h:
+            fine = h["level_1/partition_0/hydro/primitives"]
+            for nm in ("rho", "b3"):
+                assert np.all(np.isfinite(fine[nm][...])), f"{closure}: non-finite {nm} on the fine level"
+        heat = _body_dataset(directory, heat_name)
+        assert heat is not None and heat[0] > 0.0, f"{closure}: the finest sink released no heat"
+    with pytest.raises(RuntimeError, match="sink support sphere"):
+        runner.run(_refined_disk(MagneticSlipDisk2p5d, Path(tempfile.mkdtemp()), fraction=0.5), compute_mode="cpu", max_steps=1)
+
 
 
 @needs_backend

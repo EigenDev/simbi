@@ -88,7 +88,7 @@ pub use gv_penalize::{
 };
 pub use gv_refinement::{
     ProlongOrder, WB_BAND_CHAIN_MAX, WB_CF_CHAIN_MAX, band_energy_gv, field_axpy_shift_gv, field_lincomb_gv, field_product_gv,
-    field_copy_gv, field_fill_gv, field_lerp_multi_gv, refine_acc_edge_gv, refine_acc_face_gv,
+    field_copy_gv, field_fill_gv, field_lerp_multi_gv, refine_acc_edge_gv, refine_acc_face_gv, refine_acc_node_gv,
     refine_prolong_face_gv, refine_prolong_gv, refine_prolong_multi_1t_gv, refine_prolong_multi_gv,
     refine_prolong_sweep_multi_gv, refine_restrict_face_gv, refine_restrict_gv, wb_band_decode_gv,
     wb_band_encode_gv, wb_cf_decode_gv, wb_cf_lerp_encode_gv, wb_target_decode_gv,

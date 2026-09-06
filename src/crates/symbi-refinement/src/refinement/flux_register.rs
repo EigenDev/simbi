@@ -43,7 +43,7 @@ use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
 
 use symbi_ir::KernelId;
-use symbi_sim::state::{ConsFieldsGeneric, axis_name};
+use symbi_sim::state::{BcellFields, BfluxFields, ConsFieldsGeneric, axis_name};
 use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
 
 /// per coarse-fine interface accumulator. faces[2*ax + side] is the register
@@ -52,6 +52,10 @@ use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
 pub struct FluxRegister<const D: usize, const DOF: usize, Mem: MemorySpace> {
     faces: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6],
     domains: [Option<Domain<D>>; 6],
+    /// the out-of-plane magnetic components of a partially gridded chart (the cell-centered
+    /// B_z of a 2.5D grid), conserved by their induction-flux divergence and refluxed like the
+    /// gas: one register face field per component, `DOF - D` of them, magnetized runs only.
+    oop: [Option<Vec<Field<f64, D, Mem>>>; 6],
     /// sign-weighted running den totals of the coarse / fine accumulations
     /// (conservation-budget diagnostics: the pure-coarse outside-mass change
     /// must equal -debug_coarse_den, the fine interior change -debug_fine_den).
@@ -96,9 +100,11 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         coarse_interior: &Domain<D>,
         has_energy: bool,
         has_dye: bool,
+        n_oop: usize,
     ) -> symbi_xpu::Result<Self> {
         let mut faces: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6] = std::array::from_fn(|_| None);
         let mut domains: [Option<Domain<D>>; 6] = std::array::from_fn(|_| None);
+        let mut oop: [Option<Vec<Field<f64, D, Mem>>>; 6] = std::array::from_fn(|_| None);
 
         for ax in 0..D {
             for side in 0..2usize {
@@ -133,12 +139,20 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                     face.alloc_chi(&face_domain)?;
                 }
                 faces[2 * ax + side] = Some(face);
+                if n_oop > 0 {
+                    let mut v = Vec::with_capacity(n_oop);
+                    for _ in 0..n_oop {
+                        v.push(Field::zeros(&face_domain)?);
+                    }
+                    oop[2 * ax + side] = Some(v);
+                }
                 domains[2 * ax + side] = Some(face_domain);
             }
         }
         Ok(FluxRegister {
             faces,
             domains,
+            oop,
             debug_coarse_den: std::cell::Cell::new(0.0),
             debug_fine_den: std::cell::Cell::new(0.0),
         })
@@ -281,6 +295,13 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                 }
             }
         }
+        for (fields, dom) in self.oop.iter().zip(self.domains.iter()) {
+            if let (Some(fields), Some(dom)) = (fields, dom) {
+                for field in fields {
+                    dispatch_fields_each::<f64, Mem, D>(name, dom, &[], &[field], &[], &[0.0]);
+                }
+            }
+        }
     }
 
     /// `R -= F_coarse * A * w` with the constant cartesian face area
@@ -384,6 +405,92 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
     }
 }
 
+impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Mem> {
+    /// `R -= F_coarse * A * w` for the out-of-plane magnetic components' induction fluxes
+    /// through the register faces normal to `dir`, constant cartesian face area.
+    pub fn accumulate_coarse_uniform_oop(
+        &self,
+        bflux: &[BfluxFields<D, DOF, Mem>; D],
+        dx: &[f64; D],
+        dir: usize,
+        w: f64,
+    ) {
+        let area: f64 = (0..D).filter(|&t| t != dir).map(|t| dx[t]).product();
+        let name = KernelId::FieldAxpyShift { ndim: D as u8 }.name();
+        let ints = [0i32; 3];
+        let scalars = [-area * w];
+        for side in 0..2usize {
+            let idx = 2 * dir + side;
+            if let (Some(reg), Some(dom)) = (&self.oop[idx], &self.domains[idx]) {
+                for (k, rf) in reg.iter().enumerate() {
+                    dispatch_fields_each::<f64, Mem, D>(name, dom, &[&bflux[dir].f[D + k]], &[rf], &ints[..D], &scalars);
+                }
+            }
+        }
+    }
+
+    /// `R += sum(F_fine) * A_fine * w` for the out-of-plane magnetic components over the fine
+    /// faces covering each coarse register face.
+    pub fn accumulate_fine_uniform_oop(
+        &self,
+        fine_bflux: &[BfluxFields<D, DOF, Mem>; D],
+        fine_dx: &[f64; D],
+        dir: usize,
+        w: f64,
+    ) {
+        let area: f64 = (0..D).filter(|&t| t != dir).map(|t| fine_dx[t]).product();
+        let name = KernelId::RefineAccFace {
+            axis: dir as u8,
+            ndim: D as u8,
+        }
+        .name();
+        let scalars = [area * w];
+        for side in 0..2usize {
+            let idx = 2 * dir + side;
+            if let (Some(reg), Some(dom)) = (&self.oop[idx], &self.domains[idx]) {
+                for (k, rf) in reg.iter().enumerate() {
+                    dispatch_fields_each::<f64, Mem, D>(name, dom, &[&fine_bflux[dir].f[D + k]], &[rf], &[], &scalars);
+                }
+            }
+        }
+    }
+
+    /// apply the out-of-plane magnetic corrections to the coarse cell field abutting the
+    /// interface, the constant cartesian volume: lo faces correct the cell below, hi faces the
+    /// cell at the face, as `apply_uniform` does for the gas.
+    pub fn apply_uniform_oop(&self, bcell: &BcellFields<D, DOF, Mem>, dx: &[f64; D]) {
+        let inv_vol = 1.0 / dx.iter().product::<f64>();
+        let name = KernelId::FieldAxpyShift { ndim: D as u8 }.name();
+        for ax in 0..D {
+            for side in 0..2usize {
+                let idx = 2 * ax + side;
+                if let (Some(reg), Some(dom)) = (&self.oop[idx], &self.domains[idx]) {
+                    let (cell_dom, arg, sign) = if side == 0 {
+                        let spaces: [Space; D] = std::array::from_fn(|aa| {
+                            let s = &dom.spaces[aa];
+                            let shift = if aa == ax { 1 } else { 0 };
+                            Space {
+                                name: s.name,
+                                lo: s.lo - shift,
+                                hi: s.hi - shift,
+                            }
+                        });
+                        let mut ints = [0i32; 3];
+                        ints[ax] = 1;
+                        (Domain::new(spaces), ints, -1.0)
+                    } else {
+                        (dom.clone(), [0i32; 3], 1.0)
+                    };
+                    let scalars = [sign * inv_vol];
+                    for (k, rf) in reg.iter().enumerate() {
+                        dispatch_fields_each::<f64, Mem, D>(name, &cell_dom, &[rf], &[&bcell.b[D + k]], &arg[..D], &scalars);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// visit every transverse fine-face offset (`0..ratio` on each axis != dir,
 /// zero on `dir`): 1 face in 1d, `ratio` in 2d, `ratio^2` in 3d.
 fn for_each_transverse<const D: usize>(dir: usize, ratio: usize, mut f: impl FnMut(&[isize; D])) {
@@ -449,7 +556,7 @@ mod tests {
             lo: 3,
             hi: 7,
         }]);
-        let reg = FluxRegister::new(&coverage, &interior, true, false).unwrap();
+        let reg = FluxRegister::new(&coverage, &interior, true, false, 0).unwrap();
         let coarse_geo =
             BlockGeometry::uniform(Cartesian, [0.0], [0.1], std::array::from_fn(|d| d));
         let fine_geo = BlockGeometry::uniform(Cartesian, [0.0], [0.05], std::array::from_fn(|d| d));
@@ -475,7 +582,7 @@ mod tests {
             hi: 5,
         }]);
         let touching =
-            FluxRegister::<1, 1, HostMemory>::new(&coverage, &interior, true, false).unwrap();
+            FluxRegister::<1, 1, HostMemory>::new(&coverage, &interior, true, false, 0).unwrap();
         assert!(touching.faces[0].is_none() && touching.faces[1].is_some());
     }
 

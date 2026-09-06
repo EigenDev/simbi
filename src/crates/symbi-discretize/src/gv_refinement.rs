@@ -429,6 +429,34 @@ pub fn refine_acc_edge_gv(ndim: usize, ratio: i64, axis: usize) -> KernelProgram
     })
 }
 
+/// dst(g) += scale * src(ratio g): the coincident fine node of a coarse node, with no length
+/// average. the two-dimensional corner-EMF register's fine accumulation: a 2.5D coarse edge runs
+/// along the missing axis, so its one fine sub-edge is the fine corner node itself and `scale`
+/// carries the fine dt alone.
+pub fn refine_acc_node_gv(ndim: usize, ratio: i64) -> KernelProgram {
+    assert!((1..=3).contains(&ndim), "refine_acc_node_gv: ndim must be 1..=3");
+    assert!(ratio >= 2, "refine_acc_node_gv: ratio must be >= 2");
+    trace_kernel(|cx| {
+        let scaled: Vec<NodeId> = cx.with_trace(|t| {
+            let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
+            let g = t.graph();
+            coords
+                .into_iter()
+                .map(|c| {
+                    let r = g.add_const(ConstValue::I32(ratio as i32), None);
+                    g.element_wise(ElementWiseOp::Mul, vec![c, r], None)
+                })
+                .collect()
+        });
+        let scale = cx.scalar("scale");
+        let dst = cx.field("dst", "dst");
+        let src = gv_load_at(cx, "src", "src", &scaled);
+        let v = dst + scale * src;
+        let writes = vec![KernelWrite::new("dst", "dst", v.node())];
+        writes
+    })
+}
+
 /// the raw transverse child sum (the caller's scale carries the weights,
 /// averaging included), normal axis passing through.
 fn acc_face_sum<'t>(
@@ -1449,7 +1477,14 @@ pub fn band_energy_gv(ndim: usize) -> KernelProgram {
 /// sweep (axis 0 innermost among them): the coarse bface carries a +/-1
 /// transverse halo, exactly the reach the plm stencil needs, so plm is the
 /// maximum order here, one above the pcm a plain copy would be.
-/// inputs "src_old"/"src_new" + scalar "alpha" as in `refine_prolong_gv`.
+/// the odd (midpoint) faces carry the divergence-closing term of the Balsara (2001) polynomial:
+/// with the coincident faces linear in the transverse coordinates, the normal component's
+/// quadratic coefficient is fixed by the transverse components' cross slopes,
+/// `a_nn = -(sum_t b_{t,nt}) / 2`, and the midpoint value gains `-a_nn / 4`, one eighth of the
+/// difference between the parent cell's hi and lo t-faces' limited slopes along the normal, summed
+/// over the transverse axes t. every fine cell of the parent is then divergence-free whenever the
+/// parent is. inputs "src_old"/"src_new" for the normal component, "t{k}_old"/"t{k}_new" for each
+/// transverse component k, + scalar "alpha" as in `refine_prolong_gv`.
 pub fn refine_prolong_face_gv(ndim: usize, ratio: i64, axis: usize) -> KernelProgram {
     assert!(
         (1..=3).contains(&ndim),
@@ -1515,6 +1550,42 @@ pub fn refine_prolong_face_gv(ndim: usize, ratio: i64, axis: usize) -> KernelPro
             alpha,
         };
         let val = face_prolong_eval(cx, &ctx, ndim as isize - 1, &mut [0; 3]);
+
+        // the divergence-closing term on the midpoint faces: for each transverse axis t, the
+        // parent cell's t-faces (lo at parent_t, hi at parent_t + 1) of component t, each with
+        // its van-leer slope along the normal from the cells at -1, 0, +1.
+        let lerp = |key_old: String, key_new: String, coords: Vec<NodeId>| {
+            let v_old = gv_load_at(cx, &key_old, key_old.as_str(), &coords);
+            let v_new = gv_load_at(cx, &key_new, key_new.as_str(), &coords);
+            (one - alpha) * v_old + alpha * v_new
+        };
+        let mut cross = Gv::ZERO;
+        for t in 0..ndim {
+            if t == axis {
+                continue;
+            }
+            let mut slopes = Vec::with_capacity(2);
+            for side in 0..2i64 {
+                let at = |shift: i64| {
+                    let coords: Vec<NodeId> = cx.with_trace(|tr| {
+                        let g = tr.graph();
+                        (0..ndim)
+                            .map(|kk| {
+                                let o = if kk == t { side } else if kk == axis { shift } else { 0 };
+                                let oc = g.add_const(ConstValue::I32(o as i32), None);
+                                g.element_wise(ElementWiseOp::Add, vec![parent[kk], oc], None)
+                            })
+                            .collect()
+                    });
+                    lerp(format!("t{t}_old"), format!("t{t}_new"), coords)
+                };
+                let (vm, vc, vp) = (at(-1), at(0), at(1));
+                slopes.push(van_leer(vc - vm, vp - vc));
+            }
+            cross = cross + (slopes[1] - slopes[0]);
+        }
+        let odd = cx.gv(parity[axis]).cmp_gt(Gv::ZERO);
+        let val = Gv::select(odd, val + cross * Gv::from_f64(0.125), val);
         let writes = vec![KernelWrite::new("dst", "dst", val.node())];
         writes
     })

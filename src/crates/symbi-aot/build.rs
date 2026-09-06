@@ -299,6 +299,9 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
         ndim,
         &program,
     );
+    // the coincident-node accumulation of the two-dimensional corner-EMF register.
+    let program = symbi_discretize::refine_acc_node_gv(nd, 2);
+    emit_gv(out_dir, &format!("refine_acc_node_{ndim}d"), ndim, &program);
     // staggered face restriction + prolongation (mhd bface) + the accumulating
     // child sum (fine flux register): one instance per face-normal axis.
     for ax in 0..ndim {

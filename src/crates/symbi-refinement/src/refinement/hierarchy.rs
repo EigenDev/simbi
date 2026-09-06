@@ -176,9 +176,10 @@ where
     /// traffic. allocated alongside prim_old (None on the finest) and reused on
     /// every call, so the step loop allocates nothing.
     pub prim_lerp: Option<PrimFieldsGeneric<NDIM, DOF, Mem>>,
-    /// cell-centered B at this level's step start (mhd only) — the magnetic
-    /// counterpart of prim_old for the finer level's ghost prolongation.
-    pub bcell_old: Option<[Field<f64, NDIM, Mem>; NDIM]>,
+    /// cell-centered B at this level's step start (mhd only), every component, the out-of-plane
+    /// ones of a partially gridded chart included — the magnetic counterpart of prim_old for the
+    /// finer level's ghost prolongation.
+    pub bcell_old: Option<[Field<f64, NDIM, Mem>; DOF]>,
     /// staggered face B at this level's step start (mhd only) — feeds the
     /// finer level's bface transverse-halo prolongation (per-component
     /// staggered domains, cloned from this level's bface).
@@ -971,17 +972,13 @@ where
                 for k in 0..DOF {
                     prolong_field(&cm.bcell[k], &zero, &fm.bcell[k], &region, order, 0.0);
                 }
+                let mut zero_faces: Vec<Field<f64, NDIM, Mem>> = Vec::with_capacity(NDIM);
+                for dd in 0..NDIM {
+                    zero_faces.push(Field::<f64, NDIM, Mem>::zeros(cm.bface[dd].domain())?);
+                }
                 for dd in 0..NDIM {
                     let face_region = fine.geom.interior.extend(dd, 0, 1);
-                    let zero_face = Field::<f64, NDIM, Mem>::zeros(cm.bface[dd].domain())?;
-                    prolong_face_field(
-                        dd,
-                        &cm.bface[dd],
-                        &zero_face,
-                        &fm.bface[dd],
-                        &face_region,
-                        0.0,
-                    );
+                    prolong_face_field(dd, &cm.bface.b[..], &zero_faces[..], &fm.bface[dd], &face_region, 0.0);
                 }
                 bcell_from_bface_region(fm, fc.nrg_field(), &region);
                 fm.bface_initialized
@@ -1113,8 +1110,8 @@ where
             let parent = &levels.last().unwrap().state;
             if parent.fields.mhd.is_some() {
                 assert!(
-                    NDIM == 3,
-                    "mhd refinement: the staggered CT substrate is 3d-only"
+                    NDIM == 2 || NDIM == 3,
+                    "mhd refinement: the staggered CT substrate runs on a 2.5D or 3D grid"
                 );
                 assert!(
                     parent.geom.coords == symbi_geometry::Geometry::Cartesian,
@@ -1230,12 +1227,14 @@ where
             );
         }
         for ll in 0..levels.len().saturating_sub(1) {
+            // the out-of-plane magnetic components of a partially gridded chart reflux with the
+            // gas; a fully gridded chart and a hydrodynamic run carry none.
+            let oop_components = if levels[ll].state.fields.mhd.is_some() { DOF - NDIM } else { 0 };
             flux_registers.push(FluxRegister::new(
                 levels[ll].coverage.as_ref().unwrap(),
                 &levels[ll].state.geom.interior,
                 levels[ll].state.fields.cons.has_energy(),
-                levels[ll].state.fields.cons.chi_field().is_some(),
-            )?);
+                levels[ll].state.fields.cons.chi_field().is_some(), oop_components)?);
             emf_registers.push(if levels[ll].state.fields.mhd.is_some() {
                 Some(EmfRegister::new(
                     levels[ll].coverage.as_ref().unwrap(),
@@ -1674,7 +1673,7 @@ where
             let cov = coarse.coverage.as_ref().unwrap();
             let cmhd = coarse.state.fields.mhd.as_ref().unwrap();
             let fmhd = fine.state.fields.mhd.as_ref().unwrap();
-            for aa in 0..NDIM {
+            for aa in 0..DOF {
                 restrict_cell_field(&fmhd.bcell[aa], &cmhd.bcell[aa], cov);
             }
             restrict_bface(&fmhd.bface, &cmhd.bface, cov);
@@ -2505,6 +2504,11 @@ where
                                     dd,
                                     weights[ii] * dt,
                                 );
+                                if let Some(m) = l.state.fields.mhd.as_ref() {
+                                    if DOF > NDIM {
+                                        reg.accumulate_coarse_uniform_oop(&m.bflux, &l.state.geom.dx, dd, weights[ii] * dt);
+                                    }
+                                }
                                 if let Some(feq) = l.flux_eq.as_ref() {
                                     reg.accumulate_coarse_uniform(
                                         feq,
@@ -2542,6 +2546,11 @@ where
                                     dd,
                                     weights[ii] * dt,
                                 );
+                                if let Some(m) = l.state.fields.mhd.as_ref() {
+                                    if DOF > NDIM {
+                                        reg.accumulate_fine_uniform_oop(&m.bflux, &l.state.geom.dx, dd, weights[ii] * dt);
+                                    }
+                                }
                                 if let Some(feq) = l.flux_eq.as_ref() {
                                     reg.accumulate_fine_uniform(
                                         feq,
@@ -3096,7 +3105,7 @@ where
         let cov = coarse.coverage.as_ref().expect("a level with a finer child carries its coverage");
         restrict_cons(&fine.state.fields.cons, &coarse.state.fields.cons, cov);
         if let (Some(cmhd), Some(fmhd)) = (coarse.state.fields.mhd.as_ref(), fine.state.fields.mhd.as_ref()) {
-            for aa in 0..NDIM {
+            for aa in 0..DOF {
                 restrict_cell_field(&fmhd.bcell[aa], &cmhd.bcell[aa], cov);
             }
             restrict_bface(&fmhd.bface, &cmhd.bface, cov);
@@ -3135,7 +3144,7 @@ where
             if is_mhd {
                 let cmhd = coarse.state.fields.mhd.as_ref().unwrap();
                 let fmhd = fine.state.fields.mhd.as_ref().unwrap();
-                for aa in 0..NDIM {
+                for aa in 0..DOF {
                     restrict_cell_field(&fmhd.bcell[aa], &cmhd.bcell[aa], cov);
                 }
                 restrict_bface(&fmhd.bface, &cmhd.bface, cov);
@@ -3152,6 +3161,11 @@ where
             let l = &self.levels[level];
             if uniform_cartesian(&l.state) {
                 self.flux_registers[level].apply_uniform(&l.state.fields.cons, &l.state.geom.dx);
+                if let Some(m) = l.state.fields.mhd.as_ref() {
+                    if DOF > NDIM {
+                        self.flux_registers[level].apply_uniform_oop(&m.bcell, &l.state.geom.dx);
+                    }
+                }
             } else {
                 let geo = l.state.geom.block_geometry(l.state.physics.metric);
                 self.flux_registers[level].apply(&l.state.fields.cons, &geo);
@@ -3378,7 +3392,7 @@ where
                 (fine.state.fields.mhd.as_ref(), parent.bcell_old.as_ref())
             {
                 let pmhd = parent.state.fields.mhd.as_ref().unwrap();
-                for aa in 0..NDIM {
+                for aa in 0..DOF {
                     prof("refine_prolong_face", || {
                         prolong_field(
                             &bcell_old[aa],
@@ -3406,14 +3420,7 @@ where
                     bface_cf_halo_slabs(&fine.state.geom.interior, &fine.state.boundaries, dd)
                 {
                     prof("refine_prolong_face", || {
-                        prolong_face_field(
-                            dd,
-                            &bface_old[dd],
-                            &pmhd.bface[dd],
-                            &fmhd.bface[dd],
-                            &slab,
-                            alpha,
-                        )
+                        prolong_face_field(dd, &bface_old[..], &pmhd.bface.b[..], &fmhd.bface[dd], &slab, alpha)
                     });
                 }
             }
@@ -4060,7 +4067,7 @@ fn save_prim_old<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
         copy_field(c, pc);
     }
     if let (Some(mhd), Some(bo)) = (lvl.state.fields.mhd.as_ref(), lvl.bcell_old.as_ref()) {
-        for dd in 0..NDIM {
+        for dd in 0..DOF {
             copy_field(&mhd.bcell[dd], &bo[dd]);
         }
     }

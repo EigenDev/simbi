@@ -59,8 +59,14 @@ const RATIO: i64 = 2;
 /// one accumulator slab: the in-plane edges of direction `tt` on the coverage
 /// side plane (`bb`, `side`).
 struct EdgeSlab<const D: usize, Mem: MemorySpace> {
+    /// the edge direction as a physical axis: a grid axis in 3D, the missing axis (2) on a
+    /// 2.5D grid, whose corner EMF runs along it.
     tt: usize,
+    /// the efield storage slot holding that edge's EMF.
+    slot: usize,
     bb: usize,
+    /// the axis of the faces the edge's curl corrects, the third axis of (t, b).
+    aa: usize,
     side: usize,
     dom: Domain<D>,
     reg: Field<f64, D, Mem>,
@@ -77,12 +83,16 @@ pub struct EmfRegister<const D: usize, Mem: MemorySpace> {
 impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
     /// build the side-plane edge slabs from the coverage box (absolute coarse
     /// indices); planes flush with the coarse interior boundary have no
-    /// outside cells and are skipped. the staggered CT machinery is 3d-only.
+    /// outside cells and are skipped. in 3D every grid axis carries edges; on a 2.5D grid the
+    /// one edge family is the corner EMF along the missing axis, stored in slot 0, whose curl
+    /// corrects the in-plane faces.
     pub fn new(coverage: &Domain<D>, coarse_interior: &Domain<D>) -> symbi_xpu::Result<Self> {
-        assert!(D == 3, "EmfRegister: the staggered CT stack is 3d-only");
+        assert!(D == 2 || D == 3, "EmfRegister: the staggered CT stack is 2.5D or 3D");
         let mut slabs = Vec::new();
-        for tt in 0..3 {
-            for bb in 0..3 {
+        // (edge axis, storage slot) families: the three grid axes in 3D, the missing axis in 2D.
+        let families: Vec<(usize, usize)> = if D == 3 { vec![(0, 0), (1, 1), (2, 2)] } else { vec![(2, 0)] };
+        for (tt, slot) in families {
+            for bb in 0..D {
                 if bb == tt {
                     continue;
                 }
@@ -119,7 +129,9 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
                     let reg = Field::zeros(&dom)?;
                     slabs.push(EdgeSlab {
                         tt,
+                        slot,
                         bb,
+                        aa,
                         side,
                         dom,
                         reg,
@@ -150,7 +162,7 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
             dispatch_fields_each::<f64, Mem, D>(
                 name,
                 &slab.dom,
-                &[&efield[slab.tt]],
+                &[&efield[slab.slot]],
                 &[&slab.reg],
                 &ints[..D],
                 &[-dt],
@@ -163,17 +175,26 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
     /// `2g` and `2g + e_t`): `R += (dt_f / 2) * (E_f(2g) + E_f(2g + e_t))`.
     /// call after each fine substep's stage loop.
     pub fn accumulate_fine(&self, efield: &EfieldFields<D, Mem>, dt_f: f64) {
-        let scale = dt_f / RATIO as f64;
         for slab in &self.slabs {
-            let name = KernelId::RefineAccEdge {
-                axis: slab.tt as u8,
-                ndim: D as u8,
-            }
-            .name();
+            // a 3D coarse edge covers two fine sub-edges, length-averaged; a 2.5D coarse corner
+            // edge runs along the missing axis and covers the one coincident fine corner.
+            let (name, scale) = if D == 3 {
+                (
+                    KernelId::RefineAccEdge {
+                        axis: slab.tt as u8,
+                        ndim: D as u8,
+                    }
+                    .name()
+                    .to_string(),
+                    dt_f / RATIO as f64,
+                )
+            } else {
+                (format!("refine_acc_node_{D}d"), dt_f)
+            };
             dispatch_fields_each::<f64, Mem, D>(
-                name,
+                &name,
                 &slab.dom,
-                &[&efield[slab.tt]],
+                &[&efield[slab.slot]],
                 &[&slab.reg],
                 &[],
                 &[scale],
@@ -189,8 +210,7 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
     pub fn apply(&self, bface: &BfaceFields<D, Mem>, inv_dx: &[f64; D]) {
         let name = KernelId::FieldAxpyShift { ndim: D as u8 }.name();
         for slab in &self.slabs {
-            let (tt, bb, side) = (slab.tt, slab.bb, slab.side);
-            let aa = 3 - tt - bb;
+            let (tt, bb, side, aa) = (slab.tt, slab.bb, slab.side, slab.aa);
             // the curl coefficient of edge E_t in face bface_a: with
             // (p1, p2) cyclic of a, t == p1 pairs the faces (g: -1/dx_p2,
             // g - e_p2: +1/dx_p2) and t == p2 the faces (g: +1/dx_p1,
