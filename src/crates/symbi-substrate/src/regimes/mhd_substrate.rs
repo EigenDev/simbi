@@ -1331,6 +1331,9 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
                     .expect("UCT-HLLC needs prim.pre (ideal gas)"),
                 Some(CtScratch::Cell(CtCellCt::BCell(Pc::Out))) => &mhd.bcell[p_out],
                 Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
+                _ if matches!(b, FieldBind::Ref(symbi_ir::FieldRef::IsoCs2)) => {
+                    sim.fields.cs2.as_ref().expect("isothermal closure field")
+                }
                 _ => panic!("rmhd_edge_emf: unknown manifest slot '{}'", b.name()),
             }
         };
@@ -1817,6 +1820,7 @@ where
                         StateComp::Nrg => sim.fields.cons.nrg_field().expect("adiabatic nrg"),
                         o => panic!("body_slip_emf cell: unexpected cons component {o:?}"),
                     },
+                    FieldBind::Ref(FieldRef::IsoCs2) => sim.fields.cs2.as_ref().expect("isothermal closure field"),
                     o => panic!("body_slip_emf cell: unknown manifest slot '{}'", o.name()),
                 },
             }
@@ -1974,6 +1978,7 @@ where
                         StateComp::Nrg => sim.fields.cons.nrg_field().expect("adiabatic nrg"),
                         o => panic!("body_slip_emf_2p5d cell: unexpected cons component {o:?}"),
                     },
+                    FieldBind::Ref(FieldRef::IsoCs2) => sim.fields.cs2.as_ref().expect("isothermal closure field"),
                     o => panic!("body_slip_emf_2p5d cell: unknown manifest slot '{}'", o.name()),
                 },
             }
@@ -2332,6 +2337,7 @@ fn slip_cell_pass<const D: usize, const DOF: usize, Mem, Sc>(
                     StateComp::Nrg => sim.fields.cons.nrg_field().expect("adiabatic nrg"),
                     o => panic!("{name}: unexpected cons component {o:?}"),
                 },
+                FieldBind::Ref(FieldRef::IsoCs2) => sim.fields.cs2.as_ref().expect("isothermal closure field"),
                 o => panic!("{name}: unknown manifest slot '{}'", o.name()),
             },
         }

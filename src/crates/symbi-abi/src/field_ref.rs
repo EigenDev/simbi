@@ -82,6 +82,10 @@ pub enum StateComp {
 /// the one canonical spelling, the round-trip is pinned on it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum FieldRef {
+    /// the isothermal closure's prescribed sound speed squared per cell, `cs^2(x)`: a read-only
+    /// Eulerian field every isothermal kernel reads in place of a constant. uniform at the
+    /// closure's constant on a globally isothermal run.
+    IsoCs2,
     /// primitive density `prim.rho`.
     PrimRho,
     /// primitive pressure `prim.pre` (supplied as the regime pressure override at
@@ -281,6 +285,7 @@ impl FieldRef {
             FieldRef::PrimVel(k) => format!("prim.vel[{k}]"),
             FieldRef::PrimMag(k) => format!("prim.mag[{k}]"),
             FieldRef::PrimChi => "prim.chi".to_string(),
+            FieldRef::IsoCs2 => "iso.cs2".to_string(),
             FieldRef::State { slot, comp } => match comp {
                 StateComp::Den => format!("{}.den", slot.prefix()),
                 StateComp::Nrg => format!("{}.nrg", slot.prefix()),
@@ -313,6 +318,7 @@ impl FieldRef {
             "prim.rho" => return Some(FieldRef::PrimRho),
             "prim.pre" => return Some(FieldRef::PrimPre),
             "prim.chi" => return Some(FieldRef::PrimChi),
+            "iso.cs2" => return Some(FieldRef::IsoCs2),
             "scratch" => return Some(FieldRef::Scratch),
             "c" => return Some(FieldRef::ScratchC),
             "bface_n" => return Some(FieldRef::BFaceNormal),

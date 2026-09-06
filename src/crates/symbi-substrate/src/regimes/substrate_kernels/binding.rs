@@ -442,6 +442,10 @@ where
     // exhaustive match: adding a `FieldRef` variant is a compile error until bound.
     match fref {
         FieldRef::PrimRho => &f.prim.rho,
+        FieldRef::IsoCs2 => f
+            .cs2
+            .as_ref()
+            .expect("iso.cs2 bound but the run carries no isothermal closure field"),
         // pressure is supplied by the caller as `pre` — energy regimes pass `sim.fields.prim.pre`,
         // iso passes the kernel-set's substrate-owned pressure (`cs^2*rho`). the override is
         // authoritative: iso also allocates `sim.fields.prim.pre` for GPU as an empty field, so

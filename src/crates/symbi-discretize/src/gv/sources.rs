@@ -264,7 +264,7 @@ pub(crate) fn gv_geometric_source<'t>(
         }
         GeoSource::IsothermalMhd => {
             // isothermal MHD stress: ptot = cs^2 rho + 1/2|B|^2, the gas pressure coming from the
-            // `cs` scalar and rho. otherwise identical to NewtonianMhd (gas inertial via cons.mom,
+            // closure's per-cell cs^2 and rho. otherwise identical to NewtonianMhd (gas inertial via cons.mom,
             // lab-frame B tension). every `ncomp` (DOF) component (see NewtonianMhd) for the
             // spherical 2.5D out-of-plane source.
             let vel: Vec<Gv> = (0..ncomp)
@@ -272,9 +272,8 @@ pub(crate) fn gv_geometric_source<'t>(
                 .collect();
             let mag: [Gv; 3] = std::array::from_fn(|k| mag_field(k));
             let rho = cx.field("prim_rho", FieldRef::PrimRho);
-            let cs = cx.scalar("cs");
             let bsq = mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2];
-            let ptot = cs * cs * rho + Gv::from_f64(0.5) * bsq;
+            let ptot = super::iso_cs2_gv(cx) * rho + Gv::from_f64(0.5) * bsq;
             let gas_mom: Vec<Gv> = cons_mom[..ncomp].to_vec();
             let mag_n: Vec<Gv> = (0..ncomp).map(|k| mag[k]).collect();
             geometric_momentum_sources_gv(

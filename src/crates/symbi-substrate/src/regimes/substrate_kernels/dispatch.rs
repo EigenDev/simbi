@@ -1977,6 +1977,8 @@ pub fn dispatch_penalize_with_stiffness<const D: usize, const DOF: usize, Mem, S
 struct ShapedPenalizeKernel {
     kernel: symbi_jit::CompiledKernel,
     scalar_params: Vec<super::params::ScalarBind>,
+    /// the kernel's field reads in buffer-index order, the order the raw driver binds inputs.
+    field_binds: Vec<FieldBind>,
 }
 
 /// the device (CUDA) form of the shaped porous kernel: the serialized backend-neutral IR blob
@@ -2129,6 +2131,12 @@ fn shaped_penalize_kernel(
                     .iter()
                     .map(|s| super::params::ScalarBind::from_name(s.as_str()))
                     .collect(),
+                field_binds: program
+                    .kernel()
+                    .field_inputs()
+                    .iter()
+                    .map(|(_, b)| b.clone())
+                    .collect(),
             })
         });
     w.insert(key, built.clone());
@@ -2262,15 +2270,34 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         let cons_ptr = |f: &Field<Sc, D, Mem>| f.as_ptr() as *const f64;
         let cons_ptr_mut = |f: &Field<Sc, D, Mem>| f.as_ptr() as *mut f64;
         // the shaped kernel is JIT-built with dof = DOF, so it reads/writes all DOF momentum
-        // components; bind them all. the delta scratch stays D (the in-plane force).
-        let mut in_bases: Vec<*const f64> = Vec::with_capacity(D + 2);
-        in_bases.push(cons_ptr(&sim.fields.cons.den));
-        for c in 0..DOF {
-            in_bases.push(cons_ptr(&sim.fields.cons.mom[c]));
-        }
-        if let Some(n) = nrg {
-            in_bases.push(cons_ptr(n));
-        }
+        // components; the inputs bind in the kernel's own read order, the conserved state plus
+        // the isothermal closure's sound-speed field on an energy-free regime. the delta scratch
+        // stays D (the in-plane force).
+        let in_bases: Vec<*const f64> = sk
+            .field_binds
+            .iter()
+            .map(|bind| match bind {
+                FieldBind::Ref(FieldRef::State {
+                    slot: symbi_ir::StateSlot::Cons,
+                    comp: symbi_ir::StateComp::Den,
+                }) => cons_ptr(&sim.fields.cons.den),
+                FieldBind::Ref(FieldRef::State {
+                    slot: symbi_ir::StateSlot::Cons,
+                    comp: symbi_ir::StateComp::Mom(k),
+                }) => cons_ptr(&sim.fields.cons.mom[*k as usize]),
+                FieldBind::Ref(FieldRef::State {
+                    slot: symbi_ir::StateSlot::Cons,
+                    comp: symbi_ir::StateComp::Nrg,
+                }) => cons_ptr(nrg.expect("shaped penalize: energy read on an energy-free regime")),
+                FieldBind::Ref(FieldRef::IsoCs2) => cons_ptr(
+                    sim.fields
+                        .cs2
+                        .as_ref()
+                        .expect("shaped penalize: the isothermal closure field on an isothermal regime"),
+                ),
+                other => panic!("shaped penalize: unexpected input '{}'", other.name()),
+            })
+            .collect();
         let mut out_bases: Vec<*mut f64> = Vec::with_capacity(D + 2 + n_delta + n_torque + D);
         out_bases.push(cons_ptr_mut(&sim.fields.cons.den));
         for c in 0..DOF {

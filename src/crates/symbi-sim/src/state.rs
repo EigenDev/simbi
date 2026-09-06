@@ -460,6 +460,11 @@ pub struct PartitionFieldsGeneric<
     /// written by the source pass before godunov, read by godunov.
     /// zeroed at the start of each step. None when no sources are active.
     pub source: Option<ConsFieldsGeneric<NDIM, DOF, M, Sc>>,
+    /// the isothermal closure's sound speed squared per cell, `cs^2(x)`: a read-only Eulerian
+    /// field the isothermal kernels read in place of a constant, uniform at the closure's value
+    /// from construction and overwritten once by a locally isothermal profile before the first
+    /// step. absent on a regime that evolves an energy.
+    pub cs2: Option<Field<Sc, NDIM, M>>,
 }
 
 /// the natural case: vector dimension == grid dimension.
@@ -2173,6 +2178,30 @@ pub struct Context<S: ExecutionSpace> {
 impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>
     FieldStore<NDIM, DOF, Mem, Sc>
 {
+    /// the isothermal closure's `cs^2(x)` from a per-cell pressure field, `cs^2 = p / rho` over the
+    /// interior, then continued into every ghost cell: the periodic image on a periodic axis, the
+    /// nearest interior value otherwise. the field is read-only from here on.
+    pub fn set_isothermal_cs2_from_pressure(&self, pre: &Field<Sc, NDIM, Mem>) {
+        let cs2 = self
+            .fields
+            .cs2
+            .as_ref()
+            .expect("the isothermal closure field exists on an energy-free regime");
+        for c in self.geom.interior.iter() {
+            cs2.set(c, *pre.at(c) / *self.fields.cons.den.at(c));
+        }
+        extend_closure_into_ghosts(cs2, &self.geom.allocated, &self.geom.interior, &self.boundaries);
+    }
+
+    /// continue the isothermal closure field from `filled` (a region already holding its values)
+    /// into every other allocated cell: the periodic image on a periodic axis, the nearest cell
+    /// of `filled` otherwise.
+    pub fn extend_isothermal_cs2_into_ghosts(&self, filled: &Domain<NDIM>) {
+        if let Some(cs2) = self.fields.cs2.as_ref() {
+            extend_closure_into_ghosts(cs2, &self.geom.allocated, filled, &self.boundaries);
+        }
+    }
+
     /// the stage-input conserved set — the state an SSP stage's sources and its FOFC fallback
     /// evaluate against. it is `u_n` at the first stage of a multi-stage scheme (where `snapshot`
     /// has already captured it and the driver elides the redundant `cons -> u_stage` copy), and the
@@ -2692,6 +2721,25 @@ where
         };
         let has_energy = regime.has_energy();
 
+        // the isothermal closure's per-cell sound speed squared, uniform at the EOS's value; the
+        // kernels compute with the square root of this field where they need the speed itself, and
+        // the square root of a squared value is that value exactly, so a globally isothermal run
+        // computes with its constant to the bit.
+        let cs2 = if has_energy {
+            None
+        } else {
+            let cs = eos.sound_speed(
+                symbi_hydro::quantity::Density(Sc::ONE),
+                symbi_hydro::quantity::Pressure(Sc::ONE),
+            );
+            let field = Field::<Sc, D, Mem>::zeros(&allocated)?;
+            let cs_sq = cs * cs;
+            for coord in allocated.iter() {
+                field.set(coord, cs_sq);
+            }
+            Some(field)
+        };
+
         // allocate MHD fields if the regime has magnetic fields. only GRMHD (magnetized, with
         // energy, on a curved background) can reject a step: its physical-constraint-preserving
         // redo falls back to halving the timestep when the source-free low-order anchor is
@@ -2723,6 +2771,7 @@ where
             c2p_error: Field::zeros(&allocated)?,
             mhd,
             source: None,
+            cs2,
         };
 
         let workspace = RkWorkspaceGeneric {
@@ -3926,5 +3975,34 @@ mod tests {
         // all-Center reproduces the centroid.
         let ctr = g.stagger_coord([2, 3, 4], [Loc::Center; 3]);
         assert!(approx(ctr[0], cc[0]) && approx(ctr[1], cc[1]) && approx(ctr[2], cc[2]));
+    }
+}
+
+/// continue a prescribed cell field from `filled` into every other cell of `allocated`: on a
+/// periodic axis the image inside `filled` (wrapping by the interior extent), on any other axis the
+/// nearest cell of `filled`. a value outside `filled` is never read.
+pub fn extend_closure_into_ghosts<const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
+    field: &Field<Sc, D, Mem>,
+    allocated: &Domain<D>,
+    filled: &Domain<D>,
+    boundaries: &Boundaries<D>,
+) {
+    for c in allocated.iter() {
+        if filled.contains(c) {
+            continue;
+        }
+        let mut src = c;
+        for ax in 0..D {
+            let (lo, hi) = (filled.spaces[ax].lo, filled.spaces[ax].hi);
+            let n = hi - lo;
+            let periodic = boundaries.lo(ax) == BoundaryType::Periodic && boundaries.hi(ax) == BoundaryType::Periodic;
+            src[ax] = if periodic {
+                (c[ax] - lo).rem_euclid(n) + lo
+            } else {
+                c[ax].clamp(lo, hi - 1)
+            };
+        }
+        let v = *field.at(src);
+        field.set(c, v);
     }
 }

@@ -378,7 +378,6 @@ pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> KernelProgram {
     trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let alpha = cx.scalar("alpha");
-        let cs = cx.scalar("cs");
         let gm = cx.scalar("body_0_mass");
         let dx1 = cx.scalar("dx_0");
         let dx2 = cx.scalar("dx_1");
@@ -392,7 +391,7 @@ pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> KernelProgram {
             NDIM as usize,
         );
         let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
-        let cs2 = cs * cs;
+        let cs2 = crate::gv::iso_cs2_gv(cx);
 
         let mut h1 = [[Gv::ZERO; 3]; 3];
         let mut h2 = [[Gv::ZERO; 3]; 3];
@@ -652,7 +651,6 @@ pub fn viscous_iso_alpha_gv_3d() -> KernelProgram {
     trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let alpha = cx.scalar("alpha");
-        let cs = cx.scalar("cs");
         let gm = cx.scalar("body_0_mass");
         let dx = cx.scalar("dx_0");
         let dy = cx.scalar("dx_1");
@@ -670,7 +668,7 @@ pub fn viscous_iso_alpha_gv_3d() -> KernelProgram {
             NDIM as usize,
         );
         let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
-        let cs2 = cs * cs;
+        let cs2 = crate::gv::iso_cs2_gv(cx);
 
         // nu is z-invariant (cylindrical R), so every k-slice of the stencil is equal.
         let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
@@ -703,7 +701,6 @@ pub fn viscous_iso_alpha_gv() -> KernelProgram {
     trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let alpha = cx.scalar("alpha");
-        let cs = cx.scalar("cs");
         let gm = cx.scalar("body_0_mass");
         let dx = cx.scalar("dx_0");
         let dy = cx.scalar("dx_1");
@@ -722,7 +719,7 @@ pub fn viscous_iso_alpha_gv() -> KernelProgram {
             NDIM as usize,
         );
         let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
-        let cs2 = cs * cs;
+        let cs2 = crate::gv::iso_cs2_gv(cx);
 
         let mut nust = [[Gv::ZERO; 3]; 3];
         for jj in 0..3usize {
@@ -836,8 +833,8 @@ pub fn viscous_ortho_2p5d_gv(plane: OrthoPlane25, adiabatic: bool, alpha: bool) 
                         let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
                         gamma * pre / rho
                     } else {
-                        let cs = cx.scalar("cs");
-                        cs * cs
+                        let off = [di as i32 - 1, dj as i32 - 1];
+                        cx.field_offset("cs2", FieldRef::IsoCs2, NDIM, &off)
                     };
                     let r = ortho_25_orbital_radius(plane, x0, x1);
                     alpha_viscosity(a, cs2, gm, r)
@@ -915,8 +912,8 @@ pub fn viscous_ortho_3d_gv(coords: Coords, adiabatic: bool, alpha: bool) -> Kern
                             let rho = cx.field_offset("prim_rho", "prim.rho", NDIM, &off);
                             gamma * pre / rho
                         } else {
-                            let cs = cx.scalar("cs");
-                            cs * cs
+                            let off = [di as i32 - 1, dj as i32 - 1, dk as i32 - 1];
+                            cx.field_offset("cs2", FieldRef::IsoCs2, NDIM, &off)
                         };
                         alpha_viscosity(a, cs2, gm, r_orb)
                     } else {

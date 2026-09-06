@@ -2077,8 +2077,10 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> KernelPro
 /// contact mode -> chi~^s from the HLL central state, a/d/nu unchanged). the eos kernel scalar
 /// carries the regime's one thermodynamic parameter and is named for it.
 trait UctHlldFan: EnergyModel + Sized {
-    /// the kernel scalar naming the regime's thermodynamic parameter.
-    const EOS_SCALAR: &'static str;
+    /// the regime's thermodynamic parameter at the edge: the adiabatic index scalar, or the
+    /// isothermal sound speed from the closure's cs^2 averaged over the four cells sharing the
+    /// edge (a uniform field gives the constant exactly).
+    fn eos_at<'t>(cx: TraceCx<'t>, ndim: usize, corners: &[Vec<i32>; 4]) -> Gv<'t>;
     /// the per-face `(a^L, d^L, d^R)` coefficients (M&DZ 2020 Eq. 44-46) from reconstructed L/R prims.
     fn coeffs<'t>(
         eos_scalar: Gv<'t>,
@@ -2089,7 +2091,9 @@ trait UctHlldFan: EnergyModel + Sized {
 }
 
 impl UctHlldFan for Adiabatic {
-    const EOS_SCALAR: &'static str = "gamma";
+    fn eos_at<'t>(cx: TraceCx<'t>, _ndim: usize, _corners: &[Vec<i32>; 4]) -> Gv<'t> {
+        cx.scalar("gamma")
+    }
     fn coeffs<'t>(
         eos_scalar: Gv<'t>,
         prim_l: &MhdPrimG<Gv<'t>, 3, Self>,
@@ -2101,7 +2105,11 @@ impl UctHlldFan for Adiabatic {
 }
 
 impl UctHlldFan for IsoModel {
-    const EOS_SCALAR: &'static str = "cs";
+    fn eos_at<'t>(cx: TraceCx<'t>, ndim: usize, corners: &[Vec<i32>; 4]) -> Gv<'t> {
+        let at = |off: &Vec<i32>| gv_field_at(cx, "cs2", FieldRef::IsoCs2, ndim, off);
+        let sum = (at(&corners[0]) + at(&corners[1])) + (at(&corners[2]) + at(&corners[3]));
+        (sum * Gv::from_f64(0.25)).sqrt()
+    }
     fn coeffs<'t>(
         eos_scalar: Gv<'t>,
         prim_l: &MhdPrimG<Gv<'t>, 3, Self>,
@@ -2154,7 +2162,7 @@ fn newtonian_edge_emf_uct_hlld_impl<E: UctHlldFan>(
         // the normal velocity + rho/p/|B| only, so the out-of-plane velocity stays zero.
         // the adiabatic prim reconstructs the pressure; the isothermal pressure slot is
         // zero-sized (pressure derives from the constant sound speed inside the fan).
-        let eos_scalar = cx.scalar(E::EOS_SCALAR);
+        let eos_scalar = E::eos_at(cx, ndim, &[ne.clone(), nw.clone(), se.clone(), sw.clone()]);
         let face_prim = |base: &[i32], naxis: usize, nidx: usize, sign: f64, bn_face| {
             let mut mag = [
                 recon_cell("h_bp1", CtCellCt::BCell(PlaneComp::P1), base, naxis, sign),

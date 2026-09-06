@@ -102,6 +102,11 @@ fn van_leer<S: Scalar>(dl: S, dr: S) -> S {
 ///   theta <  0 -> van leer (the smooth, MHD-friendly limiter; the magnitude is unused).
 /// overloading theta's sign avoids a second ABI scalar — switch limiters at runtime via `--plm-theta`
 /// (>=0 minmod-MC, e.g., -1 for van leer). both branches are traced; `select` keeps it NaN-safe.
+/// the isothermal closure's sound speed squared at the cell, the read-only `iso.cs2` field.
+pub(crate) fn iso_cs2_gv<'t>(cx: TraceCx<'t>) -> Gv<'t> {
+    cx.field("cs2", FieldRef::IsoCs2)
+}
+
 fn plm_theta_gv<'t>(
     cx: TraceCx<'t>,
     key: &str,

@@ -116,6 +116,8 @@ struct Snapshot<const D: usize> {
     // v2.0 reader expects: start = [0; D], fin = interior cell counts.
     owned_start: Vec<i64>,
     owned_fin: Vec<i64>,
+    // the isothermal closure's cs^2(x) over the allocated domain, energy-free regimes only.
+    iso_cs2: Option<Vec<f64>>,
 }
 
 /// visit every cell of `domain` in axis-0-fastest order (x varies fastest) — the on-disk
@@ -311,6 +313,7 @@ where
         bface_dom,
         owned_start,
         owned_fin,
+        iso_cs2: sim.fields.cs2.as_ref().map(|c| extract_field(c, c.domain())),
     }
 }
 
@@ -598,7 +601,7 @@ where
 
     // the level's own clock: every level shares the root's time after a root step, and a finer
     // level's iteration counts its substeps, ratio times the root's per level.
-    Tree::new(format!("level_{idx}"))
+    let mut level = Tree::new(format!("level_{idx}"))
         .with_attr("scale_factor_a", sim.motion.a)
         .with_attr("scale_factor_adot", sim.motion.a_dot)
         .with_attr("time", sim.time)
@@ -606,7 +609,12 @@ where
         .with_attr("iteration", Attr::U64(sim.iteration))
         .with_group(mesh)
         .with_group(partition_0)
-        .with_group(cons)
+        .with_group(cons);
+    // the isothermal closure's prescribed cs^2(x), so a restart carries the profile the run held.
+    if let Some(cs2) = snap.iso_cs2.as_ref() {
+        level = level.with_dataset(Dataset::new("iso_cs2", shape.clone(), DataRef::F64(cs2)));
+    }
+    level
 }
 
 // =============================================================================
@@ -1586,6 +1594,13 @@ where
     }
     if let Some(a) = level_0.find_attr("iteration") {
         sim.iteration = a.as_u64(&format!("{level_name}/iteration"))?;
+    }
+    // the isothermal closure's cs^2(x), when the file carries it; older files leave the
+    // constructor's uniform value.
+    if let Some(cs2) = sim.fields.cs2.as_ref() {
+        if level_0.find_dataset("iso_cs2").is_some() {
+            restore_field(level_0, "iso_cs2", cs2, cs2.domain())?;
+        }
     }
     let interior = sim.geom.interior.clone();
 

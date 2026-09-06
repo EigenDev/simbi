@@ -949,6 +949,17 @@ where
             if let (Some(cn), Some(fn_nrg)) = (cc.nrg_field(), fc.nrg_field()) {
                 prolong_field(cn, &zero, fn_nrg, &region, order, 0.0);
             }
+            // the isothermal closure's cs^2(x): prolonged over the fine interior and a band of two
+            // ghost cells, the band the fine flux, drain, and viscous stencils read across the
+            // coarse-fine boundary, then continued into the remaining ghosts.
+            if let (Some(ccs), Some(fcs)) = (coarse.fields.cs2.as_ref(), fine.fields.cs2.as_ref()) {
+                let mut band = region.clone();
+                for ax in 0..NDIM {
+                    band = band.extend(ax, 2, 2);
+                }
+                prolong_field(ccs, &zero, fcs, &band, order, 0.0);
+                fine.extend_isothermal_cs2_into_ghosts(&band);
+            }
             // mhd: the staggered faces by the divergence-free prolongation per normal axis
             // (Balsara), so the fine CT starts at div(B) = 0 and coarse-fine consistent. the
             // cell-centered B is then the interpolation of the seeded faces, the relation the CT

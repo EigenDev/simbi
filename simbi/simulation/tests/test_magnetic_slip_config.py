@@ -17,7 +17,9 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
+from typing import Annotated
 
+from simbi import ProblemParam
 from simbi.simulation import runner
 from simbi.simulation.problem import ConfigError
 from simbi.types.bodies import (
@@ -420,3 +422,48 @@ def test_a_refined_isothermal_slip_run_books_exported_heat_and_keeps_the_contain
             compute_mode="cpu",
             max_steps=1,
         )
+
+
+# -- the locally isothermal closure ----------------------------------------------------------
+class _LocallyIsothermalDisk(MagneticSlipDisk2p5d):
+    """the isothermal 2.5D disk with a prescribed radial sound speed cs^2(r) = cs^2 (1 + r^2 / 4),
+    supplied as the per-cell initial pressure the closure derives its field from."""
+
+    locally_isothermal: Annotated[bool, ProblemParam(True)]
+
+    def initial_primitive_state(self):
+        gas_state, bx, by, bz = super().initial_primitive_state()
+        nx, ny, _ = self.resolution
+        (x0, x1), (y0, y1) = self.bounds[0], self.bounds[1]
+        dx, dy = (x1 - x0) / nx, (y1 - y0) / ny
+
+        def local_state():
+            for jj in range(ny):
+                for ii in range(nx):
+                    x = x0 + (ii + 0.5) * dx
+                    y = y0 + (jj + 0.5) * dy
+                    cs2 = self.ambient_sound_speed**2 * (1.0 + 0.25 * (x * x + y * y))
+                    yield (self.ambient_density, 0.0, 0.0, 0.0, cs2 * self.ambient_density)
+
+        return (local_state, bx, by, bz)
+
+
+@needs_backend
+def test_a_locally_isothermal_disk_carries_its_closure_field_and_restarts_identically(tmp_path) -> None:
+    continuous = tmp_path / "continuous"
+    split = tmp_path / "split"
+    restarted = tmp_path / "restarted"
+    kw = dict(thermal_closure="isothermal")
+    runner.run(_disk(_LocallyIsothermalDisk, continuous, **kw), compute_mode="cpu", max_steps=6)
+    with h5py.File(_final(continuous), "r") as h:
+        cs2 = h["level_0/iso_cs2"][...]
+        assert cs2.max() > 1.5 * cs2.min(), "the closure field is uniform; the local profile was dropped"
+    runner.run(_disk(_LocallyIsothermalDisk, split, **kw), compute_mode="cpu", max_steps=3)
+    runner.run(
+        _disk(_LocallyIsothermalDisk, restarted, checkpoint_file=_final(split), **kw),
+        compute_mode="cpu",
+        max_steps=6,
+    )
+    with h5py.File(_final(continuous)) as a, h5py.File(_final(restarted)) as b:
+        _assert_tree_equal(a["level_0"], b["level_0"])
+    assert _body_dataset(continuous, "exported_slip_heat")[0] > 0.0, "the locally isothermal sink exported no heat"

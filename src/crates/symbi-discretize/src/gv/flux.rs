@@ -178,7 +178,12 @@ fn imhd_reconstruct<'t>(
     IsoMhdPrim<Gv<'t>, 3>,
     Normalized<Physical<Gv<'t>, 3>>,
 ) {
-    let cs = cx.scalar("cs");
+    // the face sound speed of the isothermal closure: the mean of the two cells' cs^2, the left
+    // cell at -1 and the right cell at 0 along the sweep, then the root; a uniform field gives
+    // the constant exactly.
+    let cs2_l = cx.field_shifted("cs2", FieldRef::IsoCs2, ndim, dir, -1);
+    let cs2_r = cx.field_shifted("cs2", FieldRef::IsoCs2, ndim, dir, 0);
+    let cs = (Gv::from_f64(0.5) * (cs2_l + cs2_r)).sqrt();
     let theta = cx.scalar("theta");
     let (rho_l, rho_r) = plm_theta_gv(cx, "prim_rho", "prim.rho", ndim, dir, theta);
     let mut vl = Vec::with_capacity(3);

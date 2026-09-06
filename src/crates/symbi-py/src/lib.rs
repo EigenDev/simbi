@@ -6690,6 +6690,35 @@ macro_rules! build_and_run_imhd {
             .seed_faces_indexed(&bufs[0..$d])
             .build();
 
+        // a locally isothermal run carries a fifth per-cell component, the initial pressure
+        // p(x): cs^2(x) = p(x) / rho(x) is derived once and held fixed, the closure field the
+        // isothermal kernels read; its ghosts are continued from the interior. a globally
+        // isothermal run keeps the constructor's uniform cs^2.
+        if cfg.locally_isothermal {
+            if prims.first().is_some_and(|row| row.len() < 5) {
+                return Err(format!(
+                    "locally isothermal MHD prim row has {} components, expected 5 (rho, v1..v3, \
+                     p_local)",
+                    prims[0].len()
+                ));
+            }
+            let pre_ic = Field::<f64, $d, _>::zeros(&sim.geom.allocated)
+                .map_err(|e| format!("pre_ic alloc: {e:?}"))?;
+            let interior = sim.geom.interior.clone();
+            let mut coord: [isize; $d] = std::array::from_fn(|ax| interior.spaces[ax].lo);
+            for lin in 0..total {
+                pre_ic.view_mut().set(coord, prims[lin][4]);
+                for ax in 0..$d {
+                    coord[ax] += 1;
+                    if coord[ax] < interior.spaces[ax].hi {
+                        break;
+                    }
+                    coord[ax] = interior.spaces[ax].lo;
+                }
+            }
+            sim.set_isothermal_cs2_from_pressure(&pre_ic);
+        }
+
         // attach immersed bodies (gravity / accretion sinks) when the config declares any;
         // body-free runs keep the original sim untouched. a refined run attaches them to the
         // hierarchy instead: the finest level owns the sinks, the coarser levels carry
@@ -7663,6 +7692,13 @@ macro_rules! build_and_run_iso {
             // ghosts keep the constructor's uniform cs^2 and the ghost-pressure pass
             // books an alien temperature into every boundary flux.
             sub.extend_cs2_into_ghosts(&sim.geom.allocated, &interior);
+            // the closure field the shared isothermal kernels (drains, viscosity, the godunov
+            // parachute) read: the substrate's cs^2, copied once.
+            if let Some(dst) = sim.fields.cs2.as_ref() {
+                for c in sim.geom.allocated.iter() {
+                    dst.set(c, *sub.cs2.at(c));
+                }
+            }
         }
 
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
@@ -7746,6 +7782,11 @@ macro_rules! build_and_run_iso {
                 hi[0]
                     .kernels
                     .extend_cs2_into_ghosts(&hi[0].state.geom.allocated, &region);
+                if let Some(dst) = hi[0].state.fields.cs2.as_ref() {
+                    for c in hi[0].state.geom.allocated.iter() {
+                        dst.set(c, *hi[0].kernels.cs2.at(c));
+                    }
+                }
             }
         }
 

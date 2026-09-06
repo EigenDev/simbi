@@ -65,7 +65,7 @@ pub fn imhd_wave_speed_map_gv(
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
         let mag: [Gv; 3] =
             std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-        let cs = cx.scalar("cs");
+        let cs = super::iso_cs2_gv(cx).sqrt();
         let eos = Isothermal { cs };
         let prim = IsoMhdPrim::<Gv, 3>::new(
             PrimG::isothermal(Density(rho), Tensor::new(vel)),
@@ -1956,7 +1956,7 @@ pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
             std::array::from_fn(|k| cx.field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
         let mag: [Gv; 3] =
             std::array::from_fn(|k| cx.field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
-        let cs = cx.scalar("cs");
+        let cs = super::iso_cs2_gv(cx).sqrt();
         let eos = Isothermal { cs };
         let prim = IsoMhdPrim::<Gv, 3>::new(
             PrimG::isothermal(Density(rho), Tensor::new(vel)),

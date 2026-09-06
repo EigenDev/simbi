@@ -743,7 +743,7 @@ fn slip_dyad_coefficient_gv<'t>(
         let e_g = crate::gv::ct_field(cx, CtCellCt::SlipGasEnergy);
         (gamma * (gamma - Gv::ONE) * e_g / den).sqrt()
     } else {
-        cx.scalar("cs")
+        crate::gv::iso_cs2_gv(cx).sqrt()
     };
     let c_drain = cx.scalar("c_drain");
     let mut min_w = gv_axis_width(cx, 0, Spacing::Uniform);
@@ -1066,7 +1066,11 @@ fn penalize_drain_midpoint_impl<E: EnergyModel>(coords: Coords, ndim: usize, dof
     );
     let (kernel, writes) = trace(|cx| {
         let dt = cx.scalar("dt");
-        let eos = cx.scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
+        let eos = if E::HAS_ENERGY {
+            cx.scalar("gamma")
+        } else {
+            crate::gv::iso_cs2_gv(cx).sqrt()
+        };
         let c_drain = cx.scalar("c_drain");
 
         let den = cx.field("den", symbi_ir::FieldRef::cons_den());
@@ -1182,7 +1186,11 @@ fn penalize_drain_impl<E: EnergyModel>(
     );
     let (kernel, writes) = trace(|cx| {
         let dt = cx.scalar("dt");
-        let eos = cx.scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
+        let eos = if E::HAS_ENERGY {
+            cx.scalar("gamma")
+        } else {
+            crate::gv::iso_cs2_gv(cx).sqrt()
+        };
         let c_drain = cx.scalar("c_drain");
 
         // conserved reads (in-place: the same fields are the writes). the momentum runs over dof (all
@@ -1505,7 +1513,11 @@ fn penalize_porous_impl<E: EnergyModel>(
         let dt = cx.scalar("dt");
         // the regime's eos handle: adiabatic reads `gamma` (the sound speed is recovered from the
         // conserved state below); isothermal reads the constant sound speed `cs` directly.
-        let eos = cx.scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
+        let eos = if E::HAS_ENERGY {
+            cx.scalar("gamma")
+        } else {
+            crate::gv::iso_cs2_gv(cx).sqrt()
+        };
         let c_drain = cx.scalar("c_drain");
         let porosity = cx.scalar("porosity");
         let k_eta_n = cx.scalar("k_eta_n");
@@ -1738,7 +1750,11 @@ fn penalize_torque_free_impl<E: EnergyModel>(
     );
     let (kernel, writes) = trace(|cx| {
         let dt = cx.scalar("dt");
-        let eos = cx.scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
+        let eos = if E::HAS_ENERGY {
+            cx.scalar("gamma")
+        } else {
+            crate::gv::iso_cs2_gv(cx).sqrt()
+        };
         let c_drain = cx.scalar("c_drain");
         let xi = cx.scalar("xi");
 
@@ -1949,7 +1965,11 @@ mod twin_tests {
         for (name, adiabatic, iso) in &pairs {
             let (ka, ki) = (adiabatic.kernel(), iso.kernel());
             assert!(ka.scalar_params().iter().any(|p| p == "gamma"), "{name}: the adiabatic kernel reads gamma");
-            assert!(ki.scalar_params().iter().any(|p| p == "cs"), "{name}: the iso kernel reads the prescribed sound speed");
+            assert!(
+                ki.field_inputs().iter().any(|(_, b)| matches!(b, symbi_ir::FieldBind::Ref(symbi_ir::FieldRef::IsoCs2))),
+                "{name}: the iso kernel reads the closure's cs^2 field"
+            );
+            assert!(!ki.scalar_params().iter().any(|p| p == "cs"), "{name}: the iso kernel reads no sound-speed scalar");
             assert!(!ki.scalar_params().iter().any(|p| p == "gamma"), "{name}: the iso kernel must not read gamma");
             let iso_inputs: Vec<String> = ki.field_inputs().iter().map(|(k, _)| format!("{k:?}")).collect();
             assert!(
@@ -1992,8 +2012,8 @@ mod twin_tests {
                 "{name}: every adiabatic spherical sink recovers its local sound speed from gamma"
             );
             assert!(
-                ki.scalar_params().iter().any(|p| p == "cs"),
-                "{name}: every isothermal spherical sink reads its prescribed sound speed"
+                ki.field_inputs().iter().any(|(_, b)| matches!(b, symbi_ir::FieldBind::Ref(symbi_ir::FieldRef::IsoCs2))),
+                "{name}: every isothermal spherical sink reads the closure's cs^2 field"
             );
             assert!(
                 !ki.scalar_params().iter().any(|p| p == "gamma"),

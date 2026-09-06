@@ -274,8 +274,7 @@ pub fn fofc_select_with_body_gv(
         } else {
             // isothermal EOS: p = cs^2 * rho, so the stage-input pressure is a closed form of us_den; the
             // pressure stays positive wherever the density does, hence only the density guard.
-            let cs = cx.scalar("cs");
-            let us_pre = cs * cs * us_den;
+            let us_pre = super::iso_cs2_gv(cx) * us_den;
             let (b_den, b_mom) = crate::gv_immersed::body_evolved_iso_gv(
                 cx, us_den, &us_mom, us_pre, dt, n_bodies, coords, ndim, ncomp, axes,
             );
