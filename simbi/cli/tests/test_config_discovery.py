@@ -88,6 +88,31 @@ def test_is_config_file_recognizes_a_subclass_of_an_imported_base(tmp_path: Path
     assert not _is_config_file(helper)
 
 
+def test_is_config_file_recognizes_a_base_reached_through_an_imported_module(
+    tmp_path: Path,
+) -> None:
+    # a config may import a sibling config as a module and subclass one of its
+    # classes through the module attribute. the base class name never appears in
+    # an import line, so the marker must accept an attribute base whose module
+    # alias was imported from simbi_configs.
+    derived = tmp_path / "magnetic_bondi.py"
+    derived.write_text(
+        "from simbi_configs.science.projects import bondi as hydro_bondi\n"
+        "class MagnetizedBondi(hydro_bondi.SphericalBondiTest):\n    pass\n"
+    )
+    assert _is_config_file(derived)
+
+    # an attribute base on a module that comes from outside simbi_configs stays a
+    # plain class, whatever the sibling import alongside it.
+    plain = tmp_path / "plain.py"
+    plain.write_text(
+        "import enum\n"
+        "from simbi_configs.science.projects import bondi as hydro_bondi\n"
+        "class Color(enum.Enum):\n    RED = 1\n"
+    )
+    assert not _is_config_file(plain)
+
+
 # =============================================================================
 # which roots get searched (the above covers what is a config once a root is walked)
 #

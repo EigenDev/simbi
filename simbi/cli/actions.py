@@ -147,7 +147,10 @@ class PrintAvailableConfigsAction(Action):
 
 def _defines_a_config(tree: ast.Module) -> bool:
     """true if the module defines a class subclassing SimbiProblem, directly or via
-    a base imported from a simbi_configs module (a sibling config it extends)."""
+    a base imported from a simbi_configs module (a sibling config it extends). the
+    sibling may be imported as a class (`from simbi_configs.x import Base`) or as a
+    module (`from simbi_configs.x import bondi as hydro`) whose attribute is the base
+    (`class Derived(hydro.Base)`)."""
     config_bases: set[str] = {_SIMBI_PROBLEM_BASE}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module and "simbi_configs" in node.module:
@@ -158,8 +161,11 @@ def _defines_a_config(tree: ast.Module) -> bool:
             for base in node.bases:
                 if isinstance(base, ast.Name) and base.id in config_bases:
                     return True
-                if isinstance(base, ast.Attribute) and base.attr in config_bases:
-                    return True
+                if isinstance(base, ast.Attribute):
+                    if base.attr in config_bases:
+                        return True
+                    if isinstance(base.value, ast.Name) and base.value.id in config_bases:
+                        return True
     return False
 
 
