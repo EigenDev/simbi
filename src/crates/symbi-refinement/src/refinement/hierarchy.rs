@@ -1119,6 +1119,25 @@ where
                 );
             }
             let coverage = region_to_domain(region, &parent.geom.x_lo, &parent.geom.dx);
+            // a region covering its parent entirely leaves the parent no leaf cell: the parent's
+            // CFL reduction then runs over nothing and the run stops on a zero timestep. such a
+            // run wants a finer root grid, so it is refused here with the reason.
+            let covers_parent = (0..NDIM).all(|ax| {
+                coverage.spaces[ax].lo <= parent.geom.interior.spaces[ax].lo
+                    && coverage.spaces[ax].hi >= parent.geom.interior.spaces[ax].hi
+            });
+            if covers_parent {
+                return Err(symbi_xpu::XpuError {
+                    operation: "refinement region",
+                    code: 0,
+                    detail: format!(
+                        "region [{:?}, {:?}] covers its parent level entirely, leaving no leaf \
+                         cell on it; a run resolved at that spacing everywhere wants a finer root \
+                         grid, or a region strictly inside the parent",
+                        region.x_lo, region.x_hi
+                    ),
+                });
+            }
             // fine ghost depth: one above the root's (the prolongation stencil
             // is one order above the evolution reconstruction).
             let ng = root_ng + 1;
