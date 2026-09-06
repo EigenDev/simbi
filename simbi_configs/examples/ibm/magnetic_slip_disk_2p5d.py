@@ -235,7 +235,13 @@ class MagneticSlipDisk2p5d(SimbiProblem):
 
     @property
     def cell_size(self) -> float:
-        return (self.bounds[0][1] - self.bounds[0][0]) / self.resolution[0]
+        """the finest level's cell size: the sink and its shell are sized on the level that
+        owns them."""
+        dx = (self.bounds[0][1] - self.bounds[0][0]) / self.resolution[0]
+        if self.refinement_enabled:
+            for ratio in self.refinement_ratios:
+                dx /= float(ratio)
+        return dx
 
     @property
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:
