@@ -817,22 +817,23 @@ where
         // the immersed-body penalization under MHD, via the 1/2|B|^2 sandwich: strip
         // the magnetic energy so the (unchanged) hydro drain acts on the gas energy alone, run
         // it, then restore the field energy. the drain never touches bcell, so B and 1/2|B|^2
-        // are exactly invariant and the flux is left to constrained transport. with no body the
-        // shifts would be a wasted no-op. the sandwich and the Alfven stiffness reduction are host
-        // passes, so a device-resident state with bodies stops here: a drain that silently
-        // vanished would leave the sink inert while the run reports accretion.
-        let Some(im) = sim.immersed.as_ref() else {
+        // are exactly invariant and the flux is left to constrained transport. the sandwich, the
+        // Alfven stiffness reduction, and the drain all run in the store's memory space. with no
+        // body the shifts would be a wasted no-op.
+        if sim.immersed.is_none() {
             return;
-        };
-        assert!(
-            Mem::IS_HOST_ACCESSIBLE || im.bodies.is_empty(),
-            "immersed bodies in MHD run on host memory: the magnetic-energy sandwich around the \
-             drain and the Alfven stiffness reduction are host passes, so the drain has no device \
-             form yet"
-        );
+        }
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, -1.0);
-        // eos_param is gamma (has_energy MHD); both drain dials use the adiabatic defaults.
-        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.eos_param.value(), 1.0);
+        let c_a2 = crate::regimes::mhd_substrate::alfven_stiffness_max(sim, &self.cfl_scratch);
+        // eos_param is gamma on an adiabatic gas, cs on an isothermal one; both drain dials use
+        // the adiabatic defaults.
+        crate::regimes::substrate_kernels::dispatch_penalize_with_stiffness(
+            sim,
+            dt,
+            self.eos_param.value(),
+            1.0,
+            c_a2,
+        );
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, 1.0);
     }
 

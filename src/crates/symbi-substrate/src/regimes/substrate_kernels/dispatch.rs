@@ -1946,8 +1946,25 @@ pub fn dispatch_penalize<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    // the hydrodynamic path: no magnetic field, so the Alfven stiffness is zero.
+    dispatch_penalize_with_stiffness(sim, dt, gamma, c_drain, symbi_sim::state::local_c_a2_max(sim));
+}
+
+/// the penalization with the domain's Alfven stiffness `max |B|^2 / rho` supplied by the caller,
+/// the magnetized kernel set having reduced it in the store's memory space; a decomposed run's
+/// cross-tile override takes precedence.
+pub fn dispatch_penalize_with_stiffness<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    gamma: f64,
+    c_drain: f64,
+    c_a2: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
     symbi_sim::driver::prof("penalize", || {
-        dispatch_penalize_inner(sim, dt, gamma, c_drain);
+        dispatch_penalize_inner(sim, dt, gamma, c_drain, c_a2);
     });
 }
 
@@ -2333,6 +2350,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     gamma: f64,
     c_drain: f64,
+    c_a2: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -2388,9 +2406,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     // per-tile maxima and publishes the global value (a per-tile local max would relax the same
     // wall cell at a different rate than the monolithic run). unset (the monolithic / single-gpu
     // path) => this grid's local max, which is the global max on a single grid.
-    let c_a2_max: f64 = im
-        .c_a2_override()
-        .unwrap_or_else(|| symbi_sim::state::local_c_a2_max(sim));
+    let c_a2_max: f64 = im.c_a2_override().unwrap_or(c_a2);
     let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
         let surface = bodies.get(b).spec.surface;
         match bind {

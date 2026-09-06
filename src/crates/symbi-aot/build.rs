@@ -1470,11 +1470,22 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
     // the second-order material drain the slip-coupled step runs: a local-Alfven midpoint rate, so
     // the density drain stays second-order accurate where the field stiffens the mask. the dyed twin
     // drains the dissolved passive scalar with the same factor.
+    {
+        let program = symbi_discretize::mhd_energy_shift_gv(3);
+        emit_gv(out_dir, "mhd_energy_shift_1d", 1, &program);
+        let program = symbi_discretize::mhd_alfven_stiffness_gv(3);
+        emit_gv(out_dir, "mhd_alfven_stiffness_1d", 1, &program);
+    }
     for ndim in [3u8, 2u8] {
         let program = symbi_discretize::penalize_drain_midpoint_gv(Coords::Cartesian, ndim as usize, 3, false);
         emit_gv(out_dir, &format!("penalize_drain_midpoint_{ndim}d"), ndim, &program);
         let program = symbi_discretize::penalize_drain_midpoint_gv(Coords::Cartesian, ndim as usize, 3, true);
         emit_gv(out_dir, &format!("penalize_drain_midpoint_dyed_{ndim}d"), ndim, &program);
+        // the drain's magnetic-energy sandwich and the Alfven stiffness the rate lift reads.
+        let program = symbi_discretize::mhd_energy_shift_gv(3);
+        emit_gv(out_dir, &format!("mhd_energy_shift_{ndim}d"), ndim, &program);
+        let program = symbi_discretize::mhd_alfven_stiffness_gv(3);
+        emit_gv(out_dir, &format!("mhd_alfven_stiffness_{ndim}d"), ndim, &program);
         // the isothermal twins: the prescribed sound speed in the rate, no energy slot.
         let program = symbi_discretize::penalize_drain_midpoint_iso_gv(Coords::Cartesian, ndim as usize, 3, false);
         emit_gv(out_dir, &format!("penalize_drain_midpoint_iso_{ndim}d"), ndim, &program);

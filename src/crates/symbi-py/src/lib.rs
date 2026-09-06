@@ -7883,18 +7883,6 @@ fn dispatch_and_run(
     if !cfg.bodies.is_empty() && cfg.refinement_enabled && cfg.regime.contains("mhd") {
         validate_refined_mhd_bodies(&cfg.bodies, &cfg.regime, cfg.dims, &cfg.coord_system, cfg.locally_isothermal)?;
     }
-    // a gpu build evolves on device memory, where the MHD immersed-body drain has no form: its
-    // magnetic-energy sandwich and Alfven stiffness reduction are host passes. refuse rather than
-    // run a sink that would silently stop draining.
-    if cfg!(feature = "gpu") && cfg.regime.contains("mhd") && !cfg.bodies.is_empty() {
-        return Err(
-            "immersed bodies in MHD (rmhd, nmhd, imhd) run on the cpu build: the drain's \
-             magnetic-energy sandwich and Alfven stiffness reduction have no device form yet, and a \
-             gpu run would leave the sink inert while reporting accretion. run this configuration \
-             with compute_mode='cpu' until the device-native MHD drain lands"
-                .to_string(),
-        );
-    }
     // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/rhd/isothermal) and
     // single-level MHD (rmhd/nmhd/imhd, the equivalence-tested staggered-CT halo exchange + face
     // gather). reject every other case here so a multi-gpu request never

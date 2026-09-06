@@ -142,15 +142,13 @@ where
     }
 }
 
-/// shift the magnetic energy `1/2|B|^2` into (`sign = +1`) or out of (`sign = -1`) the
-/// total energy `cons.nrg`, cell by cell over the whole allocated buffer, from the
-/// cell-centered `bcell`. bracketing the immersed-body drain with `-1` before and `+1`
-/// after presents the drain a valid hydro conserved state (`nrg = gas energy`), then
-/// restores the field energy. the drain never writes `bcell`, so the two shifts cancel
-/// exactly on every cell it did not touch — a whole-buffer pass is correct with no need to
-/// mask the body's footprint. a no-op for isothermal MHD (no `nrg` slot).
-pub(crate) fn shift_magnetic_energy<const D: usize, Mem, Sc>(
-    sim: &FieldStore<D, 3, Mem, Sc>,
+/// the magnetic-energy sandwich around the material drain: `E += sign |B_cell|^2 / 2` over every
+/// stored cell, `sign = -1` stripping the cell magnetic energy so the hydrodynamic drain acts on
+/// the gas energy alone, `+1` restoring it. the drain leaves `B_cell` untouched, so the sandwich
+/// is exact; a store without an energy field carries no magnetic energy to shift. runs in the
+/// store's memory space.
+pub(crate) fn shift_magnetic_energy<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
     sign: f64,
 ) where
     Mem: MemorySpace,
@@ -159,18 +157,44 @@ pub(crate) fn shift_magnetic_energy<const D: usize, Mem, Sc>(
     let (Some(nrg), Some(mhd)) = (sim.fields.cons.nrg_field(), sim.fields.mhd.as_ref()) else {
         return;
     };
-    let coeff = Sc::from_f64(0.5 * sign);
-    let n = nrg.view().len();
-    // nrg and bcell are distinct buffers, so the mut/shared raw slices do not alias.
-    unsafe {
-        let e = std::slice::from_raw_parts_mut(nrg.as_mut_ptr(), n);
-        let b: [&[Sc]; 3] =
-            std::array::from_fn(|k| std::slice::from_raw_parts(mhd.bcell[k].as_ptr(), n));
-        for c in 0..n {
-            let bsq = b[0][c] * b[0][c] + b[1][c] * b[1][c] + b[2][c] * b[2][c];
-            e[c] = e[c] + coeff * bsq;
-        }
-    }
+    let inputs: Vec<&Field<Sc, D, Mem>> = (0..DOF).map(|k| &mhd.bcell[k]).collect();
+    dispatch_fields_each::<Sc, Mem, D>(
+        &format!("mhd_energy_shift_{D}d"),
+        &sim.geom.allocated,
+        &inputs,
+        &[nrg],
+        &[],
+        &[Sc::from_f64(0.5 * sign)],
+    );
+}
+
+/// the domain maximum of the local Alfven stiffness `|B_cell|^2 / rho` over the interior, the
+/// fast-magnetosonic lift of the drain rate. the pointwise field lands in `scratch` (a cell field
+/// on the allocated domain) and the reduction folds it in the store's memory space. zero without
+/// a magnetic field.
+pub fn alfven_stiffness_max<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    scratch: &Field<Sc, D, Mem>,
+) -> f64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let Some(mhd) = sim.fields.mhd.as_ref() else {
+        return 0.0;
+    };
+    let interior = &sim.geom.interior;
+    let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
+    inputs.extend((0..DOF).map(|k| &mhd.bcell[k]));
+    dispatch_fields_each::<Sc, Mem, D>(
+        &format!("mhd_alfven_stiffness_{D}d"),
+        interior,
+        &inputs,
+        &[scratch],
+        &[],
+        &[],
+    );
+    field_reduce(scratch, interior, ReductionOp::Max)
 }
 
 /// fill the ghost band of a single scalar field via the lattice pullback

@@ -33,6 +33,7 @@ use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{BodyKin, PenalizationRelaxation, Property, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::gv::{KernelWrite, KernelWrites};
+use symbi_ir::trace_kernel;
 use symbi_ir::{CtCellCt, CtEdgeCt, CtFaceCt, CtScratchKey, CtWireName, PhysComp, Transverse};
 use symbi_ir::{Gv, KernelProgram, ParamExpr, TraceCx};
 
@@ -676,6 +677,44 @@ pub fn slip_commit_energy_3d_gv() -> KernelProgram {
     });
     let kernel = kernel.with_derived_support(&writes);
     KernelProgram::new(kernel, writes)
+}
+
+/// the magnetic-energy shift around the material drain on a magnetized gas, pointwise:
+/// `E += scale |B_cell|^2`, with `scale = -1/2` stripping the cell magnetic energy before the
+/// hydrodynamic drain acts on the gas energy alone and `+1/2` restoring it after. `B_cell` is
+/// untouched by the drain, so the sandwich is exact. the `dof` cell components sum in order.
+pub fn mhd_energy_shift_gv(dof: usize) -> KernelProgram {
+    trace_kernel(|cx| {
+        let scale = cx.scalar("scale");
+        let energy = cx.field("e", "e");
+        let b: Vec<Gv> = (0..dof)
+            .map(|k| {
+                let key = format!("b_{k}");
+                cx.field(&key, key.as_str())
+            })
+            .collect();
+        let bsq = b.iter().fold(Gv::ZERO, |sum, v| sum + *v * *v);
+        let e = energy + scale * bsq;
+        vec![KernelWrite::new("e", "e", e.node())]
+    })
+}
+
+/// the local Alfven stiffness `|B_cell|^2 / rho` of a cell, pointwise, zero where the density is
+/// not positive: the field the drain's fast-magnetosonic rate lift reads at its domain maximum.
+pub fn mhd_alfven_stiffness_gv(dof: usize) -> KernelProgram {
+    trace_kernel(|cx| {
+        let rho = cx.field("rho", "rho");
+        let b: Vec<Gv> = (0..dof)
+            .map(|k| {
+                let key = format!("b_{k}");
+                cx.field(&key, key.as_str())
+            })
+            .collect();
+        let bsq = b.iter().fold(Gv::ZERO, |sum, v| sum + *v * *v);
+        let positive = rho.cmp_gt(Gv::ZERO);
+        let v = Gv::select(positive, bsq / rho, Gv::ZERO);
+        vec![KernelWrite::new("s", "s", v.node())]
+    })
 }
 
 /// the frozen dyad coefficient `a_B chi_B` of the slip operator at the cell, from the coefficient
