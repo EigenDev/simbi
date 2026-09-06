@@ -17,9 +17,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
-from typing import Annotated
 
-from simbi import ProblemParam
+from pydantic import computed_field
 from simbi.simulation import runner
 from simbi.simulation.problem import ConfigError
 from simbi.types.bodies import (
@@ -429,7 +428,10 @@ class _LocallyIsothermalDisk(MagneticSlipDisk2p5d):
     """the isothermal 2.5D disk with a prescribed radial sound speed cs^2(r) = cs^2 (1 + r^2 / 4),
     supplied as the per-cell initial pressure the closure derives its field from."""
 
-    locally_isothermal: Annotated[bool, ProblemParam(True)]
+    @computed_field
+    @property
+    def locally_isothermal(self) -> bool:
+        return True
 
     def initial_primitive_state(self):
         gas_state, bx, by, bz = super().initial_primitive_state()
