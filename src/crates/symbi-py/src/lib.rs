@@ -5962,6 +5962,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 /// are single-grid only. the correctness contract is decomposed == monolithic.
 macro_rules! build_and_run_hydro_decomposed {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $dof:literal, $geom:expr, $geom_ty:ty) => {{
+                .coord_maps(axis_maps::<$d>(cfg))
         use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
@@ -6203,6 +6204,7 @@ macro_rules! hydro_dispatch {
             // combinations below would otherwise fall through to a flat `(dims, coords)` arm and run
             // silently on a Minkowski metric (wrong physics, zero warning). the matches! set is the
             // single source of truth for the baked GR-hydro arms; `test_dispatch_rejects_unbaked_gr`
+            .coord_maps(axis_maps::<$d>(cfg))
             // asserts it stays in lockstep with the actual arms (guarded-arm-or-Err, never silent-flat).
             (d, c)
                 if $cfg.spacetime != "minkowski"
@@ -7050,6 +7052,7 @@ macro_rules! build_and_run_imhd_decomposed {
         if bufs.len() < 3 {
             return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
         }
+            .coord_maps(axis_maps::<$d>(cfg))
         let partition = tile_partition(n, cfg)?;
         let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
@@ -7230,6 +7233,7 @@ macro_rules! mhd_dispatch {
                 Err(format!(
                     "no baked GR-MHD kernel for (dims={d}, coords={c}, spacetime={}): refusing to \
                      run silently on a flat Minkowski metric. add the (dims, coords, spacetime) arm \
+            .coord_maps(axis_maps::<$d>(cfg))
                      + kernel, or use spacetime=minkowski.",
                     $cfg.spacetime
                 ))
@@ -7576,6 +7580,7 @@ macro_rules! build_and_run_iso {
                     },
                 ));
             }
+            .coord_maps(axis_maps::<$d>(cfg))
         }
         let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
         let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
@@ -9333,6 +9338,17 @@ fn run_simulation(
         .map_err(PyRuntimeError::new_err)?;
     Ok(NativeRunDiagnostics { inner: diagnostics })
 }
+        // the same switch that folds logical devices onto too few physical ones runs the
+        // decomposed path as host tiles here: the whole build + scatter + exchange + gather +
+        // checkpoint path on one cpu, so a decomposed run can be diffed against the single grid
+        // without a device. no parallelism.
+        if std::env::var("SYMBI_GPU_OVERSUBSCRIBE").is_ok() {
+            eprintln!(
+                "warning: gpus={n_gpus} on a cpu build; running {n_gpus} host tiles \
+                 (SYMBI_GPU_OVERSUBSCRIBE) -- correctness check only, no speedup."
+            );
+            return Ok(());
+        }
 
 /// whether a config's `alpha`-key spelling is unambiguous.
 ///
