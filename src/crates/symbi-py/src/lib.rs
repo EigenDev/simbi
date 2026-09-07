@@ -9327,6 +9327,9 @@ mod alpha_key_tests {
 
 fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
     validate_gpu_request(cfg.n_gpus)?;
+    // the axis placement rule runs here as well as at dispatch, so a misplaced or unsupported
+    // axis face fails before a queue slot is spent.
+    validate_axis_boundaries(cfg)?;
     if cfg.restart_path.is_some() && cfg.n_gpus > 1 {
         return Err("checkpoint restart is not yet supported with decomposition".to_string());
     }
