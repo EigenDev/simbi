@@ -3968,9 +3968,11 @@ mod magnetic_slip_boundary_tests {
             b.capability = 1;
             b
         };
-        let refused: [(&str, Vec<BodyParams>, &str, usize, &str, bool); 8] = [
+        // the isothermal slip is built too: its heat leaves through the cooling reservoir.
+        check(&[draining_sink(Some(SLIP), None)], "imhd", 3, "cartesian", false)
+            .expect("an isothermal 3D cartesian draining sink carries the slip");
+        let refused: [(&str, Vec<BodyParams>, &str, usize, &str, bool); 7] = [
             ("both couplings", vec![draining_sink(Some(SLIP), Some(0.1))], "nmhd", 3, "cartesian", false),
-            ("isothermal regime", vec![draining_sink(Some(SLIP), None)], "imhd", 3, "cartesian", false),
             ("relativistic regime", vec![draining_sink(Some(SLIP), None)], "rmhd", 3, "cartesian", false),
             ("locally isothermal", vec![draining_sink(Some(SLIP), None)], "nmhd", 3, "cartesian", true),
             ("one dimension", vec![draining_sink(Some(SLIP), None)], "nmhd", 1, "cartesian", false),
@@ -5386,8 +5388,6 @@ where
 
     let ntiles = tiles.len();
     let devices: Vec<i32> = (0..ntiles as i32).collect();
-    // open peer links once (no-op for pairs that can't peer; those stage).
-    enable_peer_mesh(&devices);
     let n_zones: u64 = tiles
         .iter()
         .map(|(s, _)| (0..D).map(|ax| s.geom.interior.spaces[ax].size() as u64).product::<u64>())
@@ -5405,9 +5405,11 @@ where
         })
         .collect();
     let mut reporter = DecomposedReporter::new(cfg, n_zones, &counts, &slabs);
+    // open peer links once (no-op for pairs that can't peer; those stage).
+    enable_peer_mesh(&devices);
+    reporter.milestone("peer links opened");
 
     // the universal transport: adaptive peer/staged. single-device builds compile the host arm
-    reporter.milestone("peer links opened");
     // but never reach this fn (gpus>1 needs a gpu feature; validate_gpu_request enforces it).
     #[cfg(feature = "gpu")]
     let transport = symbi::sim::decomp::PeerCopy;
@@ -5486,9 +5488,9 @@ where
 
     let mut next_cp = cfg.start_time + cp_dt;
     let mut cp_index = cfg.checkpoint_index + 1;
+    let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
     let diagnostics = {
         // the decomposed loop owns the tiles by `&mut` (the per-step immersed-body bookkeeping
-    let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
         // mutates the bodies). build the `&mut` store handles + the `&` kernels from the same tiles
         // (disjoint tuple fields). the checkpoint callback receives the shared tile slice it needs
         // for the gather (it cannot capture `stores` while the loop holds them mutably).
@@ -5513,8 +5515,6 @@ where
             }
         }
         let schedule = Schedule::derive_with_seam(counts, stores[0].geom.ng, &topology, seam);
-        evolve_scheduled(
-            &mut stores,
         reporter.milestone(&format!(
             "halo schedule: {} legs{}; priming primitives, halos and the first exchange",
             schedule.legs().len(),
@@ -5524,6 +5524,8 @@ where
                 format!(" + {} antipodal legs", schedule.polar_legs().len())
             }
         ));
+        evolve_scheduled(
+            &mut stores,
             &kernels,
             &schedule,
             &devices,
@@ -5570,13 +5572,13 @@ where
                         }
                     }
                 }
-                std::ops::ControlFlow::Continue(())
-            },
                 // bounded march: stop after `max_steps` root iterations (0 = unbounded), as the
                 // single-grid run does; the final snapshot still follows.
                 if cfg.max_steps > 0 && iter >= cfg.max_steps {
                     return std::ops::ControlFlow::Break(());
                 }
+                std::ops::ControlFlow::Continue(())
+            },
         )
     };
 
@@ -5705,9 +5707,9 @@ where
 
     let mut next_cp = cfg.start_time + cp_dt;
     let mut cp_index = cfg.checkpoint_index + 1;
+    let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
     let diagnostics = evolve_hierarchy_decomposed(
         &mut tiles,
-    let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
         counts,
         &devices,
         &transport,
@@ -5727,18 +5729,18 @@ where
                 }
                 cp_index += 1;
             }
-            std::ops::ControlFlow::Continue(())
-        },
             if cfg.max_steps > 0 && iter >= cfg.max_steps {
                 return std::ops::ControlFlow::Break(());
             }
+            std::ops::ControlFlow::Continue(())
+        },
     );
 
-    // canonical final snapshot.
-    write_cp(
     if let Some(msg) = cp_error.into_inner() {
         return Err(msg);
     }
+    // canonical final snapshot.
+    write_cp(
         &tiles,
         &checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed)),
         cp_index,
@@ -5960,9 +5962,9 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 .cells(n)
                 .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
                 .spacing(dx)
+                .coord_maps(axis_maps::<$d>(cfg))
                 .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
                 .cfl(cfg.cfl)
-                .coord_maps(axis_maps::<$d>(cfg))
                 .timestepping(cfg.timestepping)
                 .cyl_plane(cfg.cyl_plane)
                 .allocate()
@@ -6202,9 +6204,9 @@ macro_rules! build_and_run_hydro_decomposed {
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+            .coord_maps(axis_maps::<$d>(cfg))
             .boundaries(phys)
             .cfl(cfg.cfl)
-            .coord_maps(axis_maps::<$d>(cfg))
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
             .allocate()
@@ -7050,9 +7052,9 @@ macro_rules! build_and_run_mhd_decomposed {
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+            .coord_maps(axis_maps::<$d>(cfg))
             .boundaries(phys)
             .cfl(cfg.cfl)
-            .coord_maps(axis_maps::<$d>(cfg))
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
             .allocate()
@@ -7231,9 +7233,9 @@ macro_rules! build_and_run_imhd_decomposed {
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+            .coord_maps(axis_maps::<$d>(cfg))
             .boundaries(phys)
             .cfl(cfg.cfl)
-            .coord_maps(axis_maps::<$d>(cfg))
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
             .allocate()
@@ -7578,9 +7580,9 @@ macro_rules! build_and_run_iso_decomposed {
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+            .coord_maps(axis_maps::<$d>(cfg))
             .boundaries(phys)
             .cfl(cfg.cfl)
-            .coord_maps(axis_maps::<$d>(cfg))
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
             .allocate()
@@ -8034,8 +8036,6 @@ fn validate_axis_boundaries(cfg: &Config) -> Result<(), String> {
     violation.map_or(Ok(()), Err)
 }
 
-/// the polar seam of a decomposed run, when a polar axis face sits on a chart whose gridded
-/// azimuth is cut: the mirror axis and its axis faces from the declared boundaries, the azimuth
 
 /// the one-process report of a decomposed run: the setup panel, the initialization milestones,
 /// the periodic progress row, checkpoint notices, and the completion or failure frame, on the
@@ -8200,6 +8200,8 @@ fn checkpoint_write_error(path: &str, err: impl std::fmt::Debug) -> String {
     format!("checkpoint write failed: {path}: {err:?}")
 }
 
+/// the polar seam of a decomposed run, when a polar axis face sits on a chart whose gridded
+/// azimuth is cut: the mirror axis and its axis faces from the declared boundaries, the azimuth
 /// axis from the chart, and each azimuth tile's interior cell count read off the tiles.
 fn polar_seam_of<const D: usize, const DOF: usize, Mem: MemorySpace>(
     cfg: &Config,
@@ -9336,8 +9338,6 @@ fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
     }
     #[cfg(not(feature = "gpu"))]
     {
-        Err(format!(
-            "gpus={n_gpus} requested, but this is a cpu build. multi-gpu needs a gpu build: \
         // the same switch that folds logical devices onto too few physical ones runs the
         // decomposed path as host tiles here: the whole build + scatter + exchange + gather +
         // checkpoint path on one cpu, so a decomposed run can be diffed against the single grid
@@ -9349,6 +9349,8 @@ fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
             );
             return Ok(());
         }
+        Err(format!(
+            "gpus={n_gpus} requested, but this is a cpu build. multi-gpu needs a gpu build: \
              `./dev.py install --gpu` (nvidia) or `--hip` (amd)."
         ))
     }
