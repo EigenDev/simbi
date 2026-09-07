@@ -5388,8 +5388,26 @@ where
     let devices: Vec<i32> = (0..ntiles as i32).collect();
     // open peer links once (no-op for pairs that can't peer; those stage).
     enable_peer_mesh(&devices);
+    let n_zones: u64 = tiles
+        .iter()
+        .map(|(s, _)| (0..D).map(|ax| s.geom.interior.spaces[ax].size() as u64).product::<u64>())
+        .sum();
+    let slabs: Vec<Vec<usize>> = (0..D)
+        .map(|ax| {
+            (0..counts[ax])
+                .map(|i| {
+                    let mut tc = [0usize; D];
+                    tc[ax] = i;
+                    let g = &tiles[symbi::sim::decomp::flatten(tc, counts)].0.geom.interior;
+                    g.spaces[ax].size()
+                })
+                .collect()
+        })
+        .collect();
+    let mut reporter = DecomposedReporter::new(cfg, n_zones, &counts, &slabs);
 
     // the universal transport: adaptive peer/staged. single-device builds compile the host arm
+    reporter.milestone("peer links opened");
     // but never reach this fn (gpus>1 needs a gpu feature; validate_gpu_request enforces it).
     #[cfg(feature = "gpu")]
     let transport = symbi::sim::decomp::PeerCopy;
@@ -5441,11 +5459,18 @@ where
         gather_faces(&global, &sh, counts);
         gather_tracers(&mut global, &sh);
         let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
-        let _ = write_hierarchy_checkpoint(
+        let path = checkpoint_name(cfg, &tag);
+        let t_io = std::time::Instant::now();
+        if let Err(e) = write_hierarchy_checkpoint(
             &[&global],
-            &checkpoint_name(cfg, &tag),
+            &path,
             &checkpoint_metadata(cfg, cfg.checkpoint_index),
-        );
+        ) {
+            let msg = checkpoint_write_error(&path, e);
+            reporter.fail(&msg);
+            return Err(msg);
+        }
+        reporter.checkpoint_written(cfg, &path, cfg.start_time, t_io.elapsed().as_secs_f64());
     }
 
     // the seam sample rides the plan, independent of the checkpoint guard above: a
@@ -5463,6 +5488,7 @@ where
     let mut cp_index = cfg.checkpoint_index + 1;
     let diagnostics = {
         // the decomposed loop owns the tiles by `&mut` (the per-step immersed-body bookkeeping
+    let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
         // mutates the bodies). build the `&mut` store handles + the `&` kernels from the same tiles
         // (disjoint tuple fields). the checkpoint callback receives the shared tile slice it needs
         // for the gather (it cannot capture `stores` while the loop holds them mutably).
@@ -5489,6 +5515,15 @@ where
         let schedule = Schedule::derive_with_seam(counts, stores[0].geom.ng, &topology, seam);
         evolve_scheduled(
             &mut stores,
+        reporter.milestone(&format!(
+            "halo schedule: {} legs{}; priming primitives, halos and the first exchange",
+            schedule.legs().len(),
+            if schedule.polar_legs().is_empty() {
+                String::new()
+            } else {
+                format!(" + {} antipodal legs", schedule.polar_legs().len())
+            }
+        ));
             &kernels,
             &schedule,
             &devices,
@@ -5497,7 +5532,8 @@ where
             cfg.t_final,
             1,
             &transport,
-            |_iter, time, sh| {
+            |iter, time, sh| {
+                reporter.progress(iter, time);
                 if time + f64::EPSILON >= next_cp {
                     // the writer records the gather target's clock/scale factor: sync from
                     // tile 0 (all tiles advance in lockstep) or the checkpoint carries the
@@ -5509,11 +5545,17 @@ where
                     gather_faces(&global, sh, counts);
                     gather_tracers(&mut global, sh);
                     let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
-                    let _ = write_hierarchy_checkpoint(
+                    let path = checkpoint_name(cfg, &tag);
+                    let t_io = std::time::Instant::now();
+                    if let Err(e) = write_hierarchy_checkpoint(
                         &[&global],
-                        &checkpoint_name(cfg, &tag),
+                        &path,
                         &checkpoint_metadata(cfg, cp_index),
-                    );
+                    ) {
+                        *cp_error.borrow_mut() = Some(checkpoint_write_error(&path, e));
+                        return std::ops::ControlFlow::Break(());
+                    }
+                    reporter.checkpoint_written(cfg, &path, time, t_io.elapsed().as_secs_f64());
                     while next_cp <= time {
                         next_cp += cp_dt;
                     }
@@ -5530,6 +5572,11 @@ where
                 }
                 std::ops::ControlFlow::Continue(())
             },
+                // bounded march: stop after `max_steps` root iterations (0 = unbounded), as the
+                // single-grid run does; the final snapshot still follows.
+                if cfg.max_steps > 0 && iter >= cfg.max_steps {
+                    return std::ops::ControlFlow::Break(());
+                }
         )
     };
 
@@ -5543,11 +5590,21 @@ where
         gather_faces(&global, &sh, counts);
         gather_tracers(&mut global, &sh);
     }
-    let _ = write_hierarchy_checkpoint(
-        &[&global],
-        &checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed)),
-        &checkpoint_metadata(cfg, cp_index),
-    );
+    if let Some(msg) = cp_error.into_inner() {
+        reporter.fail(&msg);
+        return Err(msg);
+    }
+    let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
+    let t_io = std::time::Instant::now();
+    if let Err(e) =
+        write_hierarchy_checkpoint(&[&global], &final_path, &checkpoint_metadata(cfg, cp_index))
+    {
+        let msg = checkpoint_write_error(&final_path, e);
+        reporter.fail(&msg);
+        return Err(msg);
+    }
+    reporter.checkpoint_written(cfg, &final_path, global.time, t_io.elapsed().as_secs_f64());
+    reporter.finish(global.iteration, global.time, &final_path);
     Ok(diagnostics)
 }
 
@@ -5636,19 +5693,21 @@ where
                 gather_decomposed_hierarchy_tracers(&mut global, tiles);
             }
             let states: Vec<_> = global.levels.iter().map(|l| &l.state).collect();
-            let _ = write_hierarchy_checkpoint(&states, path, &checkpoint_metadata(cfg, cp_index));
+            write_hierarchy_checkpoint(&states, path, &checkpoint_metadata(cfg, cp_index))
+                .map_err(|e| checkpoint_write_error(path, e))
         };
 
     // t=start initial condition.
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
         let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
-        write_cp(&tiles, &checkpoint_name(cfg, &tag), cfg.checkpoint_index);
+        write_cp(&tiles, &checkpoint_name(cfg, &tag), cfg.checkpoint_index)?;
     }
 
     let mut next_cp = cfg.start_time + cp_dt;
     let mut cp_index = cfg.checkpoint_index + 1;
     let diagnostics = evolve_hierarchy_decomposed(
         &mut tiles,
+    let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
         counts,
         &devices,
         &transport,
@@ -5656,10 +5715,13 @@ where
         cfg.start_time,
         cfg.t_final,
         1,
-        |_iter, time, tiles| {
+        |iter, time, tiles| {
             if time + f64::EPSILON >= next_cp {
                 let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
-                write_cp(tiles, &checkpoint_name(cfg, &tag), cp_index);
+                if let Err(e) = write_cp(tiles, &checkpoint_name(cfg, &tag), cp_index) {
+                    *cp_error.borrow_mut() = Some(e);
+                    return std::ops::ControlFlow::Break(());
+                }
                 while next_cp <= time {
                     next_cp += cp_dt;
                 }
@@ -5667,14 +5729,20 @@ where
             }
             std::ops::ControlFlow::Continue(())
         },
+            if cfg.max_steps > 0 && iter >= cfg.max_steps {
+                return std::ops::ControlFlow::Break(());
+            }
     );
 
     // canonical final snapshot.
     write_cp(
+    if let Some(msg) = cp_error.into_inner() {
+        return Err(msg);
+    }
         &tiles,
         &checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed)),
         cp_index,
-    );
+    )?;
     Ok(diagnostics)
 }
 
@@ -5894,6 +5962,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 .spacing(dx)
                 .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
                 .cfl(cfg.cfl)
+                .coord_maps(axis_maps::<$d>(cfg))
                 .timestepping(cfg.timestepping)
                 .cyl_plane(cfg.cyl_plane)
                 .allocate()
@@ -5962,7 +6031,6 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 /// are single-grid only. the correctness contract is decomposed == monolithic.
 macro_rules! build_and_run_hydro_decomposed {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $dof:literal, $geom:expr, $geom_ty:ty) => {{
-                .coord_maps(axis_maps::<$d>(cfg))
         use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
@@ -6136,6 +6204,7 @@ macro_rules! build_and_run_hydro_decomposed {
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
             .boundaries(phys)
             .cfl(cfg.cfl)
+            .coord_maps(axis_maps::<$d>(cfg))
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
             .allocate()
@@ -6204,7 +6273,6 @@ macro_rules! hydro_dispatch {
             // combinations below would otherwise fall through to a flat `(dims, coords)` arm and run
             // silently on a Minkowski metric (wrong physics, zero warning). the matches! set is the
             // single source of truth for the baked GR-hydro arms; `test_dispatch_rejects_unbaked_gr`
-            .coord_maps(axis_maps::<$d>(cfg))
             // asserts it stays in lockstep with the actual arms (guarded-arm-or-Err, never silent-flat).
             (d, c)
                 if $cfg.spacetime != "minkowski"
@@ -6984,6 +7052,7 @@ macro_rules! build_and_run_mhd_decomposed {
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
             .boundaries(phys)
             .cfl(cfg.cfl)
+            .coord_maps(axis_maps::<$d>(cfg))
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
             .allocate()
@@ -7052,7 +7121,6 @@ macro_rules! build_and_run_imhd_decomposed {
         if bufs.len() < 3 {
             return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
         }
-            .coord_maps(axis_maps::<$d>(cfg))
         let partition = tile_partition(n, cfg)?;
         let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
@@ -7165,6 +7233,7 @@ macro_rules! build_and_run_imhd_decomposed {
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
             .boundaries(phys)
             .cfl(cfg.cfl)
+            .coord_maps(axis_maps::<$d>(cfg))
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
             .allocate()
@@ -7233,7 +7302,6 @@ macro_rules! mhd_dispatch {
                 Err(format!(
                     "no baked GR-MHD kernel for (dims={d}, coords={c}, spacetime={}): refusing to \
                      run silently on a flat Minkowski metric. add the (dims, coords, spacetime) arm \
-            .coord_maps(axis_maps::<$d>(cfg))
                      + kernel, or use spacetime=minkowski.",
                     $cfg.spacetime
                 ))
@@ -7512,6 +7580,7 @@ macro_rules! build_and_run_iso_decomposed {
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
             .boundaries(phys)
             .cfl(cfg.cfl)
+            .coord_maps(axis_maps::<$d>(cfg))
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
             .allocate()
@@ -7580,7 +7649,6 @@ macro_rules! build_and_run_iso {
                     },
                 ));
             }
-            .coord_maps(axis_maps::<$d>(cfg))
         }
         let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
         let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
@@ -7968,6 +8036,170 @@ fn validate_axis_boundaries(cfg: &Config) -> Result<(), String> {
 
 /// the polar seam of a decomposed run, when a polar axis face sits on a chart whose gridded
 /// azimuth is cut: the mirror axis and its axis faces from the declared boundaries, the azimuth
+
+/// the one-process report of a decomposed run: the setup panel, the initialization milestones,
+/// the periodic progress row, checkpoint notices, and the completion or failure frame, on the
+/// same table the single-grid run draws. throughput is zone-cycles per second: the interior
+/// cells summed over every tile, times the iterations completed in a wall-clock window,
+/// divided by that window, so it is comparable to the single-grid figure for the same grid.
+/// the row's dt is the mean step over the window. one table for the whole run; no tile
+/// posts on its own and nothing here synchronizes a device.
+struct DecomposedReporter {
+    table: Table,
+    dash: Option<LiveDashboard>,
+    screen: ScreenGuard,
+    n_zones: u64,
+    t_final: f64,
+    start: std::time::Instant,
+    last_inst: std::time::Instant,
+    last_iter: u64,
+    last_time: f64,
+    io_secs: f64,
+    live: bool,
+}
+
+impl DecomposedReporter {
+    fn new(cfg: &Config, n_zones: u64, counts: &[usize], slabs: &[Vec<usize>]) -> Self {
+        let mut setup = problem_setup_rows(cfg);
+        setup.push(["Decomposition".into(), "gpus".into(), cfg.n_gpus.to_string()]);
+        setup.push([
+            "Decomposition".into(),
+            "tile grid".into(),
+            counts.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(" x "),
+        ]);
+        for (ax, widths) in slabs.iter().enumerate() {
+            if widths.len() > 1 {
+                setup.push([
+                    "Decomposition".into(),
+                    format!("axis {ax} slabs"),
+                    widths.iter().map(|w| w.to_string()).collect::<Vec<_>>().join(", "),
+                ]);
+            }
+        }
+        setup.push([
+            "Decomposition".into(),
+            "global zones".into(),
+            (0..cfg.dims).map(|ax| cfg.n_cells[ax].to_string()).collect::<Vec<_>>().join(" x "),
+        ]);
+        let setup_ref: Vec<[&str; 3]> = setup
+            .iter()
+            .map(|r| [r[0].as_str(), r[1].as_str(), r[2].as_str()])
+            .collect();
+        let title = if cfg.name.is_empty() {
+            "SIMBI".to_string()
+        } else {
+            format!("SIMBI  -  {}", cfg.name)
+        };
+        let mut table = Table::new(&title, true);
+        table.set_subtitle(&format!(
+            "{} · {} zones · {} gpus",
+            cfg.regime,
+            (0..cfg.dims).map(|ax| cfg.n_cells[ax] as u64).product::<u64>(),
+            cfg.n_gpus
+        ));
+        table.set_regime(&cfg.regime.to_uppercase());
+        table.set_cfl(cfg.cfl, 1.0);
+        table.set_problem_setup(&setup_ref);
+        table.set_header(&["Iteration", "Time", "dt", "zone-cyc/s"]);
+        if let Some(p) = log_path(cfg) {
+            let _ = table.set_log_file(std::path::Path::new(&p));
+        }
+        table.set_host(Some(symbi_display::hostinfo::HostStats::sample()));
+        let screen = ScreenGuard::enter();
+        let dash = LiveDashboard::spawn();
+        let now = std::time::Instant::now();
+        let mut me = Self {
+            table,
+            dash,
+            screen,
+            n_zones,
+            t_final: cfg.t_final,
+            start: now,
+            last_inst: now,
+            last_iter: 0,
+            last_time: cfg.start_time,
+            io_secs: 0.0,
+            live: cfg.live_monitor,
+        };
+        me.milestone(&format!(
+            "decomposed run: {} tiles over {} gpus, {} zones per root step",
+            counts.iter().product::<usize>(),
+            cfg.n_gpus,
+            n_zones
+        ));
+        me
+    }
+
+    fn refresh(&mut self) {
+        publish_or_refresh(self.dash.as_ref(), &mut self.table);
+    }
+
+    /// an initialization step completed; visible at once, so a stall shows where it stopped.
+    fn milestone(&mut self, msg: &str) {
+        self.table.post_info(msg);
+        self.refresh();
+    }
+
+    /// the progress row every hundred iterations, rated over the window since the last row.
+    fn progress(&mut self, iter: u64, time: f64) {
+        if iter == 0 || iter % 100 != 0 {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.last_inst).as_secs_f64();
+        let d_iter = iter.saturating_sub(self.last_iter);
+        let rate = if elapsed > 1e-9 && d_iter > 0 {
+            self.n_zones as f64 * d_iter as f64 / elapsed
+        } else {
+            0.0
+        };
+        let dt = if d_iter > 0 { (time - self.last_time) / d_iter as f64 } else { 0.0 };
+        self.last_inst = now;
+        self.last_iter = iter;
+        self.last_time = time;
+        set_row(&mut self.table, iter, time, dt, self.t_final, rate);
+        self.table.push_throughput(rate);
+        self.table.push_metrics(iter, time, dt, rate);
+        self.refresh();
+    }
+
+    /// a checkpoint landed; the write's wall time is kept out of the sustained rate.
+    fn checkpoint_written(&mut self, cfg: &Config, path: &str, time: f64, io: f64) {
+        self.io_secs += io;
+        self.table.post_success(&format!("checkpoint {path}  ({})", fmt_time_msg(cfg, time)));
+        self.refresh();
+    }
+
+    fn finish(mut self, iter: u64, time: f64, final_path: &str) {
+        let wall = self.start.elapsed().as_secs_f64();
+        let compute = (wall - self.io_secs).max(1e-9);
+        let avg = self.n_zones as f64 * iter as f64 / compute;
+        self.screen.leave();
+        self.table.set_dynamic(false);
+        let summary = format!(
+            "complete — {iter} steps, t = {time:.4}, {wall:.2}s ({:.2}s io), {}/s sustained · final {final_path}",
+            self.io_secs,
+            humanize_rate(avg),
+        );
+        self.table.post_success(&summary);
+        self.table.exit_frame(ExitKind::Success, &summary);
+        let _ = self.live;
+    }
+
+    fn fail(mut self, msg: &str) {
+        self.screen.leave();
+        self.table.set_dynamic(false);
+        self.table.post_error(msg);
+        self.table.exit_frame(ExitKind::Crash, msg);
+    }
+}
+
+/// the error a failed checkpoint write raises: the target path and the writer's own detail,
+/// so a run never reports success over a missing or partial file.
+fn checkpoint_write_error(path: &str, err: impl std::fmt::Debug) -> String {
+    format!("checkpoint write failed: {path}: {err:?}")
+}
+
 /// axis from the chart, and each azimuth tile's interior cell count read off the tiles.
 fn polar_seam_of<const D: usize, const DOF: usize, Mem: MemorySpace>(
     cfg: &Config,
@@ -9106,6 +9338,17 @@ fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
     {
         Err(format!(
             "gpus={n_gpus} requested, but this is a cpu build. multi-gpu needs a gpu build: \
+        // the same switch that folds logical devices onto too few physical ones runs the
+        // decomposed path as host tiles here: the whole build + scatter + exchange + gather +
+        // checkpoint path on one cpu, so a decomposed run can be diffed against the single grid
+        // without a device. no parallelism.
+        if std::env::var("SYMBI_GPU_OVERSUBSCRIBE").is_ok() {
+            eprintln!(
+                "warning: gpus={n_gpus} on a cpu build; running {n_gpus} host tiles \
+                 (SYMBI_GPU_OVERSUBSCRIBE) -- correctness check only, no speedup."
+            );
+            return Ok(());
+        }
              `./dev.py install --gpu` (nvidia) or `--hip` (amd)."
         ))
     }
@@ -9338,17 +9581,6 @@ fn run_simulation(
         .map_err(PyRuntimeError::new_err)?;
     Ok(NativeRunDiagnostics { inner: diagnostics })
 }
-        // the same switch that folds logical devices onto too few physical ones runs the
-        // decomposed path as host tiles here: the whole build + scatter + exchange + gather +
-        // checkpoint path on one cpu, so a decomposed run can be diffed against the single grid
-        // without a device. no parallelism.
-        if std::env::var("SYMBI_GPU_OVERSUBSCRIBE").is_ok() {
-            eprintln!(
-                "warning: gpus={n_gpus} on a cpu build; running {n_gpus} host tiles \
-                 (SYMBI_GPU_OVERSUBSCRIBE) -- correctness check only, no speedup."
-            );
-            return Ok(());
-        }
 
 /// whether a config's `alpha`-key spelling is unambiguous.
 ///

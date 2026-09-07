@@ -4,8 +4,9 @@
 # the decomposed run's checkpoint against the single grid's: the gathered output state
 # carries the run's coordinate maps, so a logarithmic radial mesh records the same cell
 # counts, axis order, spacing types, bounds, ratios and reconstructed coordinates from
-# two tiles as from one. the decomposed path runs as host tiles on a cpu build, through
-# the same construction and writer a multi-gpu run uses.
+# two tiles as from one; and a checkpoint that cannot be written fails the run with the
+# target path in the error. both run the decomposed path as host tiles on a cpu build,
+# through the same construction and writer a multi-gpu run uses.
 # =============================================================================
 import os
 import stat
@@ -49,3 +50,19 @@ def test_two_host_tiles_record_the_log_radial_mesh_like_one(tmp_path: Path, monk
     np.testing.assert_array_equal(b.mesh.x2v, a.mesh.x2v)
     assert b.metadata.x1_spacing == a.metadata.x1_spacing
     assert b.metadata.x2_spacing == a.metadata.x2_spacing
+
+
+def test_a_failed_decomposed_checkpoint_write_fails_the_run(tmp_path: Path, monkeypatch) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("a read-only directory does not refuse root")
+    monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
+    out = tmp_path / "sealed"
+    out.mkdir()
+    problem = _sedov(2, out)
+    out.chmod(stat.S_IRUSR | stat.S_IXUSR)
+    try:
+        with pytest.raises(RuntimeError, match=r"checkpoint write failed: .*sealed") as err:
+            runner.run(problem, compute_mode="cpu", validate=True, max_steps=1)
+    finally:
+        out.chmod(stat.S_IRWXU)
+    assert "sealed" in str(err.value)
