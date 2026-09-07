@@ -286,13 +286,18 @@ def compute_num_polar_zones(
     zpd: Optional[int] = None,
     theta_bounds: tuple[float, float] = (0.0, np.pi),
 ) -> int:
+    """Count polar cells with angular width approximately equal to ``delta ln r``.
+
+    ``nr`` counts radial cells, not grid points. Symmetry constraints such as an
+    even full-sphere count belong to the calling problem configuration.
+    """
     if zpd is not None:
         return int(
             round((theta_bounds[1] - theta_bounds[0]) * zpd / np.log(10))
         )
     elif None not in (rmin, rmax, nr):
         dlogr: float = np.log(rmax / rmin) / nr
-        return int(round(1 + (theta_bounds[1] - theta_bounds[0]) / dlogr))
+        return int(round((theta_bounds[1] - theta_bounds[0]) / dlogr))
     else:
         raise ValueError(
             "Please either specify zones per decade or rmin, rmax, and nr"
