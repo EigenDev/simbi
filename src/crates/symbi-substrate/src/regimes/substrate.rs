@@ -463,7 +463,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // pressure is pulled back too (a grade-0 scalar, like density).
         let bc = to_bc_array::<D>(&sim.boundaries);
         let name = format!("iso_ghost_fill_{D}d");
-        GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
+        let basis = sim.geom.spacetime.component_basis();
+        GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc)
+            .with_polar_turn(crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior))
+            .drive_sweep(
             |region, p| {
                 let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
                     FieldBind::Ref(fref) => resolve_path(sim, Some(&self.pre), None, 0, *fref),
@@ -477,12 +480,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                     |bind| match bind {
                         ScalarBind::Ref(ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
                         ScalarBind::Ref(ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+                        ScalarBind::Ref(ScalarRef::Turn(ax)) => p.turn[*ax as usize],
+                        ScalarBind::Ref(ScalarRef::TurnLo(ax)) => p.turn_lo[*ax as usize],
                         o => panic!("ghost_fill: unexpected int param {o:?}"),
                     },
                     |bind| match bind {
-                        ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
-                            Sc::from_f64(p.vel_sign[*ax as usize])
-                        }
+                        ScalarBind::Ref(ScalarRef::VelSign(ax)) => Sc::from_f64(
+                            crate::kernels::support::axis_vel_sign(p, *ax as usize, basis),
+                        ),
                         ScalarBind::Ref(ScalarRef::OopSign(ax)) => {
                             Sc::from_f64(p.oop_sign[*ax as usize])
                         }

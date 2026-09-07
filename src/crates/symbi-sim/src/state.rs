@@ -1799,15 +1799,18 @@ impl<const D: usize> Boundaries<D> {
 
 /// the reason an `Axis` face is misplaced, if any. the axis boundary sits on the spherical pole
 /// (axis 1: theta = 0 on the low face, theta = pi on the high face) or on the cylindrical R = 0
-/// line (axis 0, low face, in the (R, z) plane), on a chart whose azimuth is the out-of-plane
-/// component. a gridded azimuth continues across the axis by a half-turn in phi, a lattice map
-/// the mirror fill does not carry, so three-dimensional charts are refused. `x_hi` is the
+/// line (axis 0, low face; the (R, z) plane in two dimensions). in 2.5D the azimuth is the
+/// out-of-plane component and the fill is the mirror; on a gridded azimuth (spherical
+/// (r, theta, phi), cylindrical (R, phi, z)) the crossing is a half-turn of that axis, which
+/// the fill carries as a rotation by half the azimuth's cell count, so the azimuth must be
+/// periodic on both faces, span exactly 2 pi, and carry an even cell count. `x_hi` is the
 /// physical upper bound per axis.
 pub fn axis_boundary_violation<const D: usize>(
     coords: symbi_geometry::Geometry,
     cyl_plane: CylPlane,
     x_lo: &[f64; D],
     x_hi: &[f64; D],
+    n_cells: &[usize; D],
     boundaries: &Boundaries<D>,
 ) -> Option<String> {
     use symbi_geometry::Geometry;
@@ -1824,11 +1827,6 @@ pub fn axis_boundary_violation<const D: usize>(
                         "{face} is declared an axis, but a cartesian chart has no coordinate axis; use reflecting"
                     ));
                 }
-                _ if D == 3 => {
-                    return Some(format!(
-                        "{face} is declared an axis, but a gridded azimuth continues across the axis by a half-turn in phi, which the mirror fill does not carry; use reflecting or drop to 2.5D"
-                    ));
-                }
                 Geometry::Spherical => {
                     ax == 1
                         && if side == 0 {
@@ -1838,9 +1836,29 @@ pub fn axis_boundary_violation<const D: usize>(
                         }
                 }
                 Geometry::Cylindrical => {
-                    cyl_plane == CylPlane::Rz && ax == 0 && side == 0 && x_lo[ax].abs() <= TOL
+                    (D == 3 || cyl_plane == CylPlane::Rz)
+                        && ax == 0
+                        && side == 0
+                        && x_lo[ax].abs() <= TOL
                 }
             };
+            if ok && D == 3 {
+                let azimuth = match coords {
+                    Geometry::Spherical => 2,
+                    _ => 1,
+                };
+                let periodic = boundaries.0[azimuth] == [BoundaryType::Periodic; 2];
+                let full_turn = (x_hi[azimuth] - x_lo[azimuth] - 2.0 * std::f64::consts::PI).abs() <= TOL;
+                let even = n_cells[azimuth] % 2 == 0;
+                if !(periodic && full_turn && even) {
+                    return Some(format!(
+                        "{face} is declared an axis on a gridded azimuth (axis {azimuth}), whose polar continuation is a half-turn: the azimuth must be periodic on both faces, span exactly 2 pi, and carry an even cell count; got boundaries {:?}, span {}, {} cells",
+                        boundaries.0[azimuth],
+                        x_hi[azimuth] - x_lo[azimuth],
+                        n_cells[azimuth]
+                    ));
+                }
+            }
             if !ok {
                 let bound = if side == 0 { x_lo[ax] } else { x_hi[ax] };
                 return Some(format!(
@@ -4092,29 +4110,58 @@ mod axis_boundary_tests {
     fn the_axis_is_admitted_on_the_spherical_poles() {
         let both = polar(BoundaryType::Axis, BoundaryType::Axis);
         assert_eq!(
-            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0], &[2.0, PI], &both),
+            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0], &[2.0, PI], &[8, 8], &both),
             None
         );
         let half = polar(BoundaryType::Axis, BoundaryType::Reflect);
         assert_eq!(
-            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0], &[2.0, 0.5 * PI], &half),
+            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0], &[2.0, 0.5 * PI], &[8, 8], &half),
             None
+        );
+    }
+
+    #[test]
+    fn the_gridded_azimuth_admits_the_pole_on_a_periodic_even_full_turn_only() {
+        let sph3 = |phi: [BoundaryType; 2]| {
+            Boundaries::<3>::per_axis([[BoundaryType::Outflow; 2], [BoundaryType::Axis; 2], phi])
+        };
+        let ok = sph3([BoundaryType::Periodic; 2]);
+        assert_eq!(
+            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0, 0.0], &[2.0, PI, 2.0 * PI], &[8, 8, 8], &ok),
+            None
+        );
+        let v = axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0, 0.0], &[2.0, PI, 2.0 * PI], &[8, 8, 7], &ok)
+            .expect("an odd azimuth count has no half-turn");
+        assert!(v.contains("half-turn"), "{v}");
+        assert!(
+            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0, 0.0], &[2.0, PI, PI], &[8, 8, 8], &ok).is_some(),
+            "a half wedge in phi has no antipode"
+        );
+        assert!(
+            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0, 0.0], &[2.0, PI, 2.0 * PI], &[8, 8, 8], &sph3([BoundaryType::Outflow; 2])).is_some(),
+            "the azimuth must close on itself"
+        );
+        let cyl3 = Boundaries::<3>::per_axis([[BoundaryType::Axis, BoundaryType::Outflow], [BoundaryType::Periodic; 2], [BoundaryType::Outflow; 2]]);
+        assert_eq!(
+            axis_boundary_violation(Geometry::Cylindrical, CylPlane::RPhi, &[0.0, 0.0, -1.0], &[1.0, 2.0 * PI, 1.0], &[8, 16, 8], &cyl3),
+            None,
+            "the cylindrical (R, phi, z) axis rotates along axis 1"
         );
     }
 
     #[test]
     fn the_axis_is_refused_off_the_pole() {
         let half = polar(BoundaryType::Axis, BoundaryType::Axis);
-        let v = axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0], &[2.0, 0.5 * PI], &half)
+        let v = axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0], &[2.0, 0.5 * PI], &[8, 8], &half)
             .expect("an axis face on the equator is refused");
         assert!(v.contains("high face of axis 1"), "{v}");
         let radial = Boundaries::per_axis([[BoundaryType::Axis, BoundaryType::Outflow], [BoundaryType::Reflect; 2]]);
-        let v = axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[0.0, 0.0], &[2.0, PI], &radial)
+        let v = axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[0.0, 0.0], &[2.0, PI], &[8, 8], &radial)
             .expect("the radial origin is a point, so its face is refused");
         assert!(v.contains("low face of axis 0"), "{v}");
         let shifted = polar(BoundaryType::Axis, BoundaryType::Reflect);
         assert!(
-            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.1], &[2.0, PI], &shifted).is_some(),
+            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.1], &[2.0, PI], &[8, 8], &shifted).is_some(),
             "a low theta face away from zero is refused"
         );
     }
@@ -4123,40 +4170,32 @@ mod axis_boundary_tests {
     fn the_axis_is_admitted_on_the_cylindrical_origin_of_the_rz_plane_only() {
         let rz = Boundaries::per_axis([[BoundaryType::Axis, BoundaryType::Outflow], [BoundaryType::Outflow; 2]]);
         assert_eq!(
-            axis_boundary_violation(Geometry::Cylindrical, CylPlane::Rz, &[0.0, -1.0], &[1.0, 1.0], &rz),
+            axis_boundary_violation(Geometry::Cylindrical, CylPlane::Rz, &[0.0, -1.0], &[1.0, 1.0], &[8, 8], &rz),
             None
         );
         assert!(
-            axis_boundary_violation(Geometry::Cylindrical, CylPlane::RPhi, &[0.0, 0.0], &[1.0, 2.0 * PI], &rz).is_some(),
-            "the (R, phi) plane grids the azimuth, so the mirror fill cannot continue across R = 0"
+            axis_boundary_violation(Geometry::Cylindrical, CylPlane::RPhi, &[0.0, 0.0], &[1.0, 2.0 * PI], &[8, 8], &rz).is_some(),
+            "the (R, phi) plane's axis is a point of the plane with no third axis to rotate about"
         );
         assert!(
-            axis_boundary_violation(Geometry::Cylindrical, CylPlane::Rz, &[0.5, -1.0], &[1.0, 1.0], &rz).is_some(),
+            axis_boundary_violation(Geometry::Cylindrical, CylPlane::Rz, &[0.5, -1.0], &[1.0, 1.0], &[8, 8], &rz).is_some(),
             "an inner cylinder wall away from R = 0 is refused"
         );
     }
 
     #[test]
-    fn the_axis_is_refused_on_cartesian_and_three_dimensional_charts() {
+    fn the_axis_is_refused_on_cartesian_charts() {
         let cart = polar(BoundaryType::Axis, BoundaryType::Outflow);
-        let v = axis_boundary_violation(Geometry::Cartesian, CylPlane::Rz, &[0.0, 0.0], &[1.0, 1.0], &cart)
+        let v = axis_boundary_violation(Geometry::Cartesian, CylPlane::Rz, &[0.0, 0.0], &[1.0, 1.0], &[8, 8], &cart)
             .expect("cartesian has no axis");
         assert!(v.contains("cartesian"), "{v}");
-        let sph3 = Boundaries::<3>::per_axis([
-            [BoundaryType::Outflow; 2],
-            [BoundaryType::Axis, BoundaryType::Axis],
-            [BoundaryType::Periodic; 2],
-        ]);
-        let v = axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0, 0.0], &[2.0, PI, 2.0 * PI], &sph3)
-            .expect("a gridded azimuth needs the half-turn map");
-        assert!(v.contains("half-turn"), "{v}");
     }
 
     #[test]
     fn a_domain_without_an_axis_face_passes() {
         let walls = polar(BoundaryType::Reflect, BoundaryType::Reflect);
         assert_eq!(
-            axis_boundary_violation(Geometry::Cartesian, CylPlane::Rz, &[0.0, 0.0], &[1.0, 1.0], &walls),
+            axis_boundary_violation(Geometry::Cartesian, CylPlane::Rz, &[0.0, 0.0], &[1.0, 1.0], &[8, 8], &walls),
             None
         );
     }

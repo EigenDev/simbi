@@ -377,6 +377,7 @@ pub fn dispatch_gradient_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
                                 0
                             }
                         }
+                        ScalarBind::Ref(ScalarRef::Turn(_) | ScalarRef::TurnLo(_)) => 0,
                         o => panic!("gradient boundary: unexpected int param {o:?}"),
                     },
                     |bind| match bind {

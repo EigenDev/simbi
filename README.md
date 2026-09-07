@@ -810,7 +810,7 @@ divergence. The extra work is about 1.4x in the flux stage and less over a compl
 **Boundary conditions:**
 - `PERIODIC`, wrap around
 - `REFLECTING`, mirror symmetry: a wall, where the normal velocity and field mirror and every tangential component copies
-- `AXIS`, the polar axis of a 2.5D spherical grid (theta = 0 or theta = pi) or the R = 0 line of a 2.5D cylindrical (R, z) grid: crossing it is a half-turn, so the normal component mirrors, the remaining in-plane component and the scalars continue, and the azimuthal components mirror when stored as physical components (Newtonian and flat relativistic runs) and continue when stored as contravariant coordinate components (curved-spacetime runs)
+- `AXIS`, the polar axis of a spherical grid (theta = 0 or theta = pi) or the R = 0 line of a cylindrical grid: crossing it is a half-turn, so the normal component mirrors, the remaining in-plane component and the scalars continue, and the azimuthal component mirrors when stored as a physical component (Newtonian and flat relativistic runs) and continues when stored as a contravariant coordinate component (curved-spacetime runs). In 2.5D the azimuth is out of plane and the fill is the mirror. With the azimuth gridded (3D spherical (r, theta, phi), cylindrical (R, phi, z)) the fill also rotates its source half a period along phi, which needs a periodic, uniformly spaced azimuth spanning 2 pi with an even cell count; on one GPU only until the decomposition carries the antipodal exchange.
 - `OUTFLOW`, zero gradient
 - `DYNAMIC`, user-defined expressions
 

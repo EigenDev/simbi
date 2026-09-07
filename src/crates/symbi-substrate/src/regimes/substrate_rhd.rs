@@ -511,7 +511,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
         // the state's basis decides the azimuthal parity across a polar axis face.
         let basis = sim.geom.spacetime.component_basis();
-        GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
+        GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc)
+            .with_polar_turn(crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior))
+            .drive_sweep(
             |region, p| {
                 let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
                     FieldBind::Ref(fref) => resolve_path(sim, Some(pre), None, 0, *fref),
@@ -527,12 +529,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     |bind| match bind {
                         ScalarBind::Ref(ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
                         ScalarBind::Ref(ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+                        ScalarBind::Ref(ScalarRef::Turn(ax)) => p.turn[*ax as usize],
+                        ScalarBind::Ref(ScalarRef::TurnLo(ax)) => p.turn_lo[*ax as usize],
                         o => panic!("ghost_fill: unexpected int param {o:?}"),
                     },
                     |bind| match bind {
-                        ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
-                            Sc::from_f64(p.vel_sign[*ax as usize])
-                        }
+                        ScalarBind::Ref(ScalarRef::VelSign(ax)) => Sc::from_f64(
+                            crate::kernels::support::axis_vel_sign(p, *ax as usize, basis),
+                        ),
                         ScalarBind::Ref(ScalarRef::OopSign(ax)) => Sc::from_f64(
                             crate::kernels::support::axis_oop_sign(p, *ax as usize, basis),
                         ),

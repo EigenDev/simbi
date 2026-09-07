@@ -392,6 +392,15 @@ fn gv_lattice_source(cx: TraceCx, ndim: usize) -> Vec<NodeId> {
         let arg: Vec<NodeId> = (0..ndim)
             .map(|ax| t.scalar_int(&format!("arg_{ax}")))
             .collect();
+        // the polar half-turn: crossing a polar axis face on a gridded azimuth lands on the
+        // cell half a period away in phi, so the azimuth axis, itself passthrough under the
+        // sweep, reads its source rotated by `turn` cells within [turn_lo, turn_lo + 2 turn).
+        let turn: Vec<NodeId> = (0..ndim)
+            .map(|ax| t.scalar_int(&format!("turn_{ax}")))
+            .collect();
+        let turn_lo: Vec<NodeId> = (0..ndim)
+            .map(|ax| t.scalar_int(&format!("turn_lo_{ax}")))
+            .collect();
         (0..ndim)
             .map(|ax| {
                 let (c, mt, ag) = (coords[ax], map_type[ax], arg[ax]);
@@ -406,7 +415,17 @@ fn gv_lattice_source(cx: TraceCx, ndim: usize) -> Vec<NodeId> {
                 let reflect = g.element_wise(Sub, vec![ag, c], None); // arg - c
                 let pick_reflect = g.select(is_reflect, reflect, ag, None); // else outflow
                 let pick_periodic = g.select(is_periodic, periodic, pick_reflect, None);
-                g.select(is_skip, c, pick_periodic, None)
+                let mapped = g.select(is_skip, c, pick_periodic, None);
+                let (tn, lo) = (turn[ax], turn_lo[ax]);
+                let turning = g.element_wise(Ne, vec![tn, zero], None);
+                let period = g.element_wise(Add, vec![tn, tn], None);
+                let offset = g.element_wise(Sub, vec![mapped, lo], None);
+                let shifted = g.element_wise(Add, vec![offset, tn], None);
+                let past = g.element_wise(Ge, vec![shifted, period], None);
+                let wrapped_hi = g.element_wise(Sub, vec![shifted, period], None);
+                let wrapped = g.select(past, wrapped_hi, shifted, None);
+                let rotated = g.element_wise(Add, vec![lo, wrapped], None);
+                g.select(turning, rotated, mapped, None)
             })
             .collect()
     })

@@ -169,6 +169,13 @@ pub enum ScalarRef {
     /// the ghost-fill per-axis out-of-plane flip sign `oop_sign_{ax}`: -1 across a coordinate
     /// axis, where the azimuthal vector components change sign; +1 across a wall.
     OopSign(u8),
+    /// the ghost-fill per-axis polar half-turn `turn_{ax}` (int lane): the number of cells the
+    /// source is rotated along the azimuth axis when a polar axis face is crossed on a gridded
+    /// azimuth, half the azimuth's period; zero on every other axis and for every other map.
+    Turn(u8),
+    /// the ghost-fill per-axis half-turn window origin `turn_lo_{ax}` (int lane): the first
+    /// interior index of the azimuth axis, the origin the rotation wraps within.
+    TurnLo(u8),
 }
 
 impl ScalarRef {
@@ -197,6 +204,8 @@ impl ScalarRef {
             ScalarRef::Arg(ax) => format!("arg_{ax}"),
             ScalarRef::VelSign(ax) => format!("vel_sign_{ax}"),
             ScalarRef::OopSign(ax) => format!("oop_sign_{ax}"),
+            ScalarRef::Turn(ax) => format!("turn_{ax}"),
+            ScalarRef::TurnLo(ax) => format!("turn_lo_{ax}"),
         }
     }
 
@@ -254,6 +263,12 @@ impl ScalarRef {
         }
         if let Some(ax) = name.strip_prefix("oop_sign_") {
             return ax.parse().ok().map(ScalarRef::OopSign);
+        }
+        if let Some(ax) = name.strip_prefix("turn_lo_") {
+            return ax.parse().ok().map(ScalarRef::TurnLo);
+        }
+        if let Some(ax) = name.strip_prefix("turn_") {
+            return ax.parse().ok().map(ScalarRef::Turn);
         }
 
         // immersed-body block: `body_{idx}_{field}`.
@@ -331,6 +346,8 @@ mod tests {
             v.push(ScalarRef::Arg(ax));
             v.push(ScalarRef::VelSign(ax));
             v.push(ScalarRef::OopSign(ax));
+            v.push(ScalarRef::Turn(ax));
+            v.push(ScalarRef::TurnLo(ax));
             v.push(ScalarRef::Mesh(MeshScalar::Adot(ax)));
             v.push(ScalarRef::Mesh(MeshScalar::Vtrans(ax)));
         }

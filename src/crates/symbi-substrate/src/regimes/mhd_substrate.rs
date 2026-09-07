@@ -217,17 +217,12 @@ pub(crate) fn flag_ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let name = format!("scalar_ghost_fill_{D}d");
     let (flo, fext, fvol) = field_layout(flag);
-    GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
+    GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc)
+            .with_polar_turn(crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior))
+            .drive_sweep(
         |region, p| {
             let (grid, dlo) = exec_layout(&region.domain);
-            let mut ints = Vec::with_capacity(2 * D);
-            for ax in 0..D {
-                ints.push(p.map_type[ax] as i32);
-            }
-            for ax in 0..D {
-                ints.push(p.arg[ax]);
-            }
-            let scalars = [Sc::from_f64(1.0)];
+            let (ints, scalars) = scalar_ghost_params::<D, Sc>(&name, p, 1.0);
             let inv = KernelInvocation {
                 buffers: vec![Buf {
                     handle: BufHandle::HostMut(unsafe {
@@ -471,6 +466,30 @@ fn godunov_stage_impl<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// the lattice-map pullback ghost fill: prim rho/vel/pre + bcell, in-place
 /// read-at-source / write-at-cell, per boundary region.
+/// the lattice-map params of a single-scalar ghost fill, routed by the kernel's manifest: the
+/// per-axis map ints (kind, arg, half-turn, window) and the one float `sign` the copied value
+/// is multiplied by.
+fn scalar_ghost_params<const D: usize, Sc: Scalar + OrderedNumeric>(
+    name: &str,
+    p: &crate::kernels::support::GhostMapParams<D>,
+    sign: f64,
+) -> (Vec<i32>, Vec<Sc>) {
+    crate::regimes::substrate_kernels::resolve_params(
+        name,
+        |bind| match bind {
+            ScalarBind::Ref(symbi_ir::ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
+            ScalarBind::Ref(symbi_ir::ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+            ScalarBind::Ref(symbi_ir::ScalarRef::Turn(ax)) => p.turn[*ax as usize],
+            ScalarBind::Ref(symbi_ir::ScalarRef::TurnLo(ax)) => p.turn_lo[*ax as usize],
+            o => panic!("scalar ghost fill: unexpected int param {o:?}"),
+        },
+        |bind| match bind {
+            ScalarBind::Spec(s) if &**s == "sign" => Sc::from_f64(sign),
+            o => panic!("scalar ghost fill: unexpected scalar {o:?}"),
+        },
+    )
+}
+
 pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     has_energy: bool,
@@ -502,7 +521,9 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
         sim.geom.coords,
         sim.motion.a,
     );
-    GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
+    GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc)
+            .with_polar_turn(crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior))
+            .drive_sweep(
         |region, p| {
             // both instances route their params by manifest: the kerr instance adds the metric
             // mass/spin and the log-aware grid floats to the lattice-map ints and signs.
@@ -514,12 +535,14 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
                             p.map_type[*ax as usize] as i32
                         }
                         ScalarBind::Ref(symbi_ir::ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+                        ScalarBind::Ref(symbi_ir::ScalarRef::Turn(ax)) => p.turn[*ax as usize],
+                        ScalarBind::Ref(symbi_ir::ScalarRef::TurnLo(ax)) => p.turn_lo[*ax as usize],
                         o => panic!("mhd kerr ghost: unexpected int param {o:?}"),
                     },
                     |bind| match bind {
-                        ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => {
-                            Sc::from_f64(p.vel_sign[*ax as usize])
-                        }
+                        ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => Sc::from_f64(
+                            crate::kernels::support::axis_vel_sign(p, *ax as usize, basis),
+                        ),
                         ScalarBind::Ref(symbi_ir::ScalarRef::OopSign(ax)) => Sc::from_f64(
                             crate::kernels::support::axis_oop_sign(p, *ax as usize, basis),
                         ),
@@ -557,12 +580,14 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
                             p.map_type[*ax as usize] as i32
                         }
                         ScalarBind::Ref(symbi_ir::ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+                        ScalarBind::Ref(symbi_ir::ScalarRef::Turn(ax)) => p.turn[*ax as usize],
+                        ScalarBind::Ref(symbi_ir::ScalarRef::TurnLo(ax)) => p.turn_lo[*ax as usize],
                         o => panic!("mhd ghost: unexpected int param {o:?}"),
                     },
                     |bind| match bind {
-                        ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => {
-                            Sc::from_f64(p.vel_sign[*ax as usize])
-                        }
+                        ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => Sc::from_f64(
+                            crate::kernels::support::axis_vel_sign(p, *ax as usize, basis),
+                        ),
                         ScalarBind::Ref(symbi_ir::ScalarRef::OopSign(ax)) => Sc::from_f64(
                             crate::kernels::support::axis_oop_sign(p, *ax as usize, basis),
                         ),
@@ -607,16 +632,17 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
         let owned = sim.geom.interior.extend(dir, 0, 1);
         let face_alloc = mhd.bface[dir].domain().clone();
         let (flo, fext, fvol) = field_layout(&mhd.bface[dir]);
-        GhostFillDriver::<D>::new(&face_alloc, &owned, bc).drive_sweep(|region, p| {
+        GhostFillDriver::<D>::new(&face_alloc, &owned, bc)
+            .with_polar_turn(crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior))
+            .drive_sweep(|region, p| {
             let (grid, dlo) = exec_layout(&region.domain);
-            let mut ints = Vec::with_capacity(2 * D);
-            for ax in 0..D {
-                ints.push(p.map_type[ax] as i32);
-            }
-            for ax in 0..D {
-                ints.push(p.arg[ax]);
-            }
-            let scalars = [Sc::from_f64(p.vel_sign[dir])];
+            // the component is tangential to every halo wall it crosses, so it carries its own
+            // axis's sign; along a rotated azimuth that sign includes the azimuthal parity.
+            let (ints, scalars) = scalar_ghost_params::<D, Sc>(
+                &scalar_ghost,
+                p,
+                crate::kernels::support::axis_vel_sign(p, dir, basis),
+            );
             let inv = KernelInvocation {
                 buffers: vec![Buf {
                     handle: BufHandle::HostMut(unsafe {
@@ -2253,16 +2279,11 @@ fn extend_bface_periodic<const D: usize, const DOF: usize, Mem, Sc>(
         let (flo, fext, fvol) = field_layout(field);
         // the face field's own domain is the allocated extent: the closing face and every halo
         // face lie outside the cell interior, and the wrap period is the interior cell count.
-        GhostFillDriver::<D>::new(field.domain(), &sim.geom.interior, bc).drive_sweep(|region, p| {
+        GhostFillDriver::<D>::new(field.domain(), &sim.geom.interior, bc)
+            .with_polar_turn(crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior))
+            .drive_sweep(|region, p| {
             let (grid, dlo) = exec_layout(&region.domain);
-            let mut ints = Vec::with_capacity(2 * D);
-            for ax in 0..D {
-                ints.push(p.map_type[ax] as i32);
-            }
-            for ax in 0..D {
-                ints.push(p.arg[ax]);
-            }
-            let scalars = [Sc::from_f64(1.0)];
+            let (ints, scalars) = scalar_ghost_params::<D, Sc>(&name, p, 1.0);
             let inv = KernelInvocation {
                 buffers: vec![Buf {
                     handle: BufHandle::HostMut(unsafe {

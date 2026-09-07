@@ -171,8 +171,23 @@ fn ct_curl_metric_gv<'t>(
             }
         })
         .collect();
-    let inv_pref =
-        Gv::ONE / (gv_scale_factor(coords, p1, &center) * gv_scale_factor(coords, p2, &center));
+    // a face lying on the coordinate axis has zero area: the spherical theta face at a pole
+    // (h_phi = r sin theta = 0) and the cylindrical R face at R = 0 (h_phi = R = 0). the EMF
+    // loop around such a face vanishes, its azimuthal edges having no length and its two
+    // remaining edges being the same axis segment traversed both ways, so the face-normal
+    // field there holds its value and the update is zero in place of a division by the
+    // vanishing scale factor. the pole is detected on the face position itself, since a
+    // theta bound computed as pi carries sin(theta) at roundoff rather than zero.
+    let pref = gv_scale_factor(coords, p1, &center) * gv_scale_factor(coords, p2, &center);
+    let on_axis = match (coords, dir) {
+        (Coords::Spherical, 1) => {
+            let s = center[1].sin();
+            (s * s).cmp_lt(Gv::from_f64(1.0e-18))
+        }
+        (Coords::Cylindrical, 0) => (center[0] * center[0]).cmp_lt(Gv::from_f64(1.0e-24)),
+        _ => Gv::ZERO.cmp_gt(Gv::ONE),
+    };
+    let inv_pref = Gv::select(on_axis, Gv::ZERO, Gv::ONE / pref);
     let inv_dx_p1 = Gv::ONE
         / (gv_axis_face_at(cx, p1, spacing[p1], 1) - gv_axis_face_at(cx, p1, spacing[p1], 0));
     let inv_dx_p2 = Gv::ONE

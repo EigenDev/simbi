@@ -6822,7 +6822,8 @@ macro_rules! build_and_run_imhd {
 /// `staggered_bfields` (`tile_face_buffer`), so the shared internal face is identical in both
 /// neighbors by construction. output gathers cell fields + cell B (`gather_interiors`) and the
 /// staggered faces (`gather_faces`) into one global sim written by the existing checkpoint path.
-/// single-level only: refinement / bodies / user sources with gpus>1 are refused.
+/// single-level only: refinement with gpus>1 is refused; immersed bodies attach per tile at
+/// their global positions.
 macro_rules! build_and_run_mhd_decomposed {
     ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
         use symbi::sim::decomp::unflatten;
@@ -7892,40 +7893,58 @@ fn validate_axis_boundaries(cfg: &Config) -> Result<(), String> {
     };
     let x_hi: [f64; 3] =
         std::array::from_fn(|ax| cfg.x_lo[ax] + cfg.dx[ax] * cfg.n_cells[ax] as f64);
+    // the mirror and the half-turn are index maps, so the mirrored axis and, on a gridded
+    // azimuth, the rotated axis must be uniformly spaced for an index shift to be the angle.
+    let spacing = [
+        cfg.x1_spacing.as_str(),
+        cfg.x2_spacing.as_str(),
+        cfg.x3_spacing.as_str(),
+    ];
+    let bnd3 = boundaries_nd::<3>(&cfg.boundaries);
+    let mut uniform_axes: Vec<usize> = (0..cfg.dims)
+        .filter(|&ax| bnd3.lo(ax) == BoundaryType::Axis || bnd3.hi(ax) == BoundaryType::Axis)
+        .collect();
+    if cfg.dims == 3 && !uniform_axes.is_empty() {
+        uniform_axes.push(if cfg.coord_system == "spherical" { 2 } else { 1 });
+        if cfg.n_gpus > 1 {
+            return Err("gpus>1 does not yet support an axis face on a gridded azimuth: the polar half-turn reads the antipodal tile, an exchange leg the decomposition does not carry; set gpus=1".to_string());
+        }
+        if cfg.n_tracers > 0 {
+            return Err("tracers do not yet cross a polar axis on a gridded azimuth; set n_tracers=0 or use reflecting".to_string());
+        }
+    }
+    for ax in uniform_axes {
+        if spacing[ax] != "linear" {
+            return Err(format!(
+                "an axis face needs linear spacing on axis {ax} (the mirrored axis and the rotated azimuth); got '{}'",
+                spacing[ax]
+            ));
+        }
+    }
     let violation = match cfg.dims {
         1 => symbi_sim::state::axis_boundary_violation::<1>(
             coords,
             cfg.cyl_plane,
             &[cfg.x_lo[0]],
             &[x_hi[0]],
+            &[cfg.n_cells[0]],
             &boundaries_nd::<1>(&cfg.boundaries),
         ),
-        2 => {
-            let spacing = [cfg.x1_spacing.as_str(), cfg.x2_spacing.as_str()];
-            for ax in 0..2 {
-                let is_axis = |b: BoundaryType| b == BoundaryType::Axis;
-                let bnd = boundaries_nd::<2>(&cfg.boundaries);
-                if (is_axis(bnd.lo(ax)) || is_axis(bnd.hi(ax))) && spacing[ax] != "linear" {
-                    return Err(format!(
-                        "an axis face on axis {ax} needs linear spacing on that axis; got '{}'",
-                        spacing[ax]
-                    ));
-                }
-            }
-            symbi_sim::state::axis_boundary_violation::<2>(
-                coords,
-                cfg.cyl_plane,
-                &[cfg.x_lo[0], cfg.x_lo[1]],
-                &[x_hi[0], x_hi[1]],
-                &boundaries_nd::<2>(&cfg.boundaries),
-            )
-        }
+        2 => symbi_sim::state::axis_boundary_violation::<2>(
+            coords,
+            cfg.cyl_plane,
+            &[cfg.x_lo[0], cfg.x_lo[1]],
+            &[x_hi[0], x_hi[1]],
+            &[cfg.n_cells[0], cfg.n_cells[1]],
+            &boundaries_nd::<2>(&cfg.boundaries),
+        ),
         _ => symbi_sim::state::axis_boundary_violation::<3>(
             coords,
             cfg.cyl_plane,
             &cfg.x_lo,
             &x_hi,
-            &boundaries_nd::<3>(&cfg.boundaries),
+            &cfg.n_cells,
+            &bnd3,
         ),
     };
     violation.map_or(Ok(()), Err)

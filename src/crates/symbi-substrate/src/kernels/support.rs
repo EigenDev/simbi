@@ -99,6 +99,56 @@ pub fn to_bc_array_scalar<const D: usize>(boundaries: &Boundaries<D>) -> [[BcTyp
     })
 }
 
+/// the azimuth axis of a chart whose azimuth is gridded, with the interior window a polar
+/// half-turn rotates within: spherical (r, theta, phi) and cylindrical (R, phi, z) in three
+/// dimensions. every other layout carries its azimuth out of plane or has no axis at all.
+pub fn polar_turn_for<const D: usize>(
+    coords: symbi_geometry::Geometry,
+    interior: &Domain<D>,
+) -> Option<PolarTurn> {
+    use symbi_geometry::Geometry;
+    let axis = match (coords, D) {
+        (Geometry::Spherical, 3) => 2,
+        (Geometry::Cylindrical, 3) => 1,
+        _ => return None,
+    };
+    Some(PolarTurn {
+        axis,
+        lo: interior.spaces[axis].lo,
+        n: interior.spaces[axis].hi - interior.spaces[axis].lo,
+    })
+}
+
+/// the gridded azimuth a polar axis face rotates along: its axis index and the interior
+/// window [lo, lo + n) the rotation wraps within. `n` is even, so a shift of n/2 cells is
+/// exactly a half-turn.
+#[derive(Clone, Copy, Debug)]
+pub struct PolarTurn {
+    pub axis: usize,
+    pub lo: isize,
+    pub n: isize,
+}
+
+/// the sign an in-plane vector component `ax` picks up under the region's lattice map: its own
+/// axis's reflect sign, and, when it is the gridded azimuth a polar face rotates along, the
+/// azimuthal parity of the state's basis as well (odd for orthonormal components, even for
+/// contravariant ones), exactly as the out-of-plane azimuth of a 2.5D layout.
+pub fn axis_vel_sign<const D: usize>(
+    p: &GhostMapParams<D>,
+    ax: usize,
+    basis: symbi_geometry::ComponentBasis,
+) -> f64 {
+    let azimuthal = if p.turn[ax] != 0 {
+        match basis {
+            symbi_geometry::ComponentBasis::Orthonormal => -1.0,
+            symbi_geometry::ComponentBasis::Contravariant => 1.0,
+        }
+    } else {
+        1.0
+    };
+    p.vel_sign[ax] * azimuthal
+}
+
 /// the sign every out-of-plane vector component picks up across the region's faces, by the
 /// basis the state is stored in. an orthonormal (physical) azimuthal component rides the unit
 /// vector phi-hat = d/dphi / (r sin theta), whose normalization changes sign with sin theta
@@ -133,6 +183,9 @@ pub fn axis_oop_sign<const D: usize>(
 ///   oop_sign:     -1.0 for axes that are a coordinate axis (flips every
 ///                 out-of-plane vector component; the kernel multiplies the
 ///                 per-axis signs, so a corner of two axis faces copies)
+///   turn, turn_lo: on a gridded azimuth, crossing a polar axis face is a half-turn: the
+///                 source is rotated by `turn` cells (half the period) along the azimuth axis,
+///                 wrapping within [turn_lo, turn_lo + 2 turn). zero everywhere else.
 ///
 /// when `map_type[ax] == 0` the axis is passthrough; the kernel must
 /// interpret that as "leave coord[ax] alone."
@@ -145,6 +198,8 @@ pub struct GhostMapParams<const D: usize> {
     pub clamp_val: [f64; D],
     pub vel_sign: [f64; D],
     pub oop_sign: [f64; D],
+    pub turn: [i32; D],
+    pub turn_lo: [i32; D],
     /// the lattice-map source-coord arg, one integer per axis,
     /// for the substrate `iso_ghost_fill` kernel: a signed periodic shift
     /// (`+len` on a low-side ghost, `-len` on a high side), a reflect `pivot2`, or
@@ -199,6 +254,7 @@ pub struct GhostFillDriver<'a, const D: usize> {
     allocated: &'a Domain<D>,
     interior: &'a Domain<D>,
     bc: [[BcType; 2]; D],
+    polar: Option<PolarTurn>,
 }
 
 impl<'a, const D: usize> GhostFillDriver<'a, D> {
@@ -207,7 +263,21 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
             allocated,
             interior,
             bc,
+            polar: None,
         }
+    }
+
+    /// the gridded azimuth an axis face rotates along. with it set, an `Axis` face on any other
+    /// axis maps its source through the mirror and a half-turn of the azimuth; without it an
+    /// `Axis` face is the plain mirror (the azimuth is out of plane). the window comes from
+    /// the cell interior even for a face-anchored field, so the closing periodic face rotates
+    /// onto its physical partner.
+    pub fn with_polar_turn(mut self, polar: Option<PolarTurn>) -> Self {
+        if let Some(t) = polar {
+            assert!(t.n % 2 == 0, "a polar half-turn needs an even azimuth cell count, got {}", t.n);
+        }
+        self.polar = polar;
+        self
     }
 
     /// for each ghost region contributing a non-skip fill, compute the
@@ -306,6 +376,8 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
             clamp_val: [0.0; D],
             vel_sign: [1.0; D],
             oop_sign: [1.0; D],
+            turn: [0; D],
+            turn_lo: [0; D],
             arg: [0; D],
         };
 
@@ -346,6 +418,10 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
                     p.vel_sign[ax] = -1.0;
                     if bc_type == BcType::Axis {
                         p.oop_sign[ax] = -1.0;
+                        if let Some(t) = self.polar.filter(|t| t.axis != ax) {
+                            p.turn[t.axis] = (t.n / 2) as i32;
+                            p.turn_lo[t.axis] = t.lo as i32;
+                        }
                     }
                     p.arg[ax] = (2 * face - 1) as i32;
                 }
@@ -602,6 +678,39 @@ mod tests {
             assert_eq!(params.oop_sign[0], 1.0, "an outflow face carries no azimuthal flip");
         });
         assert!(saw[0] && saw[1], "expected both theta faces to dispatch");
+    }
+
+    #[test]
+    fn ghost_driver_polar_turn_rotates_the_azimuth_by_half_its_period() {
+        let sp = |name, lo, hi| Space { name, lo, hi };
+        let alloc = Domain::new([sp("r", 0, 12), sp("theta", 0, 12), sp("phi", 0, 12)]);
+        let interior = Domain::new([sp("r", 2, 10), sp("theta", 2, 10), sp("phi", 2, 10)]);
+        let bc = [
+            [BcType::Outflow, BcType::Outflow],
+            [BcType::Axis, BcType::Axis],
+            [BcType::Periodic, BcType::Periodic],
+        ];
+        let turn = polar_turn_for::<3>(symbi_geometry::Geometry::Spherical, &interior);
+        let mut saw_theta = 0;
+        GhostFillDriver::<3>::new(&alloc, &interior, bc)
+            .with_polar_turn(turn)
+            .drive_sweep(|region, params| {
+                if region.directions[1] != FaceSide::None {
+                    assert_eq!(params.map_type[1], 2.0, "the pole is the mirror on theta");
+                    assert_eq!(params.turn[2], 4, "half of the 8 azimuth cells");
+                    assert_eq!(params.turn_lo[2], 2);
+                    assert_eq!(params.turn[1], 0, "the mirrored axis itself is unrotated");
+                    saw_theta += 1;
+                } else {
+                    assert_eq!(params.turn, [0; 3], "only a polar face rotates the source");
+                }
+            });
+        assert_eq!(saw_theta, 2);
+        let plane = Domain::new([sp("r", 2, 10), sp("theta", 2, 10)]);
+        assert!(
+            polar_turn_for::<2>(symbi_geometry::Geometry::Spherical, &plane).is_none(),
+            "a 2.5D layout keeps its azimuth out of plane"
+        );
     }
 
     // ----- drive_sweep tests -----
