@@ -24,8 +24,8 @@ pub use block::{AxisMap, BlockGeometry};
 pub use centroid::volume_weighted_centroid;
 pub use coord_map::{CellInterval, CoordMap, LogMap, UniformMap};
 pub use metric::{
-    Cartesian, Cylindrical, CylindricalRPhi, DiagonalMetric, Geometry, KerrKS, KerrKSCartesian,
-    KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
+    Cartesian, ComponentBasis, Cylindrical, CylindricalRPhi, DiagonalMetric, Geometry, KerrKS,
+    KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical, Spacetime, Spherical,
 };
 pub use motion::MotionState;

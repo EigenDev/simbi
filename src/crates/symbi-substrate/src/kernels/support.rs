@@ -105,10 +105,17 @@ pub fn to_bc_array_scalar<const D: usize>(boundaries: &Boundaries<D>) -> [[BcTyp
 /// through the pole, so it is odd there and the axis face binds -1. a contravariant coordinate
 /// component rides d/dphi itself, which continues unchanged through the pole (the ghost cell's
 /// coordinate basis vector equals the image point's), so it is even and the axis face binds +1.
-/// the newtonian and flat relativistic states are orthonormal; the curved-spacetime (valencia)
-/// state is contravariant, so `contravariant` is the spacetime being other than minkowski.
-pub fn axis_oop_sign<const D: usize>(p: &GhostMapParams<D>, ax: usize, contravariant: bool) -> f64 {
-    if contravariant { 1.0 } else { p.oop_sign[ax] }
+/// the basis comes from `Spacetime::component_basis`, the same predicate the seeding and the
+/// metric-aware recovery follow.
+pub fn axis_oop_sign<const D: usize>(
+    p: &GhostMapParams<D>,
+    ax: usize,
+    basis: symbi_geometry::ComponentBasis,
+) -> f64 {
+    match basis {
+        symbi_geometry::ComponentBasis::Orthonormal => p.oop_sign[ax],
+        symbi_geometry::ComponentBasis::Contravariant => 1.0,
+    }
 }
 
 // =============================================================================

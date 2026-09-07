@@ -2521,7 +2521,9 @@ where
     pub fn seed_cell(&self, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim) {
         use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
         use symbi_hydro::state::SeedableCons;
-        let cons = if matches!(self.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
+        let cons = if self.geom.spacetime.component_basis()
+            == symbi_geometry::ComponentBasis::Orthonormal
+        {
             <R as Regime<Sc, DOF>>::to_conserved(&self.physics.regime, &self.physics.eos, prim)
         } else {
             // the metric point matches the point the in-kernel geometry evaluates at

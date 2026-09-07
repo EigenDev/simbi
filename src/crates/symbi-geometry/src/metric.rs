@@ -68,10 +68,33 @@ pub enum Spacetime {
     KerrKS = 3,
 }
 
+/// the basis a regime's vector components (velocity, magnetic field) are stored in. the flat
+/// state carries orthonormal (physical) components; every curved-spacetime state carries the
+/// valencia contravariant coordinate components, since a componentwise orthonormal frame exists
+/// for a diagonal spatial metric alone. the seeding, the metric-aware c2p, and the ghost fill's
+/// azimuthal parity all read this one predicate, so the storage convention has one owner.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ComponentBasis {
+    /// physical components on the chart's unit vectors; across a polar axis the azimuthal
+    /// unit vector flips with sin theta, so azimuthal components are odd there.
+    Orthonormal,
+    /// contravariant components on the coordinate basis; across a polar axis d/dphi continues
+    /// unchanged, so azimuthal components are even there and only the theta component reverses.
+    Contravariant,
+}
+
 impl Spacetime {
     /// integer representation for GPU kernel dispatch.
     pub fn as_i32(self) -> i32 {
         self as i32
+    }
+
+    /// the basis the state is stored in on this spacetime.
+    pub fn component_basis(self) -> ComponentBasis {
+        match self {
+            Spacetime::Minkowski => ComponentBasis::Orthonormal,
+            Spacetime::SchwarzschildKS | Spacetime::KerrKS => ComponentBasis::Contravariant,
+        }
     }
 }
 
@@ -2195,6 +2218,18 @@ impl<S: Scalar> DiagonalMetric<S, 3> for Cylindrical {}
 // ============================================================
 // tests
 // ============================================================
+
+#[cfg(test)]
+mod component_basis_tests {
+    use super::*;
+
+    #[test]
+    fn the_flat_state_is_orthonormal_and_every_curved_state_contravariant() {
+        assert_eq!(Spacetime::Minkowski.component_basis(), ComponentBasis::Orthonormal);
+        assert_eq!(Spacetime::SchwarzschildKS.component_basis(), ComponentBasis::Contravariant);
+        assert_eq!(Spacetime::KerrKS.component_basis(), ComponentBasis::Contravariant);
+    }
+}
 
 #[cfg(test)]
 mod tests {
