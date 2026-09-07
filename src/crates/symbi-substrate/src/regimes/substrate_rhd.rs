@@ -531,6 +531,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                         ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
                             Sc::from_f64(p.vel_sign[*ax as usize])
                         }
+                        ScalarBind::Ref(ScalarRef::OopSign(ax)) => {
+                            Sc::from_f64(p.oop_sign[*ax as usize])
+                        }
                         ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
                             sim.geom
                                 .spacetime_scalars

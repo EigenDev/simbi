@@ -78,8 +78,20 @@ def normalize_regime(regime: str) -> str:
 
 
 class BoundaryCondition(str, ExtendedEnum):
+    """the condition on one domain face.
+
+    OUTFLOW copies the nearest interior state. REFLECTING is a wall: the wall-normal velocity
+    and magnetic field mirror, every tangential component copies. AXIS is the coordinate axis of
+    an axisymmetric chart, the spherical pole (theta = 0 or theta = pi) or the cylindrical
+    R = 0 line in the (R, z) plane: crossing it is a half-turn about the axis, so the normal
+    component and every out-of-plane (azimuthal) component mirror while the remaining in-plane
+    component and the scalars continue. DYNAMIC evaluates a prescribed boundary expression.
+    PERIODIC identifies the two faces of the axis.
+    """
+
     OUTFLOW = "outflow"
     REFLECTING = "reflecting"
+    AXIS = "axis"
     DYNAMIC = "dynamic"
     PERIODIC = "periodic"
 

@@ -1739,6 +1739,12 @@ pub enum BoundaryType {
     Periodic,
     Outflow,
     Reflect,
+    /// the coordinate axis of an axisymmetric chart: the spherical pole (theta = 0 or pi) or the
+    /// cylindrical R = 0 line. crossing it is a half-turn about the axis, so the wall-normal
+    /// component and every out-of-plane (azimuthal) component change sign while the remaining
+    /// in-plane component and the scalars continue unchanged. the lattice map is the mirror, the
+    /// same as `Reflect`; the two differ only in the sign of the azimuthal components.
+    Axis,
     /// filled by prolongation from a coarser AMR level.
     /// standard ghost fill skips these faces.
     CoarseFine,
@@ -1789,6 +1795,69 @@ impl<const D: usize> Boundaries<D> {
     pub fn hi(&self, ax: usize) -> BoundaryType {
         self.0[ax][1]
     }
+}
+
+/// the reason an `Axis` face is misplaced, if any. the axis boundary sits on the spherical pole
+/// (axis 1: theta = 0 on the low face, theta = pi on the high face) or on the cylindrical R = 0
+/// line (axis 0, low face, in the (R, z) plane), on a chart whose azimuth is the out-of-plane
+/// component. a gridded azimuth continues across the axis by a half-turn in phi, a lattice map
+/// the mirror fill does not carry, so three-dimensional charts are refused. `x_hi` is the
+/// physical upper bound per axis.
+pub fn axis_boundary_violation<const D: usize>(
+    coords: symbi_geometry::Geometry,
+    cyl_plane: CylPlane,
+    x_lo: &[f64; D],
+    x_hi: &[f64; D],
+    boundaries: &Boundaries<D>,
+) -> Option<String> {
+    use symbi_geometry::Geometry;
+    const TOL: f64 = 1.0e-9;
+    for ax in 0..D {
+        for (side, name) in [(0usize, "low"), (1usize, "high")] {
+            if boundaries.0[ax][side] != BoundaryType::Axis {
+                continue;
+            }
+            let face = format!("the {name} face of axis {ax}");
+            let ok = match coords {
+                Geometry::Cartesian => {
+                    return Some(format!(
+                        "{face} is declared an axis, but a cartesian chart has no coordinate axis; use reflecting"
+                    ));
+                }
+                _ if D == 3 => {
+                    return Some(format!(
+                        "{face} is declared an axis, but a gridded azimuth continues across the axis by a half-turn in phi, which the mirror fill does not carry; use reflecting or drop to 2.5D"
+                    ));
+                }
+                Geometry::Spherical => {
+                    ax == 1
+                        && if side == 0 {
+                            x_lo[ax].abs() <= TOL
+                        } else {
+                            (x_hi[ax] - std::f64::consts::PI).abs() <= TOL
+                        }
+                }
+                Geometry::Cylindrical => {
+                    cyl_plane == CylPlane::Rz && ax == 0 && side == 0 && x_lo[ax].abs() <= TOL
+                }
+            };
+            if !ok {
+                let bound = if side == 0 { x_lo[ax] } else { x_hi[ax] };
+                return Some(format!(
+                    "{face} is declared an axis at coordinate {bound}, which is off the {} axis; the axis boundary belongs on {}",
+                    match coords {
+                        Geometry::Spherical => "polar",
+                        _ => "cylindrical",
+                    },
+                    match coords {
+                        Geometry::Spherical => "theta = 0 (low face of axis 1) or theta = pi (high face of axis 1)",
+                        _ => "R = 0 (low face of axis 0) in the (R, z) plane",
+                    }
+                ));
+            }
+        }
+    }
+    None
 }
 
 /// a bare `BoundaryType` means the uniform-all-faces case (`Boundaries::uniform`). lets the builder
@@ -4004,5 +4073,89 @@ pub fn extend_closure_into_ghosts<const D: usize, Mem: MemorySpace, Sc: Scalar +
         }
         let v = *field.at(src);
         field.set(c, v);
+    }
+}
+
+#[cfg(test)]
+mod axis_boundary_tests {
+    use super::*;
+    use std::f64::consts::PI;
+    use symbi_geometry::Geometry;
+
+    fn polar(lo: BoundaryType, hi: BoundaryType) -> Boundaries<2> {
+        Boundaries::per_axis([[BoundaryType::Outflow, BoundaryType::Outflow], [lo, hi]])
+    }
+
+    #[test]
+    fn the_axis_is_admitted_on_the_spherical_poles() {
+        let both = polar(BoundaryType::Axis, BoundaryType::Axis);
+        assert_eq!(
+            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0], &[2.0, PI], &both),
+            None
+        );
+        let half = polar(BoundaryType::Axis, BoundaryType::Reflect);
+        assert_eq!(
+            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0], &[2.0, 0.5 * PI], &half),
+            None
+        );
+    }
+
+    #[test]
+    fn the_axis_is_refused_off_the_pole() {
+        let half = polar(BoundaryType::Axis, BoundaryType::Axis);
+        let v = axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0], &[2.0, 0.5 * PI], &half)
+            .expect("an axis face on the equator is refused");
+        assert!(v.contains("high face of axis 1"), "{v}");
+        let radial = Boundaries::per_axis([[BoundaryType::Axis, BoundaryType::Outflow], [BoundaryType::Reflect; 2]]);
+        let v = axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[0.0, 0.0], &[2.0, PI], &radial)
+            .expect("the radial origin is a point, so its face is refused");
+        assert!(v.contains("low face of axis 0"), "{v}");
+        let shifted = polar(BoundaryType::Axis, BoundaryType::Reflect);
+        assert!(
+            axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.1], &[2.0, PI], &shifted).is_some(),
+            "a low theta face away from zero is refused"
+        );
+    }
+
+    #[test]
+    fn the_axis_is_admitted_on_the_cylindrical_origin_of_the_rz_plane_only() {
+        let rz = Boundaries::per_axis([[BoundaryType::Axis, BoundaryType::Outflow], [BoundaryType::Outflow; 2]]);
+        assert_eq!(
+            axis_boundary_violation(Geometry::Cylindrical, CylPlane::Rz, &[0.0, -1.0], &[1.0, 1.0], &rz),
+            None
+        );
+        assert!(
+            axis_boundary_violation(Geometry::Cylindrical, CylPlane::RPhi, &[0.0, 0.0], &[1.0, 2.0 * PI], &rz).is_some(),
+            "the (R, phi) plane grids the azimuth, so the mirror fill cannot continue across R = 0"
+        );
+        assert!(
+            axis_boundary_violation(Geometry::Cylindrical, CylPlane::Rz, &[0.5, -1.0], &[1.0, 1.0], &rz).is_some(),
+            "an inner cylinder wall away from R = 0 is refused"
+        );
+    }
+
+    #[test]
+    fn the_axis_is_refused_on_cartesian_and_three_dimensional_charts() {
+        let cart = polar(BoundaryType::Axis, BoundaryType::Outflow);
+        let v = axis_boundary_violation(Geometry::Cartesian, CylPlane::Rz, &[0.0, 0.0], &[1.0, 1.0], &cart)
+            .expect("cartesian has no axis");
+        assert!(v.contains("cartesian"), "{v}");
+        let sph3 = Boundaries::<3>::per_axis([
+            [BoundaryType::Outflow; 2],
+            [BoundaryType::Axis, BoundaryType::Axis],
+            [BoundaryType::Periodic; 2],
+        ]);
+        let v = axis_boundary_violation(Geometry::Spherical, CylPlane::Rz, &[1.0, 0.0, 0.0], &[2.0, PI, 2.0 * PI], &sph3)
+            .expect("a gridded azimuth needs the half-turn map");
+        assert!(v.contains("half-turn"), "{v}");
+    }
+
+    #[test]
+    fn a_domain_without_an_axis_face_passes() {
+        let walls = polar(BoundaryType::Reflect, BoundaryType::Reflect);
+        assert_eq!(
+            axis_boundary_violation(Geometry::Cartesian, CylPlane::Rz, &[0.0, 0.0], &[1.0, 1.0], &walls),
+            None
+        );
     }
 }

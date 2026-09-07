@@ -491,7 +491,8 @@ pub fn apply_continuous_boundaries_host<const D: usize, Mem: symbi_xpu::MemorySp
                     crate::state::BoundaryType::Periodic => {
                         point[axis] = if high { bounds[axis].0 } else { bounds[axis].1 };
                     }
-                    crate::state::BoundaryType::Reflect => {
+                    crate::state::BoundaryType::Reflect
+                    | crate::state::BoundaryType::Axis => {
                         remaining[axis] = -remaining[axis];
                     }
                     crate::state::BoundaryType::CoarseFine => {
@@ -573,7 +574,8 @@ pub fn fill_ito_coefficient_boundaries_host<const D: usize, Mem: symbi_xpu::Memo
                         let size = space.size() as isize;
                         donor[axis] = space.lo + (donor[axis] - space.lo).rem_euclid(size);
                     }
-                    crate::state::BoundaryType::Reflect => {
+                    crate::state::BoundaryType::Reflect
+                    | crate::state::BoundaryType::Axis => {
                         donor[axis] = if high {
                             2 * space.hi - 1 - donor[axis]
                         } else {
@@ -1171,6 +1173,7 @@ where
                 sim.boundaries.0[dd][high as usize],
                 crate::state::BoundaryType::Periodic
                     | crate::state::BoundaryType::Reflect
+                    | crate::state::BoundaryType::Axis
                     | crate::state::BoundaryType::CoarseFine
             ) {
                 continue;
@@ -3531,7 +3534,9 @@ fn face_destination<const D: usize>(
             };
             address(global)
         }
-        crate::state::BoundaryType::Reflect => cell_container(coord, domain, layout),
+        crate::state::BoundaryType::Reflect | crate::state::BoundaryType::Axis => {
+            cell_container(coord, domain, layout)
+        }
         crate::state::BoundaryType::CoarseFine => cell_container(coord, domain, layout),
         _ => exterior_container(axis, high),
     }

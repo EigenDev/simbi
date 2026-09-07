@@ -60,6 +60,7 @@ pub fn to_bc_array<const D: usize>(boundaries: &Boundaries<D>) -> [[BcType; 2]; 
             BoundaryType::Periodic => BcType::Periodic,
             BoundaryType::Outflow => BcType::Outflow,
             BoundaryType::Reflect => BcType::Reflect,
+            BoundaryType::Axis => BcType::Axis,
             BoundaryType::CoarseFine => BcType::Skip,
             // driven faces are skipped by the standard pullback; the
             // driven-boundary pass prescribes their ghost state from the DAG afterward.
@@ -89,7 +90,7 @@ pub fn to_bc_array_scalar<const D: usize>(boundaries: &Boundaries<D>) -> [[BcTyp
         let conv = |bt: BoundaryType| match bt {
             BoundaryType::Periodic => BcType::Periodic,
             BoundaryType::Outflow => BcType::Outflow,
-            BoundaryType::Reflect => BcType::Reflect,
+            BoundaryType::Reflect | BoundaryType::Axis => BcType::Reflect,
             BoundaryType::CoarseFine => BcType::Skip,
             BoundaryType::Driven(_) => BcType::Skip,
             BoundaryType::Neumann(_) | BoundaryType::Robin(_) => BcType::Outflow,
@@ -110,6 +111,9 @@ pub fn to_bc_array_scalar<const D: usize>(boundaries: &Boundaries<D>) -> [[BcTyp
 ///   pivot:        reflect pivot (2*face - 1)
 ///   clamp_val:    outflow clamp target (face boundary)
 ///   vel_sign:     -1.0 for axes that reflect (flips normal-vector sign)
+///   oop_sign:     -1.0 for axes that are a coordinate axis (flips every
+///                 out-of-plane vector component; the kernel multiplies the
+///                 per-axis signs, so a corner of two axis faces copies)
 ///
 /// when `map_type[ax] == 0` the axis is passthrough; the kernel must
 /// interpret that as "leave coord[ax] alone."
@@ -121,6 +125,7 @@ pub struct GhostMapParams<const D: usize> {
     pub pivot: [f64; D],
     pub clamp_val: [f64; D],
     pub vel_sign: [f64; D],
+    pub oop_sign: [f64; D],
     /// the lattice-map source-coord arg, one integer per axis,
     /// for the substrate `iso_ghost_fill` kernel: a signed periodic shift
     /// (`+len` on a low-side ghost, `-len` on a high side), a reflect `pivot2`, or
@@ -281,6 +286,7 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
             pivot: [0.0; D],
             clamp_val: [0.0; D],
             vel_sign: [1.0; D],
+            oop_sign: [1.0; D],
             arg: [0; D],
         };
 
@@ -314,11 +320,14 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
                         -period
                     };
                 }
-                BcType::Reflect => {
+                BcType::Reflect | BcType::Axis => {
                     p.map_type[ax] = 2.0;
                     let face = if side == FaceSide::Minus { lo } else { hi };
                     p.pivot[ax] = (2 * face - 1) as f64;
                     p.vel_sign[ax] = -1.0;
+                    if bc_type == BcType::Axis {
+                        p.oop_sign[ax] = -1.0;
+                    }
                     p.arg[ax] = (2 * face - 1) as i32;
                 }
                 BcType::Outflow => {
@@ -523,6 +532,57 @@ mod tests {
             saw_lo_x_reflect,
             "expected at least one lo-x reflect region"
         );
+    }
+
+    #[test]
+    fn ghost_driver_axis_flips_the_normal_and_the_out_of_plane_signs() {
+        let alloc = Domain::new([
+            Space {
+                name: "r",
+                lo: 0,
+                hi: 12,
+            },
+            Space {
+                name: "theta",
+                lo: 0,
+                hi: 12,
+            },
+        ]);
+        let interior = Domain::new([
+            Space {
+                name: "r",
+                lo: 2,
+                hi: 10,
+            },
+            Space {
+                name: "theta",
+                lo: 2,
+                hi: 10,
+            },
+        ]);
+        let bc = [
+            [BcType::Outflow, BcType::Outflow],
+            [BcType::Axis, BcType::Reflect],
+        ];
+        let mut saw = [false; 2];
+        GhostFillDriver::<2>::new(&alloc, &interior, bc).drive(|region, params| {
+            match region.directions[1] {
+                FaceSide::Minus => {
+                    assert_eq!(params.map_type[1], 2.0, "the axis shares the mirror map");
+                    assert_eq!(params.vel_sign[1], -1.0);
+                    assert_eq!(params.oop_sign[1], -1.0);
+                    saw[0] = true;
+                }
+                FaceSide::Plus => {
+                    assert_eq!(params.vel_sign[1], -1.0);
+                    assert_eq!(params.oop_sign[1], 1.0, "a reflecting wall keeps the azimuthal sign");
+                    saw[1] = true;
+                }
+                FaceSide::None => {}
+            }
+            assert_eq!(params.oop_sign[0], 1.0, "an outflow face carries no azimuthal flip");
+        });
+        assert!(saw[0] && saw[1], "expected both theta faces to dispatch");
     }
 
     // ----- drive_sweep tests -----

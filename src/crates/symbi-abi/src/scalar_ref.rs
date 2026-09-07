@@ -166,6 +166,9 @@ pub enum ScalarRef {
     Arg(u8),
     /// the ghost-fill per-axis velocity-flip sign `vel_sign_{ax}`.
     VelSign(u8),
+    /// the ghost-fill per-axis out-of-plane flip sign `oop_sign_{ax}`: -1 across a coordinate
+    /// axis, where the azimuthal vector components change sign; +1 across a wall.
+    OopSign(u8),
 }
 
 impl ScalarRef {
@@ -193,6 +196,7 @@ impl ScalarRef {
             ScalarRef::MapType(ax) => format!("map_type_{ax}"),
             ScalarRef::Arg(ax) => format!("arg_{ax}"),
             ScalarRef::VelSign(ax) => format!("vel_sign_{ax}"),
+            ScalarRef::OopSign(ax) => format!("oop_sign_{ax}"),
         }
     }
 
@@ -247,6 +251,9 @@ impl ScalarRef {
         }
         if let Some(ax) = name.strip_prefix("vel_sign_") {
             return ax.parse().ok().map(ScalarRef::VelSign);
+        }
+        if let Some(ax) = name.strip_prefix("oop_sign_") {
+            return ax.parse().ok().map(ScalarRef::OopSign);
         }
 
         // immersed-body block: `body_{idx}_{field}`.
@@ -323,6 +330,7 @@ mod tests {
             v.push(ScalarRef::MapType(ax));
             v.push(ScalarRef::Arg(ax));
             v.push(ScalarRef::VelSign(ax));
+            v.push(ScalarRef::OopSign(ax));
             v.push(ScalarRef::Mesh(MeshScalar::Adot(ax)));
             v.push(ScalarRef::Mesh(MeshScalar::Vtrans(ax)));
         }

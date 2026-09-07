@@ -89,6 +89,9 @@ pub enum Boundary {
     Outflow,
     /// a solid wall: the normal velocity mirrors.
     Reflecting,
+    /// the coordinate axis of an axisymmetric chart: the normal and the azimuthal components
+    /// mirror, the rest continue.
+    Axis,
     /// the two faces of the axis are identified.
     Periodic,
 }
@@ -297,6 +300,7 @@ fn engine_boundaries(b: Boundaries) -> EngineBoundaries<1> {
     let face = |side: Boundary| match side {
         Boundary::Outflow => BoundaryType::Outflow,
         Boundary::Reflecting => BoundaryType::Reflect,
+        Boundary::Axis => BoundaryType::Axis,
         Boundary::Periodic => BoundaryType::Periodic,
     };
     EngineBoundaries::per_axis([[face(b.lo), face(b.hi)]])

@@ -483,6 +483,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                         ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
                             Sc::from_f64(p.vel_sign[*ax as usize])
                         }
+                        ScalarBind::Ref(ScalarRef::OopSign(ax)) => {
+                            Sc::from_f64(p.oop_sign[*ax as usize])
+                        }
                         o => panic!("ghost_fill: unexpected scalar {o:?}"),
                     },
                 );

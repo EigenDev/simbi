@@ -19,6 +19,7 @@ pub fn iso_ghost_fill_gv(ndim: usize, ncomp: usize, axes: &[usize]) -> KernelPro
         let vel_sign: Vec<Gv> = (0..ndim)
             .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
             .collect();
+        let oop_sign = gv_oop_sign(cx, ndim);
         let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
         let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
         for k in 0..ncomp {
@@ -26,7 +27,7 @@ pub fn iso_ghost_fill_gv(ndim: usize, ncomp: usize, axes: &[usize]) -> KernelPro
             // grade-1 wall flip on the grid axis whose coordinate is k; ungridded keeps its sign.
             let v = match axes.iter().position(|&c| c == k) {
                 Some(ax) => v * vel_sign[ax],
-                None => v,
+                None => v * oop_sign,
             };
             writes.push(KernelWrite::new(
                 format!("prim_v{k}"),
@@ -167,13 +168,23 @@ pub fn scalar_ghost_fill_gv(ndim: usize) -> KernelProgram {
     })
 }
 
-// the per-vector-component wall-map sign: the in-plane components (k < ndim) pick up the
-// boundary axis's reflect sign (B/vel are grade-1 vectors under the wall map); the out-of-
-// plane components (k >= ndim, e.g., Bz/vz in 1.5D/2.5D) are tangential to every grid-axis
-// wall, so they copy unchanged (sign = +1). this is why ghost fill loops 0..ncomp (DOF):
-// a 0..ndim loop leaves the out-of-plane ghosts at zero, which drains the boundary.
-fn gv_ghost_sign<'t>(k: usize, ndim: usize, vel_sign: &[Gv<'t>]) -> Gv<'t> {
-    if k < ndim { vel_sign[k] } else { Gv::ONE }
+// the per-vector-component lattice-map sign: the in-plane components (k < ndim) pick up their
+// own axis's reflect sign (B/vel are grade-1 vectors under the wall map); the out-of-plane
+// components (k >= ndim, e.g., Bz/vz in 1.5D/2.5D) are tangential to every wall and copy
+// unchanged there, and change sign across a coordinate axis, where the crossing is a half-turn
+// about the axis. `oop_sign` is the product of the per-axis axis signs of the region. ghost fill
+// loops 0..ncomp (DOF): a 0..ndim loop leaves the out-of-plane ghosts at zero, which drains the
+// boundary.
+fn gv_ghost_sign<'t>(k: usize, ndim: usize, vel_sign: &[Gv<'t>], oop_sign: Gv<'t>) -> Gv<'t> {
+    if k < ndim { vel_sign[k] } else { oop_sign }
+}
+
+// the sign every out-of-plane vector component picks up under the region's lattice map: the
+// product over the grid axes of `oop_sign_{ax}`, -1 on a coordinate axis and +1 elsewhere.
+fn gv_oop_sign<'t>(cx: TraceCx<'t>, ndim: usize) -> Gv<'t> {
+    (0..ndim)
+        .map(|ax| cx.scalar(&format!("oop_sign_{ax}")))
+        .fold(Gv::ONE, |acc, s| acc * s)
 }
 
 /// the RMHD lattice-map ghost fill — `iso_ghost_fill_gv` plus the cell-centered B: pull back
@@ -186,11 +197,12 @@ pub fn rmhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> KernelProgram {
         let vel_sign: Vec<Gv> = (0..ndim)
             .map(|k| cx.scalar(&format!("vel_sign_{k}")))
             .collect();
+        let oop_sign = gv_oop_sign(cx, ndim);
         let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
         let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
         for k in 0..ncomp {
             let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src)
-                * gv_ghost_sign(k, ndim, &vel_sign);
+                * gv_ghost_sign(k, ndim, &vel_sign, oop_sign);
             writes.push(KernelWrite::new(
                 format!("prim_v{k}"),
                 FieldRef::PrimVel(k as u8),
@@ -201,7 +213,7 @@ pub fn rmhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> KernelProgram {
         writes.push(KernelWrite::new("prim_pre", FieldRef::PrimPre, pre.node()));
         for k in 0..ncomp {
             let b = gv_load_at(cx, &format!("bcell_{k}"), &format!("mhd.bcell[{k}]"), &src)
-                * gv_ghost_sign(k, ndim, &vel_sign);
+                * gv_ghost_sign(k, ndim, &vel_sign, oop_sign);
             writes.push(KernelWrite::new(
                 format!("bcell_{k}"),
                 format!("mhd.bcell[{k}]"),
@@ -220,11 +232,12 @@ pub fn imhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> KernelProgram {
         let vel_sign: Vec<Gv> = (0..ndim)
             .map(|k| cx.scalar(&format!("vel_sign_{k}")))
             .collect();
+        let oop_sign = gv_oop_sign(cx, ndim);
         let rho = gv_load_at(cx, "prim_rho", "prim.rho", &src);
         let mut writes = vec![KernelWrite::new("prim_rho", FieldRef::PrimRho, rho.node())];
         for k in 0..ncomp {
             let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src)
-                * gv_ghost_sign(k, ndim, &vel_sign);
+                * gv_ghost_sign(k, ndim, &vel_sign, oop_sign);
             writes.push(KernelWrite::new(
                 format!("prim_v{k}"),
                 FieldRef::PrimVel(k as u8),
@@ -233,7 +246,7 @@ pub fn imhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> KernelProgram {
         }
         for k in 0..ncomp {
             let b = gv_load_at(cx, &format!("bcell_{k}"), &format!("mhd.bcell[{k}]"), &src)
-                * gv_ghost_sign(k, ndim, &vel_sign);
+                * gv_ghost_sign(k, ndim, &vel_sign, oop_sign);
             writes.push(KernelWrite::new(
                 format!("bcell_{k}"),
                 format!("mhd.bcell[{k}]"),
@@ -427,6 +440,7 @@ pub fn wb_ghost_fill_gv(
         let vel_sign: Vec<Gv> = (0..ndim)
             .map(|ax| cx.scalar(&format!("vel_sign_{ax}")))
             .collect();
+        let oop_sign = gv_oop_sign(cx, ndim);
         // the bake-time spacing enum is vestigial: face positions and the cell center both come
         // from the runtime per-axis map (`map_kind_{ax}`), so this one kernel serves every
         // grading. the center is the map's own (geometric mean on a log axis, arithmetic midpoint
@@ -530,7 +544,7 @@ pub fn wb_ghost_fill_gv(
             let v = gv_load_at(cx, &format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src);
             let v = match axes.iter().position(|&c| c == k) {
                 Some(ax) => v * vel_sign[ax],
-                None => v,
+                None => v * oop_sign,
             };
             writes.push(KernelWrite::new(
                 format!("prim_v{k}"),

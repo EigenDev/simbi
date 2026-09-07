@@ -809,7 +809,8 @@ divergence. The extra work is about 1.4x in the flux stage and less over a compl
 
 **Boundary conditions:**
 - `PERIODIC`, wrap around
-- `REFLECTING`, mirror symmetry
+- `REFLECTING`, mirror symmetry: a wall, where the normal velocity and field mirror and every tangential component copies
+- `AXIS`, the polar axis of a 2.5D spherical grid (theta = 0 or theta = pi) or the R = 0 line of a 2.5D cylindrical (R, z) grid: crossing it is a half-turn, so the normal and the azimuthal components mirror while the remaining in-plane component and the scalars continue
 - `OUTFLOW`, zero gradient
 - `DYNAMIC`, user-defined expressions
 

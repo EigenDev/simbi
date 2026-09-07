@@ -975,6 +975,7 @@ fn boundary_from_str(s: &str) -> PyResult<BoundaryType> {
         "periodic" => Ok(BoundaryType::Periodic),
         "outflow" => Ok(BoundaryType::Outflow),
         "reflecting" | "reflect" => Ok(BoundaryType::Reflect),
+        "axis" => Ok(BoundaryType::Axis),
         other => Err(PyValueError::new_err(format!(
             "unsupported boundary '{other}'"
         ))),
@@ -7877,6 +7878,64 @@ macro_rules! iso_dispatch {
     };
 }
 
+/// an `axis` face is admitted only on the polar or cylindrical axis of a 2D (2.5D) chart; the
+/// placement rule lives beside `BoundaryType`.
+fn validate_axis_boundaries(cfg: &Config) -> Result<(), String> {
+    if !cfg.boundaries.contains(&BoundaryType::Axis) {
+        return Ok(());
+    }
+    if cfg.spacetime.contains("kerr") {
+        return Err(
+            "an axis face on a kerr chart is unsupported: the kerr ghost fill continues the frame-dragging manifold w = v^phi + q v^r without the half-turn parity; use reflecting".to_string(),
+        );
+    }
+    let coords = match cfg.coord_system.as_str() {
+        "cartesian" => symbi_geometry::Geometry::Cartesian,
+        "spherical" => symbi_geometry::Geometry::Spherical,
+        "cylindrical" => symbi_geometry::Geometry::Cylindrical,
+        other => return Err(format!("unknown coordinate system '{other}'")),
+    };
+    let x_hi: [f64; 3] =
+        std::array::from_fn(|ax| cfg.x_lo[ax] + cfg.dx[ax] * cfg.n_cells[ax] as f64);
+    let violation = match cfg.dims {
+        1 => symbi_sim::state::axis_boundary_violation::<1>(
+            coords,
+            cfg.cyl_plane,
+            &[cfg.x_lo[0]],
+            &[x_hi[0]],
+            &boundaries_nd::<1>(&cfg.boundaries),
+        ),
+        2 => {
+            let spacing = [cfg.x1_spacing.as_str(), cfg.x2_spacing.as_str()];
+            for ax in 0..2 {
+                let is_axis = |b: BoundaryType| b == BoundaryType::Axis;
+                let bnd = boundaries_nd::<2>(&cfg.boundaries);
+                if (is_axis(bnd.lo(ax)) || is_axis(bnd.hi(ax))) && spacing[ax] != "linear" {
+                    return Err(format!(
+                        "an axis face on axis {ax} needs linear spacing on that axis; got '{}'",
+                        spacing[ax]
+                    ));
+                }
+            }
+            symbi_sim::state::axis_boundary_violation::<2>(
+                coords,
+                cfg.cyl_plane,
+                &[cfg.x_lo[0], cfg.x_lo[1]],
+                &[x_hi[0], x_hi[1]],
+                &boundaries_nd::<2>(&cfg.boundaries),
+            )
+        }
+        _ => symbi_sim::state::axis_boundary_violation::<3>(
+            coords,
+            cfg.cyl_plane,
+            &cfg.x_lo,
+            &x_hi,
+            &boundaries_nd::<3>(&cfg.boundaries),
+        ),
+    };
+    violation.map_or(Ok(()), Err)
+}
+
 /// runtime dispatch on the config tags -> a monomorphized sim. hydro regimes
 /// (newtonian/rhd/isothermal) x cartesian (+ curvilinear for adiabatic) x 1/2/3d;
 /// the mhd regimes (rmhd/nmhd/imhd) x cartesian x 1/2/3d.
@@ -7886,6 +7945,7 @@ fn dispatch_and_run(
     bfields: &[Vec<f64>],
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String> {
     validate_porous_body_overlaps(&cfg.bodies)?;
+    validate_axis_boundaries(cfg)?;
     validate_magnetic_slip_bodies(
         &cfg.bodies,
         &cfg.regime,
@@ -8237,6 +8297,7 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
             BoundaryType::Periodic => "periodic",
             BoundaryType::Outflow => "outflow",
             BoundaryType::Reflect => "reflecting",
+            BoundaryType::Axis => "axis",
             BoundaryType::CoarseFine => "coarse_fine",
             BoundaryType::Driven(_) => "dynamic",
             BoundaryType::Neumann(_) => "neumann",

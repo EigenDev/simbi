@@ -616,6 +616,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                         ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
                             Sc::from_f64(p.vel_sign[*ax as usize])
                         }
+                        ScalarBind::Ref(ScalarRef::OopSign(ax)) => {
+                            Sc::from_f64(p.oop_sign[*ax as usize])
+                        }
                         ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.gamma),
                         // the balance-aware fill evaluates the body potential at the ghost
                         // and source centroids; same slots the body source binds.

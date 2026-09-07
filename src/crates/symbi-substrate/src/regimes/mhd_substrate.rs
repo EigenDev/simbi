@@ -502,8 +502,8 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     );
     GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
         |region, p| {
-            // the generic ghost is float-only (vel_sign); the kerr instance is mixed (map_type/arg ints
-            // + vel_sign/mass/spin/grid floats), so it routes by manifest through resolve_params.
+            // both instances route their params by manifest: the kerr instance adds the metric
+            // mass/spin and the log-aware grid floats to the lattice-map ints and signs.
             let (ints, scalars): (Vec<i32>, Vec<Sc>) = if is_kerr {
                 crate::regimes::substrate_kernels::resolve_params(
                     &gname,
@@ -517,6 +517,9 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
                     |bind| match bind {
                         ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => {
                             Sc::from_f64(p.vel_sign[*ax as usize])
+                        }
+                        ScalarBind::Ref(symbi_ir::ScalarRef::OopSign(ax)) => {
+                            Sc::from_f64(p.oop_sign[*ax as usize])
                         }
                         ScalarBind::Ref(symbi_ir::ScalarRef::SchwarzschildMass) => Sc::from_f64(
                             sim.geom
@@ -543,18 +546,27 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
                     },
                 )
             } else {
-                let mut ints = Vec::with_capacity(2 * D);
-                for ax in 0..D {
-                    ints.push(p.map_type[ax] as i32);
-                }
-                for ax in 0..D {
-                    ints.push(p.arg[ax]);
-                }
-                let mut scalars = Vec::with_capacity(D);
-                for ax in 0..D {
-                    scalars.push(Sc::from_f64(p.vel_sign[ax]));
-                }
-                (ints, scalars)
+                // the generic ghost: map_type/arg ints, and the per-axis reflect sign plus the
+                // axis (out-of-plane) sign as floats, each routed by the manifest.
+                crate::regimes::substrate_kernels::resolve_params(
+                    &gname,
+                    |bind| match bind {
+                        ScalarBind::Ref(symbi_ir::ScalarRef::MapType(ax)) => {
+                            p.map_type[*ax as usize] as i32
+                        }
+                        ScalarBind::Ref(symbi_ir::ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+                        o => panic!("mhd ghost: unexpected int param {o:?}"),
+                    },
+                    |bind| match bind {
+                        ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => {
+                            Sc::from_f64(p.vel_sign[*ax as usize])
+                        }
+                        ScalarBind::Ref(symbi_ir::ScalarRef::OopSign(ax)) => {
+                            Sc::from_f64(p.oop_sign[*ax as usize])
+                        }
+                        o => panic!("mhd ghost: unexpected scalar {o:?}"),
+                    },
+                )
             };
             // bind by manifest: the in-place prim.{rho,vel,pre?} + bcell writes (read-at-source /
             // write-at-cell, over all DOF B-components). prim.pre is a real output for energy; iso

@@ -100,6 +100,9 @@ pub enum BcType {
     Periodic,
     Outflow,
     Reflect,
+    /// the mirror lattice map of `Reflect` on the axis of an axisymmetric chart; the fill kernels
+    /// also flip the out-of-plane (azimuthal) vector components across it.
+    Axis,
     /// skip ghost fill on this face (filled externally, e.g., by AMR prolongation).
     Skip,
 }
@@ -200,7 +203,7 @@ pub fn build_bc_map<const D: usize>(
                         out[ax] = hi - 1;
                     }
                 }
-                BcType::Reflect => {
+                BcType::Reflect | BcType::Axis => {
                     let pivot = if side == FaceSide::Minus { lo } else { hi };
                     out[ax] = 2 * pivot - 1 - out[ax];
                 }
@@ -323,8 +326,8 @@ pub fn ghost_fill_all_reflect<const D: usize>(
         let mut reflect_mask: u8 = 0;
         for ax in 0..D {
             let is_reflect = match region.directions[ax] {
-                FaceSide::Minus => boundaries[ax][0] == BcType::Reflect,
-                FaceSide::Plus => boundaries[ax][1] == BcType::Reflect,
+                FaceSide::Minus => matches!(boundaries[ax][0], BcType::Reflect | BcType::Axis),
+                FaceSide::Plus => matches!(boundaries[ax][1], BcType::Reflect | BcType::Axis),
                 FaceSide::None => false,
             };
             if is_reflect {
