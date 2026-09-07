@@ -481,6 +481,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         shell_accretion_rates(sim, pre, &self.cfl_scratch, diagnostic_radius)
     }
 
+    fn flip_polar_band(
+        &self,
+        sim: &FieldStore<D, DOF, Mem, Sc>,
+        mirror: usize,
+        side: symbi_algebra::Side,
+        reach: usize,
+    ) {
+        crate::regimes::substrate_kernels::flip_polar_band(sim, mirror, side, reach);
+    }
+
     fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // the shared lattice-map pullback (iso_ghost_fill_{D}d): the EOS-generic
         // prim pullback (rho/vel_0..DOF-1/pre), in-place, per ghost region. the DOF-lift

@@ -5472,7 +5472,21 @@ where
             stores.push(&mut **s);
             kernels.push(&*k);
         }
-        let schedule = Schedule::derive(counts, stores[0].geom.ng, &topology);
+        // a polar axis face whose azimuth is cut hands its ghost band to the schedule's
+        // antipodal legs: the pole tiles' axis faces become cuts so their own fill skips the
+        // band, and the seam names the azimuth slabs the legs rotate across.
+        let seam = polar_seam_of(cfg, counts, &stores.iter().map(|s| &**s).collect::<Vec<_>>());
+        if let Some(seam) = seam.as_ref() {
+            for (flat, store) in stores.iter_mut().enumerate() {
+                let tc = symbi::sim::decomp::unflatten(flat, counts);
+                for (side, on_pole) in [(0usize, tc[seam.mirror] == 0), (1usize, tc[seam.mirror] + 1 == counts[seam.mirror])] {
+                    if seam.sides[side] && on_pole {
+                        store.boundaries.0[seam.mirror][side] = BoundaryType::CoarseFine;
+                    }
+                }
+            }
+        }
+        let schedule = Schedule::derive_with_seam(counts, stores[0].geom.ng, &topology, seam);
         evolve_scheduled(
             &mut stores,
             &kernels,
@@ -7906,9 +7920,6 @@ fn validate_axis_boundaries(cfg: &Config) -> Result<(), String> {
         .collect();
     if cfg.dims == 3 && !uniform_axes.is_empty() {
         uniform_axes.push(if cfg.coord_system == "spherical" { 2 } else { 1 });
-        if cfg.n_gpus > 1 {
-            return Err("gpus>1 does not yet support an axis face on a gridded azimuth: the polar half-turn reads the antipodal tile, an exchange leg the decomposition does not carry; set gpus=1".to_string());
-        }
         if cfg.n_tracers > 0 {
             return Err("tracers do not yet cross a polar axis on a gridded azimuth; set n_tracers=0 or use reflecting".to_string());
         }
@@ -7948,6 +7959,49 @@ fn validate_axis_boundaries(cfg: &Config) -> Result<(), String> {
         ),
     };
     violation.map_or(Ok(()), Err)
+}
+
+/// the polar seam of a decomposed run, when a polar axis face sits on a chart whose gridded
+/// azimuth is cut: the mirror axis and its axis faces from the declared boundaries, the azimuth
+/// axis from the chart, and each azimuth tile's interior cell count read off the tiles.
+fn polar_seam_of<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    cfg: &Config,
+    counts: [usize; D],
+    tiles: &[&symbi::sim::state::FieldStore<D, DOF, Mem, f64>],
+) -> Option<symbi::sim::decomp::PolarSeam> {
+    if D != 3 {
+        return None;
+    }
+    let (mirror, azimuth) = match cfg.coord_system.as_str() {
+        "spherical" => (1usize, 2usize),
+        "cylindrical" => (0usize, 1usize),
+        _ => return None,
+    };
+    if counts[azimuth] < 2 {
+        return None;
+    }
+    let phys = boundaries_nd::<D>(&cfg.boundaries);
+    let sides = [
+        phys.lo(mirror) == BoundaryType::Axis,
+        phys.hi(mirror) == BoundaryType::Axis,
+    ];
+    if !(sides[0] || sides[1]) {
+        return None;
+    }
+    let slabs = (0..counts[azimuth])
+        .map(|i| {
+            let mut tc = [0usize; D];
+            tc[azimuth] = i;
+            let g = &tiles[symbi::sim::decomp::flatten(tc, counts)].geom.interior;
+            (g.spaces[azimuth].hi - g.spaces[azimuth].lo) as usize
+        })
+        .collect();
+    Some(symbi::sim::decomp::PolarSeam {
+        mirror,
+        sides,
+        azimuth,
+        slabs,
+    })
 }
 
 /// runtime dispatch on the config tags -> a monomorphized sim. hydro regimes

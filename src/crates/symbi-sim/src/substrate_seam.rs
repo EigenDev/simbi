@@ -248,6 +248,21 @@ where
     fn godunov_stage(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64);
     fn cfl(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>) -> f64;
     fn ghost_fill(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>);
+
+    /// negate the odd components of the ghost band `reach` cells beyond the polar `side` face
+    /// of the `mirror` axis, after an antipodal exchange filled it with rotated interior copies:
+    /// the mirror-axis component always, the azimuthal component in the orthonormal basis, for
+    /// the cell state and the staggered faces alike. a set that owns no such band reports it.
+    fn flip_polar_band(
+        &self,
+        store: &FieldStore<NDIM, DOF, Mem, Sc>,
+        mirror: usize,
+        side: symbi_algebra::Side,
+        reach: usize,
+    ) {
+        let _ = (store, mirror, side, reach);
+        panic!("this kernel set carries no polar band flip; an antipodal exchange needs one");
+    }
     fn snapshot(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>);
 
     /// first-order flux correction, run per RK substage after c2p: any zone whose high-order c2p

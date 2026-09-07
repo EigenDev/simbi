@@ -63,6 +63,81 @@ fn ghost_band_domain<const D: usize>(
     }))
 }
 
+/// negate a field over `domain` through a scratch field on the same domain: the band is copied
+/// out and combined back as `dst = 0 dst - scratch`, since a kernel binding may not alias an
+/// input with an output.
+fn negate_over<const D: usize, Mem, Sc>(
+    domain: &Domain<D>,
+    field: &symbi_grid::Field<Sc, D, Mem>,
+    scratch: &symbi_grid::Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    if domain.volume() == 0 {
+        return;
+    }
+    crate::regimes::substrate_kernels::dispatch_fields_each::<Sc, Mem, D>(
+        symbi_ir::KernelId::FieldCopy { ndim: D as u8 }.name(),
+        domain,
+        &[field],
+        &[scratch],
+        &[],
+        &[],
+    );
+    crate::regimes::substrate_kernels::dispatch_fields_each::<Sc, Mem, D>(
+        symbi_ir::KernelId::FieldLincomb { ndim: D as u8 }.name(),
+        domain,
+        &[scratch],
+        &[field],
+        &[],
+        &[Sc::ZERO, Sc::from_f64(-1.0)],
+    );
+}
+
+/// the sign flip of a polar ghost band an antipodal exchange filled: the band `reach` cells
+/// beyond the pole on `side` of the `mirror` axis holds rotated interior copies, and the
+/// components the half-turn reverses take their sign here. the mirror-axis component reverses
+/// in every basis; the azimuthal component reverses for orthonormal storage and continues for
+/// contravariant storage, the rule `axis_vel_sign` applies on an uncut azimuth. cell velocity
+/// and cell B share the cell band; the azimuth faces of the band follow on their own domain.
+pub fn flip_polar_band<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    mirror: usize,
+    side: symbi_algebra::Side,
+    reach: usize,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let turn = crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior)
+        .expect("a polar band exists on a gridded azimuth alone");
+    let az = turn.axis;
+    let azimuth_flips =
+        sim.geom.spacetime.component_basis() == symbi_geometry::ComponentBasis::Orthonormal;
+    let ng = reach as isize;
+    // the flux stage's scratch fields are free between an exchange and the next sweep: the
+    // conserved-flux density slot shares the cell domain, and the azimuth flux slot shares
+    // the azimuth face domain.
+    let cell_scratch = &sim.fields.flux[0].den;
+    let cell_band = sim.geom.allocated.boundary(mirror, side, ng);
+    negate_over(&cell_band, &sim.fields.prim.vel[mirror], cell_scratch);
+    if azimuth_flips {
+        negate_over(&cell_band, &sim.fields.prim.vel[az], cell_scratch);
+    }
+    let Some(mhd) = sim.fields.mhd.as_ref() else {
+        return;
+    };
+    negate_over(&cell_band, &mhd.bcell[mirror], cell_scratch);
+    if azimuth_flips {
+        negate_over(&cell_band, &mhd.bcell[az], cell_scratch);
+        // the mirror-axis face field carries no halo beyond the pole face; the azimuth faces
+        // on the band's rows follow the cell rule.
+        let az_band = mhd.bface[az].domain().boundary(mirror, side, ng);
+        negate_over(&az_band, &mhd.bface[az], &mhd.bflux[az].f[0]);
+    }
+}
+
 /// run every `Driven(id)` face's prescription. iterates the sim's per-axis `Boundaries`; for each
 /// driven face, looks up the DAG (`dags[id]`) and dispatches `boundary_fill` over its ghost band.
 /// called at the tail of a regime's `ghost_fill`, after the standard pullback has skipped these faces.

@@ -534,6 +534,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         crate::regimes::substrate_kernels::dispatch_viscous(sim, dt, self.viscosity);
     }
 
+    fn flip_polar_band(
+        &self,
+        sim: &FieldStore<D, DOF, Mem, Sc>,
+        mirror: usize,
+        side: symbi_algebra::Side,
+        reach: usize,
+    ) {
+        crate::regimes::substrate_kernels::flip_polar_band(sim, mirror, side, reach);
+    }
+
     fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // the shared lattice-map pullback (iso_ghost_fill{sfx}_{D}d): rho/vel/pre, in-place,
         // bound by manifest. (DOF>NDIM: the cyl ghost manifest carries no per-axis bc entry,

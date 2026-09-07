@@ -924,6 +924,35 @@ pub struct Leg<const D: usize> {
     pub clip: [bool; D],
 }
 
+/// a polar axis face on a chart whose azimuth is gridded and cut into tiles. the ghost band
+/// beyond the pole of a tile is the interior half a period away in the azimuth, which lives on
+/// other tiles, so the schedule carries antipodal legs for it: `mirror` is the polar axis
+/// (theta on a sphere, R on a cylinder), `sides` which of its faces are the axis, `azimuth`
+/// the rotated axis, and `slabs` the interior cell count of every azimuth tile in order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolarSeam {
+    pub mirror: usize,
+    pub sides: [bool; 2],
+    pub azimuth: usize,
+    pub slabs: Vec<usize>,
+}
+
+/// one antipodal transfer: `len` azimuth cells of the `src` tile's interior, starting `src_lo`
+/// cells into its interior, fill the `dst` tile's ghost band beyond the pole on `side`,
+/// starting `dst_lo` cells into the destination's interior. the mirrored rows are moved one at
+/// a time, since the mirror reverses their order. an explicit cut whose half-turn image
+/// straddles tiles yields several legs into the same band.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolarLeg<const D: usize> {
+    pub side: Side,
+    pub dst: usize,
+    pub src: usize,
+    pub dst_lo: isize,
+    pub src_lo: isize,
+    pub len: isize,
+    pub clip: [bool; D],
+}
+
 /// the ordered halo transfers a tile grid implies. derived once from the partition's tile
 /// counts, the stencil reach, and the boundary topology; the exchange functions walk the legs
 /// and move bytes, so neighbor discovery and pass ordering live in exactly one place and a
@@ -934,6 +963,8 @@ pub struct Schedule<const D: usize> {
     reach: usize,
     topology: Topology<D>,
     legs: Vec<Leg<D>>,
+    seam: Option<PolarSeam>,
+    polar: Vec<PolarLeg<D>>,
 }
 
 impl<const D: usize> Schedule<D> {
@@ -943,12 +974,29 @@ impl<const D: usize> Schedule<D> {
     /// values ride along; an axis still to come is clipped back to the interior. `counts` is
     /// the partition's tile grid and `reach` the halo width the stencil declares.
     pub fn derive(counts: [usize; D], reach: usize, topology: &Topology<D>) -> Self {
+        Self::derive_with_seam(counts, reach, topology, None)
+    }
+
+    /// `derive` plus the antipodal legs of a polar seam whose azimuth is cut. the legs of a
+    /// pole tile run in its mirror axis's pass, after that axis's ordinary legs, so the axes
+    /// still to come clip to the interior and carry the band's corners afterwards. a seam whose
+    /// azimuth is uncut adds nothing: the tile's own half-turn fill covers it.
+    pub fn derive_with_seam(
+        counts: [usize; D],
+        reach: usize,
+        topology: &Topology<D>,
+        seam: Option<PolarSeam>,
+    ) -> Self {
         let total: usize = counts.iter().product();
         let mut legs = Vec::new();
+        let mut polar = Vec::new();
         let mut processed = [false; D];
         for axis in 0..D {
             let clip: [bool; D] =
                 std::array::from_fn(|b| b != axis && !processed[b] && counts[b] > 1);
+            if let Some(seam) = seam.as_ref().filter(|s| s.mirror == axis) {
+                polar.extend(polar_legs(counts, seam, clip));
+            }
             for flat in 0..total {
                 let tc = unflatten(flat, counts);
                 let wraps = tc[axis] + 1 == counts[axis];
@@ -973,7 +1021,31 @@ impl<const D: usize> Schedule<D> {
             reach,
             topology: *topology,
             legs,
+            seam,
+            polar,
         }
+    }
+
+    /// the antipodal legs of the polar seam, in the order they run.
+    pub fn polar_legs(&self) -> &[PolarLeg<D>] {
+        &self.polar
+    }
+
+    /// the polar seam the schedule carries antipodal legs for.
+    pub fn seam(&self) -> Option<&PolarSeam> {
+        self.seam.as_ref()
+    }
+
+    /// every (tile, side) whose ghost band beyond the pole is filled by antipodal legs, once
+    /// each; the band's odd components are negated after the legs land.
+    pub fn polar_bands(&self) -> Vec<(usize, Side)> {
+        let mut bands: Vec<(usize, Side)> = Vec::new();
+        for leg in &self.polar {
+            if !bands.contains(&(leg.dst, leg.side)) {
+                bands.push((leg.dst, leg.side));
+            }
+        }
+        bands
     }
 
     /// the schedule for a tile grid whose end tiles carry physical boundaries.
@@ -1002,6 +1074,197 @@ impl<const D: usize> Schedule<D> {
 
     pub fn n_tiles(&self) -> usize {
         self.counts.iter().product()
+    }
+}
+
+/// the antipodal legs of one polar seam: for every tile on a declared pole face, the half-turn
+/// image of its azimuth slab, split at the period's wrap and at every source tile boundary.
+/// offsets are interior-relative cell indices on the azimuth axis.
+fn polar_legs<const D: usize>(
+    counts: [usize; D],
+    seam: &PolarSeam,
+    clip: [bool; D],
+) -> Vec<PolarLeg<D>> {
+    let az = seam.azimuth;
+    assert_eq!(seam.slabs.len(), counts[az], "one azimuth slab per azimuth tile");
+    if counts[az] < 2 {
+        return Vec::new();
+    }
+    let n: usize = seam.slabs.iter().sum();
+    assert!(n % 2 == 0, "a polar half-turn needs an even azimuth cell count, got {n}");
+    let half = n / 2;
+    let offsets: Vec<usize> = seam
+        .slabs
+        .iter()
+        .scan(0usize, |acc, &w| {
+            let start = *acc;
+            *acc += w;
+            Some(start)
+        })
+        .collect();
+    let total: usize = counts.iter().product();
+    let mut legs = Vec::new();
+    for (side_index, side) in [(0usize, Side::Lo), (1usize, Side::Hi)] {
+        if !seam.sides[side_index] {
+            continue;
+        }
+        for flat in 0..total {
+            let tc = unflatten(flat, counts);
+            let on_pole = if side == Side::Lo {
+                tc[seam.mirror] == 0
+            } else {
+                tc[seam.mirror] + 1 == counts[seam.mirror]
+            };
+            if !on_pole {
+                continue;
+            }
+            let (g0, w) = (offsets[tc[az]], seam.slabs[tc[az]]);
+            // the destination slab [g0, g0 + w) reads the source [g0 + half, g0 + w + half)
+            // modulo n: at most two unwrapped pieces, each intersected with every azimuth tile.
+            let pieces = {
+                let (a, b) = (g0 + half, g0 + w + half);
+                if b <= n {
+                    vec![(a, b, 0isize)]
+                } else if a >= n {
+                    vec![(a - n, b - n, 0isize)]
+                } else {
+                    vec![(a, n, 0isize), (0, b - n, (n - a) as isize)]
+                }
+            };
+            for (a, b, dst_shift) in pieces {
+                for (s_index, (&s_off, &s_w)) in offsets.iter().zip(&seam.slabs).enumerate() {
+                    let lo = a.max(s_off);
+                    let hi = b.min(s_off + s_w);
+                    if lo >= hi {
+                        continue;
+                    }
+                    let mut sc = tc;
+                    sc[az] = s_index;
+                    legs.push(PolarLeg {
+                        side,
+                        dst: flat,
+                        src: flatten(sc, counts),
+                        dst_lo: (lo - a) as isize + dst_shift,
+                        src_lo: (lo - s_off) as isize,
+                        len: (hi - lo) as isize,
+                        clip,
+                    });
+                }
+            }
+        }
+    }
+    legs
+}
+
+/// the cell-centered and face transfers one antipodal leg carries, one mirrored row at a time:
+/// row `k` beyond the pole reads interior row `k` counted from the pole, the azimuth window
+/// rotated by the leg's offsets, the axes already exchanged at their full extent and the ones
+/// still to come at the interior. the mirror-axis face field carries no halo beyond the pole
+/// face, which the seed and the constrained-transport update own, so only the transverse face
+/// fields move; the azimuth face field carries one face past the window so the closing face of
+/// a slab lands on its physical partner.
+/// `visit` receives (source tile, source field, source region, destination tile, destination
+/// field, destination region, tag).
+fn polar_transfers<const D: usize, const DOF: usize, M: MemorySpace, F>(
+    dst: &FieldStore<D, DOF, M>,
+    src: &FieldStore<D, DOF, M>,
+    leg: &PolarLeg<D>,
+    seam: &PolarSeam,
+    reach: usize,
+    tag_base: u64,
+    mut visit: F,
+) where
+    F: FnMut(usize, &Field<f64, D, M>, &Domain<D>, usize, &Field<f64, D, M>, &Domain<D>, u64),
+{
+    let (mirror, az) = (seam.mirror, seam.azimuth);
+    let dg = &dst.geom;
+    let sg = &src.geom;
+    let cell_rows = |k: isize| -> (isize, isize) {
+        match leg.side {
+            Side::Lo => (
+                dg.interior.spaces[mirror].lo - 1 - k,
+                sg.interior.spaces[mirror].lo + k,
+            ),
+            Side::Hi => (
+                dg.interior.spaces[mirror].hi + k,
+                sg.interior.spaces[mirror].hi - 1 - k,
+            ),
+        }
+    };
+    // `alloc` is the field's own domain and `d` its face axis (`D` for a cell field): the
+    // mirror row and the azimuth window explicit, the clipped axes at the interior, one face
+    // longer on the field's own axis.
+    let region = |alloc: &Domain<D>, geom: &PartitionGeometry<D>, d: usize, row: isize, az_lo: isize| {
+        let mut r = alloc.slab(mirror, (row, row + 1));
+        let face_extra = if d == az { 1 } else { 0 };
+        let az0 = geom.interior.spaces[az].lo + az_lo;
+        r = r.slab(az, (az0, az0 + leg.len + face_extra));
+        for b in 0..D {
+            if b != mirror && b != az && leg.clip[b] {
+                let hi_ext = if b == d { 1 } else { 0 };
+                r = r.slab(
+                    b,
+                    (geom.interior.spaces[b].lo, geom.interior.spaces[b].hi + hi_ext),
+                );
+            }
+        }
+        r
+    };
+    let dst_fields = prim_fields(dst);
+    let src_fields = prim_fields(src);
+    let inside = |what: &str, field: &Field<f64, D, M>, r: &Domain<D>| {
+        let dom = field.domain();
+        for a in 0..D {
+            debug_assert!(
+                r.spaces[a].lo >= dom.spaces[a].lo && r.spaces[a].hi <= dom.spaces[a].hi,
+                "polar leg {leg:?}: {what} region {r:?} leaves the field domain {dom:?} on axis {a}"
+            );
+        }
+    };
+    for k in 0..reach as isize {
+        let (drow, srow) = cell_rows(k);
+        for (field_index, (df, sf)) in dst_fields.iter().zip(&src_fields).enumerate() {
+            let dreg = region(&dg.allocated, dg, D, drow, leg.dst_lo);
+            let sreg = region(&sg.allocated, sg, D, srow, leg.src_lo);
+            inside("cell dst", df, &dreg);
+            inside("cell src", sf, &sreg);
+            let tag = tag_base | ((k as u64) << 12) | ((field_index as u64) << 1);
+            visit(leg.src, sf, &sreg, leg.dst, df, &dreg, tag);
+        }
+        if let (Some(dm), Some(sm)) = (dst.fields.mhd.as_ref(), src.fields.mhd.as_ref()) {
+            // a face field carries halos on its transverse axes alone, so the mirror-axis
+            // faces have no band beyond the pole face to fill.
+            for d in (0..D).filter(|&d| d != mirror) {
+                let dreg = region(&dm.bface[d].domain(), dg, d, drow, leg.dst_lo);
+                let sreg = region(&sm.bface[d].domain(), sg, d, srow, leg.src_lo);
+                inside("face dst", &dm.bface[d], &dreg);
+                inside("face src", &sm.bface[d], &sreg);
+                let tag = tag_base | ((k as u64) << 12) | (((dst_fields.len() + d) as u64) << 1);
+                visit(leg.src, &sm.bface[d], &sreg, leg.dst, &dm.bface[d], &dreg, tag);
+            }
+        }
+    }
+}
+
+/// negate the odd components of every polar ghost band the antipodal legs filled: the band is
+/// a rotated copy of the interior, and the components the half-turn reverses take their sign
+/// here, once, before the physical-boundary refill reads the band's edge.
+fn flip_polar_bands<const D: usize, const DOF: usize, M, K>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    kernels: &[&K],
+    schedule: &Schedule<D>,
+    devices: &[i32],
+) where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+{
+    let Some(seam) = schedule.seam() else {
+        return;
+    };
+    for (tile, side) in schedule.polar_bands() {
+        symbi_xpu::with_device(devices[tile], || {
+            kernels[tile].flip_polar_band(tiles[tile], seam.mirror, side, schedule.reach())
+        });
     }
 }
 
@@ -1228,6 +1491,39 @@ pub fn exchange_grid_phase<
             },
         );
     }
+    if let Some(seam) = schedule.seam().filter(|s| s.mirror == axis) {
+        for (leg_index, leg) in schedule.polar_legs().iter().enumerate() {
+            polar_transfers(
+                tiles[leg.dst],
+                tiles[leg.src],
+                leg,
+                seam,
+                schedule.reach(),
+                (0x1000 | leg_index as u64) << 20,
+                |src_tile, src_field, src_region, dst_tile, dst_field, dst_region, tag| {
+                    let have_src = ownership.owns(src_tile);
+                    let have_dst = ownership.owns(dst_tile);
+                    match (have_src, have_dst, phase) {
+                        (true, true, Phase::Post) => transport.copy_region(
+                            src_field,
+                            src_region,
+                            dst_field,
+                            dst_region,
+                            devices[src_tile],
+                            devices[dst_tile],
+                        ),
+                        (true, false, Phase::Post) => {
+                            messages.send(src_field, src_region, devices[src_tile], tag)
+                        }
+                        (false, true, Phase::Complete) => {
+                            messages.recv(dst_field, dst_region, devices[dst_tile], tag)
+                        }
+                        _ => {}
+                    }
+                },
+            );
+        }
+    }
 }
 
 fn exchange_grid_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
@@ -1247,17 +1543,44 @@ fn exchange_grid_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
         schedule.n_tiles(),
         "devices slice length does not match the schedule's tile grid"
     );
-    for leg in schedule.legs() {
-        exchange_faces_set(
-            tiles[leg.lo],
-            tiles[leg.hi],
-            leg,
-            schedule.reach(),
-            devices[leg.lo],
-            devices[leg.hi],
-            transport,
-            set,
-        );
+    for axis in 0..D {
+        for leg in schedule.legs().iter().filter(|l| l.axis == axis) {
+            exchange_faces_set(
+                tiles[leg.lo],
+                tiles[leg.hi],
+                leg,
+                schedule.reach(),
+                devices[leg.lo],
+                devices[leg.hi],
+                transport,
+                set,
+            );
+        }
+        if set != ExchangeSet::Prim {
+            continue;
+        }
+        if let Some(seam) = schedule.seam().filter(|s| s.mirror == axis) {
+            for leg in schedule.polar_legs() {
+                polar_transfers(
+                    tiles[leg.dst],
+                    tiles[leg.src],
+                    leg,
+                    seam,
+                    schedule.reach(),
+                    0,
+                    |src_tile, sf, sreg, dst_tile, df, dreg, _tag| {
+                        transport.copy_region(
+                            sf,
+                            sreg,
+                            df,
+                            dreg,
+                            devices[src_tile],
+                            devices[dst_tile],
+                        )
+                    },
+                );
+            }
+        }
     }
 }
 
@@ -1989,6 +2312,7 @@ where
         }
         drain_devices::<M>(devices);
         exchange_grid(&sh, &schedule, devices, transport);
+                flip_polar_bands(&sh, kernels, &schedule, devices);
         // re-fill physical boundary ghosts after the exchange. at a corner where a domain-boundary
         // (outflow/reflect) meets a tile cut, the boundary ghost is derived from cells that include
         // the cut halo -- only valid post-exchange. with ghost_fill before the exchange, that corner
@@ -2130,6 +2454,7 @@ where
                 // refresh the cut halos from each neighbor's stage-updated interior.
                 drain_devices::<M>(devices);
                 exchange_grid(&sh, &schedule, devices, transport);
+                flip_polar_bands(&sh, kernels, &schedule, devices);
                 // re-fill physical boundary ghosts post-exchange (cut-corner consistency, see prime).
                 for i in 0..n {
                     symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
@@ -2225,6 +2550,7 @@ where
             {
                 let sh = shared!();
                 exchange_grid(&sh, &schedule, devices, transport);
+                flip_polar_bands(&sh, kernels, &schedule, devices);
                 for ii in 0..n {
                     symbi_xpu::with_device(devices[ii], || kernels[ii].ghost_fill(sh[ii]));
                 }
@@ -2330,12 +2656,14 @@ where
                     }
                     drain_devices::<M>(devices);
                     exchange_grid(&sh, &schedule, devices, transport);
+                flip_polar_bands(&sh, kernels, &schedule, devices);
                 }
                 for i in 0..n {
                     symbi_xpu::with_device(devices[i], || kernels[i].excise_finalize(sh[i]));
                 }
                 drain_devices::<M>(devices);
                 exchange_grid(&sh, &schedule, devices, transport);
+                flip_polar_bands(&sh, kernels, &schedule, devices);
             }
             let horizon = sh.first().and_then(|store| horizon_request(*store));
             if let Some((index, diagnostic_radius)) = horizon {
@@ -3056,8 +3384,9 @@ impl MessageTransport for PeerCopy {
 #[cfg(test)]
 mod tests {
     use super::{
-        LocalCopy, Partition, Schedule, Topology, decompose_grid, exchange_ito_coefficients,
-        migrate_continuous_tracers, spawn_decomposed_continuous_injection, unflatten,
+        LocalCopy, Partition, PolarSeam, Schedule, Side, Topology, decompose_grid,
+        exchange_ito_coefficients, migrate_continuous_tracers,
+        spawn_decomposed_continuous_injection, unflatten,
     };
 
     #[test]
@@ -3132,6 +3461,88 @@ mod tests {
         let one_cut = Schedule::open([3usize, 1], 2);
         assert_eq!(one_cut.legs().len(), 2);
         assert!(one_cut.legs().iter().all(|l| l.axis == 0));
+    }
+
+    // the antipodal legs of a polar seam on equal azimuth slabs: with four slabs of two cells
+    // over an eight-cell period, every pole tile reads the slab two tiles on, whole, on both
+    // poles, and the legs run in the mirror axis's pass with the azimuth clipped.
+    #[test]
+    fn a_polar_seam_on_equal_slabs_pairs_each_tile_with_its_antipode() {
+        let counts = [1usize, 2, 4];
+        let seam = PolarSeam {
+            mirror: 1,
+            sides: [true, true],
+            azimuth: 2,
+            slabs: vec![2, 2, 2, 2],
+        };
+        let sched = Schedule::derive_with_seam(counts, 2, &Topology::wrapping([false, false, true]), Some(seam));
+        let legs = sched.polar_legs();
+        assert_eq!(legs.len(), 8, "one leg per pole tile per side");
+        for leg in legs {
+            let dst = unflatten(leg.dst, counts);
+            let src = unflatten(leg.src, counts);
+            assert_eq!(src[2], (dst[2] + 2) % 4, "the antipode is two slabs on");
+            assert_eq!(src[1], dst[1], "the source shares the pole tile's mirror-axis index");
+            assert_eq!((leg.dst_lo, leg.src_lo, leg.len), (0, 0, 2), "a whole slab moves");
+            assert_eq!(leg.clip, [false, false, true], "the azimuth is still to come");
+            let expect_side = if dst[1] == 0 { Side::Lo } else { Side::Hi };
+            assert_eq!(leg.side, expect_side);
+        }
+        assert_eq!(sched.polar_bands().len(), 8);
+    }
+
+    // uneven cuts: slabs of 3, 2, 3 over eight cells. the first slab [0, 3) reads [4, 7),
+    // which lies in the second slab's last cell and the third slab's first two, so its band
+    // comes from two sources; the last slab [5, 8) reads [1, 4), inside the first slab.
+    #[test]
+    fn a_polar_seam_on_uneven_slabs_splits_the_band_across_its_sources() {
+        let counts = [1usize, 1, 3];
+        let seam = PolarSeam {
+            mirror: 1,
+            sides: [true, false],
+            azimuth: 2,
+            slabs: vec![3, 2, 3],
+        };
+        let sched = Schedule::derive_with_seam(counts, 2, &Topology::wrapping([false, false, true]), Some(seam));
+        let mut legs: Vec<(usize, usize, isize, isize, isize)> = sched
+            .polar_legs()
+            .iter()
+            .map(|l| (l.dst, l.src, l.dst_lo, l.src_lo, l.len))
+            .collect();
+        legs.sort();
+        assert_eq!(
+            legs,
+            vec![
+                (0, 1, 0, 1, 1),
+                (0, 2, 1, 0, 2),
+                (1, 2, 0, 2, 1),
+                (1, 0, 1, 0, 1),
+                (2, 0, 0, 1, 2),
+                (2, 1, 2, 0, 1),
+            ]
+            .into_iter()
+            .map(|(d, s, dl, sl, n)| (d, s, dl, sl, n))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+        );
+        assert!(sched.polar_legs().iter().all(|l| l.side == Side::Lo));
+    }
+
+    // an uncut azimuth leaves the half-turn to the tile's own fill.
+    #[test]
+    fn a_polar_seam_on_an_uncut_azimuth_adds_no_legs() {
+        let seam = PolarSeam {
+            mirror: 1,
+            sides: [true, true],
+            azimuth: 2,
+            slabs: vec![8],
+        };
+        let sched = Schedule::derive_with_seam([2usize, 1, 1], 2, &Topology::open(), Some(seam));
+        assert!(sched.polar_legs().is_empty());
+        assert!(sched.polar_bands().is_empty());
     }
 
     // a periodic axis closes the ring: the last tile's hi ghosts come from the first tile,

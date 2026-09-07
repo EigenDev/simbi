@@ -1295,6 +1295,16 @@ where
             ac,
         );
     }
+    fn flip_polar_band(
+        &self,
+        sim: &FieldStore<D, 3, Mem, Sc>,
+        mirror: usize,
+        side: symbi_algebra::Side,
+        reach: usize,
+    ) {
+        crate::regimes::substrate_kernels::flip_polar_band(sim, mirror, side, reach);
+    }
+
     fn ghost_fill(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         crate::regimes::mhd_substrate::ghost_fill(sim, R::SPEC.has_energy);
         // the standard fill skips Driven faces (Driven -> Skip); prescribe

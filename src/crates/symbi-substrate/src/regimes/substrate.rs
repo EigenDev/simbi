@@ -458,6 +458,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         )
     }
 
+    fn flip_polar_band(
+        &self,
+        sim: &FieldStore<D, D, Mem, Sc>,
+        mirror: usize,
+        side: symbi_algebra::Side,
+        reach: usize,
+    ) {
+        crate::regimes::substrate_kernels::flip_polar_band(sim, mirror, side, reach);
+    }
+
     fn ghost_fill(&self, sim: &FieldStore<D, D, Mem, Sc>) {
         // the lattice-map pullback (iso_ghost_fill_{D}d): rho/vel/pre, in-place. the
         // pressure is pulled back too (a grade-0 scalar, like density).

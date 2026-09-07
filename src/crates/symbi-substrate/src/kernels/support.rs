@@ -273,9 +273,6 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
     /// the cell interior even for a face-anchored field, so the closing periodic face rotates
     /// onto its physical partner.
     pub fn with_polar_turn(mut self, polar: Option<PolarTurn>) -> Self {
-        if let Some(t) = polar {
-            assert!(t.n % 2 == 0, "a polar half-turn needs an even azimuth cell count, got {}", t.n);
-        }
         self.polar = polar;
         self
     }
@@ -419,6 +416,11 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
                     if bc_type == BcType::Axis {
                         p.oop_sign[ax] = -1.0;
                         if let Some(t) = self.polar.filter(|t| t.axis != ax) {
+                            assert!(
+                                t.n % 2 == 0,
+                                "a polar half-turn needs an even azimuth cell count, got {}",
+                                t.n
+                            );
                             p.turn[t.axis] = (t.n / 2) as i32;
                             p.turn_lo[t.axis] = t.lo as i32;
                         }
