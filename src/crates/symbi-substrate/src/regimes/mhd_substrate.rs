@@ -486,6 +486,9 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     // spherical-azimuth only: the cartesian kerr chart has no coordinate azimuth and copies raw prims.
     let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::KerrKS)
         && sim.geom.coords == symbi_geometry::Geometry::Spherical;
+    // the valencia state stores contravariant components, whose azimuthal entries continue
+    // evenly through a polar axis face.
+    let contravariant = !matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Minkowski);
     let gname = if is_kerr {
         format!("rmhd_ghost_fill{}_{D}d", spacetime_slug(sim.geom.spacetime))
     } else if has_energy {
@@ -518,9 +521,9 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
                         ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => {
                             Sc::from_f64(p.vel_sign[*ax as usize])
                         }
-                        ScalarBind::Ref(symbi_ir::ScalarRef::OopSign(ax)) => {
-                            Sc::from_f64(p.oop_sign[*ax as usize])
-                        }
+                        ScalarBind::Ref(symbi_ir::ScalarRef::OopSign(ax)) => Sc::from_f64(
+                            crate::kernels::support::axis_oop_sign(p, *ax as usize, contravariant),
+                        ),
                         ScalarBind::Ref(symbi_ir::ScalarRef::SchwarzschildMass) => Sc::from_f64(
                             sim.geom
                                 .spacetime_scalars
@@ -561,9 +564,9 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
                         ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => {
                             Sc::from_f64(p.vel_sign[*ax as usize])
                         }
-                        ScalarBind::Ref(symbi_ir::ScalarRef::OopSign(ax)) => {
-                            Sc::from_f64(p.oop_sign[*ax as usize])
-                        }
+                        ScalarBind::Ref(symbi_ir::ScalarRef::OopSign(ax)) => Sc::from_f64(
+                            crate::kernels::support::axis_oop_sign(p, *ax as usize, contravariant),
+                        ),
                         o => panic!("mhd ghost: unexpected scalar {o:?}"),
                     },
                 )

@@ -99,6 +99,18 @@ pub fn to_bc_array_scalar<const D: usize>(boundaries: &Boundaries<D>) -> [[BcTyp
     })
 }
 
+/// the sign every out-of-plane vector component picks up across the region's faces, by the
+/// basis the state is stored in. an orthonormal (physical) azimuthal component rides the unit
+/// vector phi-hat = d/dphi / (r sin theta), whose normalization changes sign with sin theta
+/// through the pole, so it is odd there and the axis face binds -1. a contravariant coordinate
+/// component rides d/dphi itself, which continues unchanged through the pole (the ghost cell's
+/// coordinate basis vector equals the image point's), so it is even and the axis face binds +1.
+/// the newtonian and flat relativistic states are orthonormal; the curved-spacetime (valencia)
+/// state is contravariant, so `contravariant` is the spacetime being other than minkowski.
+pub fn axis_oop_sign<const D: usize>(p: &GhostMapParams<D>, ax: usize, contravariant: bool) -> f64 {
+    if contravariant { 1.0 } else { p.oop_sign[ax] }
+}
+
 // =============================================================================
 // GhostFillDriver: region analysis + per-axis map parameters
 // =============================================================================

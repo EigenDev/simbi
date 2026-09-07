@@ -7884,11 +7884,6 @@ fn validate_axis_boundaries(cfg: &Config) -> Result<(), String> {
     if !cfg.boundaries.contains(&BoundaryType::Axis) {
         return Ok(());
     }
-    if cfg.spacetime.contains("kerr") {
-        return Err(
-            "an axis face on a kerr chart is unsupported: the kerr ghost fill continues the frame-dragging manifold w = v^phi + q v^r without the half-turn parity; use reflecting".to_string(),
-        );
-    }
     let coords = match cfg.coord_system.as_str() {
         "cartesian" => symbi_geometry::Geometry::Cartesian,
         "spherical" => symbi_geometry::Geometry::Spherical,

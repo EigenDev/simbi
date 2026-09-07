@@ -171,8 +171,10 @@ pub fn scalar_ghost_fill_gv(ndim: usize) -> KernelProgram {
 // the per-vector-component lattice-map sign: the in-plane components (k < ndim) pick up their
 // own axis's reflect sign (B/vel are grade-1 vectors under the wall map); the out-of-plane
 // components (k >= ndim, e.g., Bz/vz in 1.5D/2.5D) are tangential to every wall and copy
-// unchanged there, and change sign across a coordinate axis, where the crossing is a half-turn
-// about the axis. `oop_sign` is the product of the per-axis axis signs of the region. ghost fill
+// unchanged there, and pick up `oop_sign` across a coordinate axis, where the crossing is a
+// half-turn about the axis: -1 for an orthonormal component, whose unit vector phi-hat flips
+// with sin theta through the pole, and +1 for a contravariant coordinate component, whose basis
+// vector d/dphi continues unchanged. the binding site chooses by the state's basis. ghost fill
 // loops 0..ncomp (DOF): a 0..ndim loop leaves the out-of-plane ghosts at zero, which drains the
 // boundary.
 fn gv_ghost_sign<'t>(k: usize, ndim: usize, vel_sign: &[Gv<'t>], oop_sign: Gv<'t>) -> Gv<'t> {

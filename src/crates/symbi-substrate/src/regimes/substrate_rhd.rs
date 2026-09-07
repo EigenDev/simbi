@@ -509,6 +509,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             sim.motion.a,
         );
 
+        // the valencia state stores contravariant components, whose azimuthal entries continue
+        // evenly through a polar axis face.
+        let contravariant = !matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Minkowski);
         GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
             |region, p| {
                 let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
@@ -531,9 +534,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                         ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
                             Sc::from_f64(p.vel_sign[*ax as usize])
                         }
-                        ScalarBind::Ref(ScalarRef::OopSign(ax)) => {
-                            Sc::from_f64(p.oop_sign[*ax as usize])
-                        }
+                        ScalarBind::Ref(ScalarRef::OopSign(ax)) => Sc::from_f64(
+                            crate::kernels::support::axis_oop_sign(p, *ax as usize, contravariant),
+                        ),
                         ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
                             sim.geom
                                 .spacetime_scalars
