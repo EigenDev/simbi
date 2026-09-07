@@ -61,18 +61,24 @@ pub enum Spacetime {
     SchwarzschildKS = 2,
     /// spinning Kerr in ingoing kerr-schild coordinates — horizon-penetrating, non-diagonal
     /// spatial metric (gamma_{r phi} carries the frame dragging into the spatial slice), radial
-    /// shift beta^r = 2Mr/(Sigma + 2Mr). the covariant valencia storage is required here, since a
-    /// componentwise orthonormal frame exists for a diagonal gamma alone. the mass M and spin a
+    /// shift beta^r = 2Mr/(Sigma + 2Mr). the state is stored in contravariant valencia
+    /// components (`ComponentBasis::Contravariant`): an orthonormal frame on this non-diagonal
+    /// gamma is a tetrad that mixes components, which the GR HLLD fan builds at a face and the
+    /// storage convention keeps out of the cell state. the mass M and spin a
     /// ride as kernel scalars (`schwarzschild_mass`, `kerr_spin`). reduces to `SchwarzschildKS`
     /// physics at a = 0 (different kernel expressions, same values).
     KerrKS = 3,
 }
 
-/// the basis a regime's vector components (velocity, magnetic field) are stored in. the flat
-/// state carries orthonormal (physical) components; every curved-spacetime state carries the
-/// valencia contravariant coordinate components, since a componentwise orthonormal frame exists
-/// for a diagonal spatial metric alone. the seeding, the metric-aware c2p, and the ghost fill's
-/// azimuthal parity all read this one predicate, so the storage convention has one owner.
+/// the basis a regime's vector components (velocity, magnetic field) are stored in: the
+/// storage convention of the code. the flat state carries orthonormal (physical) components;
+/// every curved-spacetime state carries the valencia contravariant coordinate components. an
+/// orthonormal frame exists on any metric, on a non-diagonal one as a tetrad that mixes
+/// components, and the code builds such a tetrad only where a face solver needs it (the GR
+/// HLLD fan); the cell state stays in the coordinate basis. the recovery and face-flux kernel
+/// families a spacetime's dispatch slug selects are written for its basis, and `kernel_slug`
+/// pins that the slug's flat/curved split coincides with this predicate; the seeding and the
+/// ghost fill's azimuthal parity read it directly.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ComponentBasis {
     /// physical components on the chart's unit vectors; across a polar axis the azimuthal

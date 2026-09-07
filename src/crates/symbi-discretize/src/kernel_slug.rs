@@ -273,7 +273,9 @@ pub fn mhd_flux_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
 /// the spacetime background tag: flat `Minkowski` is unsuffixed (the
 /// densitization is a no-op -> bit-identical to the SR kernel); each curved
 /// chart carries its slug. orthogonal to the spatial suffix and the physics
-/// regime (GR is a spacetime).
+/// regime (GR is a spacetime). the unsuffixed families take orthonormal
+/// components and the suffixed (valencia) families contravariant ones, which
+/// is `Spacetime::component_basis`; the two splits are pinned equal below.
 pub fn spacetime_slug(spacetime: Spacetime) -> &'static str {
     match spacetime {
         Spacetime::Minkowski => "",
@@ -305,5 +307,29 @@ pub fn gr_chart_dof_tag(
         }
     } else {
         ""
+    }
+}
+
+#[cfg(test)]
+mod spacetime_basis_tests {
+    use super::*;
+    use symbi_geometry::ComponentBasis;
+
+    #[test]
+    fn the_dispatch_slug_splits_flat_from_curved_exactly_where_the_basis_does() {
+        // the recovery and face-flux kernels are selected by the spacetime slug; the
+        // unsuffixed families are written for orthonormal components and the suffixed
+        // (valencia) families for contravariant ones, so the slug's flat/curved split and the
+        // storage basis must agree on every chart.
+        for st in [Spacetime::Minkowski, Spacetime::SchwarzschildKS, Spacetime::KerrKS] {
+            let orthonormal = st.component_basis() == ComponentBasis::Orthonormal;
+            assert_eq!(
+                spacetime_slug(st).is_empty(),
+                orthonormal,
+                "{st:?}: slug '{}' vs basis {:?}",
+                spacetime_slug(st),
+                st.component_basis()
+            );
+        }
     }
 }
