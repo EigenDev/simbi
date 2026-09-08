@@ -5651,7 +5651,38 @@ where
 
     let ntiles = tiles.len();
     let devices: Vec<i32> = (0..ntiles as i32).collect();
+    // zone-cycles per root step over every tile and level: level ll subcycles 2^ll times over
+    // its own interior, the same accounting the single-grid hierarchy reports.
+    let n_zones: u64 = tiles
+        .iter()
+        .map(|h| {
+            h.levels
+                .iter()
+                .enumerate()
+                .map(|(ll, level)| {
+                    let cells: u64 = (0..D)
+                        .map(|ax| level.state.geom.interior.spaces[ax].size() as u64)
+                        .product();
+                    cells * (1u64 << ll)
+                })
+                .sum::<u64>()
+        })
+        .sum();
+    let slabs: Vec<Vec<usize>> = (0..D)
+        .map(|ax| {
+            (0..counts[ax])
+                .map(|i| {
+                    let mut tc = [0usize; D];
+                    tc[ax] = i;
+                    let g = &tiles[symbi::sim::decomp::flatten(tc, counts)].levels[0].state.geom.interior;
+                    g.spaces[ax].size()
+                })
+                .collect()
+        })
+        .collect();
+    let mut reporter = DecomposedReporter::new(cfg, n_zones, &counts, &slabs);
     enable_peer_mesh(&devices);
+    reporter.milestone("peer links opened");
 
     #[cfg(feature = "gpu")]
     let transport = symbi::sim::decomp::PeerCopy;
@@ -5667,6 +5698,10 @@ where
 
     // the fine sub-grid (which tiles carry a fine level + their order/counts) for the fine gather.
     let fg = fine_subgrid(&tiles, counts, &devices);
+    reporter.milestone(&format!(
+        "refinement: {} of {ntiles} tiles carry a fine level",
+        fg.as_ref().map_or(0, |f| f.order.len())
+    ));
 
     // gather each level of the decomposed tiles into the global hierarchy (root over `counts`, fine
     // over the fine sub-grid), then write all the global levels through the multi-level writer.
@@ -5695,19 +5730,29 @@ where
                 gather_decomposed_hierarchy_tracers(&mut global, tiles);
             }
             let states: Vec<_> = global.levels.iter().map(|l| &l.state).collect();
+            let t_io = std::time::Instant::now();
             write_hierarchy_checkpoint(&states, path, &checkpoint_metadata(cfg, cp_index))
                 .map_err(|e| checkpoint_write_error(path, e))
+                .map(|()| t_io.elapsed().as_secs_f64())
         };
 
     // t=start initial condition.
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
         let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
-        write_cp(&tiles, &checkpoint_name(cfg, &tag), cfg.checkpoint_index)?;
+        let path = checkpoint_name(cfg, &tag);
+        match write_cp(&tiles, &path, cfg.checkpoint_index) {
+            Ok(io) => reporter.checkpoint_written(cfg, &path, cfg.start_time, io),
+            Err(msg) => {
+                reporter.fail(&msg);
+                return Err(msg);
+            }
+        }
     }
 
     let mut next_cp = cfg.start_time + cp_dt;
     let mut cp_index = cfg.checkpoint_index + 1;
     let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+    reporter.milestone("priming the hierarchy levels, their halos and the first exchange");
     let diagnostics = evolve_hierarchy_decomposed(
         &mut tiles,
         counts,
@@ -5718,11 +5763,16 @@ where
         cfg.t_final,
         1,
         |iter, time, tiles| {
+            reporter.progress(iter, time);
             if time + f64::EPSILON >= next_cp {
                 let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
-                if let Err(e) = write_cp(tiles, &checkpoint_name(cfg, &tag), cp_index) {
-                    *cp_error.borrow_mut() = Some(e);
-                    return std::ops::ControlFlow::Break(());
+                let path = checkpoint_name(cfg, &tag);
+                match write_cp(tiles, &path, cp_index) {
+                    Ok(io) => reporter.checkpoint_written(cfg, &path, time, io),
+                    Err(e) => {
+                        *cp_error.borrow_mut() = Some(e);
+                        return std::ops::ControlFlow::Break(());
+                    }
                 }
                 while next_cp <= time {
                     next_cp += cp_dt;
@@ -5737,14 +5787,23 @@ where
     );
 
     if let Some(msg) = cp_error.into_inner() {
+        reporter.fail(&msg);
         return Err(msg);
     }
     // canonical final snapshot.
-    write_cp(
-        &tiles,
-        &checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed)),
-        cp_index,
-    )?;
+    let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
+    match write_cp(&tiles, &final_path, cp_index) {
+        Ok(io) => {
+            let root = &tiles[0].levels[0].state;
+            let (iter, time) = (root.iteration, root.time);
+            reporter.checkpoint_written(cfg, &final_path, time, io);
+            reporter.finish(iter, time, &final_path);
+        }
+        Err(msg) => {
+            reporter.fail(&msg);
+            return Err(msg);
+        }
+    }
     Ok(diagnostics)
 }
 

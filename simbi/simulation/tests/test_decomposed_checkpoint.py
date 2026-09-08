@@ -66,3 +66,21 @@ def test_a_failed_decomposed_checkpoint_write_fails_the_run(tmp_path: Path, monk
     finally:
         out.chmod(stat.S_IRWXU)
     assert "sealed" in str(err.value)
+
+
+def test_a_refined_decomposed_run_reports_and_writes_its_final_checkpoint(
+    tmp_path: Path, monkeypatch, capfd
+) -> None:
+    # the refined decomposed loop draws the same report as the single-level one: the setup
+    # milestones, the checkpoint notices and the completion line, and its final snapshot lands.
+    from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
+
+    monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
+    out = tmp_path / "refined"
+    problem = RefinedBlast(resolution=(16, 16, 1), gpus=2, data_directory=out)
+    runner.run(problem, compute_mode="cpu", validate=True, max_steps=2)
+    captured = capfd.readouterr()
+    text = captured.out + captured.err
+    assert "tiles carry a fine level" in text
+    assert "complete —" in text
+    assert len(list(out.glob("*final*.h5"))) == 1
