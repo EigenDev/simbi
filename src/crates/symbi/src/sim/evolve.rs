@@ -276,6 +276,10 @@ where
             // combination, but the receipt stays at its full pre-blend value —
             // the ledger then over-counts (RK2: 3/2x). post-step, receipt == removal exactly.
             prof("penalize", || kernels.penalize(sim, sim.dt));
+            if symbi_sim::state::positivity_trace_enabled() {
+                crate::regimes::substrate_gpu::device_sync::<Mem>();
+                sim.positivity_trace("step phase=penalize");
+            }
             if let Some(density_before) = accretion_density.as_deref() {
                 crate::regimes::substrate_gpu::device_sync::<Mem>();
                 symbi_sim::tracers::advance_accretion_transport(sim, density_before)

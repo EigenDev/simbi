@@ -4200,3 +4200,86 @@ mod axis_boundary_tests {
         );
     }
 }
+
+
+// =============================================================================
+// positivity trace: the interior's least density and internal energy after a phase
+// =============================================================================
+
+/// whether the positivity trace is on (`SYMBI_TRACE_POSITIVITY` set), read once.
+pub fn positivity_trace_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("SYMBI_TRACE_POSITIVITY").is_ok())
+}
+
+impl<const NDIM: usize, const DOF: usize, Mem, Sc> FieldStore<NDIM, DOF, Mem, Sc>
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    /// print the interior's least density and least internal energy density
+    /// `E - |m|^2/(2 rho) - |B|^2/2` with their cells and the energy split there, plus the
+    /// largest gap between the stored primitive density and the conserved density (a stored
+    /// primitive state one update behind the conserved one shows here), under `label`. reads
+    /// the host view, so a device store must be drained first. a no-op unless
+    /// `SYMBI_TRACE_POSITIVITY` is set.
+    pub fn positivity_trace(&self, label: &str) {
+        if !positivity_trace_enabled() {
+            return;
+        }
+        let Some(nrg) = self.fields.cons.nrg_field() else {
+            return;
+        };
+        let den = self.fields.cons.den.view();
+        let mom: Vec<_> = self.fields.cons.mom.iter().map(|m| m.view()).collect();
+        let nrg = nrg.view();
+        let bcell: Option<Vec<_>> = self
+            .fields
+            .mhd
+            .as_ref()
+            .map(|m| m.bcell.b.iter().map(|b| b.view()).collect());
+        let prim_rho = self.fields.prim.rho.view();
+        let mut min_rho = (f64::INFINITY, [0isize; NDIM]);
+        let mut min_eint = (f64::INFINITY, [0isize; NDIM], 0.0f64, 0.0f64, 0.0f64);
+        let mut worst_gap = (0.0f64, [0isize; NDIM], 0.0f64, 0.0f64);
+        for c in self.geom.interior.iter() {
+            let rho = den.at(c).to_f64();
+            let ke = 0.5
+                * mom
+                    .iter()
+                    .map(|m| {
+                        let v = m.at(c).to_f64();
+                        v * v
+                    })
+                    .sum::<f64>()
+                / rho;
+            let mag = bcell.as_ref().map_or(0.0, |b| {
+                0.5 * b
+                    .iter()
+                    .map(|f| {
+                        let v = f.at(c).to_f64();
+                        v * v
+                    })
+                    .sum::<f64>()
+            });
+            let e = nrg.at(c).to_f64();
+            let eint = e - ke - mag;
+            if rho < min_rho.0 {
+                min_rho = (rho, c);
+            }
+            if eint < min_eint.0 {
+                min_eint = (eint, c, e, ke, mag);
+            }
+            let stored = prim_rho.at(c).to_f64();
+            let gap = (stored - rho).abs();
+            if gap > worst_gap.0 {
+                worst_gap = (gap, c, stored, rho);
+            }
+        }
+        eprintln!(
+            "SYMBI_TRACE_POSITIVITY {label} iter={} t={:.9e} dt={:.3e} min_rho={:.6e}@{:?} min_eint={:.6e}@{:?} E={:.6e} ke={:.6e} mag={:.6e} prim_gap={:.3e}@{:?} rho_prim={:.6e} rho_cons={:.6e}",
+            self.iteration, self.time, self.dt, min_rho.0, min_rho.1, min_eint.0, min_eint.1, min_eint.2, min_eint.3, min_eint.4,
+            worst_gap.0, worst_gap.1, worst_gap.2, worst_gap.3
+        );
+    }
+}

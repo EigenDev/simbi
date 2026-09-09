@@ -2823,6 +2823,10 @@ where
                 None
             };
             prof("penalize", || l.kernels.penalize(&l.state, dt));
+            if symbi_sim::state::positivity_trace_enabled() {
+                symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+                l.state.positivity_trace(&format!("level={level} phase=penalize"));
+            }
             if let Some(density_before) = accretion_density.as_deref() {
                 symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
                 let layout = self.tracer_layout(level);

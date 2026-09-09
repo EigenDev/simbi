@@ -418,6 +418,9 @@ where
                 prof("ghost_fill", || kernels.ghost_fill(sim));
             }
         }
+        if crate::state::positivity_trace_enabled() {
+            sim.positivity_trace(&format!("stage={} phase={}", args.stage, ph.name));
+        }
         have = have.or(ph.writes);
     }
     StageOutcome::Accepted
