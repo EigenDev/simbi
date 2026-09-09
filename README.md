@@ -44,7 +44,7 @@ SIMBI started life as a C++ code. I eventually rewrote the compute backend in Ru
 - Immersed bodies with point-mass gravity, masked accretors for problems such as Bondi-Hoyle flow, and rigid walls built from constructive solid geometry (CSG). The surface coupling uses volume penalization in the spirit of [Angot, Bruneau & Fabrie (1999)](https://doi.org/10.1007/s002110050401). Bodies support prescribed motion or two-way coupling, including translation, rotation, gas–body energy exchange, and force, torque, and accretion diagnostics. This part of SIMBI grew out of a class I took with [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin) as a graduate student at NYU; I loved the subject and wanted to bring some of those ideas into the code.
 - Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart, cells inside the horizon are held at a cold vacuum floor while the exterior flow remains regular
 - Block-based static mesh refinement with [Berger-Colella](https://www.sciencedirect.com/science/article/pii/0021999189900351) subcycling
-- Single-node **multi-GPU domain decomposition** — set `gpus > 1` and the domain splits across the cards, halo-exchanged in lockstep and bit-identical to a monolithic run
+- Single-node **multi-GPU domain decomposition** — use `--ngpus N` to split the domain across CUDA or HIP devices, with halo exchange, partition-independent checkpoints, and one process driving the run. See [Multi-GPU runs](#multi-gpu-runs) for setup and usage
 - In-situ binned reductions (a "census") for shell profiles, scaling laws, and other summary quantities
 - Flux-based [Monte Carlo tracers from Genel et al. (2013)](https://doi.org/10.1093/mnras/stt1383) and continuous [Itô tracers from Moseley, Teyssier & Abel (2026)](https://arxiv.org/abs/2604.23041), including transport across refinement levels and multi-GPU boundaries
 - Afterglow radiation transport using the synchrotron model of [Sari, Piran & Narayan (1998)](https://doi.org/10.1086/311269), so you can turn a simulation into synthetic observables
@@ -263,7 +263,9 @@ The CLI tries to be a good roommate: configuration names work with kebab-case or
 typos get a “did you mean…?”, and if two directories contain the same name, it lists both and asks.
 
 **Common options:**
+
 - `--mode cpu|gpu` sets the execution backend
+- `--ngpus N` selects the number of devices on one node (default 1); it does not request a scheduler allocation
 - `--resolution N`, `--resolution N,M`, or `--resolution N,M,K` sets the grid. Comma is required for 2D and 3D.
 - `--end-time` is when to stop
 - `--data-directory` is where the output goes
@@ -302,6 +304,104 @@ counts cells flagged by recovery; `frozen_cells` counts cells the correcting
 select actually held. A troubled-cell count is not a claim that a cell-local
 fallback was applied—the flux splice itself acts on faces. Existing callers may
 continue to ignore the return value.
+
+### Multi-GPU runs
+
+SIMBI can run one simulation across several GPUs **within one node**, using one
+process and one domain tile per device. Each device evolves its local state;
+halo exchanges connect the tiles between updates. CUDA and HIP builds use this
+same decomposition machinery. MPI and multi-node execution are not yet supported:
+launching eight independent SIMBI processes is not equivalent to an eight-device run.
+
+Start with a small shipped example on two visible devices:
+
+```bash
+simbi run decomposed-tabulated-geometric --mode gpu --ngpus 2 \
+    --end-time 0.001 --data-directory data/multi-gpu-smoke
+```
+
+The installed extension must have been built with CUDA or HIP. `--ngpus` chooses
+the runtime device count, not the GPU backend. In Python configs the corresponding
+field is still `gpus`; the CLI spelling is `--ngpus` (formerly `--gpus`).
+
+#### Workstations and scheduled jobs
+
+On a workstation, run the command directly with `--ngpus N`, where `N` is the
+number of visible devices to use. No scheduler or MPI launcher is required.
+
+On a cluster, request one node and one task with the desired GPU count. For
+example, inside a Slurm allocation with eight GPUs available to the task:
+
+```bash
+srun -N 1 -n 1 --gpus-per-task=8 \
+    simbi run /path/to/problem.py --mode gpu --ngpus 8 \
+    --data-directory /path/to/fresh-output
+```
+
+The Slurm option `--gpus-per-task` allocates devices; SIMBI's `--ngpus` partitions
+the simulation across them. These counts should agree. Do not use one Slurm task
+per GPU for this single-process driver. Before submission, check the requested
+configuration with `simbi run /path/to/problem.py --ngpus 8 --validate`; this checks
+configuration compatibility, not available device memory or hardware performance.
+
+#### Choosing the cuts
+
+The default decomposition uses a balanced longest-axis heuristic. For deliberate
+layouts, set `decompose` in the Python config: one list of interior cell-index
+cuts per physical grid axis. Empty lists leave an axis intact. For a spherical
+grid ordered `(r, theta, phi)` with 128 azimuthal cells, eight phi slabs are:
+
+```python
+gpus: int = 8
+decompose: list[list[int]] = [[], [], [16, 32, 48, 64, 80, 96, 112]]
+```
+
+The lists describe cut locations, not slab widths or device IDs. Their implied
+tile count must equal `gpus`; uneven cuts are supported. A config can also expose
+`decompose` as a CLI parameter with `ProblemParam(..., cli=True)`.
+
+Full-sphere spherical runs with `AXIS` poles need a periodic, uniformly spaced
+azimuth covering `2*pi` with an even cell count. Across phi slabs, polar ghost
+values come from the antipodal tiles, not just the immediate neighbors. Keep
+enough cells in each slab for the halo stencil; more GPUs are not automatically
+faster when they leave very narrow tiles.
+
+#### Memory, output, and restart
+
+Checkpointing does not gather a whole-grid simulation onto device 0. The devices
+are drained before output, and tile data streams into global HDF5 datasets through
+a bounded host staging buffer. `SYMBI_CHECKPOINT_STAGING_MB` sets its hard cap
+(64 MB by default). This is a staging limit, not a limit on total host or device
+memory: local state, halos, solver scratch, and runtime allocations still count.
+Tracer runs retain one exception: whole-grid initialization for particle seeding,
+followed by splitting the population and dropping that grid.
+
+Checkpoints preserve the global mesh and can restart with a different device
+count or valid set of cuts, without interpolation onto a different grid:
+
+```bash
+simbi run /path/to/problem.py --mode gpu --ngpus 8 \
+    --checkpoint /path/to/single-gpu.chkpt.final.h5 \
+    --end-time 2.0 --data-directory /path/to/continuation
+```
+
+If the config pins explicit cuts, update them to match the new device count.
+Writes publish the final filename only after successful completion; a failed
+write fails the run rather than silently losing the checkpoint.
+
+#### Compatibility and performance
+
+Feature combinations are checked at startup: single-device support does not imply
+that every refinement, closure, reconstruction, or body option composes with
+multi-GPU execution. Changing the partition can introduce floating-point roundoff;
+bitwise equality with a single-device run is not a general guarantee.
+
+Reported zone-cycles/s is aggregate throughput across the tiles, not per-device
+throughput. To measure scaling, hold the global grid, solver, physics, end time,
+and output cadence fixed while changing only the device count and cuts. Speedup
+depends on the workload, tile sizes, and device interconnect, not just the GPU
+count. Record the startup backend/config identities and use `SYMBI_PROFILE=1`
+to investigate runtime costs before choosing a production layout.
 
 ### Visualization
 
