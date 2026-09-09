@@ -1557,6 +1557,7 @@ name = "symbi-io"
 version = "0.1.0"
 dependencies = [
  "hdf5-metno",
+ "ndarray",
  "symbi-algebra",
  "symbi-grid",
  "symbi-hydro",
