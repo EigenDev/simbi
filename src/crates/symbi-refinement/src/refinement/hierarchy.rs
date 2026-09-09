@@ -2823,11 +2823,13 @@ where
                 None
             };
             prof("penalize", || l.kernels.penalize(&l.state, dt));
-            // the drain rescales the conserved state after the last stage's recovery, so the
-            // stored primitives are recovered again from the drained state: the next step's
+            // a surface stack rescales the conserved state after the last stage's recovery, so
+            // the stored primitives are recovered again from the penalized state: the next step's
             // reconstruction and a checkpoint at the step boundary read the drained gas.
-            prof("c2p", || l.kernels.c2p(&l.state));
-            prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+            if l.state.immersed.as_ref().is_some_and(|im| im.bodies.penalizes()) {
+                prof("c2p", || l.kernels.c2p(&l.state));
+                prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+            }
             if symbi_sim::state::positivity_trace_enabled() {
                 symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
                 l.state.positivity_trace(&format!("level={level} phase=penalize"));

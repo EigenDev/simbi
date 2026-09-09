@@ -267,6 +267,13 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
         self.bodies.iter().filter(|b| b.has_accretion()).count()
     }
 
+    /// whether some body runs a surface stack (a mask radius: accretor, porous or rigid wall),
+    /// which is the set the penalization pass relaxes; a passive or purely gravitational body
+    /// contributes no penalization.
+    pub fn penalizes(&self) -> bool {
+        self.bodies.iter().any(|b| b.mask_radius().is_some())
+    }
+
     pub fn rigid_count(&self) -> usize {
         self.bodies.iter().filter(|b| b.has_rigid()).count()
     }

@@ -507,10 +507,11 @@ fn prim_fields<const D: usize, const DOF: usize, M: MemorySpace>(
 }
 
 /// the ghost strip on a staggered face field's own allocated domain (for MHD `bface`). mirrors
-/// `ghost_strip` but takes the field's own `alloc` domain, and
-/// extends the interior by one on the field's normal axis `d` (a face field has one extra face
-/// past the last cell on its normal axis). used only for `d != axis`, where `axis` is transverse
-/// to the face and indexes like cells.
+/// `ghost_strip` but takes the field's own `alloc` domain and its own halo width `ng` on `axis`
+/// (a face field carries a two-deep transverse halo, which sits inside the cell halo of a
+/// third-order stencil), and extends the interior by one on the field's normal axis `d` (a face
+/// field has one extra face past the last cell on its normal axis). used only for `d != axis`,
+/// where `axis` is transverse to the face and indexes like cells.
 fn face_ghost_strip<const D: usize>(
     alloc: &Domain<D>,
     geom: &PartitionGeometry<D>,
@@ -518,8 +519,8 @@ fn face_ghost_strip<const D: usize>(
     side: Side,
     d: usize,
     clip: &[bool; D],
+    ng: isize,
 ) -> Domain<D> {
-    let ng = geom.ng as isize;
     let mut strip = alloc.boundary(axis, side, ng);
     for b in 0..D {
         if clip[b] {
@@ -624,12 +625,17 @@ fn exchange_faces_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
             let fr = &hi_mhd.bface[d];
             let lo_alloc = fl.domain();
             let hi_alloc = fr.domain();
+            // the strips take the face field's own transverse halo width, so the destination band
+            // stays on ghost faces: a cell-halo-wide band would start inside the interior and
+            // overwrite the tile's last interior faces with the neighbor's first column.
+            let lo_ng = ng; // TEMP
+            let hi_ng = ng; // TEMP
             let lo_ghost_f =
-                face_ghost_strip(&lo_alloc, &lo.geom, axis, Side::Hi, d, &leg.clip);
-            let hi_src_f = lo_ghost_f.slab(axis, (i_lo_hi, i_lo_hi + ng));
+                face_ghost_strip(&lo_alloc, &lo.geom, axis, Side::Hi, d, &leg.clip, lo_ng);
+            let hi_src_f = lo_ghost_f.slab(axis, (i_lo_hi, i_lo_hi + lo_ng));
             let hi_ghost_f =
-                face_ghost_strip(&hi_alloc, &hi.geom, axis, Side::Lo, d, &leg.clip);
-            let lo_src_f = hi_ghost_f.slab(axis, (i_hi_lo - ng, i_hi_lo));
+                face_ghost_strip(&hi_alloc, &hi.geom, axis, Side::Lo, d, &leg.clip, hi_ng);
+            let lo_src_f = hi_ghost_f.slab(axis, (i_hi_lo - hi_ng, i_hi_lo));
             transport.copy_region(fr, &hi_src_f, fl, &lo_ghost_f, hi_dev, lo_dev);
             transport.copy_region(fl, &lo_src_f, fr, &hi_ghost_f, lo_dev, hi_dev);
         }
@@ -2704,14 +2710,34 @@ where
                         .map(|store| crate::tracers::snapshot_accretion_density(*store))
                         .collect();
                 }
+                // IBM surface physics once per step, after all stages (receipt == removal; see
+                // evolve.rs). a surface stack rescales the conserved state after the last stage's
+                // recovery, so every tile recovers its primitives and ghost band from the
+                // penalized state, then the cut halos are refreshed so the next step's
+                // reconstruction reads the drained gas across cuts too.
+                let penalizes = sh
+                    .iter()
+                    .any(|store| store.immersed.as_ref().is_some_and(|im| im.bodies.penalizes()));
                 for i in 0..n {
-                    // IBM surface physics once per step, after all stages
-                    // (receipt == removal; see evolve.rs), then the feedback —
-                    // gated like the other drivers: only bodies whose dynamics
-                    // consume the reduction (two-way or accreting) pay for it.
                     symbi_xpu::with_device(devices[i], || {
-                        prof("penalize", || kernels[i].penalize(sh[i], dt))
+                        prof("penalize", || kernels[i].penalize(sh[i], dt));
+                        if penalizes {
+                            prof("c2p", || kernels[i].c2p(sh[i]));
+                            prof("ghost_fill", || kernels[i].ghost_fill(sh[i]));
+                        }
                     });
+                }
+                if penalizes {
+                    drain_devices::<M>(devices);
+                    exchange_grid(&sh, &schedule, devices, transport);
+                    flip_polar_bands(&sh, kernels, &schedule, devices);
+                    for i in 0..n {
+                        symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
+                    }
+                }
+                // the feedback, gated like the other drivers: only bodies whose dynamics consume
+                // the reduction (two-way or accreting) pay for it.
+                for i in 0..n {
                     let needs_fb = sh[i]
                         .immersed
                         .as_ref()
@@ -2721,22 +2747,6 @@ where
                             prof("body_feedback", || kernels[i].body_feedback(sh[i], dt))
                         });
                     }
-                }
-                // the drain rescales the conserved state after the last stage's recovery: every
-                // tile recovers its primitives and ghost band from the drained state, then the cut
-                // halos are refreshed so the next step's reconstruction reads the drained gas
-                // across cuts too.
-                for i in 0..n {
-                    symbi_xpu::with_device(devices[i], || {
-                        prof("c2p", || kernels[i].c2p(sh[i]));
-                        prof("ghost_fill", || kernels[i].ghost_fill(sh[i]));
-                    });
-                }
-                drain_devices::<M>(devices);
-                exchange_grid(&sh, &schedule, devices, transport);
-                flip_polar_bands(&sh, kernels, &schedule, devices);
-                for i in 0..n {
-                    symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
                 }
                 drain_devices::<M>(devices);
             }

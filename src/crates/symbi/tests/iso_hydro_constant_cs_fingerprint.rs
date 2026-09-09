@@ -70,4 +70,6 @@ fn the_isothermal_hydro_drain_fingerprint_holds() {
     assert_eq!(h, FINGERPRINT, "the constant-sound-speed isothermal hydro drain path changed");
 }
 
-const FINGERPRINT: u64 = 0x7c2b8334e9b4f5fb;
+// the pinned run recovers its primitives from the drained conserved state before the next
+// step, so the reconstruction after each drain reads the drained gas.
+const FINGERPRINT: u64 = 0xdf5348682ae1c25b;

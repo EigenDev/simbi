@@ -276,11 +276,13 @@ where
             // combination, but the receipt stays at its full pre-blend value —
             // the ledger then over-counts (RK2: 3/2x). post-step, receipt == removal exactly.
             prof("penalize", || kernels.penalize(sim, sim.dt));
-            // the drain rescales the conserved state after the last stage's recovery, so the
-            // stored primitives are recovered again from the drained state: the next step's
+            // a surface stack rescales the conserved state after the last stage's recovery, so
+            // the stored primitives are recovered again from the penalized state: the next step's
             // reconstruction and a checkpoint at the step boundary read the drained gas.
-            prof("c2p", || kernels.c2p(sim));
-            prof("ghost_fill", || kernels.ghost_fill(sim));
+            if sim.immersed.as_ref().is_some_and(|im| im.bodies.penalizes()) {
+                prof("c2p", || kernels.c2p(sim));
+                prof("ghost_fill", || kernels.ghost_fill(sim));
+            }
             if symbi_sim::state::positivity_trace_enabled() {
                 crate::regimes::substrate_gpu::device_sync::<Mem>();
                 sim.positivity_trace("step phase=penalize");
