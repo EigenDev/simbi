@@ -86,7 +86,7 @@ impl Hdf5Backend {
 
 // ----- adapter for writing attrs/datasets to either a File or a Group --
 
-enum FileOrGroup<'a> {
+pub(crate) enum FileOrGroup<'a> {
     File(&'a hdf5_metno::File),
     Group(&'a hdf5_metno::Group),
 }
@@ -147,7 +147,7 @@ impl<'a> FileOrGroup<'a> {
     }
 }
 
-fn write_group_attrs(file: &hdf5_metno::File, attrs: &[(String, Attr)]) -> Result<()> {
+pub(crate) fn write_group_attrs(file: &hdf5_metno::File, attrs: &[(String, Attr)]) -> Result<()> {
     write_attrs(&FileOrGroup::File(file), attrs)
 }
 
@@ -185,7 +185,7 @@ fn write_attrs(target: &FileOrGroup<'_>, attrs: &[(String, Attr)]) -> Result<()>
     Ok(())
 }
 
-fn write_dataset(target: &FileOrGroup<'_>, ds: &Dataset<'_>) -> Result<()> {
+pub(crate) fn write_dataset(target: &FileOrGroup<'_>, ds: &Dataset<'_>) -> Result<()> {
     match ds.data {
         DataRef::F64(d) => target
             .create_dataset::<f64>(&ds.name, &ds.shape)?
@@ -210,7 +210,7 @@ fn write_dataset(target: &FileOrGroup<'_>, ds: &Dataset<'_>) -> Result<()> {
     }
 }
 
-fn write_subtree(parent: &hdf5_metno::File, sub: &Tree<'_>) -> Result<()> {
+pub(crate) fn write_subtree(parent: &hdf5_metno::File, sub: &Tree<'_>) -> Result<()> {
     let grp = parent
         .create_group(&sub.name)
         .map_err(|e| IoError::Backend(format!("create group '{}': {e}", sub.name)))?;

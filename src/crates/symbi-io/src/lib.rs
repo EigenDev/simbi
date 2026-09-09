@@ -29,6 +29,7 @@ pub mod backend;
 pub mod error;
 pub mod field_layout;
 pub mod hdf5;
+pub mod stream;
 pub mod json;
 pub mod tree;
 
@@ -39,3 +40,4 @@ pub use field_layout::{component_count, dataset_name, iter_components};
 pub use hdf5::Hdf5Backend;
 pub use json::schema_json;
 pub use tree::{DType, DataBuf, DataRef, Dataset, DatasetBuf, Tree, TreeBuf};
+pub use stream::{Hdf5Stream, read_slab};
