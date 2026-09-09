@@ -2508,8 +2508,8 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // keyed on the domain-wide c_a2 max relaxes every sink cell at the emptiest cell's rate and
         // the whole interior evacuates in finite time; the local rate lets the inflow feed the
         // interior. the midpoint kernel is baked for the cartesian 3D grid and the 2.5D x-y grid: a
-        // magnetic-slip body requires it, a magnetized drain on another chart and every porous or
-        // torque-free surface keep the global-rate kernels.
+        // magnetic-slip body requires it, a magnetized drain on another chart is refused, and the
+        // porous and torque-free surfaces keep the global-rate kernels.
         let has_slip = matches!(
             bodies.get(b).spec.magnetic,
             symbi_ib::MagneticSpec::Slip { .. }
@@ -2522,10 +2522,14 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                  grid; got coords {coords_g:?} D={D} DOF={DOF}"
             );
         }
-        let local_rate = has_slip
-            || (midpoint_baked
-                && sim.fields.mhd.is_some()
-                && matches!(bodies.get(b).spec.surface, symbi_ib::SurfaceSpec::Drain));
+        let magnetized_drain =
+            sim.fields.mhd.is_some() && matches!(bodies.get(b).spec.surface, symbi_ib::SurfaceSpec::Drain);
+        assert!(
+            !magnetized_drain || midpoint_baked,
+            "immersed body {b}: a magnetized drain relaxes at its local Alfven rate, a kernel baked \
+             for the cartesian 3D grid and the 2.5D x-y grid; got coords {coords_g:?} D={D} DOF={DOF}"
+        );
+        let local_rate = has_slip || magnetized_drain;
         // the midpoint drain is baked with all three momentum components on either grid, so its
         // name carries the grid dimension alone; the isothermal twin reads the prescribed sound
         // speed and binds no energy slot.
