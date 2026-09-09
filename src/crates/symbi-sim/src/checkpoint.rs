@@ -2372,7 +2372,8 @@ impl<'a, const D: usize, const DOF: usize, Mem: MemorySpace> LevelTiles<'a, D, D
 }
 
 /// the host staging budget in cells per slab, from `SYMBI_CHECKPOINT_STAGING_MB` (64 MB when
-/// unset): every tile block larger than this is written in row groups along the slowest axis.
+/// unset): a hard cap on the staging buffer, every tile block being cut into boxes of at most
+/// this many cells across as many axes as it takes.
 pub fn staging_budget_cells() -> usize {
     let mb: usize = std::env::var("SYMBI_CHECKPOINT_STAGING_MB")
         .ok()
@@ -2396,8 +2397,48 @@ fn slab_start_and_count<const D: usize>(
     (start, count)
 }
 
-/// stream one field's `region` into the dataset at `dataset_path`, in row groups along the
-/// slowest axis whose volume stays within `budget` cells, through one reused staging buffer.
+/// split `region` into boxes of at most `budget` cells: the slowest axis is cut into row groups,
+/// and a row group that still exceeds the budget on its own is cut along the next faster axis,
+/// down to single cells, so the cap is hard at any budget of one cell or more.
+fn chunk_region<const D: usize>(
+    region: &symbi_algebra::Domain<D>,
+    budget: usize,
+) -> Vec<symbi_algebra::Domain<D>> {
+    fn split<const D: usize>(
+        region: &symbi_algebra::Domain<D>,
+        axis: usize,
+        budget: usize,
+        out: &mut Vec<symbi_algebra::Domain<D>>,
+    ) {
+        if region.volume() <= budget {
+            out.push(region.clone());
+            return;
+        }
+        let row_volume: usize = (0..axis).map(|ax| region.spaces[ax].size()).product();
+        let (lo, hi) = (region.spaces[axis].lo, region.spaces[axis].hi);
+        if row_volume <= budget {
+            let rows = (budget / row_volume.max(1)).max(1) as isize;
+            let mut r0 = lo;
+            while r0 < hi {
+                let r1 = (r0 + rows).min(hi);
+                out.push(region.slab(axis, (r0, r1)));
+                r0 = r1;
+            }
+        } else {
+            for r in lo..hi {
+                split(&region.slab(axis, (r, r + 1)), axis - 1, budget, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if region.volume() > 0 {
+        split(region, D - 1, budget.max(1), &mut out);
+    }
+    out
+}
+
+/// stream one field's `region` into the dataset at `dataset_path` through one reused staging
+/// buffer, one box of at most `budget` cells at a time.
 fn stream_region<const D: usize, Mem: MemorySpace>(
     stream: &Hdf5Stream,
     dataset_path: &str,
@@ -2407,22 +2448,11 @@ fn stream_region<const D: usize, Mem: MemorySpace>(
     budget: usize,
     staging: &mut Vec<f64>,
 ) -> Result<()> {
-    if region.volume() == 0 {
-        return Ok(());
-    }
-    let slow = D - 1;
-    let row_volume: usize = (0..slow).map(|ax| region.spaces[ax].size()).product();
-    let rows_per_chunk = (budget / row_volume.max(1)).max(1) as isize;
-    let (lo, hi) = (region.spaces[slow].lo, region.spaces[slow].hi);
-    let mut r0 = lo;
-    while r0 < hi {
-        let r1 = (r0 + rows_per_chunk).min(hi);
-        let chunk = region.slab(slow, (r0, r1));
+    for chunk in chunk_region(region, budget) {
         staging.clear();
         for_each_cell_axis0(&chunk, |coord| staging.push(*field.view().at(coord)));
         let (start, count) = slab_start_and_count(&chunk, file_of);
         stream.write_slab(dataset_path, &start, &count, staging)?;
-        r0 = r1;
     }
     Ok(())
 }
@@ -2997,6 +3027,35 @@ mod partitioned_tests {
     }
 
     #[test]
+    fn the_staging_cap_holds_below_one_row_and_down_to_one_cell() {
+        let region = symbi_algebra::Domain::new([
+            symbi_algebra::Space { name: "x", lo: -2, hi: 6 },
+            symbi_algebra::Space { name: "y", lo: 0, hi: 3 },
+        ]);
+        for budget in [1usize, 3, 5, 8, 9, 100] {
+            let chunks = chunk_region(&region, budget);
+            assert!(chunks.iter().all(|c| c.volume() <= budget), "budget {budget}: a box exceeds it");
+            assert_eq!(chunks.iter().map(|c| c.volume()).sum::<usize>(), region.volume(), "budget {budget}: coverage");
+            let mut seen = std::collections::HashSet::new();
+            for c in &chunks {
+                for coord in c.iter() {
+                    assert!(seen.insert(coord), "budget {budget}: cell {coord:?} twice");
+                }
+            }
+        }
+        assert_eq!(chunk_region(&region, 1).len(), 24, "one cell per box");
+        // a file written at the one-cell cap matches the whole-block write.
+        let dir = scratch("cap");
+        let whole = tile([0, 0], [8, 6]);
+        let a = dir.join("wide.h5");
+        let b = dir.join("cell.h5");
+        let id = PhysicsIdentity::of(&whole);
+        write_partitioned_checkpoint::<NewtonianMhd, 2, 3, HostMemory>(&id, &[LevelTiles::whole(&whole.store)], a.to_str().unwrap(), &Metadata::new()).unwrap();
+        write_partitioned_checkpoint_with_budget::<NewtonianMhd, 2, 3, HostMemory>(&id, &[LevelTiles::whole(&whole.store)], b.to_str().unwrap(), &Metadata::new(), 1).unwrap();
+        assert_trees_equal(&Hdf5Backend.read(&a).unwrap(), &Hdf5Backend.read(&b).unwrap(), "");
+    }
+
+    #[test]
     fn a_write_that_cannot_open_its_file_publishes_nothing() {
         let sim = tile([0, 0], [4, 4]);
         let target = scratch("sealed").join("absent").join("run.h5");
@@ -3010,8 +3069,8 @@ mod partitioned_tests {
 // partitioned restart: a tile reads its own block of each global dataset
 // =============================================================================
 
-/// read `region` of the dataset at `dataset_path` into `field`, in row groups along the slowest
-/// axis within `budget` cells, through one reused staging buffer.
+/// read `region` of the dataset at `dataset_path` into `field`, one box of at most `budget`
+/// cells at a time.
 fn read_region<const D: usize, Mem: MemorySpace>(
     path: &Path,
     dataset_path: &str,
@@ -3020,18 +3079,8 @@ fn read_region<const D: usize, Mem: MemorySpace>(
     file_of: &dyn Fn(usize, isize) -> usize,
     budget: usize,
 ) -> Result<()> {
-    if region.volume() == 0 {
-        return Ok(());
-    }
-    let slow = D - 1;
-    let row_volume: usize = (0..slow).map(|ax| region.spaces[ax].size()).product();
-    let rows_per_chunk = (budget / row_volume.max(1)).max(1) as isize;
-    let (lo, hi) = (region.spaces[slow].lo, region.spaces[slow].hi);
     let view = field.view_mut();
-    let mut r0 = lo;
-    while r0 < hi {
-        let r1 = (r0 + rows_per_chunk).min(hi);
-        let chunk = region.slab(slow, (r0, r1));
+    for chunk in chunk_region(region, budget) {
         let (start, count) = slab_start_and_count(&chunk, file_of);
         let data = read_slab(path, dataset_path, &start, &count)?;
         let mut ii = 0usize;
@@ -3039,7 +3088,6 @@ fn read_region<const D: usize, Mem: MemorySpace>(
             view.set(coord, data[ii]);
             ii += 1;
         });
-        r0 = r1;
     }
     Ok(())
 }

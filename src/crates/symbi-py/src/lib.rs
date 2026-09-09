@@ -5476,8 +5476,16 @@ where
     for (s, _) in tiles.iter_mut() {
         s.time = cfg.start_time;
     }
-    // t=start initial condition.
+    if cfg.n_tracers > 0 {
+        reporter.milestone(&format!(
+            "tracers: {} seeded on the whole grid at initialization, a whole-grid allocation that \
+             lives for the seeding alone",
+            cfg.n_tracers
+        ));
+    }
+    // t=start initial condition. every device finishes its seeding before the staging reads.
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
+        symbi::sim::decomp::drain_devices::<Mem>(&devices);
         let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
         let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
         let path = checkpoint_name(cfg, &tag);
@@ -5589,7 +5597,9 @@ where
         reporter.fail(&msg);
         return Err(msg);
     }
-    // canonical final snapshot, mirroring the single-grid run.
+    // canonical final snapshot, mirroring the single-grid run; the march drained every device
+    // before returning, and the drain here pins that boundary in front of the staging reads.
+    symbi::sim::decomp::drain_devices::<Mem>(&devices);
     let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
     let (iter, time) = (tiles[0].0.iteration, tiles[0].0.time);
     let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
@@ -5809,8 +5819,9 @@ where
             .map(|()| t_io.elapsed().as_secs_f64())
     };
 
-    // t=start initial condition.
+    // t=start initial condition. every device finishes its seeding before the staging reads.
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
+        symbi::sim::decomp::drain_devices::<Mem>(&devices);
         let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
         let path = checkpoint_name(cfg, &tag);
         match write_cp(&tiles, &path, cfg.checkpoint_index) {
@@ -5863,7 +5874,8 @@ where
         reporter.fail(&msg);
         return Err(msg);
     }
-    // canonical final snapshot.
+    // canonical final snapshot, after every device drained.
+    symbi::sim::decomp::drain_devices::<Mem>(&devices);
     let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
     match write_cp(&tiles, &final_path, cp_index) {
         Ok(io) => {
