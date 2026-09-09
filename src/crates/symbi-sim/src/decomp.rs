@@ -2722,6 +2722,22 @@ where
                         });
                     }
                 }
+                // the drain rescales the conserved state after the last stage's recovery: every
+                // tile recovers its primitives and ghost band from the drained state, then the cut
+                // halos are refreshed so the next step's reconstruction reads the drained gas
+                // across cuts too.
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || {
+                        prof("c2p", || kernels[i].c2p(sh[i]));
+                        prof("ghost_fill", || kernels[i].ghost_fill(sh[i]));
+                    });
+                }
+                drain_devices::<M>(devices);
+                exchange_grid(&sh, &schedule, devices, transport);
+                flip_polar_bands(&sh, kernels, &schedule, devices);
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
+                }
                 drain_devices::<M>(devices);
             }
         }
