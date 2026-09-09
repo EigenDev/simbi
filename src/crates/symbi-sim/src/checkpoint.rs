@@ -21,7 +21,6 @@ use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
 
-use symbi_hydro::FieldSpec;
 pub use symbi_io::{Attr, IoError, Metadata, Result};
 use symbi_io::{DataRef, Dataset, Hdf5Backend, Hdf5Stream, IoBackend, Tree, TreeBuf};
 use symbi_io::{dataset_shape, read_attrs, read_group, read_slab};
@@ -52,32 +51,7 @@ fn motion_axis_scale(geometry: symbi_geometry::Geometry, ax: usize, d: usize, a:
     }
 }
 
-fn write_tree_atomic(path: &Path, tree: &Tree<'_>) -> Result<()> {
-    let file_name = path.file_name().ok_or_else(|| {
-        IoError::MissingPath(format!("checkpoint path has no file name: {path:?}"))
-    })?;
-    let temporary = path.with_file_name(format!(
-        ".{}.tmp.{}",
-        file_name.to_string_lossy(),
-        std::process::id()
-    ));
-    if temporary.exists() {
-        std::fs::remove_file(&temporary)?;
-    }
-    if let Err(error) = Hdf5Backend.write(&temporary, tree) {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(error);
-    }
-    if let Err(error) = std::fs::rename(&temporary, path) {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(error.into());
-    }
-    Ok(())
-}
 
-/// whether `time` has reached a cadence boundary, tolerant of the roundoff an
-/// accumulating clock carries: a step that lands within 32 eps of the boundary
-/// counts as having reached it, so a checkpoint is never skipped by one ulp.
 pub fn time_at_or_after(time: f64, boundary: f64) -> bool {
     let tolerance = 32.0 * f64::EPSILON * time.abs().max(boundary.abs());
     time >= boundary || (time - boundary).abs() <= tolerance
@@ -89,37 +63,7 @@ pub fn time_at_or_after(time: f64, boundary: f64) -> bool {
 // no copies during Tree construction.
 // =============================================================================
 
-/// the owned per-bucket buffers a write borrows from. each entry is a
-/// `(canonical_name, interior_data)` pair — the canonical name comes from
-/// `symbi_io::dataset_name(fs, idx)` driven by `R::SPEC.{fields,
-/// primitive_fields}`. one source of truth per regime; the writer never
-/// hand-spells "m1..mD".
-struct Snapshot<const D: usize> {
-    resolution: Vec<u64>,
-    // the allocated (padded) cell extent per axis = interior + 2*ng. cell-centered
-    // field datasets are written at this full extent so a restart restores the
-    // entire field — ghost zones included — not just the interior (which would
-    // truncate the halo the next step's stencil reads before the first ghost-fill).
-    // the reader trims `halo_radius` (= ng) back to the interior for plotting.
-    data_shape: Vec<u64>,
-    // interior cell counts in storage (reversed) axis order for the reader's
-    // `mesh/global_cells` ([nx3,nx2,nx1]); matches the reversed field `shape` so the
-    // plot axes are not transposed (a non-square grid otherwise crashes pcolormesh).
-    mesh_cells: Vec<u64>,
-    dx_phys: Vec<f64>,
-    x_lo_phys: Vec<f64>,
-    conserved: Vec<(String, Vec<f64>)>,
-    primitive: Vec<(String, Vec<f64>)>,
-    bface: Vec<(String, Vec<f64>)>, // canonical "B1".."bd" face-centered B, MHD only
-    // per-face (start, fin) index bounds for the reader's `magnetic/Bn/domain` group.
-    bface_dom: Vec<(Vec<i64>, Vec<i64>)>,
-    // single-partition owned cell range for the `partition_0` group the frozen
-    // v2.0 reader expects: start = [0; D], fin = interior cell counts.
-    owned_start: Vec<i64>,
-    owned_fin: Vec<i64>,
-    // the isothermal closure's cs^2(x) over the allocated domain, energy-free regimes only.
-    iso_cs2: Option<Vec<f64>>,
-}
+
 
 /// visit every cell of `domain` in axis-0-fastest order (x varies fastest) — the on-disk
 /// checkpoint layout, so numpy `arr.reshape((Nz, Ny, Nx))` puts physical x on the horizontal
@@ -143,180 +87,8 @@ fn for_each_cell_axis0<const D: usize>(
     }
 }
 
-fn extract_field<const D: usize, Mem: MemorySpace>(
-    field: &symbi_grid::Field<f64, D, Mem>,
-    domain: &symbi_algebra::Domain<D>,
-) -> Vec<f64> {
-    let mut data = Vec::with_capacity(domain.volume());
-    for_each_cell_axis0(domain, |coord| data.push(*field.view().at(coord)));
-    data
-}
 
-/// drive the canonical iteration of one bucket's `FieldSpec` list. for each
-/// (FieldSpec \times component-idx), the closure dispatches to the right struct
-/// member or returns `None` when the field isn't allocated for this regime
-/// (e.g., iso has no cons.nrg, non-MHD has no mhd.bcell). returns the
-/// `(name, data)` vec the snapshot uses. each cell-centered field is gathered
-/// over its own allocated domain (`field.domain()` — interior + ghosts), so the
-/// written buffer carries the halo and a restart is not truncated.
-fn collect_bucket<'a, F, const D: usize, Mem: MemorySpace>(
-    fields: &[FieldSpec],
-    // the vector-component count for DimVector fields (mom/vel): the momentum DOF, which
-    // exceeds the grid dimension for a lifted (swirl) run — every stored component writes.
-    dof: usize,
-    mut pick: F,
-) -> Vec<(String, Vec<f64>)>
-where
-    F: FnMut(&FieldSpec, usize) -> Option<&'a symbi_grid::Field<f64, D, Mem>>,
-{
-    let mut out = Vec::new();
-    for fs in fields {
-        let n = symbi_io::component_count(fs, dof);
-        for idx in 0..n {
-            if let Some(field) = pick(fs, idx) {
-                let name = symbi_io::dataset_name(fs, idx);
-                out.push((name, extract_field(field, field.domain())));
-            }
-        }
-    }
-    out
-}
 
-fn snapshot<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-) -> Snapshot<D>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
-    // before reading fields here, sync the device so the host sees the
-    // committed state from the last RK2 stage (removing the per-launch `ctx_sync()`
-    // was a production pipelining win). gate on `IS_DEVICE_ACCESSIBLE`; the cuda
-    // feature alone is insufficient: a host-memory sim in a cuda-feature build has no CUDA context, so
-    // an unconditional `cuCtxSynchronize` panics (CUDA_ERROR_INVALID_CONTEXT). only
-    // device-resident memory needs the sync; host memory is already coherent.
-    #[cfg(feature = "gpu")]
-    if Mem::IS_DEVICE_ACCESSIBLE {
-        symbi_xpu::ctx_sync();
-    }
-    let interior = &sim.geom.interior;
-    let a = sim.motion.a;
-    let resolution: Vec<u64> = (0..D).map(|ax| interior.spaces[ax].size() as u64).collect();
-    // the allocated (padded) cell extent — `den` exists in every regime, so its
-    // domain is the canonical cell domain (interior + ng ghosts on every side).
-    // cell-centered datasets are written at this extent; the reader trims ng back.
-    let alloc = sim.fields.cons.den.domain();
-    let data_shape: Vec<u64> = (0..D).map(|ax| alloc.spaces[ax].size() as u64).collect();
-    let mesh_cells: Vec<u64> = (0..D)
-        .rev()
-        .map(|ax| interior.spaces[ax].size() as u64)
-        .collect();
-    // homologous expansion is radial: a(t) scales the radial coordinate (and, in cartesian,
-    // every coordinate isotropically), but never an angular one (theta/phi) — a moving spherical
-    // mesh must not report theta -> a*theta. mirror the per-geometry volume jacobian (block.rs:
-    // spherical ~a^3 = only r; cylindrical ~a^2 = r,z; cartesian ~a^D = all). axis 0 is x1 (r).
-    let metric_geom = sim.physics.metric.geometry();
-    let axis_scale = |ax: usize| -> f64 {
-        let is_length = match metric_geom {
-            symbi_geometry::Geometry::Cartesian => true,
-            symbi_geometry::Geometry::Spherical => ax == 0,
-            symbi_geometry::Geometry::Cylindrical => ax == 0 || ax == D - 1,
-        };
-        if is_length { a } else { 1.0 }
-    };
-    let dx_phys: Vec<f64> = sim.geom.dx[..D]
-        .iter()
-        .enumerate()
-        .map(|(ax, &d)| d * axis_scale(ax))
-        .collect();
-    let x_lo_phys: Vec<f64> = sim.geom.x_lo[..D]
-        .iter()
-        .enumerate()
-        .map(|(ax, &x)| x * axis_scale(ax))
-        .collect();
-    // ----- RegimeSpec-driven conserved iteration ------
-    let mut conserved = collect_bucket(R::SPEC.fields, DOF, |fs, idx| match fs.name {
-        "den" => Some(&sim.fields.cons.den),
-        "mom" => Some(&sim.fields.cons.mom[idx]),
-        "nrg" => sim.fields.cons.nrg_field(),
-        "mag" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
-        other => panic!("checkpoint write: unknown conserved field '{other}'"),
-    });
-    // the passive scalar is a run-level opt-in, not a regime field, so it rides
-    // outside the spec iteration: present iff allocated.
-    if let Some(chi) = sim.fields.cons.chi_field() {
-        conserved.push(("chi".to_string(), extract_field(chi, chi.domain())));
-    }
-
-    // ----- RegimeSpec-driven primitive iteration ------
-    let mut primitive = collect_bucket(R::SPEC.primitive_fields, DOF, |fs, idx| match fs.name {
-        "rho" => Some(&sim.fields.prim.rho),
-        "vel" => Some(&sim.fields.prim.vel[idx]),
-        "pre" => sim.fields.prim.pre_field(),
-        "bcell" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
-        other => panic!("checkpoint write: unknown primitive field '{other}'"),
-    });
-    if let Some(chi) = sim.fields.prim.chi_field() {
-        primitive.push(("chi".to_string(), extract_field(chi, chi.domain())));
-    }
-
-    // ----- face-centered B (CT ground truth) — separate group ----
-    let (bface, bface_dom): (Vec<(String, Vec<f64>)>, Vec<(Vec<i64>, Vec<i64>)>) =
-        if let Some(ref mhd) = sim.fields.mhd {
-            if mhd
-                .bface_initialized
-                .load(std::sync::atomic::Ordering::Relaxed)
-            {
-                (0..D)
-                    .map(|d| {
-                        let face_dom = interior.extend(d, 0, 1);
-                        let name = format!("B{}", d + 1);
-                        let start: Vec<i64> =
-                            (0..D).map(|ax| face_dom.spaces[ax].lo as i64).collect();
-                        let fin: Vec<i64> =
-                            (0..D).map(|ax| face_dom.spaces[ax].hi as i64).collect();
-                        (
-                            (name, extract_field(&mhd.bface[d], &face_dom)),
-                            (start, fin),
-                        )
-                    })
-                    .unzip()
-            } else {
-                (Vec::new(), Vec::new())
-            }
-        } else {
-            (Vec::new(), Vec::new())
-        };
-
-    // the owned interior index range [0, ncells) per axis, in the same reversed (storage) axis order
-    // as `mesh_cells` and the `dim_*` geometry. without the reverse, owned is (x, y, ..) while
-    // global_cells / dims are (.., y, x): the reader then pairs the y geometry with the x extent, and
-    // a non-square AMR fine patch renders transposed / offset (a square grid hides it -- both orders
-    // agree). matches the `(0..D).rev()` walk used for `mesh_cells` above.
-    let owned_start: Vec<i64> = vec![0; D];
-    let owned_fin: Vec<i64> = (0..D)
-        .rev()
-        .map(|ax| interior.spaces[ax].size() as i64)
-        .collect();
-
-    Snapshot {
-        resolution,
-        data_shape,
-        mesh_cells,
-        dx_phys,
-        x_lo_phys,
-        conserved,
-        primitive,
-        bface,
-        bface_dom,
-        owned_start,
-        owned_fin,
-        iso_cs2: sim.fields.cs2.as_ref().map(|c| extract_field(c, c.domain())),
-    }
-}
 
 // =============================================================================
 // build_tree — the schema description SimState contributes. one place that
@@ -372,6 +144,49 @@ fn timestepping_name(t: Timestepping) -> &'static str {
 /// the global `/metadata` group — time/physics/scheme attrs (same across an AMR
 /// hierarchy, so authored from the coarse level) + the coarse mesh datasets for
 /// single-level readers.
+/// the physics a checkpoint identifies its run by, read once from a state: the regime and its
+/// closure, the equation of state's index, the isothermal sound speed when the closure has no
+/// energy, and the coordinate chart. every tile of a decomposed run shares it.
+#[derive(Clone, Debug)]
+pub struct PhysicsIdentity {
+    pub regime: &'static str,
+    pub is_mhd: bool,
+    pub is_relativistic: bool,
+    pub has_energy: bool,
+    pub gamma: f64,
+    pub sound_speed: Option<f64>,
+    pub geometry: symbi_geometry::Geometry,
+}
+
+impl PhysicsIdentity {
+    pub fn of<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+        sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    ) -> Self
+    where
+        R: Regime<f64, D>,
+        M: Metric<f64, D> + Copy,
+        E: Eos<f64>,
+        S: ExecutionSpace,
+        Mem: MemorySpace,
+    {
+        let has_energy = sim.physics.regime.has_energy();
+        Self {
+            regime: regime_name(&sim.physics.regime),
+            is_mhd: sim.physics.regime.is_mhd(),
+            is_relativistic: sim.physics.regime.is_relativistic(),
+            has_energy,
+            gamma: sim.physics.eos.gamma(),
+            sound_speed: (!has_energy).then(|| {
+                sim.physics.eos.sound_speed(
+                    symbi_hydro::quantity::Density(1.0),
+                    symbi_hydro::quantity::Pressure(1.0),
+                )
+            }),
+            geometry: sim.physics.metric.geometry(),
+        }
+    }
+}
+
 /// the coarse level's mesh facts the metadata group records for single-level readers: interior
 /// cell counts, physical cell widths and physical lower bounds per axis, all scaled by the
 /// mesh motion.
@@ -381,67 +196,49 @@ pub struct MeshFacts {
     pub x_lo_phys: Vec<f64>,
 }
 
-fn build_metadata_group<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+fn build_metadata_group<'a, const D: usize, const DOF: usize, Mem: MemorySpace>(
+    identity: &'a PhysicsIdentity,
+    store: &'a FieldStore<D, DOF, Mem, f64>,
     facts: &'a MeshFacts,
     extras: &'a Metadata,
-) -> Tree<'a>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
+) -> Tree<'a> {
     // builtins. user extras can override any name here — explicit win.
     let mut builtins: Vec<(&str, Attr)> = vec![
-        ("gamma", Attr::F64(sim.physics.eos.gamma())),
-        ("cfl", Attr::F64(sim.cfl)),
-        ("time", Attr::F64(sim.time)),
-        ("dt", Attr::F64(sim.dt)),
-        ("iteration", Attr::U64(sim.iteration as u64)),
+        ("gamma", Attr::F64(identity.gamma)),
+        ("cfl", Attr::F64(store.cfl)),
+        ("time", Attr::F64(store.time)),
+        ("dt", Attr::F64(store.dt)),
+        ("iteration", Attr::U64(store.iteration as u64)),
         ("dimensions", Attr::U64(D as u64)),
-        ("halo_radius", Attr::U64(sim.geom.ng as u64)),
-        ("scale_factor", Attr::F64(sim.motion.a)),
-        ("scale_factor_dot", Attr::F64(sim.motion.a_dot)),
-        ("homologous", Attr::Bool(sim.motion.homologous)),
-        ("regime", Attr::Str(regime_name(&sim.physics.regime).into())),
-        ("is_mhd", Attr::Bool(sim.physics.regime.is_mhd())),
-        (
-            "is_relativistic",
-            Attr::Bool(sim.physics.regime.is_relativistic()),
-        ),
+        ("halo_radius", Attr::U64(store.geom.ng as u64)),
+        ("scale_factor", Attr::F64(store.motion.a)),
+        ("scale_factor_dot", Attr::F64(store.motion.a_dot)),
+        ("homologous", Attr::Bool(store.motion.homologous)),
+        ("regime", Attr::Str(identity.regime.into())),
+        ("is_mhd", Attr::Bool(identity.is_mhd)),
+        ("is_relativistic", Attr::Bool(identity.is_relativistic)),
         (
             "timestepping",
-            Attr::Str(timestepping_name(sim.timestepping).into()),
+            Attr::Str(timestepping_name(store.timestepping).into()),
         ),
-        (
-            "coord_system",
-            Attr::Str(coord_name(sim.physics.metric.geometry()).into()),
-        ),
+        ("coord_system", Attr::Str(coord_name(identity.geometry).into())),
         // the background spacetime chart — orthogonal to coord_system. GR readers need
         // this to select the metric (lapse, shift, densitization) when reducing fluxes.
         (
             "spacetime",
-            Attr::Str(spacetime_name(sim.geom.spacetime).into()),
+            Attr::Str(spacetime_name(store.geom.spacetime).into()),
         ),
     ];
     // the curved-spacetime scalar params (schwarzschild_mass, kerr_spin) ride as
     // named attrs so a reader can reconstruct the metric; empty on a flat background.
-    for (name, value) in &sim.geom.spacetime_scalars {
+    for (name, value) in &store.geom.spacetime_scalars {
         builtins.push((name.as_str(), Attr::F64(*value)));
     }
     // isothermal regimes close with p = cs^2 rho at a constant sound speed
     // and store no pressure dataset; record cs so readers can reconstruct
-    // pressure-dependent fields. the isothermal eos ignores (rho, pre).
-    if !sim.physics.regime.has_energy() {
-        builtins.push((
-            "sound_speed",
-            Attr::F64(sim.physics.eos.sound_speed(
-                symbi_hydro::quantity::Density(1.0),
-                symbi_hydro::quantity::Pressure(1.0),
-            )),
-        ));
+    // pressure-dependent fields.
+    if let Some(cs) = identity.sound_speed {
+        builtins.push(("sound_speed", Attr::F64(cs)));
     }
     let mut meta = Tree::new("metadata");
     // explicit user extras win. start with them, then fill in any built-in
@@ -466,166 +263,7 @@ where
     meta
 }
 
-/// one `/level_{idx}` group — mesh geometry + partition_0/hydro (+ magnetic) +
-/// conserved. each AMR level carries its own resolution / origin / dx, so this is
-/// authored per (sim, snap). `idx` is the refinement level (0 = coarse).
-fn build_level_group<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-    snap: &'a Snapshot<D>,
-    idx: usize,
-) -> Tree<'a>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
-    // ---- mesh — frozen v2.0 reader schema: global_cells + geometry ----
-    // the reader rebuilds cell centers from (global_cells, per-dim start/end, type),
-    // so the mesh carries the geometry description and no precomputed coordinate
-    // arrays. symbi's own `load_checkpoint` reconstructs geometry from config,
-    // so this layout serves external readers without breaking restart.
-    let mut geometry =
-        Tree::new("geometry").with_attr("metric", coord_name(sim.physics.metric.geometry()));
-    // mesh metadata (global_cells + per-dim geometry) is written in storage
-    // (reversed) axis order so it matches the reversed field `shape` below and the
-    // reader's [nx3,nx2,nx1] expectation: dim_0 is the slowest-varying screen axis,
-    // dim_{D-1} the fastest (x1). without the reverse, global_cells/dims are
-    // transposed vs the data -> a square grid plots mis-oriented and a non-square
-    // grid crashes pcolormesh ("C dims should be one smaller than X and Y").
-    for (slot, ax) in (0..D).rev().enumerate() {
-        // the interior lower edge — honors an AMR fine level whose interior
-        // starts at a non-zero global index (start = global origin offset by
-        // the interior origin), so the reader rebuilds cell centers correctly.
-        let lo_index = sim.geom.interior.spaces[ax].lo;
-        let hi_index = sim.geom.interior.spaces[ax].hi;
-        let scale = motion_axis_scale(sim.physics.metric.geometry(), ax, D, sim.motion.a);
-        let (start, end) = match &sim.geom.maps {
-            Some(maps) => (
-                maps[ax].face(lo_index) * scale,
-                maps[ax].face(hi_index) * scale,
-            ),
-            None => {
-                let start = snap.x_lo_phys[ax] + lo_index as f64 * snap.dx_phys[ax];
-                (start, start + snap.dx_phys[ax] * snap.resolution[ax] as f64)
-            }
-        };
-        // the per-axis spacing the reader reconstructs cell centers from: "linear" -> uniform faces
-        // start + i*dx, "log" -> geometric faces start*10^(i*slope). taken from the grid's coordinate
-        // maps (uniform when unset). start/end are the axis domain bounds [r_lo, r_hi]; logspace over
-        // them recovers the geometric grid.
-        let (spacing_label, spacing_ratio) = match &sim.geom.maps {
-            Some(maps) => match maps[ax] {
-                symbi_geometry::AxisMap::Uniform { .. } => ("linear", 1.0),
-                symbi_geometry::AxisMap::Log { .. } => ("log", 1.0),
-                symbi_geometry::AxisMap::Geometric { ratio, .. } => ("geometric", ratio),
-            },
-            None => ("linear", 1.0),
-        };
-        geometry.push_group(
-            Tree::new(format!("dim_{slot}"))
-                .with_attr("start", start)
-                .with_attr("end", end)
-                .with_attr("type", spacing_label)
-                .with_attr("ratio", spacing_ratio),
-        );
-    }
-    let mesh = Tree::new("mesh")
-        .with_attr("halo_width", sim.geom.ng as u64)
-        .with_dataset(Dataset::new(
-            "global_cells",
-            vec![D],
-            DataRef::U64(&snap.mesh_cells),
-        ))
-        .with_group(geometry);
 
-    // declare shape in reversed axis order so it matches the on-disk layout
-    // `extract_field` produces (axis-0-fastest in memory -> axis-0 is the last
-    // dim of the numpy shape). numpy/matplotlib then put physical x on the
-    // horizontal screen axis. for 2D OT: shape = [Ny, Nx]; for 3D: [Nz, Ny, Nx].
-    // cell datasets carry the padded extent (interior + 2*ng); the reader trims
-    // `halo_width` per side back to the interior `global_cells` for plotting.
-    let shape: Vec<usize> = (0..D)
-        .rev()
-        .map(|ax| snap.data_shape[ax] as usize)
-        .collect();
-
-    // ---- partition_0/hydro/primitives (RegimeSpec-driven) ----
-    let mut prim = Tree::new("primitives");
-    for (name, data) in &snap.primitive {
-        prim.push_dataset(Dataset::new(
-            name.clone(),
-            shape.clone(),
-            DataRef::F64(data),
-        ));
-    }
-    let mut hydro = Tree::new("hydro").with_group(prim);
-
-    // face-centered B (MHD) under hydro/magnetic — each B-face as the group the
-    // frozen reader expects: `Bn/{domain/{start,fin}, data}`.
-    if !snap.bface.is_empty() {
-        let interior = &sim.geom.interior;
-        let mut magnetic = Tree::new("magnetic");
-        for (face_ax, (name, data)) in snap.bface.iter().enumerate() {
-            let face_dom = interior.extend(face_ax, 0, 1);
-            let face_shape: Vec<usize> = (0..D)
-                .rev()
-                .map(|ax| face_dom.spaces[ax].size() as usize)
-                .collect();
-            let (start, fin) = &snap.bface_dom[face_ax];
-            let domain = Tree::new("domain")
-                .with_dataset(Dataset::new("start", vec![D], DataRef::I64(start)))
-                .with_dataset(Dataset::new("fin", vec![D], DataRef::I64(fin)));
-            magnetic.push_group(
-                Tree::new(name.clone())
-                    .with_group(domain)
-                    .with_dataset(Dataset::new("data", face_shape, DataRef::F64(data))),
-            );
-        }
-        hydro.push_group(magnetic);
-    }
-
-    let partition_0 = Tree::new("partition_0")
-        .with_dataset(Dataset::new(
-            "owned_start",
-            vec![D],
-            DataRef::I64(&snap.owned_start),
-        ))
-        .with_dataset(Dataset::new(
-            "owned_fin",
-            vec![D],
-            DataRef::I64(&snap.owned_fin),
-        ))
-        .with_group(hydro);
-
-    // ---- conserved — kept as the primary for symbi's own restart ----
-    let mut cons = Tree::new("conserved");
-    for (name, data) in &snap.conserved {
-        cons.push_dataset(Dataset::new(
-            name.clone(),
-            shape.clone(),
-            DataRef::F64(data),
-        ));
-    }
-
-    // the level's own clock: every level shares the root's time after a root step, and a finer
-    // level's iteration counts its substeps, ratio times the root's per level.
-    let mut level = Tree::new(format!("level_{idx}"))
-        .with_attr("scale_factor_a", sim.motion.a)
-        .with_attr("scale_factor_adot", sim.motion.a_dot)
-        .with_attr("time", sim.time)
-        .with_attr("dt", sim.dt)
-        .with_attr("iteration", Attr::U64(sim.iteration))
-        .with_group(mesh)
-        .with_group(partition_0)
-        .with_group(cons);
-    // the isothermal closure's prescribed cs^2(x), so a restart carries the profile the run held.
-    if let Some(cs2) = snap.iso_cs2.as_ref() {
-        level = level.with_dataset(Dataset::new("iso_cs2", shape.clone(), DataRef::F64(cs2)));
-    }
-    level
-}
 
 // =============================================================================
 // body state round-trip: the per-body kinematic + accretion ledger a restart
@@ -1069,93 +707,14 @@ const SQRT_MINUS_G: &str = "sqrt_minus_g";
 /// flat spacetime, and GR MHD, whose induction and CT seam are still Valencia — does not. the two
 /// states differ by a per-cell factor `sqrt(-g)(x)`, so reloading one as the other is silently
 /// wrong rather than loud, which is why the file records which it holds.
-fn conserved_densitization<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-) -> Option<&'static str>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
-    let curved = sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski;
-    (curved && sim.fields.mhd.is_none()).then_some(SQRT_MINUS_G)
+fn conserved_densitization<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    store: &FieldStore<D, DOF, Mem, f64>,
+) -> Option<&'static str> {
+    let curved = store.geom.spacetime != symbi_geometry::Spacetime::Minkowski;
+    (curved && store.fields.mhd.is_none()).then_some(SQRT_MINUS_G)
 }
 
-fn build_tree<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-    snap: &'a Snapshot<D>,
-    facts: &'a MeshFacts,
-    extras: &'a Metadata,
-) -> Tree<'a>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
-    let mut root = Tree::new("")
-        .with_attr("format_version", "2.0")
-        .with_attr("symbi_version", "0.1.0");
-    if let Some(tag) = conserved_densitization(sim) {
-        root = root.with_attr(CONSERVED_DENSITIZATION_ATTR, tag);
-    }
-    root.push_group(build_metadata_group(sim, facts, extras));
-    root.push_group(build_level_group(sim, snap, 0));
-    // the per-step body-gas exchange series (immersed runs): Mdot(t) is
-    // mass_delta/dt, the accretion drag is force. shapes: time/dt [len],
-    // mass_delta/energy_delta [len, nb], force [len, nb, D]. the series covers
-    // this run segment only (it restarts empty on checkpoint load).
-    if let Some(im) = sim.immersed.as_ref()
-        && !im.history.is_empty()
-    {
-        let (n, nb) = (im.history.len(), im.history.n_bodies());
-        root.push_group(
-            Tree::new("body_diagnostics")
-                .with_attr("n_bodies", nb as u64)
-                .with_dataset(Dataset::new(
-                    "time",
-                    vec![n],
-                    DataRef::F64(im.history.time()),
-                ))
-                .with_dataset(Dataset::new("dt", vec![n], DataRef::F64(im.history.dt())))
-                .with_dataset(Dataset::new(
-                    "mass_delta",
-                    vec![n, nb],
-                    DataRef::F64(im.history.mass_delta()),
-                ))
-                .with_dataset(Dataset::new(
-                    "energy_delta",
-                    vec![n, nb],
-                    DataRef::F64(im.history.energy_delta()),
-                ))
-                .with_dataset(Dataset::new(
-                    "force",
-                    vec![n, nb, D],
-                    DataRef::F64(im.history.force()),
-                ))
-                .with_dataset(Dataset::new(
-                    "force_normal",
-                    vec![n, nb, D],
-                    DataRef::F64(im.history.force_normal()),
-                ))
-                .with_dataset(Dataset::new(
-                    "torque",
-                    vec![n, nb, 3],
-                    DataRef::F64(im.history.torque()),
-                )),
-        );
-    }
-    for group in census_groups(sim) {
-        root.push_group(group);
-    }
-    root
-}
 
-/// the checkpoint tag for a reduce op — what a reader needs to know to interpret the
-/// accumulators (a sum combines across restart segments; an extremum does not).
 fn reduction_op_tag(op: symbi_ir::emit::ReductionOp) -> String {
     match op {
         symbi_ir::emit::ReductionOp::Add => "add",
@@ -1194,40 +753,16 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
-    let snap = snapshot(sim);
-    let facts = MeshFacts {
-        resolution: snap.resolution.clone(),
-        dx_phys: snap.dx_phys.clone(),
-        x_lo_phys: snap.x_lo_phys.clone(),
-    };
-    let mut tree = build_tree(sim, &snap, &facts, extras);
-    // per-body kinematic + accretion state (restart round-trip): derived
-    // buffers, so they live here and the tree borrows them.
-    let body_snap = sim.immersed.as_ref().map(body_state_snap);
-    if let Some(bs) = body_snap.as_ref() {
-        tree.push_group(body_state_group::<D>(bs, slip_heat_dataset_name(sim.fields.cons.nrg_field().is_some())));
-    }
-    let tr_snap = sim.tracers.as_ref().map(tracer_snap);
-    if let Some(ts) = tr_snap.as_ref() {
-        tree.push_group(tracer_group::<D>(ts));
-    }
-    let continuous_snap = sim.continuous_tracers.as_ref().map(continuous_tracer_snap);
-    if let Some(snap) = continuous_snap.as_ref() {
-        tree.push_group(continuous_tracer_group::<D>(snap));
-    }
-    write_tree_atomic(Path::new(path), &tree)
+    write_partitioned_checkpoint::<R, D, DOF, Mem>(
+        &PhysicsIdentity::of(sim),
+        &[LevelTiles::whole(&sim.store)],
+        path,
+        extras,
+    )
 }
 
-/// **AMR checkpoint** — write an entire refinement hierarchy into one file as
-/// `/level_0`, `/level_1`, ... sibling groups (the frozen v2.0 reader walks
-/// `while level_i in f`). `levels[0]` is the coarse level and authors the global
-/// `/metadata`; every level carries its own mesh + fields. this is the
-/// "all levels, one file" layout.
-///
-/// ```ignore
-/// let states: Vec<&SimState<..>> = hier.levels.iter().map(|l| &l.state).collect();
-/// write_hierarchy_checkpoint(&states, "run_0001.h5", &extras)?;
-/// ```
+/// write every level of a hierarchy, each held whole by one state, into one file: `levels[0]`
+/// is the coarse level and authors the global metadata.
 pub fn write_hierarchy_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     levels: &[&SimStateGeneric<R, D, DOF, M, E, S, Mem>],
     path: &str,
@@ -1240,109 +775,9 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
-    if levels.is_empty() {
-        return Err(IoError::MissingPath("hierarchy has no levels".into()));
-    }
-    // snapshot every level up front so the borrowed field data outlives the tree.
-    let snaps: Vec<Snapshot<D>> = levels.iter().map(|s| snapshot(s)).collect();
-    let mut root = Tree::new("")
-        .with_attr("format_version", "2.0")
-        .with_attr("symbi_version", "0.1.0");
-    if let Some(tag) = conserved_densitization(levels[0]) {
-        root = root.with_attr(CONSERVED_DENSITIZATION_ATTR, tag);
-    }
-    // global metadata authored from the coarse level.
-    let facts = MeshFacts {
-        resolution: snaps[0].resolution.clone(),
-        dx_phys: snaps[0].dx_phys.clone(),
-        x_lo_phys: snaps[0].x_lo_phys.clone(),
-    };
-    root.push_group(build_metadata_group(levels[0], &facts, extras));
-    for (idx, snap) in snaps.iter().enumerate() {
-        root.push_group(build_level_group(levels[idx], snap, idx));
-    }
-    // per-body kinematic + accretion state (restart round-trip) from the finest level carrying
-    // the immersed sidecar: the finest level owns every sink's drain and books its accreted mass,
-    // while the coarser levels hold gravity-only proxies whose kinematics are copies.
-    let body_snap = levels
-        .iter()
-        .filter_map(|l| l.immersed.as_ref())
-        .last()
-        .map(body_state_snap);
-    if let Some(bs) = body_snap.as_ref() {
-        root.push_group(body_state_group::<D>(bs, slip_heat_dataset_name(levels[0].fields.cons.nrg_field().is_some())));
-    }
-    // the tracer population lives on whichever level carries it (uni-grid:
-    // level 0) — same group layout as the single-grid writer.
-    let tr_snap = levels
-        .iter()
-        .filter_map(|l| l.tracers.as_ref())
-        .next()
-        .map(tracer_snap);
-    if let Some(ts) = tr_snap.as_ref() {
-        root.push_group(tracer_group::<D>(ts));
-    }
-    let continuous_snap = combine_continuous_tracer_snaps(levels.iter().filter_map(|level| {
-        level
-            .continuous_tracers
-            .as_ref()
-            .map(continuous_tracer_snap)
-    }));
-    if let Some(snap) = continuous_snap.as_ref() {
-        root.push_group(continuous_tracer_group::<D>(snap));
-    }
-    // the per-step body-gas exchange series: whichever level carries the
-    // immersed sidecar (the driver consolidates on one) supplies it — the
-    // same group layout the single-grid writer emits.
-    if let Some(im) = levels
-        .iter()
-        .filter_map(|l| l.immersed.as_ref())
-        .find(|im| !im.history.is_empty())
-    {
-        let (n, nb) = (im.history.len(), im.history.n_bodies());
-        root.push_group(
-            Tree::new("body_diagnostics")
-                .with_attr("n_bodies", nb as u64)
-                .with_dataset(Dataset::new(
-                    "time",
-                    vec![n],
-                    DataRef::F64(im.history.time()),
-                ))
-                .with_dataset(Dataset::new("dt", vec![n], DataRef::F64(im.history.dt())))
-                .with_dataset(Dataset::new(
-                    "mass_delta",
-                    vec![n, nb],
-                    DataRef::F64(im.history.mass_delta()),
-                ))
-                .with_dataset(Dataset::new(
-                    "energy_delta",
-                    vec![n, nb],
-                    DataRef::F64(im.history.energy_delta()),
-                ))
-                .with_dataset(Dataset::new(
-                    "force",
-                    vec![n, nb, D],
-                    DataRef::F64(im.history.force()),
-                ))
-                .with_dataset(Dataset::new(
-                    "force_normal",
-                    vec![n, nb, D],
-                    DataRef::F64(im.history.force_normal()),
-                ))
-                .with_dataset(Dataset::new(
-                    "torque",
-                    vec![n, nb, 3],
-                    DataRef::F64(im.history.torque()),
-                )),
-        );
-    }
-    // the censuses live on the root level's store, which is where both drivers register and
-    // sample them; a refined hierarchy is refused at the sampling site rather than reduced
-    // across levels, so there is no second level's history to merge here.
-    for group in census_groups(levels[0]) {
-        root.push_group(group);
-    }
-    write_tree_atomic(Path::new(path), &root)
+    let tiles: Vec<LevelTiles<'_, D, DOF, Mem>> =
+        levels.iter().map(|s| LevelTiles::whole(&s.store)).collect();
+    write_partitioned_checkpoint::<R, D, DOF, Mem>(&PhysicsIdentity::of(levels[0]), &tiles, path, extras)
 }
 
 // =============================================================================
@@ -1589,7 +1024,7 @@ where
         Some(Attr::Str(s)) => Some(s.as_str()),
         _ => None,
     };
-    let expected = conserved_densitization(sim);
+    let expected = conserved_densitization(&sim.store);
     if stored != expected {
         return Err(IoError::Backend(format!(
             "{path}: the checkpoint stores a {} conserved state but this run evolves a {} one",
@@ -2793,16 +2228,9 @@ mod tests {
 /// build their trees separately, and a census group written by only one of them leaves every run
 /// on the other driver recording nothing — a checkpoint with no census group reads exactly like a
 /// run that registered none, so the omission carries no signal at all.
-fn census_groups<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-) -> Vec<Tree<'a>>
-where
-    R: symbi_hydro::regime::Regime<f64, D>,
-    M: symbi_geometry::Metric<f64, D> + Copy,
-    E: symbi_hydro::eos::Eos<f64>,
-    S: symbi_xpu::ExecutionSpace,
-    Mem: symbi_xpu::MemorySpace,
-{
+fn census_groups<'a, const D: usize, const DOF: usize, Mem: symbi_xpu::MemorySpace>(
+    sim: &'a FieldStore<D, DOF, Mem, f64>,
+) -> Vec<Tree<'a>> {
     // the registered binned reductions, one group each. like the body series these cover
     // this run segment only and restart empty on checkpoint load, so a restart chain
     // concatenates offline rather than the run carrying its whole history forward.
@@ -2902,17 +2330,8 @@ pub struct GlobalGrid<const D: usize> {
 }
 
 impl<const D: usize> GlobalGrid<D> {
-    /// the grid of a state that is its whole level.
-    pub fn of_state<R, const DOF: usize, M, E, S, Mem>(
-        sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-    ) -> Self
-    where
-        R: Regime<f64, D>,
-        M: Metric<f64, D> + Copy,
-        E: Eos<f64>,
-        S: ExecutionSpace,
-        Mem: MemorySpace,
-    {
+    /// the grid of a store that is its whole level.
+    pub fn of_state<const DOF: usize, Mem: MemorySpace>(sim: &FieldStore<D, DOF, Mem, f64>) -> Self {
         let interior = &sim.geom.interior;
         Self {
             cells: std::array::from_fn(|ax| interior.spaces[ax].size()),
@@ -2925,44 +2344,22 @@ impl<const D: usize> GlobalGrid<D> {
     }
 }
 
-/// one tile of a level for output: a read-only view of its state and the global index of its
+/// one tile of a level for output: a read-only view of its fields and the global index of its
 /// first interior cell per axis.
-pub struct TileView<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
-    pub state: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+pub struct TileView<'a, const D: usize, const DOF: usize, Mem: MemorySpace> {
+    pub state: &'a FieldStore<D, DOF, Mem, f64>,
     pub offset: [isize; D],
 }
 
-/// the tiles of one level and the grid they partition. tile 0 supplies the level's clock and
-/// the physics identity every tile shares.
-pub struct LevelTiles<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
-    pub tiles: Vec<TileView<'a, R, D, DOF, M, E, S, Mem>>,
+/// the tiles of one level and the grid they partition. tile 0 supplies the level's clock.
+pub struct LevelTiles<'a, const D: usize, const DOF: usize, Mem: MemorySpace> {
+    pub tiles: Vec<TileView<'a, D, DOF, Mem>>,
     pub grid: GlobalGrid<D>,
 }
 
-impl<'a, R, const D: usize, const DOF: usize, M, E, S, Mem> LevelTiles<'a, R, D, DOF, M, E, S, Mem>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
-    /// a level held whole by one state.
-    pub fn whole(state: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>) -> Self {
+impl<'a, const D: usize, const DOF: usize, Mem: MemorySpace> LevelTiles<'a, D, DOF, Mem> {
+    /// a level held whole by one store.
+    pub fn whole(state: &'a FieldStore<D, DOF, Mem, f64>) -> Self {
         let grid = GlobalGrid::of_state(state);
         Self {
             tiles: vec![TileView {
@@ -3032,19 +2429,8 @@ fn stream_region<const D: usize, Mem: MemorySpace>(
 
 /// the level's mesh facts for the metadata group: global interior counts, physical widths and
 /// lower bounds scaled by the mesh motion, in grid axis order.
-fn mesh_facts<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-    grid: &GlobalGrid<D>,
-) -> MeshFacts
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
-    let geometry = sim.physics.metric.geometry();
-    let scale = |ax: usize| motion_axis_scale(geometry, ax, D, sim.motion.a);
+fn mesh_facts<const D: usize>(geometry: symbi_geometry::Geometry, a: f64, grid: &GlobalGrid<D>) -> MeshFacts {
+    let scale = |ax: usize| motion_axis_scale(geometry, ax, D, a);
     MeshFacts {
         resolution: grid.cells.iter().map(|&c| c as u64).collect(),
         dx_phys: (0..D).map(|ax| grid.dx[ax] * scale(ax)).collect(),
@@ -3055,14 +2441,11 @@ where
 /// the cell-centered datasets a state contributes, in checkpoint order: the conserved bucket,
 /// the primitive bucket, and the isothermal closure, each as (group path under the level, name,
 /// field).
-fn cell_datasets<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+fn cell_datasets<'a, R, const D: usize, const DOF: usize, Mem>(
+    sim: &'a FieldStore<D, DOF, Mem, f64>,
 ) -> Vec<(&'static str, String, &'a symbi_grid::Field<f64, D, Mem>)>
 where
     R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
     Mem: MemorySpace,
 {
     let mut out: Vec<(&'static str, String, &symbi_grid::Field<f64, D, Mem>)> = Vec::new();
@@ -3108,7 +2491,7 @@ where
 
 /// the union of the tiles' tracer populations in stable id order, the same reassembly a gathered
 /// output state performs: ids and cohorts concatenate, the next free id is the largest any tile
-/// reached, and the injection remainders sum.
+/// reached, the injection remainders sum, and the one particle weight every tile shares is kept.
 fn combine_tracer_snaps(snaps: Vec<TracerSnap>) -> Option<TracerSnap> {
     let mut iter = snaps.into_iter();
     let mut combined = iter.next()?;
@@ -3122,7 +2505,6 @@ fn combine_tracer_snaps(snaps: Vec<TracerSnap>) -> Option<TracerSnap> {
         combined.escaped.extend(snap.escaped);
         combined.crossed.extend(snap.crossed);
         combined.crossing_time.extend(snap.crossing_time);
-        combined.weight.extend(snap.weight);
         combined.next_id = combined.next_id.max(snap.next_id);
         combined.injection_remainder += snap.injection_remainder;
     }
@@ -3141,7 +2523,6 @@ fn combine_tracer_snaps(snaps: Vec<TracerSnap>) -> Option<TracerSnap> {
     combined.escaped = take(&combined.escaped);
     combined.crossed = take(&combined.crossed);
     combined.crossing_time = take(&combined.crossing_time);
-    combined.weight = take(&combined.weight);
     Some(combined)
 }
 
@@ -3152,33 +2533,29 @@ fn combine_tracer_snaps(snaps: Vec<TracerSnap>) -> Option<TracerSnap> {
 /// element has exactly one writer. tile 0 of each level supplies the clock, tile 0 of the coarse
 /// level the physics identity, the finest level's tile 0 the body state, and the tiles together
 /// the tracer population. the file takes its name only once every write succeeded.
-pub fn write_partitioned_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    levels: &[LevelTiles<'_, R, D, DOF, M, E, S, Mem>],
+pub fn write_partitioned_checkpoint<R, const D: usize, const DOF: usize, Mem>(
+    identity: &PhysicsIdentity,
+    levels: &[LevelTiles<'_, D, DOF, Mem>],
     path: &str,
     extras: &Metadata,
 ) -> Result<()>
 where
     R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
     Mem: MemorySpace,
 {
-    write_partitioned_checkpoint_with_budget(levels, path, extras, staging_budget_cells())
+    write_partitioned_checkpoint_with_budget::<R, D, DOF, Mem>(identity, levels, path, extras, staging_budget_cells())
 }
 
 /// `write_partitioned_checkpoint` at an explicit staging budget in cells per slab.
-pub fn write_partitioned_checkpoint_with_budget<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    levels: &[LevelTiles<'_, R, D, DOF, M, E, S, Mem>],
+pub fn write_partitioned_checkpoint_with_budget<R, const D: usize, const DOF: usize, Mem>(
+    identity: &PhysicsIdentity,
+    levels: &[LevelTiles<'_, D, DOF, Mem>],
     path: &str,
     extras: &Metadata,
     budget: usize,
 ) -> Result<()>
 where
     R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
     Mem: MemorySpace,
 {
     if levels.is_empty() || levels.iter().any(|l| l.tiles.is_empty()) {
@@ -3189,14 +2566,14 @@ where
         symbi_xpu::ctx_sync();
     }
     let authority = levels[0].tiles[0].state;
-    let facts = mesh_facts(authority, &levels[0].grid);
+    let facts = mesh_facts(identity.geometry, authority.motion.a, &levels[0].grid);
     let mut root = Tree::new("")
         .with_attr("format_version", "2.0")
         .with_attr("symbi_version", "0.1.0");
     if let Some(tag) = conserved_densitization(authority) {
         root = root.with_attr(CONSERVED_DENSITIZATION_ATTR, tag);
     }
-    root.push_group(build_metadata_group(authority, &facts, extras));
+    root.push_group(build_metadata_group(identity, authority, &facts, extras));
 
     // the small per-level groups: mesh geometry, ownership, the face domains and the level clock.
     struct LevelSmall {
@@ -3238,7 +2615,7 @@ where
     for (idx, (level, small)) in levels.iter().zip(&smalls).enumerate() {
         let sim = level.tiles[0].state;
         let grid = &level.grid;
-        let geometry_kind = sim.physics.metric.geometry();
+        let geometry_kind = identity.geometry;
         let mut geometry = Tree::new("geometry").with_attr("metric", coord_name(geometry_kind));
         for (slot, ax) in (0..D).rev().enumerate() {
             let lo_index = grid.interior_lo[ax];
@@ -3309,13 +2686,19 @@ where
         .last()
         .map(body_state_snap);
     let heat_name = slip_heat_dataset_name(authority.fields.cons.nrg_field().is_some());
+    let _ = identity.has_energy;
     if let Some(bs) = finest_bodies.as_ref() {
         root.push_group(body_state_group::<D>(bs, heat_name));
     }
+    // a level held whole writes its population in its own order; tiles combine theirs in id order.
     let tracers = levels
         .iter()
         .find(|l| l.tiles.iter().any(|t| t.state.tracers.is_some()))
-        .and_then(|l| combine_tracer_snaps(l.tiles.iter().filter_map(|t| t.state.tracers.as_ref().map(tracer_snap)).collect()));
+        .and_then(|l| {
+            let snaps: Vec<TracerSnap> =
+                l.tiles.iter().filter_map(|t| t.state.tracers.as_ref().map(tracer_snap)).collect();
+            if snaps.len() == 1 { snaps.into_iter().next() } else { combine_tracer_snaps(snaps) }
+        });
     if let Some(ts) = tracers.as_ref() {
         root.push_group(tracer_group::<D>(ts));
     }
@@ -3359,7 +2742,7 @@ where
         let grid = &level.grid;
         let level_path = format!("level_{idx}");
         let cell_shape: Vec<usize> = (0..D).rev().map(|ax| grid.cells[ax] + 2 * grid.ng).collect();
-        let names = cell_datasets(level.tiles[0].state);
+        let names = cell_datasets::<R, D, DOF, Mem>(level.tiles[0].state);
         for (group, name, _) in &names {
             let group_path = if group.is_empty() { level_path.clone() } else { format!("{level_path}/{group}") };
             stream.declare_f64(&group_path, name, &cell_shape)?;
@@ -3396,7 +2779,7 @@ where
             };
             let shift: [isize; D] = std::array::from_fn(|ax| tile.offset[ax] - interior.spaces[ax].lo - grid.interior_lo[ax]);
             let cell_file_of = |ax: usize, c: isize| (c + shift[ax] + ng) as usize;
-            for (group, name, field) in cell_datasets(sim) {
+            for (group, name, field) in cell_datasets::<R, D, DOF, Mem>(sim) {
                 let dataset_path = if group.is_empty() {
                     format!("{level_path}/{name}")
                 } else {
@@ -3481,7 +2864,7 @@ mod partitioned_tests_support {
     /// appears under both the primitive and the conserved bucket and carries one value.
     pub fn unique_cell_fields(sim: &Sim) -> Vec<(String, &symbi_grid::Field<f64, 2, HostMemory>)> {
         let mut out: Vec<(String, &symbi_grid::Field<f64, 2, HostMemory>)> = Vec::new();
-        for (_, name, field) in cell_datasets(sim) {
+        for (_, name, field) in cell_datasets::<NewtonianMhd, 2, 3, HostMemory>(&sim.store) {
             if !out.iter().any(|(_, f)| std::ptr::eq(*f, field)) {
                 out.push((name, field));
             }
@@ -3555,7 +2938,9 @@ mod partitioned_tests_support {
 mod partitioned_tests {
     use super::partitioned_tests_support::*;
     use super::*;
+    use symbi_hydro::newtonian_mhd::NewtonianMhd;
     use symbi_io::TreeBuf;
+    use symbi_xpu::HostMemory;
 
     fn assert_trees_equal(a: &TreeBuf, b: &TreeBuf, path: &str) {
         assert_eq!(a.attrs.len(), b.attrs.len(), "{path}: attribute count");
@@ -3588,37 +2973,24 @@ mod partitioned_tests {
     }
 
     #[test]
-    fn a_whole_level_streams_the_same_file_the_tree_writer_builds() {
-        let dir = scratch("whole");
-        let sim = tile([0, 0], [8, 6]);
-        let tree_path = dir.join("tree.h5");
-        let stream_path = dir.join("stream.h5");
-        write_hierarchy_checkpoint(&[&sim], tree_path.to_str().unwrap(), &Metadata::new()).unwrap();
-        write_partitioned_checkpoint(&[LevelTiles::whole(&sim)], stream_path.to_str().unwrap(), &Metadata::new()).unwrap();
-        let a = Hdf5Backend.read(&tree_path).unwrap();
-        let b = Hdf5Backend.read(&stream_path).unwrap();
-        assert_trees_equal(&a, &b, "");
-    }
-
-    #[test]
     fn tiles_cut_unevenly_along_an_axis_write_the_whole_grid_file() {
         let dir = scratch("tiles");
         let whole = tile([0, 0], [8, 6]);
         let left = tile([0, 0], [3, 6]);
         let right = tile([3, 0], [5, 6]);
-        let grid = GlobalGrid::of_state(&whole);
+        let grid = GlobalGrid::of_state(&whole.store);
         let whole_path = dir.join("whole.h5");
         let tiled_path = dir.join("tiled.h5");
-        write_partitioned_checkpoint(&[LevelTiles::whole(&whole)], whole_path.to_str().unwrap(), &Metadata::new()).unwrap();
+        write_partitioned_checkpoint::<NewtonianMhd, 2, 3, HostMemory>(&PhysicsIdentity::of(&whole), &[LevelTiles::whole(&whole.store)], whole_path.to_str().unwrap(), &Metadata::new()).unwrap();
         let level = LevelTiles {
             tiles: vec![
-                TileView { state: &left, offset: [0, 0] },
-                TileView { state: &right, offset: [3, 0] },
+                TileView { state: &left.store, offset: [0, 0] },
+                TileView { state: &right.store, offset: [3, 0] },
             ],
             grid,
         };
         // a staging budget of five cells forces every block through several slabs.
-        write_partitioned_checkpoint_with_budget(&[level], tiled_path.to_str().unwrap(), &Metadata::new(), 5).unwrap();
+        write_partitioned_checkpoint_with_budget::<NewtonianMhd, 2, 3, HostMemory>(&PhysicsIdentity::of(&whole), &[level], tiled_path.to_str().unwrap(), &Metadata::new(), 5).unwrap();
         let a = Hdf5Backend.read(&whole_path).unwrap();
         let b = Hdf5Backend.read(&tiled_path).unwrap();
         assert_trees_equal(&a, &b, "");
@@ -3628,7 +3000,7 @@ mod partitioned_tests {
     fn a_write_that_cannot_open_its_file_publishes_nothing() {
         let sim = tile([0, 0], [4, 4]);
         let target = scratch("sealed").join("absent").join("run.h5");
-        let err = write_partitioned_checkpoint(&[LevelTiles::whole(&sim)], target.to_str().unwrap(), &Metadata::new()).unwrap_err();
+        let err = write_partitioned_checkpoint::<NewtonianMhd, 2, 3, HostMemory>(&PhysicsIdentity::of(&sim), &[LevelTiles::whole(&sim.store)], target.to_str().unwrap(), &Metadata::new()).unwrap_err();
         assert!(matches!(err, IoError::Backend(_)), "{err:?}");
         assert!(!target.exists());
     }
@@ -3699,7 +3071,7 @@ where
     let file = Path::new(path);
     let root = read_attrs(file, "")?;
     let stored = attr_of(&root, CONSERVED_DENSITIZATION_ATTR).map(|a| format!("{a:?}"));
-    let expected = conserved_densitization(sim).map(|t| format!("{:?}", Attr::Str(t.into())));
+    let expected = conserved_densitization(&sim.store).map(|t| format!("{:?}", Attr::Str(t.into())));
     if stored != expected {
         return Err(IoError::Backend(format!(
             "checkpoint '{path}' stores conserved variables with densitization {stored:?}; this run evolves {expected:?}"
@@ -3762,7 +3134,7 @@ where
         r
     };
     let cell_file_of = |ax: usize, c: isize| (c + shift[ax] + ng) as usize;
-    for (group, name, field) in cell_datasets(sim) {
+    for (group, name, field) in cell_datasets::<R, D, DOF, Mem>(&sim.store) {
         let dataset_path = if group.is_empty() {
             format!("{level_path}/{name}")
         } else {
@@ -3797,21 +3169,23 @@ where
 mod partitioned_restart_tests {
     use super::partitioned_tests_support::*;
     use super::*;
+    use symbi_hydro::newtonian_mhd::NewtonianMhd;
+    use symbi_xpu::HostMemory;
 
     #[test]
     fn a_restart_reconstructs_tiles_of_a_different_cut_and_the_whole_grid() {
         let dir = scratch("restart");
         let path = dir.join("two.h5");
         let source = [tile([0, 0], [3, 6]), tile([3, 0], [5, 6])];
-        let grid = GlobalGrid::of_state(&tile([0, 0], [8, 6]));
+        let grid = GlobalGrid::of_state(&tile([0, 0], [8, 6]).store);
         let level = LevelTiles {
             tiles: vec![
-                TileView { state: &source[0], offset: [0, 0] },
-                TileView { state: &source[1], offset: [3, 0] },
+                TileView { state: &source[0].store, offset: [0, 0] },
+                TileView { state: &source[1].store, offset: [3, 0] },
             ],
             grid: grid.clone(),
         };
-        write_partitioned_checkpoint(&[level], path.to_str().unwrap(), &Metadata::new()).unwrap();
+        write_partitioned_checkpoint::<NewtonianMhd, 2, 3, HostMemory>(&PhysicsIdentity::of(&source[0]), &[level], path.to_str().unwrap(), &Metadata::new()).unwrap();
         let path = path.to_str().unwrap();
         // three tiles cut where the source had none, each starting blank.
         let cuts = [([0isize, 0], [2usize, 6]), ([2, 0], [3, 6]), ([5, 0], [3, 6])];
@@ -3834,9 +3208,9 @@ mod partitioned_restart_tests {
         let dir = scratch("refuse_restart");
         let path = dir.join("one.h5");
         let source = tile([0, 0], [8, 6]);
-        write_partitioned_checkpoint(&[LevelTiles::whole(&source)], path.to_str().unwrap(), &Metadata::new()).unwrap();
+        write_partitioned_checkpoint::<NewtonianMhd, 2, 3, HostMemory>(&PhysicsIdentity::of(&source), &[LevelTiles::whole(&source.store)], path.to_str().unwrap(), &Metadata::new()).unwrap();
         let mut other = blank([0, 0], [8, 4]);
-        let wrong = GlobalGrid::of_state(&other);
+        let wrong = GlobalGrid::of_state(&other.store);
         let err = load_partitioned_level(&mut other, path.to_str().unwrap(), 0, [0, 0], &wrong).unwrap_err();
         assert!(matches!(err, IoError::ShapeMismatch { .. }), "{err:?}");
     }

@@ -5365,7 +5365,8 @@ macro_rules! build_and_run_hydro {
 fn run_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     cfg: &Config,
     mut tiles: Vec<(SimStateGeneric<R, D, DOF, M, E, S, Mem>, K)>,
-    mut global: SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    offsets: Vec<[isize; D]>,
+    grid: symbi_sim::checkpoint::GlobalGrid<D>,
     counts: [usize; D],
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String>
 where
@@ -5377,11 +5378,38 @@ where
     K: KernelSet<D, DOF, Mem, f64>,
     Cartesian: Metric<f64, D>,
 {
-    use symbi::sim::decomp::{
-        Schedule, enable_peer_mesh, evolve_scheduled, gather_faces, gather_interiors,
-        gather_tracers,
+    use symbi::sim::decomp::{Schedule, enable_peer_mesh, evolve_scheduled};
+    use symbi_sim::checkpoint::{
+        LevelTiles, TileView, load_partitioned_level, write_partitioned_checkpoint,
     };
 
+    // a restart reads each tile's own block of the checkpoint's global grid, whatever partition
+    // wrote it; the exchange rebuilds the cut halos when the march primes.
+    if let Some(path) = cfg.restart_path.as_deref() {
+        for (flat, (tile, _)) in tiles.iter_mut().enumerate() {
+            load_partitioned_level(tile, path, 0, offsets[flat], &grid)
+                .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+        }
+    }
+    // one checkpoint write from the tiles as they stand: every tile streams its owned block.
+    let identity = symbi_sim::checkpoint::PhysicsIdentity::of(&tiles[0].0);
+    let write_tiles = |states: &[&symbi_sim::state::FieldStore<D, DOF, Mem, f64>],
+                       path: &str,
+                       cp_index: u64|
+     -> Result<f64, String> {
+        let level = LevelTiles {
+            tiles: states
+                .iter()
+                .zip(&offsets)
+                .map(|(state, &offset)| TileView { state: *state, offset })
+                .collect(),
+            grid: grid.clone(),
+        };
+        let t_io = std::time::Instant::now();
+        write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &[level], path, &checkpoint_metadata(cfg, cp_index))
+            .map_err(|e| checkpoint_write_error(path, e))?;
+        Ok(t_io.elapsed().as_secs_f64())
+    };
     let phys = boundaries_nd::<D>(&cfg.boundaries);
     let topology = wrap_topology(&phys, counts);
     wrap_capability(&topology, cfg.wb_reconstruction, !cfg.bodies.is_empty())?;
@@ -5448,31 +5476,18 @@ where
     for (s, _) in tiles.iter_mut() {
         s.time = cfg.start_time;
     }
-    global.time = cfg.start_time;
-
-    // t=start initial condition. a shared reborrow of the tiles for the gather (evolve_decomposed
-    // takes them by `&mut` below, so the gather views are scoped reborrows on either side).
+    // t=start initial condition.
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
         let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
-        global.time = sh[0].time;
-        global.iteration = sh[0].iteration;
-        global.motion = sh[0].motion;
-        gather_interiors(&global, &sh, counts);
-        gather_faces(&global, &sh, counts);
-        gather_tracers(&mut global, &sh);
         let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
         let path = checkpoint_name(cfg, &tag);
-        let t_io = std::time::Instant::now();
-        if let Err(e) = write_hierarchy_checkpoint(
-            &[&global],
-            &path,
-            &checkpoint_metadata(cfg, cfg.checkpoint_index),
-        ) {
-            let msg = checkpoint_write_error(&path, e);
-            reporter.fail(&msg);
-            return Err(msg);
+        match write_tiles(&sh, &path, cfg.checkpoint_index) {
+            Ok(io) => reporter.checkpoint_written(cfg, &path, cfg.start_time, io),
+            Err(msg) => {
+                reporter.fail(&msg);
+                return Err(msg);
+            }
         }
-        reporter.checkpoint_written(cfg, &path, cfg.start_time, t_io.elapsed().as_secs_f64());
     }
 
     // the seam sample rides the plan, independent of the checkpoint guard above: a
@@ -5537,27 +5552,15 @@ where
             |iter, time, sh| {
                 reporter.progress(iter, time);
                 if time + f64::EPSILON >= next_cp {
-                    // the writer records the gather target's clock/scale factor: sync from
-                    // tile 0 (all tiles advance in lockstep) or the checkpoint carries the
-                    // start-time forever.
-                    global.time = sh[0].time;
-                    global.iteration = sh[0].iteration;
-                    global.motion = sh[0].motion;
-                    gather_interiors(&global, sh, counts);
-                    gather_faces(&global, sh, counts);
-                    gather_tracers(&mut global, sh);
                     let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
                     let path = checkpoint_name(cfg, &tag);
-                    let t_io = std::time::Instant::now();
-                    if let Err(e) = write_hierarchy_checkpoint(
-                        &[&global],
-                        &path,
-                        &checkpoint_metadata(cfg, cp_index),
-                    ) {
-                        *cp_error.borrow_mut() = Some(checkpoint_write_error(&path, e));
-                        return std::ops::ControlFlow::Break(());
+                    match write_tiles(sh, &path, cp_index) {
+                        Ok(io) => reporter.checkpoint_written(cfg, &path, time, io),
+                        Err(msg) => {
+                            *cp_error.borrow_mut() = Some(msg);
+                            return std::ops::ControlFlow::Break(());
+                        }
                     }
-                    reporter.checkpoint_written(cfg, &path, time, t_io.elapsed().as_secs_f64());
                     while next_cp <= time {
                         next_cp += cp_dt;
                     }
@@ -5582,32 +5585,50 @@ where
         )
     };
 
-    // canonical final snapshot, mirroring the single-grid run (shared reborrow again).
-    {
-        let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
-        global.time = sh[0].time;
-        global.iteration = sh[0].iteration;
-        global.motion = sh[0].motion;
-        gather_interiors(&global, &sh, counts);
-        gather_faces(&global, &sh, counts);
-        gather_tracers(&mut global, &sh);
-    }
     if let Some(msg) = cp_error.into_inner() {
         reporter.fail(&msg);
         return Err(msg);
     }
+    // canonical final snapshot, mirroring the single-grid run.
     let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
-    let t_io = std::time::Instant::now();
-    if let Err(e) =
-        write_hierarchy_checkpoint(&[&global], &final_path, &checkpoint_metadata(cfg, cp_index))
-    {
-        let msg = checkpoint_write_error(&final_path, e);
-        reporter.fail(&msg);
-        return Err(msg);
+    let (iter, time) = (tiles[0].0.iteration, tiles[0].0.time);
+    let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
+    match write_tiles(&sh, &final_path, cp_index) {
+        Ok(io) => {
+            reporter.checkpoint_written(cfg, &final_path, time, io);
+            reporter.finish(iter, time, &final_path);
+        }
+        Err(msg) => {
+            reporter.fail(&msg);
+            return Err(msg);
+        }
     }
-    reporter.checkpoint_written(cfg, &final_path, global.time, t_io.elapsed().as_secs_f64());
-    reporter.finish(global.iteration, global.time, &final_path);
     Ok(diagnostics)
+}
+
+/// the global grid a decomposed run's tiles partition: the run's cell counts, origin, spacing
+/// and coordinate maps, with the tiles' halo width.
+fn decomposed_grid<const D: usize>(cfg: &Config, ng: usize) -> symbi_sim::checkpoint::GlobalGrid<D> {
+    symbi_sim::checkpoint::GlobalGrid {
+        cells: std::array::from_fn(|ax| cfg.n_cells[ax]),
+        interior_lo: [0; D],
+        ng,
+        x_lo: std::array::from_fn(|ax| cfg.x_lo[ax]),
+        dx: std::array::from_fn(|ax| cfg.dx[ax]),
+        maps: axis_maps::<D>(cfg),
+    }
+}
+
+/// each tile's global interior offset per axis, in the partition's flat tile order.
+fn tile_offsets<const D: usize>(partition: &Partition<D>) -> Vec<[isize; D]> {
+    let counts = partition.counts();
+    (0..partition.n_tiles())
+        .map(|flat| {
+            let tc = symbi::sim::decomp::unflatten(flat, counts);
+            let ext = partition.tile_extents(tc);
+            std::array::from_fn(|ax| ext[ax].0 as isize)
+        })
+        .collect()
 }
 
 /// the multi-gpu (gpus>1) refined path: decompose a 2-level static-refinement hierarchy. each tile
@@ -5621,7 +5642,8 @@ where
 fn run_refined_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     cfg: &Config,
     mut tiles: Vec<Hierarchy<R, D, DOF, M, E, S, Mem, K>>,
-    mut global: Hierarchy<R, D, DOF, M, E, S, Mem, K>,
+    root_offsets: Vec<[isize; D]>,
+    root_grid: symbi_sim::checkpoint::GlobalGrid<D>,
     counts: [usize; D],
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String>
 where
@@ -5632,9 +5654,12 @@ where
     Mem: MemorySpace + Sync,
     K: KernelSet<D, DOF, Mem, f64>,
 {
-    use symbi::sim::decomp::{enable_peer_mesh, gather_interiors};
+    use symbi::sim::decomp::enable_peer_mesh;
     use symbi::sim::refinement::{
-        evolve_hierarchy_decomposed, fine_subgrid, gather_decomposed_hierarchy_tracers,
+        evolve_hierarchy_decomposed, fine_subgrid,
+    };
+    use symbi_sim::checkpoint::{
+        LevelTiles, PhysicsIdentity, TileView, load_partitioned_level, write_partitioned_checkpoint,
     };
 
     // the fine levels exchange over their own tile grid, which carries no wrap legs, so a
@@ -5702,39 +5727,87 @@ where
         "refinement: {} of {ntiles} tiles carry a fine level",
         fg.as_ref().map_or(0, |f| f.order.len())
     ));
+    // the fine level's global grid and each fine tile's offset on it: a tile's fine interior
+    // starts at twice its root offset plus its own fine interior origin (the refinement ratio
+    // is two), and the grid spans the refined tiles' fine interiors with the root's origin at
+    // half the root spacing.
+    let fine = fg.as_ref().map(|fg| {
+        let fine_offset = |i: usize| -> [isize; D] {
+            let f = &tiles[i].levels[1].state.geom.interior;
+            std::array::from_fn(|ax| root_offsets[i][ax] * 2 + f.spaces[ax].lo)
+        };
+        let offsets: Vec<[isize; D]> = fg.order.iter().map(|&i| fine_offset(i)).collect();
+        let cells: [usize; D] = std::array::from_fn(|ax| {
+            (0..fg.counts[ax])
+                .map(|k| {
+                    let mut rc = [0usize; D];
+                    rc[ax] = k;
+                    let i = fg.order[symbi::sim::decomp::flatten(rc, fg.counts)];
+                    tiles[i].levels[1].state.geom.interior.spaces[ax].size()
+                })
+                .sum()
+        });
+        let interior_lo: [isize; D] =
+            std::array::from_fn(|ax| offsets.iter().map(|o| o[ax]).min().unwrap_or(0));
+        let grid = symbi_sim::checkpoint::GlobalGrid {
+            cells,
+            interior_lo,
+            ng: tiles[fg.order[0]].levels[1].state.geom.ng,
+            x_lo: root_grid.x_lo,
+            dx: std::array::from_fn(|ax| root_grid.dx[ax] / 2.0),
+            maps: None,
+        };
+        (offsets, grid)
+    });
+    // a restart reads every level of every tile from the checkpoint's global grids.
+    if let Some(path) = cfg.restart_path.as_deref() {
+        let stored = symbi_sim::checkpoint::checkpoint_level_count(path).map_err(|e| format!("{e}"))?;
+        for (i, tile) in tiles.iter_mut().enumerate() {
+            load_partitioned_level(&mut tile.levels[0].state, path, 0, root_offsets[i], &root_grid)
+                .map_err(|e| format!("restart of tile {i} root from '{path}': {e}"))?;
+        }
+        if let Some((offsets, grid)) = fine.as_ref() {
+            if stored < 2 {
+                return Err(format!(
+                    "restart from '{path}': the checkpoint holds one level, this run refines; a \
+                     refined decomposed run resumes from a refined checkpoint"
+                ));
+            }
+            for (k, &i) in fg.as_ref().unwrap().order.iter().enumerate() {
+                load_partitioned_level(&mut tiles[i].levels[1].state, path, 1, offsets[k], grid)
+                    .map_err(|e| format!("restart of tile {i} fine level from '{path}': {e}"))?;
+            }
+        }
+    }
+    let identity = PhysicsIdentity::of(&tiles[0].levels[0].state);
 
     // gather each level of the decomposed tiles into the global hierarchy (root over `counts`, fine
     // over the fine sub-grid), then write all the global levels through the multi-level writer.
-    let mut write_cp =
-        |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64| {
-            // the writer records the gather target's clock: sync every global level from tile 0
-            // (all tiles advance in lockstep; between root steps the fine clock equals the root's)
-            // or the checkpoint carries the start-time forever.
-            let t_now = tiles[0].levels[0].state.time;
-            let it_now = tiles[0].levels[0].state.iteration;
-            for l in global.levels.iter_mut() {
-                l.state.time = t_now;
-                l.state.iteration = it_now;
-            }
-            let roots: Vec<_> = tiles.iter().map(|h| &*h.levels[0].state).collect();
-            gather_interiors(&*global.levels[0].state, &roots, counts);
-            if let Some(fg) = &fg {
-                let fines: Vec<_> = fg
+    let write_cp = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64| {
+        let mut levels = vec![LevelTiles {
+            tiles: tiles
+                .iter()
+                .zip(&root_offsets)
+                .map(|(h, &offset)| TileView { state: &h.levels[0].state.store, offset })
+                .collect(),
+            grid: root_grid.clone(),
+        }];
+        if let (Some(fg), Some((offsets, grid))) = (fg.as_ref(), fine.as_ref()) {
+            levels.push(LevelTiles {
+                tiles: fg
                     .order
                     .iter()
-                    .map(|&i| &*tiles[i].levels[1].state)
-                    .collect();
-                gather_interiors(&*global.levels[1].state, &fines, fg.counts);
-            }
-            if cfg.n_tracers > 0 {
-                gather_decomposed_hierarchy_tracers(&mut global, tiles);
-            }
-            let states: Vec<_> = global.levels.iter().map(|l| &l.state).collect();
-            let t_io = std::time::Instant::now();
-            write_hierarchy_checkpoint(&states, path, &checkpoint_metadata(cfg, cp_index))
-                .map_err(|e| checkpoint_write_error(path, e))
-                .map(|()| t_io.elapsed().as_secs_f64())
-        };
+                    .zip(offsets)
+                    .map(|(&i, &offset)| TileView { state: &tiles[i].levels[1].state.store, offset })
+                    .collect(),
+                grid: grid.clone(),
+            });
+        }
+        let t_io = std::time::Instant::now();
+        write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &levels, path, &checkpoint_metadata(cfg, cp_index))
+            .map_err(|e| checkpoint_write_error(path, e))
+            .map(|()| t_io.elapsed().as_secs_f64())
+    };
 
     // t=start initial condition.
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
@@ -6016,6 +6089,11 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 
         // the full-size output hierarchy (root + the full region): gather scatters each level's tile
         // interiors into it. lives on device 0 (touched only at output).
+        let offsets = tile_offsets(&partition);
+        let grid = decomposed_grid::<$d>(cfg, tiles[0].levels[0].state.geom.ng);
+        // the tracer population seeds once from the whole hierarchy and splits across the
+        // tiles; the whole hierarchy lives for that seeding alone.
+        if cfg.n_tracers > 0 {
         let mut global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
             let groot = Sim::build($regime, host_eos(cfg), $geom)
                 .cells(n)
@@ -6078,8 +6156,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 }
             }
         }
-
-        run_refined_decomposed_loop(cfg, tiles, global, counts)
+        }
+        run_refined_decomposed_loop(cfg, tiles, offsets, grid, counts)
     }};
 }
 
@@ -6259,6 +6337,12 @@ macro_rules! build_and_run_hydro_decomposed {
 
         // one full-size sim as the output view: the gather scatters tile interiors into it and
         // the existing writer serializes it. lives on device 0 (it is only touched at output).
+        let offsets = tile_offsets(&partition);
+        let grid = decomposed_grid::<$d>(cfg, tiles[0].0.geom.ng);
+        // the tracer population seeds once from the whole-grid density and splits across the
+        // tiles by position, so the run starts from the particles a single grid would carry;
+        // the whole-grid state lives for that seeding alone.
+        if cfg.n_tracers > 0 {
         let global = Sim::build($regime, host_eos(cfg), $geom)
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
@@ -6321,7 +6405,8 @@ macro_rules! build_and_run_hydro_decomposed {
 
         // hand the built tiles + output sim to the regime-agnostic decomposed loop (evolve +
         // gather + checkpoint, universal transport). every regime shares this loop.
-        run_decomposed_loop(cfg, tiles, global, counts)
+        }
+        run_decomposed_loop(cfg, tiles, offsets, grid, counts)
     }};
 }
 
@@ -7107,6 +7192,12 @@ macro_rules! build_and_run_mhd_decomposed {
         // the full-size output view: gather scatters tile interiors (cells + cell B) and faces into
         // it each checkpoint; seed the faces so `bface_initialized` is set (the gather overwrites
         // the interior). lives on device 0 (touched only at output).
+        let offsets = tile_offsets(&partition);
+        let grid = decomposed_grid::<$d>(cfg, tiles[0].0.geom.ng);
+        // the tracer population seeds once from the whole-grid density and splits across the
+        // tiles by position, so the run starts from the particles a single grid would carry;
+        // the whole-grid state lives for that seeding alone.
+        if cfg.n_tracers > 0 {
         let mut global = Sim::build($regime, host_eos(cfg), $geom)
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
@@ -7154,8 +7245,8 @@ macro_rules! build_and_run_mhd_decomposed {
                 global.tracers = Some(symbi_sim::tracers::TracerSet::default());
             }
         }
-
-        run_decomposed_loop(cfg, tiles, global, counts)
+        }
+        run_decomposed_loop(cfg, tiles, offsets, grid, counts)
     }};
 }
 
@@ -7288,6 +7379,12 @@ macro_rules! build_and_run_imhd_decomposed {
             tiles.push(built);
         }
 
+        let offsets = tile_offsets(&partition);
+        let grid = decomposed_grid::<$d>(cfg, tiles[0].0.geom.ng);
+        // the tracer population seeds once from the whole-grid density and splits across the
+        // tiles by position, so the run starts from the particles a single grid would carry;
+        // the whole-grid state lives for that seeding alone.
+        if cfg.n_tracers > 0 {
         let mut global = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
@@ -7335,8 +7432,8 @@ macro_rules! build_and_run_imhd_decomposed {
                 global.tracers = Some(symbi_sim::tracers::TracerSet::default());
             }
         }
-
-        run_decomposed_loop(cfg, tiles, global, counts)
+        }
+        run_decomposed_loop(cfg, tiles, offsets, grid, counts)
     }};
 }
 
@@ -7635,30 +7732,9 @@ macro_rules! build_and_run_iso_decomposed {
             tiles.push(built);
         }
 
-        let global = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
-            .cells(n)
-            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-            .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
-            .coord_maps(axis_maps::<$d>(cfg))
-            .boundaries(phys)
-            .cfl(cfg.cfl)
-            .timestepping(cfg.timestepping)
-            .cyl_plane(cfg.cyl_plane)
-            .allocate()
-            .map_err(|e| format!("global output sim allocate: {e:?}"))?
-            .set_initial_indexed(|idx, _x| {
-                let mut lin = 0usize;
-                let mut stride = 1usize;
-                for ax in 0..$d {
-                    lin += idx[ax] as usize * stride;
-                    stride *= n[ax];
-                }
-                let row = &prims[lin];
-                PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
-            })
-            .build();
-
-        run_decomposed_loop(cfg, tiles, global, counts)
+        let offsets = tile_offsets(&partition);
+        let grid = decomposed_grid::<$d>(cfg, tiles[0].0.geom.ng);
+        run_decomposed_loop(cfg, tiles, offsets, grid, counts)
     }};
 }
 
@@ -9712,9 +9788,6 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
     // the axis placement rule runs here as well as at dispatch, so a misplaced or unsupported
     // axis face fails before a queue slot is spent.
     validate_axis_boundaries(cfg)?;
-    if cfg.restart_path.is_some() && cfg.n_gpus > 1 {
-        return Err("checkpoint restart is not yet supported with decomposition".to_string());
-    }
     check_horizon_containment(
         &cfg.spacetime,
         cfg.schwarzschild_mass,
