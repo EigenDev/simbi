@@ -628,8 +628,8 @@ fn exchange_faces_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
             // the strips take the face field's own transverse halo width, so the destination band
             // stays on ghost faces: a cell-halo-wide band would start inside the interior and
             // overwrite the tile's last interior faces with the neighbor's first column.
-            let lo_ng = ng; // TEMP
-            let hi_ng = ng; // TEMP
+            let lo_ng = (lo_alloc.spaces[axis].hi - lo.geom.interior.spaces[axis].hi).min(ng);
+            let hi_ng = (hi.geom.interior.spaces[axis].lo - hi_alloc.spaces[axis].lo).min(ng);
             let lo_ghost_f =
                 face_ghost_strip(&lo_alloc, &lo.geom, axis, Side::Hi, d, &leg.clip, lo_ng);
             let hi_src_f = lo_ghost_f.slab(axis, (i_lo_hi, i_lo_hi + lo_ng));

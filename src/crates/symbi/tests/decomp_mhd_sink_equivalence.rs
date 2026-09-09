@@ -30,18 +30,38 @@ const N: usize = 32;
 const DX: f64 = 1.0 / N as f64;
 const T_FINAL: f64 = 0.06;
 const B0: [f64; 3] = [0.6, 0.3, 0.2];
-const BODY: [f64; 2] = [0.5, 0.5];
 const R_BODY: f64 = 0.15;
 
 type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>;
 type Kern = NewtonianMhdSubstrateKernelSet<HostMemory, f64, 2>;
 
-fn make(
-    cells: [usize; 2],
-    origin: [f64; 2],
-    bnd: Boundaries<2>,
+/// one arm of the gate: the sink position, the coupling, and the cell halo width.
+#[derive(Clone, Copy, Debug)]
+struct Setup {
+    body: [f64; 2],
     magnetic: MagneticSpec,
-) -> (Sim, Kern) {
+    ghosts: usize,
+}
+
+impl Setup {
+    fn corner(magnetic: MagneticSpec) -> Self {
+        Self {
+            body: [0.5, 0.5],
+            magnetic,
+            ghosts: 2,
+        }
+    }
+
+    fn off_corner(magnetic: MagneticSpec) -> Self {
+        Self {
+            body: [0.55, 0.45],
+            magnetic,
+            ghosts: 3,
+        }
+    }
+}
+
+fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, setup: Setup) -> (Sim, Kern) {
     let sim = Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
@@ -49,6 +69,7 @@ fn make(
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
+        .ghosts(setup.ghosts)
         .allocate()
         .expect("mhd sim")
         .set_initial(|_| {
@@ -63,7 +84,7 @@ fn make(
             BodyCollection::new().add(
                 Body::black_hole(
                     0,
-                    Tensor::new(BODY),
+                    Tensor::new(setup.body),
                     Tensor::zeros(),
                     1.0,
                     R_BODY,
@@ -73,14 +94,14 @@ fn make(
                     R_BODY,
                 )
                 .with_surface(SurfaceSpec::Drain)
-                .with_magnetic(magnetic),
+                .with_magnetic(setup.magnetic),
             ),
         );
     let k = Kern::new(GAMMA, CFL, 1.0, &sim.geom.allocated);
     (sim, k)
 }
 
-fn grid_tiles(counts: [usize; 2], magnetic: MagneticSpec) -> Vec<(Sim, Kern)> {
+fn grid_tiles(counts: [usize; 2], setup: Setup) -> Vec<(Sim, Kern)> {
     let m: [usize; 2] = std::array::from_fn(|a| {
         assert!(N % counts[a] == 0, "N must split into counts[{a}]");
         N / counts[a]
@@ -103,7 +124,7 @@ fn grid_tiles(counts: [usize; 2], magnetic: MagneticSpec) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd, magnetic)
+            make(m, origin, bnd, setup)
         })
         .collect()
 }
@@ -155,7 +176,7 @@ fn max_err(a: &[f64], b: &[f64]) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
-fn assert_decomposed_matches(counts: [usize; 2], magnetic: MagneticSpec) {
+fn assert_decomposed_matches(counts: [usize; 2], setup: Setup) {
     let den = |s: &Sim, c| *s.fields.cons.den.view().at(c);
     let momx = |s: &Sim, c| *s.fields.cons.mom[0].view().at(c);
     let momy = |s: &Sim, c| *s.fields.cons.mom[1].view().at(c);
@@ -172,14 +193,14 @@ fn assert_decomposed_matches(counts: [usize; 2], magnetic: MagneticSpec) {
         [N, N],
         [0.0, 0.0],
         Boundaries::uniform(BoundaryType::Outflow),
-        magnetic,
+        setup,
     )];
     {
         let (sim, k) = &mut mono[0];
         evolve_with_callback(sim, k, T_FINAL, u64::MAX, |_| {})
             .expect("the monolithic run went inadmissible");
     }
-    let mut dec = grid_tiles(counts, magnetic);
+    let mut dec = grid_tiles(counts, setup);
     run(&mut dec, counts);
 
     let mono_den = global_field(&mono, [1, 1], den);
@@ -213,28 +234,44 @@ fn assert_decomposed_matches(counts: [usize; 2], magnetic: MagneticSpec) {
         );
         let e = max_err(&mv, &dv);
         assert!(
-            e < 1e-11,
-            "{counts:?} {magnetic:?} {name} decomposed != mono under a magnetized sink: err {e:e}"
+            mv.iter().zip(&dv).all(|(a, b)| a.to_bits() == b.to_bits()),
+            "{counts:?} {setup:?} {name} decomposed != mono under a magnetized sink: err {e:e}"
         );
     }
 }
 
 #[test]
 fn transparent_sink_two_tile_x_cut() {
-    assert_decomposed_matches([2, 1], MagneticSpec::None);
+    assert_decomposed_matches([2, 1], Setup::corner(MagneticSpec::None));
 }
 
 #[test]
 fn transparent_sink_quad_tile() {
-    assert_decomposed_matches([2, 2], MagneticSpec::None);
+    assert_decomposed_matches([2, 2], Setup::corner(MagneticSpec::None));
 }
 
 #[test]
 fn resistive_sink_two_tile_y_cut() {
-    assert_decomposed_matches([1, 2], MagneticSpec::Resistive { eta: 0.05 });
+    assert_decomposed_matches([1, 2], Setup::corner(MagneticSpec::Resistive { eta: 0.05 }));
 }
 
 #[test]
 fn resistive_sink_quad_tile() {
-    assert_decomposed_matches([2, 2], MagneticSpec::Resistive { eta: 0.05 });
+    assert_decomposed_matches([2, 2], Setup::corner(MagneticSpec::Resistive { eta: 0.05 }));
+}
+
+// a three-cell halo (the third-order stencil's) around the staggered field's two-face transverse
+// halo; the sink sits off the tile corner so the two sides of a cut evolve differently and a
+// face strip that reaches into the interior shows.
+#[test]
+fn transparent_sink_three_cell_halo_off_corner_x_cut() {
+    assert_decomposed_matches([2, 1], Setup::off_corner(MagneticSpec::None));
+}
+
+#[test]
+fn resistive_sink_three_cell_halo_off_corner_quad_tile() {
+    assert_decomposed_matches(
+        [2, 2],
+        Setup::off_corner(MagneticSpec::Resistive { eta: 0.05 }),
+    );
 }
