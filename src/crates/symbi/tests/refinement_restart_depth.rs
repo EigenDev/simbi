@@ -472,7 +472,9 @@ fn a_restart_onto_a_moved_region_is_refused_by_the_restart_itself() {
         .restore_from_checkpoint(p)
         .expect("an identical schedule must restart");
 
-    // a schedule whose level 1 sits somewhere else — the shape a level-count-dependent region takes.
+    // a schedule whose level 1 sits somewhere else — the shape a level-count-dependent region
+    // takes. its level 2 sits strictly inside that level 1, since a region covering its parent
+    // entirely is refused at build.
     let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N])
         .origin([-L0])
@@ -489,7 +491,7 @@ fn a_restart_onto_a_moved_region_is_refused_by_the_restart_itself() {
             x_lo: [-L0 / 4.0],
             x_hi: [L0 / 4.0],
         },
-        region(2),
+        region(3),
     ];
     let mut other = Hierarchy::with_refinement(coarse, ck, &moved, ProlongOrder::Ppm, |s| {
         Kset::new(GAMMA, CFL, &s.geom.allocated)
