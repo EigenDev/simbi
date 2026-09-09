@@ -9,8 +9,8 @@
 # expected diagnostic:
 #  validation passed
 # bounded execution:
-#  simbi run simbi_configs/examples/newtonian/decomposed_tabulated_geometric.py --end-time 0.001 --gpus 1
-#  simbi run simbi_configs/examples/newtonian/decomposed_tabulated_geometric.py --end-time 0.001 --gpus 2 --gpu
+#  simbi run simbi_configs/examples/newtonian/decomposed_tabulated_geometric.py --end-time 0.001 --ngpus 1
+#  simbi run simbi_configs/examples/newtonian/decomposed_tabulated_geometric.py --end-time 0.001 --ngpus 2 --gpu
 # =============================================================================
 from typing import Annotated
 

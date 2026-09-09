@@ -9,10 +9,10 @@
 # coarse IC.
 #
 # multi-gpu: this also exercises refinement x decomposition. run on N gpus (single
-# node) with `--gpus N` -- the root grid is tiled, the fine box is tiled with it
+# node) with `--ngpus N` -- the root grid is tiled, the fine box is tiled with it
 # (its halos exchanged at the cuts), and the gathered checkpoint matches the
-# single-gpu output. validate on one card: `--gpus 1` vs
-# `SYMBI_GPU_OVERSUBSCRIBE=1 --gpus 2`, then diff the checkpoints.
+# single-gpu output. validate on one card: `--ngpus 1` vs
+# `SYMBI_GPU_OVERSUBSCRIBE=1 --ngpus 2`, then diff the checkpoints.
 # =============================================================================
 from pathlib import Path
 from typing import Annotated

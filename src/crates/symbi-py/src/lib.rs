@@ -5358,8 +5358,8 @@ macro_rules! build_and_run_hydro {
 
 /// the regime-agnostic decomposed run loop: evolve N pre-built tiles in
 /// lockstep with the universal `PeerCopy` transport (real peer where a link exists, staged over
-/// managed memory otherwise -- so the same code runs on one card with `--gpus 2` and on a node
-/// with `--gpus 8`, no machine-specific branch), gathering into `global` for output through the
+/// managed memory otherwise -- so the same code runs on one card with `--ngpus 2` and on a node
+/// with `--ngpus 8`, no machine-specific branch), gathering into `global` for output through the
 /// existing single-grid checkpoint writer. every regime's decomposed build feeds this one loop;
 /// adding a regime is just a tile-build. the checkpoint cadence is the linear `checkpoint_interval`.
 fn run_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(

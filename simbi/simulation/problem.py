@@ -438,6 +438,7 @@ class SimbiProblem(BaseModel):
             1,
             ge=1,
             cli=True,
+            cli_name="ngpus",
             checkpoint_safe=True,
             description="number of gpus to decompose the domain across, intra-node "
             "(NVLink/peer). 1 = single device (default). >1 requires a gpu build "
@@ -1542,7 +1543,7 @@ class SimbiProblem(BaseModel):
             if not cls._field_is_cli(field_name):
                 continue
 
-            cli_name = metadata.cli_name or field_name.replace("_", "-")
+            cli_name = cls._field_cli_name(field_name)
             help_text = field_info.description or f"set {field_name}"
             kwargs: dict[str, Any] = {
                 "dest": field_name,
@@ -1569,6 +1570,17 @@ class SimbiProblem(BaseModel):
                     )
                 except argparse.ArgumentError:
                     pass
+
+    @classmethod
+    def _field_cli_name(cls, field_name: str) -> str:
+        """Inherit explicit CLI names when a config overrides a field default."""
+        for klass in cls.__mro__:
+            fields = getattr(klass, "model_fields", {})
+            if field_name in fields:
+                name = get_param_metadata(fields[field_name]).cli_name
+                if name is not None:
+                    return name
+        return field_name.replace("_", "-")
 
     @classmethod
     def _field_is_cli(cls, field_name: str) -> bool:
@@ -1683,7 +1695,7 @@ class SimbiProblem(BaseModel):
             metadata = get_param_metadata(field_info)
             if not metadata.deprecated_names:
                 continue
-            canonical_flag = f"--{metadata.cli_name or field_name.replace('_', '-')}"
+            canonical_flag = f"--{cls._field_cli_name(field_name)}"
             for legacy in metadata.deprecated_names:
                 legacy_flag = f"--{legacy.replace('_', '-')}"
                 if not used(legacy_flag):

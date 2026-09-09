@@ -9,6 +9,9 @@
 # mro to keep the exposure (the child default/type still win).
 # =============================================================================
 from typing import Annotated
+import argparse
+
+import pytest
 
 from simbi.simulation.param import ProblemParam
 from simbi.simulation.problem import SimbiProblem
@@ -40,3 +43,22 @@ def test_cli_solver_override_applies_to_real_config() -> None:
     assert KelvinHelmholtz.from_cli([]).solver is Solver.HLLC
     assert KelvinHelmholtz.from_cli(["--solver", "hlle"]).solver is Solver.HLLE
     assert KelvinHelmholtz.from_cli(["--solver", "hllc"]).solver is Solver.HLLC
+
+
+class _ShadowGpuCount(KelvinHelmholtz):
+    gpus: Annotated[int, ProblemParam(2, ge=1, cli=True)]
+
+
+@pytest.mark.parametrize("config", [KelvinHelmholtz, _ShadowGpuCount])
+def test_ngpus_cli_name_survives_config_overrides(config) -> None:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    config.setup_cli(parser)
+    assert parser.parse_args(["--ngpus", "8"]).gpus == 8
+    assert parser.parse_args(["--ngpus=4"]).gpus == 4
+    assert "--ngpus" in parser.format_help()
+    assert "--gpus" not in parser.format_help()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--gpus", "8"])
+    problem = config.from_cli(["--ngpus", "8"])
+    assert problem.gpus == 8
+    assert "gpus" in problem._cli_explicit
