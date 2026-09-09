@@ -2425,10 +2425,11 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         _ => 0,
     };
     let bodies = &im.bodies;
-    // the max Alfven speed squared c_a^2 = |B|^2 / rho over the interior lifts the wall/drain
-    // relaxation from the sound speed to the fast magnetosonic speed (bound to the kernel's `c_a2`
-    // scalar), so the wall stays a signal-crossing stiff in the low-beta regions a magnetized sink
-    // accumulates. 0 off MHD, where the rate reduces to c_s exactly and a hydro run is unchanged.
+    // the max Alfven speed squared c_a^2 = |B|^2 / rho over the interior lifts the wall relaxation
+    // from the sound speed to the fast magnetosonic speed (bound to the kernel's `c_a2` scalar), so
+    // the wall stays a signal-crossing stiff in the low-beta regions a magnetized body accumulates.
+    // a magnetized sink's drain reads its local Alfven speed instead (the midpoint kernel below).
+    // 0 off MHD, where the rate reduces to c_s exactly and a hydro run is unchanged.
     // under domain decomposition the max is a global property: the decomposed loop reduces the
     // per-tile maxima and publishes the global value (a per-tile local max would relax the same
     // wall cell at a different rate than the monolithic run). unset (the monolithic / single-gpu
@@ -2502,24 +2503,33 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         } else {
             ""
         };
-        // a slip body's material drain runs the local-Alfven midpoint rate (second-order in time),
-        // which reads the cell's own `bcell` rather than the domain-wide c_a2 max. a body with no
-        // magnetic slip keeps the legacy global-rate drain bit-for-bit.
+        // a magnetized sink's material drain runs the local-Alfven midpoint rate (second-order in
+        // time), which reads the cell's own `bcell`. the drain leaves the field in place, so a rate
+        // keyed on the domain-wide c_a2 max relaxes every sink cell at the emptiest cell's rate and
+        // the whole interior evacuates in finite time; the local rate lets the inflow feed the
+        // interior. the midpoint kernel is baked for the cartesian 3D grid and the 2.5D x-y grid: a
+        // magnetic-slip body requires it, a magnetized drain on another chart and every porous or
+        // torque-free surface keep the global-rate kernels.
         let has_slip = matches!(
             bodies.get(b).spec.magnetic,
             symbi_ib::MagneticSpec::Slip { .. }
         );
+        let midpoint_baked = coords_g == cart && DOF == 3 && (D == 3 || D == 2);
         if has_slip {
             assert!(
-                coords_g == cart && DOF == 3 && (D == 3 || D == 2),
+                midpoint_baked,
                 "the magnetic-slip midpoint drain is a cartesian kernel on a 3D grid or a 2.5D x-y \
                  grid; got coords {coords_g:?} D={D} DOF={DOF}"
             );
         }
+        let local_rate = has_slip
+            || (midpoint_baked
+                && sim.fields.mhd.is_some()
+                && matches!(bodies.get(b).spec.surface, symbi_ib::SurfaceSpec::Drain));
         // the midpoint drain is baked with all three momentum components on either grid, so its
         // name carries the grid dimension alone; the isothermal twin reads the prescribed sound
         // speed and binds no energy slot.
-        let name_owned: String = if has_slip {
+        let name_owned: String = if local_rate {
             let closure = if nrg.is_some() { "" } else { "_iso" };
             format!("penalize_drain_midpoint{closure}{dye}_{D}d")
         } else {
@@ -2556,7 +2566,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // 2.5D MHD (DOF > D) selects the DOF-aware `_dof{DOF}` kernel that drains all momentum
         // components; hydro / full 3D MHD (DOF == D) keep the base name. the baked matrix covers
         // cartesian all-surfaces + curvilinear drain; anything else fails loud as an unbaked kernel.
-        let name_owned = if DOF != D && !has_slip {
+        let name_owned = if DOF != D && !local_rate {
             format!("{name_owned}_dof{DOF}")
         } else {
             name_owned
