@@ -392,3 +392,12 @@ def test_unknown_props_component_gets_did_you_mean():
 
     with pytest.raises(ValueError, match="did you mean"):
         load_component_props(None, ["qaud.cmap=inferno"])
+
+
+def test_a_grid_shape_agrees_with_its_three_axis_spelling():
+    # a 2D config computes a two-entry resolution; the checkpoint records three axes with a
+    # trailing one. they name the same grid, so a restart must not read them as a change.
+    assert _values_agree((8, 5), (8, 5, 1))
+    assert _values_agree((8, 5, 1), [8, 5])
+    assert not _values_agree((8, 5), (8, 6, 1))
+    assert not _values_agree((8, 1), (8, 5))

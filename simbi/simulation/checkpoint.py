@@ -138,6 +138,14 @@ def metadata_to_config_dict(
     return config
 
 
+def _without_trailing_units(seq: Any) -> tuple:
+    """`seq` with its trailing entries equal to one removed, one entry kept at least."""
+    items = list(seq)
+    while len(items) > 1 and items[-1] == 1:
+        items.pop()
+    return tuple(items)
+
+
 def _values_agree(a: Any, b: Any) -> bool:
     """order- and container-insensitive equality for the restart conflict check:
     a CLI tuple must match a checkpoint list, an enum its value string, a numpy
@@ -145,6 +153,9 @@ def _values_agree(a: Any, b: Any) -> bool:
     av = getattr(a, "value", a)
     bv = getattr(b, "value", b)
     if isinstance(av, (list, tuple)) and isinstance(bv, (list, tuple)):
+        # a grid shape spelled at its own dimension and the checkpoint's three-axis form
+        # name the same grid: trailing unit axes carry no information.
+        av, bv = _without_trailing_units(av), _without_trailing_units(bv)
         return len(av) == len(bv) and all(_values_agree(x, y) for x, y in zip(av, bv))
     if isinstance(av, float) or isinstance(bv, float):
         try:
@@ -270,6 +281,21 @@ def merge_with_checkpoint(
         annotation = field_info.annotation
         args = get_args(annotation)
 
+        # the value as recorded, then with trailing unit axes dropped one at a time: a
+        # lower-dimensional run's shape is recorded padded to three axes, and the padding
+        # carries no information.
+        candidates = [value]
+        if isinstance(value, (list, tuple)) and len(value) > 1:
+            trimmed = list(value)
+            while len(trimmed) > 1 and trimmed[-1] == 1:
+                trimmed.pop()
+                candidates.append(tuple(trimmed))
+        for candidate in candidates:
+            try:
+                return TypeAdapter(annotation).validate_python(candidate)
+            except (ValidationError, TypeError):
+                continue
+
         # filter out NoneType from optional fields
         union_members = [a for a in args if a is not type(None)] if args else []
 
@@ -298,9 +324,6 @@ def merge_with_checkpoint(
             adapter = TypeAdapter(annotation)
             return adapter.validate_python(value)
         except (ValidationError, TypeError):
-            # a lower-dimensional run restores from the 3-padded checkpoint
-            # resolution (nx, 1, 1): trailing 1s carry no information, so a
-            # scalar field takes the leading entry.
             if (
                 isinstance(value, (list, tuple))
                 and len(value) > 1

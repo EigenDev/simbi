@@ -814,6 +814,8 @@ divergence. The extra work is about 1.4x in the flux stage and less over a compl
 - `OUTFLOW`, zero gradient
 - `DYNAMIC`, user-defined expressions
 
+**Checkpoints on many GPUs.** A decomposed run writes the same file a single grid writes: every tile streams its own block of each global dataset through a host staging buffer bounded by `SYMBI_CHECKPOINT_STAGING_MB` (64 MB by default), the file is built under a temporary name and takes its final name only after every write succeeded, and a failed write fails the run. The file carries the global grid alone, so a run resumes from it under any partition: one GPU to eight, eight to one, or eight to a different set of cuts.
+
 There are also two dataclass boundaries you can drop into the per-face list alongside those:
 `Neumann` (prescribed gradient) and `Robin` (mixed `a*U + b*dU/dn = c`), per primitive variable.
 
