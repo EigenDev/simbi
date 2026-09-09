@@ -19,7 +19,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{IoError, Result};
-use crate::hdf5::{FileOrGroup, write_dataset, write_group_attrs, write_subtree};
+use crate::attr::Attr;
+use crate::hdf5::{FileOrGroup, FileOrGroupRead, read_group_attrs, read_subtree, write_dataset, write_group_attrs, write_subtree};
+use crate::tree::TreeBuf;
 use crate::tree::Tree;
 use hdf5_metno::{Hyperslab, Selection, SliceOrIndex};
 
@@ -182,6 +184,41 @@ fn slab_selection(start: &[usize], count: &[usize]) -> Selection {
     Selection::from(Hyperslab::from(slices))
 }
 
+/// the attributes of the group at `group_path` in `path` (the root when empty), without reading
+/// any dataset.
+pub fn read_attrs(path: &Path, group_path: &str) -> Result<Vec<(String, Attr)>> {
+    let file = hdf5_metno::File::open(path)
+        .map_err(|e| IoError::Backend(format!("open file {path:?}: {e}")))?;
+    let mut out = Vec::new();
+    if group_path.is_empty() {
+        read_group_attrs(&FileOrGroupRead::File(&file), &mut out)?;
+    } else {
+        let group = file
+            .group(group_path)
+            .map_err(|e| IoError::Backend(format!("open group '{group_path}': {e}")))?;
+        read_group_attrs(&FileOrGroupRead::Group(&group), &mut out)?;
+    }
+    Ok(out)
+}
+
+/// the subtree rooted at the group `group_path` in `path`, datasets included: for the small
+/// groups (mesh, bodies, tracers) a restart reads whole.
+pub fn read_group(path: &Path, group_path: &str) -> Result<TreeBuf> {
+    let file = hdf5_metno::File::open(path)
+        .map_err(|e| IoError::Backend(format!("open file {path:?}: {e}")))?;
+    read_subtree(&file, group_path)
+}
+
+/// the shape of the dataset at `dataset_path` in `path`.
+pub fn dataset_shape(path: &Path, dataset_path: &str) -> Result<Vec<usize>> {
+    let file = hdf5_metno::File::open(path)
+        .map_err(|e| IoError::Backend(format!("open file {path:?}: {e}")))?;
+    let ds = file
+        .dataset(dataset_path)
+        .map_err(|e| IoError::Backend(format!("open dataset '{dataset_path}': {e}")))?;
+    Ok(ds.shape())
+}
+
 /// read the block of the f64 dataset at `dataset_path` in `path` that starts at `start` and
 /// spans `count`, in row-major order over `count`.
 pub fn read_slab(path: &Path, dataset_path: &str, start: &[usize], count: &[usize]) -> Result<Vec<f64>> {
@@ -252,6 +289,13 @@ mod tests {
         // a partial column read: y = 1..3, x = 2..4 of the upper row.
         let block = read_slab(&target, "level_0/hydro/rho", &[1, 1, 2], &[1, 2, 2]).unwrap();
         assert_eq!(block, vec![106.0, 107.0, 110.0, 111.0]);
+        let attrs = read_attrs(&target, "").unwrap();
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].0, "format_version");
+        assert_eq!(dataset_shape(&target, "level_0/hydro/rho").unwrap(), vec![2, 3, 4]);
+        let hydro = read_group(&target, "level_0/hydro").unwrap();
+        assert_eq!(hydro.datasets.len(), 1);
+        assert_eq!(hydro.datasets[0].name, "rho");
     }
 
     #[test]

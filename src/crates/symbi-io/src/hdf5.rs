@@ -233,7 +233,7 @@ fn write_subtree_into(grp: &hdf5_metno::Group, sub: &Tree<'_>) -> Result<()> {
 
 // ----- read side -----------------------------------------------------------
 
-enum FileOrGroupRead<'a> {
+pub(crate) enum FileOrGroupRead<'a> {
     File(&'a hdf5_metno::File),
     Group(&'a hdf5_metno::Group),
 }
@@ -281,7 +281,7 @@ impl<'a> FileOrGroupRead<'a> {
     }
 }
 
-fn read_group_attrs(src: &FileOrGroupRead<'_>, out: &mut Vec<(String, Attr)>) -> Result<()> {
+pub(crate) fn read_group_attrs(src: &FileOrGroupRead<'_>, out: &mut Vec<(String, Attr)>) -> Result<()> {
     use hdf5_metno::types::{FloatSize, IntSize, TypeDescriptor};
     for name in src.attr_names()? {
         let attr = src.attr(&name)?;
@@ -454,7 +454,7 @@ fn read_dataset_slice(
     })
 }
 
-fn read_subtree(parent: &hdf5_metno::File, name: &str) -> Result<TreeBuf> {
+pub(crate) fn read_subtree(parent: &hdf5_metno::File, name: &str) -> Result<TreeBuf> {
     let grp = parent
         .group(name)
         .map_err(|_| IoError::MissingPath(name.into()))?;

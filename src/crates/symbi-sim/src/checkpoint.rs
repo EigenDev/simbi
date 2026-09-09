@@ -24,6 +24,7 @@ use symbi_xpu::{ExecutionSpace, MemorySpace};
 use symbi_hydro::FieldSpec;
 pub use symbi_io::{Attr, IoError, Metadata, Result};
 use symbi_io::{DataRef, Dataset, Hdf5Backend, Hdf5Stream, IoBackend, Tree, TreeBuf};
+use symbi_io::{dataset_shape, read_attrs, read_group, read_slab};
 
 /// the homologous mesh-motion factor applied to axis `ax` of a `d`-dimensional
 /// grid: cartesian expands every axis, spherical the radius only, cylindrical
@@ -1935,82 +1936,91 @@ where
     }
 
     if let (Some(bodies_g), Some(im)) = (tree.find_group("bodies"), sim.immersed.as_mut()) {
-        let get = |name: &str| -> Result<Vec<f64>> {
-            Ok(bodies_g
-                .find_dataset(name)
-                .ok_or_else(|| IoError::MissingPath(format!("bodies/{name}")))?
-                .data
-                .as_f64()
-                .ok_or_else(|| IoError::MissingPath(format!("bodies/{name}: not f64")))?
-                .to_vec())
-        };
-        let (pos, vel) = (get("position")?, get("velocity")?);
-        let (mass, accreted, rate) = (
-            get("mass")?,
-            get("total_accreted_mass")?,
-            get("accretion_rate")?,
-        );
-        let nb = im.bodies.len().min(mass.len());
-        // the slip heat under either closure's name; files written before the receipt existed
-        // leave the counters at zero.
-        let optional = |name: &str| -> Option<Vec<f64>> {
-            bodies_g.find_dataset(name).and_then(|d| d.data.as_f64().map(|v| v.to_vec()))
-        };
-        let heat = optional("magnetic_slip_heating").or_else(|| optional("exported_slip_heat"));
-        let heat_rate = optional("magnetic_slip_heating_rate").or_else(|| optional("exported_slip_heat_rate"));
-        for b in 0..nb {
-            let body = im.bodies.get_mut(b);
-            for a in 0..D {
-                body.position[a] = pos[b * D + a];
-                body.velocity[a] = vel[b * D + a];
-            }
-            body.mass = mass[b];
-            // the slip heat belongs to the body that owns the slip; a gravity-only proxy of it on
-            // a coarser level carries the coupling stripped and books nothing.
-            if matches!(body.spec.magnetic, symbi_ib::MagneticSpec::Slip { .. }) {
-                if let Some(h) = heat.as_ref() {
-                    body.slip_heat_total = h[b];
-                }
-                if let Some(h) = heat_rate.as_ref() {
-                    body.slip_heat_rate = h[b];
-                }
-            }
-            if let symbi_ib::BodyKind::BlackHole {
-                total_accreted_mass,
-                accretion_rate,
-                ..
-            } = &mut body.kind
-            {
-                *total_accreted_mass = accreted[b];
-                *accretion_rate = rate[b];
-            }
-        }
-        // restore the evolved rigid-body rotation (orientation matrix + angular velocity) so a
-        // spinning / tumbling body resumes its exact pose. checkpoints written before these datasets
-        // existed keep the config values (identity orientation, prescribed omega).
-        let get_opt = |name: &str| -> Option<Vec<f64>> {
-            bodies_g
-                .find_dataset(name)?
-                .data
-                .as_f64()
-                .map(|d| d.to_vec())
-        };
-        if let (Some(orient), Some(omega)) = (get_opt("orientation"), get_opt("omega")) {
-            for b in 0..nb {
-                let body = im.bodies.get_mut(b);
-                for i in 0..3 {
-                    for j in 0..3 {
-                        body.orientation[i][j] = orient[b * 9 + i * 3 + j];
-                    }
-                }
-                for k in 0..3 {
-                    body.omega[k] = omega[b * 3 + k];
-                }
-            }
-        }
+        restore_bodies::<D>(bodies_g, im)?;
     }
 
     Ok(meta)
+}
+
+/// restore the per-body kinematic and accretion state recorded under `bodies` over the
+/// config-attached collection `im`: without it a restart resets a moving body's orbit phase and
+/// a sink's cumulative accreted mass. files written before a dataset existed keep the config
+/// value for that quantity.
+fn restore_bodies<const D: usize>(bodies_g: &TreeBuf, im: &mut ImmersedBodies<D>) -> Result<()> {
+    let get = |name: &str| -> Result<Vec<f64>> {
+        Ok(bodies_g
+            .find_dataset(name)
+            .ok_or_else(|| IoError::MissingPath(format!("bodies/{name}")))?
+            .data
+            .as_f64()
+            .ok_or_else(|| IoError::MissingPath(format!("bodies/{name}: not f64")))?
+            .to_vec())
+    };
+    let (pos, vel) = (get("position")?, get("velocity")?);
+    let (mass, accreted, rate) = (
+        get("mass")?,
+        get("total_accreted_mass")?,
+        get("accretion_rate")?,
+    );
+    let nb = im.bodies.len().min(mass.len());
+    // the slip heat under either closure's name; files written before the receipt existed
+    // leave the counters at zero.
+    let optional = |name: &str| -> Option<Vec<f64>> {
+        bodies_g.find_dataset(name).and_then(|d| d.data.as_f64().map(|v| v.to_vec()))
+    };
+    let heat = optional("magnetic_slip_heating").or_else(|| optional("exported_slip_heat"));
+    let heat_rate = optional("magnetic_slip_heating_rate").or_else(|| optional("exported_slip_heat_rate"));
+    for b in 0..nb {
+        let body = im.bodies.get_mut(b);
+        for a in 0..D {
+            body.position[a] = pos[b * D + a];
+            body.velocity[a] = vel[b * D + a];
+        }
+        body.mass = mass[b];
+        // the slip heat belongs to the body that owns the slip; a gravity-only proxy of it on
+        // a coarser level carries the coupling stripped and books nothing.
+        if matches!(body.spec.magnetic, symbi_ib::MagneticSpec::Slip { .. }) {
+            if let Some(h) = heat.as_ref() {
+                body.slip_heat_total = h[b];
+            }
+            if let Some(h) = heat_rate.as_ref() {
+                body.slip_heat_rate = h[b];
+            }
+        }
+        if let symbi_ib::BodyKind::BlackHole {
+            total_accreted_mass,
+            accretion_rate,
+            ..
+        } = &mut body.kind
+        {
+            *total_accreted_mass = accreted[b];
+            *accretion_rate = rate[b];
+        }
+    }
+    // restore the evolved rigid-body rotation (orientation matrix + angular velocity) so a
+    // spinning / tumbling body resumes its exact pose. checkpoints written before these datasets
+    // existed keep the config values (identity orientation, prescribed omega).
+    let get_opt = |name: &str| -> Option<Vec<f64>> {
+        bodies_g
+            .find_dataset(name)?
+            .data
+            .as_f64()
+            .map(|d| d.to_vec())
+    };
+    if let (Some(orient), Some(omega)) = (get_opt("orientation"), get_opt("omega")) {
+        for b in 0..nb {
+            let body = im.bodies.get_mut(b);
+            for i in 0..3 {
+                for j in 0..3 {
+                    body.orientation[i][j] = orient[b * 9 + i * 3 + j];
+                }
+            }
+            for k in 0..3 {
+                body.omega[k] = omega[b * 3 + k];
+            }
+        }
+    }
+    Ok(())
 }
 
 fn restore_field<const D: usize, Mem: MemorySpace>(
@@ -3426,23 +3436,24 @@ fn facts_x_lo(x_lo: &[f64], dx: f64, lo_index: isize, ax: usize, scale: f64) -> 
 }
 
 #[cfg(test)]
-mod partitioned_tests {
+mod partitioned_tests_support {
     use super::*;
     use symbi_geometry::Cartesian;
     use symbi_hydro::eos::IdealGas;
     use symbi_hydro::newtonian_mhd::NewtonianMhd;
-    use symbi_io::TreeBuf;
     use symbi_xpu::{CpuSpace, HostMemory};
 
-    type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    pub type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    pub const NG: usize = 2;
 
-    const NG: usize = 2;
+    /// the analytic value of field `tag` at global cell `g`: distinct per field and per cell.
+    pub fn value(tag: usize, g: [isize; 2]) -> f64 {
+        1.0 + tag as f64 * 0.01 + 0.5 * g[0] as f64 + 0.125 * g[1] as f64
+    }
 
-    /// a 2.5D MHD state whose interior starts at global index `offset` with `cells` cells, on a
-    /// log-spaced first axis; every cell and face field, halos included, is an analytic function
-    /// of the global index, so tiles cut from the same grid agree with the whole grid wherever
-    /// both hold a value.
-    fn tile(offset: [isize; 2], cells: [usize; 2]) -> Sim {
+    /// a blank 2.5D MHD tile whose interior starts at global index `offset` with `cells` cells,
+    /// on a log-spaced first axis.
+    pub fn blank(offset: [isize; 2], cells: [usize; 2]) -> Sim {
         let dx = [0.1, 0.25];
         let x_lo = [1.0 * 10f64.powf(0.05 * offset[0] as f64), offset[1] as f64 * dx[1]];
         let mut sim = Sim::new(
@@ -3463,27 +3474,88 @@ mod partitioned_tests {
             symbi_geometry::AxisMap::Log { start: x_lo[0], log_slope: 0.05 },
             symbi_geometry::AxisMap::Uniform { start: x_lo[1], dx: dx[1] },
         ]);
+        sim
+    }
+
+    /// the distinct cell fields a state stores, each once: the cell-centered magnetic field
+    /// appears under both the primitive and the conserved bucket and carries one value.
+    pub fn unique_cell_fields(sim: &Sim) -> Vec<(String, &symbi_grid::Field<f64, 2, HostMemory>)> {
+        let mut out: Vec<(String, &symbi_grid::Field<f64, 2, HostMemory>)> = Vec::new();
+        for (_, name, field) in cell_datasets(sim) {
+            if !out.iter().any(|(_, f)| std::ptr::eq(*f, field)) {
+                out.push((name, field));
+            }
+        }
+        out
+    }
+
+    /// `blank` with every cell and face field, halos included, set to the analytic function of
+    /// the global index, so tiles cut from one grid agree with the whole grid wherever both hold
+    /// a value.
+    pub fn tile(offset: [isize; 2], cells: [usize; 2]) -> Sim {
+        let sim = blank(offset, cells);
         let int_lo = [sim.geom.interior.spaces[0].lo, sim.geom.interior.spaces[1].lo];
-        let value = |tag: usize, c: [isize; 2]| {
-            let g = [c[0] - int_lo[0] + offset[0], c[1] - int_lo[1] + offset[1]];
-            1.0 + tag as f64 * 0.01 + 0.5 * g[0] as f64 + 0.125 * g[1] as f64
-        };
-        for (tag, (_, _, field)) in cell_datasets(&sim).into_iter().enumerate() {
+        let global = |c: [isize; 2]| [c[0] - int_lo[0] + offset[0], c[1] - int_lo[1] + offset[1]];
+        for (tag, (_, field)) in unique_cell_fields(&sim).into_iter().enumerate() {
             let view = field.view_mut();
             for c in field.domain().iter() {
-                view.set(c, value(tag, c));
+                view.set(c, value(tag, global(c)));
             }
         }
         let mhd = sim.fields.mhd.as_ref().unwrap();
         for d in 0..2 {
             let view = mhd.bface[d].view_mut();
             for c in mhd.bface[d].domain().iter() {
-                view.set(c, value(100 + d, c));
+                view.set(c, value(100 + d, global(c)));
             }
         }
         mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
         sim
     }
+
+    /// every cell of the tile whose global index lies inside the file's cell box, and every face
+    /// of its owned face domain, against the analytic function.
+    pub fn assert_tile_matches_the_function(sim: &Sim, offset: [isize; 2], grid: &GlobalGrid<2>, label: &str) {
+        let int_lo = [sim.geom.interior.spaces[0].lo, sim.geom.interior.spaces[1].lo];
+        let global = |c: [isize; 2]| [c[0] - int_lo[0] + offset[0], c[1] - int_lo[1] + offset[1]];
+        let ng = grid.ng as isize;
+        let inside = |g: [isize; 2]| (0..2).all(|ax| g[ax] >= -ng && g[ax] < grid.cells[ax] as isize + ng);
+        let mut checked = 0;
+        for (tag, (name, field)) in unique_cell_fields(sim).into_iter().enumerate() {
+            for c in field.domain().iter() {
+                let g = global(c);
+                if !inside(g) {
+                    continue;
+                }
+                let got = *field.view().at(c);
+                assert_eq!(got.to_bits(), value(tag, g).to_bits(), "{label}: {name} at {c:?} (global {g:?}) = {got}");
+                checked += 1;
+            }
+        }
+        let mhd = sim.fields.mhd.as_ref().unwrap();
+        for d in 0..2 {
+            for c in sim.geom.interior.extend(d, 0, 1).iter() {
+                let got = *mhd.bface[d].view().at(c);
+                assert_eq!(got.to_bits(), value(100 + d, global(c)).to_bits(), "{label}: B{} at {c:?}", d + 1);
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "{label}: nothing compared");
+    }
+
+    pub fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("symbi_partitioned_{}_{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+}
+
+#[cfg(test)]
+mod partitioned_tests {
+    use super::partitioned_tests_support::*;
+    use super::*;
+    use symbi_io::TreeBuf;
 
     fn assert_trees_equal(a: &TreeBuf, b: &TreeBuf, path: &str) {
         assert_eq!(a.attrs.len(), b.attrs.len(), "{path}: attribute count");
@@ -3513,13 +3585,6 @@ mod partitioned_tests {
         for (x, y) in a.groups.iter().zip(&b.groups) {
             assert_trees_equal(x, y, &format!("{path}/{}", x.name));
         }
-    }
-
-    fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("symbi_partitioned_{}_{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
     }
 
     #[test]
@@ -3566,5 +3631,213 @@ mod partitioned_tests {
         let err = write_partitioned_checkpoint(&[LevelTiles::whole(&sim)], target.to_str().unwrap(), &Metadata::new()).unwrap_err();
         assert!(matches!(err, IoError::Backend(_)), "{err:?}");
         assert!(!target.exists());
+    }
+}
+
+// =============================================================================
+// partitioned restart: a tile reads its own block of each global dataset
+// =============================================================================
+
+/// read `region` of the dataset at `dataset_path` into `field`, in row groups along the slowest
+/// axis within `budget` cells, through one reused staging buffer.
+fn read_region<const D: usize, Mem: MemorySpace>(
+    path: &Path,
+    dataset_path: &str,
+    field: &symbi_grid::Field<f64, D, Mem>,
+    region: &symbi_algebra::Domain<D>,
+    file_of: &dyn Fn(usize, isize) -> usize,
+    budget: usize,
+) -> Result<()> {
+    if region.volume() == 0 {
+        return Ok(());
+    }
+    let slow = D - 1;
+    let row_volume: usize = (0..slow).map(|ax| region.spaces[ax].size()).product();
+    let rows_per_chunk = (budget / row_volume.max(1)).max(1) as isize;
+    let (lo, hi) = (region.spaces[slow].lo, region.spaces[slow].hi);
+    let view = field.view_mut();
+    let mut r0 = lo;
+    while r0 < hi {
+        let r1 = (r0 + rows_per_chunk).min(hi);
+        let chunk = region.slab(slow, (r0, r1));
+        let (start, count) = slab_start_and_count(&chunk, file_of);
+        let data = read_slab(path, dataset_path, &start, &count)?;
+        let mut ii = 0usize;
+        for_each_cell_axis0(&chunk, |coord| {
+            view.set(coord, data[ii]);
+            ii += 1;
+        });
+        r0 = r1;
+    }
+    Ok(())
+}
+
+fn attr_of<'a>(attrs: &'a [(String, Attr)], name: &str) -> Option<&'a Attr> {
+    attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v)
+}
+
+/// load level `level_index` of the checkpoint at `path` into one tile of a partition of the
+/// level's grid: the tile's cells over its allocated box clipped to the file's cell box, so a
+/// cut halo arrives from the neighbor's interior and a domain halo from the file's own, its
+/// faces over its owned face domain (the shared cut face included), the level clock, and the
+/// body state. the file carries the global grid alone, so the partition it is read into is
+/// free. tracer populations are refused, since they need repartitioning by owner.
+pub fn load_partitioned_level<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    path: &str,
+    level_index: usize,
+    offset: [isize; D],
+    grid: &GlobalGrid<D>,
+) -> Result<()>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    let file = Path::new(path);
+    let root = read_attrs(file, "")?;
+    let stored = attr_of(&root, CONSERVED_DENSITIZATION_ATTR).map(|a| format!("{a:?}"));
+    let expected = conserved_densitization(sim).map(|t| format!("{:?}", Attr::Str(t.into())));
+    if stored != expected {
+        return Err(IoError::Backend(format!(
+            "checkpoint '{path}' stores conserved variables with densitization {stored:?}; this run evolves {expected:?}"
+        )));
+    }
+    let meta = read_attrs(file, "metadata")?;
+    let regime = attr_of(&meta, "regime")
+        .ok_or_else(|| IoError::MissingPath("metadata/regime".into()))?
+        .as_str("metadata/regime")?;
+    if regime != regime_name(&sim.physics.regime) {
+        return Err(IoError::Backend(format!(
+            "checkpoint '{path}' holds a {regime} run; this run is {}",
+            regime_name(&sim.physics.regime)
+        )));
+    }
+    let level_path = format!("level_{level_index}");
+    let level_attrs = read_attrs(file, &level_path)?;
+    if let Some(a) = attr_of(&level_attrs, "time") {
+        sim.time = a.as_f64(&format!("{level_path}/time"))?;
+    }
+    if let Some(a) = attr_of(&level_attrs, "iteration") {
+        sim.iteration = a.as_u64(&format!("{level_path}/iteration"))?;
+    }
+    let mesh = read_group(file, &format!("{level_path}/mesh"))?;
+    let stored_cells: Vec<u64> = mesh
+        .find_dataset("global_cells")
+        .and_then(|d| d.data.as_u64().map(|v| v.to_vec()))
+        .ok_or_else(|| IoError::MissingPath(format!("{level_path}/mesh/global_cells")))?;
+    let expected_cells: Vec<u64> = (0..D).rev().map(|ax| grid.cells[ax] as u64).collect();
+    if stored_cells != expected_cells {
+        return Err(IoError::ShapeMismatch {
+            path: format!("{level_path}/mesh/global_cells"),
+            expected: expected_cells.iter().map(|&c| c as usize).collect(),
+            actual: stored_cells.iter().map(|&c| c as usize).collect(),
+        });
+    }
+    let halo = mesh
+        .find_attr("halo_width")
+        .ok_or_else(|| IoError::MissingPath(format!("{level_path}/mesh/halo_width")))?
+        .as_u64("halo_width")? as usize;
+    if halo != grid.ng {
+        return Err(IoError::Backend(format!(
+            "checkpoint '{path}' carries a halo of {halo} cells; this run allocates {}",
+            grid.ng
+        )));
+    }
+    let budget = staging_budget_cells();
+    let interior = sim.geom.interior.clone();
+    let alloc = sim.fields.cons.den.domain().clone();
+    let ng = grid.ng as isize;
+    let shift: [isize; D] = std::array::from_fn(|ax| offset[ax] - interior.spaces[ax].lo - grid.interior_lo[ax]);
+    // the tile's cells whose file index lies inside the file's cell box.
+    let cell_region = {
+        let mut r = alloc.clone();
+        for ax in 0..D {
+            let lo = alloc.spaces[ax].lo.max(-shift[ax] - ng);
+            let hi = alloc.spaces[ax].hi.min(grid.cells[ax] as isize + ng - shift[ax]);
+            r = r.slab(ax, (lo, hi));
+        }
+        r
+    };
+    let cell_file_of = |ax: usize, c: isize| (c + shift[ax] + ng) as usize;
+    for (group, name, field) in cell_datasets(sim) {
+        let dataset_path = if group.is_empty() {
+            format!("{level_path}/{name}")
+        } else {
+            format!("{level_path}/{group}/{name}")
+        };
+        read_region(file, &dataset_path, field, &cell_region, &cell_file_of, budget)?;
+    }
+    if let Some(mhd) = sim.fields.mhd.as_ref() {
+        let face_file_of = |ax: usize, c: isize| (c + shift[ax]) as usize;
+        for d in 0..D {
+            let dataset_path = format!("{level_path}/partition_0/hydro/magnetic/B{}/data", d + 1);
+            dataset_shape(file, &dataset_path)?;
+            let region = interior.extend(d, 0, 1);
+            read_region(file, &dataset_path, &mhd.bface[d], &region, &face_file_of, budget)?;
+        }
+        mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    if read_group(file, "tracers").is_ok() {
+        return Err(IoError::Backend(format!(
+            "checkpoint '{path}' carries a tracer population; a partitioned restart does not repartition tracers"
+        )));
+    }
+    if let Some(im) = sim.immersed.as_mut() {
+        if let Ok(bodies) = read_group(file, "bodies") {
+            restore_bodies::<D>(&bodies, im)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod partitioned_restart_tests {
+    use super::partitioned_tests_support::*;
+    use super::*;
+
+    #[test]
+    fn a_restart_reconstructs_tiles_of_a_different_cut_and_the_whole_grid() {
+        let dir = scratch("restart");
+        let path = dir.join("two.h5");
+        let source = [tile([0, 0], [3, 6]), tile([3, 0], [5, 6])];
+        let grid = GlobalGrid::of_state(&tile([0, 0], [8, 6]));
+        let level = LevelTiles {
+            tiles: vec![
+                TileView { state: &source[0], offset: [0, 0] },
+                TileView { state: &source[1], offset: [3, 0] },
+            ],
+            grid: grid.clone(),
+        };
+        write_partitioned_checkpoint(&[level], path.to_str().unwrap(), &Metadata::new()).unwrap();
+        let path = path.to_str().unwrap();
+        // three tiles cut where the source had none, each starting blank.
+        let cuts = [([0isize, 0], [2usize, 6]), ([2, 0], [3, 6]), ([5, 0], [3, 6])];
+        for (offset, cells) in cuts {
+            let mut fresh = blank(offset, cells);
+            load_partitioned_level(&mut fresh, path, 0, offset, &grid).unwrap();
+            assert_tile_matches_the_function(&fresh, offset, &grid, "three-cut tile");
+        }
+        let mut whole = blank([0, 0], [8, 6]);
+        load_partitioned_level(&mut whole, path, 0, [0, 0], &grid).unwrap();
+        assert_tile_matches_the_function(&whole, [0, 0], &grid, "whole from tiles");
+        // the classic whole-grid loader reads the same file.
+        let mut classic = blank([0, 0], [8, 6]);
+        load_checkpoint_level(&mut classic, path, 0).unwrap();
+        assert_tile_matches_the_function(&classic, [0, 0], &grid, "classic loader");
+    }
+
+    #[test]
+    fn a_restart_refuses_a_grid_of_another_size_or_regime_halo() {
+        let dir = scratch("refuse_restart");
+        let path = dir.join("one.h5");
+        let source = tile([0, 0], [8, 6]);
+        write_partitioned_checkpoint(&[LevelTiles::whole(&source)], path.to_str().unwrap(), &Metadata::new()).unwrap();
+        let mut other = blank([0, 0], [8, 4]);
+        let wrong = GlobalGrid::of_state(&other);
+        let err = load_partitioned_level(&mut other, path.to_str().unwrap(), 0, [0, 0], &wrong).unwrap_err();
+        assert!(matches!(err, IoError::ShapeMismatch { .. }), "{err:?}");
     }
 }

@@ -40,4 +40,4 @@ pub use field_layout::{component_count, dataset_name, iter_components};
 pub use hdf5::Hdf5Backend;
 pub use json::schema_json;
 pub use tree::{DType, DataBuf, DataRef, Dataset, DatasetBuf, Tree, TreeBuf};
-pub use stream::{Hdf5Stream, read_slab};
+pub use stream::{Hdf5Stream, dataset_shape, read_attrs, read_group, read_slab};
