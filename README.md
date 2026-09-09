@@ -307,11 +307,9 @@ continue to ignore the return value.
 
 ### Multi-GPU runs
 
-SIMBI can run one simulation across several GPUs **within one node**, using one
-process and one domain tile per device. Each device evolves its local state;
-halo exchanges connect the tiles between updates. CUDA and HIP builds use this
-same decomposition machinery. MPI and multi-node execution are not yet supported:
-launching eight independent SIMBI processes is not equivalent to an eight-device run.
+SIMBI distributes a simulation across the GPUs in a single node. One process
+coordinates the run, with each GPU evolving a tile of the domain and exchanging
+boundary data with the other tiles. This works with both CUDA and HIP builds.
 
 Start with a small shipped example on two visible devices:
 
@@ -320,14 +318,13 @@ simbi run decomposed-tabulated-geometric --mode gpu --ngpus 2 \
     --end-time 0.001 --data-directory data/multi-gpu-smoke
 ```
 
-The installed extension must have been built with CUDA or HIP. `--ngpus` chooses
-the runtime device count, not the GPU backend. In Python configs the corresponding
-field is still `gpus`; the CLI spelling is `--ngpus` (formerly `--gpus`).
+Install a [GPU build](#gpu-builds), then choose how many devices to use with
+`--ngpus`. In Python configs, the corresponding field is `gpus`.
 
 #### Workstations and scheduled jobs
 
 On a workstation, run the command directly with `--ngpus N`, where `N` is the
-number of visible devices to use. No scheduler or MPI launcher is required.
+number of visible devices to use.
 
 On a cluster, request one node and one task with the desired GPU count. For
 example, inside a Slurm allocation with eight GPUs available to the task:
@@ -338,11 +335,9 @@ srun -N 1 -n 1 --gpus-per-task=8 \
     --data-directory /path/to/fresh-output
 ```
 
-The Slurm option `--gpus-per-task` allocates devices; SIMBI's `--ngpus` partitions
-the simulation across them. These counts should agree. Do not use one Slurm task
-per GPU for this single-process driver. Before submission, check the requested
-configuration with `simbi run /path/to/problem.py --ngpus 8 --validate`; this checks
-configuration compatibility, not available device memory or hardware performance.
+Match Slurm's `--gpus-per-task` to SIMBI's `--ngpus`, keeping one task for the run.
+You can check the configuration before submission with
+`simbi run /path/to/problem.py --ngpus 8 --validate`.
 
 #### Choosing the cuts
 
@@ -356,28 +351,26 @@ gpus: int = 8
 decompose: list[list[int]] = [[], [], [16, 32, 48, 64, 80, 96, 112]]
 ```
 
-The lists describe cut locations, not slab widths or device IDs. Their implied
-tile count must equal `gpus`; uneven cuts are supported. A config can also expose
+Each number is the cell index where a new tile begins. The resulting tile count
+must equal `gpus`; uneven cuts are supported. A config can also expose
 `decompose` as a CLI parameter with `ProblemParam(..., cli=True)`.
 
 Full-sphere spherical runs with `AXIS` poles need a periodic, uniformly spaced
 azimuth covering `2*pi` with an even cell count. Across phi slabs, polar ghost
-values come from the antipodal tiles, not just the immediate neighbors. Keep
-enough cells in each slab for the halo stencil; more GPUs are not automatically
-faster when they leave very narrow tiles.
+values come from the tiles half a turn away. Each slab needs enough cells for
+the halo stencil.
 
 #### Memory, output, and restart
 
-Checkpointing does not gather a whole-grid simulation onto device 0. The devices
-are drained before output, and tile data streams into global HDF5 datasets through
-a bounded host staging buffer. `SYMBI_CHECKPOINT_STAGING_MB` sets its hard cap
-(64 MB by default). This is a staging limit, not a limit on total host or device
-memory: local state, halos, solver scratch, and runtime allocations still count.
-Tracer runs retain one exception: whole-grid initialization for particle seeding,
-followed by splitting the population and dropping that grid.
+Each GPU holds its tile's state, halos, and solver scratch. At checkpoint time,
+SIMBI waits for device work to finish and streams the tiles into global HDF5
+datasets through a reusable host buffer. `SYMBI_CHECKPOINT_STAGING_MB` caps this
+buffer at 64 MB by default, keeping output staging memory bounded as the grid grows.
+Runs with tracers also allocate a whole grid temporarily during initialization
+to seed and distribute the particles.
 
 Checkpoints preserve the global mesh and can restart with a different device
-count or valid set of cuts, without interpolation onto a different grid:
+count or a different set of cuts:
 
 ```bash
 simbi run /path/to/problem.py --mode gpu --ngpus 8 \
@@ -386,21 +379,20 @@ simbi run /path/to/problem.py --mode gpu --ngpus 8 \
 ```
 
 If the config pins explicit cuts, update them to match the new device count.
-Writes publish the final filename only after successful completion; a failed
-write fails the run rather than silently losing the checkpoint.
+Completed checkpoints are published atomically; write errors stop the run with
+the failing path and error message.
 
 #### Compatibility and performance
 
-Feature combinations are checked at startup: single-device support does not imply
-that every refinement, closure, reconstruction, or body option composes with
-multi-GPU execution. Changing the partition can introduce floating-point roundoff;
-bitwise equality with a single-device run is not a general guarantee.
+SIMBI checks the requested physics and grid features at startup and reports
+unsupported combinations. Multi-node execution remains on the roadmap. Changing
+the partition can introduce small floating-point roundoff differences.
 
-Reported zone-cycles/s is aggregate throughput across the tiles, not per-device
-throughput. To measure scaling, hold the global grid, solver, physics, end time,
+Reported zone-cycles/s is the combined throughput of all tiles. To measure
+scaling, hold the global grid, solver, physics, end time,
 and output cadence fixed while changing only the device count and cuts. Speedup
-depends on the workload, tile sizes, and device interconnect, not just the GPU
-count. Record the startup backend/config identities and use `SYMBI_PROFILE=1`
+depends on the workload, tile sizes, and device interconnect. Record the startup
+backend/config identities and use `SYMBI_PROFILE=1`
 to investigate runtime costs before choosing a production layout.
 
 ### Visualization
