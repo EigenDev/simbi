@@ -23,7 +23,7 @@ use symbi_xpu::{ExecutionSpace, MemorySpace};
 
 use symbi_hydro::FieldSpec;
 pub use symbi_io::{Attr, IoError, Metadata, Result};
-use symbi_io::{DataRef, Dataset, Hdf5Backend, IoBackend, Tree, TreeBuf};
+use symbi_io::{DataRef, Dataset, Hdf5Backend, Hdf5Stream, IoBackend, Tree, TreeBuf};
 
 /// the homologous mesh-motion factor applied to axis `ax` of a `d`-dimensional
 /// grid: cartesian expands every axis, spherical the radius only, cylindrical
@@ -371,9 +371,18 @@ fn timestepping_name(t: Timestepping) -> &'static str {
 /// the global `/metadata` group — time/physics/scheme attrs (same across an AMR
 /// hierarchy, so authored from the coarse level) + the coarse mesh datasets for
 /// single-level readers.
+/// the coarse level's mesh facts the metadata group records for single-level readers: interior
+/// cell counts, physical cell widths and physical lower bounds per axis, all scaled by the
+/// mesh motion.
+pub struct MeshFacts {
+    pub resolution: Vec<u64>,
+    pub dx_phys: Vec<f64>,
+    pub x_lo_phys: Vec<f64>,
+}
+
 fn build_metadata_group<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-    snap: &'a Snapshot<D>,
+    facts: &'a MeshFacts,
     extras: &'a Metadata,
 ) -> Tree<'a>
 where
@@ -449,10 +458,10 @@ where
     meta.push_dataset(Dataset::new(
         "resolution",
         vec![D],
-        DataRef::U64(&snap.resolution),
+        DataRef::U64(&facts.resolution),
     ));
-    meta.push_dataset(Dataset::new("dx", vec![D], DataRef::F64(&snap.dx_phys)));
-    meta.push_dataset(Dataset::new("x_lo", vec![D], DataRef::F64(&snap.x_lo_phys)));
+    meta.push_dataset(Dataset::new("dx", vec![D], DataRef::F64(&facts.dx_phys)));
+    meta.push_dataset(Dataset::new("x_lo", vec![D], DataRef::F64(&facts.x_lo_phys)));
     meta
 }
 
@@ -1076,6 +1085,7 @@ where
 fn build_tree<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     snap: &'a Snapshot<D>,
+    facts: &'a MeshFacts,
     extras: &'a Metadata,
 ) -> Tree<'a>
 where
@@ -1091,7 +1101,7 @@ where
     if let Some(tag) = conserved_densitization(sim) {
         root = root.with_attr(CONSERVED_DENSITIZATION_ATTR, tag);
     }
-    root.push_group(build_metadata_group(sim, snap, extras));
+    root.push_group(build_metadata_group(sim, facts, extras));
     root.push_group(build_level_group(sim, snap, 0));
     // the per-step body-gas exchange series (immersed runs): Mdot(t) is
     // mass_delta/dt, the accretion drag is force. shapes: time/dt [len],
@@ -1184,7 +1194,12 @@ where
     Mem: MemorySpace,
 {
     let snap = snapshot(sim);
-    let mut tree = build_tree(sim, &snap, extras);
+    let facts = MeshFacts {
+        resolution: snap.resolution.clone(),
+        dx_phys: snap.dx_phys.clone(),
+        x_lo_phys: snap.x_lo_phys.clone(),
+    };
+    let mut tree = build_tree(sim, &snap, &facts, extras);
     // per-body kinematic + accretion state (restart round-trip): derived
     // buffers, so they live here and the tree borrows them.
     let body_snap = sim.immersed.as_ref().map(body_state_snap);
@@ -1236,7 +1251,12 @@ where
         root = root.with_attr(CONSERVED_DENSITIZATION_ATTR, tag);
     }
     // global metadata authored from the coarse level.
-    root.push_group(build_metadata_group(levels[0], &snaps[0], extras));
+    let facts = MeshFacts {
+        resolution: snaps[0].resolution.clone(),
+        dx_phys: snaps[0].dx_phys.clone(),
+        x_lo_phys: snaps[0].x_lo_phys.clone(),
+    };
+    root.push_group(build_metadata_group(levels[0], &facts, extras));
     for (idx, snap) in snaps.iter().enumerate() {
         root.push_group(build_level_group(levels[idx], snap, idx));
     }
@@ -2851,4 +2871,700 @@ where
         out.push(group);
     }
     out
+}
+
+// =============================================================================
+// partitioned output: every tile streams its owned block of each global dataset
+// =============================================================================
+
+/// the global grid of one level as the checkpoint records it: the interior cell counts and the
+/// global index of the first interior cell per axis, the halo width every cell dataset carries,
+/// and the coordinate description the mesh group is rebuilt from. the tiles of a decomposed run
+/// partition this grid; a single state is the whole of it.
+#[derive(Clone, Debug)]
+pub struct GlobalGrid<const D: usize> {
+    pub cells: [usize; D],
+    pub interior_lo: [isize; D],
+    pub ng: usize,
+    pub x_lo: [f64; D],
+    pub dx: [f64; D],
+    pub maps: Option<[symbi_geometry::AxisMap; D]>,
+}
+
+impl<const D: usize> GlobalGrid<D> {
+    /// the grid of a state that is its whole level.
+    pub fn of_state<R, const DOF: usize, M, E, S, Mem>(
+        sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    ) -> Self
+    where
+        R: Regime<f64, D>,
+        M: Metric<f64, D> + Copy,
+        E: Eos<f64>,
+        S: ExecutionSpace,
+        Mem: MemorySpace,
+    {
+        let interior = &sim.geom.interior;
+        Self {
+            cells: std::array::from_fn(|ax| interior.spaces[ax].size()),
+            interior_lo: std::array::from_fn(|ax| interior.spaces[ax].lo),
+            ng: sim.geom.ng,
+            x_lo: std::array::from_fn(|ax| sim.geom.x_lo[ax]),
+            dx: std::array::from_fn(|ax| sim.geom.dx[ax]),
+            maps: sim.geom.maps,
+        }
+    }
+}
+
+/// one tile of a level for output: a read-only view of its state and the global index of its
+/// first interior cell per axis.
+pub struct TileView<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    pub state: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    pub offset: [isize; D],
+}
+
+/// the tiles of one level and the grid they partition. tile 0 supplies the level's clock and
+/// the physics identity every tile shares.
+pub struct LevelTiles<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    pub tiles: Vec<TileView<'a, R, D, DOF, M, E, S, Mem>>,
+    pub grid: GlobalGrid<D>,
+}
+
+impl<'a, R, const D: usize, const DOF: usize, M, E, S, Mem> LevelTiles<'a, R, D, DOF, M, E, S, Mem>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    /// a level held whole by one state.
+    pub fn whole(state: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>) -> Self {
+        let grid = GlobalGrid::of_state(state);
+        Self {
+            tiles: vec![TileView {
+                state,
+                offset: grid.interior_lo,
+            }],
+            grid,
+        }
+    }
+}
+
+/// the host staging budget in cells per slab, from `SYMBI_CHECKPOINT_STAGING_MB` (64 MB when
+/// unset): every tile block larger than this is written in row groups along the slowest axis.
+pub fn staging_budget_cells() -> usize {
+    let mb: usize = std::env::var("SYMBI_CHECKPOINT_STAGING_MB")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&mb| mb > 0)
+        .unwrap_or(64);
+    mb * (1 << 20) / std::mem::size_of::<f64>()
+}
+
+/// the row-major shape and origin of a local region in the file's index space, which runs
+/// storage order (axis D-1 slowest) with the file origin `file_of(local coordinate)`.
+fn slab_start_and_count<const D: usize>(
+    region: &symbi_algebra::Domain<D>,
+    file_of: impl Fn(usize, isize) -> usize,
+) -> (Vec<usize>, Vec<usize>) {
+    let start = (0..D)
+        .rev()
+        .map(|ax| file_of(ax, region.spaces[ax].lo))
+        .collect();
+    let count = (0..D).rev().map(|ax| region.spaces[ax].size()).collect();
+    (start, count)
+}
+
+/// stream one field's `region` into the dataset at `dataset_path`, in row groups along the
+/// slowest axis whose volume stays within `budget` cells, through one reused staging buffer.
+fn stream_region<const D: usize, Mem: MemorySpace>(
+    stream: &Hdf5Stream,
+    dataset_path: &str,
+    field: &symbi_grid::Field<f64, D, Mem>,
+    region: &symbi_algebra::Domain<D>,
+    file_of: &dyn Fn(usize, isize) -> usize,
+    budget: usize,
+    staging: &mut Vec<f64>,
+) -> Result<()> {
+    if region.volume() == 0 {
+        return Ok(());
+    }
+    let slow = D - 1;
+    let row_volume: usize = (0..slow).map(|ax| region.spaces[ax].size()).product();
+    let rows_per_chunk = (budget / row_volume.max(1)).max(1) as isize;
+    let (lo, hi) = (region.spaces[slow].lo, region.spaces[slow].hi);
+    let mut r0 = lo;
+    while r0 < hi {
+        let r1 = (r0 + rows_per_chunk).min(hi);
+        let chunk = region.slab(slow, (r0, r1));
+        staging.clear();
+        for_each_cell_axis0(&chunk, |coord| staging.push(*field.view().at(coord)));
+        let (start, count) = slab_start_and_count(&chunk, file_of);
+        stream.write_slab(dataset_path, &start, &count, staging)?;
+        r0 = r1;
+    }
+    Ok(())
+}
+
+/// the level's mesh facts for the metadata group: global interior counts, physical widths and
+/// lower bounds scaled by the mesh motion, in grid axis order.
+fn mesh_facts<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    grid: &GlobalGrid<D>,
+) -> MeshFacts
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    let geometry = sim.physics.metric.geometry();
+    let scale = |ax: usize| motion_axis_scale(geometry, ax, D, sim.motion.a);
+    MeshFacts {
+        resolution: grid.cells.iter().map(|&c| c as u64).collect(),
+        dx_phys: (0..D).map(|ax| grid.dx[ax] * scale(ax)).collect(),
+        x_lo_phys: (0..D).map(|ax| grid.x_lo[ax] * scale(ax)).collect(),
+    }
+}
+
+/// the cell-centered datasets a state contributes, in checkpoint order: the conserved bucket,
+/// the primitive bucket, and the isothermal closure, each as (group path under the level, name,
+/// field).
+fn cell_datasets<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+) -> Vec<(&'static str, String, &'a symbi_grid::Field<f64, D, Mem>)>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    let mut out: Vec<(&'static str, String, &symbi_grid::Field<f64, D, Mem>)> = Vec::new();
+    for fs in R::SPEC.primitive_fields {
+        for idx in 0..symbi_io::component_count(fs, DOF) {
+            let field = match fs.name {
+                "rho" => Some(&sim.fields.prim.rho),
+                "vel" => Some(&sim.fields.prim.vel[idx]),
+                "pre" => sim.fields.prim.pre_field(),
+                "bcell" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
+                other => panic!("checkpoint write: unknown primitive field '{other}'"),
+            };
+            if let Some(field) = field {
+                out.push(("partition_0/hydro/primitives", symbi_io::dataset_name(fs, idx), field));
+            }
+        }
+    }
+    if let Some(chi) = sim.fields.prim.chi_field() {
+        out.push(("partition_0/hydro/primitives", "chi".to_string(), chi));
+    }
+    for fs in R::SPEC.fields {
+        for idx in 0..symbi_io::component_count(fs, DOF) {
+            let field = match fs.name {
+                "den" => Some(&sim.fields.cons.den),
+                "mom" => Some(&sim.fields.cons.mom[idx]),
+                "nrg" => sim.fields.cons.nrg_field(),
+                "mag" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
+                other => panic!("checkpoint write: unknown conserved field '{other}'"),
+            };
+            if let Some(field) = field {
+                out.push(("conserved", symbi_io::dataset_name(fs, idx), field));
+            }
+        }
+    }
+    if let Some(chi) = sim.fields.cons.chi_field() {
+        out.push(("conserved", "chi".to_string(), chi));
+    }
+    if let Some(cs2) = sim.fields.cs2.as_ref() {
+        out.push(("", "iso_cs2".to_string(), cs2));
+    }
+    out
+}
+
+/// the union of the tiles' tracer populations in stable id order, the same reassembly a gathered
+/// output state performs: ids and cohorts concatenate, the next free id is the largest any tile
+/// reached, and the injection remainders sum.
+fn combine_tracer_snaps(snaps: Vec<TracerSnap>) -> Option<TracerSnap> {
+    let mut iter = snaps.into_iter();
+    let mut combined = iter.next()?;
+    let d = if combined.n > 0 { combined.x.len() / combined.n } else { 0 };
+    for snap in iter {
+        combined.n += snap.n;
+        combined.x.extend(snap.x);
+        combined.id.extend(snap.id);
+        combined.cohort.extend(snap.cohort);
+        combined.owner.extend(snap.owner);
+        combined.escaped.extend(snap.escaped);
+        combined.crossed.extend(snap.crossed);
+        combined.crossing_time.extend(snap.crossing_time);
+        combined.weight.extend(snap.weight);
+        combined.next_id = combined.next_id.max(snap.next_id);
+        combined.injection_remainder += snap.injection_remainder;
+    }
+    let mut perm: Vec<usize> = (0..combined.n).collect();
+    perm.sort_by_key(|&i| combined.id[i]);
+    let take = |v: &Vec<f64>| -> Vec<f64> { perm.iter().map(|&i| v[i]).collect() };
+    let take_u = |v: &Vec<u64>| -> Vec<u64> { perm.iter().map(|&i| v[i]).collect() };
+    let x: Vec<f64> = perm
+        .iter()
+        .flat_map(|&i| combined.x[i * d..(i + 1) * d].iter().copied())
+        .collect();
+    combined.x = x;
+    combined.id = take_u(&combined.id);
+    combined.cohort = take_u(&combined.cohort);
+    combined.owner = take_u(&combined.owner);
+    combined.escaped = take(&combined.escaped);
+    combined.crossed = take(&combined.crossed);
+    combined.crossing_time = take(&combined.crossing_time);
+    combined.weight = take(&combined.weight);
+    Some(combined)
+}
+
+/// write a checkpoint from the tiles of every level, streaming each tile's owned block of every
+/// field into the global datasets through a bounded staging buffer: cell datasets carry the
+/// global halo, which the tiles on the domain boundary own; face datasets carry the global
+/// interior faces plus the closing face on each axis, owned by the last tile along it; every
+/// element has exactly one writer. tile 0 of each level supplies the clock, tile 0 of the coarse
+/// level the physics identity, the finest level's tile 0 the body state, and the tiles together
+/// the tracer population. the file takes its name only once every write succeeded.
+pub fn write_partitioned_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    levels: &[LevelTiles<'_, R, D, DOF, M, E, S, Mem>],
+    path: &str,
+    extras: &Metadata,
+) -> Result<()>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    write_partitioned_checkpoint_with_budget(levels, path, extras, staging_budget_cells())
+}
+
+/// `write_partitioned_checkpoint` at an explicit staging budget in cells per slab.
+pub fn write_partitioned_checkpoint_with_budget<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    levels: &[LevelTiles<'_, R, D, DOF, M, E, S, Mem>],
+    path: &str,
+    extras: &Metadata,
+    budget: usize,
+) -> Result<()>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    if levels.is_empty() || levels.iter().any(|l| l.tiles.is_empty()) {
+        return Err(IoError::MissingPath("hierarchy has no levels or a level has no tiles".into()));
+    }
+    #[cfg(feature = "gpu")]
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        symbi_xpu::ctx_sync();
+    }
+    let authority = levels[0].tiles[0].state;
+    let facts = mesh_facts(authority, &levels[0].grid);
+    let mut root = Tree::new("")
+        .with_attr("format_version", "2.0")
+        .with_attr("symbi_version", "0.1.0");
+    if let Some(tag) = conserved_densitization(authority) {
+        root = root.with_attr(CONSERVED_DENSITIZATION_ATTR, tag);
+    }
+    root.push_group(build_metadata_group(authority, &facts, extras));
+
+    // the small per-level groups: mesh geometry, ownership, the face domains and the level clock.
+    struct LevelSmall {
+        mesh_cells: Vec<u64>,
+        owned_start: Vec<i64>,
+        owned_fin: Vec<i64>,
+        face_domains: Vec<(Vec<i64>, Vec<i64>)>,
+    }
+    let smalls: Vec<LevelSmall> = levels
+        .iter()
+        .map(|level| {
+            let grid = &level.grid;
+            let faces = level.tiles[0]
+                .state
+                .fields
+                .mhd
+                .as_ref()
+                .is_some_and(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed));
+            LevelSmall {
+                mesh_cells: (0..D).rev().map(|ax| grid.cells[ax] as u64).collect(),
+                owned_start: vec![0; D],
+                owned_fin: (0..D).rev().map(|ax| grid.cells[ax] as i64).collect(),
+                face_domains: if faces {
+                    (0..D)
+                        .map(|d| {
+                            let start: Vec<i64> = (0..D).map(|ax| grid.interior_lo[ax] as i64).collect();
+                            let fin: Vec<i64> = (0..D)
+                                .map(|ax| grid.interior_lo[ax] as i64 + grid.cells[ax] as i64 + if ax == d { 1 } else { 0 })
+                                .collect();
+                            (start, fin)
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+            }
+        })
+        .collect();
+    for (idx, (level, small)) in levels.iter().zip(&smalls).enumerate() {
+        let sim = level.tiles[0].state;
+        let grid = &level.grid;
+        let geometry_kind = sim.physics.metric.geometry();
+        let mut geometry = Tree::new("geometry").with_attr("metric", coord_name(geometry_kind));
+        for (slot, ax) in (0..D).rev().enumerate() {
+            let lo_index = grid.interior_lo[ax];
+            let hi_index = lo_index + grid.cells[ax] as isize;
+            let scale = motion_axis_scale(geometry_kind, ax, D, sim.motion.a);
+            let (start, end) = match &grid.maps {
+                Some(maps) => (maps[ax].face(lo_index) * scale, maps[ax].face(hi_index) * scale),
+                None => {
+                    let start = facts_x_lo(&grid.x_lo, grid.dx[ax], lo_index, ax, scale);
+                    (start, start + grid.dx[ax] * scale * grid.cells[ax] as f64)
+                }
+            };
+            let (spacing_label, spacing_ratio) = match &grid.maps {
+                Some(maps) => match maps[ax] {
+                    symbi_geometry::AxisMap::Uniform { .. } => ("linear", 1.0),
+                    symbi_geometry::AxisMap::Log { .. } => ("log", 1.0),
+                    symbi_geometry::AxisMap::Geometric { ratio, .. } => ("geometric", ratio),
+                },
+                None => ("linear", 1.0),
+            };
+            geometry.push_group(
+                Tree::new(format!("dim_{slot}"))
+                    .with_attr("start", start)
+                    .with_attr("end", end)
+                    .with_attr("type", spacing_label)
+                    .with_attr("ratio", spacing_ratio),
+            );
+        }
+        let mesh = Tree::new("mesh")
+            .with_attr("halo_width", grid.ng as u64)
+            .with_dataset(Dataset::new("global_cells", vec![D], DataRef::U64(&small.mesh_cells)))
+            .with_group(geometry);
+        let mut hydro = Tree::new("hydro").with_group(Tree::new("primitives"));
+        if !small.face_domains.is_empty() {
+            let mut magnetic = Tree::new("magnetic");
+            for (d, (start, fin)) in small.face_domains.iter().enumerate() {
+                magnetic.push_group(
+                    Tree::new(format!("B{}", d + 1)).with_group(
+                        Tree::new("domain")
+                            .with_dataset(Dataset::new("start", vec![D], DataRef::I64(start)))
+                            .with_dataset(Dataset::new("fin", vec![D], DataRef::I64(fin))),
+                    ),
+                );
+            }
+            hydro.push_group(magnetic);
+        }
+        let partition_0 = Tree::new("partition_0")
+            .with_dataset(Dataset::new("owned_start", vec![D], DataRef::I64(&small.owned_start)))
+            .with_dataset(Dataset::new("owned_fin", vec![D], DataRef::I64(&small.owned_fin)))
+            .with_group(hydro);
+        root.push_group(
+            Tree::new(format!("level_{idx}"))
+                .with_attr("scale_factor_a", sim.motion.a)
+                .with_attr("scale_factor_adot", sim.motion.a_dot)
+                .with_attr("time", sim.time)
+                .with_attr("dt", sim.dt)
+                .with_attr("iteration", Attr::U64(sim.iteration))
+                .with_group(mesh)
+                .with_group(partition_0)
+                .with_group(Tree::new("conserved")),
+        );
+    }
+    // the sidecars every tile shares: the finest level's body state, the tiles' tracer union,
+    // the continuous tracers, the body series, and, for a level held whole, its censuses.
+    let finest_bodies = levels
+        .iter()
+        .filter_map(|l| l.tiles[0].state.immersed.as_ref())
+        .last()
+        .map(body_state_snap);
+    let heat_name = slip_heat_dataset_name(authority.fields.cons.nrg_field().is_some());
+    if let Some(bs) = finest_bodies.as_ref() {
+        root.push_group(body_state_group::<D>(bs, heat_name));
+    }
+    let tracers = levels
+        .iter()
+        .find(|l| l.tiles.iter().any(|t| t.state.tracers.is_some()))
+        .and_then(|l| combine_tracer_snaps(l.tiles.iter().filter_map(|t| t.state.tracers.as_ref().map(tracer_snap)).collect()));
+    if let Some(ts) = tracers.as_ref() {
+        root.push_group(tracer_group::<D>(ts));
+    }
+    let continuous = combine_continuous_tracer_snaps(
+        levels
+            .iter()
+            .flat_map(|l| l.tiles.iter())
+            .filter_map(|t| t.state.continuous_tracers.as_ref().map(continuous_tracer_snap)),
+    );
+    if let Some(snap) = continuous.as_ref() {
+        root.push_group(continuous_tracer_group::<D>(snap));
+    }
+    if let Some(im) = levels
+        .iter()
+        .filter_map(|l| l.tiles[0].state.immersed.as_ref())
+        .find(|im| !im.history.is_empty())
+    {
+        let (n, nb) = (im.history.len(), im.history.n_bodies());
+        root.push_group(
+            Tree::new("body_diagnostics")
+                .with_attr("n_bodies", nb as u64)
+                .with_dataset(Dataset::new("time", vec![n], DataRef::F64(im.history.time())))
+                .with_dataset(Dataset::new("dt", vec![n], DataRef::F64(im.history.dt())))
+                .with_dataset(Dataset::new("mass_delta", vec![n, nb], DataRef::F64(im.history.mass_delta())))
+                .with_dataset(Dataset::new("energy_delta", vec![n, nb], DataRef::F64(im.history.energy_delta())))
+                .with_dataset(Dataset::new("force", vec![n, nb, D], DataRef::F64(im.history.force())))
+                .with_dataset(Dataset::new("force_normal", vec![n, nb, D], DataRef::F64(im.history.force_normal())))
+                .with_dataset(Dataset::new("torque", vec![n, nb, 3], DataRef::F64(im.history.torque()))),
+        );
+    }
+    if levels[0].tiles.len() == 1 {
+        for group in census_groups(authority) {
+            root.push_group(group);
+        }
+    }
+
+    let stream = Hdf5Stream::create(Path::new(path))?;
+    stream.write_tree(&root)?;
+    let mut staging: Vec<f64> = Vec::new();
+    for (idx, level) in levels.iter().enumerate() {
+        let grid = &level.grid;
+        let level_path = format!("level_{idx}");
+        let cell_shape: Vec<usize> = (0..D).rev().map(|ax| grid.cells[ax] + 2 * grid.ng).collect();
+        let names = cell_datasets(level.tiles[0].state);
+        for (group, name, _) in &names {
+            let group_path = if group.is_empty() { level_path.clone() } else { format!("{level_path}/{group}") };
+            stream.declare_f64(&group_path, name, &cell_shape)?;
+        }
+        for d in 0..D {
+            if level.tiles[0].state.fields.mhd.as_ref().is_some_and(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed)) {
+                let face_shape: Vec<usize> = (0..D)
+                    .rev()
+                    .map(|ax| grid.cells[ax] + if ax == d { 1 } else { 0 })
+                    .collect();
+                stream.declare_f64(&format!("{level_path}/partition_0/hydro/magnetic/B{}", d + 1), "data", &face_shape)?;
+            }
+        }
+        for tile in &level.tiles {
+            let sim = tile.state;
+            let interior = &sim.geom.interior;
+            let alloc = sim.fields.cons.den.domain();
+            let ng = grid.ng as isize;
+            let first: [bool; D] = std::array::from_fn(|ax| tile.offset[ax] == grid.interior_lo[ax]);
+            let last: [bool; D] = std::array::from_fn(|ax| {
+                tile.offset[ax] + interior.spaces[ax].size() as isize == grid.interior_lo[ax] + grid.cells[ax] as isize
+            });
+            // a tile's cell block: its interior, extended into the global halo on every side it
+            // touches the domain boundary. the file's cell index of local coordinate `c` on an
+            // axis is the global interior index plus the halo width.
+            let cell_region = {
+                let mut r = interior.clone();
+                for ax in 0..D {
+                    let lo = if first[ax] { alloc.spaces[ax].lo } else { interior.spaces[ax].lo };
+                    let hi = if last[ax] { alloc.spaces[ax].hi } else { interior.spaces[ax].hi };
+                    r = r.slab(ax, (lo, hi));
+                }
+                r
+            };
+            let shift: [isize; D] = std::array::from_fn(|ax| tile.offset[ax] - interior.spaces[ax].lo - grid.interior_lo[ax]);
+            let cell_file_of = |ax: usize, c: isize| (c + shift[ax] + ng) as usize;
+            for (group, name, field) in cell_datasets(sim) {
+                let dataset_path = if group.is_empty() {
+                    format!("{level_path}/{name}")
+                } else {
+                    format!("{level_path}/{group}/{name}")
+                };
+                stream_region(&stream, &dataset_path, field, &cell_region, &cell_file_of, budget, &mut staging)?;
+            }
+            if let Some(mhd) = sim.fields.mhd.as_ref().filter(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed)) {
+                for d in 0..D {
+                    // a tile's faces along `d`: those at the low side of its interior cells, plus
+                    // the closing face when the tile ends the axis; interior extents elsewhere.
+                    let mut region = interior.clone();
+                    if last[d] {
+                        region = region.extend(d, 0, 1);
+                    }
+                    let face_file_of = |ax: usize, c: isize| (c + shift[ax]) as usize;
+                    stream_region(
+                        &stream,
+                        &format!("{level_path}/partition_0/hydro/magnetic/B{}/data", d + 1),
+                        &mhd.bface[d],
+                        &region,
+                        &face_file_of,
+                        budget,
+                        &mut staging,
+                    )?;
+                }
+            }
+        }
+    }
+    stream.publish()?;
+    Ok(())
+}
+
+/// the physical lower bound of a uniform axis at global interior index `lo_index`.
+fn facts_x_lo(x_lo: &[f64], dx: f64, lo_index: isize, ax: usize, scale: f64) -> f64 {
+    x_lo[ax] * scale + lo_index as f64 * dx * scale
+}
+
+#[cfg(test)]
+mod partitioned_tests {
+    use super::*;
+    use symbi_geometry::Cartesian;
+    use symbi_hydro::eos::IdealGas;
+    use symbi_hydro::newtonian_mhd::NewtonianMhd;
+    use symbi_io::TreeBuf;
+    use symbi_xpu::{CpuSpace, HostMemory};
+
+    type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+
+    const NG: usize = 2;
+
+    /// a 2.5D MHD state whose interior starts at global index `offset` with `cells` cells, on a
+    /// log-spaced first axis; every cell and face field, halos included, is an analytic function
+    /// of the global index, so tiles cut from the same grid agree with the whole grid wherever
+    /// both hold a value.
+    fn tile(offset: [isize; 2], cells: [usize; 2]) -> Sim {
+        let dx = [0.1, 0.25];
+        let x_lo = [1.0 * 10f64.powf(0.05 * offset[0] as f64), offset[1] as f64 * dx[1]];
+        let mut sim = Sim::new(
+            NewtonianMhd,
+            IdealGas { gamma: 5.0 / 3.0 },
+            Cartesian,
+            cells,
+            x_lo,
+            dx,
+            NG,
+            Boundaries::uniform(BoundaryType::Outflow),
+            0.4,
+            Timestepping::Rk2,
+            0,
+        )
+        .unwrap();
+        sim.geom.set_maps([
+            symbi_geometry::AxisMap::Log { start: x_lo[0], log_slope: 0.05 },
+            symbi_geometry::AxisMap::Uniform { start: x_lo[1], dx: dx[1] },
+        ]);
+        let int_lo = [sim.geom.interior.spaces[0].lo, sim.geom.interior.spaces[1].lo];
+        let value = |tag: usize, c: [isize; 2]| {
+            let g = [c[0] - int_lo[0] + offset[0], c[1] - int_lo[1] + offset[1]];
+            1.0 + tag as f64 * 0.01 + 0.5 * g[0] as f64 + 0.125 * g[1] as f64
+        };
+        for (tag, (_, _, field)) in cell_datasets(&sim).into_iter().enumerate() {
+            let view = field.view_mut();
+            for c in field.domain().iter() {
+                view.set(c, value(tag, c));
+            }
+        }
+        let mhd = sim.fields.mhd.as_ref().unwrap();
+        for d in 0..2 {
+            let view = mhd.bface[d].view_mut();
+            for c in mhd.bface[d].domain().iter() {
+                view.set(c, value(100 + d, c));
+            }
+        }
+        mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
+        sim
+    }
+
+    fn assert_trees_equal(a: &TreeBuf, b: &TreeBuf, path: &str) {
+        assert_eq!(a.attrs.len(), b.attrs.len(), "{path}: attribute count");
+        for (x, y) in a.attrs.iter().zip(&b.attrs) {
+            assert_eq!(x.0, y.0, "{path}: attribute name");
+            assert_eq!(format!("{:?}", x.1), format!("{:?}", y.1), "{path}: attribute {}", x.0);
+        }
+        assert_eq!(a.datasets.len(), b.datasets.len(), "{path}: dataset count");
+        for (x, y) in a.datasets.iter().zip(&b.datasets) {
+            assert_eq!(x.name, y.name, "{path}: dataset name");
+            assert_eq!(x.shape, y.shape, "{path}/{}: shape", x.name);
+            match (x.data.as_f64(), y.data.as_f64()) {
+                (Some(p), Some(q)) => {
+                    assert_eq!(p.len(), q.len(), "{path}/{}: length", x.name);
+                    for (i, (u, v)) in p.iter().zip(q).enumerate() {
+                        assert_eq!(u.to_bits(), v.to_bits(), "{path}/{}[{i}]: {u} vs {v}", x.name);
+                    }
+                }
+                _ => assert_eq!(format!("{:?}", x.data), format!("{:?}", y.data), "{path}/{}", x.name),
+            }
+        }
+        assert_eq!(
+            a.groups.iter().map(|g| g.name.clone()).collect::<Vec<_>>(),
+            b.groups.iter().map(|g| g.name.clone()).collect::<Vec<_>>(),
+            "{path}: groups"
+        );
+        for (x, y) in a.groups.iter().zip(&b.groups) {
+            assert_trees_equal(x, y, &format!("{path}/{}", x.name));
+        }
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("symbi_partitioned_{}_{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_whole_level_streams_the_same_file_the_tree_writer_builds() {
+        let dir = scratch("whole");
+        let sim = tile([0, 0], [8, 6]);
+        let tree_path = dir.join("tree.h5");
+        let stream_path = dir.join("stream.h5");
+        write_hierarchy_checkpoint(&[&sim], tree_path.to_str().unwrap(), &Metadata::new()).unwrap();
+        write_partitioned_checkpoint(&[LevelTiles::whole(&sim)], stream_path.to_str().unwrap(), &Metadata::new()).unwrap();
+        let a = Hdf5Backend.read(&tree_path).unwrap();
+        let b = Hdf5Backend.read(&stream_path).unwrap();
+        assert_trees_equal(&a, &b, "");
+    }
+
+    #[test]
+    fn tiles_cut_unevenly_along_an_axis_write_the_whole_grid_file() {
+        let dir = scratch("tiles");
+        let whole = tile([0, 0], [8, 6]);
+        let left = tile([0, 0], [3, 6]);
+        let right = tile([3, 0], [5, 6]);
+        let grid = GlobalGrid::of_state(&whole);
+        let whole_path = dir.join("whole.h5");
+        let tiled_path = dir.join("tiled.h5");
+        write_partitioned_checkpoint(&[LevelTiles::whole(&whole)], whole_path.to_str().unwrap(), &Metadata::new()).unwrap();
+        let level = LevelTiles {
+            tiles: vec![
+                TileView { state: &left, offset: [0, 0] },
+                TileView { state: &right, offset: [3, 0] },
+            ],
+            grid,
+        };
+        // a staging budget of five cells forces every block through several slabs.
+        write_partitioned_checkpoint_with_budget(&[level], tiled_path.to_str().unwrap(), &Metadata::new(), 5).unwrap();
+        let a = Hdf5Backend.read(&whole_path).unwrap();
+        let b = Hdf5Backend.read(&tiled_path).unwrap();
+        assert_trees_equal(&a, &b, "");
+    }
+
+    #[test]
+    fn a_write_that_cannot_open_its_file_publishes_nothing() {
+        let sim = tile([0, 0], [4, 4]);
+        let target = scratch("sealed").join("absent").join("run.h5");
+        let err = write_partitioned_checkpoint(&[LevelTiles::whole(&sim)], target.to_str().unwrap(), &Metadata::new()).unwrap_err();
+        assert!(matches!(err, IoError::Backend(_)), "{err:?}");
+        assert!(!target.exists());
+    }
 }
