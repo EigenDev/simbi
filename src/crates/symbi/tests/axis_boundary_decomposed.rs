@@ -60,7 +60,7 @@ fn probe(r: f64, th: f64, ph: f64) -> MhdPrim<f64, 3> {
 
 /// one tile: `cells` on each axis, its azimuth slab starting at global cell `phi0`, with the
 /// face kinds given. the physical spacing is the global shell's on every tile.
-fn tile(cells: [usize; 3], phi0: usize, bnd: Boundaries<3>) -> (Sim, Kern) {
+fn tile(cells: [usize; 3], phi0: usize, bnd: Boundaries<3>, ng: usize) -> (Sim, Kern) {
     let dphi = 2.0 * PI / N[2] as f64;
     let sim = Sim::build(Rmhd, IdealGas { gamma: GAMMA }, Spherical)
         .cells(cells)
@@ -68,6 +68,7 @@ fn tile(cells: [usize; 3], phi0: usize, bnd: Boundaries<3>) -> (Sim, Kern) {
         .origin([R_LO, 0.0, phi0 as f64 * dphi])
         .boundaries(bnd)
         .cfl(CFL)
+        .ghosts(ng)
         .allocate()
         .expect("spherical 3D tile")
         .set_initial(|[r, th, ph]| probe(r, th, ph))
@@ -77,7 +78,7 @@ fn tile(cells: [usize; 3], phi0: usize, bnd: Boundaries<3>) -> (Sim, Kern) {
     (sim, k)
 }
 
-fn single() -> (Sim, Kern) {
+fn single(ng: usize) -> (Sim, Kern) {
     tile(
         N,
         0,
@@ -86,13 +87,14 @@ fn single() -> (Sim, Kern) {
             [BoundaryType::Axis, BoundaryType::Axis],
             [BoundaryType::Periodic, BoundaryType::Periodic],
         ]),
+        ng,
     )
 }
 
 /// the azimuth cut at `cuts` (global cell indices): every tile spans the full r and theta
 /// extents, its pole faces handed to the antipodal legs and its azimuth faces to the wrap
 /// legs, exactly as a decomposed run declares them.
-fn slabs(cuts: &[usize]) -> (Vec<(Sim, Kern)>, [usize; 3], Schedule<3>) {
+fn slabs(cuts: &[usize], ng: usize) -> (Vec<(Sim, Kern)>, [usize; 3], Schedule<3>) {
     let mut bounds = vec![0usize];
     bounds.extend_from_slice(cuts);
     bounds.push(N[2]);
@@ -110,6 +112,7 @@ fn slabs(cuts: &[usize]) -> (Vec<(Sim, Kern)>, [usize; 3], Schedule<3>) {
                     [BoundaryType::CoarseFine, BoundaryType::CoarseFine],
                     [BoundaryType::CoarseFine, BoundaryType::CoarseFine],
                 ]),
+                ng,
             )
         })
         .collect();
@@ -278,9 +281,9 @@ fn evolve_tiles(tiles: &mut [(Sim, Kern)], schedule: &Schedule<3>) {
     );
 }
 
-fn check(cuts: &[usize], label: &str) {
-    let mut one = single();
-    let (mut tiles, counts, schedule) = slabs(cuts);
+fn check(cuts: &[usize], ng: usize, label: &str) {
+    let mut one = single(ng);
+    let (mut tiles, counts, schedule) = slabs(cuts, ng);
     assert!(
         !schedule.polar_legs().is_empty(),
         "{label}: the seam produced antipodal legs"
@@ -294,8 +297,8 @@ fn check(cuts: &[usize], label: &str) {
         &format!("{label} seed interior"),
         false,
     );
-    let mut one = single();
-    let (mut tiles, counts, schedule) = slabs(cuts);
+    let mut one = single(ng);
+    let (mut tiles, counts, schedule) = slabs(cuts, ng);
     symbi::sim::evolve::evolve(&mut one.0, &one.1, T_FINAL).expect("single evolve");
     evolve_tiles(&mut tiles, &schedule);
     assert_tiles_match(&one.0, &tiles, counts, &format!("{label} evolved"), false);
@@ -303,17 +306,24 @@ fn check(cuts: &[usize], label: &str) {
 
 #[test]
 fn two_equal_slabs_match_the_single_tile() {
-    check(&[4], "two slabs");
+    check(&[4], 2, "two slabs");
 }
 
 #[test]
 fn four_equal_slabs_match_the_single_tile() {
-    check(&[2, 4, 6], "four slabs");
+    check(&[2, 4, 6], 2, "four slabs");
 }
 
 #[test]
 fn uneven_slabs_whose_antipodes_straddle_tiles_match_the_single_tile() {
-    check(&[3, 5], "slabs 3/2/3");
+    check(&[3, 5], 2, "slabs 3/2/3");
+}
+
+/// a three-cell halo (the third-order stencil's) around the staggered field's two-face band
+/// beyond the pole: the legs carry the third cell row and stop the face rows at the field.
+#[test]
+fn a_three_cell_halo_matches_the_single_tile_across_the_poles() {
+    check(&[3, 5], 3, "slabs 3/2/3 with a three-cell halo");
 }
 
 /// the antipodal legs through the one-sided message seam: the tiles split into two owner
@@ -322,8 +332,8 @@ fn uneven_slabs_whose_antipodes_straddle_tiles_match_the_single_tile() {
 #[test]
 fn the_antipodal_legs_travel_as_messages_like_any_other_leg() {
     use symbi::sim::decomp::{MessageQueue, Ownership, Phase, exchange_grid_phase};
-    let (mut direct, _, schedule) = slabs(&[3, 5]);
-    let (mut ranked, _, _) = slabs(&[3, 5]);
+    let (mut direct, _, schedule) = slabs(&[3, 5], 2);
+    let (mut ranked, _, _) = slabs(&[3, 5], 2);
     for tiles in [&mut direct, &mut ranked] {
         for (s, k) in tiles.iter() {
             k.c2p(s);

@@ -132,8 +132,14 @@ pub fn flip_polar_band<const D: usize, const DOF: usize, Mem, Sc>(
     if azimuth_flips {
         negate_over(&cell_band, &mhd.bcell[az], cell_scratch);
         // the mirror-axis face field carries no halo beyond the pole face; the azimuth faces
-        // on the band's rows follow the cell rule.
-        let az_band = mhd.bface[az].domain().boundary(mirror, side, ng);
+        // on the band's rows follow the cell rule, over the face field's own band beyond the
+        // pole, which is two faces deep whatever the cell halo.
+        let az_dom = mhd.bface[az].domain();
+        let face_ng = match side {
+            symbi_algebra::Side::Lo => sim.geom.interior.spaces[mirror].lo - az_dom.spaces[mirror].lo,
+            symbi_algebra::Side::Hi => az_dom.spaces[mirror].hi - sim.geom.interior.spaces[mirror].hi,
+        };
+        let az_band = az_dom.boundary(mirror, side, ng.min(face_ng));
         negate_over(&az_band, &mhd.bface[az], &mhd.bflux[az].f[0]);
     }
 }

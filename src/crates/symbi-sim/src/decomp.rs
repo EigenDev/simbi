@@ -1239,8 +1239,19 @@ fn polar_transfers<const D: usize, const DOF: usize, M: MemorySpace, F>(
         }
         if let (Some(dm), Some(sm)) = (dst.fields.mhd.as_ref(), src.fields.mhd.as_ref()) {
             // a face field carries halos on its transverse axes alone, so the mirror-axis
-            // faces have no band beyond the pole face to fill.
+            // faces have no band beyond the pole face to fill. a transverse face field's band
+            // beyond the pole is two faces deep whatever the cell halo, so the rows a deeper
+            // cell halo carries stop at the face field's own domain.
             for d in (0..D).filter(|&d| d != mirror) {
+                let dom = dm.bface[d].domain();
+                let sdom = sm.bface[d].domain();
+                let (dst_in, src_in) = (
+                    drow >= dom.spaces[mirror].lo && drow < dom.spaces[mirror].hi,
+                    srow >= sdom.spaces[mirror].lo && srow < sdom.spaces[mirror].hi,
+                );
+                if !dst_in || !src_in {
+                    continue;
+                }
                 let dreg = region(&dm.bface[d].domain(), dg, d, drow, leg.dst_lo);
                 let sreg = region(&sm.bface[d].domain(), sg, d, srow, leg.src_lo);
                 inside("face dst", &dm.bface[d], &dreg);
