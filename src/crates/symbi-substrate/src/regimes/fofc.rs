@@ -35,7 +35,7 @@ use crate::regimes::substrate_kernels::{
     resolve_body_scalars,
 };
 use symbi_ir::emit::ReductionOp;
-use symbi_ir::{CtCellCt, CtScratch, FieldBind};
+use symbi_ir::{CtCellCt, CtScratch, FieldBind, FieldRef};
 
 // FOFC observability counters — the running totals of deliberate fallback events over a run, so a
 // run can surface how often/where the first-order flux correction and the last-resort freeze fired
@@ -294,8 +294,12 @@ pub fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("{prefix}_fofc_select{dof_sfx}_{D}d");
-    // every slot is free scratch: `freeze`, `us_{comp}`, `x_{comp}`.
+    // the isothermal closure field is the one physical read; every other slot is free scratch:
+    // `freeze`, `us_{comp}`, `x_{comp}`.
     let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        if matches!(b, FieldBind::Ref(FieldRef::IsoCs2)) {
+            return sim.fields.cs2.as_ref().expect("iso.cs2 bound but the run carries no isothermal closure field");
+        }
         let s = free_payload("fofc_select", b);
         if s == "freeze" {
             // the FreezeApplied channel: the select reports its own act.
@@ -339,8 +343,13 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
     let u_stage = sim.stage_input();
     let cons = &sim.fields.cons;
     let prim = &sim.fields.prim;
-    // every slot is free scratch: `freeze`, `us_{comp}`, `x_{comp}`.
+    // the isothermal closure field is the one physical read (the parachute's drain and sound
+    // speed take the cell's own cs^2); every other slot is free scratch: `freeze`, `us_{comp}`,
+    // `x_{comp}`.
     let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
+        if matches!(b, FieldBind::Ref(FieldRef::IsoCs2)) {
+            return sim.fields.cs2.as_ref().expect("iso.cs2 bound but the run carries no isothermal closure field");
+        }
         let s = free_payload("fofc_select_with_body", b);
         if s == "freeze" {
             // the FreezeApplied channel: the select reports its own act.

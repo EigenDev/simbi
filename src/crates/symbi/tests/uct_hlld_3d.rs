@@ -166,10 +166,58 @@ fn nmhd_uct_hll_3d_preserves_divb() {
 
 #[test]
 fn imhd_uct_hlld_3d_preserves_divb() {
-    run_3d_divb!(
-        NewtonianMhd, NewtonianMhd, IsothermalMhdSubstrateKernelSet3D<HostMemory, f64>,
-        CS, 0.5, 1.0, CS * CS, Solver::Hlld, "imhd uct-hlld 3d"
-    );
+    // the isothermal arm runs on an energy-free store: the closure's cs^2 field lives there,
+    // and the isothermal kernel set reads it at every face and edge.
+    use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::eos::Isothermal;
+    use symbi_hydro::isothermal_mhd::IsothermalMhd;
+    use symbi_hydro::mhd_state::MhdPrimG;
+    use symbi_hydro::state::PrimG;
+    type Sim = SimState<IsothermalMhd, 3, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+    let d = [1.0 / NX as f64, 1.0 / NY as f64, 1.0 / NZ as f64];
+    let v0 = 0.5;
+    let mut sim = Sim::build(IsothermalMhd, Isothermal { cs: CS }, Cartesian)
+        .cells([NX, NY, NZ])
+        .spacing(d)
+        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim")
+        .set_initial(move |[x, y, _z]| {
+            MhdPrimG::<f64, 3, IsoModel>::new(
+                PrimG::isothermal(
+                    Density(1.0),
+                    Tensor::new([
+                        -v0 * (2.0 * PI * y).sin(),
+                        v0 * (2.0 * PI * x).sin(),
+                        0.5 * v0 * (2.0 * PI * y).sin(),
+                    ]),
+                ),
+                Tensor::new([
+                    -B0 * (2.0 * PI * y).sin(),
+                    B0 * (4.0 * PI * x).sin(),
+                    0.5 * B0 * (2.0 * PI * x).sin(),
+                ]),
+            )
+        })
+        .seed_faces(|axis, [x, y, _z]| swirl_face(axis, x, y))
+        .build();
+    let inv_d = [NX as f64, NY as f64, NZ as f64];
+    let (div0, b_max) = max_divb(&sim, inv_d);
+    assert!(div0 / b_max.max(1.0) < 1e-13, "imhd uct-hlld 3d: IC not div-free: {div0:e}");
+    let sub = IsothermalMhdSubstrateKernelSet3D::<HostMemory, f64>::new(CS, CFL, 1.0, &sim.geom.allocated)
+        .with_solver(Solver::Hlld)
+        .expect("valid solver/regime pair")
+        .ct_method(CtMethod::Uct);
+    let mut steps: u64 = 0;
+    evolve_with_callback(&mut sim, &sub, T_FINAL, 1, |s| {
+        let (max_div, max_b) = max_divb(s, inv_d);
+        let rel = max_div / max_b.max(1.0);
+        assert!(rel < DIVB_TOL, "imhd uct-hlld 3d: div(B) grew at iter {} t={:.3e}: rel {rel:e}", s.iteration, s.time);
+        steps = s.iteration;
+    })
+    .expect("imhd uct-hlld 3d evolve");
+    assert!(steps > 5, "imhd uct-hlld 3d: too few steps ({steps}) for a meaningful div(B) check");
 }
 
 #[test]
