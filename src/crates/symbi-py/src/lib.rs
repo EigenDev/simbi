@@ -352,6 +352,36 @@ fn validate_magnetic_slip_bodies(
     Ok(())
 }
 
+/// the public-boundary contract of a magnetized drain: a mass-removing body under any MHD regime
+/// relaxes each cell at its local Alfven rate through a kernel baked for the cartesian grid in 3D
+/// or 2.5D, so every other chart is refused here, before the grid exists.
+fn validate_magnetized_drain_bodies(
+    bodies: &[BodyParams],
+    regime: &str,
+    dims: usize,
+    coord_system: &str,
+) -> Result<(), String> {
+    const ACCRETION: u64 = 2;
+    if !regime.ends_with("mhd") {
+        return Ok(());
+    }
+    for (idx, b) in bodies.iter().enumerate() {
+        let drains = b.capability & ACCRETION != 0
+            && (b.torque_free_xi.is_some() || b.porosity.is_none_or(|p| p > 0.0));
+        if !drains {
+            continue;
+        }
+        if !(dims == 3 || dims == 2) || coord_system != "cartesian" {
+            return Err(format!(
+                "immersed body {idx}: a magnetized drain relaxes at its local Alfven rate on a \
+                 cartesian grid in 3D or in 2.5D (an x-y grid with three vector components); this \
+                 run is {dims}D {coord_system} under regime {regime}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// immersed bodies on a refined staggered-field hierarchy: adiabatic Newtonian MHD or isothermal
 /// MHD on a 3D or 2.5D cartesian grid, every body a drain (transparent, resistive, or magnetic-slip coupling) with
 /// no rigid surface. the hierarchy itself checks that each sink's operator support lies inside
@@ -3931,6 +3961,23 @@ mod magnetic_slip_boundary_tests {
             bodies.get(1).spec.magnetic,
             symbi_ib::MagneticSpec::Resistive { eta: 0.25 }
         );
+    }
+
+    #[test]
+    fn a_magnetized_drain_is_admitted_on_cartesian_grids_alone() {
+        let sink = draining_sink(None, None);
+        validate_magnetized_drain_bodies(std::slice::from_ref(&sink), "nmhd", 3, "cartesian")
+            .expect("a 3D cartesian magnetized drain");
+        validate_magnetized_drain_bodies(std::slice::from_ref(&sink), "imhd", 2, "cartesian")
+            .expect("a 2.5D cartesian isothermal magnetized drain");
+        validate_magnetized_drain_bodies(std::slice::from_ref(&sink), "newtonian", 2, "spherical")
+            .expect("a hydro drain runs on every chart");
+        let err = validate_magnetized_drain_bodies(std::slice::from_ref(&sink), "nmhd", 2, "cylindrical")
+            .expect_err("a magnetized drain on the cylindrical section is refused");
+        assert!(err.contains("local Alfven rate") && err.contains("2D cylindrical"), "{err}");
+        let err = validate_magnetized_drain_bodies(std::slice::from_ref(&sink), "rmhd", 3, "spherical")
+            .expect_err("a magnetized drain on a spherical grid is refused");
+        assert!(err.contains("3D spherical"), "{err}");
     }
 
     #[test]
@@ -8407,6 +8454,7 @@ fn dispatch_and_run(
         &cfg.coord_system,
         cfg.locally_isothermal,
     )?;
+    validate_magnetized_drain_bodies(&cfg.bodies, &cfg.regime, cfg.dims, &cfg.coord_system)?;
     // static mesh refinement is wired for hydro (incl. globally-isothermal). the two cases
     // refused below need fine-level prolongation the transfer set does not carry:
     if cfg.refinement_enabled

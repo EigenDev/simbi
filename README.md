@@ -951,6 +951,7 @@ Feature coverage varies by chart and regime. SIMBI validates these combinations 
 | refinement | cartesian with `LINEAR` spacing. MHD refinement is 3D cartesian only, and runs on its own — immersed bodies and mesh motion are separate paths |
 | passive scalar | Newtonian and isothermal, cartesian. carries through refinement, immersed bodies, mesh motion, and multi-GPU |
 | tracers | flat cartesian (refinement is fine) |
+| magnetized sinks | an immersed-body drain under MHD relaxes each cell at its local Alfven rate on 3D cartesian and 2.5D x-y grids, through multi-GPU decomposition and refinement; any other chart is refused at startup |
 | horizon excision | 3D cartesian, or 1D/2D spherical. 2D cartesian is unsupported because the slice represents a black string and the staircased excision circle seeds a growing m = 4 mode |
 
 For a GR run you'll also want `schwarzschild_mass` and, on Kerr, `kerr_spin` (with `|a| <= M`).
