@@ -1,19 +1,18 @@
 # symbi-exec
 
-This crate handles kernel dispatch. Given a kernel name resolved through the ahead-of-time
-registry, a set of field buffers over a domain, the packed integer and scalar
-tails, and an execution policy, it launches the work. It also holds the CPU
-parallelism policy, including the cache-blocking traversal.
+This launches kernels from the ahead-of-time registry. It takes a kernel name,
+field buffers over a domain, packed integer and scalar arguments, and an
+execution policy. The CPU parallelism policy, including cache-blocking traversal,
+also lives here.
 
-It does not contain physics. No regime name and no
-simulation state crosses this boundary, which is what allows it to depend only on
-the lower crates and keeps the layering free of a cycle back into the orchestration.
+Dispatch doesn't need to know the fluid regime or hold simulation state, so this
+crate can depend on the lower-level crates without a dependency cycle.
 
-## Where it sits
+## Dependencies
 
-Above the ahead-of-time kernels, the grid, the IR, and the execution abstraction.
-Below the substrate that calls it.
+Uses the ahead-of-time kernels, grid, IR, and execution abstraction.
+`symbi-substrate` calls it to launch work.
 
-## Where to start reading
+## Start here
 
-`policy.rs` for the CPU side, `engine.rs` for the neutral dispatch.
+`policy.rs` handles CPU parallelism, and `engine.rs` handles dispatch.

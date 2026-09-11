@@ -1,33 +1,29 @@
 # symbi-sim
 
-The hub. `FieldStore` and `SimState` hold the simulation's data in
-structure-of-arrays form, and around them sit the pieces that every driver needs
-regardless of how it steps in time: the stage bookkeeping for a Runge-Kutta
-substep, checkpoint reading and writing, the domain decomposition for multiple
-devices, the radial census that science runs accumulate, and the passive tracers.
+Simulation data and routines shared by the drivers. `FieldStore` and `SimState`
+hold the data in structure-of-arrays form. This crate also handles Runge-Kutta
+stage bookkeeping, checkpoint reading and writing, domain decomposition across
+devices, radial census diagnostics, and passive tracers.
 
-It also carries the seam between a simulation and a substrate, meaning the
-`KernelSet` and `RegimeSubstrate` traits together with the enums that classify a
-run. Those traits are declared here and implemented above, which is what lets the
-hub sit below both the substrate and the integrator so that they depend downward on
-it rather than sideways on each other.
+The `KernelSet` and `RegimeSubstrate` traits describe how a simulation uses its
+kernels. They're defined here and implemented in higher-level crates, so both the
+substrate and time integrators can use the same interface without depending on
+each other. The enums that classify a run also live here.
 
-## Where it sits
+## Dependencies
 
-Above the dependency floor of algebra, geometry, grid, hydro, IO, the IR, and the
-execution abstraction. It names no concrete kernel set and no executor.
+Uses algebra, geometry, grid, hydro, IO, IR, and the execution abstraction. It
+doesn't depend on a concrete kernel set or executor.
 
-## Where to start reading
+## Start here
 
-`state.rs` for the containers, `substrate_seam.rs` for the traits, and `driver.rs`
-for the stepping primitives that both the single-grid and refined drivers share.
+`state.rs` has the data containers, `substrate_seam.rs` defines the traits, and
+`driver.rs` has stepping routines shared by the single-grid and refined drivers.
 
-## Things worth knowing before you change it
+## Notes
 
-The single-grid driver and the refined driver are siblings. Both consume the
-primitives in `driver.rs`, and neither depends on the other. When you add a step to
-one of them, the question to ask is whether the other needs it too, because the
-shared primitive is usually the right home.
+When adding a step to either driver, check whether the other needs it too. Shared
+routines belong in `driver.rs`.
 
-Checkpoint time and the logarithmic output cadence are anchored separately, so a
-restart resumes the cadence rather than restarting it.
+Checkpoint time and logarithmic output cadence have separate anchors. A restart
+resumes the existing cadence instead of starting a new one.

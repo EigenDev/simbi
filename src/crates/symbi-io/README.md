@@ -1,20 +1,18 @@
 # symbi-io
 
-Serialization driven by a schema. One `Tree` describes the output, and every
-channel walks that same tree: the HDF5 backend that writes production checkpoints,
-the JSON backend that exposes the schema for introspection, and the table renderer
-that the terminal display reads through.
+Simulation output from a shared schema. A `Tree` describes the data, and the
+HDF5 writer, JSON backend, and terminal table renderer all walk that tree.
+HDF5 is used for checkpoints; JSON lets you inspect the schema.
 
-The reason for the arrangement is that a writer and a reader which each spell the
-field names themselves will eventually disagree. Here the on-disk naming derives
-from the regime specification, in one place, and both directions consult it.
+Field names come from the regime specification in one place, so readers and
+writers use the same on-disk names.
 
-## Where it sits
+## Dependencies
 
-Above algebra, grid, and hydro. The display crate and the afterglow adapter read
+Uses algebra, grid, and hydro. The display crate and afterglow adapter read
 through it.
 
-## Where to start reading
+## Start here
 
-`tree.rs` for the schema, `field_layout.rs` for the naming, `hdf5.rs` for the
-production path.
+`tree.rs` defines the schema, `field_layout.rs` handles field names, and
+`hdf5.rs` handles checkpoint output.

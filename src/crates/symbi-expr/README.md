@@ -1,31 +1,28 @@
 # symbi-expr
 
-The expression language a user's configuration writes in. You build a directed
-acyclic graph of operations, compile it into a flat instruction stream, and
-evaluate that stream with a register machine that uses no stack and no recursion.
-Initial conditions, source terms, boundary conditions, and mesh motion laws all
-arrive through here.
+The expression language used in simulation configurations. Initial conditions,
+source terms, boundary conditions, and mesh motion laws come through here.
 
-The flatness is the point. A linearized instruction stream with a fixed register
-bank is something a GPU can execute, and it is also something the rest of the
-workspace can splice into a larger computation graph.
+Expressions start as directed acyclic graphs. They're compiled into a flat
+instruction stream and evaluated by a register machine, with no stack or
+recursion. That form works on a GPU and can also be inserted into a larger
+computation graph.
 
-## Where it sits
+## Dependencies
 
-A leaf in the workspace, carrying serde for the wire format. `symbi-hydro`
-reads configurations through it, and `symbi-discretize` uses
-it in tests.
+Uses serde for serialization and has no workspace dependencies. `symbi-hydro`
+reads configuration expressions through it, and `symbi-discretize` uses it in
+tests.
 
-## Where to start reading
+## Start here
 
-`dag.rs` to see how expressions are built, then `linearize.rs` for the topological
-sort and the register allocation, then `eval.rs` for the machine itself.
-`load.rs` holds the JSON wire format the Python frontend sends.
+`dag.rs` builds expressions. `linearize.rs` handles topological sorting and
+register allocation, and `eval.rs` runs the instructions. `load.rs` defines the
+JSON format sent by the Python frontend.
 
-## Things worth knowing before you change it
+## Notes
 
-Registers are recycled at their last use, and expressions are scheduled in index
-order. The quantity under pressure is how many values are simultaneously live,
-which is a rather different thing from how many nodes the graph has. A wide
-expression with a shallow dependence structure costs very little; a narrow one that
-keeps early results alive until the end costs a great deal.
+Expressions are scheduled in index order, and a register can be reused after its
+value's last use. Register pressure depends on how many values are live at once,
+not just the number of nodes. When looking at a large expression, check how long
+intermediate results have to stick around.

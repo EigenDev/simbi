@@ -1,24 +1,23 @@
 # symbi-grid
 
-Field storage. A `Field` owns memory through a `symbi-xpu` memory block and is
-bound to a domain from `symbi-algebra`. Reads and writes go through views, or
-through coordinate-indexed access for the occasional host-side probe.
+Field storage and access. A `Field` owns a `symbi-xpu` memory block and uses a
+domain from `symbi-algebra`. Most reads and writes use views; coordinate-indexed
+access is also available for host-side probes.
 
-`Centering` records whether a field lives at cell centers, on faces, or on edges,
-which matters a great deal once constrained transport enters the picture.
+`Centering` records whether a field lives at cell centers, on faces, or on edges.
+This is especially useful for keeping track of fields in constrained transport.
 
-## Where it sits
+## Dependencies
 
-Above `symbi-algebra` and `symbi-xpu`. The generated substrate kernels operate on
-this storage directly.
+Uses `symbi-algebra` and `symbi-xpu`. Generated substrate kernels work directly
+on this storage.
 
-## Where to start reading
+## Start here
 
-`field.rs`, then `ghost.rs` for the halo regions.
+`field.rs` defines the fields, and `ghost.rs` describes the halo regions.
 
-## Things worth knowing before you change it
+## Notes
 
-Primitives are stored with their halo included, while the owned index range is
-interior-relative. A reader that slices with the owned bounds without accounting
-for the halo gets a lattice displaced by the halo width, which looks like a
-physical asymmetry rather than an indexing error.
+Primitive storage includes the halo, but owned index bounds are relative to the
+interior. Account for that offset when slicing. Missing it shifts the grid by the
+halo width and can look like a physical asymmetry.

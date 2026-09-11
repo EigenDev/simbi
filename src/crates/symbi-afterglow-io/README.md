@@ -1,16 +1,14 @@
 # symbi-afterglow-io
 
-The adapter that lets the afterglow module read real simulation output. It takes
-an HDF5 checkpoint written in whatever geometry the hydrodynamics ran, in one, two,
-or three dimensions, and produces the neutral Cartesian cell list the afterglow
-core expects.
+This reads hydrodynamic HDF5 checkpoints and converts them to the Cartesian cell
+list used by `symbi-afterglow`. It handles simulation output in one, two, or three
+dimensions and accounts for the geometry of the original grid.
 
-Its particular job is knowing which axis means what, since that is the part that
-differs from run to run. Spherical three-dimensional data has axes for radius,
-polar angle, and azimuth, while a two-dimensional axisymmetric run has only the
-first two and needs the third synthesized. Cylindrical two-dimensional data is the
-one to watch, because its second axis carries the third role.
+Most of the bookkeeping is about axes. A 3D spherical grid has radius, polar
+angle, and azimuth. A 2D axisymmetric grid needs the azimuthal direction filled
+in. The 2D cylindrical case needs extra care because its second axis plays the
+role of the third coordinate.
 
-## Where it sits
+## Dependencies
 
-Above `symbi-afterglow` and `symbi-io`.
+`symbi-afterglow` and `symbi-io`.

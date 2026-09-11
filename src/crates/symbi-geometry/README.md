@@ -1,28 +1,26 @@
 # symbi-geometry
 
-Coordinate maps, metric tensors, and the finite-volume geometry that follows from
-them. Cell volumes, face areas, centroids, and the connection terms that appear as
-sources when the coordinates are curvilinear.
+Coordinate maps, metric tensors, and finite-volume geometry: cell volumes, face
+areas, centroids, and the connection terms that appear as sources in curvilinear
+coordinates.
 
-The design is built around the 3+1 ADM decomposition, which has a pleasant
-consequence. Flat charts such as Cartesian, spherical, and cylindrical are special
-cases of the same machinery that carries Schwarzschild and Kerr, so extending to a
-new spacetime means implementing the `Metric` trait rather than opening up the
-discretization.
+The metrics use the 3+1 ADM decomposition. Cartesian, spherical, and cylindrical
+coordinates in flat spacetime use the same machinery as Schwarzschild and Kerr.
+To add a spacetime, implement `Metric`; the discretization can then use that
+metric definition.
 
-## Where it sits
+## Dependencies
 
-Above `symbi-algebra` and `symbi-ir`, below the physics.
+Uses `symbi-algebra` and `symbi-ir`. The physics crates build on this one.
 
-## Where to start reading
+## Start here
 
-`metric.rs` for the trait and its implementations, `coord_map.rs` for the
-index-to-position maps including the logarithmic and geometric spacings, and
-`centroid.rs` for the volume-weighted cell centers.
+`metric.rs` defines the trait and its implementations. `coord_map.rs` maps grid
+indices to positions, including logarithmic and geometric spacing. `centroid.rs`
+computes volume-weighted cell centers.
 
-## Things worth knowing before you change it
+## Notes
 
-Christoffel symbols are obtained by automatic differentiation through the `Dual`
-carrier rather than being written out by hand. This is load-bearing. Hand-derived
-connection coefficients for a new chart are a reliable source of quiet errors, and
-letting the derivative fall out of the metric definition removes that whole class.
+Christoffel symbols are computed by automatic differentiation with `Dual`. Keep
+that calculation tied to the metric definition when adding a chart, so there's
+no separate set of hand-derived connection coefficients to maintain.

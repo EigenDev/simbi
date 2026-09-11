@@ -1,149 +1,136 @@
 # The symbi workspace
 
-The workspace contains twenty-two crates organized into a few layers. This page
-summarizes their responsibilities and dependencies.
+The Rust code is split into twenty-two crates. This page is a guide to what's
+where and how the pieces fit together.
 
 ## Where to begin
 
-Physics work, such as adding a source term, trying a different Riemann solver,
-changing a boundary, or setting up a new problem, usually belongs in
-`symbi-hydro`, `symbi-geometry`, `symbi-ib`, or the Python frontend. Most of this
-work does not require opening the compiler crates.
+If you're adding a source term, trying a Riemann solver, changing a boundary, or
+setting up a problem, start with `symbi-hydro`, `symbi-geometry`, `symbi-ib`, or
+the Python frontend. You usually won't need to touch the compiler code.
 
-Compiler and code-generation work lives in `symbi-ir`, `symbi-discretize`, and
-`symbi-aot`. These crates turn the physics definitions into executable CPU and GPU
-kernels. Most physics changes do not require changes in this layer.
+For compiler and code generation work, start with `symbi-ir`,
+`symbi-discretize`, and `symbi-aot`. They turn the physics definitions into CPU
+and GPU kernels.
 
-## Background
+## A bit of background
 
-A limited amount of graph theory is used: directed acyclic graphs, topological
-order, and reachability from a set of outputs. Register allocation in `symbi-expr`
-also relies on graph scheduling.
-The quantity under pressure there is how many values are simultaneously live, and
-that crate once refused any expression past about 252 nodes because a depth-first
-schedule kept values alive long after their last use.
+The physics code works with several kinds of scalar. Run a Riemann solver with
+`S = f64` and you get numbers. Run it with `S = Gv` and the arithmetic records a
+computation graph. With `S = Dual`, it carries derivatives alongside the values.
+The equations stay the same; what changes is how the arithmetic is evaluated.
 
-The main organizing idea is to write an expression once and evaluate it in more
-than one algebra. The same Riemann solver code runs at
-`S = f64` and produces numbers, at `S = Gv` and produces a computation graph, and
-at `S = Dual` and carries derivatives alongside values. A graph appears because one
-of those algebras has no behavior except to remember what it was asked to do, so
-the graph is a consequence of the arrangement rather than the goal of it.
+If you've used dual numbers for automatic differentiation, this should feel
+familiar. Tracking units through a calculation or keeping terms in a perturbation
+series follows a similar idea.
 
-Automatic differentiation through dual numbers is exactly this pattern. So is
-carrying units through a calculation, where the algebra tracks dimensions alongside
-magnitudes and declines a sum that makes no sense. Formal perturbation theory in
-powers of a small parameter has the same shape. Anyone who has the instinct from
-one of those has the instinct that matters here.
+The graphs are directed and acyclic. We use topological ordering to schedule
+operations and reachability from the outputs to find the parts we need. In
+compiler terms, removing unused operations is *dead code elimination*. Finding
+repeated expressions is *common subexpression elimination*, and *lowering* means
+rewriting the graph into a simpler form on the way to executable code.
 
-The remaining concepts use standard compiler vocabulary. Lowering
-means rewriting something into a simpler form on the way to machine code. Common
-subexpression elimination is a question about when two expressions are the same
-thing. Dead code elimination is reachability from the outputs. A graph and a
-schedule are separate objects with separate costs, which is why the order in which
-nodes are visited can matter as much as how many of them there are.
+Graph size isn't the only thing that matters. In `symbi-expr`, register use
+depends on how many intermediate values need to stay alive at once. A previous
+depth-first schedule kept values around too long and hit a limit at about 252
+nodes. Changing the order of evaluation can make a big difference without
+changing the calculation.
 
-## Data flow
+## How the physics becomes a kernel
 
-The physics is
-written once over `S: Scalar`, the discretization evaluates it at `S = Gv` to
-obtain a stencil graph, and the IR lowers that graph and renders it for whichever
-backend is in play. The same Riemann solver definition serves the CPU, CUDA, and
-HIP paths.
+`symbi-discretize` evaluates the physics at `S = Gv` to record a stencil graph.
+The IR lowers that graph and generates code for the chosen backend. This lets the
+CPU, CUDA, and HIP paths share the same Riemann solver definition.
 
-    symbi-hydro        the physics, generic over S: Scalar
+    symbi-hydro        physics, generic over S: Scalar
          |
          |             evaluate at S = Gv
          v
-    symbi-discretize   trace it into a stencil graph
+    symbi-discretize   record a stencil graph
          |
          v
-    symbi-ir           lower the graph, rewrite it, render it
+    symbi-ir           lower, simplify, and generate code
          |
          v
-    symbi-aot          bake CPU Rust and a neutral IR blob at build time
+    symbi-aot          generate CPU Rust and a neutral IR blob at build time
          |
          v
-    symbi-exec         launch it
+    symbi-exec         launch the kernel
          |
          v
-    symbi-substrate    the live kernel sets, one per regime
+    symbi-substrate    manage the kernel sets for each regime
 
-The same IR carries user expressions from a configuration file, which is why it has
-to exist at all. A source term written in Python cannot be compiled ahead of time,
-so something has to lower it at runtime, and once that machinery is present it may
-as well serve the baked kernels too.
+User expressions from configuration files go through the same IR. Those
+expressions aren't known when the library is built, so they need runtime
+compilation. The kernels generated at build time use the same machinery.
 
-## The crates, from the bottom up
+## The crates
 
-**Foundations, depending on little or nothing**
+### Basic types, storage, and compilation
 
-| Crate | What it holds |
+| Crate | What's in it |
 | --- | --- |
-| `symbi-algebra` | Tensors, domains, memory layout. No dependencies at all. |
-| `symbi-abi` | The names a trace and a dispatch must agree on. |
-| `symbi-expr` | The user expression language and its register machine. |
-| `symbi-xpu` | Where data lives and how work runs, on CPU, CUDA, and HIP. |
-| `symbi-ir` | The computation graph, its passes, and its backends. |
-| `symbi-jit` | Cranelift compilation of user expressions on the CPU. |
-| `symbi-geometry` | Coordinate maps, metrics, finite-volume geometry. |
+| `symbi-algebra` | Tensors, domains, and memory layout. No dependencies. |
+| `symbi-abi` | Shared names for kernel parameters and buffers. |
+| `symbi-expr` | User expressions and their register machine. |
+| `symbi-xpu` | Memory and execution on CPU, CUDA, and HIP. |
+| `symbi-ir` | Computation graphs, compiler passes, and code generation. |
+| `symbi-jit` | CPU compilation of user expressions with Cranelift. |
+| `symbi-geometry` | Coordinate maps, metrics, and finite-volume geometry. |
 | `symbi-grid` | Field storage, views, and halos. |
 
-**Physics**
+### Physics
 
-| Crate | What it holds |
+| Crate | What's in it |
 | --- | --- |
-| `symbi-hydro` | Equations of state, regimes, Riemann solvers, sources. |
-| `symbi-ib` | Immersed bodies, signed-distance geometry, penalization. |
+| `symbi-hydro` | Equations of state, regimes, Riemann solvers, and sources. |
+| `symbi-ib` | Immersed bodies, signed-distance geometry, and penalization. |
 
-**Code generation and dispatch**
+### Building and running kernels
 
-| Crate | What it holds |
+| Crate | What's in it |
 | --- | --- |
-| `symbi-discretize` | The physics traced at `S = Gv` into stencil graphs. |
-| `symbi-aot` | The kernel library, baked at build time. |
-| `symbi-exec` | Neutral dispatch and the CPU parallelism policy. |
-| `symbi-substrate` | The live per-regime kernel sets. |
+| `symbi-discretize` | Stencil graphs traced from the physics at `S = Gv`. |
+| `symbi-aot` | The kernel library generated at build time. |
+| `symbi-exec` | Kernel dispatch and CPU parallelism. |
+| `symbi-substrate` | Kernel sets for each regime. |
 
-**Running a simulation**
+### Running a simulation
 
-| Crate | What it holds |
+| Crate | What's in it |
 | --- | --- |
-| `symbi-sim` | The state containers, the stepping primitives, checkpoints. |
+| `symbi-sim` | Simulation state, shared stepping routines, and checkpoints. |
 | `symbi-refinement` | Fixed mesh refinement and conservative level transfer. |
-| `symbi` | The builder and the evolution driver a user calls. |
+| `symbi` | The builder and evolution driver. |
 
-**Output and post-processing**
+### Output and post-processing
 
-| Crate | What it holds |
+| Crate | What's in it |
 | --- | --- |
-| `symbi-io` | Schema-driven HDF5 and JSON serialization. |
-| `symbi-display` | The terminal view of a running simulation. |
+| `symbi-io` | HDF5 and JSON serialization from a shared schema. |
+| `symbi-display` | The terminal display for a running simulation. |
 | `symbi-afterglow` | Synchrotron light curves from relativistic blast waves. |
-| `symbi-afterglow-io` | Reading checkpoints of any geometry into that module. |
+| `symbi-afterglow-io` | Checkpoint reading and geometry conversion for afterglow calculations. |
 | `symbi-py` | The Python extension module. |
 
-## A few conventions that hold everywhere
+## A few conventions
 
-Loop indices are doubled, so `ii`, `jj`, `kk`. This is partly to avoid collisions
-and partly so that searching for a loop variable returns loops.
+Loop indices use doubled letters: `ii`, `jj`, `kk`. This helps avoid name
+collisions and makes them easier to search for.
 
-Comment prose is lowercase, and it states what the code does rather than what it
-avoids doing. A comment should still make sense to somebody who has never seen the
-conversation or the document that produced it, which rules out references to task
-numbers and internal notes.
+Comments use lowercase prose and explain the code in terms of the physics or
+algorithm. Leave out task numbers and references to internal discussions so the
+comment makes sense on its own.
 
-Warnings are denied across the workspace. A deliberate exception is written as an
-`#[allow(...)]` at the specific site, with a reason.
+Warnings are denied across the workspace. If an exception is needed, use
+`#[allow(...)]` at the relevant spot and explain why.
 
 ## Working here
 
-The fast inner loop is `cargo check -p <crate>`. A full bake takes a few minutes
-and a Python install takes rather longer, so it pays to know which of the three a
-given question actually needs.
+`cargo check -p <crate>` is useful for quick feedback. Generating the full kernel
+library takes a few minutes, and a Python install takes longer.
 
-When a refactor is meant to preserve behavior, diffing the emitted kernels before
-and after settles the question more convincingly than a passing test suite does.
+For refactors that should preserve behavior, compare the generated kernels before
+and after as well as running the tests.
 
-Tests are run in debug. The release profile is for measuring performance, and
-performance claims should be based on measurements.
+Run tests in debug mode. Use the release profile when measuring performance.

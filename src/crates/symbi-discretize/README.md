@@ -1,47 +1,43 @@
 # symbi-discretize
 
-The bridge between physics and code generation. It runs the carrier-generic
-physics of `symbi-hydro` at `S = Gv` and collects the resulting stencil graph,
-which `symbi-ir` then lowers and a backend renders.
+This turns the physics in `symbi-hydro` into stencil graphs. It evaluates the
+generic physics code at `S = Gv`, recording the operations for `symbi-ir` to
+lower and turn into code.
 
-The main data flow is:
-
-    symbi-hydro       what the physics is        (generic over S: Scalar)
+    symbi-hydro       physics, generic over S: Scalar
          |
-         |            evaluate it at S = Gv
+         |            evaluate at S = Gv in symbi-discretize
          v
-    symbi-ir          what the kernel computes   (a stencil graph)
+    symbi-ir          stencil graph
          |
-         |            lower and emit
+         |            lower and generate code
          v
     CPU Rust, CUDA, HIP
 
-Every production kernel comes through here. Conserved-to-primitive inversion, face
-fluxes, wave speeds, the Godunov update, ghost filling, the constrained-transport
-curl, refinement transfer, viscous terms, and the immersed-boundary penalization.
+All production kernels are traced here: conserved-to-primitive inversion, face
+fluxes, wave speeds, Godunov updates, ghost filling, constrained-transport curls,
+refinement transfer, viscous terms, and immersed-boundary penalization.
 
-## Where it sits
+## Dependencies
 
-Above hydro, geometry, the immersed bodies, and the IR. Below the ahead-of-time
-kernel library that bakes what it produces.
+Uses hydro, geometry, immersed bodies, and the IR. `symbi-aot` builds the kernel
+library from these graphs.
 
-## Where to start reading
+## Start here
 
-`gv/flux.rs` for a representative builder, since a face flux exercises
-reconstruction, the Riemann solve, and the geometry all at once. Then `coords.rs`
-for how a chart and a spacing reach the trace, and `kernel_slug.rs` for how a
-kernel's name is assembled from its configuration.
+`gv/flux.rs` is a useful example because a face flux brings together
+reconstruction, a Riemann solve, and geometry. `coords.rs` passes the chart and
+spacing into the trace. `kernel_slug.rs` builds a kernel's name from its
+configuration.
 
-## Things worth knowing before you change it
+## Notes
 
-A kernel's name encodes its configuration, and the dispatch side reconstructs that
-name at runtime. When you add an axis of variation, the baking side and the
-dispatch side have to learn about it together, or a run ends with a panic about an
-unbaked kernel. There is a coverage gate in CI for exactly this.
+Kernel names encode their configuration. If you add a configuration option that
+changes the name, update both generation and runtime dispatch. Otherwise, a run
+can ask for a kernel that wasn't built. CI checks kernel coverage.
 
-Grid spacing is a runtime property rather than a baked one. A recurring source of
-confusion is treating the bake-time `spacing` as though it decided the runtime map,
-when the runtime `map_kind_d` is what actually governs.
+Grid spacing is a runtime property. The runtime `map_kind_d` determines the map;
+the build-time `spacing` doesn't select it.
 
-For behavior-preserving refactors, compare the emitted kernels before and after in
-addition to running the tests.
+For refactors that should preserve behavior, compare generated kernels before and
+after as well as running the tests.

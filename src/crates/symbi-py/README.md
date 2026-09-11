@@ -1,31 +1,28 @@
 # symbi-py
 
-The Python extension module. It parses the configuration dictionary the Python
-frontend produces, drains the initial-condition generator into a typed buffer,
-releases the interpreter lock, dispatches on the run's regime, dimensionality,
-geometry, and equation of state, and runs.
+The Python extension module. It reads the frontend's configuration dictionary,
+collects the initial-condition generator into a typed buffer, releases the Python
+interpreter lock, and starts the run with the selected regime, dimension,
+geometry, and equation of state.
 
-Checkpoints are written by `symbi_sim::checkpoint`, in the layout the existing
-Python reader expects, so results come back through the unchanged `simbi.reader`
-and `simbi.viz` stack.
+`symbi_sim::checkpoint` writes checkpoints in the layout expected by the Python
+reader, so results can be loaded with `simbi.reader` and plotted with `simbi.viz`.
 
-## Where it sits
+## Dependencies
 
-At the very top. It depends on `symbi` and on several crates directly for the
-configuration and post-processing surfaces it exposes.
+Uses `symbi` and several other crates directly for configuration and
+post-processing.
 
-## Where to start reading
+## Start here
 
-`lib.rs`, following one configuration field from the dictionary through to the
-value the solver receives.
+`lib.rs`. Following one configuration field from the dictionary to the solver is
+a useful way to see how the pieces connect.
 
-## Things worth knowing before you change it
+## Notes
 
-This crate is where a mistaken configuration should be caught, since a
-misinterpreted field here becomes wrong physics with no other warning. The
-pre-flight validation exists for that reason, and a new configuration surface
-deserves a check there alongside the wiring.
+Validate configuration here, before it reaches the solver. A misread field can
+change the physics without causing a runtime error. Add validation when exposing
+a new option.
 
-Retired option names raise an informative error rather than being ignored, which
-matters because a silently dropped solver name would leave a run quietly using the
-default.
+Retired option names raise an explanatory error. Silently ignoring one could
+leave a run using a default solver the user didn't ask for.

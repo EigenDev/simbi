@@ -1,28 +1,25 @@
 # symbi-substrate
 
-The live kernel sets, one per regime, and the machinery that binds a simulation
-state to them. It answers the question of which kernels this run needs, what
-buffers and parameters they take, and in what order they fire.
+Kernel sets for each fluid regime. This connects simulation state to the kernels,
+provides their buffers and parameters, and arranges the calls.
 
-`SimSubstrate` is the front door. Below it sit the per-regime kernel sets for the
-isothermal, adiabatic, relativistic, and magnetized cases, along with the shared
-support that none of them should duplicate, such as the CFL reduction, the ghost
-filling driver, and the runtime source path.
+`SimSubstrate` is the main interface. The isothermal, adiabatic, relativistic,
+and magnetized regimes have their own kernel sets. They share routines for CFL
+reduction, ghost filling, and runtime sources.
 
-## Where it sits
+## Dependencies
 
-Above `symbi-sim`, whose `FieldStore` it implements kernel sets over, and above
-`symbi-exec`, through which it dispatches. Below the top-level `symbi` crate, which
-drives it. It names no time integrator and no refinement strategy, since both of
-those depend downward on it.
+Uses `symbi-sim` for `FieldStore` and `symbi-exec` to launch kernels. The
+top-level `symbi` crate drives it. Time integration and refinement are handled
+by the crates above it.
 
-## Where to start reading
+## Start here
 
-`regimes/regime_substrate.rs` for the map from a regime to its kernel set, then any
-one of the concrete substrates in `regimes/substrate.rs`.
+`regimes/regime_substrate.rs` maps regimes to kernel sets.
+`regimes/substrate.rs` contains the concrete implementations.
 
-## Things worth knowing before you change it
+## Notes
 
-Pointwise sources ride inside the Godunov kernel rather than in a separate pass,
-and that fusion is gated to be bit-exact against the unfused path. If you add a
-source, decide consciously which side of that seam it belongs on.
+Pointwise sources run inside the Godunov kernel. Tests check that this gives
+bit-exact results against running them separately. When adding a source, check
+whether it belongs in that kernel or needs a separate pass.

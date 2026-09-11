@@ -1,48 +1,38 @@
 # symbi-ir
 
-The computation graph, and the compiler that turns it into something a machine can
-run. Physics enters as a traced graph, passes rewrite that graph, and backends
-render it to CPU Rust, to CUDA or HIP source, or to a serialized blob that can be
-rendered later.
+Computation graphs and the compiler that turns them into kernels. Physics arrives
+as a traced graph. Compiler passes rewrite it, and backends generate CPU Rust,
+CUDA or HIP source, or a serialized blob for later code generation.
 
-This is the crate where you are reading a compiler rather than reading physics, and
-it is worth knowing that when you open it. Someone adding a source term or a
-Riemann solver should be able to work for a long time without coming in here.
+Start here if you're working on the compiler. For a new source term or Riemann
+solver, `symbi-hydro` is usually the place to look.
 
-## Where it sits
+## Dependencies
 
-Above `symbi-algebra` and `symbi-abi`, and below everything that generates a
-kernel. It shells no toolchain of its own. Driving `nvcc` and `hiprtc` belongs to
-`symbi-xpu`.
+Uses `symbi-algebra` and `symbi-abi`. Kernel generation builds on this crate.
+External compiler calls are handled by `symbi-xpu`.
 
-## Where to start reading
+## Start here
 
-`gv.rs` first, because `Gv` is the whole front end. It is a `Scalar` implementation
-whose arithmetic operators record nodes instead of computing numbers, so running
-ordinary generic physics code at `S = Gv` leaves a graph behind. Then `graph.rs`
-for the data structure, `passes/scalarize.rs` for the lowering, and
-`backends/` for the emitters.
+`gv.rs` defines `Gv`, a `Scalar` implementation whose arithmetic records graph
+nodes. Running the generic physics with `S = Gv` builds the graph.
 
-## Things worth knowing before you change it
+Then try `graph.rs` for the data structure, `passes/scalarize.rs` for lowering,
+and `backends/` for code generation.
 
-Two distinctions cause most of the confusion here, and neither is visible in the
-types yet.
+## Notes
 
-The first is trace time against lowering time. A kernel's parameter list is
-collected while the trace runs, so it records everything the builder touched. Dead
-code elimination happens later, during lowering. The parameter list is therefore a
-superset of the parameters the lowered code actually reads, and code that assumes
-the two agree will be right until the day it is not.
+A kernel's parameter list is collected during tracing and includes everything the
+builder touched. Dead code elimination happens later, during lowering, so the
+list can include parameters the generated code never reads. Don't assume those
+sets are identical.
 
-The second is that there are two lowering entry points with different behavior.
-`scalarize` takes a single output and lowers every node in the graph.
-`scalarize_kernel` takes several outputs and prunes what none of them reach. Both
-are correct for their callers, and a graph handed to the wrong one produces a
-parameter list of the wrong length rather than a wrong answer, which at least fails
-loudly.
+There are two lowering entry points. `scalarize` takes one output and lowers
+every node. `scalarize_kernel` takes several outputs and prunes nodes unreachable
+from them. Using the wrong entry point can produce a parameter list of the wrong
+length.
 
-There is also the ambient trace. `with_trace` and `in_isolated_trace` mean a
-builder can behave differently depending on whether something above it has already
-opened a trace, and the fused source path does exactly that. This is the standing
-cost of a tracing front end, and `in_isolated_trace` is the sanctioned way to
-re-enter.
+Check whether a trace is already active when working with builders. `with_trace`
+and `in_isolated_trace` can behave differently in that case, as in the fused
+source path. Use `in_isolated_trace` when starting a separate trace inside an
+existing one.

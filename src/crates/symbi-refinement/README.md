@@ -1,30 +1,29 @@
 # symbi-refinement
 
-Fixed mesh refinement. A hierarchy of levels, each with its own simulation state
-and kernel set, plus the transfer operators that move data between them and the
-registers that keep the coarse-fine interface conservative.
+Fixed mesh refinement. Each level has its own simulation state and kernel set.
+Transfer operators move data between levels, and flux and EMF registers keep the
+coarse-fine interface conservative.
 
-The transfer operators are where the care goes. Restriction has to conserve, and
-prolongation has to avoid manufacturing structure that was never there. The
-coarse-fine flux and EMF registers exist so that a face shared between two levels
-carries one flux rather than two slightly different ones.
+Restriction needs to conserve the transferred quantities, and prolongation needs
+to avoid introducing spurious structure. The registers reconcile fluxes at shared
+faces so the coarse and fine levels agree.
 
-## Where it sits
+## Dependencies
 
-Above `symbi-sim`, whose driver primitives it reuses, and above `symbi-substrate`,
-whose kernel sets it dispatches per level. The `symbi` crate drives it. It is a
-sibling of the single-grid driver rather than a layer above it.
+Uses stepping routines from `symbi-sim` and per-level kernel sets from
+`symbi-substrate`. The `symbi` crate drives it. The refined and single-grid
+drivers share those lower-level routines without depending on each other.
 
-## Where to start reading
+## Start here
 
-`refinement/hierarchy.rs`, which holds `Hierarchy`.
+`refinement/hierarchy.rs` defines `Hierarchy`.
 
-## Things worth knowing before you change it
+## Notes
 
-The coarse-fine ghost transfer is balance-aware. On a stratified background, moving
-a raw state across the interface leaves an entropy signature at the seam, so what
-crosses is the departure from the local hydrostatic isentrope instead. The
-equivalent device kernels are baked and are bit-identical to the host path.
+Coarse-fine ghost transfer accounts for hydrostatic balance. On a stratified
+background, transferring the raw state leaves an entropy signature at the
+interface. Instead, the transfer uses the departure from the local hydrostatic
+isentrope. The generated device kernels are bit-identical to the host path.
 
-Seeding a fine level that spans a decomposition cut needs the conserved exchange
-and the decomposed seeding path, and it has to happen before the level is primed.
+If a new fine level spans a domain decomposition cut, use the conserved exchange
+and decomposed seeding path before priming the level.

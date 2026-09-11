@@ -1,25 +1,23 @@
 # symbi-xpu
 
-This crate manages memory, execution, and synchronization for CPU, CUDA, and HIP.
-It owns memory
-lifetime and leaves layout to its callers, it orders execution through a stream
-that the executor holds, and it loads kernels that were compiled elsewhere.
+Memory, execution, and synchronization for CPU, CUDA, and HIP. This manages
+memory lifetimes while callers choose the layout. The executor holds a stream
+that orders the work, and this crate loads the compiled kernels.
 
-## Where it sits
+## Dependencies
 
-Just above `symbi-algebra`. It generates no code itself, though it does drive
-`nvrtc` and `hiprtc` when a kernel needs compiling at runtime.
+Uses `symbi-algebra`. Code generation happens elsewhere, but this crate calls
+`nvrtc` and `hiprtc` when kernels need to be compiled at runtime.
 
-## Where to start reading
+## Start here
 
-`runtime.rs` for the execution model, then whichever of `cuda.rs` or `hip.rs`
-matches your machine.
+`runtime.rs` describes execution. Then look at `cuda.rs` or `hip.rs`, depending
+on the hardware you're using.
 
-## Things worth knowing before you change it
+## Notes
 
-On AMD hardware, managed memory needs `HSA_XNACK=1`. Without it an MI250X run
-can be roughly twenty-four times slower. Check `rocminfo` when diagnosing poor AMD
-performance.
+AMD managed memory needs `HSA_XNACK=1`. An MI250X run can be roughly 24 times
+slower without it, so check `rocminfo` when investigating poor AMD performance.
 
-Dispatch is resolved at compile time, with no `dyn` anywhere, and every fallible
-operation returns `Result<T, XpuError>` rather than panicking.
+Dispatch is resolved at compile time without `dyn`. Fallible operations return
+`Result<T, XpuError>` instead of panicking.

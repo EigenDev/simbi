@@ -1,15 +1,14 @@
 # symbi-display
 
-The terminal front end for a running simulation. Box-drawn tables, a color
-palette, progress bars, and a scrolling message board. A live terminal is drawn
-with ratatui, and a headless or redirected run falls back to a plain string
-renderer so that log files stay readable.
+The terminal display for a running simulation: tables, colors, progress bars, and
+scrolling messages. Interactive runs use ratatui. Headless runs and redirected
+output use a plain text renderer to keep the logs readable.
 
-## Where it sits
+## Dependencies
 
-Above `symbi-io`, which it reads the schema through. Nothing in the physics
-depends on it.
+Reads the output schema through `symbi-io`. The physics crates don't depend on
+this one.
 
-## Where to start reading
+## Start here
 
-`table.rs` for the layout, `live.rs` for the interactive frame.
+`table.rs` has the layout, and `live.rs` draws the interactive display.

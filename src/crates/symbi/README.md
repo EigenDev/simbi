@@ -1,7 +1,8 @@
 # symbi
 
-The user-facing crate. It re-exports the core crates and provides the builder and
-the evolution driver, so that a program written against it reads roughly as
+The Rust interface for setting up and running a simulation. It re-exports the
+core crates and provides the builder and evolution driver. A program looks
+roughly like this:
 
     let mut sim = SimState::build(Newtonian, eos, Cartesian)
         .cells([n]).spacing([dx]).boundaries(BoundaryType::Outflow)
@@ -9,12 +10,10 @@ the evolution driver, so that a program written against it reads roughly as
     let sub = sim.substrate();
     evolve(&mut sim, &sub, t_final)?;
 
-## Where it sits
+## Dependencies
 
-At the top of the Rust side, depending on nearly everything. `symbi-py` sits above
-it and exposes the same capability to Python.
+This brings together most of the Rust workspace. `symbi-py` exposes it to Python.
 
-## Where to start reading
+## Start here
 
-`prelude.rs` to see what a user is given, then `sim/` for the builder and the
-driver.
+`prelude.rs` lists the main imports. `sim/` has the builder and evolution driver.

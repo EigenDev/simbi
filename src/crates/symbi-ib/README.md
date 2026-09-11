@@ -1,35 +1,29 @@
 # symbi-ib
 
-Discrete objects living inside the fluid. Black holes, planets, rigid bodies of
-arbitrary shape, and the bonded assemblies built from them. The crate splits
-cleanly into two halves that are worth keeping separate in your head.
+Bodies inside the fluid: black holes, planets, rigid bodies of arbitrary shape,
+and bonded assemblies.
 
-The first is kinematics. Where a body is, how it moves, how bodies attract each
-other, how they collide, and how bonds hold fragments together.
+One part of the crate handles their motion: positions, gravity, collisions, and
+bonds between fragments. The other handles their interaction with the fluid.
+Shapes are described by signed distance functions, combined with
+constructive-solid-geometry operations. Volume penalization couples the bodies
+to the fluid based on how far a cell lies inside a body.
 
-The second is how a body meets the fluid. Geometry is exact, expressed as signed
-distance functions that compose through the usual constructive-solid-geometry
-operations, and the surface physics is volume penalization over that geometry. A
-cell knows how deeply it lies inside a body, and the penalty is applied in
-proportion.
+Accretion, drainage, and horizon excision are also handled here.
 
-Accretion, drainage, and horizon excision also live here, since each is a statement
-about what a body does to the fluid that reaches it.
+## Dependencies
 
-## Where it sits
+Uses algebra, geometry, hydro, and the IR. The discretization traces penalization
+into kernels, and the simulation crates store the bodies.
 
-Above algebra, geometry, hydro, and the IR. The discretization traces its
-penalization into kernels, and the simulation crates carry the bodies.
+## Start here
 
-## Where to start reading
+`body.rs` defines a body, `sdf.rs` describes its geometry, and `penalize.rs`
+handles the fluid coupling.
 
-`body.rs` for what a body is, `sdf.rs` for the geometry, and `penalize.rs` for the
-coupling.
+## Notes
 
-## Things worth knowing before you change it
-
-The softening of a body's gravitational field is a configuration choice with a
-long reach. A Plummer-softened point mass and a compact one produce visibly
-different flows near the accretor, and the honest way to know which a given run
-used is to measure the field from the flow itself rather than to infer it from when
-the run was launched.
+Gravitational softening is part of the physical setup. Plummer and compact
+softening give different flows near an accretor. If you're unsure which was used
+in an old run, check the field implied by the flow rather than guessing from the
+run date.
