@@ -233,6 +233,7 @@ artifacts, not source data; `./dev.py clean` (or `cargo clean`) removes them.
 
 ```bash
 simbi run        # run simulations
+simbi launch     # run one simulation across worker processes (CPU, single host)
 simbi plot       # visualize checkpoint data
 simbi afterglow  # radiation transport and observables
 simbi attach     # watch a headless (cluster/batch) run from your own terminal
@@ -338,6 +339,39 @@ srun -N 1 -n 1 --gpus-per-task=8 \
 Match Slurm's `--gpus-per-task` to SIMBI's `--ngpus`, keeping one task for the run.
 You can check the configuration before submission with
 `simbi run /path/to/problem.py --ngpus 8 --validate`.
+
+### Multi-process runs on one host
+
+`simbi launch` evolves one problem across worker processes that exchange
+boundary data over TCP on the local host, without MPI. It covers 2D Cartesian
+adiabatic Newtonian hydro on a uniform static grid; every other configuration
+is refused at startup with the property named. A layout file names the worker
+count and the partition, and each worker holds one tile:
+
+```toml
+[execution]
+workers = 2
+
+[partition]
+shape = [2, 1]        # or cuts = [[16], []]: interior cut indices per axis
+
+[checkpoint]
+staging_mb = 4        # checkpoint block size; directory = "..." overrides the output directory
+```
+
+```bash
+simbi launch simbi_configs/examples/newtonian/kh.py --layout two.toml --resolution 32,32
+simbi launch /path/to/problem.py --layout three.toml --checkpoint data/32x32.chkpt.final.h5
+```
+
+Problem flags pass through as they do for `simbi run`. The launcher starts the
+workers, prints each worker's pid and exit code, and exits nonzero if any
+worker did; interrupting the launcher ends every worker. Checkpoints are
+written by the coordinator worker with the same names and layout as a
+single-grid run, so a run started on one partition resumes on another with
+`--checkpoint`. The workers agree on the build, the resolved configuration,
+the partition, and the placement before any data moves, and refuse the
+session otherwise.
 
 #### Choosing the cuts
 

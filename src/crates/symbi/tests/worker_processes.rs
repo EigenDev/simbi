@@ -267,6 +267,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         &cfg,
         |_, _, _, _| Ok(ControlFlow::Continue(())),
     )?;
+    fabric.finish(TRANSFER_DEADLINE)?;
     let mut bytes = Vec::new();
     for (flat, (sim, _)) in mine.iter().zip(&built) {
         bytes.extend_from_slice(&(*flat as u64).to_le_bytes());

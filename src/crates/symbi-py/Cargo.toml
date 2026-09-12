@@ -20,6 +20,7 @@ hip = ["gpu", "symbi/hip"]
 [dependencies]
 symbi = { path = "../symbi" }
 symbi-sim = { path = "../symbi-sim" }
+symbi-fabric = { path = "../symbi-fabric" }
 symbi-hydro = { path = "../symbi-hydro" }
 symbi-source-compile = { path = "../symbi-source-compile" }
 symbi-geometry = { path = "../symbi-geometry" }

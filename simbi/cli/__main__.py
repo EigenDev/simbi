@@ -26,7 +26,7 @@ def main() -> None:
     # `run` forwards leftover flags to the config's own parser (from_cli), which
     # rejects unknowns itself; every other subcommand consumes nothing, so a
     # leftover flag there is a typo that must fail loudly.
-    if args.command != "run" and remaining:
+    if args.command not in ("run", "launch") and remaining:
         parser.error("unrecognized arguments: " + " ".join(remaining))
 
     if hasattr(args, "func"):

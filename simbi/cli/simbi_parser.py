@@ -8,7 +8,7 @@ from typing import Any
 
 from .actions import PrintVersionAction
 from .base_parser import BaseParser
-from .commands import afterglow, attach, plot, run
+from .commands import afterglow, attach, launch, plot, run
 from .utils.formatter import HelpFormatter
 
 
@@ -37,6 +37,7 @@ class SimbiParser(BaseParser):
 
     def _add_subcommands(self) -> None:
         run.setup_parser(self.subparsers)
+        launch.setup_parser(self.subparsers)
         plot.setup_parser(self.subparsers)
         afterglow.setup_parser(self.subparsers)
         attach.setup_parser(self.subparsers)

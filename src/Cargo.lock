@@ -1606,6 +1606,7 @@ dependencies = [
  "symbi-afterglow",
  "symbi-algebra",
  "symbi-display",
+ "symbi-fabric",
  "symbi-geometry",
  "symbi-hydro",
  "symbi-ib",

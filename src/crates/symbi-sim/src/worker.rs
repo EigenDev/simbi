@@ -206,7 +206,8 @@ fn fail<L: Link>(fabric: &mut Fabric<L>, err: WorkerError) -> WorkerError {
 /// tiles; `devices` is indexed by tile id over the whole plan. `on_step` runs
 /// after every accepted step with the held stores and the fabric, so a
 /// checkpoint runs there; it may stop the run, and its error reaches every
-/// peer through the abort relay.
+/// peer through the abort relay. the session stays open on return, so the
+/// caller writes its final checkpoint and then finishes the fabric.
 #[allow(clippy::too_many_arguments)]
 pub fn evolve_worker<const D: usize, const DOF: usize, M, K, T, L, F>(
     tiles: &[TileId],
@@ -457,8 +458,5 @@ where
             Err(e) => return Err(fail(fabric, e)),
         }
     }
-    fabric
-        .finish(deadline)
-        .map_err(|e| fail(fabric, e.into()))?;
     Ok(report)
 }

@@ -92,7 +92,7 @@ fn run2(sim: &mut Sim2, kern: &Kern2, regime: RegimeKind) -> Result<(), WorkerEr
         &config(regime),
         |_, _, _, _| Ok(ControlFlow::Continue(())),
     )
-    .map(|_| ())
+    .and_then(|_| fabric.finish(Duration::from_secs(2)).map_err(WorkerError::from))
 }
 
 fn refused(result: Result<(), WorkerError>, expect: &str) {
@@ -207,6 +207,6 @@ fn a_one_dimensional_grid_is_refused() {
         &config(RegimeKind::of::<f64, 1, Newtonian>()),
         |_, _, _, _| Ok(ControlFlow::Continue(())),
     )
-    .map(|_| ());
+    .and_then(|_| fabric.finish(Duration::from_secs(2)).map_err(WorkerError::from));
     refused(result, "1-dimensional");
 }

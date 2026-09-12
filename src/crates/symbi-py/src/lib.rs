@@ -10054,6 +10054,8 @@ fn reset_projection_ledger() {
 // the NVRTC device path — so the registration is identical and lives here.
 fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_simulation, m)?)?;
+    m.add_function(wrap_pyfunction!(launch_worker, m)?)?;
+    m.add_function(wrap_pyfunction!(config_digest, m)?)?;
     m.add_class::<NativeRunDiagnostics>()?;
     m.add_class::<NativeProjectionDiagnostics>()?;
     m.add_class::<NativeGuardDiagnostics>()?;
@@ -10107,6 +10109,542 @@ fn device_stats(ndim: usize, extent: &[u32]) -> Option<symbi_display::hostinfo::
 #[cfg(not(feature = "gpu"))]
 fn device_stats(_ndim: usize, _extent: &[u32]) -> Option<symbi_display::hostinfo::DeviceStats> {
     None
+}
+
+/// the launch parameters one worker of a `simbi launch` session receives.
+struct WorkerLaunch {
+    worker: usize,
+    workers: usize,
+    owner: Vec<usize>,
+    rendezvous: String,
+    credential: u64,
+    staging_cells: usize,
+    /// the digest of the effective execution configuration every worker must share
+    config_digest: u64,
+}
+
+/// the distributed first release: 2D cartesian adiabatic newtonian hydro on a static uniform
+/// grid with a linear checkpoint cadence. every other configuration is named and refused here,
+/// before any tile is built.
+fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
+    let refused = |what: &str| Err(format!("{what} is outside the distributed first release"));
+    if cfg.regime != "newtonian" {
+        return refused(&format!("the {} regime", cfg.regime));
+    }
+    if cfg.dims != 2 {
+        return refused(&format!("a {}-dimensional grid", cfg.dims));
+    }
+    if cfg.coord_system != "cartesian" {
+        return refused(&format!("the {} chart", cfg.coord_system));
+    }
+    if cfg.spacetime != "minkowski" {
+        return refused(&format!("the {} spacetime", cfg.spacetime));
+    }
+    if cfg.locally_isothermal {
+        return refused("a locally isothermal closure");
+    }
+    if cfg.refinement_enabled {
+        return refused("mesh refinement");
+    }
+    if cfg.mesh_motion {
+        return refused("mesh motion");
+    }
+    if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
+        return refused("an immersed body");
+    }
+    if cfg.n_tracers > 0 {
+        return refused("a tracer population");
+    }
+    if !cfg.chi_ic.is_empty() {
+        return refused("a passive scalar");
+    }
+    if cfg.viscosity != 0.0 || cfg.alpha != 0.0 {
+        return refused("viscous transport");
+    }
+    if cfg.perturbation_json.is_some() {
+        return refused("a perturbation expression");
+    }
+    if !cfg.source_jsons.is_empty() || !cfg.driven_exprs.is_empty() || cfg.equilibrium_json.is_some() {
+        return refused("a user source or driven boundary");
+    }
+    if cfg.dlogt > 0.0 {
+        return refused("a logarithmic checkpoint cadence");
+    }
+    if axis_maps::<2>(cfg).is_some() {
+        return refused("nonuniform spacing");
+    }
+    Ok(())
+}
+
+/// evolve this worker's tiles through the fabric: the per-tile build of the decomposed path
+/// restricted to the tiles this worker holds, the rendezvous under the session credential,
+/// the worker loop with the coordinator-written checkpoints at the linear cadence, and the
+/// final checkpoint before the session ends. worker 0 reports through the decomposed table.
+fn run_worker_process(cfg: &Config, prims: &[Vec<f64>], launch: &WorkerLaunch) -> Result<(), String> {
+    use symbi::sim::decomp::{LocalCopy, plan_schema, unflatten};
+    use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
+    use symbi_fabric::{Fabric, WorkerId};
+    use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
+    use symbi_sim::checkpoint::{LevelTiles, PhysicsIdentity, TileView, load_partitioned_level};
+    use symbi_sim::distributed_checkpoint::{CheckpointRequest, block_credit_for, distributed_checkpoint};
+    use symbi_sim::plan_exchange::PlanExchange;
+    use symbi_sim::substrate_seam::RegimeKind;
+    use symbi_sim::worker::{Injection, WorkerConfig, WorkerError, evolve_worker};
+
+    validate_launch_scope(cfg)?;
+    type Sim = SimDefaultGeneric<Newtonian, 2, 2, Cartesian, EosSelect<f64>>;
+    let n: [usize; 2] = [cfg.n_cells[0], cfg.n_cells[1]];
+    let total: usize = n.iter().product();
+    if prims.len() != total {
+        return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+    }
+    let partition = tile_partition(n, cfg)?;
+    let counts = partition.counts();
+    if launch.owner.len() != partition.n_tiles() {
+        return Err(format!(
+            "the owner map names {} tiles; the partition has {}",
+            launch.owner.len(),
+            partition.n_tiles()
+        ));
+    }
+    let owner: Vec<WorkerId> = launch.owner.iter().map(|&w| WorkerId(w as u32)).collect();
+    let placement = Placement::new(launch.workers as u32, owner)?;
+    let me = WorkerId(launch.worker as u32);
+    let phys = boundaries_nd::<2>(&cfg.boundaries);
+    let topology = wrap_topology(&phys, counts);
+    wrap_capability(&topology, cfg.wb_reconstruction, false)?;
+    let theta = build_theta(cfg);
+    let solver = cfg.solver;
+    let mine: Vec<usize> = (0..partition.n_tiles())
+        .filter(|&f| placement.owner_of(TileId(f as u32)) == me)
+        .collect();
+    if mine.is_empty() {
+        return Err(format!("worker {} holds no tile", launch.worker));
+    }
+    let offsets = tile_offsets(&partition);
+    let mut tiles = Vec::with_capacity(mine.len());
+    for &flat in &mine {
+        let tc = unflatten(flat, counts);
+        let ext = partition.tile_extents(tc);
+        let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
+        let m: [usize; 2] = [ext[0].1, ext[1].1];
+        let origin = tile_origin::<2>(cfg, tile_lo);
+        let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
+        let bnd = tile_boundaries(&phys, tc, counts);
+        let sim = Sim::build(Newtonian, host_eos(cfg), Cartesian)
+            .cells(m)
+            .origin(origin)
+            .spacing(spacing)
+            .ghosts(ghost_width(cfg))
+            .boundaries(bnd)
+            .cfl(cfg.cfl)
+            .timestepping(cfg.timestepping)
+            .allocate()
+            .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+            .set_initial_indexed(|idx, _x| {
+                let lin = (tile_lo[0] + idx[0] as usize) + (tile_lo[1] + idx[1] as usize) * n[0];
+                let row = &prims[lin];
+                Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2]]), Pressure(row[3]))
+            })
+            .build();
+        // the numerics the single path installs: reconstruction, the ppm flatten, the
+        // well-balanced reconstruction, the eos, and the solver
+        let sub = sim
+            .substrate()
+            .theta(theta)
+            .reconstruction(build_recon(cfg))
+            .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+            .well_balanced_reconstruction(cfg.wb_reconstruction)
+            .with_eos(build_eos(cfg))
+            .with_solver(solver)
+            .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+        tiles.push((sim, sub));
+    }
+    let ng = tiles[0].0.geom.ng;
+    let grid = decomposed_grid::<2>(cfg, ng);
+    if let Some(path) = cfg.restart_path.as_deref() {
+        for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
+            load_partitioned_level(sim, path, 0, offsets[flat], &grid)
+                .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+        }
+    }
+    for (sim, _) in tiles.iter_mut() {
+        sim.time = cfg.start_time;
+    }
+    let identity = PhysicsIdentity::of(&tiles[0].0);
+    let tile_ids: Vec<TileId> = mine.iter().map(|&f| TileId(f as u32)).collect();
+    let my_offsets: Vec<[isize; 2]> = mine.iter().map(|&f| offsets[f]).collect();
+    let schema = plan_schema(&*tiles[0].0);
+    let plan = ExchangePlan::compile(&partition, &topology, &schema, ng).map_err(|e| e.to_string())?;
+    let exchange = PlanExchange::new(&plan, &placement, me);
+    let budget = launch.staging_cells.max(1);
+    let credit = block_credit_for(budget, 2);
+    let rendezvous = Rendezvous {
+        me,
+        coordinator: "127.0.0.1:0".parse().expect("a loopback address"),
+        announce: Some(std::path::PathBuf::from(&launch.rendezvous)),
+        identity: Identity {
+            credential: launch.credential,
+            build_id: build_source_id(),
+            config_digest: symbi_fabric::Digest(launch.config_digest),
+            plan_digest: plan.digest,
+            placement_digest: placement.digest(),
+            ng: ng as u32,
+            workers: launch.workers as u32,
+            block_credit: credit,
+        },
+        startup: std::time::Duration::from_secs(120),
+    };
+    let deadline = std::time::Duration::from_secs(600);
+    let lens = exchange.lens();
+    let max_payload = (lens.iter().max().copied().unwrap_or(0) * 8).max(credit as usize);
+    let (link, session) = connect(&rendezvous, max_payload).map_err(|e| e.to_string())?;
+    let mut fabric = Fabric::new(link, me, session, launch.workers, 2, &lens, exchange.sends_per_peer_axis())
+        .with_block_credit(credit);
+    let devices = vec![0i32; partition.n_tiles()];
+
+    // the coordinator reports through the decomposed table
+    let slabs: Vec<Vec<usize>> = (0..2)
+        .map(|ax| (0..counts[ax]).map(|i| partition.tile_range(ax, i).1).collect())
+        .collect();
+    let mut reporter = if me == WorkerId(0) {
+        let mut r = DecomposedReporter::new(cfg, total as u64, &counts, &slabs);
+        r.milestone(&format!(
+            "fabric session over {} workers; plan {:016x}, placement {:016x}",
+            launch.workers, plan.digest.0, placement.digest().0
+        ));
+        Some(r)
+    } else {
+        None
+    };
+    let cp_dt = if cfg.checkpoint_interval > 0.0 {
+        cfg.checkpoint_interval * cfg.time_unit
+    } else {
+        f64::INFINITY
+    };
+    let cp_width = checkpoint_time_width(cfg);
+    let extras_of = |cp_index: u64| checkpoint_metadata(cfg, cp_index);
+
+    // one checkpoint through the coordinator from this worker's tiles as they stand
+    let write = |sh: &[&symbi_sim::state::FieldStore<2, 2, _, f64>],
+                 fabric: &mut Fabric<_>,
+                 path: &str,
+                 cp_index: u64|
+     -> Result<f64, String> {
+        let level = LevelTiles {
+            tiles: sh
+                .iter()
+                .zip(&my_offsets)
+                .map(|(s, &offset)| TileView { state: *s, offset })
+                .collect(),
+            grid: grid.clone(),
+        };
+        let extras = extras_of(cp_index);
+        let req = CheckpointRequest {
+            path,
+            extras: &extras,
+            budget,
+            deadline,
+            drop_block: None,
+            duplicate_first_block: false,
+            vote_no: false,
+        };
+        let t_io = std::time::Instant::now();
+        distributed_checkpoint::<Newtonian, 2, 2, _, _>(fabric, &plan, &placement, &identity, &level, &tile_ids, &req)
+            .map_err(|e| checkpoint_write_error(path, symbi_io::IoError::Backend(e.to_string())))?;
+        Ok(t_io.elapsed().as_secs_f64())
+    };
+
+    let mut stores: Vec<&mut symbi_sim::state::FieldStore<2, 2, _, f64>> = Vec::new();
+    let mut kernels = Vec::new();
+    for (s, k) in tiles.iter_mut() {
+        stores.push(&mut **s);
+        kernels.push(&*k);
+    }
+    let outcome: Result<(u64, f64), String> = (|| {
+        if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
+            let sh: Vec<&symbi_sim::state::FieldStore<2, 2, _, f64>> = stores.iter().map(|s| &**s).collect();
+            let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+            let path = checkpoint_name(cfg, &tag);
+            let io = write(&sh, &mut fabric, &path, cfg.checkpoint_index)?;
+            if let Some(r) = reporter.as_mut() {
+                r.checkpoint_written(cfg, &path, cfg.start_time, io);
+            }
+        }
+        let mut next_cp = cfg.start_time + cp_dt;
+        let mut cp_index = cfg.checkpoint_index + 1;
+        let worker_cfg = WorkerConfig {
+            regime: RegimeKind::of::<f64, 2, Newtonian>(),
+            timestepping: cfg.timestepping,
+            start_time: cfg.start_time,
+            t_final: cfg.t_final,
+            max_steps: cfg.max_steps,
+            deadline,
+            injection: Injection::default(),
+        };
+        let report = evolve_worker(
+            &tile_ids,
+            &mut stores,
+            &kernels,
+            &devices,
+            &exchange,
+            &LocalCopy,
+            &mut fabric,
+            &worker_cfg,
+            |iter, time, sh, fabric| {
+                if let Some(r) = reporter.as_mut() {
+                    r.progress(iter, time);
+                }
+                if time + f64::EPSILON >= next_cp {
+                    let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+                    let path = checkpoint_name(cfg, &tag);
+                    let io = write(sh, fabric, &path, cp_index).map_err(WorkerError::Checkpoint)?;
+                    if let Some(r) = reporter.as_mut() {
+                        r.checkpoint_written(cfg, &path, time, io);
+                    }
+                    while next_cp <= time {
+                        next_cp += cp_dt;
+                    }
+                    cp_index += 1;
+                }
+                Ok(std::ops::ControlFlow::Continue(()))
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let sh: Vec<&symbi_sim::state::FieldStore<2, 2, _, f64>> = stores.iter().map(|s| &**s).collect();
+        let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
+        let io = write(&sh, &mut fabric, &final_path, cp_index)?;
+        if let Some(r) = reporter.as_mut() {
+            r.checkpoint_written(cfg, &final_path, report.time, io);
+        }
+        fabric.finish(deadline).map_err(|e| e.to_string())?;
+        Ok((report.steps, report.time))
+    })();
+    match outcome {
+        Ok((iter, time)) => {
+            if let Some(r) = reporter {
+                let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
+                r.finish(iter, time, &final_path);
+            }
+            Ok(())
+        }
+        Err(msg) => {
+            fabric.abort(&msg);
+            if let Some(r) = reporter {
+                r.fail(&msg);
+            }
+            Err(msg)
+        }
+    }
+}
+
+/// the canonical form of one execution-configuration value. the supported set is exactly
+/// what the execution dict carries: none, booleans, integers, floats, strings (including
+/// the string-valued enums, which encode as their value), and sequences and mappings of
+/// those. a mapping encodes its entries in key order, so insertion order plays no part; a
+/// sequence keeps its order, since a sequence's order is data.
+#[derive(Debug, Clone, PartialEq)]
+enum Canon {
+    None,
+    Bool(bool),
+    Int(i128),
+    Float(f64),
+    Str(String),
+    Seq(Vec<Canon>),
+    Map(Vec<(String, Canon)>),
+}
+
+fn canon_of(value: &Bound<'_, PyAny>, path: &str) -> PyResult<Canon> {
+    use pyo3::types::{PyBool, PyDict, PyFloat, PyList, PyString, PyTuple};
+    if value.is_none() {
+        return Ok(Canon::None);
+    }
+    if value.is_instance_of::<PyBool>() {
+        return Ok(Canon::Bool(value.extract()?));
+    }
+    if value.is_instance_of::<PyFloat>() {
+        return Ok(Canon::Float(value.extract()?));
+    }
+    if value.is_instance_of::<PyString>() {
+        return Ok(Canon::Str(value.extract()?));
+    }
+    if let Ok(i) = value.extract::<i128>() {
+        return Ok(Canon::Int(i));
+    }
+    if value.is_instance_of::<PyList>() || value.is_instance_of::<PyTuple>() {
+        let mut items = Vec::new();
+        for (i, item) in value.try_iter()?.enumerate() {
+            items.push(canon_of(&item?, &format!("{path}[{i}]"))?);
+        }
+        return Ok(Canon::Seq(items));
+    }
+    if let Ok(dict) = value.cast::<PyDict>() {
+        let mut entries = Vec::with_capacity(dict.len());
+        for (key, item) in dict.iter() {
+            let Ok(key) = key.extract::<String>() else {
+                return Err(PyValueError::new_err(format!(
+                    "configuration key at {path} is not a string"
+                )));
+            };
+            let canon = canon_of(&item, &format!("{path}.{key}"))?;
+            entries.push((key, canon));
+        }
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        return Ok(Canon::Map(entries));
+    }
+    Err(PyValueError::new_err(format!(
+        "configuration value at '{path}' has unsupported type {}",
+        value.get_type().name()?
+    )))
+}
+
+/// the canonical byte encoding, folded into the digest: a tag per value, lengths before
+/// containers and strings, integers as 128-bit little-endian, floats as their bit pattern.
+fn encode_canon(value: &Canon, h: &mut symbi_fabric::Fnv) {
+    match value {
+        Canon::None => h.u8(0),
+        Canon::Bool(b) => {
+            h.u8(1);
+            h.u8(u8::from(*b));
+        }
+        Canon::Int(i) => {
+            h.u8(2);
+            h.bytes(&i.to_le_bytes());
+        }
+        Canon::Float(f) => {
+            h.u8(3);
+            h.u64(f.to_bits());
+        }
+        Canon::Str(s) => {
+            h.u8(4);
+            h.str(s);
+        }
+        Canon::Seq(items) => {
+            h.u8(5);
+            h.u32(items.len() as u32);
+            for item in items {
+                encode_canon(item, h);
+            }
+        }
+        Canon::Map(entries) => {
+            h.u8(6);
+            h.u32(entries.len() as u32);
+            for (key, item) in entries {
+                h.str(key);
+                encode_canon(item, h);
+            }
+        }
+    }
+}
+
+fn digest_of_canon(source_sha256: &str, canon: &Canon) -> u64 {
+    let mut h = symbi_fabric::Fnv::new();
+    h.str(source_sha256);
+    encode_canon(canon, &mut h);
+    h.finish().0
+}
+
+/// the digest of the effective execution configuration: every resolved flag and
+/// environment-derived parameter, canonically encoded after the source digest. two workers
+/// agree on it exactly when their execution dicts are equal as values.
+fn effective_config_digest(sim_info: &Bound<'_, PyDict>, source_sha256: &str) -> PyResult<u64> {
+    let canon = canon_of(sim_info.as_any(), "")?;
+    Ok(digest_of_canon(source_sha256, &canon))
+}
+
+/// the effective configuration digest of an execution dict, as the launch handshake
+/// computes it: mappings in key order, sequences in order, unsupported values refused.
+#[pyfunction]
+fn config_digest(sim_info: &Bound<'_, PyDict>) -> PyResult<u64> {
+    let source = sim_info
+        .get_item("config_sha256")?
+        .map(|v| v.extract::<String>())
+        .transpose()?
+        .unwrap_or_default();
+    effective_config_digest(sim_info, &source)
+}
+
+#[cfg(test)]
+mod canon_tests {
+    use super::{Canon, digest_of_canon};
+
+    fn nested(order: &[(&str, Canon)]) -> Canon {
+        let mut entries: Vec<(String, Canon)> = order.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Canon::Map(entries)
+    }
+
+    #[test]
+    fn insertion_order_plays_no_part_at_any_depth() {
+        let inner_a = nested(&[("x", Canon::Int(1)), ("y", Canon::Float(0.5))]);
+        let inner_b = nested(&[("y", Canon::Float(0.5)), ("x", Canon::Int(1))]);
+        let a = nested(&[("cfl", Canon::Float(0.4)), ("inner", inner_a)]);
+        let b = nested(&[("inner", inner_b), ("cfl", Canon::Float(0.4))]);
+        assert_eq!(digest_of_canon("s", &a), digest_of_canon("s", &b));
+    }
+
+    #[test]
+    fn a_changed_numerical_parameter_changes_the_digest() {
+        let a = nested(&[("cfl", Canon::Float(0.4)), ("theta", Canon::Float(1.5))]);
+        let b = nested(&[("cfl", Canon::Float(0.4000001)), ("theta", Canon::Float(1.5))]);
+        assert_ne!(digest_of_canon("s", &a), digest_of_canon("s", &b));
+        let c = nested(&[("cfl", Canon::Float(0.4)), ("theta", Canon::Float(1.5)), ("n", Canon::Int(64))]);
+        let d = nested(&[("cfl", Canon::Float(0.4)), ("theta", Canon::Float(1.5)), ("n", Canon::Int(65))]);
+        assert_ne!(digest_of_canon("s", &c), digest_of_canon("s", &d));
+    }
+
+    #[test]
+    fn sequence_order_and_types_are_data() {
+        let a = Canon::Seq(vec![Canon::Int(1), Canon::Int(2)]);
+        let b = Canon::Seq(vec![Canon::Int(2), Canon::Int(1)]);
+        assert_ne!(digest_of_canon("s", &a), digest_of_canon("s", &b));
+        assert_ne!(digest_of_canon("s", &Canon::Int(1)), digest_of_canon("s", &Canon::Float(1.0)));
+        assert_ne!(digest_of_canon("s", &Canon::Bool(true)), digest_of_canon("s", &Canon::Int(1)));
+        assert_ne!(digest_of_canon("a", &Canon::None), digest_of_canon("b", &Canon::None));
+    }
+}
+
+/// one worker of a `simbi launch` session. `launch` carries the worker id, the worker count,
+/// the tile owner map, the per-axis cuts, the rendezvous file, the session credential, and the
+/// checkpoint block size in cells.
+#[pyfunction]
+fn launch_worker(
+    py: Python<'_>,
+    prim_gen: &Bound<'_, PyAny>,
+    sim_info: &Bound<'_, PyDict>,
+    launch: &Bound<'_, PyDict>,
+) -> PyResult<()> {
+    let mut cfg = parse_config(sim_info)?;
+    validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
+    let get = |key: &str| -> PyResult<Bound<'_, PyAny>> {
+        launch
+            .get_item(key)?
+            .ok_or_else(|| PyValueError::new_err(format!("launch: missing '{key}'")))
+    };
+    let owner: Vec<usize> = get("owner")?.extract()?;
+    let cuts: Vec<Vec<usize>> = get("cuts")?.extract()?;
+    let params = WorkerLaunch {
+        worker: get("worker")?.extract()?,
+        workers: get("workers")?.extract()?,
+        owner,
+        rendezvous: get("rendezvous")?.extract()?,
+        credential: get("credential")?.extract()?,
+        staging_cells: get("staging_cells")?.extract()?,
+        config_digest: effective_config_digest(sim_info, &cfg.config_sha256)?,
+    };
+    cfg.n_gpus = params.owner.len();
+    cfg.decompose = cuts;
+    eprintln!(
+        "SIMBI provenance: backend={} config={} config_sha256={} worker={}/{}",
+        build_source_id(),
+        cfg.config_source,
+        cfg.config_sha256,
+        params.worker,
+        params.workers
+    );
+    let prims = drain_prims(prim_gen)?;
+    py.detach(|| run_worker_process(&cfg, &prims, &params))
+        .map_err(PyRuntimeError::new_err)
 }
 
 // cpu build -> `simbi.libs.cpu_ext`.

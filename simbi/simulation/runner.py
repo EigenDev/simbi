@@ -869,6 +869,59 @@ def run(
     return from_native_diagnostics(native, data_dir)
 
 
+def launch_worker(
+    problem: SimbiProblem,
+    worker: int,
+    workers: int,
+    owner: Sequence[int],
+    cuts: Sequence[Sequence[int]],
+    rendezvous: str,
+    credential: int,
+    staging_cells: int,
+    max_steps: int = 0,
+    compute_mode: str = "cpu",
+) -> None:
+    """
+    evolve this worker's tiles of `problem` through the fabric: one process of a
+    `simbi launch` session. the problem is prepared exactly as `run` prepares it;
+    the partition is `cuts` per axis, `owner` names the worker holding each tile,
+    and the coordinator (worker 0) announces its address in `rendezvous`.
+    """
+    from .checkpoint import merge_with_checkpoint
+
+    if problem.checkpoint_file:
+        checkpoint_path = Path(problem.checkpoint_file)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"checkpoint not found: {checkpoint_path}")
+        problem = merge_with_checkpoint(problem, checkpoint_path)
+    data_dir = Path(problem.data_directory)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    exec_dict = to_execution_dict(problem)
+    exec_dict["live_monitor"] = False
+    if max_steps < 0:
+        raise ValueError(f"max_steps must be >= 0, got {max_steps}")
+    exec_dict["max_steps"] = max_steps
+    backend = _load_backend(compute_mode)
+    if backend is None:
+        raise RuntimeError("no backend is available for launch")
+    _require_backend_features(problem, backend)
+    prim_iterator, _bfield_iterators = _get_iterators(problem)
+    prim_iterator = _check_first_tuple(problem, prim_iterator)
+    backend.launch_worker(
+        prim_gen=prim_iterator,
+        sim_info=exec_dict,
+        launch={
+            "worker": int(worker),
+            "workers": int(workers),
+            "owner": [int(o) for o in owner],
+            "cuts": [[int(c) for c in axis] for axis in cuts],
+            "rendezvous": str(rendezvous),
+            "credential": int(credential),
+            "staging_cells": int(staging_cells),
+        },
+    )
+
+
 def _check_first_tuple(problem: SimbiProblem, it: GasStateGenerator) -> GasStateGenerator:
     """peek the generator's first yielded tuple, validate the contract, and
     return an iterator that replays it: `initial_primitive_state` must return a
