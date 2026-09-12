@@ -13,8 +13,8 @@
 
 use symbi_fabric::frame::encode_f64s;
 use symbi_fabric::{
-    Epoch, Fabric, FabricError, Header, Kind, Loopback, PhaseSpec, Progress, SessionId, TransferId,
-    WorkerId,
+    Epoch, Fabric, FabricError, Header, Kind, Loopback, OpKind, PhaseSpec, Progress, SessionId,
+    TransferId, WorkerId,
 };
 
 const S: SessionId = SessionId(99);
@@ -608,4 +608,177 @@ fn finish_waits_for_outbound_drain() {
         1,
         "the Done reached the link"
     );
+}
+
+fn pair2(link: &Loopback) -> (Fabric<Loopback>, Fabric<Loopback>) {
+    let a = Fabric::new(
+        link.clone(),
+        A,
+        S,
+        2,
+        2,
+        &LENS,
+        vec![vec![0, 0], vec![1, 1]],
+    );
+    let b = Fabric::new(
+        link.clone(),
+        B,
+        S,
+        2,
+        2,
+        &LENS,
+        vec![vec![1, 1], vec![0, 0]],
+    );
+    (a, b)
+}
+
+/// drive a collective on both endpoints until both hold the result.
+fn run_collective(
+    a: &mut Fabric<Loopback>,
+    b: &mut Fabric<Loopback>,
+    kind: OpKind,
+    va: u64,
+    vb: u64,
+) -> (u64, u64) {
+    a.begin_collective(kind, va).unwrap();
+    b.begin_collective(kind, vb).unwrap();
+    let (mut ra, mut rb) = (None, None);
+    for _ in 0..16 {
+        if ra.is_none() {
+            ra = a.collective_progress().unwrap();
+        }
+        if rb.is_none() {
+            rb = b.collective_progress().unwrap();
+        }
+        if ra.is_some() && rb.is_some() {
+            return (ra.unwrap(), rb.unwrap());
+        }
+    }
+    panic!("the collective made no progress");
+}
+
+#[test]
+fn min_broadcasts_the_smaller_candidate_as_bits() {
+    let link = Loopback::new();
+    let (mut a, mut b) = pair2(&link);
+    let (ra, rb) = run_collective(
+        &mut a,
+        &mut b,
+        OpKind::Min,
+        0.25f64.to_bits(),
+        0.125f64.to_bits(),
+    );
+    assert_eq!(f64::from_bits(ra), 0.125);
+    assert_eq!(ra, rb);
+    let (ra, rb) = run_collective(&mut a, &mut b, OpKind::Any, 0, 1);
+    assert_eq!((ra, rb), (1, 1));
+    let (ra, rb) = run_collective(&mut a, &mut b, OpKind::Any, 0, 0);
+    assert_eq!((ra, rb), (0, 0));
+    let (ra, _) = run_collective(&mut a, &mut b, OpKind::CheckpointOpen, 1, 0);
+    assert_eq!(ra, 0);
+}
+
+#[test]
+fn an_invalid_min_candidate_is_refused_locally() {
+    let link = Loopback::new();
+    let (mut a, _b) = pair2(&link);
+    assert!(
+        a.begin_collective(OpKind::Min, f64::NAN.to_bits())
+            .unwrap_err()
+            .is_protocol()
+    );
+    assert!(
+        a.begin_collective(OpKind::Min, 0.0f64.to_bits())
+            .unwrap_err()
+            .is_protocol()
+    );
+}
+
+#[test]
+fn a_result_for_an_unexpected_op_is_rejected() {
+    let link = Loopback::new();
+    let (_a, mut b) = pair2(&link);
+    let mut payload = [0u8; 9];
+    payload[0] = OpKind::Any as u8;
+    link.inject(
+        A,
+        B,
+        Header {
+            kind: Kind::Result,
+            session: S,
+            epoch: Epoch {
+                step: 0,
+                attempt: 0,
+                point: Epoch::NO_POINT,
+                axis: Epoch::NO_AXIS,
+            },
+            id: 0,
+            payload_len: 9,
+        },
+        &payload,
+    );
+    assert!(b.service().unwrap_err().is_protocol());
+}
+
+#[test]
+fn a_contribution_two_ops_ahead_is_rejected() {
+    let link = Loopback::new();
+    let (mut a, _b) = pair2(&link);
+    let mut payload = [0u8; 9];
+    payload[0] = OpKind::Any as u8;
+    let contribute = |op| Header {
+        kind: Kind::Contribute,
+        session: S,
+        epoch: Epoch {
+            step: 0,
+            attempt: 0,
+            point: Epoch::NO_POINT,
+            axis: Epoch::NO_AXIS,
+        },
+        id: op,
+        payload_len: 9,
+    };
+    // one ahead is tabled
+    link.inject(B, A, contribute(1), &payload);
+    a.service().unwrap();
+    // two ahead is refused
+    link.inject(B, A, contribute(2), &payload);
+    assert!(a.service().unwrap_err().is_protocol());
+}
+
+/// a grant arriving while this worker's collective is pending is tabled, and consumed once
+/// the result lets the worker open the phase.
+#[test]
+fn a_grant_during_a_pending_collective_is_tabled() {
+    let link = Loopback::new();
+    let (mut a, mut b) = pair2(&link);
+    b.begin_collective(OpKind::Any, 0).unwrap();
+    assert_eq!(b.collective_progress().unwrap(), None);
+    let e = epoch(0, 1, 0);
+    link.inject(A, B, grant(e, 1), &[]);
+    assert_eq!(b.collective_progress().unwrap(), None);
+    assert!(b.grants().is_tabled(A, e));
+    a.begin_collective(OpKind::Any, 0).unwrap();
+    assert_eq!(a.collective_progress().unwrap(), Some(0));
+    assert_eq!(b.collective_progress().unwrap(), Some(0));
+    b.pack(T1, |buf| buf.fill(1.0)).unwrap();
+    b.open(PhaseSpec {
+        epoch: e,
+        sends: &[(T1, A)],
+        receives: &[(T0, A)],
+    })
+    .unwrap();
+    assert_eq!(b.progress().unwrap(), Progress::Pending);
+    assert!(
+        !b.grants().is_tabled(A, e),
+        "the grant was consumed at open"
+    );
+}
+
+#[test]
+fn finish_refuses_with_a_collective_pending() {
+    let link = Loopback::new();
+    let (mut a, _b) = pair2(&link);
+    a.begin_collective(OpKind::Any, 0).unwrap();
+    assert!(a.begin_finish().unwrap_err().is_protocol());
 }

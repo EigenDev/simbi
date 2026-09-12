@@ -768,6 +768,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         DOF == D
     }
 
+    fn is_viscous(&self) -> bool {
+        self.viscosity != 0.0 || self.alpha != 0.0
+    }
+
     fn fofc(
         &self,
         sim: &FieldStore<D, DOF, Mem, Sc>,

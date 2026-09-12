@@ -26,6 +26,7 @@ pub mod run_diagnostics;
 pub mod census;
 pub mod checkpoint;
 pub mod decomp;
+pub mod distributed_checkpoint;
 pub mod driver;
 pub mod hydro_ops;
 pub mod mass_transport;
@@ -36,3 +37,4 @@ pub mod substrate_seam;
 #[cfg(feature = "gpu")]
 mod tracer_device;
 pub mod tracers;
+pub mod worker;

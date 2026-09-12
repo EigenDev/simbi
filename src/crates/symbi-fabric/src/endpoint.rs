@@ -180,6 +180,93 @@ pub struct Stats {
     pub passes: u64,
 }
 
+/// a global operation. every worker issues the same sequence of operations, so
+/// the operation id is the position in that sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum OpKind {
+    /// the minimum of f64 bit patterns; every contribution is finite and positive
+    Min = 1,
+    /// whether any contribution is nonzero
+    Any = 2,
+    /// whether every contribution is nonzero: the checkpoint may open
+    CheckpointOpen = 3,
+    /// whether every contribution is nonzero: the checkpoint is complete
+    CheckpointClose = 4,
+}
+
+impl OpKind {
+    fn from_byte(b: u8) -> Option<Self> {
+        Some(match b {
+            1 => OpKind::Min,
+            2 => OpKind::Any,
+            3 => OpKind::CheckpointOpen,
+            4 => OpKind::CheckpointClose,
+            _ => return None,
+        })
+    }
+}
+
+/// the payload of a Contribute or Result frame: the kind byte and the value bits.
+const OP_PAYLOAD: usize = 9;
+
+fn encode_op(kind: OpKind, value: u64) -> [u8; OP_PAYLOAD] {
+    let mut out = [0u8; OP_PAYLOAD];
+    out[0] = kind as u8;
+    out[1..].copy_from_slice(&value.to_le_bytes());
+    out
+}
+
+fn decode_op(payload: &[u8]) -> Option<(OpKind, u64)> {
+    if payload.len() != OP_PAYLOAD {
+        return None;
+    }
+    let kind = OpKind::from_byte(payload[0])?;
+    let value = u64::from_le_bytes(payload[1..].try_into().expect("eight bytes"));
+    Some((kind, value))
+}
+
+/// the coordinator's table for one operation: one contribution per worker.
+#[derive(Debug)]
+struct Gather {
+    op: u32,
+    kind: Option<OpKind>,
+    values: Vec<Option<u64>>,
+    count: usize,
+}
+
+impl Gather {
+    fn fresh(op: u32, workers: usize) -> Self {
+        Self {
+            op,
+            kind: None,
+            values: vec![None; workers],
+            count: 0,
+        }
+    }
+
+    fn reset(&mut self, op: u32) {
+        self.op = op;
+        self.kind = None;
+        self.values.iter_mut().for_each(|v| *v = None);
+        self.count = 0;
+    }
+}
+
+/// the collective state of one worker. the coordinator keeps two gathers, for
+/// the current operation and the next, since a worker that holds the current
+/// result may contribute to the next before every worker has the current one.
+#[derive(Debug)]
+struct Collective {
+    next_op: u32,
+    pending: Option<(u32, OpKind)>,
+    result: Option<u64>,
+    gathers: [Gather; 2],
+    /// results the coordinator holds back for a peer: the race-gate hook
+    delay: Option<(WorkerId, Duration)>,
+    held: Vec<(WorkerId, Header, [u8; OP_PAYLOAD], Instant)>,
+}
+
 /// the transfers of one phase from this worker's point of view.
 pub struct PhaseSpec<'a> {
     pub epoch: Epoch,
@@ -220,6 +307,24 @@ pub struct Fabric<L: Link> {
     /// peers that have sent Done: their sockets may close from here on
     done_from: Vec<bool>,
     finishing: bool,
+    collective: Collective,
+    blocks: Blocks,
+}
+
+/// the checkpoint block path. a worker sends blocks to the coordinator under a byte
+/// credit; the coordinator stages one block at a time and returns the credit once the
+/// block is written.
+#[derive(Debug)]
+struct Blocks {
+    /// bytes this worker may have in flight toward the coordinator
+    credit: u32,
+    outstanding: u32,
+    next_seq: u32,
+    /// the coordinator's staged block: sender, sequence, payload
+    staged: Option<(WorkerId, u32)>,
+    staged_payload: Vec<u8>,
+    /// the coordinator's credit granted to each worker, for validating incoming blocks
+    granted: Vec<u32>,
 }
 
 /// the pause between progress passes while waiting on the link.
@@ -280,7 +385,53 @@ impl<L: Link> Fabric<L> {
             stats: Stats::default(),
             done_from: vec![false; workers],
             finishing: false,
+            collective: Collective {
+                next_op: 0,
+                pending: None,
+                result: None,
+                gathers: [Gather::fresh(0, workers), Gather::fresh(1, workers)],
+                delay: None,
+                held: Vec::new(),
+            },
+            blocks: Blocks {
+                credit: 0,
+                outstanding: 0,
+                next_seq: 0,
+                staged: None,
+                staged_payload: Vec::new(),
+                granted: vec![0; workers],
+            },
         }
+    }
+
+    /// set the block credit agreed at the handshake: the bytes a worker may have in flight
+    /// toward the coordinator. the inbox and the coordinator's staging grow to hold one
+    /// block of that size, once, here.
+    pub fn with_block_credit(mut self, credit: u32) -> Self {
+        self.blocks.credit = credit;
+        self.blocks.granted.iter_mut().for_each(|g| *g = credit);
+        let need = credit as usize;
+        if self.inbox.capacity() < need {
+            self.inbox.reserve(need);
+        }
+        if self.is_coordinator() && self.blocks.staged_payload.capacity() < need {
+            self.blocks.staged_payload.reserve(need);
+        }
+        self
+    }
+
+    pub fn block_credit(&self) -> u32 {
+        self.blocks.credit
+    }
+
+    pub fn is_coordinator(&self) -> bool {
+        self.me == WorkerId(0)
+    }
+
+    /// hold every Result frame for `peer` back by `duration`: the hook that makes a
+    /// peer's grant reach a worker before its own result. coordinator only.
+    pub fn delay_result_to(&mut self, peer: WorkerId, duration: Duration) {
+        self.collective.delay = Some((peer, duration));
     }
 
     pub fn me(&self) -> WorkerId {
@@ -313,6 +464,7 @@ impl<L: Link> Fabric<L> {
             + self.inbox.capacity()
             + self.phase.sends.capacity() * std::mem::size_of::<(TransferId, WorkerId)>()
             + self.phase.receives.capacity() * std::mem::size_of::<TransferId>()
+            + self.blocks.staged_payload.capacity()
     }
 
     fn local(&self, detail: impl Into<String>) -> FabricError {
@@ -426,7 +578,11 @@ impl<L: Link> Fabric<L> {
     /// take every frame the link holds for this worker. runs inside `progress` and stands
     /// alone while the worker waits between phases, so grants from faster peers are tabled.
     pub fn service(&mut self) -> Result<(), FabricError> {
+        self.release_held_results()?;
         self.tolerating_done(|link| link.drive(self.me))?;
+        if self.blocks.staged.is_some() {
+            return Ok(());
+        }
         loop {
             let mut inbox = std::mem::take(&mut self.inbox);
             let polled = self.link.poll(self.me, &mut inbox);
@@ -437,7 +593,11 @@ impl<L: Link> Fabric<L> {
             };
             self.inbox = inbox;
             match result {
-                Ok(true) => {}
+                Ok(true) => {
+                    if self.blocks.staged.is_some() {
+                        return Ok(());
+                    }
+                }
                 Ok(false) => return Ok(()),
                 Err(FabricError::Disconnected { peer, .. }) if self.done_from[peer.0 as usize] => {
                     self.link.detach(peer);
@@ -577,6 +737,81 @@ impl<L: Link> Fabric<L> {
                 slot.recv = RecvState::Received;
                 Ok(())
             }
+            Kind::Contribute => {
+                if !self.is_coordinator() {
+                    return Err(FabricError::protocol(from, "Contribute sent to a worker"));
+                }
+                let Some((kind, value)) = decode_op(payload) else {
+                    return Err(FabricError::protocol(from, "malformed Contribute payload"));
+                };
+                self.table_contribution(from, header.id, kind, value)
+            }
+            Kind::Result => {
+                if self.is_coordinator() {
+                    return Err(FabricError::protocol(
+                        from,
+                        "Result sent to the coordinator",
+                    ));
+                }
+                if from != WorkerId(0) {
+                    return Err(FabricError::protocol(from, "Result from a worker"));
+                }
+                let Some((kind, value)) = decode_op(payload) else {
+                    return Err(FabricError::protocol(from, "malformed Result payload"));
+                };
+                match self.collective.pending {
+                    Some((op, k)) if op == header.id && k == kind => {
+                        self.collective.result = Some(value);
+                        Ok(())
+                    }
+                    other => Err(FabricError::protocol(
+                        from,
+                        format!(
+                            "Result for op {} ({kind:?}) while waiting on {other:?}",
+                            header.id
+                        ),
+                    )),
+                }
+            }
+            Kind::Block => {
+                if !self.is_coordinator() {
+                    return Err(FabricError::protocol(from, "Block sent to a worker"));
+                }
+                if self.blocks.staged.is_some() {
+                    return Err(FabricError::protocol(from, "Block while one is staged"));
+                }
+                let len = header.payload_len;
+                if len > self.blocks.granted[from.0 as usize] {
+                    return Err(FabricError::protocol(
+                        from,
+                        format!(
+                            "block of {len} bytes exceeds its credit of {}",
+                            self.blocks.granted[from.0 as usize]
+                        ),
+                    ));
+                }
+                self.blocks.granted[from.0 as usize] -= len;
+                self.blocks.staged_payload.clear();
+                self.blocks.staged_payload.extend_from_slice(payload);
+                self.blocks.staged = Some((from, header.id));
+                Ok(())
+            }
+            Kind::Credit => {
+                if self.is_coordinator() || from != WorkerId(0) {
+                    return Err(FabricError::protocol(from, "Credit from a worker"));
+                }
+                if header.id > self.blocks.outstanding {
+                    return Err(FabricError::protocol(
+                        from,
+                        format!(
+                            "credit of {} returned against {} outstanding",
+                            header.id, self.blocks.outstanding
+                        ),
+                    ));
+                }
+                self.blocks.outstanding -= header.id;
+                Ok(())
+            }
             Kind::Abort => Err(FabricError::PeerAborted {
                 peer: from,
                 reason: AbortReason::Protocol,
@@ -610,6 +845,299 @@ impl<L: Link> Fabric<L> {
                 format!("unexpected {other:?} frame"),
             )),
         }
+    }
+
+    /// the coordinator records one worker's contribution to `op`; the operation completes
+    /// once every worker has contributed, and its result goes to every peer and to the
+    /// coordinator's own pending slot. a contribution beyond the next operation, a duplicate,
+    /// a kind that differs from the others', or a Min value outside the finite positive
+    /// range is a protocol error.
+    fn table_contribution(
+        &mut self,
+        from: WorkerId,
+        op: u32,
+        kind: OpKind,
+        value: u64,
+    ) -> Result<(), FabricError> {
+        let workers = self.workers;
+        let current = self.collective.gathers[0].op;
+        let slot = if op == current {
+            0
+        } else if op == current + 1 {
+            1
+        } else {
+            return Err(FabricError::protocol(
+                from,
+                format!("contribution to op {op} while the coordinator gathers {current}"),
+            ));
+        };
+        if kind == OpKind::Min {
+            let v = f64::from_bits(value);
+            if !v.is_finite() || v <= 0.0 {
+                return Err(FabricError::protocol(
+                    from,
+                    format!("Min contribution {v:e}"),
+                ));
+            }
+        }
+        let gather = &mut self.collective.gathers[slot];
+        match gather.kind {
+            None => gather.kind = Some(kind),
+            Some(k) if k == kind => {}
+            Some(k) => {
+                return Err(FabricError::protocol(
+                    from,
+                    format!("op {op} contributed as {kind:?} against {k:?}"),
+                ));
+            }
+        }
+        if gather.values[from.0 as usize].is_some() {
+            return Err(FabricError::protocol(
+                from,
+                format!("duplicate contribution to op {op}"),
+            ));
+        }
+        gather.values[from.0 as usize] = Some(value);
+        gather.count += 1;
+        if slot == 0 && gather.count == workers {
+            let kind = gather.kind.expect("set with the first contribution");
+            let values = gather
+                .values
+                .iter()
+                .map(|v| v.expect("every worker contributed"));
+            let result = match kind {
+                OpKind::Min => values
+                    .map(f64::from_bits)
+                    .fold(f64::INFINITY, f64::min)
+                    .to_bits(),
+                OpKind::Any => u64::from(values.into_iter().any(|v| v != 0)),
+                OpKind::CheckpointOpen | OpKind::CheckpointClose => {
+                    u64::from(values.into_iter().all(|v| v != 0))
+                }
+            };
+            let header = Header {
+                kind: Kind::Result,
+                session: self.session,
+                epoch: none_epoch(),
+                id: op,
+                payload_len: OP_PAYLOAD as u32,
+            };
+            let payload = encode_op(kind, result);
+            for peer in 1..workers {
+                let peer = WorkerId(peer as u32);
+                match self.collective.delay {
+                    Some((held, duration)) if held == peer => {
+                        self.collective.held.push((
+                            peer,
+                            header,
+                            payload,
+                            Instant::now() + duration,
+                        ));
+                    }
+                    _ => self.link.send(self.me, peer, header, &payload)?,
+                }
+            }
+            if let Some((pending, _)) = self.collective.pending {
+                if pending == op {
+                    self.collective.result = Some(result);
+                }
+            }
+            self.collective.gathers.swap(0, 1);
+            self.collective.gathers[1].reset(op + 2);
+        }
+        Ok(())
+    }
+
+    fn release_held_results(&mut self) -> Result<(), FabricError> {
+        if self.collective.held.is_empty() {
+            return Ok(());
+        }
+        let now = Instant::now();
+        let mut i = 0;
+        while i < self.collective.held.len() {
+            if self.collective.held[i].3 <= now {
+                let (peer, header, payload, _) = self.collective.held.remove(i);
+                self.link.send(self.me, peer, header, &payload)?;
+            } else {
+                i += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// issue the next collective operation with this worker's contribution. the result
+    /// arrives through `collective_progress`.
+    pub fn begin_collective(&mut self, kind: OpKind, value: u64) -> Result<u32, FabricError> {
+        if let Some((op, k)) = self.collective.pending {
+            return Err(self.local(format!(
+                "collective {kind:?} begun while op {op} ({k:?}) is pending"
+            )));
+        }
+        if kind == OpKind::Min {
+            let v = f64::from_bits(value);
+            if !v.is_finite() || v <= 0.0 {
+                return Err(self.local(format!("Min contribution {v:e}")));
+            }
+        }
+        let op = self.collective.next_op;
+        self.collective.next_op += 1;
+        self.collective.pending = Some((op, kind));
+        self.collective.result = None;
+        if self.is_coordinator() {
+            self.table_contribution(self.me, op, kind, value)?;
+        } else {
+            let header = Header {
+                kind: Kind::Contribute,
+                session: self.session,
+                epoch: none_epoch(),
+                id: op,
+                payload_len: OP_PAYLOAD as u32,
+            };
+            self.link
+                .send(self.me, WorkerId(0), header, &encode_op(kind, value))?;
+        }
+        Ok(op)
+    }
+
+    /// service the link; the result bits once the pending operation has completed.
+    pub fn collective_progress(&mut self) -> Result<Option<u64>, FabricError> {
+        if self.collective.pending.is_none() {
+            return Err(self.local("collective progress with no operation pending"));
+        }
+        self.service()?;
+        if let Some(result) = self.collective.result.take() {
+            self.collective.pending = None;
+            return Ok(Some(result));
+        }
+        Ok(None)
+    }
+
+    /// a complete collective: contribute, then service until the result arrives or
+    /// `deadline` passes. the result is the coordinator's bits, consumed as sent.
+    pub fn collective(
+        &mut self,
+        kind: OpKind,
+        value: u64,
+        deadline: Duration,
+    ) -> Result<u64, FabricError> {
+        let op = self.begin_collective(kind, value)?;
+        let start = Instant::now();
+        loop {
+            if let Some(result) = self.collective_progress()? {
+                return Ok(result);
+            }
+            if start.elapsed() > deadline {
+                return Err(FabricError::Deadline {
+                    phase: Deadline::Transfer,
+                    peer: None,
+                    epoch: None,
+                    pending: 1 + usize::from(op == 0),
+                });
+            }
+            std::thread::sleep(POLL_PAUSE);
+        }
+    }
+
+    /// send one checkpoint block to the coordinator, waiting for credit up to `deadline`.
+    /// the coordinator writes its own blocks directly and never calls this.
+    pub fn send_block(&mut self, payload: &[u8], deadline: Duration) -> Result<(), FabricError> {
+        if self.is_coordinator() {
+            return Err(self.local("send_block on the coordinator"));
+        }
+        let len = payload.len() as u32;
+        if len > self.blocks.credit {
+            return Err(self.local(format!(
+                "block of {len} bytes exceeds the credit of {}",
+                self.blocks.credit
+            )));
+        }
+        // both the byte credit and the link's payload slot must be free: two blocks can fit
+        // the credit while the first still occupies the outbox
+        let start = Instant::now();
+        while self.blocks.outstanding + len > self.blocks.credit || !self.link.ready(WorkerId(0)) {
+            self.service()?;
+            if start.elapsed() > deadline {
+                return Err(FabricError::Deadline {
+                    phase: Deadline::Checkpoint,
+                    peer: Some(WorkerId(0)),
+                    epoch: None,
+                    pending: 1,
+                });
+            }
+            std::thread::sleep(POLL_PAUSE);
+        }
+        let header = Header {
+            kind: Kind::Block,
+            session: self.session,
+            epoch: none_epoch(),
+            id: self.blocks.next_seq,
+            payload_len: len,
+        };
+        self.blocks.next_seq += 1;
+        self.blocks.outstanding += len;
+        self.link.send(self.me, WorkerId(0), header, payload)?;
+        self.link.drive(self.me)
+    }
+
+    /// the coordinator's staged block, if one arrived: the sender, its sequence number, and
+    /// the payload. the block stays staged, and no further frame is taken, until
+    /// `release_block` returns the credit.
+    pub fn staged_block(&self) -> Option<(WorkerId, u32, &[u8])> {
+        self.blocks
+            .staged
+            .map(|(from, seq)| (from, seq, self.blocks.staged_payload.as_slice()))
+    }
+
+    /// the coordinator has written the staged block: return its credit to the sender.
+    pub fn release_block(&mut self) -> Result<(), FabricError> {
+        let Some((from, _)) = self.blocks.staged.take() else {
+            return Err(self.local("release with no block staged"));
+        };
+        let len = self.blocks.staged_payload.len() as u32;
+        self.blocks.granted[from.0 as usize] += len;
+        let header = Header {
+            kind: Kind::Credit,
+            session: self.session,
+            epoch: none_epoch(),
+            id: len,
+            payload_len: 0,
+        };
+        self.link.send(self.me, from, header, &[])
+    }
+
+    /// the coordinator's count of contributions received for the current operation, for a
+    /// coordinator that contributes last.
+    pub fn contributions_to_current(&self) -> usize {
+        self.collective.gathers[0].count
+    }
+
+    /// whether every contribution received so far for the current operation is nonzero:
+    /// the workers' verdict, read by a coordinator before it acts and votes last.
+    pub fn current_contributions_all_nonzero(&self) -> bool {
+        self.collective.gathers[0]
+            .values
+            .iter()
+            .flatten()
+            .all(|&v| v != 0)
+    }
+
+    /// wait until every worker's block traffic and this worker's own sends have drained,
+    /// up to `deadline`: the coordinator calls this before verifying the coverage ledger.
+    pub fn drain_blocks(&mut self, deadline: Duration) -> Result<(), FabricError> {
+        let start = Instant::now();
+        while self.blocks.outstanding > 0 || self.link.outbound_pending() {
+            self.service()?;
+            if start.elapsed() > deadline {
+                return Err(FabricError::Deadline {
+                    phase: Deadline::Checkpoint,
+                    peer: None,
+                    epoch: None,
+                    pending: self.blocks.outstanding as usize,
+                });
+            }
+            std::thread::sleep(POLL_PAUSE);
+        }
+        Ok(())
     }
 
     /// service the link and push the open phase forward: sends leave once their peer's
@@ -805,6 +1333,9 @@ impl<L: Link> Fabric<L> {
     /// unexpected end of file.
     pub fn begin_finish(&mut self) -> Result<(), FabricError> {
         self.shutdown()?;
+        if self.collective.pending.is_some() {
+            return Err(self.local("finish with a collective pending"));
+        }
         if self.finishing {
             return Err(self.local("finish begun twice"));
         }

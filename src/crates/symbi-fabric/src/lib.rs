@@ -25,7 +25,9 @@ pub mod ident;
 pub mod rendezvous;
 pub mod tcp;
 
-pub use endpoint::{Fabric, Link, Loopback, PhaseSpec, Progress, RecvState, SendState, Stats};
+pub use endpoint::{
+    Fabric, Link, Loopback, OpKind, PhaseSpec, Progress, RecvState, SendState, Stats,
+};
 pub use error::{AbortReason, Deadline, FabricError};
 pub use frame::{HEADER_LEN, Header, Kind, MAGIC, VERSION};
 pub use grant::GrantTable;

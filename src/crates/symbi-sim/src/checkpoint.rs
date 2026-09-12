@@ -2432,7 +2432,7 @@ pub fn owned_face_region<const D: usize>(
 
 /// the row-major shape and origin of a local region in the file's index space, which runs
 /// storage order (axis D-1 slowest) with the file origin `file_of(local coordinate)`.
-fn slab_start_and_count<const D: usize>(
+pub(crate) fn slab_start_and_count<const D: usize>(
     region: &symbi_algebra::Domain<D>,
     file_of: impl Fn(usize, isize) -> usize,
 ) -> (Vec<usize>, Vec<usize>) {
@@ -2447,7 +2447,7 @@ fn slab_start_and_count<const D: usize>(
 /// split `region` into boxes of at most `budget` cells: the slowest axis is cut into row groups,
 /// and a row group that still exceeds the budget on its own is cut along the next faster axis,
 /// down to single cells, so the cap is hard at any budget of one cell or more.
-fn chunk_region<const D: usize>(
+pub(crate) fn chunk_region<const D: usize>(
     region: &symbi_algebra::Domain<D>,
     budget: usize,
 ) -> Vec<symbi_algebra::Domain<D>> {
@@ -2484,26 +2484,6 @@ fn chunk_region<const D: usize>(
     out
 }
 
-/// stream one field's `region` into the dataset at `dataset_path` through one reused staging
-/// buffer, one box of at most `budget` cells at a time.
-fn stream_region<const D: usize, Mem: MemorySpace>(
-    stream: &Hdf5Stream,
-    dataset_path: &str,
-    field: &symbi_grid::Field<f64, D, Mem>,
-    region: &symbi_algebra::Domain<D>,
-    file_of: &dyn Fn(usize, isize) -> usize,
-    budget: usize,
-    staging: &mut Vec<f64>,
-) -> Result<()> {
-    for chunk in chunk_region(region, budget) {
-        staging.clear();
-        for_each_cell_axis0(&chunk, |coord| staging.push(*field.view().at(coord)));
-        let (start, count) = slab_start_and_count(&chunk, file_of);
-        stream.write_slab(dataset_path, &start, &count, staging)?;
-    }
-    Ok(())
-}
-
 /// the level's mesh facts for the metadata group: global interior counts, physical widths and
 /// lower bounds scaled by the mesh motion, in grid axis order.
 fn mesh_facts<const D: usize>(geometry: symbi_geometry::Geometry, a: f64, grid: &GlobalGrid<D>) -> MeshFacts {
@@ -2518,7 +2498,7 @@ fn mesh_facts<const D: usize>(geometry: symbi_geometry::Geometry, a: f64, grid: 
 /// the cell-centered datasets a state contributes, in checkpoint order: the conserved bucket,
 /// the primitive bucket, and the isothermal closure, each as (group path under the level, name,
 /// field).
-fn cell_datasets<'a, R, const D: usize, const DOF: usize, Mem>(
+pub(crate) fn cell_datasets<'a, R, const D: usize, const DOF: usize, Mem>(
     sim: &'a FieldStore<D, DOF, Mem, f64>,
 ) -> Vec<(&'static str, String, &'a symbi_grid::Field<f64, D, Mem>)>
 where
@@ -2635,13 +2615,52 @@ where
     R: Regime<f64, D>,
     Mem: MemorySpace,
 {
-    if levels.is_empty() || levels.iter().any(|l| l.tiles.is_empty()) {
-        return Err(IoError::MissingPath("hierarchy has no levels or a level has no tiles".into()));
+    let whole = levels.first().is_some_and(|l| l.tiles.len() == 1);
+    let mut stream = CheckpointStream::open::<R, D, DOF, Mem>(identity, levels, path, extras, budget, whole)?;
+    for (idx, level) in levels.iter().enumerate() {
+        for tile in &level.tiles {
+            let mut sink = |dataset_path: &str, start: &[usize], count: &[usize], data: &[f64]| {
+                stream.block(dataset_path, start, count, data)
+            };
+            owned_blocks::<R, D, DOF, Mem>(idx, tile, &level.grid, budget, &mut sink)?;
+        }
     }
-    #[cfg(feature = "gpu")]
-    if Mem::IS_DEVICE_ACCESSIBLE {
-        symbi_xpu::ctx_sync();
-    }
+    stream.publish()
+}
+
+/// a checkpoint file being written: the temporary, its declared datasets, and the staging
+/// budget. blocks arrive through `block`; the file takes its name at `publish` and the
+/// temporary is removed if the stream is dropped before then.
+pub struct CheckpointStream {
+    stream: Hdf5Stream,
+    budget: usize,
+}
+
+impl CheckpointStream {
+    /// open the temporary at `path`, write the metadata tree, and declare every cell and face
+    /// dataset at the global shape. `levels` supplies each level's grid and the authority
+    /// tile (its first) for the clock, the physics identity, and the dataset list; the tiles
+    /// listed need not cover the level. `whole` marks a level held as one tile, whose
+    /// censuses are written with it.
+    pub fn open<R, const D: usize, const DOF: usize, Mem>(
+        identity: &PhysicsIdentity,
+        levels: &[LevelTiles<'_, D, DOF, Mem>],
+        path: &str,
+        extras: &Metadata,
+        budget: usize,
+        whole: bool,
+    ) -> Result<Self>
+    where
+        R: Regime<f64, D>,
+        Mem: MemorySpace,
+    {
+        if levels.is_empty() || levels.iter().any(|l| l.tiles.is_empty()) {
+            return Err(IoError::MissingPath("hierarchy has no levels or a level has no tiles".into()));
+        }
+        #[cfg(feature = "gpu")]
+        if Mem::IS_DEVICE_ACCESSIBLE {
+            symbi_xpu::ctx_sync();
+        }
     let authority = levels[0].tiles[0].state;
     let facts = mesh_facts(identity.geometry, authority.motion.a, &levels[0].grid);
     let mut root = Tree::new("")
@@ -2806,72 +2825,159 @@ where
                 .with_dataset(Dataset::new("torque", vec![n, nb, 3], DataRef::F64(im.history.torque()))),
         );
     }
-    if levels[0].tiles.len() == 1 {
+    if whole {
         for group in census_groups(authority) {
             root.push_group(group);
         }
     }
 
-    let stream = Hdf5Stream::create(Path::new(path))?;
-    stream.write_tree(&root)?;
-    let mut staging: Vec<f64> = Vec::new();
-    for (idx, level) in levels.iter().enumerate() {
-        let grid = &level.grid;
-        let level_path = format!("level_{idx}");
-        let cell_shape: Vec<usize> = (0..D).rev().map(|ax| grid.cells[ax] + 2 * grid.ng).collect();
-        let names = cell_datasets::<R, D, DOF, Mem>(level.tiles[0].state);
-        for (group, name, _) in &names {
-            let group_path = if group.is_empty() { level_path.clone() } else { format!("{level_path}/{group}") };
-            stream.declare_f64(&group_path, name, &cell_shape)?;
-        }
-        for d in 0..D {
-            if level.tiles[0].state.fields.mhd.as_ref().is_some_and(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed)) {
-                let face_shape: Vec<usize> = (0..D)
-                    .rev()
-                    .map(|ax| grid.cells[ax] + if ax == d { 1 } else { 0 })
-                    .collect();
-                stream.declare_f64(&format!("{level_path}/partition_0/hydro/magnetic/B{}", d + 1), "data", &face_shape)?;
+        let stream = Hdf5Stream::create(Path::new(path))?;
+        stream.write_tree(&root)?;
+        for (idx, level) in levels.iter().enumerate() {
+            let grid = &level.grid;
+            let level_path = format!("level_{idx}");
+            let cell_shape: Vec<usize> = (0..D).rev().map(|ax| grid.cells[ax] + 2 * grid.ng).collect();
+            let names = cell_datasets::<R, D, DOF, Mem>(level.tiles[0].state);
+            for (group, name, _) in &names {
+                let group_path = if group.is_empty() { level_path.clone() } else { format!("{level_path}/{group}") };
+                stream.declare_f64(&group_path, name, &cell_shape)?;
             }
-        }
-        for tile in &level.tiles {
-            let sim = tile.state;
-            let interior = &sim.geom.interior;
-            let alloc = sim.fields.cons.den.domain();
-            let ng = grid.ng as isize;
-            let size: [usize; D] = std::array::from_fn(|ax| interior.spaces[ax].size());
-            let (first, last) = touches_domain_edges(&tile.offset, &size, grid);
-            // the file's cell index of local coordinate `c` on an axis is the global interior
-            // index plus the halo width.
-            let cell_region = owned_cell_region(interior, alloc, &first, &last);
-            let shift: [isize; D] = std::array::from_fn(|ax| tile.offset[ax] - interior.spaces[ax].lo - grid.interior_lo[ax]);
-            let cell_file_of = |ax: usize, c: isize| (c + shift[ax] + ng) as usize;
-            for (group, name, field) in cell_datasets::<R, D, DOF, Mem>(sim) {
-                let dataset_path = if group.is_empty() {
-                    format!("{level_path}/{name}")
-                } else {
-                    format!("{level_path}/{group}/{name}")
-                };
-                stream_region(&stream, &dataset_path, field, &cell_region, &cell_file_of, budget, &mut staging)?;
-            }
-            if let Some(mhd) = sim.fields.mhd.as_ref().filter(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed)) {
-                for d in 0..D {
-                    let region = owned_face_region(interior, d, &last);
-                    let face_file_of = |ax: usize, c: isize| (c + shift[ax]) as usize;
-                    stream_region(
-                        &stream,
-                        &format!("{level_path}/partition_0/hydro/magnetic/B{}/data", d + 1),
-                        &mhd.bface[d],
-                        &region,
-                        &face_file_of,
-                        budget,
-                        &mut staging,
-                    )?;
+            for d in 0..D {
+                if level.tiles[0].state.fields.mhd.as_ref().is_some_and(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed)) {
+                    let face_shape: Vec<usize> = (0..D)
+                        .rev()
+                        .map(|ax| grid.cells[ax] + if ax == d { 1 } else { 0 })
+                        .collect();
+                    stream.declare_f64(&format!("{level_path}/partition_0/hydro/magnetic/B{}", d + 1), "data", &face_shape)?;
                 }
             }
         }
+        Ok(Self { stream, budget })
     }
-    stream.publish()?;
+
+    pub fn budget(&self) -> usize {
+        self.budget
+    }
+
+    /// write one box of one dataset. `start` and `count` are in the file's storage order.
+    pub fn block(&mut self, dataset_path: &str, start: &[usize], count: &[usize], data: &[f64]) -> Result<()> {
+        if data.len() > self.budget {
+            return Err(IoError::Backend(format!(
+                "block of {} cells exceeds the staging budget of {}",
+                data.len(),
+                self.budget
+            )));
+        }
+        self.stream.write_slab(dataset_path, start, count, data)
+    }
+
+    /// close and give the file its name.
+    pub fn publish(self) -> Result<()> {
+        self.stream.publish().map(|_| ())
+    }
+}
+
+/// the dataset path of every cell dataset a tile contributes, in checkpoint order, plus the
+/// face datasets when the tile carries initialized faces.
+pub fn dataset_paths<R, const D: usize, const DOF: usize, Mem>(
+    level_index: usize,
+    state: &FieldStore<D, DOF, Mem, f64>,
+) -> Vec<String>
+where
+    R: Regime<f64, D>,
+    Mem: MemorySpace,
+{
+    let level_path = format!("level_{level_index}");
+    let mut out: Vec<String> = cell_datasets::<R, D, DOF, Mem>(state)
+        .into_iter()
+        .map(|(group, name, _)| {
+            if group.is_empty() {
+                format!("{level_path}/{name}")
+            } else {
+                format!("{level_path}/{group}/{name}")
+            }
+        })
+        .collect();
+    if state.fields.mhd.as_ref().is_some_and(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed)) {
+        for d in 0..D {
+            out.push(format!("{level_path}/partition_0/hydro/magnetic/B{}/data", d + 1));
+        }
+    }
+    out
+}
+
+/// the owned boxes of one tile, in checkpoint order, each cut to the staging budget: the
+/// dataset path, the file-order start and count, and the data. this is the one walk the
+/// local writer and a remote worker share, so a coordinator's coverage ledger and a worker's
+/// blocks cannot disagree.
+pub fn owned_blocks<R, const D: usize, const DOF: usize, Mem>(
+    level_index: usize,
+    tile: &TileView<'_, D, DOF, Mem>,
+    grid: &GlobalGrid<D>,
+    budget: usize,
+    sink: &mut dyn FnMut(&str, &[usize], &[usize], &[f64]) -> Result<()>,
+) -> Result<()>
+where
+    R: Regime<f64, D>,
+    Mem: MemorySpace,
+{
+    let sim = tile.state;
+    let interior = &sim.geom.interior;
+    let alloc = sim.fields.cons.den.domain();
+    let ng = grid.ng as isize;
+    let size: [usize; D] = std::array::from_fn(|ax| interior.spaces[ax].size());
+    let (first, last) = touches_domain_edges(&tile.offset, &size, grid);
+    let cell_region = owned_cell_region(interior, alloc, &first, &last);
+    let shift: [isize; D] = std::array::from_fn(|ax| tile.offset[ax] - interior.spaces[ax].lo - grid.interior_lo[ax]);
+    let cell_file_of = |ax: usize, c: isize| (c + shift[ax] + ng) as usize;
+    let level_path = format!("level_{level_index}");
+    let mut staging: Vec<f64> = Vec::new();
+    for (group, name, field) in cell_datasets::<R, D, DOF, Mem>(sim) {
+        let dataset_path = if group.is_empty() {
+            format!("{level_path}/{name}")
+        } else {
+            format!("{level_path}/{group}/{name}")
+        };
+        for chunk in chunk_region(&cell_region, budget) {
+            staging.clear();
+            for_each_cell_axis0(&chunk, |coord| staging.push(*field.view().at(coord)));
+            let (start, count) = slab_start_and_count(&chunk, &cell_file_of);
+            sink(&dataset_path, &start, &count, &staging)?;
+        }
+    }
+    if let Some(mhd) = sim.fields.mhd.as_ref().filter(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed)) {
+        for d in 0..D {
+            let region = owned_face_region(interior, d, &last);
+            let face_file_of = |ax: usize, c: isize| (c + shift[ax]) as usize;
+            let dataset_path = format!("{level_path}/partition_0/hydro/magnetic/B{}/data", d + 1);
+            for chunk in chunk_region(&region, budget) {
+                staging.clear();
+                for_each_cell_axis0(&chunk, |coord| staging.push(*mhd.bface[d].view().at(coord)));
+                let (start, count) = slab_start_and_count(&chunk, &face_file_of);
+                sink(&dataset_path, &start, &count, &staging)?;
+            }
+        }
+    }
     Ok(())
+}
+
+/// the number of blocks `owned_blocks` produces for one tile: the coverage ledger's capacity.
+pub fn owned_block_count<R, const D: usize, const DOF: usize, Mem>(
+    tile: &TileView<'_, D, DOF, Mem>,
+    grid: &GlobalGrid<D>,
+    budget: usize,
+) -> usize
+where
+    R: Regime<f64, D>,
+    Mem: MemorySpace,
+{
+    let mut count = 0;
+    let mut sink = |_: &str, _: &[usize], _: &[usize], _: &[f64]| {
+        count += 1;
+        Ok(())
+    };
+    owned_blocks::<R, D, DOF, Mem>(0, tile, grid, budget, &mut sink).expect("a counting sink cannot fail");
+    count
 }
 
 /// the physical lower bound of a uniform axis at global interior index `lo_index`.

@@ -21,7 +21,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
-use symbi_fabric::{Digest, Epoch, Fabric, FabricError, PhaseSpec, TransferId, WorkerId};
+use symbi_fabric::{Digest, Epoch, Fabric, FabricError, OpKind, PhaseSpec, TransferId, WorkerId};
 
 /// every allocation in this binary is counted, so a worker can show that a phase and the
 /// session end allocate nothing and never raise the high-water mark.
@@ -94,6 +94,12 @@ struct Scenario {
     expect_partial_writes: bool,
     expect_partial_reads: bool,
     expect_early_grant: bool,
+    /// three workers: 1 and 2 exchange after a collective whose result the coordinator
+    /// delays to worker 2, so worker 1's grant reaches worker 2 before its own result
+    race: bool,
+    /// worker 1 streams blocks of varying size to a slow coordinator under a credit that
+    /// admits two small blocks while a large one still occupies the outbox
+    blocks: bool,
 }
 
 impl Scenario {
@@ -112,6 +118,8 @@ impl Scenario {
             expect_partial_writes: env_u64("W_EXPECT_PARTIAL_WRITES", 0) == 1,
             expect_partial_reads: env_u64("W_EXPECT_PARTIAL_READS", 0) == 1,
             expect_early_grant: env_u64("W_EXPECT_EARLY_GRANT", 0) == 1,
+            race: env_u64("W_RACE", 0) == 1,
+            blocks: env_u64("W_BLOCKS", 0) == 1,
         }
     }
 }
@@ -125,7 +133,7 @@ fn identity(workers: u32) -> Identity {
         placement_digest: Digest(env_u64("W_PLACEMENT", 33)),
         ng: 2,
         workers,
-        block_credit: 4096,
+        block_credit: BLOCK_CREDIT,
     }
 }
 
@@ -143,7 +151,7 @@ fn run_worker(s: &Scenario) -> Result<(), FabricError> {
         startup: STARTUP_DEADLINE,
     };
     let lens = [s.len0, 3, 2, 2];
-    let max_payload = lens.iter().max().copied().unwrap() * 8;
+    let max_payload = (lens.iter().max().copied().unwrap() * 8).max(BLOCK_CREDIT as usize);
     let (link, session) = connect(&r, max_payload)?;
     println!("READY");
     if s.stall_after_ready {
@@ -153,13 +161,20 @@ fn run_worker(s: &Scenario) -> Result<(), FabricError> {
     let b = WorkerId(1);
     let n = s.workers as usize;
     let mut sends = vec![vec![0u32; 2]; n];
-    if s.me == a {
+    if s.race {
+        if s.me == WorkerId(1) {
+            sends[2] = vec![1, 0];
+        } else if s.me == WorkerId(2) {
+            sends[1] = vec![1, 0];
+        }
+    } else if s.me == a {
         sends[1] = vec![1, 1];
     } else if s.me == b {
         sends[0] = vec![1, 1];
     }
     let peer_bytes_before = link.peer_buffer_bytes();
-    let mut fabric = Fabric::new(link, s.me, session, n, 2, &lens, sends);
+    let mut fabric =
+        Fabric::new(link, s.me, session, n, 2, &lens, sends).with_block_credit(BLOCK_CREDIT);
     // a local failure tells every peer before this worker leaves
     let result = run_phases(s, &mut fabric, peer_bytes_before);
     if let Err(e) = &result {
@@ -168,11 +183,139 @@ fn run_worker(s: &Scenario) -> Result<(), FabricError> {
     result
 }
 
+const BLOCK_MAX: usize = 2 << 20;
+const BLOCK_CREDIT: u32 = 2 * BLOCK_MAX as u32;
+const BLOCK_COUNT: u32 = 9;
+
+fn block_len(seq: u32) -> usize {
+    [BLOCK_MAX, BLOCK_MAX / 3, BLOCK_MAX / 2][seq as usize % 3]
+}
+
+/// the block scenario: worker 1 sends nine blocks whose sizes cycle large, third, half;
+/// the coordinator sleeps before releasing each one, so the socket fills and the sender
+/// must wait for the outbox as well as for credit.
+fn run_blocks(s: &Scenario, fabric: &mut Fabric<symbi_fabric::TcpLink>) -> Result<(), FabricError> {
+    if s.me == WorkerId(0) {
+        let mut received = 0u32;
+        let start = Instant::now();
+        while received < BLOCK_COUNT {
+            fabric.service()?;
+            if let Some((from, seq, payload)) = fabric.staged_block() {
+                if from != WorkerId(1) || seq != received || payload.len() != block_len(seq) {
+                    eprintln!(
+                        "block {seq} from {from:?} of {} bytes; expected {} of {}",
+                        payload.len(),
+                        received,
+                        block_len(received)
+                    );
+                    std::process::exit(4);
+                }
+                if payload.iter().any(|&b| b != seq as u8) {
+                    eprintln!("block {seq} payload corrupted");
+                    std::process::exit(4);
+                }
+                std::thread::sleep(Duration::from_millis(30));
+                fabric.release_block()?;
+                received += 1;
+            }
+            if start.elapsed() > TRANSFER_DEADLINE * 3 {
+                eprintln!("blocks stalled at {received}");
+                std::process::exit(4);
+            }
+            std::thread::sleep(Duration::from_micros(50));
+        }
+    } else {
+        let mut payload = vec![0u8; BLOCK_MAX];
+        for seq in 0..BLOCK_COUNT {
+            let len = block_len(seq);
+            payload[..len].fill(seq as u8);
+            fabric.send_block(&payload[..len], TRANSFER_DEADLINE)?;
+        }
+        fabric.drain_blocks(TRANSFER_DEADLINE)?;
+    }
+    fabric.finish(TRANSFER_DEADLINE)
+}
+
+/// the race scenario: worker 0 coordinates and holds worker 2's result for 300 ms; workers
+/// 1 and 2 contribute, then exchange transfers 0 (1 -> 2) and 1 (2 -> 1) on axis 0. worker 1
+/// gets its result at once, opens, and grants worker 2, whose result is still on hold.
+fn run_race(s: &Scenario, fabric: &mut Fabric<symbi_fabric::TcpLink>) -> Result<(), FabricError> {
+    let e = epoch(1, 0);
+    let one = WorkerId(1);
+    let two = WorkerId(2);
+    if s.me == WorkerId(0) {
+        fabric.delay_result_to(two, Duration::from_millis(300));
+    }
+    let result = fabric.collective(OpKind::Any, u64::from(s.me == one), TRANSFER_DEADLINE)?;
+    if result != 1 {
+        eprintln!("Any over (0, 1, 0) gave {result}");
+        std::process::exit(4);
+    }
+    if s.me == two && !fabric.grants().is_tabled(one, e) {
+        eprintln!("worker 2's result arrived before worker 1's grant; the race was not exercised");
+        std::process::exit(4);
+    }
+    let (send, recv) = match s.me {
+        WorkerId(1) => (Some((TransferId(0), two)), Some((TransferId(1), two))),
+        WorkerId(2) => (Some((TransferId(1), one)), Some((TransferId(0), one))),
+        _ => (None, None),
+    };
+    if let Some((id, _)) = send {
+        fabric.pack(id, |buf| {
+            for (i, v) in buf.iter_mut().enumerate() {
+                *v = value(s.me.0, id.0, i);
+            }
+        })?;
+    }
+    let sends: Vec<_> = send.into_iter().collect();
+    let receives: Vec<_> = recv.into_iter().collect();
+    fabric.open(PhaseSpec {
+        epoch: e,
+        sends: &sends,
+        receives: &receives,
+    })?;
+    fabric.wait(TRANSFER_DEADLINE)?;
+    if let Some((id, from)) = recv {
+        for (i, v) in fabric.payload(id)?.iter().enumerate() {
+            if v.to_bits() != value(from.0, id.0, i).to_bits() {
+                eprintln!("transfer {id:?} value {i} wrong");
+                std::process::exit(4);
+            }
+        }
+        fabric.mark_unpacked(id)?;
+    }
+    fabric.close()?;
+    // the second axis is local-only for everyone; a second collective closes the run
+    fabric.open(PhaseSpec {
+        epoch: epoch(1, 1),
+        sends: &[],
+        receives: &[],
+    })?;
+    fabric.wait(TRANSFER_DEADLINE)?;
+    fabric.close()?;
+    let dt = fabric.collective(
+        OpKind::Min,
+        (0.5 + f64::from(s.me.0)).to_bits(),
+        TRANSFER_DEADLINE,
+    )?;
+    if f64::from_bits(dt) != 0.5 {
+        eprintln!("Min gave {}", f64::from_bits(dt));
+        std::process::exit(4);
+    }
+    fabric.finish(TRANSFER_DEADLINE)
+}
+
 fn run_phases(
     s: &Scenario,
     fabric: &mut Fabric<symbi_fabric::TcpLink>,
     peer_bytes_before: usize,
 ) -> Result<(), FabricError> {
+    if s.race {
+        return run_race(s, fabric);
+    }
+    if s.blocks {
+        return run_blocks(s, fabric);
+    }
     let a = WorkerId(0);
     let b = WorkerId(1);
     let bytes_before = fabric.buffer_bytes();
@@ -672,4 +815,38 @@ fn a_missing_worker_trips_the_startup_deadline() {
         "{}",
         outcomes[0].stderr
     );
+}
+
+/// a real collective result racing a peer's grant: the coordinator holds worker 2's Result
+/// while worker 1, already holding its own, opens the next phase and grants worker 2. the
+/// grant is tabled during worker 2's wait and consumed after its result arrives.
+#[test]
+fn a_peer_grant_arrives_before_the_collective_result() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let coord = rendezvous_file();
+    let test = "a_peer_grant_arrives_before_the_collective_result";
+    let race = [("W_RACE", "1".to_string())];
+    let outcomes = collect(vec![
+        spawn(test, 0, 3, &coord, &race),
+        spawn(test, 1, 3, &coord, &race),
+        spawn(test, 2, 3, &coord, &race),
+    ]);
+    assert_all_ok(&outcomes);
+}
+
+/// variable-sized blocks to a slow coordinator: credit for two small blocks does not make
+/// the outbox free, so the sender waits for both before each send.
+#[test]
+fn variable_sized_blocks_complete_under_backpressure() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let blocks = [("W_BLOCKS", "1".to_string())];
+    assert_all_ok(&run_pair(
+        "variable_sized_blocks_complete_under_backpressure",
+        &blocks,
+        &blocks,
+    ));
 }

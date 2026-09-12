@@ -384,6 +384,13 @@ where
     /// default: no-op (inviscid regimes, and sets without a baked viscous kernel).
     fn viscous(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 
+    /// whether this set carries a viscous transport (a constant nu or an alpha
+    /// prescription), so a driver limited to inviscid flow can refuse it. default: false,
+    /// which is exact for sets without a baked viscous kernel.
+    fn is_viscous(&self) -> bool {
+        false
+    }
+
     /// whether this set runs the implicit magnetic-slip midpoint on `store`: an immersed body with a
     /// slip magnetic coupling on an MHD regime. the coupled driver selects the palindromic schedule
     /// on it. default: false.
