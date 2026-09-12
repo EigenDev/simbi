@@ -3,15 +3,17 @@
 //
 // the process-to-process runtime beneath a decomposed run: wire identities,
 // framing, the receiver-grant table, the per-worker endpoint with its send and
-// receive state machines, and the error model. the crate moves byte buffers
-// and f64 bit patterns between workers and names no field, region, or mesh;
-// the simulation layer packs and unpacks.
+// receive state machines, the TCP mesh link, the session handshake, and the
+// error model. the crate moves byte buffers and f64 bit patterns between
+// workers and names no field, region, or mesh; the simulation layer packs and
+// unpacks.
 //
 // dependency floor: std only. every type that crosses the wire is defined
 // here and imported by the simulation layer, never the reverse.
 //
 // usage:
-//  use symbi_fabric::{Fabric, Loopback, PhaseSpec, Progress};
+//  use symbi_fabric::{Fabric, Loopback, PhaseSpec, Progress, TcpLink};
+//  use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
 //  use symbi_fabric::{Digest, Epoch, Fnv, TransferId, WorkerId};
 // =============================================================================
 
@@ -20,9 +22,12 @@ pub mod error;
 pub mod frame;
 pub mod grant;
 pub mod ident;
+pub mod rendezvous;
+pub mod tcp;
 
-pub use endpoint::{Fabric, Link, Loopback, PhaseSpec, Progress, RecvState, SendState};
+pub use endpoint::{Fabric, Link, Loopback, PhaseSpec, Progress, RecvState, SendState, Stats};
 pub use error::{AbortReason, Deadline, FabricError};
 pub use frame::{HEADER_LEN, Header, Kind, MAGIC, VERSION};
 pub use grant::GrantTable;
 pub use ident::{Digest, Epoch, Fnv, OpId, SessionId, TransferId, WorkerId};
+pub use tcp::{LinkStats, TcpLink};

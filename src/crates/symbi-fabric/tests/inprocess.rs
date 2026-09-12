@@ -412,3 +412,200 @@ fn a_frame_from_another_session_is_rejected() {
     link.inject(B, A, h, &[]);
     assert!(a.service().unwrap_err().is_protocol());
 }
+
+/// the session-end barrier over the loopback: both sides say Done and each leaves once it
+/// has heard the other.
+#[test]
+fn finish_exchanges_done_both_ways() {
+    let link = Loopback::new();
+    let mut a = Fabric::new(
+        link.clone(),
+        A,
+        S,
+        2,
+        2,
+        &LENS,
+        vec![vec![0, 0], vec![1, 1]],
+    );
+    let mut b = Fabric::new(
+        link.clone(),
+        B,
+        S,
+        2,
+        2,
+        &LENS,
+        vec![vec![1, 1], vec![0, 0]],
+    );
+    open_axis0(&mut a, &mut b, epoch(0, 1, 0));
+    drive(&mut [&mut a, &mut b]).unwrap();
+    finish_axis0(&mut a, &mut b);
+    a.begin_finish().unwrap();
+    assert_eq!(a.finish_progress().unwrap(), Progress::Pending);
+    b.begin_finish().unwrap();
+    assert_eq!(b.finish_progress().unwrap(), Progress::Done);
+    assert_eq!(a.finish_progress().unwrap(), Progress::Done);
+    assert!(a.begin_finish().unwrap_err().is_protocol());
+}
+
+/// a Done from a peer this worker still expects a halo from is a protocol error.
+#[test]
+fn done_from_a_peer_still_owed_a_halo_rejected() {
+    let link = Loopback::new();
+    let (mut a, mut b) = pair(&link);
+    open_axis0(&mut a, &mut b, epoch(0, 1, 0));
+    link.inject(
+        A,
+        B,
+        Header {
+            kind: Kind::Done,
+            session: S,
+            epoch: Epoch {
+                step: 0,
+                attempt: 0,
+                point: Epoch::NO_POINT,
+                axis: Epoch::NO_AXIS,
+            },
+            id: 0,
+            payload_len: 0,
+        },
+        &[],
+    );
+    assert!(b.service().unwrap_err().is_protocol());
+}
+
+/// a Done from a peer with nothing owed in the open phase is tabled; opening a later phase
+/// that exchanges with that peer is refused.
+#[test]
+fn done_from_an_uninvolved_peer_is_tabled_and_bars_later_phases() {
+    let link = Loopback::new();
+    let (mut a, _b) = pair(&link);
+    a.open(PhaseSpec {
+        epoch: epoch(0, 1, 1),
+        sends: &[],
+        receives: &[],
+    })
+    .unwrap();
+    link.inject(
+        C,
+        A,
+        Header {
+            kind: Kind::Done,
+            session: S,
+            epoch: Epoch {
+                step: 0,
+                attempt: 0,
+                point: Epoch::NO_POINT,
+                axis: Epoch::NO_AXIS,
+            },
+            id: 0,
+            payload_len: 0,
+        },
+        &[],
+    );
+    a.service().unwrap();
+    a.close().unwrap();
+    // c has finished; a phase that would receive from c is refused
+    assert!(
+        a.open(PhaseSpec {
+            epoch: epoch(0, 2, 0),
+            sends: &[],
+            receives: &[(T1, C)],
+        })
+        .unwrap_err()
+        .is_protocol()
+    );
+}
+
+/// a link that holds every frame until released, so this worker's own Done stays queued
+/// while every peer's Done has already arrived.
+#[derive(Clone)]
+struct Held {
+    inner: Loopback,
+    open: std::rc::Rc<std::cell::Cell<bool>>,
+    queue: std::rc::Rc<std::cell::RefCell<Vec<(WorkerId, WorkerId, Header, Vec<u8>)>>>,
+}
+
+impl symbi_fabric::Link for Held {
+    fn send(
+        &self,
+        from: WorkerId,
+        to: WorkerId,
+        header: Header,
+        payload: &[u8],
+    ) -> Result<(), FabricError> {
+        self.queue
+            .borrow_mut()
+            .push((from, to, header, payload.to_vec()));
+        Ok(())
+    }
+    fn poll(
+        &self,
+        me: WorkerId,
+        payload: &mut Vec<u8>,
+    ) -> Result<Option<(WorkerId, Header)>, FabricError> {
+        self.inner.poll(me, payload)
+    }
+    fn drive(&self, _me: WorkerId) -> Result<(), FabricError> {
+        if self.open.get() {
+            for (from, to, header, payload) in self.queue.borrow_mut().drain(..) {
+                self.inner.inject(from, to, header, &payload);
+            }
+        }
+        Ok(())
+    }
+    fn outbound_pending(&self) -> bool {
+        !self.queue.borrow().is_empty()
+    }
+}
+
+/// every peer's Done is in hand but this worker's own Done has not left the link: finish
+/// stays pending until the outbound queue drains.
+#[test]
+fn finish_waits_for_outbound_drain() {
+    let link = Loopback::new();
+    let held = Held {
+        inner: link.clone(),
+        open: std::rc::Rc::new(std::cell::Cell::new(false)),
+        queue: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+    };
+    let mut a = Fabric::new(
+        held.clone(),
+        A,
+        S,
+        2,
+        2,
+        &LENS,
+        vec![vec![0, 0], vec![1, 1]],
+    );
+    link.inject(
+        B,
+        A,
+        Header {
+            kind: Kind::Done,
+            session: S,
+            epoch: Epoch {
+                step: 0,
+                attempt: 0,
+                point: Epoch::NO_POINT,
+                axis: Epoch::NO_AXIS,
+            },
+            id: 0,
+            payload_len: 0,
+        },
+        &[],
+    );
+    a.begin_finish().unwrap();
+    assert_eq!(
+        a.finish_progress().unwrap(),
+        Progress::Pending,
+        "own Done still queued"
+    );
+    assert_eq!(a.finish_progress().unwrap(), Progress::Pending);
+    held.open.set(true);
+    assert_eq!(a.finish_progress().unwrap(), Progress::Done);
+    assert_eq!(
+        link.queued_of_kind(Kind::Done),
+        1,
+        "the Done reached the link"
+    );
+}
