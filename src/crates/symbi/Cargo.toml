@@ -43,6 +43,7 @@ symbi-discretize = { path = "../symbi-discretize" }
 symbi-jit = { path = "../symbi-jit" }
 symbi-display = { path = "../symbi-display" }
 symbi-io = { path = "../symbi-io" }
+symbi-fabric = { path = "../symbi-fabric" }
 hdf5-metno = { version = "0.12", features = ["static"] }
 rayon = "1"
 # stack-resident small vectors for the per-dispatch buffer-layout list (bounded

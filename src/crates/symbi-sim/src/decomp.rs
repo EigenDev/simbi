@@ -19,6 +19,7 @@
 // lives in one tested place.
 // =============================================================================
 
+use crate::atlas::FieldLayout;
 use crate::driver::{advance_state_clock, book_horizon_receipt, horizon_request, prof};
 use crate::state::{BoundaryType, FieldStore, PartitionGeometry, Timestepping};
 use crate::substrate_seam::KernelSet;
@@ -295,16 +296,16 @@ impl HaloTransport for DeviceCopy {
 /// interior on every axis the leg marks -- the two-pass corner rule, carried by the leg.
 /// an unmarked axis keeps its full allocated extent, whose ghosts are valid there.
 fn ghost_strip<const D: usize>(
-    geom: &PartitionGeometry<D>,
+    layout: &FieldLayout<D>,
     axis: usize,
     side: Side,
     clip: &[bool; D],
+    h: isize,
 ) -> Domain<D> {
-    let ng = geom.ng as isize;
-    let mut strip = geom.allocated.boundary(axis, side, ng);
+    let mut strip = layout.allocated_domain().boundary(axis, side, h);
     for b in 0..D {
         if clip[b] {
-            strip = strip.slab(b, (geom.interior.spaces[b].lo, geom.interior.spaces[b].hi));
+            strip = strip.slab(b, (layout.interior[b].lo, layout.interior[b].hi));
         }
     }
     strip
@@ -506,37 +507,43 @@ fn prim_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     fields
 }
 
-/// the ghost strip on a staggered face field's own allocated domain (for MHD `bface`). mirrors
-/// `ghost_strip` but takes the field's own `alloc` domain and its own halo width `ng` on `axis`
-/// (a face field carries a two-deep transverse halo, which sits inside the cell halo of a
-/// third-order stencil), and extends the interior by one on the field's normal axis `d` (a face
-/// field has one extra face past the last cell on its normal axis). used only for `d != axis`,
-/// where `axis` is transverse to the face and indexes like cells.
-fn face_ghost_strip<const D: usize>(
-    alloc: &Domain<D>,
-    geom: &PartitionGeometry<D>,
-    axis: usize,
-    side: Side,
-    d: usize,
-    clip: &[bool; D],
-    ng: isize,
-) -> Domain<D> {
-    let mut strip = alloc.boundary(axis, side, ng);
-    for b in 0..D {
-        if clip[b] {
-            // the leg's clipped axes come back to the interior (the two-pass corner rule). on
-            // the face's own normal axis there is one extra face past the last interior cell.
-            let hi_ext = if b == d { 1 } else { 0 };
-            strip = strip.slab(
-                b,
-                (
-                    geom.interior.spaces[b].lo,
-                    geom.interior.spaces[b].hi + hi_ext,
-                ),
-            );
+/// the fields a compiled exchange plan moves, in schema order: the primitive set as
+/// `prim_fields` lists it, then the staggered face-normal fields for MHD.
+pub fn plan_fields<const D: usize, const DOF: usize, M: MemorySpace>(
+    store: &FieldStore<D, DOF, M>,
+) -> Vec<&Field<f64, D, M>> {
+    let mut fields = prim_fields(store);
+    if let Some(mhd) = store.fields.mhd.as_ref() {
+        fields.extend(mhd.bface.b.iter());
+    }
+    fields
+}
+
+/// the schema `plan_fields` realizes: one entry per field, cells first, faces after, so a
+/// plan compiled from it indexes `plan_fields` directly.
+pub fn plan_schema<const D: usize, const DOF: usize, M: MemorySpace>(
+    store: &FieldStore<D, DOF, M>,
+) -> crate::atlas::FieldSchema {
+    let mut schema = crate::atlas::FieldSchema::new().cell("rho");
+    for i in 0..store.fields.prim.vel.len() {
+        schema = schema.cell(&format!("v{i}"));
+    }
+    if store.fields.prim.pre.is_some() {
+        schema = schema.cell("pre");
+    }
+    if store.fields.prim.chi.is_some() {
+        schema = schema.cell("chi");
+    }
+    if let Some(mhd) = store.fields.mhd.as_ref() {
+        for i in 0..mhd.bcell.b.len() {
+            schema = schema.cell(&format!("b{i}"));
+        }
+        for d in 0..D {
+            schema = schema.face(&format!("bface{d}"), d as u8);
         }
     }
-    strip
+    debug_assert_eq!(schema.len(), plan_fields(store).len());
+    schema
 }
 
 /// exchange same-level halos across the shared face a `leg` names: `lo`'s hi face on the
@@ -580,9 +587,6 @@ fn exchange_faces_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     set: ExchangeSet,
 ) {
     let axis = leg.axis;
-    let ng = reach as isize;
-    let i_hi_lo = lo.geom.interior.spaces[axis].hi; // one past lo's last interior cell
-    let i_lo_hi = hi.geom.interior.spaces[axis].lo; // hi's first interior cell
     let dev_of = |tile: usize| if tile == leg.lo { lo_dev } else { hi_dev };
     leg_transfers(
         lo,
@@ -623,21 +627,22 @@ fn exchange_faces_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
             }
             let fl = &lo_mhd.bface[d];
             let fr = &hi_mhd.bface[d];
-            let lo_alloc = fl.domain();
-            let hi_alloc = fr.domain();
+            let lo_layout = FieldLayout::face_of_geometry(&lo.geom, d);
+            let hi_layout = FieldLayout::face_of_geometry(&hi.geom, d);
+            debug_assert_eq!(lo_layout.allocated, crate::atlas::spans_of(fl.domain()));
+            debug_assert_eq!(hi_layout.allocated, crate::atlas::spans_of(fr.domain()));
             // the strips take the face field's own transverse halo width, so the destination band
             // stays on ghost faces: a cell-halo-wide band would start inside the interior and
             // overwrite the tile's last interior faces with the neighbor's first column.
-            let lo_ng = (lo_alloc.spaces[axis].hi - lo.geom.interior.spaces[axis].hi).min(ng);
-            let hi_ng = (hi.geom.interior.spaces[axis].lo - hi_alloc.spaces[axis].lo).min(ng);
-            let lo_ghost_f =
-                face_ghost_strip(&lo_alloc, &lo.geom, axis, Side::Hi, d, &leg.clip, lo_ng);
-            let hi_src_f = lo_ghost_f.slab(axis, (i_lo_hi, i_lo_hi + lo_ng));
-            let hi_ghost_f =
-                face_ghost_strip(&hi_alloc, &hi.geom, axis, Side::Lo, d, &leg.clip, hi_ng);
-            let lo_src_f = hi_ghost_f.slab(axis, (i_hi_lo - hi_ng, i_hi_lo));
-            transport.copy_region(fr, &hi_src_f, fl, &lo_ghost_f, hi_dev, lo_dev);
-            transport.copy_region(fl, &lo_src_f, fr, &hi_ghost_f, lo_dev, hi_dev);
+            let h = lo_layout.halo[axis].min(hi_layout.halo[axis]).min(reach);
+            let LegRegions {
+                lo_ghost,
+                hi_src,
+                hi_ghost,
+                lo_src,
+            } = leg_regions(&lo_layout, &hi_layout, leg, h);
+            transport.copy_region(fr, &hi_src, fl, &lo_ghost, hi_dev, lo_dev);
+            transport.copy_region(fl, &lo_src, fr, &hi_ghost, lo_dev, hi_dev);
         }
     }
 }
@@ -1309,31 +1314,33 @@ pub fn schedule_of_tiles<const D: usize, const DOF: usize, M: MemorySpace>(
 
 /// the four regions a leg moves: the `lo` tile's hi-ghost strip with the `hi`-tile source that
 /// fills it, and the `hi` tile's lo-ghost strip with the `lo`-tile source that fills it. every
-/// index comes from the tiles' own domains, so unequal tiles need no special case.
-struct LegRegions<const D: usize> {
-    lo_ghost: Domain<D>,
-    hi_src: Domain<D>,
-    hi_ghost: Domain<D>,
-    lo_src: Domain<D>,
+/// index comes from the field layouts' own spans, so unequal tiles need no special case.
+pub(crate) struct LegRegions<const D: usize> {
+    pub(crate) lo_ghost: Domain<D>,
+    pub(crate) hi_src: Domain<D>,
+    pub(crate) hi_ghost: Domain<D>,
+    pub(crate) lo_src: Domain<D>,
 }
 
-fn leg_regions<const D: usize>(
-    lo: &PartitionGeometry<D>,
-    hi: &PartitionGeometry<D>,
+/// the regions of `leg` for one field, given that field's layout on the two tiles and the
+/// width `h` it exchanges on the leg's axis: the cell halo for a cell field, the field's own
+/// transverse halo for a face field. the clipped axes come back to the field's interior,
+/// which on a face field's own axis is one face longer than the cells.
+pub(crate) fn leg_regions<const D: usize>(
+    lo: &FieldLayout<D>,
+    hi: &FieldLayout<D>,
     leg: &Leg<D>,
-    reach: usize,
+    h: usize,
 ) -> LegRegions<D> {
-    debug_assert_eq!(lo.ng, reach, "the schedule reach matches the tile halo width");
-    debug_assert_eq!(hi.ng, reach, "the schedule reach matches the tile halo width");
-    let ng = reach as isize;
+    let h = h as isize;
     let axis = leg.axis;
-    let i_hi_lo = lo.interior.spaces[axis].hi; // one past lo's last interior cell
-    let i_lo_hi = hi.interior.spaces[axis].lo; // hi's first interior cell
-    let lo_ghost = ghost_strip(lo, axis, Side::Hi, &leg.clip);
-    let hi_ghost = ghost_strip(hi, axis, Side::Lo, &leg.clip);
+    let i_hi_lo = lo.interior[axis].hi; // one past lo's last interior cell
+    let i_lo_hi = hi.interior[axis].lo; // hi's first interior cell
+    let lo_ghost = ghost_strip(lo, axis, Side::Hi, &leg.clip, h);
+    let hi_ghost = ghost_strip(hi, axis, Side::Lo, &leg.clip, h);
     LegRegions {
-        hi_src: lo_ghost.slab(axis, (i_lo_hi, i_lo_hi + ng)),
-        lo_src: hi_ghost.slab(axis, (i_hi_lo - ng, i_hi_lo)),
+        hi_src: lo_ghost.slab(axis, (i_lo_hi, i_lo_hi + h)),
+        lo_src: hi_ghost.slab(axis, (i_hi_lo - h, i_hi_lo)),
         lo_ghost,
         hi_ghost,
     }
@@ -1431,7 +1438,14 @@ fn leg_transfers<const D: usize, const DOF: usize, M: MemorySpace, F>(
         hi_src,
         hi_ghost,
         lo_src,
-    } = leg_regions(&lo.geom, &hi.geom, leg, reach);
+    } = leg_regions(
+        &FieldLayout::cell_of_geometry(&lo.geom),
+        &FieldLayout::cell_of_geometry(&hi.geom),
+        leg,
+        reach,
+    );
+    debug_assert_eq!(lo.geom.ng, reach, "the schedule reach matches the tile halo width");
+    debug_assert_eq!(hi.geom.ng, reach, "the schedule reach matches the tile halo width");
     for (field_index, (fl, fr)) in exchange_set_fields(lo, set)
         .into_iter()
         .zip(exchange_set_fields(hi, set))
@@ -1635,7 +1649,12 @@ fn exchange_ito_coefficients<const D: usize, const DOF: usize, M: MemorySpace, T
             hi_src,
             hi_ghost,
             lo_src,
-        } = leg_regions(&lo.geom, &hi.geom, leg, schedule.reach());
+        } = leg_regions(
+            &FieldLayout::cell_of_geometry(&lo.geom),
+            &FieldLayout::cell_of_geometry(&hi.geom),
+            leg,
+            schedule.reach(),
+        );
         for dd in 0..D {
             for (fl, fr) in [
                 (&lo_fields.drift[dd], &hi_fields.drift[dd]),

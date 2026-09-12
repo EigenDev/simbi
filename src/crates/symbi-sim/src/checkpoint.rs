@@ -2383,6 +2383,53 @@ pub fn staging_budget_cells() -> usize {
     mb * (1 << 20) / std::mem::size_of::<f64>()
 }
 
+/// which domain edges a tile touches: `first[ax]` when its interior starts the global interior
+/// on `ax`, `last[ax]` when it ends it. `offset` is the global index of the tile's first
+/// interior cell and `size` its interior cell count.
+pub fn touches_domain_edges<const D: usize>(
+    offset: &[isize; D],
+    size: &[usize; D],
+    grid: &GlobalGrid<D>,
+) -> ([bool; D], [bool; D]) {
+    let first = std::array::from_fn(|ax| offset[ax] == grid.interior_lo[ax]);
+    let last = std::array::from_fn(|ax| {
+        offset[ax] + size[ax] as isize == grid.interior_lo[ax] + grid.cells[ax] as isize
+    });
+    (first, last)
+}
+
+/// the cell block a tile owns in the file: its interior, extended into the global halo on every
+/// side where it touches the domain boundary. every cell of the global dataset has exactly one
+/// owner under this rule.
+pub fn owned_cell_region<const D: usize>(
+    interior: &symbi_algebra::Domain<D>,
+    alloc: &symbi_algebra::Domain<D>,
+    first: &[bool; D],
+    last: &[bool; D],
+) -> symbi_algebra::Domain<D> {
+    let mut r = interior.clone();
+    for ax in 0..D {
+        let lo = if first[ax] { alloc.spaces[ax].lo } else { interior.spaces[ax].lo };
+        let hi = if last[ax] { alloc.spaces[ax].hi } else { interior.spaces[ax].hi };
+        r = r.slab(ax, (lo, hi));
+    }
+    r
+}
+
+/// the faces along `d` a tile owns in the file: those at the low side of its interior cells,
+/// plus the closing face when the tile ends the axis; interior extents on the other axes.
+pub fn owned_face_region<const D: usize>(
+    interior: &symbi_algebra::Domain<D>,
+    d: usize,
+    last: &[bool; D],
+) -> symbi_algebra::Domain<D> {
+    if last[d] {
+        interior.extend(d, 0, 1)
+    } else {
+        interior.clone()
+    }
+}
+
 /// the row-major shape and origin of a local region in the file's index space, which runs
 /// storage order (axis D-1 slowest) with the file origin `file_of(local coordinate)`.
 fn slab_start_and_count<const D: usize>(
@@ -2791,22 +2838,11 @@ where
             let interior = &sim.geom.interior;
             let alloc = sim.fields.cons.den.domain();
             let ng = grid.ng as isize;
-            let first: [bool; D] = std::array::from_fn(|ax| tile.offset[ax] == grid.interior_lo[ax]);
-            let last: [bool; D] = std::array::from_fn(|ax| {
-                tile.offset[ax] + interior.spaces[ax].size() as isize == grid.interior_lo[ax] + grid.cells[ax] as isize
-            });
-            // a tile's cell block: its interior, extended into the global halo on every side it
-            // touches the domain boundary. the file's cell index of local coordinate `c` on an
-            // axis is the global interior index plus the halo width.
-            let cell_region = {
-                let mut r = interior.clone();
-                for ax in 0..D {
-                    let lo = if first[ax] { alloc.spaces[ax].lo } else { interior.spaces[ax].lo };
-                    let hi = if last[ax] { alloc.spaces[ax].hi } else { interior.spaces[ax].hi };
-                    r = r.slab(ax, (lo, hi));
-                }
-                r
-            };
+            let size: [usize; D] = std::array::from_fn(|ax| interior.spaces[ax].size());
+            let (first, last) = touches_domain_edges(&tile.offset, &size, grid);
+            // the file's cell index of local coordinate `c` on an axis is the global interior
+            // index plus the halo width.
+            let cell_region = owned_cell_region(interior, alloc, &first, &last);
             let shift: [isize; D] = std::array::from_fn(|ax| tile.offset[ax] - interior.spaces[ax].lo - grid.interior_lo[ax]);
             let cell_file_of = |ax: usize, c: isize| (c + shift[ax] + ng) as usize;
             for (group, name, field) in cell_datasets::<R, D, DOF, Mem>(sim) {
@@ -2819,12 +2855,7 @@ where
             }
             if let Some(mhd) = sim.fields.mhd.as_ref().filter(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed)) {
                 for d in 0..D {
-                    // a tile's faces along `d`: those at the low side of its interior cells, plus
-                    // the closing face when the tile ends the axis; interior extents elsewhere.
-                    let mut region = interior.clone();
-                    if last[d] {
-                        region = region.extend(d, 0, 1);
-                    }
+                    let region = owned_face_region(interior, d, &last);
                     let face_file_of = |ax: usize, c: isize| (c + shift[ax]) as usize;
                     stream_region(
                         &stream,

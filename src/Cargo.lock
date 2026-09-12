@@ -1402,6 +1402,7 @@ dependencies = [
  "symbi-discretize",
  "symbi-display",
  "symbi-exec",
+ "symbi-fabric",
  "symbi-geometry",
  "symbi-grid",
  "symbi-hydro",
@@ -1512,6 +1513,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "symbi-fabric"
+version = "0.1.0"
 
 [[package]]
 name = "symbi-geometry"
@@ -1633,6 +1638,7 @@ version = "0.1.0"
 dependencies = [
  "symbi-algebra",
  "symbi-carrier",
+ "symbi-fabric",
  "symbi-geometry",
  "symbi-grid",
  "symbi-hydro",

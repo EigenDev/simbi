@@ -19,6 +19,7 @@
 //  use symbi_sim::substrate_seam::{KernelSet, RegimeSubstrate, Solver};
 // =============================================================================
 
+pub mod atlas;
 pub mod projection_ledger;
 pub mod guard_ledger;
 pub mod run_diagnostics;
@@ -28,6 +29,7 @@ pub mod decomp;
 pub mod driver;
 pub mod hydro_ops;
 pub mod mass_transport;
+pub mod plan_exchange;
 pub mod stage;
 pub mod state;
 pub mod substrate_seam;

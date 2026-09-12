@@ -14,6 +14,7 @@ members = [
     "crates/symbi-discretize",
     "crates/symbi-aot",
     "crates/symbi-exec",
+    "crates/symbi-fabric",
     "crates/symbi-sim",
     "crates/symbi-substrate",
     "crates/symbi-refinement",

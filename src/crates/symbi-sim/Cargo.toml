@@ -20,6 +20,7 @@ symbi-ir = { path = "../symbi-ir" }
 symbi-ib = { path = "../symbi-ib" }
 symbi-xpu = { path = "../symbi-xpu" }
 symbi-io = { path = "../symbi-io" }
+symbi-fabric = { path = "../symbi-fabric" }
 
 [lints]
 workspace = true
