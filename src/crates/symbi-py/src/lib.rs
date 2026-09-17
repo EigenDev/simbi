@@ -6365,7 +6365,16 @@ macro_rules! build_and_run_hydro_decomposed {
                     .reconstruction(build_recon(cfg))
                     .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
                     .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    // the transport and excision settings the single-grid build installs; the
+                    // decomposed march drives the viscous pass and the excision sweeps per tile.
+                    .with_viscosity(cfg.viscosity)
+                    .with_resistivity(cfg.resistivity)
+                    .with_excision(
+                        cfg.excision_radius,
+                        cfg.excision_rho_scale,
+                        cfg.excision_pre_scale,
+                    );
                 // attach the user source per tile (two-pass via attach_runtime_source). each tile
                 // evaluates S at its own global coords (the per-tile origin above), so a
                 // position-dependent force is correct across cuts -- decomposed == monolithic
@@ -8756,6 +8765,15 @@ fn dispatch_and_run(
     // the synge (taub-mathews) eos: baked for the flat rhd family only. every
     // unsupported combination refuses here, before any build, with the reason
     // attached.
+    // the decomposed tile builders install the plain reconstruction; the balanced one has no
+    // decomposed equivalence gate, so the combination is refused rather than run unbalanced.
+    if cfg.wb_reconstruction && cfg.n_gpus > 1 {
+        return Err(
+            "wb_reconstruction with gpus > 1 awaits a decomposed equivalence gate for the \
+             balanced reconstruction; run on one device or unset it"
+                .to_string(),
+        );
+    }
     if cfg.eos_name == "synge" {
         if cfg.regime != "rhd" {
             return Err(format!(
