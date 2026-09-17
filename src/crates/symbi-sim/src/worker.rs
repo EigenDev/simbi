@@ -31,7 +31,7 @@ use crate::stage::{StageArgs, StageOutcome, fold_stage};
 use crate::state::{FieldStore, Timestepping};
 use crate::substrate_seam::{KernelSet, RegimeKind};
 use std::ops::ControlFlow;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use symbi_fabric::{Fabric, FabricError, Link, OpKind};
 use symbi_grid::Field;
 use symbi_xpu::{MemorySpace, with_device};
@@ -66,6 +66,21 @@ pub struct WorkerReport {
     pub time: f64,
     /// the accepted timestep of every step, in order
     pub dt_sequence: Vec<f64>,
+    /// wall time by activity; the buckets are disjoint and sum to the march's wall time
+    /// less the step callback
+    pub timing: WorkerTiming,
+}
+
+/// where a worker's wall time went. `collectives` and `exchange` include the time spent
+/// waiting for slower peers, so a load imbalance shows up there.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WorkerTiming {
+    /// kernels on owned tiles: recovery, ghost fill, timestep candidates, stages, restores
+    pub compute: Duration,
+    /// the timestep minimum and the rejection votes
+    pub collectives: Duration,
+    /// halo exchange: pack, grants, transfer, scatter
+    pub exchange: Duration,
 }
 
 #[derive(Debug)]
@@ -175,20 +190,27 @@ fn exchange_point<const D: usize, const DOF: usize, M, T, L>(
     step: u64,
     attempt: u16,
     deadline: Duration,
+    spent: &mut Duration,
 ) -> Result<(), FabricError>
 where
     M: MemorySpace,
     T: HaloTransport,
     L: Link,
 {
+    let clock = Instant::now();
     let fields = field_lists(tiles, stores, n_tiles);
-    for axis in 0..D {
-        let epoch = PlanExchange::<D>::epoch(point, step, attempt, axis);
-        exchange.open_axis(&fields, devices, transport, fabric, epoch)?;
-        fabric.wait(deadline)?;
-        exchange.finish_axis(&fields, fabric, axis)?;
-    }
-    Ok(())
+    let mut run = || -> Result<(), FabricError> {
+        for axis in 0..D {
+            let epoch = PlanExchange::<D>::epoch(point, step, attempt, axis);
+            exchange.open_axis(&fields, devices, transport, fabric, epoch)?;
+            fabric.wait(deadline)?;
+            exchange.finish_axis(&fields, fabric, axis)?;
+        }
+        Ok(())
+    };
+    let result = run();
+    *spent += clock.elapsed();
+    result
 }
 
 /// a local fatal error: every peer is told before it is returned.
@@ -248,6 +270,9 @@ where
         refuse(cfg.regime, &sh, kernels).map_err(|e| fail(fabric, e))?;
     }
     let deadline = cfg.deadline;
+    let mut timing = WorkerTiming::default();
+    let march_start = Instant::now();
+    let mut in_callback = Duration::ZERO;
     let stages = cfg.timestepping.stages();
     let multistage = needs_step_snapshot(stages);
     let schedule = stage_schedule(stages);
@@ -274,6 +299,7 @@ where
             0,
             0,
             deadline,
+            &mut timing.exchange,
         )
         .map_err(|e| fail(fabric, e.into()))?;
         for k in 0..n {
@@ -322,9 +348,11 @@ where
                 local = local.min(candidate);
             }
         }
+        let clock = Instant::now();
         let global = fabric
             .collective(OpKind::Min, local.to_bits(), deadline)
             .map_err(|e| fail(fabric, e.into()))?;
+        timing.collectives += clock.elapsed();
         let mut dt = select_timestep([f64::from_bits(global)], cfg.t_final - t, iter, t)
             .map_err(|e| fail(fabric, WorkerError::Numerics(e.detail)))?;
         let mut attempt: u16 = 0;
@@ -371,9 +399,11 @@ where
                 }
                 // the rejection is decided before this stage's halos move, so no halo is
                 // computed from a rejected state.
+                let clock = Instant::now();
                 let reject = fabric
                     .collective(OpKind::Any, u64::from(retry), deadline)
                     .map_err(|e| fail(fabric, e.into()))?;
+                timing.collectives += clock.elapsed();
                 if reject != 0 {
                     rejected = true;
                     break;
@@ -390,7 +420,8 @@ where
                     iter,
                     attempt,
                     deadline,
-                )
+            &mut timing.exchange,
+        )
                 .map_err(|e| fail(fabric, e.into()))?;
                 for k in 0..n {
                     with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
@@ -428,7 +459,8 @@ where
                     iter,
                     attempt,
                     deadline,
-                )
+            &mut timing.exchange,
+        )
                 .map_err(|e| fail(fabric, e.into()))?;
                 for k in 0..n {
                     with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
@@ -452,11 +484,20 @@ where
         report.time = t;
         report.dt_sequence.push(dt);
         let sh = shared!();
-        match on_step(iter, t, &sh, fabric) {
+        let clock = Instant::now();
+        let flow = on_step(iter, t, &sh, fabric);
+        in_callback += clock.elapsed();
+        match flow {
             Ok(ControlFlow::Continue(())) => {}
             Ok(ControlFlow::Break(())) => break,
             Err(e) => return Err(fail(fabric, e)),
         }
     }
+    // compute is the remainder: every kernel call on owned tiles, outside the fabric and the
+    // step callback
+    timing.compute = march_start
+        .elapsed()
+        .saturating_sub(timing.collectives + timing.exchange + in_callback);
+    report.timing = timing;
     Ok(report)
 }

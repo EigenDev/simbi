@@ -11,7 +11,9 @@
 # starts one task per node, runs the reference, and compares. it records each worker's hostname, backend hash, and exit code and
 # fails unless the workers occupied two distinct nodes, every exit code is
 # zero, every backend hash equals the reference's, and each arm left exactly
-# one final checkpoint in a fresh output directory on a shared filesystem.
+# one final checkpoint in a fresh output directory on a shared filesystem. the
+# records, the layout, the task step, and the source provenance (commit, dirty
+# state) are archived as gate-archive.tar.gz on every exit.
 #
 # usage:
 #   sbatch --nodes=2 --ntasks-per-node=1 scripts/fabric_two_node_gate.sh /shared/fresh-dir
@@ -38,6 +40,23 @@ if [[ -e "$OUT" ]]; then
 fi
 mkdir -p "$OUT/records"
 OUT="$(cd "$OUT" && pwd)"
+
+# the records, the layout, and the task step are archived on every exit, pass or fail
+archive() { tar czf "$OUT/gate-archive.tar.gz" -C "$OUT" records two-node.toml task.sh 2>/dev/null || true; }
+trap archive EXIT
+
+# the source this run was built from: the commit, its dirty state, and the commit's identity
+{
+    echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "slurm job: ${SLURM_JOB_ID} nodes: ${SLURM_JOB_NODELIST:-unknown}"
+    echo "config: $CONFIG resolution: $RESOLUTION end time: $END_TIME"
+    echo "--- git rev-parse HEAD"
+    git rev-parse HEAD
+    echo "--- git status --short"
+    git status --short
+    echo "--- git show --no-patch --format=fuller HEAD"
+    git show --no-patch --format=fuller HEAD
+} > "$OUT/records/provenance.txt" 2>&1 || true
 
 # the layout, written once, before any worker exists
 cat > "$OUT/two-node.toml" <<TOML
@@ -90,7 +109,7 @@ if [[ "$reference_code" -ne 0 ]]; then
 fi
 
 python - "$OUT" "$srun_code" <<'PY'
-import glob, re, sys
+import glob, re, subprocess, sys
 from pathlib import Path
 
 import h5py
@@ -108,6 +127,13 @@ def backend(path):
     return next(iter(found)) if len(found) == 1 else None
 backends = {f"worker-{k}": backend(records / f"worker-{k}.err") for k in (0, 1)}
 backends["reference"] = backend(records / "reference.err")
+
+reported = {b.removesuffix("-dirty") for b in backends.values() if b}
+with open(records / "provenance.txt", "a") as prov:
+    for commit in sorted(reported):
+        shown = subprocess.run(["git", "show", "--no-patch", "--format=fuller", commit], capture_output=True, text=True)
+        prov.write(f"--- git show --no-patch --format=fuller {commit} (the reported backend)\n")
+        prov.write(shown.stdout if shown.returncode == 0 else f"not a commit of this checkout: {shown.stderr}")
 
 print("two-node gate records")
 for k in (0, 1):

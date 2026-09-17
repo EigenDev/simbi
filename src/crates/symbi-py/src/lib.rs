@@ -10145,6 +10145,45 @@ struct WorkerLaunch {
     config_digest: u64,
 }
 
+/// a fault a validation run asks one worker to produce, from `SIMBI_FABRIC_INJECT`:
+/// `reject:WORKER:STEP:STAGE` reports a stage rejection, `bad_cfl:WORKER:STEP` reports an
+/// invalid timestep candidate, `exit:WORKER:STEP` ends the process after that step as a lost
+/// node would. unset, every worker runs clean.
+#[derive(Default)]
+struct LaunchFault {
+    injection: symbi_sim::worker::Injection,
+    exit_after: Option<u64>,
+}
+
+impl LaunchFault {
+    fn from_env(me: usize) -> Result<Self, String> {
+        let Ok(spec) = std::env::var("SIMBI_FABRIC_INJECT") else {
+            return Ok(Self::default());
+        };
+        let parts: Vec<&str> = spec.split(':').collect();
+        let number = |i: usize| -> Result<u64, String> {
+            parts
+                .get(i)
+                .and_then(|p| p.parse::<u64>().ok())
+                .ok_or_else(|| format!("SIMBI_FABRIC_INJECT='{spec}': field {i} is not a number"))
+        };
+        let mut fault = Self::default();
+        if number(1)? as usize != me {
+            match parts[0] {
+                "reject" | "bad_cfl" | "exit" => return Ok(fault),
+                other => return Err(format!("SIMBI_FABRIC_INJECT: unknown fault '{other}'")),
+            }
+        }
+        match parts[0] {
+            "reject" => fault.injection.reject_at = Some((number(2)?, number(3)? as usize)),
+            "bad_cfl" => fault.injection.invalid_cfl_at = Some(number(2)?),
+            "exit" => fault.exit_after = Some(number(2)?),
+            other => return Err(format!("SIMBI_FABRIC_INJECT: unknown fault '{other}'")),
+        }
+        Ok(fault)
+    }
+}
+
 /// the distributed first release: 2D cartesian adiabatic newtonian hydro on a static uniform
 /// grid with a linear checkpoint cadence. every other configuration is named and refused here,
 /// before any tile is built.
@@ -10214,6 +10253,7 @@ fn run_worker_process(cfg: &Config, prims: &[Vec<f64>], launch: &WorkerLaunch) -
     use symbi_sim::worker::{Injection, WorkerConfig, WorkerError, evolve_worker};
 
     validate_launch_scope(cfg)?;
+    let fault = LaunchFault::from_env(launch.worker)?;
     type Sim = SimDefaultGeneric<Newtonian, 2, 2, Cartesian, EosSelect<f64>>;
     let n: [usize; 2] = [cfg.n_cells[0], cfg.n_cells[1]];
     let total: usize = n.iter().product();
@@ -10408,7 +10448,7 @@ fn run_worker_process(cfg: &Config, prims: &[Vec<f64>], launch: &WorkerLaunch) -
             t_final: cfg.t_final,
             max_steps: cfg.max_steps,
             deadline,
-            injection: Injection::default(),
+            injection: fault.injection,
         };
         let report = evolve_worker(
             &tile_ids,
@@ -10420,6 +10460,11 @@ fn run_worker_process(cfg: &Config, prims: &[Vec<f64>], launch: &WorkerLaunch) -
             &mut fabric,
             &worker_cfg,
             |iter, time, sh, fabric| {
+                if fault.exit_after == Some(iter) {
+                    // the process ends here as a lost node would: no relay, no unwinding, the
+                    // sockets closed by the operating system
+                    std::process::exit(86);
+                }
                 if let Some(r) = reporter.as_mut() {
                     r.progress(iter, time);
                 }
@@ -10446,6 +10491,24 @@ fn run_worker_process(cfg: &Config, prims: &[Vec<f64>], launch: &WorkerLaunch) -
             r.checkpoint_written(cfg, &final_path, report.time, io);
         }
         fabric.finish(deadline).map_err(|e| e.to_string())?;
+        // one write, so the lines of concurrent workers sharing a stream stay whole
+        {
+            use std::io::Write;
+            let t = report.timing;
+            let line = format!(
+                "SIMBI launch: worker={}/{} steps={} rejections={} compute={:.6}s collectives={:.6}s \
+                 exchange={:.6}s final_checkpoint={:.6}s\n",
+                launch.worker,
+                launch.workers,
+                report.steps,
+                report.rejections,
+                t.compute.as_secs_f64(),
+                t.collectives.as_secs_f64(),
+                t.exchange.as_secs_f64(),
+                io,
+            );
+            let _ = std::io::stderr().write_all(line.as_bytes());
+        }
         Ok((report.steps, report.time))
     })();
     match outcome {
